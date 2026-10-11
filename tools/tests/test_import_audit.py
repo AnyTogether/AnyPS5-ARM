@@ -14,6 +14,15 @@ import nid_names
 
 GLOBAL_FUNCTION = 0x12
 LOCAL_FUNCTION = 0x02
+EXPORTS_TRIE, DYLD_INFO_ONLY, DYLD_INFO = 0x80000033, 0x80000022, 0x22
+TRIE_NODES = (
+    (b"", (("_", 1),)),
+    (b"", (("A", 2), ("_Z3foo", 3))),
+    (b"", (("AAAAAAAAAA", 4), ("BBBBBBBBBB", 5))),
+    (b"\x08\x01_" + b"Z" * 130 + b"\0", ()),
+    (b"\x00\x80\x20", ()),
+    (b"\x00\x90\x20", ()),
+)
 STUB_SOURCE = "int APS5_VABI {name}(int value) {{ NotImplemented_nid_no_patch(__func__); return 0; }}\n"
 DONE_SOURCE = "int APS5_VABI {name}(int value) {{ return value; }}\n"
 MESSAGE_NID = "wTpfglkmv34"
@@ -62,6 +71,45 @@ def build_pe(names):
     image[0x58 + 112:0x58 + 120] = struct.pack("<II", section_rva, len(raw))
     image[0x58 + 240:0x58 + 280] = struct.pack("<8sIIIIIIHHI", b".edata", len(raw), section_rva, len(raw), raw_offset, 0, 0, 0, 0, 0x40000040)
     return bytes(image) + raw
+
+
+def uleb(value):
+    out = b""
+    while value >= 0x80:
+        out += bytes([value & 0x7f | 0x80])
+        value >>= 7
+    return out + bytes([value])
+
+
+def trie_node(terminal, *children):
+    out = uleb(len(terminal)) + terminal + bytes([len(children)])
+    for edge, offset in children:
+        out += edge.encode() + b"\0" + uleb(offset)
+    return out
+
+
+def build_trie(nodes=TRIE_NODES):
+    offsets = [0] * len(nodes)
+    while True:
+        out, found = b"", []
+        for terminal, children in nodes:
+            found.append(len(out))
+            out += trie_node(terminal, *((edge, offsets[child]) for edge, child in children))
+        if found == offsets:
+            return out
+        offsets = found
+
+
+def build_macho(exports):
+    loads, tries = b"", b""
+    offset = 32 + sum(16 if command == EXPORTS_TRIE else 48 for command in exports)
+    for command, trie in exports.items():
+        if command == EXPORTS_TRIE:
+            loads += struct.pack("<IIII", command, 16, offset + len(tries), len(trie))
+        else:
+            loads += struct.pack("<12I", command, 48, *[0] * 8, offset + len(tries), len(trie))
+        tries += trie
+    return struct.pack("<IiiIIIII", 0xfeedfacf, 0x01000007, 3, 6, len(exports), len(loads), 0, 0) + loads + tries
 
 
 def write_source(root, library, text):
@@ -220,15 +268,46 @@ class ImportAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(import_audit.AuditError, "lib.prx"):
                 import_audit.pe_exports(path, image[:cut])
 
+    def test_macho_reader(self):
+        path = Path("lib.prx")
+        names = {"AAAAAAAAAAA", "ABBBBBBBBBB", "_Z3foo"}
+        self.assertEqual(import_audit.uleb128(b"\xe5\x8e\x26", 0, path, "value"), (624485, 3))
+        trie = build_trie()
+        self.assertGreater(len(trie), 0x7f)
+        self.assertEqual(import_audit.macho_exports(path, build_macho({EXPORTS_TRIE: trie})), names)
+        self.assertEqual(import_audit.macho_exports(path, build_macho({DYLD_INFO_ONLY: trie})), names)
+        self.assertEqual(import_audit.macho_exports(path, build_macho({DYLD_INFO: trie})), names)
+        other = build_trie(((b"", (("_zzz", 1),)), (b"\x00\x80\x20", ())))
+        self.assertEqual(import_audit.macho_exports(path, build_macho({DYLD_INFO_ONLY: other})), {"zzz"})
+        self.assertEqual(import_audit.macho_exports(path, build_macho({DYLD_INFO_ONLY: other, EXPORTS_TRIE: trie})), names)
+        self.assertEqual(import_audit.macho_exports(path, build_macho({EXPORTS_TRIE: trie, DYLD_INFO_ONLY: other})), names)
+        self.assertEqual(import_audit.macho_exports(path, build_macho({EXPORTS_TRIE: b""})), set())
+        self.assertEqual(import_audit.macho_exports(path, build_macho({EXPORTS_TRIE: trie_node(b"")})), set())
+        image = build_macho({EXPORTS_TRIE: trie})
+        for cut in (16, 40, len(image) - 5):
+            with self.assertRaisesRegex(import_audit.AuditError, "lib.prx"):
+                import_audit.macho_exports(path, image[:cut])
+        corrupt = ((trie_node(b"", ("x", 0)), "reached twice"), (trie_node(b"", ("x", 99)), "outside the export trie"),
+                   (b"\x80" * 12, "ULEB128"), (b"\x00\x01x", "NUL-terminated"))
+        for bad, message in corrupt:
+            with self.assertRaisesRegex(import_audit.AuditError, message):
+                import_audit.macho_exports(path, build_macho({EXPORTS_TRIE: bad}))
+        with self.assertRaisesRegex(import_audit.AuditError, "no export trie"):
+            import_audit.macho_exports(path, build_macho({}))
+        for magic in (b"\xca\xfe\xba\xbe", b"\xce\xfa\xed\xfe"):
+            with self.assertRaisesRegex(import_audit.AuditError, "only little-endian 64-bit Mach-O"):
+                import_audit.macho_exports(path, magic + image[4:])
+
     def test_library_directories(self):
         work = self.work
         (work.libs / "libSceA.prx").write_bytes(build_pe(["AAAAAAAAAAA"]))
         (work.libs / "libSceB.prx").write_bytes(exporting("AAAAAAAAAAA", "BBBBBBBBBBB"))
+        (work.libs / "libSceC.prx").write_bytes(build_macho({EXPORTS_TRIE: build_trie()}))
         exports, libraries = import_audit.built_libraries([work.libs])
-        self.assertEqual(exports, {"AAAAAAAAAAA": ["libSceA.prx", "libSceB.prx"], "BBBBBBBBBBB": ["libSceB.prx"]})
-        self.assertEqual(libraries, {"libSceA.prx", "libSceB.prx"})
-        (work.libs / "libSceC.prx").write_bytes(b"text")
-        with self.assertRaisesRegex(import_audit.AuditError, r"libSceC.prx: neither ELF nor PE"):
+        self.assertEqual(exports, {"AAAAAAAAAAA": ["libSceA.prx", "libSceB.prx", "libSceC.prx"], "ABBBBBBBBBB": ["libSceC.prx"], "BBBBBBBBBBB": ["libSceB.prx"], "_Z3foo": ["libSceC.prx"]})
+        self.assertEqual(libraries, {"libSceA.prx", "libSceB.prx", "libSceC.prx"})
+        (work.libs / "libSceD.prx").write_bytes(b"text")
+        with self.assertRaisesRegex(import_audit.AuditError, r"libSceD.prx: neither ELF, PE nor Mach-O"):
             import_audit.built_libraries([work.libs])
         with self.assertRaisesRegex(import_audit.AuditError, "no .prx files"):
             import_audit.built_libraries([work.modules])
