@@ -27,6 +27,15 @@ int APS5_VABI sceAgcDriverFindResourcesPublic(const void*, void*);
 bool APS5_VABI sceAgcDriverIsCaptureInProgress(void);
 bool APS5_VABI sceAgcDriverIsTraceInProgress(void);
 bool APS5_VABI sceAgcDriverIsSubmitValidationEnabled(void);
+int APS5_VABI sceAgcDriverGetShaderDebuggingStatus(void);
+int APS5_VABI sceAgcDriverSetValidationErrorOutputFrequency(std::uint32_t);
+int APS5_VABI sceAgcDriverSetSubmitValidationMode(std::uint32_t);
+int APS5_VABI sceAgcDriverGetSubmitValidationMode(std::uint32_t*);
+int APS5_VABI sceAgcDriverSetSubmitValidationConfig(const void*);
+int APS5_VABI sceAgcDriverGetSubmitValidationConfig(void*);
+int APS5_VABI sceAgcDriverRequestCaptureStart(const char*);
+int APS5_VABI sceAgcDriverRequestCaptureStop(void);
+int APS5_VABI sceAgcDriverTriggerCapture(void);
 }
 
 static constexpr int Unavailable = static_cast<int>(0x8A6C9018);
@@ -88,6 +97,22 @@ int main() {
     Require(std::string_view(name) == "unchanged");
     Require(sceAgcDriverRegisterWorkloadStream(1u, memory) == 0);
     Require(sceAgcDriverUnregisterWorkloadStream(1u) == 0);
+    Require(!sceAgcDriverIsCaptureInProgress());
+    constexpr int debugUnavailable = static_cast<int>(0x8a6c1000u);
+    Require(sceAgcDriverGetShaderDebuggingStatus() == 1);
+    std::uint32_t validationMode = 0xa5a5a5a5u;
+    std::array<std::uint8_t, 64> validationConfig{};
+    validationConfig.fill(0x5a);
+    Require(sceAgcDriverSetValidationErrorOutputFrequency(1) == debugUnavailable);
+    Require(sceAgcDriverSetSubmitValidationMode(1) == debugUnavailable);
+    Require(sceAgcDriverGetSubmitValidationMode(&validationMode) == debugUnavailable && validationMode == 0xa5a5a5a5u);
+    Require(sceAgcDriverSetSubmitValidationConfig(validationConfig.data()) == debugUnavailable);
+    Require(sceAgcDriverGetSubmitValidationConfig(validationConfig.data()) == debugUnavailable);
+    Require(validationConfig[0] == 0x5a && validationConfig[63] == 0x5a);
+    Require(!sceAgcDriverIsSubmitValidationEnabled());
+    Require(sceAgcDriverRequestCaptureStart("/data/capture") == debugUnavailable);
+    Require(sceAgcDriverTriggerCapture() == debugUnavailable);
+    Require(sceAgcDriverRequestCaptureStop() == debugUnavailable);
     Require(!sceAgcDriverIsCaptureInProgress());
     Require(!sceAgcDriverIsTraceInProgress());
     Require(!sceAgcDriverIsSubmitValidationEnabled());
