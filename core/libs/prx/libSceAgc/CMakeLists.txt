@@ -47,6 +47,7 @@ add_library(libSceAgc SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/Predication/src/Predication.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/CreateShader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/GsOversubscription.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/GsPrimPayload.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/InterpolantMapping.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/LinkShaders.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Shader/src/PrimState.cpp
@@ -278,6 +279,7 @@ endif()
 add_test_executable(agc_gs_oversubscription_tests EXCLUDE_FROM_ALL
         tests/GsOversubscription.cpp
         Shader/src/GsOversubscription.cpp
+        Shader/src/GsPrimPayload.cpp
 )
 target_include_directories(agc_gs_oversubscription_tests PRIVATE ${LIBS_INCLUDE_DIR})
 target_link_libraries(agc_gs_oversubscription_tests PRIVATE libc)

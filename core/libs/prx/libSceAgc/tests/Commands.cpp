@@ -14,6 +14,7 @@ extern "C" std::uint32_t* APS5_VABI sceAgcDcbResetQueue(CommandBuffer* buf, std:
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbClearState(CommandBuffer* buf, std::uint32_t command);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetFlip(CommandBuffer* buf, std::uint32_t handle, std::int32_t index, std::uint32_t mode, std::int64_t argument);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbWaitUntilSafeForRendering(CommandBuffer* buf, std::uint32_t handle, std::uint32_t index);
+extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetFlip(CommandBuffer* buf, std::uint32_t handle, std::int32_t index, std::uint32_t mode, std::int64_t argument);
 extern "C" int APS5_VABI sceAgcSuspendPoint();
 extern "C" int APS5_VABI sceAgcInit(std::uint32_t version);
 extern "C" void* APS5_VABI sceAgcGetRegisterDefaults();
@@ -378,6 +379,24 @@ void testFlip() {
     check(sceAgcSuspendPoint() == 0, "empty suspend failed");
 }
 
+void testAcbFlip() {
+    Storage dcb;
+    Storage acb;
+    dcb.words.fill(0xdeadbeefu);
+    acb.words.fill(0xdeadbeefu);
+    auto* acbFlip = sceAgcAcbSetFlip(&acb.buffer, 0xfedcba98u, -2, 0x12345678u, -0x123456789abcdefLL);
+    auto* dcbFlip = sceAgcDcbSetFlip(&dcb.buffer, 0xfedcba98u, -2, 0x12345678u, -0x123456789abcdefLL);
+    const std::array<std::uint32_t, 6> expected{0xc004105cu, 0xfedcba98u, 0xfffffffeu, 0x12345678u, 0x76543211u, 0xfedcba98u};
+    check(acbFlip == acb.words.data() && std::equal(expected.begin(), expected.end(), acbFlip), "ACB flip packet mismatch");
+    check(acb.buffer.cursor_up == acbFlip + 6 && acbFlip[6] == 0xdeadbeefu, "ACB flip packet overran allocation");
+    check(dcbFlip == dcb.words.data() && acb.words == dcb.words, "ACB and DCB flip packets differ");
+    expectFailure([] { sceAgcAcbSetFlip(nullptr, 1, 0, 1, 0); });
+    Storage exhausted;
+    exhausted.buffer.cursor_down = exhausted.words.data() + 5;
+    expectFailure([&] { sceAgcAcbSetFlip(&exhausted.buffer, 1, 0, 1, 0); });
+    check(exhausted.buffer.cursor_up == exhausted.words.data(), "failed ACB flip allocation advanced cursor");
+}
+
 void testRegisters() {
     Storage storage;
     const std::array<ShaderRegister, 3> registers{{{0x10, 7}, {0x11, 8}, {0x20, 9}}};
@@ -561,6 +580,7 @@ int main(int argc, char** argv) {
         testIndirectBase();
         testContextState();
         testFlip();
+        testAcbFlip();
         testRegisters();
         testRegisterRange();
         testPacketPayloadAddress();
