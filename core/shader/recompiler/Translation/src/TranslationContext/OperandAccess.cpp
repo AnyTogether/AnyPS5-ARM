@@ -146,7 +146,7 @@ RdnaOperand TranslationContext::plainOperand(const RdnaOperand& operand) {
 }
 
 IrU32 TranslationContext::flushF32Denormal(IrU32 bits) {
-    if ((f32DenormalFlush & 1u) == 0u) return bits;
+    if ((f32DenormalFlush & 1u) == 0u || relaxedFloat) return bits;
     if (bits.Value().HasImmediate()) {
         const std::uint32_t value = bits.Value().ImmediateU32();
         return (value & 0x7f800000u) == 0u ? IrU32(ir.Constant(value & 0x80000000u)) : bits;
@@ -156,7 +156,7 @@ IrU32 TranslationContext::flushF32Denormal(IrU32 bits) {
 }
 
 IrF32 TranslationContext::flushTinyProduct(IrValue* lhs, IrValue* rhs, IrValue* product, IrValue* addend, bool afterRounding) {
-    if ((f32DenormalFlush & 2u) == 0u || keepsProductOutOfTinyRange(*lhs) || keepsProductOutOfTinyRange(*rhs)) return IrF32(*product);
+    if ((f32DenormalFlush & 2u) == 0u || relaxedFloat || keepsProductOutOfTinyRange(*lhs) || keepsProductOutOfTinyRange(*rhs)) return IrF32(*product);
     IrValue& lhsBits = ir.BitCastU32(*lhs);
     IrValue& rhsBits = ir.BitCastU32(*rhs);
     const auto exponent = [&](IrValue& bits) -> IrValue& { return ir.Emit(IrOpcode::BitFieldUExtract, IrType::U32, {&bits, &ir.Constant(23u), &ir.Constant(8u)}); };
@@ -333,6 +333,7 @@ IrU32 TranslationContext::quietNan32(IrU32 bits) {
 }
 
 IrValue* TranslationContext::nanResultF32(std::initializer_list<IrValue*> sources, IrValue* result, IrValue* invalidProduct) {
+    if (relaxedFloat) return result;
     const auto isNan = [&](IrValue& bits) -> IrValue& { return ir.UGreaterThan(ir.BitwiseAnd(bits, ir.Constant(0x7fffffffu)), ir.Constant(0x7f800000u)); };
     IrValue* bits = &ir.BitCastU32(*result);
     bits = &ir.Select(isNan(*bits), ir.Constant(0xffc00000u), *bits);

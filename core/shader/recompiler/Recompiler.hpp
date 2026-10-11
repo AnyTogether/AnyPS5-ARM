@@ -227,6 +227,9 @@ struct SpirvTarget {
     bool narrowSubgroupClock = false;
     std::uint32_t subgroupStages = 0xffffffffu;
     bool fixedPushSlots = false;
+    // AMD's NaN payloads and f32 denormal flushes are not reproduced: on MoltenVK they more than doubled
+    // large shaders, which the Metal compiler then could not build.
+    bool relaxedFloat = false;
 };
 
 struct BindingLayout {

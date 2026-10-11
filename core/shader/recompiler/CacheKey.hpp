@@ -239,6 +239,7 @@ private:
         append(key, value.srgbDecodeFormats);
         append(key, value.narrowSubgroupClock);
         append(key, value.subgroupStages);
+        append(key, value.relaxedFloat);
     }
 };
 

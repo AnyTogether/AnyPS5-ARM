@@ -93,6 +93,13 @@ void TranslationContext::vInterpMovF32(const RdnaInstruction& inst) {
     if (inst.source0.value >= 3u) {
         throw std::runtime_error("v_interp_mov_f32 mode is reserved");
     }
+    // Without per-vertex inputs the vertex values are approximated: P0 by the host's value (exact for
+    // flat inputs) and the P10/P20 deltas by 0, as if the attribute were constant over the primitive.
+    const bool flat = pixelInput != nullptr && inst.source1.value < pixelInput->inputNum && pixelInput->InputIsFlat(inst.source1.value);
+    if (hostInterpolationOnly && !(flat && inst.source0.value == 2u)) {
+        writeOperand(inst.destination, inst.source0.value == 2u ? &ir.Emit(IrOpcode::GetAttribute, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value)}) : &ir.Constant(0u));
+        return;
+    }
     IrValue& value = ir.Emit(IrOpcode::GetInterpolationParameter, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(inst.source0.value)});
     writeOperand(inst.destination, &value);
 }

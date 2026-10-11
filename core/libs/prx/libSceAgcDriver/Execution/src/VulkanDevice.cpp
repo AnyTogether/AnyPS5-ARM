@@ -220,6 +220,7 @@ struct VulkanDevice::State {
     bool sampleRateShading = false;
     bool shaderClock = false;
     bool narrowSubgroupClock = false;
+    bool moltenVk = false;
     // VK_EXT_descriptor_indexing with non-uniform image array indexing (bindless image tables in
     // graphics stages, and compute workgroups wider than a wave).
     bool descriptorIndexing = false;
@@ -882,6 +883,12 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &clockFeatures};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
         state->shaderClock = clockFeatures.shaderSubgroupClock == VK_TRUE && clockFeatures.shaderDeviceClock == VK_TRUE;
+    }
+    if (hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
+        state->moltenVk = driver.driverID == VK_DRIVER_ID_MOLTENVK;
     }
     if (state->shaderClock && hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
         VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
@@ -2676,6 +2683,10 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.narrowSubgroupClock = state->narrowSubgroupClock;
     target.subgroupStages = state->subgroup.supportedStages;
     target.fixedPushSlots = state->graphicsPipelineLibrary;
+    // On by default for a title's MoltenVK device; tests (no window) keep the exact semantics they check.
+    static const bool exactFloat = std::getenv("APS5_EXACT_FLOAT") != nullptr;
+    static const bool relaxedFloat = std::getenv("APS5_RELAXED_FLOAT") != nullptr;
+    target.relaxedFloat = !exactFloat && (relaxedFloat || (state->moltenVk && state->window != nullptr));
     target.srgbDecodeFormats = state->srgbDecodeFormats;
     if (state->meshShader) {
         const auto& mesh = state->meshLimits;

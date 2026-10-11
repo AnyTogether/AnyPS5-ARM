@@ -164,6 +164,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     translateOptions.scratchDwords = request.context.compute.has_value() ? request.context.compute->scratchDwords : 0u;
     translateOptions.sharedMemoryBytes = DeviceMemoryLdsBytes(request);
     translateOptions.fragmentShaderBarycentricEnabled = request.target.fragmentShaderBarycentricEnabled;
+    translateOptions.relaxedFloat = request.target.relaxedFloat;
     translateOptions.floatMode = request.context.floatMode;
     translateOptions.inputInfo = inputInfo;
 
@@ -223,6 +224,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
             simplify();
         } else {
             // Without geometry shaders (MoltenVK) the emulating stage cannot run: keep host interpolation.
+            translateOptions.hostInterpolationOnly = true;
             program = translator.Translate(decoded, cfg, translateOptions);
             simplify();
             HostInterpolationChecker{}.ForceLower(program);
