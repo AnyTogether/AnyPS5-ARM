@@ -36,16 +36,17 @@ Measured on an M3 Pro with macOS 26.6, Vulkan SDK 1.4.363.0 and MoltenVK:
 | Full build (all targets and 115 prx libraries) | builds |
 | `macos_fixtures`: argv, imports, TLS, C++ exceptions, C cleanup, threads, modules, TLS across modules, `--to-intel` | 10/10 run under Rosetta |
 | Breakout guest (video out, pad, audio out), relinked and packaged as `.app` | runs at about 60 fps |
-| ctest, full suite on MoltenVK | 477 of 484 pass |
+| ctest, full suite on MoltenVK | 832 tests: 775 pass, 43 skip features the device lacks (64-bit atomics, Float64, mesh shaders), 14 fail |
 | Dreaming Sarah (PPSA02929), relinked with `--macos --to-rosetta`, packaged as `.app` and opened from Finder | runs the animated main menu at 60 fps (about 18 fps before the write watch) |
 
-The 7 tests that still fail:
+The 14 tests that fail (macOS 26.1, MoltenVK 1.4.2):
 
-- **Apple GPU or Metal limits (2):**
-  - 64-bit buffer atomics: `buffer_unaligned_base`
-  - 32 KiB threadgroup memory against the 40 KiB LDS the test uses: `lds_src2`
+- **Apple GPU or Metal limits (4):** `f32_dot2_rounding` needs the Float64 capability, `f32_constant_factor_tininess` gets a product flushed to zero where RDNA2 keeps the smallest normal, `float16_rounding` gets a differently rounded `v_mul_f16` product, and `pixel_interlock` needs fragment shader interlock, which SPIRV-Cross cannot write as MSL.
 - **A product that should give `-0.0` gives `+0.0` (4):** `f32_denormal_flush`, `f32_output_modifier`, `packed_alu`, `sdwa_float_selectors`. See [TechnicalDebt](TechnicalDebt.md).
-- **`pixel_interlock`:** SPIRV-Cross writes MSL that Metal rejects for fragment shader interlock.
+- **Host platform (5):** `agc_thread_priority_refused_rt`, `agc_thread_priority_refused_high` and `agc_driver_pm4_priority_refused` expect a refused priority request to throw, `agc_shared_write` cannot inspect mapping lifetimes, and `check_skips` passes from the repository root but not from the working directory ctest gives it.
+- **`patched_libraries`:** loads all patched libraries and exceeds the 300 s test timeout only when the whole suite runs in parallel after a rebuild; it passes alone.
+
+`macos_fixtures` passes once on a fresh build and times out in every later run: its `argv` fixture, which ends with `int3`, stays exiting in the kernel under Rosetta until a reboot. It was left out of the run above.
 
 Changes on top of the merged port:
 
