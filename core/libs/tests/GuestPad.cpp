@@ -17,6 +17,7 @@ int APS5_VABI scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(bool);
 int APS5_VABI scePadSetVibrationMode(int, int);
 int APS5_VABI scePadInit_nid_postfix(void);
 int APS5_VABI scePadRead_nid_postfix(int, PadData*, int);
+int APS5_VABI scePadReadExt(int, PadData*, int);
 int APS5_VABI scePadReadState(int, PadData*);
 int APS5_VABI scePadSetTiltCorrectionState(int, bool);
 int APS5_VABI scePadResetOrientation(int);
@@ -76,6 +77,8 @@ static void CheckReadStateHandle(int handle) {
     Require(scePadReadState(handle + 1, &data) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadRead_nid_postfix(0, &data, 1) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(scePadReadExt(handle + 1, &data, 1) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadReadExt(handle, &data, 1) == 1);
 }
 
 static void CheckAngularVelocityFilters(int handle) {

@@ -149,7 +149,12 @@ int APS5_VABI scePadOpenExt(int userId, int type, int index, const void* param) 
  return scePadOpen_nid_postfix(userId, type, index, param);
 }
 
-int APS5_VABI scePadReadExt() { NotImplemented_nid_no_patch(__func__); return 0; }
+int APS5_VABI scePadRead_nid_postfix(int handle, PadData* data, int num);
+
+// scePadOpenExt hands out the standard pad's handle, so its states have the scePadRead layout.
+int APS5_VABI scePadReadExt(int handle, PadData* data, int num) {
+ return scePadRead_nid_postfix(handle, data, num);
+}
 
 // Raw HID reports address special controllers, and since none can be opened no handle reaches them.
 int APS5_VABI scePadGetFeatureReport(int handle) {

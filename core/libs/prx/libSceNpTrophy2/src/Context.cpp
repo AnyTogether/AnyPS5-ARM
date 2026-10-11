@@ -47,9 +47,10 @@ int APS5_VABI sceNpTrophy2GetRewardIcon(int context, int handle, int trophy_id, 
     throw std::runtime_error(std::string(__func__) + ": icon file not found");
 }
 
-int APS5_VABI sceNpTrophy2ShowTrophyList(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+// The host has no system trophy list overlay to open; contexts are not validated, as in the calls above.
+int APS5_VABI sceNpTrophy2ShowTrophyList(int context) {
+    (void)context;
+    return SCE_NP_TROPHY2_OK;
 }
 
 }

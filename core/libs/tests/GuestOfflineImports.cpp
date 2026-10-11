@@ -15,6 +15,7 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfoList();
 int APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfoList();
 int APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfoList();
 int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfoList();
+int APS5_VABI sceNpEntitlementAccessGetPftFlag(std::uint32_t*);
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
 int APS5_VABI sceRudpActivate();
 int APS5_VABI sceRudpGetStatus(void*, std::size_t);
@@ -59,6 +60,9 @@ int main() {
     Require(sceNpEntitlementAccessPollUnifiedEntitlementInfoList() == signedOut);
     Require(sceNpEntitlementAccessRequestServiceEntitlementInfoList() == signedOut);
     Require(sceNpEntitlementAccessPollServiceEntitlementInfoList() == signedOut);
+    Require(sceNpEntitlementAccessGetPftFlag(nullptr) == static_cast<int>(0x80558003));
+    std::uint32_t pftFlag = 0x5a5a5a5a;
+    Require(sceNpEntitlementAccessGetPftFlag(&pftFlag) == 0 && pftFlag == 0);
 
     Require(sceRudpActivate() == 0);
     std::array<unsigned char, 248> status;
