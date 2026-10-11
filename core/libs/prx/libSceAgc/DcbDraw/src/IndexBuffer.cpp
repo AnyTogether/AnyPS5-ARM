@@ -49,9 +49,9 @@ std::uint32_t* APS5_VABI sceAgcDcbSetIndexIndirectArgs(CommandBuffer* buf, std::
     return nullptr;
 }
 
+// INDEX_ATTRIBUTES_INDIRECT (0x91) is four dwords: header, attribute table address and attribute index.
 std::uint32_t APS5_VABI sceAgcDcbSetIndexIndirectArgsGetSize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 16;
 }
 
 }
