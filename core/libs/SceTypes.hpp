@@ -538,6 +538,60 @@ struct AudioOut2MasteringStatesHeader {
     std::uint32_t states_id;
 };
 
+struct AudioOut2MasteringStatesDescriptor {
+    std::uint32_t id;
+    std::uint32_t size;
+};
+
+struct AudioOut2MasteringCompressorStates {
+    AudioOut2MasteringStatesDescriptor desc;
+    std::uint32_t reserved[2];
+    float input_rms[3][8];
+    float compression_coeff[3][8];
+};
+
+struct AudioOut2MasteringCompressorStatesV2 {
+    AudioOut2MasteringStatesDescriptor desc;
+    std::uint32_t reserved[2];
+    float input_rms[4][8];
+    float compression_coeff[4][8];
+};
+
+struct AudioOut2MasteringLimiterStates {
+    AudioOut2MasteringStatesDescriptor desc;
+    std::uint32_t reserved[2];
+    float input_peak[8];
+    float output_peak[8];
+    float gain_peak[8];
+};
+
+struct AudioOut2MasteringStates {
+    AudioOut2MasteringStatesHeader header;
+    std::uint32_t reserved[3];
+    AudioOut2MasteringCompressorStates compressor;
+    AudioOut2MasteringLimiterStates limiter;
+};
+
+struct AudioOut2MasteringStatesV2 {
+    AudioOut2MasteringStatesHeader header;
+    std::uint32_t reserved[3];
+    AudioOut2MasteringCompressorStatesV2 compressor;
+    AudioOut2MasteringLimiterStates limiter;
+};
+
+static_assert(sizeof(AudioOut2MasteringCompressorStates) == 208);
+static_assert(sizeof(AudioOut2MasteringCompressorStatesV2) == 272);
+static_assert(sizeof(AudioOut2MasteringLimiterStates) == 112);
+static_assert(offsetof(AudioOut2MasteringCompressorStates, input_rms) == 16);
+static_assert(offsetof(AudioOut2MasteringCompressorStates, compression_coeff) == 112);
+static_assert(offsetof(AudioOut2MasteringLimiterStates, input_peak) == 16);
+static_assert(offsetof(AudioOut2MasteringLimiterStates, gain_peak) == 80);
+static_assert(sizeof(AudioOut2MasteringStates) == 336);
+static_assert(offsetof(AudioOut2MasteringStates, compressor) == 16);
+static_assert(offsetof(AudioOut2MasteringStates, limiter) == 224);
+static_assert(sizeof(AudioOut2MasteringStatesV2) == 400);
+static_assert(offsetof(AudioOut2MasteringStatesV2, limiter) == 288);
+
 struct AudioOutOutputParam {
     int handle;
     const void* ptr;

@@ -610,7 +610,9 @@ void TestBatchCancel(std::uint32_t context) {
 
 constexpr std::uint64_t CONTROL_RESET = 1ull << 13;
 constexpr std::uint64_t CONTROL_INITIALIZE = 1ull << 14;
+constexpr std::uint64_t CONTROL_RESAMPLE = 1ull << 15;
 constexpr std::uint64_t SIDEBAND_GAPLESS_DECODE = 1ull << 45;
+constexpr std::uint64_t SIDEBAND_FORMAT = 1ull << 46;
 constexpr std::uint64_t CONTROL_START = CONTROL_RESET | CONTROL_INITIALIZE | SIDEBAND_GAPLESS_DECODE;
 
 struct At9Control {
@@ -626,12 +628,28 @@ struct OpusControl {
     std::uint32_t third;
 };
 
-void RunControl(std::uint32_t context, std::uint32_t instance, std::uint64_t flags, const void* input, std::size_t inputSize, std::int32_t* result) {
+struct ResampleParameters {
+    float ratio;
+    std::uint32_t flags;
+};
+
+struct At9ResampleControl {
+    GaplessDecode gapless;
+    ResampleParameters resample;
+    std::uint8_t config[4];
+    std::uint32_t reserved;
+};
+
+void RunControlSideband(std::uint32_t context, std::uint32_t instance, std::uint64_t flags, const void* input, std::size_t inputSize, void* output, std::size_t outputSize) {
     std::vector<std::uint8_t> batch(4096);
     AjmBatchInfo info{};
     Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
-    Require(sceAjmBatchJobControl(&info, instance, flags, input, inputSize, result, 2 * sizeof(std::int32_t)) == 0);
+    Require(sceAjmBatchJobControl(&info, instance, flags, input, inputSize, output, outputSize) == 0);
     Submit(context, info);
+}
+
+void RunControl(std::uint32_t context, std::uint32_t instance, std::uint64_t flags, const void* input, std::size_t inputSize, std::int32_t* result) {
+    RunControlSideband(context, instance, flags, input, inputSize, result, 2 * sizeof(std::int32_t));
 }
 
 bool ControlThrows(std::uint32_t instance, std::uint64_t flags, const void* input, std::size_t inputSize, std::size_t outputSize) {
@@ -735,109 +753,6 @@ void TestMultichannelAt9(std::uint32_t context) {
     Require(audible);
 }
 
-void TestControlAt9(std::uint32_t context) {
-    std::uint32_t instance = 0;
-    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
-    std::vector<std::uint8_t> batch(4096);
-    const At9Control start{{2000, 100, 0}, {0xFE, 0x72, 0x1F, 0xF0}, 0xDEADBEEFu};
-    std::int32_t result[4] = {-1, -1, -1, -1};
-    At9CodecInfoSideband codec{-1, -1, 0, 0, 0, 0};
-    GaplessSideband gapless{-1, -1, 0, 0, 0xffff};
-    AjmBatchInfo info{};
-    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
-    Require(sceAjmBatchJobControl(&info, instance, CONTROL_START, &start, sizeof(start), result, 2 * sizeof(std::int32_t)) == 0);
-    Require(sceAjmBatchJobGetCodecInfo(&info, instance, &codec, sizeof(codec)) == 0);
-    Require(sceAjmBatchJobGetGaplessDecode(&info, instance, &gapless) == 0);
-    Submit(context, info);
-    Require(result[0] == 0 && result[1] == 0 && result[2] == -1 && result[3] == -1);
-    Require(codec.result == 0 && codec.superframeSize == 1024 && codec.framesInSuperframe == 4 && codec.nextFrameSize == 1024 && codec.frameSamples == 256);
-    Require(gapless.result == 0 && gapless.totalSamples == 2000 && gapless.skipSamples == 100 && gapless.skippedSamples == 0);
-
-    At9Control broken = start;
-    broken.config[0] = 0xFD;
-    At9CodecInfoSideband uninitialized{-1, -1, 0, 0, 0, 0};
-    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
-    Require(sceAjmBatchJobControl(&info, instance, CONTROL_START, &broken, sizeof(broken), result, 2 * sizeof(std::int32_t)) == 0);
-    Require(sceAjmBatchJobGetCodecInfo(&info, instance, &uninitialized, sizeof(uninitialized)) == 0);
-    Submit(context, info);
-    Require(result[0] == 4 && uninitialized.result == 1);
-
-    result[0] = -1;
-    RunControl(context, instance, CONTROL_INITIALIZE, start.config, sizeof(start) - sizeof(start.gapless), result);
-    Require(result[0] == 0);
-
-    Require(ControlRefused(context, instance, CONTROL_INITIALIZE, &start, sizeof(start)));
-    Require(ControlRefused(context, instance, CONTROL_RESET | SIDEBAND_GAPLESS_DECODE, &start, sizeof(start)));
-    Require(ControlThrows(instance, CONTROL_INITIALIZE | SIDEBAND_GAPLESS_DECODE, &start, sizeof(start), 8));
-    Require(ControlThrows(instance, CONTROL_START | (1ull << 15), &start, sizeof(start), 8));
-    Require(ControlThrows(instance, CONTROL_START | (1ull << 46), &start, sizeof(start), 8));
-    Require(ControlThrows(instance, CONTROL_START | (1ull << 12), &start, sizeof(start), 8));
-    Require(ControlThrows(instance, 0, nullptr, 0, 8));
-    Require(ControlThrows(instance, CONTROL_START, &start, sizeof(start), 16));
-    Require(ControlThrows(instance, CONTROL_START, nullptr, sizeof(start), 8));
-    Require(sceAjmInstanceDestroy(context, instance) == 0);
-
-    result[0] = -1;
-    RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
-    Require(result[0] == 4);
-
-    const std::uint32_t aac[4] = {0, 0, 1, 0};
-    Require(sceAjmInstanceCreate(context, 2, 0, &instance) == 0);
-    Require(ControlRefused(context, instance, CONTROL_START, aac, sizeof(aac)));
-    Require(sceAjmInstanceDestroy(context, instance) == 0);
-}
-
-void TestControlMp3(std::uint32_t context) {
-    std::uint32_t instance = 0;
-    Require(sceAjmInstanceCreate(context, 0, 0, &instance) == 0);
-    std::vector<std::int16_t> pcm(1152);
-    const std::size_t pcmBytes = pcm.size() * sizeof(std::int16_t);
-    DecodeSideband decoded{};
-    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
-    RunDecode(context, instance, MP3_MONO + 96, sizeof(MP3_MONO) - 96, pcm.data(), pcmBytes, decoded);
-    Require(decoded.result == 0 && decoded.totalDecodedSamples == 2 * 1152);
-
-    const GaplessDecode skip{0, 100, 0};
-    std::int32_t result[2] = {-1, -1};
-    RunControl(context, instance, CONTROL_START, &skip, sizeof(skip), result);
-    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
-    Require(result[0] == 0 && decoded.result == 0 && decoded.inputConsumed == 96 && decoded.outputWritten == (1152 - 100) * 2 && decoded.totalDecodedSamples == 1152 - 100);
-
-    result[0] = -1;
-    RunControl(context, instance, CONTROL_RESET, nullptr, 0, result);
-    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
-    Require(result[0] == 0 && decoded.result == 0 && decoded.outputWritten == (1152 - 100) * 2 && decoded.totalDecodedSamples == 1152 - 100);
-
-    const GaplessDecode none{0, 0, 0};
-    Require(ControlThrows(instance, SIDEBAND_GAPLESS_DECODE, &none, sizeof(none), 8));
-
-    const GaplessDecode longer{5000, 200, 0};
-    result[0] = -1;
-    RunControl(context, instance, CONTROL_RESET | SIDEBAND_GAPLESS_DECODE, &longer, sizeof(longer), result);
-    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
-    Require(result[0] == 0 && decoded.result == 0 && decoded.outputWritten == (1152 - 200) * 2 && decoded.totalDecodedSamples == 1152 - 200);
-
-    const std::uint32_t parameters[2] = {1, 0};
-    Require(ControlRefused(context, instance, CONTROL_INITIALIZE, parameters, sizeof(parameters)));
-    Require(sceAjmInstanceDestroy(context, instance) == 0);
-}
-
-void TestControlOpus(std::uint32_t context) {
-    std::uint32_t instance = 0;
-    Require(sceAjmInstanceCreate(context, 24, 0, &instance) == 0);
-    const OpusControl start{{0, 0, 0}, 2, 48000, 0};
-    std::int32_t result[2] = {-1, -1};
-    RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
-    Require(result[0] == 0);
-    std::vector<std::int16_t> pcm(960 * 2);
-    DecodeSideband decoded{};
-    RunDecode(context, instance, OPUS_STEREO, sizeof(OPUS_STEREO), pcm.data(), pcm.size() * sizeof(std::int16_t), decoded);
-    const std::size_t bytes = OPUS_STEREO[0] | (std::size_t{OPUS_STEREO[1]} << 8u);
-    Require(decoded.result == 0 && static_cast<std::size_t>(decoded.inputConsumed) == 2 + bytes && decoded.outputWritten == 960 * 2 * 2);
-    Require(ControlRefused(context, instance, CONTROL_START, &start, sizeof(start) - sizeof(start.third)));
-    Require(sceAjmInstanceDestroy(context, instance) == 0);
-}
-
 struct ResampleInfo {
     std::int32_t result;
     std::int32_t internalResult;
@@ -926,6 +841,181 @@ void RequireInterpolated(const std::vector<std::int16_t>& reference, const std::
             else Require(std::fabs(resampled[frame * channels + channel] - midpoint) <= 1.5);
         }
     }
+}
+
+void TestControlAt9(std::uint32_t context) {
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 1, 0, &instance) == 0);
+    std::vector<std::uint8_t> batch(4096);
+    FormatSideband early{-1, -1, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau};
+    RunControlSideband(context, instance, SIDEBAND_FORMAT, nullptr, 0, &early, sizeof(early));
+    Require(early.result == 1 && early.internalResult == 0 && early.numChannels == 0xaaaaaaaau && early.sampleRate == 0xaaaaaaaau);
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_FORMAT, nullptr, 0, &early, sizeof(early));
+    Require(early.result == 1 && early.internalResult == 0 && early.numChannels == 0xaaaaaaaau && early.sampleRate == 0xaaaaaaaau);
+    const At9Control start{{2000, 100, 0}, {0xFE, 0x72, 0x1F, 0xF0}, 0xDEADBEEFu};
+    std::int32_t result[4] = {-1, -1, -1, -1};
+    At9CodecInfoSideband codec{-1, -1, 0, 0, 0, 0};
+    GaplessSideband gapless{-1, -1, 0, 0, 0xffff};
+    AjmBatchInfo info{};
+    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+    Require(sceAjmBatchJobControl(&info, instance, CONTROL_START, &start, sizeof(start), result, 2 * sizeof(std::int32_t)) == 0);
+    Require(sceAjmBatchJobGetCodecInfo(&info, instance, &codec, sizeof(codec)) == 0);
+    Require(sceAjmBatchJobGetGaplessDecode(&info, instance, &gapless) == 0);
+    Submit(context, info);
+    Require(result[0] == 0 && result[1] == 0 && result[2] == -1 && result[3] == -1);
+    Require(codec.result == 0 && codec.superframeSize == 1024 && codec.framesInSuperframe == 4 && codec.nextFrameSize == 1024 && codec.frameSamples == 256);
+    Require(gapless.result == 0 && gapless.totalSamples == 2000 && gapless.skipSamples == 100 && gapless.skippedSamples == 0);
+
+    At9Control broken = start;
+    broken.config[0] = 0xFD;
+    At9CodecInfoSideband uninitialized{-1, -1, 0, 0, 0, 0};
+    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+    Require(sceAjmBatchJobControl(&info, instance, CONTROL_START, &broken, sizeof(broken), result, 2 * sizeof(std::int32_t)) == 0);
+    Require(sceAjmBatchJobGetCodecInfo(&info, instance, &uninitialized, sizeof(uninitialized)) == 0);
+    Submit(context, info);
+    Require(result[0] == 4 && uninitialized.result == 1);
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_FORMAT, nullptr, 0, &early, sizeof(early));
+    Require(early.result == 1 && early.numChannels == 0xaaaaaaaau && early.sampleRate == 0xaaaaaaaau);
+
+    result[0] = -1;
+    RunControl(context, instance, CONTROL_INITIALIZE, start.config, sizeof(start) - sizeof(start.gapless), result);
+    Require(result[0] == 0);
+
+    GaplessSideband echoed{-1, -1, 0, 0, 0xffff};
+    RunControlSideband(context, instance, CONTROL_START, &start, sizeof(start), &echoed, sizeof(echoed));
+    Require(echoed.result == 0 && echoed.internalResult == 0 && echoed.totalSamples == 2000 && echoed.skipSamples == 100 && echoed.skippedSamples == 0);
+    GaplessSideband bounded{-1, -1, 0xaaaaaaaau, 0xaaaa, 0xaaaa};
+    RunControlSideband(context, instance, CONTROL_START, &start, sizeof(start), &bounded, 3 * sizeof(std::int32_t));
+    Require(bounded.result == 0 && bounded.internalResult == 0 && bounded.totalSamples == 0xaaaaaaaau && bounded.skipSamples == 0xaaaa && bounded.skippedSamples == 0xaaaa);
+
+    FormatSideband format{-1, -1, 0, 0, 0, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau};
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_FORMAT, nullptr, 0, &format, sizeof(format));
+    Require(format.result == 0 && format.internalResult == 0 && format.numChannels == 2 && format.channelMask == 0x3 && format.sampleRate == 48000 && format.sampleEncoding == 0 && format.bitrate == 0 && format.reserved == 0);
+
+    const At9ResampleControl resampled{{3000, 50, 0}, {2.0f, 0}, {0xFE, 0x72, 0x1F, 0xF0}, 0};
+    At9CodecInfoSideband again{-1, -1, 0, 0, 0, 0};
+    GaplessSideband counts{-1, -1, 0, 0, 0xffff};
+    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+    Require(sceAjmBatchJobControl(&info, instance, CONTROL_START | CONTROL_RESAMPLE, &resampled, sizeof(resampled), result, 2 * sizeof(std::int32_t)) == 0);
+    Require(sceAjmBatchJobGetCodecInfo(&info, instance, &again, sizeof(again)) == 0);
+    Require(sceAjmBatchJobGetGaplessDecode(&info, instance, &counts) == 0);
+    Submit(context, info);
+    Require(result[0] == 0 && again.result == 0 && again.superframeSize == 1024 && again.framesInSuperframe == 4 && again.frameSamples == 256);
+    Require(counts.result == 0 && counts.totalSamples == 3000 && counts.skipSamples == 50 && counts.skippedSamples == 0);
+    Require(GetResampleInfo(context, instance).ratio == 2.0f);
+
+    Require(ControlRefused(context, instance, CONTROL_INITIALIZE, &start, sizeof(start)));
+    Require(ControlRefused(context, instance, CONTROL_RESET | SIDEBAND_GAPLESS_DECODE, &start, sizeof(start)));
+    Require(ControlRefused(context, instance, CONTROL_START | CONTROL_RESAMPLE, &start, sizeof(start)));
+    Require(ControlThrows(instance, CONTROL_INITIALIZE | SIDEBAND_GAPLESS_DECODE, &start, sizeof(start), 8));
+    Require(ControlThrows(instance, CONTROL_START | SIDEBAND_FORMAT, &start, sizeof(start), 32));
+    Require(ControlThrows(instance, CONTROL_START | (1ull << 11), &start, sizeof(start), 8));
+    Require(ControlThrows(instance, CONTROL_START | (1ull << 12), &start, sizeof(start), 8));
+    Require(ControlThrows(instance, CONTROL_START | (1ull << 16), &start, sizeof(start), 8));
+    Require(ControlThrows(instance, CONTROL_START | (1ull << 47), &start, sizeof(start), 8));
+    Require(ControlThrows(instance, CONTROL_START | (1ull << 48), &start, sizeof(start), 8));
+    Require(ControlThrows(instance, 0, nullptr, 0, 8));
+    Require(ControlThrows(instance, CONTROL_START, nullptr, sizeof(start), 8));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+
+    result[0] = -1;
+    RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
+    Require(result[0] == 4);
+
+    const std::uint32_t aac[4] = {0, 0, 1, 0};
+    Require(sceAjmInstanceCreate(context, 2, 0, &instance) == 0);
+    Require(ControlRefused(context, instance, CONTROL_START, aac, sizeof(aac)));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+void TestControlMp3(std::uint32_t context) {
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 0, 0, &instance) == 0);
+    std::vector<std::int16_t> pcm(1152);
+    const std::size_t pcmBytes = pcm.size() * sizeof(std::int16_t);
+    DecodeSideband decoded{};
+    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
+    RunDecode(context, instance, MP3_MONO + 96, sizeof(MP3_MONO) - 96, pcm.data(), pcmBytes, decoded);
+    Require(decoded.result == 0 && decoded.totalDecodedSamples == 2 * 1152);
+
+    const GaplessDecode skip{0, 100, 0};
+    std::int32_t result[2] = {-1, -1};
+    RunControl(context, instance, CONTROL_START, &skip, sizeof(skip), result);
+    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
+    Require(result[0] == 0 && decoded.result == 0 && decoded.inputConsumed == 96 && decoded.outputWritten == (1152 - 100) * 2 && decoded.totalDecodedSamples == 1152 - 100);
+
+    result[0] = -1;
+    RunControl(context, instance, CONTROL_RESET, nullptr, 0, result);
+    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
+    Require(result[0] == 0 && decoded.result == 0 && decoded.outputWritten == (1152 - 100) * 2 && decoded.totalDecodedSamples == 1152 - 100);
+
+    const GaplessDecode none{0, 0, 0};
+    Require(ControlThrows(instance, SIDEBAND_GAPLESS_DECODE, &none, sizeof(none), 8));
+
+    const GaplessDecode longer{5000, 200, 0};
+    result[0] = -1;
+    RunControl(context, instance, CONTROL_RESET | SIDEBAND_GAPLESS_DECODE, &longer, sizeof(longer), result);
+    RunDecode(context, instance, MP3_MONO, sizeof(MP3_MONO), pcm.data(), pcmBytes, decoded);
+    Require(result[0] == 0 && decoded.result == 0 && decoded.outputWritten == (1152 - 200) * 2 && decoded.totalDecodedSamples == 1152 - 200);
+
+    GaplessSideband echoed{-1, -1, 0, 0, 0xffff};
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_GAPLESS_DECODE, &longer, sizeof(longer), &echoed, sizeof(echoed));
+    Require(echoed.result == 0 && echoed.internalResult == 0 && echoed.totalSamples == 5000 && echoed.skipSamples == 200 && echoed.skippedSamples == 0);
+    FormatSideband format{-1, -1, 0, 0, 0, 0xaaaaaaaau, 0, 0xaaaaaaaau};
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_FORMAT, nullptr, 0, &format, sizeof(format));
+    Require(format.result == 0 && format.internalResult == 0 && format.numChannels == 1 && format.channelMask == 0x4 && format.sampleRate == 48000 && format.sampleEncoding == 0 && format.bitrate == 32000 && format.reserved == 0);
+
+    const std::uint32_t parameters[2] = {1, 0};
+    Require(ControlRefused(context, instance, CONTROL_INITIALIZE, parameters, sizeof(parameters)));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+void TestControlOpus(std::uint32_t context) {
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 24, 0, &instance) == 0);
+    const OpusControl start{{0, 0, 0}, 2, 48000, 0};
+    std::int32_t result[2] = {-1, -1};
+    FormatSideband early{-1, -1, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau};
+    RunControlSideband(context, instance, CONTROL_RESET | SIDEBAND_FORMAT, nullptr, 0, &early, sizeof(early));
+    Require(early.result == 1 && early.internalResult == 0 && early.numChannels == 0xaaaaaaaau && early.sampleRate == 0xaaaaaaaau);
+    RunControl(context, instance, CONTROL_START, &start, sizeof(start), result);
+    Require(result[0] == 0);
+    std::vector<std::int16_t> pcm(960 * 2);
+    DecodeSideband decoded{};
+    RunDecode(context, instance, OPUS_STEREO, sizeof(OPUS_STEREO), pcm.data(), pcm.size() * sizeof(std::int16_t), decoded);
+    const std::size_t bytes = OPUS_STEREO[0] | (std::size_t{OPUS_STEREO[1]} << 8u);
+    Require(decoded.result == 0 && static_cast<std::size_t>(decoded.inputConsumed) == 2 + bytes && decoded.outputWritten == 960 * 2 * 2);
+    Require(ControlRefused(context, instance, CONTROL_START, &start, sizeof(start) - sizeof(start.third)));
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+
+    const std::uint32_t plain = CreateOpus(context);
+    const auto reference = Stream(context, plain, OPUS_STEREO, sizeof(OPUS_STEREO), 2, 960, 0);
+    const std::uint32_t resampled = CreateOpus(context);
+    const ResampleParameters faster{2.0f, 0};
+    result[0] = -1;
+    RunControl(context, resampled, CONTROL_RESET | CONTROL_RESAMPLE, &faster, sizeof(faster), result);
+    Require(result[0] == 0 && GetResampleInfo(context, resampled).ratio == 2.0f);
+    RequireDecimated(reference.pcm, Stream(context, resampled, OPUS_STEREO, sizeof(OPUS_STEREO), 2, 512, 0).pcm, 2, 2);
+
+    const ResampleParameters slower{0.5f, 0};
+    result[0] = -1;
+    RunControl(context, resampled, CONTROL_RESET | CONTROL_RESAMPLE, &slower, sizeof(slower), result);
+    const ResampleInfo reset = GetResampleInfo(context, resampled);
+    Require(result[0] == 0 && reset.result == 0 && reset.ratio == 0.5f && reset.samples == 0);
+    RequireInterpolated(reference.pcm, Stream(context, resampled, OPUS_STEREO, sizeof(OPUS_STEREO), 2, 512, 0).pcm, 2);
+
+    for (const float bad : {0.0f, -1.0f, std::nanf(""), INFINITY}) {
+        const ResampleParameters invalid{bad, 0};
+        result[0] = -1;
+        RunControl(context, resampled, CONTROL_RESAMPLE, &invalid, sizeof(invalid), result);
+        Require(result[0] == 4 && GetResampleInfo(context, resampled).ratio == 0.5f);
+    }
+
+    FormatSideband format{-1, -1, 0, 0, 0, 0xaaaaaaaau, 0xaaaaaaaau, 0xaaaaaaaau};
+    RunControlSideband(context, resampled, SIDEBAND_FORMAT, nullptr, 0, &format, sizeof(format));
+    Require(format.result == 0 && format.internalResult == 0 && format.numChannels == 2 && format.channelMask == 0x3 && format.sampleRate == 48000 && format.sampleEncoding == 0 && format.bitrate == 0 && format.reserved == 0);
+    Require(ControlThrows(resampled, CONTROL_RESAMPLE | SIDEBAND_FORMAT, &faster, sizeof(faster), 32));
+    Require(sceAjmInstanceDestroy(context, plain) == 0 && sceAjmInstanceDestroy(context, resampled) == 0);
 }
 
 void TestResampleOpus(std::uint32_t context) {

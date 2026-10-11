@@ -130,6 +130,12 @@ int main() {
     RequireThrows<std::runtime_error>([&] { sceAudioPropagationSourceCalculateAudioPaths(source, rays, 1, 1, nullptr, 0); }, "path calculation with rays");
     Require(sceAudioPropagationSourceSetAudioPaths(source, nullptr, 0) == 0, "empty audio paths failed");
     RequireThrows<std::runtime_error>([&] { sceAudioPropagationSourceSetAudioPaths(source, rays, 1); }, "set audio paths");
+    std::uint8_t pathData[AudioPropagation::PathEntrySize];
+    std::memset(pathData, 0x5a, sizeof(pathData));
+    RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceSetAudioPath(0, pathData, 1.0f); }, "set audio path without a handle");
+    RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceSetAudioPath(source, pathData, 1.0f); }, "set audio path on a source");
+    RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceSetAudioPath(system, pathData, 1.0f); }, "set audio path on a system");
+    RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceSetAudioPath(path, nullptr, 0.0f); }, "set audio path on the unreturned path");
 
     alignas(16) std::uint8_t otherArena[64]{};
     auto otherMemory = Memory();
@@ -204,6 +210,8 @@ int main() {
     reset();
     RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceRender(system, infos, 2); }, "render of a destroyed source");
     Require(sceAudioPropagationSystemDestroy(otherSystem) == 0, "second system destroy failed");
+    RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceSetAudioPath(otherSource, pathData, 1.0f); }, "set audio path on a destroyed system's source");
+    for (const std::uint8_t byte : pathData) Require(byte == 0x5a, "rejected audio path update wrote the path data");
 
     RequireThrows<std::invalid_argument>([&] { sceAudioPropagationRoomDestroy(system, source); }, "room destroy of a source");
     RequireThrows<std::invalid_argument>([&] { sceAudioPropagationSourceDestroy(system + 16, source); }, "source destroy with another system");
