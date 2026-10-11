@@ -28,16 +28,29 @@ extern "C" {
     std::abort();
 }
 
+// Ye20uNnlglA is the NID of abs (sce_symbols aerolib.csv, verified with tools/nid_names.py).
 APS5_EXPORT("Ye20uNnlglA", libcCyberUnknown02);
-std::uint64_t APS5_VABI libcCyberUnknown02(void) {
-    NotImplemented_nid_no_patch("Ye20uNnlglA");
-    return 0;
+int APS5_VABI libcCyberUnknown02(int value) {
+    // abs(INT_MIN) wraps to INT_MIN like the two's-complement libc does, without signed overflow.
+    const unsigned magnitude = value < 0 ? 0u - static_cast<unsigned>(value) : static_cast<unsigned>(value);
+    return static_cast<int>(magnitude);
 }
 
+// H+8UBOwfScI is the NID of __powidf2 (sce_symbols aerolib.csv): the compiler runtime's
+// double raised to an int power, computed by square-and-multiply as compiler-rt powidf2.c does.
 APS5_EXPORT("H+8UBOwfScI", libcCyberUnknown08);
-std::uint64_t APS5_VABI libcCyberUnknown08(void) {
-    NotImplemented_nid_no_patch("H+8UBOwfScI");
-    return 0;
+double APS5_VABI libcCyberUnknown08(double base, int exponent) {
+    const bool reciprocal = exponent < 0;
+    double result = 1.0;
+    while (true) {
+        if (exponent & 1)
+            result *= base;
+        exponent /= 2;
+        if (exponent == 0)
+            break;
+        base *= base;
+    }
+    return reciprocal ? 1.0 / result : result;
 }
 
 }
