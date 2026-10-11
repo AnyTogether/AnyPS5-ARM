@@ -26,6 +26,8 @@
 extern "C" {
 void* APS5_VABI _Znwm_nid_postfix(std::size_t size);
 void APS5_VABI _ZdlPv_nid_postfix(void* pointer);
+void APS5_VABI _Locksyslock_nid_postfix();
+void APS5_VABI _Unlocksyslock_nid_postfix();
 }
 
 namespace {
@@ -33,6 +35,22 @@ namespace {
 std::mutex g_localeInitMutex;
 bool g_localeInitialized = false;
 std::vector<GuestLocale::Facet*> g_registeredFacets;
+
+constexpr std::int64_t StandardStreamCount = 8;
+GuestLocale::IosBase* g_standardStreams[StandardStreamCount + 2] {};
+int g_standardStreamOpens[StandardStreamCount + 2] {};
+
+struct SystemLock {
+    SystemLock() { _Locksyslock_nid_postfix(); }
+    ~SystemLock() { _Unlocksyslock_nid_postfix(); }
+    SystemLock(const SystemLock&) = delete;
+    SystemLock& operator=(const SystemLock&) = delete;
+};
+
+bool StandardStreamStaysOpen(const GuestLocale::IosBase& stream) {
+    SystemLock lock;
+    return --g_standardStreamOpens[stream.standardStream] > 0;
+}
 
 void APS5_VABI DestroyClassicLocale(GuestLocale::Facet*) {
     throw std::runtime_error("Cannot destroy the classic locale");
@@ -299,9 +317,21 @@ GuestLocale::Implementation* _ZSt21_sceLibcClassicLocale_nid_postfix = &g_classi
 
 void APS5_VABI _ZNSt8ios_baseD2Ev_nid_postfix(GuestLocale::IosBase* self) {
     if (self == nullptr) throw std::invalid_argument("ios_base destructor: null object");
-    if (self->standardStream != 0 || self->storage != nullptr || self->callbacks != nullptr) throw std::runtime_error("ios_base destructor: unsupported stream storage or callbacks");
+    if (self->standardStream < 0 || self->standardStream > StandardStreamCount) throw std::runtime_error("ios_base destructor: invalid standard stream index");
+    if (self->standardStream > 0 && StandardStreamStaysOpen(*self)) return;
+    if (self->storage != nullptr || self->callbacks != nullptr) throw std::runtime_error("ios_base destructor: unsupported stream storage or callbacks");
     if (self->locale != &_ZSt21_sceLibcClassicLocale_nid_postfix) throw std::runtime_error("ios_base destructor: unsupported locale ownership");
     self->locale = nullptr;
+}
+
+void APS5_VABI _ZNSt8ios_base7_AddstdEPS__nid_postfix(GuestLocale::IosBase* self) {
+    if (self == nullptr) throw std::invalid_argument("ios_base::_Addstd: null stream");
+    SystemLock lock;
+    std::int64_t index = 1;
+    while (index < StandardStreamCount && g_standardStreams[index] != nullptr && g_standardStreams[index] != self) ++index;
+    g_standardStreams[index] = self;
+    ++g_standardStreamOpens[index];
+    self->standardStream = index;
 }
 
 // Dinkumware's static locale::_Init(bool) returns the global _Locimp, which the caller copies.

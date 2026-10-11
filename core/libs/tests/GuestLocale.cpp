@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cwchar>
 #include <climits>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -16,6 +17,7 @@ void APS5_VABI _ZNSt6locale5facet9_RegisterEv_nid_postfix(GuestLocale::Facet* se
 void APS5_VABI _ZNSt8_LocinfoC1EPKc_nid_postfix(GuestLocale::LocinfoStorage* self, const char* localeName);
 void APS5_VABI _ZNSt8_LocinfoD1Ev_nid_postfix(GuestLocale::LocinfoStorage* self);
 void APS5_VABI _ZNSt8ios_baseD2Ev_nid_postfix(GuestLocale::IosBase* self);
+void APS5_VABI _ZNSt8ios_base7_AddstdEPS__nid_postfix(GuestLocale::IosBase* self);
 const short* APS5_VABI _Getpctype_nid_postfix();
 const short* APS5_VABI _Getptolower_nid_postfix();
 const short* APS5_VABI _Getptoupper_nid_postfix();
@@ -144,12 +146,73 @@ static void CheckStreamDestruction() {
     Require(object.stream.locale == &_ZSt21_sceLibcClassicLocale_nid_postfix);
 }
 
+static void CheckStandardStreams() {
+    struct GuardedStream {
+        std::uint64_t before = 0x12345678;
+        GuestLocale::IosBase stream{};
+        std::uint64_t after = 0x87654321;
+    };
+    auto* const classic = &_ZSt21_sceLibcClassicLocale_nid_postfix;
+    RequireException([] { _ZNSt8ios_base7_AddstdEPS__nid_postfix(nullptr); });
+    std::array<GuardedStream, 9> streams;
+    for (auto& object : streams) object.stream.locale = classic;
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[1].stream);
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.standardStream == 1 && streams[1].stream.standardStream == 2);
+    for (const auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321 && object.stream.locale == classic && object.stream.storage == nullptr);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.locale == classic && streams[0].stream.standardStream == 1);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.locale == nullptr);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[1].stream);
+    Require(streams[1].stream.locale == nullptr);
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[2].stream);
+    Require(streams[2].stream.standardStream == 3);
+    streams[0].stream.locale = classic;
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.standardStream == 1);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.locale == nullptr);
+    for (std::size_t index = 3; index < 7; ++index) {
+        _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[index].stream);
+        Require(streams[index].stream.standardStream == static_cast<std::int64_t>(index) + 1);
+    }
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[7].stream);
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[8].stream);
+    Require(streams[7].stream.standardStream == 8 && streams[8].stream.standardStream == 8);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[7].stream);
+    Require(streams[7].stream.locale == classic);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[8].stream);
+    Require(streams[8].stream.locale == nullptr);
+    for (std::size_t index = 2; index < 7; ++index) {
+        _ZNSt8ios_baseD2Ev_nid_postfix(&streams[index].stream);
+        Require(streams[index].stream.locale == nullptr);
+    }
+    GuardedStream corrupt;
+    corrupt.stream.locale = classic;
+    corrupt.stream.standardStream = 9;
+    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
+    Require(corrupt.stream.locale == classic);
+    corrupt.stream.standardStream = -1;
+    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
+    Require(corrupt.stream.locale == classic);
+    corrupt.stream.standardStream = INT64_MIN;
+    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
+    Require(corrupt.stream.locale == classic);
+    corrupt.stream.standardStream = 0;
+    _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream);
+    Require(corrupt.stream.locale == nullptr);
+    for (const auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321);
+}
+
 int main() {
     CheckGuestCalls();
     CheckLocinfoAlignment();
     CheckCharacterTables();
     CheckCharacterConversions();
     CheckStreamDestruction();
+    CheckStandardStreams();
     _Locksyslock_nid_postfix();
     _Locksyslock_nid_postfix();
     _Unlocksyslock_nid_postfix();
