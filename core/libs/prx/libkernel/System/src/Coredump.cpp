@@ -4,6 +4,7 @@
 #include <cstdio>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/KernelErrors.hpp"
 
 // The handler is recorded but never invoked: host crashes are not turned into guest core dumps.
 static std::atomic<uint64_t> g_coredumpHandler{0};
@@ -31,9 +32,10 @@ int APS5_VABI sceKernelDebugWriteCppExceptionInfo(const void* exception, uint64_
 }
 
 
-int APS5_VABI sceCoredumpAttachUserFile(void) {
-    NotImplemented_nid_no_patch("5nc2gdLNsok");
-    return 0;
+// No core dump is ever written (see above), so attachments are checked and then have nothing to join.
+int APS5_VABI sceCoredumpAttachUserFile(uint32_t userValue, const char* path) {
+    (void)userValue;
+    return path == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
 }
 
 int APS5_VABI sceCoredumpGetStopInfoGpu_Agc(void) {
@@ -41,9 +43,10 @@ int APS5_VABI sceCoredumpGetStopInfoGpu_Agc(void) {
     return 0;
 }
 
-int APS5_VABI sceCoredumpAttachMemoryRegionAsUserFile(void) {
-    NotImplemented_nid_no_patch("MEJ7tc7ThwM");
-    return 0;
+int APS5_VABI sceCoredumpAttachMemoryRegionAsUserFile(uint32_t userValue, const void* memory, size_t size, const char* name) {
+    (void)userValue;
+    (void)size;
+    return memory == nullptr || name == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
 }
 
 int APS5_VABI sceCoredumpSetUserDataType(void) {
@@ -51,9 +54,10 @@ int APS5_VABI sceCoredumpSetUserDataType(void) {
     return 0;
 }
 
-int APS5_VABI sceCoredumpDebugTextOut(void) {
-    NotImplemented_nid_no_patch("dei8oUx6DbU");
-    return 0;
+// The text would go into the core dump; it is shown on the host's error output instead.
+void APS5_VABI sceCoredumpDebugTextOut(const char* text, int length) {
+    if (text == nullptr || length <= 0) return;
+    std::fprintf(stderr, "[coredump] %.*s\n", length, text);
 }
 
 int APS5_VABI sceCoredumpGetStopInfoCpu(void) {
@@ -66,13 +70,15 @@ int APS5_VABI sceCoredumpWriteUserString() {
     return 0;
 }
 
-int APS5_VABI sceCoredumpAttachUserMemoryFile(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceCoredumpAttachUserMemoryFile(uint32_t userValue, const void* memory, size_t size) {
+    (void)userValue;
+    (void)size;
+    return memory == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
 }
 
-int APS5_VABI sceCoredumpAttachMemoryRegion(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceCoredumpAttachMemoryRegion(uint32_t userValue, const void* memory, size_t size) {
+    (void)userValue;
+    (void)size;
+    return memory == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
 }
 }
