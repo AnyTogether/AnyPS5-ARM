@@ -176,6 +176,7 @@ private:
         append(key, value.executeOnNoop);
         append(key, value.conservativeZExport);
         append(key, value.orderedPixelShader);
+        append(key, value.alphaToCoverage);
         append(key, value.targetOutputMode);
     }
 
@@ -240,6 +241,7 @@ private:
         append(key, value.narrowSubgroupClock);
         append(key, value.subgroupStages);
         append(key, value.relaxedFloat);
+        append(key, value.float64DenormPreserve);
     }
 };
 

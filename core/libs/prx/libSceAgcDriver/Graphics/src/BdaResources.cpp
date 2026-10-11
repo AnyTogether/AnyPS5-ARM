@@ -124,7 +124,7 @@ BdaResources::BdaResources(const Context& context) {
     static_assert(std::endian::native == std::endian::little);
     Require(ShaderRecompiler::BdaAbi::FaultBufferBytes <= context.limits.maxStorageBufferRange, "BDA fault buffer exceeds storage buffer range limit");
     fault = std::make_unique<Buffer>(context, ShaderRecompiler::BdaAbi::FaultBufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    std::memset(fault->Bytes().data(), 0, fault->Bytes().size());
+    std::memset(fault->Bytes().data(), 0, ShaderRecompiler::BdaAbi::WrittenListWord * sizeof(std::uint32_t));
 }
 
 BdaResources::BdaResources(const Context& context, const GuestBufferMemory& memory) : BdaResources(context) {
@@ -192,6 +192,7 @@ BdaResources::BdaResources(const Context& context, const GuestBufferMemory& memo
             ++it;
         }
     }
+    for (const auto& range : ranges) Require((range.permissions & ShaderRecompiler::BdaAbi::Write) == 0 || range.end <= ShaderRecompiler::BdaAbi::WrittenAddressLimit, "a writable BDA range ends past the addresses the written-page record can hold");
     table = std::make_shared<Buffer>(context, tableBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     const ShaderRecompiler::BdaAbi::Header header{ShaderRecompiler::BdaAbi::Version, static_cast<std::uint32_t>(ranges.size()), sizeof(ShaderRecompiler::BdaAbi::Range), 0};
     std::memcpy(table->Bytes().data(), &header, sizeof(header));
@@ -276,15 +277,16 @@ namespace AgcDriver::Graphics {
 void BdaResources::markWrittenPages() const {
     namespace Abi = ShaderRecompiler::BdaAbi;
     auto* words = reinterpret_cast<std::uint32_t*>(fault->Bytes().data());
-    Require(words[Abi::WrittenOverflowWord] == 0, "more than " + std::to_string(Abi::WrittenPageSlots) + " pages stored to through the BDA table in one use are not implemented");
-    bool any = false;
-    for (std::uint32_t slot = 0; slot < Abi::WrittenPageSlots; ++slot) {
-        const auto page = words[Abi::WrittenSlotsWord + slot];
-        if (page == 0) continue;
-        GuestMemory::MarkWritten(static_cast<std::uint64_t>(page - 1u) << Abi::WrittenPageShift, std::size_t{1} << Abi::WrittenPageShift);
-        any = true;
+    Require(words[Abi::WrittenOverflowWord] == 0, "more than " + std::to_string(Abi::WrittenPageSlots) + " chunks of " + std::to_string(Abi::WrittenChunkPages) + " pages stored to through the BDA table in one use are not implemented");
+    const auto count = words[Abi::WrittenCountWord];
+    if (count == 0) return;
+    Require(Abi::ForEachWrittenRange(words, [](std::uint64_t address, std::size_t bytes) { GuestMemory::MarkWritten(address, bytes); }), "invalid BDA written-page record");
+    for (std::uint32_t claim = 0; claim < count; ++claim) {
+        const auto slot = words[Abi::WrittenListWord + claim];
+        words[Abi::WrittenSlotsWord + 2 * slot] = 0;
+        words[Abi::WrittenSlotsWord + 2 * slot + 1] = 0;
     }
-    if (any) std::memset(words + Abi::WrittenSlotsWord, 0, Abi::WrittenPageSlots * sizeof(std::uint32_t));
+    words[Abi::WrittenCountWord] = 0;
 }
 
 }

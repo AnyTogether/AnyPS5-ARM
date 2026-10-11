@@ -572,6 +572,14 @@ int APS5_VABI sceUltUlthreadRuntimeDestroy(void* runtime) {
     return ULT_OK;
 }
 
+int APS5_VABI _sceUltWaitingQueueResourcePoolCreate(void* pool, const char* name, std::uint32_t numThreads, std::uint32_t numSyncObjects, void* workArea, const void* optParam, std::uint32_t buildVersion) {
+    return sceUltWaitingQueueResourcePoolCreate(pool, name, numThreads, numSyncObjects, workArea, optParam, buildVersion);
+}
+
+int APS5_VABI _sceUltSemaphoreCreate(void* semaphore, const char* name, std::int32_t numInitialResource, void* waitingQueueResourcePool, const void* optParam, std::uint32_t buildVersion) {
+    return sceUltSemaphoreCreate(semaphore, name, numInitialResource, waitingQueueResourcePool, optParam, buildVersion);
+}
+
 int APS5_VABI _sceUltUlthreadRuntimeOptParamInitialize(UltUlthreadRuntimeOptParam* optParam, std::uint32_t buildVersion) {
     return sceUltUlthreadRuntimeOptParamInitialize(optParam, buildVersion);
 }

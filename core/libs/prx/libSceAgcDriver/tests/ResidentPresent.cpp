@@ -24,6 +24,7 @@ using AgcDriver::ResidentPresent;
 constexpr std::uint64_t Bgra8 = 0x8000000000000000ull;
 constexpr std::uint64_t Rgba8 = 0x8000000022000000ull;
 constexpr std::uint64_t TenBit = 0x0100000000000000ull;
+constexpr std::uint64_t Rgba16Float = 0xc001000622000000ull;
 
 void decisionTests() {
     using AgcDriver::DisplayTexelFormat;
@@ -55,19 +56,26 @@ std::uint32_t memoryType(const Context& context, std::uint32_t bits, VkMemoryPro
 void conversionTest(const Context& context, std::uint64_t pixelFormat, VkFormat format) {
     constexpr std::uint32_t width = 200;
     constexpr std::uint32_t height = 130;
-    std::vector<std::byte> words(static_cast<std::size_t>(width) * height * 4);
+    const auto texelBytes = AgcDriver::DisplayTexelBytes(pixelFormat);
+    std::vector<std::byte> words(static_cast<std::size_t>(width) * height * texelBytes);
     std::uint32_t seed = 0x9e3779b9u ^ static_cast<std::uint32_t>(format);
     for (std::size_t i = 0; i < words.size(); ++i) {
         seed = seed * 1664525u + 1013904223u;
         words[i] = static_cast<std::byte>(seed >> 24u);
     }
-    const ColorTargetLayout layout(width, height, ColorTileMode::RenderTarget);
+    const ColorTargetLayout layout(width, height, ColorTileMode::RenderTarget, texelBytes);
     std::vector<std::byte> storage(layout.Bytes() + 65536);
     auto* aligned = reinterpret_cast<std::byte*>((reinterpret_cast<std::uintptr_t>(storage.data()) + 65535u) & ~std::uintptr_t{65535});
     std::span<std::byte> guest(aligned, layout.Bytes());
-    layout.Tile(words, guest);
     const DisplayBuffer display{reinterpret_cast<std::uint64_t>(aligned), pixelFormat, width, height};
     Require(AgcDriver::DisplayBufferSize(display) == guest.size(), "test display buffer size differs from the color layout");
+    if (texelBytes == 4u) {
+        layout.Tile(words, guest);
+    } else {
+        for (std::uint32_t y = 0; y < height; ++y) {
+            for (std::uint32_t x = 0; x < width; ++x) std::memcpy(guest.data() + AgcDriver::DisplayBufferOffset(display, x, y), words.data() + (static_cast<std::size_t>(y) * width + x) * texelBytes, texelBytes);
+        }
+    }
     const auto expected = AgcDriver::DecodeDisplayBuffer(display, guest);
 
     VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -107,13 +115,14 @@ void conversionTest(const Context& context, std::uint64_t pixelFormat, VkFormat 
     GpuColorTransfer transfer(context);
     const bool redLow = AgcDriver::DisplayRedLow(pixelFormat);
     const bool tenBit = AgcDriver::DisplayTenBit(pixelFormat);
+    const bool halfFloat = AgcDriver::DisplayHalfFloat(pixelFormat);
     const auto barrier = context.Function<PFN_vkCmdPipelineBarrier>("vkCmdPipelineBarrier");
     const auto readback = [&](VkCommandBuffer commands, Buffer& destination) {
         const VkBufferCopy copy{0, 0, expected.size()};
         context.Function<PFN_vkCmdCopyBuffer>("vkCmdCopyBuffer")(commands, transfer.LinearBuffer(), destination.Handle(), 1, &copy);
         RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_HOST_READ_BIT);
     };
-    transfer.Upload(display.address, width, height, ColorTileMode::RenderTarget);
+    transfer.Upload(display.address, width, height, ColorTileMode::RenderTarget, texelBytes);
     {
         CommandBatch batch(context);
         const auto commands = batch.Handle();
@@ -135,13 +144,13 @@ void conversionTest(const Context& context, std::uint64_t pixelFormat, VkFormat 
         toGeneral.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         toGeneral.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toGeneral);
-        transfer.Detile(commands, redLow, tenBit);
+        transfer.Detile(commands, redLow, tenBit, halfFloat);
         readback(commands, fromGuest);
-        transfer.DetileImage(commands, image, VK_IMAGE_LAYOUT_GENERAL, width, height, ColorTileMode::RenderTarget, redLow, tenBit);
+        transfer.DetileImage(commands, image, VK_IMAGE_LAYOUT_GENERAL, width, height, ColorTileMode::RenderTarget, redLow, tenBit, halfFloat);
         readback(commands, fromImage);
         batch.SubmitAndWait();
     }
-    const auto name = std::string(tenBit ? "10-bit " : "8-bit ") + (redLow ? "red-low" : "blue-low") + " display from VkFormat " + std::to_string(static_cast<int>(format));
+    const auto name = std::string(halfFloat ? "16-bit float " : tenBit ? "10-bit " : "8-bit ") + (redLow ? "red-low" : "blue-low") + " display from VkFormat " + std::to_string(static_cast<int>(format));
     Require(std::equal(expected.begin(), expected.end(), fromGuest.Bytes().begin()), "the GPU detile differs from the CPU decode: " + name);
     Require(std::equal(expected.begin(), expected.end(), fromImage.Bytes().begin()), "the resident image presents other pixels than guest memory: " + name);
 }
@@ -155,5 +164,6 @@ void RunResidentPresentTests(const Context& context) {
     conversionTest(context, Bgra8 | TenBit, VK_FORMAT_A2R10G10B10_UNORM_PACK32);
     conversionTest(context, Bgra8, VK_FORMAT_R8G8B8A8_UNORM);
     conversionTest(context, Rgba8, VK_FORMAT_B8G8R8A8_UNORM);
+    conversionTest(context, Rgba16Float, VK_FORMAT_R16G16B16A16_SFLOAT);
     std::cout << "resident present format and conversion tests passed\n";
 }

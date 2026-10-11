@@ -21,6 +21,7 @@ struct SpirvTargetOptions {
     bool nonConstantImageOffsets = false;
     bool narrowSubgroupClock = false;
     std::uint32_t subgroupStages = 0xffffffffu;
+    bool float64DenormPreserve = false;
 };
 
 class SpirvEmitter {

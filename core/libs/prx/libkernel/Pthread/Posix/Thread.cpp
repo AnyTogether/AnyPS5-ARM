@@ -9,6 +9,7 @@
 #include "Common.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include <chrono>
+#include <cstring>
 #include <thread>
 
 extern "C" {
@@ -28,13 +29,16 @@ int APS5_VABI scePthreadGetprio(Pthread thread, int* prio);
 }
 
 static constexpr int GUEST_SCHED_FIFO = 1;
+static constexpr std::size_t GUEST_CPUSET_BYTES = 32;
+static constexpr int GUEST_ERANGE = 34;
 
 extern "C" {
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI scePthreadGetaffinity(Pthread thread, KernelCpumask* mask);
 int APS5_VABI scePthreadGetthreadid(void);
-int APS5_VABI getpid_nid_postfix(void);
+int APS5_VABI scePthreadSetaffinity(Pthread thread, KernelCpumask mask);
 KernelCpumask APS5_VABI sceKernelGetAvailableCpumask(void);
+int APS5_VABI getpid_nid_postfix(void);
 
 // The root and process sets hold every CPU the title may use; only the calling thread can be
 // named by thread id, since guest threads are not indexed by id.
@@ -57,6 +61,32 @@ int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t 
     if (level == LevelWhich && which == WhichThread) scePthreadGetaffinity(scePthreadSelf(), &affinity);
     std::memset(mask, 0, size);
     std::memcpy(mask, &affinity, sizeof(affinity));
+    return 0;
+}
+
+int APS5_VABI cpuset_setaffinity_nid_postfix(int level, int which, std::int64_t id, std::size_t size, const void* mask) {
+    constexpr int LevelWhich = 3, WhichThread = 1, WhichProcess = 2;
+    constexpr int GuestEdeadlk = 11, GuestEfault = 14, GuestEinval = 22, GuestErange = 34;
+    constexpr std::size_t MaximumSize = 256 / 8;
+    const auto fail = [](int error) {
+        *__error_nid_postfix() = error;
+        return -1;
+    };
+    if (size < sizeof(KernelCpumask) || size > MaximumSize) return fail(GuestErange);
+    if (!mask) return fail(GuestEfault);
+    const auto* bytes = static_cast<const std::uint8_t*>(mask);
+    for (std::size_t index = sizeof(KernelCpumask); index < size; ++index) {
+        if (bytes[index] != 0) return fail(GuestEinval);
+    }
+    const bool thread = level == LevelWhich && which == WhichThread && id == -1;
+    const bool process = level == LevelWhich && which == WhichProcess && (id == -1 || id == getpid_nid_postfix());
+    if (!thread && !process) NotImplemented_nid_no_patch("cpuset_setaffinity other than the calling thread or process");
+    KernelCpumask requested = 0;
+    std::memcpy(&requested, bytes, sizeof(requested));
+    const KernelCpumask affinity = requested & sceKernelGetAvailableCpumask();
+    if (affinity == 0) return fail(GuestEdeadlk);
+    if (thread) scePthreadSetaffinity(scePthreadSelf(), affinity);
+    else SetLiveGuestThreadsAffinity(affinity);
     return 0;
 }
 
@@ -94,6 +124,18 @@ int APS5_VABI pthread_getschedparam_nid_postfix(Pthread thread, int* policy, Ker
     return PosixThread::ToErrno(scePthreadGetprio(thread, &param->sched_priority));
 }
 
+int APS5_VABI pthread_getaffinity_np_nid_postfix(Pthread thread, std::size_t cpusetSize, void* cpuset) {
+    if (!thread) return PosixThread::GUEST_EINVAL;
+    if (cpusetSize != GUEST_CPUSET_BYTES) return GUEST_ERANGE;
+    if (!cpuset) return PosixThread::GUEST_EFAULT;
+    KernelCpumask mask = 0;
+    const int result = scePthreadGetaffinity(thread, &mask);
+    if (result != 0) return PosixThread::ToErrno(result);
+    std::memset(cpuset, 0, GUEST_CPUSET_BYTES);
+    std::memcpy(cpuset, &mask, sizeof(mask));
+    return 0;
+}
+
 int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value) {
     return PosixThread::ToErrno(scePthreadJoin(thread, value));
 }
@@ -109,8 +151,18 @@ int APS5_VABI pthread_getname_np_nid_postfix(Pthread thread, char* name) {
     return PosixThread::ToErrno(scePthreadGetname(thread, name));
 }
 
+void APS5_VABI pthread_set_name_np_nid_postfix(Pthread thread, const char* name) {
+    scePthreadRename(thread, name != nullptr ? name : "");
+}
+
 Pthread APS5_VABI pthread_self_nid_postfix(void) {
     return scePthreadSelf();
+}
+
+int APS5_VABI scePthreadGetthreadid(void);
+
+int APS5_VABI pthread_getthreadid_np_nid_postfix(void) {
+    return scePthreadGetthreadid();
 }
 
 int APS5_VABI pthread_equal_nid_postfix(Pthread first, Pthread second) {

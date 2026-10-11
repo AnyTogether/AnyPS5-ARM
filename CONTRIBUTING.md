@@ -11,7 +11,7 @@
 - Don't add replacements for modules that titles ship themselves in `sce_module/`, `sce_modules/` or `prx/`: engine or middleware modules (Cohtml, FMOD, GOG Galaxy) and SDK libraries that only wrap other system libraries (NpCppWebApi over NpWebApi2). The relinker converts and loads the title's own module, and a host library with the same name is left out of `DT_NEEDED`. Only system libraries, which reach the kernel or the hardware, are reimplemented in [core/libs/prx](core/libs/prx).
 - Avoid non-standard extensions (`__attribute__`, etc.) where standard C++ is enough. Helper symbols that must not become NIDs use the `_nid_no_patch` or `_nid_no_patch_cut` suffix.
 - The relinker uses only the C++20 standard library.
-- Third-party code is added as a submodule under `3rdparty/` and built from source, not found on the system.
+- Third-party code is added as a submodule under `3rdparty/` and built from source, not found on the system. With `ANYPS5_USE_SYSTEM_DEPS=ON` the packages packaged by the distributions (SDL2, freetype, Vulkan-Headers, SPIRV-Headers, glslang and SPIRV-Tools) come from the system instead; that resolution lives in [cmake/SystemDeps.cmake](cmake/SystemDeps.cmake) and the default build never reads the system.
 - Don't add tests that only check that a symbol is exported: a missing export already fails at startup.
 - Each test finishes in 30 s on the CI runners, Vulkan tests included (Linux runs them on lavapipe), counting the first run with no shader cache. ctest runs in parallel there, so a slow test competes for the cores and times out on some runs and not others. Split or shrink a test that gets close instead of raising its timeout. CI reports every test over 30 s as a warning on the pull request.
 
@@ -50,9 +50,10 @@ python3 tools/check_conventions.py --base origin/main
 The [pull request template](.github/pull_request_template.md) is the checklist for these rules.
 
 - One branch per topic, based on current `main`. Follow-up work goes in a new pull request, not into an open one.
+- Open pull requests per author are limited by how many of theirs are merged into `main`: 1 with none merged, 20 with at least 1, no limit from 20. A pull request opened or reopened over the limit is closed automatically; reopen it once another one is merged or closed.
 - Before starting, check that no open pull request already implements the same functions.
 - Keep the branch up to date with `main` and resolve conflicts yourself; rebasing and force-pushing is fine.
-- If a pull request needs another one first, say so in the description (`Depends on #N`).
+- If a pull request needs another one first, say so on the checklist line (`Depends on: #N`; `none` otherwise).
 - Run the tests before opening the pull request and describe what was tested (OS, title or homebrew).
 - Investigation notes, reports, screenshots and logs go in the pull request, not in the repository. Images for documentation go in the [gist](https://gist.github.com/boykopovar/0e53f2e1426f29ecd41e3b51540b8a90) comments.
 - Say whether the change was written with AI assistance. The author of the pull request is responsible for every line of it.

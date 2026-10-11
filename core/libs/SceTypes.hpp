@@ -16,6 +16,23 @@ struct alignas(16) __m128 { float v[4]; };
 
 using Bool = std::uint8_t;
 
+struct SonyLconv {
+    char* monetary[7];
+    char chars[14];
+    char pad[2];
+    char* decimal_point;
+    char* grouping;
+    char* thousands_sep;
+    char* frac_grouping;
+    char* frac_sep;
+    char* false_text;
+    char* true_text;
+    char* no_text;
+    char* yes_text;
+};
+static_assert(offsetof(SonyLconv, decimal_point) == 0x48);
+static_assert(sizeof(SonyLconv) == 0x90);
+
 using KernelModule = std::int32_t;
 using KernelCpumask = std::uint64_t;
 using KernelUseconds = unsigned int;
@@ -1278,6 +1295,18 @@ struct NpTitleId { char data[13]; char pad[3]; };
 struct NpTitleSecret { std::uint8_t data[128]; };
 struct NpContentRestriction { std::uint8_t opaque[128]; };
 struct NpOnlineId { char data[17]; char pad[3]; };
+
+struct SharePlayConnectionInfoA {
+    std::int32_t status;
+    std::int32_t mode;
+    NpOnlineId hostOnlineId;
+    NpOnlineId visitorOnlineId;
+    std::uint64_t hostAccountId;
+    std::uint64_t visitorAccountId;
+    std::int32_t hostUserId;
+    std::int32_t visitorUserId;
+};
+static_assert(sizeof(SharePlayConnectionInfoA) == 72 && offsetof(SharePlayConnectionInfoA, hostAccountId) == 48 && offsetof(SharePlayConnectionInfoA, hostUserId) == 64);
 struct NpId { NpOnlineId online_id; std::uint8_t opaque[4]; };
 struct NpCreateAsyncRequestParameter { std::uint8_t opaque[64]; };
 struct NpCheckPremiumParameter { std::uint8_t opaque[64]; };

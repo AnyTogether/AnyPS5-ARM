@@ -97,6 +97,20 @@ public:
             (std::feof(GetHandle()) ? 0x20 : 0) | (std::ferror(GetHandle()) || encodingError ? 0x40 : 0));
     }
 
+    void SyncUnlockedStatus() {
+        _guest.readRemaining = 0;
+        _guest.writeRemaining = 0;
+#ifdef _WIN32
+        const bool endOfFile = std::feof(GetHandle()) != 0;
+        const bool error = std::ferror(GetHandle()) != 0;
+#else
+        const bool endOfFile = ::feof_unlocked(GetHandle()) != 0;
+        const bool error = ::ferror_unlocked(GetHandle()) != 0;
+#endif
+        _guest.flags = static_cast<std::int16_t>((_guest.flags & ~0x60) |
+            (endOfFile ? 0x20 : 0) | (error || encodingError ? 0x40 : 0));
+    }
+
     void SetEncodingError() {
         encodingError = true;
         SyncStatus();

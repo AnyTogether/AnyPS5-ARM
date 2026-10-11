@@ -1,0 +1,173 @@
+#include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+constexpr int MaxTypes = 5;
+constexpr int LinearCongruentialType = 0;
+constexpr int LinearCongruentialShuffles = 50;
+constexpr std::array<std::int64_t, MaxTypes> MinimumStateBytes {8, 32, 64, 128, 256};
+constexpr std::array<int, MaxTypes> Degrees {0, 7, 15, 31, 63};
+constexpr std::array<int, MaxTypes> Separations {0, 3, 1, 3, 1};
+
+std::uint32_t g_defaultTable[] {
+    3,
+    0x2cf41758, 0x27bb3711, 0x4916d4d1, 0x7b02f59f, 0x9b8e28eb, 0xc0e80269,
+    0x696f5c16, 0x878f1ff5, 0x52d9c07f, 0x916a06cd, 0xb50b3a20, 0x2776970a,
+    0xee4eb2a6, 0xe94640ec, 0xb1d65612, 0x9d1ed968, 0x1043f6b7, 0xa3432a76,
+    0x17eacbb9, 0x3c09e2eb, 0x04f8c2b3, 0x708a1f57, 0xee341814, 0x95d0e4d2,
+    0xb06f216c, 0x8bd2e72e, 0x8f7c38d7, 0xcfc6a8fc, 0x02a59495, 0xa20d2a69,
+    0xe29d12d1
+};
+
+struct AdditiveFeedbackState {
+    char* table;
+    int type;
+    int degree;
+    int separation;
+    int front;
+    int rear;
+};
+
+std::mutex g_randomLock;
+AdditiveFeedbackState g_random {reinterpret_cast<char*>(g_defaultTable), 3, 31, 3, 3, 0};
+
+std::uint32_t LoadWord(const char* table, int index) {
+    std::uint32_t value;
+    std::memcpy(&value, table + sizeof(value) * static_cast<std::size_t>(index), sizeof(value));
+    return value;
+}
+
+void StoreWord(char* table, int index, std::uint32_t value) {
+    std::memcpy(table + sizeof(value) * static_cast<std::size_t>(index), &value, sizeof(value));
+}
+
+std::uint32_t GoodRand(std::uint32_t context) {
+    std::int32_t x = static_cast<std::int32_t>(context % 0x7ffffffeu) + 1;
+    const std::int32_t high = x / 127773;
+    const std::int32_t low = x % 127773;
+    x = 16807 * low - 2836 * high;
+    if (x < 0) x += 0x7fffffff;
+    return static_cast<std::uint32_t>(x - 1);
+}
+
+std::uint32_t NextLocked() {
+    auto& state = g_random;
+    if (state.type == LinearCongruentialType) {
+        const std::uint32_t value = GoodRand(LoadWord(state.table, 1));
+        StoreWord(state.table, 1, value);
+        return value;
+    }
+    const std::uint32_t sum = LoadWord(state.table, 1 + state.front) + LoadWord(state.table, 1 + state.rear);
+    StoreWord(state.table, 1 + state.front, sum);
+    if (++state.front >= state.degree) {
+        state.front = 0;
+        ++state.rear;
+    } else if (++state.rear >= state.degree) {
+        state.rear = 0;
+    }
+    return sum >> 1;
+}
+
+void SeedLocked(std::uint32_t seed) {
+    auto& state = g_random;
+    StoreWord(state.table, 1, seed);
+    int rounds = LinearCongruentialShuffles;
+    if (state.type != LinearCongruentialType) {
+        for (int i = 1; i < state.degree; ++i) StoreWord(state.table, 1 + i, GoodRand(LoadWord(state.table, i)));
+        state.front = state.separation;
+        state.rear = 0;
+        rounds = 10 * state.degree;
+    }
+    for (int i = 0; i < rounds; ++i) NextLocked();
+}
+
+void SaveTypeWordLocked() {
+    const auto& state = g_random;
+    const int word = state.type == LinearCongruentialType ? state.type : MaxTypes * state.rear + state.type;
+    StoreWord(state.table, 0, static_cast<std::uint32_t>(word));
+}
+
+std::uint64_t NextRand48(std::uint16_t* seed, const char* function) {
+    if (seed == nullptr) throw std::invalid_argument(std::string(function) + ": null seed");
+    constexpr std::uint64_t Multiplier = 0x5deece66dull;
+    constexpr std::uint64_t Addend = 0xb;
+    constexpr std::uint64_t Mask = (1ull << 48) - 1;
+    std::uint64_t value = (static_cast<std::uint64_t>(seed[2]) << 32) | (static_cast<std::uint64_t>(seed[1]) << 16) | seed[0];
+    value = (value * Multiplier + Addend) & Mask;
+    seed[0] = static_cast<std::uint16_t>(value);
+    seed[1] = static_cast<std::uint16_t>(value >> 16);
+    seed[2] = static_cast<std::uint16_t>(value >> 32);
+    return value;
+}
+
+}
+
+extern "C" {
+
+double APS5_VABI erand48_nid_postfix(std::uint16_t* seed) {
+    return std::ldexp(static_cast<double>(NextRand48(seed, __func__)), -48);
+}
+
+std::int64_t APS5_VABI nrand48_nid_postfix(std::uint16_t* seed) {
+    return static_cast<std::int64_t>(NextRand48(seed, __func__) >> 17);
+}
+
+std::int64_t APS5_VABI jrand48_nid_postfix(std::uint16_t* seed) {
+    return static_cast<std::int32_t>(static_cast<std::uint32_t>(NextRand48(seed, __func__) >> 16));
+}
+
+std::int64_t APS5_VABI random_nid_postfix() {
+    std::lock_guard lock(g_randomLock);
+    return static_cast<std::int64_t>(NextLocked());
+}
+
+void APS5_VABI srandom_nid_postfix(std::uint64_t seed) {
+    std::lock_guard lock(g_randomLock);
+    SeedLocked(static_cast<std::uint32_t>(seed));
+}
+
+char* APS5_VABI initstate_nid_postfix(std::uint64_t seed, char* state, std::int64_t size) {
+    if (size < MinimumStateBytes[0]) return nullptr;
+    if (state == nullptr) throw std::invalid_argument("initstate: null state");
+    std::lock_guard lock(g_randomLock);
+    char* previous = g_random.table;
+    SaveTypeWordLocked();
+    int type = MaxTypes - 1;
+    while (size < MinimumStateBytes[static_cast<std::size_t>(type)]) --type;
+    g_random = {state, type, Degrees[static_cast<std::size_t>(type)], Separations[static_cast<std::size_t>(type)], 0, 0};
+    SeedLocked(static_cast<std::uint32_t>(seed));
+    SaveTypeWordLocked();
+    return previous;
+}
+
+char* APS5_VABI setstate_nid_postfix(char* state) {
+    if (state == nullptr) throw std::invalid_argument("setstate: null state");
+    std::lock_guard lock(g_randomLock);
+    const std::uint32_t word = LoadWord(state, 0);
+    const int type = static_cast<int>(word % MaxTypes);
+    const std::uint32_t rear = word / MaxTypes;
+    const int degree = Degrees[static_cast<std::size_t>(type)];
+    if (type != LinearCongruentialType && rear >= static_cast<std::uint32_t>(degree)) return nullptr;
+    char* previous = g_random.table;
+    SaveTypeWordLocked();
+    const int separation = Separations[static_cast<std::size_t>(type)];
+    g_random.table = state;
+    g_random.type = type;
+    g_random.degree = degree;
+    g_random.separation = separation;
+    if (type != LinearCongruentialType) {
+        g_random.rear = static_cast<int>(rear);
+        g_random.front = (static_cast<int>(rear) + separation) % degree;
+    }
+    return previous;
+}
+
+}

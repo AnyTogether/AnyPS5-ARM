@@ -8,6 +8,7 @@
 
 extern "C" {
 int APS5_VABI malloc_stats_fast_nid_postfix(void*);
+std::size_t APS5_VABI malloc_usable_size_nid_postfix(void*);
 }
 
 namespace {
@@ -46,6 +47,15 @@ int APS5_VABI statsFast(void* stats) {
     return 0x2a;
 }
 
+unsigned usableCalls = 0;
+void* lastUsable = nullptr;
+
+std::size_t APS5_VABI usableSize(void* pointer) {
+    ++usableCalls;
+    lastUsable = pointer;
+    return 0x55;
+}
+
 template<typename TValue, std::size_t TSize>
 void write(std::array<std::byte, TSize>& data, std::size_t offset, TValue value) {
     require(offset <= data.size() && sizeof(value) <= data.size() - offset);
@@ -75,19 +85,29 @@ int main(int argc, char** argv) {
     write(replacement, 0x48, &realign);
     write(replacement, 0x50, &posixAlign);
     write(replacement, 0x60, &statsFast);
+    write(replacement, 0x68, &usableSize);
     if (argc > 1 && std::strcmp(argv[1], "default") == 0) {
         std::memset(replacement.data() + 0x20, 0, 10 * sizeof(void*));
         ApplicationHeapInitialize_nid_no_patch(process.data());
         require(ApplicationHeapAllocate_nid_no_patch(16) != nullptr);
         reject([&] { malloc_stats_fast_nid_postfix(stats.data()); });
+        auto* small = ApplicationHeapAllocate_nid_no_patch(16);
+        auto* large = ApplicationHeapAllocate_nid_no_patch(100000);
+        require(malloc_usable_size_nid_postfix(small) == 16 && malloc_usable_size_nid_postfix(large) == 100000);
+        require(malloc_usable_size_nid_postfix(nullptr) == 0 && usableCalls == 0);
+        ApplicationHeapFree_nid_no_patch(small);
+        ApplicationHeapFree_nid_no_patch(large);
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "missing") == 0) {
         write(replacement, 0x60, static_cast<void*>(nullptr));
+        write(replacement, 0x68, static_cast<void*>(nullptr));
         ApplicationHeapInitialize_nid_no_patch(process.data());
         require(ApplicationHeapAllocate_nid_no_patch(16) == storage.data());
         reject([&] { malloc_stats_fast_nid_postfix(stats.data()); });
-        require(statsCalls == 0);
+        reject([&] { malloc_usable_size_nid_postfix(storage.data()); });
+        reject([&] { malloc_usable_size_nid_postfix(nullptr); });
+        require(statsCalls == 0 && usableCalls == 0);
         return 0;
     }
     ApplicationHeapInitialize_nid_no_patch(process.data());
@@ -99,4 +119,6 @@ int main(int argc, char** argv) {
     require(statsCalls == 3);
     require(malloc_stats_fast_nid_postfix(stats.data()) == 0x2a && statsCalls == 4);
     require(ApplicationHeapAllocate_nid_no_patch(16) == storage.data());
+    require(malloc_usable_size_nid_postfix(storage.data()) == 0x55 && usableCalls == 1 && lastUsable == storage.data());
+    require(malloc_usable_size_nid_postfix(nullptr) == 0x55 && usableCalls == 2 && lastUsable == nullptr);
 }

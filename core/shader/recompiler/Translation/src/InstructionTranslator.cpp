@@ -170,6 +170,9 @@ void emitEntryPrologue(IrProgram& program, IrBlock& entryBlock, const TranslateO
         IrValue& index = builtin(kind);
         return folded < 0 ? index : entryIr.ISub(index, entryIr.GetUserData(static_cast<ScalarReg>(folded)));
     };
+    const auto tessellationBase = [&entryIr](TessellationBaseKind kind) -> IrValue& {
+        return entryIr.Emit(IrOpcode::TessellationBase, IrOpcodeType(IrOpcode::TessellationBase), {&entryIr.Constant(static_cast<std::uint32_t>(kind))});
+    };
 
     for (std::uint32_t index = 0; index < options.userDataCount; index++) {
         const auto reg = static_cast<ScalarReg>(options.userDataBaseRegister + index);
@@ -305,21 +308,22 @@ void emitEntryPrologue(IrProgram& program, IrBlock& entryBlock, const TranslateO
     } else if (options.stage == ShaderStageKind::Local) {
         entryIr.SetScalarReg(static_cast<ScalarReg>(3), entryIr.Constant(64u));
         entryIr.SetVectorReg(static_cast<VectorReg>(2), drawIndex(StageInputKind::VertexIndex));
-        entryIr.SetVectorReg(static_cast<VectorReg>(3), entryIr.Constant(0u));
+        entryIr.SetVectorReg(static_cast<VectorReg>(3), tessellationBase(TessellationBaseKind::RelativeIndex));
         entryIr.SetVectorReg(static_cast<VectorReg>(5), drawIndex(StageInputKind::InstanceIndex));
     } else if (options.stage == ShaderStageKind::TessellationControl) {
         const auto& tess = options.inputInfo.vertex->tess;
-        entryIr.SetScalarReg(static_cast<ScalarReg>(2), entryIr.Emit(IrOpcode::TessellationBase, IrOpcodeType(IrOpcode::TessellationBase), {&entryIr.Constant(0u)}));
-        entryIr.SetScalarReg(static_cast<ScalarReg>(4), entryIr.Emit(IrOpcode::TessellationBase, IrOpcodeType(IrOpcode::TessellationBase), {&entryIr.Constant(1u)}));
+        entryIr.SetScalarReg(static_cast<ScalarReg>(2), tessellationBase(TessellationBaseKind::OffChip));
+        entryIr.SetScalarReg(static_cast<ScalarReg>(4), tessellationBase(TessellationBaseKind::Factor));
         entryIr.SetScalarReg(static_cast<ScalarReg>(3), entryIr.Constant(0x81010000u | tess.inputControlPoints | (tess.outputControlPoints << 8u)));
         entryIr.SetVectorReg(static_cast<VectorReg>(0), builtin(StageInputKind::PrimitiveId));
-        entryIr.SetVectorReg(static_cast<VectorReg>(1), entryIr.ShiftLeftLogical(builtin(StageInputKind::InvocationId), entryIr.Constant(8u)));
+        entryIr.SetVectorReg(static_cast<VectorReg>(1), entryIr.BitwiseOr(entryIr.ShiftLeftLogical(builtin(StageInputKind::InvocationId), entryIr.Constant(8u)), tessellationBase(TessellationBaseKind::RelativeIndex)));
     } else if (options.stage == ShaderStageKind::TessellationEvaluation) {
         entryIr.SetScalarReg(static_cast<ScalarReg>(3), entryIr.Constant(64u));
-        entryIr.SetScalarReg(static_cast<ScalarReg>(4), entryIr.Emit(IrOpcode::TessellationBase, IrOpcodeType(IrOpcode::TessellationBase), {&entryIr.Constant(0u)}));
+        entryIr.SetScalarReg(static_cast<ScalarReg>(4), tessellationBase(TessellationBaseKind::OffChip));
+        entryIr.SetVectorReg(static_cast<VectorReg>(0), tessellationBase(TessellationBaseKind::PassthroughPrimitive));
         entryIr.SetVectorReg(static_cast<VectorReg>(5), builtin(StageInputKind::TessCoord, 0u));
         entryIr.SetVectorReg(static_cast<VectorReg>(6), builtin(StageInputKind::TessCoord, 1u));
-        entryIr.SetVectorReg(static_cast<VectorReg>(7), entryIr.Constant(0u));
+        entryIr.SetVectorReg(static_cast<VectorReg>(7), tessellationBase(TessellationBaseKind::RelativeIndex));
         entryIr.SetVectorReg(static_cast<VectorReg>(8), builtin(StageInputKind::PrimitiveId));
     } else if (options.stage == ShaderStageKind::Pixel) {
         const auto* ps = options.inputInfo.pixel;

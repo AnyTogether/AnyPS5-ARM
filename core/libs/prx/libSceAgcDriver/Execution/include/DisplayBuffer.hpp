@@ -25,6 +25,7 @@ struct DisplayBuffer {
 };
 
 std::size_t DisplayBufferSize(const DisplayBuffer& buffer);
+std::size_t DisplayBufferOffset(const DisplayBuffer& buffer, std::uint32_t x, std::uint32_t y);
 std::vector<std::byte> DecodeDisplayBuffer(const DisplayBuffer& buffer, std::span<const std::byte> source);
 std::vector<std::byte> ReadDisplayBuffer(const DisplayBuffer& buffer);
 std::array<std::byte, 4> DisplayBufferClearPixel(const DisplayBuffer& buffer, Graphics::DccKeys keys);

@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include <atomic>
@@ -19,6 +20,8 @@ namespace {
 
 constexpr int ERROR_NOT_FOUND = static_cast<int>(0x8095F004);
 constexpr int ERROR_INVALID_ARG = static_cast<int>(0x8095177A);
+constexpr int ERROR_INVALID_ID = static_cast<int>(0x8095F006);
+constexpr int ERROR_INVALID_VALUE = static_cast<int>(0x8095F007);
 
 struct SslData {
     char* ptr;
@@ -134,10 +137,13 @@ int APS5_VABI sceSslUnloadCert(int sslCtxId) {
 }
 
 int APS5_VABI sceSslGetMemoryPoolStats(int ssl_ctx_id, SslMemoryPoolStats* stats) {
-    if (stats == nullptr) APS5_INVALID_ARG_EX;
+    if (stats == nullptr) return ERROR_INVALID_VALUE;
     std::lock_guard lock(g_poolsMutex);
     const auto pool = g_pools.find(ssl_ctx_id);
-    if (pool == g_pools.end()) throw std::invalid_argument("sceSslGetMemoryPoolStats: unknown context");
+    if (pool == g_pools.end()) {
+        std::memset(stats, 0, sizeof(*stats));
+        return ERROR_INVALID_ID;
+    }
     *stats = {static_cast<size_t>(pool->second), 0, 0, 0};
     return 0;
 }

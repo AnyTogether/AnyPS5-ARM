@@ -78,6 +78,7 @@ public:
 
 private:
     void TriggerExpiredTimers(uint64_t nowNs);
+    int CollectTriggered(KernelEvent* ev, int num);
     bool NextTimerWaitMicros(uint64_t nowNs, uint32_t* out) const;
     bool PollEvents();
     void WakePollers();

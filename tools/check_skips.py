@@ -3,7 +3,7 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-DEVICE_LIMITATION = re.compile(r"skipped,.*(subgroup|the device has no|the device reports|no display)", re.IGNORECASE)
+DEVICE_LIMITATION = re.compile(r"skipped,.*(subgroup|the device (has no|reports|lacks|does not|imports no|flushes|binds fewer)|no display|no usable Vulkan device|host imports are unavailable)", re.IGNORECASE)
 
 NO_DISPLAY = re.compile(r"skipped,.*no display", re.IGNORECASE)
 

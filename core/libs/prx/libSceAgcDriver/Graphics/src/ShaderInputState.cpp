@@ -71,9 +71,9 @@ template <typename T> void _readHeaderArray(std::span<const std::byte> header, s
 }
 
 ShaderRecompiler::ShaderComputeStageInfo DecodeComputeStageInfo(const Registers& shader, std::span<const std::byte> header) {
-    const auto numThreadX = read(shader, computeNumThreadX, RegisterBank::Shader);
-    const auto numThreadY = read(shader, computeNumThreadY, RegisterBank::Shader);
-    const auto numThreadZ = read(shader, computeNumThreadZ, RegisterBank::Shader);
+    const auto numThreadX = read(shader, computeNumThreadX, RegisterBank::Shader) & 0xffffu;
+    const auto numThreadY = read(shader, computeNumThreadY, RegisterBank::Shader) & 0xffffu;
+    const auto numThreadZ = read(shader, computeNumThreadZ, RegisterBank::Shader) & 0xffffu;
     if (numThreadX == 0 || numThreadY == 0 || numThreadZ == 0) {
         throw std::runtime_error("AGC graphics: COMPUTE_NUM_THREAD_X/Y/Z must be nonzero");
     }
@@ -170,6 +170,7 @@ ShaderRecompiler::ShaderPixelStageInfo DecodePixelStageInfo(const Registers& con
 }
 
 ShaderRecompiler::ShaderVertexStageInfo DecodeVertexStageInfo(std::span<const std::byte> header, std::uint64_t headerAddress, std::span<const std::uint32_t> userData, std::vector<DecodeRead>* reads, bool staticAbi) {
+    if (header.empty()) return {};
     if (header.size() < sizeof(Shader)) throw std::runtime_error("AGC graphics: shader header is smaller than the fixed AGC header");
     Shader shader;
     std::memcpy(&shader, header.data(), sizeof(Shader));

@@ -9,6 +9,7 @@
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Module/EhFrame.hpp"
+#include "prx/libkernel/Module/ModuleArgs.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #include <psapi.h>
@@ -17,8 +18,8 @@
 #include <mach-o/getsect.h>
 #include <mach-o/loader.h>
 #else
-#include <fstream>
 #include <string_view>
+#include "prx/libc/include/specifics/linux/HostMapping.hpp"
 #endif
 
 #ifdef _WIN32
@@ -92,7 +93,9 @@ extern "C" {
 
 int APS5_VABI sceKernelDlsym(KernelModule handle, const char* symbol, void** addr) {
  if (!symbol || !addr) return SCE_KERNEL_ERROR_EFAULT;
- void* found = dlsym_nid_postfix(reinterpret_cast<void*>(static_cast<intptr_t>(handle)), symbol);
+ void* module = handle == 0 ? dlopen_nid_postfix(nullptr, kRtldNow) : reinterpret_cast<void*>(static_cast<intptr_t>(handle));
+ void* found = dlsym_nid_postfix(module, symbol);
+ if (handle == 0 && module) dlclose_nid_postfix(module);
  if (!found) return SCE_KERNEL_ERROR_ESRCH;
  *addr = found;
  return 0;
@@ -163,43 +166,23 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
   info->seg0_size = textSize;
   return 0;
 #else
-  std::ifstream maps("/proc/self/maps");
-  if (!maps) throw std::runtime_error("sceKernelGetModuleInfoForUnwind: failed to open /proc/self/maps");
-  std::string line;
-  while (std::getline(maps, line)) {
-    std::uint64_t start = 0;
-    std::uint64_t end = 0;
-    char perms[8] = {};
-    std::uint64_t offset = 0;
-    unsigned int devMajor = 0;
-    unsigned int devMinor = 0;
-    std::uint64_t inode = 0;
-    char path[4096] = {};
-    int parsed = std::sscanf(line.c_str(), "%llx-%llx %7s %llx %x:%x %llu %4095s",
-      (unsigned long long*)&start, (unsigned long long*)&end, perms,
-      (unsigned long long*)&offset, &devMajor, &devMinor, (unsigned long long*)&inode, path);
-    if (parsed < 7 || addr < start || addr >= end) continue;
-    info->st_size = sizeof(ModuleInfoForUnwind);
-    std::strncpy(info->name, parsed >= 8 ? path : "", sizeof(info->name) - 1);
-    info->name[sizeof(info->name) - 1] = '\0';
-    info->eh_frame_hdr_addr = 0;
-    info->eh_frame_addr = 0;
-    info->eh_frame_size = 0;
-    info->seg0_addr = start;
-    info->seg0_size = end - start;
-    if (IsRelinkedImage(addr)) FillGuestUnwindInfo(addr, info);
-    return 0;
-  }
-  return SCE_KERNEL_ERROR_ESRCH;
+  const auto mapping = HostMapping::Find(addr, "sceKernelGetModuleInfoForUnwind");
+  if (!mapping) return SCE_KERNEL_ERROR_ESRCH;
+  info->st_size = sizeof(ModuleInfoForUnwind);
+  std::strncpy(info->name, mapping->path.c_str(), sizeof(info->name) - 1);
+  info->name[sizeof(info->name) - 1] = '\0';
+  info->eh_frame_hdr_addr = 0;
+  info->eh_frame_addr = 0;
+  info->eh_frame_size = 0;
+  info->seg0_addr = mapping->start;
+  info->seg0_size = mapping->end - mapping->start;
+  if (IsRelinkedImage(addr)) FillGuestUnwindInfo(addr, info);
+  return 0;
 #endif
 }
 
 namespace {
 
-struct PendingModuleArgs {
-    std::size_t args = 0;
-    const void* argp = nullptr;
-};
 thread_local PendingModuleArgs pendingModuleArgs;
 thread_local int pendingModuleInitResult = 0;
 

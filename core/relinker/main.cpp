@@ -3,6 +3,7 @@
 #include <io/FileReader.hpp>
 #include <io/NativePath.hpp>
 #include <elfpatcher/linux/LinuxElfPatcher.hpp>
+#include <elfpatcher/linux/LinuxDesktopEntryWriter.hpp>
 #include <elfpatcher/general/SegmentFilter.hpp>
 #include <elfpatcher/general/EntryStubBuilder.hpp>
 #include <elfpatcher/general/ProgramHeaderLayoutBuilder.hpp>
@@ -108,18 +109,31 @@ int Run(const int argc, char* argv[]) {
 
         std::vector<Relinker::GuestArtifact> guestArtifacts;
         if (!args.skipSceModule) {
-            guestArtifacts = Relinker::GuestModuleBuilder().Build(Io::NativePath(args.inputPath), Io::NativePath(absPath), result.DynamicSection, args.toWindows, args.toMacos, args.toIntel, args.toRosetta, *syscallScanner, args.lazyBinding, args.runPath, args.excludedSceModules, Io::NativePath(args.sceModulePath));
+            guestArtifacts = Relinker::GuestModuleBuilder().Build(Io::NativePath(args.inputPath), Io::NativePath(absPath), result.DynamicSection, args.toWindows, args.toMacos, args.toIntel, args.toRosetta, *syscallScanner, args.lazyBinding, args.runPath, args.excludedSceModules, Io::NativePath(args.sceModulePath), args.moduleDirectories);
         }
+
+        const Elfpatcher::Linux::LinuxDesktopEntryWriter desktopEntryWriter;
+        const auto desktopEntry = args.toWindows || args.toMacos ? std::nullopt : desktopEntryWriter.Prepare(Io::NativePath(args.inputPath).parent_path() / "sce_sys", Io::NativePath(absPath));
 
         if (args.writeRegistry) {
             const std::filesystem::path outFsPath = Io::NativePath(absPath);
-            const std::string registryPath = Io::Utf8Path(outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + ".registry.json"));
-            const auto registryWriter = std::make_shared<Relinker::CallRegistryWriter>();
-            fileWriter.Write(registryPath, registryWriter->WriteCallRegistry(result.RegistryEntries));
-            for (const auto& artifact : guestArtifacts) {
-                const auto modulePath = outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + "." + Io::Utf8Path(artifact.Path.filename()) + ".registry.json");
-                fileWriter.Write(Io::Utf8Path(modulePath), registryWriter->WriteModuleImports(artifact.Imports));
+            std::vector<std::filesystem::path> registryPaths{
+                outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + ".registry.json")
+            };
+            for (const auto& artifact : guestArtifacts)
+                registryPaths.push_back(outFsPath.parent_path() / Io::NativePath(Io::Utf8Path(outFsPath.stem()) + "." + Io::Utf8Path(artifact.Path.filename()) + ".registry.json"));
+            for (const auto& path : registryPaths) {
+                if (!std::filesystem::exists(path)) continue;
+                if (std::filesystem::equivalent(Io::NativePath(args.inputPath), path))
+                    throw Domain::RelinkerException("Registry output would overwrite the input executable: " + Io::Utf8Path(path));
+                for (const auto& artifact : guestArtifacts)
+                    if (std::filesystem::equivalent(artifact.SourcePath, path))
+                        throw Domain::RelinkerException("Registry output would overwrite an input module: " + Io::Utf8Path(path));
             }
+            const auto registryWriter = std::make_shared<Relinker::CallRegistryWriter>();
+            fileWriter.Write(Io::Utf8Path(registryPaths.front()), registryWriter->WriteCallRegistry(result.RegistryEntries));
+            for (std::size_t index = 0; index < guestArtifacts.size(); ++index)
+                fileWriter.Write(Io::Utf8Path(registryPaths[index + 1]), registryWriter->WriteModuleImports(guestArtifacts[index].Imports));
         }
 
         auto byteWriter = std::make_shared<Io::ByteWriter>();
@@ -154,6 +168,7 @@ int Run(const int argc, char* argv[]) {
             std::cout << "Guest module: " << Io::Utf8Path(artifact.Path) << '\n';
         }
         fileWriter.Write(absPath, executableBytes);
+        if (desktopEntry) std::cout << "Desktop entry: " << Io::Utf8Path(desktopEntryWriter.Write(*desktopEntry)) << '\n';
         std::cout << "External prx references: " << result.RegistryEntries.size() << "\nOutput file: " << absPath << '\n';
         std::cout << "Expected runtime layout (relative to the output executable):\n"
                   << Io::Utf8Path(Io::NativePath(absPath).filename()) << "\n"

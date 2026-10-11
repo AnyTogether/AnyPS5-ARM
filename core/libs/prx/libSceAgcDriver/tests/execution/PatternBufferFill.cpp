@@ -167,6 +167,24 @@ void ExecuteTests() {
     }
 }
 
+void PartialGroupTests() {
+    for (const auto wave : {32u, 64u}) {
+        Output.fill(0xcafebabeu);
+        Pattern[0] = 0x5a5a5a5au;
+        Control = {256, 0, 0, 0};
+        auto words = Commands(UserData(Output.data(), 256), 128, wave, false, false);
+        words[2] = 0x00100040u;
+        words[3] = 0x00010001u;
+        words[4] = 0x00010001u;
+        words.back() |= 0x2u;
+        Submit(words);
+        for (std::size_t i = 0; i < Output.size(); ++i) {
+            const auto expected = i < 80 ? 0x5a5a5a5au : 0xcafebabeu;
+            Require(Output[i] == expected, "partial last thread group fill mismatch at " + std::to_string(i) + " wave " + std::to_string(wave));
+        }
+    }
+}
+
 void Benchmark() {
     constexpr std::size_t bytes = 64u << 20u;
     std::vector<std::uint32_t> storage(bytes / 4 + 4);
@@ -196,7 +214,10 @@ int main(int argc, char** argv) {
             if (!device) return VulkanTestSkipped;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--benchmark") Benchmark();
-        else ExecuteTests();
+        else {
+            ExecuteTests();
+            PartialGroupTests();
+        }
         AgcDriverShutdown_nid_postfix();
         std::puts("pattern buffer fill tests passed");
         return 0;

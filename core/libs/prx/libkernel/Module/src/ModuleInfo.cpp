@@ -316,12 +316,6 @@ extern "C" {
 int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, ModuleInfoEx* info) {
     if (!info) return SCE_KERNEL_ERROR_EFAULT;
     if (flags != 2) throw std::invalid_argument("sceKernelGetModuleInfoFromAddr: unsupported flags " + std::to_string(flags));
-#ifndef __APPLE__
-    // PPSA02929 calls this on exit with st_size left uninitialized (shadPS4 does not read it either),
-    // which the macOS port, where that title runs, accepts.
-    if (info->st_size != sizeof(ModuleInfoEx))
-        throw std::invalid_argument("sceKernelGetModuleInfoFromAddr: unsupported st_size " + std::to_string(info->st_size));
-#endif
     ModuleInfoEx result{};
     result.st_size = sizeof(ModuleInfoEx);
 #ifdef _WIN32

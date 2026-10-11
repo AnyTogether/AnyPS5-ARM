@@ -152,17 +152,19 @@ def nid_of(name, aliases):
 def source_stubs(source):
     if not Path(source).is_dir():
         raise AuditError(f"{source}: not a directory")
-    done, pending = set(), {}
+    stubs = {}
     for library in sorted(item for item in Path(source).iterdir() if item.is_dir()):
         aliases = {}
         for file in library.rglob("*.cpp"):
             for nid, name in EXPORT_ALIAS.findall(file.read_text(errors="ignore")):
                 aliases[name] = nid
         group = progress.scan_library(library)
-        done.update(nid_of(name, aliases) for name in group["done_names"])
+        done = {nid_of(name, aliases) for name in group["done_names"]}
         for name in group["todo_names"]:
-            pending.setdefault(nid_of(name, aliases), name)
-    return {nid: name for nid, name in pending.items() if nid not in done}
+            nid = nid_of(name, aliases)
+            if nid not in done:
+                stubs.setdefault((library.name + ".prx", nid), name)
+    return stubs
 
 
 def read_registry(path):
@@ -202,14 +204,14 @@ def audit(imports, exports, stubs, libraries, modules):
             kind = "module"
         elif not providers:
             kind = "absent"
-        elif nid in stubs:
+        elif all((provider, nid) in stubs for provider in providers):
             kind = "stub"
         else:
             kind = "implemented"
         record["class"] = kind
         record["providers"] = providers
         record["library_mismatch"] = kind in ("implemented", "stub") and bool(library) and library not in providers and "libc.prx" not in providers
-        record["name"] = stubs.get(nid)
+        record["name"] = next((stubs[(provider, nid)] for provider in providers if (provider, nid) in stubs), None) if kind == "stub" else None
     ordered = sorted(records.values(), key=lambda record: (record["class"], record["library"], record["nid"]))
     check_conservation(len(imports), ordered)
     missing = defaultdict(int)

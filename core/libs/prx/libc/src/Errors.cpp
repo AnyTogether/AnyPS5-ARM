@@ -62,7 +62,7 @@ int APS5_VABI strerror_r_nid_postfix(int error, char* buffer, std::size_t length
     else std::snprintf(temporary, sizeof(temporary), "Unknown error: %d", error);
     const auto required = std::strlen(temporary) + 1;
     int result = Known(error) ? 0 : 22;
-    if (!buffer || length < required) result = 34;
+    if (Known(error) && (!buffer || length < required)) result = 34;
     if (buffer && length) {
         const auto count = required <= length ? required - 1 : length - 1;
         std::memcpy(buffer, temporary, count);

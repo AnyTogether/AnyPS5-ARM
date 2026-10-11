@@ -633,6 +633,19 @@ bool ConstantFolder::tryFoldValue(IrProgram& program, IrValue& value) const {
             replaceWith(value, builder.Constant(static_cast<std::uint32_t>(std::popcount(operand.ImmediateU64()))));
             return true;
         }
+        case IrOpcode::BitReverse32: {
+            auto& operand = resolveArg(value, 0);
+            if (!isImmediate(operand, IrType::U32)) {
+                return false;
+            }
+            const std::uint32_t word = operand.ImmediateU32();
+            std::uint32_t reversed = 0;
+            for (std::uint32_t bit = 0; bit < 32; ++bit) {
+                reversed |= ((word >> bit) & 1u) << (31u - bit);
+            }
+            replaceWith(value, builder.Constant(reversed));
+            return true;
+        }
         case IrOpcode::SMin32:
         case IrOpcode::SMax32: {
             const auto opcode = value.Opcode();

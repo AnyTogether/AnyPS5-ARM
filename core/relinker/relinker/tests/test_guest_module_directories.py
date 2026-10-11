@@ -117,9 +117,8 @@ def main():
                 (case / "sce_module" / "libc.prx").write_bytes(magic + bytes(0x1000))
                 (case / "prx" / "provider.prx").write_bytes(module_with_symbol(True))
                 result, output = convert(case, windows)
-                assert result.returncode == 2 and "Guest module is a SELF container, not an ELF" in result.stderr, result.stderr
-                assert str(case / "sce_module" / "libc.prx") in result.stderr, result.stderr
-                assert not output.exists() and not (case / "app0").exists(), output
+                assert result.returncode == 0 and output.exists(), result.stderr
+                assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"provider.prx.guest.prx"}
                 result, output = convert(case, windows, ["--exclude-sce-module", "libc.prx"])
                 assert result.returncode == 0 and output.exists(), result.stderr
                 assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"provider.prx.guest.prx"}

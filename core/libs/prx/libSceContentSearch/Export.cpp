@@ -62,6 +62,26 @@ int APS5_VABI sceContentSearchSearchContent(const void* column_set, std::uint32_
     return 0;
 }
 
+int APS5_VABI sceContentSearchGetContentLastUpdateId(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentSearchOpenMetadataByContentId(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentSearchGetTotalContentSize(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentSearchGetNumOfContent(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceContentSearchTerm(void) {
     bool expected = true;
     if (!g_initialized.compare_exchange_strong(expected, false)) throw std::logic_error(std::string(__func__) + ": not initialized");

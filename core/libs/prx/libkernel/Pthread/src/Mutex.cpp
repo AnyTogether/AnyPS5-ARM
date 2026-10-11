@@ -87,7 +87,17 @@ int MutexOperations::Timedlock(PthreadMutex* mutex, const KernelTimespec* abstim
     if (std::chrono::duration<long double>(duration) >= std::chrono::duration<long double>(std::chrono::system_clock::duration::max()))
         throw std::overflow_error("Absolute mutex timeout exceeds the host clock range");
     const auto deadline = std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(duration));
-    return acquireMutex(resolveMutex(mutex, true), [&](auto& native) { return native.try_lock_until(deadline); }, sceTimedOut, false);
+    return acquireMutex(resolveMutex(mutex, true), [&](auto& native) {
+#ifdef _WIN32
+        while (!native.try_lock()) {
+            if (std::chrono::system_clock::now() >= deadline) return false;
+            TimedWait::SleepNanos(1000000);
+        }
+        return true;
+#else
+        return native.try_lock_until(deadline);
+#endif
+    }, sceTimedOut, false);
 }
 
 extern "C" {

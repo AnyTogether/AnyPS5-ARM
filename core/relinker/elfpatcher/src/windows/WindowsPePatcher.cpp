@@ -88,7 +88,7 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t
     libraries.insert(libraries.begin(), guestPaths.begin(), guestPaths.end());
     if (dependencyDiagnostics)
         writeDiagnosticsImports(relocations.Imports);
-    auto entry = WindowsEntryStubBuilder().Build(nextRva, image.GetEntryRva(), nativeImports, libraries, relocations.Imports, runPath, lazyBinding, dependencyDiagnostics, dynamicSection.GuestModules);
+    auto entry = WindowsEntryStubBuilder().Build(nextRva, image.GetEntryRva(), nativeImports, libraries, relocations.Imports, runPath, lazyBinding, dependencyDiagnostics, dynamicSection.GuestModules, dynamicSection.UnmatchedImportModules);
     directories[3] = entry.ExceptionDirectory;
     const auto entryRva = entry.Code.Rva;
     nextRva = AlignRva(entry.Code.Rva + entry.Code.Data.size());

@@ -4,6 +4,8 @@ add_executable(relinker
         ${CMAKE_CURRENT_SOURCE_DIR}/cli/src/Autorun.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/linux/LinuxElfPatcher.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/linux/LinuxGuestModuleWriter.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/linux/LinuxDesktopEntryWriter.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../libs/prx/libkernel/AppMetadata/src/ParamJsonParser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/windows/WindowsGuestModuleWriter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/windows/WindowsGuestStartup.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/guest/GuestImageReader.cpp
@@ -76,6 +78,7 @@ target_include_directories(relinker PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/io/include
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/include
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../libs
 )
 
 if(WIN32)
@@ -172,6 +175,20 @@ if(BUILD_TESTING)
         )
         add_test(NAME file_writer_binary COMMAND file_writer_tests binary)
         add_test(NAME file_writer_text COMMAND file_writer_tests text)
+
+        add_test_executable(linux_desktop_entry_tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/tests/LinuxDesktopEntryTests.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/linux/LinuxDesktopEntryWriter.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../libs/prx/libkernel/AppMetadata/src/ParamJsonParser.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/io/src/NativePath.cpp
+        )
+        target_include_directories(linux_desktop_entry_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/domain/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/io/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../libs
+        )
+        add_test(NAME linux_desktop_entry COMMAND linux_desktop_entry_tests)
     endif()
 
     add_test_executable(amd64_only_converter_tests
@@ -256,6 +273,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_runpath.py $<TARGET_FILE:relinker>)
         add_test(NAME executable_segments COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_executable_segments.py $<TARGET_FILE:relinker>)
+        add_test(NAME linux_executable_exports COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_executable_exports.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_entry_argv COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_entry_argv.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_program_header_order COMMAND ${Python3_EXECUTABLE}
@@ -268,16 +287,22 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_working_directory.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_address_space COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_address_space.py $<TARGET_FILE:relinker>)
+        add_test(NAME windows_tls_thread_pointer COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_tls_thread_pointer.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_bss COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_bss.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_icon COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_icon.py $<TARGET_FILE:relinker>)
+        add_test(NAME linux_desktop_entry_output COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_desktop_entry_output.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_intel_trampolines COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_intel_trampolines.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_tls COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_tls.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_needed_modules COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_needed_modules.py $<TARGET_FILE:relinker>)
+        add_test(NAME guest_module_dir COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_dir.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_module_directories COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_directories.py $<TARGET_FILE:relinker>)
         add_test(NAME sce_module_path COMMAND ${Python3_EXECUTABLE}
@@ -324,6 +349,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_input_nonascii.py $<TARGET_FILE:relinker>)
         add_test(NAME string_table_bounds COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_string_table_bounds.py $<TARGET_FILE:relinker>)
+        add_test(NAME sce_code_extent COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_code_extent.py $<TARGET_FILE:relinker>)
         add_test(NAME call_registry COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_call_registry.py $<TARGET_FILE:relinker>)
         add_test(NAME jmprel_table_bounds COMMAND ${Python3_EXECUTABLE}
@@ -337,6 +364,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_entry_point_bounds.py $<TARGET_FILE:relinker>)
         add_test(NAME init_array_roots COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_init_array_roots.py $<TARGET_FILE:relinker>)
+        add_test(NAME gnu_hash_analysis COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_gnu_hash_analysis.py $<TARGET_FILE:relinker>)
         add_test(NAME to_rosetta COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_to_rosetta.py $<TARGET_FILE:relinker>)
         add_test(NAME syscall_number COMMAND ${Python3_EXECUTABLE}

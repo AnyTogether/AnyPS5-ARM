@@ -46,12 +46,6 @@ int APS5_VABI sceAgcSetShaderInstrumentation(std::uint32_t flags) {
     return 0;
 }
 
-// A retail console has no debugger to raise the exception to, so the request is only reported.
-int APS5_VABI sceAgcDebugRaiseException(std::uint32_t exceptionId) {
-    std::fprintf(stderr, "[agc] sceAgcDebugRaiseException(0x%08x) ignored: no GPU debugger is attached\n", exceptionId);
-    return 0;
-}
-
 // The AMM semaphore memory is set once per process and split into 32-byte labels.
 int APS5_VABI sceAgcSetAmmSemaphoreMemory(void* memory, std::uint64_t sizeInBytes) {
     std::lock_guard guard(ammSemaphoreLock);

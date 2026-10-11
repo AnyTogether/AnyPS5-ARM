@@ -37,8 +37,10 @@ using Key = std::vector<std::byte>;
 struct DeviceLibraries {
     PFN_vkDestroyPipeline destroyPipeline = nullptr;
     PFN_vkDestroyPipelineLayout destroyLayout = nullptr;
+    PFN_vkDestroyShaderModule destroyModule = nullptr;
     std::map<Key, VkPipelineLayout> layouts;
     std::array<std::map<Key, VkPipeline>, 4> parts;
+    std::vector<VkShaderModule> modules;
     PipelineLibraryCounters counters;
 };
 
@@ -99,7 +101,7 @@ std::span<const VkDynamicState> PipelineLibraryDynamicStates() {
     return dynamicStates;
 }
 
-VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPipelineCreateInfo& info, const VkPipelineRenderingCreateInfoKHR& rendering, const VkPipelineLayoutCreateInfo& layout, const PipelineLibraryKeys& keys, std::shared_ptr<OptimizedPipeline>* optimized) {
+VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPipelineCreateInfo& info, const VkPipelineRenderingCreateInfoKHR& rendering, const VkPipelineLayoutCreateInfo& layout, const PipelineLibraryKeys& keys, std::shared_ptr<OptimizedPipeline>* optimized, std::span<VkShaderModule> modules) {
     Require(info.renderPass == VK_NULL_HANDLE && info.pDynamicState != nullptr, "pipeline library parts need dynamic rendering and the library dynamic states");
     auto& store = Libraries();
     std::lock_guard lock(store.mutex);
@@ -107,6 +109,7 @@ VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPip
     if (device.destroyPipeline == nullptr) {
         device.destroyPipeline = context.Function<PFN_vkDestroyPipeline>("vkDestroyPipeline");
         device.destroyLayout = context.Function<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout");
+        device.destroyModule = context.Function<PFN_vkDestroyShaderModule>("vkDestroyShaderModule");
     }
     auto pipelineLayout = device.layouts.find(keys.layout);
     if (pipelineLayout == device.layouts.end()) {
@@ -135,6 +138,8 @@ VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPip
     const std::array<const Key*, 4> contextKeys{&none, &keys.layout, &keys.layout, &keys.renderPass};
     const VkPipelineRenderingCreateInfoKHR shaderRendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
     VkPipelineDepthStencilStateCreateInfo dynamicDepth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    static const bool backgroundLinking = std::getenv("APS5_NO_PIPELINE_LTO") == nullptr;
+    const bool optimize = backgroundLinking && context.pipelineLinkTimeOptimization;
     std::vector<VkPipeline> libraries;
     for (std::size_t part = 0; part < flags.size(); ++part) {
         if (part == 0 && mesh) continue;
@@ -179,6 +184,15 @@ VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPip
         VkPipeline handle = VK_NULL_HANDLE;
         Check(context.Function<PFN_vkCreateGraphicsPipelines>("vkCreateGraphicsPipelines")(context.device, context.pipelineCache, 1, &create, nullptr, &handle), "vkCreateGraphicsPipelines library");
         cache.emplace(key, handle);
+        if (optimize) {
+            for (std::uint32_t stage = 0; stage < create.stageCount; ++stage) {
+                for (auto& module : modules) {
+                    if (module == VK_NULL_HANDLE || module != create.pStages[stage].module) continue;
+                    device.modules.push_back(module);
+                    module = VK_NULL_HANDLE;
+                }
+            }
+        }
         ++device.counters.built[part];
         libraries.push_back(handle);
     }
@@ -191,7 +205,6 @@ VkPipeline LinkPipelineFromLibraries(const Context& context, const VkGraphicsPip
     VkPipeline pipeline = VK_NULL_HANDLE;
     Check(context.Function<PFN_vkCreateGraphicsPipelines>("vkCreateGraphicsPipelines")(context.device, context.pipelineCache, 1, &create, nullptr, &pipeline), "vkCreateGraphicsPipelines link");
     ++device.counters.linked;
-    static const bool optimize = std::getenv("APS5_NO_PIPELINE_LTO") == nullptr;
     if (optimize && optimized != nullptr) {
         auto slot = std::make_shared<OptimizedPipeline>();
         slot->device = context.device;
@@ -242,6 +255,7 @@ void ClearPipelineLibraries(VkDevice device) {
     for (auto& part : libraries.parts) {
         for (const auto& [key, handle] : part) libraries.destroyPipeline(device, handle, nullptr);
     }
+    for (const auto module : libraries.modules) libraries.destroyModule(device, module, nullptr);
     for (const auto& [key, handle] : libraries.layouts) libraries.destroyLayout(device, handle, nullptr);
     store.devices.erase(found);
 }

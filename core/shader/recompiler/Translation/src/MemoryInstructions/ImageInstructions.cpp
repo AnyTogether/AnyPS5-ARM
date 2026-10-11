@@ -204,15 +204,7 @@ bool TranslationContext::imageSample(const RdnaInstruction& inst) {
     IrValue* sampler = getSamplerResource(memory);
     IrValue* address = makeImageAddress(inst, inst.source0);
     IrValue& result = ir.Emit(IrOpcode::ImageSampleRaw, IrOpcodeType(IrOpcode::ImageSampleRaw), {resource, sampler, address}, addMemoryInfo(memory, inst.programCounter));
-    const bool dref = (memory.imageSampleFlags & RdnaImageSampleFlagCompare) != 0u;
-    if (dref && memory.dataBits != 16u) {
-        IrValue& component = ir.CompositeExtract(result, 0u);
-        for (std::uint32_t index = 0; index < memory.dataDwords; ++index) {
-            writeOperand(offsetOperand(inst.destination, index), &component);
-        }
-    } else {
-        writeImageComponents(inst.destination, &result, memory, 4u);
-    }
+    writeImageComponents(inst.destination, &result, memory, 4u);
     return true;
 }
 

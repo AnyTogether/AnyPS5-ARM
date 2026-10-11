@@ -84,7 +84,7 @@ void TranslationContext::vInterpP2F32(const RdnaInstruction& inst) {
             program.Metadata().pixelPerspectiveInputs |= bit;
         }
     }
-    ir.Emit(IrOpcode::InterpolateHostP2, IrType::Void, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), readOperand(inst.source0, IrType::F32), readOperand(inst.destination, IrType::F32), &ir.GetExec()});
+    (void)ir.Emit(IrOpcode::InterpolateHostP2, IrType::Void, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), readOperand(inst.source0, IrType::F32), readOperand(inst.destination, IrType::F32), &ir.GetExec()});
     IrValue& value = ir.Emit(IrOpcode::GetAttribute, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value)});
     writeOperand(inst.destination, &value);
 }

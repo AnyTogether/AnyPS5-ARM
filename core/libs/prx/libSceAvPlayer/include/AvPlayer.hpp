@@ -4,7 +4,6 @@
 #ifndef CORE_LIBS_PRX_LIBSCEAVPLAYER_INCLUDE_AVPLAYER_HPP
 #define CORE_LIBS_PRX_LIBSCEAVPLAYER_INCLUDE_AVPLAYER_HPP
 
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -13,6 +12,7 @@
 #include <string_view>
 #include <thread>
 #include "SceTypes.hpp"
+#include "prx/libkernel/Time/include/TimedWait.hpp"
 
 namespace AvPlayer {
 
@@ -151,7 +151,7 @@ private:
     std::uint32_t demuxVideoBytes = 0;
 
     std::mutex eventMutex;
-    std::condition_variable eventCondition;
+    TimedWait::Condition eventCondition;
     std::deque<Event> events;
     bool quit = false;
     std::thread controller;

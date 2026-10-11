@@ -8,6 +8,8 @@ int APS5_VABI pthread_mutexattr_destroy_nid_postfix(PthreadMutexattr* attr);
 int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, int protocol);
 int APS5_VABI pthread_mutexattr_setprioceiling_nid_postfix(PthreadMutexattr* attr, int prioceiling);
 int APS5_VABI pthread_mutexattr_getprioceiling_nid_postfix(const PthreadMutexattr* attr, int* prioceiling);
+int APS5_VABI pthread_mutexattr_settype_nid_postfix(PthreadMutexattr* attr, int type);
+int APS5_VABI pthread_mutexattr_gettype_nid_postfix(const PthreadMutexattr* attr, int* type);
 int APS5_VABI pthread_mutex_init_nid_postfix(PthreadMutex* mutex, const PthreadMutexattr* attr);
 int APS5_VABI pthread_mutex_lock_nid_postfix(PthreadMutex* mutex);
 int APS5_VABI pthread_mutex_unlock_nid_postfix(PthreadMutex* mutex);
@@ -33,7 +35,26 @@ static bool Throws(Call call) {
     return false;
 }
 
+static void CheckType() {
+    PthreadMutexattr attr = nullptr;
+    Require(pthread_mutexattr_init_nid_postfix(&attr) == 0);
+    int type = -1;
+    Require(pthread_mutexattr_gettype_nid_postfix(&attr, &type) == 0 && type == 1);
+    for (const int set : {2, 3, 4, 1}) {
+        Require(pthread_mutexattr_settype_nid_postfix(&attr, set) == 0);
+        Require(pthread_mutexattr_gettype_nid_postfix(&attr, &type) == 0 && type == set);
+    }
+    Require(pthread_mutexattr_settype_nid_postfix(&attr, 5) == GUEST_EINVAL);
+    Require(pthread_mutexattr_gettype_nid_postfix(&attr, &type) == 0 && type == 1);
+    Require(Throws([&] { pthread_mutexattr_gettype_nid_postfix(&attr, nullptr); }));
+    Require(pthread_mutexattr_destroy_nid_postfix(&attr) == 0);
+    type = -1;
+    Require(pthread_mutexattr_gettype_nid_postfix(&attr, &type) == GUEST_EINVAL && type == -1);
+    Require(pthread_mutexattr_gettype_nid_postfix(nullptr, &type) == GUEST_EINVAL && type == -1);
+}
+
 int main() {
+    CheckType();
     PthreadMutexattr attr = nullptr;
     Require(pthread_mutexattr_init_nid_postfix(&attr) == 0);
     int ceiling = -1;

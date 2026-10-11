@@ -7,12 +7,58 @@ import tempfile
 from test_guest_intel_trampolines import PLAIN_SITE, guest_fixture, main_fixture
 
 
+def check_registry_inputs(relinker, work, windows):
+    options = ["--windows"] if windows else []
+    for module_registry in (False, True):
+        for bundled in (False, True):
+            for alias in ("direct", "hardlink", "symlink"):
+                if bundled and alias == "direct":
+                    continue
+                case = work / f"registry-{windows}-{module_registry}-{bundled}-{alias}"
+                modules = case / "sce_module"
+                modules.mkdir(parents=True)
+                module = modules / "sample.prx"
+                module_original = bytes(guest_fixture(PLAIN_SITE))
+                module.write_bytes(module_original)
+                output = case / ("output.exe" if windows else "output.elf")
+                registries = [case / "output.registry.json", case / "output.sample.prx.guest.prx.registry.json"]
+                registry = registries[int(module_registry)]
+                source = registry if alias == "direct" else case / "input.elf"
+                original = bytes(main_fixture())
+                source.write_bytes(original)
+                protected = module if bundled else source
+                if alias == "hardlink":
+                    os.link(protected, registry)
+                elif alias == "symlink":
+                    try:
+                        registry.symlink_to(protected)
+                    except OSError as error:
+                        if os.name != "nt" or error.winerror != 1314:
+                            raise
+                        print("Registry symbolic-link case skipped: Windows symlink privilege unavailable")
+                        continue
+                previous_registry = b"previous registry"
+                untouched = registries[int(not module_registry)]
+                untouched.write_bytes(previous_registry)
+                previous_output = b"previous executable"
+                output.write_bytes(previous_output)
+                result = subprocess.run([str(relinker), *options, "--registry", str(source), str(output)],
+                                        capture_output=True, text=True, timeout=20)
+                expected = "Registry output would overwrite an input module" if bundled else "Registry output would overwrite the input executable"
+                assert result.returncode == 2 and expected in result.stderr, (result.returncode, result.stdout, result.stderr)
+                assert source.read_bytes() == original and module.read_bytes() == module_original
+                assert output.read_bytes() == previous_output and untouched.read_bytes() == previous_registry
+                assert registry.read_bytes() == (module_original if bundled else original)
+                assert not (case / "app0").exists()
+
+
 def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="anyps5-input-preservation-") as directory:
         work = Path(directory)
         for windows in (False, True):
             options = ["--windows"] if windows else []
+            check_registry_inputs(relinker, work, windows)
             for bundled in (False, True):
                 for alias in ("direct", "normalized", "hardlink", "symlink"):
                     case = work / f"{windows}-{bundled}-{alias}"

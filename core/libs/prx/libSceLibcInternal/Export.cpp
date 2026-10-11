@@ -15,6 +15,7 @@
 
 extern "C" void APS5_VABI sceKernelSetThreadDtors(thread_dtors_func_t dtors);
 extern "C" int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, ModuleInfoEx* info);
+extern "C" const char* __progname_nid_postfix;
 
 namespace {
 
@@ -103,6 +104,10 @@ void RegisterThreadExitHook() {
 extern "C" {
 
 int Need_sceLibcInternal_nid_postfix = 1;
+
+const char* APS5_VABI getprogname_nid_postfix() {
+    return __progname_nid_postfix;
+}
 
 void APS5_VABI __cxa_finalize_nid_postfix(void* dsoHandle) {
     CxaFinalize_nid_no_patch(dsoHandle);

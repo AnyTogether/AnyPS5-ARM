@@ -2,11 +2,13 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <source_location>
 
 extern "C" void APS5_VABI arc4random_buf_nid_postfix(void*, std::size_t);
+extern "C" std::uint32_t APS5_VABI arc4random_nid_postfix();
 
 void Require(bool condition, std::source_location location = std::source_location::current()) {
     if (!condition) {
@@ -33,5 +35,23 @@ int main() {
     std::array<std::size_t, 256> counts{};
     for (const auto value : first) ++counts[value];
     Require(*std::max_element(counts.begin(), counts.end()) < 64);
+
+    constexpr std::size_t Draws = 65536;
+    static std::array<std::uint32_t, Draws> words{};
+    for (auto& word : words) word = arc4random_nid_postfix();
+    std::array<std::size_t, 32> bits{};
+    std::array<std::size_t, 16> nibbles{};
+    for (const auto word : words) {
+        for (std::size_t bit = 0; bit < bits.size(); ++bit) bits[bit] += (word >> bit) & 1u;
+        ++nibbles[word >> 28];
+    }
+    for (const auto count : bits) Require(count > Draws / 2 - 1500 && count < Draws / 2 + 1500);
+    for (const auto count : nibbles) Require(count > Draws / 16 - 600 && count < Draws / 16 + 600);
+    Require(*std::min_element(words.begin(), words.end()) < 0x00100000u);
+    Require(*std::max_element(words.begin(), words.end()) > 0xfff00000u);
+    std::sort(words.begin(), words.end());
+    std::size_t repeats = 0;
+    for (std::size_t index = 1; index < Draws; ++index) repeats += words[index] == words[index - 1];
+    Require(repeats < 16);
     return 0;
 }

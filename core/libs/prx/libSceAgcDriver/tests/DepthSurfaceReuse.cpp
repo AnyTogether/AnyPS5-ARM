@@ -12,11 +12,13 @@ namespace {
 
 using namespace AgcDriver::Graphics;
 
+constexpr std::uint32_t FormatR8Uint = 5;
 constexpr std::uint32_t FormatR16Unorm = 7;
 constexpr std::uint32_t FormatR16Uint = 11;
 constexpr std::uint32_t FormatR32Uint = 20;
 constexpr std::uint32_t FormatR32Float = 22;
 constexpr std::uint32_t FormatR11G11B10Float = 36;
+constexpr std::uint32_t FormatR8G8B8A8Unorm = 56;
 constexpr std::uint32_t TileDepth64KB = 0x18;
 constexpr std::uint32_t TileRenderTarget64KB = 0x1b;
 constexpr std::uint32_t Type2D = 9;
@@ -163,8 +165,11 @@ void RunDepthSurfaceReuseTests() {
     context.limits.maxFramebufferHeight = 16384;
     constexpr std::uint64_t depth32 = 0x40000000;
     constexpr std::uint64_t depth16 = 0x50000000;
+    constexpr std::uint64_t depthStencil = 0x60000000;
+    constexpr std::uint64_t stencil = 0x60800000;
     DepthSurfaceView(context, {depth32, 0, {384, 384}, VK_FORMAT_D32_SFLOAT, 1.0f, 0});
     DepthSurfaceView(context, {depth16, 0, {256, 256}, VK_FORMAT_D16_UNORM, 1.0f, 0});
+    DepthSurfaceView(context, {depthStencil, stencil, {320, 180}, VK_FORMAT_D32_SFLOAT_S8_UINT, 1.0f, 0});
 
     Require(lookup(context, {depth32, FormatR32Float, 384, 384}) != nullptr, "an R32F view of a D32 surface's own extent must sample its depth plane");
     Require(lookup(context, {depth16, FormatR16Unorm, 256, 256}) != nullptr, "an R16 view of a D16 surface's own extent must sample its depth plane");
@@ -176,6 +181,10 @@ void RunDepthSurfaceReuseTests() {
     Require(lookup(context, {depth32, FormatR32Float, 512, 512, TileDepth64KB, Type2DArray, 5}) == nullptr, "a 2D array view of another extent over a depth surface must be read as reused memory");
     Require(lookup(context, {depth32, FormatR32Uint, 384, 384, TileRenderTarget64KB}) == nullptr, "an R32 uint view without a depth layout must be read as reused memory");
     Require(lookup(context, {depth16, FormatR32Float, 256, 256}) == nullptr, "an R32F view of a D16 surface's own extent must be read as reused memory");
+
+    Require(lookup(context, {stencil, FormatR8Uint, 320, 180}) != nullptr, "an 8-bit view of a stencil plane's own extent must sample the stencil plane");
+    Require(lookup(context, {stencil, FormatR8G8B8A8Unorm, 320, 180, TileRenderTarget64KB}) == nullptr, "an RGBA8 view of a stencil plane's own extent must be read as reused memory");
+    Require(lookup(context, {stencil, FormatR32Float, 320, 180}) == nullptr, "an R32F view of a stencil plane's own extent must be read as reused memory");
 
     ClearDepthSurfaces(context.device);
 }

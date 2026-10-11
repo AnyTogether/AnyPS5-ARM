@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparation.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "Optimization/ResourceProgram.hpp"
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -147,6 +148,54 @@ void HeaderSelection() {
     Reject([&] { static_cast<void>(RegisteredProgram(*registry, 0x10000, {2, 4})); });
 }
 
+void FusedHullHeaderSelection() {
+    struct Hull {
+        Shader shader{};
+        std::array<ShaderRegister, 7> registers{{{0x100, 0x11}, {0x108, 0x100}, {0x109, 0}, {0x10a, 0x2}, {0x10b, 0x10}, {0x148, 0}, {0x149, 0}}};
+        ShaderSpecialRegs specials{};
+    } back;
+    back.shader.file_header = 0x34333231u;
+    back.shader.version = 0x18;
+    back.shader.header_size = sizeof(Hull);
+    back.shader.shader_size = 4;
+    back.shader.code = reinterpret_cast<const void*>(std::uintptr_t{0x50000});
+    back.shader.type = 7;
+    back.shader.sh_registers = back.registers.data();
+    back.shader.num_sh_registers = back.registers.size();
+    back.shader.specials = &back.specials;
+    auto snapshot = std::make_shared<ShaderSnapshot>();
+    snapshot->codeAddress = 0x50000;
+    snapshot->headerAddress = reinterpret_cast<std::uintptr_t>(&back);
+    snapshot->type = 7;
+    snapshot->code = {0xbf810000u};
+    snapshot->header.resize(sizeof(Hull));
+    std::memcpy(snapshot->header.data(), &back, sizeof(Hull));
+    std::shared_ptr<ShaderRegistry> registry;
+    PublishRegisteredShader(registry, snapshot);
+    auto registers = back.registers;
+    registers[0].value = 0x22;
+    registers[3].value = 0x3;
+    registers[4].value = 0x1e;
+    registers[5].value = 0x600;
+    registers[6].value = 0x1;
+    Shader fused = back.shader;
+    fused.type = 3;
+    fused.sh_registers = registers.data();
+    fused.user_data = nullptr;
+    Require(RegisteredHeader(*registry, &fused) == snapshot, "a fused hull header did not select its registered back half");
+    registers[1].value = 0x200;
+    Require(RegisteredHeader(*registry, &fused) == nullptr, "a fused hull header with another hull program selected the back half");
+    registers[1].value = 0x100;
+    registers[2].offset = 0x10c;
+    Require(RegisteredHeader(*registry, &fused) == nullptr, "a fused hull header with other registers selected the back half");
+    registers[2].offset = 0x109;
+    fused.target ^= 1u;
+    Require(RegisteredHeader(*registry, &fused) == nullptr, "a fused hull header with another target selected the back half");
+    fused.target ^= 1u;
+    fused.type = 2;
+    Require(RegisteredHeader(*registry, &fused) == nullptr, "a vertex header selected a registered hull back half");
+}
+
 void Registration(AgcDriver::VulkanDevice& device) {
     const std::array<std::uint32_t, 1> code{0xbf810000u};
     RecompileRequest request{{ShaderStage::Compute, 0x10000, code, 0, {}}, {32, 0, {}, ShaderComputeStageInfo{{1, 1, 1}, 0, {false, false, false}, false, 0, {}}, {}, {}, {}}, device.ComputeTarget(32), {0, 0, 0, 128}};
@@ -234,6 +283,7 @@ int main() {
     try {
         Transactions();
         HeaderSelection();
+        FusedHullHeaderSelection();
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         Registration(*device);

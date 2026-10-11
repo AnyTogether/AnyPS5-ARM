@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/HalfFloatScanout.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -31,6 +32,30 @@ std::uint64_t baseFormat(std::uint64_t pixelFormat) {
 
 std::uint32_t tileOffset(std::uint32_t x, std::uint32_t y) {
     return ((y << 4u) & 0x0070u) ^ ((y << 5u) & 0x0f00u) ^ ((y << 9u) & 0x1000u) ^ ((y << 8u) & 0x4000u) ^ ((x << 2u) & 0x000cu) ^ ((x << 5u) & 0x0380u) ^ ((x << 4u) & 0x0400u) ^ ((x << 6u) & 0x0800u) ^ ((x << 9u) & 0xa000u);
+}
+
+std::uint32_t tileOffset64(std::uint32_t x, std::uint32_t y) {
+    return ((x << 3u) & 0x0008u) ^ ((x << 4u) & 0x0460u) ^ ((x << 5u) & 0x0300u) ^ ((x << 6u) & 0x0800u) ^ ((x << 9u) & 0x8000u) ^ ((x << 10u) & 0x2000u) ^ ((y << 4u) & 0x0010u) ^ ((y << 6u) & 0x0080u) ^ ((y << 5u) & 0x0f00u) ^ ((y << 10u) & 0x5000u);
+}
+
+std::size_t texelOffset(const DisplayBuffer& buffer, std::uint32_t x, std::uint32_t y, std::uint32_t texelBytes) {
+    if (buffer.tilingMode == 1) {
+        const auto pitch = buffer.pitchInPixel == 0 ? buffer.width : buffer.pitchInPixel;
+        return (static_cast<std::size_t>(y) * pitch + x) * texelBytes;
+    }
+    const auto blocksPerRow = (buffer.width + 127u) / 128u;
+    const auto blockHeight = 65536u / 128u / texelBytes;
+    const auto block = static_cast<std::size_t>(y / blockHeight) * blocksPerRow + x / 128u;
+    return block * 65536u + (texelBytes == 8u ? tileOffset64(x, y) : tileOffset(x, y));
+}
+
+void decodeHalfFloatTexel(const std::byte* texel, std::byte* pixel, bool redLow) {
+    std::array<std::uint16_t, 4> halves{};
+    std::memcpy(halves.data(), texel, sizeof(halves));
+    pixel[0] = static_cast<std::byte>(Graphics::HalfFloatScanoutCode(halves[redLow ? 2 : 0], false));
+    pixel[1] = static_cast<std::byte>(Graphics::HalfFloatScanoutCode(halves[1], false));
+    pixel[2] = static_cast<std::byte>(Graphics::HalfFloatScanoutCode(halves[redLow ? 0 : 2], false));
+    pixel[3] = static_cast<std::byte>(Graphics::HalfFloatScanoutCode(halves[3], true));
 }
 
 void decodeTexel(const std::byte* texel, std::byte* pixel, bool rgba, bool tenBit) {
@@ -90,11 +115,13 @@ void traceDisplayKeys(const DisplayBuffer& buffer, const std::uint8_t* keys, std
 
 std::size_t DisplayBufferSize(const DisplayBuffer& buffer) {
     require(buffer.width != 0 && buffer.height != 0 && buffer.width <= 16384 && buffer.height <= 16384, "VideoOut: invalid display buffer dimensions");
-    if (baseFormat(buffer.pixelFormat) != PixelFormatB8G8R8A8 && baseFormat(buffer.pixelFormat) != PixelFormatR8G8B8A8) {
+    const bool halfFloat = DisplayHalfFloat(buffer.pixelFormat);
+    if (!halfFloat && baseFormat(buffer.pixelFormat) != PixelFormatB8G8R8A8 && baseFormat(buffer.pixelFormat) != PixelFormatR8G8B8A8) {
         char message[96];
         std::snprintf(message, sizeof(message), "VideoOut: unsupported display pixel format 0x%016llx", static_cast<unsigned long long>(buffer.pixelFormat));
         throw std::runtime_error(message);
     }
+    require(!halfFloat || buffer.dccAddress == 0, "VideoOut: DCC metadata on a 16-bit float display buffer is not implemented");
     require(buffer.address != 0 && (buffer.address & 65535u) == 0, "VideoOut: display buffer requires 64 KiB alignment");
     require(buffer.tilingMode <= 1, "VideoOut: unsupported display tiling mode");
     require(buffer.tilingMode != 0 || buffer.pitchInPixel == 0, "VideoOut: tiled display pitch is unsupported");
@@ -102,16 +129,33 @@ std::size_t DisplayBufferSize(const DisplayBuffer& buffer) {
     require(buffer.dccAddress != 0 || buffer.dccClearColor == 0, "VideoOut: a DCC clear color needs DCC metadata");
     const auto pitch = buffer.pitchInPixel == 0 ? buffer.width : buffer.pitchInPixel;
     require(pitch >= buffer.width && pitch <= 16384, "VideoOut: invalid linear display pitch");
-    const auto size = buffer.tilingMode == 1 ? static_cast<std::uint64_t>(pitch) * buffer.height * 4u
-        : static_cast<std::uint64_t>((buffer.width + 127u) / 128u) * ((buffer.height + 127u) / 128u) * 65536u;
+    const auto texelBytes = DisplayTexelBytes(buffer.pixelFormat);
+    const auto blockHeight = 65536u / 128u / texelBytes;
+    const auto size = buffer.tilingMode == 1 ? static_cast<std::uint64_t>(pitch) * buffer.height * texelBytes
+        : static_cast<std::uint64_t>((buffer.width + 127u) / 128u) * ((buffer.height + blockHeight - 1u) / blockHeight) * 65536u;
     require(size <= std::numeric_limits<std::size_t>::max() && size <= std::numeric_limits<std::uintptr_t>::max() - buffer.address, "VideoOut: display buffer range overflow");
     return static_cast<std::size_t>(size);
+}
+
+std::size_t DisplayBufferOffset(const DisplayBuffer& buffer, std::uint32_t x, std::uint32_t y) {
+    static_cast<void>(DisplayBufferSize(buffer));
+    require(x < buffer.width && y < buffer.height, "VideoOut: display buffer coordinate out of range");
+    return texelOffset(buffer, x, y, DisplayTexelBytes(buffer.pixelFormat));
 }
 
 std::vector<std::byte> DecodeDisplayBuffer(const DisplayBuffer& buffer, std::span<const std::byte> source) {
     PerformanceTimer timing("DisplayBuffer.Decode");
     require(source.size() == DisplayBufferSize(buffer), "VideoOut: invalid display buffer size");
     std::vector<std::byte> pixels(static_cast<std::size_t>(buffer.width) * buffer.height * 4);
+    if (DisplayHalfFloat(buffer.pixelFormat)) {
+        const bool redLow = DisplayRedLow(buffer.pixelFormat);
+        timing.Mark("validate_allocate");
+        for (std::uint32_t y = 0; y < buffer.height; ++y) {
+            for (std::uint32_t x = 0; x < buffer.width; ++x) decodeHalfFloatTexel(source.data() + texelOffset(buffer, x, y, 8u), pixels.data() + (static_cast<std::size_t>(y) * buffer.width + x) * 4, redLow);
+        }
+        timing.Mark("detile_convert");
+        return pixels;
+    }
     const auto blocksPerRow = (buffer.width + 127u) / 128u;
     const bool rgba = baseFormat(buffer.pixelFormat) == PixelFormatR8G8B8A8;
     // Bit 56 marks the 10-bit variant: A2B10G10R10 with red in the low bits (the scanout draws render

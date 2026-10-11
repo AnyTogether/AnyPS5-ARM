@@ -20,6 +20,35 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(group["done_names"], [])
             self.assertEqual(group["todo_names"], ["sceExampleSupportFormat"])
 
+    def test_braces_in_literals_and_comments_do_not_delimit_bodies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(
+                "static int Helper() { const char* brace = \"}\"; NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "int APS5_VABI sceExampleOpen(char* out) { *out = '{'; return 0; }\n"
+                "int APS5_VABI sceExampleClose(char* out) { *out = '}'; NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "int APS5_VABI sceExampleQuote(std::string& out) { out += \"{\\\"\"; return 0; }\n"
+                "int APS5_VABI sceExampleNoted() { // }\n    NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "int APS5_VABI sceExampleBlock() { /* { */ return 0; }\n"
+                "int APS5_VABI sceExampleWrapped() { return Helper(); }\n"
+                "int APS5_VABI sceExampleReady() { return 0; }\n")
+            group = progress.scan_library(library)
+            self.assertEqual(group["done_names"], ["sceExampleBlock", "sceExampleOpen", "sceExampleQuote", "sceExampleReady"])
+            self.assertEqual(group["todo_names"], ["sceExampleClose", "sceExampleNoted", "sceExampleWrapped"])
+
+    def test_apostrophe_in_a_comment_does_not_pair_with_a_later_literal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(
+                "int APS5_VABI sceExamplePending() {\n    /* it's */ log('}');\n"
+                "    NotImplemented_nid_no_patch(__func__);\n    return 0;\n}\n"
+                "int APS5_VABI sceExampleReady() { return 0; }\n")
+            group = progress.scan_library(library)
+            self.assertEqual(group["done_names"], ["sceExampleReady"])
+            self.assertEqual(group["todo_names"], ["sceExamplePending"])
+
     def test_test_sources_do_not_change_library_progress(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "tests" / "prx"
@@ -91,6 +120,81 @@ class ProgressTests(unittest.TestCase):
                 report = "\n".join(progress.compare("Libraries", "Library", "functions", base, removed))
                 self.assertIn("-1 removed", report)
                 self.assertIn("Pending", report)
+
+    def test_inert_bodies_are_marked_without_changing_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(
+                "static int Support() { return 0; }\n"
+                "static int Compute(int x) { return x * 2; }\n"
+                "int APS5_VABI A() { return 0; }\n"
+                "int APS5_VABI B(const void* p) { (void)p; return SCE_KERNEL_ERROR_EOPNOTSUPP; }\n"
+                "int APS5_VABI C(void* p) { (void)p; return 0x8A810001; }\n"
+                'const char* APS5_VABI I() { return "constant; { text }"; }\n'
+                'int APS5_VABI D() { throw std::runtime_error("no"); }\n'
+                'std::string APS5_VABI J() { return std::string("not constant"); }\n'
+                "int APS5_VABI E() { return Support(); }\n"
+                "int APS5_VABI F(int a, int b) { return a + b; }\n"
+                "int APS5_VABI G() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "int APS5_VABI H(int a) { return Compute(a); }\n")
+            group = progress.scan_library(library)
+            self.assertEqual(group["inert_names"], ["A", "B", "C", "D", "E", "I"])
+            self.assertEqual(group["done_names"], ["A", "B", "C", "D", "E", "F", "H", "I", "J"])
+            self.assertEqual(group["todo_names"], ["G"])
+
+    def test_compare_marks_behaviourally_empty_implementations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "libSceExample"
+            library.mkdir()
+            kept = (
+                "int APS5_VABI Ready() { return 0; }\n"
+                "int APS5_VABI Stubbed() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "static int Compute(int x) { return x * 2; }\n"
+                "int APS5_VABI Wrapped(int a) { return Compute(a); }\n")
+            added = (
+                "static int Support() { return 0; }\n"
+                "int APS5_VABI A() { return 0; }\n"
+                "int APS5_VABI B(const void* p) { (void)p; return SCE_KERNEL_ERROR_EOPNOTSUPP; }\n"
+                "int APS5_VABI C(void* p) { (void)p; return 0x8A810001; }\n"
+                'int APS5_VABI D() { throw std::runtime_error("no"); }\n'
+                "int APS5_VABI E() { return Support(); }\n"
+                "int APS5_VABI F(int a, int b) { return a + b; }\n")
+            (library / "Export.cpp").write_text(kept)
+            with patch.object(progress, "PRX", root):
+                base = progress.collect_libraries()
+            for group in base["groups"]:
+                del group["inert_names"]
+            (library / "Export.cpp").write_text(kept + added)
+            with patch.object(progress, "PRX", root):
+                head = progress.collect_libraries()
+            report = "\n".join(progress.compare("Libraries", "Library", "functions", base, head))
+            self.assertIn("+6 implemented", report)
+            self.assertIn("<summary>⚪ 5 behaviourally empty (constant return or throw)</summary>", report)
+            empty = report.split("behaviourally empty (constant return or throw)</summary>")[1]
+            self.assertEqual([line for line in empty.splitlines() if line.startswith("|")],
+                             ["| Library | Name |", "| - | - |"]
+                             + [f"| libSceExample | `{name}` |" for name in "ABCDE"])
+            self.assertEqual(progress.compare("Libraries", "Library", "functions", head, head), [])
+            (library / "Export.cpp").write_text("int APS5_VABI Ready() { return 0; }\n")
+            with patch.object(progress, "PRX", root):
+                before = progress.collect_libraries()
+            (library / "Export.cpp").write_text(
+                "int APS5_VABI Ready() { return 0; }\nint APS5_VABI F(int a, int b) { return a + b; }\n")
+            with patch.object(progress, "PRX", root):
+                after = progress.collect_libraries()
+            report = "\n".join(progress.compare("Libraries", "Library", "functions", before, after))
+            self.assertIn("+1 implemented", report)
+            self.assertNotIn("behaviourally empty", report)
+            (library / "Export.cpp").write_text(
+                "int APS5_VABI Ready() { return 0; }\nint APS5_VABI F(int a, int b) { return a + b; }\nint APS5_VABI A() { return 0; }\n")
+            with patch.object(progress, "PRX", root):
+                grown = progress.collect_libraries()
+            report = "\n".join(progress.compare("Libraries", "Library", "functions", after, grown))
+            self.assertIn("+1 implemented", report)
+            self.assertIn("| libSceExample | `A` |", report)
+            self.assertIn("<summary>⚪ 1 behaviourally empty (constant return or throw)</summary>", report)
 
     def test_empty_libraries(self):
         with tempfile.TemporaryDirectory() as directory:

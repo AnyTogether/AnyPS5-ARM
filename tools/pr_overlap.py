@@ -16,7 +16,7 @@ MARKER = "<!-- pr-overlap -->"
 
 
 def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout
 
 
 def gh(*args):
@@ -27,29 +27,36 @@ def upstream():
     return os.environ.get("GITHUB_REPOSITORY") or gh("repo", "view", "--json", "nameWithOwner,parent", "--jq", PARENT).strip()
 
 
+def depends_on(body):
+    body = re.sub(r"<!--.*?-->", "", body or "", flags=re.S)
+    match = DEPENDS.search(body)
+    if not match or not match.group(1).strip():
+        match = PLAIN_DEPENDS.search(body)
+    return {int(n) for n in re.findall(r"#(\d+)", match.group(1))} if match else set()
+
+
 def open_prs(base):
     query = urlencode({"state": "open", "base": base, "per_page": 100})
     out = gh("api", "--paginate", "--slurp", f"repos/{REPO}/pulls?{query}")
     prs = {}
     for pr in chain.from_iterable(json.loads(out)):
-        depends = DEPENDS.search(pr["body"] or "") or PLAIN_DEPENDS.search(pr["body"] or "")
         prs[pr["number"]] = {
             "ref": f"refs/pr/{pr['number']}",
             "sha": pr["head"]["sha"],
             "author": pr["user"]["login"],
-            "depends": {int(n) for n in re.findall(r"#(\d+)", depends.group(1))} if depends else set(),
+            "depends": depends_on(pr["body"]),
         }
     return prs
 
 
 def fetch(base, prs):
-    refspecs = [f"+refs/heads/{base}:refs/pr/base"] + [f"+refs/pull/{n}/head:{pr['ref']}" for n, pr in prs.items()]
+    refspecs = [f"+refs/heads/{base}:refs/pr/base"] + [f"+{pr['sha']}:{pr['ref']}" for pr in prs.values()]
     git("fetch", "--no-tags", "-q", f"https://github.com/{REPO}.git", *refspecs)
 
 
 def merge(*args):
     result = subprocess.run(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", *args],
-                            capture_output=True, text=True, encoding="utf-8")
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
     lines = result.stdout.splitlines()
     if result.returncode not in (0, 1) or not lines:
         raise RuntimeError(f"git merge-tree {' '.join(args)} failed: {result.stderr.strip()}")

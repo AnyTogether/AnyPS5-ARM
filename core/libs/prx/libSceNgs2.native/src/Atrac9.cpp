@@ -217,14 +217,16 @@ struct RiffChunks {
     std::size_t dataSize = 0;
 };
 
-static int ReadChunks(const std::uint8_t* bytes, std::size_t size, RiffChunks& chunks) {
+template <class TRead>
+static int ReadChunks(std::size_t size, TRead&& read, RiffChunks& chunks) {
     if (size < 12) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
-    if (std::memcmp(bytes, "RIFF", 4) != 0 || std::memcmp(bytes + 8, "WAVE", 4) != 0) return SCE_NGS2_ERROR_UNKNOWN_WAVEFORM_FORMAT;
-    const std::size_t riffEnd = 8 + static_cast<std::size_t>(ReadLe32(bytes + 4));
+    const auto* header = read(0, 12);
+    if (std::memcmp(header, "RIFF", 4) != 0 || std::memcmp(header + 8, "WAVE", 4) != 0) return SCE_NGS2_ERROR_UNKNOWN_WAVEFORM_FORMAT;
+    const std::size_t riffEnd = 8 + static_cast<std::size_t>(ReadLe32(header + 4));
     if (riffEnd < 12) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     const std::size_t end = std::min(size, riffEnd);
     for (std::size_t offset = 12; offset + 8 <= end;) {
-        const auto* chunk = bytes + offset;
+        const auto* chunk = read(offset, 8);
         const std::size_t payload = offset + 8;
         const std::size_t chunkSize = ReadLe32(chunk + 4);
         if (chunkSize > riffEnd - payload) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
@@ -236,13 +238,13 @@ static int ReadChunks(const std::uint8_t* bytes, std::size_t size, RiffChunks& c
         }
         if (chunkSize > end - payload) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
         if (std::memcmp(chunk, "fmt ", 4) == 0) {
-            chunks.format = bytes + payload;
+            chunks.format = read(payload, chunkSize);
             chunks.formatSize = chunkSize;
         } else if (std::memcmp(chunk, "fact", 4) == 0) {
-            chunks.fact = bytes + payload;
+            chunks.fact = read(payload, chunkSize);
             chunks.factSize = chunkSize;
         } else if (std::memcmp(chunk, "smpl", 4) == 0) {
-            chunks.sampler = bytes + payload;
+            chunks.sampler = read(payload, chunkSize);
             chunks.samplerSize = chunkSize;
         }
         offset = payload + chunkSize + (chunkSize & 1);
@@ -349,6 +351,17 @@ static int ParsePcm16(const RiffChunks& chunks, std::size_t size, Ngs2WaveformIn
     return SCE_NGS2_OK;
 }
 
+static int ParseWaveform(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo& info) {
+    if (chunks.formatSize < 2) return SCE_NGS2_ERROR_INVALID_WAVEFORM_FORMAT;
+    const std::uint16_t tag = ReadLe16(chunks.format);
+    if (tag == WAVE_FORMAT_EXTENSIBLE && chunks.formatSize >= FMT_GUID_OFFSET + sizeof(ATRAC9_GUID) &&
+        std::memcmp(chunks.format + FMT_GUID_OFFSET, ATRAC9_GUID, sizeof(ATRAC9_GUID)) == 0) {
+        return ParseAtrac9(chunks, info);
+    }
+    if (tag == WAVE_FORMAT_PCM) return ParsePcm16(chunks, size, info);
+    throw std::runtime_error("NGS2: parsing waveform format tag " + Ngs2Hex(tag) + " is not implemented");
+}
+
 #pragma GCC visibility push(default)
 
 extern "C" {
@@ -357,17 +370,11 @@ int APS5_VABI sceNgs2ParseWaveformData(const void* data, size_t data_size, Ngs2W
     if (info == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     *info = {};
     if (data == nullptr) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
     RiffChunks chunks;
-    const int result = ReadChunks(static_cast<const std::uint8_t*>(data), data_size, chunks);
+    const int result = ReadChunks(data_size, [bytes](std::size_t at, std::size_t) { return bytes + at; }, chunks);
     if (result != SCE_NGS2_OK) return result;
-    if (chunks.formatSize < 2) return SCE_NGS2_ERROR_INVALID_WAVEFORM_FORMAT;
-    const std::uint16_t tag = ReadLe16(chunks.format);
-    if (tag == WAVE_FORMAT_EXTENSIBLE && chunks.formatSize >= FMT_GUID_OFFSET + sizeof(ATRAC9_GUID) &&
-        std::memcmp(chunks.format + FMT_GUID_OFFSET, ATRAC9_GUID, sizeof(ATRAC9_GUID)) == 0) {
-        return ParseAtrac9(chunks, *info);
-    }
-    if (tag == WAVE_FORMAT_PCM) return ParsePcm16(chunks, data_size, *info);
-    throw std::runtime_error("NGS2: parsing waveform format tag " + Ngs2Hex(tag) + " is not implemented");
+    return ParseWaveform(chunks, data_size, *info);
 }
 
 int APS5_VABI sceNgs2ParseWaveformFile(const char* path, uint32_t offset, Ngs2WaveformInfo* info) {
@@ -379,11 +386,18 @@ int APS5_VABI sceNgs2ParseWaveformFile(const char* path, uint32_t offset, Ngs2Wa
     if (!file) throw std::runtime_error(std::string(__func__) + ": cannot open " + host.string());
     const auto fileSize = static_cast<std::uint64_t>(file.tellg());
     if (offset > fileSize) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
-    const std::uint64_t length = fileSize - offset;
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
-    file.seekg(offset);
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) throw std::runtime_error(std::string(__func__) + ": read failed for " + host.string());
-    const int result = sceNgs2ParseWaveformData(bytes.data(), bytes.size(), info);
+    const auto length = static_cast<std::size_t>(fileSize - offset);
+    const std::string function = __func__;
+    std::vector<std::vector<std::uint8_t>> pieces;
+    const auto readBytes = [&](std::size_t at, std::size_t count) {
+        auto& piece = pieces.emplace_back(std::max<std::size_t>(count, 1));
+        file.seekg(static_cast<std::streamoff>(offset + at));
+        if (!file.read(reinterpret_cast<char*>(piece.data()), static_cast<std::streamsize>(count))) throw std::runtime_error(function + ": read failed for " + host.string());
+        return static_cast<const std::uint8_t*>(piece.data());
+    };
+    RiffChunks chunks;
+    int result = ReadChunks(length, readBytes, chunks);
+    if (result == SCE_NGS2_OK) result = ParseWaveform(chunks, length, *info);
     if (result != SCE_NGS2_OK) return result;
     info->data_offset += offset;
     for (std::uint32_t i = 0; i < info->num_blocks; i++) info->block[i].data_offset += offset;

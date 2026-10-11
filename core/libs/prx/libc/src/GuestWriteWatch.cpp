@@ -334,6 +334,8 @@ public:
         end = pageEnd(end);
         if (!_available || end <= begin) return;
         std::vector<std::uint8_t> pages((end - begin) / _page, Written | Fresh);
+        std::vector<bool> queried(pages.size(), false);
+        const Lock lock(_lock);
         for (auto cursor = begin; cursor < end;) {
             mach_vm_address_t address = cursor;
             mach_vm_size_t size = 0;
@@ -344,12 +346,18 @@ public:
             const auto first = std::max<std::uintptr_t>(cursor, address);
             const auto last = std::min<std::uintptr_t>(end, address + size);
             const std::uint8_t protection = ((info.protection & VM_PROT_READ) ? PROT_READ : 0) | ((info.protection & VM_PROT_WRITE) ? PROT_WRITE : 0) | ((info.protection & VM_PROT_EXECUTE) ? PROT_EXEC : 0);
-            for (auto page = first; page < last; page += _page) pages[(page - begin) / _page] = Written | Fresh | protection;
+            for (auto page = first; page < last; page += _page) {
+                pages[(page - begin) / _page] = Written | Fresh | protection;
+                queried[(page - begin) / _page] = true;
+            }
             cursor = last;
         }
-        const Lock lock(_lock);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
-            pages[(page - begin) / _page] = static_cast<std::uint8_t>(Written | Fresh | (state & ProtectionMask));
+            auto& entry = pages[(page - begin) / _page];
+            const std::uint8_t recorded = state & ProtectionMask;
+            const bool armed = (state & Protected) != 0 && (entry & ProtectionMask) == (recorded & ~PROT_WRITE);
+            if (armed || !queried[(page - begin) / _page]) entry = static_cast<std::uint8_t>(Written | Fresh | recorded);
+            else state = static_cast<std::uint8_t>(state & ~Protected);
         });
         erase(begin, end);
         _ranges.emplace(begin, Range{end, std::move(pages)});

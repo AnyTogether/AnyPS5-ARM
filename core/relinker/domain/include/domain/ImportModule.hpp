@@ -17,8 +17,7 @@ inline std::string ImportModuleName(std::string name) {
     return name;
 }
 
-inline std::string ImportModule(const std::string& symbol, const std::map<std::uint64_t, std::string>& modules,
-    std::span<const std::string> dependencies = {}) {
+inline std::string DeclaredImportModule(const std::string& symbol, const std::map<std::uint64_t, std::string>& modules) {
     if (modules.empty()) return {};
     const auto first = symbol.find('#');
     if (first == std::string::npos) return {};
@@ -38,6 +37,13 @@ inline std::string ImportModule(const std::string& symbol, const std::map<std::u
     auto name = module->second;
     if (name.empty() || name.find_first_of("/\\:$\r\n") != std::string::npos)
         throw RelinkerException("Invalid import module name: " + name);
+    return name;
+}
+
+inline std::string ImportModule(const std::string& symbol, const std::map<std::uint64_t, std::string>& modules,
+    std::span<const std::string> dependencies = {}) {
+    auto name = DeclaredImportModule(symbol, modules);
+    if (name.empty()) return {};
     if (!name.ends_with(".prx") && !name.ends_with(".sprx") && !name.ends_with(".suprx")) name += ".prx";
     if (std::find(dependencies.begin(), dependencies.end(), name) != dependencies.end()) return name;
     std::string matched;

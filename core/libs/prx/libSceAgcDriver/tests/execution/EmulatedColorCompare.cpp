@@ -24,6 +24,9 @@ using ShaderRecompiler::ShaderStage;
 constexpr std::uint32_t Threads = 32;
 constexpr std::uint32_t Side = 2;
 constexpr std::uint32_t Format8888UNorm = 56;
+constexpr std::uint32_t Format9995Float = 132;
+constexpr std::uint32_t Format8Srgb = 128;
+constexpr std::uint32_t Format8_8Srgb = 129;
 constexpr std::uint32_t Format8888Srgb = 130;
 constexpr std::uint32_t Format8888UInt = 60;
 constexpr std::uint32_t Format32Float = 22;
@@ -47,7 +50,8 @@ constexpr std::array<std::uint8_t, 4> Red{0, 64, 128, 255};
 
 alignas(256) std::array<float, Threads * 3> Input{};
 alignas(256) std::array<float, Threads * 4> CubeInput{};
-alignas(256) std::array<float, Threads> Output{};
+alignas(256) std::array<float, Threads * 4> Output{};
+std::uint32_t Swizzle = 0xfacu;
 alignas(256) std::array<std::uint32_t, Threads * 3> Extra{};
 alignas(4096) std::array<std::uint8_t, 4096> Texels{};
 
@@ -71,6 +75,14 @@ alignas(256) constexpr std::array<std::uint32_t, 16> OffsetCode{
     0x7e0c0308, 0xf0f80108, 0x00820901, 0xbf8c3f70, 0x34160082, 0xe0701000, 0x8001090b, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 17> QuadCode{
+    0x1614008c, 0xe03c1000, 0x8000010a, 0x7e0802f3, 0x7e0a02f3, 0x7e0c02f3, 0x7e0e02f3, 0xbf8c3f70, 0xf0bc0f08, 0x00820401, 0xbf8c3f70, 0x34160084, 0xe0781000, 0x8001040b, 0xbf810000, 0xbf810000, 0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 17> PairCode{
+    0x1614008c, 0xe03c1000, 0x8000010a, 0x7e0802f3, 0x7e0a02f3, 0x7e0c02f3, 0x7e0e02f3, 0xbf8c3f70, 0xf0bc0608, 0x00820401, 0xbf8c3f70, 0x34160084, 0xe0781000, 0x8001040b, 0xbf810000, 0xbf810000, 0xbf810000,
+};
+
 struct Sampler {
     std::uint32_t clamp;
     std::uint32_t filter;
@@ -78,6 +90,7 @@ struct Sampler {
     std::uint32_t reduction = 0;
     std::uint32_t lodBias = 0;
     bool disableCubeWrap = false;
+    std::uint32_t function = LessEqual;
 };
 
 std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t bytes) {
@@ -91,14 +104,14 @@ std::array<std::uint32_t, 8> TextureDescriptor(std::uint32_t format, bool cube =
         static_cast<std::uint32_t>(address >> 8u),
         static_cast<std::uint32_t>((address >> 40u) & 0xffu) | (format << 20u) | (((Side - 1u) & 3u) << 30u),
         ((Side - 1u) >> 2u) | ((Side - 1u) << 14u),
-        0xfacu | ((cube ? TypeCube : Type2D) << 28u),
+        Swizzle | ((cube ? TypeCube : Type2D) << 28u),
         cube ? 5u : 0u, 0u, 0u, 0u,
     };
 }
 
 std::array<std::uint32_t, 4> SamplerDescriptor(const Sampler& sampler) {
     return {
-        sampler.clamp | (sampler.clamp << 3u) | (ClampEdge << 6u) | (LessEqual << 12u) | (sampler.reduction << 29u) | (sampler.disableCubeWrap ? (1u << 28u) : 0u),
+        sampler.clamp | (sampler.clamp << 3u) | (ClampEdge << 6u) | (sampler.function << 12u) | (sampler.reduction << 29u) | (sampler.disableCubeWrap ? (1u << 28u) : 0u),
         0u,
         sampler.lodBias | (sampler.filter << 20u) | (sampler.filter << 22u),
         sampler.border << 30u,
@@ -240,6 +253,32 @@ void Run(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* na
     }
 }
 
+constexpr std::uint32_t Select(std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint32_t w) {
+    return x | (y << 3u) | (z << 6u) | (w << 9u);
+}
+
+void RunChannels(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::array<std::uint32_t, 4> channels, std::uint32_t registers, std::uint32_t firstChannel, const char* name) {
+    const Sampler sampler{ClampEdge, FilterBilinear};
+    Swizzle = Select(channels[0], channels[1], channels[2], channels[3]);
+    Output.fill(-2.0f);
+    const auto result = Compile(device, Format8888UNorm, sampler, code);
+    Swizzle = 0xfacu;
+    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
+    device.WaitIdle();
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        const float compared = Expected(tid, sampler, false);
+        for (std::uint32_t reg = 0; reg < 4u; ++reg) {
+            float expected = -1.0f;
+            if (reg < registers) {
+                const auto select = channels[firstChannel + reg];
+                expected = select == 0u ? 0.0f : select == 1u ? 1.0f : compared;
+            }
+            const float actual = Output[tid * 4u + reg];
+            Require(std::fabs(actual - expected) <= 1e-4f, std::string(name) + ": thread " + std::to_string(tid) + " register " + std::to_string(reg) + " returned " + std::to_string(actual) + ", expected " + std::to_string(expected));
+        }
+    }
+}
+
 void RunCube(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* name) {
     FillCubeTexels();
     for (std::uint32_t tid = 0; tid < Threads; ++tid) {
@@ -267,6 +306,17 @@ bool BindsDepthCompare(const ShaderRecompiler::RecompileResult& result) {
     });
 }
 
+void RunSrgbZero(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, const char* name) {
+    Output.fill(-1.0f);
+    const auto result = Compile(device, format, sampler);
+    Require(!BindsDepthCompare(result), std::string(name) + " kept a depth-compare binding");
+    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
+    device.WaitIdle();
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        Require(Output[tid] == 0.0f, std::string(name) + ": thread " + std::to_string(tid) + " compared to " + std::to_string(Output[tid]) + ", expected 0");
+    }
+}
+
 void Reject(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, std::string_view reason, std::span<const std::uint32_t> code = Code, bool nativeSampleOffsets = true, bool cube = false) {
     try {
         static_cast<void>(Compile(device, format, sampler, code, false, nativeSampleOffsets, cube));
@@ -288,12 +338,22 @@ int main() {
         RunCube(*device, {ClampEdge, FilterPoint}, "point cube, clamp to edge");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
         RunCube(*device, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, true}, "bilinear cube with DISABLE_CUBE_WRAP");
-        Reject(*device, Format8888Srgb, {ClampEdge, FilterPoint}, "implemented only for float, unorm and snorm formats");
+        Reject(*device, Format9995Float, {ClampEdge, FilterPoint}, "implemented only for float, unorm and snorm formats");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterAnisoBilinear}, "point or bilinear");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterAnisoPoint}, "point or bilinear");
         FillTexels();
         Require(BindsDepthCompare(Compile(*device, Format32Float, {ClampEdge, FilterBilinear})), "an R32 float texture left the native comparison path");
         Require(!BindsDepthCompare(Compile(*device, Format8888UNorm, {ClampEdge, FilterBilinear})), "a color texture kept a depth-compare binding");
+        for (std::uint32_t function = 0; function < 8u; ++function) {
+            const auto point = "point 8_8_8_8 srgb function " + std::to_string(function);
+            const auto bilinear = "bilinear 8_8_8_8 srgb function " + std::to_string(function);
+            RunSrgbZero(*device, Format8888Srgb, {ClampEdge, FilterPoint, BorderBlack, 0u, 0u, false, function}, point.c_str());
+            RunSrgbZero(*device, Format8888Srgb, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, false, function}, bilinear.c_str());
+        }
+        RunSrgbZero(*device, Format8Srgb, {ClampEdge, FilterPoint}, "point 8 srgb");
+        RunSrgbZero(*device, Format8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8 srgb");
+        RunSrgbZero(*device, Format8_8Srgb, {ClampEdge, FilterPoint}, "point 8_8 srgb");
+        RunSrgbZero(*device, Format8_8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8_8 srgb");
         Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap with negative offsets", true);
@@ -313,6 +373,19 @@ int main() {
             Run(*device, {ClampWrap, FilterBilinear}, "cached bilinear comparison with offsets", true, true);
         }
         Reject(*device, Format32Float, {ClampEdge, FilterPoint}, "native comparison with a nonconstant texel offset requires", OffsetCode, false);
+        RunChannels(*device, QuadCode, {4, 5, 6, 7}, 4, 0, "view R,G,B,A");
+        RunChannels(*device, QuadCode, {0, 0, 0, 0}, 4, 0, "view 0,0,0,0");
+        RunChannels(*device, QuadCode, {1, 1, 1, 1}, 4, 0, "view 1,1,1,1");
+        RunChannels(*device, QuadCode, {0, 4, 1, 5}, 4, 0, "view 0,R,1,G");
+        RunChannels(*device, QuadCode, {4, 0, 0, 1}, 4, 0, "view R,0,0,1");
+        RunChannels(*device, QuadCode, {5, 4, 5, 6}, 4, 0, "view G,R,B,A");
+        RunChannels(*device, QuadCode, {7, 4, 4, 4}, 4, 0, "view A,R,R,R");
+        RunChannels(*device, PairCode, {0, 4, 4, 4}, 2, 1, "view 0,R,R,R, dmask 6");
+        Swizzle = Select(4, 2, 4, 4);
+        Reject(*device, Format8888UNorm, {ClampEdge, FilterPoint}, "every view channel is a constant or a color channel");
+        Swizzle = Select(5, 5, 5, 5);
+        Reject(*device, Format8888UNorm, {ClampEdge, FilterPoint}, "a view channel selects red");
+        Swizzle = 0xfacu;
         Reject(*device, Format8888UInt, {ClampEdge, FilterPoint}, "unsupported format");
         Reject(*device, Format8888UNorm, {ClampMirror, FilterPoint}, "wrap, clamp-to-edge or clamp-to-border");
         Reject(*device, Format8888UNorm, {ClampHalfBorder, FilterPoint}, "wrap, clamp-to-edge or clamp-to-border");

@@ -831,4 +831,9 @@ void APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(void* self, int erro
     (void)size;
     (void)userData;
 }
+
+int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }

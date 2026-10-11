@@ -73,6 +73,31 @@ int APS5_VABI sigismember_nid_postfix(const GuestSignalSet* set, int signal) {
 #endif
 
 asm(".text\n"
+    APS5_SIGNAL_ASM_FUNCTION("sigsetjmp_nid_postfix")
+    "    movl %esi, 88(%rdi)\n"
+    "    testl %esi, %esi\n"
+    "    jz 2f\n"
+    "    pushq %rdi\n"
+    "    movq %rdi, %rcx\n"
+    "    movl $1, %edi\n"
+    "    xorl %esi, %esi\n"
+    "    leaq 72(%rcx), %rdx\n"
+    APS5_SIGNAL_ASM_CALL("_sigprocmask_nid_postfix")
+    "    popq %rdi\n"
+    "2:\n"
+    "    movq %rdi, %rcx\n"
+    "    movq 0(%rsp), %rdx\n"
+    "    movq %rdx, 0(%rcx)\n"
+    "    movq %rbx, 8(%rcx)\n"
+    "    movq %rsp, 16(%rcx)\n"
+    "    movq %rbp, 24(%rcx)\n"
+    "    movq %r12, 32(%rcx)\n"
+    "    movq %r13, 40(%rcx)\n"
+    "    movq %r14, 48(%rcx)\n"
+    "    movq %r15, 56(%rcx)\n"
+    "    fnstcw 64(%rcx)\n"
+    "    xorl %eax, %eax\n"
+    "    ret\n"
     APS5_SIGNAL_ASM_FUNCTION("siglongjmp_nid_postfix")
     "    cmpl $0, 88(%rdi)\n"
     "    jz 2f\n"

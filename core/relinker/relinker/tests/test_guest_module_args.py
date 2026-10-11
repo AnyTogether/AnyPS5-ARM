@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import platform
 import shutil
 import struct
 import subprocess
@@ -7,6 +8,7 @@ import sys
 import tempfile
 
 from test_guest_symbol_names import dynamic_tags, imported_symbols, module_symbols
+from test_macos_output import MachO
 from test_windows_import_modules import executable
 
 ARGS = 0x1122334455667788
@@ -53,17 +55,34 @@ def no_relocation_module():
     return image
 
 
+def macho_binds(image):
+    linkedit = MachO(image).segment('__LINKEDIT')
+    return image[linkedit['fileoff']:linkedit['fileoff'] + linkedit['filesize']]
+
+
+def load_and_record(work, provider, module):
+    events = work / 'events.txt'
+    run = subprocess.run([sys.executable, __file__, '--load', str(provider), str(module)],
+                         env={**os.environ, 'ANYPS5_GUEST_MODULE_ARGS': str(events)},
+                         capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    recorded = events.read_text()
+    assert f'args={ARGS:016x} argp={ARGP:016x}' in recorded, recorded
+    assert f'result={RETURNED}' in recorded, recorded
+
+
 def main():
     if sys.argv[1] == '--load':
         import ctypes
-        host = ctypes.CDLL(sys.argv[2])
+        host = ctypes.CDLL(sys.argv[2], mode=ctypes.RTLD_GLOBAL if sys.platform == 'darwin' else ctypes.DEFAULT_MODE)
         host.SetPendingArgs.argtypes = [ctypes.c_size_t, ctypes.c_void_p]
         host.SetPendingArgs(ARGS, ARGP)
         ctypes.CDLL(sys.argv[3])
         return
     relinker = Path(sys.argv[1]).resolve()
     host = Path(sys.argv[2]).resolve()
-    native = sys.platform == 'linux' and os.uname().machine == 'x86_64'
+    linux = sys.platform == 'linux' and os.uname().machine == 'x86_64'
+    macos = sys.platform == 'darwin' and platform.machine() == 'x86_64'
     with tempfile.TemporaryDirectory(prefix='anyps5-guest-args-') as directory:
         work = Path(directory)
         modules = work / 'sce_module'
@@ -95,20 +114,33 @@ def main():
         assert GETTER in bare_imports, bare_imports
         assert SETTER in bare_imports, bare_imports
         assert dynamic_tags(bare_image).get(8) == 48, dynamic_tags(bare_image)
-        if not native:
+        mach = work / 'macos'
+        mach_modules = mach / 'sce_module'
+        mach_modules.mkdir(parents=True)
+        (mach_modules / name).write_bytes(args_module())
+        mach_source = mach / 'input.elf'
+        mach_source.write_bytes(executable(name))
+        mach_result = subprocess.run([str(relinker), '--macos', '--skip-syscall-check', str(mach_source), str(mach / 'output')],
+                                     capture_output=True, text=True, timeout=30)
+        assert mach_result.returncode == 0, (mach_result.stdout, mach_result.stderr)
+        mach_converted = mach / 'app0' / 'sce_module' / (name + '.guest.prx')
+        binds = macho_binds(mach_converted.read_bytes())
+        assert ('_' + GETTER).encode() in binds, f'the macOS module does not bind {GETTER}'
+        assert ('_' + SETTER).encode() in binds, f'the macOS module does not bind {SETTER}'
+        if linux:
+            libraries = work / 'libs'
+            libraries.mkdir()
+            shutil.copyfile(host, libraries / 'libc.prx')
+            load_and_record(work, libraries / 'libc.prx', converted)
+        elif macos:
+            libraries = mach / 'libs'
+            libraries.mkdir()
+            shutil.copyfile(host, libraries / 'libkernel.prx')
+            (libraries / 'libc.prx').symlink_to('libkernel.prx')
+            load_and_record(mach, libraries / 'libkernel.prx', mach_converted)
+        else:
             print('Guest module argument tests passed: native execution skipped')
             return
-        libraries = work / 'libs'
-        libraries.mkdir()
-        shutil.copyfile(host, libraries / 'libc.prx')
-        events = work / 'events.txt'
-        run = subprocess.run([sys.executable, __file__, '--load', str(libraries / 'libc.prx'), str(converted)],
-                             env={**os.environ, 'ANYPS5_GUEST_MODULE_ARGS': str(events)},
-                             capture_output=True, text=True, timeout=30)
-        assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
-        recorded = events.read_text()
-        assert f'args={ARGS:016x} argp={ARGP:016x}' in recorded, recorded
-        assert f'result={RETURNED}' in recorded, recorded
         print('Guest module argument tests passed')
 
 

@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/Shutdown.hpp"
+#include "tests/VideoOutTestEnvironment.hpp"
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -13,7 +14,7 @@ int APS5_VABI sceVideoOutClose(int handle);
 int APS5_VABI sceVideoOutInitializeOutputOptions(VideoOutOutputOptions* options);
 int APS5_VABI sceVideoOutIsOutputSupported(int handle, std::uint64_t mode, const VideoOutOutputOptions* options, void* reservedPtr, std::uint64_t reserved);
 int APS5_VABI sceVideoOutConfigureOutput(int handle, std::uint64_t mode, const VideoOutOutputOptions* options, void* reservedPtr, std::uint64_t reserved);
-int APS5_VABI sceVideoOutVrrPegToFixedRate(int handle);
+int APS5_VABI sceVideoOutVrrPegToFixedRate(int handle, std::uint64_t arg1, std::uint64_t arg2);
 int APS5_VABI sceVideoOutVrrUnpegFromFixedRate(int handle);
 }
 
@@ -28,6 +29,7 @@ static constexpr int UNKNOWN_OUTPUT_MODE = static_cast<int>(0x8029001E);
 static void Require(bool value) { if (!value) std::abort(); }
 
 int main() {
+    VideoOutTestEnvironment environment;
     std::array<std::uint8_t, sizeof(VideoOutOutputOptions)> raw{};
     raw.fill(0xAA);
     VideoOutOutputOptions options{};
@@ -83,11 +85,11 @@ int main() {
     freeWord.internalData[3] = 0xFFFFFFFF;
     Require(sceVideoOutIsOutputSupported(handle, 1, &freeWord, nullptr, 0) == 1);
     Require(sceVideoOutConfigureOutput(handle, 1, &options, nullptr, 0) == 0);
-    Require(sceVideoOutVrrPegToFixedRate(handle) == 0);
+    Require(sceVideoOutVrrPegToFixedRate(handle, 0, 0) == 0);
     Require(sceVideoOutVrrUnpegFromFixedRate(handle) == 0);
     thrown = false;
     try {
-        sceVideoOutVrrPegToFixedRate(handle + 1);
+        sceVideoOutVrrPegToFixedRate(handle + 1, 0, 0);
     } catch (const std::runtime_error&) {
         thrown = true;
     }

@@ -123,6 +123,7 @@ ColorTargetLayout::ColorTargetLayout(std::uint32_t width, std::uint32_t height, 
             const auto& tables = equationTables(mode, bytesPerElement, blockWidth, blockHeight);
             xOffsets = tables.x.data();
             yOffsets = tables.y.data();
+            if (mode == ColorTileMode::RenderTarget) equation = FindTextureSwizzleEquation(static_cast<std::uint32_t>(mode), bytesPerElement);
             break;
         }
         case ColorTileMode::Standard4KB:
@@ -149,7 +150,16 @@ ColorTargetLayout::ColorTargetLayout(std::uint32_t width, std::uint32_t height, 
 std::size_t ColorTargetLayout::offset(std::uint32_t x, std::uint32_t y) const {
     if (mode == ColorTileMode::Linear) return (static_cast<std::size_t>(y) * pitch + x) * elementBytes;
     const auto block = static_cast<std::size_t>(y / blockHeight) * (pitch / blockWidth) + x / blockWidth;
-    return block * Alignment() + (xOffsets[x % blockWidth] ^ yOffsets[y % blockHeight] ^ pipeBankXor);
+    auto inBlock = xOffsets[x % blockWidth] ^ yOffsets[y % blockHeight];
+    if (equation != nullptr) {
+        const auto highX = (x & ~(blockWidth - 1u)) & 0xfffu;
+        const auto highY = ((y & ~(blockHeight - 1u)) << 12u) & 0xfff000u;
+        for (std::uint32_t bit = 0; bit < 16u; ++bit) {
+            const auto coordinates = (highX & equation->bits[bit]) ^ (highY & equation->bits[bit]);
+            inBlock ^= (parity(coordinates) << bit);
+        }
+    }
+    return block * Alignment() + (inBlock ^ pipeBankXor);
 }
 
 std::size_t ColorTargetLayout::Offset(std::uint32_t x, std::uint32_t y) const {

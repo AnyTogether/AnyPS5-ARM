@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -73,6 +74,25 @@ class EncodingTests(unittest.TestCase):
         with command_output("", UNICODE, 128):
             with self.assertRaisesRegex(RuntimeError, UNICODE):
                 pr_overlap.merge("main", "topic")
+
+    def test_git_diff_survives_invalid_utf8(self):
+        with TemporaryDirectory() as directory:
+            repo = Path(directory)
+            source = repo / "core" / "libs" / "prx" / "x" / "a.cpp"
+            source.parent.mkdir(parents=True)
+            ident = ["-c", "user.name=t", "-c", "user.email=t@example.test"]
+            for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "base"]):
+                subprocess.run(["git", *ident, *args], cwd=repo, check=True, capture_output=True)
+            source.write_bytes(b"int APS5_VABI f() {} // caf\xe9\n")
+            for args in (["add", "."], ["commit", "-q", "-m", "add"]):
+                subprocess.run(["git", *ident, *args], cwd=repo, check=True, capture_output=True)
+            old = os.getcwd()
+            os.chdir(repo)
+            try:
+                diff = pr_overlap.git("diff", "-U0", "--no-color", "HEAD~1", "HEAD", "--", "core/libs/prx/*.cpp")
+            finally:
+                os.chdir(old)
+            self.assertEqual(pr_overlap.exports(diff), {"f"})
 
     def test_report_is_written_as_utf8(self):
         with TemporaryDirectory() as directory:

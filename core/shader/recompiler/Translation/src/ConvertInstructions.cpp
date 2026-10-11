@@ -18,10 +18,10 @@ IrU32 TranslationContext::convertF32ToU32Saturated(IrF32 value, float upperBound
     const IrU1 nan(ir.Emit(IrOpcode::FPIsNan32, IrType::U1, {&value.Value()}));
     const IrU1 low(ir.Emit(IrOpcode::FPOrdLessThanEqual32, IrType::U1, {&value.Value(), &zero.Value()}));
     const IrU1 high(ir.Emit(IrOpcode::FPOrdGreaterThanEqual32, IrType::U1, {&value.Value(), &ir.ConstantF32(upperBound)}));
-    const IrF32 truncated(ir.Emit(IrOpcode::FPTrunc32, IrType::F32, {&value.Value()}));
-    const IrF32 safeLow = selectF32(IrU1(ir.LogicalOr(nan.Value(), low.Value())), zero, truncated);
+    const IrF32 safeLow = selectF32(IrU1(ir.LogicalOr(nan.Value(), low.Value())), zero, value);
     const IrF32 safe = selectF32(high, IrF32(ir.ConstantF32(safeUpper)), safeLow);
     const IrU32 converted(ir.Emit(IrOpcode::ConvertU32F32, IrType::U32, {&safe.Value()}));
+    if (static_cast<std::uint32_t>(safeUpper) == highResult) return converted;
     return IrU32(ir.Select(high.Value(), ir.Constant(highResult), converted.Value()));
 }
 
@@ -29,14 +29,13 @@ IrU32 TranslationContext::convertF32ToI32Saturated(IrF32 value, float lowerBound
     const IrU1 nan(ir.Emit(IrOpcode::FPIsNan32, IrType::U1, {&value.Value()}));
     const IrU1 low(ir.Emit(IrOpcode::FPOrdLessThanEqual32, IrType::U1, {&value.Value(), &ir.ConstantF32(lowerBound)}));
     const IrU1 high(ir.Emit(IrOpcode::FPOrdGreaterThanEqual32, IrType::U1, {&value.Value(), &ir.ConstantF32(upperBound)}));
-    const IrF32 truncated(ir.Emit(IrOpcode::FPTrunc32, IrType::F32, {&value.Value()}));
-    const IrF32 safeLow = selectF32(low, IrF32(ir.ConstantF32(lowerBound)), truncated);
+    const IrF32 safeLow = selectF32(low, IrF32(ir.ConstantF32(lowerBound)), value);
     const IrF32 safeHigh = selectF32(high, IrF32(ir.ConstantF32(safeUpper)), safeLow);
     const IrF32 safe = selectF32(nan, IrF32(ir.ConstantF32(0.0f)), safeHigh);
-    const IrU32 converted(ir.Emit(IrOpcode::ConvertS32F32, IrType::U32, {&safe.Value()}));
-    const IrU32 clampedHigh(ir.Select(high.Value(), ir.Constant(upperResult), converted.Value()));
-    const IrU32 clamped(ir.Select(low.Value(), ir.Constant(lowerResult), clampedHigh.Value()));
-    return IrU32(ir.Select(nan.Value(), ir.Constant(0u), clamped.Value()));
+    IrU32 converted(ir.Emit(IrOpcode::ConvertS32F32, IrType::U32, {&safe.Value()}));
+    if (static_cast<std::uint32_t>(static_cast<std::int32_t>(lowerBound)) != lowerResult) converted = IrU32(ir.Select(low.Value(), ir.Constant(lowerResult), converted.Value()));
+    if (static_cast<std::uint32_t>(static_cast<std::int32_t>(safeUpper)) != upperResult) converted = IrU32(ir.Select(high.Value(), ir.Constant(upperResult), converted.Value()));
+    return converted;
 }
 
 IrU32 TranslationContext::packU16Lanes(IrU32 low, IrU32 high) {
@@ -53,33 +52,74 @@ void TranslationContext::vCvtF32Ubyte(const RdnaInstruction& inst, std::uint32_t
     writeOperand(inst.destination, &result.Value());
 }
 
+bool TranslationContext::directedF32Rounding() const {
+    return floatMode.has_value() && (floatMode->floatMode & 3u) != 0u;
+}
+
+IrF32 TranslationContext::convertMagnitudeToF32Directed(IrU32 magnitude, IrU32 signBits, std::uint32_t rounding, IrF32 native) {
+    const IrU32 msb(ir.Emit(IrOpcode::FindUMsb32, IrType::U32, {&magnitude.Value()}));
+    const IrU1 inexact(ir.UGreaterThan(msb.Value(), ir.Constant(23u)));
+    const IrU32 shift(ir.ISub(msb.Value(), ir.Constant(23u)));
+    const IrU32 top24(ir.ShiftRightLogical(magnitude.Value(), shift.Value()));
+    const IrU32 discarded(ir.BitwiseAnd(magnitude.Value(), ir.ISub(ir.ShiftLeftLogical(ir.Constant(1u), shift.Value()), ir.Constant(1u))));
+    const IrU1 positive(ir.IEqual(signBits.Value(), ir.Constant(0u)));
+    const IrU1 away(rounding == 1u ? positive : rounding == 2u ? IrU1(ir.LogicalNot(positive.Value())) : IrU1(ir.ConstantBool(false)));
+    const IrU1 increment(ir.LogicalAnd(away.Value(), ir.INotEqual(discarded.Value(), ir.Constant(0u))));
+    const IrU32 rounded(ir.IAdd(top24.Value(), ir.Select(increment.Value(), ir.Constant(1u), ir.Constant(0u))));
+    const IrU1 overflow(ir.Emit(IrOpcode::UGreaterThanEqual32, IrType::U1, {&rounded.Value(), &ir.Constant(0x1000000u)}));
+    const IrU32 finalMsb(ir.Select(overflow.Value(), ir.IAdd(msb.Value(), ir.Constant(1u)), msb.Value()));
+    const IrU32 finalTop(ir.Select(overflow.Value(), ir.Constant(0x800000u), rounded.Value()));
+    const IrU32 bits(ir.BitwiseOr(signBits.Value(), ir.BitwiseOr(ir.ShiftLeftLogical(ir.IAdd(finalMsb.Value(), ir.Constant(127u)), ir.Constant(23u)), ir.BitwiseAnd(finalTop.Value(), ir.Constant(0x7fffffu)))));
+    const IrF32 directed(ir.BitCastF32(bits.Value()));
+    const IrU1 useNative(ir.LogicalOr(ir.IEqual(magnitude.Value(), ir.Constant(0u)), ir.LogicalNot(inexact.Value())));
+    return selectF32(useNative, native, directed);
+}
+
+IrF32 TranslationContext::convertU32ToF32(IrU32 source) {
+    const IrF32 native(ir.Emit(IrOpcode::ConvertF32U32, IrType::F32, {&source.Value()}));
+    if (!directedF32Rounding()) {
+        return native;
+    }
+    return convertMagnitudeToF32Directed(source, IrU32(ir.Constant(0u)), floatMode->floatMode & 3u, native);
+}
+
+IrF32 TranslationContext::convertS32ToF32(IrU32 source) {
+    const IrF32 native(ir.Emit(IrOpcode::ConvertF32S32, IrType::F32, {&source.Value()}));
+    if (!directedF32Rounding()) {
+        return native;
+    }
+    const IrU32 signBits(ir.BitwiseAnd(source.Value(), ir.Constant(0x80000000u)));
+    const IrU32 magnitude(ir.Emit(IrOpcode::IAbs32, IrType::U32, {&source.Value()}));
+    return convertMagnitudeToF32Directed(magnitude, signBits, floatMode->floatMode & 3u, native);
+}
+
 void TranslationContext::vCvtF32U32(const RdnaInstruction& inst) {
     const IrU32 source = readU32(sourceAt(inst, 0u));
-    const IrF32 result(ir.Emit(IrOpcode::ConvertF32U32, IrType::F32, {&source.Value()}));
+    const IrF32 result = convertU32ToF32(source);
     writeOperand(inst.destination, &result.Value());
 }
 
 void TranslationContext::vCvtF32I32(const RdnaInstruction& inst) {
     const IrU32 source = readU32(sourceAt(inst, 0u));
-    const IrF32 result(ir.Emit(IrOpcode::ConvertF32S32, IrType::F32, {&source.Value()}));
+    const IrF32 result = convertS32ToF32(source);
     writeOperand(inst.destination, &result.Value());
 }
 
 void TranslationContext::vCvtU32F32(const RdnaInstruction& inst) {
-    const IrF32 value(*readOperand(sourceAt(inst, 0u), IrType::F32));
+    const IrF32 value(ir.BitCastF32(*readOperand(sourceAt(inst, 0u), IrType::U32)));
     const IrU32 result = convertF32ToU32Saturated(value, 4294967296.0f, 4294967040.0f, 0xffffffffu);
     writeOperand(inst.destination, &result.Value());
 }
 
 void TranslationContext::vCvtI32F32(const RdnaInstruction& inst) {
-    const IrF32 value(*readOperand(sourceAt(inst, 0u), IrType::F32));
+    const IrF32 value(ir.BitCastF32(*readOperand(sourceAt(inst, 0u), IrType::U32)));
     const IrU32 result = convertF32ToI32Saturated(value, -2147483648.0f, 2147483648.0f, 2147483520.0f, 0x80000000u, 0x7fffffffu);
     writeOperand(inst.destination, &result.Value());
 }
 
 void TranslationContext::vCvtF16F32(const RdnaInstruction& inst) {
     const IrF32 value(*readOperand(sourceAt(inst, 0u), IrType::F32));
-    writeF16(inst.destination, value, {&value.Value()});
+    writeF16Conversion(inst.destination, value, {&value.Value()});
 }
 
 void TranslationContext::vCvtF32F16(const RdnaInstruction& inst) {
@@ -91,7 +131,7 @@ void TranslationContext::vCvtF1616(const RdnaInstruction& inst, bool signedValue
     const IrU32 source = readU16AsU32(sourceAt(inst, 0u), signedValue);
     const IrOpcode opcode = signedValue ? IrOpcode::ConvertF32S32 : IrOpcode::ConvertF32U32;
     const IrF32 value(ir.Emit(opcode, IrType::F32, {&source.Value()}));
-    writeF16(inst.destination, value, {});
+    writeF16Conversion(inst.destination, value, {});
 }
 
 void TranslationContext::vCvt16F16(const RdnaInstruction& inst, bool signedValue) {
@@ -170,15 +210,15 @@ void TranslationContext::vCvtPknormF32(const RdnaInstruction& inst, bool signedV
 }
 
 void TranslationContext::vCvtPkU8F32(const RdnaInstruction& inst) {
-    const IrF32 source(*readOperand(sourceAt(inst, 0u), IrType::F32));
-    const IrU32 truncated = convertF32ToU32Saturated(source, 255.0f, 255.0f, 255u);
-    IrValue& whole = ir.Emit(IrOpcode::ConvertF32U32, IrType::F32, {&truncated.Value()});
-    IrValue& fraction = ir.Emit(IrOpcode::FPSub32, IrType::F32, {&source.Value(), &whole});
-    const IrU1 odd(ir.INotEqual(ir.BitwiseAnd(truncated.Value(), ir.Constant(1u)), ir.Constant(0u)));
-    const IrU1 aboveHalf(ir.Emit(IrOpcode::FPOrdGreaterThan32, IrType::U1, {&fraction, &ir.ConstantF32(0.5f)}));
-    const IrU1 tie(ir.LogicalAnd(ir.Emit(IrOpcode::FPOrdEqual32, IrType::U1, {&fraction, &ir.ConstantF32(0.5f)}), odd.Value()));
-    const IrU1 roundUp(ir.LogicalAnd(ir.LogicalOr(aboveHalf.Value(), tie.Value()), ir.ULessThan(truncated.Value(), ir.Constant(255u))));
-    const IrU32 byteValue(ir.Select(roundUp.Value(), ir.IAdd(truncated.Value(), ir.Constant(1u)), truncated.Value()));
+    const IrF32 source(ir.BitCastF32(*readOperand(sourceAt(inst, 0u), IrType::U32)));
+    const IrF32 zero(ir.ConstantF32(0.0f));
+    const IrU1 nan(ir.Emit(IrOpcode::FPIsNan32, IrType::U1, {&source.Value()}));
+    const IrU1 low(ir.Emit(IrOpcode::FPOrdLessThanEqual32, IrType::U1, {&source.Value(), &zero.Value()}));
+    const IrU1 high(ir.Emit(IrOpcode::FPOrdGreaterThanEqual32, IrType::U1, {&source.Value(), &ir.ConstantF32(255.0f)}));
+    const IrF32 rounded(ir.Emit(IrOpcode::FPRoundEven32, IrType::F32, {&source.Value()}));
+    const IrF32 bounded = selectF32(high, IrF32(ir.ConstantF32(255.0f)), rounded);
+    const IrF32 safe = selectF32(IrU1(ir.LogicalOr(nan.Value(), low.Value())), zero, bounded);
+    const IrU32 byteValue(ir.Emit(IrOpcode::ConvertU32F32, IrType::U32, {&safe.Value()}));
     const IrU32 index(ir.BitwiseAnd(readU32(sourceAt(inst, 1u)).Value(), ir.Constant(3u)));
     const IrU32 shift(ir.ShiftLeftLogical(index.Value(), ir.Constant(3u)));
     const IrU32 mask(ir.ShiftLeftLogical(ir.Constant(0xffu), shift.Value()));

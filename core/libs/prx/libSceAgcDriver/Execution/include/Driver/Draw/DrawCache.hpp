@@ -82,6 +82,8 @@ struct StageCapture {
     std::uint32_t pushOffset = 0;
 };
 
+bool DecodeProgramsCurrent(const DrawDecode& decode, const ShaderRegistry& registry);
+
 }
 
 #endif

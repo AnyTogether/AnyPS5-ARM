@@ -1,0 +1,189 @@
+#include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+
+extern "C" {
+std::int64_t APS5_VABI random_nid_postfix();
+void APS5_VABI srandom_nid_postfix(std::uint64_t);
+char* APS5_VABI initstate_nid_postfix(std::uint64_t, char*, std::int64_t);
+char* APS5_VABI setstate_nid_postfix(char*);
+int* APS5_VABI __error_nid_postfix();
+double APS5_VABI erand48_nid_postfix(std::uint16_t*);
+std::int64_t APS5_VABI nrand48_nid_postfix(std::uint16_t*);
+std::int64_t APS5_VABI jrand48_nid_postfix(std::uint16_t*);
+}
+
+static int failures = 0;
+
+static void Require(bool condition, const char* message) {
+    if (!condition) {
+        std::fprintf(stderr, "%s\n", message);
+        ++failures;
+    }
+}
+
+using Sequence = std::array<std::int64_t, 5>;
+
+static Sequence Draw() {
+    Sequence values{};
+    for (auto& value : values) value = random_nid_postfix();
+    return values;
+}
+
+static std::uint32_t Word(const char* table, std::size_t index) {
+    std::uint32_t value;
+    std::memcpy(&value, table + sizeof(value) * index, sizeof(value));
+    return value;
+}
+
+static bool SeedIs(const std::uint16_t* seed, std::uint16_t low, std::uint16_t middle, std::uint16_t high) {
+    return seed[0] == low && seed[1] == middle && seed[2] == high;
+}
+
+static void CheckRand48() {
+    std::uint16_t seed[3] = {0x330e, 0xabcd, 0x1234};
+    Require(erand48_nid_postfix(seed) == 0x657eb7255101p-48 && SeedIs(seed, 0x5101, 0xb725, 0x657e), "erand48 first value");
+    Require(nrand48_nid_postfix(seed) == 1804928587 && SeedIs(seed, 0x6378, 0x0c96, 0xd72a), "nrand48 second value");
+    Require(jrand48_nid_postfix(seed) == 1517566982 && SeedIs(seed, 0x2a23, 0x3c06, 0x5a74), "jrand48 third value");
+    Require(erand48_nid_postfix(seed) == 0x72534abf62f2p-48 && SeedIs(seed, 0x62f2, 0x4abf, 0x7253), "erand48 fourth value");
+    Require(nrand48_nid_postfix(seed) == 684387517 && SeedIs(seed, 0x8d15, 0xd97a, 0x5195), "nrand48 fifth value");
+    Require(jrand48_nid_postfix(seed) == -487786166 && SeedIs(seed, 0xeffc, 0xf94a, 0xe2ec), "jrand48 negative value");
+
+    std::uint16_t zero[3] = {};
+    Require(nrand48_nid_postfix(zero) == 0 && SeedIs(zero, 0x000b, 0, 0), "rand48 zero seed adds the increment");
+    std::uint16_t top[3] = {0xffff, 0xffff, 0xffff};
+    const double value = erand48_nid_postfix(top);
+    Require(value >= 0.0 && value < 1.0, "erand48 stays below 1");
+
+#ifndef _WIN32
+    std::uint16_t guest[3] = {0x1234, 0x5678, 0x9abc};
+    unsigned short host[3] = {0x1234, 0x5678, 0x9abc};
+    for (int round = 0; round < 64; ++round) {
+        Require(erand48_nid_postfix(guest) == ::erand48(host), "erand48 matches the host");
+        Require(nrand48_nid_postfix(guest) == ::nrand48(host), "nrand48 matches the host");
+        Require(jrand48_nid_postfix(guest) == ::jrand48(host), "jrand48 matches the host");
+    }
+#endif
+}
+
+int main() {
+    CheckRand48();
+    constexpr Sequence seedOne {1408992891, 1638182910, 83848093, 145962118, 627851256};
+    constexpr Sequence seed12345 {1052984060, 1639322404, 1971525204, 2097956667, 2012147915};
+    constexpr std::array<Sequence, 5> seed42ByType {{
+        {2060028338, 1164936638, 481681973, 1763071474, 962919018},
+        {660273387, 1356916325, 287587791, 1132382070, 1497594867},
+        {1015209508, 12952757, 1418769128, 2005808989, 1212998434},
+        {745791173, 418148062, 949332769, 1480536337, 177711995},
+        {996638292, 1209745284, 1148231710, 400392963, 1149215164},
+    }};
+    constexpr std::array<std::int64_t, 6> seed7Type1 {1271472800, 27686551, 1252069488, 1609001632, 28873941, 508017694};
+
+    Require(Draw() == seedOne, "unseeded random must match srandom(1)");
+    srandom_nid_postfix(1);
+    Require(Draw() == seedOne, "srandom(1) sequence");
+    srandom_nid_postfix(0x100000001ull);
+    Require(Draw() == seedOne, "srandom must use the low 32 bits of the seed");
+    srandom_nid_postfix(12345);
+    Require(Draw() == seed12345, "srandom(12345) sequence");
+
+    struct SizeCase {
+        std::int64_t size;
+        int type;
+        std::size_t usedBytes;
+    };
+    constexpr std::array<SizeCase, 10> sizes {{
+        {8, 0, 8}, {31, 0, 8}, {32, 1, 32}, {63, 1, 32}, {64, 2, 64},
+        {127, 2, 64}, {128, 3, 128}, {255, 3, 128}, {256, 4, 256}, {1000, 4, 256},
+    }};
+    std::vector<std::vector<char>> buffers;
+    char* defaultTable = nullptr;
+    char* active = nullptr;
+    for (const auto& sizeCase : sizes) {
+        auto& buffer = buffers.emplace_back(static_cast<std::size_t>(sizeCase.size) + 4, static_cast<char>(0xa5));
+        char* previous = initstate_nid_postfix(42, buffer.data(), sizeCase.size);
+        if (defaultTable == nullptr) defaultTable = previous;
+        else Require(previous == active, "initstate must return the previous state");
+        Require(Word(buffer.data(), 0) == static_cast<std::uint32_t>(sizeCase.type), "initstate type word");
+        Require(Draw() == seed42ByType[static_cast<std::size_t>(sizeCase.type)], "initstate(42) sequence for its size");
+        Require(std::all_of(buffer.begin() + static_cast<std::ptrdiff_t>(sizeCase.usedBytes), buffer.end(),
+            [](char value) { return value == static_cast<char>(0xa5); }), "initstate must use only the rounded state size");
+        active = buffer.data();
+    }
+    Require(defaultTable != nullptr && Word(defaultTable, 0) == 5 * 5 + 3, "default table must hold its rear position");
+    Require(setstate_nid_postfix(defaultTable) == active, "setstate must return the previous state");
+    Require(random_nid_postfix() == 1533042628 && random_nid_postfix() == 1225903521,
+        "setstate on the default table must continue the srandom(12345) sequence");
+
+    alignas(4) std::array<char, 32> small{};
+    alignas(4) std::array<char, 64> large{};
+    initstate_nid_postfix(7, small.data(), static_cast<std::int64_t>(small.size()));
+    for (std::size_t i = 0; i < 3; ++i) Require(random_nid_postfix() == seed7Type1[i], "initstate(7) on 32 bytes");
+    initstate_nid_postfix(7, large.data(), static_cast<std::int64_t>(large.size()));
+    Require(setstate_nid_postfix(small.data()) == large.data(), "setstate must return the 64-byte state");
+    Require(setstate_nid_postfix(large.data()) == small.data(), "setstate must return the 32-byte state");
+    Require(Word(small.data(), 0) == 5 * 3 + 1, "setstate must save the rear position of the old state");
+    Require(setstate_nid_postfix(small.data()) == large.data(), "setstate back to the 32-byte state");
+    for (std::size_t i = 3; i < seed7Type1.size(); ++i) Require(random_nid_postfix() == seed7Type1[i], "setstate must resume the sequence");
+
+    initstate_nid_postfix(7, small.data(), static_cast<std::int64_t>(small.size()));
+    random_nid_postfix();
+    alignas(4) std::array<char, 32> garbled{};
+    const std::uint32_t garbledWord = 5 * 7 + 1;
+    std::memcpy(garbled.data(), &garbledWord, sizeof(garbledWord));
+    Require(setstate_nid_postfix(garbled.data()) == nullptr, "setstate must reject a rear position past the degree");
+    Require(random_nid_postfix() == seed7Type1[1], "a rejected setstate must keep the current state");
+
+    *__error_nid_postfix() = 1234;
+    std::array<char, 8> tiny{};
+    tiny.fill(static_cast<char>(0x5a));
+    for (const std::int64_t size : {std::int64_t{7}, std::int64_t{0}, std::int64_t{-1}})
+        Require(initstate_nid_postfix(1, tiny.data(), size) == nullptr, "initstate below 8 bytes must return null");
+    Require(initstate_nid_postfix(1, nullptr, 4) == nullptr, "initstate below 8 bytes must return null before reading the state");
+    Require(*__error_nid_postfix() == 1234, "initstate below 8 bytes must leave errno unchanged");
+    Require(std::all_of(tiny.begin(), tiny.end(), [](char value) { return value == static_cast<char>(0x5a); }),
+        "initstate below 8 bytes must not write the state");
+    Require(random_nid_postfix() == seed7Type1[2], "a rejected initstate must keep the current state");
+
+    bool threw = false;
+    try {
+        initstate_nid_postfix(1, nullptr, 128);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Require(threw, "initstate with a null state must throw");
+    threw = false;
+    try {
+        setstate_nid_postfix(nullptr);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Require(threw, "setstate with a null state must throw");
+
+    constexpr std::size_t threadCount = 4;
+    constexpr std::size_t callsPerThread = 2000;
+    srandom_nid_postfix(99);
+    std::vector<std::int64_t> serial(threadCount * callsPerThread);
+    for (auto& value : serial) value = random_nid_postfix();
+    srandom_nid_postfix(99);
+    std::vector<std::int64_t> concurrent(threadCount * callsPerThread);
+    std::vector<std::thread> threads;
+    for (std::size_t t = 0; t < threadCount; ++t)
+        threads.emplace_back([&concurrent, t] {
+            for (std::size_t i = 0; i < callsPerThread; ++i) concurrent[t * callsPerThread + i] = random_nid_postfix();
+        });
+    for (auto& thread : threads) thread.join();
+    std::sort(serial.begin(), serial.end());
+    std::sort(concurrent.begin(), concurrent.end());
+    Require(serial == concurrent, "concurrent calls must draw the serial sequence");
+
+    return failures == 0 ? 0 : 1;
+}

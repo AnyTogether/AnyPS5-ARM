@@ -12,6 +12,8 @@
 #include <thread>
 #include <vector>
 
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -39,13 +41,14 @@ struct Region {
     std::uintptr_t Address(std::size_t index) const {
         return reinterpret_cast<std::uintptr_t>(base) + index * page;
     }
-    std::set<std::size_t> Collect() {
+    using Collector = bool (*)(std::uintptr_t, std::size_t, void (*)(void*, std::uintptr_t, std::uintptr_t), void*);
+    std::set<std::size_t> Collect(Collector collector = &GuestWriteWatchCollect_nid_postfix, std::size_t first = 0, std::size_t count = 0) {
         std::set<std::size_t> pages;
         struct Sink {
             Region* region;
             std::set<std::size_t>* pages;
         } sink{this, &pages};
-        const bool complete = GuestWriteWatchCollect_nid_postfix(Address(0), bytes, [](void* context, std::uintptr_t begin, std::uintptr_t end) {
+        const bool complete = collector(Address(first), count == 0 ? bytes - first * page : count * page, [](void* context, std::uintptr_t begin, std::uintptr_t end) {
             auto& target = *static_cast<Sink*>(context);
             for (auto at = begin; at < end; at += target.region->page) target.pages->insert((at - target.region->Address(0)) / target.region->page);
         }, &sink);
@@ -81,6 +84,29 @@ void CheckCollect() {
     Require(region.Collect() == std::set<std::size_t>({0, 1}), "a write across a page boundary is not reported on both pages");
 }
 
+void CheckFresh() {
+    Region region(8);
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(region.Collect(&GuestWriteWatchCollect_nid_postfix, 0, 4) == All(4), "the collected half is not reported in full");
+    region.base[region.page] = 1;
+    Require(region.Collect(&GuestWriteWatchCollectFresh_nid_postfix) == std::set<std::size_t>({4, 5, 6, 7}), "a fresh collection does not report exactly the never collected pages");
+    Require(region.Collect(&GuestWriteWatchCollectFresh_nid_postfix).empty(), "a fresh collection reports pages again");
+    region.base[6 * region.page] = 1;
+    Require(region.Collect() == std::set<std::size_t>({1, 6}), "a fresh collection does not arm the pages it reports");
+    Require(region.Collect().empty(), "collected writes are reported again");
+}
+
+void CheckArmed() {
+    Region region(8);
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(region.Collect(&GuestWriteWatchCollect_nid_postfix, 0, 4) == All(4), "the collected half is not reported in full");
+    region.base[region.page] = 1;
+    region.base[6 * region.page] = 1;
+    Require(region.Collect(&GuestWriteWatchCollectArmed_nid_postfix) == std::set<std::size_t>({1}), "an armed collection does not report exactly the written armed pages");
+    Require(region.Collect() == std::set<std::size_t>({4, 5, 6, 7}), "an armed collection takes never collected pages");
+    Require(region.Collect().empty(), "collected writes are reported again");
+}
+
 void CheckRegisterAgain() {
     Region region(4);
     GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
@@ -94,6 +120,33 @@ void CheckRegisterAgain() {
     region.base[0] = 1;
     region.base[3 * region.page] = 1;
     Require(region.Collect() == std::set<std::size_t>({0, 3}), "the rest of a split range stops reporting writes");
+}
+
+int KernelProtection(const void* page) {
+    mach_vm_address_t address = reinterpret_cast<mach_vm_address_t>(page);
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info{};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    Require(mach_vm_region(mach_task_self(), &address, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS && address == reinterpret_cast<mach_vm_address_t>(page), "cannot read the kernel protection of a page");
+    return ((info.protection & VM_PROT_READ) ? PROT_READ : 0) | ((info.protection & VM_PROT_WRITE) ? PROT_WRITE : 0) | ((info.protection & VM_PROT_EXECUTE) ? PROT_EXEC : 0);
+}
+
+void CheckRegisterMapped() {
+    Region region(4);
+    std::uintptr_t runEnd = 0;
+    Require(::mprotect(region.base, region.bytes, PROT_NONE) == 0, "cannot reserve the test region");
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(::mmap(region.base, region.bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == region.base, "cannot map over the reservation");
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(GuestWriteWatchProtection_nid_postfix(region.Address(0), region.Address(4), &runEnd) == (PROT_READ | PROT_WRITE) && runEnd == region.Address(4), "a range mapped over its reservation keeps the reservation's protection");
+    Require(region.Collect() == All(4), "a mapped range is not reported in full");
+    region.base[2 * region.page] = 1;
+    Require(region.Collect() == std::set<std::size_t>({2}), "a range mapped over its reservation stops reporting writes");
+    Require(::mmap(region.base + region.page, region.page, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) == region.base + region.page, "cannot reserve a watched page again");
+    GuestWriteWatchRegister_nid_postfix(region.base + region.page, region.page);
+    Require(GuestWriteWatchProtection_nid_postfix(region.Address(1), region.Address(2), &runEnd) == PROT_NONE, "a protected page reserved again reports its old protection");
+    Require(KernelProtection(region.base + region.page) == PROT_NONE, "registering a protected page reserved again restored its old protection");
 }
 
 void CheckHostWrite() {
@@ -179,10 +232,13 @@ void CheckThreads() {
 
 int main(int argc, char** argv) {
     try {
-        Require(argc == 2, "expected collect, register, host, protection or threads");
+        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, protection or threads");
         const std::string_view mode(argv[1]);
         if (mode == "collect") CheckCollect();
+        else if (mode == "fresh") CheckFresh();
+        else if (mode == "armed") CheckArmed();
         else if (mode == "register") CheckRegisterAgain();
+        else if (mode == "mapped") CheckRegisterMapped();
         else if (mode == "host") CheckHostWrite();
         else if (mode == "protection") CheckProtection();
         else if (mode == "threads") CheckThreads();

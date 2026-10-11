@@ -272,6 +272,26 @@ std::uint32_t SelectExportPacking(SpirvEmitterState& state, std::uint32_t target
     return result;
 }
 
+bool AlphaToCoverage(const SpirvEmitterState& state) {
+    return state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->psAlphaToCoverage;
+}
+
+void StoreCoverage(SpirvEmitterState& state, std::uint32_t mask) {
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassOutput, TypeI32(state)), pointer, state.sampleMaskVariable, ConstantU32(state, 0u));
+    state.module.AddFunction(spv::OpStore, pointer, mask);
+}
+
+void StoreAlphaCoverage(SpirvEmitterState& state, std::uint32_t color) {
+    const auto alpha = state.module.AllocateId();
+    state.module.AddFunction(spv::OpCompositeExtract, TypeF32(state), alpha, color, 3u);
+    const auto below = state.module.AllocateId();
+    state.module.AddFunction(spv::OpFUnordLessThan, TypeBool(state), below, alpha, ConstantF32(state, 0x3f000000u));
+    const auto mask = state.module.AllocateId();
+    state.module.AddFunction(spv::OpSelect, TypeI32(state), mask, below, ConstantI32(state, 0), ConstantI32(state, -1));
+    StoreCoverage(state, mask);
+}
+
 std::uint32_t ExportRawComponent(SpirvValueEmitContext& ctx, std::uint32_t vector, std::uint32_t component) {
     const auto value = ctx.state.module.AllocateId();
     ctx.state.module.AddFunction(spv::OpCompositeExtract, TypeU32(ctx.state), value, vector, component);
@@ -459,7 +479,6 @@ namespace {
 std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& inst) {
     auto& state = ctx.state;
     const auto kind = static_cast<TessellationAttribute>(inst.Argument(0)->ImmediateU32());
-    const auto& tess = state.inputInfo.vertex->tess;
     const auto variable = state.tessVariables.at(static_cast<std::uint32_t>(kind));
     if (variable == 0u) {
         throw std::runtime_error("tessellation attribute has no interface variable");
@@ -484,11 +503,19 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
         address = EmitBinaryU32(state, spv::OpISub, address, ConstantU32(state, state.tessPatchBase));
     }
     const bool local = kind == TessellationAttribute::LocalOutput || kind == TessellationAttribute::ControlInput;
-    const auto stride = local ? tess.lsStride : tess.hsStride;
+    const auto stride = local ? state.program.Metadata().tessellationLocalStride : state.program.Metadata().tessellationControlStride;
+    const auto type = TypePointer(state, storage, TypeU32(state));
+    const auto* sum = inst.Argument(1);
+    const auto* scaled = sum->Opcode() == IrOpcode::IAdd32 ? sum->Argument(0) : nullptr;
+    if (kind == TessellationAttribute::ControlInput && scaled != nullptr && sum->Argument(1)->HasImmediate() && scaled->Opcode() == IrOpcode::IMul32 && scaled->Argument(1)->HasImmediate() && scaled->Argument(1)->ImmediateU32() == stride) {
+        const auto constant = sum->Argument(1)->ImmediateU32();
+        const auto vertex = EmitBinaryU32(state, spv::OpIAdd, ctx.Arg(*scaled, 0), ConstantU32(state, constant / stride));
+        state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, ConstantU32(state, constant % stride / 16u), ConstantU32(state, constant % 16u / 4u));
+        return pointer;
+    }
     const auto offset = kind == TessellationAttribute::PatchOutput ? address : EmitBinaryU32(state, spv::OpUMod, address, ConstantU32(state, stride));
     const auto attribute = EmitBinaryU32(state, spv::OpShiftRightLogical, offset, ConstantU32(state, 4u));
     const auto component = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, offset, ConstantU32(state, 2u)), ConstantU32(state, 3u));
-    const auto type = TypePointer(state, storage, TypeU32(state));
     if (kind == TessellationAttribute::LocalOutput || kind == TessellationAttribute::PatchOutput) {
         state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, attribute, component);
     } else {
@@ -542,7 +569,7 @@ void DefineTessellationInterfaces(SpirvEmitterState& state) {
             type = array(TypeU32Vector(state, 4u), (patchEnd - patchBegin + 15u) / 16u);
         } else {
             const bool local = kind == TessellationAttribute::LocalOutput || kind == TessellationAttribute::ControlInput;
-            const auto stride = local ? tess.lsStride : tess.hsStride;
+            const auto stride = local ? state.program.Metadata().tessellationLocalStride : state.program.Metadata().tessellationControlStride;
             type = array(TypeU32Vector(state, 4u), (stride + 15u) / 16u);
             if (kind != TessellationAttribute::LocalOutput) {
                 type = array(type, local ? tess.inputControlPoints : tess.outputControlPoints);
@@ -556,7 +583,7 @@ void DefineTessellationInterfaces(SpirvEmitterState& state) {
             state.module.AddAnnotation(spv::OpDecorate, state.tessInnerVariable, spv::DecorationBuiltIn, spv::BuiltInTessLevelInner);
             state.module.AddAnnotation(spv::OpDecorate, state.tessInnerVariable, spv::DecorationPatch);
         } else {
-            state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationLocation, kind == TessellationAttribute::PatchOutput ? (tess.hsStride + 15u) / 16u : 0u);
+            state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationLocation, kind == TessellationAttribute::PatchOutput ? (state.program.Metadata().tessellationControlStride + 15u) / 16u : 0u);
         }
         if (kind == TessellationAttribute::Factor || kind == TessellationAttribute::PatchOutput) {
             state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationPatch);
@@ -915,11 +942,20 @@ std::uint32_t EmitTrigCycleF32(SpirvEmitterState& state, std::uint32_t src, bool
 }
 
 std::uint32_t EmitF16BitsToF32(SpirvEmitterState& state, std::uint32_t bits) {
-    const auto unpacked = state.module.AllocateId();
-    const auto result = state.module.AllocateId();
-    state.module.AddFunction(spv::OpExtInst, TypeF32Vector(state, 2), unpacked, GlslStd450(state), GLSLstd450UnpackHalf2x16, bits);
-    state.module.AddFunction(spv::OpCompositeExtract, TypeF32(state), result, unpacked, 0u);
-    return result;
+    const auto u32 = TypeU32(state);
+    const auto f32 = TypeF32(state);
+    const auto op = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, opcode, u32, lhs, rhs); };
+    const auto sign = op(spv::OpShiftLeftLogical, op(spv::OpBitwiseAnd, bits, ConstantU32(state, 0x8000u)), ConstantU32(state, 16u));
+    const auto exponent = op(spv::OpBitwiseAnd, op(spv::OpShiftRightLogical, bits, ConstantU32(state, 10u)), ConstantU32(state, 0x1fu));
+    const auto mantissa = op(spv::OpBitwiseAnd, bits, ConstantU32(state, 0x3ffu));
+    const auto mantissa32 = op(spv::OpShiftLeftLogical, mantissa, ConstantU32(state, 13u));
+    const auto normal = op(spv::OpBitwiseOr, op(spv::OpShiftLeftLogical, op(spv::OpIAdd, exponent, ConstantU32(state, 127u - 15u)), ConstantU32(state, 23u)), mantissa32);
+    const auto special = op(spv::OpBitwiseOr, ConstantU32(state, 0x7f800000u), mantissa32);
+    const auto subnormal = Unary(state, spv::OpBitcast, u32, Binary(state, spv::OpFMul, f32, Unary(state, spv::OpConvertUToF, f32, mantissa), ConstantF32Value(state, 0x1p-24f)));
+    const auto boolean = TypeBool(state);
+    const auto finite = Select(state, u32, Binary(state, spv::OpIEqual, boolean, exponent, ConstantU32(state, 0u)), subnormal, normal);
+    const auto magnitude = Select(state, u32, Binary(state, spv::OpIEqual, boolean, exponent, ConstantU32(state, 0x1fu)), special, finite);
+    return Unary(state, spv::OpBitcast, f32, op(spv::OpBitwiseOr, sign, magnitude));
 }
 
 void EmitProgram(SpirvEmitterState& state) {
@@ -940,6 +976,7 @@ void EmitProgram(SpirvEmitterState& state) {
         state.labels.emplace(block, label);
     }
     DefineGetBdaPointer(state);
+    DefineDot2F32F16Function(state);
     for (const IrBlock* block : program.BlockOrder()) {
         const bool needsScratch = std::any_of(block->Instructions().begin(), block->Instructions().end(), [](const IrValue* inst) {
             return inst->Opcode() == IrOpcode::SwizzleU32;
@@ -983,6 +1020,7 @@ void EmitProgram(SpirvEmitterState& state) {
     if (state.pixelValidMaskVariable != 0u) {
         state.module.AddFunction(spv::OpStore, state.pixelValidMaskVariable, ConstantU32(state, 1u));
     }
+    if (AlphaToCoverage(state)) StoreCoverage(state, ConstantI32(state, -1));
     if (OrderedPixelShader(state)) {
         state.module.AddFunction(spv::OpBeginInvocationInterlockEXT);
     }
@@ -1132,9 +1170,17 @@ void EmitSetTessellationAttribute(SpirvValueEmitContext& ctx, const IrValue& ins
     EmitIfCondition(ctx.state, ctx.Arg(inst, 3), [&]() {
         auto value = ctx.Arg(inst, 2);
         if (inst.Argument(0)->ImmediateU32() == static_cast<std::uint32_t>(TessellationAttribute::Factor)) {
-            const auto floating = ctx.state.module.AllocateId();
-            ctx.state.module.AddFunction(spv::OpBitcast, TypeF32(ctx.state), floating, value);
-            value = floating;
+            auto& state = ctx.state;
+            const bool outer = inst.Argument(1)->HasImmediate() && inst.Argument(1)->ImmediateU32() / 4u < 3u;
+            const auto floating = state.module.AllocateId();
+            state.module.AddFunction(spv::OpBitcast, TypeF32(state), floating, value);
+            const auto lower = ConstantF32Value(state, outer ? 0.0f : 1.0f);
+            const auto inside = state.module.AllocateId();
+            state.module.AddFunction(spv::OpFOrdGreaterThan, TypeBool(state), inside, floating, lower);
+            const auto clamped = state.module.AllocateId();
+            state.module.AddFunction(spv::OpExtInst, TypeF32(state), clamped, GlslStd450(state), GLSLstd450FMin, floating, ConstantF32Value(state, 63.0f));
+            value = state.module.AllocateId();
+            state.module.AddFunction(spv::OpSelect, TypeF32(state), value, inside, clamped, outer ? floating : lower);
         }
         ctx.state.module.AddFunction(spv::OpStore, TessellationPointer(ctx, inst), value);
     });
@@ -1235,6 +1281,7 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
             const auto mapped = state.module.AllocateId();
             state.module.AddFunction(spv::OpCompositeConstruct, vectorType, mapped, components[0], components[1], components[2], components[3]);
             value = mapped;
+            if (exp.index == 0u && !uintOutput && AlphaToCoverage(state)) StoreAlphaCoverage(state, value);
             const auto mode = MrtOutputMode(state, exp);
             if (!uintOutput && mode != 5u && mode != 6u) value = SelectExportPacking(state, exp.index, value);
         }

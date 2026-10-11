@@ -2,9 +2,13 @@
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <relinker/analysis/ValidationPolicy.hpp>
 #include <relinker/analysis/UnusedNidFilter/PltCompactor.hpp>
+#include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
+#include <algorithm>
+#include <optional>
 #include <sstream>
 #include <iostream>
 #include <cstring>
+#include <limits>
 #include <domain/ImportModule.hpp>
 
 namespace Relinker {
@@ -59,6 +63,17 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         }
     }
 
+    FileByteOffset sceTableBase = 0;
+    bool hasSceDynlibData = false;
+    for (const auto& ph : programHeaders) {
+        if (ph.Type != PT_SCE_DYNLIBDATA)
+            continue;
+        if (hasSceDynlibData)
+            throw RelinkerException("Multiple PT_SCE_DYNLIBDATA segments", ph.Offset);
+        hasSceDynlibData = true;
+        sceTableBase = ph.Offset;
+    }
+
     std::vector<DynamicTag> dynTags;
     bool hasDynamicSegment = false;
 
@@ -99,8 +114,12 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     };
 
     auto readAsOffset = [&](const std::int64_t osTag, const std::int64_t sysvTag, const char* name) -> FileByteOffset {
-        if (requireExactlyOneOf(osTag, sysvTag, name))
-            return getTagValue(osTag);
+        if (requireExactlyOneOf(osTag, sysvTag, name)) {
+            const std::uint64_t value = getTagValue(osTag);
+            if (value > std::numeric_limits<FileByteOffset>::max() - sceTableBase)
+                throw RelinkerException(std::string("Adding PT_SCE_DYNLIBDATA base to ") + name + " overflows", value);
+            return sceTableBase + value;
+        }
         return _elfReader->TranslateVirtualAddress(getTagValue(sysvTag));
     };
 
@@ -236,6 +255,43 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     for (const auto& ref : nidRefs)
         _validationPolicy->ValidateRelocationTypeSupported(ref.RelocationTypeValue, ref.RelocationTableOffset);
 
+    if (std::any_of(programHeaders.begin(), programHeaders.end(), [](const ProgramHeader& ph) { return ph.Type == PT_SCE_DYNLIBDATA; })) {
+        const auto functions = UnusedNidFilter::ReadExceptionFunctions(raw, programHeaders, {}, {});
+        for (auto& [segment, segmentVAddr] : executableSegments) {
+            VirtualAddress codeEnd = 0;
+            for (const auto& function : functions)
+                if (function.Begin >= segmentVAddr && function.Begin - segmentVAddr < segment.size())
+                    codeEnd = std::max(codeEnd, function.End);
+            if (codeEnd == 0)
+                continue;
+            if (codeEnd - segmentVAddr > segment.size())
+                throw RelinkerException("Unwind function exceeds executable segment", codeEnd);
+            if (hasPltRelocations && dynJmpRelSize != 0) {
+                const auto target = [&](const std::size_t at) {
+                    std::int32_t displacement = 0;
+                    std::memcpy(&displacement, segment.data() + at + 2, sizeof(displacement));
+                    return segmentVAddr + at + 6 + static_cast<VirtualAddress>(static_cast<std::int64_t>(displacement));
+                };
+                const std::size_t lastFunctionEnd = codeEnd - segmentVAddr;
+                std::optional<std::size_t> plt;
+                for (std::size_t at = lastFunctionEnd; segment.size() >= 16 && at <= segment.size() - 16; ++at) {
+                    if (segment[at] == 0xff && segment[at + 1] == 0x35 && segment[at + 6] == 0xff && segment[at + 7] == 0x25
+                        && target(at) == gotVAddr + 8 && target(at + 6) == gotVAddr + 16) {
+                        plt = at;
+                        break;
+                    }
+                }
+                if (!plt)
+                    throw RelinkerException("PLT not found after the last unwind function", codeEnd);
+                const ByteCount pltSize = 16 * (1 + dynJmpRelSize / relaEntSize);
+                if (pltSize > segment.size() - *plt)
+                    throw RelinkerException("PLT exceeds executable segment", segmentVAddr + *plt);
+                codeEnd = segmentVAddr + *plt + pltSize;
+            }
+            segment.resize(codeEnd - segmentVAddr);
+        }
+    }
+
     for (const auto& [segment, segmentVAddr] : executableSegments)
         _syscallScanner->ScanCodeSectionForSyscalls(segment, segmentVAddr, segment.size());
 
@@ -293,6 +349,32 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         pltCount = compacted.SlotCount;
     }
     auto dynSection = _dynamicSectionBuilder->BuildDynamicSection(dynamicRefs, neededLibraries, dynJmpRelOffset, pltCount);
+    for (const auto& ref : dynamicRefs) {
+        if (!ref.Library.empty()) continue;
+        if (auto declared = Domain::DeclaredImportModule(ref.Nid, importModules); !declared.empty()) dynSection.UnmatchedImportModules.insert(std::move(declared));
+    }
+
+    if (hasTag(DT_OS_SYMTABSZ)) {
+        const auto symbolBytes = getTagValue(DT_OS_SYMTABSZ);
+        if (symbolBytes % symEntSize != 0 || dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
+            throw RelinkerException("Invalid executable dynamic symbol table size");
+        for (ByteCount off = symEntSize; off < symbolBytes; off += symEntSize) {
+            const auto* symbol = raw.data() + dynSymTabOffset + off;
+            std::uint16_t section = 0;
+            std::memcpy(&section, symbol + 6, sizeof(section));
+            if (section == 0 || (symbol[4] >> 4) == 0 || (symbol[5] & 3) == 1 || (symbol[5] & 3) == 2) continue;
+            std::uint32_t sourceName = 0;
+            std::memcpy(&sourceName, symbol, sizeof(sourceName));
+            auto name = readCStr(sourceName);
+            name.resize(name.find('#') == std::string::npos ? name.size() : name.find('#'));
+            const auto nameOffset = static_cast<std::uint32_t>(dynSection.DynStrData.size());
+            dynSection.DynStrData.insert(dynSection.DynStrData.end(), name.begin(), name.end());
+            dynSection.DynStrData.push_back(0);
+            const auto position = dynSection.DynSymData.size();
+            dynSection.DynSymData.insert(dynSection.DynSymData.end(), symbol, symbol + symEntSize);
+            std::memcpy(dynSection.DynSymData.data() + position, &nameOffset, sizeof(nameOffset));
+        }
+    }
 
     auto appendRela = [&](std::vector<std::uint8_t>& buf, std::uint64_t offset, std::uint64_t info, std::int64_t addend) {
         std::size_t pos = buf.size();
