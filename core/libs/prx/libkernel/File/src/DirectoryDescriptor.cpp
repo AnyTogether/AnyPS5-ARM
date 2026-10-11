@@ -98,16 +98,30 @@ int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
 
 #else
 
+#ifdef __APPLE__
+#include <fcntl.h>
+#include <sys/param.h>
+#endif
+
 namespace File {
 
 std::optional<std::filesystem::path> DirectoryDescriptorPath(int fd) {
     if (fd < 0) return std::nullopt;
     std::error_code error;
+#ifdef __APPLE__
+    // macOS has no /proc; the kernel reports a descriptor's path through F_GETPATH.
+    char buffer[MAXPATHLEN];
+    if (::fcntl(fd, F_GETPATH, buffer) != 0) return std::nullopt;
+    const std::filesystem::path target(buffer);
+    if (!std::filesystem::is_directory(target, error)) return std::nullopt;
+    return target;
+#else
     const auto link = std::filesystem::path("/proc/self/fd") / std::to_string(fd);
     const auto target = std::filesystem::read_symlink(link, error);
     if (error) return std::nullopt;
     if (!std::filesystem::is_directory(target, error)) return std::nullopt;
     return target;
+#endif
 }
 
 }

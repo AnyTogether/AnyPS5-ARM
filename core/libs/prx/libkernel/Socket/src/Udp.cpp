@@ -757,6 +757,29 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags),
             reinterpret_cast<sockaddr*>(&native), size));
+#ifdef __APPLE__
+        // macOS refuses an address on a connected datagram socket (EISCONN) where Linux sends to it; an address
+        // naming the connected peer is sent there, as on Linux.
+        if (result < 0 && errno == EISCONN) {
+            sockaddr_storage peer{};
+            socklen_t peerSize = sizeof(peer);
+            const auto samePeer = [&] {
+                if (peer.ss_family != native.ss_family) return false;
+                if (native.ss_family == AF_INET) {
+                    const auto& a = reinterpret_cast<const sockaddr_in&>(peer);
+                    const auto& b = reinterpret_cast<const sockaddr_in&>(native);
+                    return a.sin_port == b.sin_port && a.sin_addr.s_addr == b.sin_addr.s_addr;
+                }
+                const auto& a = reinterpret_cast<const sockaddr_in6&>(peer);
+                const auto& b = reinterpret_cast<const sockaddr_in6&>(native);
+                return a.sin6_port == b.sin6_port && std::memcmp(&a.sin6_addr, &b.sin6_addr, sizeof(a.sin6_addr)) == 0;
+            };
+            if (::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0 && samePeer())
+                result = static_cast<int>(::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags)));
+            else
+                errno = EISCONN;
+        }
+#endif
     }
     return result < 0 ? Fail(NativeError()) : result;
 }
