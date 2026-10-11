@@ -1,3 +1,4 @@
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdlib>
@@ -11,6 +12,11 @@
 
 #include "SDL.h"
 #include "SDL_vulkan.h"
+#ifdef __APPLE__
+#include "SDL_syswm.h"
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
 #include "prx/libSceVideoOut/include/MainThread.hpp"
 #include "prx/libSceVideoOut/include/PadInput.hpp"
 #include "prx/libSceVideoOut/include/MouseInput.hpp"
@@ -53,9 +59,29 @@ VkSurfaceKHR createWindowSurface(void* context, VkInstance instance) {
     });
 }
 
+#ifdef __APPLE__
+// macOS hands a fully covered window's layer a drawable only about once a second, which would hold every flip.
+bool windowOccluded(SDL_Window* window) {
+    SDL_SysWMinfo info{};
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_COCOA || info.info.cocoa.window == nullptr) return false;
+    constexpr unsigned long OcclusionStateVisible = 1ul << 1u;
+    const auto state = reinterpret_cast<unsigned long (*)(void*, SEL)>(objc_msgSend)(static_cast<void*>(info.info.cocoa.window), sel_registerName("occlusionState"));
+    return (state & OcclusionStateVisible) == 0;
+}
+#endif
+
 void windowDrawableSize(void* context, std::uint32_t* width, std::uint32_t* height) {
     OnMainThread([&] {
-        if ((SDL_GetWindowFlags(static_cast<SDL_Window*>(context)) & SDL_WINDOW_MINIMIZED) != 0) {
+        static const bool presentOccluded = std::getenv("APS5_PRESENT_OCCLUDED") != nullptr;
+#ifdef __APPLE__
+        // The device is created from the first query, which needs the real size.
+        static std::atomic<bool> created{false};
+        const bool hidden = created.exchange(true) && !presentOccluded && windowOccluded(static_cast<SDL_Window*>(context));
+#else
+        const bool hidden = false;
+#endif
+        if (hidden || (SDL_GetWindowFlags(static_cast<SDL_Window*>(context)) & SDL_WINDOW_MINIMIZED) != 0) {
             *width = 0;
             *height = 0;
             return;
