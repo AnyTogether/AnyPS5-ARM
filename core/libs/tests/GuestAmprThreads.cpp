@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <thread>
+#include <typeinfo>
 
 struct GuestXtime {
     std::int64_t sec;
@@ -42,6 +43,8 @@ void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(void* pad, Pthread* thr
 void APS5_VABI _ZNSt4_Pad8_ReleaseEv_nid_postfix(void* pad);
 extern std::uint64_t _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix;
 extern std::uint64_t _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix;
+extern void* _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix[9];
+extern void* _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix[8];
 }
 
 static constexpr int ThrdSuccess = 0;
@@ -310,10 +313,54 @@ static void TestPad() {
     Require(pad.condition == nullptr && pad.mutex == nullptr);
 }
 
+// A guest __pbase_type_info, whose vtable pointer is the vtable's address point (past offset and type).
+struct GuestPbaseTypeInfo {
+    void* const* vtable;
+    const char* name;
+    unsigned flags;
+    const std::type_info* pointee;
+};
+
+using TypeInfoQuery = bool (APS5_VABI*)(const void*);
+using TypeInfoCatch = bool (APS5_VABI*)(const void*, const void*, void**, unsigned);
+using TypeInfoUpcast = bool (APS5_VABI*)(const void*, const void*, void**);
+
+static void TestTypeInfoVtables() {
+    auto* const pointer = _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix;
+    auto* const function = _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix;
+    Require(pointer[0] == nullptr && function[0] == nullptr);
+    Require(std::strcmp(static_cast<const std::type_info*>(pointer[1])->name(), "N10__cxxabiv119__pointer_type_infoE") == 0);
+    Require(std::strcmp(static_cast<const std::type_info*>(function[1])->name(), "N10__cxxabiv120__function_type_infoE") == 0);
+    Require(reinterpret_cast<TypeInfoQuery>(pointer[4])(nullptr) && !reinterpret_cast<TypeInfoQuery>(pointer[5])(nullptr));
+    Require(!reinterpret_cast<TypeInfoQuery>(function[4])(nullptr) && reinterpret_cast<TypeInfoQuery>(function[5])(nullptr));
+    int value = 7;
+    void* object = &value;
+    Require(!reinterpret_cast<TypeInfoUpcast>(pointer[7])(nullptr, nullptr, &object) && object == &value);
+
+    const GuestPbaseTypeInfo intPointer{pointer + 2, "Pi", 0, &typeid(int)};
+    const GuestPbaseTypeInfo constIntPointer{pointer + 2, "PKi", 1, &typeid(int)};
+    const GuestPbaseTypeInfo floatPointer{pointer + 2, "Pf", 0, &typeid(float)};
+    const auto doCatch = reinterpret_cast<TypeInfoCatch>(pointer[6]);
+    const auto pointerCatch = reinterpret_cast<TypeInfoCatch>(pointer[8]);
+    Require(doCatch(&intPointer, &intPointer, &object, 0) && object == &value);
+    Require(doCatch(&constIntPointer, &intPointer, &object, 0));
+    Require(pointerCatch(&constIntPointer, &intPointer, &object, 0));
+    Require(!doCatch(&intPointer, &constIntPointer, &object, 0));
+    Require(!pointerCatch(&floatPointer, &intPointer, &object, 0));
+
+    struct GuestTypeInfo {
+        void* const* vtable;
+        const char* name;
+    } functionType{function + 2, "FvvE"}, otherFunctionType{function + 2, "FivE"};
+    Require(reinterpret_cast<TypeInfoCatch>(function[6])(&functionType, &functionType, &object, 0));
+    Require(!reinterpret_cast<TypeInfoCatch>(function[6])(&functionType, &otherFunctionType, &object, 0));
+}
+
 int main() {
     Require(_ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix == 0);
     Require(_ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix == 0);
     TestConditionSignal();
+    TestTypeInfoVtables();
     TestThrowCppError();
     TestPad();
     TestThreadJoin();

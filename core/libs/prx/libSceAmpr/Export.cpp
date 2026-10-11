@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/specifics/itanium/CxxAbi.hpp"
 #include "prx/libkernel/Apr/include/AprCommandBuffer.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <system_error>
 #include <stdexcept>
 #include <thread>
+#include <typeinfo>
 
 static constexpr int SCE_AMPR_ERROR_BUFFER_FULL = 0x8002001C;
 static constexpr int SCE_KERNEL_ERROR_EINVAL = 0x80020016;
@@ -244,7 +246,62 @@ int APS5_VABI _Mtx_lock_nid_postfix(void** handle);
 int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
 [[noreturn]] void APS5_VABI _ZSt9terminatev_nid_postfix();
 int LibcConditionSignal_nid_no_patch(void** handle);
+bool LibcTypeInfoCatch_nid_no_patch(const std::type_info* self, const std::type_info* thrown, void** object);
 int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t** source, std::size_t limit, void* state);
+}
+
+// Vtables of the guest's pointer and function RTTI objects. libc's exception runtime tells RTTI kinds
+// apart by the type_info at vtable[-1] and matches pointer catches itself, so the slots only answer
+// the type_info virtuals: the Itanium layout of type_info, plus __pointer_catch for __pbase_type_info.
+namespace AmprTypeInfo {
+
+void APS5_VABI Destroy(std::type_info*) {}
+
+void APS5_VABI Delete(std::type_info*) {
+    throw std::runtime_error("deleting guest RTTI is not supported");
+}
+
+bool APS5_VABI Yes(const std::type_info*) { return true; }
+bool APS5_VABI No(const std::type_info*) { return false; }
+
+bool APS5_VABI Catch(const std::type_info* self, const std::type_info* thrown, void** object, unsigned) {
+    return LibcTypeInfoCatch_nid_no_patch(self, thrown, object);
+}
+
+// Only class RTTI has bases to upcast to.
+bool APS5_VABI Upcast(const std::type_info*, const void*, void**) { return false; }
+
+struct FunctionVtable {
+    std::ptrdiff_t offset;
+    const std::type_info* type;
+    decltype(&Destroy) destroy = Destroy;
+    decltype(&Delete) deleteObject = Delete;
+    decltype(&No) isPointer = No;
+    decltype(&Yes) isFunction = Yes;
+    decltype(&Catch) catchType = Catch;
+    decltype(&Upcast) upcast = Upcast;
+};
+
+struct PointerVtable {
+    std::ptrdiff_t offset;
+    const std::type_info* type;
+    decltype(&Destroy) destroy = Destroy;
+    decltype(&Delete) deleteObject = Delete;
+    decltype(&Yes) isPointer = Yes;
+    decltype(&No) isFunction = No;
+    decltype(&Catch) catchType = Catch;
+    decltype(&Upcast) upcast = Upcast;
+    decltype(&Catch) pointerCatch = Catch;
+};
+
+static_assert(sizeof(FunctionVtable) == 8 * sizeof(void*));
+static_assert(offsetof(PointerVtable, pointerCatch) == 8 * sizeof(void*));
+
+}
+
+extern "C" {
+AmprTypeInfo::PointerVtable _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__pointer_type_info)};
+AmprTypeInfo::FunctionVtable _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__function_type_info)};
 }
 
 // Dinkumware's std::thread launch pad: the new thread runs the pad's only virtual function, _Go,
@@ -951,11 +1008,6 @@ int APS5_VABI _Cnd_init_with_name_nid_postfix(void** condition, const char* name
     return _Cnd_init_nid_postfix(condition);
 }
 
-int APS5_VABI _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI _ZTVSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -967,11 +1019,6 @@ int APS5_VABI _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE3get
 }
 
 std::uint64_t _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix = 0;
-
-int APS5_VABI _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetEPKS5__nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);

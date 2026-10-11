@@ -62,6 +62,11 @@ static_assert(sizeof(TypeInfoVtable) == 11 * sizeof(void*));
 }
 
 extern "C" {
+// The __do_catch of the RTTI vtables other libraries define (libSceAmpr's pointer and function ones).
+bool LibcTypeInfoCatch_nid_no_patch(const std::type_info* self, const std::type_info* thrown, void** object) {
+    return LibcException::CatchTypeInfo(self, thrown, object, 0);
+}
+
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv117__class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__class_type_info)};
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv120__si_class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__si_class_type_info)};
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv121__vmi_class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__vmi_class_type_info)};
