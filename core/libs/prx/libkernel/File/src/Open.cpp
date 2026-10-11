@@ -6,6 +6,7 @@
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/File/include/FileLock.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
@@ -80,14 +81,19 @@ static int NativeRead(int fd, void* buf, std::size_t n) {
     if (n > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
         throw std::runtime_error("sceKernelRead: nbytes exceeds platform limit");
     }
-    return ::_read(fd, buf, static_cast<unsigned int>(n));
+    const int result = ::_read(fd, buf, static_cast<unsigned int>(n));
+    if (result < 0 && _doserrno == ERROR_NO_DATA) errno = EAGAIN;
+    return result;
 }
 static int NativeWrite(int fd, const void* buf, std::size_t n) {
     if (n > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
         throw std::runtime_error("sceKernelWrite: nbytes exceeds platform limit");
     }
-    const auto result = File::WriteSharedMemory_nid_no_patch(fd, buf, n);
-    return result == -2 ? ::_write(fd, buf, static_cast<unsigned int>(n)) : static_cast<int>(result);
+    const auto shared = File::WriteSharedMemory_nid_no_patch(fd, buf, n);
+    if (shared != -2) return static_cast<int>(shared);
+    const int result = ::_write(fd, buf, static_cast<unsigned int>(n));
+    if (result < 0 && errno == ENOSPC && _doserrno == 0 && ::GetFileType(reinterpret_cast<HANDLE>(::_get_osfhandle(fd))) == FILE_TYPE_PIPE) errno = EAGAIN;
+    return result;
 }
 extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handler(_invalid_parameter_handler);
 static void IgnoreInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, std::uintptr_t) {}
@@ -193,7 +199,9 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     if (path != nullptr && File::IsRandomDevicePath(path)) {
         if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY) throw std::runtime_error(std::string(__func__) + ": writing to " + path + " is not implemented");
         const int fd = File::OpenRandomDevice();
-        return fd < 0 ? SceErrorFromErrno(errno) : fd;
+        if (fd < 0) return SceErrorFromErrno(errno);
+        File::RememberDescriptor(fd, flags);
+        return fd;
     }
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
@@ -220,11 +228,13 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     }
     if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY || (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_TRUNC)))
         RecordWrittenPath_nid_no_patch(native);
+    File::RememberDescriptor(fd, flags);
     return fd;
 }
 
 int APS5_VABI sceKernelClose(int d) {
     File::ForgetRandomDevice(d);
+    File::ForgetDescriptor(d);
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);
     File::ForgetFileLock(d);
@@ -321,27 +331,21 @@ int APS5_VABI sceKernelUnlink(const char* path) {
 }
 
 int APS5_VABI sceKernelFcntl(int d, int command, ...) {
-    if (d < GuestSockets::FirstDescriptor) {
-        if (!DescriptorIsOpen_nid_no_patch(d)) return SCE_KERNEL_ERROR_EBADF;
-        throw std::runtime_error(std::string(__func__) + ": file descriptors are not implemented, fd=" + std::to_string(d));
-    }
-    int result;
-    if (command == GuestSetFlags) {
 #ifdef _WIN32
-        __builtin_sysv_va_list arguments;
-        __builtin_sysv_va_start(arguments, command);
-        const int flags = __builtin_va_arg(arguments, int);
-        __builtin_sysv_va_end(arguments);
+    __builtin_sysv_va_list arguments;
+    __builtin_sysv_va_start(arguments, command);
+    const auto argument = __builtin_va_arg(arguments, long long);
+    __builtin_sysv_va_end(arguments);
 #else
-        std::va_list arguments;
-        va_start(arguments, command);
-        const int flags = va_arg(arguments, int);
-        va_end(arguments);
+    std::va_list arguments;
+    va_start(arguments, command);
+    const auto argument = va_arg(arguments, long);
+    va_end(arguments);
 #endif
-        result = fcntl_nid_postfix(d, command, flags);
-    } else {
-        result = fcntl_nid_postfix(d, command);
-    }
+    int result;
+    if (d < GuestSockets::FirstDescriptor) result = File::Fcntl(d, command, static_cast<std::intptr_t>(argument));
+    else if (command == GuestSetFlags) result = fcntl_nid_postfix(d, command, static_cast<int>(argument));
+    else result = fcntl_nid_postfix(d, command);
     return result < 0 ? SceKernelError(*__error_nid_postfix()) : result;
 }
 

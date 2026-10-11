@@ -15,6 +15,7 @@ int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 int APS5_VABI open_nid_postfix(const char*, int, int);
+int APS5_VABI fcntl_nid_postfix(int, int, ...);
 int* APS5_VABI __error_nid_postfix();
 }
 
@@ -165,10 +166,39 @@ static void RandomDeviceDuplicates() {
     for (const int descriptor : {random, dupRandom, pipe[1], secondRandom}) Require(close_nid_postfix(descriptor) == 0);
 }
 
+static void DuplicatesShareStatusFlags() {
+    constexpr int GetDescriptorFlags = 1;
+    constexpr int SetDescriptorFlags = 2;
+    constexpr int GetFlags = 3;
+    constexpr int SetFlags = 4;
+    constexpr int NonBlocking = 4;
+    constexpr int GuestEagain = 35;
+    int pipe[2];
+    int other[2];
+    Require(pipe_nid_postfix(pipe) == 0);
+    Require(pipe_nid_postfix(other) == 0);
+    Require(fcntl_nid_postfix(pipe[0], SetDescriptorFlags, 1) == 0);
+    const int duplicate = dup_nid_postfix(pipe[0]);
+    Require(duplicate >= 0);
+    Require(fcntl_nid_postfix(duplicate, GetDescriptorFlags) == 0);
+    Require(fcntl_nid_postfix(duplicate, SetFlags, NonBlocking) == 0);
+    Require(fcntl_nid_postfix(pipe[0], GetFlags) == NonBlocking);
+    Require(dup2_nid_postfix(pipe[0], other[0]) == other[0]);
+    Require(fcntl_nid_postfix(other[0], GetDescriptorFlags) == 0);
+    Require(fcntl_nid_postfix(other[0], GetFlags) == NonBlocking);
+    char buffer[4] = {};
+    RequireFailure(static_cast<int>(read_nid_postfix(other[0], buffer, sizeof(buffer))), GuestEagain);
+    Require(fcntl_nid_postfix(pipe[0], SetFlags, 0) == 0);
+    Require(fcntl_nid_postfix(duplicate, GetFlags) == 0);
+    Require(fcntl_nid_postfix(pipe[0], GetDescriptorFlags) == 1);
+    for (const int descriptor : {pipe[0], pipe[1], other[0], other[1], duplicate}) Require(close_nid_postfix(descriptor) == 0);
+}
+
 int main() {
     DupOutlivesOriginal();
     Dup2ReplacesTarget();
     BadDescriptors();
     SocketDuplicates();
     RandomDeviceDuplicates();
+    DuplicatesShareStatusFlags();
 }
