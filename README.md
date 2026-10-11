@@ -9,7 +9,7 @@
 | Dreaming Sarah | AnyPS5 Breakout | Stray · 🚧 WIP |
 |---|---|---|
 | ![Dreaming Sarah](docs/screenshots/dreaming-sarah-gameplay.jpg) | ![AnyPS5 Breakout](docs/screenshots/breakout.jpg) | ![Stray](docs/screenshots/stray-brightness.jpg) |
-| 60 fps, playable | 60 fps, test title | about 1 fps, **work in progress**: boots to the brightness setup screen |
+| 60 fps, playable | 60 fps, test title | about 10 fps, **work in progress**: boots to the brightness setup screen |
 
 <sub>MacBook Pro M3 Pro, macOS 26.6.2. Stray is the first Unreal Engine 4 title to render here; see [where it stands](docs/user/GUIDE.md#stray-work-in-progress).</sub>
 

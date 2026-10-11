@@ -10,7 +10,7 @@ Measured on a MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. The game's
 |---|---|---|---|---|
 | Dreaming Sarah | PPSA02929 | | In game, playable | 60 |
 | AnyPS5 Breakout (test title) | APS5TEST1 | | Playable: video, pad and audio | 60 |
-| Stray | PPSA02100 | Unreal Engine 4 | **Work in progress:** boots through the studio logo to the brightness setup screen, then stops on a depth texture it cannot sample yet. Needs `APS5_NO_WRITE_WATCH=1` and `ANYPS5_NO_SHADER_CACHE=1`. | about 1 |
+| Stray | PPSA02100 | Unreal Engine 4 | **Work in progress:** boots through the studio logo to the brightness setup screen and past it into loading, where it still stops. Some font glyphs are missing. | about 10 |
 | Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Does not boot: some of its shaders compile to very large SPIR-V that MoltenVK takes too long to translate, and it uses 64-bit image atomics, which MoltenVK lacks | – |
 
 ## Windows and Linux
@@ -31,7 +31,7 @@ From [upstream AnyPS5](https://github.com/boykopovar/AnyPS5/blob/main/docs/user/
 |---|---|---|---|---|
 | Dreaming Sarah | PPSA02929 | | Oyun içi, oynanabilir | 60 |
 | AnyPS5 Breakout (test oyunu) | APS5TEST1 | | Oynanabilir: görüntü, kol ve ses | 60 |
-| Stray | PPSA02100 | Unreal Engine 4 | **Üzerinde çalışılıyor:** stüdyo logosundan parlaklık ayar ekranına kadar açılıyor, sonra henüz örnekleyemediği bir depth texture'da duruyor. `APS5_NO_WRITE_WATCH=1` ve `ANYPS5_NO_SHADER_CACHE=1` gerekiyor. | yaklaşık 1 |
+| Stray | PPSA02100 | Unreal Engine 4 | **Üzerinde çalışılıyor:** stüdyo logosundan parlaklık ayar ekranına geliyor ve onu geçip yüklemeye giriyor, orada hâlâ duruyor. Yazı tipinin bazı harfleri eksik. | yaklaşık 10 |
 | Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Açılmıyor: bazı shader'ları MoltenVK'nın çevirmesi çok uzun süren dev SPIR-V'ler üretiyor; ayrıca MoltenVK'de olmayan 64-bit image atomic'leri kullanıyor | – |
 
 ### Windows ve Linux

@@ -25,14 +25,15 @@ The menu and gameplay run at 60 fps (about 18 fps before the macOS write watch).
 
 #### Stray: work in progress
 
-Stray is the first Unreal Engine 4 title to render on macOS here. It boots through the studio logo to the brightness setup screen, at about 1 fps for now. Getting there took these fixes:
+Stray is the first Unreal Engine 4 title to render on macOS here. It boots through the studio logo to the brightness setup screen at about 10 fps, and past it into loading. Getting there took these fixes:
 
 - larger shader image and sampler heaps
 - a SPIR-V loop shape that MoltenVK's shader translator turned into an infinite loop and a GPU hang
 - depth and stencil surfaces read as storage images
 - draws the Metal backend cannot run (geometry shaders, the depth bounds test) skipped instead of stopping the game
+- the guest's own `libc.prx` bound before the host libraries, write-watch fixes, a smaller SPIR-V output that the Metal compiler can build, and relaxed float semantics on MoltenVK
 
-It still needs `APS5_NO_WRITE_WATCH=1` and `ANYPS5_NO_SHADER_CACHE=1`, and stops later on a depth texture it cannot sample yet.
+It runs with the default settings now. A few letters of its font are missing (glyphs the GPU adds to the font atlas later), and it still stops on the loading after the brightness screen.
 
 | Studio logo | Brightness setup |
 |---|---|
@@ -219,14 +220,15 @@ Menü ve oynanış 60 FPS'te çalışıyor (macOS yazma izleme eklenmeden önce 
 
 #### Stray: üzerinde çalışılıyor
 
-Stray, burada macOS'ta görüntü veren ilk Unreal Engine 4 oyunu. Stüdyo logosundan parlaklık ayar ekranına kadar açılıyor, şimdilik yaklaşık 1 FPS ile. Bunun için şu düzeltmeler yapıldı:
+Stray, burada macOS'ta görüntü veren ilk Unreal Engine 4 oyunu. Stüdyo logosundan parlaklık ayar ekranına yaklaşık 10 FPS ile geliyor ve onu geçip yüklemeye giriyor. Bunun için şu düzeltmeler yapıldı:
 
 - daha büyük shader image ve sampler heap'leri
 - MoltenVK'nın shader çeviricisinin sonsuz döngüye ve GPU kilitlenmesine çevirdiği bir SPIR-V döngü biçimi
 - storage image olarak okunan depth ve stencil yüzeyleri
 - Metal'in çalıştıramadığı çizimlerin (geometry shader'lar, depth bounds testi) oyunu durdurmak yerine atlanması
+- oyunun kendi `libc.prx`'inin host kütüphanelerinden önce bağlanması, write watch düzeltmeleri, Metal derleyicisinin derleyebildiği daha küçük SPIR-V çıktısı ve MoltenVK'da gevşek float kuralları
 
-Hâlâ `APS5_NO_WRITE_WATCH=1` ve `ANYPS5_NO_SHADER_CACHE=1` gerekiyor ve daha ileride henüz örnekleyemediği bir depth texture'da duruyor.
+Artık varsayılan ayarlarla çalışıyor. Yazı tipinin bazı harfleri eksik (GPU'nun font atlasına sonradan eklediği harfler) ve parlaklık ekranından sonraki yüklemede hâlâ duruyor.
 
 | Stüdyo logosu | Parlaklık ayarı |
 |---|---|
