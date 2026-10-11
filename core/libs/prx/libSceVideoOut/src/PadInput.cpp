@@ -12,6 +12,70 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/PadInputTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <chrono>
+#include <vector>
+
+namespace {
+
+// Debug aid for unattended runs: APS5_PAD_SCRIPT="<seconds>:<button>[+<button>...][~<ms>],..." holds the
+// buttons from that many seconds after the first input update, for <ms> (200 by default). Buttons:
+// cross circle square triangle up down left right options l1 r1 l2 r2 l3 r3 touchpad.
+struct ScriptedPress {
+    double at;
+    double hold;
+    std::uint32_t buttons;
+};
+
+std::vector<ScriptedPress> LoadPadScript() {
+    std::vector<ScriptedPress> presses;
+    const char* text = std::getenv("APS5_PAD_SCRIPT");
+    if (text == nullptr) return presses;
+    static constexpr std::pair<const char*, Pad::PadButton> names[] = {
+        {"cross", Pad::PadButton::Cross}, {"circle", Pad::PadButton::Circle}, {"square", Pad::PadButton::Square}, {"triangle", Pad::PadButton::Triangle},
+        {"up", Pad::PadButton::Up}, {"down", Pad::PadButton::Down}, {"left", Pad::PadButton::Left}, {"right", Pad::PadButton::Right},
+        {"options", Pad::PadButton::Options}, {"l1", Pad::PadButton::L1}, {"r1", Pad::PadButton::R1}, {"l2", Pad::PadButton::L2},
+        {"r2", Pad::PadButton::R2}, {"l3", Pad::PadButton::L3}, {"r3", Pad::PadButton::R3}, {"touchpad", Pad::PadButton::TouchPad}};
+    const std::string script(text);
+    std::size_t start = 0;
+    while (start < script.size()) {
+        const auto end = std::min(script.find(',', start), script.size());
+        const std::string entry = script.substr(start, end - start);
+        start = end + 1;
+        const auto colon = entry.find(':');
+        if (colon == std::string::npos) throw std::runtime_error("APS5_PAD_SCRIPT entry without a time: " + entry);
+        ScriptedPress press{std::stod(entry.substr(0, colon)), 0.2, 0};
+        std::string rest = entry.substr(colon + 1);
+        if (const auto tilde = rest.find('~'); tilde != std::string::npos) {
+            press.hold = std::stod(rest.substr(tilde + 1)) / 1000.0;
+            rest.resize(tilde);
+        }
+        std::size_t from = 0;
+        while (from <= rest.size()) {
+            const auto plus = std::min(rest.find('+', from), rest.size());
+            const std::string name = rest.substr(from, plus - from);
+            from = plus + 1;
+            const auto found = std::find_if(std::begin(names), std::end(names), [&](const auto& item) { return name == item.first; });
+            if (found == std::end(names)) throw std::runtime_error("APS5_PAD_SCRIPT has an unknown button: " + name);
+            press.buttons |= static_cast<std::uint32_t>(found->second);
+        }
+        presses.push_back(press);
+    }
+    return presses;
+}
+
+std::uint32_t ScriptedButtons() {
+    static const auto presses = LoadPadScript();
+    if (presses.empty()) return 0;
+    static const auto origin = std::chrono::steady_clock::now();
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - origin).count();
+    std::uint32_t buttons = 0;
+    for (const auto& press : presses) {
+        if (now >= press.at && now < press.at + press.hold) buttons |= press.buttons;
+    }
+    return buttons;
+}
+
+}
 
 PadInput::PadInput()
     : bindings(Pad::LoadInputMapping()), pressed(bindings.size()), wheelReleaseTimes(bindings.size()) {
@@ -263,6 +327,11 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
 void PadInput::Update() {
     if (controller != nullptr) SDL_GameControllerUpdate();
     applyOutput();
+    static std::uint32_t scripted = 0;
+    if (const auto buttons = ScriptedButtons(); buttons != scripted) {
+        scripted = buttons;
+        publish();
+    }
     if (controller != nullptr) {
         controllerState = sampleController();
         publish();
@@ -301,7 +370,7 @@ void PadInput::Update() {
 
 void PadInput::publish() {
     PadInputState state;
-    state.buttons = controllerState.buttons;
+    state.buttons = controllerState.buttons | ScriptedButtons();
     state.sticks = controllerState.sticks;
     state.analogButtonsL2 = controllerState.analogButtonsL2;
     state.analogButtonsR2 = controllerState.analogButtonsR2;
