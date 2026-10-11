@@ -161,9 +161,12 @@ int APS5_VABI sceSslGetNameEntryInfo(int sslCtxId, const void* certName, int ent
     return NameQuery(__func__, sslCtxId, certName);
 }
 
-int APS5_VABI sceSslGetPem(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+// A null buffer asks only for the size of the PEM text.
+int APS5_VABI sceSslGetPem(int sslCtxId, const void* cert, char* pem, size_t* pemSize) {
+    (void)pem;
+    if (!cert || !pemSize) return ERROR_INVALID_ARG;
+    RequireContext(__func__, sslCtxId);
+    ForeignObject(__func__, "certificate");
 }
 
 int APS5_VABI sceSslGetSubjectName(int sslCtxId, const void* cert, void** certName) {
