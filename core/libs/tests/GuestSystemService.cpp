@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <stdexcept>
 
 extern "C" int APS5_VABI sceSystemServiceGetHdrToneMapLuminance(SystemServiceHdrToneMapLuminance* luminance);
@@ -14,15 +15,6 @@ namespace {
 constexpr int browserUnavailable = static_cast<int>(0x8002002Du);
 
 void Require(bool value) { if (!value) std::abort(); }
-
-bool ParamGetStringThrows(int paramId, char* buf, std::size_t bufSize) {
-    try {
-        static_cast<void>(sceSystemServiceParamGetString(paramId, buf, bufSize));
-    } catch (const std::runtime_error&) {
-        return true;
-    }
-    return false;
-}
 
 bool LaunchAppThrows(const char* titleId, const char* const* arguments, const void* param) {
     try {
@@ -89,9 +81,21 @@ int main() {
     std::memset(name, 'x', sizeof(name));
     Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, nullptr, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
     Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, 0) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(ParamGetStringThrows(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, sizeof(name) - 1));
-    Require(ParamGetStringThrows(SYSTEM_SERVICE_PARAM_ID_LANG, name, sizeof(name)));
-    Require(name[0] == 'x');
-    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, sizeof(name)) == SYSTEM_SERVICE_OK);
-    Require(std::strcmp(name, "PS5") == 0);
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_LANG, nullptr, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    for (int paramId : {SYSTEM_SERVICE_PARAM_ID_LANG, SYSTEM_SERVICE_PARAM_ID_DATE_FORMAT, SYSTEM_SERVICE_PARAM_ID_TIME_FORMAT,
+                        SYSTEM_SERVICE_PARAM_ID_TIME_ZONE, SYSTEM_SERVICE_PARAM_ID_SUMMERTIME, SYSTEM_SERVICE_PARAM_ID_GAME_PARENTAL_LEVEL,
+                        SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN, 0, 8, -1}) {
+        Require(sceSystemServiceParamGetString(paramId, name, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
+        Require(sceSystemServiceParamGetString(paramId, name, 4) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    }
+    for (std::size_t bufSize = 1; bufSize < 4; ++bufSize) {
+        Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, bufSize) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    }
+    for (char byte : name) Require(byte == 'x');
+    for (std::size_t bufSize : {std::size_t{4}, std::size_t{64}, sizeof(name)}) {
+        std::memset(name, 'x', sizeof(name));
+        Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, bufSize) == SYSTEM_SERVICE_OK);
+        Require(std::strcmp(name, "PS5") == 0);
+        for (std::size_t index = 4; index < sizeof(name); ++index) Require(name[index] == 'x');
+    }
 }

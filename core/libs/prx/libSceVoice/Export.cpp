@@ -233,8 +233,10 @@ int APS5_VABI sceVoiceEnableChat(void) {
     return 0;
 }
 
-int APS5_VABI sceVoiceResetPort(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVoiceResetPort(uint32_t port_id) {
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    RequirePort(voice, port_id, __func__);
     return 0;
 }
 
