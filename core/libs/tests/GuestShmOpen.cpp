@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <stdexcept>
+#include <string>
 extern "C" {
 int APS5_VABI shm_open_nid_postfix(const char*, int, int);
 int APS5_VABI ftruncate_nid_postfix(int, std::int64_t);
@@ -18,6 +20,51 @@ static void RequireInvalid(const char* path, int flags) {
     *__error_nid_postfix() = 0;
     Require(shm_open_nid_postfix(path, flags, 0600) == -1);
     Require(*__error_nid_postfix() == 22);
+}
+static void RequireError(const char* path, int flags, int error) {
+    *__error_nid_postfix() = 0;
+    Require(shm_open_nid_postfix(path, flags, 0600) == -1);
+    Require(*__error_nid_postfix() == error);
+}
+static void CheckNamed() {
+    const char* const name = "/anyps5-shm";
+    RequireError(name, 0x2, 2);
+    RequireError(name, 0x0, 2);
+    RequireError(nullptr, 0x202, 14);
+    std::string longName(1024, 'n');
+    RequireError(longName.c_str(), 0x202, 63);
+    const int creator = shm_open_nid_postfix(name, 0x100a02, 0600);
+    Require(creator >= 0);
+    RequireError(name, 0xa02, 17);
+    Require(ftruncate_nid_postfix(creator, 0x2000) == 0);
+    const char text[] = "named";
+    Require(pwrite_nid_disambig1_nid_postfix(creator, text, sizeof(text), 0x100) == static_cast<std::int64_t>(sizeof(text)));
+    const int reader = shm_open_nid_postfix(name, 0x0, 0);
+    Require(reader >= 0 && reader != creator);
+    char back[sizeof(text)] = {};
+    Require(pread_nid_postfix(reader, back, sizeof(back), 0x100) == static_cast<std::int64_t>(sizeof(back)));
+    Require(std::memcmp(back, text, sizeof(text)) == 0);
+    bool refused = false;
+    try {
+        pwrite_nid_disambig1_nid_postfix(reader, text, sizeof(text), 0);
+    } catch (const std::runtime_error&) {
+        refused = true;
+    }
+    Require(refused);
+    // Read-only O_TRUNC leaves the object alone; a read-write O_TRUNC empties it for every opener.
+    const int readOnlyTruncate = shm_open_nid_postfix(name, 0x400, 0);
+    Require(readOnlyTruncate >= 0);
+    Require(pread_nid_postfix(reader, back, 1, 0x1fff) == 1);
+    const int truncating = shm_open_nid_postfix(name, 0x602, 0600);
+    Require(truncating >= 0);
+    Require(pread_nid_postfix(reader, back, 1, 0) == 0);
+    const int other = shm_open_nid_postfix("/anyps5-shm-other", 0x202, 0600);
+    Require(other >= 0);
+    Require(pread_nid_postfix(other, back, 1, 0) == 0);
+    for (const int descriptor : {creator, reader, readOnlyTruncate, truncating, other})
+        Require(close_nid_postfix(descriptor) == 0);
+    const int reopened = shm_open_nid_postfix(name, 0x2, 0);
+    Require(reopened >= 0 && close_nid_postfix(reopened) == 0);
 }
 int main() {
     *__error_nid_postfix() = 13;
@@ -47,11 +94,5 @@ int main() {
     RequireInvalid(anonymous, 0x2 | 0x4);
     RequireInvalid("/anyps5-shm", 0x1);
     RequireInvalid("/anyps5-shm", 0x202 | 0x8);
-    bool threw = false;
-    try {
-        shm_open_nid_postfix("/anyps5-shm", 0x202, 0600);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw);
+    CheckNamed();
 }

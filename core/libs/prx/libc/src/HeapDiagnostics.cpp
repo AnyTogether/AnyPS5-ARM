@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 
 namespace {
@@ -34,12 +35,11 @@ void APS5_VABI sceLibcInternalBacktraceForGame_nid_postfix(const char* heapName)
     NotImplemented_nid_no_patch(__func__);
 }
 
-// unknown signature
-void APS5_VABI sceLibcInternalHeapErrorReportForGame_nid_postfix(void* heap, void* block, std::uint32_t error) {
-    (void)heap;
-    (void)block;
-    (void)error;
-    NotImplemented_nid_no_patch(__func__);
+// A title's own heap checks call this when they find a bad block; the report is the only effect.
+int APS5_VABI sceLibcInternalHeapErrorReportForGame_nid_postfix(void* heap, void* block, std::uint64_t error) {
+    std::fprintf(stderr, "[libc] guest heap error report: heap %p, block %p, error 0x%llx\n", heap, block, static_cast<unsigned long long>(error));
+    std::fflush(stderr);
+    return 0;
 }
 
 }

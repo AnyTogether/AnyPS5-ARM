@@ -112,9 +112,9 @@ int APS5_VABI sceSslTerm_nid_postfix(int ssl_ctx_id) {
     return 0;
 }
 
-int APS5_VABI sceSslClose() {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+// This library exports no sceSslCreateConnection, so no connection id can have come from it.
+int APS5_VABI sceSslClose(int sslConnectionId) {
+    throw std::invalid_argument("sceSslClose: connection " + std::to_string(sslConnectionId) + " not created by libSceSsl");
 }
 
 int APS5_VABI sceSslGetSerialNumber(int sslCtxId, const void* cert, const uint8_t** data, size_t* size) {

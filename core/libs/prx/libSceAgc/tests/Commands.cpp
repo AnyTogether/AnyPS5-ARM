@@ -33,6 +33,13 @@ extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetMarker(CommandBuffer* buf, const
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbPushMarker(CommandBuffer* buf, const char* str, std::uint32_t color);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbPopMarker(CommandBuffer* buf);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetMarker(CommandBuffer* buf, const char* str, std::uint32_t color);
+extern "C" std::uint32_t* APS5_VABI sceAgcDcbPushMarkerSpan(CommandBuffer* buf, const char* str, std::uint32_t length, std::uint32_t color);
+extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetMarkerSpan(CommandBuffer* buf, const char* str, std::uint32_t length, std::uint32_t color);
+extern "C" std::uint32_t* APS5_VABI sceAgcAcbPushMarkerSpan(CommandBuffer* buf, const char* str, std::uint32_t length, std::uint32_t color);
+extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetMarkerSpan(CommandBuffer* buf, const char* str, std::uint32_t length, std::uint32_t color);
+extern "C" std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint32_t queryType);
+extern "C" std::uint32_t APS5_VABI sceAgcDcbEndOcclusionQueryGetSize();
+extern "C" std::uint32_t APS5_VABI sceAgcDcbSetIndexIndirectArgsGetSize();
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetIndexBuffer(CommandBuffer* buf, std::uint64_t indexAddress);
 extern "C" std::uint32_t* APS5_VABI sceAgcSetNop(CommandBuffer* buf, std::uint32_t sizeDw);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbContextStateOp(CommandBuffer* buf, std::uint32_t operation);
@@ -209,6 +216,37 @@ void testMarkers() {
     expectFailure([] { sceAgcAcbPushMarker(nullptr, "frame", 0); });
     expectFailure([] { sceAgcAcbPopMarker(nullptr); });
     expectFailure([] { sceAgcAcbSetMarker(nullptr, "frame", 0); });
+}
+
+void testMarkerSpans() {
+    Storage dcb;
+    Storage acb;
+    // A span ends at its length: the text after it is not copied and the packet is terminated.
+    const auto* dcbPush = sceAgcDcbPushMarkerSpan(&dcb.buffer, "framebuffer", 5, 0xff0000u);
+    const auto* acbPush = sceAgcAcbPushMarkerSpan(&acb.buffer, "framebuffer", 5, 0xff0000u);
+    check(dcbPush == dcb.words.data() && dcbPush[0] == Agc::Command::Header(0x10, 3, 0x0bu << 2u), "DCB push marker span header mismatch");
+    check(std::strcmp(reinterpret_cast<const char*>(dcbPush + 1), "frame") == 0, "DCB push marker span text mismatch");
+    check(acbPush == acb.words.data() && acb.words == dcb.words, "ACB and DCB marker spans differ");
+    const auto* fourBytes = sceAgcDcbPushMarkerSpan(&dcb.buffer, "pass", 4, 0);
+    check(fourBytes == dcb.words.data() + 3 && fourBytes[0] == Agc::Command::Header(0x10, 3, 0x0bu << 2u) && fourBytes[2] == 0, "marker span terminator was not given its own dword");
+    const auto* dcbSet = sceAgcDcbSetMarkerSpan(&dcb.buffer, "draw", 0, 0);
+    check(dcbSet == dcb.words.data() + 6 && dcbSet[0] == Agc::Command::Header(0x10, 2, 0x0bu << 2u) && dcbSet[1] == 0, "empty set marker span mismatch");
+    check(dcbSet[2] == Agc::Command::Header(0x10, 2, 0x0cu << 2u), "set marker span is not a push and pop pair");
+    const auto* acbSet = sceAgcAcbSetMarkerSpan(&acb.buffer, nullptr, 0, 0);
+    check(acbSet == acb.words.data() + 3 && acb.buffer.cursor_up == acb.words.data() + 7, "ACB set marker span cursor mismatch");
+    const auto before = acb.words;
+    expectFailure([&] { sceAgcAcbPushMarkerSpan(&acb.buffer, nullptr, 3, 0); });
+    expectFailure([&] { sceAgcDcbSetMarkerSpan(&dcb.buffer, "x", 0x10000u, 0); });
+    expectFailure([] { sceAgcDcbPushMarkerSpan(nullptr, "frame", 5, 0); });
+    expectFailure([] { sceAgcAcbSetMarkerSpan(nullptr, "frame", 5, 0); });
+    check(acb.words == before, "rejected marker span modified packet memory");
+}
+
+void testPacketSizes() {
+    check(sceAgcDcbBeginOcclusionQueryGetSize(0) == 16 && sceAgcDcbBeginOcclusionQueryGetSize(1) == 288, "occlusion query begin size mismatch");
+    check(sceAgcDcbBeginOcclusionQueryGetSize(0x101) == 288 && sceAgcDcbBeginOcclusionQueryGetSize(2) == 0, "occlusion query type is not read from its low byte");
+    check(sceAgcDcbEndOcclusionQueryGetSize() == 16, "occlusion query end size mismatch");
+    check(sceAgcDcbSetIndexIndirectArgsGetSize() == 16, "index indirect arguments size mismatch");
 }
 
 void testIndexBuffer() {
@@ -478,6 +516,8 @@ int main(int argc, char** argv) {
         testClearState();
         testIndexedIndirectDraws();
         testMarkers();
+        testMarkerSpans();
+        testPacketSizes();
         testIndexBuffer();
         testContextState();
         testFlip();

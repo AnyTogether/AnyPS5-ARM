@@ -23,6 +23,8 @@ std::uint64_t APS5_VABI _Stoul_nid_postfix(const char*, char**, int);
 std::int64_t APS5_VABI atol_nid_postfix(const char*);
 long long APS5_VABI atoll_nid_postfix(const char*);
 int* APS5_VABI __error_nid_postfix();
+int APS5_VABI libcCyberUnknown02(int);
+double APS5_VABI libcCyberUnknown08(double, int);
 struct LibcFloatConstant { std::uint32_t bits[4]; };
 extern LibcFloatConstant _FInf_nid_postfix;
 extern LibcFloatConstant _FNan_nid_postfix;
@@ -214,6 +216,11 @@ static void CheckFloatClassification() {
 }
 
 int main() {
+    Require(libcCyberUnknown02(-7) == 7 && libcCyberUnknown02(7) == 7 && libcCyberUnknown02(0) == 0);
+    Require(libcCyberUnknown02(std::numeric_limits<int>::min()) == std::numeric_limits<int>::min());
+    Require(libcCyberUnknown08(2.0, 10) == 1024.0 && libcCyberUnknown08(2.0, -2) == 0.25);
+    Require(libcCyberUnknown08(-3.0, 3) == -27.0 && libcCyberUnknown08(0.0, 0) == 1.0);
+    Require(std::isinf(libcCyberUnknown08(0.0, -1)) && libcCyberUnknown08(2.0, std::numeric_limits<int>::min()) == 0.0);
     CheckFloatClassification();
     CheckIntegerConversions();
     Require(atof_nid_postfix(" -12.5tail") == -12.5);
