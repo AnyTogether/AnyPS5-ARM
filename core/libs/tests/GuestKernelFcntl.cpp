@@ -28,6 +28,7 @@ static constexpr int GetFlags = 3;
 static constexpr int SetFlags = 4;
 static constexpr int GetLock = 11;
 static constexpr int SetLock = 12;
+static constexpr int ReadAhead = 15;
 static constexpr int DarwinReadAhead = 16;
 static constexpr int DuplicateCloseOnExec = 17;
 static constexpr int ReadOnly = 0;
@@ -109,6 +110,13 @@ static void FileFlagsRoundTrip() {
     Require(sceKernelFcntl(file, GetDescriptorFlags) == 0);
     Require(fcntl_nid_postfix(file, DarwinReadAhead, 1) == 0);
     Require(fcntl_nid_postfix(file, GetFlags) == (ReadWrite | ReadAheadFlag));
+    Require(fcntl_nid_postfix(file, ReadAhead, -1) == 0);
+    Require(fcntl_nid_postfix(file, GetFlags) == ReadWrite);
+    Require(sceKernelFcntl(file, ReadAhead, 4096) == 0);
+    Require(fcntl_nid_postfix(file, GetFlags) == (ReadWrite | ReadAheadFlag));
+    Require(sceKernelFcntl(file, ReadAhead, -1) == 0);
+    Require(sceKernelFcntl(file, GetFlags) == ReadWrite);
+    Require(fcntl_nid_postfix(file, DarwinReadAhead, 1) == 0);
 
     const int duplicate = fcntl_nid_postfix(file, DuplicateCommand, 20);
     Require(duplicate >= 20);

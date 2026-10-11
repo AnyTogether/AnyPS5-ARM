@@ -381,6 +381,31 @@ int ReadAheadControl(int fd, int command, std::intptr_t argument) {
 
 namespace File {
 
+FcntlArgument FcntlArgumentOf(int command) {
+    switch (command) {
+        case DuplicateCommand:
+        case SetDescriptorFlags:
+        case SetStatusFlags:
+        case SetOwner:
+        case DuplicateToCommand:
+        case ReadAhead:
+        case DarwinReadAhead:
+        case DuplicateCloseOnExec:
+        case DuplicateToCloseOnExec:
+            return FcntlArgument::Int;
+        case OldGetLock:
+        case OldSetLock:
+        case OldSetLockWait:
+        case GetLock:
+        case SetLock:
+        case SetLockWait:
+        case SetLockRemote:
+            return FcntlArgument::Pointer;
+        default:
+            return FcntlArgument::None;
+    }
+}
+
 int Fcntl(int fd, int command, std::intptr_t argument) {
     switch (command) {
         case DuplicateCommand:

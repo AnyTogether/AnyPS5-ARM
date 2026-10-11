@@ -331,19 +331,25 @@ int APS5_VABI sceKernelUnlink(const char* path) {
 }
 
 int APS5_VABI sceKernelFcntl(int d, int command, ...) {
+    const auto type = File::FcntlArgumentOf(command);
+    std::intptr_t argument = 0;
+    if (type != File::FcntlArgument::None) {
 #ifdef _WIN32
-    __builtin_sysv_va_list arguments;
-    __builtin_sysv_va_start(arguments, command);
-    const auto argument = __builtin_va_arg(arguments, long long);
-    __builtin_sysv_va_end(arguments);
+        __builtin_sysv_va_list arguments;
+        __builtin_sysv_va_start(arguments, command);
+        argument = type == File::FcntlArgument::Int ? __builtin_va_arg(arguments, int)
+                                                    : reinterpret_cast<std::intptr_t>(__builtin_va_arg(arguments, void*));
+        __builtin_sysv_va_end(arguments);
 #else
-    std::va_list arguments;
-    va_start(arguments, command);
-    const auto argument = va_arg(arguments, long);
-    va_end(arguments);
+        std::va_list arguments;
+        va_start(arguments, command);
+        argument = type == File::FcntlArgument::Int ? va_arg(arguments, int)
+                                                    : reinterpret_cast<std::intptr_t>(va_arg(arguments, void*));
+        va_end(arguments);
 #endif
+    }
     int result;
-    if (d < GuestSockets::FirstDescriptor) result = File::Fcntl(d, command, static_cast<std::intptr_t>(argument));
+    if (d < GuestSockets::FirstDescriptor) result = File::Fcntl(d, command, argument);
     else if (command == GuestSetFlags) result = fcntl_nid_postfix(d, command, static_cast<int>(argument));
     else result = fcntl_nid_postfix(d, command);
     return result < 0 ? SceKernelError(*__error_nid_postfix()) : result;
