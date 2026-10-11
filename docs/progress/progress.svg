@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 310" width="1000" height="310">
 <rect x="0.00" y="0.00" width="1000.00" height="310.00" fill="#0d1117" stroke="#0d1117" stroke-width="0"/>
-<text x="4.00" y="21.00" font-family="sans-serif" font-size="16" fill="#ffffff" stroke="#0d1117" stroke-width="3" paint-order="stroke">System libraries*: 94.58% (3072/3248)</text>
-<g><title>libc: 632/633 (100%)</title>
+<text x="4.00" y="21.00" font-family="sans-serif" font-size="16" fill="#ffffff" stroke="#0d1117" stroke-width="3" paint-order="stroke">System libraries*: 94.67% (3075/3248)</text>
+<g><title>libc: 633/633 (100%)</title>
 <rect x="1.00" y="31.00" width="6.23" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="7.23" y="31.00" width="6.23" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="13.45" y="31.00" width="6.23" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
@@ -634,7 +634,7 @@
 <rect x="149.50" y="175.62" width="6.46" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="155.96" y="175.62" width="6.46" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="162.42" y="175.62" width="6.46" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
-<rect x="168.87" y="175.62" width="6.46" height="6.57" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
+<rect x="168.87" y="175.62" width="6.46" height="6.57" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="0.00" y="30.00" width="176.33" height="153.19" fill="none" stroke="#0d1117" stroke-width="2"/>
 <text x="5.00" y="46.00" font-family="sans-serif" font-size="12" fill="#ffffff" stroke="#0d1117" stroke-width="3" paint-order="stroke">libc</text>
 </g>
@@ -1166,7 +1166,7 @@
 <rect x="0.00" y="183.19" width="176.33" height="126.81" fill="none" stroke="#0d1117" stroke-width="2"/>
 <text x="5.00" y="199.19" font-family="sans-serif" font-size="12" fill="#ffffff" stroke="#0d1117" stroke-width="3" paint-order="stroke">libkernel</text>
 </g>
-<g><title>libSceAgc: 217/229 (95%)</title>
+<g><title>libSceAgc: 218/229 (95%)</title>
 <rect x="177.33" y="31.00" width="6.43" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="183.76" y="31.00" width="6.43" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="190.20" y="31.00" width="6.43" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
@@ -1384,7 +1384,7 @@
 <rect x="240.07" y="130.64" width="6.97" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="247.04" y="130.64" width="6.97" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="254.01" y="130.64" width="6.97" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
-<rect x="177.33" y="136.87" width="6.97" height="6.23" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
+<rect x="177.33" y="136.87" width="6.97" height="6.23" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="184.30" y="136.87" width="6.97" height="6.23" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="191.27" y="136.87" width="6.97" height="6.23" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="198.24" y="136.87" width="6.97" height="6.23" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
@@ -2864,7 +2864,7 @@
 <rect x="352.45" y="277.95" width="6.69" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="331.40" y="259.53" width="28.74" height="25.24" fill="none" stroke="#0d1117" stroke-width="2"/>
 </g>
-<g><title>libSceSsl: 15/17 (88%)</title>
+<g><title>libSceSsl: 16/17 (94%)</title>
 <rect x="332.40" y="285.76" width="5.35" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="337.74" y="285.76" width="5.35" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="343.09" y="285.76" width="5.35" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
@@ -2880,7 +2880,7 @@
 <rect x="352.45" y="297.38" width="6.69" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="332.40" y="303.19" width="6.69" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="339.08" y="303.19" width="6.69" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
-<rect x="345.77" y="303.19" width="6.69" height="5.81" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
+<rect x="345.77" y="303.19" width="6.69" height="5.81" fill="#2ea043" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="352.45" y="303.19" width="6.69" height="5.81" fill="#6e7681" stroke="#0d1117" stroke-width="0.5"/>
 <rect x="331.40" y="284.76" width="28.74" height="25.24" fill="none" stroke="#0d1117" stroke-width="2"/>
 </g>
