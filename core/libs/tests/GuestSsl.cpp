@@ -19,6 +19,7 @@ int APS5_VABI sceSslGetNameEntryCount(int, const void*);
 int APS5_VABI sceSslGetNameEntryInfo(int, const void*, int, char*, std::size_t, std::uint8_t*, std::size_t, std::size_t*);
 int APS5_VABI sceSslFreeSslCertName(int, void*);
 int APS5_VABI sceSslClose(int);
+int APS5_VABI sceSslGetPem(int, const void*, char*, std::size_t*);
 }
 
 struct SslMemoryPoolStats {
@@ -106,6 +107,13 @@ int main() {
     Require(sceSslGetNameEntryInfo(context, nullptr, 0, oid, sizeof(oid), value, sizeof(value), &valueSize) == invalidArg);
     Require(sceSslGetNameEntryInfo(context, &marker, 0, nullptr, sizeof(oid), value, sizeof(value), &valueSize) == invalidArg);
     Require(sceSslFreeSslCertName(context, nullptr) == invalidArg);
+    char pem[8] = {};
+    std::size_t pemSize = 0;
+    Require(sceSslGetPem(context, nullptr, nullptr, &pemSize) == invalidArg);
+    Require(sceSslGetPem(context, &marker, pem, nullptr) == invalidArg);
+    Require(Throws([&] { sceSslGetPem(context, &marker, nullptr, &pemSize); }));
+    Require(Throws([&] { sceSslGetPem(context, &marker, pem, &pemSize); }));
+    Require(pemSize == 0 && pem[0] == 0);
     Require(Throws([&] { sceSslGetSubjectName(context, &marker, &name); }));
     Require(Throws([&] { sceSslGetIssuerName(context, &marker, &name); }));
     Require(Throws([&] { sceSslGetSerialNumber(context, &marker, &serial, &serialSize); }));

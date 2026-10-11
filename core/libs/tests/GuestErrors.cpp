@@ -9,6 +9,7 @@ char* APS5_VABI strerror_nid_postfix(int);
 int APS5_VABI strerror_r_nid_postfix(int, char*, std::size_t);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sceLibcInternalHeapErrorReportForGame_nid_postfix(void*, void*, unsigned long long);
+void APS5_VABI sceLibcInternalBacktraceForGame_nid_postfix(const char*);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 static const char* const freebsd[97] = {
@@ -51,6 +52,8 @@ int main() {
     int block = 0;
     Require(sceLibcInternalHeapErrorReportForGame_nid_postfix(&block, &block + 1, 0x3) == 0);
     Require(sceLibcInternalHeapErrorReportForGame_nid_postfix(nullptr, nullptr, 0) == 0);
+    sceLibcInternalBacktraceForGame_nid_postfix("SceLibcHeap");
+    sceLibcInternalBacktraceForGame_nid_postfix(nullptr);
     Require(*__error_nid_postfix() == 13);
     Require(std::strcmp(strerror_nid_postfix(35), "Resource temporarily unavailable") == 0);
     Require(*__error_nid_postfix() == 13);

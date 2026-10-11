@@ -265,6 +265,46 @@ void testFlipHold() {
     AgcDriverUnregisterVideoOutput_nid_postfix(7, output);
 }
 
+void testComputeRenderingWait() {
+    auto output = std::make_shared<Output>();
+    AgcDriverRegisterVideoOutput_nid_postfix(7, output);
+    std::array<std::uint32_t, 4> wait{0xc0021018, 8, 0, 0};
+    Packet packet{wait.data(), 4, 0, {}};
+    check(expectFailure([&] { sceAgcDriverSubmitAcb(0x20, &packet); }).find("unregistered video output") != std::string::npos, "a compute rendering wait on an unregistered output was accepted");
+    wait = {0xc0021018, 7, 0, 1};
+    check(expectFailure([&] { sceAgcDriverSubmitAcb(0x20, &packet); }).find("rendering wait mode") != std::string::npos, "a compute rendering wait with a mode was accepted");
+    {
+        std::lock_guard lock(output->state->mutex);
+        output->state->gate = true;
+    }
+    struct GateRelease {
+        std::shared_ptr<State> state;
+        ~GateRelease() {
+            {
+                std::lock_guard lock(state->mutex);
+                state->gate = false;
+            }
+            state->changed.notify_all();
+        }
+    } gateRelease{output->state};
+    wait = {0xc0021018, 7, 0, 0};
+    check(sceAgcDriverSubmitAcb(0x20, &packet) == 0, "compute rendering wait submission failed");
+    {
+        std::unique_lock lock(output->state->mutex);
+        check(output->state->changed.wait_for(lock, std::chrono::seconds(5), [&] { return output->state->waiting; }), "compute worker did not reach the rendering wait");
+    }
+    auto idle = std::async(std::launch::async, [] { AgcDriverWaitIdle_nid_postfix(); });
+    check(idle.wait_for(std::chrono::milliseconds(200)) == std::future_status::timeout, "the driver went idle past a closed compute rendering wait");
+    {
+        std::lock_guard lock(output->state->mutex);
+        output->state->gate = false;
+    }
+    output->state->changed.notify_all();
+    check(idle.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "a compute rendering wait stayed blocked after release");
+    idle.get();
+    AgcDriverUnregisterVideoOutput_nid_postfix(7, output);
+}
+
 void testFailure() {
     auto output = std::make_shared<Output>();
     output->state->fail = true;
@@ -301,7 +341,7 @@ void testReset(bool compute) {
 int main(int argc, char** argv) {
     try {
         if (argc == 2) testReset(std::string(argv[1]) == "compute");
-        else { testFlipAndBoundary(); testFlipHold(); testFailure(); }
+        else { testFlipAndBoundary(); testFlipHold(); testComputeRenderingWait(); testFailure(); }
         const auto shutdown = expectFailure([] { LibcRunShutdown_nid_postfix(); });
         check(shutdown.find(argc == 2 ? (std::string(argv[1]) == "compute" ? "not readable" : "required shader register") : "intentional flip failure") != std::string::npos, "shutdown lost worker failure");
         std::puts("AGC flip and suspend tests passed");
