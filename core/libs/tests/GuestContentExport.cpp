@@ -4,6 +4,8 @@
 
 extern "C" int APS5_VABI sceContentExportInit2(const ContentExportInitParam2* init_param);
 extern "C" int APS5_VABI sceContentExportTerm(void);
+extern "C" int APS5_VABI sceContentExportStart(void);
+extern "C" int APS5_VABI sceContentExportFinish(int exp_id);
 
 namespace {
 
@@ -37,6 +39,21 @@ int main() {
     Require(Throws([&] { sceContentExportInit2(&param); }));
     Require(sceContentExportTerm() == 0);
     Require(Throws([] { sceContentExportTerm(); }));
+    Require(Throws([] { sceContentExportStart(); }));
     Require(sceContentExportInit2(&param) == 0);
+    int sessions[10];
+    for (int& session : sessions) {
+        session = sceContentExportStart();
+        Require(session > 0);
+    }
+    Require(sessions[0] != sessions[1]);
+    Require(Throws([] { sceContentExportStart(); }));
+    Require(sceContentExportFinish(sessions[3]) == 0);
+    Require(Throws([&] { sceContentExportFinish(sessions[3]); }));
+    Require(sceContentExportStart() > 0);
+    Require(sceContentExportTerm() == 0);
+    Require(Throws([&] { sceContentExportFinish(sessions[0]); }));
+    Require(sceContentExportInit2(&param) == 0);
+    Require(Throws([&] { sceContentExportFinish(sessions[0]); }));
     Require(sceContentExportTerm() == 0);
 }

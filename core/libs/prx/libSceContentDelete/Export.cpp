@@ -19,9 +19,11 @@ int APS5_VABI sceContentDeleteInitialize(const ContentDeleteInitParam* init_para
     return 0;
 }
 
-int APS5_VABI sceContentDeleteByPath(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+// The host has no content library, so no path names content that could be deleted.
+int APS5_VABI sceContentDeleteByPath(const char* content_path) {
+    if (content_path == nullptr) APS5_INVALID_ARG_EX;
+    if (!g_initialized.load()) throw std::logic_error(std::string(__func__) + ": not initialized");
+    throw std::runtime_error(std::string(__func__) + ": no content at " + content_path);
 }
 
 int APS5_VABI sceContentDeleteTerminate(void) {
