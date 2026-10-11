@@ -41,8 +41,12 @@ static constexpr int CreateWriteAppend = 0x209;
 static constexpr int GuestEbadf = 9;
 static constexpr int GuestEfault = 14;
 static constexpr int GuestEinval = 22;
+static constexpr int GuestEnotty = 25;
 static constexpr int GuestEagain = 35;
+static constexpr std::uint64_t NonblockingRequest = 0x8004667e;
 static constexpr std::uint64_t ReadableRequest = 0x4004667f;
+static constexpr std::uint64_t WindowSizeRequest = 0x40087468;
+static constexpr std::uint64_t AsyncRequest = 0x8004667d;
 static constexpr int SceEbadf = static_cast<int>(0x80020009u);
 static constexpr int SceEinval = static_cast<int>(0x80020016u);
 static constexpr int SceEnotsup = static_cast<int>(0x8002002du);
@@ -118,6 +122,12 @@ static void FileFlagsRoundTrip() {
 
     Require(write_nid_postfix(file, "abcde", 5) == 5);
     Require(sceKernelLseek(file, 2, 0) == 2);
+    int readable = -1;
+    Require(ioctl_nid_postfix(file, ReadableRequest, &readable) == 0 && readable == 3);
+    char size[8] = {};
+    RequireFailure(ioctl_nid_postfix(file, WindowSizeRequest, size), GuestEnotty);
+    RequireFailure(ioctl_nid_postfix(file, NonblockingRequest, nullptr), GuestEfault);
+    Require(ThrowsWith([file] { int on = 1; ioctl_nid_postfix(file, AsyncRequest, &on); }, "ioctl: request 0x8004667D on a file is not implemented"));
 
     RequireFailure(fcntl_nid_postfix(file, DuplicateCommand, -1), GuestEinval);
     Require(sceKernelFcntl(file, DuplicateCommand, -1) == SceEinval);
@@ -140,6 +150,7 @@ static void FileFlagsRoundTrip() {
     for (const int descriptor : {closing, duplicate, file}) Require(close_nid_postfix(descriptor) == 0);
     RequireFailure(fcntl_nid_postfix(file, GetDescriptorFlags), GuestEbadf);
     RequireFailure(fcntl_nid_postfix(file, DuplicateCommand, 0), GuestEbadf);
+    RequireFailure(ioctl_nid_postfix(file, ReadableRequest, &readable), GuestEbadf);
     Require(sceKernelFcntl(file, GetFlags) == SceEbadf);
 
     const int appending = sceKernelOpen("kernel_fcntl_probe.bin", CreateWriteAppend, 0644);
@@ -172,8 +183,18 @@ static void PipeFlagsRoundTrip() {
     char buffer[8] = {};
     RequireFailure(static_cast<int>(read_nid_postfix(pipe[0], buffer, sizeof(buffer))), GuestEagain);
     Require(write_nid_postfix(pipe[1], "abc", 3) == 3);
+    int readable = -1;
+    Require(ioctl_nid_postfix(pipe[0], ReadableRequest, &readable) == 0 && readable == 3);
+    Require(ioctl_nid_postfix(pipe[1], ReadableRequest, &readable) == 0 && readable == 0);
     Require(read_nid_postfix(pipe[0], buffer, sizeof(buffer)) == 3);
     RequireFailure(static_cast<int>(read_nid_postfix(pipe[0], buffer, sizeof(buffer))), GuestEagain);
+
+    int off = 0;
+    Require(ioctl_nid_postfix(pipe[0], NonblockingRequest, &off) == 0);
+    Require(fcntl_nid_postfix(pipe[0], GetFlags) == ReadOnly);
+    int on = 1;
+    Require(ioctl_nid_postfix(pipe[0], NonblockingRequest, &on) == 0);
+    Require(fcntl_nid_postfix(pipe[0], GetFlags) == (ReadOnly | NonBlocking));
 
     Require(fcntl_nid_postfix(pipe[1], SetFlags, NonBlocking) == 0);
     char block[1024] = {};
@@ -186,6 +207,8 @@ static void PipeFlagsRoundTrip() {
     RequireFailure(fcntl_nid_postfix(pipe[0], DarwinReadAhead, 1), GuestEbadf);
     GuestLock lock{0, 0, 0, 3, 0, 0};
     RequireFailure(fcntl_nid_postfix(pipe[1], SetLock, &lock), GuestEbadf);
+    char size[8] = {};
+    RequireFailure(ioctl_nid_postfix(pipe[0], WindowSizeRequest, size), GuestEnotty);
     Require(ThrowsWith([&pipe] { fcntl_nid_postfix(pipe[0], SetFlags, NonBlocking | 0x40); }, "fcntl: O_ASYNC on a pipe is not implemented"));
     for (const int descriptor : pipe) Require(close_nid_postfix(descriptor) == 0);
 }

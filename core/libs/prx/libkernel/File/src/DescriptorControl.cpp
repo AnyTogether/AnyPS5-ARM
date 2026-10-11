@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -21,6 +22,7 @@
 #include <winternl.h>
 #else
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -82,6 +84,11 @@ constexpr std::int16_t ReadLock = 1;
 constexpr std::int16_t Unlock = 2;
 constexpr std::int16_t WriteLock = 3;
 constexpr std::int16_t FromCurrent = 1;
+
+constexpr std::uint32_t NonblockingRequest = 0x8004667e;
+constexpr std::uint32_t ReadableRequest = 0x4004667f;
+constexpr std::uint32_t RequestIn = 0x80000000u;
+constexpr std::uint32_t TerminalGroup = 't';
 
 struct GuestLock {
     std::int64_t start;
@@ -187,6 +194,23 @@ void ApplyHostStatus(int fd, Kind kind, int changed, int next, const char* funct
     if ((changed & Nonblocking) && kind == Kind::Pipe) SetPipeNonblocking(fd, (next & Nonblocking) != 0, function);
 }
 
+int Readable(int fd, Kind kind, const char* function) {
+    if (kind == Kind::File) {
+        const auto size = ::_filelengthi64(fd);
+        const auto offset = ::_telli64(fd);
+        if (size < 0 || offset < 0)
+            throw std::runtime_error(std::string(function) + ": cannot read the size and offset of descriptor " + std::to_string(fd) + ", errno=" + std::to_string(errno));
+        return static_cast<int>(size - offset);
+    }
+    if (AccessMode(fd, function) == WriteOnly) return 0;
+    DWORD available = 0;
+    if (!::PeekNamedPipe(NativeHandle(fd), nullptr, 0, nullptr, &available, nullptr)) {
+        const DWORD error = ::GetLastError();
+        if (error == ERROR_BROKEN_PIPE) return 0;
+        throw std::runtime_error(std::string(function) + ": cannot peek pipe descriptor " + std::to_string(fd) + ", error=" + std::to_string(error));
+    }
+    return static_cast<int>(available);
+}
 #else
 std::optional<Kind> Classify(int fd, const char* function) {
     if (fd < 0) return std::nullopt;
@@ -234,6 +258,20 @@ void ApplyHostStatus(int fd, Kind, int changed, int next, const char* function) 
         throw std::runtime_error(std::string(function) + ": host F_SETFL failed, fd=" + std::to_string(fd) + ", errno=" + std::to_string(errno));
 }
 
+int Readable(int fd, Kind kind, const char* function) {
+    if (kind == Kind::File) {
+        struct stat status{};
+        const auto offset = ::lseek(fd, 0, SEEK_CUR);
+        if (::fstat(fd, &status) != 0 || offset < 0)
+            throw std::runtime_error(std::string(function) + ": cannot read the size and offset of descriptor " + std::to_string(fd) + ", errno=" + std::to_string(errno));
+        return static_cast<int>(status.st_size - offset);
+    }
+    if (AccessMode(fd, function) == WriteOnly) return 0;
+    int available = 0;
+    if (::ioctl(fd, FIONREAD, &available) != 0)
+        throw std::runtime_error(std::string(function) + ": host FIONREAD failed, fd=" + std::to_string(fd) + ", errno=" + std::to_string(errno));
+    return available;
+}
 
 int LockError(int error) {
     switch (error) {
@@ -400,6 +438,32 @@ int Fcntl(int fd, int command, std::intptr_t argument) {
         default:
             return Fail(GuestEinval);
     }
+}
+
+int Ioctl(int fd, std::uint64_t request, void* argument) {
+    const auto command = static_cast<std::uint32_t>(request);
+    const std::uint32_t length = (command >> 16) & 0x1fff;
+    if ((command & RequestIn) && length != 0 && argument == nullptr) return Fail(GuestEfault);
+    const auto kind = Classify(fd, "ioctl");
+    if (!kind) return Fail(GuestEbadf);
+    if (command == NonblockingRequest) {
+        const bool enable = *static_cast<const int*>(argument) != 0;
+        return ChangeStatus(fd, *kind, Nonblocking, enable ? Nonblocking : 0, "ioctl");
+    }
+    if (command == ReadableRequest) {
+        if (*kind == Kind::RandomDevice) return Fail(GuestEnotty);
+        if (*kind != Kind::File && *kind != Kind::Pipe) Unsupported("ioctl", "FIONREAD", *kind, fd);
+        const int available = Readable(fd, *kind, "ioctl");
+        if (argument == nullptr) return Fail(GuestEfault);
+        const GuestArena::HostWrite destination(argument, sizeof(available));
+        if (!destination.Open()) return Fail(GuestEfault);
+        std::memcpy(argument, &available, sizeof(available));
+        return 0;
+    }
+    if (((command >> 8) & 0xff) == TerminalGroup) return Fail(GuestEnotty);
+    char hex[11];
+    std::snprintf(hex, sizeof(hex), "0x%08X", command);
+    Unsupported("ioctl", std::string("request ") + hex, *kind, fd);
 }
 
 void RememberDescriptor(int fd, int openFlags) {
