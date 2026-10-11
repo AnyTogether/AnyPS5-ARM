@@ -257,6 +257,8 @@ public:
             changed |= propagateCopies();
         }
         removeDeadComputations();
+        removeUnreferencedBlocks();
+        removeUnusedConstants();
         orderPhis();
         std::vector<std::uint32_t> words = header;
         bool inserted = false;
@@ -497,6 +499,62 @@ private:
             }
         }
         return changed;
+    }
+
+    // A block prune left as a bare OpUnreachable that no branch, merge or phi names is dropped: a switch
+    // on a now-constant format kept every other case that way, thousands of blocks per helper, and the
+    // Metal compiler gave up on modules that size.
+    void removeUnreferencedBlocks() {
+        std::set<std::uint32_t> referenced;
+        for (std::size_t index = 0; index < instructions.size(); ++index) {
+            const auto& instruction = instructions[index];
+            if (instruction.empty()) continue;
+            switch (Opcode(instruction)) {
+            case spv::OpBranch: case spv::OpSelectionMerge: referenced.insert(instruction.at(1)); break;
+            case spv::OpLoopMerge: referenced.insert({instruction.at(1), instruction.at(2)}); break;
+            case spv::OpBranchConditional: referenced.insert({instruction.at(2), instruction.at(3)}); break;
+            case spv::OpSwitch: case spv::OpPhi: referenced.insert(instruction.begin() + 2, instruction.end()); break;
+            default: break;
+            }
+        }
+        for (std::size_t index = 0; index + 1u < instructions.size(); ++index) {
+            auto& label = instructions[index];
+            if (label.empty() || Opcode(label) != spv::OpLabel || referenced.contains(label.at(1))) continue;
+            std::size_t next = index + 1u;
+            while (next < instructions.size() && instructions[next].empty()) ++next;
+            if (next == instructions.size() || Opcode(instructions[next]) != spv::OpUnreachable) continue;
+            std::size_t previous = index;
+            while (previous > 0u && instructions[previous - 1u].empty()) --previous;
+            if (previous == 0u || Opcode(instructions[previous - 1u]) == spv::OpFunction || Opcode(instructions[previous - 1u]) == spv::OpFunctionParameter) continue;
+            removed.insert(label.at(1));
+            label.clear();
+            instructions[next].clear();
+        }
+    }
+
+    // Scalar constants nothing uses any more (those of the removed blocks) are dropped. Every operand word
+    // counts as a possible use, so a literal equal to a constant's id only keeps that constant.
+    void removeUnusedConstants() {
+        const auto scalar = [](const Instruction& instruction) {
+            const auto op = Opcode(instruction);
+            return op == spv::OpConstant || op == spv::OpConstantTrue || op == spv::OpConstantFalse;
+        };
+        std::set<std::uint32_t> used;
+        const auto collect = [&](const Instruction& instruction) {
+            if (instruction.empty() || scalar(instruction)) return;
+            const auto op = Opcode(instruction);
+            if (op == spv::OpName || op == spv::OpMemberName || op == spv::OpDecorate || op == spv::OpMemberDecorate) return;
+            used.insert(instruction.begin() + 1, instruction.end());
+        };
+        for (const auto& instruction : instructions) collect(instruction);
+        for (const auto& instruction : constants) collect(instruction);
+        const auto drop = [&](Instruction& instruction) {
+            if (instruction.empty() || !scalar(instruction) || used.contains(instruction.at(2))) return;
+            removed.insert(instruction.at(2));
+            instruction.clear();
+        };
+        for (auto& instruction : instructions) drop(instruction);
+        for (auto& instruction : constants) drop(instruction);
     }
 
     void orderPhis() {
