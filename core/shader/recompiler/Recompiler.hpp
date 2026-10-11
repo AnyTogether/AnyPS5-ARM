@@ -140,6 +140,7 @@ struct ShaderPixelStageInfo {
     std::array<std::uint8_t, 8> targetExportMapping;
     std::array<ColorExportPacking, 8> targetExportPacking;
     bool dualSourceBlend;
+    bool alphaToCoverage;
 };
 
 struct ShaderVertexBufferResource {
@@ -230,6 +231,7 @@ struct SpirvTarget {
     // AMD's NaN payloads and f32 denormal flushes are not reproduced: on MoltenVK they more than doubled
     // large shaders, which the Metal compiler then could not build.
     bool relaxedFloat = false;
+    bool float64DenormPreserve = false;
 };
 
 struct BindingLayout {
@@ -368,7 +370,9 @@ struct DescriptorBinding {
     // (a producer that does not fill it) must be treated as written.
     std::vector<bool> bufferWritten;
     std::vector<bool> samplerUnnormalized;
+    std::vector<bool> samplerIntegerBorder;
     std::vector<bool> imageUnnormalized;
+    std::vector<bool> imageUnnormalizedBaseLevel;
     std::vector<std::uint32_t> imageSamplers;
     std::vector<bool> bufferRead;
 };

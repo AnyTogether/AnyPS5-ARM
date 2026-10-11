@@ -28,13 +28,6 @@ extern "C" {
     std::abort();
 }
 
-// Ye20uNnlglA is the NID of abs (sce_symbols aerolib.csv, verified with tools/nid_names.py).
-APS5_EXPORT("Ye20uNnlglA", libcCyberUnknown02);
-int APS5_VABI libcCyberUnknown02(int value) {
-    // abs(INT_MIN) wraps to INT_MIN like the two's-complement libc does, without signed overflow.
-    const unsigned magnitude = value < 0 ? 0u - static_cast<unsigned>(value) : static_cast<unsigned>(value);
-    return static_cast<int>(magnitude);
-}
 
 // H+8UBOwfScI is the NID of __powidf2 (sce_symbols aerolib.csv): the compiler runtime's
 // double raised to an int power, computed by square-and-multiply as compiler-rt powidf2.c does.

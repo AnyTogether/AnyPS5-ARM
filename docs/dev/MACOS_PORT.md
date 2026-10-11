@@ -50,7 +50,7 @@ The 7 tests that still fail:
 Changes on top of the merged port:
 
 - [GuestMemory.cpp](../../core/libs/prx/libSceAgcDriver/Execution/src/GuestMemory.cpp) and [DynamicLoader.cpp](../../core/libs/prx/libkernel/Module/src/DynamicLoader.cpp) compile on macOS. `main` had added Linux-only code to both after the port was based.
-- When the device has no `robustness2.nullDescriptor` (MoltenVK), the empty slots of the typed image heaps bind zeroed [padding images](../../core/libs/prx/libSceAgcDriver/Graphics/src/PaddingImages.cpp). Before this, every draw and dispatch failed on macOS.
+- When the device has no `robustness2.nullDescriptor` (MoltenVK), the empty slots of the typed image heaps bind zeroed [placeholder images](../../core/libs/prx/libSceAgcDriver/Graphics/src/PlaceholderImages.cpp). Before this, every draw and dispatch failed on macOS.
 - Shader stages without host subgroups (MoltenVK: vertex and tessellation evaluation) run each invocation as a one-lane wave instead of failing validation.
 - Guest thread destructors register through `_tlv_atexit`. libSystem's `__cxa_thread_atexit` returns void, and reading its result as an int freed a live registration twice.
 - `dlsym`'s default scope finds the main program through dyld.

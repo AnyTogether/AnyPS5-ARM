@@ -33,6 +33,8 @@ int APS5_VABI vfprintf_nid_postfix(FileStream*, const char*, void*);
 int APS5_VABI vsprintf_nid_postfix(char*, const char*, void*);
 int APS5_VABI fgetc_nid_postfix(FileStream*);
 int APS5_VABI fputc_nid_postfix(int, FileStream*);
+int APS5_VABI getc_unlocked_nid_postfix(FileStream*);
+int APS5_VABI putc_unlocked_nid_postfix(int, FileStream*);
 int APS5_VABI fputwc_nid_postfix(char16_t, FileStream*);
 int APS5_VABI fputws_nid_postfix(const char16_t*, FileStream*);
 int APS5_VABI fscanf_nid_postfix(FileStream*, const char*, ...);
@@ -93,6 +95,85 @@ static bool CheckFileBytes(const std::string& filename, const std::string& expec
     if (actual == expected) return true;
     std::fprintf(stderr, "%s %s: expected %zu raw bytes, received %zu\n", reopen ? "freopen" : "fopen", mode, expected.size(), actual.size());
     return false;
+}
+
+static void CheckUnlockedStreams() {
+    FileStream stream(std::tmpfile());
+    auto& guest = stream.GuestState();
+    const auto originalFlags = guest.flags;
+    for (const int value : {0, 0x7f, 0x80, 0xff, 0x1ab, -2}) {
+        guest.readRemaining = 13;
+        guest.writeRemaining = 19;
+        Require(putc_unlocked_nid_postfix(value, &stream) == static_cast<unsigned char>(value));
+        Require(guest.readRemaining == 0 && guest.writeRemaining == 0 && guest.flags == originalFlags);
+    }
+    std::rewind(stream.GetHandle());
+    for (const int value : {0, 0x7f, 0x80, 0xff, 0x1ab, -2}) {
+        guest.readRemaining = 13;
+        guest.writeRemaining = 19;
+        Require(getc_unlocked_nid_postfix(&stream) == static_cast<unsigned char>(value));
+        Require(guest.readRemaining == 0 && guest.writeRemaining == 0 && guest.flags == originalFlags);
+    }
+    Require(getc_unlocked_nid_postfix(&stream) == EOF && (guest.flags & 0x20));
+    std::clearerr(stream.GetHandle());
+    Require(std::ungetc('Q', stream.GetHandle()) == 'Q');
+    Require(getc_unlocked_nid_postfix(&stream) == 'Q' && !(guest.flags & 0x20));
+    std::rewind(stream.GetHandle());
+    stream.SetEncodingError();
+    Require(putc_unlocked_nid_postfix('R', &stream) == 'R' && (guest.flags & 0x40));
+    clearerr_nid_postfix(&stream);
+    Require(!(guest.flags & 0x40));
+    stream.Close();
+
+    const auto filename = "anyps5-unlocked-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    { std::ofstream seed(filename, std::ios::binary); seed.put('A'); Require(seed.good()); }
+    FileStream readOnly(std::fopen(filename.c_str(), "rb"));
+    Require(putc_unlocked_nid_postfix('X', &readOnly) == EOF && (readOnly.GuestState().flags & 0x40));
+    readOnly.Close();
+    Require(CheckFileBytes(filename, "A", "rb", false));
+    Require(std::filesystem::remove(filename));
+}
+
+static void CheckUnlockedStreamLock(bool write) {
+    FileStream stream(std::tmpfile());
+    Require(std::fputc('A', stream.GetHandle()) == 'A');
+    std::rewind(stream.GetHandle());
+    std::atomic<bool> held = false, release = false, entered = false, done = false;
+    int result = EOF;
+    std::thread owner([&] {
+        flockfile_nid_postfix(&stream);
+        held = true;
+        while (!release) std::this_thread::yield();
+        funlockfile_nid_postfix(&stream);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!held && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+    if (!held) {
+        release = true;
+        owner.join();
+        Require(false);
+    }
+    std::thread caller([&] {
+        entered = true;
+        result = write ? putc_unlocked_nid_postfix('B', &stream) : getc_unlocked_nid_postfix(&stream);
+        done = true;
+    });
+    const auto enteredDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!entered && std::chrono::steady_clock::now() < enteredDeadline) std::this_thread::yield();
+    if (!entered) {
+        release = true;
+        owner.join();
+        caller.join();
+        Require(false);
+    }
+    const auto completionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!done && std::chrono::steady_clock::now() < completionDeadline) std::this_thread::yield();
+    const bool completedWhileHeld = done;
+    release = true;
+    owner.join();
+    caller.join();
+    Require(completedWhileHeld && result == (write ? 'B' : 'A'));
+    stream.Close();
 }
 
 static void CheckRewind() {
@@ -235,9 +316,11 @@ int main() {
     Require(setvbuf_nid_postfix(&fullyBuffered, nullptr, 0, 0) == 0);
     Require(setvbuf_nid_postfix(&stream, nullptr, 2, 0) == 0);
     Require(fputc_nid_postfix('A', &stream) == 'A');
+    Require(putc_unlocked_nid_postfix('C', &stream) == 'C');
     Require(--guest.writeRemaining < 0 && __swbuf_nid_postfix('\n', &stream) == '\n');
     std::rewind(stream.GetHandle());
     Require(--guest.readRemaining < 0 && __srget_nid_postfix(&stream) == 'A');
+    Require(getc_unlocked_nid_postfix(&stream) == 'C');
     Require(ungetc_nid_postfix('B', &stream) == 'B');
     char text[8]{};
     Require(fgets_nid_postfix(text, sizeof(text), &stream) == text);
@@ -286,6 +369,16 @@ int main() {
     Require(fscanf_nid_postfix(&scanned, "%d", &scannedNumber) == EOF);
     Require(feof_nid_postfix(&scanned) && (scanned.GuestState().flags & 0x20));
     scanned.Close();
+
+#ifdef _WIN32
+    FileStream scanSuppressed(std::tmpfile());
+    Require(std::fputs("12", scanSuppressed.GetHandle()) >= 0);
+    std::rewind(scanSuppressed.GetHandle());
+    int suppressedTarget = 321;
+    Require(fscanf_nid_postfix(&scanSuppressed, "%*d%d", &suppressedTarget) == 0 && suppressedTarget == 321);
+    Require(fscanf_nid_postfix(&scanSuppressed, "%*d") == EOF);
+    scanSuppressed.Close();
+#endif
 
     FileStream scanMany(std::tmpfile());
     Require(std::fputs("7 1 2 3 4 5 6 7 8 4294967297 -4294967298 4294967299 abc %!", scanMany.GetHandle()) >= 0);
@@ -365,5 +458,8 @@ int main() {
     Require(fgetc_nid_postfix(&locked) == 'A' && fgetc_nid_postfix(&locked) == 'B');
     locked.Close();
     CheckRewind();
+    CheckUnlockedStreams();
+    CheckUnlockedStreamLock(false);
+    CheckUnlockedStreamLock(true);
     return CheckBinaryModes() ? 0 : 1;
 }

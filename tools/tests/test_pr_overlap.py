@@ -56,5 +56,20 @@ class OpenPullRequestsTests(unittest.TestCase):
         })
 
 
+class FetchTests(unittest.TestCase):
+    def test_fetches_each_head_commit_the_api_reported(self):
+        prs = {
+            7: {"ref": "refs/pr/7", "sha": "a" * 40, "author": "one", "depends": set()},
+            9: {"ref": "refs/pr/9", "sha": "b" * 40, "author": "two", "depends": set()},
+        }
+        with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
+                patch.object(pr_overlap, "git", return_value="") as git:
+            pr_overlap.fetch("main", prs)
+        git.assert_called_once_with(
+            "fetch", "--no-tags", "-q", "https://github.com/owner/project.git",
+            "+refs/heads/main:refs/pr/base", f"+{'a' * 40}:refs/pr/7", f"+{'b' * 40}:refs/pr/9",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

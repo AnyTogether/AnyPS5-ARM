@@ -4,6 +4,10 @@
 #include <vector>
 namespace GuestSockets {
 constexpr int FirstDescriptor = 0x10000000;
+struct Iovec {
+    void* base;
+    std::size_t length;
+};
 int Duplicate(int descriptor);
 int DuplicateTo(int descriptor, int target);
 int Close(int descriptor);
@@ -19,6 +23,8 @@ struct Interest {
 std::uintptr_t CurrentWaker();
 void Wake(std::uintptr_t waker);
 bool WaitAny(const std::vector<Interest>& interests, std::uint64_t deadlineNanos);
+std::int64_t Readv(int descriptor, const Iovec* iov, int iovcnt);
+std::int64_t Writev(int descriptor, const Iovec* iov, int iovcnt);
 }
 
 extern "C" bool GuestSocketIsOpen_nid_no_patch(int descriptor);

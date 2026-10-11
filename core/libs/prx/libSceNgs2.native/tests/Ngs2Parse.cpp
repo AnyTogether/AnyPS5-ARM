@@ -87,8 +87,35 @@ static void TestParseFile() {
     std::filesystem::remove(path);
 }
 
+static void TestParseFileBank() {
+    const auto first = PcmFile(2, 48000, 16, 300);
+    auto second = PcmFile(1, 32000, 16, 50);
+    PutTag(second, "LIST");
+    Put32(second, 4);
+    PutTag(second, "INFO");
+    const std::uint32_t riffSize = static_cast<std::uint32_t>(second.size() - 8);
+    std::memcpy(second.data() + 4, &riffSize, sizeof(riffSize));
+    const char* const guestPath = "/aps5_ngs2_parse_bank.bin";
+    const auto path = ResolvePath_nid_no_patch(guestPath);
+    {
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(first.data()), static_cast<std::streamsize>(first.size()));
+        out.write(reinterpret_cast<const char*>(second.data()), static_cast<std::streamsize>(second.size()));
+    }
+    Ngs2WaveformInfo info{};
+    Require(sceNgs2ParseWaveformFile(guestPath, 0, &info) == SCE_NGS2_OK);
+    Require(info.format.num_channels == 2 && info.format.sample_rate == 48000 && info.num_samples == 300);
+    Require(info.data_offset == 44 && info.data_size == 1200 && info.block[0].data_offset == 44);
+    const auto secondOffset = static_cast<std::uint32_t>(first.size());
+    Require(sceNgs2ParseWaveformFile(guestPath, secondOffset, &info) == SCE_NGS2_OK);
+    Require(info.format.num_channels == 1 && info.format.sample_rate == 32000 && info.num_samples == 50);
+    Require(info.data_offset == secondOffset + 44 && info.data_size == 100 && info.block[0].data_offset == secondOffset + 44);
+    std::filesystem::remove(path);
+}
+
 int main() {
     TestParsePcm();
     TestParseFile();
+    TestParseFileBank();
     return 0;
 }

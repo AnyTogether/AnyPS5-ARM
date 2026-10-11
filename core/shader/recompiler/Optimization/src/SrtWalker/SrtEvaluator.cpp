@@ -143,7 +143,8 @@ bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
         const auto stride = (static_cast<std::uint32_t>(high) >> 16u) & 0x3fffu;
         const auto size = stride == 0u ? static_cast<std::uint64_t>(static_cast<std::uint32_t>(records)) : static_cast<std::uint64_t>(stride) * static_cast<std::uint32_t>(records);
         if (aligned > size || size - aligned < sizeof(std::uint32_t)) {
-            return false;
+            result = 0;
+            return true;
         }
         address = ((base & ~std::uint64_t {3}) + byteOffset) & ~std::uint64_t {3};
     } else {
@@ -259,6 +260,12 @@ bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
         case IrOpcode::IMul64:
             if (binary()) {
                 result = a * b;
+                return true;
+            }
+            return false;
+        case IrOpcode::SMin32:
+            if (binary()) {
+                result = static_cast<std::uint32_t>(std::min(std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(a)), std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(b))));
                 return true;
             }
             return false;

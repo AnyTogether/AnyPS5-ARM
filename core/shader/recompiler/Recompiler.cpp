@@ -37,6 +37,7 @@
 #include "Optimization/include/Optimization/ShaderInfoCollector.hpp"
 #include "Optimization/include/Optimization/SrtWalker.hpp"
 #include "Optimization/include/Optimization/SsaBuilder.hpp"
+#include "Optimization/include/Optimization/TessellationLowering.hpp"
 #include "SpirvBackend/include/SpirvBackend/SpirvEmitter.hpp"
 #if ANYPS5_ENABLE_SPIRV_TOOLS
 #include "SpirvBackend/SpirvOptimizer.hpp"
@@ -92,6 +93,14 @@ std::uint32_t HostSubgroupSize(const RecompileRequest& request) {
     return request.target.subgroupSize;
 }
 
+RdnaProgram DecodeStageProgram(ShaderStageKind stage, std::span<const std::uint32_t> code) {
+    if (stage != ShaderStageKind::Local) return RdnaInstructionDecoder{}.Decode(code);
+    auto program = DecodeRdnaFrontProgram(code);
+    static constexpr std::array<std::uint32_t, 1> EndProgram{0xbf810000u};
+    program.instructions.back() = DecodeRdnaInstruction(program.instructions.back().programCounter, EndProgram, 0u);
+    return program;
+}
+
 ShaderStageInputInfo RequestInputInfo(const RecompileRequest& request) {
     const auto* mesh = request.graphics && request.graphics->mesh ? &*request.graphics->mesh : nullptr;
     const auto* tessellation = request.graphics && request.graphics->tessellation ? &*request.graphics->tessellation : nullptr;
@@ -109,7 +118,7 @@ std::uint32_t DeviceMemoryLdsBytes(const RecompileRequest& request) {
 struct PreparedControlFlow {
     PreparedControlFlow(const RecompileRequest& request, const SwappcInfo& swappcInfo)
         : stage(request.shader.stage), swappc(swappcInfo), code(request.shader.code.begin(), request.shader.code.end()),
-          decoded(RdnaInstructionDecoder{}.Decode(code)), cfg(GraphBuilder{}.Build(decoded, &swappc)) {
+          decoded(DecodeStageProgram(toShaderStageKind(request.shader.stage), code)), cfg(GraphBuilder{}.Build(decoded, &swappc)) {
         Structurizer{}.Structurize(cfg);
     }
 
@@ -234,6 +243,11 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     constexpr DenormalFlushEliminator denormalFlushEliminator;
     if (denormalFlushEliminator.Eliminate(program).removedFlushes != 0u) {
         deadCodeEliminator.Eliminate(program);
+    }
+
+    if (inputInfo.vertex != nullptr) {
+        constexpr TessellationLowering tessellationLowering;
+        tessellationLowering.Lower(program, inputInfo.vertex->tess);
     }
 
     constexpr SrtWalker srtWalker;
@@ -404,6 +418,7 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     targetOptions.nonConstantImageOffsets = request.target.nonConstantImageOffsets;
     targetOptions.narrowSubgroupClock = request.target.narrowSubgroupClock;
     targetOptions.subgroupStages = request.target.subgroupStages;
+    targetOptions.float64DenormPreserve = request.target.float64DenormPreserve;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;

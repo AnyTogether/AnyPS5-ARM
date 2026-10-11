@@ -94,4 +94,7 @@ int main() {
     sentinel[0] = 'x';
     Require(strerror_r_nid_postfix(22, sentinel, 0) == 34 && sentinel[0] == 'x');
     Require(strerror_r_nid_postfix(22, nullptr, 0) == 34);
+    char truncated[4];
+    Require(strerror_r_nid_postfix(97, truncated, sizeof(truncated)) == 22 && std::strcmp(truncated, "Unk") == 0);
+    Require(strerror_r_nid_postfix(-1, truncated, sizeof(truncated)) == 22 && std::strcmp(truncated, "Unk") == 0);
 }

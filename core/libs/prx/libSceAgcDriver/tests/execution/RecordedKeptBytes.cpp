@@ -24,6 +24,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -156,6 +158,7 @@ void Dispatch(AgcDriver::VulkanDevice& device, std::uint8_t* target) {
     };
     request.useCache = false;
     const auto result = ShaderRecompiler::Recompile(request);
+    std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
 }
 
@@ -236,6 +239,22 @@ void CopiedDispatch(AgcDriver::VulkanDevice& device) {
     device.WaitIdle();
 }
 
+void BufferOnlyDispatchBounds(AgcDriver::VulkanDevice& device) {
+    GuestBuffer first(false);
+    GuestBuffer second(false);
+    device.WaitIdle();
+    Dispatch(device, first.Data());
+    auto& recorder = ActiveRecorder();
+    {
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        recorder.Keep(std::make_shared<int>(0), Recorder::KeptBytesBudget);
+    }
+    const auto submitted = recorder.Submissions();
+    Dispatch(device, second.Data());
+    Require(recorder.Submissions() > submitted, "a buffer-only dispatch did not submit the preceding batch at its kept-byte budget");
+    device.WaitIdle();
+}
+
 void ResidentTarget(AgcDriver::VulkanDevice& device, GuestBuffer& pixels) {
     GuestBuffer vertices(false);
     FillVertices(vertices);
@@ -284,6 +303,7 @@ int main() {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         CopiedDispatch(*device);
+        BufferOnlyDispatchBounds(*device);
         GuestBuffer pixels(true, TargetLayout.Bytes());
         ResidentTarget(*device, pixels);
         CopiedDraw(*device, pixels);

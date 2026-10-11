@@ -150,7 +150,6 @@ const char* UnnormalizedUseReason(std::uint32_t uses) {
     switch (uses & (~uses + 1u)) {
         case SamplerUseImplicitLod: return "is used by an implicit-LOD sample";
         case SamplerUseGradient: return "is used by a sample with derivatives";
-        case SamplerUseOffset: return "is used with a texel offset";
         case SamplerUseCompare: return "is used with depth comparison";
         case SamplerUseGather: return "is used by a gather";
         case SamplerUseQueryLod: return "is used by image_get_lod";
@@ -161,17 +160,21 @@ const char* UnnormalizedUseReason(std::uint32_t uses) {
 struct UnnormalizedProof {
     std::vector<bool> samplers;
     std::vector<bool> images;
+    std::vector<bool> imagesAtBaseLevel;
 };
 
 UnnormalizedProof ProveUnnormalized(const ShaderInfo& info, const ResourceSnapshot& snapshot) {
-    UnnormalizedProof proof{std::vector<bool>(info.samplers.size()), std::vector<bool>(info.images.size())};
+    UnnormalizedProof proof{std::vector<bool>(info.samplers.size()), std::vector<bool>(info.images.size()), std::vector<bool>(info.images.size())};
     for (std::uint32_t r = 0; r < info.samplers.size(); r++) {
         if (snapshot.samplers.at(r).dwordCount != 4u) fail("sampler descriptor must contain four dwords");
+        const auto& sampler = info.samplers[r];
         if ((snapshot.samplers[r].dwords[0] & ForceUnnormalizedBit) == 0u) {
+            if (sampler.foldTexelOffsetsOnly) {
+                fail("DescriptorBindingBuilder::Populate normalized guest sampler is used with a texel offset that is not a constant, which image sampling takes only with VK_KHR_maintenance8 and shaderImageGatherExtended");
+            }
             continue;
         }
-        const auto& sampler = info.samplers[r];
-        const std::uint32_t unsupported = sampler.uses & ~static_cast<std::uint32_t>(SamplerUseExplicitLod);
+        const std::uint32_t unsupported = sampler.uses & ~static_cast<std::uint32_t>(SamplerUseExplicitLod | SamplerUseOffset | SamplerUseNonZeroLod);
         if (unsupported != 0u) {
             failUnnormalized(UnnormalizedUseReason(unsupported));
         }
@@ -184,24 +187,23 @@ UnnormalizedProof ProveUnnormalized(const ShaderInfo& info, const ResourceSnapsh
             }
             const auto& base = info.images.at(pair.image);
             const auto& image = info.runtimeImageModes.at(pair.image).at(ResourceMaterializer::RuntimeImageMode(base, snapshot.images.at(pair.image), info.runtimeImageModes.at(pair.image)));
-            if (image.indirectRoot != ImageResource::NoIndirectImage) {
-                failUnnormalized("samples an image selected at run time");
+            if (const auto* reason = ResourceMaterializer::UnnormalizedSampleMismatch(image)) {
+                failUnnormalized(reason);
             }
-            if (image.constantSwizzle) {
-                continue;
-            }
-            if ((image.dimension != RdnaImageDimension::Dim1D && image.dimension != RdnaImageDimension::Dim2D) || image.cube) {
-                failUnnormalized("samples a 1D-array, 2D-array, 3D, cube or multisampled image");
-            }
-            if (image.depthCompare) {
-                failUnnormalized("is used with depth comparison");
-            }
-            if (image.conversionFormat != IrBufferFormat::Invalid || image.packed) {
-                failUnnormalized("samples an image that needs a format conversion or packed access");
-            }
+            if (image.constantSwizzle) continue;
             proof.images[pair.image] = true;
         }
         proof.samplers[r] = true;
+    }
+    for (std::uint32_t resource = 0; resource < info.images.size(); resource++) {
+        bool exact = proof.images[resource];
+        for (const auto& pair : info.sampledPairs) {
+            if (!exact) break;
+            if (pair.image != resource) continue;
+            const auto& words = snapshot.samplers.at(pair.sampler).dwords;
+            exact = proof.samplers[pair.sampler] && info.samplers.at(pair.sampler).uses == SamplerUseExplicitLod && (words[1] & 0xfffu) == 0u && (words[2] & 0x3fffu) == 0u;
+        }
+        proof.imagesAtBaseLevel[resource] = exact;
     }
     return proof;
 }
@@ -253,6 +255,9 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
     if (info.images.size() > ShaderInfo::MaxImages) fail("runtime image count exceeds the static capacity");
     DescriptorBindingPlan plan;
     const auto unnormalized = ProveUnnormalized(info, snapshot);
+    for (std::uint32_t index = 0; index < info.samplers.size(); ++index) {
+        if (FoldsTexelOffsets(info.samplers[index])) plan.specialization.push_back({PipelineSpecialization::FoldOffsetBase + index, unnormalized.samplers[index] ? 1u : 0u});
+    }
     std::vector<std::uint32_t> compareStates(info.images.size());
     for (std::uint32_t index = 0; index < info.images.size(); ++index) {
         if (!info.images[index].depthCompare) continue;
@@ -298,13 +303,20 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
         for (std::uint32_t component = 0; component < 4u; ++component) plan.specialization.push_back({PipelineSpecialization::ExportBase + target * 4u + component, (exportMappings[target] >> (component * 2u)) & 3u});
     }
     std::vector<std::uint32_t> samplerModes(info.samplers.size(), 0u);
+    std::vector<std::uint32_t> samplerIntegerModes(info.samplers.size(), 0u);
+    std::vector<std::uint32_t> samplerFloatModes(info.samplers.size(), 0u);
     const auto samplerMode = [](const ImageResource& image) { return !image.constantSwizzle && (image.numericClass == IrTextureNumericClass::Sint || image.conversionFormat != IrBufferFormat::Invalid || image.depthBits) ? 2u : 1u; };
+    const auto pairSampler = [&](std::uint32_t sampler, const ImageResource& image) {
+        const auto mode = samplerMode(image);
+        samplerModes.at(sampler) |= mode;
+        (image.numericClass == IrTextureNumericClass::Uint || image.numericClass == IrTextureNumericClass::Sint ? samplerIntegerModes : samplerFloatModes).at(sampler) |= mode;
+    };
     for (const auto& pair : info.sampledPairs) {
         const auto& image = info.images.at(pair.image);
-        if (image.indirectRoot == ImageResource::NoIndirectImage) samplerModes.at(pair.sampler) |= samplerMode(info.runtimeImageModes.at(pair.image).at(imageModes[pair.image]));
+        if (image.indirectRoot == ImageResource::NoIndirectImage) pairSampler(pair.sampler, info.runtimeImageModes.at(pair.image).at(imageModes[pair.image]));
         else {
             const auto& root = info.images.at(image.indirectRoot);
-            for (const auto slot : root.indirectResources) samplerModes.at(pair.sampler) |= samplerMode(info.runtimeImageModes.at(slot).at(imageModes[slot]));
+            for (const auto slot : root.indirectResources) pairSampler(pair.sampler, info.runtimeImageModes.at(slot).at(imageModes[slot]));
         }
     }
     for (std::uint32_t index = 0; index < info.images.size(); ++index) {
@@ -389,6 +401,7 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 physical.imageDepthCompare.push_back(mode.depthCompare);
                 physical.imageAtomic.push_back(image.atomic);
                 physical.imageUnnormalized.push_back(unnormalized.images.at(resource));
+                physical.imageUnnormalizedBaseLevel.push_back(unnormalized.imagesAtBaseLevel.at(resource));
                 physical.imageSamplers.push_back(0u);
                 physical.imageAtomic64.push_back(image.atomic64);
                 if (layout.runtimeImageCount == 0u || image.indirectRoot == ImageResource::NoIndirectImage) continue;
@@ -411,6 +424,8 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 for (const auto& pair : info.sampledPairs) if (pair.sampler == resource) compare |= info.images.at(pair.image).depthCompare && compareStates.at(pair.image) == 0u;
                 physical.samplerDepthCompare.push_back(compare);
                 physical.samplerUnnormalized.push_back(unnormalized.samplers.at(resource));
+                const auto mode = 1u << (originals[element] & 1u);
+                physical.samplerIntegerBorder.push_back((samplerIntegerModes.at(resource) & mode) != 0u && (samplerFloatModes.at(resource) & mode) == 0u);
                 if ((originals[element] & 1u) != 0u) entry.samplerFilterElements.push_back(element);
             }
         } else if (physical.role == DescriptorRole::ShaderData && layout.UsesPushData()) {

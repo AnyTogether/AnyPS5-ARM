@@ -1,13 +1,17 @@
+#include "prx/libc/include/general/AsmFunction.hpp"
 #include "SceTypes.hpp"
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 extern "C" {
 int APS5_VABI sceKernelInstallExceptionHandler(int signum, void* handler);
@@ -20,14 +24,33 @@ int APS5_VABI sceKernelCreateSema(KernelSema* sem, const char* name, uint32_t at
 int APS5_VABI sceKernelDeleteSema(KernelSema sem);
 int APS5_VABI sceKernelSignalSema(KernelSema sem, int count);
 int APS5_VABI sceKernelWaitSema(KernelSema sem, int need, KernelUseconds* time);
+int APS5_VABI scePthreadMutexInit(PthreadMutex* mutex, const PthreadMutexattr* attr, const char* name);
+int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex);
+int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex);
+int APS5_VABI scePthreadMutexTimedlock(PthreadMutex* mutex, KernelUseconds usec);
+int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex);
+int APS5_VABI scePthreadRwlockInit(PthreadRwlock* rwlock, const PthreadRwlockattr* attr, const char* name);
+int APS5_VABI scePthreadRwlockDestroy(PthreadRwlock* rwlock);
+int APS5_VABI scePthreadRwlockWrlock(PthreadRwlock* rwlock);
+int APS5_VABI scePthreadRwlockUnlock(PthreadRwlock* rwlock);
 int APS5_VABI sceKernelSyncOnAddressWait(std::uint32_t* address, std::uint32_t expected, const KernelUseconds* timeout, const char* name);
 }
 
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 static constexpr int SCE_KERNEL_ERROR_ESRCH = static_cast<int>(0x80020003);
 static constexpr int SCE_KERNEL_ERROR_ETIMEDOUT = static_cast<int>(0x8002003c);
-static constexpr int SIGUSR1 = 30;
+static constexpr int GuestSigusr1 = 30;
 static constexpr int Repeats = 100;
+static constexpr std::size_t R12Offset = 0xa0;
+static constexpr std::size_t R13Offset = 0xa8;
+static constexpr std::size_t Xmm8Offset = 0x140 + 160 + 8 * 16;
+static constexpr std::size_t MxcsrOffset = 0x140 + 24;
+static constexpr std::uint32_t FlushToZero = 0x8000;
+static constexpr std::uint32_t ReservedMxcsrBit = 0x10000;
+static constexpr int StartingRounds = 50;
+static constexpr std::uint64_t SpinMarker = 0x0123456789abcdefULL;
+static constexpr std::uint64_t PatchedR12 = 0x5a5a1234abcd0001ULL;
+static constexpr std::uint64_t PatchedXmm8 = 0x7e7e5678dcba0002ULL;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -37,11 +60,30 @@ static std::atomic<std::uint64_t> handlerRsp{0};
 static std::atomic<std::uintptr_t> handlerFrame{0};
 static std::atomic<Pthread> handlerSelf{nullptr};
 static std::atomic<bool> clobberVectors{false};
+static std::atomic<bool> patchContext{false};
+static std::atomic<std::uint64_t> observedR13{0};
+static std::atomic<std::uint64_t> observedXmm8{0};
+static std::atomic<std::uint32_t> observedMxcsr{0};
 
 static void APS5_VABI Handler(int signum, void* context) {
-    Require(signum == SIGUSR1);
+    Require(signum == GuestSigusr1);
+    auto* bytes = static_cast<unsigned char*>(context);
     std::uint64_t rsp = 0;
-    std::memcpy(&rsp, static_cast<unsigned char*>(context) + 0xf8, sizeof(rsp));
+    std::memcpy(&rsp, bytes + 0xf8, sizeof(rsp));
+    if (patchContext.load()) {
+        std::uint64_t value = 0;
+        std::memcpy(&value, bytes + R13Offset, sizeof(value));
+        observedR13.store(value);
+        std::memcpy(&value, bytes + Xmm8Offset, sizeof(value));
+        observedXmm8.store(value);
+        std::uint32_t mxcsr = 0;
+        std::memcpy(&mxcsr, bytes + MxcsrOffset, sizeof(mxcsr));
+        observedMxcsr.store(mxcsr);
+        mxcsr |= FlushToZero | ReservedMxcsrBit;
+        std::memcpy(bytes + R12Offset, &PatchedR12, sizeof(PatchedR12));
+        std::memcpy(bytes + Xmm8Offset, &PatchedXmm8, sizeof(PatchedXmm8));
+        std::memcpy(bytes + MxcsrOffset, &mxcsr, sizeof(mxcsr));
+    }
     int local = 0;
     handlerFrame.store(reinterpret_cast<std::uintptr_t>(&local));
     handlerRsp.store(rsp);
@@ -50,6 +92,40 @@ static void APS5_VABI Handler(int signum, void* context) {
     if (clobberVectors.load()) asm volatile("vzeroall" ::: "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15");
     calls.fetch_add(1);
 }
+
+struct SpinState {
+    std::atomic<std::uint32_t> started{0};
+    std::uint32_t padding = 0;
+    std::uint64_t r12 = 0;
+    std::uint64_t xmm8 = 0;
+    std::uint32_t mxcsr = 0;
+};
+
+static_assert(offsetof(SpinState, r12) == 8 && offsetof(SpinState, xmm8) == 16 && offsetof(SpinState, mxcsr) == 24);
+
+extern "C" void APS5_VABI RaiseTestSpinUntilR12(SpinState* state);
+asm(".text\n"
+    APS5_ASM_FUNCTION("RaiseTestSpinUntilR12")
+    "    pushq %r12\n"
+    "    pushq %r13\n"
+    "    subq $8, %rsp\n"
+    "    stmxcsr (%rsp)\n"
+    "    xorl %r12d, %r12d\n"
+    "    movabsq $0x0123456789abcdef, %r13\n"
+    "    movq %r13, %xmm8\n"
+    "    movl $1, (%rdi)\n"
+    "1:\n"
+    "    pause\n"
+    "    testq %r12, %r12\n"
+    "    jz 1b\n"
+    "    movq %r12, 8(%rdi)\n"
+    "    movq %xmm8, 16(%rdi)\n"
+    "    stmxcsr 24(%rdi)\n"
+    "    ldmxcsr (%rsp)\n"
+    "    addq $8, %rsp\n"
+    "    popq %r13\n"
+    "    popq %r12\n"
+    "    ret\n");
 
 struct Worker {
     std::atomic<bool> started{false};
@@ -109,6 +185,7 @@ static void* APS5_VABI Leaving(void* arg) {
     return nullptr;
 }
 
+#ifdef _WIN32
 static constexpr DWORD ContinuedCode = 0xe0000001u;
 static constexpr int ContinuingRounds = 50;
 static std::atomic<int> continued{0};
@@ -213,6 +290,22 @@ static void* APS5_VABI Vectors(void* arg) {
         : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15");
     return nullptr;
 }
+#endif
+
+static std::atomic<std::thread::id> spinningId;
+
+static void* APS5_VABI Spinning(void* arg) {
+    spinningId.store(std::this_thread::get_id());
+    RaiseTestSpinUntilR12(static_cast<SpinState*>(arg));
+    return nullptr;
+}
+
+static std::atomic<bool> startingRelease{false};
+
+static void* APS5_VABI Starting(void*) {
+    while (!startingRelease.load()) std::this_thread::yield();
+    return nullptr;
+}
 
 static std::atomic<bool> finishedReturned{false};
 
@@ -228,7 +321,7 @@ static std::atomic<int> nestedResult{0};
 static std::atomic<int> nestedCalls{0};
 
 static void APS5_VABI NestedHandler(int signum, void*) {
-    Require(signum == SIGUSR1);
+    Require(signum == GuestSigusr1);
     nestedEntered.store(true);
     KernelUseconds timeout = nestedTimeout;
     nestedResult.store(sceKernelSyncOnAddressWait(&nestedWord, 0, &timeout, "nested"));
@@ -280,7 +373,7 @@ static void NestedWaitKeepsLaterWaiters() {
     StartSemaWaiter(&secondThread, second, sem, "nested second");
     nestedTimeout = 20000;
     const int before = nestedCalls.load();
-    Require(sceKernelRaiseException(firstThread, SIGUSR1) == 0);
+    Require(sceKernelRaiseException(firstThread, GuestSigusr1) == 0);
     ExpectNestedDone(before);
     Require(sceKernelSignalSema(sem, 2) == 0);
     ExpectReturned(first);
@@ -299,7 +392,7 @@ static void NestedWaitKeepsOuterWake() {
     nestedTimeout = 1000000;
     nestedEntered.store(false);
     const int before = nestedCalls.load();
-    Require(sceKernelRaiseException(thread, SIGUSR1) == 0);
+    Require(sceKernelRaiseException(thread, GuestSigusr1) == 0);
     while (!nestedEntered.load()) std::this_thread::yield();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     Require(sceKernelSignalSema(sem, 1) == 0);
@@ -316,18 +409,72 @@ static void ExpectDelivery(int before, std::thread::id thread) {
     Require(handlerRsp.load() != 0 && handlerFrame.load() < handlerRsp.load());
 }
 
+static constexpr int LockRounds = 10;
+static PthreadMutex guestMutex = nullptr;
+static PthreadRwlock guestRwlock = nullptr;
+
+static int LockMutex() { return scePthreadMutexLock(&guestMutex); }
+static int TimedLockMutex() { return scePthreadMutexTimedlock(&guestMutex, 10000000); }
+static int UnlockMutex() { return scePthreadMutexUnlock(&guestMutex); }
+static int LockRwlock() { return scePthreadRwlockWrlock(&guestRwlock); }
+static int UnlockRwlock() { return scePthreadRwlockUnlock(&guestRwlock); }
+
+struct LockWorker {
+    int (*lock)() = nullptr;
+    int (*unlock)() = nullptr;
+    std::atomic<int> blocking{0};
+    std::atomic<int> acquired{0};
+    std::atomic<int> released{0};
+    std::thread::id id;
+};
+
+static void* APS5_VABI LockBlocked(void* arg) {
+    auto& worker = *static_cast<LockWorker*>(arg);
+    worker.id = std::this_thread::get_id();
+    for (int round = 1; round <= LockRounds; ++round) {
+        while (worker.released.load() != round - 1) std::this_thread::yield();
+        worker.blocking.store(round);
+        Require(worker.lock() == 0);
+        worker.acquired.store(round);
+        Require(worker.unlock() == 0);
+    }
+    return nullptr;
+}
+
+static void ExpectDeliveryWhileLockHeld(int (*lock)(), int (*unlock)(), int before) {
+    LockWorker worker;
+    worker.lock = lock;
+    worker.unlock = unlock;
+    Require(lock() == 0);
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, nullptr, LockBlocked, &worker, "lock blocked") == 0);
+    for (int round = 1; round <= LockRounds; ++round) {
+        while (worker.blocking.load() != round) std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        Require(sceKernelRaiseException(thread, GuestSigusr1) == 0);
+        ExpectDelivery(before + round - 1, worker.id);
+        Require(worker.acquired.load() == round - 1);
+        Require(unlock() == 0);
+        while (worker.acquired.load() != round) std::this_thread::yield();
+        Require(lock() == 0);
+        worker.released.store(round);
+    }
+    Require(unlock() == 0);
+    Require(scePthreadJoin(thread, nullptr) == 0);
+}
+
 int main() {
     Require(sceKernelRaiseException(scePthreadSelf(), 11) == SCE_KERNEL_ERROR_EINVAL);
     bool rejected = false;
     try {
-        sceKernelRaiseException(scePthreadSelf(), SIGUSR1);
+        sceKernelRaiseException(scePthreadSelf(), GuestSigusr1);
     } catch (const std::runtime_error&) {
         rejected = true;
     }
     Require(rejected);
-    Require(sceKernelInstallExceptionHandler(SIGUSR1, reinterpret_cast<void*>(&Handler)) == 0);
+    Require(sceKernelInstallExceptionHandler(GuestSigusr1, reinterpret_cast<void*>(&Handler)) == 0);
 
-    Require(sceKernelRaiseException(scePthreadSelf(), SIGUSR1) == 0);
+    Require(sceKernelRaiseException(scePthreadSelf(), GuestSigusr1) == 0);
     Require(calls.load() == 1 && handlerThread.load() == std::this_thread::get_id());
 
     Worker busy;
@@ -335,7 +482,7 @@ int main() {
     Require(scePthreadCreate(&busyThread, nullptr, Busy, &busy, "busy") == 0);
     while (!busy.started.load()) std::this_thread::yield();
     for (int raised = 0; raised < Repeats; ++raised) {
-        Require(sceKernelRaiseException(busyThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(busyThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + raised, busy.id);
     }
     busy.stop.store(true);
@@ -348,7 +495,7 @@ int main() {
     while (!waiting.started.load()) std::this_thread::yield();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     for (int raised = 0; raised < Repeats; ++raised) {
-        Require(sceKernelRaiseException(waitingThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(waitingThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + Repeats + raised, waiting.id);
     }
     Require(sceKernelSignalSema(waiting.sem, 1) == 0);
@@ -363,7 +510,7 @@ int main() {
     for (int round = 0; round < HostRounds; ++round) {
         while (!blocked.started.load()) std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        Require(sceKernelRaiseException(blockedThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(blockedThread, GuestSigusr1) == 0);
         hostLock.unlock();
         ExpectDelivery(1 + 2 * Repeats + round, blocked.id);
         while (hostAcquired.load() != round + 1) std::this_thread::yield();
@@ -384,13 +531,14 @@ int main() {
         std::this_thread::sleep_for(std::chrono::microseconds(200));
         Require(sceKernelSignalSema(leaving.sem, 1) == 0);
         for (int spin = 0; spin < round % 16 * 64; ++spin) std::this_thread::yield();
-        Require(sceKernelRaiseException(leavingThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(leavingThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + 2 * Repeats + HostRounds + round, leaving.id);
         leavingRound.store(round + 1);
     }
     Require(scePthreadJoin(leavingThread, nullptr) == 0);
     Require(sceKernelDeleteSema(leaving.sem) == 0);
 
+#ifdef _WIN32
     void* const vectored = AddVectoredExceptionHandler(1, ContinueRaised);
     Require(vectored != nullptr);
     Worker continuing;
@@ -398,7 +546,7 @@ int main() {
     Require(scePthreadCreate(&continuingThread, nullptr, Continuing, &continuing, "continuing") == 0);
     while (!continuing.started.load() || continued.load() == 0) std::this_thread::yield();
     for (int raised = 0; raised < ContinuingRounds; ++raised) {
-        Require(sceKernelRaiseException(continuingThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(continuingThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + 2 * Repeats + HostRounds + LeavingRounds + raised, continuing.id);
     }
     continuing.stop.store(true);
@@ -410,7 +558,7 @@ int main() {
     Require(scePthreadCreate(&selfingThread, nullptr, Selfing, &selfing, "selfing") == 0);
     while (!selfing.started.load()) std::this_thread::yield();
     for (int raised = 0; raised < SelfingRounds; ++raised) {
-        Require(sceKernelRaiseException(selfingThread, SIGUSR1) == 0);
+        Require(sceKernelRaiseException(selfingThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + 2 * Repeats + HostRounds + LeavingRounds + ContinuingRounds + raised, selfing.id);
         Require(handlerSelf.load() == selfingThread);
     }
@@ -426,7 +574,7 @@ int main() {
     const auto raisedAt = std::chrono::steady_clock::now();
     bool refused = false;
     try {
-        sceKernelRaiseException(loopingThread, SIGUSR1);
+        sceKernelRaiseException(loopingThread, GuestSigusr1);
     } catch (const std::runtime_error&) {
         refused = true;
     }
@@ -453,7 +601,7 @@ int main() {
         while (!vectors.started.load()) std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         for (int raised = 0; raised < VectorRounds; ++raised) {
-            Require(sceKernelRaiseException(vectorsThread, SIGUSR1) == 0);
+            Require(sceKernelRaiseException(vectorsThread, GuestSigusr1) == 0);
             ExpectDelivery(1 + 2 * Repeats + HostRounds + LeavingRounds + ContinuingRounds + SelfingRounds + raised, vectors.id);
         }
         clobberVectors.store(false);
@@ -461,18 +609,55 @@ int main() {
         Require(scePthreadJoin(vectorsThread, nullptr) == 0);
         Require(std::memcmp(vectorPattern, vectorResult, VectorBytes) == 0);
     }
+#endif
+
+    SpinState spin;
+    Pthread spinningThread = nullptr;
+    Require(scePthreadCreate(&spinningThread, nullptr, Spinning, &spin, "spinning") == 0);
+    while (spin.started.load() == 0) std::this_thread::yield();
+    patchContext.store(true);
+    const int spinBefore = calls.load();
+    Require(sceKernelRaiseException(spinningThread, GuestSigusr1) == 0);
+    ExpectDelivery(spinBefore, spinningId.load());
+    Require(scePthreadJoin(spinningThread, nullptr) == 0);
+    patchContext.store(false);
+    Require(observedR13.load() == SpinMarker && observedXmm8.load() == SpinMarker);
+    Require(spin.r12 == PatchedR12 && spin.xmm8 == PatchedXmm8);
+    Require(spin.mxcsr == (observedMxcsr.load() | FlushToZero));
+
+    for (int round = 0; round < StartingRounds; ++round) {
+        const int before = calls.load();
+        startingRelease.store(false);
+        Pthread startingThread = nullptr;
+        Require(scePthreadCreate(&startingThread, nullptr, Starting, nullptr, "starting") == 0);
+        Require(sceKernelRaiseException(startingThread, GuestSigusr1) == 0);
+        for (int attempt = 0; attempt < 5000 && calls.load() == before; ++attempt) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        Require(calls.load() == before + 1);
+        Require(handlerSelf.load() == startingThread);
+        startingRelease.store(true);
+        Require(scePthreadJoin(startingThread, nullptr) == 0);
+    }
+
+    const int beforeLocks = calls.load();
+    Require(scePthreadMutexInit(&guestMutex, nullptr, "raise") == 0);
+    ExpectDeliveryWhileLockHeld(LockMutex, UnlockMutex, beforeLocks);
+    ExpectDeliveryWhileLockHeld(TimedLockMutex, UnlockMutex, beforeLocks + LockRounds);
+    Require(scePthreadMutexDestroy(&guestMutex) == 0);
+    Require(scePthreadRwlockInit(&guestRwlock, nullptr, "raise") == 0);
+    ExpectDeliveryWhileLockHeld(LockRwlock, UnlockRwlock, beforeLocks + 2 * LockRounds);
+    Require(scePthreadRwlockDestroy(&guestRwlock) == 0);
 
     Pthread finishedThread = nullptr;
     Require(scePthreadCreate(&finishedThread, nullptr, Finished, nullptr, "finished") == 0);
     while (!finishedReturned.load()) std::this_thread::yield();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    Require(sceKernelRaiseException(finishedThread, SIGUSR1) == SCE_KERNEL_ERROR_ESRCH);
+    Require(sceKernelRaiseException(finishedThread, GuestSigusr1) == SCE_KERNEL_ERROR_ESRCH);
     Require(scePthreadJoin(finishedThread, nullptr) == 0);
 
-    Require(sceKernelRemoveExceptionHandler(SIGUSR1) == 0);
+    Require(sceKernelRemoveExceptionHandler(GuestSigusr1) == 0);
 
-    Require(sceKernelInstallExceptionHandler(SIGUSR1, reinterpret_cast<void*>(&NestedHandler)) == 0);
+    Require(sceKernelInstallExceptionHandler(GuestSigusr1, reinterpret_cast<void*>(&NestedHandler)) == 0);
     NestedWaitKeepsLaterWaiters();
     NestedWaitKeepsOuterWake();
-    Require(sceKernelRemoveExceptionHandler(SIGUSR1) == 0);
+    Require(sceKernelRemoveExceptionHandler(GuestSigusr1) == 0);
 }

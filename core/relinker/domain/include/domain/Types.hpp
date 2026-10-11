@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 #include <stdexcept>
 #include <domain/GuestRuntime.hpp>
@@ -96,6 +97,7 @@ struct SysVDynamicSection {
     std::vector<std::uint8_t> RelaPltData;
     std::vector<GuestRuntime> GuestModules;
     std::map<VirtualAddress, std::string> ImportModules;
+    std::set<std::string> UnmatchedImportModules;
 };
 
 struct CallRegistryEntry {

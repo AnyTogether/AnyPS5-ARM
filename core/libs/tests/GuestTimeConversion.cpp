@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <limits>
 #include <thread>
 
@@ -91,6 +92,94 @@ static void CheckUtc(const UtcCase& expected) {
     Require(utc.tm_zone != nullptr && std::strcmp(utc.tm_zone, "UTC") == 0, "UTC conversion did not set tm_zone");
 }
 
+static void CheckFormat(const GuestTm& guest, const char* format, const char* expected) {
+    char buffer[96]{};
+    const std::size_t size = strftime_nid_postfix(buffer, sizeof(buffer), format, &guest);
+    if (size != std::strlen(expected) || std::strcmp(buffer, expected) != 0)
+        std::fprintf(stderr, "Format '%s': expected '%s', got '%s' (%zu bytes)\n", format, expected, buffer, size);
+    Require(size == std::strlen(expected) && std::strcmp(buffer, expected) == 0, "strftime did not format a FreeBSD conversion");
+}
+
+static void CheckBufferSize(const GuestTm& guest, const char* format, std::size_t length) {
+    char buffer[96];
+    std::memset(buffer, 'x', sizeof(buffer));
+    Require(strftime_nid_postfix(buffer, length + 1, format, &guest) == length, "strftime rejected an exact-fit buffer");
+    Require(std::strlen(buffer) == length, "strftime did not terminate an exact-fit buffer");
+    Require(strftime_nid_postfix(buffer, length, format, &guest) == 0, "strftime accepted a buffer one byte short");
+    Require(strftime_nid_postfix(buffer, 1, format, &guest) == 0, "strftime accepted a one byte buffer");
+}
+
+static const char* HostZoneName(int isdst) {
+#ifdef _WIN32
+    return _tzname[isdst != 0 ? 1 : 0];
+#else
+    return tzname[isdst != 0 ? 1 : 0];
+#endif
+}
+
+static void CheckFreeBsdConversions() {
+    const std::int64_t timer = 1700000000;
+    GuestTm guest{};
+    Require(gmtime_s_nid_postfix(&timer, &guest) == &guest, "UTC conversion failed");
+    CheckFormat(guest, "%k|%l", "22|10");
+    CheckFormat(guest, "%v", "14-Nov-2023");
+    CheckFormat(guest, "%+", "Tue Nov 14 22:13:20 UTC 2023");
+    CheckFormat(guest, "%s", "1699992800");
+    CheckFormat(guest, "%%k %%l %%s %%v %%+", "%k %l %s %v %+");
+    CheckFormat(guest, "%%%k", "%22");
+    CheckFormat(guest, "[%k][%l]", "[22][10]");
+    CheckFormat(guest, "%Ek|%Ol|%Os|%Ev|%O+", "22|10|1699992800|14-Nov-2023|Tue Nov 14 22:13:20 UTC 2023");
+    CheckFormat(guest, "%E%k", "%k");
+    CheckFormat(guest, "%O%l", "%l");
+    CheckFormat(guest, "%E%s", "%s");
+    CheckFormat(guest, "%E%v", "%v");
+    CheckFormat(guest, "%O%+", "%+");
+    CheckFormat(guest, "%k|%E%l|%l", "22|%l|10");
+    CheckFormat(guest, "%E%", "%");
+    CheckFormat(guest, "%O%%k", "%22");
+    CheckFormat(guest, "%E%k%k", "%k22");
+    CheckBufferSize(guest, "%k", 2);
+    CheckBufferSize(guest, "%k:%l", 5);
+    CheckBufferSize(guest, "%+", 28);
+    CheckBufferSize(guest, "%Ek", 2);
+
+    guest.tm_zone = "XYZ";
+    CheckFormat(guest, "%+", "Tue Nov 14 22:13:20 XYZ 2023");
+    CheckFormat(guest, "%O+", "Tue Nov 14 22:13:20 XYZ 2023");
+    guest.tm_zone = "A%B";
+    CheckFormat(guest, "%+", "Tue Nov 14 22:13:20 A%B 2023");
+    guest.tm_zone = nullptr;
+    guest.tm_isdst = 0;
+    char expected[96];
+    std::snprintf(expected, sizeof(expected), "Tue Nov 14 22:13:20 %s 2023", HostZoneName(0));
+    CheckFormat(guest, "%+", expected);
+    guest.tm_isdst = 1;
+    std::snprintf(expected, sizeof(expected), "Tue Nov 14 22:13:20 %s 2023", HostZoneName(1));
+    CheckFormat(guest, "%+", expected);
+    guest.tm_isdst = 0;
+
+    GuestTm local{};
+    Require(localtime_s_nid_postfix(&timer, &local) == &local, "Local conversion failed");
+    GuestTm normalized = local;
+    const std::int64_t mktimeResult = mktime_nid_postfix(&normalized);
+    Require(mktimeResult == timer, "mktime did not invert localtime");
+    std::snprintf(expected, sizeof(expected), "%lld", static_cast<long long>(mktimeResult));
+    CheckFormat(local, "%s", expected);
+    CheckFormat(local, "%Os", expected);
+
+    guest.tm_hour = 0;
+    CheckFormat(guest, "%k|%l", " 0|12");
+    guest.tm_hour = 12;
+    CheckFormat(guest, "%k|%l", "12|12");
+    guest.tm_hour = 5;
+    guest.tm_mday = 5;
+    CheckFormat(guest, "%k|%l|%v", " 5| 5| 5-Nov-2023");
+    guest.tm_hour = 13;
+    CheckFormat(guest, "%k|%l", "13| 1");
+    char tooSmall[4]{};
+    Require(strftime_nid_postfix(tooSmall, sizeof(tooSmall), "%k:%l", &guest) == 0, "strftime accepted an undersized buffer");
+}
+
 int main() {
 #ifdef _WIN32
     _putenv_s("TZ", "UTC-2");
@@ -142,6 +231,8 @@ int main() {
     char formatted[64]{};
     Require(strftime_nid_postfix(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S", &utc) == 19
         && std::strcmp(formatted, "1970-01-01 00:00:00") == 0, "strftime did not read the guest tm");
+
+    CheckFreeBsdConversions();
 
     CheckConcurrent(libc_gmtime_nid_postfix, gmtime_s_nid_postfix, "Concurrent libc_gmtime returned another thread's date");
     CheckConcurrent(gmtime_nid_postfix, gmtime_s_nid_postfix, "Concurrent gmtime returned another thread's date");

@@ -2,8 +2,10 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
-#include "prx/libkernel/Socket/include/SocketPoll.hpp"
 #include "prx/libkernel/File/include/File.hpp"
+#include "prx/libkernel/File/include/RandomDevice.hpp"
+#include "prx/libkernel/Socket/include/SocketPoll.hpp"
+#include "prx/libkernel/Socket/include/SocketSelectDeadline.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -53,8 +55,9 @@ void KernelSetSocketPoller_nid_no_patch(KernelSocketPoll::Poller poller) {
     g_socketPoller.store(poller);
 }
 
-// Sockets are polled through libSceNet. Any other open descriptor is a file, which, as on
-// FreeBSD, is always ready for reading and writing and never has exceptional conditions.
+// Sockets are polled through libSceNet. /dev/urandom and any other open descriptor is a file, which,
+// as on FreeBSD, is always ready for reading and writing and never has exceptional conditions; the
+// standard descriptors only accept output.
 int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* exceptfds, const void* timeout) {
     const auto* limit = static_cast<const GuestTimeval*>(timeout);
     if (nfds < 0 || nfds > SelectDescriptorLimit || (limit != nullptr && (limit->seconds < 0 || limit->microseconds < 0 || limit->microseconds >= 1000000))) {
@@ -84,11 +87,18 @@ int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* 
             sockets.push_back(entry);
             continue;
         }
-        if (!DescriptorIsOpen_nid_no_patch(entry.descriptor)) {
-            *__error_nid_postfix() = GuestEbadf;
-            return -1;
+        if (File::IsRandomDevice(entry.descriptor)) {
+            entry.revents = static_cast<short>(entry.events & (KernelSocketPoll::Readable | KernelSocketPoll::Writable));
+        } else if (entry.descriptor <= 2) {
+            // The standard descriptors have no console behind them: stdin never has input, and output is always accepted.
+            entry.revents = static_cast<short>(entry.descriptor == 0 ? 0 : entry.events & KernelSocketPoll::Writable);
+        } else {
+            if (!DescriptorIsOpen_nid_no_patch(entry.descriptor)) {
+                *__error_nid_postfix() = GuestEbadf;
+                return -1;
+            }
+            entry.revents = static_cast<short>(entry.events & (KernelSocketPoll::Readable | KernelSocketPoll::Writable));
         }
-        entry.revents = static_cast<short>(entry.events & (KernelSocketPoll::Readable | KernelSocketPoll::Writable));
         files.push_back(entry);
     }
     const auto finish = [&] {
@@ -116,7 +126,7 @@ int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* 
     if (anyReady(sockets) || anyReady(files)) return finish();
     const auto start = std::chrono::steady_clock::now();
     const auto deadline = limit == nullptr ? std::chrono::steady_clock::time_point::max()
-        : start + std::chrono::seconds(limit->seconds) + std::chrono::microseconds(limit->microseconds);
+        : KernelSocketSelect::DeadlineAfter(start, limit->seconds, limit->microseconds);
     for (;;) {
         if (limit != nullptr && std::chrono::steady_clock::now() >= deadline) {
             for (auto* group : {&sockets, &files}) {

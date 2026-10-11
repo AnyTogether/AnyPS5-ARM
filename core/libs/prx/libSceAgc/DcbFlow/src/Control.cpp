@@ -35,8 +35,7 @@ std::uint32_t* APS5_VABI sceAgcDcbResetQueue(CommandBuffer* buf, std::uint32_t o
 }
 
 std::uint32_t* APS5_VABI sceAgcDcbClearState(CommandBuffer* buf, std::uint32_t command) {
-    Agc::Command::CheckBits(command, 0xfu, __func__);
-    return Agc::Command::Emit(buf, 0x12u, {command}, __func__);
+    return Agc::Command::Emit(buf, 0x12u, {command & 0xfu}, __func__);
 }
 
 uint32_t* APS5_VABI sceAgcDcbRewind(CommandBuffer* buf, uint32_t initial_state) {

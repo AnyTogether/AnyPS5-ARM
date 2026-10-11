@@ -138,12 +138,11 @@ int APS5_VABI sceKernelAllocateMainDirectMemory(size_t len, size_t alignment, in
 
 int APS5_VABI sceKernelAvailableDirectMemorySize(int64_t search_start, int64_t search_end, size_t alignment, int64_t* phys_addr_out, size_t* size_out) {
  if (!phys_addr_out || !size_out) return SCE_KERNEL_ERROR_EINVAL;
- int64_t tmpPhys = 0;
- int ret = DirectMemoryAlloc(search_start, search_end, PS5_PAGE_SIZE, alignment, -1, &tmpPhys);
- if (ret != 0) { *phys_addr_out = 0; *size_out = 0; return ret; }
- DirectMemoryFree(tmpPhys, PS5_PAGE_SIZE);
- *phys_addr_out = tmpPhys;
- *size_out = DirectMemoryFreeRun(static_cast<uint64_t>(tmpPhys), static_cast<uint64_t>(search_end));
+ int64_t start = 0;
+ size_t size = 0;
+ if (!DirectMemoryLargestFree(search_start, search_end, alignment, &start, &size)) { *phys_addr_out = 0; *size_out = 0; return SCE_KERNEL_ERROR_EAGAIN; }
+ *phys_addr_out = start;
+ *size_out = size;
  return 0;
 }
 

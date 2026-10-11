@@ -140,12 +140,15 @@ struct MemoryCopy {
     std::size_t bytes;
 };
 std::optional<MemoryCopy> DecodeMemoryCopy(std::span<const std::uint32_t> packet);
+std::uint32_t DmaSource(std::span<const std::uint32_t> packet);
+std::uint32_t DmaDestination(std::span<const std::uint32_t> packet);
 // A DISPATCH_INDIRECT's arguments: the guest address of its three group-count dwords (no memory
 // access, so the GPU can read them in place: VulkanDevice::DispatchIndirect), the DISPATCH_DIRECT
 // packet made by reading them there (through the checked guest memory path, which waits for
 // recorded GPU work that writes them), and both steps in one for the packet.
 std::uint64_t DispatchArgumentAddress(std::span<const std::uint32_t> packet, const QueueState& queue);
 std::array<std::uint32_t, 5> ReadDispatchArguments(std::uint64_t arguments, std::uint32_t initiator);
+std::array<std::uint32_t, 3> PartialGroupThreads(const std::array<std::uint32_t, 3>& groups, const std::array<std::uint32_t, 3>& numThreads);
 std::array<std::uint32_t, 5> ResolveDispatch(std::span<const std::uint32_t> packet, const QueueState& queue);
 DrawParameters ResolveDraw(std::span<const std::uint32_t> packet, const QueueState& queue);
 

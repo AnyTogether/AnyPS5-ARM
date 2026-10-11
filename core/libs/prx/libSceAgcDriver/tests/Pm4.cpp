@@ -144,10 +144,16 @@ void testRegisterFile() {
     std::vector<std::pair<std::uint32_t, std::uint32_t>> order;
     for (const auto& [offset, value] : registers) order.emplace_back(offset, value);
     check(order == std::vector<std::pair<std::uint32_t, std::uint32_t>>{{0x10, 7}, {0x41, 2}, {0x300, 3}}, "register file order");
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> visited;
+    registers.ForEach([&](std::uint32_t offset, std::uint32_t value) { visited.emplace_back(offset, value); });
+    check(visited == order, "register file visit order");
     auto copy = registers;
     copy[0x7000] = 5;
     check(copy.size() == 4 && registers.size() == 3 && !registers.contains(0x7000) && !(copy == registers), "register file copy");
     check(copy.erase(0x7000) == 1 && copy.erase(0x7000) == 0 && copy == registers, "register file erase");
+    visited.clear();
+    copy.ForEach([&](std::uint32_t offset, std::uint32_t value) { visited.emplace_back(offset, value); });
+    check(visited == order, "register file visited an erased register");
     bool threw = false;
     try {
         static_cast<void>(registers.at(0x42));
@@ -182,6 +188,20 @@ void testContextAndBases() {
     expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x15, {1, 1, 1, 0x4041}), 0); }, "dispatch modifiers");
     AgcDriver::Pm4::Validate(makePacket(0x15, {0x280, 1, 1, 0x2045}, 2), 0);
     AgcDriver::Pm4::Validate(makePacket(0x16, {0, 0x2045}, 2), 0);
+    AgcDriver::Pm4::Validate(makePacket(0x15, {0xc0, 1, 1, 0x2047}, 2), 0);
+    AgcDriver::Pm4::Validate(makePacket(0x15, {0xc0, 1, 1, 0x2007}, 2), 0);
+    AgcDriver::Pm4::Validate(makePacket(0x16, {0, 0x2005}, 2), 0);
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x15, {1, 1, 1, 0x40}), 0); }, "dispatch modifiers");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x16, {0, 0x2047}, 2), 0); }, "indirect dispatch modifiers");
+    using Threads = std::array<std::uint32_t, 3>;
+    check(AgcDriver::Pm4::PartialGroupThreads({0xc0, 1, 1}, {0x00400040, 0x00010001, 0x00010001}) == Threads{}, "complete last groups reported partial threads");
+    check(AgcDriver::Pm4::PartialGroupThreads({3, 2, 1}, {0x00100040, 0x00080008, 0x00010001}) == Threads{144, 16, 1}, "partial last group threads lost");
+    check(AgcDriver::Pm4::PartialGroupThreads({0, 1, 1}, {0x00100040, 0x00010001, 0x00010001}) == Threads{}, "an empty dispatch reported partial threads");
+    expectFailure([] { static_cast<void>(AgcDriver::Pm4::PartialGroupThreads({1, 1, 1}, {0x00000040, 0x00010001, 0x00010001})); }, "partial group size");
+    expectFailure([] { static_cast<void>(AgcDriver::Pm4::PartialGroupThreads({1, 1, 1}, {0x00410040, 0x00010001, 0x00010001})); }, "partial group size");
+    expectFailure([] { static_cast<void>(AgcDriver::Pm4::PartialGroupThreads({1, 0, 1}, {0x00100040, 0x00010001, 0x00000001})); }, "partial group size");
+    expectFailure([] { static_cast<void>(AgcDriver::Pm4::PartialGroupThreads({0x10002, 1, 1}, {0x0001ffff, 0x00010001, 0x00010001})); }, "exceeds 32 bits");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x15, {1, 1, 1, 0x2063}, 2), 0); }, "dispatch modifiers");
     expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x15, {1, 1, 1, 0x41}, 4), 0); }, "header flags");
     expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x15, {1, 1, 1, 0x49}), 0); }, "dispatch modifiers");
     execute(state, makePacket(0x13, {32}));
@@ -293,6 +313,14 @@ void testIndirectDraw() {
     check(draw.indirect->baseVertexLocation == 0x280 && draw.indirect->startInstanceLocation == 0x8e && draw.indirect->drawIndexLocation == 0x280 && !draw.indirect->drawIndexEnabled && draw.indirect->indxOffset == 5 && draw.firstVertex == 5 && !draw.indexed && draw.indexCount == 0 && draw.instanceCount == 0, "indirect draw locations mismatch");
     check(draw.indirect->RangeBytes() == 16 && draw.indirect->VertexDwordOffset() == 8 && draw.indirect->InstanceDwordOffset() == 12, "indirect draw record geometry mismatch");
     check(AgcDriver::Pm4::ResolveDraw(makePacket(0x24, {0x60, 0x280, 0x8e, 2}), state).indirect->arguments == 0x105d87fca0ull, "indirect draw offset not applied");
+    AgcDriver::Pm4::Validate(makePacket(0x24, {0, 0x8d, 0, 2}), 0);
+    AgcDriver::Pm4::Validate(makePacket(0x11, {1, 0x10400014, 0x40}), 0);
+    expectFailure([] { AgcDriver::Pm4::Validate(makePacket(0x11, {1, 0x10400012, 0x40}), 0); }, "alignment");
+    const auto unused = AgcDriver::Pm4::ResolveDraw(makePacket(0x24, {0, 0x8d, 0, 2}), state);
+    check(unused.indirect->baseVertexLocation == 0x8d && unused.indirect->startInstanceLocation == 0x280, "an indirect draw location 0 did not mean no register");
+    const auto unusedMulti = AgcDriver::Pm4::ResolveDraw(makePacket(0x2c, {0x20, 0x8c, 0, 0, 3, 0, 0, 32, 0x22}), state);
+    check(unusedMulti.indirect->startInstanceLocation == 0x280 && unusedMulti.indirect->drawIndexLocation == 0x280, "a multi indirect draw location 0 did not mean no register");
+    expectFailure([] { AgcDriver::Pm4::Validate(makePacket(0x24, {0, 0x8d, 0x200, 2}), 0); }, "invalid indirect draw register location");
     const auto multi = AgcDriver::Pm4::ResolveDraw(makePacket(0x2c, {0x20, 0x8c, 0x280, 0x8d | (1u << 31u), 3, 0, 0, 32, 0x22}), state);
     check(multi.indirect->count == 3 && multi.indirect->stride == 32 && multi.indirect->drawIndexEnabled && multi.indirect->drawIndexLocation == 0x8d && !multi.indirect->countIndirect && multi.flags == 0x20 && multi.indirect->RangeBytes() == 80, "indirect multi-draw mismatch");
     expectFailure([&] { AgcDriver::Pm4::ResolveDraw(makePacket(0x25, {0, 0x8c, 0x280, 0}), state); }, "index base");
@@ -336,9 +364,14 @@ void testMemory() {
     check(data[0] == 81 && data[1] == 82, "WRITE_DATA to memory from the graphics queue failed");
     expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x37, {0x08000100, low(data.data()), high(data.data()), 71}), 0); }, "reserved");
     expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x37, {0x80000100, low(data.data()), high(data.data()), 51}), 0); }, "engine");
+    execute(state, makePacket(0x83, {0xbff8, 2, low(data.data()), high(data.data())}));
+    check(data[0] == 0 && data[1] == 0, "unwritten constant RAM is not zero");
     execute(state, makePacket(0x81, {4, 31, 32}));
     execute(state, makePacket(0x83, {4, 2, low(data.data()), high(data.data())}));
     check(data[0] == 31 && data[1] == 32, "constant RAM round trip failed");
+    auto copied = state;
+    execute(copied, makePacket(0x83, {0, 3, low(data.data()), high(data.data())}));
+    check(data[0] == 0 && data[1] == 31 && data[2] == 32, "a copied queue state lost its constant RAM");
     expectFailure([&] { execute(state, makePacket(0x81, {0xbffc, 1, 2})); }, "overflow");
     expectFailure([&] { execute(state, makePacket(0x40, {0x10105, 0, 0, low(data.data()), high(data.data())})); }, "64-bit immediate");
 }
@@ -351,6 +384,22 @@ void testCopies() {
     check(destination[0] == 11 && destination[1] == 12 && destination[2] == 0, "64-bit COPY_DATA failed");
     execute(state, makePacket(0x40, {0x105, 0x12345678, 0, low(destination.data()), high(destination.data())}));
     check(destination[0] == 0x12345678, "immediate COPY_DATA failed");
+    execute(state, makePacket(0x40, {0x505, 0x7654321, 0, low(destination.data()), high(destination.data())}));
+    check(destination[0] == 0x7654321, "immediate COPY_DATA to DST_SEL 5 memory failed");
+    alignas(8) std::array<std::uint64_t, 1> stamp{};
+    execute(state, makePacket(0x40, {0x110509, 0, 0, low(stamp.data()), high(stamp.data())}));
+    check(stamp[0] != 0, "GPU timestamp COPY_DATA to DST_SEL 5 memory failed");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x40, {0x305, 1, 0, 0, 0}), 0); }, "GDS or performance-counter destination");
+    alignas(8) std::array<std::uint32_t, 2> clearValues{0x55, 0x3f800000};
+    execute(state, makePacket(0x40, {0x10001, low(clearValues.data()), high(clearValues.data()), 0xa00a, 0}));
+    check(state.context.at(0x0a) == 0x55 && state.context.at(0x0b) == 0x3f800000, "COPY_DATA to two context registers failed");
+    execute(state, makePacket(0x40, {0x1, low(&clearValues[1]), high(&clearValues[1]), 0xa323, 0}));
+    check(state.context.at(0x323) == 0x3f800000 && !state.context.contains(0x324), "COPY_DATA to one context register failed");
+    check(!AgcDriver::Pm4::ResolveStore(makePacket(0x40, {0x1, low(clearValues.data()), high(clearValues.data()), 0xa00c, 0}), state, 64).has_value(), "COPY_DATA to a register resolved as a memory store");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x40, {0x5, 7, 0, 0xa00a, 0}), 0); }, "to a register from a register, GDS, immediate");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x40, {0x1, low(clearValues.data()), high(clearValues.data()), 0x2e40, 0}), 0); }, "outside the context registers");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x40, {0x10001, low(clearValues.data()), high(clearValues.data()), 0xa3ff, 0}), 0); }, "outside the context registers");
+    expectFailure([&] { AgcDriver::Pm4::Validate(makePacket(0x40, {0x1, low(clearValues.data()) + 2, high(clearValues.data()), 0xa00a, 0}), 0); }, "misaligned COPY_DATA source");
     alignas(8) std::array<std::uint64_t, 2> clock{};
     const auto clockCopy = [&](std::uint64_t* target) { return makePacket(0x40, {0x06016209, 0, 0, low(target), high(target)}); };
     execute(state, clockCopy(&clock[0]));
@@ -535,6 +584,28 @@ void testWriteChangedKeepsUntouchedBytes() {
     guest[100] = 0x55;
     AgcDriver::GuestMemory::WriteChanged(reinterpret_cast<std::uintptr_t>(guest), current, original);
     check(guest[3] == 7 && guest[100] == 0x55, "write-back rolled back a byte the GPU did not change");
+}
+
+void testWriteChangedStoresExactlyTheChangedRuns() {
+    alignas(256) static std::uint8_t guest[1024 + 13];
+    std::vector<std::byte> original(sizeof(guest)), current(sizeof(guest));
+    std::uint32_t seed = 12345;
+    const auto next = [&] { return seed = seed * 1103515245u + 12345u, seed >> 16u; };
+    for (std::size_t i = 0; i < sizeof(guest);) {
+        const auto length = 1 + next() % 40;
+        const bool changed = next() % 2 == 0;
+        for (std::size_t j = i; j < std::min(sizeof(guest), i + length); ++j) {
+            original[j] = static_cast<std::byte>(next());
+            current[j] = changed && next() % 9 != 0 ? static_cast<std::byte>(static_cast<std::uint8_t>(original[j]) ^ (1u + next() % 255u)) : original[j];
+        }
+        i += length;
+    }
+    for (std::size_t i = 0; i < sizeof(guest); ++i) guest[i] = static_cast<std::uint8_t>(0xa0u ^ i);
+    AgcDriver::GuestMemory::WriteChanged(reinterpret_cast<std::uintptr_t>(guest), current, original);
+    for (std::size_t i = 0; i < sizeof(guest); ++i) {
+        const auto expected = current[i] != original[i] ? static_cast<std::uint8_t>(current[i]) : static_cast<std::uint8_t>(0xa0u ^ i);
+        check(guest[i] == expected, "write-back stored a byte the GPU did not change or missed one it did");
+    }
 }
 
 void testEventWrite() {
@@ -1049,6 +1120,7 @@ int main(int argc, char** argv) {
         testCatalog();
         testNopPad();
         testWriteChangedKeepsUntouchedBytes();
+        testWriteChangedStoresExactlyTheChangedRuns();
         testRegisters();
         testRegisterFile();
         testContextAndBases();

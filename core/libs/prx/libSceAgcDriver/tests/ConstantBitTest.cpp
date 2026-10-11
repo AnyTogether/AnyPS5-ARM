@@ -28,6 +28,22 @@ bool foldsTo(std::uint32_t word, bool expected, bool maskedShift) {
     return result->HasImmediate() && result->ImmediateBool() == expected;
 }
 
+bool reversesTo(std::uint32_t word, std::uint32_t expected) {
+    IrProgram program;
+    auto& block = program.CreateBlock();
+    program.SetEntryBlock(block);
+    program.BlockOrder().push_back(&block);
+    IrBuilder builder(program);
+    builder.SetInsertionPoint(block);
+    auto& reversed = builder.Emit(IrOpcode::BitReverse32, IrType::U32, {&builder.Constant(word)});
+    auto& test = builder.Emit(IrOpcode::IEqual32, IrType::Bool, {&reversed, &builder.Constant(expected)});
+    auto& user = builder.Emit(IrOpcode::Reference, IrType::Void, {&test});
+    static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
+    ConstantFolder().Fold(program);
+    const IrValue* result = user.Argument(0)->Resolve();
+    return result->HasImmediate() && result->ImmediateBool();
+}
+
 bool run(const char* name, bool passed) {
     if (!passed) std::fprintf(stderr, "%s\n", name);
     return passed;
@@ -42,6 +58,11 @@ int main() {
         passed &= run("an all-one word must fold the lane bit test to true", foldsTo(0xffffffffu, true, true));
         passed &= run("a mixed word must keep the lane bit test", foldsTo(0x0000ffffu, false, true));
         passed &= run("an unmasked lane number must keep the lane bit test", foldsTo(0xffffffffu, true, false));
+        passed &= run("a reversed zero must fold to zero", reversesTo(0x00000000u, 0x00000000u));
+        passed &= run("a reversed single bit must fold to the opposite end", reversesTo(0x00000001u, 0x80000000u));
+        passed &= run("a reversed high bit must fold to bit zero", reversesTo(0x80000000u, 0x00000001u));
+        passed &= run("a reversed mixed word must fold to its mirror image", reversesTo(0x12345678u, 0x1e6a2c48u));
+        passed &= run("a reversed descriptor dword must fold to its mirror image", reversesTo(0xdeadbeefu, 0xf77db57bu));
         return passed ? 0 : 1;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());

@@ -9,7 +9,9 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace {
 
@@ -465,6 +467,117 @@ void relativeRelocationTableBounds() {
     requireFailure([&] { Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(overflowDynamicOffset); }, "PT_DYNAMIC offset near UINT64_MAX was accepted");
 }
 
+void sceDynlibDataOffsets() {
+    auto input = fixture();
+    emit(input, 0, {0xC3});
+    importThunk(input, 16, 0x2000);
+    auto bytes = elfFixture(input);
+    bytes.resize(0xA00);
+    write<std::uint16_t>(bytes, 56, 4);
+    write<std::uint32_t>(bytes, 176, 2);
+    write<std::uint32_t>(bytes, 180, 6);
+    write<std::uint64_t>(bytes, 184, 0x300);
+    write<std::uint64_t>(bytes, 192, 0x2000);
+    write<std::uint64_t>(bytes, 208, 0x40);
+    write<std::uint64_t>(bytes, 216, 0x40);
+    write<std::uint64_t>(bytes, 224, 8);
+    write<std::uint32_t>(bytes, 232, 0x61000000);
+    write<std::uint32_t>(bytes, 236, 4);
+    write<std::uint64_t>(bytes, 240, 0x500);
+    write<std::uint64_t>(bytes, 264, 0x500);
+    write<std::uint64_t>(bytes, 272, 0x500);
+    write<std::uint64_t>(bytes, 280, 0x10);
+    write<std::int64_t>(bytes, 0x300, 0x6100002F);
+    write<std::uint64_t>(bytes, 0x308, 0x400);
+    write<std::int64_t>(bytes, 0x310, 0x61000031);
+    write<std::uint64_t>(bytes, 0x318, 24);
+    write<std::int64_t>(bytes, 0x320, 0x61000033);
+    write<std::uint64_t>(bytes, 0x328, 24);
+    write<std::uint64_t>(bytes, 0x900, 0x2040);
+    write<std::uint64_t>(bytes, 0x908, 8);
+    write<std::uint64_t>(bytes, 0x910, 0x1010);
+
+    std::string failures;
+    try {
+        const auto index = Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(bytes);
+        if (index->TargetOfSlot(0x2040) != 0x1010) failures += "SCE relative relocation was not indexed; ";
+    } catch (const std::exception& error) {
+        failures += std::string("SCE relative relocation index: ") + error.what() + "; ";
+    }
+    try {
+        const std::vector<Relinker::NidReference> references = {{"live", {}, 6, 0x900, 0x2000, 0}};
+        const auto filtered = Relinker::MakeStrictUnusedNidFilter()->Filter(references, bytes, input.Text, input.TextVaddr);
+        if (filtered.size() != 1) failures += "SCE relocation target did not keep its import";
+    } catch (const std::exception& error) {
+        failures += std::string("SCE strict filter: ") + error.what();
+    }
+    require(failures.empty(), failures.c_str());
+
+    auto noSegment = bytes;
+    write<std::uint32_t>(noSegment, 232, 0x6FFFFF01);
+    write<std::uint64_t>(noSegment, 0x308, 0x900);
+    require(Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(noSegment)->TargetOfSlot(0x2040) == 0x1010,
+            "SCE relocation without PT_SCE_DYNLIBDATA was not read at its absolute file offset");
+    const std::vector<Relinker::NidReference> references = {{"live", {}, 6, 0x900, 0x2000, 0}};
+    require(Relinker::MakeStrictUnusedNidFilter()->Filter(references, noSegment, input.Text, input.TextVaddr).size() == 1,
+            "Strict filter lost an SCE relocation without PT_SCE_DYNLIBDATA");
+
+    auto jmprel = bytes;
+    write<std::uint64_t>(jmprel, 208, 0x60);
+    write<std::uint64_t>(jmprel, 216, 0x60);
+    write<std::uint64_t>(jmprel, 0x318, 0);
+    write<std::int64_t>(jmprel, 0x330, 0x61000029);
+    write<std::uint64_t>(jmprel, 0x338, 0x430);
+    write<std::int64_t>(jmprel, 0x340, 0x6100002D);
+    write<std::uint64_t>(jmprel, 0x348, 24);
+    write<std::uint64_t>(jmprel, 0x930, 0x2050);
+    write<std::uint64_t>(jmprel, 0x938, 8);
+    write<std::uint64_t>(jmprel, 0x940, 0x1010);
+    require(Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(jmprel)->TargetOfSlot(0x2050) == 0x1010,
+            "SCE JMPREL table was not read at its segment-relative file offset");
+    write<std::uint64_t>(jmprel, 0x338, 0x4F0);
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(jmprel); },
+                   "SCE JMPREL table past the end of the file was accepted");
+
+    auto emptyJmprel = jmprel;
+    write<std::uint64_t>(emptyJmprel, 0x338, 0x430);
+    write<std::uint64_t>(emptyJmprel, 0x348, 0);
+    require(!Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyJmprel)->TargetOfSlot(0x2050),
+            "Valid empty SCE JMPREL table was rejected or parsed");
+    write<std::uint64_t>(emptyJmprel, 0x338, 0x501);
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyJmprel); },
+                   "Empty SCE JMPREL table past the file was accepted");
+    write<std::uint64_t>(emptyJmprel, 0x338, std::numeric_limits<std::uint64_t>::max());
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyJmprel); },
+                   "Empty SCE JMPREL table with overflowing offset was accepted");
+
+    auto emptyRela = bytes;
+    write<std::uint64_t>(emptyRela, 0x318, 0);
+    require(!Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyRela)->TargetOfSlot(0x2040),
+            "Valid empty SCE RELA table was rejected or parsed");
+    write<std::uint64_t>(emptyRela, 0x308, 0x501);
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyRela); },
+                   "Empty SCE RELA table past the file was accepted");
+    write<std::uint64_t>(emptyRela, 0x308, std::numeric_limits<std::uint64_t>::max());
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(emptyRela); },
+                   "Empty SCE RELA table with overflowing offset was accepted");
+
+    auto overflow = bytes;
+    write<std::uint64_t>(overflow, 0x308, std::numeric_limits<std::uint64_t>::max());
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(overflow); },
+                   "SCE relocation file offset overflow was accepted");
+    requireFailure([&] { (void)Relinker::MakeStrictUnusedNidFilter()->Filter(references, overflow, input.Text, input.TextVaddr); },
+                   "Strict filter accepted an overflowing SCE table offset");
+
+    auto duplicate = bytes;
+    write<std::uint16_t>(duplicate, 56, 5);
+    write<std::uint32_t>(duplicate, 288, 0x61000000);
+    requireFailure([&] { (void)Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(duplicate); },
+                   "Duplicate PT_SCE_DYNLIBDATA segments were accepted");
+    requireFailure([&] { (void)Relinker::MakeStrictUnusedNidFilter()->Filter(references, duplicate, input.Text, input.TextVaddr); },
+                   "Strict filter accepted duplicate PT_SCE_DYNLIBDATA segments");
+}
+
 }
 
 int main() {
@@ -486,6 +599,7 @@ int main() {
         filterCallbackDataImports();
         filterAndPltCompaction();
         relativeRelocationTableBounds();
+        sceDynlibDataOffsets();
         std::cout << "Strict NID filter tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

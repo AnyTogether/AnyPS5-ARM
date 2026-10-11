@@ -33,6 +33,9 @@ std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::int64_t APS5_VABI sceKernelPread(int, void*, std::size_t, std::int64_t);
 int APS5_VABI sceKernelLseek(int, std::int64_t, int);
 std::int64_t APS5_VABI sceKernelReadv(int, const GuestIovec*, int);
+std::int64_t APS5_VABI readv_nid_postfix(int, const GuestIovec*, int);
+std::int64_t APS5_VABI writev_nid_postfix(int, const GuestIovec*, int);
+int* APS5_VABI __error_nid_postfix();
 std::int64_t APS5_VABI sceKernelWritev(int, const GuestIovec*, int);
 std::int64_t APS5_VABI sceKernelPreadv(int, const GuestIovec*, int, std::int64_t);
 std::int64_t APS5_VABI sceKernelPwritev(int, const GuestIovec*, int, std::int64_t);
@@ -81,6 +84,14 @@ int main() {
     Require(sceKernelReadv(file, reads, 2) == 3);
     Require(std::memcmp(first, "789", 3) == 0);
     Require(sceKernelReadv(file, reads, 2) == 0);
+    Require(sceKernelLseek(file, 0, 0) == 0);
+    Require(readv_nid_postfix(file, reads, 2) == 7);
+    Require(std::memcmp(first, "012", 3) == 0 && std::memcmp(second, "3456", 4) == 0);
+    Require(sceKernelLseek(file, 0, 1) == 7);
+    Require(readv_nid_postfix(file, reads, 2) == 3);
+    Require(readv_nid_postfix(file, reads, 2) == 0);
+    Require(readv_nid_postfix(file, reads, -1) == -1 && *__error_nid_postfix() == 22);
+    Require(writev_nid_postfix(file, nullptr, 1) == -1 && *__error_nid_postfix() == 14);
 
     Require(sceKernelPreadv(file, reads, 2, 1) == 7);
     Require(std::memcmp(first, "123", 3) == 0 && std::memcmp(second, "4567", 4) == 0);
@@ -97,6 +108,11 @@ int main() {
     Require(sceKernelLseek(file, 8, 0) == 8);
     Require(sceKernelWritev(file, writes, 2) == 5);
     Require(sceKernelLseek(file, 0, 1) == 13);
+    Require(Contents(path) == "01ABCDE7ABCDE");
+    GuestIovec swapped[2] = {{cde, 3}, {ab, 2}};
+    Require(sceKernelLseek(file, 8, 0) == 8 && writev_nid_postfix(file, swapped, 2) == 5);
+    Require(sceKernelLseek(file, 0, 1) == 13 && Contents(path) == "01ABCDE7CDEAB");
+    Require(sceKernelLseek(file, 8, 0) == 8 && writev_nid_postfix(file, writes, 2) == 5);
     Require(Contents(path) == "01ABCDE7ABCDE");
 
     GuestIovec gapped[3] = {{first, 2}, {nullptr, 0}, {second, 3}};

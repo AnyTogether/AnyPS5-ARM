@@ -9,16 +9,19 @@
 #include <windows.h>
 #include <psapi.h>
 #else
-#include <fstream>
+#include "prx/libc/include/specifics/linux/HostMapping.hpp"
 #endif
 
 #include "SceTypes.hpp"
 #include "ModuleTable.hpp"
 #include "prx/libc/include/General.hpp"
 
+extern "C" void* APS5_VABI dlopen_nid_postfix(const char* path, int flags);
+
 namespace {
 
 constexpr int SCE_SYSMODULE_ERROR_UNLOADED = static_cast<int>(0x805A1001);
+constexpr int kRtldNow = 2;
 
 const char* findModuleName(const std::uint32_t id) {
     const auto it = kModuleTable.find(id);
@@ -27,6 +30,12 @@ const char* findModuleName(const std::uint32_t id) {
 
 std::mutex gMutex;
 std::unordered_map<std::uint32_t, std::int32_t> gLoadCount;
+std::unordered_map<std::uint32_t, KernelModule> gHandles;
+
+void* openHostModule(const char* name) {
+    const std::string relative = std::string("libs/") + name + ".prx";
+    return dlopen_nid_postfix(relative.c_str(), kRtldNow);
+}
 
 bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
 #ifdef _WIN32
@@ -47,46 +56,19 @@ bool fillModuleInfoForUnwind(std::uint64_t addr, ModuleInfoForUnwind* info) {
     info->name[sizeof(info->name) - 1] = '\0';
     return true;
 #else
-    std::ifstream maps("/proc/self/maps");
-    if (!maps) {
-        throw std::runtime_error("sceSysmoduleGetModuleInfoForUnwind: failed to open /proc/self/maps");
+    const auto mapping = HostMapping::Find(addr, "sceSysmoduleGetModuleInfoForUnwind");
+    if (!mapping) {
+        return false;
     }
-    std::string line;
-    while (std::getline(maps, line)) {
-        std::uint64_t start = 0;
-        std::uint64_t end = 0;
-        char perms[8] = {};
-        std::uint64_t offset = 0;
-        unsigned int devMajor = 0;
-        unsigned int devMinor = 0;
-        std::uint64_t inode = 0;
-        char path[4096] = {};
-        int parsed = std::sscanf(
-            line.c_str(),
-            "%llx-%llx %7s %llx %x:%x %llu %4095s",
-            (unsigned long long*)&start,
-            (unsigned long long*)&end,
-            perms,
-            (unsigned long long*)&offset,
-            &devMajor,
-            &devMinor,
-            (unsigned long long*)&inode,
-            path
-        );
-        if (parsed < 7 || addr < start || addr >= end) {
-            continue;
-        }
-        info->st_size = sizeof(ModuleInfoForUnwind);
-        std::strncpy(info->name, parsed >= 8 ? path : "", sizeof(info->name) - 1);
-        info->name[sizeof(info->name) - 1] = '\0';
-        info->eh_frame_hdr_addr = 0;
-        info->eh_frame_addr = 0;
-        info->eh_frame_size = 0;
-        info->seg0_addr = start;
-        info->seg0_size = end - start;
-        return true;
-    }
-    return false;
+    info->st_size = sizeof(ModuleInfoForUnwind);
+    std::strncpy(info->name, mapping->path.c_str(), sizeof(info->name) - 1);
+    info->name[sizeof(info->name) - 1] = '\0';
+    info->eh_frame_hdr_addr = 0;
+    info->eh_frame_addr = 0;
+    info->eh_frame_size = 0;
+    info->seg0_addr = mapping->start;
+    info->seg0_size = mapping->end - mapping->start;
+    return true;
 #endif
 }
 
@@ -99,6 +81,37 @@ int APS5_VABI sceSysmoduleGetModuleInfoForUnwind(std::uint64_t addr, int flags, 
     if (!fillModuleInfoForUnwind(addr, info)) {
         throw std::runtime_error("sceSysmoduleGetModuleInfoForUnwind: address not found");
     }
+    return 0;
+}
+
+int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t* handle) {
+    if ((id & 0x7fffffffu) == 0) {
+        throw std::runtime_error("sceSysmoduleGetModuleHandleInternal: invalid id 0");
+    }
+    if (!handle) {
+        throw std::runtime_error("sceSysmoduleGetModuleHandleInternal: null handle");
+    }
+    const char* name = findModuleName(id);
+    if (!name) {
+        throw std::runtime_error(std::string("sceSysmoduleGetModuleHandleInternal: unknown id ") + std::to_string(id));
+    }
+    std::lock_guard<std::mutex> lock(gMutex);
+    const auto loaded = gLoadCount.find(id);
+    if (loaded == gLoadCount.end() || loaded->second < 1) {
+        return SCE_SYSMODULE_ERROR_UNLOADED;
+    }
+    const auto existing = gHandles.find(id);
+    if (existing != gHandles.end()) {
+        *handle = existing->second;
+        return 0;
+    }
+    void* module = openHostModule(name);
+    if (!module) {
+        throw std::runtime_error(std::string("sceSysmoduleGetModuleHandleInternal: failed to open ") + name);
+    }
+    const auto value = static_cast<KernelModule>(reinterpret_cast<std::intptr_t>(module));
+    gHandles.emplace(id, value);
+    *handle = value;
     return 0;
 }
 

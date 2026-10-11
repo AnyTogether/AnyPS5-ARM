@@ -4,6 +4,12 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <algorithm>
+#include <array>
+#include <map>
+#include <mutex>
+#include <utility>
+#include <vector>
 #endif
 #ifdef __APPLE__
 #include <dlfcn.h>
@@ -82,9 +88,9 @@ struct Frame {
     bool signal {};
 };
 
-bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query) {
+bool DecodeRange(Frame& frame, const Lookup& query, const Byte*& p, const char*& augmentation, Byte& lsdaEncoding) {
     if (!query.fde) return false;
-    const Byte* p = query.fde;
+    p = query.fde;
     auto length = Read<std::uint32_t>(p);
     if (!length || length == 0xffffffff) return false;
     frame.end = p + length;
@@ -97,7 +103,7 @@ bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query
     if (Read<std::uint32_t>(c) != 0) return false;
     Byte version = *c++;
     if (version != 1 && version != 3 && version != 4) return false;
-    const char* augmentation = reinterpret_cast<const char*>(c);
+    augmentation = reinterpret_cast<const char*>(c);
     while (*c++) {}
     if (version == 4 && (*c++ != sizeof(Word) || *c++ != 0)) return false;
     frame.codeAlign = Uleb(c);
@@ -108,7 +114,8 @@ bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query
 #else
     if (frame.returnRegister >= 17) return false;
 #endif
-    Byte pointerEncoding = 0, lsdaEncoding = 255;
+    Byte pointerEncoding = 0;
+    lsdaEncoding = 255;
     if (*augmentation == 'z') {
         Word size = Uleb(c);
         const Byte* end = c + size;
@@ -126,6 +133,14 @@ bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query
     frame.cieBegin = c;
     frame.start = Encoded(p, pointerEncoding, query.data, 0, query.text);
     frame.length = Encoded(p, pointerEncoding & 15);
+    return true;
+}
+
+bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query) {
+    const Byte* p;
+    const char* augmentation;
+    Byte lsdaEncoding;
+    if (!DecodeRange(frame, query, p, augmentation, lsdaEncoding)) return false;
     if (query.pc < frame.start || query.pc - frame.start >= frame.length) return false;
     if (*augmentation == 'z') {
         Word size = Uleb(p);
@@ -141,6 +156,39 @@ bool DecodeCandidate(_Unwind_Context& context, Frame& frame, const Lookup& query
     context.dataBase = query.data;
     return true;
 }
+
+#ifdef _WIN32
+using FrameIndex = std::vector<std::pair<Word, const Byte*>>;
+using ImageKey = std::array<Word, 6>;
+
+const FrameIndex& IndexFrames(const ImageKey& key, const Byte* begin, const Byte* end) {
+    static std::mutex mutex;
+    static std::map<ImageKey, FrameIndex> indexes;
+    std::lock_guard lock(mutex);
+    const auto [entry, inserted] = indexes.try_emplace(key);
+    auto& index = entry->second;
+    if (!inserted) return index;
+    const Byte* p = begin;
+    while (end - p >= 8) {
+        const Byte* record = p;
+        const auto length = Read<std::uint32_t>(p);
+        if (!length) continue;
+        if (length == 0xffffffff || length < 4 || Word(end - p) < length) break;
+        const Byte* next = p + length;
+        if (Read<std::uint32_t>(p)) {
+            Frame candidate {};
+            const Byte* cursor;
+            const char* augmentation;
+            Byte lsdaEncoding;
+            if (DecodeRange(candidate, Lookup {0, record}, cursor, augmentation, lsdaEncoding))
+                index.emplace_back(candidate.start, record);
+        }
+        p = next;
+    }
+    std::sort(index.begin(), index.end());
+    return index;
+}
+#endif
 
 bool DecodeFrame(_Unwind_Context& context, Frame& frame) {
     Lookup query {context.registers[16] - !context.signalFrame};
@@ -172,10 +220,9 @@ bool DecodeFrame(_Unwind_Context& context, Frame& frame) {
 #endif
     return DecodeCandidate(context, frame, query);
 #else
-    MEMORY_BASIC_INFORMATION memory{};
-    if (!VirtualQuery(reinterpret_cast<void*>(query.pc), &memory, sizeof(memory)) || memory.Type != MEM_IMAGE)
-        return false;
-    const auto* base = static_cast<const Byte*>(memory.AllocationBase);
+    void* image = nullptr;
+    if (!RtlPcToFileHeader(reinterpret_cast<void*>(query.pc), &image) || !image) return false;
+    const auto* base = static_cast<const Byte*>(image);
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
@@ -205,21 +252,14 @@ bool DecodeFrame(_Unwind_Context& context, Frame& frame) {
             return DecodeCandidate(context, frame, query);
         }
         if (std::memcmp(section.Name, ".ehfram", 8) != 0) continue;
-        const Byte* p = base + section.VirtualAddress;
-        const Byte* end = p + section.Misc.VirtualSize;
-        while (end - p >= 8) {
-            const Byte* record = p;
-            const auto length = Read<std::uint32_t>(p);
-            if (!length) continue;
-            if (length == 0xffffffff || length < 4 || Word(end - p) < length) return false;
-            const Byte* next = p + length;
-            if (Read<std::uint32_t>(p)) {
-                query.fde = record;
-                frame = {};
-                if (DecodeCandidate(context, frame, query)) return true;
-            }
-            p = next;
-        }
+        const Byte* frames = base + section.VirtualAddress;
+        const ImageKey key {Word(base), nt->FileHeader.TimeDateStamp, nt->OptionalHeader.CheckSum, nt->OptionalHeader.SizeOfImage, section.VirtualAddress, section.Misc.VirtualSize};
+        const auto& index = IndexFrames(key, frames, frames + section.Misc.VirtualSize);
+        auto found = std::upper_bound(index.begin(), index.end(), query.pc, [](Word pc, const std::pair<Word, const Byte*>& entry) { return pc < entry.first; });
+        if (found == index.begin()) continue;
+        query.fde = std::prev(found)->second;
+        frame = {};
+        if (DecodeCandidate(context, frame, query)) return true;
     }
     return false;
 #endif

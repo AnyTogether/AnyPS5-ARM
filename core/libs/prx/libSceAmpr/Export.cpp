@@ -1,8 +1,10 @@
 #include <cstdint>
 #include <cstddef>
+#include <ctime>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/specifics/itanium/CxxAbi.hpp"
+#include "prx/libc/include/SonyCrt.hpp"
 #include "prx/libkernel/Apr/include/AprCommandBuffer.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include <algorithm>
@@ -428,7 +430,11 @@ int APS5_VABI sceAmprAprCommandBufferReadFileGather(Apr::CommandBufferObject* bu
     (void)mapState;
     (void)scatterGatherState;
     if (!ValidReadLength(size) || !ValidReadOffset(offset)) return SCE_KERNEL_ERROR_EINVAL;
-    return AppendRead(buffer, Apr::Opcode::ReadFileGather, 0, nullptr, size, offset);
+    if (!buffer || (buffer->recording & Apr::ScatterGatherValid) == 0u) return SCE_KERNEL_ERROR_EINVAL;
+    const Apr::CompactReadFileGatherCommand command{
+        static_cast<std::uint32_t>(Apr::Opcode::CompactReadFileGather) | static_cast<std::uint32_t>(offset >> 32u) << 8u,
+        static_cast<std::uint32_t>(size - 1u), static_cast<std::uint32_t>(offset)};
+    return Append(buffer, &command, sizeof(command));
 }
 
 int APS5_VABI sceAmprAprCommandBufferReadFileGatherScatter(Apr::CommandBufferObject* buffer, std::uint64_t* mapState, std::uint64_t* scatterGatherState, void* destination, std::uint64_t size, std::uint64_t offset) {
@@ -489,7 +495,7 @@ int APS5_VABI sceAmprCommandBufferConstructNop(Apr::CommandBufferObject* buffer,
 }
 
 int APS5_VABI sceAmprCommandBufferConstructor(Apr::CommandBufferObject* buffer) {
-    *buffer = {nullptr, 0, 0, 0, Apr::BufferType::Generic};
+    *buffer = {Apr::BufferType::Generic, 0, 0, 0, 0, nullptr};
     return 0;
 }
 
@@ -652,7 +658,7 @@ uint32_t APS5_VABI sceAmprMeasureCommandSizeReadFile(void) {
 
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeReadFileGather(std::uint64_t size, std::uint64_t offset) {
     if (!ValidReadLength(size) || !ValidReadOffset(offset)) return MeasureInvalid;
-    return sizeof(Apr::ReadFileCommand);
+    return sizeof(Apr::CompactReadFileGatherCommand);
 }
 
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeReadFileGatherScatter(void* destination, std::uint64_t size, std::uint64_t offset) {
@@ -1056,5 +1062,65 @@ int APS5_VABI wcstombs_s_nid_postfix(std::size_t* result, char* destination, std
 [[noreturn]] void APS5_VABI __cxa_call_unexpected_nid_postfix(void* exception) {
     (void)exception;
     _ZSt9terminatev_nid_postfix();
+}
+
+APS5_EXPORT("0hlfW1O4Aa4", sceAmprLocaleconv);
+SonyLconv* APS5_VABI sceAmprLocaleconv(void) {
+    return SonyLocaleconv();
+}
+
+APS5_EXPORT("802pFCwC9w0", sceAmprUdivti3);
+unsigned __int128 APS5_VABI sceAmprUdivti3(unsigned __int128 dividend, unsigned __int128 divisor) {
+    return SonyUdivti3(dividend, divisor);
+}
+
+APS5_EXPORT("MU25eqxSDTw", sceAmprSinh);
+double APS5_VABI sceAmprSinh(double x, double y) {
+    return SonySinh(x, y);
+}
+
+APS5_EXPORT("-vXEQdRADLI", sceAmprStrtokS);
+char* APS5_VABI sceAmprStrtokS(char* str, const char* delim, char** context) {
+    return SonyStrtokS(str, delim, context);
+}
+
+APS5_EXPORT("2UFh+YKfuzk", sceAmprCtimeS);
+int APS5_VABI sceAmprCtimeS(char* buffer, std::size_t size, const std::int64_t* time) {
+    return SonyCtimeS(buffer, size, time);
+}
+
+APS5_EXPORT("6f5f-qx4ucA", sceAmprWcscpyS);
+int APS5_VABI sceAmprWcscpyS(std::uint16_t* dest, std::size_t size, const std::uint16_t* src) {
+    return SonyWcscpyS(dest, size, src);
+}
+
+APS5_EXPORT("ENLfKJEZTjE", sceAmprSetConstraintHandlerS);
+void* APS5_VABI sceAmprSetConstraintHandlerS(void* handler) {
+    return SonySetConstraintHandlerS(handler);
+}
+
+APS5_EXPORT("Jo9ON-AX9eU", sceAmprFltrounds);
+int APS5_VABI sceAmprFltrounds(void) {
+    return SonyFltrounds();
+}
+
+APS5_EXPORT("ODGONXcSmz4", sceAmprIgnoreHandlerS);
+void APS5_VABI sceAmprIgnoreHandlerS(const char* message, void* pointer, int error) {
+    SonyIgnoreHandlerS(message, pointer, error);
+}
+
+APS5_EXPORT("VUzjXknPPBs", sceAmprMbstowcs);
+std::size_t APS5_VABI sceAmprMbstowcs(std::uint16_t* dest, const char* src, std::size_t size) {
+    return SonyMbstowcs(dest, src, size);
+}
+
+APS5_EXPORT("qPe7-h5Jnuc", sceAmprAsctimeS);
+int APS5_VABI sceAmprAsctimeS(char* buffer, std::size_t size, const GuestTm* time) {
+    return SonyAsctimeS(buffer, size, time);
+}
+
+APS5_EXPORT("qlWiRfOJx1A", sceAmprFpclassifyd);
+int APS5_VABI sceAmprFpclassifyd(double value) {
+    return SonyFpclassifyd(value);
 }
 }

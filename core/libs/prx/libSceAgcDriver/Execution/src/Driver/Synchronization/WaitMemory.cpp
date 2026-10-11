@@ -366,7 +366,7 @@ void Driver::waitMemory(std::span<const std::uint32_t> packet, std::uint32_t que
                 static std::uint64_t timeouts = 0;
                 const std::lock_guard lock(reportedMutex);
                 if (++timeouts % 20 == 0) std::fprintf(stderr, "[gpu] %llu GPU waits have timed out\n", static_cast<unsigned long long>(timeouts));
-                if (!reported.insert(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u)).second) return;
+                if (!reported.insert(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u)).second) continue;
             }
             const bool wide = ((packet[0] >> 8u) & 0xffu) == 0x93u;
             const std::uint64_t reference = wide ? packet[4] | (static_cast<std::uint64_t>(packet[5]) << 32u) : packet[4];
@@ -392,7 +392,6 @@ void Driver::waitMemory(std::span<const std::uint32_t> packet, std::uint32_t que
             }
             context.Print(stderr, "[gpu]   preceding packet %s\n");
         }
-        if (warned) return;
     }
     ++outcomes.polled;
 }

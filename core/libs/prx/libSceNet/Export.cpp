@@ -921,13 +921,13 @@ int APS5_VABI sceNetEpollCreate(const char* name, int flags) {
 }
 
 int APS5_VABI sceNetGetMemoryPoolStats(int memid, NetMemoryPoolStats* stats) {
-    if (stats == nullptr) {
-        return fail(NET_EINVAL);
-    }
     std::lock_guard lk(g_mutex);
     const auto pool = g_pools.find(memid);
     if (pool == g_pools.end()) {
         return fail(NET_EBADF);
+    }
+    if (stats == nullptr) {
+        return fail(NET_EINVAL);
     }
     *stats = {pool->second, 0, 0};
     return 0;
@@ -1268,6 +1268,11 @@ int APS5_VABI sceNetResolverAbort(int rid, int flags) {
 int APS5_VABI sceNetResolverStartNtoaMultipleRecords(int rid, const char* hostname, NetResolverInfo* info, int timeout,
     int retry, int flags) {
     return sceNetResolverStartNtoaMultipleRecordsEx(rid, hostname, info, timeout, retry, flags);
+}
+
+int APS5_VABI sceNetShowIfconfig() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 extern const std::uint8_t in6addr_any_nid_postfix[16] = {};

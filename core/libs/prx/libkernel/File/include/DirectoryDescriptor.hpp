@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <optional>
 
+extern "C" const char* GetDirectoryDescriptorPath_nid_no_patch(int fd, int* error);
+
 namespace File {
 
 int OpenDirectoryDescriptor(const std::filesystem::path& path);

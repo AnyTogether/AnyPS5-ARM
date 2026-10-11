@@ -180,13 +180,15 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
         return {};
     const auto alignment = std::max<std::uint64_t>(tls->Alignment, 16);
     const auto blockSize = CheckedRva((tls->MemorySize + alignment - 1) & ~(alignment - 1));
+    const auto threadPointerAlignment = std::max<std::uint64_t>(tls->Alignment, 1);
+    const auto threadPointerOffset = CheckedRva((tls->MemorySize + threadPointerAlignment - 1) & ~(threadPointerAlignment - 1));
     const auto templateOffset = CheckedRva((64 + alignment - 1) & ~(alignment - 1));
     constexpr std::uint32_t threadControlBlockSize = 0x30;
     constexpr std::int64_t stackGuardDisplacement = 0x28;
     for (const auto& access : accesses) {
         if (access.StoreImmediate || access.Displacement == 0) continue;
         const auto displacement = static_cast<std::int64_t>(std::bit_cast<std::int32_t>(access.Displacement));
-        if (displacement != stackGuardDisplacement && (displacement > 0 || displacement < -static_cast<std::int64_t>(blockSize)))
+        if (displacement != stackGuardDisplacement && (displacement > 0 || displacement < -static_cast<std::int64_t>(threadPointerOffset)))
             throw Domain::RelinkerException("Windows guest TLS load displacement " + std::to_string(displacement) + " is not in the thread TLS block, 0 or the stack guard at 0x28", access.FileOffset);
     }
     PeSection data{".gtls", nextRva, SectionRead | SectionWrite | 0x40u, std::vector<std::uint8_t>(templateOffset + blockSize + threadControlBlockSize)};
@@ -201,7 +203,7 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
     const auto loadPointer = [&] {
         code.Rip({0x8b, 0x0d}, indexRva);
         code.Emit({0x65, 0x48, 0x8b, 0x04, 0x25, 0x58, 0, 0, 0, 0x48, 0x8b, 0x04, 0xc8, 0x48, 0x8d, 0x80});
-        code.U32(blockSize);
+        code.U32(threadPointerOffset);
     };
 
     code.Emit({0x83, 0xfa, 1});

@@ -217,6 +217,16 @@ int DirectoryFailure(const std::error_code& error) {
     if (error == std::errc::too_many_symbolic_link_levels) return 62;
     return 5;
 }
+int SetWorkingDirectory(WorkingDirectory& state, const std::filesystem::path& resolved) {
+    std::error_code error;
+    const auto canonical = std::filesystem::canonical(resolved, error);
+    if (error) return DirectoryFailure(error);
+    if (!std::filesystem::is_directory(canonical, error)) return error ? DirectoryFailure(error) : 20;
+    const auto relative = canonical.lexically_relative(state.root);
+    if (relative.empty() || *relative.begin() == "..") return 45;
+    state.current = canonical;
+    return 0;
+}
 }
 
 extern "C" void AddPathAlias_nid_no_patch(const char* guestPrefix, const char* hostPath) {
@@ -313,21 +323,36 @@ extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path) {
     return Resolve(state, path);
 }
 
+extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {
+    if (resolved == nullptr) return 14;
+    auto& state = Directories();
+    std::lock_guard lock(state.mutex);
+    try {
+        return SetWorkingDirectory(state, std::filesystem::u8path(resolved));
+    } catch (const std::bad_alloc&) {
+        return 12;
+    } catch (const std::filesystem::filesystem_error& error) {
+        return DirectoryFailure(error.code());
+    }
+}
+
+extern "C" bool FinalPathComponentIsDot_nid_no_patch(const char* path) {
+    std::string_view text(path);
+    while (!text.empty() && (text.back() == '/' || text.back() == '\\')) text.remove_suffix(1);
+    const auto separator = text.find_last_of("/\\");
+    const auto component = text.substr(separator == std::string_view::npos ? 0 : separator + 1);
+    return component == ".";
+}
+
 extern "C" int APS5_VABI chdir_nid_postfix(const char* path) {
     if (!path) { errno = 14; return -1; }
     if (!*path) { errno = 2; return -1; }
     try {
         auto& state = Directories();
         std::lock_guard lock(state.mutex);
-        std::error_code error;
-        const auto resolved = std::filesystem::canonical(Resolve(state, path), error);
-        if (error) { errno = DirectoryFailure(error); return -1; }
-        if (!std::filesystem::is_directory(resolved, error)) {
-            errno = error ? DirectoryFailure(error) : 20; return -1;
-        }
-        const auto relative = resolved.lexically_relative(state.root);
-        if (relative.empty() || *relative.begin() == "..") { errno = 45; return -1; }
-        state.current = resolved;
+        const auto resolved = Resolve(state, path);
+        const int error = SetWorkingDirectory(state, resolved);
+        if (error) { errno = error; return -1; }
         return 0;
     } catch (const std::bad_alloc&) { errno = 12; return -1; }
       catch (const std::filesystem::filesystem_error& error) { errno = DirectoryFailure(error.code()); return -1; }

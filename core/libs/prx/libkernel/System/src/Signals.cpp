@@ -1,4 +1,6 @@
+#include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/Pthread/Posix/Common.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <atomic>
 #include <chrono>
@@ -11,10 +13,12 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI getpid_nid_postfix(void);
+extern "C" Pthread APS5_VABI scePthreadSelf(void);
 
 struct GuestSignalSet {
     std::uint32_t bits[4];
@@ -161,8 +165,7 @@ thread_local GuestStack alternateStack{nullptr, 0, SsDisable};
 extern "C" {
 GuestHandler APS5_VABI signal_nid_postfix(int guest, GuestHandler handler) {
     const auto invalid = reinterpret_cast<GuestHandler>(static_cast<std::uintptr_t>(-1));
-    const int native = NativeSignal(guest);
-    if (!native || handler == invalid) { *__error_nid_postfix() = 22; return invalid; }
+    if (guest < 1 || guest > MaxSignal || ((guest == GuestSigkill || guest == GuestSigstop) && handler != nullptr)) { *__error_nid_postfix() = 22; return invalid; }
     std::lock_guard lock(registration);
     const GuestSigaction action{reinterpret_cast<std::uintptr_t>(handler), SaRestart, {}};
     if (!Install(guest, action)) { *__error_nid_postfix() = 22; return invalid; }
@@ -198,6 +201,13 @@ int APS5_VABI kill_nid_postfix(int pid, int guest) {
     const int self = getpid_nid_postfix();
     if (pid != self && pid != 0 && pid != -self) { *__error_nid_postfix() = 3; return -1; }
     return guest == 0 ? 0 : raise_nid_postfix(guest);
+}
+int APS5_VABI pthread_kill_nid_postfix(Pthread thread, int guest) {
+    if (guest < 0 || guest > MaxSignal) return PosixThread::GUEST_EINVAL;
+    if (thread == nullptr) return PosixThread::GUEST_ESRCH;
+    if (guest == 0) return 0;
+    if (thread != scePthreadSelf()) NotImplemented_nid_no_patch(("pthread_kill signal " + std::to_string(guest) + " to another thread").c_str());
+    return raise_nid_postfix(guest) == 0 ? 0 : *__error_nid_postfix();
 }
 int APS5_VABI sigaltstack_nid_postfix(const GuestStack* stack, GuestStack* previous) {
     GuestStack replacement = alternateStack;
@@ -238,6 +248,14 @@ int APS5_VABI sigprocmask_nid_postfix(int how, const void* set, void* previousSe
 int APS5_VABI pthread_sigmask_nid_postfix(int how, const GuestSignalSet* set, GuestSignalSet* previousSet) {
     if (set != nullptr && (how < 1 || how > 3)) return 22;
     return _sigprocmask_nid_postfix(how, set, previousSet);
+}
+
+int APS5_VABI sigtimedwait_nid_postfix(const GuestSignalSet* set, void* info, const void* timeout) {
+    (void)set;
+    (void)info;
+    (void)timeout;
+    NotImplemented_nid_no_patch("sigtimedwait: waiting for a pending signal");
+    return -1;
 }
 }
 

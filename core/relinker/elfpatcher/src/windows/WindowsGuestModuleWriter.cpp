@@ -107,6 +107,18 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
         sections.push_back({".ehmeta", nextRva, SectionRead | 0x40u, std::move(metadata)});
         nextRva = AlignRva(nextRva + sections.back().Data.size());
     }
+    const auto returnsZero = [&](const std::uint64_t address) {
+        for (const auto& header : guest.Headers) {
+            if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
+            const auto start = guest.Bytes.begin() + static_cast<std::ptrdiff_t>(header.Offset + (address - header.MappedAddress));
+            const auto available = header.FileSize - (address - header.MappedAddress);
+            const auto matches = [&](const std::vector<std::uint8_t>& code) {
+                return code.size() <= available && std::equal(code.begin(), code.end(), start);
+            };
+            return matches({0x31, 0xc0, 0xc3}) || matches({0x66, 0x0f, 0xef, 0xc0, 0x31, 0xc0, 0xc3});
+        }
+        return false;
+    };
     std::map<std::string, std::uint32_t> exports;
     PeSection tlsExports{".tlsrefs", nextRva, SectionRead | 0x40u, {}};
     for (const auto& symbol : guest.Symbols) {
@@ -121,10 +133,20 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
             relocations.push_back(rva);
         } else rva = image.GetRva(symbol.Value, std::max<std::uint64_t>(symbol.Size, 1));
         if (!exports.emplace(symbol.Name, rva).second) throw Domain::RelinkerException("Duplicate guest export: " + symbol.Name);
+        if ((symbol.Info & 15) == 2 && returnsZero(symbol.Value)) runtime.ZeroReturnExports.insert(symbol.Name);
     }
     if (!tlsExports.Data.empty()) {
         nextRva = AlignRva(nextRva + tlsExports.Data.size());
         sections.push_back(std::move(tlsExports));
+    }
+    if (runtime.DeferInitialization) {
+        PeSection lifecycle{".ginit", nextRva, SectionRead | 0x40u, {}};
+        Io::AppendU32(lifecycle.Data, guest.Init == 0 ? 0 : image.GetRva(guest.Init));
+        Io::AppendU32(lifecycle.Data, CheckedRva(guest.InitArray.size()));
+        for (const auto slot : guest.InitArray) Io::AppendU32(lifecycle.Data, image.GetRva(slot, 8));
+        if (!exports.emplace(Relinker::GuestInitializeExport, nextRva).second) throw Domain::RelinkerException("Duplicate guest export: " + std::string(Relinker::GuestInitializeExport));
+        nextRva = AlignRva(nextRva + lifecycle.Data.size());
+        sections.push_back(std::move(lifecycle));
     }
     if (exports.size() > 65535) throw Domain::RelinkerException("Too many guest PE exports");
     PeSection exportSection{".edata", nextRva, SectionRead | 0x40u, std::vector<std::uint8_t>(40)};
@@ -173,6 +195,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
     for (const auto slot : guest.InitArray) runtime.InitArrayRvas.push_back(image.GetRva(slot, 8));
     for (const auto slot : guest.FiniArray) runtime.FiniArrayRvas.push_back(image.GetRva(slot, 8));
     runtime.InitRva = guest.Init == 0 ? 0 : image.GetRva(guest.Init);
+    runtime.UnmatchedImportModules.assign(guest.Dynamic.UnmatchedImportModules.begin(), guest.Dynamic.UnmatchedImportModules.end());
     runtime.FiniRva = guest.Fini == 0 ? 0 : image.GetRva(guest.Fini);
     auto result = WindowsPeWriter().Write(sections, entry, directories);
     const auto characteristics = Io::ReadU16(result, 0x80 + 22);

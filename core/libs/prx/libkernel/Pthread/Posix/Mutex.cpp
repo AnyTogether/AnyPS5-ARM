@@ -118,4 +118,11 @@ int APS5_VABI pthread_mutexattr_settype_nid_postfix(PthreadMutexattr* attr, int 
     return PosixThread::ToErrno(scePthreadMutexattrSettype(attr, type));
 }
 
+int APS5_VABI pthread_mutexattr_gettype_nid_postfix(const PthreadMutexattr* attr, int* type) {
+    if (!attr || !*attr) return POSIX_EINVAL;
+    if (!type) throw std::runtime_error("pthread_mutexattr_gettype: null type");
+    *type = static_cast<int>((*attr)->type);
+    return 0;
+}
+
 }

@@ -24,6 +24,8 @@ int main() {
     Require(sceNpTrophy2RegisterUnlockCallback(reinterpret_cast<void*>(&OnUnlock), &userdata) == 0);
     Require(sceNpTrophy2UnregisterUnlockCallback() == 0);
 
+    Require(sceNpTrophy2ShowTrophyList(1) == 0);
+
     NpTrophy2GameDetails details{};
     NpTrophy2GameData data{};
     Require(sceNpTrophy2GetGameInfo(1, 1, &details, nullptr) == 0);

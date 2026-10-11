@@ -29,13 +29,17 @@ void APS5_VABI GuestDeallocate_nid_no_patch(void*, void* memory) {
     GuestHeap::GuestHeapFree_nid_postfix(memory);
 }
 
+void* APS5_VABI GuestAllocateTexture_nid_no_patch(void*, std::uint32_t alignment, std::uint32_t size) {
+    return GuestHeap::GuestHeapAlignForGpu_nid_postfix(std::max<std::uint32_t>(alignment, 16), size);
+}
+
 AvPlayerMemAllocator WithGuestHeapFallback(AvPlayerMemAllocator memory) {
     if (!memory.allocate || !memory.deallocate) {
         memory.allocate = GuestAllocate_nid_no_patch;
         memory.deallocate = GuestDeallocate_nid_no_patch;
     }
     if (!memory.allocate_texture || !memory.deallocate_texture) {
-        memory.allocate_texture = GuestAllocate_nid_no_patch;
+        memory.allocate_texture = GuestAllocateTexture_nid_no_patch;
         memory.deallocate_texture = GuestDeallocate_nid_no_patch;
     }
     return memory;
@@ -74,7 +78,7 @@ Player::~Player() {
         std::lock_guard lock(eventMutex);
         quit = true;
     }
-    eventCondition.notify_all();
+    eventCondition.NotifyAll();
     controller.join();
     std::lock_guard lock(mutex);
     source.reset();
@@ -85,7 +89,7 @@ void Player::queue(const Event& event) {
         std::lock_guard lock(eventMutex);
         events.push_back(event);
     }
-    eventCondition.notify_all();
+    eventCondition.NotifyAll();
 }
 
 void Player::OnWarning(std::int32_t code) {
@@ -102,7 +106,7 @@ void Player::controllerLoop() {
         bool pending = false;
         {
             std::unique_lock lock(eventMutex);
-            eventCondition.wait_for(lock, std::chrono::milliseconds(5), [this] { return quit || !events.empty(); });
+            eventCondition.WaitUntil(lock, TimedWait::DeadlineNanos(5000), [this] { return quit || !events.empty(); });
             if (quit) return;
             if (!events.empty()) {
                 event = events.front();

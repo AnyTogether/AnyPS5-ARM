@@ -9,6 +9,8 @@
 
 namespace AgcDriver::Graphics {
 
+struct TextureSwizzleEquation;
+
 enum class ColorTileMode : std::uint32_t {
     Linear = 0,
     Standard4KB = 5,
@@ -57,6 +59,7 @@ private:
     // The XOR swizzle is linear over GF(2), so a block offset is xOffsets[x] ^ yOffsets[y].
     const std::uint32_t* xOffsets = nullptr;
     const std::uint32_t* yOffsets = nullptr;
+    const TextureSwizzleEquation* equation = nullptr;
 };
 
 class CmaskLayout {

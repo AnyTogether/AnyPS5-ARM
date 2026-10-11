@@ -42,6 +42,7 @@ extern "C" std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint
 extern "C" std::uint32_t APS5_VABI sceAgcDcbEndOcclusionQueryGetSize();
 extern "C" std::uint32_t APS5_VABI sceAgcDcbSetIndexIndirectArgsGetSize();
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetIndexBuffer(CommandBuffer* buf, std::uint64_t indexAddress);
+extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetBaseIndirectArgs(CommandBuffer* buf, std::uint32_t shaderType, const volatile void* indirectBaseAddr);
 extern "C" std::uint32_t* APS5_VABI sceAgcSetNop(CommandBuffer* buf, std::uint32_t sizeDw);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbContextStateOp(CommandBuffer* buf, std::uint32_t operation);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbAcquireMem(CommandBuffer* buf, std::uint8_t engine, std::uint32_t cbDbOp, std::uint32_t gcrControl, const volatile void* base, std::uint64_t sizeBytes, std::uint32_t pollCycles);
@@ -52,6 +53,7 @@ extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetWorkloadStreamInactive(CommandBu
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadsActive(CommandBuffer* buf, std::uint32_t streamId, const std::uint32_t* ids, std::uint32_t count);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadComplete(CommandBuffer* buf, std::uint32_t streamId, std::uint32_t id);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadStreamInactive(CommandBuffer* buf, std::uint32_t streamId);
+extern "C" int APS5_VABI sceAgcDebugRaiseException(std::uint32_t exceptionId);
 
 namespace {
 
@@ -149,12 +151,14 @@ void testClearState() {
         auto* packet = sceAgcDcbClearState(&storage.buffer, command);
         check(packet == storage.words.data() + command * 2 && packet[0] == 0xc0001200u && packet[1] == command, "incorrect CLEAR_STATE packet");
     }
-    check(storage.buffer.cursor_up == storage.words.data() + 32 && storage.words[32] == 0xdeadbeefu, "incorrect CLEAR_STATE cursor advance");
+    auto* maskedZero = sceAgcDcbClearState(&storage.buffer, 0x10u);
+    check(maskedZero == storage.words.data() + 32 && maskedZero[0] == 0xc0001200u && maskedZero[1] == 0, "CLEAR_STATE did not mask the command to four bits");
+    auto* maskedF = sceAgcDcbClearState(&storage.buffer, 0xffffffffu);
+    check(maskedF == storage.words.data() + 34 && maskedF[0] == 0xc0001200u && maskedF[1] == 0xfu, "CLEAR_STATE did not mask the command to four bits");
+    check(storage.buffer.cursor_up == storage.words.data() + 36 && storage.words[36] == 0xdeadbeefu, "incorrect CLEAR_STATE cursor advance");
     const auto before = storage.words;
-    expectFailure([&] { sceAgcDcbClearState(&storage.buffer, 0x10u); });
-    expectFailure([&] { sceAgcDcbClearState(&storage.buffer, 0xffffffffu); });
     expectFailure([] { sceAgcDcbClearState(nullptr, 0); });
-    check(storage.words == before && storage.buffer.cursor_up == storage.words.data() + 32, "invalid CLEAR_STATE modified the buffer");
+    check(storage.words == before && storage.buffer.cursor_up == storage.words.data() + 36, "invalid CLEAR_STATE modified the buffer");
 }
 
 struct ContextGrowth {
@@ -267,6 +271,19 @@ void testIndexBuffer() {
         return;
     }
     throw std::runtime_error("misaligned index buffer was accepted");
+}
+
+void testIndirectBase() {
+    Storage storage;
+    alignas(8) std::uint32_t arguments[4]{};
+    const auto address = reinterpret_cast<std::uintptr_t>(arguments);
+    const auto* bound = sceAgcDcbSetBaseIndirectArgs(&storage.buffer, 0, arguments);
+    check(bound[1] == 1 && bound[2] == static_cast<std::uint32_t>(address) && bound[3] == static_cast<std::uint32_t>(address >> 32u), "indirect base address mismatch");
+    const auto* cleared = sceAgcDcbSetBaseIndirectArgs(&storage.buffer, 1, nullptr);
+    check(cleared == bound + 4 && (cleared[0] & 2u) != 0 && cleared[1] == 1 && cleared[2] == 0 && cleared[3] == 0, "indirect base was not cleared");
+    const auto before = storage.words;
+    expectFailure([&] { sceAgcDcbSetBaseIndirectArgs(&storage.buffer, 0, reinterpret_cast<const volatile void*>(address + 4)); });
+    check(storage.words == before, "misaligned indirect base modified packet memory");
 }
 
 void testContextState() {
@@ -491,6 +508,16 @@ void testWorkloads() {
     check(storage.buffer.cursor_up == storage.words.data() + 19, "invalid workload command advanced the cursor");
 }
 
+void testDebugRaiseException() {
+    int result = -1;
+    try {
+        result = sceAgcDebugRaiseException(0x1234abcdu);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string("debug exception stopped the caller: ") + error.what());
+    }
+    check(result == 0, "debug exception did not return 0");
+}
+
 void testDefaults() {
     std::uint32_t state = 0x12345678;
     check(sceAgcInit_0090(&state, 8) == 0 && state == 0x12345678, "AGC initialization failed or modified caller state");
@@ -531,6 +558,7 @@ int main(int argc, char** argv) {
         testMarkerSpans();
         testPacketSizes();
         testIndexBuffer();
+        testIndirectBase();
         testContextState();
         testFlip();
         testRegisters();
@@ -540,6 +568,7 @@ int main(int argc, char** argv) {
         testContextStateUnversioned();
         testAcquireMemEngine();
         testWorkloads();
+        testDebugRaiseException();
         testDefaults();
         LibcRunShutdown_nid_postfix();
         std::puts("AGC command tests passed");

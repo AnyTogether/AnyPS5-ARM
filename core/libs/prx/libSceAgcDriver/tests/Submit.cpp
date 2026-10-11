@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "execution/VulkanTestDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/QueueState.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawCache.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libc/include/GuestHeap.hpp"
@@ -278,7 +279,7 @@ void testEndOfPipeLabelsWithoutWork() {
 }
 
 void testLabelStoredSinceSubmission() {
-    alignas(64) static volatile std::uint32_t gate = 0, label = 0, done = 0, late = 0;
+    alignas(64) static volatile std::uint32_t gate = 0, label = 0, done = 0, late = 0, waiting = 0;
     submit(0x20, commands(waitEqual(&gate, 1), waitEqual(&label, 1), writeData(&done, 1)));
     submit(0, commands(writeData(&label, 1)));
     waitFor(&label, 1, "producer label never landed");
@@ -286,13 +287,17 @@ void testLabelStoredSinceSubmission() {
     gate = 1;
     check(waitFor(&done, 1, "consumer never passed its waits") < std::chrono::milliseconds(500), "a label stored after the wait's submission did not satisfy it");
     AgcDriverWaitIdle_nid_postfix();
-    submit(0x20, commands(waitEqual(&label, 1), writeData(&late, 1)));
-    check(waitFor(&late, 1, "consumer never passed its wait") >= std::chrono::milliseconds(900), "a label stored before the wait's submission satisfied it");
+    submit(0x20, commands(writeData(&waiting, 1), waitEqual(&label, 1), writeData(&late, 1)));
+    waitFor(&waiting, 1, "consumer never reached its label wait");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    check(late == 0, "a label stored before the wait's submission satisfied it or the wait expired");
+    submit(0, commands(writeData(&label, 1)));
+    waitFor(&late, 1, "consumer did not resume after a new producer label");
     AgcDriverWaitIdle_nid_postfix();
 }
 
 void testWideLabelStoredSinceSubmission() {
-    alignas(64) static volatile std::uint32_t gate = 0, done = 0, late = 0;
+    alignas(64) static volatile std::uint32_t gate = 0, done = 0, late = 0, waiting = 0;
     alignas(64) static volatile std::uint32_t label[2] = {0, 0x5eed};
     submit(0x20, commands(waitEqual(&gate, 1), waitEqual64(label, 1, 0xffffffffu), writeData(&done, 1)));
     submit(0, commands(writeData(label, 1)));
@@ -302,17 +307,21 @@ void testWideLabelStoredSinceSubmission() {
     check(waitFor(&done, 1, "consumer never passed its waits") < std::chrono::milliseconds(500), "a 32-bit label stored after a low-dword 64-bit wait's submission did not satisfy it");
     AgcDriverWaitIdle_nid_postfix();
     gate = 0;
-    submit(0x20, commands(waitEqual(&gate, 1), waitEqual64(label, 1, ~0ull), writeData(&late, 1)));
+    submit(0x20, commands(waitEqual(&gate, 1), writeData(&waiting, 1), waitEqual64(label, 1, ~0ull), writeData(&late, 1)));
     submit(0, commands(writeData(label, 1)));
     waitFor(label, 1, "producer label never landed");
     label[0] = 0;
     gate = 1;
-    check(waitFor(&late, 1, "consumer never passed its wait") >= std::chrono::milliseconds(900), "a 32-bit store satisfied a 64-bit wait whose high dword never matched");
+    waitFor(&waiting, 1, "consumer never reached its wide label wait");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    check(late == 0, "a mismatched high dword satisfied the 64-bit wait or the wait expired");
+    submit(0, commands(writeData(label + 1, 0), writeData(label, 1)));
+    waitFor(&late, 1, "consumer did not resume after a matching 64-bit label");
     AgcDriverWaitIdle_nid_postfix();
 }
 
 void testLabelHeldAtSubmission() {
-    alignas(64) static volatile std::uint32_t gate = 0, label = 1, done = 0, reset = 0;
+    alignas(64) static volatile std::uint32_t gate = 0, label = 1, done = 0, reset = 0, waiting = 0;
     submit(0x20, commands(waitEqual(&gate, 1), waitEqual(&label, 1), writeData(&done, 1)));
     label = 0;
     gate = 1;
@@ -320,9 +329,13 @@ void testLabelHeldAtSubmission() {
     AgcDriverWaitIdle_nid_postfix();
     gate = 0;
     label = 1;
-    submit(0x20, commands(waitEqual(&gate, 1), writeData(&label, 0), waitEqual(&label, 1), writeData(&reset, 1)));
+    submit(0x20, commands(waitEqual(&gate, 1), writeData(&label, 0), writeData(&waiting, 1), waitEqual(&label, 1), writeData(&reset, 1)));
     gate = 1;
-    check(waitFor(&reset, 1, "consumer never passed its wait") >= std::chrono::milliseconds(900), "a label its own queue stored first counted as held at the submission");
+    waitFor(&waiting, 1, "consumer never reached its reset label wait");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    check(reset == 0, "a label reset by its own queue satisfied the wait or the wait expired");
+    submit(0x28, commands(writeData(&label, 1)));
+    waitFor(&reset, 1, "consumer did not resume after another queue restored the label");
     AgcDriverWaitIdle_nid_postfix();
 }
 
@@ -450,8 +463,8 @@ std::array<std::uint32_t, 7> memoryCopy(const void* destination, const void* sou
 void testCopyIntoHostMemory() {
     constexpr std::size_t words = 32768;
     constexpr auto bytes = static_cast<std::uint32_t>(words * 4);
-    auto* produced = static_cast<std::uint32_t*>(GuestHeap::GuestHeapAlign_nid_postfix(65536, bytes));
-    auto* source = static_cast<std::uint32_t*>(GuestHeap::GuestHeapAlign_nid_postfix(65536, bytes));
+    auto* produced = static_cast<std::uint32_t*>(GuestHeap::GuestHeapAlignForGpu_nid_postfix(65536, bytes));
+    auto* source = static_cast<std::uint32_t*>(GuestHeap::GuestHeapAlignForGpu_nid_postfix(65536, bytes));
     std::vector<std::uint32_t> destination(words);
     for (const bool label : {false, true}) {
         for (std::size_t i = 0; i < words; ++i) {
@@ -565,6 +578,57 @@ void testRegisteredFloatMode() {
     }
 }
 
+void testProgramSnapshots() {
+    alignas(256) static std::array<std::uint32_t, 64> registered{};
+    registered.fill(0xbf800000);
+    registered[0] = 0xbf810000;
+    alignas(256) static std::array<std::uint32_t, 64> raw{};
+    raw.fill(0xbf800000);
+    raw[1] = 0xbf810000;
+    const auto registeredAddress = reinterpret_cast<std::uintptr_t>(registered.data());
+    const auto rawAddress = reinterpret_cast<std::uintptr_t>(raw.data());
+    AgcDriver::DriverDetail::ShaderRegistry shaders;
+    AgcDriver::DriverDetail::ShaderSnapshot snapshot{registeredAddress, 0x1000, 2, {}, {}};
+    snapshot.code.assign(registered.begin(), registered.end());
+    snapshot.header.resize(sizeof(Shader));
+    const auto entry = std::make_shared<const AgcDriver::DriverDetail::ShaderSnapshot>(std::move(snapshot));
+    shaders[registeredAddress] = {entry};
+    check(AgcDriver::DriverDetail::ProgramSnapshot(shaders, registeredAddress, {2}) == entry, "a registered program was not resolved to its registration");
+    check(AgcDriver::DriverDetail::ProgramSnapshot(shaders, registeredAddress + 4 * 8, {2}) == entry, "an entry inside registered code was not resolved to its registration");
+    check(!expectFailure([&] { static_cast<void>(AgcDriver::DriverDetail::ProgramSnapshot(shaders, rawAddress, {2})); }).empty(), "an unregistered program was read raw while shaders are registered");
+    const auto unregistered = AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2});
+    check(unregistered != entry && unregistered->codeAddress == rawAddress && unregistered->header.empty() && unregistered->code.size() == 2, "an empty registry did not read the program as raw code");
+    check(AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2}) == unregistered, "unchanged raw code lost its snapshot identity");
+    check(!expectFailure([] { static_cast<void>(AgcDriver::DriverDetail::ProgramSnapshot({}, 0, {2})); }).empty(), "an unmapped unregistered program was accepted");
+    AgcDriver::DriverDetail::DrawDecode decode{};
+    decode.programs.resize(2);
+    decode.programs[0].snapshot = unregistered;
+    decode.programs[1].snapshot = entry;
+    decode.programs[1].codeOffset = 8;
+    check(AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "an unchanged decode was not current");
+    registered[8] = 0xbf810000;
+    check(AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "a rewritten registered program made a decode stale");
+    raw[0] = 0xbf810000;
+    check(!AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "a rewritten unregistered program left its decode current");
+    decode.programs[0].snapshot = AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2});
+    check(AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "a decode with the rewritten program was not current");
+}
+
+void testProgramWorkgroupUse() {
+    const auto snapshot = [](std::vector<std::uint32_t> code) {
+        AgcDriver::DriverDetail::ShaderSnapshot result{0x1000, 0, 2, std::move(code), {}};
+        return result;
+    };
+    const auto plain = snapshot({0xbf800000, 0xbf810000});
+    check(!AgcDriver::DriverDetail::ProgramUsesWorkgroup(plain, 0) && !AgcDriver::DriverDetail::ProgramUsesWorkgroup(plain, 0), "a program without LDS or barriers needs a workgroup");
+    const auto barrier = snapshot({0xbf8a0000, 0xbf810000});
+    check(AgcDriver::DriverDetail::ProgramUsesWorkgroup(barrier, 0), "an s_barrier did not need a workgroup");
+    const auto lds = snapshot({0xd8340000, 0x00000100, 0xbf810000});
+    check(AgcDriver::DriverDetail::ProgramUsesWorkgroup(lds, 0) && AgcDriver::DriverDetail::ProgramUsesWorkgroup(lds, 0), "an LDS write did not need a workgroup");
+    const auto entry = snapshot({0xbf8a0000, 0xbf810000, 0xbf800000, 0xbf810000});
+    check(!AgcDriver::DriverDetail::ProgramUsesWorkgroup(entry, 2) && AgcDriver::DriverDetail::ProgramUsesWorkgroup(entry, 0), "the workgroup check did not start at the program's entry");
+}
+
 void testWorkerFailure() {
     std::array<std::uint32_t, 5> words{0xc0031500, 1, 1, 1, 0x41};
     Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
@@ -593,20 +657,20 @@ int main() {
         rawCode[1] = 0xbf810000;
         rawCode[2] = 0xbf810000;
         const auto rawAddress = reinterpret_cast<std::uintptr_t>(rawCode.data());
-        const auto literal = AgcDriver::DriverDetail::ReadRawComputeShader(rawAddress);
+        const auto literal = AgcDriver::DriverDetail::ReadRawShader(rawAddress);
         check(literal->code.size() == 3 && literal->header.empty(), "raw compute stopped at an instruction literal");
-        check(AgcDriver::DriverDetail::ReadRawComputeShader(rawAddress) == literal, "unchanged raw compute code lost its snapshot identity");
+        check(AgcDriver::DriverDetail::ReadRawShader(rawAddress) == literal, "unchanged raw compute code lost its snapshot identity");
         rawCode[0] = 0xbf820002;
         rawCode[1] = 0xbf810000;
         rawCode[2] = 0xbf800000;
         rawCode[3] = 0xbf810000;
-        const auto branched = AgcDriver::DriverDetail::ReadRawComputeShader(rawAddress);
+        const auto branched = AgcDriver::DriverDetail::ReadRawShader(rawAddress);
         check(branched->code.size() == 4 && literal->code[0] == 0xbe8003ff, "raw compute lost branch targets or modified an earlier snapshot");
         check(branched != literal, "changed raw compute code reused a stale snapshot");
         std::array<std::shared_ptr<const AgcDriver::DriverDetail::ShaderSnapshot>, 8> concurrent;
         std::vector<std::thread> readers;
         for (auto& snapshot : concurrent) readers.emplace_back([&snapshot, rawAddress] {
-            snapshot = AgcDriver::DriverDetail::ReadRawComputeShader(rawAddress);
+            snapshot = AgcDriver::DriverDetail::ReadRawShader(rawAddress);
         });
         for (auto& reader : readers) reader.join();
         for (const auto& snapshot : concurrent) check(snapshot == branched, "concurrent raw compute readers lost snapshot reuse");
@@ -615,23 +679,23 @@ int main() {
         const auto firstAddress = reinterpret_cast<std::uintptr_t>(programs.front().data());
         readers.clear();
         for (auto& snapshot : concurrent) readers.emplace_back([&snapshot, firstAddress] {
-            snapshot = AgcDriver::DriverDetail::ReadRawComputeShader(firstAddress);
+            snapshot = AgcDriver::DriverDetail::ReadRawShader(firstAddress);
         });
         for (auto& reader : readers) reader.join();
         for (const auto& snapshot : concurrent) check(snapshot == concurrent.front(), "concurrent raw compute misses duplicated snapshots");
-        const auto evicted = AgcDriver::DriverDetail::ReadRawComputeShader(firstAddress);
+        const auto evicted = AgcDriver::DriverDetail::ReadRawShader(firstAddress);
         for (std::size_t i = 1; i < programs.size(); ++i)
-            AgcDriver::DriverDetail::ReadRawComputeShader(reinterpret_cast<std::uintptr_t>(programs[i].data()));
-        check(AgcDriver::DriverDetail::ReadRawComputeShader(firstAddress) != evicted && evicted->code[0] == 0xbf810000,
+            AgcDriver::DriverDetail::ReadRawShader(reinterpret_cast<std::uintptr_t>(programs[i].data()));
+        check(AgcDriver::DriverDetail::ReadRawShader(firstAddress) != evicted && evicted->code[0] == 0xbf810000,
             "raw compute cache eviction lost snapshot lifetime or exceeded its entry limit");
-        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawComputeShader(rawAddress + 4); }).empty(), "raw compute accepted a misaligned entry");
-        check(!expectFailure([] { AgcDriver::DriverDetail::ReadRawComputeShader(0); }).empty(), "raw compute accepted an unmapped entry");
+        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawShader(rawAddress + 4); }).empty(), "raw compute accepted a misaligned entry");
+        check(!expectFailure([] { AgcDriver::DriverDetail::ReadRawShader(0); }).empty(), "raw compute accepted an unmapped entry");
         alignas(256) std::array<std::uint32_t, 128> straddling{};
         straddling.fill(0xbf800000);
         straddling[63] = 0xf4000000;
         straddling[64] = 0xfa000000;
         straddling[65] = 0xbf810000;
-        const auto straddled = AgcDriver::DriverDetail::ReadRawComputeShader(reinterpret_cast<std::uintptr_t>(straddling.data()));
+        const auto straddled = AgcDriver::DriverDetail::ReadRawShader(reinterpret_cast<std::uintptr_t>(straddling.data()));
         check(straddled->code.size() == 66 && straddled->code[64] == 0xfa000000, "raw compute stopped at a memory instruction across its first read window");
 #ifdef _WIN32
         auto* mapping = static_cast<std::uint32_t*>(VirtualAlloc(nullptr, 8192, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
@@ -641,21 +705,23 @@ int main() {
         auto* boundedCode = mapping + 1024 - 64;
         std::fill_n(boundedCode, 64, 0xbf800000u);
         const auto boundedAddress = reinterpret_cast<std::uintptr_t>(boundedCode);
-        const auto unterminated = expectFailure([&] { AgcDriver::DriverDetail::ReadRawComputeShader(boundedAddress); });
+        const auto unterminated = expectFailure([&] { AgcDriver::DriverDetail::ReadRawShader(boundedAddress); });
         boundedCode[63] = 0xbf810000;
-        const auto bounded = AgcDriver::DriverDetail::ReadRawComputeShader(boundedAddress);
+        const auto bounded = AgcDriver::DriverDetail::ReadRawShader(boundedAddress);
         check(VirtualProtect(mapping + 1024, 4096, PAGE_READWRITE, &protection) != 0, "cannot extend raw compute mapping");
         boundedCode[63] = 0xbf800000;
         boundedCode[64] = 0xbf810000;
-        const auto extended = AgcDriver::DriverDetail::ReadRawComputeShader(boundedAddress);
+        const auto extended = AgcDriver::DriverDetail::ReadRawShader(boundedAddress);
         check(extended != bounded && extended->code.size() == 65, "raw compute reused code before its end changed");
         check(VirtualProtect(mapping + 1024, 4096, PAGE_NOACCESS, &protection) != 0, "cannot revoke cached raw compute tail");
-        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawComputeShader(boundedAddress); }).empty(), "raw compute reused an inaccessible cached tail");
+        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawShader(boundedAddress); }).empty(), "raw compute reused an inaccessible cached tail");
         check(VirtualProtect(mapping, 4096, PAGE_NOACCESS, &protection) != 0, "cannot revoke cached raw compute code");
-        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawComputeShader(boundedAddress); }).empty(), "raw compute reused inaccessible cached code");
+        check(!expectFailure([&] { AgcDriver::DriverDetail::ReadRawShader(boundedAddress); }).empty(), "raw compute reused inaccessible cached code");
         check(VirtualFree(mapping, 0, MEM_RELEASE) != 0, "cannot release raw compute boundary test");
         check(!unterminated.empty() && bounded->code.size() == 64, "raw compute crossed inaccessible memory or missed its last instruction");
 #endif
+        testProgramSnapshots();
+        testProgramWorkgroupUse();
         testEvents();
         testValidation();
         testClearState();

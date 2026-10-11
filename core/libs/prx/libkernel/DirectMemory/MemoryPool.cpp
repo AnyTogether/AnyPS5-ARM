@@ -72,6 +72,34 @@ struct PhysicalMemoryPool {
         }
     }
 
+    bool LargestFree(int64_t searchStart, int64_t searchEnd, size_t alignment, int64_t* startOut, size_t* sizeOut) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (searchStart < 0 || searchEnd <= searchStart) return false;
+        const uint64_t align = (alignment == 0) ? PS5_PAGE_SIZE : alignment;
+        const uint64_t limit = std::min<uint64_t>(static_cast<uint64_t>(searchEnd), DIRECT_MEMORY_SIZE);
+        uint64_t bestStart = 0;
+        uint64_t bestSize = 0;
+        uint64_t cur = (static_cast<uint64_t>(searchStart) + PS5_PAGE_SIZE - 1) & ~static_cast<uint64_t>(PS5_PAGE_SIZE - 1);
+        while (cur + PS5_PAGE_SIZE <= limit) {
+            if (!_isFree(cur, PS5_PAGE_SIZE)) {
+                cur += PS5_PAGE_SIZE;
+                continue;
+            }
+            uint64_t runEnd = cur;
+            while (runEnd + PS5_PAGE_SIZE <= limit && _isFree(runEnd, PS5_PAGE_SIZE)) runEnd += PS5_PAGE_SIZE;
+            const uint64_t alignedStart = (cur + align - 1) & ~(align - 1);
+            if (alignedStart < runEnd && runEnd - alignedStart > bestSize) {
+                bestStart = alignedStart;
+                bestSize = runEnd - alignedStart;
+            }
+            cur = runEnd;
+        }
+        if (bestSize == 0) return false;
+        *startOut = static_cast<int64_t>(bestStart);
+        *sizeOut = static_cast<size_t>(bestSize);
+        return true;
+    }
+
     size_t FreeRun(uint64_t offset, uint64_t limit) {
         std::lock_guard<std::mutex> lock(_mutex);
         uint64_t cur = offset & ~static_cast<uint64_t>(PS5_PAGE_SIZE - 1);
@@ -143,6 +171,10 @@ bool DirectMemoryFind(int64_t offset, bool findNext, int64_t* start, int64_t* en
 
 void DirectMemoryRetype(int64_t start, size_t len, int memoryType) {
     PhysicalMemoryPool::Instance().Retype(static_cast<uint64_t>(start), len, memoryType);
+}
+
+bool DirectMemoryLargestFree(int64_t searchStart, int64_t searchEnd, size_t alignment, int64_t* startOut, size_t* sizeOut) {
+    return PhysicalMemoryPool::Instance().LargestFree(searchStart, searchEnd, alignment, startOut, sizeOut);
 }
 
 size_t DirectMemoryFreeRun(uint64_t offset, uint64_t limit) {

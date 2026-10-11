@@ -30,11 +30,9 @@ constexpr std::uint64_t FixedBudget = 16ull << 20u;
 constexpr std::uint64_t TestBudget = 32ull << 20u;
 constexpr std::uint32_t MaxSurfaces = 80;
 
-alignas(256) constexpr std::array<std::uint32_t, 10> LoadStoreCode{
-    0x7e040280, 0x7e060280, 0xf0001108, 0x00010402, 0xbf8c3f70, 0xf0200108, 0x00010402, 0xe0700000, 0x80000400, 0xbf810000,
+alignas(256) constexpr std::array<std::uint32_t, 8> StoreCode{
+    0x7e020280, 0x7e0402f2, 0x7e0602f2, 0x7e0802f2, 0x7e0a02f2, 0xf0201f08, 0x00010200, 0xbf810000,
 };
-
-alignas(256) std::array<std::uint32_t, 64> Output{};
 
 std::uint32_t Marker(std::uint32_t surface) {
     return 0x5a000000u | surface;
@@ -53,16 +51,12 @@ std::array<std::uint32_t, 8> TextureDescriptor(std::uint64_t address) {
     };
 }
 
-std::shared_ptr<StorageTexture> Load(AgcDriver::VulkanDevice& device, std::uint64_t base, std::uint32_t surface) {
+std::shared_ptr<StorageTexture> Store(AgcDriver::VulkanDevice& device, std::uint64_t base, std::uint32_t surface) {
     const auto address = base + surface * Stride;
-    Output.fill(0xdeadbeefu);
     std::vector<std::uint32_t> userData(16, 0u);
-    const auto output = reinterpret_cast<std::uintptr_t>(Output.data());
-    const std::array<std::uint32_t, 4> buffer{static_cast<std::uint32_t>(output), static_cast<std::uint32_t>((output >> 32u) & 0xffffu), static_cast<std::uint32_t>(Output.size() * 4u), 0x31016facu};
     const auto texture = TextureDescriptor(address);
-    std::copy(buffer.begin(), buffer.end(), userData.begin());
     std::copy(texture.begin(), texture.end(), userData.begin() + 4);
-    const std::span<const std::uint32_t> code(LoadStoreCode);
+    const std::span<const std::uint32_t> code(StoreCode);
     const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
     const ShaderRecompiler::ShaderComputeStageInfo compute{{32, 1, 1}, 0u, {false, false, false}, false, 1};
     ShaderRecompiler::RecompileRequest request{
@@ -71,13 +65,12 @@ std::shared_ptr<StorageTexture> Load(AgcDriver::VulkanDevice& device, std::uint6
         device.Target(),
         {0, 0, 0, 128}
     };
-    request.useCache = false;
+    request.useCache = true;
     const auto result = ShaderRecompiler::Recompile(request);
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
     device.WaitIdle();
     StorageTexture::FlushPending(address, static_cast<std::size_t>(SurfaceBytes), nullptr, "test");
     device.WaitIdle();
-    Require(Output[0] == Marker(surface), "surface " + std::to_string(surface) + ": the shader read " + std::to_string(Output[0]) + " instead of its first texel");
     return StorageTexture::FindLive(address, SurfaceBytes);
 }
 
@@ -108,27 +101,30 @@ int main() {
             mutation.Remove(texels);
         };
         try {
-            const auto first = Load(*device, base, 0);
+            auto first = Store(*device, base, 0);
             Require(first != nullptr, "surface 0 has no cached storage image");
+            Require(AgcDriver::Graphics::SharedResourceCache().Size() != 0, "the storage cache workload did not populate the resource cache");
             const auto held = std::max<std::uint64_t>(first->AllocationBytes(), first->GuestBytes());
             const auto reused = static_cast<std::uint32_t>(FixedBudget / held) + 1u;
             std::printf("texture cache budget %llu MiB; each 512x512 32_UINT surface holds %llu MiB; cyclic set of %u surfaces (%llu MiB)\n", static_cast<unsigned long long>(budget >> 20u), static_cast<unsigned long long>(held >> 20u), reused, static_cast<unsigned long long>((reused * held) >> 20u));
             Require(budget >= reused * held, "the cyclic set exceeds the test cache budget");
-            std::vector<std::weak_ptr<StorageTexture>> images(reused);
+            std::vector<std::weak_ptr<StorageTexture>> images(MaxSurfaces);
             images[0] = first;
-            for (std::uint32_t surface = 1; surface < reused; ++surface) images[surface] = Load(*device, base, surface);
+            first.reset();
+            for (std::uint32_t surface = 1; surface < reused; ++surface) images[surface] = Store(*device, base, surface);
             std::uint32_t remade = 0;
             for (std::uint32_t surface = 0; surface < reused; ++surface) {
-                const auto again = Load(*device, base, surface);
+                const auto again = Store(*device, base, surface);
                 if (again == nullptr || again != images[surface].lock()) ++remade;
             }
             Require(remade == 0, std::to_string(remade) + " of " + std::to_string(reused) + " storage images were made again on the second pass over a " + std::to_string((reused * held) >> 20u) + " MiB cyclic set under a " + std::to_string(budget >> 20u) + " MiB budget");
             const auto capacity = static_cast<std::uint32_t>(budget / held);
             Require(capacity + 2u <= MaxSurfaces, "the eviction set exceeds the test storage");
-            for (std::uint32_t surface = reused; surface < capacity + 2u; ++surface) Load(*device, base, surface);
+            for (std::uint32_t surface = reused; surface < capacity + 2u; ++surface) images[surface] = Store(*device, base, surface);
             for (std::uint32_t surface = 0; surface < capacity + 2u; ++surface) {
                 const bool cached = StorageTexture::FindLive(base + surface * Stride, SurfaceBytes) != nullptr;
                 Require(cached == (surface >= 2u), "surface " + std::to_string(surface) + (cached ? " is still cached" : " was evicted") + " after " + std::to_string(capacity + 2u) + " surfaces under a budget of " + std::to_string(capacity) + " of them");
+                Require(cached == !images[surface].expired(), "surface " + std::to_string(surface) + (cached ? " is cached but its weak image expired" : " was evicted but its resource cache image is still alive"));
             }
         } catch (...) {
             release();

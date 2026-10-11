@@ -26,6 +26,11 @@ int APS5_VABI sceContentDeleteByPath(const char* content_path) {
     throw std::runtime_error(std::string(__func__) + ": no content at " + content_path);
 }
 
+int APS5_VABI sceContentDeleteById(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceContentDeleteTerminate(void) {
     bool expected = true;
     if (!g_initialized.compare_exchange_strong(expected, false)) throw std::logic_error(std::string(__func__) + ": not initialized");

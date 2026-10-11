@@ -165,6 +165,19 @@ def main():
         imports = imported_symbols(declared.read_bytes())
         assert imports == {"AAAAAAAAAAA#guest", "EEEEEEEEEEE"}, imports
 
+        twins = {"libc.prx": guest_module([("AAAAAAAAAAA", True)]), "other.prx": guest_module([("AAAAAAAAAAA", True)])}
+        bound = relink(relinker, work / "needed-one", importing_executable(["AAAAAAAAAAA#B#B"], ["libc"]), twins)
+        imports = imported_symbols(bound.read_bytes())
+        assert imports == {"AAAAAAAAAAA#guest"}, imports
+
+        (work / "needed-both" / "sce_module").mkdir(parents=True)
+        (work / "needed-both" / "input.elf").write_bytes(importing_executable(["AAAAAAAAAAA#B#B"], ["libc", "other"]))
+        for name, image in twins.items():
+            (work / "needed-both" / "sce_module" / name).write_bytes(image)
+        result = subprocess.run([str(relinker), str(work / "needed-both" / "input.elf"), str(work / "needed-both" / "output.elf")],
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode != 0 and "Ambiguous guest import AAAAAAAAAAA" in result.stderr, (result.stdout, result.stderr)
+
         guests = relink(relinker, work / "guest-declared", importing_executable([]), {
             "b.prx": provider(7),
             "c.prx": consumer("libSceLibcInternal.prx", module_name="libSceLibcInternal"),

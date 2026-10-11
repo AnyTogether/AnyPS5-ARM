@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <cstdint>
 #include <cstdio>
 #include <cstdarg>
 
@@ -134,9 +135,23 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     snprintf_nid_postfix(buffer, sizeof(buffer), "%.3Lf %d %.1f", 1.125L, 7, 2.5);
     Require(std::strcmp(buffer, "1.125 7 2.5") == 0);
     char expected[1024];
-    std::snprintf(expected, sizeof(expected), "%#08x %.3e %a %g %p", 42u, 1.25, 1.25, 1.25, static_cast<void*>(buffer));
+    std::snprintf(expected, sizeof(expected), "%#08x %.3e %a %g 0x%llx", 42u, 1.25, 1.25, 1.25,
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(buffer)));
     snprintf_nid_postfix(buffer, sizeof(buffer), "%#08x %.3e %a %g %p", 42u, 1.25, 1.25, 1.25, static_cast<void*>(buffer));
     Require(std::strcmp(buffer, expected) == 0);
+#ifdef _WIN32
+    char pointers[128];
+    const auto address = [](std::uintptr_t value) { return reinterpret_cast<void*>(value); };
+    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 23 &&
+        std::strcmp(pointers, "0x0|0x1234|0xdeadbeef12") == 0);
+    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "[%8p][%-8p][%08p][%.6p][%10.4p][%.0p]",
+        address(0x1a), address(0x1a), address(0x1a), address(0x1a), address(0x1a), address(0)) == 56 &&
+        std::strcmp(pointers, "[    0x1a][0x1a    ][0x00001a][0x00001a][    0x001a][0x]") == 0);
+    Require(snprintf_nid_postfix(pointers, sizeof(pointers), "[%+p][% p][%#p][%*p][%-*p]", address(0x1a), address(0x1a),
+        address(0x1a), 6, address(0xf), -6, address(0xf)) == 34 &&
+        std::strcmp(pointers, "[0x1a][0x1a][0x1a][   0xf][0xf   ]") == 0);
+    Require(snprintf_nid_postfix(pointers, 6, "%p", address(0xabcdef)) == 8 && std::strcmp(pointers, "0xabc") == 0);
+#endif
     snprintf_nid_postfix(buffer, sizeof(buffer), "%.*s", -1, "unlimited");
     Require(std::strcmp(buffer, "unlimited") == 0);
     buffer[5] = '!';
@@ -157,6 +172,22 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
         &first, &second, &third, &fourth, &fifth, &sixth, word, &real) == 8);
     Require(first == 1 && second == 2 && third == 3 && fourth == 4 && fifth == 5 && sixth == 6);
     Require(std::strcmp(word, "seven") == 0 && real == 8.5);
+#ifdef _WIN32
+    int scanned = -1;
+    int position = -1;
+    Require(sscanf_nid_postfix("12", "%*d%d", &scanned) == 0 && scanned == -1);
+    Require(sscanf_nid_postfix("12 ", "%*d %d", &scanned) == 0);
+    Require(sscanf_nid_postfix("abc", "%*s%d", &scanned) == 0);
+    Require(sscanf_nid_postfix("a", "%*c%d", &scanned) == 0);
+    Require(sscanf_nid_postfix("abc", "%*[a-z]%d", &scanned) == 0);
+    Require(sscanf_nid_postfix("12", "%*d%n%d", &position, &scanned) == 0 && position == 2);
+    Require(sscanf_nid_postfix("12", "%*d%d%d", &scanned, &first) == 0);
+    Require(sscanf_nid_postfix("1 2", "%d%*d%d", &scanned, &first) == 1 && scanned == 1);
+    Require(sscanf_nid_postfix("1 2 3", "%*d %d %*d", &scanned) == 1 && scanned == 2);
+    Require(sscanf_nid_postfix("", "%*d", &scanned) == EOF);
+    Require(sscanf_nid_postfix("  ", "%*d%d", &scanned) == EOF);
+    Require(sscanf_nid_postfix("", "%d", &scanned) == EOF);
+#endif
     long long count = -1;
     int smallCount = -1;
     Require(snprintf_nid_postfix(buffer, 3, "abcd%lnEF%n", &count, &smallCount) == 6);

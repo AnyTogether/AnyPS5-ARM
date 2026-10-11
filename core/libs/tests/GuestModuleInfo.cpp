@@ -111,7 +111,8 @@ int main(int argc, char** argv) {
     ModuleInfoEx invalid{};
     invalid.st_size = sizeof(ModuleInfoEx);
     Require(ThrowsInvalidArgument([&] { sceKernelGetModuleInfoFromAddr(reinterpret_cast<std::uintptr_t>(add), 1, &invalid); }));
-    invalid.st_size = sizeof(ModuleInfoEx) - 8;
-    Require(ThrowsInvalidArgument([&] { sceKernelGetModuleInfoFromAddr(reinterpret_cast<std::uintptr_t>(add), 2, &invalid); }));
+    ModuleInfoEx unset{};
+    unset.st_size = 0xf0000;
+    Require(sceKernelGetModuleInfoFromAddr(reinterpret_cast<std::uintptr_t>(add), 2, &unset) == 0 && unset.st_size == sizeof(ModuleInfoEx));
     Require(dlclose_nid_postfix(module) == 0);
 }

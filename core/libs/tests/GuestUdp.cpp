@@ -7,12 +7,14 @@
 #include <chrono>
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
+int APS5_VABI connect_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI fcntl_nid_postfix(int, int, ...);
 int APS5_VABI setsockopt_nid_postfix(int, int, int, const void*, std::uint32_t);
 int APS5_VABI getsockopt_nid_postfix(int, int, int, void*, std::uint32_t*);
 int APS5_VABI bind_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI getsockname_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI ioctl_nid_postfix(int, std::uint64_t, void*);
+int APS5_VABI _ioctl_nid_postfix(int, std::uint64_t, void*);
 std::int64_t APS5_VABI sendto_nid_postfix(int, const void*, std::uint64_t, int, const void*, std::uint32_t);
 std::int64_t APS5_VABI recvfrom_nid_postfix(int, void*, std::uint64_t, int, void*, std::uint32_t*);
 int APS5_VABI close_nid_postfix(int);
@@ -36,6 +38,8 @@ struct Msghdr {
 extern "C" {
 std::int64_t APS5_VABI sendmsg_nid_postfix(int, const Msghdr*, int);
 std::int64_t APS5_VABI recvmsg_nid_postfix(int, Msghdr*, int);
+std::int64_t APS5_VABI sceKernelReadv(int, const Iovec*, int);
+std::int64_t APS5_VABI sceKernelWritev(int, const Iovec*, int);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 int main() {
@@ -47,6 +51,16 @@ int main() {
     std::uint32_t size = destination.size();
     Require(getsockname_nid_postfix(receiver, destination.data(), &size) == 0 && size == 16);
     Require(destination[2] || destination[3]);
+    Require(connect_nid_postfix(sender, destination.data(), destination.size()) == 0);
+    char vectorHead[] = "atomic ";
+    char vectorTail[] = "datagram";
+    Iovec vectorOutput[]{{vectorHead, sizeof(vectorHead) - 1}, {vectorTail, sizeof(vectorTail)}};
+    Require(sceKernelWritev(sender, vectorOutput, 2) == sizeof(vectorHead) + sizeof(vectorTail) - 1);
+    char vectorFirst[sizeof(vectorHead) - 1]{};
+    char vectorSecond[sizeof(vectorTail)]{};
+    Iovec vectorInput[]{{vectorFirst, sizeof(vectorFirst)}, {vectorSecond, sizeof(vectorSecond)}};
+    Require(sceKernelReadv(receiver, vectorInput, 2) == sizeof(vectorHead) + sizeof(vectorTail) - 1);
+    Require(std::strcmp(vectorFirst, "atomic ") == 0 && std::strcmp(vectorSecond, "datagram") == 0);
     int enabled = 1;
     Require(setsockopt_nid_postfix(sender, 0xffff, 0x20, &enabled, sizeof(enabled)) == 0);
     int option = 0;
@@ -86,6 +100,9 @@ int main() {
     Require(std::strcmp(buffer, message) == 0 && source[1] == 2 && source[4] == 127);
     Require(ioctl_nid_postfix(receiver, 0x4004667f, &queued) == 0 && queued == 0);
     Require(ioctl_nid_postfix(receiver, 123, &queued) == -1 && *__error_nid_postfix() == 25);
+    queued = -1;
+    Require(_ioctl_nid_postfix(receiver, 0x4004667f, &queued) == 0 && queued == 0);
+    Require(_ioctl_nid_postfix(receiver, 123, &queued) == -1 && *__error_nid_postfix() == 25);
     char head[] = "scatter ";
     char tail[] = "gather";
     Iovec parts[2]{{head, 8}, {tail, 6}};
@@ -122,6 +139,7 @@ int main() {
     Require(close_nid_postfix(receiver) == 0);
     Require(close_nid_postfix(receiver) == -1 && *__error_nid_postfix() == 9);
     Require(ioctl_nid_postfix(receiver, 0x4004667f, &queued) == -1);
+    Require(_ioctl_nid_postfix(receiver, 0x4004667f, &queued) == -1 && *__error_nid_postfix() == 9);
     Require(close_nid_postfix(sender) == 0);
     unsigned char parsed[16]{};
     Require(inet_pton_nid_postfix(2, "127.0.0.1", parsed) == 1);

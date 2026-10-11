@@ -134,6 +134,14 @@ int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri, void* param) {
  return SCE_KERNEL_ERROR_EOPNOTSUPP;
 }
 
+int APS5_VABI sceSystemServiceLaunchApp(const char* titleId, const char* const* arguments, const void* param) {
+ (void)titleId;
+ (void)arguments;
+ (void)param;
+ NotImplemented_nid_no_patch("sceSystemServiceLaunchApp: launching another application");
+ return 0;
+}
+
 int APS5_VABI sceSystemServiceDisableMusicPlayer(void) {
  return SYSTEM_SERVICE_OK;
 }

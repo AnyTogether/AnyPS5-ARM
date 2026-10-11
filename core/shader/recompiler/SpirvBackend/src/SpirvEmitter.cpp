@@ -387,6 +387,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.supportedExtensions = target.supportedExtensions;
     state.nonConstantImageOffsets = target.nonConstantImageOffsets;
     state.narrowSubgroupClock = target.narrowSubgroupClock;
+    state.float64DenormPreserve = target.float64DenormPreserve;
     state.hostSubgroupSize = target.subgroupSize;
     state.singleLane = (target.subgroupStages & SubgroupStageBit(program.Resources().stage)) == 0u;
     state.singleSampleImages = std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStorageImageMultisample)) == target.supportedCapabilities.end();

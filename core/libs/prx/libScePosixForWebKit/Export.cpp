@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <random>
 
@@ -30,6 +31,12 @@ void APS5_VABI arc4random_buf_nid_postfix(void* buffer, std::size_t size) {
         const unsigned int value = device();
         std::memcpy(bytes + offset, &value, std::min(sizeof(value), size - offset));
     }
+}
+
+std::uint32_t APS5_VABI arc4random_nid_postfix() {
+    std::uint32_t value;
+    arc4random_buf_nid_postfix(&value, sizeof(value));
+    return value;
 }
 
 }

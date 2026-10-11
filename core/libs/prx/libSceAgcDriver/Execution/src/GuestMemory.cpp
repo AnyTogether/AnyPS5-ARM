@@ -10,6 +10,8 @@
 #include <chrono>
 #include <atomic>
 #include <algorithm>
+#include <bit>
+#include <emmintrin.h>
 #include <functional>
 #include <cstdio>
 #include <cstdlib>
@@ -40,35 +42,7 @@
 #include <sstream>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#if __has_include(<linux/fs.h>)
-#include <linux/fs.h>
-#endif
-#if !defined(PROCMAP_QUERY)
-struct procmap_query {
-    std::uint64_t size;
-    std::uint64_t query_flags;
-    std::uint64_t query_addr;
-    std::uint64_t vma_start;
-    std::uint64_t vma_end;
-    std::uint64_t vma_flags;
-    std::uint64_t vma_page_size;
-    std::uint64_t vma_offset;
-    std::uint64_t inode;
-    std::uint32_t dev_major;
-    std::uint32_t dev_minor;
-    std::uint32_t vma_name_size;
-    std::uint32_t build_id_size;
-    std::uint64_t vma_name_addr;
-    std::uint64_t build_id_addr;
-};
-static_assert(sizeof(procmap_query) == 104);
-enum : std::uint64_t {
-    PROCMAP_QUERY_VMA_READABLE = 0x01,
-    PROCMAP_QUERY_VMA_WRITABLE = 0x02,
-    PROCMAP_QUERY_COVERING_OR_NEXT_VMA = 0x10,
-};
-#define PROCMAP_QUERY _IOWR('f', 17, struct procmap_query)
-#endif
+#include "prx/libc/include/specifics/linux/HostMapping.hpp"
 #endif
 
 namespace AgcDriver::GuestMemory {
@@ -518,22 +492,6 @@ struct PageRun {
     bool writable;
 };
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-int ProcMapsQueryFd() {
-    static const int fd = [] {
-        if (std::getenv("APS5_NO_PROCMAP_QUERY") != nullptr) return -1;
-        const int opened = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
-        if (opened < 0) return -1;
-        procmap_query probe{};
-        probe.size = sizeof(probe);
-        probe.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
-        if (ioctl(opened, PROCMAP_QUERY, &probe) == 0 || errno == ENOENT) return opened;
-        close(opened);
-        return -1;
-    }();
-    return fd;
-}
-#endif
 
 // Calls `emit` with consecutive runs of uniform accessibility covering [address, address + bytes) in
 // order, stopping early when it returns false. Returns false when the address space cannot be queried.
@@ -626,7 +584,7 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
 #else
-        if (const int fd = ProcMapsQueryFd(); fd >= 0) {
+        if (const int fd = HostMapping::QueryFd(); fd >= 0) {
             procmap_query query{};
             query.size = sizeof(query);
             query.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
@@ -1918,28 +1876,29 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
     const TimedAccess timed(CounterChangedWrite, current.size());
     auto* destination = reinterpret_cast<std::byte*>(address);
     CheckRange(destination, current.size(), 1, true);
-    constexpr std::size_t block = 256;
     const auto size = current.size();
-    const auto differs = [&](std::size_t at) {
-        const auto length = std::min(block, size - at);
-        return std::memcmp(current.data() + at, original.data() + at, length) != 0;
-    };
     // Stamped like a GPU write: a collect memoized for this packet would not see the page fault.
     storeOwn(address, size, [&] {
         std::size_t firstChanged = size;
         std::size_t lastChanged = 0;
-        for (std::size_t at = 0; at < size; at += block) {
-            if (!differs(at)) continue;
-            const auto blockEnd = std::min(at + block, size);
-            for (std::size_t run = at; run < blockEnd;) {
-                if (current[run] == original[run]) { ++run; continue; }
-                auto runEnd = run + 1;
-                while (runEnd < blockEnd && current[runEnd] != original[runEnd]) ++runEnd;
-                std::memcpy(destination + run, current.data() + run, runEnd - run);
-                firstChanged = std::min(firstChanged, run);
-                lastChanged = std::max(lastChanged, runEnd);
-                run = runEnd;
-            }
+        std::size_t at = 0;
+        for (; at + 16 <= size; at += 16) {
+            const auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current.data() + at));
+            const auto same = _mm_cmpeq_epi8(bytes, _mm_loadu_si128(reinterpret_cast<const __m128i*>(original.data() + at)));
+            const auto equal = static_cast<std::uint32_t>(_mm_movemask_epi8(same));
+            if (equal == 0xffffu) continue;
+            if (equal == 0) _mm_storeu_si128(reinterpret_cast<__m128i*>(destination + at), bytes);
+            else _mm_maskmoveu_si128(bytes, _mm_xor_si128(same, _mm_set1_epi8(-1)), reinterpret_cast<char*>(destination + at));
+            const auto changed = ~equal & 0xffffu;
+            firstChanged = std::min(firstChanged, at + static_cast<std::size_t>(std::countr_zero(changed)));
+            lastChanged = std::max(lastChanged, at + 32 - static_cast<std::size_t>(std::countl_zero(changed)));
+        }
+        _mm_sfence();
+        for (; at < size; ++at) {
+            if (current[at] == original[at]) continue;
+            destination[at] = current[at];
+            firstChanged = std::min(firstChanged, at);
+            lastChanged = std::max(lastChanged, at + 1);
         }
         return firstChanged < lastChanged ? std::pair<std::uint64_t, std::uint64_t>{address + firstChanged, address + lastChanged} : std::pair<std::uint64_t, std::uint64_t>{0, 0};
     });

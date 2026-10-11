@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace Relinker {
 
@@ -14,6 +15,7 @@ inline constexpr char GuestSymbolSuffix[] = "#guest";
 inline constexpr char GuestModuleSuffix[] = ".guest.prx";
 inline constexpr char GuestModulePattern[] = "sce_module/*.prx";
 inline constexpr std::uint16_t AbsoluteSection = 0xfff1;
+inline constexpr char GuestInitializeExport[] = "__aps5_guest_initialize";
 
 struct GuestSymbol {
     std::string Name;
@@ -54,11 +56,12 @@ struct GuestArtifact {
     std::filesystem::path Path;
     std::vector<std::uint8_t> Bytes;
     std::vector<Domain::CallRegistryEntry> Imports;
+    std::filesystem::path SourcePath;
 };
 
 class GuestModuleBuilder {
 public:
-    std::vector<GuestArtifact> Build(const std::filesystem::path& inputPath, const std::filesystem::path& outputPath, Domain::SysVDynamicSection& dynamic, bool windows, bool macos, bool toIntel, bool toRosetta, ISyscallScanner& syscallScanner, bool lazyBinding, const std::string& runPath, const std::set<std::string>& excludedModules, const std::filesystem::path& sceModulePath) const;
+    std::vector<GuestArtifact> Build(const std::filesystem::path& inputPath, const std::filesystem::path& outputPath, Domain::SysVDynamicSection& dynamic, bool windows, bool macos, bool toIntel, bool toRosetta, ISyscallScanner& syscallScanner, bool lazyBinding, const std::string& runPath, const std::set<std::string>& excludedModules, const std::filesystem::path& sceModulePath, const std::vector<std::string>& moduleDirectories = {}) const;
 };
 
 }

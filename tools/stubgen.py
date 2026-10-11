@@ -104,7 +104,7 @@ def _default_td_path(module):
 
 def td_target(module, td_path, td_lib):
     if td_path is None:
-        td_path = _default_td_path(module)
+        td_path = "../../" + _default_td_path(module)
     if td_lib is None:
         td_lib = module
     return (td_path, td_lib)
@@ -173,7 +173,7 @@ def main(argv=None):
     ap.add_argument("--nids", required=True, help="path to missing-NIDs file, one 11-char NID per line")
     ap.add_argument("--db", required=False, default=None, help="path to NID name CSV, NID name per line like aerolib.csv")
     ap.add_argument("--out", required=False, default=None, help="output file for code, default stdout")
-    ap.add_argument("--td-path", required=False, default=None, help="override file path used inside TechnicalDebt lines, default derived from module")
+    ap.add_argument("--td-path", required=False, default=None, help="override file path used inside TechnicalDebt lines, default derived from module, relative to docs/dev")
     ap.add_argument("--td-lib", required=False, default=None, help="override lib label used inside TechnicalDebt lines, default derived from module")
     ap.add_argument("--td-out", required=False, default=None, help="output file for TechnicalDebt lines, default stdout")
     ap.add_argument("--td-only", action="store_true", help="print only TechnicalDebt lines, no code")

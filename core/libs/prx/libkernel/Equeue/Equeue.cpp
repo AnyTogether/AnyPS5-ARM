@@ -133,11 +133,15 @@ int KernelEqueuePrivate::GetTriggeredEvents(KernelEvent* ev, int num) {
     }
     TriggerExpiredTimers(MonotonicNs());
     PollEvents();
+    return CollectTriggered(ev, num);
+}
+
+int KernelEqueuePrivate::CollectTriggered(KernelEvent* ev, int num) {
     int ret = 0;
-    for (auto it = m_events.begin(); it != m_events.end();) {
+    for (auto it = m_events.begin(); it != m_events.end() && ret < num;) {
         auto& e = *it;
         bool erase = false;
-        while (e.triggered) {
+        while (e.triggered && ret < num) {
             ev[ret++] = e.event;
             if ((e.event.flags & EV_ONESHOT) != 0) {
                 erase = true;
@@ -150,19 +154,14 @@ int KernelEqueuePrivate::GetTriggeredEvents(KernelEvent* ev, int num) {
                 e.event.fflags = 0;
                 e.event.data = 0;
             }
-            if (!e.pendingEvents.empty()) {
-                e.event = e.pendingEvents.front();
-                e.pendingEvents.pop_front();
-                e.triggered = true;
-            }
-            if (ret >= num) {
+            if (e.pendingEvents.empty()) {
                 break;
             }
+            e.event = e.pendingEvents.front();
+            e.pendingEvents.pop_front();
+            e.triggered = true;
         }
         it = erase ? m_events.erase(it) : std::next(it);
-        if (ret >= num) {
-            break;
-        }
     }
     return ret;
 }
@@ -176,34 +175,7 @@ int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros
     for (;;) {
         TriggerExpiredTimers(MonotonicNs());
         const bool polling = PollEvents();
-        int ret = 0;
-        for (auto it = m_events.begin(); it != m_events.end() && ret < num;) {
-            auto& e = *it;
-            bool erase = false;
-            while (e.triggered) {
-                ev[ret++] = e.event;
-                if ((e.event.flags & EV_ONESHOT) != 0) {
-                    erase = true;
-                    break;
-                }
-                if (e.filter.resetFunc != nullptr) {
-                    e.filter.resetFunc(&e);
-                } else if ((e.event.flags & EV_CLEAR) != 0) {
-                    e.triggered = false;
-                    e.event.fflags = 0;
-                    e.event.data = 0;
-                }
-                if (!e.pendingEvents.empty()) {
-                    e.event = e.pendingEvents.front();
-                    e.pendingEvents.pop_front();
-                    e.triggered = true;
-                }
-                if (ret >= num) {
-                    break;
-                }
-            }
-            it = erase ? m_events.erase(it) : std::next(it);
-        }
+        const int ret = CollectTriggered(ev, num);
         if (ret != 0) {
             return ret;
         }
@@ -355,6 +327,16 @@ int APS5_VABI EqueueDeleteEvent_nid_postfix(KernelEqueue eq, uintptr_t ident, in
     return owner->DeleteEvent(ident, filter);
 }
 
+
+int APS5_VABI kqueue_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI kevent_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name) {
     if (eq == nullptr || name == nullptr) {

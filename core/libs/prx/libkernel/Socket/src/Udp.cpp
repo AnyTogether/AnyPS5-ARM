@@ -736,6 +736,9 @@ int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* arg
     if (request == 0x4004667f) *static_cast<int*>(argument) = static_cast<int>(value);
     return 0;
 }
+int APS5_VABI _ioctl_nid_postfix(int descriptor, std::uint64_t request, void* argument) {
+    return ioctl_nid_postfix(descriptor, request, argument);
+}
 std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, std::uint64_t length,
     int flags, const void* address, std::uint32_t addressLength) {
     const auto socket = Lookup(descriptor);
@@ -754,6 +757,29 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags),
             reinterpret_cast<sockaddr*>(&native), size));
+#ifdef __APPLE__
+        // macOS refuses an address on a connected datagram socket (EISCONN) where Linux sends to it; an address
+        // naming the connected peer is sent there, as on Linux.
+        if (result < 0 && errno == EISCONN) {
+            sockaddr_storage peer{};
+            socklen_t peerSize = sizeof(peer);
+            const auto samePeer = [&] {
+                if (peer.ss_family != native.ss_family) return false;
+                if (native.ss_family == AF_INET) {
+                    const auto& a = reinterpret_cast<const sockaddr_in&>(peer);
+                    const auto& b = reinterpret_cast<const sockaddr_in&>(native);
+                    return a.sin_port == b.sin_port && a.sin_addr.s_addr == b.sin_addr.s_addr;
+                }
+                const auto& a = reinterpret_cast<const sockaddr_in6&>(peer);
+                const auto& b = reinterpret_cast<const sockaddr_in6&>(native);
+                return a.sin6_port == b.sin6_port && std::memcmp(&a.sin6_addr, &b.sin6_addr, sizeof(a.sin6_addr)) == 0;
+            };
+            if (::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0 && samePeer())
+                result = static_cast<int>(::send(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), NativeSendFlags(flags)));
+            else
+                errno = EISCONN;
+        }
+#endif
     }
     return result < 0 ? Fail(NativeError()) : result;
 }
@@ -933,4 +959,51 @@ std::int64_t GuestSockets::Read(int descriptor, void* buffer, std::size_t length
 
 std::int64_t GuestSockets::Write(int descriptor, const void* buffer, std::size_t length) {
     return send_nid_postfix(descriptor, buffer, length, 0);
+}
+
+std::int64_t GuestSockets::Readv(int descriptor, const Iovec* iov, int iovcnt) {
+    std::size_t total = 0;
+    for (int i = 0; i < iovcnt; ++i) {
+        if (iov[i].base == nullptr && iov[i].length != 0) return Fail(14);
+        if (iov[i].length > static_cast<std::size_t>(INT_MAX) - total) return Fail(22);
+        total += iov[i].length;
+    }
+    if (total == 0) return IsOpen(descriptor) ? 0 : Fail(9);
+    std::vector<char> buffer;
+    try {
+        buffer.resize(total);
+    } catch (const std::bad_alloc&) {
+        return Fail(12);
+    }
+    const auto result = Read(descriptor, buffer.data(), total);
+    if (result < 0) return result;
+    std::size_t copied = 0;
+    for (int i = 0; i < iovcnt && copied < static_cast<std::size_t>(result); ++i) {
+        const auto amount = std::min(iov[i].length, static_cast<std::size_t>(result) - copied);
+        if (amount != 0) std::memcpy(iov[i].base, buffer.data() + copied, amount);
+        copied += amount;
+    }
+    return result;
+}
+
+std::int64_t GuestSockets::Writev(int descriptor, const Iovec* iov, int iovcnt) {
+    std::size_t total = 0;
+    for (int i = 0; i < iovcnt; ++i) {
+        if (iov[i].base == nullptr && iov[i].length != 0) return Fail(14);
+        if (iov[i].length > static_cast<std::size_t>(INT_MAX) - total) return Fail(22);
+        total += iov[i].length;
+    }
+    if (total == 0) return Write(descriptor, nullptr, 0);
+    std::vector<char> buffer;
+    try {
+        buffer.resize(total);
+    } catch (const std::bad_alloc&) {
+        return Fail(12);
+    }
+    std::size_t copied = 0;
+    for (int i = 0; i < iovcnt; ++i) {
+        if (iov[i].length != 0) std::memcpy(buffer.data() + copied, iov[i].base, iov[i].length);
+        copied += iov[i].length;
+    }
+    return Write(descriptor, buffer.data(), total);
 }

@@ -11,6 +11,7 @@
 #include <map>
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,15 @@ public:
     const_iterator upper_bound(std::uint32_t offset) const { return {this, nextPresent(static_cast<std::size_t>(offset) + 1)}; }
     bool contains(std::uint32_t offset) const { return offset < values.size() && ((present[offset / 64] >> (offset % 64)) & 1u) != 0; }
     std::size_t count(std::uint32_t offset) const { return contains(offset) ? 1 : 0; }
+    template <class TVisit>
+    void ForEach(TVisit&& visit) const {
+        for (std::size_t word = 0; word < present.size(); ++word) {
+            for (auto bits = present[word]; bits != 0; bits &= bits - 1) {
+                const auto offset = word * 64 + static_cast<std::size_t>(std::countr_zero(bits));
+                visit(static_cast<std::uint32_t>(offset), values[offset]);
+            }
+        }
+    }
     std::size_t size() const { return entries; }
     bool empty() const { return entries == 0; }
     void clear() {
@@ -139,7 +149,7 @@ private:
     std::size_t entries = 0;
 };
 
-inline Registers InitialContextRegisters() {
+inline Registers BuildInitialContextRegisters() {
     Registers result{
         {0x200, 0}, {0x201, 0}, {0x202, 0xcc0010}, {0x203, 0},
         {0x204, 0}, {0x205, 0}, {0x206, 1087}, {0x207, 0},
@@ -171,6 +181,11 @@ inline Registers InitialContextRegisters() {
     return result;
 }
 
+inline Registers InitialContextRegisters() {
+    static const Registers& initial = *new Registers(BuildInitialContextRegisters());
+    return initial;
+}
+
 struct Predication {
     std::uint64_t address = 0;
     std::uint32_t operation = 0;
@@ -178,11 +193,12 @@ struct Predication {
 };
 
 struct QueueState {
+    static constexpr std::size_t ConstantRamWords = 0x3000;
     Registers shader;
     Registers context = InitialContextRegisters();
     Registers userConfig{{0x24a, 0}, {0x24b, 0}};
     std::optional<Registers> savedContext;
-    std::array<std::uint32_t, 0x3000> constantRam{};
+    std::vector<std::uint32_t> constantRam;
     std::uint64_t indexBase = 0;
     std::uint64_t drawIndirectBase = 0;
     std::uint64_t dispatchIndirectBase = 0;
@@ -194,6 +210,17 @@ struct QueueState {
 
     void ClearContext() {
         context = InitialContextRegisters();
+    }
+
+    std::span<const std::uint32_t> ConstantRam() const {
+        static const std::array<std::uint32_t, ConstantRamWords> unwritten{};
+        if (constantRam.empty()) return unwritten;
+        return constantRam;
+    }
+
+    std::span<std::uint32_t> WritableConstantRam() {
+        if (constantRam.empty()) constantRam.resize(ConstantRamWords);
+        return constantRam;
     }
 };
 

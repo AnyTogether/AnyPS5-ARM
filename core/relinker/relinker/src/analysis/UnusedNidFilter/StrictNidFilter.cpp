@@ -25,6 +25,11 @@ public:
             requireRange(segment.Offset, segment.FileSize);
             if (segment.MemorySize > std::numeric_limits<VirtualAddress>::max() - segment.MappedAddress)
                 throw RelinkerException("Strict filter: segment address overflow", segment.MappedAddress);
+            if (segment.Type == 0x61000000) {
+                if (hasSceDynlibData) throw RelinkerException("Strict filter: multiple PT_SCE_DYNLIBDATA segments", segment.Offset);
+                hasSceDynlibData = true;
+                sceTableBase = segment.Offset;
+            }
             if (segment.Type == 1 && segment.FileSize > segment.MemorySize)
                 throw RelinkerException("Strict filter: invalid load segment size", segment.Offset);
             if (segment.Type != 2) continue;
@@ -136,6 +141,8 @@ private:
     ElfReader reader;
     std::vector<ProgramHeader> headers;
     std::map<std::int64_t, std::uint64_t> tags;
+    std::uint64_t sceTableBase = 0;
+    bool hasSceDynlibData = false;
 
     void requireRange(std::uint64_t offset, std::uint64_t size) const {
         if (offset > bytes.size() || size > bytes.size() - offset) throw RelinkerException("Strict filter: file range out of bounds", offset);
@@ -168,7 +175,10 @@ private:
     std::optional<std::uint64_t> table(std::int64_t standardTag, std::int64_t osTag) const {
         const auto address = value(standardTag, osTag);
         if (!address) return std::nullopt;
-        return tags.contains(osTag) ? *address : fileOffset(*address, 0);
+        if (!tags.contains(osTag)) return fileOffset(*address, 0);
+        if (*address > std::numeric_limits<std::uint64_t>::max() - sceTableBase)
+            throw RelinkerException("Strict filter: SCE table file offset overflow", *address);
+        return sceTableBase + *address;
     }
 };
 
