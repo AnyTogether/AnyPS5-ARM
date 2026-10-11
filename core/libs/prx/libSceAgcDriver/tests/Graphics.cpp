@@ -2201,7 +2201,16 @@ void descriptorPoolResetFailureTest() {
     const auto previous = _ZSt13set_terminatePFvvE_nid_postfix([] {
         std::_Exit(mock.descriptorResetResult == VK_SUCCESS ? 0 : 1);
     });
+#ifdef __APPLE__
+    // Two-level namespaces bind the driver's std::terminate to the host C++ runtime, not to libc's export.
+    const auto hostPrevious = std::set_terminate([] {
+        std::_Exit(mock.descriptorResetResult == VK_SUCCESS ? 0 : 1);
+    });
+#endif
     cache.Free(allocation);
+#ifdef __APPLE__
+    std::set_terminate(hostPrevious);
+#endif
     _ZSt13set_terminatePFvvE_nid_postfix(previous);
 }
 

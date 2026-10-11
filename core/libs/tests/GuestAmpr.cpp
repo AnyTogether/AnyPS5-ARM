@@ -690,7 +690,8 @@ void TestAmmRangesAboveHintedMaps() {
     std::uintptr_t arenaBase = 0;
     std::size_t arenaBytes = 0;
     GuestArena::GuestArenaRange_nid_postfix(&arenaBase, &arenaBytes);
-    Require(multimapEnd == arenaBase + arenaBytes);
+    // macOS has no guest arena; the ranges then sit wherever the host reserved them.
+    if (arenaBase != 0) Require(multimapEnd == arenaBase + arenaBytes);
 
     for (std::uint64_t hint = heap + step; hint < heap + 4 * step; hint += step) {
         void* mapped = reinterpret_cast<void*>(hint);
