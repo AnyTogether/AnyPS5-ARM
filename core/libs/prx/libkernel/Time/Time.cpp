@@ -100,6 +100,9 @@ static std::uint64_t GetStartNanos() {
     return start;
 }
 
+// Process time counts from the library's load, not from its first query, which could read 0.
+static const bool g_startCaptured = (GetStartNanos(), true);
+
 #ifdef _WIN32
 // Every relative wait in the process (winpthreads nanosleep, std::condition_variable::wait_for, the
 // GPU driver's poll sleeps) rounds up to the scheduler tick, 15.6 ms by default; a console game and
