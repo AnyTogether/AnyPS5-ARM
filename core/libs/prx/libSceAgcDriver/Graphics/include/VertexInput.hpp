@@ -20,9 +20,12 @@ struct VertexFormat {
     const char* scalar;
 };
 
+// An all-zero V#, or one whose format is the all-ones 127 (Stray binds unused streams with it), fetches
+// zeros whatever its address.
 inline bool NullVertexDescriptor(const ShaderRecompiler::VertexAttribute& attribute) {
     const auto& fields = attribute.resource.fields;
-    return fields[0] == 0 && fields[1] == 0 && fields[2] == 0 && fields[3] == 0;
+    const auto format = (fields[3] >> 12u) & 0x7fu;
+    return (fields[0] == 0 && fields[1] == 0 && fields[2] == 0 && fields[3] == 0) || format == 0x7fu;
 }
 
 inline VertexFormat DecodeVertexFormat(const ShaderRecompiler::VertexAttribute& attribute) {
