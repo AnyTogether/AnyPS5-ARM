@@ -18,6 +18,7 @@ int APS5_VABI sceSslGetSerialNumber(int, const void*, const std::uint8_t**, std:
 int APS5_VABI sceSslGetNameEntryCount(int, const void*);
 int APS5_VABI sceSslGetNameEntryInfo(int, const void*, int, char*, std::size_t, std::uint8_t*, std::size_t, std::size_t*);
 int APS5_VABI sceSslFreeSslCertName(int, void*);
+int APS5_VABI sceSslClose(int);
 }
 
 struct SslMemoryPoolStats {
@@ -109,6 +110,8 @@ int main() {
     Require(Throws([&] { sceSslGetIssuerName(context, &marker, &name); }));
     Require(Throws([&] { sceSslGetSerialNumber(context, &marker, &serial, &serialSize); }));
     Require(Throws([&] { sceSslGetNameEntryCount(context, &marker); }));
+    Require(Throws([] { sceSslClose(1); }));
+    Require(Throws([&] { sceSslClose(context); }));
     Require(Throws([&] { sceSslGetNameEntryInfo(context, &marker, 0, oid, sizeof(oid), value, sizeof(value), &valueSize); }));
     Require(Throws([&] { sceSslFreeSslCertName(context, &marker); }));
     Require(name == nullptr && serial == nullptr && serialSize == 0 && valueSize == 0);
