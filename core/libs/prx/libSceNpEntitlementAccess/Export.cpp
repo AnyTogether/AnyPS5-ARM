@@ -153,8 +153,10 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo(void) {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 
-int APS5_VABI sceNpEntitlementAccessGetPftFlag(void) {
-    NotImplemented_nid_no_patch(__func__);
+// The title always runs as the full game (see the SKU flag), never as a game trial.
+int APS5_VABI sceNpEntitlementAccessGetPftFlag(uint32_t* pft_flag) {
+    if (!pft_flag) return SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER;
+    *pft_flag = 0;
     return 0;
 }
 
