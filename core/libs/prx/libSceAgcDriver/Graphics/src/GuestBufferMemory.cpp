@@ -491,12 +491,13 @@ void decideImportWatch(const Context& context, HostImports& state) {
     if (context.hostImportAlignment != 0 && GuestMemory::WriteWatched()) std::fprintf(stderr, "[write-watch] Windows direct host imports use comparisons; separate shared aliases retain guest write tracking\n");
 #else
 #ifdef __APPLE__
-    // GPU stores through a host import never fault the watch's protection, so imported ranges are
-    // compared, as on Windows (Stray's font atlas lost its new glyphs). The probe below would import a
-    // range the watch protects, which MoltenVK does not support; APS5_WRITE_WATCH_IMPORTS=watch keeps
-    // imported ranges watched.
+    // Imported ranges stay watched: compared instead (APS5_WRITE_WATCH_IMPORTS=unwatch), CPU stores into
+    // them are not stamped, and a later write-back of GPU results overwrote what the title wrote there
+    // meanwhile (Stray's command buffers in memory a render target used before). GPU stores through
+    // an import still go unseen by the watch (Stray's font atlas misses glyphs added later). The probe
+    // below would import a range the watch protects, which MoltenVK does not support.
     state.watchDevice = context.device;
-    state.unwatchImports = importWatchRequest() != ImportWatchRequest::Watch;
+    state.unwatchImports = importWatchRequest() == ImportWatchRequest::Unwatch;
     state.unwatchDmaBufImports = false;
     return;
 #endif
