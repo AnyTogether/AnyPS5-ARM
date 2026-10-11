@@ -274,6 +274,49 @@ inline std::vector<std::uint32_t> MeshRestartTable(std::span<const std::byte> in
     return starts;
 }
 
+// An index past every vertex descriptor's record count fetches zeros on the GPU, but a copy padded
+// with zeros up to it can reach gigabytes (Stray draws quads whose six indices are all 0xffffffff
+// with primitive restart off). The largest record count and stride among the per-vertex fetches
+// (the zero vertex goes at that record count) or nothing when no fetch depends on the index.
+struct IndexedRecords {
+    std::uint64_t records = 0;
+    std::uint64_t stride = 0;
+};
+
+inline IndexedRecords IndexedFetchRecords(std::span<const ShaderRecompiler::VertexAttribute> attributes) {
+    IndexedRecords result;
+    for (const auto& attribute : attributes) {
+        if (attribute.fetchIndex != 0 || NullVertexDescriptor(attribute) || VertexFetchOutOfRange(attribute)) continue;
+        const auto stride = (attribute.resource.fields[1] >> 16u) & 0x3fffu;
+        if (stride == 0) continue;
+        result.records = std::max<std::uint64_t>(result.records, attribute.resource.fields[2]);
+        result.stride = std::max<std::uint64_t>(result.stride, stride);
+    }
+    return result;
+}
+
+// Rewrites every index whose vertex (index + firstVertex) is at or past `records` to the zero vertex
+// at `records`, restart indices aside when they are skipped; returns the highest index left, or
+// nothing when the zero vertex itself would read as the restart index.
+inline std::optional<std::uint32_t> RedirectIndicesPastRecords(std::span<std::byte> indices, std::uint32_t indexSize, bool skipRestart, std::uint32_t firstVertex, std::uint64_t records) {
+    Require(indexSize == 2 || indexSize == 4, "unsupported index size");
+    const auto restartIndex = indexSize == 2 ? 0xffffu : 0xffffffffu;
+    if (records < firstVertex || records - firstVertex >= restartIndex) return std::nullopt;
+    const auto zeroVertex = static_cast<std::uint32_t>(records - firstVertex);
+    std::uint32_t highest = zeroVertex;
+    for (std::size_t offset = 0; offset + indexSize <= indices.size(); offset += indexSize) {
+        std::uint32_t index = 0;
+        std::memcpy(&index, indices.data() + offset, indexSize);
+        if (skipRestart && index == restartIndex) continue;
+        if (static_cast<std::uint64_t>(index) + firstVertex >= records) {
+            index = zeroVertex;
+            std::memcpy(indices.data() + offset, &index, indexSize);
+        }
+        highest = std::max(highest, index);
+    }
+    return highest;
+}
+
 inline std::vector<std::size_t> SoloZeroPaddedFetchIndices(const std::vector<VertexFetch>& fetches, const std::vector<std::size_t>& fetchValid) {
     Require(fetchValid.size() == fetches.size(), "fetch validity does not match the fetch count");
     std::vector<std::size_t> solo;

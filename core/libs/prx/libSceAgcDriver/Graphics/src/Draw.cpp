@@ -992,6 +992,29 @@ std::shared_ptr<Buffer> zeroVertexBuffer(const Context& context, const ShaderRec
 // Draw's validation, index and vertex phases. With `recipe` the fragment outputs, the pipeline
 // stages and the vertex input layout are the recipe's (derived from the same compiled stages)
 // instead of computed.
+// Indices past the records go to one zero vertex through a private copy of the index buffer
+// (RedirectIndicesPastRecords) once the zero padding up to them would pass 64 MiB.
+void redirectIndicesPastRecords(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const ShaderRecompiler::VertexAttribute> attributes, bool indirect, DrawInputs& inputs) {
+    constexpr std::uint64_t paddingLimit = std::uint64_t{64} << 20u;
+    if (!draw.indexed || indirect || inputs.nothing) return;
+    const auto [records, stride] = IndexedFetchRecords(attributes);
+    if (stride == 0 || inputs.maxIndex < records || (inputs.maxIndex - records) * stride <= paddingLimit) return;
+    const bool listTopology = state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    const bool fanGeometry = state.stages.mesh && state.stages.mesh->inputPrimitive == 5;
+    const bool skipRestart = state.primitiveRestart && (!listTopology || context.primitiveListRestart) && !fanGeometry;
+    const auto bytes = static_cast<std::size_t>(inputs.indexBytes);
+    GuestMemory::FlushGpuWrites(draw.indexAddress, bytes);
+    auto indices = std::make_shared<Buffer>(context, bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    const auto span = indices->Bytes().first(bytes);
+    GuestMemory::Read(draw.indexAddress, span, draw.indexSize);
+    const auto highest = RedirectIndicesPastRecords(span, draw.indexSize, skipRestart, draw.firstVertex, records);
+    if (!highest) return;
+    inputs.indices = std::move(indices);
+    inputs.indexHandle = inputs.indices->Handle();
+    inputs.indexOffset = 0;
+    inputs.maxIndex = *highest + draw.firstVertex;
+}
+
 DrawInputs prepareDrawInputs(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, DrawOutcome& outcome, DrawTimer& timer, const DrawRecipe* recipe) {
     DrawInputs inputs;
     APS5_LOG_OUT_DEBUG("Draw indices=%u instances=%u indexSize=%u flags=%u indexAddress=0x%llx", draw.indexCount, draw.instanceCount, draw.indexSize, draw.flags, static_cast<unsigned long long>(draw.indexAddress));
@@ -1106,6 +1129,7 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
         Require(draw.firstVertex <= std::numeric_limits<std::uint32_t>::max() - inputs.maxIndex, "indexed draw vertex range overflow");
         inputs.maxIndex += draw.firstVertex;
     }
+    redirectIndicesPastRecords(context, state, draw, attributes, args != nullptr, inputs);
     std::vector<VertexFetch> fetches;
     std::vector<std::size_t> fetchValid;
     fetches.reserve(attributes.size());

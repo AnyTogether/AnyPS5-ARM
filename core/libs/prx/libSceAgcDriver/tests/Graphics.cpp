@@ -3584,6 +3584,22 @@ void validationTests() {
         expectFailure([&] { AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1); }, "byte range");
         attribute.resource.fields[2] = 16;
         Require(AgcDriver::Graphics::VertexBufferReadSize(attribute, 0, 1) == 16, "OOB_SELECT 3 must read a fetch inside the range");
+        {
+            ShaderRecompiler::VertexAttribute perVertex{0, 4, {{0x1000, 40u << 16u, 50000, 77u << 12u}}, 0};
+            ShaderRecompiler::VertexAttribute perInstance{1, 4, {{0x2000, 64u << 16u, 90000, 77u << 12u}}, 1};
+            ShaderRecompiler::VertexAttribute narrow{2, 4, {{0x3000, 16u << 16u, 70000, 77u << 12u}}, 0};
+            const std::array fetches{perVertex, perInstance, narrow};
+            const auto records = AgcDriver::Graphics::IndexedFetchRecords(fetches);
+            Require(records.records == 70000 && records.stride == 40, "the zero vertex must follow the largest per-vertex record count");
+            std::array<std::uint32_t, 6> quad{0xffffffffu, 0xffffffffu, 0xffffffffu, 3, 69999, 70000};
+            const auto highest = AgcDriver::Graphics::RedirectIndicesPastRecords(std::as_writable_bytes(std::span(quad)), 4, false, 0, records.records);
+            Require(highest == 70000u && quad == std::array<std::uint32_t, 6>{70000, 70000, 70000, 3, 69999, 70000}, "indices past the records were not redirected to the zero vertex");
+            quad = {0xffffffffu, 0xffffffffu, 0xffffffffu, 2, 9, 10};
+            Require(AgcDriver::Graphics::RedirectIndicesPastRecords(std::as_writable_bytes(std::span(quad)), 4, true, 5, 15) == 10u && quad == std::array<std::uint32_t, 6>{0xffffffffu, 0xffffffffu, 0xffffffffu, 2, 9, 10}, "a skipped restart index or the first vertex was mishandled");
+            std::array<std::uint16_t, 3> narrowIndices{0xfffe, 1, 0xffff};
+            Require(AgcDriver::Graphics::RedirectIndicesPastRecords(std::as_writable_bytes(std::span(narrowIndices)), 2, true, 0, 4) == 4u && narrowIndices == std::array<std::uint16_t, 3>{4, 1, 0xffff}, "16-bit indices past the records were not redirected");
+            Require(!AgcDriver::Graphics::RedirectIndicesPastRecords(std::as_writable_bytes(std::span(narrowIndices)), 2, true, 0, 0xffff), "a zero vertex at the restart index was accepted");
+        }
         attribute.resource.fields[3] = 113u << 12u;
         expectFailure([&] { AgcDriver::Graphics::DecodeVertexFormat(attribute); }, "unsupported vertex format");
         attribute.resource.fields[3] = 50u << 12u;
