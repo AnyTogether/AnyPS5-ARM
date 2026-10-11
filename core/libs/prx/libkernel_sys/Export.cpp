@@ -16,6 +16,15 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#endif
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 
@@ -27,9 +36,6 @@ constexpr int GuestEfault = 14;
 constexpr int GuestEinval = 22;
 constexpr int GuestEexist = 17;
 constexpr int GuestExdev = 18;
-#ifdef _WIN32
-constexpr int WindowsPrivilegeNotHeld = 1314;
-#endif
 
 std::atomic<std::uint16_t> creationMask{022};
 
@@ -70,6 +76,13 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (*path == '\0') return Fail(GuestEnoent);
     if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     const auto native = ResolvePath_nid_no_patch(path);
+#ifdef _WIN32
+    const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        NotImplemented_nid_no_patch("readlink of a Windows symbolic link");
+        return -1;
+    }
+#endif
     std::error_code error;
     const auto status = std::filesystem::symlink_status(native, error);
     if (error) return Fail(GuestError(error));
@@ -123,17 +136,31 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
     }
     const auto native = ResolvePath_nid_no_patch(created);
     std::error_code error;
+#ifdef _WIN32
+    if (GetFileAttributesW(native.wstring().c_str()) != INVALID_FILE_ATTRIBUTES) return static_cast<int>(Fail(GuestEexist));
+#else
     if (std::filesystem::exists(std::filesystem::symlink_status(native, error))) return static_cast<int>(Fail(GuestEexist));
+#endif
     if (!std::filesystem::is_directory(native.parent_path(), error)) return static_cast<int>(Fail(GuestEnoent));
     const std::filesystem::path contents(target);
-    if (std::filesystem::is_directory(native.parent_path() / contents, error))
+    const bool directory = std::filesystem::is_directory(native.parent_path() / contents, error);
+#ifdef _WIN32
+    DWORD flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+    if (directory) flags |= SYMBOLIC_LINK_FLAG_DIRECTORY;
+    if (!CreateSymbolicLinkW(native.wstring().c_str(), std::filesystem::path(contents).make_preferred().wstring().c_str(), flags)) {
+        const DWORD code = GetLastError();
+        if (code == ERROR_PRIVILEGE_NOT_HELD) return static_cast<int>(Fail(GuestEperm));
+        if (code == ERROR_ALREADY_EXISTS || code == ERROR_FILE_EXISTS) return static_cast<int>(Fail(GuestEexist));
+        if (code == ERROR_PATH_NOT_FOUND) return static_cast<int>(Fail(GuestEnoent));
+        throw std::system_error(static_cast<int>(code), std::system_category(), "symlink");
+    }
+#else
+    if (directory)
         std::filesystem::create_directory_symlink(contents, native, error);
     else
         std::filesystem::create_symlink(contents, native, error);
-#ifdef _WIN32
-    if (error.category() == std::system_category() && error.value() == WindowsPrivilegeNotHeld) return static_cast<int>(Fail(GuestEperm));
-#endif
     if (error) throw std::system_error(error, "symlink");
+#endif
     RecordWrittenPath_nid_no_patch(native);
     return 0;
 }

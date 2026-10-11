@@ -32,8 +32,8 @@ alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
     0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
 };
 
-alignas(256) constexpr std::array<std::uint32_t, 9> PixelCode{
-    0x10040010, 0x06060300, 0x10060611, 0xf0800f08, 0x00610402, 0xbf8c3f70, 0xf800180f, 0x07060504, 0xbf810000,
+alignas(256) constexpr std::array<std::uint32_t, 10> PixelCode{
+    0xbefe0a7e, 0x10040010, 0x06060300, 0x10060611, 0xf0800f08, 0x00610402, 0xbf8c3f70, 0xf800180f, 0x07060504, 0xbf810000,
 };
 
 alignas(256) constexpr std::array<std::uint32_t, 9> BiasPixelCode{

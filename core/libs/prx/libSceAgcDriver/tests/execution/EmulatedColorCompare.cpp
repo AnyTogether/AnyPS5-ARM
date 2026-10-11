@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -236,10 +237,11 @@ ShaderRecompiler::RecompileResult Compile(AgcDriver::VulkanDevice& device, std::
     return ShaderRecompiler::Recompile(request);
 }
 
-void Run(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* name, bool offsets = false, bool useCache = false, bool array = false) {
+std::uint64_t Run(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* name, bool offsets = false, bool useCache = false, bool array = false, std::uint64_t expectedVariant = 0) {
     Output.fill(-1.0f);
     const std::span<const std::uint32_t> code = offsets ? std::span<const std::uint32_t>(OffsetCode) : array ? std::span<const std::uint32_t>(ArrayCode) : std::span<const std::uint32_t>(Code);
     const auto result = Compile(device, Format8888UNorm, sampler, code, useCache);
+    if (expectedVariant != 0) Require(result.cacheHit && result.variantId == expectedVariant, std::string(name) + " did not reuse the compiled comparison artifact");
     for (const auto& binding : result.bindings) {
         Require(binding.role != ShaderRecompiler::DescriptorRole::GuestSamplers, "emulated comparison retained a sampler binding");
         Require(std::all_of(binding.imageSamplers.begin(), binding.imageSamplers.end(), [](auto mask) { return mask == 0u; }), "emulated comparison retained an unused sampler association");
@@ -251,6 +253,7 @@ void Run(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* na
         const float tolerance = sampler.filter == FilterPoint ? 0.0f : 1e-4f;
         Require(std::fabs(Output[tid] - expected) <= tolerance, std::string(name) + ": thread " + std::to_string(tid) + " compared to " + std::to_string(Output[tid]) + ", expected " + std::to_string(expected));
     }
+    return result.variantId;
 }
 
 constexpr std::uint32_t Select(std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint32_t w) {
@@ -306,9 +309,10 @@ bool BindsDepthCompare(const ShaderRecompiler::RecompileResult& result) {
     });
 }
 
-void RunSrgbZero(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, const char* name) {
+void RunSrgbZero(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, const char* name, bool useCache, std::uint64_t expectedVariant) {
     Output.fill(-1.0f);
-    const auto result = Compile(device, format, sampler);
+    const auto result = Compile(device, format, sampler, Code, useCache);
+    if (useCache) Require(result.cacheHit && result.variantId == expectedVariant, std::string(name) + " did not reuse the compiled comparison artifact");
     Require(!BindsDepthCompare(result), std::string(name) + " kept a depth-compare binding");
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
     device.WaitIdle();
@@ -333,6 +337,8 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        const auto* forced = std::getenv("APS5_SRGB_SHADER_DECODE");
+        if (forced != nullptr && std::string_view(forced) == "1") Require((device->Target().srgbDecodeFormats & 3u) == 3u, "forced R8 and RG8 sRGB shader decoding is unavailable");
         FillTexels();
         FillInput();
         RunCube(*device, {ClampEdge, FilterPoint}, "point cube, clamp to edge");
@@ -344,16 +350,22 @@ int main() {
         FillTexels();
         Require(BindsDepthCompare(Compile(*device, Format32Float, {ClampEdge, FilterBilinear})), "an R32 float texture left the native comparison path");
         Require(!BindsDepthCompare(Compile(*device, Format8888UNorm, {ClampEdge, FilterBilinear})), "a color texture kept a depth-compare binding");
-        for (std::uint32_t function = 0; function < 8u; ++function) {
-            const auto point = "point 8_8_8_8 srgb function " + std::to_string(function);
-            const auto bilinear = "bilinear 8_8_8_8 srgb function " + std::to_string(function);
-            RunSrgbZero(*device, Format8888Srgb, {ClampEdge, FilterPoint, BorderBlack, 0u, 0u, false, function}, point.c_str());
-            RunSrgbZero(*device, Format8888Srgb, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, false, function}, bilinear.c_str());
+        for (const bool useCache : {false, true}) {
+            const auto variant = useCache ? Run(*device, {ClampEdge, FilterPoint}, "cached UNORM before sRGB", false, true) : 0u;
+            if (useCache) Require(variant != 0, "the cached comparison has no compiled artifact identity");
+            for (const auto format : {Format8Srgb, Format8_8Srgb, Format8888Srgb}) {
+                for (std::uint32_t function = 0; function < 8u; ++function) {
+                    for (const auto filter : {FilterPoint, FilterBilinear}) {
+                        const auto name = std::string(useCache ? "cached" : "uncached") + " sRGB format " + std::to_string(format) + " function " + std::to_string(function) + (filter == FilterPoint ? " point" : " bilinear");
+                        RunSrgbZero(*device, format, {ClampEdge, filter, BorderBlack, 0u, 0u, false, function}, name.c_str(), useCache, variant);
+                    }
+                }
+            }
+            if (useCache) Run(*device, {ClampEdge, FilterPoint}, "cached UNORM after sRGB", false, true, false, variant);
         }
-        RunSrgbZero(*device, Format8Srgb, {ClampEdge, FilterPoint}, "point 8 srgb");
-        RunSrgbZero(*device, Format8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8 srgb");
-        RunSrgbZero(*device, Format8_8Srgb, {ClampEdge, FilterPoint}, "point 8_8 srgb");
-        RunSrgbZero(*device, Format8_8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8_8 srgb");
+        for (const auto format : {Format8Srgb, Format8_8Srgb, Format8888Srgb}) {
+            Reject(*device, format, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
+        }
         Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap with negative offsets", true);

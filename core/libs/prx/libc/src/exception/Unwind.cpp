@@ -1,7 +1,11 @@
 #include "prx/libc/include/exceptions/Unwind.hpp"
+#include "prx/libc/include/exceptions/Runtime.hpp"
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include "prx/libc/src/specifics/x86_64/RegisterContext.cpp"
 
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <algorithm>
@@ -502,6 +506,14 @@ _Unwind_Reason_Code APS5_VABI _Unwind_RaiseException_nid_postfix(_Unwind_Excepti
 }
 
 [[noreturn]] void APS5_VABI _Unwind_Resume_nid_postfix(_Unwind_Exception* exception) {
+#if defined(__linux__)
+    if (!LibcException::Native(exception->exception_class) && !exception->private_1) {
+        using Resume = void (*)(_Unwind_Exception*);
+        const auto resume = reinterpret_cast<Resume>(dlsym(RTLD_NEXT, "_Unwind_Resume"));
+        if (!resume) std::abort();
+        resume(exception);
+    }
+#endif
     _Unwind_Context context;
     LibcCaptureRegisters(context.registers);
     if (!LibcUnwind::Step(context)) std::abort();

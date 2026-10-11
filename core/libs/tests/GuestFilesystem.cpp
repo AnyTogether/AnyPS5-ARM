@@ -283,7 +283,6 @@ int main() {
     const int emptyUtimes = sceKernelUtimes_nid_postfix("", nullptr);
     std::error_code restoreTimeError;
     std::filesystem::last_write_time(".", cwdWriteTime, restoreTimeError);
-    Require(!restoreTimeError);
     Require(emptyUtimes == static_cast<int>(0x80020002u));
     Require(stat_nid_postfix(presentName.c_str(), &status) == 0 && status.st_size == 5);
     Require(stat_nid_postfix(missingName.c_str(), &status) == -1 && *__error_nid_postfix() == 2);

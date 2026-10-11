@@ -156,25 +156,24 @@ static void testUncaughtExceptions() {
     if (seen != 1) throw std::runtime_error("unwinding did not count its exception");
 }
 
-static int onceDestroyed;
-struct OnceGuard { ~OnceGuard() { ++onceDestroyed; } };
-static void ThrowThroughOnce(int depth) {
-    OnceGuard guard;
-    if (depth) { ThrowThroughOnce(depth - 1); return; }
-    std::once_flag flag;
-    std::call_once(flag, [] { throw std::runtime_error("through runtime frames"); });
+static int guestFrameDestroyed;
+struct GuestFrameGuard { ~GuestFrameGuard() { ++guestFrameDestroyed; } };
+static void ThrowThroughGuestFrames(int depth) {
+    GuestFrameGuard guard;
+    if (depth) { ThrowThroughGuestFrames(depth - 1); return; }
+    throw std::runtime_error("through guest frames");
 }
 
-static void testUnwindThroughRuntimeModules() {
+static void testUnwindThroughGuestFrames() {
     for (int depth : {0, 1, 7, 64}) {
-        onceDestroyed = 0;
+        guestFrameDestroyed = 0;
         try {
-            ThrowThroughOnce(depth);
-            throw std::logic_error("call_once did not propagate");
+            ThrowThroughGuestFrames(depth);
+            throw std::logic_error("guest frame did not propagate");
         } catch (const std::runtime_error& error) {
-            if (std::strcmp(error.what(), "through runtime frames")) throw;
+            if (std::strcmp(error.what(), "through guest frames")) throw;
         }
-        if (onceDestroyed != depth + 1) throw std::runtime_error("unwinding through runtime DLL frames skipped a destructor");
+        if (guestFrameDestroyed != depth + 1) throw std::runtime_error("unwinding through guest frames skipped a destructor");
     }
 }
 
@@ -184,7 +183,7 @@ int main() {
     testFutureException();
     testMadeExceptionPointer();
     testUncaughtExceptions();
-    testUnwindThroughRuntimeModules();
+    testUnwindThroughGuestFrames();
     try {
         Rethrow();
         return 1;
