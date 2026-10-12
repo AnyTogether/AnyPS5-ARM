@@ -34,6 +34,21 @@ constexpr TextureTileMode ColorTextureTileMode(ColorTileMode mode) {
 
 ColorTileMode DecodeColorTileMode(std::uint32_t attrib3);
 
+// The guest bytes of a multisampled surface in a swizzled mode: its blocks hold the samples of each
+// pixel together, so a block spans the pixels of an element of elementBytes * samples (AddrLib's GFX10
+// rule: 4-byte elements at 4 samples fill a 64 KiB block with 64x64 pixels, not 128x128). A linear
+// surface keeps samples * its single-sample bytes.
+constexpr std::uint64_t MultisampleSurfaceBytes(std::uint32_t width, std::uint32_t height, ColorTileMode mode, std::uint32_t elementBytes, std::uint32_t samples, std::uint64_t singleSampleBytes) {
+    const std::uint64_t element = static_cast<std::uint64_t>(elementBytes) * samples;
+    const std::uint64_t block = ColorTileModeBlockBytes(mode);
+    if (mode == ColorTileMode::Linear || element == 0 || element > block || (element & (element - 1)) != 0) return singleSampleBytes * samples;
+    std::uint32_t log2 = 0;
+    while ((std::uint64_t{1} << (log2 + 1)) <= block / element) ++log2;
+    const std::uint64_t blockWidth = std::uint64_t{1} << ((log2 + 1) / 2);
+    const std::uint64_t blockHeight = std::uint64_t{1} << (log2 / 2);
+    return ((width + blockWidth - 1) / blockWidth) * ((height + blockHeight - 1) / blockHeight) * block;
+}
+
 class ColorTargetLayout {
 public:
     ColorTargetLayout(std::uint32_t width, std::uint32_t height, ColorTileMode mode, std::uint32_t bytesPerElement = 4, std::uint32_t pipeBankXor = 0);
