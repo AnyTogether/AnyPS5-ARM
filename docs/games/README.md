@@ -14,5 +14,5 @@ Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son gü
 | <img src="img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Oynanabilir | 60 |
 | <img src="img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | Projenin test oyunu | 🟢 Oynanabilir | 60 |
 | <img src="img/stray-saveselect.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🔴 Başlangıçta kapanıyor (gerileme) | — |
-|  | [**Quake II ve Quake III**](quake.md) | `PPSA99007 · PPSA99303` | Kendi GPU sürücüsü (Mesa/RADV) | ⚪ Bu yaklaşımın dışında | — |
+| <img src="img/quake2-base1.jpg" width="180"> | [**Quake II ve Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II oyun içi · Quake III veri bekliyor | Menü ~48 · oyun içi ~13 |
 |  | **GTA III – Definitive Edition** | `PPSA03527` | Unreal Engine 4 | 🔴 Henüz yeniden denenmedi | — |

@@ -15,7 +15,7 @@ Measured on a MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. The game's
 | AnyPS5 Breakout (test title) | APS5TEST1 | | Playable: video, pad and audio | 60 |
 | Stray | PPSA02100 | Unreal Engine 4 | **Regression:** crashes at start-up on current `main` while its memory allocator is set up; earlier builds reached the menus ([page](../games/stray.md)) | – |
 | Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Not retried since the last report: some shaders compile to very large SPIR-V and it uses 64-bit image atomics, which MoltenVK lacks | – |
-| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | own Mesa/RADV GPU driver | Out of scope: they drive the GPU through the PS5 kernel directly instead of Sony's libraries ([page](../games/quake.md)) | – |
+| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | PS5_Mesa (OpenGL / RADV) through `sceAgcDriverSubmitDcb` | **Work in progress:** Quake II reaches the menu and base1; Quake III runs but needs the user's `pak0.pk3` and the 1.32 `pak1-8.pk3` ([page](../games/quake.md)) | Quake II: menu ~48, in game ~13 |
 
 ## Windows and Linux
 
@@ -53,7 +53,7 @@ Not verified: Linux with Intel GPUs.
 | AnyPS5 Breakout (test oyunu) | APS5TEST1 | | Oynanabilir: görüntü, kol ve ses | 60 |
 | Stray | PPSA02100 | Unreal Engine 4 | **Gerileme:** güncel `main`'de bellek ayırıcısı kurulurken açılışta kapanıyor; önceki derlemeler menülere geliyordu ([sayfa](../games/stray.md)) | – |
 | Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Son rapordan beri yeniden denenmedi: bazı shader'lar çok büyük SPIR-V'lere dönüşüyor ve MoltenVK'de olmayan 64-bit image atomic kullanıyor | – |
-| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | kendi Mesa/RADV GPU sürücüsü | Kapsam dışı: GPU'ya Sony'nin kütüphaneleri yerine doğrudan PS5 çekirdeği üzerinden erişiyorlar ([sayfa](../games/quake.md)) | – |
+| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | PS5_Mesa (OpenGL / RADV), `sceAgcDriverSubmitDcb` üzerinden | **Üzerinde çalışılıyor:** Quake II menüye ve base1'e geliyor; Quake III çalışıyor ama kullanıcının `pak0.pk3` ve 1.32 `pak1-8.pk3` dosyalarına ihtiyaç var ([sayfa](../games/quake.md)) | Quake II: menü ~48, oyun içi ~13 |
 
 ### Windows ve Linux
 
