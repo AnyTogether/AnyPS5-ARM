@@ -1,6 +1,7 @@
 #ifndef CODEGEN_X86_STUBBODYBUILDER_HPP
 #define CODEGEN_X86_STUBBODYBUILDER_HPP
 
+#include <codegen/CodegenTypes.hpp>
 #include <codegen/x86/Amd64OnlySubstitutionTypes.hpp>
 #include <domain/Types.hpp>
 #include <array>
@@ -53,6 +54,10 @@ public:
     void Restore(std::uint8_t reg);
     void Raw(std::span<const std::uint8_t> bytes);
     void Move(std::span<const std::uint8_t> instruction, std::optional<std::size_t> ripDisplacementOffset);
+    void RipRelative(std::span<const std::uint8_t> instruction, std::size_t displacementOffset, std::int64_t target);
+    void MoveControlFlow(std::span<const std::uint8_t> instruction, const DecodedInstructionInfo& info);
+    void JumpTo(std::int64_t siteTarget);
+    void Seek(std::int64_t siteOffset);
     void Advance(std::size_t length);
     [[nodiscard]] LoweredBody Finish();
 
@@ -63,12 +68,15 @@ private:
         std::size_t ConstantIndex;
     };
 
+    void _rel32(std::initializer_list<std::uint8_t> opcode, std::int64_t siteTarget);
+    void _pushReturnAddress(std::int64_t siteTarget);
+
     std::vector<std::uint8_t> _bytes;
     std::vector<Fixup> _fixups;
     std::vector<StubConstant> _constants;
     std::vector<StubRelocation> _relocations;
     std::size_t _stackDepth = 0;
-    std::size_t _siteOffset = 0;
+    std::int64_t _siteOffset = 0;
 };
 
 }
