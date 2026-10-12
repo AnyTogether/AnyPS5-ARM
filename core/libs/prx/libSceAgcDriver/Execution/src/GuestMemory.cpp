@@ -1326,6 +1326,7 @@ std::uint64_t MarkWritten(std::uint64_t address, std::size_t bytes) {
     if (!tracker.watched || !tracker.covers(address, bytes)) return 0;
 #ifndef _WIN32
     {
+        GuestWriteWatch::GuestWriteWatchHostWrites_nid_postfix(reinterpret_cast<const void*>(address), bytes);
         const auto blockFirst = address & ~(std::uint64_t{WriteBlockBytes} - 1);
         const auto blockStop = (address + bytes + WriteBlockBytes - 1) & ~(std::uint64_t{WriteBlockBytes} - 1);
         StampRuns runs{tracker, StampKind::Fresh};
