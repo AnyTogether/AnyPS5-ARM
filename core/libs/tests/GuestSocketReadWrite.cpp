@@ -2,6 +2,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -150,6 +152,14 @@ int main() {
 #ifndef _WIN32
     std::int64_t written = 0;
     for (int i = 0; i < 100 && written >= 0; ++i) written = write_nid_postfix(server, request, sizeof(request));
+#ifdef __APPLE__
+    // Before macOS has taken in the peer's reset, a nonblocking write can find the send buffer full
+    // (EAGAIN) or report the reset itself (ECONNRESET); EPIPE follows once the reset is processed.
+    for (int i = 0; i < 1000 && written == -1 && (*__error_nid_postfix() == 35 || *__error_nid_postfix() == 54); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        written = write_nid_postfix(server, request, sizeof(request));
+    }
+#endif
     Require(written == -1 && *__error_nid_postfix() == 32);
 #endif
     Require(close_nid_postfix(server) == 0);
