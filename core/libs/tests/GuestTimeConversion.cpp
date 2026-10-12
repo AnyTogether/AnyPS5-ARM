@@ -180,6 +180,53 @@ static void CheckFreeBsdConversions() {
     Require(strftime_nid_postfix(tooSmall, sizeof(tooSmall), "%k:%l", &guest) == 0, "strftime accepted an undersized buffer");
 }
 
+static void CheckLiteralConversions() {
+    const std::int64_t timer = 1700000000;
+    GuestTm guest{};
+    Require(gmtime_s_nid_postfix(&timer, &guest) == &guest, "UTC conversion failed");
+    struct FormatCase {
+        const char* format;
+        const char* expected;
+    };
+    constexpr FormatCase cases[]{
+        {"%Q", "Q"},
+        {"%P|%f|%N|%1|%#Y", "P|f|N|1|#Y"},
+        {"[%Q] %Y-%m-%d", "[Q] 2023-11-14"},
+        {"%EQ|%OQ|%_Q|%-Q|%0Q", "Q|Q|Q|Q|Q"},
+        {"%E_Q|%_EQ|%O0Q|%-OQ", "Q|Q|Q|Q"},
+        {"%EEY|%EOY|%OEY|%OOY", "EY|OY|EY|OY"},
+        {"%EE%Y|%OO%k", "E2023|O22"},
+        {"%--Y|%__Y|%00Y|%_0Y|%0-Y", "-Y|_Y|0Y|0Y|-Y"},
+        {"%E_EY|%_EOY|%O0OY", "EY|OY|OY"},
+        {"%", "%"},
+        {"text%", "text%"},
+        {"%E", "E"},
+        {"%O", "O"},
+        {"%_", "_"},
+        {"%-", "-"},
+        {"%0", "0"},
+        {"%E_", "_"},
+        {"%_E", "E"},
+        {"%Q%", "Q%"},
+        {"%k%", "22%"},
+        {"%%Q|%%%Q|%%%%Q", "%Q|%Q|%%Q"},
+        {"%E%Q|%O%Q|%_%Q|%0%Q|%-%Q", "%Q|%Q|%Q|%Q|%Q"},
+        {"%E%%Q|%O%%%Q", "%Q|%%Q"},
+        {"%Q|%Ek|%Ol|%Ev|%Y", "Q|22|10|14-Nov-2023|2023"},
+        {"%\xc3\xa5", "\xc3\xa5"},
+        {"%%", "%"},
+        {"literal text", "literal text"},
+    };
+    for (const auto& test : cases) {
+        CheckFormat(guest, test.format, test.expected);
+        CheckBufferSize(guest, test.format, std::strlen(test.expected));
+    }
+    CheckFormat(guest, "", "");
+    char buffer[2]{'x', 'y'};
+    Require(strftime_nid_postfix(buffer, 0, "%Q", &guest) == 0, "strftime accepted a zero-size buffer");
+    Require(buffer[0] == 'x' && buffer[1] == 'y', "strftime wrote to a zero-size buffer");
+}
+
 int main() {
 #ifdef _WIN32
     _putenv_s("TZ", "UTC-2");
@@ -233,6 +280,7 @@ int main() {
         && std::strcmp(formatted, "1970-01-01 00:00:00") == 0, "strftime did not read the guest tm");
 
     CheckFreeBsdConversions();
+    CheckLiteralConversions();
 
     CheckConcurrent(libc_gmtime_nid_postfix, gmtime_s_nid_postfix, "Concurrent libc_gmtime returned another thread's date");
     CheckConcurrent(gmtime_nid_postfix, gmtime_s_nid_postfix, "Concurrent gmtime returned another thread's date");

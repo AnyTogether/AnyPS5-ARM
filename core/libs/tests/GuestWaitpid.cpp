@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <initializer_list>
 extern "C" {
+int APS5_VABI wait_nid_postfix(int*);
 int APS5_VABI waitpid_nid_postfix(int, int*, int);
 int APS5_VABI getpid_nid_postfix(void);
 int* APS5_VABI __error_nid_postfix();
@@ -28,4 +29,12 @@ int main() {
         for (int options : {0x40, 0x41, 0x80, 0x100, 0x40000000, static_cast<int>(0x80000040u), static_cast<int>(0xffffffffu)})
             RequireFailure(pid, options, invalidArgument);
     }
+    int status = untouched;
+    *__error_nid_postfix() = invalidArgument;
+    Require(wait_nid_postfix(&status) == -1);
+    Require(*__error_nid_postfix() == noChild);
+    Require(status == untouched);
+    *__error_nid_postfix() = invalidArgument;
+    Require(wait_nid_postfix(nullptr) == -1);
+    Require(*__error_nid_postfix() == noChild);
 }

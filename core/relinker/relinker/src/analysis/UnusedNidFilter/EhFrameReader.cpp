@@ -1,6 +1,7 @@
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <cstring>
 #include <limits>
+#include <algorithm>
 
 namespace Relinker::UnusedNidFilter {
 
@@ -37,7 +38,7 @@ public:
             for (std::uint64_t index = 0; index < count; ++index) {
                 const auto begin = encoded(position, tableEncoding, segment.MappedAddress);
                 const auto fde = encoded(position, tableEncoding, segment.MappedAddress);
-                if (position > segment.MappedAddress + segment.FileSize) throw RelinkerException("Strict filter: EH frame table exceeds segment", position);
+                if (position < segment.MappedAddress || position - segment.MappedAddress > segment.FileSize) throw RelinkerException("Strict filter: EH frame table exceeds segment", position);
                 result.push_back(readFde(begin, fde));
             }
         }
@@ -51,11 +52,38 @@ private:
     const std::set<VirtualAddress>& importSlots;
     std::map<VirtualAddress, Cie> cies;
 
+    VirtualAddress checkedRangeEnd(VirtualAddress address, std::uint64_t size) const {
+        if (size > std::numeric_limits<VirtualAddress>::max() - address)
+            throw RelinkerException("Strict filter: unwind range overflowed", address);
+        const auto end = address + size;
+        while (address < end) {
+            bool found = false;
+            for (const auto& segment : headers) {
+                if (segment.Type != 1 || address < segment.MappedAddress) continue;
+                const auto relative = address - segment.MappedAddress;
+                if (relative >= segment.FileSize) continue;
+                const auto chunk = std::min(end - address, segment.FileSize - relative);
+                if (segment.Offset > bytes.size() || relative > bytes.size() - segment.Offset ||
+                    chunk > bytes.size() - segment.Offset - relative)
+                    throw RelinkerException("Strict filter: unwind data exceeds file", address);
+                address += chunk;
+                found = true;
+                break;
+            }
+            if (!found) throw RelinkerException("Strict filter: unwind range is not file-backed", address);
+        }
+        return end;
+    }
+
     template<typename TValue>
     TValue read(VirtualAddress& address) const {
         for (const auto& segment : headers) {
             if (segment.Type != 1 || address < segment.MappedAddress || address - segment.MappedAddress > segment.FileSize || sizeof(TValue) > segment.FileSize - (address - segment.MappedAddress)) continue;
-            const auto offset = segment.Offset + address - segment.MappedAddress;
+            const auto relative = address - segment.MappedAddress;
+            if (segment.Offset > bytes.size() || relative > bytes.size() - segment.Offset ||
+                sizeof(TValue) > std::numeric_limits<VirtualAddress>::max() - address)
+                throw RelinkerException("Strict filter: unwind data range overflowed", address);
+            const auto offset = segment.Offset + relative;
             if (offset > bytes.size() || sizeof(TValue) > bytes.size() - offset) throw RelinkerException("Strict filter: unwind data exceeds file", address);
             TValue value;
             std::memcpy(&value, bytes.data() + offset, sizeof(value));
@@ -118,7 +146,7 @@ private:
         auto position = address;
         const auto length = read<std::uint32_t>(position);
         if (length == 0xFFFFFFFF || length < 8) throw RelinkerException("Strict filter: unsupported CIE record size", address);
-        const auto end = position + length;
+        const auto end = checkedRangeEnd(position, length);
         if (read<std::uint32_t>(position) != 0) throw RelinkerException("Strict filter: invalid CIE identifier", address);
         const auto version = read<std::uint8_t>(position);
         if (version != 1 && version != 3 && version != 4) throw RelinkerException("Strict filter: unsupported CIE version", address);
@@ -140,8 +168,9 @@ private:
             if (augmentation.front() != 'z') throw RelinkerException("Strict filter: unsupported CIE augmentation", address);
             cie.Augmented = true;
             const auto size = leb(position);
+            if (position > end || size > end - position)
+                throw RelinkerException("Strict filter: CIE augmentation exceeds record", address);
             const auto augmentationEnd = position + size;
-            if (augmentationEnd > end) throw RelinkerException("Strict filter: CIE augmentation exceeds record", address);
             for (std::size_t index = 1; index < augmentation.size(); ++index) {
                 switch (augmentation[index]) {
                     case 'L': cie.LsdaEncoding = read<std::uint8_t>(position); break;
@@ -166,7 +195,7 @@ private:
         auto position = address;
         const auto length = read<std::uint32_t>(position);
         if (length == 0xFFFFFFFF || length < 8) throw RelinkerException("Strict filter: unsupported FDE record size", address);
-        const auto end = position + length;
+        const auto end = checkedRangeEnd(position, length);
         const auto cieField = position;
         const auto cieOffset = read<std::uint32_t>(position);
         if (cieOffset > cieField) throw RelinkerException("Strict filter: invalid FDE CIE offset", address);
@@ -179,6 +208,8 @@ private:
         if (cie.Personality != 0) region.ExtraTargets.push_back(cie.Personality);
         if (cie.Augmented) {
             const auto augmentationSize = leb(position);
+            if (position > end || augmentationSize > end - position)
+                throw RelinkerException("Strict filter: FDE augmentation exceeds record", address);
             const auto augmentationEnd = position + augmentationSize;
             if (augmentationEnd > end) throw RelinkerException("Strict filter: FDE augmentation exceeds record", address);
             if (cie.LsdaEncoding != 0xFF) {
@@ -201,7 +232,7 @@ private:
         if ((callEncoding & 0xF0) != 0) throw RelinkerException("Strict filter: unsupported LSDA call-site encoding", address);
         const auto tableSize = leb(position);
         if (tableSize > bytes.size()) throw RelinkerException("Strict filter: invalid LSDA table size", address);
-        const auto tableEnd = position + tableSize;
+        const auto tableEnd = checkedRangeEnd(position, tableSize);
         while (position < tableEnd) {
             encoded(position, callEncoding);
             encoded(position, callEncoding);

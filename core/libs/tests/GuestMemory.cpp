@@ -1699,6 +1699,28 @@ static void CheckAvailableDirectMemoryIsLargestFreeBlock() {
     Require(start == top && size == static_cast<std::size_t>(window));
 }
 
+static void CheckMunmapOverUnmappedPages() {
+    constexpr std::size_t page = 0x4000;
+    const auto failed = reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1));
+    void* raw = mmap_nid_postfix(nullptr, page * 3, 3, 0x1002, -1, 0);
+    Require(raw != failed);
+    auto* memory = static_cast<unsigned char*>(raw);
+    memory[0] = 1;
+    memory[page * 2] = 2;
+    Require(munmap_nid_postfix(memory + page, page) == 0);
+    Require(munmap_nid_postfix(memory, page * 3) == 0);
+    {
+        GuestAllocations::Mutation mutation;
+        Require(!mutation.Overlaps(memory, page * 3));
+    }
+    VirtualQueryInfo info{};
+    Require(sceKernelVirtualQuery(memory, 0, &info, sizeof(info)) == SCE_KERNEL_ERROR_EACCES);
+    Require(sceKernelVirtualQuery(memory + page * 2, 0, &info, sizeof(info)) == SCE_KERNEL_ERROR_EACCES);
+    Require(munmap_nid_postfix(memory, page * 3) == 0);
+    Require(sceKernelMunmap(memory, page * 3) == 0);
+    Require(sceKernelMunmap(memory, 0) == SCE_KERNEL_ERROR_EINVAL);
+}
+
 int main() {
 #ifdef _WIN32
     _putenv_s("APS5_PIN_WAIT_MS", "1000");
@@ -1708,6 +1730,7 @@ int main() {
     CheckVirtualQueryForNonReadableGuestRange();
     CheckReleaseFlexibleMemory();
     CheckVirtualQueryPartialMunmap();
+    CheckMunmapOverUnmappedPages();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
 #ifndef __APPLE__
@@ -1832,7 +1855,7 @@ int main() {
     Require(munmap_nid_postfix(memory, page) == 0);
     Require(memory[page * 2] == 73);
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
-    Require(munmap_nid_postfix(memory, page) == -1);
+    Require(munmap_nid_postfix(memory, page) == 0);
     Require(madvise_nid_postfix(memory, page, 4) == 0);
     *__error_nid_postfix() = 0;
     Require(mprotect_nid_postfix(memory, page, 1) == -1 && *__error_nid_postfix() == 22);

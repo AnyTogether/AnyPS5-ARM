@@ -134,7 +134,6 @@ int APS5_VABI sceVideoOutSubmitChangeBufferAttribute2(int handle, int setIndex, 
     group.attribute = *attribute;
     for (int i = 0; i < VIDEO_OUT_BUFFER_NUM_MAX; ++i) {
         if (cfg->buffers[i].groupIndex != setIndex) continue;
-        if (cfg->bufferPending[i] != 0) throw std::runtime_error("VideoOut: buffer attributes are in use by a pending flip");
         const auto display = DescribeVideoOutBuffer(cfg->buffers[i], group);
         AgcDriverCheckGuestMemory_nid_postfix(reinterpret_cast<const void*>(display.address), AgcDriverDisplayBufferSize_nid_postfix(display), 65536);
     }

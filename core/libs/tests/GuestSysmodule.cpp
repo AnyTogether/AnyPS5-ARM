@@ -131,6 +131,13 @@ int main() {
     Require(sceSysmoduleUnloadModule(kUltModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kUltModuleId) == kModuleUnloaded);
 
+    constexpr std::uint16_t kShareModuleId = 0x010f;
+    Require(sceSysmoduleIsLoaded(kShareModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kShareModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kShareModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kShareModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kShareModuleId) == kModuleUnloaded);
+
     Require(sceSysmoduleIsLoaded(kTrophy2ModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModuleInternal(kTrophy2ModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kTrophy2ModuleId) == 0);

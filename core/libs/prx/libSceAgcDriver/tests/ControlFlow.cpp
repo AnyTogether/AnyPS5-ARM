@@ -566,6 +566,16 @@ done:
   buffer_store_dword v1, off, s[0:3], 0
   s_endpgm)",
          Store({0x7d880090u, 0xbf860004u, 0x7d880088u, 0xbf870003u, 0x4a020081u, 0xbf820005u, 0x4a020082u, 0x7d880084u, 0xbf860001u, 0x4a020285u, 0x4a020283u}), Split::Clone},
+        {"memory access in a single-block loop latch", R"(
+  s_mov_b32 s8, 0
+  v_mov_b32 v1, 0
+loop:
+  buffer_store_dword v1, off, s[0:3], 0
+  s_add_u32 s8, s8, 1
+  s_cmp_lt_u32 s8, 4
+  s_cbranch_scc1 loop
+  s_endpgm)",
+         {0xbe880380u, 0x7e020280u, 0xe0700000u, 0x80000100u, 0x80088108u, 0xbf0a8408u, 0xbf85fffbu, 0xbf810000u}, Split::None},
         {"shared tail in a loop", R"(
   s_mov_b32 s8, 0
   v_mov_b32 v1, 0

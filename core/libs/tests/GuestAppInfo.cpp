@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -37,8 +38,11 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string_view(argv[1]) == "--without-param-json") {
         std::filesystem::current_path(argv[2]);
         AppInfo info{};
-        sceKernelGetAppInfo(getpid_nid_postfix(), &info);
-        return 0;
+        try { sceKernelGetAppInfo(getpid_nid_postfix(), &info); }
+        catch (const std::runtime_error& error) {
+            return std::string_view(error.what()) == "param.json not found" ? 0 : 1;
+        }
+        return 1;
     }
     const auto previous = std::filesystem::current_path();
     const auto root = EnterTemporaryRoot("guest_app_info_");
@@ -65,7 +69,7 @@ int main(int argc, char** argv) {
 #else
     const std::string command = arguments;
 #endif
-    Require(std::system(command.c_str()) != 0);
+    Require(std::system(command.c_str()) == 0);
     std::filesystem::remove_all(empty);
 
     Require(sceKernelUuidCreate(nullptr) == SCE_KERNEL_ERROR_EINVAL);

@@ -299,6 +299,10 @@ int APS5_VABI waitpid_nid_postfix(int pid, int* status, int options) {
     return -1;
 }
 
+int APS5_VABI wait_nid_postfix(int* status) {
+    return waitpid_nid_postfix(-1, status, 0);
+}
+
 // The guest runs alone in its process, as system() and waitpid() model it: there is no other
 // executable to replace its image with, so the call fails like the unsupported system call.
 int APS5_VABI execvp_nid_postfix(const char* file, char* const* arguments) {
@@ -392,6 +396,10 @@ int APS5_VABI sched_get_priority_min_nid_postfix(int policy) {
 int APS5_VABI getrusage_nid_postfix(int who, GuestResourceUsage* usage) {
     if (usage == nullptr)
         throw std::invalid_argument("getrusage: usage is null");
+    if (who == -1) {
+        *usage = {};
+        return 0;
+    }
     if (who != 0 && who != 1)
         throw std::invalid_argument("getrusage: unsupported who");
 #ifdef _WIN32

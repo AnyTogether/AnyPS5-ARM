@@ -144,7 +144,7 @@ bool foldPhi(IrValue& inst) {
         }
         if (same == nullptr) {
             same = value;
-        } else if (!(*same == *value)) {
+        } else if (same != value && !(same->HasImmediate() && value->HasImmediate() && *same == *value)) {
             return false;
         }
     }

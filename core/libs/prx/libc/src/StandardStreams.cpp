@@ -27,7 +27,7 @@ std::int32_t APS5_VABI ungetwc_nid_postfix(std::int32_t value, FileStream* strea
     if (value == -1) return -1;
     if (value < 0 || value > 255) {
         errno = 86;
-        stream->SetEncodingError();
+        stream->SetError();
         return -1;
     }
     const int result = std::ungetc(value, GetNativeStream(stream));
@@ -69,6 +69,11 @@ int APS5_VABI ungetc_nid_postfix(int value, FileStream* stream) {
     return result;
 }
 char* APS5_VABI fgets_nid_postfix(char* buffer, int size, FileStream* stream) {
+    if (size <= 0) {
+        stream->SetError();
+        errno = 22;
+        return nullptr;
+    }
     auto* result = std::fgets(buffer, size, GetNativeStream(stream));
     stream->SyncStatus();
     return result;

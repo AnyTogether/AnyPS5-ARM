@@ -642,6 +642,10 @@ void DefineMeshOutputs(SpirvEmitterState& state) {
     state.module.AddAnnotation(spv::OpDecorate, state.meshPrimitives, spv::DecorationBuiltIn, spv::BuiltInPrimitiveTriangleIndicesEXT);
     state.module.AddAnnotation(spv::OpDecorate, state.meshCull, spv::DecorationBuiltIn, spv::BuiltInCullPrimitiveEXT);
     state.module.AddAnnotation(spv::OpDecorate, state.meshCull, spv::DecorationPerPrimitiveEXT);
+    if (state.numWorkgroupsVariable == 0u) {
+        state.numWorkgroupsVariable = DefineInterfaceVariable(state, TypeU32Vector(state, 3u), spv::StorageClassInput, "gl_NumWorkGroups");
+        state.module.AddAnnotation(spv::OpDecorate, state.numWorkgroupsVariable, spv::DecorationBuiltIn, spv::BuiltInNumWorkgroups);
+    }
 }
 
 void EmitMeshEntryPoint(SpirvEmitterState& state) {
@@ -666,7 +670,15 @@ void EmitMeshEntryPoint(SpirvEmitterState& state) {
         state.module.AddFunction(spv::OpExtInst, TypeU32(state), result, GlslStd450(state), GLSLstd450UMin, value, ConstantU32(state, limit));
         return result;
     };
-    const auto vertices = clamp(MeshLoad(state, state.meshAllocation, spv::StorageClassWorkgroup, TypeU32(state), ConstantU32(state, 0u)), mesh.maxVertices);
+    const auto groupsX = state.module.AllocateId();
+    const auto groupsXPointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeU32(state)), groupsXPointer, state.numWorkgroupsVariable, ConstantU32(state, 0u));
+    state.module.AddFunction(spv::OpLoad, TypeU32(state), groupsX, groupsXPointer);
+    const auto noGroups = state.module.AllocateId();
+    state.module.AddFunction(spv::OpIEqual, TypeBool(state), noGroups, groupsX, ConstantU32(state, 0u));
+    const auto allocatedVertices = clamp(MeshLoad(state, state.meshAllocation, spv::StorageClassWorkgroup, TypeU32(state), ConstantU32(state, 0u)), mesh.maxVertices);
+    const auto vertices = state.module.AllocateId();
+    state.module.AddFunction(spv::OpSelect, TypeU32(state), vertices, noGroups, ConstantU32(state, 0u), allocatedVertices);
     const auto primitives = clamp(MeshLoad(state, state.meshAllocation, spv::StorageClassWorkgroup, TypeU32(state), ConstantU32(state, 1u)), mesh.maxPrimitives);
     state.module.AddFunction(spv::OpSetMeshOutputsEXT, vertices, primitives);
     const auto anyVertex = state.module.AllocateId();

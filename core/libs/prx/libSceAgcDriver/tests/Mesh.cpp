@@ -2,6 +2,7 @@
 #include "Recompiler.hpp"
 #include "execution/VulkanTestDevice.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -133,6 +134,26 @@ struct MeshDraw {
     VkCullModeFlags cull = VK_CULL_MODE_NONE;
 };
 
+bool ReadsNumWorkgroups(const std::vector<std::uint32_t>& words) {
+    constexpr std::uint32_t OpDecorate = 71;
+    constexpr std::uint32_t OpAccessChain = 65;
+    constexpr std::uint32_t OpLoad = 61;
+    constexpr std::uint32_t DecorationBuiltIn = 11;
+    constexpr std::uint32_t BuiltInNumWorkgroups = 24;
+    std::uint32_t variable = 0;
+    std::vector<std::uint32_t> pointers;
+    for (std::size_t at = 5; at < words.size();) {
+        const auto length = words[at] >> 16u;
+        const auto opcode = words[at] & 0xffffu;
+        if (length == 0 || at + length > words.size()) return false;
+        if (opcode == OpDecorate && length == 4 && words[at + 2] == DecorationBuiltIn && words[at + 3] == BuiltInNumWorkgroups) variable = words[at + 1];
+        if (opcode == OpAccessChain && length >= 4 && variable != 0 && words[at + 3] == variable) pointers.push_back(words[at + 2]);
+        if (opcode == OpLoad && length >= 4 && variable != 0 && (words[at + 3] == variable || std::find(pointers.begin(), pointers.end(), words[at + 3]) != pointers.end())) return true;
+        at += length;
+    }
+    return false;
+}
+
 void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     const auto target = device.Target();
     std::vector<std::uint32_t> userData(12, 0u);
@@ -149,6 +170,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
         ShaderRecompiler::GraphicsCompileContext{0, {}, setup.mesh, std::nullopt, {setup.draw.indexAddress, setup.draw.indexCount, setup.draw.indexSize, setup.draw.instanceCount}}
     };
     const auto meshResult = ShaderRecompiler::Recompile(geometry);
+    Require(ReadsNumWorkgroups(meshResult.spirv), "the mesh program does not read NumWorkgroups, so RADV can keep a previous vertex pipeline's user SGPR count for its dispatch");
     const auto meshPush = static_cast<std::uint32_t>(meshResult.pushConstants.size());
     Require((meshPush == 0) == (setup.geometryPushBytes == 0), "the geometry program's push data does not follow its layout");
 

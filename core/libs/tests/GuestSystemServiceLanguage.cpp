@@ -21,18 +21,25 @@ void SetLanguage(const char* value) {
 int Language() {
     int value = -1;
     Require(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_LANG, &value) == SYSTEM_SERVICE_OK);
+    int sameValue = -1;
+    Require(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_400, &sameValue) == SYSTEM_SERVICE_OK);
+    Require(sameValue == value);
     return value;
 }
 
-bool Rejected(const char* value) {
-    SetLanguage(value);
+bool ParameterRejected(int paramId) {
     int language = -1;
     try {
-        static_cast<void>(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_LANG, &language));
+        static_cast<void>(sceSystemServiceParamGetInt(paramId, &language));
     } catch (const std::runtime_error& error) {
         return language == -1 && std::string(error.what()).find("ANYPS5_LANGUAGE") != std::string::npos;
     }
     return false;
+}
+
+bool Rejected(const char* value) {
+    SetLanguage(value);
+    return ParameterRejected(SYSTEM_SERVICE_PARAM_ID_LANG) && ParameterRejected(SYSTEM_SERVICE_PARAM_ID_400);
 }
 
 }
@@ -54,6 +61,7 @@ int main() {
 
     SetLanguage("arabic");
     Require(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_LANG, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    Require(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_400, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
     int enterButton = -1;
     Require(sceSystemServiceParamGetInt(SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN, &enterButton) == SYSTEM_SERVICE_OK);
     Require(enterButton == SYSTEM_SERVICE_PARAM_ENTER_BUTTON_CROSS);

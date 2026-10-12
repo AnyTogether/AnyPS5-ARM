@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
+#include "ThreadOwned.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
@@ -10,8 +11,8 @@
 namespace AgcDriver::DriverDetail {
 
 std::map<std::size_t, Driver::ResolvedDispatch>& Driver::resolvedAhead() {
-    static thread_local std::map<std::size_t, ResolvedDispatch> resolved;
-    return resolved;
+    static thread_local std::map<std::size_t, ResolvedDispatch>* resolved = nullptr;
+    return ShaderRecompiler::ThreadOwned(resolved);
 }
 
 Driver::GroupCaptureStats& Driver::groupCaptureStats() {

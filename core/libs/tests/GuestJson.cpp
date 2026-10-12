@@ -517,6 +517,7 @@ static void ValueClear() {
     _ZN3sce4Json6StringC1EPKc(&key, "prop");
     Value* item = _ZN3sce4Json6ObjectixERKNS0_6StringE(&obj, &key);
     _ZN3sce4Json5Value3setEl(item, 999);
+    _ZN3sce4Json5ValueD1Ev(&value);
     _ZN3sce4Json5ValueC1ERKNS0_6ObjectE(&value, &obj);
     Require(_ZNK3sce4Json5Value7getTypeEv(&value) == TypeObject);
     _ZN3sce4Json5Value5clearEv(&value);

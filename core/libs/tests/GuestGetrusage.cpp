@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <thread>
 struct Timeval {
@@ -28,6 +29,11 @@ static void SpinUntil(int who, std::int64_t micros) {
     }
 }
 int main() {
+    ResourceUsage children;
+    std::memset(&children, 0xff, sizeof(children));
+    Require(getrusage_nid_postfix(-1, &children) == 0);
+    const ResourceUsage empty{};
+    Require(std::memcmp(&children, &empty, sizeof(children)) == 0);
     SpinUntil(0, 400000);
     const std::int64_t mainThread = CpuMicros(1);
     Require(mainThread >= 200000);

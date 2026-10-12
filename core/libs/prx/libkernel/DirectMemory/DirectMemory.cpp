@@ -1067,6 +1067,7 @@ int DoMunmap(void* addr, size_t len) {
     Trace("unmap %p+0x%zx", addr, len);
     if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0 || !addr) return SCE_KERNEL_ERROR_EINVAL;
     GuestAllocations::Mutation mutation;
+    if (!mutation.Overlaps(addr, len)) return 0;
     UnmapRegistered(mutation, addr, len);
     return 0;
 }

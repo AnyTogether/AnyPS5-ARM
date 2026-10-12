@@ -22,6 +22,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 #ifdef _WIN32
@@ -108,6 +109,17 @@ void testValidation() {
     expectFailure([&] { sceAgcDriverSubmitDcb(&packet); });
     packet.addr = reinterpret_cast<std::uint32_t*>(0x1000);
     expectFailure([&] { sceAgcDriverSubmitDcb(&packet); });
+    AgcDriverWaitIdle_nid_postfix();
+}
+
+void testReadOnlyResummarize() {
+    std::vector<std::uint32_t> commands;
+    for (const auto [offset, value] : {std::pair{0x000u, 0x10u}, {0x200u, 0x007007f3u}, {0x010u, 0xa0000183u}, {0x011u, 0x20000180u}, {0x8eu, 0xffffffffu}, {0x8fu, 0u}, {0x1c4u, 0u}, {0x203u, 0u}}) {
+        commands.insert(commands.end(), {0xc0016900u, offset, value});
+    }
+    commands.insert(commands.end(), {0xc0012d00u, 3u, 2u});
+    Packet packet{commands.data(), static_cast<std::uint32_t>(commands.size()), 0, {}};
+    check(sceAgcDriverSubmitDcb(&packet) == 0, "read-only resummarize submission failed");
     AgcDriverWaitIdle_nid_postfix();
 }
 
@@ -671,8 +683,14 @@ void testWorkerFailure() {
 
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--readonly-resummarize") {
+            testReadOnlyResummarize();
+            LibcRunShutdown_nid_postfix();
+            std::puts("Read-only resummarize submission passed");
+            return 0;
+        }
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         alignas(256) std::array<std::uint32_t, 64> rawCode{};
@@ -766,6 +784,7 @@ int main() {
         testHeaderWithoutProgramAddress();
         testCopyIntoHostMemory();
         testRegisteredFloatMode();
+        testReadOnlyResummarize();
         testWorkerFailure();
         check(expectFailure([] { LibcRunShutdown_nid_postfix(); }).find("required shader register") != std::string::npos, "shutdown lost worker failure");
         std::puts("AGC driver submit tests passed");

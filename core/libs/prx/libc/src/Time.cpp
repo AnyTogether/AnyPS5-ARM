@@ -108,24 +108,41 @@ bool isFreeBsdConversion(char specifier) {
     return specifier == 'k' || specifier == 'l' || specifier == 's' || specifier == 'v' || specifier == '+';
 }
 
-bool isModifiedPercent(const char* afterPercent) {
-    return (afterPercent[0] == 'E' || afterPercent[0] == 'O') && afterPercent[1] == '%';
-}
+struct FormatConversion {
+    std::size_t length;
+    char specifier;
+    bool literal;
+    bool padded;
+};
 
-std::size_t freeBsdConversionLength(const char* afterPercent, char& conversion) {
+FormatConversion parseConversion(const char* afterPercent) {
     const char* cursor = afterPercent;
-    if ((*cursor == 'E' || *cursor == 'O') && isFreeBsdConversion(cursor[1])) ++cursor;
-    if (!isFreeBsdConversion(*cursor)) return 0;
-    conversion = *cursor;
-    return static_cast<std::size_t>(cursor - afterPercent) + 1;
+    bool alternative = false;
+    bool padded = false;
+    while (*cursor != '\0') {
+        if (*cursor == 'E' || *cursor == 'O') {
+            if (alternative) break;
+            alternative = true;
+        } else if (*cursor == '-' || *cursor == '_' || *cursor == '0') {
+            if (padded) break;
+            padded = true;
+        } else {
+            break;
+        }
+        ++cursor;
+    }
+    if (*cursor == '\0')
+        return {static_cast<std::size_t>(cursor - afterPercent), cursor[-1], true, padded};
+    const bool literal = *cursor == '%' || std::strchr("aAbBcCdDeFgGhHIjklmMnprRsStTuUVvWwXxyYzZ+", *cursor) == nullptr;
+    return {static_cast<std::size_t>(cursor - afterPercent) + 1, *cursor, literal, padded};
 }
 
-bool hasFreeBsdConversion(const char* format) {
+bool requiresFreeBsdExpansion(const char* format) {
     while (*format != '\0') {
-        if (*format++ != '%' || *format == '\0') continue;
-        char conversion = 0;
-        if (freeBsdConversionLength(format, conversion) != 0) return true;
-        format += isModifiedPercent(format) ? 2 : 1;
+        if (*format++ != '%') continue;
+        const auto conversion = parseConversion(format);
+        if (conversion.literal || (!conversion.padded && isFreeBsdConversion(conversion.specifier))) return true;
+        format += conversion.length;
     }
     return false;
 }
@@ -143,26 +160,25 @@ std::string expandFreeBsdConversions(const char* format, const GuestTm& guest) {
     std::string result;
     while (*format != '\0') {
         const char next = *format++;
-        if (next != '%' || *format == '\0') {
+        if (next != '%') {
             result += next;
             continue;
         }
-        if (isModifiedPercent(format)) {
-            result += '%';
-            result += *format++;
-            result += *format++;
+        const auto conversion = parseConversion(format);
+        if (conversion.literal) {
+            if (conversion.specifier == '%') result += '%';
+            result += conversion.specifier;
+            format += conversion.length;
             continue;
         }
-        char conversion = 0;
-        const std::size_t length = freeBsdConversionLength(format, conversion);
-        if (length == 0) {
-            result += '%';
-            result += *format++;
+        if (conversion.padded || !isFreeBsdConversion(conversion.specifier)) {
+            result.append(format - 1, conversion.length + 1);
+            format += conversion.length;
             continue;
         }
-        format += length;
+        format += conversion.length;
         char text[32];
-        switch (conversion) {
+        switch (conversion.specifier) {
         case 'k':
             std::snprintf(text, sizeof(text), "%2d", guest.tm_hour);
             result += text;
@@ -303,7 +319,7 @@ int64_t APS5_VABI mktime_nid_postfix(GuestTm* timeptr) {
 
 size_t APS5_VABI libc_strftime_nid_postfix(char* str, size_t count, const char* format, const GuestTm* timeptr) {
     const std::tm host = toHostTm(*timeptr);
-    if (!hasFreeBsdConversion(format)) return std::strftime(str, count, format, &host);
+    if (!requiresFreeBsdExpansion(format)) return std::strftime(str, count, format, &host);
     const std::string expanded = expandFreeBsdConversions(format, *timeptr);
     return std::strftime(str, count, expanded.c_str(), &host);
 }

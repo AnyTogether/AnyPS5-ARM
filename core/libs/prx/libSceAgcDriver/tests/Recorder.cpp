@@ -2089,6 +2089,45 @@ void drawInputInPlaceTests(const Device& device, Recorder& recorder) {
     Require(InPlaceDrawInput(unrecorded, vertices, 256, 4) == nullptr, "a draw without a recorder bound its input in place");
     recorder.Sync();
     Require(!recorder.PendingReadOverlaps(vertices, 256), "an in-place draw input's read outlived its batch");
+    if (!AgcDriver::GuestMemory::Watched(address, bytes)) {
+        std::cout << "host imports are compared, not watched: kept highest indices not tested\n";
+        return;
+    }
+    const auto indices = address + 20480;
+    constexpr std::size_t kept = Recorder::KeptIndexRangeIndices * 2;
+    std::vector<std::uint16_t> first(Recorder::KeptIndexRangeIndices * 2, 1);
+    first[0] = 3;
+    first[1] = 9;
+    first[2] = 0xffff;
+    std::memcpy(reinterpret_cast<void*>(indices), first.data(), kept * 2);
+    auto range = InPlaceIndexRange(recorder, indices, kept, 2, false);
+    Require(!range.reused && range.highest == 0xffffu, "an in-place index range was not scanned at its first use");
+    range = InPlaceIndexRange(recorder, indices, kept, 2, false);
+    Require(range.reused && range.highest == 0xffffu, "an unchanged in-place index range was scanned again");
+    range = InPlaceIndexRange(recorder, indices, kept, 2, true);
+    Require(!range.reused && range.highest == 9u, "an in-place index range served a scan made under the other restart rule");
+    Require(!InPlaceIndexRange(recorder, indices, kept + 2, 2, true).reused, "an in-place index range served a scan of another size");
+    const std::uint16_t raised = 12;
+    std::memcpy(reinterpret_cast<void*>(indices + 2), &raised, sizeof(raised));
+    range = InPlaceIndexRange(recorder, indices, kept, 2, true);
+    Require(!range.reused && range.highest == 12u, "an in-place index range kept its highest index over a guest write");
+    range = InPlaceIndexRange(recorder, indices, kept, 2, true);
+    Require(range.reused && range.highest == 12u, "a rescanned in-place index range was not kept");
+    range = InPlaceIndexRange(recorder, indices, kept - 2, 2, true);
+    Require(!range.reused && range.highest == 12u, "an in-place index range below the kept size was not scanned");
+    range = InPlaceIndexRange(recorder, indices, kept - 2, 2, true);
+    Require(!range.reused && range.highest == 12u, "an in-place index range below the kept size was kept");
+    range = InPlaceIndexRange(recorder, indices, kept * 2 - 4, 4, false);
+    Require(!range.reused && range.highest == 0x000c0003u, "a 32-bit in-place index range below the kept size was not scanned");
+    Require(!InPlaceIndexRange(recorder, indices, kept * 2 - 4, 4, false).reused, "a 32-bit in-place index range below the kept size was kept");
+    Require(!InPlaceIndexRange(recorder, indices, kept * 2, 4, false).reused, "a 32-bit in-place index range was not scanned at its first use");
+    range = InPlaceIndexRange(recorder, indices, kept * 2, 4, false);
+    Require(range.reused && range.highest == 0x000c0003u, "an unchanged 32-bit in-place index range was scanned again");
+    const std::vector<std::uint16_t> restarts(Recorder::KeptIndexRangeIndices, 0xffff);
+    std::memcpy(reinterpret_cast<void*>(indices + 20480), restarts.data(), kept);
+    Require(!InPlaceIndexRange(recorder, indices + 20480, kept, 2, true).highest.has_value(), "an index range of restart indices has a highest index");
+    range = InPlaceIndexRange(recorder, indices + 20480, kept, 2, true);
+    Require(range.reused && !range.highest.has_value(), "an empty in-place index range was scanned again");
 }
 
 // Unit shadows (UnitShadow.hpp) over a host import of write-watched arena memory: a retile piece's
@@ -5380,6 +5419,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--cmask-only") {
             cmaskPassTests(device, recorder);
             std::cout << "CMASK copied clear, write-back and failure tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--draw-inputs-in-place-only") {
+            drawInputInPlaceTests(device, recorder);
+            std::cout << "In-place draw input tests passed\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--multisample-only") {

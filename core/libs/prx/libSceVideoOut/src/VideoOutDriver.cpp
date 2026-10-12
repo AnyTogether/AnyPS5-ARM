@@ -117,7 +117,7 @@ void resolveFlipBuffer(FlipRequest& request, const VideoOutConfig& cfg) {
         return;
     }
     require(request.buffer.groupIndex < VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX, "invalid buffer group");
-    request.group = cfg.groups[request.buffer.groupIndex];
+    if (!request.groupCaptured) request.group = cfg.groups[request.buffer.groupIndex];
     require(request.group.occupied, "buffer group is not registered");
     require(request.buffer.dataAddress != 0, "null registered buffer address");
     static_cast<void>(DescribeVideoOutBuffer(request.buffer, request.group));
@@ -185,6 +185,10 @@ public:
         ++queue->reservations;
         ++cfg->flipStatus.flipPendingNum;
         if (info.index >= 0) ++cfg->bufferPending[info.index];
+        if (info.index >= 0 && cfg->buffers[info.index].Occupied() && cfg->buffers[info.index].groupIndex < VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX && cfg->groups[cfg->buffers[info.index].groupIndex].occupied) {
+            request->group = cfg->groups[cfg->buffers[info.index].groupIndex];
+            request->groupCaptured = true;
+        }
         request->reserved = true;
         return request;
     }

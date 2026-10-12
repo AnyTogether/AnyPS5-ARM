@@ -104,12 +104,13 @@ bool TranslationContext::packedFloat16(const RdnaInstruction& inst, IrOpcode opc
 
 bool TranslationContext::float16Unary(const RdnaInstruction& inst, IrOpcode opcode) {
     const RdnaOperand& operand = sourceAt(inst, 0u);
-    const IrF32 argument = readF16AsF32(operand);
+    const IrF32 argument = flushF16InputValue(readF16AsF32(operand));
     const auto [result, invalid] = unaryFloatSpecials(opcode, argument, IrF32(ir.Emit(opcode, IrType::F32, {&argument.Value()})));
     IrU32 bits = packHalf2x16(applyF16ResultModifiers(inst.destination, clampF16Overflow(result, {&argument.Value()})), IrF32(ir.ConstantF32(0.0f)));
     if (opcode == IrOpcode::FPFract32) {
         bits = IrU32(ir.Select(ir.IEqual(bits.Value(), ir.Constant(0x3c00u)), ir.Constant(0x3bffu), bits.Value()));
     }
+    bits = flushF16Result(bits);
     const IrU32 half = readF16Bits(operand);
     const IrU1 nan(ir.UGreaterThan(ir.BitwiseAnd(half.Value(), ir.Constant(0x7fffu)), ir.Constant(0x7c00u)));
     const IrU32 special(ir.Select(nan.Value(), quietNan16(half).Value(), ir.Constant(0xfe00u)));
@@ -347,11 +348,7 @@ IrU32 TranslationContext::normF32(IrU32 bits, bool signedValue) {
 
 bool TranslationContext::vLdexpF16(const RdnaInstruction& inst) {
     const IrU32 source = readF16Bits(sourceAt(inst, 0u));
-    IrU32 bits = source;
-    if (floatMode.has_value() && (floatMode->floatMode & 0x40u) == 0u) {
-        const IrU1 tiny(ir.ULessThan(ir.BitwiseAnd(bits.Value(), ir.Constant(0x7fffu)), ir.Constant(0x0400u)));
-        bits = IrU32(ir.Select(tiny.Value(), ir.BitwiseAnd(bits.Value(), ir.Constant(0x8000u)), bits.Value()));
-    }
+    const IrU32 bits = flushF16Input(source);
     const IrF16 half(ir.Emit(IrOpcode::BitCastF16U16, IrType::F16, {&ir.Emit(IrOpcode::ConvertU16U32, IrType::U16, {&bits.Value()})}));
     const IrF32 value(ir.Emit(IrOpcode::ConvertF32F16, IrType::F32, {&half.Value()}));
     const RdnaOperand& exponentSource = sourceAt(inst, 1u);
@@ -372,8 +369,8 @@ bool TranslationContext::vLdexpF16(const RdnaInstruction& inst) {
 }
 
 bool TranslationContext::vFrexpF16(const RdnaInstruction& inst, bool exponent) {
-    const IrU32 bits = readF16Bits(sourceAt(inst, 0u));
-    const IrF32 value = readF16AsF32(sourceAt(inst, 0u));
+    const IrU32 bits = flushF16Input(readF16Bits(sourceAt(inst, 0u)));
+    const IrF32 value = flushF16InputValue(readF16AsF32(sourceAt(inst, 0u)));
     const IrU32 word(ir.BitCastU32(value.Value()));
     const IrU1 special(ir.LogicalOr(ir.IEqual(ir.BitwiseAnd(bits.Value(), ir.Constant(0x7fffu)), ir.Constant(0u)),
         ir.Emit(IrOpcode::UGreaterThanEqual32, IrType::U1, {&ir.BitwiseAnd(bits.Value(), ir.Constant(0x7fffu)), &ir.Constant(0x7c00u)})));
@@ -392,7 +389,7 @@ bool TranslationContext::vFrexpF16(const RdnaInstruction& inst, bool exponent) {
 }
 
 bool TranslationContext::vCvtNormF16(const RdnaInstruction& inst, bool signedValue) {
-    write16Bits(inst.destination, normF16(readF16Bits(sourceAt(inst, 0u)), signedValue));
+    write16Bits(inst.destination, normF16(flushF16Input(readF16Bits(sourceAt(inst, 0u))), signedValue));
     return true;
 }
 

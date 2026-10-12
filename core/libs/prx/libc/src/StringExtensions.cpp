@@ -46,27 +46,25 @@ char* APS5_VABI dirname_nid_postfix(const char* path) {
     }
 
     auto length = std::strlen(path);
-    if (length >= sizeof(buffer)) {
-        errno = 63;
-        return nullptr;
-    }
-    std::memcpy(buffer, path, length + 1);
-    while (length > 0 && buffer[length - 1] == '/') --length;
+    while (length > 0 && path[length - 1] == '/') --length;
     if (length == 0) {
         buffer[0] = '/';
         buffer[1] = '\0';
         return buffer;
     }
-    buffer[length] = '\0';
-
     auto separator = length;
-    while (separator > 0 && buffer[separator - 1] != '/') --separator;
+    while (separator > 0 && path[separator - 1] != '/') --separator;
     if (separator == 0) {
         buffer[0] = '.';
         buffer[1] = '\0';
         return buffer;
     }
-    while (separator > 1 && buffer[separator - 1] == '/') --separator;
+    while (separator > 1 && path[separator - 1] == '/') --separator;
+    if (separator >= sizeof(buffer)) {
+        errno = 63;
+        return nullptr;
+    }
+    std::memcpy(buffer, path, separator);
     buffer[separator] = '\0';
     return buffer;
 }

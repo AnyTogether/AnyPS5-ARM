@@ -123,7 +123,7 @@ void TranslationContext::vCvtF16F32(const RdnaInstruction& inst) {
 }
 
 void TranslationContext::vCvtF32F16(const RdnaInstruction& inst) {
-    const IrF32 value = readF16AsF32(sourceAt(inst, 0u));
+    const IrF32 value = flushF16InputValue(readF16AsF32(sourceAt(inst, 0u)));
     writeOperand(inst.destination, &value.Value());
 }
 

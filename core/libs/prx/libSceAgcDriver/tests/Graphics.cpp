@@ -1301,6 +1301,32 @@ void depthMaintenanceTests() {
     auto absent = makeState();
     absent.context.erase(0x000);
     Require(AgcDriver::Graphics::DepthMaintenanceRejection(absent).empty(), "an absent depth control produced a maintenance verdict");
+    auto readOnly = makeState();
+    readOnly.context[0x000] = 0x10;
+    readOnly.context[0x200] = 0x007007f3;
+    readOnly.context[0x010] = 0xa0000183;
+    readOnly.context[0x011] = 0x20000180;
+    readOnly.context[0x8e] = 0xffffffff;
+    readOnly.context[0x8f] = 0;
+    readOnly.shader.erase(0x8);
+    readOnly.shader.erase(0x9);
+    Require(AgcDriver::Graphics::DepthMaintenanceRejection(readOnly).empty(), "a resummarize draw with pass-through read-only depth and no stencil plane was rejected");
+    for (const auto [offset, value] : {std::pair{0x200u, 0x007007f7u}, {0x200u, 0x007007fbu}, {0x200u, 0x007007e3u}, {0x011u, 0x20000181u}, {0x8fu, 0xfu}, {0x000u, 0x11u}, {0x010u, 0xa0000182u}}) {
+        auto changed = readOnly;
+        changed.context[offset] = value;
+        Require(!AgcDriver::Graphics::DepthMaintenanceRejection(changed).empty(), "a resummarize draw with surface work or unsupported depth passed");
+    }
+    auto pixel = readOnly;
+    pixel.shader[0x8] = 1;
+    pixel.shader[0x9] = 0;
+    pixel.context[0x1c4] = 0;
+    pixel.context[0x203] = 0x40;
+    Require(!AgcDriver::Graphics::DepthMaintenanceRejection(pixel).empty(), "a resummarize draw with a running pixel stage passed");
+    for (const auto offset : {0x200u, 0x010u, 0x011u, 0x8eu, 0x8fu}) {
+        auto missing = readOnly;
+        missing.context.erase(offset);
+        Require(!AgcDriver::Graphics::DepthMaintenanceRejection(missing).empty(), "a resummarize draw without a required register passed");
+    }
 }
 
 // SPI_SHADER_Z_FORMAT (0x1c4) and the export enables of DB_SHADER_CONTROL (0x203): Z export needs a

@@ -42,7 +42,7 @@ class FileStream {
     std::byte _reserved[256 - sizeof(GuestFilePrefix)]{};
     std::FILE* _handle;
     bool _dynamic;
-    bool encodingError = false;
+    bool guestError = false;
 
 public:
     explicit FileStream(std::FILE* handle, bool dynamic = false) : _handle(handle), _dynamic(dynamic) {
@@ -72,7 +72,7 @@ public:
     bool Reopen(const std::filesystem::path& filename, const char* mode) {
         auto* previous = GetHandle();
         _guest = {};
-        encodingError = false;
+        guestError = false;
 #ifdef _WIN32
         std::wstring wideMode;
         for (const char character : std::string_view(mode)) wideMode.push_back(static_cast<unsigned char>(character));
@@ -94,7 +94,7 @@ public:
         _guest.readRemaining = 0;
         _guest.writeRemaining = 0;
         _guest.flags = static_cast<std::int16_t>((_guest.flags & ~0x60) |
-            (std::feof(GetHandle()) ? 0x20 : 0) | (std::ferror(GetHandle()) || encodingError ? 0x40 : 0));
+            (std::feof(GetHandle()) ? 0x20 : 0) | (std::ferror(GetHandle()) || guestError ? 0x40 : 0));
     }
 
     void SyncUnlockedStatus() {
@@ -108,17 +108,17 @@ public:
         const bool error = ferror_unlocked(GetHandle()) != 0;
 #endif
         _guest.flags = static_cast<std::int16_t>((_guest.flags & ~0x60) |
-            (endOfFile ? 0x20 : 0) | (error || encodingError ? 0x40 : 0));
+            (endOfFile ? 0x20 : 0) | (error || guestError ? 0x40 : 0));
     }
 
-    void SetEncodingError() {
-        encodingError = true;
+    void SetError() {
+        guestError = true;
         SyncStatus();
     }
 
     void ClearError() {
         std::clearerr(GetHandle());
-        encodingError = false;
+        guestError = false;
         SyncStatus();
     }
 
