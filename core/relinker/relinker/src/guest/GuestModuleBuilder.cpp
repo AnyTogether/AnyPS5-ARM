@@ -210,9 +210,11 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         Io::AppendString(strings, name + GuestSymbolSuffix);
     };
     // On macOS a guest export still wins over the host library an import declares: titles such as Stray bundle a
-    // libc.prx whose exports their other modules import from libSceLibcInternal. A function export that only
-    // returns zero is a placeholder for that host library (homebrew libc.prx files export memset and snprintf
-    // so), and the host wins it, as the Windows loader's ZeroReturnExports do.
+    // libc.prx whose exports their other modules import from libSceLibcInternal. A stub library, whose function
+    // exports nearly all only return zero (homebrew libc.prx files export memset and snprintf so), only stands in
+    // for the host library, and the host wins its zero exports, as the Windows loader's ZeroReturnExports do. In a
+    // real library a zero answer is the answer: Stray's libc.prx returns no malloc replacement from
+    // _sceLibcGetMallocParam, and the host's would start the title's allocator before it exists.
     const auto returnsZero = [&](const GuestImage& image, const std::uint64_t address) {
         for (const auto& header : image.Headers) {
             if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
@@ -227,8 +229,23 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     };
     std::set<std::string> placeholderExports;
     if (macos) {
+        const auto exportedFunction = [](const auto& symbol) {
+            return symbol.Section != 0 && symbol.Section != AbsoluteSection && (symbol.Info >> 4) != 0 && symbol.Visibility != 1 && symbol.Visibility != 2 && (symbol.Info & 15) == 2;
+        };
+        std::vector<bool> stubLibrary(images.size(), false);
+        for (std::size_t provider = 0; provider < images.size(); ++provider) {
+            std::size_t functions = 0;
+            std::size_t zero = 0;
+            for (const auto& symbol : images[provider].Symbols) {
+                if (!exportedFunction(symbol)) continue;
+                ++functions;
+                if (returnsZero(images[provider], symbol.Value)) ++zero;
+            }
+            stubLibrary[provider] = functions != 0 && zero * 10 >= functions * 9;
+        }
         for (const auto& [name, providers] : exports) {
             const bool placeholder = !providers.empty() && std::all_of(providers.begin(), providers.end(), [&](const std::size_t provider) {
+                if (!stubLibrary[provider]) return false;
                 const auto& symbols = images[provider].Symbols;
                 const auto symbol = std::find_if(symbols.begin(), symbols.end(), [&](const auto& candidate) {
                     return candidate.Name == name && candidate.Section != 0 && candidate.Section != AbsoluteSection && (candidate.Info >> 4) != 0 && candidate.Visibility != 1 && candidate.Visibility != 2;
@@ -276,6 +293,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         if (!windows && exports.contains(name)) rename(dynamic.DynSymData, dynamic.DynStrData, offset / 24, name);
     }
     std::vector<std::set<std::size_t>> dependencies(images.size());
+    std::vector<std::pair<std::size_t, std::size_t>> guestWins;
     std::vector<std::set<std::size_t>> systemImports(images.size());
     for (auto& image : images) {
         image.UsePlatformTlsResolver = !windows ? !exports.contains("vNe1w4diLCs") : std::none_of(image.Symbols.begin(), image.Symbols.end(), [](const auto& symbol) {
@@ -308,8 +326,30 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
                 if (exported == provider.Symbols.end() || ((symbol.Info & 15) != 0 && (symbol.Info & 15) != (exported->Info & 15))) throw Domain::RelinkerException("Guest import/export type mismatch: " + symbol.Name);
                 if (providers.front() != index) dependencies[index].insert(providers.front());
             } else if (windows && (symbol.Info & 15) == 6) throw Domain::RelinkerException("Windows guest TLS import requires a guest TLS export: " + symbol.Name);
+            if (providers.empty() && macos && found != exports.end() && found->second.size() == 1 && found->second.front() != index)
+                guestWins.emplace_back(index, found->second.front());
             if (providers.empty()) systemImports[index].insert(symbolIndex);
         }
+    }
+    // An import a guest export wins on macOS (bound by name to the #guest export below) makes its provider a
+    // dependency too, so the provider initializes first as on the console: Stray's libSceNpCppWebApi registers 64
+    // destructors with the bundled libc.prx's __cxa_atexit before that libc ran its initializer otherwise. An edge
+    // that would close a cycle is left out.
+    const auto reaches = [&](const std::size_t from, const std::size_t to) {
+        std::vector<std::size_t> pending{from};
+        std::vector<bool> seen(images.size());
+        while (!pending.empty()) {
+            const auto current = pending.back();
+            pending.pop_back();
+            if (current == to) return true;
+            if (seen[current]) continue;
+            seen[current] = true;
+            pending.insert(pending.end(), dependencies[current].begin(), dependencies[current].end());
+        }
+        return false;
+    };
+    for (const auto& [importer, provider] : guestWins) {
+        if (!dependencies[importer].contains(provider) && !reaches(provider, importer)) dependencies[importer].insert(provider);
     }
     std::vector<bool> required(images.size());
     for (const auto& name : neededNames) {
