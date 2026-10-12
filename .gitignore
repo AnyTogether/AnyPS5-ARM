@@ -111,4 +111,5 @@ cookies.txt
 .env.local
 
 !docs/screenshots/*.jpg
+!docs/games/img/*.jpg
 tools/macos/converter/.build/
