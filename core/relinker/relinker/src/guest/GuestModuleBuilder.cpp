@@ -1,4 +1,6 @@
 #include <relinker/guest/GuestImage.hpp>
+#include <relinker/analysis/IndirectBranchTargets.hpp>
+#include <relinker/parsing/ElfReader.hpp>
 #include <elfpatcher/general/GuestModuleWriter.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
 #include <io/FileReader.hpp>
@@ -338,9 +340,11 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         std::vector<Domain::ProgramHeader> codeHeaders;
         for (const auto& header : image.Headers) if (header.Type == 1 && (header.Flags & 1) != 0) codeHeaders.push_back(header);
         if (toIntel) {
-            auto converted = Codegen::MakeAmd64OnlyConverter(toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel)->Convert(std::move(image.Bytes), codeHeaders);
+            const auto indirectTargets = ReadIndirectBranchTargets(ElfReader(image.Bytes));
+            auto converted = Codegen::MakeAmd64OnlyConverter(toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel)->Convert(std::move(image.Bytes), codeHeaders, indirectTargets);
             image.Trampolines = std::move(converted.Trampolines);
             image.Bytes = std::move(converted.Bytes);
+            std::cout << "; indirect branch targets: " << indirectTargets.size() << "; Intel conversion: " << converted.ReplacedCount << " in place, " << image.Trampolines.size() << " stubs, " << converted.KeptCount << " kept (" << converted.KeptByIndirectTargetCount << " by indirect branch targets)" << std::flush;
         }
         for (const auto& header : codeHeaders) {
             const std::vector<std::uint8_t> code(image.Bytes.begin() + header.Offset, image.Bytes.begin() + header.Offset + header.FileSize);

@@ -1054,6 +1054,71 @@ void converterShortStoreHosting() {
     requireFailure([&] { (void)intel->Convert(intelFile, {segmentHeader(intelText.size())}); }, "The Intel target moved a return or a preceding instruction into a stub");
 }
 
+void converterIndirectTargets() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    const auto join = [](std::initializer_list<Bytes> parts) {
+        Bytes joined;
+        for (const auto& part : parts) joined.insert(joined.end(), part.begin(), part.end());
+        return joined;
+    };
+    const auto convert = [&](const Bytes& text, const std::vector<Domain::VirtualAddress>& targets) {
+        Bytes file(0x300, 0xCC);
+        std::copy(text.begin(), text.end(), file.begin() + 0x200);
+        auto result = converter->Convert(file, {segmentHeader(text.size())}, targets);
+        require(result.Bytes == file, "Indirect targets changed the segment bytes");
+        return result;
+    };
+    const Bytes store = {0xC5, 0xFC, 0x11, 0x07};
+    const Bytes second = {0xC5, 0xFC, 0x11, 0x0E};
+    const Bytes mov = {0x48, 0x89, 0xF8};
+    const Bytes call = {0xE8, 0, 0, 0, 0};
+
+    const auto merged = convert(join({store, second, {0xC3}}), {});
+    require(merged.Trampolines.size() == 1 && merged.KeptCount == 0 && merged.KeptByIndirectTargetCount == 0, "Adjacent stores without indirect targets were not merged");
+    const auto split = convert(join({store, second, {0xC3}}), {0x1004});
+    require(split.Trampolines.size() == 1 && split.KeptCount == 1 && split.KeptByIndirectTargetCount == 1 && split.Trampolines[0].Offset == 0x204 && split.Trampolines[0].Length == 5 && split.Reports.size() == 2 && split.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Kept && split.Reports[0].Offset == 0x200, "An indirect target at the second store did not end the merge and keep the first store");
+    const auto mergedFirst = convert(join({store, second, {0xC3}}), {0x1000});
+    require(mergedFirst.Trampolines.size() == 1 && mergedFirst.KeptCount == 0 && mergedFirst.Trampolines[0].Length == 8, "An indirect target at the merged site's first byte refused the merge");
+
+    const auto trailing = convert(join({store, {0xC3}}), {0x1004});
+    require(trailing.Trampolines.empty() && trailing.KeptCount == 1 && trailing.KeptByIndirectTargetCount == 1, "A return that an indirect branch targets was moved into the stub");
+    const auto trailingFirst = convert(join({store, {0xC3}}), {0x1000});
+    require(trailingFirst.Trampolines.size() == 1 && trailingFirst.KeptCount == 0, "An indirect target at the store's first byte refused the return follower");
+
+    const auto leading = convert(join({mov, store, call, {0xC3}}), {0x1003});
+    require(leading.Trampolines.empty() && leading.KeptCount == 1 && leading.KeptByIndirectTargetCount == 1, "A store that an indirect branch targets was absorbed backwards");
+    const auto leadingFirst = convert(join({mov, store, call, {0xC3}}), {0x1000});
+    require(leadingFirst.Trampolines.size() == 1 && leadingFirst.KeptCount == 0 && leadingFirst.Trampolines[0].Offset == 0x200 && leadingFirst.Trampolines[0].Length == 7, "An indirect target at the extended site's first byte refused leading absorption");
+
+    const auto unhosted = convert(join({store, call, {0xC3}}), {0x1000});
+    require(unhosted.Trampolines.empty() && unhosted.KeptCount == 1 && unhosted.KeptByIndirectTargetCount == 0, "A store kept for want of a host was counted as refused by an indirect target");
+    const auto outside = convert(join({store, {0xC3}}), {0x0FFF, 0x1005, 0x2000});
+    require(outside.Trampolines.size() == 1 && outside.KeptCount == 0, "Indirect targets outside the site bounded it");
+
+    const auto intel = Codegen::MakeAmd64OnlyConverter();
+    Bytes intelFile(0x300, 0xCC);
+    const auto intelText = join({store, second, {0xC3}});
+    std::copy(intelText.begin(), intelText.end(), intelFile.begin() + 0x200);
+    const auto untouched = intel->Convert(intelFile, {segmentHeader(intelText.size())}, {0x1004});
+    require(untouched.Reports.empty() && untouched.Trampolines.empty() && untouched.KeptCount == 0 && untouched.Bytes == intelFile, "The Intel target converted a 256-bit store bounded by an indirect target");
+    const auto fixture = segmentFixture();
+    requireFailure([&] { (void)intel->Convert(fixture, {segmentHeader(20)}, {0x100A}); }, "An indirect target inside an SSE4a site was accepted by the Intel target");
+    const auto atStart = intel->Convert(fixture, {segmentHeader(20)}, {0x1008});
+    require(atStart.Trampolines.size() == 1 && atStart.Trampolines[0].Address == 0x1008, "An indirect target at the SSE4a site's first byte refused the site");
+
+    Bytes two(0x300, 0xCC);
+    const auto first = join({store, {0xC3}});
+    std::copy(first.begin(), first.end(), two.begin() + 0x200);
+    Bytes jump = {0xE9, 0, 0, 0, 0};
+    write<std::int32_t>(jump, 1, static_cast<std::int32_t>(0x1004 - 0x2005));
+    std::copy(jump.begin(), jump.end(), two.begin() + 0x280);
+    const Domain::ProgramHeader other{1, 5, 0x280, 0x2000, 0, 5, 5, 16};
+    const auto crossed = converter->Convert(two, {segmentHeader(5), other}, {});
+    require(crossed.Trampolines.empty() && crossed.KeptCount == 1 && crossed.KeptByIndirectTargetCount == 1 && crossed.Bytes == two, "A direct branch from another code segment did not bound the site");
+    const auto alone = converter->Convert(two, {segmentHeader(5)}, {});
+    require(alone.Trampolines.size() == 1 && alone.KeptCount == 0, "The site was refused without the other code segment");
+}
+
 void converterStrayRex() {
     const auto converter = Codegen::MakeAmd64OnlyConverter();
     const auto convert = [&](const Bytes& text) {
@@ -1905,6 +1970,7 @@ int main() {
         wideStoreBodies();
         converterWideStore();
         converterShortStoreHosting();
+        converterIndirectTargets();
         converterStrayRex();
         rewriterStrayRex();
     rewriterReferenceSites();

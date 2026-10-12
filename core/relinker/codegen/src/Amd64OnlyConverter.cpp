@@ -37,9 +37,12 @@ class Amd64OnlyConverter : public IAmd64OnlyConverter {
 public:
     explicit Amd64OnlyConverter(const Amd64OnlyTarget target) : _target(target), _matcher(MakeAmd64OnlyInstructionMatcher(target)) {}
 
+    using IAmd64OnlyConverter::Convert;
+
     [[nodiscard]] ConvertResult Convert(
         std::vector<std::uint8_t> fileBytes,
-        const std::vector<Domain::ProgramHeader>& codeSegments
+        const std::vector<Domain::ProgramHeader>& codeSegments,
+        const std::vector<Domain::VirtualAddress>& indirectTargets
     ) const override;
 
 private:
@@ -55,6 +58,11 @@ private:
         std::vector<std::span<const std::uint8_t>> Instructions;
     };
 
+    struct LoweredSite {
+        SitePlan Plan;
+        TrampolineSite Site;
+    };
+
     Amd64OnlyTarget _target;
     std::unique_ptr<IAmd64OnlyInstructionMatcher> _matcher;
     std::unique_ptr<IInstructionScanner> _scanner = MakeInstructionScanner();
@@ -68,11 +76,40 @@ private:
         std::size_t coveredEnd
     ) const;
 
+    [[nodiscard]] LoweredSite _lowerSite(
+        const std::vector<std::uint8_t>& seg,
+        const std::vector<InstructionMatch>& matches,
+        const Pending& item,
+        const Domain::ProgramHeader& ph,
+        const std::set<std::uint64_t>& branchTargets,
+        std::size_t coveredEnd
+    ) const;
+
+    [[nodiscard]] bool _canLower(
+        const std::vector<std::uint8_t>& seg,
+        const std::vector<InstructionMatch>& matches,
+        const Pending& item,
+        const Domain::ProgramHeader& ph,
+        const std::set<std::uint64_t>& branchTargets,
+        std::size_t coveredEnd
+    ) const;
+
     void _convertSegment(
         std::vector<std::uint8_t>& fileBytes,
         const Domain::ProgramHeader& ph,
+        const std::set<std::uint64_t>& externalTargets,
         ConvertResult& result
     ) const;
+
+    [[nodiscard]] std::set<std::uint64_t> _segmentBranchTargets(
+        const std::vector<std::uint8_t>& fileBytes,
+        const Domain::ProgramHeader& ph
+    ) const;
+
+    [[nodiscard]] static std::vector<std::uint8_t> _segmentBytes(
+        const std::vector<std::uint8_t>& fileBytes,
+        const Domain::ProgramHeader& ph
+    );
 
     [[nodiscard]] static std::set<std::uint64_t> _collectBranchTargets(
         const std::vector<std::uint8_t>& seg,
@@ -80,6 +117,29 @@ private:
         const Domain::ProgramHeader& ph
     );
 };
+
+std::vector<std::uint8_t> Amd64OnlyConverter::_segmentBytes(
+    const std::vector<std::uint8_t>& fileBytes,
+    const Domain::ProgramHeader& ph
+) {
+    const auto segOffset = static_cast<std::size_t>(ph.Offset);
+    const auto segSize = static_cast<std::size_t>(ph.FileSize);
+    if (segOffset > fileBytes.size() || segSize > fileBytes.size() - segOffset)
+        throw CodegenException("Code segment exceeds the file", ph.Offset);
+    return {
+        fileBytes.begin() + static_cast<std::ptrdiff_t>(segOffset),
+        fileBytes.begin() + static_cast<std::ptrdiff_t>(segOffset + segSize)
+    };
+}
+
+std::set<std::uint64_t> Amd64OnlyConverter::_segmentBranchTargets(
+    const std::vector<std::uint8_t>& fileBytes,
+    const Domain::ProgramHeader& ph
+) const {
+    const auto seg = _segmentBytes(fileBytes, ph);
+    const auto matches = _atFileOffset(ph.Offset, [&] { return _scanner->ScanCodeSection(seg, 0, seg.size()); });
+    return _collectBranchTargets(seg, matches, ph);
+}
 
 std::set<std::uint64_t> Amd64OnlyConverter::_collectBranchTargets(
     const std::vector<std::uint8_t>& seg,
@@ -173,20 +233,67 @@ Amd64OnlyConverter::SitePlan Amd64OnlyConverter::_planSite(
     return plan;
 }
 
+Amd64OnlyConverter::LoweredSite Amd64OnlyConverter::_lowerSite(
+    const std::vector<std::uint8_t>& seg,
+    const std::vector<InstructionMatch>& matches,
+    const Pending& item,
+    const Domain::ProgramHeader& ph,
+    const std::set<std::uint64_t>& branchTargets,
+    const std::size_t coveredEnd
+) const {
+    const auto fileOffset = static_cast<Domain::FileByteOffset>(ph.Offset + item.Instruction.Offset);
+    auto plan = _planSite(seg, matches, item.Index, ph, branchTargets, coveredEnd);
+    auto stub = item.Substitution;
+    if (plan.Instructions.size() > 1) {
+        auto relocated = _atFileOffset(fileOffset, [&] { return _matcher->MatchSequence(plan.Instructions); });
+        if (!relocated.has_value() || relocated->Lowering != Amd64OnlyLowering::Trampoline)
+            throw CodegenException("AMD-only instruction sequence has no out-of-line lowering", fileOffset);
+        stub = std::move(*relocated);
+    }
+    const auto siteOffset = matches[plan.First].Offset;
+    const auto siteLength = static_cast<std::size_t>(matches[plan.End - 1].Offset + matches[plan.End - 1].Length - siteOffset);
+    const auto siteAddress = static_cast<Domain::VirtualAddress>(ph.MappedAddress + siteOffset);
+    const auto hit = branchTargets.upper_bound(siteAddress);
+    if (hit != branchTargets.end() && *hit < siteAddress + siteLength)
+        throw CodegenException("Branch enters an AMD-only instruction", ph.Offset + (*hit - ph.MappedAddress));
+    const auto begin = seg.begin() + static_cast<std::ptrdiff_t>(siteOffset);
+    TrampolineSite site{
+        static_cast<Domain::FileByteOffset>(ph.Offset + siteOffset),
+        siteAddress,
+        siteLength,
+        std::vector<std::uint8_t>(begin, begin + static_cast<std::ptrdiff_t>(siteLength)),
+        std::move(stub.StubBody),
+        stub.ReturnBranchOffset,
+        std::move(stub.Relocations)
+    };
+    return {std::move(plan), std::move(site)};
+}
+
+bool Amd64OnlyConverter::_canLower(
+    const std::vector<std::uint8_t>& seg,
+    const std::vector<InstructionMatch>& matches,
+    const Pending& item,
+    const Domain::ProgramHeader& ph,
+    const std::set<std::uint64_t>& branchTargets,
+    const std::size_t coveredEnd
+) const {
+    try {
+        (void)_lowerSite(seg, matches, item, ph, branchTargets, coveredEnd);
+        return true;
+    } catch (const CodegenException&) {
+        return false;
+    }
+}
+
 void Amd64OnlyConverter::_convertSegment(
     std::vector<std::uint8_t>& fileBytes,
     const Domain::ProgramHeader& ph,
+    const std::set<std::uint64_t>& externalTargets,
     ConvertResult& result
 ) const {
     const auto segOffset = static_cast<std::size_t>(ph.Offset);
     const auto segSize = static_cast<std::size_t>(ph.FileSize);
-    if (segOffset > fileBytes.size() || segSize > fileBytes.size() - segOffset)
-        throw CodegenException("Code segment exceeds the file", ph.Offset);
-
-    std::vector<std::uint8_t> seg(
-        fileBytes.begin() + static_cast<std::ptrdiff_t>(segOffset),
-        fileBytes.begin() + static_cast<std::ptrdiff_t>(segOffset + segSize)
-    );
+    auto seg = _segmentBytes(fileBytes, ph);
 
     const auto matches = _atFileOffset(ph.Offset, [&] { return _scanner->ScanCodeSection(seg, 0, seg.size()); });
 
@@ -203,7 +310,11 @@ void Amd64OnlyConverter::_convertSegment(
     const bool needsBranchTargets = std::any_of(pending.begin(), pending.end(), [](const Pending& item) {
         return item.Substitution.Lowering == Amd64OnlyLowering::Trampoline;
     });
-    const auto branchTargets = needsBranchTargets ? _collectBranchTargets(seg, matches, ph) : std::set<std::uint64_t>{};
+    const auto directTargets = needsBranchTargets ? _collectBranchTargets(seg, matches, ph) : std::set<std::uint64_t>{};
+    auto branchTargets = directTargets;
+    if (needsBranchTargets)
+        branchTargets.insert(externalTargets.lower_bound(ph.MappedAddress), externalTargets.lower_bound(ph.MappedAddress + segSize));
+    const bool hasExternalTargets = branchTargets.size() != directTargets.size();
 
     std::set<std::size_t> consumed;
     std::size_t coveredEnd = 0;
@@ -227,38 +338,18 @@ void Amd64OnlyConverter::_convertSegment(
         }
         case Amd64OnlyLowering::Trampoline: {
             try {
-                const auto plan = _planSite(seg, matches, item.Index, ph, branchTargets, coveredEnd);
-                auto stub = substitution;
-                if (plan.Instructions.size() > 1) {
-                    auto relocated = _atFileOffset(fileOffset, [&] { return _matcher->MatchSequence(plan.Instructions); });
-                    if (!relocated.has_value() || relocated->Lowering != Amd64OnlyLowering::Trampoline)
-                        throw CodegenException("AMD-only instruction sequence has no out-of-line lowering", fileOffset);
-                    stub = std::move(*relocated);
-                }
-                const auto siteOffset = matches[plan.First].Offset;
-                const auto siteLength = static_cast<std::size_t>(matches[plan.End - 1].Offset + matches[plan.End - 1].Length - siteOffset);
-                const auto siteAddress = static_cast<Domain::VirtualAddress>(ph.MappedAddress + siteOffset);
-                const auto hit = branchTargets.upper_bound(siteAddress);
-                if (hit != branchTargets.end() && *hit < siteAddress + siteLength)
-                    throw CodegenException("Branch enters an AMD-only instruction", ph.Offset + (*hit - ph.MappedAddress));
-                const auto begin = seg.begin() + static_cast<std::ptrdiff_t>(siteOffset);
-                result.Trampolines.push_back({
-                    static_cast<Domain::FileByteOffset>(ph.Offset + siteOffset),
-                    siteAddress,
-                    siteLength,
-                    std::vector<std::uint8_t>(begin, begin + static_cast<std::ptrdiff_t>(siteLength)),
-                    stub.StubBody,
-                    stub.ReturnBranchOffset,
-                    stub.Relocations
-                });
-                replacementLength = stub.StubBody.size();
-                for (auto covered = plan.First; covered < plan.End; ++covered)
+                auto lowered = _lowerSite(seg, matches, item, ph, branchTargets, coveredEnd);
+                replacementLength = lowered.Site.Body.size();
+                for (auto covered = lowered.Plan.First; covered < lowered.Plan.End; ++covered)
                     consumed.insert(covered);
-                coveredEnd = plan.End;
+                coveredEnd = lowered.Plan.End;
+                result.Trampolines.push_back(std::move(lowered.Site));
             } catch (const CodegenException&) {
                 if (!substitution.Optional)
                     throw;
                 ++result.KeptCount;
+                if (hasExternalTargets && _canLower(seg, matches, item, ph, directTargets, coveredEnd))
+                    ++result.KeptByIndirectTargetCount;
                 result.Reports.push_back({substitution.InstructionName, fileOffset, match.Length, 0, Amd64OnlyLowering::Kept});
                 continue;
             }
@@ -279,11 +370,16 @@ void Amd64OnlyConverter::_convertSegment(
 
 ConvertResult Amd64OnlyConverter::Convert(
     std::vector<std::uint8_t> fileBytes,
-    const std::vector<Domain::ProgramHeader>& codeSegments
+    const std::vector<Domain::ProgramHeader>& codeSegments,
+    const std::vector<Domain::VirtualAddress>& indirectTargets
 ) const {
     ConvertResult result{};
+    std::set<std::uint64_t> externalTargets(indirectTargets.begin(), indirectTargets.end());
+    if (codeSegments.size() > 1)
+        for (const auto& ph : codeSegments)
+            externalTargets.merge(_segmentBranchTargets(fileBytes, ph));
     for (const auto& ph : codeSegments)
-        _convertSegment(fileBytes, ph, result);
+        _convertSegment(fileBytes, ph, externalTargets, result);
     result.Bytes = std::move(fileBytes);
     return result;
 }

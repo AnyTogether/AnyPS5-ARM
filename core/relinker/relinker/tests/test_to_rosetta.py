@@ -1,4 +1,4 @@
-"""Check that --to-rosetta lowers what Rosetta lacks, splits 256-bit stores, hosts a short store with the return that follows it and keeps one that nothing can host, and that --to-intel and a plain relink leave them alone."""
+"""Check that --to-rosetta lowers what Rosetta lacks, splits 256-bit stores, hosts a short store with the return that follows it, keeps one that nothing can host and one whose return the entry point targets, and that --to-intel and a plain relink leave them alone."""
 
 from pathlib import Path
 import struct
@@ -24,17 +24,17 @@ SPLIT = VMOVUPS_XMM + VEXTRACTF128 + ADD_RCX + b"\xe9"
 RETURNING = VMOVUPS_XMM + VEXTRACTF128 + RET
 
 
-def executable():
+def executable(entry):
     image = fixture()
-    struct.pack_into("<Q", image, 24, 0x10)
+    struct.pack_into("<Q", image, 24, entry)
     image[0x4010:0x4010 + len(SITES)] = SITES
     return image
 
 
-def relink(relinker, directory, name, *options):
+def relink(relinker, directory, name, *options, entry=0x10):
     source = Path(directory) / f"{name}.elf"
     output = Path(directory) / f"{name}.out"
-    source.write_bytes(bytes(executable()))
+    source.write_bytes(bytes(executable(entry)))
     result = subprocess.run([str(relinker), "--skip-sce-module", *options, str(source), str(output)], capture_output=True, text=True, timeout=30)
     return result, output
 
@@ -52,7 +52,12 @@ def main():
             assert result.returncode == 0, (options, result.stdout, result.stderr)
             data = output.read_bytes()
             assert LOWERED in data and SPLIT in data and RETURNING in data and SITES not in data and VMOVUPS_YMM + ADD_RCX not in data and VMOVUPS_YMM + RET not in data, f"{options} did not lower RDSEED and CLWB, split the 256-bit stores or host the store before the return"
-            assert "VMOVUPS -> stub at 2 sites" in result.stdout and "VMOVUPS kept at 1 sites" in result.stdout and "Intel conversion: 2 in place, 2 stubs, 1 kept" in result.stdout and "kept: no room for a jump" not in result.stdout, result.stdout
+            assert "VMOVUPS -> stub at 2 sites" in result.stdout and "VMOVUPS kept at 1 sites" in result.stdout and "Indirect branch targets: 1\n" in result.stdout and "Intel conversion: 2 in place, 2 stubs, 1 kept (0 by indirect branch targets)" in result.stdout and "kept: no room for a jump" not in result.stdout, result.stdout
+        result, output = relink(relinker, directory, "indirect", "--to-rosetta", entry=0x10 + len(SITES) - 1)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        data = output.read_bytes()
+        assert LOWERED in data and SPLIT in data and VMOVUPS_YMM + RET in data and RETURNING not in data, "an entry point at the return after the last store did not keep that store native"
+        assert "VMOVUPS -> stub at 1 sites" in result.stdout and "VMOVUPS kept at 2 sites" in result.stdout and "Indirect branch targets: 1\n" in result.stdout and "Intel conversion: 2 in place, 1 stubs, 2 kept (1 by indirect branch targets)" in result.stdout, result.stdout
         for options, lowered in ((("--macos",), False), (("--macos", "--to-intel"), False), (("--macos", "--to-rosetta"), True)):
             result, output = relink(relinker, directory, "macos" + "".join(options), *options)
             assert result.returncode == 0, (options, result.stdout, result.stderr)

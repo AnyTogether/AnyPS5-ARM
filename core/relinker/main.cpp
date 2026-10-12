@@ -17,6 +17,7 @@
 #include <relinker/analysis/SyscallScanner.hpp>
 #include <relinker/analysis/CallSiteResolver.hpp>
 #include <relinker/analysis/UnusedNidFilter.hpp>
+#include <relinker/analysis/IndirectBranchTargets.hpp>
 #include <relinker/output/SysVDynamicSectionBuilder.hpp>
 #include <relinker/output/CallRegistryWriter.hpp>
 #include <relinker/pipeline/RelinkerPipeline.hpp>
@@ -67,8 +68,10 @@ int Run(const int argc, char* argv[]) {
 
         std::vector<Codegen::TrampolineSite> trampolines;
         if (args.toIntel) {
-            const auto codeSegments = Relinker::ElfReader(sourceBytes).ReadCodeSegments();
-            auto converted = Codegen::MakeAmd64OnlyConverter(args.toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel)->Convert(std::move(sourceBytes), codeSegments);
+            const Relinker::ElfReader sourceReader(sourceBytes);
+            const auto codeSegments = sourceReader.ReadCodeSegments();
+            const auto indirectTargets = Relinker::ReadIndirectBranchTargets(sourceReader);
+            auto converted = Codegen::MakeAmd64OnlyConverter(args.toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel)->Convert(std::move(sourceBytes), codeSegments, indirectTargets);
             sourceBytes = std::move(converted.Bytes);
             trampolines = std::move(converted.Trampolines);
             static const std::set<std::string> countedByName = {"VRSQRTPS", "VRCPPS", "VMOVUPS", "VMOVUPD", "VMOVAPS", "VMOVAPD", "VMOVDQA", "VMOVDQU", "VMOVNTPS", "VMOVNTPD", "VMOVNTDQ"};
@@ -87,7 +90,8 @@ int Run(const int argc, char* argv[]) {
                 std::cout << "Intel substitution: " << name << " -> stub at " << count << " sites\n";
             for (const auto& [name, count] : keptByName)
                 std::cout << "Intel substitution: " << name << " kept at " << count << " sites\n";
-            std::cout << "Intel conversion: " << converted.ReplacedCount << " in place, " << trampolines.size() << " stubs, " << converted.KeptCount << " kept\n";
+            std::cout << "Indirect branch targets: " << indirectTargets.size() << "\n";
+            std::cout << "Intel conversion: " << converted.ReplacedCount << " in place, " << trampolines.size() << " stubs, " << converted.KeptCount << " kept (" << converted.KeptByIndirectTargetCount << " by indirect branch targets)\n";
         }
 
         auto elfReader = std::make_shared<Relinker::ElfReader>(sourceBytes);

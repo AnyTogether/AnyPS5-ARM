@@ -7,8 +7,10 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 namespace RelinkerTests {
 
@@ -111,6 +113,7 @@ inline Bytes MakeModule(const std::span<const std::uint8_t> code) {
     return image;
 }
 
+#ifndef _WIN32
 class MappedImage {
 public:
     explicit MappedImage(const Bytes& elf) {
@@ -164,5 +167,6 @@ private:
     void* base = nullptr;
     std::size_t size = 0;
 };
+#endif
 
 } // namespace RelinkerTests

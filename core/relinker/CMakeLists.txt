@@ -59,6 +59,7 @@ add_executable(relinker
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/SyscallScanner.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CallSiteResolver.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CodeInstructionCollector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/IndirectBranchTargets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictReachability.cpp
@@ -428,6 +429,19 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/include
     )
     add_test(NAME strict_nid_filter COMMAND strict_nid_filter_tests)
+
+    add_test_executable(indirect_branch_targets_tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/IndirectBranchTargetsTests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/IndirectBranchTargets.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/EhFrameReader.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/ElfReader.cpp
+    )
+    target_include_directories(indirect_branch_targets_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/domain/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/include
+    )
+    add_test(NAME indirect_branch_targets COMMAND indirect_branch_targets_tests)
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
         add_test_executable(to_intel_linux_stubs_tests
