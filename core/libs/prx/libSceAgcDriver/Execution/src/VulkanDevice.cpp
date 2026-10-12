@@ -2440,6 +2440,9 @@ ResidentPresent ResidentPresentable(const Graphics::Context& context, const Grap
 
 std::shared_ptr<Graphics::StorageTexture> PresentableResident(const Graphics::Context& context, const DisplayBuffer& buffer, VkFilter& filter, bool& pending, bool& convert) {
     auto resident = Graphics::StorageTexture::FindPending(buffer.address, DisplayBufferSize(buffer));
+    // An image whose results were already stored (the idle write-back before the flip) still holds
+    // them: blitted from like a pending one, after the same check for CPU writes since.
+    if (resident == nullptr) resident = Graphics::StorageTexture::FindLive(buffer.address, DisplayBufferSize(buffer));
     pending = resident != nullptr;
     convert = false;
     if (resident == nullptr) return resident;

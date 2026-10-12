@@ -992,6 +992,59 @@ InPlaceIndices InPlaceIndexRange(Recorder& recorder, std::uint64_t address, std:
 
 namespace {
 
+// A last-provoking-vertex draw on a device without provokingVertexLast (MoltenVK) whose fragment
+// stage reads flat or per-vertex inputs: drawn as a list from a private 32-bit index copy in which
+// each primitive starts with its last vertex (LastVertexFirstList), provoked by the first.
+struct ProvokingRewrite {
+    State state;
+    Pm4::DrawParameters draw;
+    std::shared_ptr<Buffer> indices;
+    std::uint32_t highest = 0;
+};
+
+std::optional<ProvokingRewrite> rewriteLastProvokingVertex(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders) {
+    if (state.provokingVertexMode != VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT || context.provokingVertexLast || draw.indirect) return std::nullopt;
+    if (state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.rectList || state.stages.path != ShaderPath::Vertex || state.stages.mesh || state.stages.tessellation) return std::nullopt;
+    if (!ReadsProvokingVertex(shaders) || draw.indexCount == 0 || draw.instanceCount == 0) return std::nullopt;
+    std::vector<std::uint32_t> source(draw.indexCount);
+    std::optional<std::uint32_t> restart;
+    if (draw.indexed) {
+        Require(draw.indexSize == 2 || draw.indexSize == 4, "only uint16 and uint32 index buffers are supported");
+        const auto bytes = static_cast<std::size_t>(draw.indexCount) * draw.indexSize;
+        GuestMemory::CheckRange(reinterpret_cast<const void*>(draw.indexAddress), bytes, draw.indexSize);
+        GuestMemory::FlushGpuWrites(draw.indexAddress, bytes);
+        std::vector<std::byte> raw(bytes);
+        GuestMemory::Read(draw.indexAddress, raw, draw.indexSize);
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            if (draw.indexSize == 2) {
+                std::uint16_t index = 0;
+                std::memcpy(&index, raw.data() + i * 2, 2);
+                source[i] = index;
+            } else {
+                std::memcpy(&source[i], raw.data() + i * 4, 4);
+            }
+        }
+        if (state.primitiveRestart) restart = draw.indexSize == 2 ? 0xffffu : 0xffffffffu;
+    } else {
+        for (std::uint32_t i = 0; i < draw.indexCount; ++i) source[i] = i;
+    }
+    const auto list = LastVertexFirstList(state.topology, source, restart);
+    ProvokingRewrite rewrite{state, draw, nullptr, 0};
+    rewrite.state.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
+    rewrite.state.topology = state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    rewrite.state.primitiveRestart = false;
+    rewrite.draw.indexed = true;
+    rewrite.draw.indexAddress = 0;
+    rewrite.draw.indexSize = 4;
+    rewrite.draw.indexCount = static_cast<std::uint32_t>(list.size());
+    rewrite.draw.flags = 0;
+    if (list.empty()) return rewrite;
+    rewrite.indices = std::make_shared<Buffer>(context, list.size() * sizeof(std::uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    std::memcpy(rewrite.indices->Bytes().data(), list.data(), list.size() * sizeof(std::uint32_t));
+    rewrite.highest = *std::max_element(list.begin(), list.end());
+    return rewrite;
+}
+
 // The draw's inputs before its resources (prepareDrawInputs): the validated parameters, the index
 // buffer copy with its highest index, the vertex buffer copies and their layout, the fragment
 // outputs and the pipeline stages.
@@ -1046,7 +1099,7 @@ void redirectIndicesPastRecords(const Context& context, const State& state, cons
     inputs.maxIndex = *highest + draw.firstVertex;
 }
 
-DrawInputs prepareDrawInputs(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, DrawOutcome& outcome, DrawTimer& timer, const DrawRecipe* recipe) {
+DrawInputs prepareDrawInputs(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, DrawOutcome& outcome, DrawTimer& timer, const DrawRecipe* recipe, const ProvokingRewrite* rewrite = nullptr) {
     DrawInputs inputs;
     APS5_LOG_OUT_DEBUG("Draw indices=%u instances=%u indexSize=%u flags=%u indexAddress=0x%llx", draw.indexCount, draw.instanceCount, draw.indexSize, draw.flags, static_cast<unsigned long long>(draw.indexAddress));
     APS5_LOG_OUT_DEBUG("State colorTarget=%u render=%ux%u colorAddress=0x%llx colorBytes=%llu colorExtent=%ux%u", state.hasColorTarget ? 1u : 0u, state.renderExtent.width, state.renderExtent.height, static_cast<unsigned long long>(state.color.address), static_cast<unsigned long long>(state.color.bytes), state.color.extent.width, state.color.extent.height);
@@ -1076,7 +1129,7 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
     const auto indexBytes = inputs.indexBytes;
     APS5_LOG_OUT_DEBUG("Index buffer bytes=%llu", static_cast<unsigned long long>(indexBytes));
     Require(indexBytes <= std::numeric_limits<std::size_t>::max(), "index buffer size overflow");
-    if (draw.indexed) GuestMemory::CheckRange(reinterpret_cast<const void*>(draw.indexAddress), static_cast<std::size_t>(indexBytes), draw.indexSize);
+    if (draw.indexed && rewrite == nullptr) GuestMemory::CheckRange(reinterpret_cast<const void*>(draw.indexAddress), static_cast<std::size_t>(indexBytes), draw.indexSize);
     APS5_LOG_CHARS_OUT_DEBUG("Index buffer range OK");
     Require(!draw.indexed || !state.hasColorTarget || draw.indexAddress + indexBytes <= state.color.address || state.color.address + state.color.bytes <= draw.indexAddress, "index buffer aliases the render target");
     APS5_LOG_CHARS_OUT_DEBUG("ValidateShaders");
@@ -1109,7 +1162,16 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
     ValidateDepthBounds(context, state);
     timer.phase(PhaseValidate);
     inputs.maxIndex = draw.indexed ? 0u : draw.firstVertex + draw.indexCount - 1u;
-    if (draw.indexed) {
+    if (rewrite != nullptr) {
+        if (rewrite->indices == nullptr) {
+            inputs.nothing = true;
+            return inputs;
+        }
+        Require(rewrite->highest <= context.limits.maxDrawIndexedIndexValue, "index exceeds the device's indexed draw limit");
+        inputs.maxIndex = rewrite->highest;
+        inputs.indices = rewrite->indices;
+        inputs.indexHandle = inputs.indices->Handle();
+    } else if (draw.indexed) {
         const bool listTopology = state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         const bool fanGeometry = state.stages.mesh && state.stages.mesh->inputPrimitive == 5;
         const bool skipRestart = state.primitiveRestart && (!listTopology || context.primitiveListRestart) && !fanGeometry;
@@ -1160,7 +1222,7 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
         Require(draw.firstVertex <= std::numeric_limits<std::uint32_t>::max() - inputs.maxIndex, "indexed draw vertex range overflow");
         inputs.maxIndex += draw.firstVertex;
     }
-    redirectIndicesPastRecords(context, state, draw, attributes, args != nullptr, inputs);
+    if (rewrite == nullptr) redirectIndicesPastRecords(context, state, draw, attributes, args != nullptr, inputs);
     std::vector<VertexFetch> fetches;
     std::vector<std::size_t> fetchValid;
     fetches.reserve(attributes.size());
@@ -1869,7 +1931,9 @@ std::optional<std::string> KnownValidationFailure(const Context& context, std::s
     return std::nullopt;
 }
 
-void Draw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut) {
+namespace {
+
+void drawWith(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut, const ProvokingRewrite* rewrite) {
     if (context.recorder != nullptr) context.recorder->BoundKeptBytes();
     PerformanceTimer timing("Graphics.Draw");
     // APS5_PROFILE_DRAW prints the time of each phase of the draw (microseconds) and the [draws] totals.
@@ -1888,7 +1952,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     const auto waitedBefore = profile ? Recorder::ThreadWaitedMs() : 0.0;
     double ownWaitedMs = 0;
     const auto report = [&](const char* suffix) { reportDrawEnd(state, timer, built, outcome, waitedBefore, ownWaitedMs, suffix); };
-    auto inputs = prepareDrawInputs(context, state, draw, shaders, outcome, timer, nullptr);
+    auto inputs = prepareDrawInputs(context, state, draw, shaders, outcome, timer, nullptr, rewrite);
     if (inputs.nothing) return;
     const auto* args = draw.indirect ? &*draw.indirect : nullptr;
     const auto indexBytes = inputs.indexBytes;
@@ -2441,6 +2505,16 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
         report(" synchronous");
     }
     APS5_LOG_CHARS_OUT_DEBUG("Draw finished");
+}
+
+}
+
+void Draw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, std::shared_ptr<const DrawRecipe>* recipeOut) {
+    if (const auto rewrite = rewriteLastProvokingVertex(context, state, draw, shaders)) {
+        drawWith(context, rewrite->state, rewrite->draw, shaders, snapshots, nullptr, &*rewrite);
+        return;
+    }
+    drawWith(context, state, draw, shaders, snapshots, recipeOut, nullptr);
 }
 
 DrawRecipeOutcome DrawWithRecipe(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, std::span<const GuestMemorySnapshot> snapshots, const DrawRecipe& recipe) {

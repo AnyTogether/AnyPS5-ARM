@@ -111,21 +111,6 @@ int main() {
             {ShaderRecompiler::ShaderStage::Vertex, &vertex, 0},
             {ShaderRecompiler::ShaderStage::Fragment, &fragment, 0}
         }};
-        if (!device->ProvokingVertexLast()) {
-            for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP}) Run(*device, topology, shaders, false);
-            bool rejected = false;
-            try {
-                Run(*device, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, shaders);
-            } catch (const std::exception& error) {
-                Require(std::string(error.what()).find("last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled") != std::string::npos, std::string("unexpected last-vertex rejection: ") + error.what());
-                rejected = true;
-            }
-            Require(rejected, "last provoking vertex was drawn without device support");
-            device->WaitIdle();
-            Require(std::getenv("ANYPS5_REQUIRE_VULKAN") == nullptr, "required provoking vertex rendering coverage is unavailable: provokingVertexLast is not supported");
-            std::puts("skipped last-vertex rendering, provokingVertexLast is unavailable; first-vertex rendering and feature rejection passed");
-            return VulkanTestSkipped;
-        }
         for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP}) Run(*device, topology, shaders);
         const auto guestPixel = GuestPixel(device->Target());
         const std::array<AgcDriver::Graphics::CompiledShader, 2> guestShaders{{
@@ -133,7 +118,7 @@ int main() {
             {ShaderRecompiler::ShaderStage::Fragment, &guestPixel, 0}
         }};
         for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP}) Run(*device, topology, guestShaders, true, "guest P0");
-        std::puts("provoking vertex rendering tests passed: GLSL and guest P0, triangle list and strip, first/last/first");
+        std::puts(device->ProvokingVertexLast() ? "provoking vertex rendering tests passed: GLSL and guest P0, triangle list and strip, first/last/first" : "provoking vertex rendering tests passed through the last-vertex-first index rewrite: GLSL and guest P0, triangle list and strip, first/last/first");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

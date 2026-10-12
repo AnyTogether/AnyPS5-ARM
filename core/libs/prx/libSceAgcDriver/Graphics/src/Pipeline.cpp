@@ -93,10 +93,39 @@ void ValidateDepthBounds(const Context& context, const State& state) {
     Require(!state.depthBoundsTest || !context.depthBounds || context.depthRangeUnrestricted || (state.minDepthBounds >= 0.0f && state.minDepthBounds <= 1.0f && state.maxDepthBounds >= 0.0f && state.maxDepthBounds <= 1.0f), "depth bounds outside [0, 1] require VK_EXT_depth_range_unrestricted");
 }
 
+namespace {
+
+bool readsProvokingVertex(const ShaderRecompiler::RecompileResult& program) {
+    constexpr std::uint32_t OpDecorate = 71, OpMemberDecorate = 72, DecorationFlat = 14, DecorationPerVertex = 5285;
+    if (std::any_of(program.fragmentParameters.begin(), program.fragmentParameters.end(), [](const ShaderRecompiler::FragmentParameter& parameter) { return parameter.flat || parameter.perVertex; })) return true;
+    const auto& words = program.spirv;
+    for (std::size_t at = 5; at < words.size();) {
+        const auto count = words[at] >> 16u;
+        const auto opcode = words[at] & 0xffffu;
+        if (count == 0 || at + count > words.size()) break;
+        const auto decoration = opcode == OpDecorate && count >= 3 ? words[at + 2] : opcode == OpMemberDecorate && count >= 4 ? words[at + 3] : 0u;
+        if (decoration == DecorationFlat || decoration == DecorationPerVertex) return true;
+        at += count;
+    }
+    return false;
+}
+
+}
+
+bool ReadsProvokingVertex(std::span<const CompiledShader> shaders) {
+    return std::any_of(shaders.begin(), shaders.end(), [](const CompiledShader& shader) {
+        return shader.stage == ShaderRecompiler::ShaderStage::Fragment && (shader.program == nullptr || readsProvokingVertex(*shader.program));
+    });
+}
+
 void ValidateProvokingVertex(const Context& context, const State& state, std::span<const CompiledShader> shaders) {
     Require(state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT || state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT, "invalid provoking vertex mode");
     if (state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT) return;
-    Require(context.provokingVertexLast, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+    if (!context.provokingVertexLast) {
+        // Without flat or per-vertex fragment inputs no shader can tell which vertex provokes, so the first one serves.
+        Require(!ReadsProvokingVertex(shaders), "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+        return;
+    }
     Require(!state.rectList && state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "last provoking vertex is unsupported for generated primitive pipelines");
     Require(state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "last provoking vertex is unsupported for this primitive topology");
     for (const auto& shader : shaders) {
@@ -111,7 +140,14 @@ bool NormalizeUnobservedViewportDepth(const Context& context, State& state, cons
     auto& viewport = state.viewport;
     if (context.depthRangeUnrestricted || !std::isfinite(viewport.minDepth) || !std::isfinite(viewport.maxDepth)) return false;
     if (viewport.minDepth >= 0 && viewport.minDepth <= 1 && viewport.maxDepth >= 0 && viewport.maxDepth <= 1) return false;
-    if (state.depthTest || state.depthWrite || state.depthBoundsTest || pixel.posZ || pixel.depthExportEnable) return false;
+    if (state.depthTest || state.depthWrite || state.depthBoundsTest || pixel.posZ || pixel.depthExportEnable) {
+        // A GL-clip range [-s, s] (Mesa's u_blitter: z scale s, offset 0) puts z in [-1, 0) below 0, where
+        // the depth unit clamps it; zero-to-one clipping on [0, s] keeps every depth of z in [0, 1].
+        if (!state.negativeOneToOne || viewport.minDepth != -viewport.maxDepth || !(viewport.maxDepth > 0 && viewport.maxDepth <= 1)) return false;
+        state.negativeOneToOne = false;
+        viewport.minDepth = 0.0f;
+        return true;
+    }
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     return true;

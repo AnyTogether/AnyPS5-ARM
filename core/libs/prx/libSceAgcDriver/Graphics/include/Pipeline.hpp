@@ -107,6 +107,8 @@ bool NormalizeUnobservedViewportDepth(const Context& context, State& state, cons
 void ValidateViewport(const Context& context, const VkViewport& viewport);
 void ValidateDepthBounds(const Context& context, const State& state);
 void ValidateProvokingVertex(const Context& context, const State& state, std::span<const CompiledShader> shaders = {});
+// Whether a fragment stage reads flat or per-vertex inputs, so that the provoking vertex shows.
+bool ReadsProvokingVertex(std::span<const CompiledShader> shaders);
 
 void ValidateShaderPair(const ShaderRecompiler::RecompileResult& vertex, const ShaderRecompiler::RecompileResult& fragment);
 bool ShadersWriteMemory(std::span<const CompiledShader> shaders);

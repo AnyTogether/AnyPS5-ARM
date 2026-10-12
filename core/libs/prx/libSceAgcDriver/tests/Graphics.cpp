@@ -1977,8 +1977,15 @@ void UnobservedViewportDepthTests() {
         state = AgcDriver::Graphics::DecodeState(queue);
         auto reading = pixel;
         observe(state, reading);
-        Require(!NormalizeUnobservedViewportDepth(context, state, reading) && state.viewport.minDepth == -1 && state.viewport.maxDepth == 1, std::string("a depth range observed through ") + what + " was normalized");
-        expectFailure([&] { AgcDriver::Graphics::ValidateViewport(context, state.viewport); }, "viewport depth [-1, 1] outside [0, 1]");
+        Require(NormalizeUnobservedViewportDepth(context, state, reading) && state.viewport.minDepth == 0 && state.viewport.maxDepth == 1 && !state.negativeOneToOne, std::string("a GL-clip depth range observed through ") + what + " did not become zero-to-one clipping");
+        AgcDriver::Graphics::ValidateViewport(context, state.viewport);
+        state = AgcDriver::Graphics::DecodeState(queue);
+        reading = pixel;
+        observe(state, reading);
+        state.viewport.minDepth = -0.5f;
+        state.viewport.maxDepth = 1.5f;
+        Require(!NormalizeUnobservedViewportDepth(context, state, reading) && state.viewport.minDepth == -0.5f && state.viewport.maxDepth == 1.5f && state.negativeOneToOne, std::string("a depth range past 1 observed through ") + what + " was normalized");
+        expectFailure([&] { AgcDriver::Graphics::ValidateViewport(context, state.viewport); }, "viewport depth [-0.5, 1.5] outside [0, 1]");
     };
     observed([](AgcDriver::Graphics::State& s, ShaderRecompiler::ShaderPixelStageInfo&) { s.depthTest = true; }, "the depth test");
     observed([](AgcDriver::Graphics::State& s, ShaderRecompiler::ShaderPixelStageInfo&) { s.depthWrite = true; }, "depth writes");
@@ -3691,7 +3698,7 @@ void ProvokingVertexTests() {
     ValidateProvokingVertex(unsupported, first);
     auto last = first;
     last.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT;
-    expectFailure([&] { ValidateProvokingVertex(unsupported, last); }, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+    ValidateProvokingVertex(unsupported, last);
     auto supported = unsupported;
     supported.provokingVertexLast = true;
     ValidateProvokingVertex(supported, last);
@@ -3723,6 +3730,11 @@ void ProvokingVertexTests() {
                 auto firstState = state;
                 firstState.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
                 ValidateProvokingVertex(unsupported, firstState, shaders);
+                if (flat || perVertex) {
+                    expectFailure([&] { ValidateProvokingVertex(unsupported, state, shaders); }, "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+                } else {
+                    ValidateProvokingVertex(unsupported, state, shaders);
+                }
                 if (flat && perVertex) {
                     expectFailure([&] { ValidateProvokingVertex(supported, state, shaders); }, "last provoking vertex with explicit per-vertex flat interpolation is unsupported");
                 } else if (perVertex && topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP) {
@@ -3749,6 +3761,21 @@ void ProvokingVertexTests() {
     }
     last.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_MAX_ENUM_EXT;
     expectFailure([&] { ValidateProvokingVertex(supported, last); }, "invalid provoking vertex mode");
+}
+
+void LastVertexFirstListTests() {
+    using namespace AgcDriver::Graphics;
+    using List = std::vector<std::uint32_t>;
+    const List six{0, 1, 2, 3, 4, 5};
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, six, std::nullopt) == List{2, 0, 1, 5, 3, 4}, "triangle list rotation");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, List{0, 1, 2, 3, 4}, std::nullopt) == List{2, 0, 1, 3, 2, 1, 4, 2, 3}, "triangle strip rotation");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, List{0, 1, 2, 3}, std::nullopt) == List{2, 0, 1, 3, 0, 2}, "triangle fan rotation");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, List{0, 1, 2, 3, 4}, std::nullopt) == List{1, 0, 3, 2}, "line list rotation");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, List{0, 1, 2}, std::nullopt) == List{1, 0, 2, 1}, "line strip rotation");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, List{0, 1, 2, 0xffffu, 3, 4, 5, 6}, 0xffffu) == List{2, 0, 1, 5, 3, 4, 6, 5, 4}, "triangle strip restart");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, List{0, 1, 0xffffu, 2, 3, 4}, 0xffffu) == List{4, 2, 3}, "triangle list restart drops the incomplete run");
+    Require(LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, List{0, 1}, std::nullopt).empty(), "incomplete triangle");
+    expectFailure([] { LastVertexFirstList(VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, List{0, 1, 2}, std::nullopt); }, "last provoking vertex is unsupported for this primitive topology");
 }
 
 void ProvokingVertexRenderPassTests() {
@@ -4702,6 +4729,7 @@ int main(int argc, char** argv) {
         orderedPixelShaderTests();
         ProvokingVertexTests();
         ProvokingVertexRenderPassTests();
+        LastVertexFirstListTests();
         ConservativeRasterizationTests();
         DisabledColorTests();
         OpaqueDestinationAlphaTests();
