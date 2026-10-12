@@ -8,10 +8,14 @@ Measured on a MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. The game's
 
 | Game | ID | Engine | Status | FPS |
 |---|---|---|---|---|
-| Dreaming Sarah | PPSA02929 | | In game, playable | 60 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Work in progress:** in game in the first area; an occasional crash in long sessions. Needs the manual Unity module steps ([page](../games/silksong.md)) | menus 60, in game about 28–48 |
+| Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Work in progress:** opening screens up to the EA user agreement, no crash in 5 minutes ([page](../games/pvz.md)) | 60 |
+| DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | In game (E1M1 and later maps) ([page](../games/doom.md)) | 35 (the game's own cap) |
+| Dreaming Sarah | PPSA02929 | Construct 2 | In game, playable | 60 |
 | AnyPS5 Breakout (test title) | APS5TEST1 | | Playable: video, pad and audio | 60 |
-| Stray | PPSA02100 | Unreal Engine 4 | **Work in progress:** boots through the studio logo to the brightness setup screen and past it into loading, where it still stops. Some font glyphs are missing. | about 10 |
-| Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Does not boot: some of its shaders compile to very large SPIR-V that MoltenVK takes too long to translate, and it uses 64-bit image atomics, which MoltenVK lacks | – |
+| Stray | PPSA02100 | Unreal Engine 4 | **Regression:** crashes at start-up on current `main` while its memory allocator is set up; earlier builds reached the menus ([page](../games/stray.md)) | – |
+| Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Not retried since the last report: some shaders compile to very large SPIR-V and it uses 64-bit image atomics, which MoltenVK lacks | – |
+| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | own Mesa/RADV GPU driver | Out of scope: they drive the GPU through the PS5 kernel directly instead of Sony's libraries ([page](../games/quake.md)) | – |
 
 ## Windows and Linux
 
@@ -41,10 +45,14 @@ Not verified: Windows on current `main` without extra PRs, Linux with Intel GPUs
 
 | Oyun | Kimlik | Motor | Durum | FPS |
 |---|---|---|---|---|
-| Dreaming Sarah | PPSA02929 | | Oyun içi, oynanabilir | 60 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** ilk bölgede oyun içi; uzun oturumlarda ara sıra kapanıyor. Elle Unity modül adımları gerekiyor ([sayfa](../games/silksong.md)) | menü 60, oyun içi ~28–48 |
+| Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** EA kullanıcı sözleşmesine kadar açılış ekranları, 5 dakikada kapanma yok ([sayfa](../games/pvz.md)) | 60 |
+| DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | Oyun içi (E1M1 ve sonrası) ([sayfa](../games/doom.md)) | 35 (oyunun kendi sınırı) |
+| Dreaming Sarah | PPSA02929 | Construct 2 | Oyun içi, oynanabilir | 60 |
 | AnyPS5 Breakout (test oyunu) | APS5TEST1 | | Oynanabilir: görüntü, kol ve ses | 60 |
-| Stray | PPSA02100 | Unreal Engine 4 | **Üzerinde çalışılıyor:** stüdyo logosundan parlaklık ayar ekranına geliyor ve onu geçip yüklemeye giriyor, orada hâlâ duruyor. Yazı tipinin bazı harfleri eksik. | yaklaşık 10 |
-| Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Açılmıyor: bazı shader'ları MoltenVK'nın çevirmesi çok uzun süren dev SPIR-V'ler üretiyor; ayrıca MoltenVK'de olmayan 64-bit image atomic'leri kullanıyor | – |
+| Stray | PPSA02100 | Unreal Engine 4 | **Gerileme:** güncel `main`'de bellek ayırıcısı kurulurken açılışta kapanıyor; önceki derlemeler menülere geliyordu ([sayfa](../games/stray.md)) | – |
+| Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Son rapordan beri yeniden denenmedi: bazı shader'lar çok büyük SPIR-V'lere dönüşüyor ve MoltenVK'de olmayan 64-bit image atomic kullanıyor | – |
+| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | kendi Mesa/RADV GPU sürücüsü | Kapsam dışı: GPU'ya Sony'nin kütüphaneleri yerine doğrudan PS5 çekirdeği üzerinden erişiyorlar ([sayfa](../games/quake.md)) | – |
 
 ### Windows ve Linux
 
