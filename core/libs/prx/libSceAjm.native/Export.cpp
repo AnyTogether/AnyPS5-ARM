@@ -51,8 +51,9 @@ const char* APS5_VABI sceAjmStrError(int error) {
     case 0x80930012u: return "SCE_AJM_ERROR_JOB_CREATION";
     case 0x80930013u: return "SCE_AJM_ERROR_INVALID_OPCODE";
     case 0x80930014u: return "SCE_AJM_ERROR_PRIORITY_VIOLATION";
-    case 0x80930015u: return "SCE_AJM_ERROR_BATCH_RESET";
-    case 0x80930016u: return "SCE_AJM_ERROR_CANCELLED";
+    case 0x80930015u: return "SCE_AJM_ERROR_BUFFER_TOO_BIG";
+    case 0x80930016u: return "SCE_AJM_ERROR_INVALID_ADDRESS";
+    case 0x80930017u: return "SCE_AJM_ERROR_CANCELLED";
     default: return "SCE_AJM_ERROR (unknown code)";
     }
 }

@@ -1284,5 +1284,8 @@ int main() {
     Require(std::strcmp(sceAjmStrError(0), "SCE_OK") == 0);
     Require(std::strcmp(sceAjmStrError(invalidParameter), "SCE_AJM_ERROR_INVALID_PARAMETER") == 0);
     Require(std::strcmp(sceAjmStrError(static_cast<int>(0x80930002)), "SCE_AJM_ERROR_INVALID_CONTEXT") == 0);
+    Require(std::strcmp(sceAjmStrError(static_cast<int>(0x80930015)), "SCE_AJM_ERROR_BUFFER_TOO_BIG") == 0);
+    Require(std::strcmp(sceAjmStrError(static_cast<int>(0x80930016)), "SCE_AJM_ERROR_INVALID_ADDRESS") == 0);
+    Require(std::strcmp(sceAjmStrError(static_cast<int>(0x80930017)), "SCE_AJM_ERROR_CANCELLED") == 0);
     Require(sceAjmStrError(-1) != nullptr && sceAjmStrError(1) != nullptr);
 }
