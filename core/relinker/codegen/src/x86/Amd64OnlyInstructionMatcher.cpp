@@ -11,6 +11,8 @@
 #include <codegen/x86/Sha256Operands.hpp>
 #include <codegen/x86/Sha1Lowering.hpp>
 #include <codegen/x86/Sha1Operands.hpp>
+#include <codegen/x86/WideStoreLowering.hpp>
+#include <codegen/x86/WideStoreOperands.hpp>
 #include <codegen/x86/StubBodyBuilder.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/x86/X64OpcodeConstants.hpp>
@@ -42,6 +44,38 @@ const Entry& _sse4aEntry(const Sse4aOperands& operands) {
 
 const Entry& _reciprocalEntry(const ReciprocalOperands& operands) {
     return operands.Operation == ReciprocalOperation::ReciprocalSquareRoot ? kVrsqrtps : kVrcpps;
+}
+
+const Entry& _wideStoreEntry(const WideStoreOperands& operands) {
+    switch (operands.Kind) {
+    case WideStoreKind::Movups:
+        return kVmovups;
+    case WideStoreKind::Movupd:
+        return kVmovupd;
+    case WideStoreKind::Movaps:
+        return kVmovaps;
+    case WideStoreKind::Movapd:
+        return kVmovapd;
+    case WideStoreKind::Movdqa:
+        return kVmovdqa;
+    case WideStoreKind::Movdqu:
+        return kVmovdqu;
+    case WideStoreKind::Movntps:
+        return kVmovntps;
+    case WideStoreKind::Movntpd:
+        return kVmovntpd;
+    case WideStoreKind::Movntdq:
+        return kVmovntdq;
+    case WideStoreKind::Maskmovps:
+        return kVmaskmovps;
+    case WideStoreKind::Maskmovpd:
+        return kVmaskmovpd;
+    case WideStoreKind::Pmaskmovd:
+        return kVpmaskmovd;
+    case WideStoreKind::Pmaskmovq:
+        return kVpmaskmovq;
+    }
+    return kVmovups;
 }
 
 const Entry& _sha256Entry(const Sha256Operands& operands) {
@@ -149,7 +183,9 @@ private:
     Sha1Lowering _sha1Lowering;
     ClzeroLowering _clzeroLowering;
     ReciprocalLowering _reciprocalLowering;
+    WideStoreLowering _wideStoreLowering;
 
+    [[nodiscard]] std::optional<WideStoreOperands> _wideStore(const DecodedInstruction& instr) const;
     [[nodiscard]] Amd64OnlyMatch _matchMovnts(const DecodedInstruction& instr, const Entry& entry) const;
     [[nodiscard]] Amd64OnlyMatch _matchSse4a(const DecodedInstruction& instr, const Entry& entry, const Entry& registerFormEntry, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] Amd64OnlyMatch _matchSha256(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
@@ -157,6 +193,15 @@ private:
     [[nodiscard]] Amd64OnlyMatch _matchClzero(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] std::optional<Amd64OnlyMatch> _matchRosetta(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
 };
+
+std::optional<WideStoreOperands> Amd64OnlyInstructionMatcher::_wideStore(const DecodedInstruction& instr) const {
+    if (_target != Amd64OnlyTarget::Rosetta)
+        return std::nullopt;
+    auto store = DecodeWideStore(instr.Data, instr.Length);
+    if (store && store->Masked)
+        return std::nullopt;
+    return store;
+}
 
 Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchMovnts(const DecodedInstruction& instr, const Entry& entry) const {
     using namespace X64OpcodeConstants;
@@ -211,6 +256,8 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::_matchRosetta(const D
     // Optional: code that checks CPUID never reaches it under Rosetta, which reports no RDPID.
     if (instr.IsRdpid())
         return _trampoline(kRdpid.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { body.Raw(_rdpidReplacement(instr)); }), true);
+    if (const auto store = _wideStore(instr))
+        return _trampoline(_wideStoreEntry(*store).Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _wideStoreLowering.EmitOutOfLine(body, *store); }), true);
     return std::nullopt;
 }
 
@@ -252,6 +299,10 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::MatchSequence(
             if (name == nullptr)
                 name = kRdpid.Name;
             body.Raw(_rdpidReplacement(instr));
+        } else if (const auto store = _wideStore(instr)) {
+            if (name == nullptr)
+                name = _wideStoreEntry(*store).Name;
+            _wideStoreLowering.EmitOutOfLine(body, *store);
         } else {
             return std::nullopt;
         }
@@ -259,7 +310,7 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::MatchSequence(
     }
     _moveTrailing(body, trailing);
     const DecodedInstruction first{instructions.front().data(), instructions.front().size()};
-    const bool optional = DecodeVexReciprocal(first.Data, first.Length).has_value() || (_target == Amd64OnlyTarget::Rosetta && first.IsRdpid());
+    const bool optional = DecodeVexReciprocal(first.Data, first.Length).has_value() || (_target == Amd64OnlyTarget::Rosetta && first.IsRdpid()) || _wideStore(first).has_value();
     return _trampoline(name, instructions.front().size(), body.Finish(), optional);
 }
 

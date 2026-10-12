@@ -49,6 +49,7 @@ public:
     void ShiftDwordImm(std::uint8_t extension, std::uint8_t reg, std::uint8_t imm);
     void RipOperand(std::initializer_list<std::uint8_t> opcode, std::uint8_t reg, const StubConstant& constant);
     void Load(std::uint8_t reg, const MemoryOperand& operand);
+    void Memory(std::span<const std::uint8_t> head, std::uint8_t reg, const MemoryOperand& operand, std::int32_t displacementAdjust, std::span<const std::uint8_t> tail);
     void Spill(std::uint8_t reg);
     void Restore(std::uint8_t reg);
     void Raw(std::span<const std::uint8_t> bytes);

@@ -23,6 +23,7 @@
 #include <relinker/guest/GuestImage.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
 #include <map>
+#include <set>
 #include <codegen/CodegenException.hpp>
 #include <algorithm>
 #include <filesystem>
@@ -70,17 +71,22 @@ int Run(const int argc, char* argv[]) {
             auto converted = Codegen::MakeAmd64OnlyConverter(args.toRosetta ? Codegen::Amd64OnlyTarget::Rosetta : Codegen::Amd64OnlyTarget::Intel)->Convert(std::move(sourceBytes), codeSegments);
             sourceBytes = std::move(converted.Bytes);
             trampolines = std::move(converted.Trampolines);
+            static const std::set<std::string> countedByName = {"VRSQRTPS", "VRCPPS", "VMOVUPS", "VMOVUPD", "VMOVAPS", "VMOVAPD", "VMOVDQA", "VMOVDQU", "VMOVNTPS", "VMOVNTPD", "VMOVNTDQ"};
             std::map<std::string, std::size_t> stubsByName;
+            std::map<std::string, std::size_t> keptByName;
             for (const auto& report : converted.Reports) {
-                if (report.Lowering == Codegen::Amd64OnlyLowering::Kept)
+                const bool kept = report.Lowering == Codegen::Amd64OnlyLowering::Kept;
+                if (countedByName.contains(report.InstructionName))
+                    ++(kept ? keptByName : stubsByName)[report.InstructionName];
+                else if (kept)
                     std::cout << "Intel substitution: " << report.InstructionName << " at 0x" << std::hex << report.Offset << std::dec << " (" << report.OriginalLength << " bytes) kept: no room for a jump\n";
-                else if (report.InstructionName == "VRSQRTPS" || report.InstructionName == "VRCPPS")
-                    ++stubsByName[report.InstructionName];
                 else
                     std::cout << "Intel substitution: " << report.InstructionName << " at 0x" << std::hex << report.Offset << std::dec << " (" << report.OriginalLength << " bytes) -> " << (report.Lowering == Codegen::Amd64OnlyLowering::InPlace ? "in place " : "stub ") << report.ReplacementLength << " bytes\n";
             }
             for (const auto& [name, count] : stubsByName)
                 std::cout << "Intel substitution: " << name << " -> stub at " << count << " sites\n";
+            for (const auto& [name, count] : keptByName)
+                std::cout << "Intel substitution: " << name << " kept at " << count << " sites\n";
             std::cout << "Intel conversion: " << converted.ReplacedCount << " in place, " << trampolines.size() << " stubs, " << converted.KeptCount << " kept\n";
         }
 

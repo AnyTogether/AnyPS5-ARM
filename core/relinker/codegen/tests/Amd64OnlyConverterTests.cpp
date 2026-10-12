@@ -8,6 +8,8 @@
 #include <codegen/x86/ClzeroOperands.hpp>
 #include <codegen/x86/ClzeroLowering.hpp>
 #include <codegen/x86/ReciprocalOperands.hpp>
+#include <codegen/x86/WideStoreLowering.hpp>
+#include <codegen/x86/WideStoreOperands.hpp>
 #include <codegen/x86/StubBodyBuilder.hpp>
 #include <codegen/x86/DecodedInstruction.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
@@ -19,6 +21,7 @@
 #include <elfpatcher/general/SegmentFilter.hpp>
 #include <elfpatcher/linux/LinuxElfPatcher.hpp>
 #include <io/ByteWriter.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -138,7 +141,9 @@ void decoderLengths() {
         {0x48, 0x64, 0x8B, 0x00}, {0x48, 0xF3, 0x0F, 0x2B, 0x00}, {0x48, 0x67, 0x0F, 0x01, 0xFC}, {0x48, 0x48, 0x0F, 0x01, 0xFC},
         {0x8F, 0xE8, 0x40, 0xA3, 0xC1, 0x70}, {0x8F, 0xE8, 0xF8, 0xA3, 0x4A, 0x10, 0x60}, {0x8F, 0xE8, 0xC0, 0xA3, 0xBA, 0x70, 0xFF, 0xFF, 0xFF, 0x30},
         {0x8F, 0xE9, 0x78, 0x90, 0xC1}, {0x8F, 0xEA, 0x78, 0x10, 0xC0, 1, 2, 3, 4},
-        {0x8F, 0xC0}, {0x41, 0x8F, 0x07}, {0x8F, 0x05, 1, 2, 3, 4}};
+        {0x8F, 0xC0}, {0x41, 0x8F, 0x07}, {0x8F, 0x05, 1, 2, 3, 4},
+        {0xC5, 0xFC, 0x11, 0x07}, {0xC5, 0xFD, 0x7F, 0x47, 0x20}, {0xC5, 0xFC, 0x2B, 0x04, 0x24}, {0x64, 0xC5, 0xFC, 0x11, 0x03}, {0xC4, 0xC1, 0x7C, 0x11, 0x44, 0x8C, 0x10},
+        {0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01}, {0xC4, 0xE2, 0x7D, 0x2E, 0x07}};
     Bytes padded;
     for (const auto& instruction : instructions) {
         padded = instruction;
@@ -172,6 +177,12 @@ void decoderRipRelative() {
     }
     for (const auto& instruction : kRegisterVectorOperations)
         require(!decoder.DecodeInstruction(instruction.data(), instruction.size()).HasRipRelativeDisp, "Vector instruction without a RIP-relative operand was reported as RIP-relative");
+    const Bytes wideStore = {0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00, 0x00};
+    const auto store = decoder.DecodeInstruction(wideStore.data(), wideStore.size());
+    require(store.Length == 8 && store.HasRipRelativeDisp && store.RipRelativeDispOffset == 4, "RIP-relative 256-bit store was not reported");
+    const Bytes extract = {0xC4, 0xE3, 0x7D, 0x19, 0x05, 0x10, 0x00, 0x00, 0x00, 0x01};
+    const auto extracted = decoder.DecodeInstruction(extract.data(), extract.size());
+    require(extracted.Length == 10 && extracted.HasRipRelativeDisp && extracted.RipRelativeDispOffset == 5, "RIP-relative VEXTRACTF128 store was not reported with its immediate");
     const Bytes ud1 = {0x0F, 0xB9, 0x05, 0x10, 0x00, 0x00, 0x00};
     const auto trap = decoder.DecodeInstruction(ud1.data(), ud1.size());
     require(trap.Length == ud1.size() && trap.FlowKind == Codegen::ControlFlowKind::Trap && trap.HasRipRelativeDisp && read<std::int32_t>(ud1, trap.RipRelativeDispOffset) == 0x10, "UD1 was not decoded as a trap with its RIP-relative operand");
@@ -746,6 +757,187 @@ void converterReciprocal() {
     require(movedSite.Relocations.size() == 1 && movedSite.Relocations[0].DisplacementOffset == movedSite.ReturnBranchOffset - 4 && movedSite.Relocations[0].InstructionEnd == movedSite.ReturnBranchOffset && movedSite.Relocations[0].SiteTarget == 10 + 0x10, "Absorbed RIP-relative load has the wrong relocation");
 }
 
+void wideStoreOperands() {
+    using Codegen::WideStoreKind;
+    const auto decode = [](const Bytes& bytes) { return Codegen::DecodeWideStore(bytes.data(), bytes.size()); };
+    const std::vector<std::pair<Bytes, WideStoreKind>> kinds = {
+        {{0xC5, 0xFC, 0x11, 0x00}, WideStoreKind::Movups}, {{0xC4, 0xE1, 0x7C, 0x11, 0x00}, WideStoreKind::Movups},
+        {{0xC5, 0xFD, 0x11, 0x00}, WideStoreKind::Movupd}, {{0xC4, 0xE1, 0x7D, 0x11, 0x00}, WideStoreKind::Movupd},
+        {{0xC5, 0xFC, 0x29, 0x00}, WideStoreKind::Movaps}, {{0xC4, 0xE1, 0xFC, 0x29, 0x00}, WideStoreKind::Movaps},
+        {{0xC5, 0xFD, 0x29, 0x00}, WideStoreKind::Movapd}, {{0xC4, 0xE1, 0xFD, 0x29, 0x00}, WideStoreKind::Movapd},
+        {{0xC5, 0xFD, 0x7F, 0x00}, WideStoreKind::Movdqa}, {{0xC4, 0xE1, 0x7D, 0x7F, 0x00}, WideStoreKind::Movdqa},
+        {{0xC5, 0xFE, 0x7F, 0x00}, WideStoreKind::Movdqu}, {{0xC4, 0xE1, 0x7E, 0x7F, 0x00}, WideStoreKind::Movdqu},
+        {{0xC5, 0xFC, 0x2B, 0x00}, WideStoreKind::Movntps}, {{0xC4, 0xE1, 0x7C, 0x2B, 0x00}, WideStoreKind::Movntps},
+        {{0xC5, 0xFD, 0x2B, 0x00}, WideStoreKind::Movntpd}, {{0xC4, 0xE1, 0x7D, 0x2B, 0x00}, WideStoreKind::Movntpd},
+        {{0xC5, 0xFD, 0xE7, 0x00}, WideStoreKind::Movntdq}, {{0xC4, 0xE1, 0x7D, 0xE7, 0x00}, WideStoreKind::Movntdq}};
+    for (const auto& [bytes, kind] : kinds) {
+        const auto store = decode(bytes);
+        require(store && store->Kind == kind && !store->Masked && store->Source == 0 && store->Head.size() == bytes.size() - 1 && store->VectorLengthOffset == bytes.size() - 3 && (store->Head[store->VectorLengthOffset] & 0x04) != 0, "256-bit store was not decoded to its kind");
+        require(store->Memory.Mod == 0 && store->Memory.Rm == 0 && store->Memory.Displacement == 0 && !store->Memory.RipRelative && store->Memory.InstructionLength == bytes.size() && store->Memory.Prefixes.empty(), "256-bit store memory operand was decoded incorrectly");
+    }
+    const std::vector<std::pair<Bytes, WideStoreKind>> masked = {
+        {{0xC4, 0xE2, 0x7D, 0x2E, 0x00}, WideStoreKind::Maskmovps}, {{0xC4, 0xE2, 0x7D, 0x2F, 0x00}, WideStoreKind::Maskmovpd},
+        {{0xC4, 0xE2, 0x7D, 0x8E, 0x00}, WideStoreKind::Pmaskmovd}, {{0xC4, 0xE2, 0xFD, 0x8E, 0x00}, WideStoreKind::Pmaskmovq}, {{0xC4, 0xE2, 0x75, 0x2E, 0x07}, WideStoreKind::Maskmovps}};
+    for (const auto& [bytes, kind] : masked) {
+        const auto store = decode(bytes);
+        require(store && store->Kind == kind && store->Masked, "Masked 256-bit store was not recognised");
+    }
+    const auto high = decode({0xC5, 0x7C, 0x11, 0x38});
+    require(high && high->Source == 15 && high->Memory.Rm == 0 && high->Memory.RexIndexBase == 0, "VEX2 R-bar did not extend the source register");
+    const auto extended = decode({0xC4, 0x41, 0x7C, 0x11, 0x4C, 0x8C, 0x10});
+    require(extended && extended->Source == 9 && extended->Memory.RexIndexBase == 1 && extended->Memory.Mod == 1 && extended->Memory.Rm == 4 && extended->Memory.Sib == 0x8C && extended->Memory.Displacement == 0x10 && !extended->Memory.StackBase, "VEX3 R-bar and B-bar were not decoded");
+    const auto index = decode({0xC4, 0xA1, 0x7C, 0x11, 0x04, 0x48});
+    require(index && index->Source == 0 && index->Memory.RexIndexBase == 2 && index->Memory.Sib == 0x48, "VEX3 X-bar was not decoded");
+    const auto stack = decode({0xC5, 0xFC, 0x11, 0x44, 0x24, 0x20});
+    require(stack && stack->Memory.StackBase && stack->Memory.Displacement == 0x20 && stack->Memory.EncodedSize == 3, "Stack-based 256-bit store was not decoded");
+    const auto disp32 = decode({0xC5, 0xFC, 0x11, 0x80, 0x00, 0x01, 0x00, 0x00});
+    require(disp32 && disp32->Memory.Mod == 2 && disp32->Memory.Displacement == 0x100, "disp32 256-bit store was not decoded");
+    const auto negative = decode({0xC5, 0xFC, 0x11, 0x40, 0xF0});
+    require(negative && negative->Memory.Displacement == -0x10, "disp8 was not sign-extended");
+    const auto absolute = decode({0xC5, 0xFC, 0x11, 0x04, 0x25, 0x44, 0x33, 0x22, 0x11});
+    require(absolute && absolute->Memory.Mod == 0 && absolute->Memory.Sib == 0x25 && absolute->Memory.Displacement == 0x11223344, "Baseless 256-bit store was not decoded");
+    const auto rip = decode({0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00, 0x00});
+    require(rip && rip->Memory.RipRelative && rip->Memory.Displacement == 0x10 && rip->Memory.InstructionLength == 8, "RIP-relative 256-bit store was not decoded");
+    const auto segment = decode({0x2E, 0x64, 0xC5, 0xFC, 0x11, 0x03});
+    require(segment && segment->Memory.Prefixes == Bytes{0x2E, 0x64} && segment->Head == Bytes{0xC5, 0xFC, 0x11} && segment->VectorLengthOffset == 1, "Segment overrides before a 256-bit store were not kept");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xF8, 0x11, 0x00}, Bytes{0xC4, 0xE1, 0x78, 0x11, 0x00}, Bytes{0xC4, 0xE2, 0x79, 0x2E, 0x00}})
+        require(!decode(bytes).has_value(), "128-bit store must stay native");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xFC, 0x11, 0xC1}, Bytes{0xC5, 0xFD, 0x7F, 0xC1}, Bytes{0xC4, 0xE2, 0x7D, 0x2E, 0xC0}})
+        require(!decode(bytes).has_value(), "Register form must stay native");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xFE, 0x11, 0x00}, Bytes{0xC5, 0xFF, 0x11, 0x00}, Bytes{0xC5, 0xFC, 0x7F, 0x00}, Bytes{0xC5, 0xFF, 0x7F, 0x00}, Bytes{0xC5, 0xFC, 0xE7, 0x00}, Bytes{0xC5, 0xFE, 0x29, 0x00}, Bytes{0xC5, 0xFE, 0x2B, 0x00}})
+        require(!decode(bytes).has_value(), "Scalar or undefined opcode column must stay native");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xFC, 0x10, 0x00}, Bytes{0xC5, 0xFC, 0x28, 0x00}, Bytes{0xC5, 0xFE, 0x6F, 0x00}, Bytes{0xC4, 0xE3, 0x7D, 0x19, 0x00, 0x01}, Bytes{0xC4, 0xE3, 0x7D, 0x39, 0x00, 0x01}, Bytes{0xC5, 0xF8, 0x13, 0x00}, Bytes{0xC5, 0xF8, 0x17, 0x00}, Bytes{0xC5, 0xF9, 0xD6, 0x00}, Bytes{0xC5, 0xF9, 0x7E, 0x00}})
+        require(!decode(bytes).has_value(), "Load, extract or narrow store must stay native");
+    for (const Bytes& bytes : {Bytes{0x0F, 0x11, 0x00}, Bytes{0x66, 0x0F, 0x7F, 0x00}, Bytes{0x62, 0xF1, 0x7C, 0x28, 0x11, 0x00}, Bytes{0x8F, 0xE8, 0x78, 0xA3, 0x00, 0x30}, Bytes{0xC5, 0xFC}, Bytes{0x64}, Bytes{}})
+        require(!decode(bytes).has_value(), "Legacy, EVEX, XOP or incomplete encoding must stay native");
+    requireFailure([&] { (void)decode({0x67, 0xC5, 0xFC, 0x11, 0x00}); }, "Address-size prefix before a 256-bit store was accepted");
+    for (const Bytes& bytes : {Bytes{0x66, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0xF2, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0xF3, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0xF0, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0x64, 0x66, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0x48, 0x66, 0xC5, 0xFC, 0x11, 0x00}})
+        requireFailure([&] { (void)decode(bytes); }, "Legacy prefix before a 256-bit store was accepted");
+    for (const Bytes& bytes : {Bytes{0x48, 0xC5, 0xFC, 0x11, 0x00}, Bytes{0x41, 0xC4, 0xE1, 0x7C, 0x11, 0x00}, Bytes{0x64, 0x48, 0xC5, 0xFC, 0x11, 0x00}})
+        requireFailure([&] { (void)decode(bytes); }, "REX directly before a 256-bit store was accepted");
+    const auto resetRex = decode({0x48, 0x64, 0xC5, 0xFC, 0x11, 0x00});
+    require(resetRex && resetRex->Memory.Prefixes == Bytes{0x64} && resetRex->Head == Bytes{0xC5, 0xFC, 0x11}, "REX that a later prefix resets was not ignored");
+    for (const Bytes& bytes : {Bytes{0x67, 0xC4, 0xE2, 0x7D, 0x2E, 0x07}, Bytes{0x66, 0xC4, 0xE2, 0x7D, 0x2E, 0x07}, Bytes{0xF0, 0xC4, 0xE2, 0x7D, 0x2E, 0x07}, Bytes{0x48, 0xC4, 0xE2, 0x7D, 0x2E, 0x07}}) {
+        const auto store = decode(bytes);
+        require(store && store->Masked && store->Kind == WideStoreKind::Maskmovps, "Prefixed masked store was not recognised as masked");
+    }
+    for (const Bytes& bytes : {Bytes{0xC5, 0xBC, 0x11, 0x00}, Bytes{0xC4, 0xE1, 0x74, 0x11, 0x00}})
+        requireFailure([&] { (void)decode(bytes); }, "256-bit store with a vvvv register was accepted");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xFC, 0x11}, Bytes{0xC5, 0xFC, 0x11, 0x47}, Bytes{0xC5, 0xFC, 0x11, 0x04}, Bytes{0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00}, Bytes{0xC5, 0xFC, 0x11, 0x80, 0x00, 0x01}})
+        requireFailure([&] { (void)decode(bytes); }, "Truncated 256-bit store was accepted");
+    for (const Bytes& bytes : {Bytes{0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00, 0x00, 0x90}, Bytes{0xC5, 0xFC, 0x11, 0x00, 0x90}})
+        requireFailure([&] { (void)decode(bytes); }, "256-bit store with trailing bytes was accepted");
+}
+
+void wideStoreBodies() {
+    const Codegen::WideStoreLowering lowering;
+    const auto lower = [&](const Bytes& site) { return lowering.LowerOutOfLine(*Codegen::DecodeWideStore(site.data(), site.size())); };
+    const auto golden = [&](const Bytes& site, const Bytes& low, const Bytes& high, const char* message) {
+        const auto body = lower(site);
+        Bytes expected = low;
+        expected.insert(expected.end(), high.begin(), high.end());
+        expected.insert(expected.end(), {0xE9, 0x00, 0x00, 0x00, 0x00});
+        require(body.Bytes == expected && body.ReturnBranchOffset == low.size() + high.size() && body.Relocations.empty(), message);
+    };
+    golden({0xC5, 0xFC, 0x11, 0x07}, {0xC5, 0xF8, 0x11, 0x07}, {0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01}, "[base] store was not split into a VEX.128 store and a disp8 extract");
+    golden({0xC5, 0xFD, 0x29, 0x40, 0x60}, {0xC5, 0xF9, 0x29, 0x40, 0x60}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x70, 0x01}, "disp8 that stays within int8 was widened");
+    golden({0xC5, 0xFE, 0x7F, 0x48, 0x78}, {0xC5, 0xFA, 0x7F, 0x48, 0x78}, {0xC4, 0xE3, 0x7D, 0x19, 0x88, 0x88, 0x00, 0x00, 0x00, 0x01}, "disp8 leaving int8 was not widened to disp32");
+    golden({0xC5, 0xFC, 0x11, 0x40, 0xF0}, {0xC5, 0xF8, 0x11, 0x40, 0xF0}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x00, 0x01}, "Negative disp8 was not adjusted");
+    golden({0xC5, 0xFC, 0x11, 0x45, 0x00}, {0xC5, 0xF8, 0x11, 0x45, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x45, 0x10, 0x01}, "[rbp] store lost its disp8 form");
+    golden({0xC5, 0xFC, 0x11, 0x44, 0x24, 0x20}, {0xC5, 0xF8, 0x11, 0x44, 0x24, 0x20}, {0xC4, 0xE3, 0x7D, 0x19, 0x44, 0x24, 0x30, 0x01}, "[rsp+disp8] store was not split with its SIB");
+    golden({0xC5, 0xFC, 0x11, 0x80, 0x00, 0x01, 0x00, 0x00}, {0xC5, 0xF8, 0x11, 0x80, 0x00, 0x01, 0x00, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x80, 0x10, 0x01, 0x00, 0x00, 0x01}, "disp32 store was not adjusted");
+    golden({0xC5, 0xFC, 0x11, 0x04, 0x25, 0x44, 0x33, 0x22, 0x11}, {0xC5, 0xF8, 0x11, 0x04, 0x25, 0x44, 0x33, 0x22, 0x11}, {0xC4, 0xE3, 0x7D, 0x19, 0x04, 0x25, 0x54, 0x33, 0x22, 0x11, 0x01}, "Baseless disp32 store was not adjusted in place");
+    golden({0xC4, 0xC1, 0x7C, 0x11, 0x44, 0x8C, 0x10}, {0xC4, 0xC1, 0x78, 0x11, 0x44, 0x8C, 0x10}, {0xC4, 0xC3, 0x7D, 0x19, 0x44, 0x8C, 0x20, 0x01}, "VEX3 B-bar was not carried to the extract");
+    golden({0xC4, 0xA1, 0x7C, 0x11, 0x04, 0x48}, {0xC4, 0xA1, 0x78, 0x11, 0x04, 0x48}, {0xC4, 0xA3, 0x7D, 0x19, 0x44, 0x48, 0x10, 0x01}, "VEX3 X-bar was not carried to the extract");
+    golden({0xC4, 0xC1, 0x7C, 0x11, 0x45, 0x00}, {0xC4, 0xC1, 0x78, 0x11, 0x45, 0x00}, {0xC4, 0xC3, 0x7D, 0x19, 0x45, 0x10, 0x01}, "[r13] store was not split");
+    golden({0xC5, 0x7C, 0x11, 0x00}, {0xC5, 0x78, 0x11, 0x00}, {0xC4, 0x63, 0x7D, 0x19, 0x40, 0x10, 0x01}, "VEX2 R-bar was not carried to the extract");
+    golden({0xC4, 0x41, 0x7D, 0x7F, 0x4C, 0x8C, 0x10}, {0xC4, 0x41, 0x79, 0x7F, 0x4C, 0x8C, 0x10}, {0xC4, 0x43, 0x7D, 0x19, 0x4C, 0x8C, 0x20, 0x01}, "VEX3 R-bar and B-bar were not carried to the extract");
+    golden({0x64, 0xC5, 0xFC, 0x11, 0x03}, {0x64, 0xC5, 0xF8, 0x11, 0x03}, {0x64, 0xC4, 0xE3, 0x7D, 0x19, 0x43, 0x10, 0x01}, "Segment override was not copied onto both halves");
+    golden({0x48, 0x64, 0xC5, 0xFC, 0x11, 0x00}, {0x64, 0xC5, 0xF8, 0x11, 0x00}, {0x64, 0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01}, "REX that a later prefix resets was not dropped from both halves");
+    golden({0xC5, 0xFD, 0xE7, 0x00}, {0xC5, 0xF9, 0xE7, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01}, "Non-temporal store did not keep its non-temporal low half");
+    golden({0xC5, 0xFC, 0x2B, 0x00}, {0xC5, 0xF8, 0x2B, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01}, "VMOVNTPS did not keep its non-temporal low half");
+    golden({0xC4, 0xE1, 0xFD, 0x29, 0x00}, {0xC4, 0xE1, 0xF9, 0x29, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01}, "VEX.W was not left as encoded in the low half");
+    const auto rip = lower({0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00, 0x00});
+    require(rip.Bytes == Bytes{0xC5, 0xF8, 0x11, 0x05, 0x00, 0x00, 0x00, 0x00, 0xC4, 0xE3, 0x7D, 0x19, 0x05, 0x00, 0x00, 0x00, 0x00, 0x01, 0xE9, 0x00, 0x00, 0x00, 0x00} && rip.ReturnBranchOffset == 18, "RIP-relative store was not split with cleared displacements");
+    require(rip.Relocations.size() == 2 && rip.Relocations[0].DisplacementOffset == 4 && rip.Relocations[0].InstructionEnd == 8 && rip.Relocations[0].SiteTarget == 8 + 0x10, "RIP-relative low half has the wrong relocation");
+    require(rip.Relocations[1].DisplacementOffset == 13 && rip.Relocations[1].InstructionEnd == 18 && rip.Relocations[1].SiteTarget == 8 + 0x10 + 16, "RIP-relative high half does not count its immediate or the 16-byte offset");
+    const auto negativeRip = lower({0x65, 0xC5, 0xFD, 0x7F, 0x0D, 0xF0, 0xFF, 0xFF, 0xFF});
+    require(negativeRip.Relocations.size() == 2 && negativeRip.Relocations[0].SiteTarget == 9 - 16 && negativeRip.Relocations[1].DisplacementOffset == 15 && negativeRip.Relocations[1].InstructionEnd == 20 && negativeRip.Relocations[1].SiteTarget == 9, "Prefixed RIP-relative store has the wrong relocations");
+    requireFailure([&] { (void)lower({0xC5, 0xFC, 0x11, 0x80, 0xF0, 0xFF, 0xFF, 0x7F}); }, "disp32 overflowing int32 after the adjustment was accepted");
+    requireFailure([&] { (void)lower({0xC5, 0xFC, 0x11, 0x04, 0x25, 0xF8, 0xFF, 0xFF, 0x7F}); }, "Baseless disp32 overflowing int32 after the adjustment was accepted");
+    Bytes overlong(7, 0x2E);
+    overlong.insert(overlong.end(), {0xC5, 0xFC, 0x11, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00});
+    requireFailure([&] { (void)lower(overlong); }, "Extract longer than 15 bytes was accepted");
+    const auto masked = Codegen::DecodeWideStore(Bytes{0xC4, 0xE2, 0x7D, 0x2E, 0x07}.data(), 5);
+    requireFailure([&] { (void)lowering.LowerOutOfLine(*masked); }, "Masked store was lowered");
+    Codegen::StubBodyBuilder spilled;
+    spilled.Spill(0);
+    const auto stack = Codegen::DecodeWideStore(Bytes{0xC5, 0xFC, 0x11, 0x44, 0x24, 0x20}.data(), 6);
+    spilled.Memory(Bytes{0xC5, 0xF8, 0x11}, 0, stack->Memory, 16, {});
+    const auto rebased = spilled.Finish();
+    require(Bytes(rebased.Bytes.begin() + 13, rebased.Bytes.begin() + 22) == Bytes{0xC5, 0xF8, 0x11, 0x84, 0x24, 0xC0, 0x00, 0x00, 0x00}, "Stack operand was not rebased past the spill frame");
+    const auto intel = Codegen::MakeAmd64OnlyInstructionMatcher();
+    const auto rosetta = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    const Bytes site = {0xC5, 0xFC, 0x11, 0x47, 0x20};
+    require(!intel->Match(site.data(), site.size()).has_value(), "256-bit store was converted for an Intel host");
+    const auto match = rosetta->Match(site.data(), site.size());
+    require(match && match->Lowering == Codegen::Amd64OnlyLowering::Trampoline && match->Optional && match->InstructionName == "VMOVUPS" && match->Length == 5 && match->StubBody == Bytes{0xC5, 0xF8, 0x11, 0x47, 0x20, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x30, 0x01, 0xE9, 0x00, 0x00, 0x00, 0x00}, "256-bit store was not lowered through an optional stub for Rosetta");
+    for (const auto& [bytes, name] : std::vector<std::pair<Bytes, std::string>>{{{0xC5, 0xFD, 0x11, 0x00}, "VMOVUPD"}, {{0xC5, 0xFC, 0x29, 0x00}, "VMOVAPS"}, {{0xC5, 0xFD, 0x29, 0x00}, "VMOVAPD"}, {{0xC5, 0xFD, 0x7F, 0x00}, "VMOVDQA"}, {{0xC5, 0xFE, 0x7F, 0x00}, "VMOVDQU"}, {{0xC5, 0xFC, 0x2B, 0x00}, "VMOVNTPS"}, {{0xC5, 0xFD, 0x2B, 0x00}, "VMOVNTPD"}, {{0xC5, 0xFD, 0xE7, 0x00}, "VMOVNTDQ"}}) {
+        const auto named = rosetta->Match(bytes.data(), bytes.size());
+        require(named && named->InstructionName == name, "256-bit store was reported under the wrong name");
+    }
+    const Bytes maskedSite = {0xC4, 0xE2, 0x7D, 0x2E, 0x07};
+    require(!rosetta->Match(maskedSite.data(), maskedSite.size()).has_value() && !intel->Match(maskedSite.data(), maskedSite.size()).has_value(), "Masked 256-bit store was matched");
+    const Bytes followers = {0x48, 0x8D, 0x05, 0x10, 0x00, 0x00, 0x00};
+    const Bytes ripSite = {0xC5, 0xFC, 0x11, 0x05, 0x10, 0x00, 0x00, 0x00};
+    const auto moved = rosetta->Match(ripSite.data(), ripSite.size(), followers);
+    require(moved && moved->Relocations.size() == 3 && moved->Relocations[2].SiteTarget == 8 + 7 + 0x10 && moved->Relocations[1].SiteTarget == 8 + 0x10 + 16, "Trailing RIP-relative instruction after a split store has the wrong relocation");
+}
+
+void converterWideStore() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    Bytes file(0x300, 0xCC);
+    const Bytes text = {
+        0xC5, 0xFC, 0x11, 0x07,
+        0x48, 0x83, 0xC1, 0x01,
+        0xC5, 0xFC, 0x11, 0x06,
+        0xC5, 0xFC, 0x11, 0x4E, 0x20,
+        0xC5, 0xFC, 0x11, 0x00,
+        0xC3};
+    std::copy(text.begin(), text.end(), file.begin() + 0x200);
+    const auto result = converter->Convert(file, {segmentHeader(text.size())});
+    require(result.Trampolines.size() == 2 && result.KeptCount == 1 && result.ReplacedCount == 0 && result.Reports.size() == 3 && result.Bytes == file, "256-bit stores were not lowered through two stubs with one kept");
+    const auto& absorbed = result.Trampolines[0];
+    const Bytes add = {0x48, 0x83, 0xC1, 0x01};
+    require(absorbed.Offset == 0x200 && absorbed.Length == 8 && result.Reports[0].InstructionName == "VMOVUPS" && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, "4-byte store did not absorb the following instruction");
+    require(Bytes(absorbed.Body.begin(), absorbed.Body.begin() + 11) == Bytes{0xC5, 0xF8, 0x11, 0x07, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01} && Bytes(absorbed.Body.begin() + static_cast<std::ptrdiff_t>(absorbed.ReturnBranchOffset - add.size()), absorbed.Body.begin() + static_cast<std::ptrdiff_t>(absorbed.ReturnBranchOffset)) == add, "Split store does not run before the absorbed instruction");
+    const auto& pair = result.Trampolines[1];
+    require(pair.Offset == 0x208 && pair.Length == 9 && result.Reports[1].InstructionName == "VMOVUPS" && result.Reports[1].Offset == 0x208, "Consecutive 256-bit stores were not lowered into one stub");
+    require(pair.Body == Bytes{0xC5, 0xF8, 0x11, 0x06, 0xC4, 0xE3, 0x7D, 0x19, 0x46, 0x10, 0x01, 0xC5, 0xF8, 0x11, 0x4E, 0x20, 0xC4, 0xE3, 0x7D, 0x19, 0x4E, 0x30, 0x01, 0xE9, 0x00, 0x00, 0x00, 0x00} && pair.ReturnBranchOffset == 23, "Two-store sequence body holds the wrong halves");
+    require(result.Reports[2].InstructionName == "VMOVUPS" && result.Reports[2].Lowering == Codegen::Amd64OnlyLowering::Kept && result.Reports[2].Offset == 0x211, "Store before a return was not reported as kept");
+    const auto intel = Codegen::MakeAmd64OnlyConverter()->Convert(file, {segmentHeader(text.size())});
+    require(intel.Reports.empty() && intel.Trampolines.empty() && intel.Bytes == file, "The Intel target converted a 256-bit store");
+    Bytes branchInto(0x300, 0xCC);
+    const Bytes jumpInside = {0xEB, 0x06, 0xC5, 0xFC, 0x11, 0x07, 0x48, 0x83, 0xC1, 0x01, 0x90, 0x90, 0xC3};
+    std::copy(jumpInside.begin(), jumpInside.end(), branchInto.begin() + 0x200);
+    const auto inside = converter->Convert(branchInto, {segmentHeader(jumpInside.size())});
+    require(inside.Trampolines.empty() && inside.KeptCount == 1 && inside.Bytes == branchInto, "A branch into the absorbed instruction must keep the store native");
+    Bytes maskedFile(0x300, 0xCC);
+    const Bytes maskedText = {0xC4, 0xE2, 0x7D, 0x2E, 0x07, 0xC4, 0xE2, 0xFD, 0x8E, 0x0F, 0x67, 0xC4, 0xE2, 0x7D, 0x2E, 0x07, 0xC3};
+    std::copy(maskedText.begin(), maskedText.end(), maskedFile.begin() + 0x200);
+    const auto masked = converter->Convert(maskedFile, {segmentHeader(maskedText.size())});
+    require(masked.Reports.empty() && masked.Trampolines.empty() && masked.KeptCount == 0 && masked.Bytes == maskedFile, "Masked 256-bit stores were converted or reported");
+    Bytes prefixed(0x300, 0xCC);
+    const Bytes addressSize = {0x90, 0x67, 0xC5, 0xFC, 0x11, 0x07, 0xC3};
+    std::copy(addressSize.begin(), addressSize.end(), prefixed.begin() + 0x200);
+    require(failureOffset([&] { (void)converter->Convert(prefixed, {segmentHeader(addressSize.size())}); }, "Address-size prefixed 256-bit store was accepted") == 0x201, "Prefixed store failure does not carry the file offset");
+    Bytes resetRex(0x300, 0xCC);
+    const Bytes rexThenSegment = {0x48, 0x64, 0xC5, 0xFC, 0x11, 0x07, 0xC3};
+    std::copy(rexThenSegment.begin(), rexThenSegment.end(), resetRex.begin() + 0x200);
+    const auto dropped = converter->Convert(resetRex, {segmentHeader(rexThenSegment.size())});
+    require(dropped.Trampolines.size() == 1 && dropped.KeptCount == 0 && dropped.Trampolines[0].Length == 6 && Bytes(dropped.Trampolines[0].Body.begin(), dropped.Trampolines[0].Body.begin() + 13) == Bytes{0x64, 0xC5, 0xF8, 0x11, 0x07, 0x64, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01}, "Store with a REX that a later prefix resets was not split with the segment override alone");
+}
+
 void converterStrayRex() {
     const auto converter = Codegen::MakeAmd64OnlyConverter();
     const auto convert = [&](const Bytes& text) {
@@ -908,6 +1100,25 @@ void linuxRipRelativePlacement() {
     const auto bodyOffset = executableFileOffset(output, static_cast<std::uint64_t>(stub));
     const auto operand = stub + static_cast<std::int64_t>(relocation.InstructionEnd) + read<std::int32_t>(output, bodyOffset + relocation.DisplacementOffset);
     require(operand == 0x2040, "Relocated RIP-relative operand does not reach the original address");
+}
+
+void linuxWideStorePlacement() {
+    Bytes text = {0xC5, 0xFC, 0x11, 0x05, 0x00, 0x00, 0x00, 0x00, 0xC3};
+    write<std::int32_t>(text, 4, 0x2040 - 0x1008);
+    const auto source = elfFixture(text);
+    const auto headers = elfHeaders();
+    const auto converted = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta)->Convert(source, {headers[0]});
+    require(converted.Trampolines.size() == 1 && converted.Trampolines[0].Relocations.size() == 2, "RIP-relative 256-bit store was not lowered with two relocations");
+    auto patcher = linuxPatcher();
+    const auto output = patcher.Patch(converted.Bytes, headers, {}, 0, "$ORIGIN/libs", true, false, converted.Trampolines);
+    require(output[0x200] == 0xE9, "RIP-relative 256-bit store site was not replaced by a jump");
+    const auto stub = 0x1000 + 5 + static_cast<std::int64_t>(read<std::int32_t>(output, 0x201));
+    const auto bodyOffset = executableFileOffset(output, static_cast<std::uint64_t>(stub));
+    const auto operand = [&](const Codegen::StubRelocation& relocation) {
+        return stub + static_cast<std::int64_t>(relocation.InstructionEnd) + read<std::int32_t>(output, bodyOffset + relocation.DisplacementOffset);
+    };
+    require(operand(converted.Trampolines[0].Relocations[0]) == 0x2040 && operand(converted.Trampolines[0].Relocations[1]) == 0x2050, "Relocated halves do not reach the original address and the one 16 bytes above it");
+    require(output[bodyOffset + 17] == 0x01 && output[bodyOffset + 18] == 0xE9, "High half does not end with its immediate before the return jump");
 }
 
 }
@@ -1345,6 +1556,150 @@ void ripRelativeExecution() {
     require(movedRun.Rax == movedRun.SiteAddress + 4096 + 0x30, "Moved RIP-relative LEA did not compute the original address");
     unchanged(movedRun, (1u << 1) | (1u << 3), "Stub with moved RIP-relative instructions clobbered a register or RFLAGS");
 }
+struct WideStoreRun {
+    std::uint64_t Flags;
+    std::uint64_t Ymm[16][4];
+    Bytes Data;
+};
+
+WideStoreRun runWideStoreBody(const Codegen::Amd64OnlyMatch& match, const std::uint64_t base, const std::uint64_t (&ymmIn)[16][4]) {
+    require(match.Lowering == Codegen::Amd64OnlyLowering::Trampoline, "Wide store stub was not produced");
+    auto body = match.StubBody;
+    const auto ret = body.size();
+    body.push_back(0xC3);
+    const auto displacement = static_cast<std::int32_t>(ret - (match.ReturnBranchOffset + 5));
+    std::memcpy(body.data() + match.ReturnBranchOffset + 1, &displacement, sizeof(displacement));
+    require(body.size() <= 4096, "Wide store stub does not fit in a page");
+    auto* code = static_cast<std::uint8_t*>(mmap(nullptr, 3 * 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    require(code != MAP_FAILED, "cannot map executable memory for the wide store stub");
+    Codegen::ApplyStubRelocations(std::span<std::uint8_t>(body).first(match.ReturnBranchOffset), match.Relocations, reinterpret_cast<std::uint64_t>(code) + 4096, reinterpret_cast<std::uint64_t>(code), 0);
+    std::memcpy(code, body.data(), body.size());
+    std::memset(code + 2 * 4096, 0xA5, 4096);
+    WideStoreRun run{};
+    asm volatile(
+        "vmovdqu 0x000(%[ymmIn]), %%ymm0\n\t"
+        "vmovdqu 0x020(%[ymmIn]), %%ymm1\n\t"
+        "vmovdqu 0x040(%[ymmIn]), %%ymm2\n\t"
+        "vmovdqu 0x060(%[ymmIn]), %%ymm3\n\t"
+        "vmovdqu 0x080(%[ymmIn]), %%ymm4\n\t"
+        "vmovdqu 0x0a0(%[ymmIn]), %%ymm5\n\t"
+        "vmovdqu 0x0c0(%[ymmIn]), %%ymm6\n\t"
+        "vmovdqu 0x0e0(%[ymmIn]), %%ymm7\n\t"
+        "vmovdqu 0x100(%[ymmIn]), %%ymm8\n\t"
+        "vmovdqu 0x120(%[ymmIn]), %%ymm9\n\t"
+        "vmovdqu 0x140(%[ymmIn]), %%ymm10\n\t"
+        "vmovdqu 0x160(%[ymmIn]), %%ymm11\n\t"
+        "vmovdqu 0x180(%[ymmIn]), %%ymm12\n\t"
+        "vmovdqu 0x1a0(%[ymmIn]), %%ymm13\n\t"
+        "vmovdqu 0x1c0(%[ymmIn]), %%ymm14\n\t"
+        "vmovdqu 0x1e0(%[ymmIn]), %%ymm15\n\t"
+        "mov %[base], %%rdi\n\t"
+        "mov %[base], %%r9\n\t"
+        "sub $128, %%rsp\n\t"
+        "pushq $0x8D7\n\t"
+        "popfq\n\t"
+        "call *%[code]\n\t"
+        "pushfq\n\t"
+        "popq %[flags]\n\t"
+        "add $128, %%rsp\n\t"
+        "vmovdqu %%ymm0, 0x000(%[ymmOut])\n\t"
+        "vmovdqu %%ymm1, 0x020(%[ymmOut])\n\t"
+        "vmovdqu %%ymm2, 0x040(%[ymmOut])\n\t"
+        "vmovdqu %%ymm3, 0x060(%[ymmOut])\n\t"
+        "vmovdqu %%ymm4, 0x080(%[ymmOut])\n\t"
+        "vmovdqu %%ymm5, 0x0a0(%[ymmOut])\n\t"
+        "vmovdqu %%ymm6, 0x0c0(%[ymmOut])\n\t"
+        "vmovdqu %%ymm7, 0x0e0(%[ymmOut])\n\t"
+        "vmovdqu %%ymm8, 0x100(%[ymmOut])\n\t"
+        "vmovdqu %%ymm9, 0x120(%[ymmOut])\n\t"
+        "vmovdqu %%ymm10, 0x140(%[ymmOut])\n\t"
+        "vmovdqu %%ymm11, 0x160(%[ymmOut])\n\t"
+        "vmovdqu %%ymm12, 0x180(%[ymmOut])\n\t"
+        "vmovdqu %%ymm13, 0x1a0(%[ymmOut])\n\t"
+        "vmovdqu %%ymm14, 0x1c0(%[ymmOut])\n\t"
+        "vmovdqu %%ymm15, 0x1e0(%[ymmOut])\n\t"
+        "vzeroupper\n\t"
+        : [flags] "=&r"(run.Flags)
+        : [ymmIn] "r"(ymmIn), [ymmOut] "r"(run.Ymm), [base] "r"(base), [code] "r"(code)
+        : "rcx", "rdi", "r9", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15", "memory", "cc");
+    run.Data.assign(code + 2 * 4096, code + 3 * 4096);
+    munmap(code, 3 * 4096);
+    return run;
+}
+
+void wideStoreExecution() {
+    const auto matcher = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    std::uint64_t ymmIn[16][4];
+    std::uint64_t seed = 0x9e3779b97f4a7c15ull;
+    for (auto& reg : ymmIn)
+        for (auto& lane : reg) {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            lane = seed;
+        }
+    const auto unchanged = [&](const WideStoreRun& run) {
+        for (unsigned reg = 0; reg < 16; ++reg)
+            require(std::memcmp(run.Ymm[reg], ymmIn[reg], sizeof(ymmIn[reg])) == 0, "Split store clobbered a ymm register");
+        require((run.Flags & 0x8D5) == (0x8D7 & 0x8D5), "Split store changed RFLAGS");
+    };
+    struct Write {
+        std::int64_t Offset;
+        unsigned Source;
+    };
+    struct Case {
+        std::optional<Codegen::Amd64OnlyMatch> Match;
+        std::vector<Write> Writes;
+        bool Aligned;
+        const char* Name;
+    };
+    const auto single = [&](const Bytes& site) { return matcher->Match(site.data(), site.size()); };
+    const Bytes lea = {0x48, 0x8D, 0x4F, 0x01};
+    const Bytes first = {0xC5, 0xFC, 0x11, 0x07};
+    const Bytes second = {0xC5, 0xFC, 0x11, 0x4F, 0x20};
+    const std::vector<std::span<const std::uint8_t>> pair = {first, second};
+    const std::vector<Case> cases = {
+        {single({0xC5, 0xFC, 0x11, 0x47, 0x20}), {{0x20, 0}}, false, "VMOVUPS with a disp8"},
+        {matcher->Match(first.data(), first.size(), lea), {{0, 0}}, false, "VMOVUPS [base] with an absorbed follower"},
+        {single({0xC5, 0x7C, 0x11, 0x4F, 0xE0}), {{-0x20, 9}}, false, "VMOVUPS of ymm9 with a negative disp8"},
+        {single({0xC4, 0xC1, 0x7C, 0x11, 0x41, 0x20}), {{0x20, 0}}, false, "VMOVUPS with an r9 base"},
+        {single({0xC5, 0x7E, 0x7F, 0x7F, 0x10}), {{0x10, 15}}, false, "VMOVDQU of ymm15"},
+        {single({0xC5, 0xFC, 0x29, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVAPS"},
+        {single({0xC5, 0xFD, 0x29, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVAPD"},
+        {single({0xC5, 0xFD, 0x7F, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVDQA"},
+        {single({0xC5, 0xFC, 0x2B, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTPS"},
+        {single({0xC5, 0xFD, 0x2B, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTPD"},
+        {single({0xC5, 0xFD, 0xE7, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTDQ"},
+        {matcher->MatchSequence(pair, {}), {{0, 0}, {0x20, 1}}, false, "Two-store sequence"}};
+    constexpr std::size_t kBufferSize = 3 * 4096;
+    auto* buffer = static_cast<std::uint8_t*>(mmap(nullptr, kBufferSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    require(buffer != MAP_FAILED, "cannot map the wide store buffer");
+    const std::vector<std::size_t> unalignedTargets = {0, 0x2A3, 4096 - 24, 4096 - 16, 4096 - 8};
+    const std::vector<std::size_t> alignedTargets = {0, 4096 - 32, 8192};
+    for (const auto& item : cases) {
+        require(item.Match.has_value(), item.Name);
+        for (const auto target : item.Aligned ? alignedTargets : unalignedTargets) {
+            std::memset(buffer, 0xA5, kBufferSize);
+            const auto baseOffset = static_cast<std::int64_t>(target) - item.Writes[0].Offset;
+            const auto run = runWideStoreBody(*item.Match, reinterpret_cast<std::uint64_t>(buffer) + static_cast<std::uint64_t>(baseOffset), ymmIn);
+            Bytes expected(kBufferSize, 0xA5);
+            for (const auto& [offset, source] : item.Writes)
+                std::memcpy(expected.data() + baseOffset + offset, ymmIn[source], sizeof(ymmIn[source]));
+            require(std::equal(expected.begin(), expected.end(), buffer), "Split store did not write exactly the 32 bytes of its source register");
+            unchanged(run);
+        }
+    }
+    munmap(buffer, kBufferSize);
+    Bytes rip = {0xC5, 0xFC, 0x11, 0x1D, 0x00, 0x00, 0x00, 0x00};
+    write<std::int32_t>(rip, 4, 4096 + 0x30 - 8);
+    const auto ripMatch = single(rip);
+    require(ripMatch && ripMatch->Relocations.size() == 2, "RIP-relative split store was not produced with two relocations");
+    const auto ripRun = runWideStoreBody(*ripMatch, 0, ymmIn);
+    Bytes expectedData(4096, 0xA5);
+    std::memcpy(expectedData.data() + 0x30, ymmIn[3], sizeof(ymmIn[3]));
+    require(ripRun.Data == expectedData, "RIP-relative split store did not reach the original address and the one 16 bytes above it");
+    unchanged(ripRun);
+}
 #else
 void reciprocalExecution() {}
 void registerFormExecution() {}
@@ -1353,6 +1708,7 @@ void sha256Execution() {}
 void clzeroExecution() {}
 void immediateFormExecution() {}
 void ripRelativeExecution() {}
+void wideStoreExecution() {}
 #endif
 
 void scannerZeroTail() {
@@ -1384,6 +1740,7 @@ int main() {
         clzeroExecution();
         reciprocalExecution();
         ripRelativeExecution();
+        wideStoreExecution();
         converterSegment();
         converterRipRelativeFollower();
         converterSha256();
@@ -1393,12 +1750,16 @@ int main() {
         rosettaSubstitutions();
         converterRosetta();
         converterReciprocal();
+        wideStoreOperands();
+        wideStoreBodies();
+        converterWideStore();
         converterStrayRex();
         rewriterStrayRex();
     rewriterReferenceSites();
         converterFailureOffsets();
         linuxPlacement();
         linuxRipRelativePlacement();
+        linuxWideStorePlacement();
         scannerZeroTail();
         std::cout << "AMD64-only converter tests passed\n";
     } catch (const std::exception& error) {

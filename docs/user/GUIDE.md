@@ -131,7 +131,7 @@ build-mac/core/relinker/relinker --macos --to-rosetta MyGame/eboot.bin out/eboot
 ```
 
 - `--macos` writes a Mach-O executable.
-- `--to-rosetta` rewrites the AMD-only instructions and the ones Rosetta lacks (RDSEED, RDPID, CLWB).
+- `--to-rosetta` rewrites the AMD-only instructions and the ones Rosetta lacks (RDSEED, RDPID, CLWB), and splits every 256-bit vector store into two 128-bit stores so the macOS write watch can resume the fault it takes on them.
 - The converted modules are written to `out/app0/sce_module/`.
 
 #### 3. Package it as an app
@@ -326,7 +326,7 @@ build-mac/core/relinker/relinker --macos --to-rosetta MyGame/eboot.bin out/eboot
 ```
 
 - `--macos`, Mach-O dosyası üretir.
-- `--to-rosetta`, AMD'ye özel komutları ve Rosetta'nın çalıştıramadığı komutları (RDSEED, RDPID, CLWB) dönüştürür.
+- `--to-rosetta`, AMD'ye özel komutları ve Rosetta'nın çalıştıramadığı komutları (RDSEED, RDPID, CLWB) dönüştürür ve macOS yazma izleyicisinin bu komutlarda aldığı hatadan devam edebilmesi için her 256 bitlik vektör saklama komutunu iki 128 bitlik saklama komutuna böler.
 - Dönüştürülen modüller `out/app0/sce_module/` klasörüne yazılır.
 
 #### 3. Uygulama olarak paketleme

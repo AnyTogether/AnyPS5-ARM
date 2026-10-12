@@ -23,6 +23,7 @@ constexpr std::uint8_t kSibRsp = 0x24;
 constexpr std::uint8_t kShiftDwords = 0x72;
 constexpr std::uint8_t kShiftQwords = 0x73;
 constexpr std::uint8_t kMovdqu = 0x6F;
+constexpr std::size_t kMaxInstructionLength = 15;
 
 std::uint8_t _rex(const std::uint8_t reg, const std::uint8_t rm) {
     return static_cast<std::uint8_t>(kRexBase | ((reg & 8) != 0 ? kRexR : 0) | ((rm & 8) != 0 ? kRexB : 0));
@@ -157,6 +158,40 @@ void StubBodyBuilder::Load(const std::uint8_t reg, const MemoryOperand& operand)
     const auto value = static_cast<std::uint32_t>(static_cast<std::int32_t>(displacement));
     for (std::size_t index = 0; index < _displacementSize(mod, operand.Rm, operand.Sib); ++index)
         _bytes.push_back(static_cast<std::uint8_t>(value >> (index * 8)));
+}
+
+void StubBodyBuilder::Memory(const std::span<const std::uint8_t> head, const std::uint8_t reg, const MemoryOperand& operand, const std::int32_t displacementAdjust, const std::span<const std::uint8_t> tail) {
+    using namespace X64OpcodeConstants;
+    const auto start = _bytes.size();
+    _bytes.insert(_bytes.end(), operand.Prefixes.begin(), operand.Prefixes.end());
+    _bytes.insert(_bytes.end(), head.begin(), head.end());
+    const auto siteTarget = static_cast<std::int64_t>(_siteOffset + operand.InstructionLength) + operand.Displacement + displacementAdjust;
+    if (operand.RipRelative) {
+        _bytes.push_back(static_cast<std::uint8_t>((ModRmModIndirect << ModRmModShift) | ((reg & 7) << ModRmRegShift) | ModRmRmRipRelative));
+        const auto displacementOffset = _bytes.size();
+        _bytes.insert(_bytes.end(), Disp32Size, 0);
+        _bytes.insert(_bytes.end(), tail.begin(), tail.end());
+        _relocations.push_back({displacementOffset, _bytes.size(), siteTarget});
+    } else {
+        const auto displacement = static_cast<std::int64_t>(operand.Displacement) + displacementAdjust + static_cast<std::int64_t>(operand.StackBase ? _stackDepth : 0);
+        if (displacement < std::numeric_limits<std::int32_t>::min() || displacement > std::numeric_limits<std::int32_t>::max())
+            throw CodegenException("Adjusted displacement does not fit in 32 bits");
+        const bool baseless = operand.Mod == ModRmModIndirect && operand.Rm == ModRmRmSibPresent && (operand.Sib & SibBaseMask) == SibBaseDisp32;
+        auto mod = operand.Mod;
+        if (!baseless && mod == ModRmModIndirect && displacement != 0)
+            mod = ModRmModDisp8;
+        if (mod == ModRmModDisp8 && (displacement < std::numeric_limits<std::int8_t>::min() || displacement > std::numeric_limits<std::int8_t>::max()))
+            mod = ModRmModDisp32;
+        _bytes.push_back(static_cast<std::uint8_t>((mod << ModRmModShift) | ((reg & 7) << ModRmRegShift) | operand.Rm));
+        if (operand.Rm == ModRmRmSibPresent)
+            _bytes.push_back(operand.Sib);
+        const auto value = static_cast<std::uint32_t>(static_cast<std::int32_t>(displacement));
+        for (std::size_t index = 0; index < _displacementSize(mod, operand.Rm, operand.Sib); ++index)
+            _bytes.push_back(static_cast<std::uint8_t>(value >> (index * 8)));
+        _bytes.insert(_bytes.end(), tail.begin(), tail.end());
+    }
+    if (_bytes.size() - start > kMaxInstructionLength)
+        throw CodegenException("Re-encoded memory operand instruction exceeds 15 bytes");
 }
 
 void StubBodyBuilder::Spill(const std::uint8_t reg) {
