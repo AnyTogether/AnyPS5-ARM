@@ -102,6 +102,7 @@ std::shared_ptr<Pipeline> CachedPipeline(const Context& context, const State& st
 void ClearCachedPipelines(VkDevice device);
 bool HasStencil(VkFormat format);
 // Device limit checks of the viewport, which is dynamic state and so no longer checked by Pipeline.
+bool NormalizeUnobservedViewportDepth(const Context& context, State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel);
 void ValidateViewport(const Context& context, const VkViewport& viewport);
 void ValidateDepthBounds(const Context& context, const State& state);
 void ValidateProvokingVertex(const Context& context, const State& state, std::span<const CompiledShader> shaders = {});

@@ -124,6 +124,7 @@ std::shared_ptr<DrawDecode> Driver::decodeDraw(const QueueState& queue, const Su
     product->pixel.targetExportPacking = Graphics::ExportPackings(product->state);
     product->pixel.dualSourceBlend = product->state.dualSourceBlend;
     product->pixel.alphaToCoverage = product->state.alphaToCoverage;
+    if (const auto localDevice = device.Load(); localDevice != nullptr) localDevice->NormalizeUnobservedViewportDepth(product->state, product->pixel);
     return product;
 }
 

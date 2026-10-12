@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <list>
 #include <mutex>
+#include <sstream>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -106,9 +107,24 @@ void ValidateProvokingVertex(const Context& context, const State& state, std::sp
     }
 }
 
+bool NormalizeUnobservedViewportDepth(const Context& context, State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) {
+    auto& viewport = state.viewport;
+    if (context.depthRangeUnrestricted || !std::isfinite(viewport.minDepth) || !std::isfinite(viewport.maxDepth)) return false;
+    if (viewport.minDepth >= 0 && viewport.minDepth <= 1 && viewport.maxDepth >= 0 && viewport.maxDepth <= 1) return false;
+    if (state.depthTest || state.depthWrite || state.depthBoundsTest || pixel.posZ || pixel.depthExportEnable) return false;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    return true;
+}
+
 void ValidateViewport(const Context& context, const VkViewport& viewport) {
     Require(std::isfinite(viewport.minDepth) && std::isfinite(viewport.maxDepth), "non-finite viewport depth range");
-    Require(context.depthRangeUnrestricted || (viewport.minDepth >= 0 && viewport.minDepth <= 1 && viewport.maxDepth >= 0 && viewport.maxDepth <= 1), "viewport depth outside [0, 1] requires VK_EXT_depth_range_unrestricted");
+    if (!context.depthRangeUnrestricted && !(viewport.minDepth >= 0 && viewport.minDepth <= 1 && viewport.maxDepth >= 0 && viewport.maxDepth <= 1)) {
+        std::ostringstream message;
+        message.precision(9);
+        message << "viewport depth [" << viewport.minDepth << ", " << viewport.maxDepth << "] outside [0, 1] requires VK_EXT_depth_range_unrestricted";
+        Require(false, message.str());
+    }
     Require(std::isfinite(viewport.x) && std::isfinite(viewport.y) && std::isfinite(viewport.width) && std::isfinite(viewport.height), "viewport arithmetic overflow");
     Require(viewport.width <= context.limits.maxViewportDimensions[0] && std::abs(viewport.height) <= context.limits.maxViewportDimensions[1], "viewport dimensions exceed device limits");
     Require(viewport.x >= context.limits.viewportBoundsRange[0] && viewport.x + viewport.width <= context.limits.viewportBoundsRange[1], "viewport X exceeds device bounds");
