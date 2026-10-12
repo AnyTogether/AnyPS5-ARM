@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libkernel/Pthread/Posix/Common.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <atomic>
@@ -76,6 +77,7 @@ bool Install(int guest, const GuestSigaction& action) {
     if (!native) return true;
     const auto previous = handlers[guest].exchange(Delivered(action) ? reinterpret_cast<GuestHandler>(action.handler) : nullptr);
     auto hostHandler = action.handler == 1 ? SIG_IGN : Delivered(action) ? Dispatch : SIG_DFL;
+    if (GuestWriteWatch::GuestWriteWatchChainSignal_nid_postfix(native, hostHandler)) return true;
     if (std::signal(native, hostHandler) == SIG_ERR) {
         handlers[guest].store(previous);
         return false;

@@ -451,6 +451,17 @@ public:
         });
     }
 
+    // The guest's own SIGSEGV or SIGBUS disposition: faults the watch does not own go to it instead of
+    // replacing the watch's handler, which would leave every watched page faulting forever.
+    bool ChainSignal(int signal, void (*handler)(int)) {
+        if (!_available || (signal != SIGSEGV && signal != SIGBUS)) return false;
+        struct sigaction chained {};
+        chained.sa_handler = handler;
+        sigemptyset(&chained.sa_mask);
+        (signal == SIGBUS ? _previousBus : _previousSegv) = chained;
+        return true;
+    }
+
     void ProtectionChanged(std::uintptr_t begin, std::uintptr_t end, int protection) {
         begin = pageStart(begin);
         end = pageEnd(end);
@@ -846,6 +857,16 @@ void GuestWriteWatchHostWrites_nid_postfix(const void* pointer, std::size_t byte
 #else
     static_cast<void>(pointer);
     static_cast<void>(bytes);
+#endif
+}
+
+bool GuestWriteWatchChainSignal_nid_postfix(int signal, void (*handler)(int)) {
+#if defined(__APPLE__)
+    return Watch::Get().ChainSignal(signal, handler);
+#else
+    static_cast<void>(signal);
+    static_cast<void>(handler);
+    return false;
 #endif
 }
 
