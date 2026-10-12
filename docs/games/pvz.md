@@ -4,12 +4,17 @@
 
 `PPSA29802` · Unity (IL2CPP)
 
-**Status:** 🟢 Playable · Main menu and the first level · **FPS:** menu ~120 · in game 70–120 (120 Hz display)
+**Status:** 🟢 Playable · Levels 1-1 to 1-3 played through · **FPS:** menu ~120 · in game 60–120 (120 Hz display)
 
-Plays from the main menu into the levels and draws correctly. Rarely, a masked (`vmaskmovps`) or not yet split 256-bit store still ends the game with a Rosetta `EmulateForward` abort.
+Plays from the main menu through the first levels, unlocks and huge waves included, and draws correctly. Six minutes of continuous play showed no glitch and no crash. Rarely, a masked (`vmaskmovps`) or not yet split 256-bit store still ends the game with a Rosetta `EmulateForward` abort.
 
 ![In game: the first level, planting the first seed, 117 FPS](img/pvz-ingame.jpg)
 *In game: the first level, planting the first seed, 117 FPS*
+
+| | |
+|---|---|
+| <img src="img/pvz-newplant.jpg" width="420"><br>*Level 1-1 finished: the Sunflower unlocked* | <img src="img/pvz-garden.jpg" width="420"><br>*Level 1-2: sunflowers and peashooters* |
+| <img src="img/pvz-wave.jpg" width="420"><br>*Level 1-3: "A huge wave of zombies is approaching!", 88 FPS* | <img src="img/pvz-zombies.jpg" width="420"><br>*Level 1-3: the wave reaches the garden* |
 
 ![EA user agreement screen](img/pvz-agreement.jpg)
 *EA user agreement screen*
@@ -23,7 +28,7 @@ Plays from the main menu into the levels and draws correctly. Rarely, a masked (
 | ✅ | **MSAA sample locations** | The game uses nonstandard sample positions with 4x MSAA. They are applied through VK_EXT_sample_locations; main now uses upstream's implementation. |
 | ✅ | **MSAA memory size** | The size of the 4x MSAA target was computed 2 MB too large and overlapped a small image; fixed with AddrLib's GFX10 rule. |
 | ✅ | **Rosetta + AVX crash** | Fixed by upstream #4194; 53,718 stores were split in the executable. |
-| ✅ | **Main menu and game** | Played by hand: main menu at ~120 FPS, in game 70–120 FPS on a 120 Hz display. |
+| ✅ | **Main menu and game** | Played by hand through levels 1-1, 1-2 and 1-3: main menu at ~120 FPS, in game 60–120 FPS on a 120 Hz display. |
 | 🔧 | **Rare Rosetta abort** | `vmaskmovps` stores and some 256-bit stores the relinker has not split still abort when they hit a watched page. |
 
 ✅ done · 🔧 in progress · ⏭️ next

@@ -11,7 +11,7 @@ Test hardware: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Last upda
 | | Game | ID | Engine | Status | FPS |
 |---|---|---|---|---|---|
 | <img src="img/silksong-ingame.jpg" width="180"> | [**Hollow Knight: Silksong**](silksong.md) | `PPSA12544` | Unity (IL2CPP) | 🟡 In game, first area | Menu 60 · in game ~28–48 |
-| <img src="img/pvz-ingame.jpg" width="180"> | [**Plants vs. Zombies: Replanted**](pvz.md) | `PPSA29802` | Unity (IL2CPP) | 🟢 Playable; rare Rosetta crash | Menu ~120 · in game 70–120 |
+| <img src="img/pvz-ingame.jpg" width="180"> | [**Plants vs. Zombies: Replanted**](pvz.md) | `PPSA29802` | Unity (IL2CPP) | 🟢 Playable, levels 1-1 to 1-3; rare Rosetta crash | Menu ~120 · in game 60–120 |
 | <img src="img/doom-e1m1.jpg" width="180"> | [**DOOM (homebrew)**](doom.md) | `PPSA99666` | lowbit/ps5-doom | 🟢 Playable, E1M1 onwards | 35 (the game's own target) |
 | <img src="img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Playable | 60 |
 | <img src="img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | The project's test game | 🟢 Playable | 60 |

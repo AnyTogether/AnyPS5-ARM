@@ -4,12 +4,17 @@
 
 `PPSA29802` · Unity (IL2CPP)
 
-**Durum:** 🟢 Oynanabilir · Ana menü ve ilk bölüm · **FPS:** menü ~120 · oyun içi 70–120 (120 Hz ekran)
+**Durum:** 🟢 Oynanabilir · 1-1, 1-2 ve 1-3 oynandı · **FPS:** menü ~120 · oyun içi 60–120 (120 Hz ekran)
 
-Ana menüden bölümlere kadar oynanıyor, görüntü kusursuz. Nadiren maskeli (`vmaskmovps`) ya da henüz bölünmemiş bir 256-bit yazma oyunu Rosetta `EmulateForward` hatasıyla kapatabiliyor.
+Ana menüden ilk bölümlere kadar, yeni bitkiler ve dev zombi dalgaları dahil oynanıyor; görüntü kusursuz. Altı dakikalık kesintisiz oyunda hiç bozulma ya da kapanma olmadı. Nadiren maskeli (`vmaskmovps`) ya da henüz bölünmemiş bir 256-bit yazma oyunu Rosetta `EmulateForward` hatasıyla kapatabiliyor.
 
 ![Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS](../img/pvz-ingame.jpg)
 *Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS*
+
+| | |
+|---|---|
+| <img src="../img/pvz-newplant.jpg" width="420"><br>*1-1 bitti: Ayçiçeği açıldı* | <img src="../img/pvz-garden.jpg" width="420"><br>*1-2: ayçiçekleri ve bezelye atıcılar* |
+| <img src="../img/pvz-wave.jpg" width="420"><br>*1-3: "A huge wave of zombies is approaching!", 88 FPS* | <img src="../img/pvz-zombies.jpg" width="420"><br>*1-3: dalga bahçeye ulaşıyor* |
 
 ![EA kullanıcı sözleşmesi ekranı](../img/pvz-agreement.jpg)
 *EA kullanıcı sözleşmesi ekranı*
@@ -23,7 +28,7 @@ Ana menüden bölümlere kadar oynanıyor, görüntü kusursuz. Nadiren maskeli 
 | ✅ | **MSAA sample locations** | Oyun 4x MSAA'da standart dışı örnek noktaları kullanıyor; VK_EXT_sample_locations ile uygulanıyor. Main artık upstream'in uygulamasını kullanıyor. |
 | ✅ | **MSAA bellek boyutu** | 4x MSAA hedefinin boyutu 2 MB fazla hesaplanıyordu ve küçük bir görüntüyle çakışıyordu; AddrLib'in GFX10 kuralıyla düzeltildi. |
 | ✅ | **Rosetta + AVX çökmesi** | Upstream #4194 ile çözüldü; exe'de 53.718 yazma bölündü. |
-| ✅ | **Ana menü ve oyun** | Elle oynandı: ana menü ~120 FPS, oyun içi 120 Hz ekranda 70–120 FPS. |
+| ✅ | **Ana menü ve oyun** | 1-1, 1-2 ve 1-3 elle oynandı: ana menü ~120 FPS, oyun içi 120 Hz ekranda 60–120 FPS. |
 | 🔧 | **Nadir Rosetta çökmesi** | `vmaskmovps` yazmaları ve relinker'ın henüz bölmediği bazı 256-bit yazmalar izlenen bir sayfaya denk gelince hâlâ çöküyor. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
