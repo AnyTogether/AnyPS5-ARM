@@ -10,6 +10,7 @@
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <sys/mman.h>
 #else
 #include <cstdio>
 #include <sys/mman.h>
