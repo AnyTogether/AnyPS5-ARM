@@ -2743,6 +2743,10 @@ bool VulkanDevice::MeshShaders() const {
     return state->meshShader;
 }
 
+bool VulkanDevice::NormalizeUnobservedViewportDepth(Graphics::State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) const {
+    return Graphics::NormalizeUnobservedViewportDepth(graphicsContext(), state, pixel);
+}
+
 VkShaderStageFlags VulkanDevice::SubgroupStages() const {
     return state->subgroup.supportedStages;
 }

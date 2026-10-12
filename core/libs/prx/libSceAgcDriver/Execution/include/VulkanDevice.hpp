@@ -45,6 +45,7 @@ public:
     std::uint64_t Serial() const { return serial; }
     // Whether the device runs mesh shaders (VK_EXT_mesh_shader), which the geometry path needs.
     bool MeshShaders() const;
+    bool NormalizeUnobservedViewportDepth(Graphics::State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) const;
     // The Vulkan device handle (a Recipe names the device it was built on).
     VkDevice Device() const;
     // Drains everything under the caller's GpuMutex: recorder Sync plus vkDeviceWaitIdle. For suspend,

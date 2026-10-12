@@ -1672,6 +1672,43 @@ void DepthClipTests() {
     }
 }
 
+void UnobservedViewportDepthTests() {
+    using AgcDriver::Graphics::NormalizeUnobservedViewportDepth;
+    auto queue = makeState();
+    queue.context[0x204] = 0;
+    AgcDriver::Graphics::Context context{};
+    context.limits.maxViewportDimensions[0] = 16384;
+    context.limits.maxViewportDimensions[1] = 16384;
+    context.limits.viewportBoundsRange[0] = -32768.0f;
+    context.limits.viewportBoundsRange[1] = 32767.0f;
+    ShaderRecompiler::ShaderPixelStageInfo pixel{};
+    auto state = AgcDriver::Graphics::DecodeState(queue);
+    Require(state.viewport.minDepth == -1 && state.viewport.maxDepth == 1 && state.negativeOneToOne, "the test state has no out-of-range depth");
+    expectFailure([&] { AgcDriver::Graphics::ValidateViewport(context, state.viewport); }, "viewport depth [-1, 1] outside [0, 1]");
+    Require(NormalizeUnobservedViewportDepth(context, state, pixel), "an unobserved depth range was not normalized");
+    Require(state.viewport.minDepth == 0 && state.viewport.maxDepth == 1 && state.negativeOneToOne, "normalization changed more than the depth range");
+    AgcDriver::Graphics::ValidateViewport(context, state.viewport);
+    auto unrestricted = context;
+    unrestricted.depthRangeUnrestricted = true;
+    state = AgcDriver::Graphics::DecodeState(queue);
+    Require(!NormalizeUnobservedViewportDepth(unrestricted, state, pixel) && state.viewport.minDepth == -1 && state.viewport.maxDepth == 1, "a device with the extension had its depth range changed");
+    auto direct = makeState();
+    state = AgcDriver::Graphics::DecodeState(direct);
+    Require(!NormalizeUnobservedViewportDepth(context, state, pixel) && state.viewport.minDepth == 0 && state.viewport.maxDepth == 1, "an in-range depth range was changed");
+    const auto observed = [&](auto&& observe, const char* what) {
+        state = AgcDriver::Graphics::DecodeState(queue);
+        auto reading = pixel;
+        observe(state, reading);
+        Require(!NormalizeUnobservedViewportDepth(context, state, reading) && state.viewport.minDepth == -1 && state.viewport.maxDepth == 1, std::string("a depth range observed through ") + what + " was normalized");
+        expectFailure([&] { AgcDriver::Graphics::ValidateViewport(context, state.viewport); }, "viewport depth [-1, 1] outside [0, 1]");
+    };
+    observed([](AgcDriver::Graphics::State& s, ShaderRecompiler::ShaderPixelStageInfo&) { s.depthTest = true; }, "the depth test");
+    observed([](AgcDriver::Graphics::State& s, ShaderRecompiler::ShaderPixelStageInfo&) { s.depthWrite = true; }, "depth writes");
+    observed([](AgcDriver::Graphics::State& s, ShaderRecompiler::ShaderPixelStageInfo&) { s.depthBoundsTest = true; }, "the depth bounds test");
+    observed([](AgcDriver::Graphics::State&, ShaderRecompiler::ShaderPixelStageInfo& p) { p.posZ = true; }, "the pixel position Z");
+    observed([](AgcDriver::Graphics::State&, ShaderRecompiler::ShaderPixelStageInfo& p) { p.depthExportEnable = true; }, "the pixel depth export");
+}
+
 void AlphaToCoverageTests() {
     auto queue = makeState();
     queue.context[0x1b3] = 2;
@@ -4323,6 +4360,7 @@ int main(int argc, char** argv) {
         hardwareScreenOffsetTests();
         srgb8TargetTests();
         DepthClipTests();
+        UnobservedViewportDepthTests();
         DepthStencilTests();
         OneDimensionalColorTests();
         htileDepthClearTests();
