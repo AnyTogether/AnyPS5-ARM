@@ -477,7 +477,7 @@ int APS5_VABI close_nid_postfix(int d) {
 #ifdef _WIN32
     File::ForgetDirectoryDescriptor(d);
     File::ForgetFileLock(d);
-    return _close(d);
+    return WithoutParameterHandler([d] { return ::_close(d); });
 #else
     return ::close(d);
 #endif

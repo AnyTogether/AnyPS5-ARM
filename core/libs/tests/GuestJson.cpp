@@ -57,6 +57,9 @@ Iterator* APS5_VABI _ZNK3sce4Json6Object3endEv(Iterator*, const Object*);
 void APS5_VABI _ZN3sce4Json6Object8iteratorD1Ev(Iterator*);
 Iterator* APS5_VABI _ZN3sce4Json6Object8iteratorppEv(Iterator*);
 Pair* APS5_VABI _ZNK3sce4Json6Object8iteratordeEv(const Iterator*);
+Pair* APS5_VABI _ZNK3sce4Json6Object8iteratorptEv(const Iterator*);
+Iterator* APS5_VABI _ZNK3sce4Json6Object4findERKNS0_6StringE(Iterator*, const Object*, const String*);
+int APS5_VABI _ZNK3sce4Json6String7compareEPKc(const String*, const char*);
 bool APS5_VABI _ZNK3sce4Json6Object8iteratorneERKS2_(const Iterator*, const Iterator*);
 void APS5_VABI _ZN3sce4Json5ValueC1Ev(Value*);
 void APS5_VABI _ZN3sce4Json5ValueC1Eb(Value*, bool);
@@ -299,6 +302,56 @@ static void ObjectsAndArrays() {
     _ZN3sce4Json5ArrayD1Ev(&array);
 }
 
+static void ObjectFind() {
+    Object object{};
+    _ZN3sce4Json6ObjectC1Ev(&object);
+    String alpha{}, beta{}, gamma{};
+    _ZN3sce4Json6StringC1EPKc(&alpha, "alpha");
+    _ZN3sce4Json6StringC1EPKc(&beta, "beta");
+    _ZN3sce4Json6StringC1EPKc(&gamma, "gamma");
+    Iterator found{}, end{};
+    _ZNK3sce4Json6Object3endEv(&end, &object);
+    _ZNK3sce4Json6Object4findERKNS0_6StringE(&found, &object, &alpha);
+    Require(!_ZNK3sce4Json6Object8iteratorneERKS2_(&found, &end));
+    _ZN3sce4Json6Object8iteratorD1Ev(&found);
+    _ZN3sce4Json6Object8iteratorD1Ev(&end);
+
+    Require(_ZN3sce4Json5Value3setEl(_ZN3sce4Json6ObjectixERKNS0_6StringE(&object, &alpha), 1) == 0);
+    Value* second = _ZN3sce4Json6ObjectixERKNS0_6StringE(&object, &beta);
+    Require(_ZN3sce4Json5Value3setEPKc(second, "b") == 0);
+    _ZNK3sce4Json6Object3endEv(&end, &object);
+    Iterator* returned = _ZNK3sce4Json6Object4findERKNS0_6StringE(&found, &object, &beta);
+    Require(returned == &found);
+    Require(_ZNK3sce4Json6Object8iteratorneERKS2_(&found, &end));
+    const Pair* pair = _ZNK3sce4Json6Object8iteratorptEv(&found);
+    Require(pair == _ZNK3sce4Json6Object8iteratordeEv(&found));
+    Require(&pair->value == second);
+    Require(std::strcmp(_ZNK3sce4Json6String5c_strEv(&pair->key), "beta") == 0);
+    _ZN3sce4Json6Object8iteratorppEv(&found);
+    Require(!_ZNK3sce4Json6Object8iteratorneERKS2_(&found, &end));
+    _ZNK3sce4Json6Object4findERKNS0_6StringE(&found, &object, &gamma);
+    Require(!_ZNK3sce4Json6Object8iteratorneERKS2_(&found, &end));
+    Require(_ZNK3sce4Json6Object4sizeEv(&object) == 2);
+    _ZN3sce4Json6Object8iteratorD1Ev(&found);
+    _ZN3sce4Json6Object8iteratorD1Ev(&end);
+
+    Require(_ZNK3sce4Json6String7compareEPKc(&beta, "beta") == 0);
+    Require(_ZNK3sce4Json6String7compareEPKc(&beta, "betb") < 0);
+    Require(_ZNK3sce4Json6String7compareEPKc(&beta, "bet") > 0);
+    Require(_ZNK3sce4Json6String7compareEPKc(&beta, "alpha") > 0);
+    bool threw = false;
+    try {
+        static_cast<void>(_ZNK3sce4Json6String7compareEPKc(&beta, nullptr));
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Require(threw);
+    _ZN3sce4Json6StringD1Ev(&alpha);
+    _ZN3sce4Json6StringD1Ev(&beta);
+    _ZN3sce4Json6StringD1Ev(&gamma);
+    _ZN3sce4Json6ObjectD1Ev(&object);
+}
+
 static void NullAccess(SetNullAccessCallback setCallback) {
     callbackCalls = 0;
     lastRequested = -1;
@@ -513,6 +566,7 @@ int main() {
     ParseAndRoundTrip();
     NestingDepth();
     ObjectsAndArrays();
+    ObjectFind();
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallbackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     ValueAccess();

@@ -122,14 +122,14 @@ class Check:
     def duplicates(self, exports):
         if not exports:
             return
-        pattern = r"\bAPS5_VABI\s+(" + "|".join(exports) + r")\s*\("
+        pattern = r"(^|[^[:alnum:]_])APS5_VABI[[:space:]]+(" + "|".join(exports) + r")[[:space:]]*\("
         result = subprocess.run(["git", "grep", "-nE", pattern, self.head, "--", "core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
         for line in result.stdout.splitlines():
-            _, path, _, text = line.split(":", 3)
+            _, path, number, text = line.split(":", 3)
             name = EXPORT.search(text).group(1)
-            own, number = exports[name]
-            if library(path) != library(own) and not text.rstrip().endswith(";"):
-                self.report("duplicate-export", own, number, f"{name} is also in {library(path)}")
+            own, own_number = exports[name]
+            if library(path) != library(own) and function_body(self.show(path).splitlines(), int(number) - 1) is not None:
+                self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def build(self):
         for path, lines in self.files(lambda p: p.name == "CMakeLists.txt" or p.suffix == ".cmake"):

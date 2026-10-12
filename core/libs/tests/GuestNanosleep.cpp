@@ -85,6 +85,22 @@ static void SleepsForTheRequest(Nanosleep sleep) {
     Require(MonotonicNanos() - start >= SLEEP_NANOS - EARLY_WAKE_MARGIN_NANOS);
 }
 
+static void CompletedSleepLeavesTheRemainingTimeAlone(Nanosleep sleep) {
+    const KernelTimespec request{0, NANOS_PER_MILLISECOND};
+    KernelTimespec remaining{7, 9};
+    Require(sleep(&request, &remaining) == SCE_OK);
+    Require(remaining.tv_sec == 7 && remaining.tv_nsec == 9);
+    KernelTimespec shared = request;
+    for (int i = 0; i < 3; ++i) {
+        Require(sleep(&shared, &shared) == SCE_OK);
+        Require(shared.tv_sec == request.tv_sec && shared.tv_nsec == request.tv_nsec);
+    }
+    const KernelTimespec invalid{0, NANOS_PER_SECOND};
+    remaining = {7, 9};
+    Require(sleep(&invalid, &remaining) != SCE_OK);
+    Require(remaining.tv_sec == 7 && remaining.tv_nsec == 9);
+}
+
 int main() {
     PosixRejectsInvalidRequests(nanosleep_nid_postfix);
     PosixRejectsInvalidRequests(_nanosleep_nid_postfix);
@@ -97,4 +113,8 @@ int main() {
     SleepsForTheRequest(nanosleep_nid_postfix);
     SleepsForTheRequest(_nanosleep_nid_postfix);
     SleepsForTheRequest(sceKernelNanosleep);
+
+    CompletedSleepLeavesTheRemainingTimeAlone(nanosleep_nid_postfix);
+    CompletedSleepLeavesTheRemainingTimeAlone(_nanosleep_nid_postfix);
+    CompletedSleepLeavesTheRemainingTimeAlone(sceKernelNanosleep);
 }

@@ -503,12 +503,11 @@ int APS5_VABI sceKernelIsTrinityMode(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetOperationMode(int* mode, int* submode) {
+void APS5_VABI sceKernelGetOperationMode(int* mode, int* submode) {
     if (!mode || !submode)
         throw std::invalid_argument("sceKernelGetOperationMode: null output");
-    *mode = 0;
+    *mode = 2;
     *submode = 0;
-    return 0;
 }
 
 int APS5_VABI seteuid_nid_postfix(std::uint32_t euid) {

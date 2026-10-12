@@ -317,7 +317,7 @@ int main() {
         if (!device) return VulkanTestSkipped;
         const auto target = device->Target();
         if (!target.tessellation.has_value()) {
-            std::puts("Tessellation tests skipped: the device has no tessellation shaders");
+            std::puts("tessellation: skipped, the device has no tessellation shaders");
             return VulkanTestSkipped;
         }
         ExpectRefusal(target, ShaderStage::TessellationControl, HullUnguardedFactors, "not written by control point 0 alone");

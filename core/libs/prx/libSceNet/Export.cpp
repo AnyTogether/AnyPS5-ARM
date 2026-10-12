@@ -167,7 +167,7 @@ bool guest_to_native_address(const void* address, std::uint32_t length,
                              sockaddr_storage& native, NativeLength& native_length) {
     if (!address || length < 2) return false;
     const auto* bytes = static_cast<const std::uint8_t*>(address);
-    if (bytes[1] == NET_AF_INET && bytes[0] == 16 && length >= 16) {
+    if (bytes[1] == NET_AF_INET && length >= 16) {
         auto& v4 = reinterpret_cast<sockaddr_in&>(native);
         v4.sin_family = AF_INET;
         std::memcpy(&v4.sin_port, bytes + 2, 2);
@@ -175,7 +175,7 @@ bool guest_to_native_address(const void* address, std::uint32_t length,
         native_length = sizeof(v4);
         return true;
     }
-    if (bytes[1] == NET_AF_INET6 && bytes[0] == 28 && length >= 28) {
+    if (bytes[1] == NET_AF_INET6 && length >= 28) {
         auto& v6 = reinterpret_cast<sockaddr_in6&>(native);
         v6.sin6_family = AF_INET6;
         std::memcpy(&v6.sin6_port, bytes + 2, 2);

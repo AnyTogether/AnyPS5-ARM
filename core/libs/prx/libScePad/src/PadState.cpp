@@ -143,8 +143,11 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     data.left_stick_y = state.sticks[1];
     data.right_stick_x = state.sticks[2];
     data.right_stick_y = state.sticks[3];
-    data.analog_buttons_l2 = std::max<std::uint8_t>(state.analogButtonsL2, (data.buttons & 0x100) != 0 ? 255 : 0);
-    data.analog_buttons_r2 = std::max<std::uint8_t>(state.analogButtonsR2, (data.buttons & 0x200) != 0 ? 255 : 0);
+    const auto trigger = [&](std::uint8_t analog, std::uint32_t bit) -> std::uint8_t {
+        return (injected & bit) != 0 || (analog == 0 && (state.buttons & bit) != 0) ? 255 : analog;
+    };
+    data.analog_buttons_l2 = trigger(state.analogButtonsL2, 0x100);
+    data.analog_buttons_r2 = trigger(state.analogButtonsR2, 0x200);
 
     const bool live = state.hasMotion && output.motionEnabled;
     const std::array<float, 3> rest{0.0f, 9.80665f, 0.0f};

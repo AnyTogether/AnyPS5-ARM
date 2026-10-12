@@ -15,6 +15,7 @@ std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 int APS5_VABI getpeername_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI shutdown_nid_postfix(int, int);
+std::int64_t APS5_VABI recvfrom_nid_postfix(int, void*, std::uint64_t, int, void*, std::uint32_t*);
 int APS5_VABI close_nid_postfix(int);
 int* APS5_VABI __error_nid_postfix();
 }
@@ -23,7 +24,31 @@ static void Require(bool condition) {
     if (!condition) std::abort();
 }
 
+static void StreamReceiveReportsNoSender() {
+    const int listener = socket_nid_postfix(2, 1, 0);
+    Require(listener >= 0);
+    std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+    Require(bind_nid_postfix(listener, address.data(), address.size()) == 0 && listen_nid_postfix(listener, 4) == 0);
+    std::uint32_t size = address.size();
+    Require(getsockname_nid_postfix(listener, address.data(), &size) == 0);
+    const int client = socket_nid_postfix(2, 1, 0);
+    Require(connect_nid_postfix(client, address.data(), address.size()) == 0);
+    const int accepted = accept_nid_postfix(listener, nullptr, nullptr);
+    Require(accepted >= 0);
+    const char text[] = "stream";
+    Require(send_nid_postfix(client, text, sizeof(text), 0) == sizeof(text));
+    std::array<std::uint8_t, 28> sender;
+    sender.fill(0xaa);
+    char received[sizeof(text)]{};
+    std::uint32_t senderSize = sender.size();
+    Require(recvfrom_nid_postfix(accepted, received, sizeof(received), 0, sender.data(), &senderSize) == sizeof(text));
+    Require(std::strcmp(text, received) == 0);
+    Require(senderSize == 0 && sender[0] == 0xaa && sender[1] == 0xaa);
+    for (const int descriptor : {client, accepted, listener}) Require(close_nid_postfix(descriptor) == 0);
+}
+
 int main() {
+    StreamReceiveReportsNoSender();
     const int listener = socket_nid_postfix(2, 1, 6);
     Require(listener >= 0);
     std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};

@@ -88,7 +88,9 @@ int APS5_VABI sceKernelWaitSema(KernelSema sem, int need, KernelUseconds* time) 
   return KERNEL_SEMA_OK;
  }
 
- const bool acquired = sem->condition.WaitUntil(lock, TimedWait::DeadlineNanos(*time), released);
+ const std::uint64_t deadline = TimedWait::DeadlineNanos(*time);
+ const bool acquired = sem->condition.WaitUntil(lock, deadline, released);
+ *time = static_cast<KernelUseconds>(TimedWait::RemainingMicros(deadline));
  traceWait(!acquired);
  if (sem->deleted) {
   return SCE_KERNEL_ERROR_EACCES;

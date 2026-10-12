@@ -316,6 +316,9 @@ static void CheckUnspecifiedIpv6() {
     Require(sceNetRecvfrom(receiver, received, sizeof(received), 0, peer.data(), &size) == sizeof(received));
     Require(std::memcmp(received, payload, sizeof(payload)) == 0 && size == peer.size() && peer[1] == 28);
     Require(std::memcmp(peer.data() + 8, address.data() + 8, 16) == 0);
+    address[0] = 0;
+    Require(sceNetSendto(sender, payload, sizeof(payload), 0, address.data(), address.size()) == sizeof(payload));
+    Require(sceNetRecvfrom(receiver, received, sizeof(received), 0, nullptr, nullptr) == sizeof(received));
     Require(std::memcmp(sce_net_in6addr_any, unspecified.data(), unspecified.size()) == 0);
     Require(sceNetSocketClose(sender) == 0);
     Require(sceNetSocketClose(receiver) == 0);
@@ -432,6 +435,10 @@ int main() {
     Require(sceNetRecvfrom(udp_receiver, datagram_result, sizeof(datagram_result), 0,
         source.data(), &address_size) == sizeof(datagram_result));
     Require(std::strcmp(datagram, datagram_result) == 0 && source[1] == 2);
+    std::array<std::uint8_t, 16> unsized = address;
+    unsized[0] = 0;
+    Require(sceNetSendto(udp_sender, datagram, sizeof(datagram), 0, unsized.data(), unsized.size()) == sizeof(datagram));
+    Require(sceNetRecvfrom(udp_receiver, datagram_result, sizeof(datagram_result), 0, nullptr, nullptr) == sizeof(datagram_result));
     std::uint64_t readable[16]{};
     readable[udp_receiver / 64] |= std::uint64_t{1} << (udp_receiver % 64);
     const std::int64_t poll_now[2]{0, 0};

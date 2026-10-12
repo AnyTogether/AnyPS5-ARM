@@ -191,8 +191,23 @@ static void CheckFailedLockAttempts() {
     Require(rwlock == nullptr);
 }
 
+static void CheckDeadlinesBeyondTheClockRange() {
+    PthreadRwlock rwlock = nullptr;
+    Holder reader{&rwlock, false};
+    Start(reader);
+    const KernelTimespec farPast{INT64_MIN, 0};
+    Require(pthread_rwlock_timedwrlock_nid_postfix(&rwlock, &farPast) == GUEST_ETIMEDOUT);
+    reader.release.store(true);
+    const KernelTimespec farFuture{INT64_MAX, 0};
+    Require(pthread_rwlock_timedwrlock_nid_postfix(&rwlock, &farFuture) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(scePthreadJoin(reader.thread, nullptr) == SCE_OK);
+    Require(pthread_rwlock_destroy_nid_postfix(&rwlock) == 0);
+}
+
 int main() {
     CheckConcurrentFirstWrlockExcludes();
+    CheckDeadlinesBeyondTheClockRange();
     const KernelTimespec invalid{0, NANOS_PER_SECOND};
     PthreadRwlock fresh[4] = {};
     Require(pthread_rwlock_tryrdlock_nid_postfix(&fresh[0]) == 0);

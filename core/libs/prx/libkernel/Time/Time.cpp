@@ -270,7 +270,7 @@ int APS5_VABI sceKernelUsleep_nid_postfix(KernelUseconds microseconds) {
     return 0;
 }
 
-static int SleepForRequest(const KernelTimespec* rqtp, KernelTimespec* rmtp) {
+static int SleepForRequest(const KernelTimespec* rqtp) {
     constexpr int guestFault = 14;
     constexpr int guestInvalid = 22;
     if (rqtp == nullptr) return guestFault;
@@ -279,20 +279,16 @@ static int SleepForRequest(const KernelTimespec* rqtp, KernelTimespec* rmtp) {
         CancellableSleep(static_cast<std::uint64_t>(rqtp->tv_sec) * 1000000000ULL +
                          static_cast<std::uint64_t>(rqtp->tv_nsec));
     }
-    if (rmtp != nullptr) {
-        rmtp->tv_sec = 0;
-        rmtp->tv_nsec = 0;
-    }
     return 0;
 }
 
 int APS5_VABI sceKernelNanosleep(const KernelTimespec* rqtp, KernelTimespec* rmtp) {
-    const int error = SleepForRequest(rqtp, rmtp);
+    const int error = SleepForRequest(rqtp);
     return error == 0 ? 0 : SceKernelError(error);
 }
 
 int APS5_VABI nanosleep_nid_postfix(const KernelTimespec* rqtp, KernelTimespec* rmtp) {
-    const int error = SleepForRequest(rqtp, rmtp);
+    const int error = SleepForRequest(rqtp);
     if (error == 0) return 0;
     *__error_nid_postfix() = error;
     return -1;
@@ -614,7 +610,7 @@ int APS5_VABI sceKernelConvertLocaltimeToUtc(int64_t local_time, int64_t reserve
     return 0;
 }
 
-int APS5_VABI sceKernelConvertUtcToLocaltime(int64_t utc_time, int64_t* local_time, KernelTimesec* st, uint64_t* dst_sec) {
+int APS5_VABI sceKernelConvertUtcToLocaltime(int64_t utc_time, int64_t* local_time, KernelTimesec* st, int32_t* dst_sec) {
     if (local_time != nullptr) *local_time = utc_time;
     if (st != nullptr) *st = {utc_time, 0u, 0u};
     if (dst_sec != nullptr) *dst_sec = 0;

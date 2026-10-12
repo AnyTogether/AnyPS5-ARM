@@ -16,7 +16,7 @@ int APS5_VABI sceKernelUsleep_nid_postfix(KernelUseconds microseconds);
 int APS5_VABI gettimeofday_nid_postfix(KernelTimeval* tv, KernelTimezone* tz);
 std::int64_t APS5_VABI _Xtime_get_ticks_nid_postfix();
 int APS5_VABI sceKernelConvertLocaltimeToUtc(std::int64_t, std::int64_t, std::int64_t*, KernelTimesec*, std::int32_t*);
-int APS5_VABI sceKernelConvertUtcToLocaltime(std::int64_t, std::int64_t*, KernelTimesec*, std::uint64_t*);
+int APS5_VABI sceKernelConvertUtcToLocaltime(std::int64_t, std::int64_t*, KernelTimesec*, std::int32_t*);
 }
 
 static constexpr int SCE_OK = 0;
@@ -179,6 +179,11 @@ static void CalendarConversionsInitializeTheirState() {
         KernelTimesec state;
         std::uint64_t after;
     };
+    struct GuardedDst {
+        std::int32_t seconds;
+        std::uint32_t after;
+    };
+    static_assert(sizeof(GuardedDst) == 8);
     for (const auto seconds : std::array<std::int64_t, 4>{-86400, 0, 1767225600, 2147483648}) {
         GuardedState local{sentinel, {-1, 0xa5a5a5a5u, 0xa5a5a5a5u}, sentinel};
         std::int64_t utc = -1;
@@ -189,9 +194,10 @@ static void CalendarConversionsInitializeTheirState() {
         Require(local.before == sentinel && local.after == sentinel);
         GuardedState universal{sentinel, {-1, 0xa5a5a5a5u, 0xa5a5a5a5u}, sentinel};
         std::int64_t converted = -1;
-        std::uint64_t universalDst = sentinel;
-        Require(sceKernelConvertUtcToLocaltime(utc, &converted, &universal.state, &universalDst) == SCE_OK);
-        Require(converted == seconds && universalDst == 0);
+        GuardedDst universalDst{-1, 0xa5a5a5a5u};
+        Require(sceKernelConvertUtcToLocaltime(utc, &converted, &universal.state, &universalDst.seconds) == SCE_OK);
+        Require(converted == seconds && universalDst.seconds == 0);
+        Require(universalDst.after == 0xa5a5a5a5u);
         Require(universal.state.t == seconds && universal.state.west_sec == 0 && universal.state.dst_sec == 0);
         Require(universal.before == sentinel && universal.after == sentinel);
     }

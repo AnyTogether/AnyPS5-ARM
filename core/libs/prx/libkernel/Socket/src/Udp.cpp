@@ -753,7 +753,10 @@ std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::u
         if (socket->type == 1) *addressLength = 0; else UnnamedAddress(address, addressLength);
         return result;
     }
-    if (address) GuestAddress(native, address, addressLength);
+    if (address) {
+        if (native.ss_family == AF_INET || native.ss_family == AF_INET6) GuestAddress(native, address, addressLength);
+        else *addressLength = 0;
+    }
     return result;
 }
 struct GuestIovec {

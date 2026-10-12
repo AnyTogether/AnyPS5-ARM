@@ -186,18 +186,7 @@ static int SceIoErrorFromErrno(int error) {
     return static_cast<int>(0x80020000u | static_cast<unsigned>(guest));
 }
 
-extern "C" {
-
-int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
-    if (path != nullptr && *path == '\0') return SCE_KERNEL_ERROR_ENOENT;
-    APS5_LOG_OUT("path=%s flags=0x%X nativeFlags=0x%X mode=0%o", path, flags, MapFlags(flags), mode);
-    if (path != nullptr && File::IsRandomDevicePath(path)) {
-        if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY) throw std::runtime_error(std::string(__func__) + ": writing to " + path + " is not implemented");
-        const int fd = File::OpenRandomDevice();
-        return fd < 0 ? SceErrorFromErrno(errno) : fd;
-    }
-    std::filesystem::path native;
-    if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
+static int OpenNative(const std::filesystem::path& native, int flags, std::uint16_t mode) {
 #ifdef _WIN32
     if ((flags & (SCE_KERNEL_O_DIRECTORY | SCE_KERNEL_O_CREAT)) == SCE_KERNEL_O_DIRECTORY) {
         std::error_code error;
@@ -233,6 +222,28 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
     if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY || (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_TRUNC)))
         RecordWrittenPath_nid_no_patch(native);
     return fd;
+}
+
+extern "C" {
+
+int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
+    if (path != nullptr && *path == '\0') return SCE_KERNEL_ERROR_ENOENT;
+    APS5_LOG_OUT("path=%s flags=0x%X nativeFlags=0x%X mode=0%o", path, flags, MapFlags(flags), mode);
+    if (path != nullptr && File::IsRandomDevicePath(path)) {
+        if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY) throw std::runtime_error(std::string(__func__) + ": writing to " + path + " is not implemented");
+        const int fd = File::OpenRandomDevice();
+        return fd < 0 ? SceErrorFromErrno(errno) : fd;
+    }
+    std::filesystem::path native;
+    if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
+    return OpenNative(native, flags, mode);
+}
+
+int OpenInDirectory_nid_no_patch(int directory, const char* path, int flags, std::uint16_t mode) {
+    int error = 0;
+    const char* base = GetDirectoryDescriptorPath_nid_no_patch(directory, &error);
+    if (base == nullptr) return SceErrorFromErrno(error);
+    return OpenNative(std::filesystem::path(reinterpret_cast<const char8_t*>(base)) / std::filesystem::path(reinterpret_cast<const char8_t*>(path)), flags, mode);
 }
 
 int APS5_VABI sceKernelClose(int d) {

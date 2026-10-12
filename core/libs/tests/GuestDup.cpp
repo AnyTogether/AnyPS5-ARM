@@ -82,6 +82,10 @@ static void Dup2ReplacesTarget() {
     for (const int descriptor : {first[0], first[1], second[0], second[1]}) Require(close_nid_postfix(descriptor) == 0);
 }
 
+#ifdef _WIN32
+static bool g_invalidParameter = false;
+static void RecordInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned, std::uintptr_t) { g_invalidParameter = true; }
+#endif
 static void BadDescriptors() {
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0);
@@ -95,6 +99,15 @@ static void BadDescriptors() {
     RequireFailure(dup2_nid_postfix(-1, pipe[0]), GuestEbadf);
     RequireFailure(dup_nid_postfix(FirstSocket + 0x0ffffff0), GuestEbadf);
     RequireFailure(dup2_nid_postfix(FirstSocket + 0x0ffffff0, FirstSocket + 0x0ffffff1), GuestEbadf);
+#ifdef _WIN32
+    const auto previous = _set_invalid_parameter_handler(RecordInvalidParameter);
+#endif
+    RequireFailure(close_nid_postfix(closed), GuestEbadf);
+    RequireFailure(close_nid_postfix(-1), GuestEbadf);
+#ifdef _WIN32
+    _set_invalid_parameter_handler(previous);
+    Require(!g_invalidParameter);
+#endif
     Require(close_nid_postfix(pipe[0]) == 0);
 }
 

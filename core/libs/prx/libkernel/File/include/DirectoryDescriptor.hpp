@@ -6,6 +6,7 @@
 #include <optional>
 
 extern "C" const char* GetDirectoryDescriptorPath_nid_no_patch(int fd, int* error);
+extern "C" int OpenInDirectory_nid_no_patch(int directory, const char* path, int flags, std::uint16_t mode);
 
 namespace File {
 

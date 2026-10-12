@@ -258,7 +258,7 @@ def squarify(values, x, y, w, h):
 
 
 def cells(count, x, y, w, h):
-    if not count:
+    if not count or w <= 0 or h <= 0:
         return []
     rows = max(1, min(count, round((count * h / w) ** 0.5)))
     result = []

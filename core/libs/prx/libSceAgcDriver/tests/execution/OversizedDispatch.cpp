@@ -181,7 +181,7 @@ int main() {
         } else if (device->WorkGroupCountLimit()[0] < Groups) {
             CheckSplitCoverage(*device);
         } else {
-            std::printf("oversized dispatch split not tested: the device's %u workgroup limit never splits a %ux1x1 dispatch\n", device->WorkGroupCountLimit()[0], Groups);
+            std::printf("oversized dispatch split: skipped, the device reports a %u workgroup limit, which never splits a %ux1x1 dispatch\n", device->WorkGroupCountLimit()[0], Groups);
             return VulkanTestSkipped;
         }
         AgcDriverShutdown_nid_postfix();
