@@ -186,5 +186,11 @@ void RunDepthSurfaceReuseTests() {
     Require(lookup(context, {stencil, FormatR8G8B8A8Unorm, 320, 180, TileRenderTarget64KB}) == nullptr, "an RGBA8 view of a stencil plane's own extent must be read as reused memory");
     Require(lookup(context, {stencil, FormatR32Float, 320, 180}) == nullptr, "an R32F view of a stencil plane's own extent must be read as reused memory");
 
+    constexpr std::uint64_t reusedDepth = 0x70000000;
+    DepthSurfaceView(context, {reusedDepth, depthStencil, {320, 180}, VK_FORMAT_D32_SFLOAT_S8_UINT, 1.0f, 0});
+    Require(lookup(context, {depthStencil, FormatR32Float, 320, 180}) != nullptr, "an R32F view must sample the older surface's depth plane when a newer surface's stencil plane reuses its address");
+    Require(lookup(context, {depthStencil, FormatR8Uint, 320, 180}) != nullptr, "an 8-bit view must sample the newer surface's stencil plane at a reused address");
+    Require(lookup(context, {reusedDepth, FormatR32Float, 320, 180}) != nullptr, "the newer surface's own depth plane must still be found");
+
     ClearDepthSurfaces(context.device);
 }
