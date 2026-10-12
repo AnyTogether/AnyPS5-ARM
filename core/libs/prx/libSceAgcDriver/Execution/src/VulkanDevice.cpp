@@ -300,6 +300,7 @@ struct VulkanDevice::State {
     bool nonSeamlessCubeMap = false;
     bool fragmentShaderPixelInterlock = false;
     bool conservativeRasterization = false;
+    VkSampleCountFlags sampleLocationCounts = 0;
     bool provokingVertexLast = false;
     bool provokingVertexModePerPipeline = false;
     // VK_KHR_timeline_semaphore enabled: the recorder's unlocked waits are available.
@@ -1197,6 +1198,16 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
         state->conservativeRasterization = conservativeProperties.primitiveOverestimationSize <= 1.0f / 256.0f && conservativeProperties.degenerateTrianglesRasterized == VK_TRUE;
         if (state->conservativeRasterization) deviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
+    }
+    // Draws with nonstandard sample positions (PvZ Replanted's MSAA); the positions are the same in every
+    // pixel, so a 1x1 grid is all a pipeline needs.
+    if (hasExtension(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME)) {
+        VkPhysicalDeviceSampleLocationsPropertiesEXT locationProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &locationProperties};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
+        const bool range = locationProperties.sampleLocationCoordinateRange[0] <= 0.0f && locationProperties.sampleLocationCoordinateRange[1] >= 15.0f / 16.0f && locationProperties.sampleLocationSubPixelBits >= 4;
+        if (range && locationProperties.maxSampleLocationGridSize.width >= 1 && locationProperties.maxSampleLocationGridSize.height >= 1) state->sampleLocationCounts = locationProperties.sampleLocationSampleCounts;
+        if (state->sampleLocationCounts != 0) deviceExtensions.push_back(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME);
     }
     // Indirect draws with a GPU-side count (DRAW_INDIRECT_MULTI with count_indirect); a device
     // without it resolves such draws on the CPU.
@@ -3040,6 +3051,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.samplerFilterMinmax = state->samplerFilterMinmax;
     context.nonSeamlessCubeMap = state->nonSeamlessCubeMap;
     context.conservativeRasterization = state->conservativeRasterization;
+    context.sampleLocationCounts = state->sampleLocationCounts;
     context.meshWave32 = state->meshWave32;
     context.provokingVertexLast = state->provokingVertexLast;
     context.graphicsPipelineLibrary = state->graphicsPipelineLibrary;

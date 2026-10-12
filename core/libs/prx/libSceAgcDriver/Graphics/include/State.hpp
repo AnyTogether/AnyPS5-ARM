@@ -116,6 +116,9 @@ struct State {
     VkPipelineColorBlendAttachmentState blend;
     std::array<float, 4> blendConstants;
     std::uint32_t samples = 1;
+    // A multisampled draw's sample positions when they are not the standard pattern: x and y of each
+    // sample in 1/16 pixel from the pixel's center, the same in every pixel. Empty for the standard ones.
+    std::vector<std::array<std::int8_t, 2>> sampleLocations;
 };
 
 ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup = false);

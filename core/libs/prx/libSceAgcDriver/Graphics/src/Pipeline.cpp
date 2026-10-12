@@ -204,6 +204,10 @@ bool libraryKeys(PipelineLibraryKeys& keys, const Context& context, const State&
     if (state.stages.tessellation) appendKey(keys.preRasterization, state.stages.tessellation->inputControlPoints);
     appendKey(keys.fragmentShader, state.samples);
     appendKey(keys.fragmentOutput, state.samples);
+    for (const auto& location : state.sampleLocations) {
+        appendKey(keys.fragmentShader, location);
+        appendKey(keys.fragmentOutput, location);
+    }
     for (const auto& blend : state.blends) appendKey(keys.fragmentOutput, blend);
     for (const auto value : state.blendConstants) appendKey(keys.fragmentOutput, value);
     appendKey(keys.renderPass, state.blends.size());
@@ -388,6 +392,16 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         }
         VkPipelineMultisampleStateCreateInfo samples{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         samples.rasterizationSamples = static_cast<VkSampleCountFlagBits>(state.samples);
+        // Positions are 1/16 pixel from the center; Vulkan places them in [0, 1) from the pixel's corner.
+        std::vector<VkSampleLocationEXT> locations;
+        for (const auto& [x, y] : state.sampleLocations) locations.push_back({0.5f + static_cast<float>(x) / 16.0f, 0.5f + static_cast<float>(y) / 16.0f});
+        VkPipelineSampleLocationsStateCreateInfoEXT locationState{VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT};
+        if (!locations.empty()) {
+            Require((context.sampleLocationCounts & static_cast<VkSampleCountFlags>(state.samples)) != 0, "nonstandard sample locations are unsupported: the device cannot place " + std::to_string(state.samples) + " samples");
+            locationState.sampleLocationsEnable = VK_TRUE;
+            locationState.sampleLocationsInfo = {VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT, nullptr, static_cast<VkSampleCountFlagBits>(state.samples), {1, 1}, static_cast<std::uint32_t>(locations.size()), locations.data()};
+            samples.pNext = &locationState;
+        }
         VkPipelineDepthStencilStateCreateInfo depthStencil{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         depthStencil.depthTestEnable = state.depthTest;
         depthStencil.depthWriteEnable = state.depthWrite;
@@ -708,6 +722,7 @@ void pipelineKey(std::vector<std::byte>& key, const Context& context, const Stat
     for (const auto& blend : state.blends) append(key, blend);
     for (const auto value : state.blendConstants) append(key, value);
     append(key, state.samples);
+    for (const auto& location : state.sampleLocations) append(key, location);
     append(key, state.colors.size());
     for (const auto& color : state.colors) append(key, color.format);
     if (state.blends.size() != state.colors.size()) {

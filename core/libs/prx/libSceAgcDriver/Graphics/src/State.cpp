@@ -318,7 +318,9 @@ constexpr std::array<std::array<std::int8_t, 2>, 2> StandardLocations2{{{4, 4}, 
 constexpr std::array<std::array<std::int8_t, 2>, 4> StandardLocations4{{{-2, -6}, {6, -2}, {-6, 2}, {2, 6}}};
 constexpr std::array<std::array<std::int8_t, 2>, 8> StandardLocations8{{{1, -3}, {-1, 3}, {5, 1}, {-3, -5}, {-5, 5}, {-7, -1}, {3, 7}, {7, -7}}};
 
-std::uint32_t decodeSamples(const Registers& cx) {
+// The positions repeat over the 2x2 pixel quad (PA_SC_AA_SAMPLE_LOCS_PIXEL_X*Y*, 0x2fe-0x30d); a draw
+// whose quad pixels differ needs a 2x2 sample location grid, which is not implemented.
+std::uint32_t decodeSamples(const Registers& cx, std::vector<std::array<std::int8_t, 2>>* locations = nullptr) {
     const auto config = read(cx, 0x2f8);
     zero(cx, 0x2f8, ~(0x7u | 0x1e000u | 0x700000u), "coverage conversion or nonstandard multisampling");
     const auto log2 = config & 7u;
@@ -330,14 +332,18 @@ std::uint32_t decodeSamples(const Registers& cx) {
     Require(((config >> 20u) & 7u) == log2, "exposing fewer samples than are rasterized is unsupported");
     const auto samples = 1u << log2;
     const std::span<const std::array<std::int8_t, 2>> standard = samples == 2 ? std::span<const std::array<std::int8_t, 2>>(StandardLocations2) : samples == 4 ? std::span<const std::array<std::int8_t, 2>>(StandardLocations4) : std::span<const std::array<std::int8_t, 2>>(StandardLocations8);
-    for (std::uint32_t pixel = 0; pixel < 4; ++pixel) {
-        for (std::uint32_t sample = 0; sample < samples; ++sample) {
-            const auto word = read(cx, 0x2fe + pixel * 4u + sample / 4u);
-            const auto bits = (word >> (8u * (sample % 4u))) & 0xffu;
-            const auto x = static_cast<std::int8_t>(static_cast<std::uint8_t>(bits << 4u)) >> 4;
-            const auto y = static_cast<std::int8_t>(static_cast<std::uint8_t>(bits & 0xf0u)) >> 4;
-            Require(x == standard[sample][0] && y == standard[sample][1], "nonstandard sample locations are unsupported");
-        }
+    const auto location = [&](std::uint32_t pixel, std::uint32_t sample) {
+        const auto word = read(cx, 0x2fe + pixel * 4u + sample / 4u);
+        const auto bits = (word >> (8u * (sample % 4u))) & 0xffu;
+        return std::array<std::int8_t, 2>{static_cast<std::int8_t>(static_cast<std::int8_t>(static_cast<std::uint8_t>(bits << 4u)) >> 4), static_cast<std::int8_t>(static_cast<std::int8_t>(static_cast<std::uint8_t>(bits & 0xf0u)) >> 4)};
+    };
+    bool nonstandard = false;
+    for (std::uint32_t sample = 0; sample < samples; ++sample) {
+        for (std::uint32_t pixel = 1; pixel < 4; ++pixel) Require(location(pixel, sample) == location(0, sample), "sample locations that differ across the 2x2 pixel quad are unsupported");
+        nonstandard = nonstandard || location(0, sample) != standard[sample];
+    }
+    if (nonstandard && locations != nullptr) {
+        for (std::uint32_t sample = 0; sample < samples; ++sample) locations->push_back(location(0, sample));
     }
     return samples;
 }
@@ -619,7 +625,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         }
     }
     zero(cx, 0x207, ~LayerExports, "clip distances, layer, viewport or auxiliary vertex exports");
-    result.samples = decodeSamples(cx);
+    result.samples = decodeSamples(cx, &result.sampleLocations);
     {
         const auto depthControl = read(cx, 0x200);
         const auto renderControl = find(cx, 0x000);

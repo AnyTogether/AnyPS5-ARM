@@ -1743,8 +1743,20 @@ void multisampleTests() {
     Require(state.samples == 2 && state.colors.size() == 1 && state.colors[0].samples == 2 && state.colors[0].cmaskAddress == 0, "2x multisampling did not decode");
     const auto rejection = AgcDriver::Graphics::DrawRejection(queue, false);
     Require(rejection.empty(), "the precheck refused 2x multisampling: " + rejection);
+    Require(state.sampleLocations.empty(), "the standard 2x sample locations were recorded as nonstandard");
+    {
+        using AgcDriver::Graphics::ColorTileMode;
+        using AgcDriver::Graphics::MultisampleSurfaceBytes;
+        Require(MultisampleSurfaceBytes(1920, 1080, ColorTileMode::RenderTarget, 4, 4, 0x870000) == 30u * 17u * 65536u, "a 4x 1920x1080 surface does not span 64x64-pixel blocks");
+        Require(MultisampleSurfaceBytes(1920, 1080, ColorTileMode::RenderTarget, 4, 2, 0x870000) == 15u * 17u * 65536u, "a 2x surface does not span 128x64-pixel blocks");
+        Require(MultisampleSurfaceBytes(1920, 1080, ColorTileMode::RenderTarget, 4, 1, 0x870000) == 15u * 9u * 65536u, "a single-sample surface does not span 128x128-pixel blocks");
+        Require(MultisampleSurfaceBytes(64, 64, ColorTileMode::Linear, 4, 4, 0x4000) == 0x10000, "a linear surface lost its per-sample bytes");
+    }
     queue.context[0x302] = 0x44cc;
-    expectFailure([&] { DecodeState(queue); }, "nonstandard sample locations");
+    expectFailure([&] { DecodeState(queue); }, "differ across the 2x2 pixel quad");
+    for (std::uint32_t pixel = 0; pixel < 4; ++pixel) queue.context[0x2fe + pixel * 4u] = 0x44cc;
+    const auto swapped = DecodeState(queue).sampleLocations;
+    Require(swapped == std::vector<std::array<std::int8_t, 2>>{{-4, -4}, {4, 4}}, "nonstandard 2x sample locations were not decoded");
     queue = multisampled();
     queue.context[0x2f8] = 0x00300003;
     queue.context[0x31d] = 0x1b000;
