@@ -120,6 +120,12 @@ if(NOT ANYPS5_USE_SYSTEM_DEPS)
     add_subdirectory(3rdparty/SDL2)
     set(CMAKE_EXE_LINKER_FLAGS "${ANYPS5_EXE_LINKER_FLAGS}")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        get_directory_property(ANYPS5_SDL_X11_XRANDR DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_X11_XRANDR)
+        if(NOT ANYPS5_SDL_X11_XRANDR)
+            message(FATAL_ERROR "SDL has no XRandR support, so X11 display refresh rates cannot be queried. "
+                "Install libxrandr-dev (Debian, Ubuntu) or libXrandr-devel (Fedora), "
+                "enable SDL_X11_XRANDR, then rerun configuration.")
+        endif()
         get_directory_property(ANYPS5_SDL_PIPEWIRE DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_PIPEWIRE)
         get_directory_property(ANYPS5_SDL_PULSEAUDIO DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_PULSEAUDIO)
         get_directory_property(ANYPS5_SDL_ALSA DIRECTORY 3rdparty/SDL2 DEFINITION HAVE_ALSA)

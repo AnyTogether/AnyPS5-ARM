@@ -62,7 +62,7 @@ jobs:
           save: false
       - name: Install lavapipe for the GPU execution tests and the audio development files
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev
       - name: Configure Linux
         if: matrix.platform == 'linux'
         run: cmake -S . -B build $CONFIGURE

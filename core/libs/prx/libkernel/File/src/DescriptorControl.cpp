@@ -246,7 +246,9 @@ Entry InitialEntry(int fd) {
     if (host & O_APPEND) status |= Append;
     if (host & O_ASYNC) status |= Asynchronous;
     if ((host & O_SYNC) == O_SYNC) status |= Synchronous;
+#ifdef O_DIRECT
     if (host & O_DIRECT) status |= Direct;
+#endif
     return {(descriptorFlags & FD_CLOEXEC) != 0, std::make_shared<int>(status)};
 }
 

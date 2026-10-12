@@ -71,6 +71,19 @@ static void CheckLanguages(const std::filesystem::path& path) {
     Require(rejected, "Accepted localizedParameters without a language entry");
 }
 
+static void CheckOutputPermission(const std::filesystem::path& path) {
+    const std::string prefix = R"({"titleId":"PPSA99007","localizedParameters":{"en-US":{"titleName":"Example"}})";
+    Require(ParseText(path, prefix + "}").attribute3 == 0, "Absent output permission is not zero");
+    for (const auto& [text, expected] : {std::pair{"0", 0u}, {"524352", 0x80040u}, {"4294967295", 0xFFFFFFFFu}}) {
+        Require(ParseText(path, prefix + ",\"attribute3\":" + text + "}").attribute3 == expected, "Incorrect output permission");
+    }
+    for (const auto* text : {"-1", "0.5", "1e3", "4294967296", "true", "null", "\"524352\""}) {
+        bool rejected = false;
+        try { ParseText(path, prefix + ",\"attribute3\":" + text + "}"); } catch (const std::exception&) { rejected = true; }
+        Require(rejected, "Accepted invalid attribute3");
+    }
+}
+
 static void CheckNumberSyntax(const std::filesystem::path& path) {
     const std::string prefix = R"({"titleId":"PPSA00000","localizedParameters":{"en-US":{"titleName":"Example"}})";
     const std::pair<const char*, const char*> fields[] = {
@@ -139,6 +152,7 @@ int main() {
         }
         CheckLanguages(path);
         CheckUserDefinedParams(path);
+        CheckOutputPermission(path);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         result = 1;

@@ -215,6 +215,8 @@ public:
     std::shared_ptr<VideoOutConfig> GetConfig(int handle);
     bool IsOpen(int handle);
     bool HasConfig(int handle);
+    bool SupportsHighFrameRate();
+    int GetDisplayRefreshRate();
 
     // 0, or VIDEO_OUT_ERROR_FLIP_QUEUE_FULL when the title has VIDEO_OUT_FLIP_QUEUE_CAPACITY flips pending.
     int SubmitFlip(int handle, int index, int flipMode, int64_t flipArg);
@@ -223,7 +225,8 @@ private:
     bool close(int handle);
     void presentLoop(std::stop_token token, std::promise<void>& started);
     void vblankLoop(std::stop_token token);
-    void vblankEnd();
+    void vblankEnd(std::uint64_t tick);
+    void updateDisplayRefreshRate();
     void processFlip(FlipRequest& req);
     void triggerEvents(VideoOutConfig& cfg, int eventKind, void* triggerData);
 
@@ -235,6 +238,7 @@ private:
     std::shared_ptr<FlipQueue> flipQueue = std::make_shared<FlipQueue>();
 
     DisplayWindow window;
+    std::atomic<int> displayRefreshRate{0};
 
     std::jthread presentThread;
     std::jthread vblankThread;
