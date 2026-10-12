@@ -16,6 +16,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
+#include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include <algorithm>
@@ -445,6 +446,26 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
 
 extern "C" {
 int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...) {
+    if (descriptor < GuestSockets::FirstDescriptor) {
+        const auto type = File::FcntlArgumentOf(command);
+        std::intptr_t argument = 0;
+        if (type != File::FcntlArgument::None) {
+#ifdef _WIN32
+            __builtin_sysv_va_list arguments;
+            __builtin_sysv_va_start(arguments, command);
+            argument = type == File::FcntlArgument::Int ? __builtin_va_arg(arguments, int)
+                                                        : reinterpret_cast<std::intptr_t>(__builtin_va_arg(arguments, void*));
+            __builtin_sysv_va_end(arguments);
+#else
+            std::va_list arguments;
+            va_start(arguments, command);
+            argument = type == File::FcntlArgument::Int ? va_arg(arguments, int)
+                                                        : reinterpret_cast<std::intptr_t>(va_arg(arguments, void*));
+            va_end(arguments);
+#endif
+        }
+        return File::Fcntl(descriptor, command, argument);
+    }
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     std::lock_guard lock(socket->modeMutex);
@@ -660,6 +681,7 @@ int APS5_VABI getpeername_nid_postfix(int descriptor, void* address, std::uint32
     return 0;
 }
 int APS5_VABI ioctl_nid_postfix(int descriptor, std::uint64_t request, void* argument) {
+    if (descriptor < GuestSockets::FirstDescriptor) return File::Ioctl(descriptor, request, argument);
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
     if (!argument) return Fail(14);
