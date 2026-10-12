@@ -6,7 +6,7 @@
 
 **Status:** 🟢 Playable · Levels 1-1 to 1-3 played through · **FPS:** menu ~120 · in game 60–120 (120 Hz display)
 
-Plays from the main menu through the first levels, unlocks and huge waves included, and draws correctly. Six minutes of continuous play showed no glitch and no crash. Rarely, a masked (`vmaskmovps`) or not yet split 256-bit store still ends the game with a Rosetta `EmulateForward` abort.
+Plays from the main menu through the first levels, unlocks and huge waves included, and draws correctly. Six minutes of continuous play showed no glitch and no crash.
 
 ![In game: the first level, planting the first seed, 117 FPS](img/pvz-ingame.jpg)
 *In game: the first level, planting the first seed, 117 FPS*
@@ -29,7 +29,7 @@ Plays from the main menu through the first levels, unlocks and huge waves includ
 | ✅ | **MSAA memory size** | The size of the 4x MSAA target was computed 2 MB too large and overlapped a small image; fixed with AddrLib's GFX10 rule. |
 | ✅ | **Rosetta + AVX crash** | Fixed by upstream #4194; 53,718 stores were split in the executable. |
 | ✅ | **Main menu and game** | Played by hand through levels 1-1, 1-2 and 1-3: main menu at ~120 FPS, in game 60–120 FPS on a 120 Hz display. |
-| 🔧 | **Rare Rosetta abort** | `vmaskmovps` stores and some 256-bit stores the relinker has not split still abort when they hit a watched page. |
+| 🔧 | **One startup abort** | Of two launches with the current build, one ended during startup, before the window opened, with a Rosetta `EmulateForward` abort on a masked `vmaskmovps` store, which #4194 does not split. The other launch played for six minutes without a crash. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 

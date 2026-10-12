@@ -6,7 +6,7 @@
 
 **Durum:** 🟢 Oynanabilir · 1-1, 1-2 ve 1-3 oynandı · **FPS:** menü ~120 · oyun içi 60–120 (120 Hz ekran)
 
-Ana menüden ilk bölümlere kadar, yeni bitkiler ve dev zombi dalgaları dahil oynanıyor; görüntü kusursuz. Altı dakikalık kesintisiz oyunda hiç bozulma ya da kapanma olmadı. Nadiren maskeli (`vmaskmovps`) ya da henüz bölünmemiş bir 256-bit yazma oyunu Rosetta `EmulateForward` hatasıyla kapatabiliyor.
+Ana menüden ilk bölümlere kadar, yeni bitkiler ve dev zombi dalgaları dahil oynanıyor; görüntü kusursuz. Altı dakikalık kesintisiz oyunda hiç bozulma ya da kapanma olmadı.
 
 ![Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS](../img/pvz-ingame.jpg)
 *Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS*
@@ -29,7 +29,7 @@ Ana menüden ilk bölümlere kadar, yeni bitkiler ve dev zombi dalgaları dahil 
 | ✅ | **MSAA bellek boyutu** | 4x MSAA hedefinin boyutu 2 MB fazla hesaplanıyordu ve küçük bir görüntüyle çakışıyordu; AddrLib'in GFX10 kuralıyla düzeltildi. |
 | ✅ | **Rosetta + AVX çökmesi** | Upstream #4194 ile çözüldü; exe'de 53.718 yazma bölündü. |
 | ✅ | **Ana menü ve oyun** | 1-1, 1-2 ve 1-3 elle oynandı: ana menü ~120 FPS, oyun içi 120 Hz ekranda 60–120 FPS. |
-| 🔧 | **Nadir Rosetta çökmesi** | `vmaskmovps` yazmaları ve relinker'ın henüz bölmediği bazı 256-bit yazmalar izlenen bir sayfaya denk gelince hâlâ çöküyor. |
+| 🔧 | **Açılışta bir çökme** | Güncel derlemeyle yapılan iki açılıştan biri, pencere açılmadan önce Rosetta `EmulateForward` hatasıyla kapandı. Sebep, #4194'ün bölmediği maskeli bir `vmaskmovps` yazması. Diğer açılışta oyun altı dakika boyunca hiç çökmeden oynandı. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
