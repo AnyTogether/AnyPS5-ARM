@@ -4,15 +4,20 @@
 
 `PPSA12544` · Unity (IL2CPP)
 
-**Durum:** 🟡 Üzerinde çalışılıyor · Oyun içi, ilk bölge · **FPS:** Menü 60 · oyun içi ~28–48
+**Durum:** 🟢 Oynanabilir · Yeni oyun, Moss Grotto'ya kadar · **FPS:** menüler 100–120 · oyun içi ~25–50
 
-Oyun açılıyor, menülerden geçip ilk bölgede oynanıyor. Tek pürüz, uzun oturumlarda ara sıra görülen bir kapanma.
+Yeni oyun profil ekranından ve açılış sinemasından Moss Grotto'ya kadar oynanıyor, duraklatma menüsünden çıkılabiliyor; görüntü kusursuz. 12 Ekim'deki 4,5 dakikalık oturum çökmeden, normal şekilde kapatıldı. Oyun içi FPS hâlâ düşük (Moss Grotto'da ~26).
 
 ![Oyun içi: Hornet ilk bölgede, HUD ve "Bind" ipucu görünüyor](../img/silksong-ingame.jpg)
 *Oyun içi: Hornet ilk bölgede, HUD ve "Bind" ipucu görünüyor*
 
 ![Profil seçme ekranı (Select Profile)](../img/silksong-profiles.jpg)
 *Profil seçme ekranı (Select Profile)*
+
+| | |
+|---|---|
+| <img src="../img/silksong-intro.jpg" width="420"><br>*Açılış sineması* | <img src="../img/silksong-moss.jpg" width="420"><br>*Moss Grotto, açılış jeneriğiyle* |
+| <img src="../img/silksong-enemy.jpg" width="420"><br>*Hornet bir düşmanla karşılaşıyor, 28 FPS* | <img src="../img/silksong-grotto.jpg" width="420"><br>*Moss Grotto'nun derinleri* |
 
 ## Adım adım
 
@@ -23,8 +28,8 @@ Oyun açılıyor, menülerden geçip ilk bölgede oynanıyor. Tek pürüz, uzun 
 | ✅ | **"PSN eski sürüm" hatası çözüldü** | Eklentilere başlangıç argümanları artık iletiliyor: fablevoid'in macOS relinker düzeltmesi (1b865fc3e), upstream üzerinden geldi. |
 | ✅ | **Eklenti bağımlılıkları** | Media/Plugins altındaki eklentilerin libc ve libSceNpCppWebApi bağımlılıkları bulunur hâle getirildi. |
 | ✅ | **Rosetta + AVX çökmesi giderildi** | Sayfa sınırını aşan hizasız 256-bit yazmalar ikiye bölünüyor (upstream #4194). Exe'de 55.017 yazma bölündü. |
-| 🔧 | **Ara sıra kapanma** | Beş dakikalık iki denemeden birinde 293. saniyede segfault; çökme raporu yok. İnceleniyor. |
-| ⏭️ | **Performans** | Oyun içinde FPS düşüyor; Rosetta ve MoltenVK katmanları ile GPU senkronizasyonu incelenecek. |
+| 🔧 | **Ara sıra kapanma** | Daha önce beş dakikalık iki denemeden biri 293. saniyede segfault verdi; çökme raporu yok. 12 Ekim'deki 4,5 dakikalık oturumda çökme olmadı. İnceleniyor. |
+| 🔧 | **Performans** | Menüler 100–120 FPS ama oyun içi ~25–50 FPS (Moss Grotto'da ~26). Sırada, Quake II'deki gibi Rosetta write-watch hataları ve GPU senkronizasyonu var. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 

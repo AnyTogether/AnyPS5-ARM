@@ -4,15 +4,20 @@
 
 `PPSA12544` · Unity (IL2CPP)
 
-**Status:** 🟡 Work in progress · In game, first area · **FPS:** menu 60 · in game ~28–48
+**Status:** 🟢 Playable · New game through Moss Grotto · **FPS:** menus 100–120 · in game ~25–50
 
-The game starts, goes through its menus and plays in the first area. The one problem left is an occasional crash in long sessions.
+A new game plays from the profile screen and the opening cinematic into Moss Grotto, and back out through the pause menu, with correct drawing. A 4.5-minute session on 12 October ended normally, without a crash. In-game FPS is still low (about 26 in Moss Grotto).
 
 ![In game: Hornet in the first area, with the HUD and the "Bind" hint](img/silksong-ingame.jpg)
 *In game: Hornet in the first area, with the HUD and the "Bind" hint*
 
 ![Profile selection screen (Select Profile)](img/silksong-profiles.jpg)
 *Profile selection screen (Select Profile)*
+
+| | |
+|---|---|
+| <img src="img/silksong-intro.jpg" width="420"><br>*The opening cinematic* | <img src="img/silksong-moss.jpg" width="420"><br>*Moss Grotto, with the opening credits* |
+| <img src="img/silksong-enemy.jpg" width="420"><br>*Hornet meets an enemy, 28 FPS* | <img src="img/silksong-grotto.jpg" width="420"><br>*Further into Moss Grotto* |
 
 ## Step by step
 
@@ -23,8 +28,8 @@ The game starts, goes through its menus and plays in the first area. The one pro
 | ✅ | **"PSN old version" error fixed** | The plugins now receive their start arguments: fablevoid's macOS relinker fix (1b865fc3e), which came through upstream. |
 | ✅ | **Plugin dependencies** | The libc and libSceNpCppWebApi dependencies of the plugins under Media/Plugins are now found. |
 | ✅ | **Rosetta + AVX crash fixed** | Unaligned 256-bit stores that cross a page boundary are split in two (upstream #4194). 55,017 stores were split in the executable. |
-| 🔧 | **Occasional crash** | In one of two five-minute runs it segfaulted at second 293, with no crash report. Under investigation. |
-| ⏭️ | **Performance** | FPS drops in game; the Rosetta and MoltenVK layers and GPU synchronization will be looked at. |
+| 🔧 | **Occasional crash** | Earlier, one of two five-minute runs segfaulted at second 293, with no crash report. The 4.5-minute session on 12 October did not crash. Under investigation. |
+| 🔧 | **Performance** | Menus run at 100–120 FPS, but in game it is ~25–50 FPS (about 26 in Moss Grotto). Next: Rosetta write-watch faults, as with Quake II, and GPU synchronization. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 

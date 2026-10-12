@@ -6,9 +6,9 @@
 
 ## Games on a Mac
 
-| Hollow Knight: Silksong · 🚧 | Plants vs. Zombies: Replanted | Dreaming Sarah | AnyPS5 Breakout |
+| Hollow Knight: Silksong | Plants vs. Zombies: Replanted | Dreaming Sarah | AnyPS5 Breakout |
 |---|---|---|---|
-| ![Silksong](docs/games/img/silksong-ingame.jpg) | ![PvZ Replanted](docs/games/img/pvz-ingame.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
+| ![Silksong](docs/games/img/silksong-enemy.jpg) | ![PvZ Replanted](docs/games/img/pvz-ingame.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
 | in game (first area), work in progress | opening screens at 60 fps, work in progress | 60 fps, playable | 60 fps, test title |
 
 **[Game status notebook →](docs/games/README.md)** ([Türkçe](docs/games/tr/README.md)) one page per game with screenshots, the steps behind it and technical details: DOOM (homebrew) plays too, Stray is in progress.

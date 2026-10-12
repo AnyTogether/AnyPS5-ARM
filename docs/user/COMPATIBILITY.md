@@ -8,7 +8,7 @@ Measured on a MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. The game's
 
 | Game | ID | Engine | Status | FPS |
 |---|---|---|---|---|
-| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Work in progress:** in game in the first area; an occasional crash in long sessions. Needs the manual Unity module steps ([page](../games/silksong.md)) | menus 60, in game about 28–48 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Playable:** new game through the opening cinematic into Moss Grotto; a 4.5-minute session ended normally. In-game FPS is still low. Needs the manual Unity module steps ([page](../games/silksong.md)) | menus 100–120, in game ~25–50 |
 | Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Playable:** main menu and levels 1-1 to 1-3 played through, six minutes without a crash. One of two launches ended at startup on a masked-store Rosetta abort. Manual Unity module steps ([page](../games/pvz.md)) | menu ~120, in game 60–120 (120 Hz display) |
 | DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | In game (E1M1 and later maps) ([page](../games/doom.md)) | 35 (the game's own cap) |
 | Dreaming Sarah | PPSA02929 | Construct 2 | In game, playable | 60 |
@@ -46,7 +46,7 @@ Not verified: Linux with Intel GPUs.
 
 | Oyun | Kimlik | Motor | Durum | FPS |
 |---|---|---|---|---|
-| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** ilk bölgede oyun içi; uzun oturumlarda ara sıra kapanıyor. Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/silksong.md)) | menü 60, oyun içi ~28–48 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Oynanabilir:** yeni oyun, açılış sinemasından Moss Grotto'ya; 4,5 dakikalık oturum normal kapandı. Oyun içi FPS hâlâ düşük. Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/silksong.md)) | menüler 100–120, oyun içi ~25–50 |
 | Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Oynanabilir:** ana menü ve 1-1–1-3 bölümleri oynandı, altı dakika boyunca çökme yok. İki açılıştan biri açılışta maskeli yazma kaynaklı bir Rosetta hatasıyla kapandı. Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/pvz.md)) | menü ~120, oyun içi 60–120 (120 Hz ekran) |
 | DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | Oyun içi (E1M1 ve sonrası) ([sayfa](../games/tr/doom.md)) | 35 (oyunun kendi sınırı) |
 | Dreaming Sarah | PPSA02929 | Construct 2 | Oyun içi, oynanabilir | 60 |
