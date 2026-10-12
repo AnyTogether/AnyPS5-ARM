@@ -118,6 +118,10 @@ const HeapFinalizerRegistration heapFinalizerRegistration;
 
 }
 
+void ApplicationHeapFinalize_nid_no_patch() {
+    finalize();
+}
+
 void ApplicationHeapRegister_nid_no_patch(void* const* api) {
     if (api == nullptr) throw std::invalid_argument("application heap: null allocator API");
     std::array<void*, 10> replacement;

@@ -1,9 +1,12 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/Shutdown.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <initializer_list>
+#include <set>
 #include <stdexcept>
 #include <string>
 extern "C" {
@@ -25,6 +28,12 @@ static void RequireError(const char* path, int flags, int error) {
     *__error_nid_postfix() = 0;
     Require(shm_open_nid_postfix(path, flags, 0600) == -1);
     Require(*__error_nid_postfix() == error);
+}
+static std::set<std::filesystem::path> NamedBackingFiles() {
+    std::set<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::temp_directory_path()))
+        if (entry.path().filename().string().starts_with("anyps5-shm-named-")) files.insert(entry.path());
+    return files;
 }
 static void CheckNamed() {
     const char* const name = "/anyps5-shm";
@@ -94,5 +103,12 @@ int main() {
     RequireInvalid(anonymous, 0x2 | 0x4);
     RequireInvalid("/anyps5-shm", 0x1);
     RequireInvalid("/anyps5-shm", 0x202 | 0x8);
+    const auto before = NamedBackingFiles();
     CheckNamed();
+    std::set<std::filesystem::path> created;
+    for (const auto& file : NamedBackingFiles())
+        if (!before.contains(file)) created.insert(file);
+    Require(created.size() == 2);
+    LibcRunShutdown_nid_postfix();
+    for (const auto& file : created) Require(!std::filesystem::exists(file));
 }

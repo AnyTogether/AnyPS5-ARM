@@ -13,11 +13,12 @@ extern "C" void APS5_VABI _Exit_nid_postfix(int);
 extern "C" void APS5_VABI catchReturnFromMain_nid_postfix(int);
 using GuestQuickExitCallback = void (APS5_VABI*)();
 extern "C" int APS5_VABI at_quick_exit_nid_postfix(GuestQuickExitCallback);
+extern "C" int APS5_VABI atexit_nid_postfix(GuestQuickExitCallback);
 extern "C" void APS5_VABI quick_exit_nid_postfix(int);
 namespace {
 bool cleaned = false;
 void Cleanup() { cleaned = true; }
-void VerifyExit() {
+void APS5_VABI VerifyExit() {
     if (!cleaned) std::_Exit(1);
     std::puts("Guest shutdown and atexit completed");
 }
@@ -57,7 +58,7 @@ int main(int argc, char** argv) {
     }
     if (argc > 1) {
         LibcRegisterShutdown_nid_postfix(Cleanup);
-        Require(std::atexit(VerifyExit) == 0);
+        Require(atexit_nid_postfix(VerifyExit) == 0);
         sceSystemServiceLoadExec("exit", nullptr);
         return 2;
     }

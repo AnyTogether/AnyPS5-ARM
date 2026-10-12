@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -128,7 +129,7 @@ int KernelProtection(const void* page) {
     vm_region_basic_info_data_64_t info{};
     mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t object = MACH_PORT_NULL;
-    Require(mach_vm_region(mach_task_self(), &address, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS && address == reinterpret_cast<mach_vm_address_t>(page), "cannot read the kernel protection of a page");
+    Require(mach_vm_region(mach_task_self(), &address, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) == KERN_SUCCESS && address <= reinterpret_cast<mach_vm_address_t>(page) && reinterpret_cast<mach_vm_address_t>(page) < address + size, "cannot read the kernel protection of a page");
     return ((info.protection & VM_PROT_READ) ? PROT_READ : 0) | ((info.protection & VM_PROT_WRITE) ? PROT_WRITE : 0) | ((info.protection & VM_PROT_EXECUTE) ? PROT_EXEC : 0);
 }
 
@@ -194,6 +195,59 @@ void CheckProtection() {
     Require(!GuestWriteWatchCovers_nid_postfix(region.Address(2), region.page), "an unregistered range is covered");
 }
 
+std::atomic<int> faults{0};
+struct sigaction watchBus{};
+struct sigaction watchSegv{};
+
+void CountFault(int signal, siginfo_t* info, void* context) {
+    faults.fetch_add(1);
+    (signal == SIGBUS ? watchBus : watchSegv).sa_sigaction(signal, info, context);
+}
+
+void CountFaults() {
+    Require(::sigaction(SIGBUS, nullptr, &watchBus) == 0 && ::sigaction(SIGSEGV, nullptr, &watchSegv) == 0, "cannot read the watch's handlers");
+    Require((watchBus.sa_flags & SA_SIGINFO) != 0 && (watchSegv.sa_flags & SA_SIGINFO) != 0, "the watch's handlers are not installed");
+    struct sigaction counting{};
+    counting.sa_sigaction = &CountFault;
+    counting.sa_flags = SA_SIGINFO | SA_RESTART | SA_NODEFER;
+    sigemptyset(&counting.sa_mask);
+    Require(::sigaction(SIGBUS, &counting, nullptr) == 0 && ::sigaction(SIGSEGV, &counting, nullptr) == 0, "cannot count the faults");
+}
+
+void CheckDisarm() {
+    Region region(6);
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(region.Collect() == All(6), "a new range is not reported in full");
+    Require(::mprotect(region.base + 4 * region.page, region.page, PROT_READ) == 0, "cannot change the protection");
+    GuestWriteWatchProtectionChanged_nid_postfix(region.base + 4 * region.page, region.page, PROT_READ);
+    Require(region.Collect() == std::set<std::size_t>({4}), "a protection change is not reported as a write");
+    for (std::size_t index = 0; index < 6; ++index) Require(KernelProtection(region.base + index * region.page) == PROT_READ, "a collected page is not protected");
+    CountFaults();
+    region.base[region.page] = 1;
+    Require(faults.load() == 1, "a write to a protected page did not reach the handler");
+    Require(region.Collect() == std::set<std::size_t>({1}), "the counted write is not reported");
+    Require(KernelProtection(region.base + region.page) == PROT_READ, "a collected page is not protected again");
+    GuestWriteWatchDisarm_nid_postfix();
+    Require(!GuestWriteWatchAvailable_nid_postfix(), "a disarmed watch is available");
+    for (std::size_t index : {0, 1, 2, 3, 5}) Require(KernelProtection(region.base + index * region.page) == (PROT_READ | PROT_WRITE), "disarming did not restore the protection");
+    Require(KernelProtection(region.base + 4 * region.page) == PROT_READ, "disarming changed a page the watch had not protected");
+    for (std::size_t index : {0, 1, 2, 3, 5}) region.base[index * region.page] = 2;
+    Require(faults.load() == 1, "a write after disarming reached the handler");
+    for (std::size_t index : {0, 1, 2, 3, 5}) Require(KernelProtection(region.base + index * region.page) == (PROT_READ | PROT_WRITE), "a write after disarming protected the page");
+    region.base[4 * region.page] = 3;
+    Require(faults.load() == 2, "a write to a read-only watched page did not reach the handler");
+    Require(region.base[4 * region.page] == 3, "the write to a read-only watched page was lost");
+    Require(KernelProtection(region.base + 4 * region.page) == (PROT_READ | PROT_WRITE), "the disarmed handler did not unprotect the read-only watched page");
+    Require(!GuestWriteWatchCollect_nid_postfix(region.Address(0), region.bytes, [](void*, std::uintptr_t, std::uintptr_t) {}, nullptr), "a disarmed watch collects");
+    Require(!GuestWriteWatchCovers_nid_postfix(region.Address(0), region.bytes), "a disarmed watch covers a range");
+    GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+    Require(!GuestWriteWatchCovers_nid_postfix(region.Address(0), region.bytes), "a disarmed watch registers a range");
+    GuestWriteWatchDisarm_nid_postfix();
+    for (std::size_t index = 0; index < 6; ++index) region.base[index * region.page] = 4;
+    Require(faults.load() == 2, "a write after disarming twice reached the handler");
+    Require(GuestWriteWatchUnregister_nid_postfix(region.base, region.bytes), "a disarmed watch forgets its ranges");
+}
+
 void CheckThreads() {
     constexpr std::size_t Threads = 4;
     constexpr std::size_t PagesPerThread = 64;
@@ -232,7 +286,7 @@ void CheckThreads() {
 
 int main(int argc, char** argv) {
     try {
-        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, protection or threads");
+        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, protection, disarm or threads");
         const std::string_view mode(argv[1]);
         if (mode == "collect") CheckCollect();
         else if (mode == "fresh") CheckFresh();
@@ -241,6 +295,7 @@ int main(int argc, char** argv) {
         else if (mode == "mapped") CheckRegisterMapped();
         else if (mode == "host") CheckHostWrite();
         else if (mode == "protection") CheckProtection();
+        else if (mode == "disarm") CheckDisarm();
         else if (mode == "threads") CheckThreads();
         else throw std::runtime_error("unknown write watch test");
         std::printf("write watch %s passed\n", argv[1]);

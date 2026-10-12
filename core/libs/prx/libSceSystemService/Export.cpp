@@ -18,8 +18,7 @@ int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* argu
         NotImplemented_nid_no_patch("sceSystemServiceLoadExec: executable replacement");
     }
     (void)arguments;
-    LibcRunShutdown_nid_postfix();
-    std::exit(0);
+    LibcExit_nid_no_patch(0);
 }
 
 int APS5_VABI sceSystemServiceDisableNoticeScreenSkipFlagAutoSet(void) {

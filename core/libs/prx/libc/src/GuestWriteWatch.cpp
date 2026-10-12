@@ -1,6 +1,7 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -23,7 +24,6 @@
 #endif
 
 #if defined(__APPLE__)
-#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -47,12 +47,17 @@ constexpr std::uintptr_t PageBytes = 4096;
 class Watch {
 public:
     static Watch& Get() {
-        static Watch watch;
+        static Watch& watch = *new Watch;
         return watch;
     }
 
     bool Available() const {
-        return _pagemap >= 0;
+        return _pagemap >= 0 && !_disarmed.load(std::memory_order_acquire);
+    }
+
+    void Disarm() {
+        std::unique_lock lock(_lock);
+        _disarmed.store(true, std::memory_order_release);
     }
 
     void Register(std::uintptr_t begin, std::uintptr_t end) {
@@ -311,6 +316,7 @@ private:
 
     int _uffd = -1;
     int _pagemap = -1;
+    std::atomic<bool> _disarmed{false};
     std::shared_mutex _lock;
     std::map<std::uintptr_t, std::uintptr_t> _ranges;
     std::map<std::uintptr_t, std::uintptr_t> _fresh;
@@ -321,12 +327,12 @@ const bool g_opened = (Watch::Get(), true);
 class Watch {
 public:
     static Watch& Get() {
-        static Watch watch;
+        static Watch& watch = *new Watch;
         return watch;
     }
 
     bool Available() const {
-        return _available;
+        return _available.load(std::memory_order_acquire);
     }
 
     void Register(std::uintptr_t begin, std::uintptr_t end) {
@@ -336,6 +342,7 @@ public:
         std::vector<std::uint8_t> pages((end - begin) / _page, Written | Fresh);
         std::vector<bool> queried(pages.size(), false);
         const Lock lock(_lock);
+        if (!_available) return;
         for (auto cursor = begin; cursor < end;) {
             mach_vm_address_t address = cursor;
             mach_vm_size_t size = 0;
@@ -366,7 +373,7 @@ public:
     bool Unregister(std::uintptr_t begin, std::uintptr_t end) {
         begin = pageStart(begin);
         end = pageEnd(end);
-        if (!_available || end <= begin) return false;
+        if (end <= begin) return false;
         const Lock lock(_lock);
         return erase(begin, end);
     }
@@ -389,6 +396,7 @@ public:
         std::vector<std::pair<std::uintptr_t, std::uintptr_t>> runs;
         {
             const Lock lock(_lock);
+            if (!_available) return false;
             if (take != Take::Fresh && !covers(begin, end)) return false;
             forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
                 if ((state & Written) == 0) return;
@@ -456,6 +464,7 @@ public:
         end = pageEnd(end);
         if (!_available || end <= begin) return;
         const Lock lock(_lock);
+        if (!_available) return;
         forEachPage(begin, end, [&](std::uintptr_t, std::uint8_t& state) {
             if ((state & Opened) == 0) return;
             state = static_cast<std::uint8_t>(state & ~Opened);
@@ -479,6 +488,29 @@ public:
         }
         *runEnd = it != _ranges.end() ? std::min(it->first, limit) : limit;
         return -1;
+    }
+
+    void Disarm() {
+        const Lock lock(_lock);
+        if (!_available) return;
+        _available.store(false, std::memory_order_release);
+        for (auto& [begin, range] : _ranges) {
+            auto runStart = begin;
+            auto page = begin;
+            int runProtection = -1;
+            for (auto& state : range.pages) {
+                const int wanted = (state & Protected) != 0 ? (state & ProtectionMask) : -1;
+                if (wanted != runProtection) {
+                    if (runProtection >= 0) ::mprotect(reinterpret_cast<void*>(runStart), page - runStart, runProtection);
+                    runStart = page;
+                    runProtection = wanted;
+                }
+                state = static_cast<std::uint8_t>((state & (ProtectionMask | Fresh)) | Written);
+                page += _page;
+            }
+            if (runProtection >= 0) ::mprotect(reinterpret_cast<void*>(runStart), page - runStart, runProtection);
+        }
+        _hostWrites.clear();
     }
 
 private:
@@ -519,7 +551,7 @@ private:
             std::fprintf(stderr, "[memory] write watch: cannot install the fault handler (%s); guest buffers are fully re-read every use\n", std::strerror(errno));
             return;
         }
-        _available = true;
+        _available.store(true, std::memory_order_release);
     }
 
     static void fault(int signal, siginfo_t* info, void* context) {
@@ -545,6 +577,11 @@ private:
         --it;
         if (page >= it->second.end) return false;
         auto& state = it->second.pages[(page - it->first) / _page];
+        if (!_available) {
+            state = static_cast<std::uint8_t>((state & (ProtectionMask | Fresh)) | PROT_READ | PROT_WRITE | Written);
+            ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
+            return true;
+        }
         if ((state & Protected) != 0) {
             state = static_cast<std::uint8_t>((state & (ProtectionMask | Fresh)) | Written);
             ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
@@ -631,7 +668,7 @@ private:
     }
 
     const std::uintptr_t _page = static_cast<std::uintptr_t>(::getpagesize());
-    bool _available = false;
+    std::atomic<bool> _available{false};
     Turns _lock;
     std::map<std::uintptr_t, Range> _ranges;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> _hostWrites;
@@ -649,6 +686,12 @@ bool GuestWriteWatchAvailable_nid_postfix() {
     return Watch::Get().Available();
 #else
     return false;
+#endif
+}
+
+void GuestWriteWatchDisarm_nid_postfix() {
+#ifdef APS5_GUEST_WRITE_WATCH
+    Watch::Get().Disarm();
 #endif
 }
 

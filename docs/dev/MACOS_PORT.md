@@ -46,7 +46,7 @@ The 14 tests that fail (macOS 26.1, MoltenVK 1.4.2):
 - **Host platform (5):** `agc_thread_priority_refused_rt`, `agc_thread_priority_refused_high` and `agc_driver_pm4_priority_refused` expect a refused priority request to throw, `agc_shared_write` cannot inspect mapping lifetimes, and `check_skips` passes from the repository root but not from the working directory ctest gives it.
 - **`patched_libraries`:** loads all patched libraries and exceeds the 300 s test timeout only when the whole suite runs in parallel after a rebuild; it passes alone.
 
-`macos_fixtures` passes once on a fresh build and times out in every later run: its `argv` fixture, which ends with `int3`, stays exiting in the kernel under Rosetta until a reboot. It was left out of the run above.
+`macos_fixtures` passes once on a fresh build and times out in every later run: its `argv` fixture, which ends with `int3`, stays exiting in the kernel under Rosetta until a reboot. It was left out of the run above. A title quit with Cmd-Q while the write watch was on showed the same state (`ps` state `UNE`, every thread asleep, memory held until a reboot; `APS5_NO_WRITE_WATCH=1` quit cleanly): `exit` ran the host static destructors while guest threads kept storing into the watch's protected pages, the destroyed watch's handler fell through to the default action, and the signal death hung in the kernel. `exit` now disarms the watch and ends the process with `_Exit` after the guest handlers (see [TechnicalDebt](TechnicalDebt.md)); a process that dies by a signal under Rosetta still hangs the same way.
 
 Changes on top of the merged port:
 

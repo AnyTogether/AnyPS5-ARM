@@ -16,8 +16,14 @@
 #include <stdexcept>
 #include "prx/libc/include/Shutdown.hpp"
 
+#include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
 #include "SceTypes.hpp"
+
+#ifdef __APPLE__
+extern "C" void _tlv_exit();
+#endif
 
 namespace {
 
@@ -35,14 +41,20 @@ using GuestExitCallback = void (APS5_VABI*)();
 std::mutex exitCallbackMutex;
 std::vector<GuestExitCallback> exitCallbacks;
 
-void runGuestExitCallback() {
+bool runGuestExitCallback() {
     GuestExitCallback callback;
     {
         std::lock_guard lock(exitCallbackMutex);
+        if (exitCallbacks.empty()) return false;
         callback = exitCallbacks.back();
         exitCallbacks.pop_back();
     }
     callback();
+    return true;
+}
+
+void runGuestExitCallbacks() {
+    while (runGuestExitCallback()) {}
 }
 
 }
@@ -124,6 +136,7 @@ extern "C" {
     exitRequested.store(true);
     if (exitStarted.exchange(true)) LibcAwaitExit_nid_postfix();
     LibcRunShutdown_nid_postfix();
+    GuestWriteWatch::GuestWriteWatchDisarm_nid_postfix();
 #ifdef __APPLE__
     // exit runs the guest images' finalizers, and on macOS one in PPSA02929's libc.prx waits forever,
     // so the exit is bounded.
@@ -132,9 +145,14 @@ extern "C" {
         std::fflush(nullptr);
         std::_Exit(code);
     }).detach();
+    _tlv_exit();
 #endif
     CxaFinalize_nid_no_patch(nullptr);
-    std::exit(code);
+    runGuestExitCallbacks();
+    CxaFinalize_nid_no_patch(nullptr);
+    ApplicationHeapFinalize_nid_no_patch();
+    std::fflush(nullptr);
+    std::_Exit(code);
 }
 
 void APS5_VABI exit_nid_postfix(int code) {
@@ -178,7 +196,7 @@ int APS5_VABI atexit_nid_postfix(GuestExitCallback func) {
         return 0;
     std::lock_guard lock(exitCallbackMutex);
     exitCallbacks.push_back(func);
-    const int result = std::atexit(runGuestExitCallback);
+    const int result = std::atexit([] { runGuestExitCallback(); });
     if (result != 0) exitCallbacks.pop_back();
     return result;
 }

@@ -1,5 +1,6 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
+#include "prx/libc/include/Shutdown.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -100,9 +101,15 @@ int CreateAnonymousFile() {
 class NamedObjects {
 public:
     ~NamedObjects() {
+        Remove();
+    }
+
+    void Remove() {
+        std::lock_guard guard(lock);
         std::error_code ignored;
         for (const auto& [name, backing] : objects)
             std::filesystem::remove(backing, ignored);
+        objects.clear();
     }
 
     std::mutex lock;
@@ -113,6 +120,8 @@ NamedObjects& Named() {
     static NamedObjects named;
     return named;
 }
+
+const bool namedObjectsRemovedAtExit = (LibcRegisterShutdown_nid_postfix([] { Named().Remove(); }), true);
 
 bool CreateBackingFile(std::filesystem::path& backing) {
 #ifdef _WIN32
