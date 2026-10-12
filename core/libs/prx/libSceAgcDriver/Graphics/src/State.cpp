@@ -318,9 +318,7 @@ constexpr std::array<std::array<std::int8_t, 2>, 2> StandardLocations2{{{4, 4}, 
 constexpr std::array<std::array<std::int8_t, 2>, 4> StandardLocations4{{{-2, -6}, {6, -2}, {-6, 2}, {2, 6}}};
 constexpr std::array<std::array<std::int8_t, 2>, 8> StandardLocations8{{{1, -3}, {-1, 3}, {5, 1}, {-3, -5}, {-5, 5}, {-7, -1}, {3, 7}, {7, -7}}};
 
-// The positions repeat over the 2x2 pixel quad (PA_SC_AA_SAMPLE_LOCS_PIXEL_X*Y*, 0x2fe-0x30d); a draw
-// whose quad pixels differ needs a 2x2 sample location grid, which is not implemented.
-std::uint32_t decodeSamples(const Registers& cx, std::vector<std::array<std::int8_t, 2>>* locations = nullptr) {
+std::uint32_t decodeSamples(const Registers& cx) {
     const auto config = read(cx, 0x2f8);
     zero(cx, 0x2f8, ~(0x7u | 0x1e000u | 0x700000u), "coverage conversion or nonstandard multisampling");
     const auto log2 = config & 7u;
@@ -330,22 +328,27 @@ std::uint32_t decodeSamples(const Registers& cx, std::vector<std::array<std::int
     }
     Require(log2 <= 3u, "more than eight samples are unsupported");
     Require(((config >> 20u) & 7u) == log2, "exposing fewer samples than are rasterized is unsupported");
-    const auto samples = 1u << log2;
+    return 1u << log2;
+}
+
+void decodeSampleLocations(const Registers& cx, State& state) {
+    const auto samples = state.samples;
+    if (samples == 1) return;
     const std::span<const std::array<std::int8_t, 2>> standard = samples == 2 ? std::span<const std::array<std::int8_t, 2>>(StandardLocations2) : samples == 4 ? std::span<const std::array<std::int8_t, 2>>(StandardLocations4) : std::span<const std::array<std::int8_t, 2>>(StandardLocations8);
-    const auto location = [&](std::uint32_t pixel, std::uint32_t sample) {
-        const auto word = read(cx, 0x2fe + pixel * 4u + sample / 4u);
-        const auto bits = (word >> (8u * (sample % 4u))) & 0xffu;
-        return std::array<std::int8_t, 2>{static_cast<std::int8_t>(static_cast<std::int8_t>(static_cast<std::uint8_t>(bits << 4u)) >> 4), static_cast<std::int8_t>(static_cast<std::int8_t>(static_cast<std::uint8_t>(bits & 0xf0u)) >> 4)};
-    };
-    bool nonstandard = false;
-    for (std::uint32_t sample = 0; sample < samples; ++sample) {
-        for (std::uint32_t pixel = 1; pixel < 4; ++pixel) Require(location(pixel, sample) == location(0, sample), "sample locations that differ across the 2x2 pixel quad are unsupported");
-        nonstandard = nonstandard || location(0, sample) != standard[sample];
+    for (std::uint32_t pixel = 0; pixel < 4; ++pixel) {
+        for (std::uint32_t sample = 0; sample < samples; ++sample) {
+            const auto word = read(cx, 0x2fe + pixel * 4u + sample / 4u);
+            const auto bits = (word >> (8u * (sample % 4u))) & 0xffu;
+            const auto x = static_cast<std::int8_t>(static_cast<std::uint8_t>(bits << 4u)) >> 4;
+            const auto y = static_cast<std::int8_t>(static_cast<std::uint8_t>(bits & 0xf0u)) >> 4;
+            if (pixel == 0) {
+                state.sampleLocations[sample] = static_cast<std::uint8_t>(bits);
+                state.customSampleLocations |= x != standard[sample][0] || y != standard[sample][1];
+            } else {
+                Require(bits == state.sampleLocations[sample], "nonstandard sample locations varying between pixels are unsupported");
+            }
+        }
     }
-    if (nonstandard && locations != nullptr) {
-        for (std::uint32_t sample = 0; sample < samples; ++sample) locations->push_back(location(0, sample));
-    }
-    return samples;
 }
 
 bool colorControlSupported(std::uint32_t colorControl, bool hasColorTarget) {
@@ -526,6 +529,23 @@ void intersect(VkRect2D& result, const Registers& registers, std::uint32_t offse
 
 }
 
+std::array<VkSampleLocationEXT, 8> SampleLocations(const State& state) {
+    Require(state.samples == 1 || state.samples == 2 || state.samples == 4 || state.samples == 8, "invalid sample count");
+    std::array<VkSampleLocationEXT, 8> locations{};
+    for (std::uint32_t sample = 0; sample < state.samples; ++sample) {
+        std::array<int, 2> position{};
+        if (state.customSampleLocations) {
+            const auto bits = state.sampleLocations[sample];
+            position = {static_cast<int>(bits & 7u) - static_cast<int>(bits & 8u), static_cast<int>((bits >> 4u) & 7u) - static_cast<int>((bits >> 4u) & 8u)};
+        } else if (state.samples != 1) {
+            const auto& standard = state.samples == 2 ? StandardLocations2[sample] : state.samples == 4 ? StandardLocations4[sample] : StandardLocations8[sample];
+            position = {standard[0], standard[1]};
+        }
+        locations[sample] = {0.5f + position[0] / 16.0f, 0.5f + position[1] / 16.0f};
+    }
+    return locations;
+}
+
 ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
     const auto value = read(queue.context, 0x2d5);
     const auto validate = [&](bool condition, const char* reason) {
@@ -640,7 +660,8 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         }
     }
     zero(cx, 0x207, ~LayerExports, "clip distances, layer, viewport or auxiliary vertex exports");
-    result.samples = decodeSamples(cx, &result.sampleLocations);
+    result.samples = decodeSamples(cx);
+    decodeSampleLocations(cx, result);
     {
         const auto depthControl = read(cx, 0x200);
         const auto renderControl = find(cx, 0x000);

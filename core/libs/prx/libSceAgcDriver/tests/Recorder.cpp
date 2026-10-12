@@ -5339,6 +5339,37 @@ void pipelineLibraryTests(const Device& device) {
     state.samples = 1;
     state.colors.front().samples = 1;
     Require(lookup() != multisampled && counters().built == std::array<std::uint64_t, 4>{2, 2, 4, 4}, "the 1x pipeline after a 4x one built its libraries again");
+    if ((context.sampleLocationSampleCounts & VK_SAMPLE_COUNT_4_BIT) != 0) {
+        state.samples = 4;
+        state.colors.front().samples = 4;
+        state.customSampleLocations = true;
+        state.sampleLocations = {0x10, 0x21, 0x32, 0x43};
+        const auto pattern = lookup();
+        const auto beforePatternChange = counters().built;
+        state.sampleLocations[0] = 0x20;
+        const auto otherPattern = lookup();
+        Require(otherPattern != pattern && counters().built[2] == beforePatternChange[2] + 1u && counters().built[3] == beforePatternChange[3] + 1u && counters().built[0] == beforePatternChange[0] && counters().built[1] == beforePatternChange[1], "a custom sample pattern did not rebuild exactly the fragment shader and fragment output libraries");
+        state.sampleLocations[0] = 0x10;
+        Require(lookup() == pattern && counters().built[2] == beforePatternChange[2] + 1u && counters().built[3] == beforePatternChange[3] + 1u, "a cached custom sample pattern was not reused");
+
+        std::optional<VkFormat> compatibleDepth, incompatibleDepth;
+        state.customSampleLocations = false;
+        for (const auto format : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT}) {
+            state.depth = DepthTarget{};
+            state.depth->format = format;
+            state.depth->samples = state.samples;
+            (ValidateSampleLocations(context, state) ? compatibleDepth : incompatibleDepth) = format;
+        }
+        if (compatibleDepth && incompatibleDepth) {
+            state.depth->format = *compatibleDepth;
+            const auto compatible = lookup();
+            const auto beforeDepthChange = counters().built;
+            state.depth->format = *incompatibleDepth;
+            const auto incompatible = lookup();
+            Require(incompatible != compatible && counters().built[2] == beforeDepthChange[2] + 1u && counters().built[3] == beforeDepthChange[3] + 1u, "depth-format sample-location enablement did not rebuild both fragment libraries");
+        }
+        state.customSampleLocations = true;
+    }
     WaitForOptimizedPipelines(context.device);
     const auto lto = std::getenv("APS5_NO_PIPELINE_LTO") == nullptr && context.pipelineLinkTimeOptimization;
     Require(counters().optimized == (lto ? counters().linked : 0u), "a linked pipeline was not optimized in the background");

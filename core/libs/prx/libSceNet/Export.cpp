@@ -70,10 +70,17 @@ constexpr int NET_AF_INET6 = 28;
 constexpr int NET_SOCK_STREAM = 1;
 constexpr int NET_SOCK_DGRAM = 2;
 constexpr int NET_SOCK_RAW = 3;
+constexpr int NET_EPOLL_CTL_ADD = 1;
+constexpr int NET_EPOLL_CTL_MOD = 2;
+constexpr int NET_EPOLL_CTL_DEL = 3;
 constexpr int NET_SOL_SOCKET = 0xFFFF;
 constexpr int NET_SO_SNDTIMEO = 0x1005;
 constexpr int NET_SO_RCVTIMEO = 0x1006;
 constexpr int NET_SO_NBIO = 0x1200;
+constexpr int NET_SO_REUSEADDR = 0x4;
+constexpr int NET_SO_BROADCAST = 0x20;
+constexpr int NET_SO_SNDBUF = 0x1001;
+constexpr int NET_SO_RCVBUF = 0x1002;
 constexpr int NET_MSG_PEEK = 0x2;
 constexpr int NET_MSG_TRUNC = 0x10;
 constexpr int NET_UIO_MAXIOV = 1024;
@@ -301,8 +308,15 @@ int* errno_slot() {
     return &e;
 }
 
-int fail(int err) {
+extern "C" int* APS5_VABI __error_nid_postfix();
+
+void set_errno(int err) {
     *errno_slot() = err;
+    *__error_nid_postfix() = err;
+}
+
+int fail(int err) {
+    set_errno(err);
     return NET_ERROR_BASE | err;
 }
 
@@ -447,6 +461,32 @@ int PollSockets(KernelSocketPoll::Entry* entries, int count, int timeoutMillisec
 }
 
 const bool g_socketPollerRegistered = (KernelSetSocketPoller_nid_no_patch(&PollSockets), true);
+
+extern "C" int APS5_VABI sceNetSocketClose(int s);
+
+bool CloseSocketForKernel(int descriptor, int* error) {
+    {
+        std::lock_guard lk(g_mutex);
+        if (g_socks.count(descriptor) == 0) return false;
+    }
+    *error = sceNetSocketClose(descriptor) == 0 ? 0 : *errno_slot();
+    return true;
+}
+
+const bool g_socketCloserRegistered = (KernelSetSocketCloser_nid_no_patch(&CloseSocketForKernel), true);
+
+extern "C" int APS5_VABI sceNetSetsockopt(int s, int level, int optname, const void* optval, uint32_t optlen);
+
+bool SetSocketOptionForKernel(int descriptor, int level, int option, const void* value, std::uint32_t length, int* error) {
+    {
+        std::lock_guard lk(g_mutex);
+        if (g_socks.count(descriptor) == 0) return false;
+    }
+    *error = sceNetSetsockopt(descriptor, level, option, value, length) == 0 ? 0 : *errno_slot();
+    return true;
+}
+
+const bool g_socketOptionSetterRegistered = (KernelSetSocketOptionSetter_nid_no_patch(&SetSocketOptionForKernel), true);
 
 int APS5_VABI sceNetInit_nid_postfix(void) {
     std::lock_guard lk(g_mutex);
@@ -840,6 +880,10 @@ int APS5_VABI sceNetSetsockopt(int s, int level, int optname, const void* optval
         if (::setsockopt(socket.native->value, SOL_SOCKET, native_option, &timeout, sizeof(timeout)) != 0)
             return fail(native_error());
 #endif
+    } else if (optname == NET_SO_REUSEADDR || optname == NET_SO_BROADCAST || optname == NET_SO_SNDBUF || optname == NET_SO_RCVBUF) {
+        const int native_option = optname == NET_SO_REUSEADDR ? SO_REUSEADDR : optname == NET_SO_BROADCAST ? SO_BROADCAST : optname == NET_SO_SNDBUF ? SO_SNDBUF : SO_RCVBUF;
+        if (::setsockopt(socket.native->value, SOL_SOCKET, native_option, reinterpret_cast<const char*>(&value), sizeof(value)) != 0)
+            return fail(native_error());
     } else {
         return fail(NET_EOPNOTSUPP);
     }
@@ -967,13 +1011,13 @@ int APS5_VABI sceNetEpollControl(int eid, int op, int id, const NetEpollEvent* e
     if (g_epolls.count(eid) == 0) {
         return fail(NET_EBADF);
     }
-    if (op < 1 || op > 3) return fail(NET_EINVAL);
-    if (op != 2 && !event) return fail(NET_EINVAL);
-    if (op != 2 && g_socks.count(id) == 0) return fail(NET_EBADF);
+    if (op != NET_EPOLL_CTL_ADD && op != NET_EPOLL_CTL_MOD && op != NET_EPOLL_CTL_DEL) return fail(NET_EINVAL);
+    if (op != NET_EPOLL_CTL_DEL && !event) return fail(NET_EINVAL);
+    if (op != NET_EPOLL_CTL_DEL && g_socks.count(id) == 0) return fail(NET_EBADF);
     auto& registrations = g_epoll_socks[eid];
-    if (op == 1) {
+    if (op == NET_EPOLL_CTL_ADD) {
         if (!registrations.emplace(id, *event).second) return fail(NET_EADDRINUSE);
-    } else if (op == 2) {
+    } else if (op == NET_EPOLL_CTL_DEL) {
         if (registrations.erase(id) == 0) return fail(NET_ENOENT);
     } else {
         auto registration = registrations.find(id);
@@ -1100,11 +1144,11 @@ int APS5_VABI sceNetInetPton(int af, const char* src, void* dst) {
 
 const char* APS5_VABI sceNetInetNtop(int af, const void* src, char* dst, uint32_t size) {
     if (src == nullptr || dst == nullptr) {
-        *errno_slot() = NET_EINVAL;
+        set_errno(NET_EINVAL);
         return nullptr;
     }
     if (af != NET_AF_INET && af != NET_AF_INET6) {
-        *errno_slot() = NET_EAFNOSUPPORT;
+        set_errno(NET_EAFNOSUPPORT);
         return nullptr;
     }
     char text[INET6_ADDRSTRLEN];
@@ -1114,12 +1158,12 @@ const char* APS5_VABI sceNetInetNtop(int af, const void* src, char* dst, uint32_
     const auto* result = ::inet_ntop(af == NET_AF_INET ? AF_INET : AF_INET6, src, text, sizeof(text));
 #endif
     if (!result) {
-        *errno_slot() = native_error();
+        set_errno(native_error());
         return nullptr;
     }
     const auto length = std::strlen(text) + 1;
     if (length > size) {
-        *errno_slot() = NET_ENOSPC;
+        set_errno(NET_ENOSPC);
         return nullptr;
     }
     std::memcpy(dst, text, length);
@@ -1172,7 +1216,7 @@ int lookup_ipv4(int rid, const char* hostname, const char* func, std::vector<std
     addrinfo* results = nullptr;
     const int result = ::getaddrinfo(hostname, nullptr, &hints, &results);
     if (result != 0) {
-        *errno_slot() = result == EAI_AGAIN ? NET_ETIMEDOUT : NET_ENOENT;
+        set_errno(result == EAI_AGAIN ? NET_ETIMEDOUT : NET_ENOENT);
         log_soft(func, "host DNS lookup failed");
         set_resolver_error(rid, NET_ERROR_RESOLVER_ENODNS);
         return NET_ERROR_RESOLVER_ENODNS;
@@ -1247,7 +1291,7 @@ int APS5_VABI sceNetResolverStartAton(int rid, const void* addr, char* hostname,
     const int result = ::getnameinfo(reinterpret_cast<const sockaddr*>(&address), sizeof(address), hostname,
         static_cast<NativeLength>(len), nullptr, 0, NI_NAMEREQD);
     if (result != 0) {
-        *errno_slot() = result == EAI_AGAIN ? NET_ETIMEDOUT : NET_ENOENT;
+        set_errno(result == EAI_AGAIN ? NET_ETIMEDOUT : NET_ENOENT);
         log_soft(__func__, "host reverse DNS lookup failed");
         set_resolver_error(rid, NET_ERROR_RESOLVER_ENODNS);
         return NET_ERROR_RESOLVER_ENODNS;

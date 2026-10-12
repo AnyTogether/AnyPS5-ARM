@@ -151,7 +151,12 @@ float APS5_VABI logf_nid_postfix(float x) { return std::log(x); }
 float APS5_VABI log2f_nid_postfix(float x) { return std::log2(x); }
 double APS5_VABI log10_nid_postfix(double x) { return std::log10(x); }
 float APS5_VABI ldexpf_nid_postfix(float x, int exp) { return std::ldexp(x, exp); }
-double APS5_VABI fmod_nid_postfix(double x, double y) { return std::fmod(x, y); }
+double APS5_VABI fmod_nid_postfix(double x, double y) {
+    int saved_errno = errno;
+    double result = std::fmod(x, y);
+    errno = saved_errno;
+    return result;
+}
 float APS5_VABI roundf_nid_postfix(float x) { return std::round(x); }
 double APS5_VABI round_nid_postfix(double x) { return std::round(x); }
 float APS5_VABI cbrtf_nid_postfix(float x) { return std::cbrt(x); }

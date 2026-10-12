@@ -15,9 +15,15 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <io.h>
+extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handler(_invalid_parameter_handler);
+#endif
 extern "C" {
 int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode);
 int APS5_VABI sceKernelClose(int d);
+std::int64_t APS5_VABI sceKernelPread(int, void*, std::size_t, std::int64_t);
+std::int64_t APS5_VABI sceKernelPwrite(int, const void*, std::size_t, std::int64_t);
 std::int64_t APS5_VABI sceKernelLseek(int d, std::int64_t offset, int whence);
 int APS5_VABI sceKernelAioDeleteRequest(std::int32_t id, std::int32_t* ret);
 int APS5_VABI sceKernelAioInitializeImpl(void* param, std::int32_t size);
@@ -42,7 +48,50 @@ static void Require(bool value, int line) {
     }
 }
 #define Check(value) Require((value), __LINE__)
-int main() {
+#ifdef _WIN32
+static int g_parameterReports = 0;
+static void CountParameterReport(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, std::uintptr_t) {
+    ++g_parameterReports;
+}
+static void CheckBadPositionedDescriptors() {
+    const auto file = std::filesystem::path("anyps5-aio-bad-descriptor-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    { std::ofstream stream(file, std::ios::binary); stream << "data"; Check(static_cast<bool>(stream)); }
+    const int closed = sceKernelOpen(file.string().c_str(), SCE_KERNEL_O_RDWR, 0);
+    Check(closed >= 0 && sceKernelClose(closed) == 0);
+    const auto previous = _set_thread_local_invalid_parameter_handler(CountParameterReport);
+    for (int descriptor : {-1, closed}) {
+        for (std::size_t count : {std::size_t{0}, std::size_t{1}}) {
+            char buffer = 'x';
+            Check(sceKernelPread(descriptor, &buffer, count, 0) == SCE_KERNEL_ERROR_EBADF);
+            Check(sceKernelPwrite(descriptor, &buffer, count, 0) == SCE_KERNEL_ERROR_EBADF);
+            for (bool write : {false, true}) {
+                KernelAioResult result{-1, 0};
+                KernelAioRwRequest request{0, count, &buffer, &result, descriptor};
+                std::int32_t id = 0;
+                Check((write ? sceKernelAioSubmitWriteCommands(&request, 1, 0, &id)
+                             : sceKernelAioSubmitReadCommands(&request, 1, 0, &id)) == 0);
+                Check(result.state == 4 && result.return_value == SCE_KERNEL_ERROR_EBADF);
+                std::int32_t removed = -1;
+                Check(sceKernelAioDeleteRequest(id, &removed) == 0);
+            }
+            Check(buffer == 'x');
+            Check(g_parameterReports == 0);
+        }
+    }
+    Check(::_get_osfhandle(closed) == -1);
+    Check(g_parameterReports == 1);
+    Check(_set_thread_local_invalid_parameter_handler(previous) == CountParameterReport);
+    Check(std::filesystem::remove(file));
+}
+#endif
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (argc > 1 && std::strcmp(argv[1], "bad-descriptors") == 0) {
+        CheckBadPositionedDescriptors();
+        return 0;
+    }
+#endif
     const auto root = std::filesystem::path("anyps5-aio-test-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Check(std::filesystem::create_directory(root));

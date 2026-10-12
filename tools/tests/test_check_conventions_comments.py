@@ -295,6 +295,14 @@ class RepositoryChecksTests(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", "test: add convention fixture")
 
+    def add_thirdparty_submodule(self, gitmodules=None):
+        head = self.git("rev-parse", "HEAD")
+        if gitmodules is not None:
+            (self.root / ".gitmodules").write_text(gitmodules, encoding="utf-8")
+            self.git("add", ".gitmodules")
+        self.git("update-index", "--add", "--cacheinfo", "160000", head, "3rdparty/vendor")
+        self.git("commit", "-qm", "build: add submodule")
+
     def test_quoted_utf8_paths_are_checked(self):
         name = "docs/dev/測試guide.md" if os.name == "nt" else "docs/dev/測試\tguide.md"
         path = self.root / name
@@ -337,12 +345,29 @@ class RepositoryChecksTests(unittest.TestCase):
         self.assertIn(("system-dependency", "vendor", 0, "submodule outside 3rdparty/"), check.findings)
 
     def test_thirdparty_submodule_remains_allowed(self):
-        head = self.git("rev-parse", "HEAD")
-        self.git("update-index", "--add", "--cacheinfo", "160000", head, "3rdparty/vendor")
-        self.git("commit", "-qm", "build: add allowed submodule")
+        self.add_thirdparty_submodule('[submodule "vendor"]\n\tpath = 3rdparty/vendor\n'
+                                      "\turl = https://example.com/vendor.git\n")
         check = Check("HEAD~1", "HEAD")
         check.repository()
         self.assertEqual(check.findings, [])
+
+    def test_thirdparty_submodule_without_gitmodules_entry_is_reported(self):
+        self.add_thirdparty_submodule()
+        check = Check("HEAD~1", "HEAD")
+        check.repository()
+        self.assertEqual(check.findings,
+                         [("system-dependency", "3rdparty/vendor", 0, "submodule without a url in .gitmodules")])
+
+    def test_dropping_a_submodule_url_is_reported(self):
+        self.add_thirdparty_submodule('[submodule "vendor"]\n\tpath = 3rdparty/vendor\n'
+                                      "\turl = https://example.com/vendor.git\n")
+        (self.root / ".gitmodules").write_text('[submodule "vendor"]\n\tpath = 3rdparty/vendor\n', encoding="utf-8")
+        self.git("add", ".gitmodules")
+        self.git("commit", "-qm", "build: drop submodule url")
+        check = Check("HEAD~1", "HEAD")
+        check.repository()
+        self.assertEqual(check.findings,
+                         [("system-dependency", "3rdparty/vendor", 0, "submodule without a url in .gitmodules")])
 
     def test_relative_link_url_decoding(self):
         self.assertEqual(links("docs/dev/index.md", "[guide](./space%20name.md#details)"),

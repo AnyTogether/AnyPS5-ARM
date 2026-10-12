@@ -239,6 +239,48 @@ class ImportAuditTests(unittest.TestCase):
         records, _ = import_audit.audit([(nid, "libB.prx")], exports, stubs, {"libA.prx", "libB.prx"}, set())
         self.assertEqual(records[0]["class"], "implemented")
 
+    def test_formatted_export_aliases_remain_stubs(self):
+        work = self.work
+        nid = "AAAAAAAAAAA"
+        (work.libs / "libSceAlias.prx").write_bytes(exporting(nid))
+        registry = work.root / "game.json"
+        result = work.root / "audit.json"
+        write_registry(registry, [(nid, "libSceAlias.prx")])
+        aliases = [
+            'APS5_EXPORT (\n "AAAAAAAAAAA",\n NAME\n);\n',
+            'APS5_EXPORT(/* nid */ "AAAAAAAAAAA", /* name */ NAME);\n',
+            'APS5_EX\\\nPORT("AAAAAAAAAAA", NAME);\n',
+        ]
+        for name in ("sceAliasUnknown", "sceAliasedCall"):
+            for alias in aliases:
+                with self.subTest(name=name, alias=alias):
+                    write_source(work.source, "libSceAlias", alias.replace("NAME", name) + STUB_SOURCE.format(name=name))
+                    code, _, err = work.run(registry, "--json", str(result))
+                    self.assertEqual((code, err), (0, ""))
+                    record, = json.loads(result.read_text())["imports"]
+                    self.assertEqual((record["class"], record["name"]), ("stub", name))
+
+    def test_comments_and_literals_do_not_override_export_aliases(self):
+        work = self.work
+        nid, name = "AAAAAAAAAAA", "sceAliasUnknown"
+        (work.libs / "libSceAlias.prx").write_bytes(exporting(nid))
+        registry = work.root / "game.json"
+        result = work.root / "audit.json"
+        write_registry(registry, [(nid, "libSceAlias.prx")])
+        source = 'APS5_EXPORT("AAAAAAAAAAA", sceAliasUnknown);\n' + STUB_SOURCE.format(name=name)
+        decoys = [
+            '// APS5_EXPORT("BBBBBBBBBBB", sceAliasUnknown);\n',
+            '/* APS5_EXPORT("BBBBBBBBBBB", sceAliasUnknown); */\n',
+            'auto example = R"text(APS5_EXPORT("BBBBBBBBBBB", sceAliasUnknown);)text";\n',
+        ]
+        for decoy in decoys:
+            with self.subTest(decoy=decoy):
+                write_source(work.source, "libSceAlias", source + decoy)
+                code, _, err = work.run(registry, "--json", str(result))
+                self.assertEqual((code, err), (0, ""))
+                record, = json.loads(result.read_text())["imports"]
+                self.assertEqual((record["class"], record["name"]), ("stub", name))
+
     @unittest.skipUnless((import_audit.ROOT / ".git").exists(), "needs a git checkout")
     def test_json_is_stamped_with_the_source_commit(self):
         work = self.work

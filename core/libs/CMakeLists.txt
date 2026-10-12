@@ -341,6 +341,11 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME host_thread_local COMMAND host_thread_local_tests)
     set_tests_properties(host_thread_local PROPERTIES TIMEOUT 15)
+    if(MINGW)
+        add_test(NAME prx_thread_local_destructors COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DOBJDUMP=${CMAKE_OBJDUMP}
+            -DMODULES=$<TARGET_FILE_DIR:libc> -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/ThreadLocalDestructors.cmake)
+        set_tests_properties(prx_thread_local_destructors PROPERTIES TIMEOUT 300)
+    endif()
 
     add_test_executable(savedata_core_write_replacement_tests tests/SaveDataWriteReplacement.cpp)
     target_include_directories(savedata_core_write_replacement_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -511,7 +511,7 @@ def add_alias(image, size, begin=0x1200):
 
 def main():
     groups = ("metadata", "padding", "register_loads", "displacement_bounds", "alu_execution",
-              "register_address_loads", "rejected")
+              "register_address_loads", "moved_branch", "rejected")
     groups += tuple(f"displacement_r{register}" for register in range(16) if register != 4)
     groups += tuple(f"alu_{name}" for name in ALU_READ)
     parser = argparse.ArgumentParser(description="Run Windows guest TLS function coverage fixtures")
@@ -699,12 +699,35 @@ def main():
                 stub = pe_bytes_at(pe, 0x10000 + address + 5 + struct.unpack_from("<i", patched, 1)[0], 96)
                 head, tail = register_alu_stub(instruction, opcode, register, wide)
                 assert stub.startswith(head) and tail + moved in stub, (name, head.hex(), (tail + moved).hex(), stub.hex())
+        if args.group in ("all", "moved_branch"):
+            prologue = bytes.fromhex("48 c7 c3 f0 ff ff ff 48 31 c0")
+            rel8_body = prologue + bytes.fromhex("64 48 33 03 75 06 31 c0 c3 90 90 90 b8 2a 00 00 00 c3")
+            rel32_body = prologue + bytes.fromhex("64 48 33 03 0f 85") + struct.pack("<i", 0x1259 - 0x1254) + bytes.fromhex("31 c0 c3 90 90 b8 2a 00 00 00 c3")
+            jmp_body = prologue + bytes.fromhex("64 48 33 03 eb 06 b8 01 00 00 00 c3 90 b8 2a 00 00 00 c3")
+            for name, body, access, target, branch_opcode in (
+                ("moved-rel8-branch", rel8_body, 0x124A, 0x1256, "0f 85"),
+                ("moved-rel32-branch", rel32_body, 0x124A, 0x1259, "0f 85"),
+                ("moved-rel8-jump", jmp_body, 0x124A, 0x1256, "e9"),
+            ):
+                image = make_image("register", "unwind", body=body)
+                convert(name, image, tls_address=access)
+                pe = (work / (name + ".exe")).read_bytes()
+                patched = pe_bytes_at(pe, 0x10000 + access, 6)
+                assert patched[0] == 0xe9 and patched[5] == 0x90, (name, patched.hex())
+                stub_address = 0x10000 + access + 5 + struct.unpack_from("<i", patched, 1)[0]
+                stub = pe_bytes_at(pe, stub_address, 128)
+                encoding = bytes.fromhex(branch_opcode)
+                offset = stub.find(encoding)
+                assert offset >= 0, (name, stub.hex())
+                displacement = struct.unpack_from("<i", stub, offset + len(encoding))[0]
+                assert displacement == (0x10000 + target) - (stub_address + offset + len(encoding) + 4), (name, displacement)
         if args.group in ("all", "rejected"):
             for name, instruction in {
                 "short-before-return": bytes.fromhex("64 48 8b 03 c3"),
                 "short-before-call": bytes.fromhex("64 48 8b 03 e8 00 00 00 00 c3"),
                 "short-before-tls": bytes.fromhex("64 48 8b 03 64 48 8b 03 c3"),
                 "short-alu-before-return": bytes.fromhex("64 48 33 03 c3"),
+                "short-before-loop": bytes.fromhex("64 48 33 03 e2 00"),
             }.items():
                 convert(name, make_image("register", "unwind", body=instruction),
                         "Short guest TLS instruction is followed by an instruction that cannot move", error_offset=0x1244)

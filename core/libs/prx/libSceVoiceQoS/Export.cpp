@@ -138,6 +138,11 @@ int APS5_VABI sceVoiceQoSDisconnect(int32_t connection_id) {
     return Locked([&](QoS& qos) { return qos.connections.erase(connection_id) != 0 ? 0 : SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID; });
 }
 
+int APS5_VABI sceVoiceQoSSetConnectionAttribute() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceVoiceQoSSetLocalEndpointAttribute(int32_t local_id, int32_t attribute_id, const void* value, int32_t size) {
     return Locked([&](QoS& qos) { return SetAttribute(qos.locals, local_id, attribute_id, value, size); });
 }

@@ -209,7 +209,7 @@ int main() {
 
     passed &= run("cross-lane reads must keep the select", [] {
         bool ok = true;
-        for (const IrOpcode opcode : {IrOpcode::ReadFirstLane, IrOpcode::DppMoveU32, IrOpcode::BpermuteU32, IrOpcode::Permlane16U32, IrOpcode::SwizzleU32}) {
+        for (const IrOpcode opcode : {IrOpcode::DppMoveU32, IrOpcode::BpermuteU32, IrOpcode::Permlane16U32, IrOpcode::SwizzleU32}) {
             Builder b;
             auto& exec = b.mask(16u);
             auto& old = b.lane();
@@ -225,6 +225,132 @@ int main() {
         auto& ballot = b.emit(IrOpcode::Ballot, IrType::U32x4, {&b.emit(IrOpcode::INotEqual32, IrType::Bool, {&written, &b.constant(0u)})});
         b.keep(b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&ballot, &b.constant(0u)}));
         return ok && b.eliminate() == 0u && !removed(written);
+    });
+
+    passed &= run("a first-lane read guarded at both ends loses the source select", [] {
+        Builder b;
+        auto& exec = b.mask(16u);
+        auto& narrow = b.logicalAnd(exec, b.mask(8u));
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        auto& read = b.emit(IrOpcode::ReadFirstLane, IrType::U32, {&written, &narrow});
+        b.keep(b.select(narrow, read, old));
+        return b.eliminate() == 1u && removed(written);
+    });
+
+    passed &= run("an unguarded first-lane result keeps the source select for empty exec", [] {
+        Builder b;
+        auto& exec = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&b.lane(), &b.constant(0u)});
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        auto& empty = b.logicalAnd(exec, b.mask(0u));
+        b.keep(b.emit(IrOpcode::ReadFirstLane, IrType::U32, {&written, &empty}));
+        return b.eliminate() == 0u && !removed(written);
+    });
+
+    passed &= run("a first-lane result read under the write mask keeps the select when read exec is narrower", [] {
+        Builder b;
+        auto& exec = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&b.lane(), &b.constant(0u)});
+        auto& empty = b.logicalAnd(exec, b.mask(0u));
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        auto& read = b.emit(IrOpcode::ReadFirstLane, IrType::U32, {&written, &empty});
+        b.keep(b.select(exec, read, old));
+        return b.eliminate() == 0u && !removed(written);
+    });
+
+    passed &= run("a first-lane read under a wider exec keeps the select", [] {
+        Builder b;
+        auto& wide = b.mask(32u);
+        auto& exec = b.logicalAnd(wide, b.mask(16u));
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        auto& read = b.emit(IrOpcode::ReadFirstLane, IrType::U32, {&written, &wide});
+        b.keep(b.select(wide, read, old));
+        return b.eliminate() == 0u && !removed(written);
+    });
+
+    const auto selectedExec = [](bool negate, bool widerArm) {
+        Builder b;
+        auto& wide = b.mask(32u);
+        auto& exec = b.logicalAnd(wide, b.mask(16u));
+        auto& empty = b.logicalAnd(exec, b.mask(0u));
+        auto& selector = negate ? b.emit(IrOpcode::LogicalNot, IrType::Bool, {&exec}) : exec;
+        auto& later = b.emit(IrOpcode::SelectU1, IrType::Bool, {&selector, negate ? (widerArm ? &wide : &empty) : &wide, negate ? &wide : (widerArm ? &wide : &empty)});
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        b.keep(b.select(later, b.add(written, 2u), old));
+        return std::pair{b.eliminate(), removed(written)};
+    };
+
+    passed &= run("selected boolean exec implies the write mask through its selector", [&] {
+        for (bool negate : {false, true}) {
+            const auto [count, gone] = selectedExec(negate, false);
+            if (count != 1u || !gone) return false;
+        }
+        return true;
+    });
+
+    passed &= run("selected boolean exec with a wider unguarded arm keeps the select", [&] {
+        for (bool negate : {false, true}) {
+            const auto [count, gone] = selectedExec(negate, true);
+            if (count != 0u || gone) return false;
+        }
+        return true;
+    });
+
+    const auto rebuiltExec = [](bool mismatchedHigh) {
+        Builder b;
+        const auto [low, high] = b.ballotWords(b.mask(16u));
+        const auto [wideLow, wideHigh] = b.ballotWords(b.mask(48u));
+        auto& exec = b.threadBit(*low, *high);
+        auto& later = b.threadBit(*low, mismatchedHigh ? *wideHigh : *high);
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        b.keep(b.select(later, b.add(written, 2u), old));
+        return std::pair{b.eliminate(), removed(written)};
+    };
+
+    passed &= run("an exec rebuilt from the same words implies the write mask", [&] {
+        const auto [count, gone] = rebuiltExec(false);
+        return count >= 1u && gone;
+    });
+
+    passed &= run("matching low mask words alone do not imply a wave64 write mask", [&] {
+        const auto [count, gone] = rebuiltExec(true);
+        return count == 0u && !gone;
+    });
+
+    const auto firstLaneInLoop = [](bool carriedResult) {
+        Builder b;
+        auto& exec = b.mask(16u);
+        auto& old = b.lane();
+        auto& written = b.select(exec, b.add(old, 1u), old);
+        IrBlock& entry = *b.block;
+        IrBlock& loop = b.newBlock();
+        entry.AddBranch(&loop);
+        loop.AddBranch(&loop);
+        b.block = &loop;
+        auto& loopExec = b.logicalAnd(exec, b.mask(8u));
+        auto& read = b.emit(IrOpcode::ReadFirstLane, IrType::U32, {&written, &loopExec});
+        if (carriedResult) {
+            auto& carried = b.phi(IrType::U32, entry, old);
+            carried.AddPhiOperand(&loop, &read);
+            b.keep(b.select(loopExec, carried, old));
+        } else {
+            b.keep(b.select(loopExec, read, old));
+        }
+        return std::pair{b.eliminate(), removed(written)};
+    };
+
+    passed &= run("a loop-local first-lane result guarded in its own iteration loses the source select", [&] {
+        const auto [count, gone] = firstLaneInLoop(false);
+        return count == 1u && gone;
+    });
+
+    passed &= run("a first-lane result carried to another loop iteration keeps the source select", [&] {
+        const auto [count, gone] = firstLaneInLoop(true);
+        return count == 0u && !gone;
     });
 
     passed &= run("a branch condition derived from the write keeps the select", [] {

@@ -25,6 +25,7 @@ constexpr int RUDP_POOL_MIN_SIZE = 0xC58;
 constexpr std::uintptr_t RUDP_POOL_ALIGNMENT = 8;
 constexpr std::size_t RUDP_STATUS_SIZE = 0xF8;
 constexpr std::size_t RUDP_STATUS_CURRENT_CONTEXTS = 0x64;
+constexpr uint16_t RUDP_MAX_SEGMENT_SIZE = 1410;
 
 using GuestRudpEventHandler = void(APS5_VABI*)(int, int, int, void*);
 
@@ -273,8 +274,15 @@ int APS5_VABI sceRudpNetReceived(void) {
     return 0;
 }
 
-int APS5_VABI sceRudpGetMaxSegmentSize(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceRudpGetMaxSegmentSize(uint16_t* size) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    if (size == nullptr) {
+        return RUDP_ERROR_INVALID_ARGUMENT;
+    }
+    *size = RUDP_MAX_SEGMENT_SIZE;
     return 0;
 }
 

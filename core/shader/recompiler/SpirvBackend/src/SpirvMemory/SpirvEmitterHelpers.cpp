@@ -291,6 +291,8 @@ void DefineInputs(SpirvEmitterState& state) {
     }
 }
 
+constexpr std::uint32_t MaxClipDistances = 8u;
+
 void DefineOutputs(SpirvEmitterState& state) {
     state.outputs.reserve(state.program.Info().outputs.size());
     std::uint32_t clipDistanceCount = 0u;
@@ -306,6 +308,18 @@ void DefineOutputs(SpirvEmitterState& state) {
     if (state.program.Resources().stage == IrShaderStage::Mesh) {
         DefineMeshOutputs(state);
         return;
+    }
+    const auto stage = state.program.Resources().stage;
+    const bool exportsPosition = std::ranges::any_of(state.outputs, [](const SpirvOutputBinding& output) { return output.kind == StageOutputKind::Position; });
+    if (exportsPosition && (stage == IrShaderStage::Vertex || stage == IrShaderStage::TessellationEvaluation)) {
+        if (std::ranges::find(state.supportedCapabilities, spv::CapabilityClipDistance) == state.supportedCapabilities.end()) {
+            FailEmit("clipping a primitive with an all-zero clip position needs shaderClipDistance on the target device");
+        }
+        state.zeroPositionClipIndex = clipDistanceCount;
+        clipDistanceCount += 1u;
+        if (clipDistanceCount > MaxClipDistances) {
+            FailEmit("guest clip distances plus the all-zero clip position distance exceed " + std::to_string(MaxClipDistances) + " clip distances");
+        }
     }
     const auto BuiltIn = [&](std::uint32_t& variable, std::uint32_t type, const char* name, std::uint32_t builtin) {
         if (variable == 0u) {
@@ -354,6 +368,9 @@ void DefineOutputs(SpirvEmitterState& state) {
             break;
         }
         }
+    }
+    if (state.zeroPositionClipIndex) {
+        BuiltIn(state.clipDistanceVariable, F32ArrayType(state, clipDistanceCount), "gl_ClipDistance", spv::BuiltInClipDistance);
     }
     if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->psAlphaToCoverage) {
         if (state.inputInfo.pixel->psSampleMaskExportEnable) throw std::runtime_error("alpha-to-coverage with a sample-mask export is unsupported");

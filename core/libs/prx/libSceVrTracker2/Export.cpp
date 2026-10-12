@@ -10,6 +10,11 @@ int APS5_VABI sceVrTracker2Finalize() {
     return 0;
 }
 
+int APS5_VABI sceVrTracker2ResetLocalCoordinate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceVrTracker2GetPlayAreaOrientedBoundingBox() {
     NotImplemented_nid_no_patch(__func__);
     return 0;

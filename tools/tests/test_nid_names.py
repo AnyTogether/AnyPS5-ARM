@@ -161,6 +161,11 @@ int APS5_VABI sceReal() { return 0; }
         self.write_source('APS5_EXPORT (\n "AAAAAAAAAAA" ,\n exampleUnknown00\n );\n')
         self.assertEqual(nid_names.collect_unknowns(), {"AAAAAAAAAAA": "core/libs/prx/libSceExample/Export.cpp:exampleUnknown00"})
 
+    def test_known_aliases_are_not_unknown_exports(self):
+        self.write_source('APS5_EXPORT("AAAAAAAAAAA", sceKnownCall);\n'
+                          'APS5_EXPORT("BBBBBBBBBBB", exampleUnknown00);\n')
+        self.assertEqual(nid_names.collect_unknowns(), {"BBBBBBBBBBB": "core/libs/prx/libSceExample/Export.cpp:exampleUnknown00"})
+
     def test_windows_source_paths_use_portable_separators(self):
         self.write_source('APS5_EXPORT("AAAAAAAAAAA", exampleUnknown00);\n')
         relative = PureWindowsPath("core/libs/prx/libSceExample/Export.cpp")

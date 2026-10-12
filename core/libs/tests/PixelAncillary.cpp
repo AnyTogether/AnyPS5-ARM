@@ -443,6 +443,69 @@ static void HelperLoopRebuilt(LoopRead read) {
     LowerMasked(program);
     RequireNoPackedWord(program);
 }
+enum class StartingQuad { Kept, BallotAfterBranch, BallotOfOtherLanes, ComputeStage };
+
+static IrValue& StartingQuadMasked(IrProgram& program, StartingQuad shape) {
+    auto& entry = Begin(program);
+    if (shape == StartingQuad::ComputeStage) program.Resources().stage = IrShaderStage::Compute;
+    IrBlock* tail = &entry;
+    if (shape == StartingQuad::BallotAfterBranch) {
+        auto& body = program.CreateBlock();
+        auto& merge = program.CreateBlock();
+        program.BlockOrder().push_back(&body);
+        program.BlockOrder().push_back(&merge);
+        entry.AddBranch(&body);
+        entry.AddBranch(&merge);
+        body.AddBranch(&merge);
+        tail = &merge;
+    }
+    IrBuilder builder(program);
+    builder.SetInsertionPoint(entry);
+    IrValue& ancillary = AncillaryBuiltin(builder);
+    IrValue& helper = builder.Emit(IrOpcode::GetBuiltin, IrType::U32, {&builder.Constant(static_cast<std::uint32_t>(StageInputKind::HelperInvocation)), &builder.Constant(0u)});
+    IrValue& started = shape == StartingQuad::BallotOfOtherLanes ? FrontFacingBuiltin(builder) : builder.IEqual(helper, builder.Constant(0u));
+    IrValue& live = builder.Emit(IrOpcode::Ballot, IrType::Vec4U32, {&started});
+    builder.SetInsertionPoint(*tail);
+    IrValue& active = builder.Emit(IrOpcode::Ballot, IrType::Vec4U32, {&builder.ConstantBool(true)});
+    IrValue& low = builder.BitwiseAnd(builder.CompositeExtract(live, 0u), builder.CompositeExtract(active, 0u));
+    IrValue& high = builder.BitwiseAnd(builder.CompositeExtract(live, 1u), builder.CompositeExtract(active, 1u));
+    IrValue& quads = builder.Emit(IrOpcode::WqmU64, IrType::U64, {&builder.Emit(IrOpcode::CompositeConstructU64, IrType::U64, {&low, &high})});
+    IrValue& lane = LaneBit(builder, builder.Emit(IrOpcode::CompositeExtractU64, IrType::U32, {&quads, &builder.Constant(0u)}), builder.Emit(IrOpcode::CompositeExtractU64, IrType::U32, {&quads, &builder.Constant(1u)}));
+    IrValue& kept = builder.Select(lane, builder.Constant(SelectOther), ancillary);
+    End(builder, kept);
+    return kept;
+}
+static const IrValue* StartingQuadExported(IrProgram& program, StartingQuad shape) {
+    static_cast<void>(StartingQuadMasked(program, shape));
+    if (shape == StartingQuad::ComputeStage) {
+        ConstantFolder().Fold(program);
+        DeadCodeEliminator().Eliminate(program);
+    } else {
+        Lower(program);
+    }
+    for (const IrBlock* block : program.BlockOrder()) {
+        for (const IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() == IrOpcode::ReferenceU32) return inst->Argument(0)->Resolve();
+        }
+    }
+    return nullptr;
+}
+static void StartingQuadOnly() {
+    IrProgram program;
+    const IrValue* value = StartingQuadExported(program, StartingQuad::Kept);
+    Require(value != nullptr && value->HasImmediate() && value->ImmediateU32() == SelectOther);
+}
+static void StartingQuadOutsidePixel() {
+    IrProgram program;
+    const IrValue* value = StartingQuadExported(program, StartingQuad::ComputeStage);
+    Require(value != nullptr && value->Opcode() == IrOpcode::SelectU32);
+}
+static void StartingQuadRebuilt(StartingQuad shape) {
+    IrProgram program;
+    static_cast<void>(StartingQuadMasked(program, shape));
+    Lower(program);
+    RequireNoPackedWord(program);
+}
 int main() {
     Extract(IrOpcode::BitFieldUExtract, 8u, 4u, StageInputKind::SampleId, 0u);
     Extract(IrOpcode::BitFieldUExtract, 9u, 2u, StageInputKind::SampleId, 1u);
@@ -493,4 +556,8 @@ int main() {
     HelperLoopOnly(LoopRead::ExportInside);
     HelperLoopOnly(LoopRead::UniformLoop);
     HelperLoopRebuilt(LoopRead::RevivedExportInside);
+    StartingQuadOnly();
+    StartingQuadRebuilt(StartingQuad::BallotAfterBranch);
+    StartingQuadRebuilt(StartingQuad::BallotOfOtherLanes);
+    StartingQuadOutsidePixel();
 }

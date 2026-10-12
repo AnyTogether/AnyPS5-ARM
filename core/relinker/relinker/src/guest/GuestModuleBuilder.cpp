@@ -1,6 +1,7 @@
 #include <relinker/guest/GuestImage.hpp>
 #include <elfpatcher/general/GuestModuleWriter.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
+#include <domain/ImportModule.hpp>
 #include <io/FileReader.hpp>
 #include <io/NativePath.hpp>
 #include <io/BufferUtils.hpp>
@@ -120,9 +121,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     Io::FileReader reader;
     std::map<std::filesystem::path, GuestImage> discovered;
     const auto matchesIdentity = [](const std::string& name, const std::vector<std::string>& identities) {
-        return std::any_of(identities.begin(), identities.end(), [&](const auto& identity) {
-            return name == identity || name == identity + ".prx" || name == identity + ".sprx" || name == identity + ".suprx";
-        });
+        const auto stem = std::string_view(name).substr(0, name.size() - Domain::ModuleSuffix(name).size());
+        return std::any_of(identities.begin(), identities.end(), [&](const auto& identity) { return name == identity || stem == identity; });
     };
     for (const auto& path : paths) discovered.emplace(path, GuestImageReader().Read(path, reader.Read(Io::Utf8Path(path)), windows));
     if (!unmatchedExclusions.empty()) throw Domain::RelinkerException("Excluded guest module file not found: " + *unmatchedExclusions.begin());

@@ -50,8 +50,8 @@ void CheckStorageOnlyModule(const RecompileResult& result, std::string_view name
 }
 
 SpirvTarget StorageOnlyTarget() {
-    static constexpr std::array<std::uint32_t, 3> capabilities{
-        spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess,
+    static constexpr std::array<std::uint32_t, 4> capabilities{
+        spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess, spv::CapabilityClipDistance,
     };
     static constexpr std::array<std::string_view, 4> extensions{
         "SPV_EXT_descriptor_indexing", "SPV_KHR_8bit_storage", "SPV_KHR_float_controls", "SPV_KHR_physical_storage_buffer",

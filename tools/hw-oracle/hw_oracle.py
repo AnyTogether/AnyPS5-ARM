@@ -1,5 +1,7 @@
 import argparse
+import hashlib
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -33,21 +35,31 @@ def tool(name):
 
 
 def oracle():
-    binary = CACHE / "oracle"
     source = HERE / "oracle.c"
-    if binary.exists() and binary.stat().st_mtime >= source.stat().st_mtime:
+    compiler = shlex.split(os.environ.get("CC", "cc"))
+    if not compiler:
+        raise ValueError("CC must name a compiler command")
+    root = rocm_root()
+    if root is not None:
+        root = root.resolve()
+    configuration = repr((compiler, str(root))).encode("utf-8")
+    key = hashlib.sha256(source.read_bytes() + configuration).hexdigest()
+    directory = CACHE / key
+    binary = directory / "oracle"
+    if binary.is_file():
         return binary
-    CACHE.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=CACHE) as tmp:
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=directory) as tmp:
         output = Path(tmp) / "oracle"
-        command = [os.environ.get("CC", "cc"), "-O1", str(source), "-o", str(output)]
-        root = rocm_root()
+        command = [*compiler, "-O1", str(source), "-o", str(output)]
         if root:
             lib = root / "lib"
             command += [f"-I{root / 'include'}", f"-L{lib}", f"-Wl,-rpath,{lib}"]
         subprocess.run(command + ["-lhsa-runtime64"], check=True)
         output.replace(binary)
     return binary
+
+
 
 
 @cache

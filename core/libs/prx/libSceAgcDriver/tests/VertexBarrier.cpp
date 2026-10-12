@@ -12,6 +12,8 @@ namespace {
 constexpr std::array<std::uint32_t, 4> BarrierExport{0xbf8a0000u, 0xf80008cfu, 0u, 0xbf810000u};
 constexpr std::array<std::uint32_t, 6> BarrierLdsExport{0xd8340000u, 0u, 0xbf8a0000u, 0xf80008cfu, 0u, 0xbf810000u};
 
+constexpr std::array<std::uint32_t, 1> VertexCapabilities{spv::CapabilityClipDistance};
+
 ShaderRecompiler::RecompileRequest vertexRequest(std::span<const std::uint32_t> code) {
     using namespace ShaderRecompiler;
     RecompileRequest request{};
@@ -21,6 +23,7 @@ ShaderRecompiler::RecompileRequest vertexRequest(std::span<const std::uint32_t> 
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 32;
+    request.target.supportedCapabilities = VertexCapabilities;
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     return request;

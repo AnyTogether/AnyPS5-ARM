@@ -14,7 +14,6 @@ import progress
 ROOT = Path(__file__).resolve().parent.parent
 PRX = ROOT / "core" / "libs" / "prx"
 NID = re.compile(r"[A-Za-z0-9+\-]{11}")
-EXPORT_ALIAS = re.compile(r'APS5_EXPORT\("([A-Za-z0-9+\-]{11})",\s*(\w+)\)')
 NID_POSTFIX = "_nid_postfix"
 CLASSES = ("implemented", "stub", "absent", "module")
 PE_DIRECTORY_OFFSET = {0x20b: 112, 0x10b: 96}
@@ -267,7 +266,7 @@ def source_stubs(source):
     for library in sorted(item for item in Path(source).iterdir() if item.is_dir()):
         aliases = {}
         for file in library.rglob("*.cpp"):
-            for nid, name in EXPORT_ALIAS.findall(file.read_text(errors="ignore")):
+            for nid, name in nid_names.source_aliases(file.read_text(errors="ignore")):
                 aliases[name] = nid
         group = progress.scan_library(library)
         done = {nid_of(name, aliases) for name in group["done_names"]}

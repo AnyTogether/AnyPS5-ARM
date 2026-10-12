@@ -42,6 +42,13 @@ static void* APS5_VABI Waiter(void* arg) {
     return nullptr;
 }
 
+static void* APS5_VABI DestroyingWaiter(void* arg) {
+    auto& context = *static_cast<Context*>(arg);
+    if (pthread_barrier_wait_nid_postfix(&context.barrier) == BARRIER_SERIAL_THREAD)
+        context.serial = pthread_barrier_destroy_nid_postfix(&context.barrier) == 0 && context.barrier == nullptr ? 1 : -1;
+    return nullptr;
+}
+
 static void RunWaiters(Context& context) {
     std::array<Pthread, WAITERS> threads{};
     for (auto& thread : threads) Require(scePthreadCreate(&thread, nullptr, Waiter, &context, nullptr) == 0);
@@ -100,6 +107,15 @@ int main() {
     Require(pthread_barrier_init_nid_postfix(&withoutAttr.barrier, nullptr, WAITERS) == 0);
     RunWaiters(withoutAttr);
     Require(pthread_barrier_destroy_nid_postfix(&withoutAttr.barrier) == 0);
+
+    for (int round = 0; round < 50; ++round) {
+        Context destroyed;
+        Require(pthread_barrier_init_nid_postfix(&destroyed.barrier, nullptr, WAITERS) == 0);
+        std::array<Pthread, WAITERS> threads{};
+        for (auto& thread : threads) Require(scePthreadCreate(&thread, nullptr, DestroyingWaiter, &destroyed, nullptr) == 0);
+        for (auto& thread : threads) Require(scePthreadJoin(thread, nullptr) == 0);
+        Require(destroyed.serial == 1);
+    }
 
     GuestBarrier* single = nullptr;
     Require(pthread_barrierattr_init_nid_postfix(&attr) == 0);

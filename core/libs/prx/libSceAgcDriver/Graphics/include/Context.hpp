@@ -143,8 +143,6 @@ struct Context {
     bool samplerFilterMinmax = false;
     bool nonSeamlessCubeMap = false;
     bool conservativeRasterization = false;
-    // VK_EXT_sample_locations: the sample counts a pipeline may give its own positions (1x1 grid).
-    VkSampleCountFlags sampleLocationCounts = 0;
     bool meshWave32 = false;
     VkBuffer emptyBuffer = VK_NULL_HANDLE;
     // The device's list of recorded dispatches whose copied written buffers await a CPU write-back
@@ -160,6 +158,7 @@ struct Context {
     bool imageInt64Atomics = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
+    bool shaderClipDistance = false;
     bool nullDescriptors = false;
     bool storageImageMultisample = false;
     bool bufferInt64Atomics = false;
@@ -173,6 +172,7 @@ struct Context {
     bool provokingVertexLast = false;
     bool provokingVertexModePerPipeline = false;
     bool singlePassStorage = false;
+    VkSampleCountFlags sampleLocationSampleCounts = 0;
 
     template<typename TFunction>
     TFunction Function(const char* name) const {

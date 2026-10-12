@@ -1,5 +1,6 @@
 #include "Optimization/ConstantFolder.hpp"
 #include "IntermediateRepresentation/IrBuilder.hpp"
+#include "IntermediateRepresentation/IrMetadata/StageIO.hpp"
 
 #include <algorithm>
 #include <array>
@@ -73,6 +74,83 @@ bool foldConstantBitTest(IrBuilder& builder, IrValue& inst) {
     const bool masked = (isImmediate(amountLeft, IrType::U32) && amountLeft.ImmediateU32() == 31u) || (isImmediate(amountRight, IrType::U32) && amountRight.ImmediateU32() == 31u);
     if (!masked) return false;
     replaceWith(inst, builder.ConstantBool(word.ImmediateU32() != 0u));
+    return true;
+}
+
+bool isLaneIndex(const IrValue& value) {
+    return value.Opcode() == IrOpcode::LaneId;
+}
+
+bool isImmediateU32(const IrValue& value, std::uint32_t immediate) {
+    return isImmediate(value, IrType::U32) && value.ImmediateU32() == immediate;
+}
+
+bool runsAllStartingLanes(const IrProgram& program, const IrBlock* target) {
+    if (program.BlockOrder().empty()) return false;
+    const IrBlock* block = program.BlockOrder().front();
+    for (std::size_t steps = 0; block != nullptr && steps < program.BlockOrder().size(); ++steps) {
+        if (block == target) return true;
+        if (block->Successors().size() != 1u) return false;
+        block = block->Successors().front();
+        if (block->Predecessors().size() != 1u) return false;
+    }
+    return false;
+}
+
+bool holdsStartingLanes(const IrProgram& program, const IrValue& word, std::uint32_t index, std::uint32_t depth = 0) {
+    if (depth > 8u) return false;
+    if (word.Opcode() == IrOpcode::BitwiseAnd32) {
+        return holdsStartingLanes(program, resolveArg(word, 0), index, depth + 1u) && holdsStartingLanes(program, resolveArg(word, 1), index, depth + 1u);
+    }
+    if (word.Opcode() == IrOpcode::BitwiseOr32) {
+        return holdsStartingLanes(program, resolveArg(word, 0), index, depth + 1u) || holdsStartingLanes(program, resolveArg(word, 1), index, depth + 1u);
+    }
+    if (word.Opcode() != IrOpcode::CompositeExtractU32x4 || !isImmediateU32(resolveArg(word, 1), index)) return false;
+    const auto& ballot = resolveArg(word, 0);
+    if (ballot.Opcode() != IrOpcode::Ballot || !runsAllStartingLanes(program, ballot.Parent())) return false;
+    const auto& condition = resolveArg(ballot, 0);
+    if (isImmediate(condition, IrType::U1)) return condition.ImmediateBool();
+    if (condition.Opcode() != IrOpcode::IEqual32) return false;
+    const auto helper = [](const IrValue& value) {
+        if (value.Opcode() != IrOpcode::GetBuiltin) return false;
+        const auto& kind = resolveArg(value, 0);
+        return isImmediate(kind, IrType::U32) && static_cast<StageInputKind>(kind.ImmediateU32()) == StageInputKind::HelperInvocation;
+    };
+    const auto& lhs = resolveArg(condition, 0);
+    const auto& rhs = resolveArg(condition, 1);
+    return (helper(lhs) && isImmediateU32(rhs, 0u)) || (helper(rhs) && isImmediateU32(lhs, 0u));
+}
+
+bool foldStartingQuadBitTest(const IrProgram& program, IrBuilder& builder, IrValue& inst) {
+    if (program.Resources().stage != IrShaderStage::Pixel) return false;
+    auto& left = resolveArg(inst, 0);
+    auto& right = resolveArg(inst, 1);
+    if (!isImmediateU32(right, 0u) || left.Opcode() != IrOpcode::BitwiseAnd32) return false;
+    IrValue* shifted = isImmediateU32(resolveArg(left, 1), 1u) ? &resolveArg(left, 0) : isImmediateU32(resolveArg(left, 0), 1u) ? &resolveArg(left, 1) : nullptr;
+    if (shifted == nullptr || shifted->Opcode() != IrOpcode::ShiftRightLogical32) return false;
+    const auto& amount = resolveArg(*shifted, 1);
+    if (amount.Opcode() != IrOpcode::BitwiseAnd32) return false;
+    const bool laneAmount = (isLaneIndex(resolveArg(amount, 0)) && isImmediateU32(resolveArg(amount, 1), 31u)) || (isLaneIndex(resolveArg(amount, 1)) && isImmediateU32(resolveArg(amount, 0), 31u));
+    if (!laneAmount) return false;
+    const auto& word = resolveArg(*shifted, 0);
+    const IrValue* low = &word;
+    const IrValue* high = nullptr;
+    if (word.Opcode() == IrOpcode::SelectU32) {
+        const auto& half = resolveArg(word, 0);
+        if (half.Opcode() != IrOpcode::ULessThan32 || !isLaneIndex(resolveArg(half, 0)) || !isImmediateU32(resolveArg(half, 1), 32u)) return false;
+        low = &resolveArg(word, 1);
+        high = &resolveArg(word, 2);
+    } else if (program.WaveSize() != 32u) {
+        return false;
+    }
+    if (low->Opcode() != IrOpcode::CompositeExtractU64 || !isImmediateU32(resolveArg(*low, 1), 0u)) return false;
+    const auto& wqm = resolveArg(*low, 0);
+    if (high != nullptr && (high->Opcode() != IrOpcode::CompositeExtractU64 || &resolveArg(*high, 0) != &wqm || !isImmediateU32(resolveArg(*high, 1), 1u))) return false;
+    if (wqm.Opcode() != IrOpcode::WqmU64) return false;
+    const auto& lanes = resolveArg(wqm, 0);
+    if (lanes.Opcode() != IrOpcode::CompositeConstructU64 || !holdsStartingLanes(program, resolveArg(lanes, 0), 0u)) return false;
+    if (high != nullptr && !holdsStartingLanes(program, resolveArg(lanes, 1), 1u)) return false;
+    replaceWith(inst, builder.ConstantBool(true));
     return true;
 }
 
@@ -662,7 +740,7 @@ bool ConstantFolder::tryFoldValue(IrProgram& program, IrValue& value) const {
             return foldU32(builder, value, [](std::uint32_t a, std::uint32_t b) { return std::max(a, b); });
         }
         case IrOpcode::IEqual32: return foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a == b; });
-        case IrOpcode::INotEqual32: return foldConstantBitTest(builder, value) || foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a != b; });
+        case IrOpcode::INotEqual32: return foldConstantBitTest(builder, value) || foldStartingQuadBitTest(program, builder, value) || foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a != b; });
         case IrOpcode::ULessThan32: return foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a < b; });
         case IrOpcode::ULessThanEqual32: return foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a <= b; });
         case IrOpcode::UGreaterThan32: return foldU32Compare(builder, value, [](std::uint32_t a, std::uint32_t b) { return a > b; });

@@ -32,6 +32,8 @@ struct GuestTimeval {
 };
 
 std::atomic<KernelSocketPoll::Poller> g_socketPoller{nullptr};
+std::atomic<KernelSocketPoll::Closer> g_socketCloser{nullptr};
+std::atomic<KernelSocketPoll::OptionSetter> g_socketOptionSetter{nullptr};
 
 bool DescriptorSet(const void* set, int descriptor) {
     return set != nullptr && ((static_cast<const std::uint64_t*>(set)[descriptor / 64] >> (descriptor % 64)) & 1u) != 0;
@@ -127,6 +129,24 @@ int* APS5_VABI __error_nid_postfix();
 
 void KernelSetSocketPoller_nid_no_patch(KernelSocketPoll::Poller poller) {
     g_socketPoller.store(poller);
+}
+
+void KernelSetSocketCloser_nid_no_patch(KernelSocketPoll::Closer closer) {
+    g_socketCloser.store(closer);
+}
+
+bool KernelCloseSocket_nid_no_patch(int descriptor, int* error) {
+    const auto closer = g_socketCloser.load();
+    return closer != nullptr && closer(descriptor, error);
+}
+
+void KernelSetSocketOptionSetter_nid_no_patch(KernelSocketPoll::OptionSetter setter) {
+    g_socketOptionSetter.store(setter);
+}
+
+bool KernelSetSocketOption_nid_no_patch(int descriptor, int level, int option, const void* value, std::uint32_t length, int* error) {
+    const auto setter = g_socketOptionSetter.load();
+    return setter != nullptr && setter(descriptor, level, option, value, length, error);
 }
 
 // Sockets are polled through libSceNet and other host descriptors through the host's poll. /dev/urandom,

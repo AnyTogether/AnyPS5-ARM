@@ -99,6 +99,7 @@ void APS5_VABI _ZN3sce4Json14InitParameter2C2Ev(void*);
 void APS5_VABI _ZN3sce4Json17InitParameterRttiC1EPNS0_14AllocParamRttiEPvm(void*, void*, void*, std::size_t);
 void APS5_VABI _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(void*, void*, void*);
 void APS5_VABI _ZN3sce4Json12MemAllocator11notifyErrorEimPv(void*, int, std::size_t, void*);
+void APS5_VABI _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(void*, std::int32_t);
 }
 
 static void Check(bool value, int line) {
@@ -494,6 +495,69 @@ static void InitParameter2BaseConstructor() {
     Require(_ZN3sce4Json11InitializerD1Ev(initializer) == 0);
 }
 
+struct StoredInitParameter2 {
+    void* allocator;
+    void* userData;
+    std::size_t fileBufferSize;
+    std::int32_t specialFloatFormatType;
+    std::uint32_t reserved[3];
+};
+static_assert(sizeof(StoredInitParameter2) == 40);
+
+static StoredInitParameter2 Stored(const std::uint8_t* parameter) {
+    StoredInitParameter2 stored{};
+    std::memcpy(&stored, parameter, sizeof(stored));
+    return stored;
+}
+
+static bool Untouched(const std::uint8_t* parameter, std::size_t from) {
+    for (std::size_t i = from; i < 40; ++i)
+        if (parameter[i] != 0xff) return false;
+    return true;
+}
+
+static void InitParameters() {
+    using Constructor = void (APS5_VABI*)(void*);
+    for (Constructor construct : {_ZN3sce4Json14InitParameter2C1Ev, _ZN3sce4Json14InitParameter2C2Ev}) {
+        alignas(16) std::uint8_t parameter[40];
+        std::memset(parameter, 0xff, sizeof(parameter));
+        construct(parameter);
+        StoredInitParameter2 stored = Stored(parameter);
+        Require(stored.allocator == nullptr && stored.userData == nullptr && stored.fileBufferSize == 0);
+        Require(stored.specialFloatFormatType == 0);
+        Require(stored.reserved[0] == 0 && stored.reserved[1] == 0 && stored.reserved[2] == 0);
+
+        int allocParam = 0;
+        int userData = 0;
+        _ZN3sce4Json14InitParameter217setFileBufferSizeEm(parameter, 8192);
+        _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, 2);
+        _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(parameter, &allocParam, &userData);
+        stored = Stored(parameter);
+        Require(stored.allocator == &allocParam && stored.userData == &userData && stored.fileBufferSize == 8192);
+        Require(stored.specialFloatFormatType == 2);
+        Require(stored.reserved[0] == 0 && stored.reserved[1] == 0 && stored.reserved[2] == 0);
+
+        _ZN3sce4Json14InitParameter225setSpecialFloatFormatTypeENS0_22SpecialFloatFormatTypeE(parameter, 0);
+        Require(Stored(parameter).specialFloatFormatType == 0 && Stored(parameter).fileBufferSize == 8192);
+
+        alignas(16) std::uint8_t initializer[16]{};
+        Require(_ZN3sce4Json11InitializerC1Ev(initializer) == 0);
+        Require(_ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(initializer, parameter) == 0);
+        Require(_ZN3sce4Json11Initializer9terminateEv(initializer) == 0);
+        Require(_ZN3sce4Json11InitializerD1Ev(initializer) == 0);
+    }
+
+    alignas(16) std::uint8_t rttiParameter[40];
+    std::memset(rttiParameter, 0xff, sizeof(rttiParameter));
+    int allocParam = 0;
+    int userData = 0;
+    _ZN3sce4Json17InitParameterRttiC1EPNS0_14AllocParamRttiEPvm(rttiParameter, &allocParam, &userData, 4096);
+    void* rttiStored[3]{};
+    std::memcpy(rttiStored, rttiParameter, sizeof(rttiStored));
+    Require(rttiStored[0] == &allocParam && rttiStored[1] == &userData && reinterpret_cast<std::uintptr_t>(rttiStored[2]) == 4096);
+    Require(Untouched(rttiParameter, sizeof(rttiStored)));
+}
+
 static void ValueClear() {
     Value value{};
     _ZN3sce4Json5ValueC1Ev(&value);
@@ -572,6 +636,7 @@ int main() {
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallbackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     ValueAccess();
     InitParameter2BaseConstructor();
+    InitParameters();
     ValueClear();
     StreamParse();
 }

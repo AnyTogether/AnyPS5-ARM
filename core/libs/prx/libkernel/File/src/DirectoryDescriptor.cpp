@@ -1,6 +1,7 @@
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 
 #include <cerrno>
 #include <string>
@@ -191,7 +192,8 @@ extern "C" const char* GetDirectoryDescriptorPath_nid_no_patch(int fd, int* erro
         *error = ENOTDIR;
         return nullptr;
     }
-    static thread_local std::string path;
+    struct PathTag {};
+    auto& path = HostThreadLocal<std::string, PathTag>();
     const auto utf8Path = directory->u8string();
     path.assign(reinterpret_cast<const char*>(utf8Path.data()), utf8Path.size());
     *error = 0;

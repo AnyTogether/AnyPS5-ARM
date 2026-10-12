@@ -56,6 +56,18 @@ class ReleasePackageTests(unittest.TestCase):
         with zipfile.ZipFile(self.output / "prx-linux-v1.0.zip") as archive:
             self.assertEqual(archive.namelist(), ["libs/libc.prx"])
 
+    def test_removed_libraries_are_not_packaged_from_a_reused_build(self):
+        stale = self.library.with_name("libRemoved.prx")
+        stale.write_bytes(b"obsolete library")
+        package_release.package("linux", self.build, self.output, "v1.0")
+        with zipfile.ZipFile(self.output / "prx-linux-v1.0.zip") as archive:
+            self.assertEqual(archive.namelist(), ["libs/libc.prx"])
+            self.assertEqual(archive.read("libs/libc.prx"), b"library bytes")
+        with tarfile.open(self.output / "prx-linux-v1.0.tar.gz") as archive:
+            self.assertEqual(archive.getnames(), ["libs/libc.prx"])
+            self.assertEqual(archive.extractfile("libs/libc.prx").read(), b"library bytes")
+        self.assertEqual(stale.read_bytes(), b"obsolete library")
+
     def test_tar_and_zip_include_the_same_symlink_contents(self):
         target = self.library.with_name("libc.target")
         self.library.rename(target)

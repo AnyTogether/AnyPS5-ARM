@@ -36,6 +36,8 @@ void requireInvariantPositions(const ShaderRecompiler::RecompileResult& result, 
 
 constexpr std::array<std::uint32_t, 3> PositionExport{0xf80008cfu, 0u, 0xbf810000u};
 
+constexpr std::array<std::uint32_t, 1> VertexCapabilities{spv::CapabilityClipDistance};
+
 ShaderRecompiler::RecompileRequest baseRequest(ShaderRecompiler::ShaderStage stage) {
     using namespace ShaderRecompiler;
     RecompileRequest request{};
@@ -45,6 +47,7 @@ ShaderRecompiler::RecompileRequest baseRequest(ShaderRecompiler::ShaderStage sta
     request.target.vulkanVersion = 0x00401000u;
     request.target.spirvVersion = 0x00010300u;
     request.target.subgroupSize = 64;
+    request.target.supportedCapabilities = VertexCapabilities;
     request.layout.pushConstantSizeBytes = 128;
     request.useCache = false;
     return request;

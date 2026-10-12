@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "prx/libc/include/HostThreadLocal.hpp"
 #endif
 
 inline constexpr unsigned long long kSubTickWaitUs = 2000;
@@ -24,7 +25,7 @@ inline void PreciseSleepUs(unsigned long long micros) {
             }
         }
     };
-    thread_local Timer timer;
+    auto& timer = HostThreadLocal<Timer, Timer>();
     if (timer.handle != nullptr) {
         LARGE_INTEGER due{};
         due.QuadPart = -static_cast<LONGLONG>(micros * 10ULL);

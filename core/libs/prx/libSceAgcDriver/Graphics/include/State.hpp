@@ -116,13 +116,13 @@ struct State {
     VkPipelineColorBlendAttachmentState blend;
     std::array<float, 4> blendConstants;
     std::uint32_t samples = 1;
-    // A multisampled draw's sample positions when they are not the standard pattern: x and y of each
-    // sample in 1/16 pixel from the pixel's center, the same in every pixel. Empty for the standard ones.
-    std::vector<std::array<std::int8_t, 2>> sampleLocations;
+    std::array<std::uint8_t, 8> sampleLocations{};
+    bool customSampleLocations = false;
 };
 
 ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup = false);
 State DecodeState(const QueueState& queue, bool vertexWorkgroup = false);
+std::array<VkSampleLocationEXT, 8> SampleLocations(const State& state);
 std::array<std::uint8_t, 8> ExportMappings(const State& state);
 std::array<ShaderRecompiler::ColorExportPacking, 8> ExportPackings(const State& state);
 ColorTarget DecodeColorBuffer(const Registers& context, std::uint32_t slot);

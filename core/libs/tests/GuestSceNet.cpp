@@ -61,6 +61,7 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI open_nid_postfix(const char*, int, int);
 int APS5_VABI close_nid_postfix(int);
+int APS5_VABI setsockopt_nid_postfix(int, int, int, const void*, std::uint32_t);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sceNetInetPton(int, const char*, void*);
 const char* APS5_VABI sceNetInetNtop(int, const void*, char*, std::uint32_t);
@@ -346,6 +347,15 @@ int main() {
     CheckLinkLocalAllNodesIpv6();
     CheckUnspecifiedIpv6();
 
+    const int closed = sceNetSocket("closed-by-kernel", 2, 2, 17);
+    Require(closed >= 0);
+    const int enabled = 1;
+    Require(setsockopt_nid_postfix(closed, 0xffff, 0x20, &enabled, sizeof(enabled)) == 0);
+    Require(sceNetSetsockopt(closed, 0xffff, 0x20, &enabled, sizeof(enabled)) == 0);
+    Require(sceNetSetsockopt(closed, 0xffff, 0x4, &enabled, sizeof(enabled)) == 0);
+    Require(close_nid_postfix(closed) == 0);
+    Require(Failed(sceNetSocketClose(closed), 9));
+
     const int listener = sceNetSocket(nullptr, 2, 1, 6);
     Require(listener >= 0);
     std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
@@ -408,6 +418,12 @@ int main() {
     Require(sceNetEpollWait(epoll, &ready, 1, 1000000) == 1 && (ready.events & 1) && ready.ident == static_cast<std::uint64_t>(accepted));
     Require(sceNetShutdown(accepted, 1) == 0);
     Require(Failed(sceNetSend(accepted, request, sizeof(request), 0), 32));
+    registration.data.u32 = 78;
+    Require(sceNetEpollControl(epoll, 2, accepted, &registration) == 0);
+    Require(Failed(sceNetEpollControl(epoll, 2, accepted, nullptr), 22));
+    Require(sceNetEpollControl(epoll, 3, accepted, nullptr) == 0);
+    Require(Failed(sceNetEpollControl(epoll, 3, accepted, nullptr), 2));
+    Require(Failed(sceNetEpollControl(epoll, 2, accepted, &registration), 2));
     Require(sceNetEpollDestroy(epoll) == 0);
     Require(sceNetSocketClose(accepted) == 0);
     bool send_failed = false;
@@ -418,7 +434,9 @@ int main() {
     Require(send_failed);
     Require(sceNetSocketClose(client) == 0);
     Require(sceNetSocketClose(listener) == 0);
+    *__error_nid_postfix() = 0;
     Require(sceNetSocketClose(listener) == static_cast<int>(0x80410109) && *sceNetErrnoLoc() == 9);
+    Require(*__error_nid_postfix() == 9);
 
     const int udp_receiver = sceNetSocket(nullptr, 2, 2, 17);
     const int udp_sender = sceNetSocket(nullptr, 2, 2, 17);

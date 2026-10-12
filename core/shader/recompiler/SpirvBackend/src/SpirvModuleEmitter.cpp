@@ -417,6 +417,32 @@ void EmitAuxPositionExport(SpirvValueEmitContext& ctx, std::uint32_t data, const
     }
 }
 
+void StoreZeroPositionClipDistance(SpirvEmitterState& state, std::uint32_t position) {
+    const auto bits = state.module.AllocateId();
+    state.module.AddFunction(spv::OpBitcast, TypeU32Vector(state, 4u), bits, position);
+    std::uint32_t combined = 0u;
+    for (std::uint32_t component = 0; component < 4u; component++) {
+        const auto raw = state.module.AllocateId();
+        const auto magnitude = state.module.AllocateId();
+        state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), raw, bits, component);
+        state.module.AddFunction(spv::OpBitwiseAnd, TypeU32(state), magnitude, raw, ConstantU32(state, 0x7fffffffu));
+        if (component == 0u) {
+            combined = magnitude;
+            continue;
+        }
+        const auto merged = state.module.AllocateId();
+        state.module.AddFunction(spv::OpBitwiseOr, TypeU32(state), merged, combined, magnitude);
+        combined = merged;
+    }
+    const auto allZero = state.module.AllocateId();
+    const auto distance = state.module.AllocateId();
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpIEqual, TypeBool(state), allZero, combined, ConstantU32(state, 0u));
+    state.module.AddFunction(spv::OpSelect, TypeF32(state), distance, allZero, ConstantF32Value(state, -1.0f), ConstantF32Value(state, 0.0f));
+    state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassOutput, TypeF32(state)), pointer, state.clipDistanceVariable, ConstantU32(state, *state.zeroPositionClipIndex));
+    state.module.AddFunction(spv::OpStore, pointer, distance);
+}
+
 std::uint32_t ConvertClipCoordinate(SpirvEmitterState& state, std::uint32_t coordinate, float scale, float offset, float halfExtent) {
     const auto window = state.module.AllocateId();
     const auto biased = state.module.AllocateId();
@@ -1311,6 +1337,9 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
             if (state.inputInfo.vertex->clipSpace.enabled) {
                 value = ConvertPositionToClipSpace(state, value);
             }
+        }
+        if (exp.kind == ExportTargetKind::Position && state.zeroPositionClipIndex) {
+            StoreZeroPositionClipDistance(state, value);
         }
         if (state.program.Resources().stage == IrShaderStage::Mesh) {
             const auto kind = exp.kind == ExportTargetKind::Position ? StageOutputKind::Position : StageOutputKind::Parameter;

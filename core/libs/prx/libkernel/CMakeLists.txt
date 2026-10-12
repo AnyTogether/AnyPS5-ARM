@@ -57,6 +57,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Process.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Sandbox.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SystemConfiguration.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Login.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SoftwareVersion.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Signals.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SignalSets.cpp
@@ -77,7 +78,7 @@ target_include_directories(libkernel PRIVATE ${LIBS_INCLUDE_DIR}/nid/include)
 target_link_libraries(libkernel PRIVATE ${CMAKE_DL_LIBS})
 target_link_libraries(libkernel PRIVATE libc)
 if(WIN32)
-    target_link_libraries(libkernel PRIVATE ws2_32 shell32)
+    target_link_libraries(libkernel PRIVATE ws2_32 shell32 advapi32)
     target_compile_definitions(libkernel PRIVATE _WIN32_WINNT=0x0602)
 endif()
 configure_windows_unwind(libkernel)
@@ -262,6 +263,9 @@ if(BUILD_TESTING)
     configure_windows_unwind(guest_aio_tests)
     add_test(NAME guest_aio COMMAND guest_aio_tests)
     if(WIN32)
+        add_test(NAME guest_aio_bad_descriptors COMMAND guest_aio_tests bad-descriptors)
+        set_tests_properties(guest_aio_bad_descriptors PROPERTIES TIMEOUT 20 ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
         set_tests_properties(guest_aio PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
@@ -733,6 +737,25 @@ if(BUILD_TESTING)
     set_tests_properties(guest_getrusage PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_getrusage PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_test_executable(guest_getlogin_tests ${LIBS_INCLUDE_DIR}/tests/GuestGetlogin.cpp)
+    target_include_directories(guest_getlogin_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_getlogin_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_getlogin_tests)
+    add_test(NAME guest_getlogin COMMAND guest_getlogin_tests)
+    set_tests_properties(guest_getlogin PROPERTIES TIMEOUT 20)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test_executable(guest_getlogin_no_session_tests
+            ${LIBS_INCLUDE_DIR}/tests/GuestGetloginNoSession.cpp
+            System/src/Login.cpp)
+        target_include_directories(guest_getlogin_no_session_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        add_test(NAME guest_getlogin_no_session COMMAND guest_getlogin_no_session_tests)
+        set_tests_properties(guest_getlogin_no_session PROPERTIES TIMEOUT 20)
+    endif()
+    if(WIN32)
+        target_link_libraries(guest_getlogin_tests PRIVATE advapi32)
+        set_tests_properties(guest_getlogin PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
     add_test_executable(guest_sched_priority_tests ${LIBS_INCLUDE_DIR}/tests/GuestSchedPriority.cpp)

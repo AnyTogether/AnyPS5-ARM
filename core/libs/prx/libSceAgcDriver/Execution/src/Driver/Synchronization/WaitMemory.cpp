@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #include <cstdlib>
 #include <mutex>
 #include <set>
@@ -54,8 +55,8 @@ bool Driver::traceLateLabels() {
 }
 
 std::vector<Driver::PendingWait>& Driver::pendingWaits() {
-    static thread_local std::vector<PendingWait> waits;
-    return waits;
+    struct WaitsTag {};
+    return HostThreadLocal<std::vector<PendingWait>, WaitsTag>();
 }
 
 void Driver::notePendingWait(std::span<const std::uint32_t> packet, std::uint32_t queue, std::uint64_t received) {

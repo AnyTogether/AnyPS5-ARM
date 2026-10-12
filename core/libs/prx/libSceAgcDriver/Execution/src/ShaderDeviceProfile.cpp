@@ -47,6 +47,7 @@ ShaderDeviceProfile::ShaderDeviceProfile(const ShaderRecompiler::SpirvTarget& ta
     checkFeature(spv::CapabilityFloat64, core.shaderFloat64 == VK_TRUE, "shaderFloat64");
     checkFeature(spv::CapabilityTessellation, core.tessellationShader == VK_TRUE, "tessellationShader");
     checkFeature(spv::CapabilityImageGatherExtended, core.shaderImageGatherExtended == VK_TRUE, "shaderImageGatherExtended");
+    checkFeature(spv::CapabilityClipDistance, core.shaderClipDistance == VK_TRUE, "shaderClipDistance");
     checkFeature(spv::CapabilityMinLod, core.shaderResourceMinLod == VK_TRUE, "shaderResourceMinLod");
     checkFeature(spv::CapabilityStorageImageMultisample, core.shaderStorageImageMultisample == VK_TRUE, "shaderStorageImageMultisample");
     checkFeature(spv::CapabilityStorageImageReadWithoutFormat, core.shaderStorageImageReadWithoutFormat == VK_TRUE, "shaderStorageImageReadWithoutFormat");

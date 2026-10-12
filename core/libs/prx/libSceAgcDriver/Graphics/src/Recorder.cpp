@@ -2507,11 +2507,19 @@ bool Recorder::refreshDrawSnapshot(DrawSnapshot& entry, std::uint64_t address, s
     const auto aligned = address / block * block;
     const auto end = address + bytes;
     const auto count = static_cast<std::size_t>((end - 1) / block - address / block + 1);
-    thread_local std::vector<std::uint64_t> generations;
-    thread_local std::vector<std::uint8_t> changed;
-    thread_local std::vector<std::pair<std::size_t, std::size_t>> differing;
-    thread_local std::vector<CompareSpan> spans;
-    thread_local std::vector<std::uint8_t> equal;
+    struct Scratch {
+        std::vector<std::uint64_t> generations;
+        std::vector<std::uint8_t> changed;
+        std::vector<std::pair<std::size_t, std::size_t>> differing;
+        std::vector<CompareSpan> spans;
+        std::vector<std::uint8_t> equal;
+    };
+    auto& scratch = HostThreadLocal<Scratch, Scratch>();
+    auto& generations = scratch.generations;
+    auto& changed = scratch.changed;
+    auto& differing = scratch.differing;
+    auto& spans = scratch.spans;
+    auto& equal = scratch.equal;
     generations.assign(count, entry.generation);
     changed.assign(count, GuestMemory::BlockWritten);
     differing.clear();

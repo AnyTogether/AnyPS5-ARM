@@ -143,7 +143,18 @@ class Check:
             if match and not match.group(1).startswith("3rdparty/"):
                 self.report("system-dependency", ".gitmodules", number, match.group(1))
 
+    def submodules(self):
+        result = subprocess.run(["git", "config", "--no-includes", "-z", "--blob", f"{self.head}:.gitmodules", "--list"],
+                                capture_output=True, encoding="utf-8", errors="replace")
+        values = {key: value for key, _, value in (entry.partition("\n") for entry in result.stdout.split("\0") if entry)}
+        return {path for key, path in values.items() if key.endswith(".path") and values.get(f"{key[:-5]}.url")}
+
     def repository(self):
+        gitlinks = {path for path, mode in self.modes.items() if mode == "160000" and path.startswith("3rdparty/")}
+        checked = gitlinks if ".gitmodules" in self.status else gitlinks & self.status.keys()
+        if checked:
+            for path in sorted(checked - self.submodules()):
+                self.report("system-dependency", path, 0, "submodule without a url in .gitmodules")
         for path, (added, deleted) in self.numstat.items():
             if path.startswith("3rdparty/"):
                 continue

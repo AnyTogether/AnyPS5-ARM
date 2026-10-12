@@ -18,7 +18,7 @@ def package(platform, build, output, version):
     if missing:
         raise RuntimeError(f"Missing patched libraries: {', '.join(sorted(missing))}")
     executable = "relinker.exe" if platform == "windows" else "relinker"
-    files = list(libraries)
+    files = [library for library in libraries if library.name in expected]
     if platform == "windows":
         runtime = Path("C:/winlibs/mingw64/bin")
         files.extend(runtime / name for name in ("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll"))

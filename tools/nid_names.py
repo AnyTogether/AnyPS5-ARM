@@ -81,7 +81,7 @@ def source_aliases(text):
             continue
         if re.fullmatch(r'"[A-Za-z0-9+\-]{11}"', literal) is None:
             continue
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) and "unknown" in name.lower():
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             yield literal[1:-1], name
 
 
@@ -97,7 +97,8 @@ def collect_unknowns():
     for path in source_files(PRX):
         text = path.read_text(encoding="utf-8")
         for nid, name in source_aliases(text):
-            found.setdefault(nid, "%s:%s" % (path.relative_to(ROOT).as_posix(), name))
+            if "unknown" in name.lower():
+                found.setdefault(nid, "%s:%s" % (path.relative_to(ROOT).as_posix(), name))
     return found
 
 

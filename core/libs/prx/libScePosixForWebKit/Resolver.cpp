@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #include <cstdint>
 #include <array>
 #include <cstring>
@@ -136,7 +137,8 @@ GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) 
             return nullptr;
         }
 #endif
-        static thread_local HostLookup lookup;
+        struct LookupTag {};
+        auto& lookup = HostThreadLocal<HostLookup, LookupTag>();
         lookup.name = native->h_name;
         lookup.aliasNames.clear();
         lookup.aliases.clear();

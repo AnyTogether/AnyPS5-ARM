@@ -1,7 +1,10 @@
 import contextlib
 import io
 import os
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,24 +41,26 @@ class OracleCacheTests(unittest.TestCase):
                     with self.assertRaises(subprocess.CalledProcessError):
                         hw_oracle.oracle()
                     self.assertEqual(binary.read_bytes() if binary.exists() else None, previous)
-                    self.assertEqual(list(cache.iterdir()), [binary] if previous is not None else [])
+                    self.assertEqual([file for file in cache.rglob("*") if file.is_file()], [binary] if previous is not None else [])
                     compiler.side_effect = succeed
-                    self.assertEqual(hw_oracle.oracle(), binary)
-                    self.assertEqual(binary.read_bytes(), b"complete executable")
-                    self.assertEqual(hw_oracle.oracle(), binary)
+                    built = hw_oracle.oracle()
+                    self.assertEqual(built.read_bytes(), b"complete executable")
+                    self.assertEqual(hw_oracle.oracle(), built)
                     self.assertEqual(compiler.call_count, 2)
-                    self.assertEqual(list(cache.iterdir()), [binary])
+                    self.assertEqual(set(file for file in cache.rglob("*") if file.is_file()), {built, binary} if previous is not None else {built})
+                    if previous is not None:
+                        self.assertEqual(binary.read_bytes(), previous)
 
     def test_overlapping_builds_do_not_expose_partial_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp) / "cache"
-            binary = cache / "oracle"
             outputs = []
 
             def compile(command, *, check):
                 self.assertTrue(check)
                 output = Path(command[command.index("-o") + 1])
                 outputs.append(output)
+                binary = output.parent.parent / "oracle"
                 output.write_bytes(b"partial executable")
                 if len(outputs) == 1:
                     self.assertFalse(binary.exists())
@@ -64,11 +69,11 @@ class OracleCacheTests(unittest.TestCase):
 
             with patch.object(hw_oracle, "CACHE", cache), patch.object(hw_oracle, "rocm_root", return_value=None), \
                     patch.object(hw_oracle.subprocess, "run", side_effect=compile) as compiler:
-                self.assertEqual(hw_oracle.oracle(), binary)
+                binary = hw_oracle.oracle()
                 self.assertEqual(binary.read_bytes(), b"complete executable")
                 self.assertEqual(compiler.call_count, 2)
                 self.assertNotEqual(outputs[0], outputs[1])
-                self.assertEqual(list(cache.iterdir()), [binary])
+                self.assertEqual([file for file in cache.rglob("*") if file.is_file()], [binary])
 
 
 class FloatModeTests(unittest.TestCase):
@@ -120,6 +125,108 @@ class FloatModeTests(unittest.TestCase):
         self.assertEqual(assemble.call_args.args[0], "s_nop 0")
         self.assertTrue(assemble.call_args.args[2])
         self.assertEqual(assemble.call_args.kwargs, MODES | {"lds": 4096})
+
+
+class OracleConfigurationTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux compiler and shared-library fixture")
+    def test_cache_and_compiler_command_with_host_toolchain(self):
+        compiler = shutil.which("cc")
+        if compiler is None:
+            self.skipTest("C compiler not found")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / "runtime"
+            (runtime / "lib").mkdir(parents=True)
+            stub = root / "runtime.c"
+            stub.write_text("void runtime_stub(void) {}\n", encoding="utf-8")
+            subprocess.run([compiler, "-shared", "-fPIC", str(stub), "-o", str(runtime / "lib/libhsa-runtime64.so")], check=True)
+            source = root / "source"
+            source.mkdir()
+            source_file = source / "oracle.c"
+            source_file.write_text('#include <stdio.h>\nint main(void) { printf("%d", VALUE); }\n', encoding="utf-8")
+            os.utime(source_file, (0, 0))
+            wrapper = root / "compiler wrapper"
+            wrapper.write_text("#!/bin/sh\nexec " + shlex.quote(compiler) + ' "$@"\n', encoding="utf-8")
+            wrapper.chmod(0o755)
+            with patch.object(hw_oracle, "HERE", source), patch.object(hw_oracle, "CACHE", root / "cache"), \
+                    patch.object(hw_oracle, "rocm_root", return_value=runtime):
+                with patch.dict(os.environ, {"CC": shlex.quote(str(wrapper)) + " -DVALUE=7"}):
+                    first = hw_oracle.oracle()
+                    self.assertEqual(subprocess.check_output([first]), b"7")
+                    self.assertEqual(hw_oracle.oracle(), first)
+                with patch.dict(os.environ, {"CC": shlex.quote(str(wrapper)) + " -DVALUE=8"}):
+                    second = hw_oracle.oracle()
+                    self.assertNotEqual(second, first)
+                    self.assertEqual(subprocess.check_output([second]), b"8")
+                    source_file.write_text('#include <stdio.h>\nint main(void) { printf("%d", VALUE + 1); }\n', encoding="utf-8")
+                    os.utime(source_file, (0, 0))
+                    third = hw_oracle.oracle()
+                    self.assertNotEqual(third, second)
+                    self.assertEqual(subprocess.check_output([third]), b"9")
+
+    def test_compiler_command_supports_wrapper_and_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def compile(command, *, check):
+                self.assertEqual(command[:3], ["ccache", "cc", "-fno-omit-frame-pointer"])
+                Path(command[command.index("-o") + 1]).write_bytes(b"executable")
+
+            with patch.object(hw_oracle, "CACHE", Path(tmp)), patch.object(hw_oracle, "rocm_root", return_value=None), \
+                    patch.dict(os.environ, {"CC": "ccache cc -fno-omit-frame-pointer"}), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=compile):
+                self.assertEqual(hw_oracle.oracle().read_bytes(), b"executable")
+
+    def test_source_change_with_preserved_timestamp_invalidates_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            source_file = source / "oracle.c"
+            source_file.write_text("first", encoding="utf-8")
+            os.utime(source_file, (0, 0))
+
+            def compile(command, *, check):
+                Path(command[command.index("-o") + 1]).write_bytes(source_file.read_bytes())
+
+            with patch.object(hw_oracle, "HERE", source), patch.object(hw_oracle, "CACHE", root / "cache"), \
+                    patch.object(hw_oracle, "rocm_root", return_value=None), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=compile) as compiler:
+                self.assertEqual(hw_oracle.oracle().read_bytes(), b"first")
+                source_file.write_text("second", encoding="utf-8")
+                os.utime(source_file, (0, 0))
+                self.assertEqual(hw_oracle.oracle().read_bytes(), b"second")
+                self.assertEqual(compiler.call_count, 2)
+
+    def test_compiler_change_invalidates_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def compile(command, *, check):
+                Path(command[command.index("-o") + 1]).write_bytes(command[0].encode())
+
+            with patch.object(hw_oracle, "CACHE", Path(tmp)), patch.object(hw_oracle, "rocm_root", return_value=None), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=compile) as compiler:
+                with patch.dict(os.environ, {"CC": "cc"}):
+                    self.assertEqual(hw_oracle.oracle().read_bytes(), b"cc")
+                with patch.dict(os.environ, {"CC": "clang"}):
+                    self.assertEqual(hw_oracle.oracle().read_bytes(), b"clang")
+                self.assertEqual(compiler.call_count, 2)
+
+    def test_runtime_path_change_invalidates_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def compile(command, *, check):
+                library_path = next(option for option in command if option.startswith("-L"))
+                Path(command[command.index("-o") + 1]).write_bytes(library_path.encode())
+
+            with patch.object(hw_oracle, "CACHE", root / "cache"), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=compile) as compiler:
+                with patch.object(hw_oracle, "rocm_root", return_value=root / "one"):
+                    first = hw_oracle.oracle()
+                    self.assertEqual(first.read_bytes(), ("-L" + str((root / "one").resolve() / "lib")).encode())
+                with patch.object(hw_oracle, "rocm_root", return_value=root / "two"):
+                    second = hw_oracle.oracle()
+                    self.assertNotEqual(second, first)
+                    self.assertEqual(second.read_bytes(), ("-L" + str((root / "two").resolve() / "lib")).encode())
+                self.assertEqual(compiler.call_count, 2)
 
 
 class GroupSegmentTests(unittest.TestCase):

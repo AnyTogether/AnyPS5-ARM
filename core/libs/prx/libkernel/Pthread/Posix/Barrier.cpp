@@ -86,7 +86,7 @@ int APS5_VABI pthread_barrier_wait_nid_postfix(PthreadBarrierPrivate** barrier) 
         return -1;
     }
     value.changed.wait(lock, [&] { return value.generation != generation; });
-    --value.active;
+    if (--value.active == 0) value.changed.notify_all();
     return 0;
 }
 
@@ -94,8 +94,9 @@ int APS5_VABI pthread_barrier_destroy_nid_postfix(PthreadBarrierPrivate** barrie
     if (!barrier || !*barrier) return 22;
     auto* value = *barrier;
     {
-        std::lock_guard lock(value->mutex);
-        if (value->active != 0) return 16;
+        std::unique_lock lock(value->mutex);
+        if (value->arrived != 0) return 16;
+        value->changed.wait(lock, [&] { return value->active == 0; });
     }
     delete value;
     *barrier = nullptr;

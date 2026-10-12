@@ -6,6 +6,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/log.h>
+#include <libavutil/mem.h>
 }
 #include <algorithm>
 #include <atomic>
@@ -140,6 +141,7 @@ struct Instance {
     std::uint32_t mp3Bitrate = 0;
     AVCodecContext* opus = nullptr;
     std::uint32_t opusChannels = 0;
+    std::uint32_t opusMappingFamily = 0;
     std::uint32_t opusSampleRate = 0;
     std::vector<std::uint8_t> opusPending;
     Resampler resampler;
@@ -375,10 +377,13 @@ std::int32_t InitializeInstance(Instance& instance, const std::uint8_t* paramete
         std::memcpy(&channels, parameters, sizeof(channels));
         std::memcpy(&sampleRate, parameters + 4, sizeof(sampleRate));
         if (channels == 0 || channels > 8 || sampleRate == 0) return AJM_RESULT_INVALID_PARAMETER;
-        std::uint32_t third = 0;
-        if (size >= 12) std::memcpy(&third, parameters + 8, sizeof(third));
-        if (sampleRate != 48000 || third != 0) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus sample rate other than 48000 or nonzero third parameter word)");
+        std::uint32_t mappingFamily = 0;
+        if (size >= 12) std::memcpy(&mappingFamily, parameters + 8, sizeof(mappingFamily));
+        if (sampleRate != 48000) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus sample rate other than 48000)");
+        if (mappingFamily > 1) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus mapping family other than 0 or 1)");
+        if (mappingFamily == 0 && channels > 2) return AJM_RESULT_INVALID_PARAMETER;
         instance.opusChannels = channels;
+        instance.opusMappingFamily = mappingFamily;
         instance.opusSampleRate = sampleRate;
         OpenOpus(instance);
         instance.opusPending.clear();
@@ -957,6 +962,29 @@ void OpenOpus(Instance& instance) {
     if (!instance.opus) throw std::runtime_error("AJM: cannot allocate the FFmpeg Opus decoder");
     av_channel_layout_default(&instance.opus->ch_layout, static_cast<int>(instance.opusChannels));
     instance.opus->sample_rate = 48000;
+    if (instance.opusMappingFamily == 1) {
+        static constexpr std::uint8_t streams[8] = {1, 1, 2, 2, 3, 4, 4, 5};
+        static constexpr std::uint8_t coupled[8] = {0, 1, 1, 2, 2, 2, 3, 3};
+        static constexpr std::uint8_t mapping[8][8] = {
+            {0}, {0, 1}, {0, 2, 1}, {0, 1, 2, 3},
+            {0, 4, 1, 2, 3}, {0, 4, 1, 2, 3, 5},
+            {0, 4, 1, 2, 3, 5, 6}, {0, 6, 1, 2, 3, 4, 5, 7}
+        };
+        const std::size_t index = instance.opusChannels - 1;
+        instance.opus->extradata_size = static_cast<int>(21 + instance.opusChannels);
+        instance.opus->extradata = static_cast<std::uint8_t*>(av_mallocz(instance.opus->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!instance.opus->extradata) throw std::bad_alloc();
+        auto* header = instance.opus->extradata;
+        std::memcpy(header, "OpusHead", 8);
+        header[8] = 1;
+        header[9] = static_cast<std::uint8_t>(instance.opusChannels);
+        header[12] = 0x80;
+        header[13] = 0xbb;
+        header[18] = 1;
+        header[19] = streams[index];
+        header[20] = coupled[index];
+        std::memcpy(header + 21, mapping[index], instance.opusChannels);
+    }
     if (avcodec_open2(instance.opus, codec, nullptr) < 0) throw std::runtime_error("AJM: cannot open the FFmpeg Opus decoder");
 }
 

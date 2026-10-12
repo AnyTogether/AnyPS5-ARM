@@ -132,10 +132,10 @@ void RunDecode(std::uint32_t context, std::uint32_t instance, const std::uint8_t
     Require(sceAjmBatchStart(context, &info, 0, &error, &id) == 0 && sceAjmBatchWait(context, id, 0, &error) == 0);
 }
 
-void TestOpus(std::uint32_t context) {
+void TestOpus(std::uint32_t context, std::uint32_t mappingFamily = 0) {
     std::uint32_t instance = 0;
     Require(sceAjmInstanceCreate(context, 24, 0, &instance) == 0);
-    const std::uint32_t parameters[3] = {2, 48000, 0};
+    const std::uint32_t parameters[3] = {2, 48000, mappingFamily};
     std::vector<std::uint8_t> batch(4096);
     AjmBatchInfo info{};
     std::int64_t initResult[2] = {-1, -1};
@@ -169,6 +169,80 @@ void TestOpus(std::uint32_t context) {
     DecodeSideband rest{};
     RunDecode(context, instance, OPUS_STEREO + sizeof(OPUS_STEREO), 0, small.data(), small.size() * sizeof(std::int16_t), rest);
     Require(rest.result == 0 && rest.inputConsumed == 0 && rest.outputWritten == (960 - 512) * 2 * 2);
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+void TestOpusSurround(std::uint32_t context, std::uint32_t channels, std::size_t activeStream) {
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 24, 0, &instance) == 0);
+    const std::uint32_t parameters[3] = {channels, 48000, 1};
+    std::vector<std::uint8_t> batch(4096);
+    AjmBatchInfo info{};
+    std::int64_t initResult[2] = {-1, -1};
+    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+    Require(sceAjmBatchJobInitialize(&info, instance, parameters, sizeof(parameters), initResult) == 0);
+    std::uint32_t id = 0;
+    AjmBatchError error{};
+    Require(sceAjmBatchStart(context, &info, 0, &error, &id) == 0 && sceAjmBatchWait(context, id, 0, &error) == 0);
+    Require(initResult[0] == 0);
+    const std::size_t streamCount = channels == 3 || channels == 4 ? 2 : channels == 5 ? 3 : channels == 8 ? 5 : 4;
+    const std::size_t coupledCount = channels == 3 ? 1 : channels >= 7 ? 3 : 2;
+    std::size_t offset = 0;
+    for (std::size_t packetIndex = 0; packetIndex < 3; ++packetIndex) {
+        const std::size_t bytes = OPUS_STEREO[offset] | (std::size_t{OPUS_STEREO[offset + 1]} << 8u);
+        Require((OPUS_STEREO[offset + 2] & 3u) == 0 && bytes < 252);
+        std::vector<std::uint8_t> packet{0, 0};
+        for (std::size_t stream = 0; stream < streamCount; ++stream) {
+            if (stream == activeStream) {
+                packet.push_back(OPUS_STEREO[offset + 2]);
+                if (stream + 1 < streamCount) packet.push_back(static_cast<std::uint8_t>(bytes - 1));
+                packet.insert(packet.end(), OPUS_STEREO + offset + 3, OPUS_STEREO + offset + 2 + bytes);
+            } else {
+                packet.push_back(stream < coupledCount ? 0xfc : 0xf8);
+                if (stream + 1 < streamCount) packet.push_back(2);
+                packet.push_back(0xff);
+                packet.push_back(0xfe);
+            }
+        }
+        const std::size_t payload = packet.size() - 2;
+        packet[0] = static_cast<std::uint8_t>(payload);
+        packet[1] = static_cast<std::uint8_t>(payload >> 8u);
+        std::vector<std::int16_t> pcm(512 * channels, -12345);
+        DecodeSideband first{};
+        RunDecode(context, instance, packet.data(), packet.size(), pcm.data(), pcm.size() * sizeof(std::int16_t), first);
+        Require(first.result == 0 && static_cast<std::size_t>(first.inputConsumed) == packet.size() && first.outputWritten == static_cast<std::int32_t>(pcm.size() * sizeof(std::int16_t)));
+        std::vector<std::int16_t> rest(448 * channels, -12345);
+        DecodeSideband remaining{};
+        RunDecode(context, instance, packet.data() + packet.size(), 0, rest.data(), rest.size() * sizeof(std::int16_t), remaining);
+        Require(remaining.result == 0 && remaining.inputConsumed == 0 && remaining.outputWritten == static_cast<std::int32_t>(rest.size() * sizeof(std::int16_t)));
+        Require(remaining.totalDecodedSamples == (packetIndex + 1) * 960);
+        pcm.insert(pcm.end(), rest.begin(), rest.end());
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            int peak = 0;
+            for (std::size_t sample = channel; sample < pcm.size(); sample += channels) peak = std::max(peak, std::abs(static_cast<int>(pcm[sample])));
+            const std::size_t activeChannel = activeStream == 0 ? 0 : channels == 4 ? 2 : channels == 5 ? 3 : channels == 6 ? 4 : channels == 7 ? activeStream == 1 ? 5 : 2 : activeStream == 1 ? 6 : 4;
+            const std::size_t secondChannel = channels == 7 && activeStream == 2 ? 4 : activeChannel + 1;
+            const bool active = channel == activeChannel || channel == secondChannel;
+            Require(active ? packetIndex == 0 || peak > 900 : peak <= 2);
+        }
+        offset += 2 + bytes;
+    }
+    Require(sceAjmInstanceDestroy(context, instance) == 0);
+}
+
+void TestOpusFamilyZeroChannels(std::uint32_t context) {
+    std::uint32_t instance = 0;
+    Require(sceAjmInstanceCreate(context, 24, 0, &instance) == 0);
+    const std::uint32_t parameters[3] = {4, 48000, 0};
+    std::vector<std::uint8_t> batch(4096);
+    AjmBatchInfo info{};
+    std::int32_t result[2] = {-1, -1};
+    Require(sceAjmBatchInitialize(batch.data(), batch.size(), &info) == 0);
+    Require(sceAjmBatchJobInitialize(&info, instance, parameters, sizeof(parameters), result) == 0);
+    std::uint32_t id = 0;
+    AjmBatchError error{};
+    Require(sceAjmBatchStart(context, &info, 0, &error, &id) == 0 && sceAjmBatchWait(context, id, 0, &error) == 0);
+    Require(result[0] == 4 && result[1] == 0);
     Require(sceAjmInstanceDestroy(context, instance) == 0);
 }
 
@@ -1261,6 +1335,18 @@ int main() {
     TestMp3ParseOfl();
     TestMp3(context);
     TestOpus(context);
+    TestOpus(context, 1);
+    TestOpusFamilyZeroChannels(context);
+    TestOpusSurround(context, 3, 0);
+    for (std::size_t stream = 0; stream < 2; ++stream) {
+        TestOpusSurround(context, 4, stream);
+        TestOpusSurround(context, 5, stream);
+        TestOpusSurround(context, 6, stream);
+    }
+    for (std::size_t stream = 0; stream < 3; ++stream) {
+        TestOpusSurround(context, 7, stream);
+        TestOpusSurround(context, 8, stream);
+    }
     TestOpusInputBeyondStatedData(context, false);
     TestOpusInputBeyondStatedData(context, true);
     TestDecodeSingle(context);

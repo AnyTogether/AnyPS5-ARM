@@ -382,6 +382,11 @@ public:
             result = true;
         } else if (condition->Opcode() == IrOpcode::LogicalAnd) {
             result = Implies(condition->Argument(0), depth + 1u) || Implies(condition->Argument(1), depth + 1u);
+        } else if (condition->Opcode() == IrOpcode::SelectU1) {
+            const IrValue* selector = condition->Argument(0)->Resolve();
+            const bool trueCase = Implies(condition->Argument(1), depth + 1u) || Implies(selector, depth + 1u);
+            const bool falseCase = Implies(condition->Argument(2), depth + 1u) || (selector->Opcode() == IrOpcode::LogicalNot && Implies(selector->Argument(0), depth + 1u));
+            result = trueCase && falseCase;
         } else if (condition->IsPhi()) {
             result = merges(*condition);
             for (std::size_t index = 0; result && index < condition->ArgumentCount(); ++index) {
@@ -443,6 +448,8 @@ private:
 
     bool wordsImply(const IrValue* low, const IrValue* high, std::uint32_t depth) {
         if (isImmediate(low, 0u) && (waveSize == 32u || isImmediate(high, 0u))) return true;
+        const auto maskBit = threadBit(mask, waveSize);
+        if (maskBit && low == maskBit->low && (waveSize == 32u || high == maskBit->high)) return true;
         const ImplicationKey key{low, high};
         if (const auto known = lookup(key)) return *known;
         if (depth > ImplicationDepthLimit || work == 0) return false;
@@ -537,10 +544,11 @@ std::size_t walkLimit(const IrProgram& program) {
 
 class MaskedLaneWalk {
 public:
-    MaskedLaneWalk(const IrProgram& program, const std::vector<Region>& regions) : program(program), regions(regions), uniform(uniformEntryBlocks(program)), limit(walkLimit(program)), implications(regions, uniform, program.WaveSize(), work) {}
+    MaskedLaneWalk(const IrProgram& program, const std::vector<Region>& regions, std::uint32_t nesting = 0) : program(program), regions(regions), uniform(uniformEntryBlocks(program)), limit(walkLimit(program)), implications(regions, uniform, program.WaveSize(), work), nesting(nesting) {}
 
     bool UnobservedWhereMasked(const IrValue& select, const IrValue* mask) {
         const bool acrossLoops = mask->HasImmediate() || regionOf(regions, mask->Parent()) == Region::Once;
+        const bool sameIteration = !acrossLoops && select.Opcode() == IrOpcode::ReadFirstLane;
         work = limit;
         implications.Reset(mask, acrossLoops);
         const bool quadMasked = program.Resources().stage == IrShaderStage::Pixel && wholeQuadSource(mask, program.WaveSize()) != nullptr;
@@ -553,10 +561,17 @@ public:
             pending.pop_back();
             for (const IrUse& use : value->OperandUses()) {
                 const IrValue* user = use.user;
-                if (!followable(regions, user->Parent(), acrossLoops)) return false;
+                if (sameIteration ? user->Parent() != select.Parent() || user->IsPhi() : !followable(regions, user->Parent(), acrossLoops)) return false;
                 if (isSelect(user->Opcode()) && use.operand == 1u && implications.Implies(user->Argument(0))) continue;
                 if (user->Opcode() == IrOpcode::LogicalAnd && use.operand < 2u && implications.Implies(user->Argument(1u - use.operand))) continue;
                 if (readsOnlyWhereActive(user->Opcode()) && use.operand + 1u < user->ArgumentCount() && implications.Implies(user->Argument(user->ArgumentCount() - 1u))) continue;
+                if (user->Opcode() == IrOpcode::ReadFirstLane && use.operand == 0u && nesting < DepthLimit && implications.Implies(user->Argument(1))) {
+                    MaskedLaneWalk nested(program, regions, nesting + 1u);
+                    nested.limit = work;
+                    const bool unobserved = nested.UnobservedWhereMasked(*user, user->Argument(1)->Resolve());
+                    work = nested.work;
+                    if (unobserved) continue;
+                }
                 if (!user->IsPhi() && !isLaneLocal(user->Opcode()) && !isExplicitLodSample(program, *user) && !(quadMasked && user->Opcode() == IrOpcode::ImageSampleRaw)) return false;
                 if (firstVisit(*user)) {
                     if (work == 0) return false;
@@ -592,6 +607,7 @@ private:
     std::vector<const IrValue*> pending;
     std::vector<std::uint32_t> visits;
     std::uint32_t epoch = 0;
+    std::uint32_t nesting = 0;
 };
 
 }
