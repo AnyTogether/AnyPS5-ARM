@@ -8,6 +8,7 @@
 #include <functional>
 #include <initializer_list>
 #include <utility>
+#include <vector>
 
 using namespace ShaderRecompiler;
 
@@ -539,25 +540,35 @@ int main() {
         return count == 0u && !gone;
     });
 
-    const auto chained = [](bool wideRoot) {
+    const auto chained = [](bool wideRoot, std::uint32_t kills) {
         Builder b;
         auto& wide = b.mask(48u);
         auto& exec = b.logicalAnd(wide, b.mask(32u));
         auto& old = b.lane();
         auto& written = b.select(exec, b.add(old, 1u), old);
         IrValue* later = wideRoot ? &wide : &exec;
-        for (std::uint32_t kill = 0; kill < 24u; ++kill) later = &b.logicalAnd(*later, b.mask(31u - kill));
+        for (std::uint32_t kill = 0; kill < kills; ++kill) later = &b.logicalAnd(*later, b.mask(31u - kill % 24u));
         b.keep(b.select(*later, b.add(written, 2u), old));
         return std::pair{b.eliminate(), removed(written)};
     };
 
     passed &= run("an exec narrowed by a long chain of kills still implies the write's exec", [&] {
-        const auto [count, gone] = chained(false);
+        const auto [count, gone] = chained(false, 24u);
         return count == 1u && gone;
     });
 
     passed &= run("a long chain of kills rooted at a wider exec keeps the select", [&] {
-        const auto [count, gone] = chained(true);
+        const auto [count, gone] = chained(true, 24u);
+        return count == 0u && !gone;
+    });
+
+    passed &= run("an exec narrowed by hundreds of kills still implies the write's exec", [&] {
+        const auto [count, gone] = chained(false, 300u);
+        return count == 1u && gone;
+    });
+
+    passed &= run("hundreds of kills rooted at a wider exec keep the select", [&] {
+        const auto [count, gone] = chained(true, 300u);
         return count == 0u && !gone;
     });
 
@@ -889,6 +900,43 @@ int main() {
         auto& next = b.select(b.mask(32u), b.add(written, 2u), old);
         b.keep(next);
         return b.eliminate() == 0u && !removed(written);
+    });
+
+    const auto shaded = [](std::uint32_t units) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        MemoryInfo memory;
+        memory.kind = ResourceKind::Image;
+        memory.imageSampleFlags = RdnaImageSampleFlagLevelZero;
+        b.program.Resources().memoryInfo.push_back(memory);
+        MemoryFlags flags{0u, 0u};
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& exec = b.mask(48u);
+        auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+        auto& sampler = b.emit(IrOpcode::GetSamplerResource, IrType::SamplerResource, {});
+        IrValue* color = &b.lane();
+        IrValue* address = nullptr;
+        std::uint32_t kept = 0;
+        std::vector<IrValue*> compared;
+        for (std::uint32_t unit = 0; unit < units; ++unit) {
+            auto& sum = b.add(*color, unit);
+            auto& low = b.emit(IrOpcode::ULessThan32, IrType::Bool, {&sum, &b.constant(100u + unit)});
+            compared.push_back(&b.select(low, sum, b.add(*color, 1u)));
+            address = &b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {compared.back(), color});
+            auto& gathered = b.emit(IrOpcode::ImageGatherRaw, IrType::U32x4, {&image, &sampler, address}, bits);
+            color = &b.select(exec, b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&gathered, &b.constant(0u)}), *color);
+        }
+        b.emit(IrOpcode::ImageWrite, IrType::Void, {&image, address, &b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {color, color, color, color}), &exec});
+        const auto stats = MaskedSelectEliminator{}.Eliminate(b.program);
+        for (const IrValue* select : compared) kept += removed(*select) ? 0u : 1u;
+        return std::pair{stats, kept};
+    };
+
+    passed &= run("selects that each reach the rest of the program are settled in steps that grow with the program, not with its square", [&] {
+        const auto [small, smallKept] = shaded(500u);
+        const auto [large, largeKept] = shaded(4000u);
+        return small.removedSelects == 500u && smallKept == 500u && large.removedSelects == 4000u && largeKept == 4000u && small.steps != 0u && large.steps <= 9u * small.steps;
     });
 
     return passed ? 0 : 1;
