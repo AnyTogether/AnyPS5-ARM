@@ -841,7 +841,8 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
         auto texture = cachedStorageTextureOverGuestMemory(context, words, viewed, mip, guestBytes);
         const auto texelBytes = static_cast<std::uint32_t>(BytesPerElement(viewed.format));
         std::string refusal = "mip " + std::to_string(mip);
-        if (mip != 0 || !CopyDepthSurfaceTo(context, viewed.baseAddress, texture->Image(), {viewed.width, viewed.height}, texelBytes, refusal)) {
+        if (mip == 0 && !CopyDepthSurfaceTo(context, viewed.baseAddress, texture->Image(), {viewed.width, viewed.height}, texelBytes, refusal)) return texture;
+        if (mip != 0) {
             char text[96];
             std::snprintf(text, sizeof(text), "AGC graphics: storage image access to depth/stencil surface 0x%llx is not implemented: ", static_cast<unsigned long long>(viewed.baseAddress));
             throw std::runtime_error(text + refusal);

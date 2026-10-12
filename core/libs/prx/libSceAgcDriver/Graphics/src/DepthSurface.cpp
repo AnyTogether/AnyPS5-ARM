@@ -226,25 +226,49 @@ void ClearDepthSurfaces(VkDevice device) {
     std::erase_if(surfaces(), [&](const auto& surface) { return surface->context.device == device; });
 }
 
-std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, VkComponentMapping components) {
-    std::lock_guard lock(surfacesMutex());
+namespace {
+
+std::uint32_t planeBytesOf(const DepthTarget& target, bool stencil) {
+    const bool d16 = target.format == VK_FORMAT_D16_UNORM || target.format == VK_FORMAT_D16_UNORM_S8_UINT;
+    return stencil ? 1u : d16 ? 2u : 4u;
+}
+
+bool addressed(const DepthTarget& target, std::uint64_t address) {
+    return target.address == address || (target.stencilAddress != 0 && target.stencilAddress == address);
+}
+
+DepthSurface* fittingSurface(const Context& context, std::uint64_t address, VkExtent2D extent, std::uint32_t texelBytes) {
     const auto& list = surfaces();
     const auto found = std::find_if(list.rbegin(), list.rend(), [&](const auto& surface) {
-        return surface->context.device == context.device && (surface->target.address == resource.baseAddress || (surface->target.stencilAddress != 0 && surface->target.stencilAddress == resource.baseAddress));
+        const auto& target = surface->target;
+        if (surface->context.device != context.device || target.extent.width != extent.width || target.extent.height != extent.height) return false;
+        if (target.address == address && texelBytes == planeBytesOf(target, false)) return true;
+        return target.stencilAddress != 0 && target.stencilAddress == address && texelBytes == planeBytesOf(target, true);
     });
-    if (found == list.rend()) return nullptr;
-    const auto& target = (*found)->target;
-    if (resource.width != target.extent.width || resource.height != target.extent.height) return nullptr;
+    return found != list.rend() ? found->get() : nullptr;
+}
+
+DepthSurface* nearestSurface(const Context& context, std::uint64_t address) {
+    const auto& list = surfaces();
+    const auto found = std::find_if(list.rbegin(), list.rend(), [&](const auto& surface) { return surface->context.device == context.device && addressed(surface->target, address); });
+    return found != list.rend() ? found->get() : nullptr;
+}
+
+}
+
+std::shared_ptr<Texture> DepthSurfaceTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& resource, VkComponentMapping components) {
+    std::lock_guard lock(surfacesMutex());
+    auto* found = fittingSurface(context, resource.baseAddress, {resource.width, resource.height}, static_cast<std::uint32_t>(BytesPerElement(resource.format)));
+    if (found == nullptr) return nullptr;
+    const auto& target = found->target;
     const bool stencil = target.stencilAddress != 0 && resource.baseAddress == target.stencilAddress;
     if (!stencil) {
         const bool d16 = target.format == VK_FORMAT_D16_UNORM || target.format == VK_FORMAT_D16_UNORM_S8_UINT;
         const bool depthBits = words.size() >= 4 && ShaderRecompiler::DepthBitsTextureWidth(words[1], words[3]) == (d16 ? 16u : 32u);
         if (ResolveTextureFormat(resource.format) != (d16 ? VK_FORMAT_R16_UNORM : VK_FORMAT_R32_SFLOAT) && !depthBits) return nullptr;
-    } else if (BytesPerElement(resource.format) != 1u) {
-        return nullptr;
     }
-    (*found)->ApplyFastClear();
-    return (*found)->Sampled(words, resource, components);
+    found->ApplyFastClear();
+    return found->Sampled(words, resource, components);
 }
 
 bool DepthSurfaceHolds(const Context& context, const GuestTextureResource& resource, const Texture* texture) {
@@ -260,22 +284,18 @@ bool DepthSurfaceHolds(const Context& context, const GuestTextureResource& resou
 
 bool CopyDepthSurfaceTo(const Context& context, std::uint64_t address, VkImage destination, VkExtent2D extent, std::uint32_t texelBytes, std::string& refusal) {
     std::lock_guard lock(surfacesMutex());
-    const auto& list = surfaces();
-    const auto found = std::find_if(list.rbegin(), list.rend(), [&](const auto& surface) {
-        return surface->context.device == context.device && (surface->target.address == address || (surface->target.stencilAddress != 0 && surface->target.stencilAddress == address));
-    });
-    if (found == list.rend()) {
-        refusal = "no depth surface lives there";
+    const auto* fitting = fittingSurface(context, address, extent, texelBytes);
+    if (fitting == nullptr) {
+        const auto* nearest = nearestSurface(context, address);
+        if (nearest == nullptr) {
+            refusal = "no depth surface lives there";
+            return false;
+        }
+        refusal = "the depth surface is " + std::to_string(nearest->target.extent.width) + "x" + std::to_string(nearest->target.extent.height) + " (vk format " + std::to_string(nearest->target.format) + "), the view " + std::to_string(extent.width) + "x" + std::to_string(extent.height) + " with " + std::to_string(texelBytes) + "-byte texels";
         return false;
     }
-    const auto& surface = **found;
+    const auto& surface = *fitting;
     const bool stencil = surface.target.address != address;
-    const bool d16 = surface.target.format == VK_FORMAT_D16_UNORM || surface.target.format == VK_FORMAT_D16_UNORM_S8_UINT;
-    const auto planeBytes = stencil ? 1u : d16 ? 2u : 4u;
-    if (surface.target.extent.width != extent.width || surface.target.extent.height != extent.height || texelBytes != planeBytes) {
-        refusal = "the depth surface is " + std::to_string(surface.target.extent.width) + "x" + std::to_string(surface.target.extent.height) + " (vk format " + std::to_string(surface.target.format) + "), the view " + std::to_string(extent.width) + "x" + std::to_string(extent.height) + " with " + std::to_string(texelBytes) + "-byte texels";
-        return false;
-    }
     auto staging = std::make_shared<Buffer>(context, static_cast<std::size_t>(extent.width) * extent.height * texelBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     auto* recorder = Recorder::Active();
     std::unique_ptr<CommandBatch> batch;
