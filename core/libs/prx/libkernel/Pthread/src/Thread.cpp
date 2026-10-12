@@ -621,8 +621,14 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
         throw std::system_error(result, std::generic_category(), "Creating guest thread");
     int created = pthread_attr_setstacksize(&nativeAttr, nativeStack);
     if (created == 0) {
+        // SIGSEGV and SIGBUS stay open: they are synchronous, and a fault while they are blocked is
+        // never delivered (a write-watched page then faults forever). Under Rosetta the creator's
+        // mask also falls back to this blocked set some time after the creation, so blocking them
+        // here left the guest's main thread unable to take a write-watch fault.
         sigset_t allSignals;
         sigfillset(&allSignals);
+        sigdelset(&allSignals, SIGSEGV);
+        sigdelset(&allSignals, SIGBUS);
         pthread_sigmask(SIG_BLOCK, &allSignals, nullptr);
         created = pthread_create(&p->hostThread, &nativeAttr, StartNativeThread, native.get());
         pthread_sigmask(SIG_SETMASK, &creatorMask, nullptr);
