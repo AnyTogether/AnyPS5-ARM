@@ -12,6 +12,7 @@
 #include <codegen/x86/Sha1Lowering.hpp>
 #include <codegen/x86/Sha1Operands.hpp>
 #include <codegen/x86/StubBodyBuilder.hpp>
+#include <codegen/x86/MaskedStoreLowering.hpp>
 #include <codegen/x86/WideStoreLowering.hpp>
 #include <codegen/x86/WideStoreOperands.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
@@ -159,6 +160,7 @@ private:
     ClzeroLowering _clzeroLowering;
     ReciprocalLowering _reciprocalLowering;
     WideStoreLowering _wideStoreLowering;
+    MaskedStoreLowering _maskedStoreLowering;
 
     [[nodiscard]] Amd64OnlyMatch _matchMovnts(const DecodedInstruction& instr, const Entry& entry) const;
     [[nodiscard]] Amd64OnlyMatch _matchSse4a(const DecodedInstruction& instr, const Entry& entry, const Entry& registerFormEntry, std::span<const std::uint8_t> trailing) const;
@@ -224,6 +226,8 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::_matchRosetta(const D
         return _trampoline(kRdpid.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { body.Raw(_rdpidReplacement(instr)); }), true);
     if (const auto wide = DecodeVexWideStore(instr.Data, instr.Length))
         return _trampoline(kWideStore.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _wideStoreLowering.EmitOutOfLine(body, *wide); }), false, true);
+    if (const auto masked = DecodeVexMaskedStore(instr.Data, instr.Length))
+        return _trampoline(kMaskedStore.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _maskedStoreLowering.EmitOutOfLine(body, *masked); }), false, true);
     return std::nullopt;
 }
 
@@ -258,6 +262,10 @@ const char* Amd64OnlyInstructionMatcher::_emitOutOfLine(StubBodyBuilder& body, c
     if (const auto wide = _target == Amd64OnlyTarget::Rosetta ? DecodeVexWideStore(instr.Data, instr.Length) : std::nullopt) {
         _wideStoreLowering.EmitOutOfLine(body, *wide);
         return kWideStore.Name;
+    }
+    if (const auto masked = _target == Amd64OnlyTarget::Rosetta ? DecodeVexMaskedStore(instr.Data, instr.Length) : std::nullopt) {
+        _maskedStoreLowering.EmitOutOfLine(body, *masked);
+        return kMaskedStore.Name;
     }
     return nullptr;
 }

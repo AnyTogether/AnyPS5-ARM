@@ -55,6 +55,7 @@ add_executable(relinker
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ReciprocalLowering.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreOperands.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreLowering.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/MaskedStoreLowering.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/parsing/ElfReader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/SyscallScanner.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CallSiteResolver.cpp
@@ -145,6 +146,7 @@ if(WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ReciprocalLowering.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreOperands.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreLowering.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/MaskedStoreLowering.cpp
     )
     target_include_directories(amd64_only_windows_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include ${CMAKE_CURRENT_SOURCE_DIR}/domain/include ${CMAKE_CURRENT_SOURCE_DIR}/io/include ${CMAKE_CURRENT_SOURCE_DIR}/codegen/include ${CMAKE_CURRENT_SOURCE_DIR}/../libs/prx/libc/src/specifics/windows)
     if(BUILD_TESTING)
@@ -310,6 +312,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ReciprocalLowering.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreOperands.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreLowering.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/MaskedStoreLowering.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/linux/LinuxElfPatcher.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/general/SegmentFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/general/EntryStubBuilder.cpp
@@ -325,6 +328,34 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/io/include
     )
     add_test(NAME amd64_only_converter COMMAND amd64_only_converter_tests)
+    if((APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64") OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))
+        add_test_executable(masked_store_stub_tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/tests/MaskedStoreStubTests.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/X64InstructionDecoder.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/DecodedInstruction.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Amd64OnlyInstructionMatcher.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sse4aOperands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sse4aLowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/StubBodyBuilder.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sha256Operands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sha256Lowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sha1Operands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/Sha1Lowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ClzeroOperands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ClzeroLowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ReciprocalOperands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/ReciprocalLowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreOperands.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/WideStoreLowering.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/MaskedStoreLowering.cpp
+        )
+        target_include_directories(masked_store_stub_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/domain/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/codegen/include
+        )
+        set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/codegen/tests/MaskedStoreStubTests.cpp PROPERTIES COMPILE_OPTIONS "-mavx2")
+        add_test(NAME masked_store_stubs COMMAND masked_store_stub_tests)
+    endif()
     add_test_executable(decoder_length_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/tests/DecoderLengthTests.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/codegen/src/x86/X64InstructionDecoder.cpp
