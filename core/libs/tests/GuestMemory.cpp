@@ -1710,7 +1710,11 @@ int main() {
     CheckVirtualQueryPartialMunmap();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
+#ifndef __APPLE__
+    // macOS lists only relinked guest images (their __APS5DATA metadata) to dl_iterate_phdr; the fixture
+    // is a host-built library named like a guest module, so its segments are not in the budget there.
     CheckGuestModuleUsesFlexibleMemory();
+#endif
     CheckBatchMapStopsAtInvalidEntry();
     CheckCheckedReleaseDirectMemory();
     CheckAudioCoprocessorProtection();

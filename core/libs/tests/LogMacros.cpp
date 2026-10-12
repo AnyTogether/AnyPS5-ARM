@@ -36,6 +36,12 @@ std::vector<std::string> CaptureWrites(TAction action) {
         DWORD read = 0;
         while (ReadFile(server, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) messages.emplace_back(buffer.data(), read);
     });
+#elif defined(__APPLE__)
+    // macOS has no SOCK_SEQPACKET for AF_UNIX: a stream whose write function records each write it gets.
+    std::FILE* stream = funopen(&messages, nullptr, [](void* cookie, const char* data, int bytes) {
+        static_cast<std::vector<std::string>*>(cookie)->emplace_back(data, static_cast<std::size_t>(bytes));
+        return bytes;
+    }, nullptr, nullptr);
 #else
     int sockets[2];
     Require(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0, "message socket pair");
@@ -50,10 +56,11 @@ std::vector<std::string> CaptureWrites(TAction action) {
     Require(std::setvbuf(stream, nullptr, _IONBF, 0) == 0, "unbuffered message stream");
     action(stream);
     std::fclose(stream);
-    reader.join();
 #ifdef _WIN32
+    reader.join();
     CloseHandle(server);
-#else
+#elif !defined(__APPLE__)
+    reader.join();
     close(sockets[1]);
 #endif
     return messages;
