@@ -4,14 +4,16 @@
 
 [Full guide in English and Turkish / Türkçe rehber](docs/user/GUIDE.md)
 
-## These three games run on a Mac
+## Games on a Mac
 
-| Dreaming Sarah | AnyPS5 Breakout | Stray · 🚧 WIP |
-|---|---|---|
-| ![Dreaming Sarah](docs/screenshots/dreaming-sarah-gameplay.jpg) | ![AnyPS5 Breakout](docs/screenshots/breakout.jpg) | ![Stray](docs/screenshots/stray-brightness.jpg) |
-| 60 fps, playable | 60 fps, test title | about 10 fps, **work in progress**: boots to the brightness setup screen |
+| Hollow Knight: Silksong · 🚧 | Plants vs. Zombies: Replanted · 🚧 | Dreaming Sarah | AnyPS5 Breakout |
+|---|---|---|---|
+| ![Silksong](docs/games/img/silksong-ingame.jpg) | ![PvZ Replanted](docs/games/img/pvz-agreement.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
+| in game (first area), work in progress | opening screens at 60 fps, work in progress | 60 fps, playable | 60 fps, test title |
 
-<sub>MacBook Pro M3 Pro, macOS 26.6.2. Stray is the first Unreal Engine 4 title to render here; see [where it stands](docs/user/GUIDE.md#stray-work-in-progress).</sub>
+**[Game status notebook / Oyun durum defteri →](docs/games/README.md)** one page per game with screenshots, the steps behind it and technical details, Stray and DOOM included.
+
+<sub>MacBook Pro M3 Pro, macOS 26.6.2. The Unity titles still need the manual module steps described on their pages; AnyPS5.app does not do them yet.</sub>
 
 ## Compatibility
 
