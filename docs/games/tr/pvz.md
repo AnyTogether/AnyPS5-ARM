@@ -29,7 +29,7 @@ Ana menüden ilk bölümlere kadar, yeni bitkiler ve dev zombi dalgaları dahil 
 | ✅ | **MSAA bellek boyutu** | 4x MSAA hedefinin boyutu 2 MB fazla hesaplanıyordu ve küçük bir görüntüyle çakışıyordu; AddrLib'in GFX10 kuralıyla düzeltildi. |
 | ✅ | **Rosetta + AVX çökmesi** | Upstream #4194 ile çözüldü; exe'de 53.718 yazma bölündü. |
 | ✅ | **Ana menü ve oyun** | 1-1, 1-2 ve 1-3 elle oynandı: ana menü ~120 FPS, oyun içi 120 Hz ekranda 60–120 FPS. |
-| 🔧 | **Açılışta bir çökme** | Güncel derlemeyle yapılan iki açılıştan biri, pencere açılmadan önce Rosetta `EmulateForward` hatasıyla kapandı. Sebep, #4194'ün bölmediği maskeli bir `vmaskmovps` yazması. Diğer açılışta oyun altı dakika boyunca hiç çökmeden oynandı. |
+| ✅ | **Açılış çökmesi düzeltildi** | İki açılıştan biri, maskeli bir `vmaskmovps` yazması izlenen bir sayfanın sınırını aştığı için Rosetta `EmulateForward` hatasıyla kapanıyordu. Relinker artık maskeli yazmaları eleman eleman yapıyor (b8dce7fb9; bu oyunda 63 site). O günden beri art arda beş açılışta hiç çökme olmadı. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
