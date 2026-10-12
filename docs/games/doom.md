@@ -1,36 +1,36 @@
-[← Tüm oyunlar](README.md)
+[← All games](README.md) · **English** · [Türkçe](tr/doom.md)
 
 # DOOM (homebrew)
 
 `PPSA99666` · lowbit/ps5-doom
 
-**Durum:** 🟢 Oynanabilir · Oynanabilir, E1M1 ve sonrası · **FPS:** 35 (oyunun kendi hedefi)
+**Status:** 🟢 Playable · E1M1 onwards · **FPS:** 35 (the game's own target)
 
-Oyun içinde oynanıyor. Paketle gelen libc.prx'teki boş yer tutucu fonksiyonları artık relinker kendisi tanıyıp yerine sistemin gerçek uygulamalarını bağlıyor.
+Plays in game. The relinker now recognizes the empty placeholder functions in the packaged libc.prx and binds the system's real implementations in their place.
 
-![E1M1: HUD, silah ve Doomguy'ın yüzü](img/doom-e1m1.jpg)
-*E1M1: HUD, silah ve Doomguy'ın yüzü*
+![E1M1: HUD, weapon and Doomguy's face](img/doom-e1m1.jpg)
+*E1M1: HUD, weapon and Doomguy's face*
 
-## Adım adım
+## Step by step
 
-| | Aşama | Ayrıntı |
+| | Stage | Details |
 |---|---|---|
-| ✅ | **Dönüştürme ve paketleme** | Homebrew paket, SELF → ELF, kendi libc.prx'i ile. |
-| ✅ | **Kök neden bulundu** | Paketteki libc.prx'te memset/snprintf gibi export'lar yalnızca 0 döndüren yer tutucular; gerçekleri sistemin libSceLibcInternal'ında. macOS'ta guest export'u kazandığı için log ve mesajlar boş kalıyor, oyun WAD'ı bulamıyordu. |
-| ✅ | **Genel relinker kuralı** | macOS'ta sadece 0 döndüren guest export'ları (xor eax,eax; ret ve pxor xmm0 biçimi) host kütüphanesine bırakılıyor; gerçek fonksiyonlarda guest kazanmaya devam ediyor. Windows yükleyicisinin ZeroReturnExports kuralının macOS karşılığı. |
-| ✅ | **Oynanabilir** | WAD'ı buluyor, E1M1 ve sonrasına giriyor; Dreaming Sarah, PvZ ve Silksong ile birlikte kontrol edildi. |
+| ✅ | **Conversion and packaging** | Homebrew package, SELF → ELF, with its own libc.prx. |
+| ✅ | **Root cause found** | In the packaged libc.prx, exports such as memset and snprintf are placeholders that only return 0; the real ones are in the system's libSceLibcInternal. On macOS the guest export won, so logs and messages stayed empty and the game could not find its WAD. |
+| ✅ | **General relinker rule** | On macOS, guest exports that only return 0 (the `xor eax,eax; ret` and `pxor xmm0` forms) are left to the host library; real functions still use the guest's. This is the macOS counterpart of the Windows loader's ZeroReturnExports rule. |
+| ✅ | **Playable** | It finds the WAD and enters E1M1 and later maps; checked together with Dreaming Sarah, PvZ and Silksong. |
 
-✅ tamamlandı · 🔧 şu an · ⏭️ sırada
+✅ done · 🔧 in progress · ⏭️ next
 
-## Teknik bilgi
+## Technical details
 
 | | |
 |---|---|
-| Kaynak | `github.com/lowbit/ps5-doom v1.1.1` |
-| Sunum | `CPU çizim + AGC compute kopya` |
+| Source | `github.com/lowbit/ps5-doom v1.1.1` |
+| Presentation | `CPU rendering + AGC compute copy` |
 | WAD | `doom1.wad (shareware)` |
-| Relinker testi | `macos_placeholder_exports` |
+| Relinker test | `macos_placeholder_exports` |
 
-## Bağlantılar
+## Links
 
-- [ps5-doom kaynak kodu](https://github.com/lowbit/ps5-doom)
+- [ps5-doom source code](https://github.com/lowbit/ps5-doom)

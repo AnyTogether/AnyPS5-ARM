@@ -1,51 +1,53 @@
-[← Tüm oyunlar](README.md)
+[← All games](README.md) · **English** · [Türkçe](tr/pvz.md)
 
 # Plants vs. Zombies: Replanted
 
 `PPSA29802` · Unity (IL2CPP)
 
-**Durum:** 🟡 Üzerinde çalışılıyor · Kullanıcı sözleşmesi ekranı · **FPS:** 60
+**Status:** 🟡 Work in progress · User agreement screen · **FPS:** 60
 
-Açılış akışı 60 FPS'te ve kusursuz çiziliyor; 5 dakikalık testte hiç kapanmadı. Sırada sözleşmeyi geçip ana menüye ve oyuna girmek var.
+The opening sequence draws correctly at 60 FPS, and a five-minute run did not crash once. Next is getting past the agreement into the main menu and the game.
 
-![EA kullanıcı sözleşmesi ekranı, 60 FPS](img/pvz-agreement.jpg)
-*EA kullanıcı sözleşmesi ekranı, 60 FPS*
+![EA user agreement screen, 60 FPS](img/pvz-agreement.jpg)
+*EA user agreement screen, 60 FPS*
 
-## Adım adım
+## Step by step
 
-| | Aşama | Ayrıntı |
+| | Stage | Details |
 |---|---|---|
-| ✅ | **Silksong ile aynı Unity hazırlığı** | SELF → ELF, modüller exe ile, eklentiler ayrı. |
-| ✅ | **C# exception'ları yakalanıyor** | Tarih/saat hesabındaki bir ArgumentOutOfRangeException oyunun kendi kodunda yakalanamıyordu. macOS'ta unwind tablolarını raporlayan düzeltme (PR #4, kabonKoda) ile çözüldü. |
-| ✅ | **MSAA sample locations** | Oyun 4x MSAA'da standart dışı örnek noktaları kullanıyor; VK_EXT_sample_locations ile uygulandı. |
-| ✅ | **MSAA bellek boyutu** | 4x MSAA hedefinin boyutu 2 MB fazla hesaplanıyordu ve küçük bir görüntüyle çakışıyordu; AddrLib'in GFX10 kuralıyla düzeltildi. |
-| ✅ | **Rosetta + AVX çökmesi** | Upstream #4194 ile çözüldü; exe'de 53.718 yazma bölündü. |
-| 🔧 | **Sözleşme ekranı** | Cross ile ilerleme komutu sözleşmeyi geçmiyor; menü gezintisi için girdi senaryosu ayarlanacak. |
-| ⏭️ | **Ana menü ve oyun** | Oyun içi çizim ve performans. |
+| ✅ | **Same Unity preparation as Silksong** | SELF → ELF, modules with the executable, plugins separately. |
+| ✅ | **C# exceptions are caught** | An ArgumentOutOfRangeException in a date/time calculation could not be caught by the game's own code. Fixed by reporting unwind tables on macOS (PR #4, kabonKoda). |
+| ✅ | **MSAA sample locations** | The game uses nonstandard sample positions with 4x MSAA. They are applied through VK_EXT_sample_locations; main now uses upstream's implementation. |
+| ✅ | **MSAA memory size** | The size of the 4x MSAA target was computed 2 MB too large and overlapped a small image; fixed with AddrLib's GFX10 rule. |
+| ✅ | **Rosetta + AVX crash** | Fixed by upstream #4194; 53,718 stores were split in the executable. |
+| 🔧 | **Agreement screen** | Advancing with Cross does not get past the agreement; the input script for menu navigation needs adjusting. |
+| ⏭️ | **Main menu and game** | In-game drawing and performance. |
 
-✅ tamamlandı · 🔧 şu an · ⏭️ sırada
+✅ done · 🔧 in progress · ⏭️ next
 
-## Teknik bilgi
+## Technical details
 
 | | |
 |---|---|
-| Kimlik | `PPSA29802 · içerik 01.001.001` |
-| Motor | `Unity, IL2CPP` |
-| MSAA | `4x, özel örnek noktaları` |
-| Bölünen 256-bit yazma | `53.718 (exe)` |
-| 5 dk test | `17.933 kare, kapanma yok` |
+| ID | `PPSA29802 · content 01.001.001` |
+| Engine | `Unity, IL2CPP` |
+| MSAA | `4x, custom sample positions` |
+| Split 256-bit stores | `53,718 (executable)` |
+| 5-minute run | `17,933 frames, no crash` |
 
-## Bugün nasıl dönüştürülür (Unity, elle)
+## Converting it today (Unity, by hand)
 
-AnyPS5.app bu adımları henüz yapmıyor; şimdilik elle:
+AnyPS5.app does not do these steps yet, so for now they are manual:
 
-1. `eboot.bin`, `sce_module/*.prx`, `Media/Modules/*.prx` ve `Media/Plugins/*.prx` dosyalarını SELF'ten ELF'e çevir.
-2. `Media/Modules` içindekileri (`Il2cppUserAssemblies.prx`, `PS5Util.prx`) `sce_module` ile birlikte koyup exe'yi `relinker --macos --to-rosetta` ile relink et.
-3. `Media/Plugins` eklentilerini exe'ye bağlamadan ayrı bir relink ile `.guest.prx` olarak üret ve orijinallerinin yanına koy; Unity onları çalışma anında başlangıç argümanlarıyla yükler.
-4. Paketledikten sonra `Media/Modules/*.guest.prx` dosyalarını `sce_module` kopyalarına symlink yap (oyun aynı modülü `Il2CppUserAssemblies` adıyla da açar), eklentilerin `libc`/`libSceNpCppWebApi` bağımlılıkları için `Media/Plugins` altına symlink ekle, `app0/libs` → `../../../MacOS/libs` bağla.
+1. Convert `eboot.bin`, `sce_module/*.prx`, `Media/Modules/*.prx` and `Media/Plugins/*.prx` from SELF to ELF.
+2. Put the `Media/Modules` modules (`Il2cppUserAssemblies.prx`, `PS5Util.prx`) next to `sce_module` and relink the executable with `relinker --macos --to-rosetta`.
+3. Relink the `Media/Plugins` plugins separately, without linking them into the executable, as `.guest.prx` files next to the originals. Unity loads them at run time with their start arguments.
+4. After packaging:
+   - symlink `Media/Modules/*.guest.prx` to the `sce_module` copies (the game also opens the same module as `Il2CppUserAssemblies`);
+   - add symlinks under `Media/Plugins` for the plugins' `libc` and `libSceNpCppWebApi` dependencies;
+   - link `app0/libs` → `../../../MacOS/libs`.
 
+## Links
 
-## Bağlantılar
-
-- [PR #4: macOS unwind tabloları](https://github.com/utkuhalis/AnyPS5-ARM/pull/4)
+- [PR #4: macOS unwind tables](https://github.com/utkuhalis/AnyPS5-ARM/pull/4)
 - [Upstream #4194](https://github.com/boykopovar/AnyPS5/pull/4194)

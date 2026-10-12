@@ -1,18 +1,20 @@
-# Oyun Durum Defteri
+**English** · [Türkçe](tr/README.md)
 
-PS5 oyunlarını Apple Silicon Mac'te, Rosetta 2 ve MoltenVK üzerinden çalıştırma denemelerimiz. Her oyunun sayfasında ekran görüntüleri, adım adım geldiğimiz yer ve teknik ayrıntılar var.
+# Game status notebook
 
-Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son güncelleme: 12 Ekim 2026.
+What we have run of PS5 games on Apple silicon Macs, through Rosetta 2 and MoltenVK. Each game's page has screenshots, the steps that got it this far, and the technical details.
 
-🟢 Oynanabilir · 🟡 Üzerinde çalışılıyor · 🔴 Açılmıyor · ⚪ Kapsam dışı
+Test hardware: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Last updated: 12 October 2026.
 
-| | Oyun | Kimlik | Motor | Durum | FPS |
+🟢 Playable · 🟡 Work in progress · 🔴 Does not start · ⚪ Out of scope
+
+| | Game | ID | Engine | Status | FPS |
 |---|---|---|---|---|---|
-| <img src="img/silksong-ingame.jpg" width="180"> | [**Hollow Knight: Silksong**](silksong.md) | `PPSA12544` | Unity (IL2CPP) | 🟡 Oyun içi, ilk bölge | Menü 60 · oyun içi ~28–48 |
-| <img src="img/pvz-agreement.jpg" width="180"> | [**Plants vs. Zombies: Replanted**](pvz.md) | `PPSA29802` | Unity (IL2CPP) | 🟡 Kullanıcı sözleşmesi ekranı | 60 |
-| <img src="img/doom-e1m1.jpg" width="180"> | [**DOOM (homebrew)**](doom.md) | `PPSA99666` | lowbit/ps5-doom | 🟢 Oynanabilir, E1M1 ve sonrası | 35 (oyunun kendi hedefi) |
-| <img src="img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Oynanabilir | 60 |
-| <img src="img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | Projenin test oyunu | 🟢 Oynanabilir | 60 |
-| <img src="img/stray-saveselect.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🔴 Başlangıçta kapanıyor (gerileme) | — |
-| <img src="img/quake2-base1.jpg" width="180"> | [**Quake II ve Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II oyun içi · Quake III veri bekliyor | Menü ~48 · oyun içi ~13 |
-|  | **GTA III – Definitive Edition** | `PPSA03527` | Unreal Engine 4 | 🔴 Henüz yeniden denenmedi | — |
+| <img src="img/silksong-ingame.jpg" width="180"> | [**Hollow Knight: Silksong**](silksong.md) | `PPSA12544` | Unity (IL2CPP) | 🟡 In game, first area | Menu 60 · in game ~28–48 |
+| <img src="img/pvz-agreement.jpg" width="180"> | [**Plants vs. Zombies: Replanted**](pvz.md) | `PPSA29802` | Unity (IL2CPP) | 🟡 User agreement screen | 60 |
+| <img src="img/doom-e1m1.jpg" width="180"> | [**DOOM (homebrew)**](doom.md) | `PPSA99666` | lowbit/ps5-doom | 🟢 Playable, E1M1 onwards | 35 (the game's own target) |
+| <img src="img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Playable | 60 |
+| <img src="img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | The project's test game | 🟢 Playable | 60 |
+| <img src="img/stray-saveselect.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🔴 Crashes at startup (regression) | — |
+| <img src="img/quake2-base1.jpg" width="180"> | [**Quake II and Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II in game · Quake III needs data files | Menu ~48 · in game ~13 |
+|  | **GTA III – Definitive Edition** | `PPSA03527` | Unreal Engine 4 | 🔴 Not retried yet | — |

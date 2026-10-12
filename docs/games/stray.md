@@ -1,37 +1,37 @@
-[← Tüm oyunlar](README.md)
+[← All games](README.md) · **English** · [Türkçe](tr/stray.md)
 
 # Stray
 
 `PPSA02100` · Unreal Engine 4
 
-**Durum:** 🔴 Açılmıyor · Başlangıçta kapanıyor (gerileme) · **FPS:** —
+**Status:** 🔴 Does not start · Crashes at startup (regression) · **FPS:** —
 
-Kök neden çözüldü ama son upstream birleştirmelerinden sonra oyun daha açılışta kapanıyor. Bu gerileme araştırılıyor.
+The root cause of the earlier corruption is understood. Since the latest upstream merges, though, the game crashes already at startup. That regression is being investigated.
 
-![Önceki deneme: GPU sonuçları anında yazılınca save ekranı tam çiziliyordu](img/stray-saveselect.jpg)
-*Önceki deneme: GPU sonuçları anında yazılınca save ekranı tam çiziliyordu*
+![Earlier run: with GPU results written back immediately, the save screen drew completely](img/stray-saveselect.jpg)
+*Earlier run: with GPU results written back immediately, the save screen drew completely*
 
-## Adım adım
+## Step by step
 
-| | Aşama | Ayrıntı |
+| | Stage | Details |
 |---|---|---|
-| ✅ | **160 GiB buffer çökmesi** | Kayıt sayısını aşan indeksler tek bir sıfır vertex'e yönlendirildi (upstream'e PR #4292). |
-| ✅ | **Kök neden: geç write-back** | GPU sonuçları belleğe geç yazılıp oyunun yeniden kullandığı belleği eziyordu. Anında yazma modunda menüler ve yazılar tam çizildi (yukarıdaki görüntü). |
-| ✅ | **Yazma izleyicisi hatası** | Rezervasyonun üstüne map edilen bellek izlenmiyordu (upstream'de düzeltildi). |
-| 🔧 | **Başlangıç gerilemesi** | Unreal'ın bellek ayırıcısı kurulurken atexit → oyunun libc'si → malloc → henüz hazır olmayan ayırıcı. Son birleştirmelerle geldi; hangi değişiklik olduğu bulunacak. |
-| ⏭️ | **Hızlı write-back düzeltmesi** | Anında yazmayı yalnızca izlenemeyen bellekle sınırlayan sürüm hazır, test edilecek. |
+| ✅ | **160 GiB buffer crash** | Indices past every vertex record count are redirected to a single zero vertex (upstream PR #4292). |
+| ✅ | **Root cause: late write-back** | GPU results were written to memory late and overwrote memory the game had already reused. With immediate write-backs, menus and text drew completely (screenshot above). |
+| ✅ | **Write watch bug** | Memory mapped over a reservation was not watched (fixed upstream). |
+| 🔧 | **Startup regression** | While Unreal's allocator is being set up: atexit → the game's libc → malloc → an allocator that is not ready yet. It came with the latest merges; the responsible change still has to be found. |
+| ⏭️ | **Fast write-back fix** | A version that limits immediate write-backs to memory that cannot be watched is ready and will be tested. |
 
-✅ tamamlandı · 🔧 şu an · ⏭️ sırada
+✅ done · 🔧 in progress · ⏭️ next
 
-## Teknik bilgi
+## Technical details
 
 | | |
 |---|---|
-| Motor | `Unreal Engine 4` |
-| Bölünen 256-bit yazma | `211.077` |
-| Son çalışan durum | `Menü/save ekranı (anında write-back ile, ~0.4 FPS)` |
-| Şu an | `Açılışta segfault` |
+| Engine | `Unreal Engine 4` |
+| Split 256-bit stores | `211,077` |
+| Last working state | `Menu/save screen (with immediate write-back, ~0.4 FPS)` |
+| Now | `Segfault at startup` |
 
-## Bağlantılar
+## Links
 
 - [Upstream PR #4292](https://github.com/boykopovar/AnyPS5/pull/4292)

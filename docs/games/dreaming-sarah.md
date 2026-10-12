@@ -1,30 +1,30 @@
-[← Tüm oyunlar](README.md)
+[← All games](README.md) · **English** · [Türkçe](tr/dreaming-sarah.md)
 
 # Dreaming Sarah
 
 `PPSA02929` · Construct 2
 
-**Durum:** 🟢 Oynanabilir · Oynanabilir · **FPS:** 60
+**Status:** 🟢 Playable · **FPS:** 60
 
-Baştan sona çalışıyor. 2D, hafif GPU yükü.
+Runs from start to finish. 2D, with a light GPU load.
 
-![Başlık ekranı, 60 FPS](img/dreaming-sarah.jpg)
-*Başlık ekranı, 60 FPS*
+![Title screen, 60 FPS](img/dreaming-sarah.jpg)
+*Title screen, 60 FPS*
 
-## Adım adım
+## Step by step
 
-| | Aşama | Ayrıntı |
+| | Stage | Details |
 |---|---|---|
-| ✅ | **Dönüştürme** | sce_module içindeki .esbak yedek dosyaları çalışma kopyasından çıkarılıyor (relinker onları ikinci bir libc sanıyordu). |
-| ✅ | **Çizim** | Barycentric interpolasyon MoltenVK'da host tarafında hesaplanıyor. |
-| ✅ | **Oynanabilir** | Görüntü, ses ve kol çalışıyor. |
+| ✅ | **Conversion** | The .esbak backup files in sce_module are removed from the working copy; the relinker took them for a second libc. |
+| ✅ | **Drawing** | Barycentric interpolation is computed on the host side on MoltenVK. |
+| ✅ | **Playable** | Picture, sound and controller work. |
 
-✅ tamamlandı · 🔧 şu an · ⏭️ sırada
+✅ done · 🔧 in progress · ⏭️ next
 
-## Teknik bilgi
+## Technical details
 
 | | |
 |---|---|
-| Motor | `Construct 2 (JavaScript çalıştırıcısı)` |
-| Oyun verisi | `data.js + images/ + media/` |
+| Engine | `Construct 2 (JavaScript runtime)` |
+| Game data | `data.js + images/ + media/` |
 | FPS | `60` |

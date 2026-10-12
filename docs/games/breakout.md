@@ -1,29 +1,29 @@
-[← Tüm oyunlar](README.md)
+[← All games](README.md) · **English** · [Türkçe](tr/breakout.md)
 
 # AnyPS5 Breakout
 
-`APS5TEST1` · Projenin test oyunu
+`APS5TEST1` · The project's test game
 
-**Durum:** 🟢 Oynanabilir · Oynanabilir · **FPS:** 60
+**Status:** 🟢 Playable · **FPS:** 60
 
-Projenin kendi test oyunu; temel sistemi (bellek, ekran, ses, kol) sınar. Sorunsuz.
+The project's own test game. It exercises the basic system (memory, display, sound, controller) and runs without problems.
 
 ![Breakout, 60 FPS](img/breakout.jpg)
 *Breakout, 60 FPS*
 
-## Adım adım
+## Step by step
 
-| | Aşama | Ayrıntı |
+| | Stage | Details |
 |---|---|---|
-| ✅ | **Derleme** | core/relinker/relinker/tests/macos/breakout.cpp, PS5 ELF olarak derleniyor. |
-| ✅ | **Oynanabilir** | CPU ile çizim, VideoOut flip, AudioOut, Pad. |
+| ✅ | **Build** | core/relinker/relinker/tests/macos/breakout.cpp, built as a PS5 ELF. |
+| ✅ | **Playable** | CPU rendering, VideoOut flip, AudioOut, Pad. |
 
-✅ tamamlandı · 🔧 şu an · ⏭️ sırada
+✅ done · 🔧 in progress · ⏭️ next
 
-## Teknik bilgi
+## Technical details
 
 | | |
 |---|---|
-| Kaynak | `core/relinker/relinker/tests/macos/breakout.cpp` |
-| GPU | `Kullanılmıyor (CPU çizim)` |
+| Source | `core/relinker/relinker/tests/macos/breakout.cpp` |
+| GPU | `Not used (CPU rendering)` |
 | FPS | `60` |

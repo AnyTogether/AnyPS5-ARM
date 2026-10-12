@@ -46,14 +46,14 @@ Not verified: Linux with Intel GPUs.
 
 | Oyun | Kimlik | Motor | Durum | FPS |
 |---|---|---|---|---|
-| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** ilk bölgede oyun içi; uzun oturumlarda ara sıra kapanıyor. Elle Unity modül adımları gerekiyor ([sayfa](../games/silksong.md)) | menü 60, oyun içi ~28–48 |
-| Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** EA kullanıcı sözleşmesine kadar açılış ekranları, 5 dakikada kapanma yok ([sayfa](../games/pvz.md)) | 60 |
-| DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | Oyun içi (E1M1 ve sonrası) ([sayfa](../games/doom.md)) | 35 (oyunun kendi sınırı) |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** ilk bölgede oyun içi; uzun oturumlarda ara sıra kapanıyor. Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/silksong.md)) | menü 60, oyun içi ~28–48 |
+| Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Üzerinde çalışılıyor:** EA kullanıcı sözleşmesine kadar açılış ekranları, 5 dakikada kapanma yok ([sayfa](../games/tr/pvz.md)) | 60 |
+| DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | Oyun içi (E1M1 ve sonrası) ([sayfa](../games/tr/doom.md)) | 35 (oyunun kendi sınırı) |
 | Dreaming Sarah | PPSA02929 | Construct 2 | Oyun içi, oynanabilir | 60 |
 | AnyPS5 Breakout (test oyunu) | APS5TEST1 | | Oynanabilir: görüntü, kol ve ses | 60 |
-| Stray | PPSA02100 | Unreal Engine 4 | **Gerileme:** güncel `main`'de bellek ayırıcısı kurulurken açılışta kapanıyor; önceki derlemeler menülere geliyordu ([sayfa](../games/stray.md)) | – |
+| Stray | PPSA02100 | Unreal Engine 4 | **Gerileme:** güncel `main`'de bellek ayırıcısı kurulurken açılışta kapanıyor; önceki derlemeler menülere geliyordu ([sayfa](../games/tr/stray.md)) | – |
 | Grand Theft Auto III – The Definitive Edition | PPSA03527 | Unreal Engine 4 | Son rapordan beri yeniden denenmedi: bazı shader'lar çok büyük SPIR-V'lere dönüşüyor ve MoltenVK'de olmayan 64-bit image atomic kullanıyor | – |
-| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | PS5_Mesa (OpenGL / RADV), `sceAgcDriverSubmitDcb` üzerinden | **Üzerinde çalışılıyor:** Quake II menüye ve base1'e geliyor; Quake III çalışıyor ama kullanıcının `pak0.pk3` ve 1.32 `pak1-8.pk3` dosyalarına ihtiyaç var ([sayfa](../games/quake.md)) | Quake II: menü ~48, oyun içi ~13 |
+| Quake II, Quake III Arena (homebrew) | PPSA99007, PPSA99303 | PS5_Mesa (OpenGL / RADV), `sceAgcDriverSubmitDcb` üzerinden | **Üzerinde çalışılıyor:** Quake II menüye ve base1'e geliyor; Quake III çalışıyor ama kullanıcının `pak0.pk3` ve 1.32 `pak1-8.pk3` dosyalarına ihtiyaç var ([sayfa](../games/tr/quake.md)) | Quake II: menü ~48, oyun içi ~13 |
 
 ### Windows ve Linux
 
