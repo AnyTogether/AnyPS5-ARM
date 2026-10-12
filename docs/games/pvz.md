@@ -4,12 +4,15 @@
 
 `PPSA29802` · Unity (IL2CPP)
 
-**Status:** 🟡 Work in progress · User agreement screen · **FPS:** 60
+**Status:** 🟢 Playable · Main menu and the first level · **FPS:** menu ~120 · in game 70–120 (120 Hz display)
 
-The opening sequence draws correctly at 60 FPS, and a five-minute run did not crash once. Next is getting past the agreement into the main menu and the game.
+Plays from the main menu into the levels and draws correctly. Rarely, a masked (`vmaskmovps`) or not yet split 256-bit store still ends the game with a Rosetta `EmulateForward` abort.
 
-![EA user agreement screen, 60 FPS](img/pvz-agreement.jpg)
-*EA user agreement screen, 60 FPS*
+![In game: the first level, planting the first seed, 117 FPS](img/pvz-ingame.jpg)
+*In game: the first level, planting the first seed, 117 FPS*
+
+![EA user agreement screen](img/pvz-agreement.jpg)
+*EA user agreement screen*
 
 ## Step by step
 
@@ -20,8 +23,8 @@ The opening sequence draws correctly at 60 FPS, and a five-minute run did not cr
 | ✅ | **MSAA sample locations** | The game uses nonstandard sample positions with 4x MSAA. They are applied through VK_EXT_sample_locations; main now uses upstream's implementation. |
 | ✅ | **MSAA memory size** | The size of the 4x MSAA target was computed 2 MB too large and overlapped a small image; fixed with AddrLib's GFX10 rule. |
 | ✅ | **Rosetta + AVX crash** | Fixed by upstream #4194; 53,718 stores were split in the executable. |
-| 🔧 | **Agreement screen** | Advancing with Cross does not get past the agreement; the input script for menu navigation needs adjusting. |
-| ⏭️ | **Main menu and game** | In-game drawing and performance. |
+| ✅ | **Main menu and game** | Played by hand: main menu at ~120 FPS, in game 70–120 FPS on a 120 Hz display. |
+| 🔧 | **Rare Rosetta abort** | `vmaskmovps` stores and some 256-bit stores the relinker has not split still abort when they hit a watched page. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 

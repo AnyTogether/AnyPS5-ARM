@@ -4,12 +4,15 @@
 
 `PPSA29802` · Unity (IL2CPP)
 
-**Durum:** 🟡 Üzerinde çalışılıyor · Kullanıcı sözleşmesi ekranı · **FPS:** 60
+**Durum:** 🟢 Oynanabilir · Ana menü ve ilk bölüm · **FPS:** menü ~120 · oyun içi 70–120 (120 Hz ekran)
 
-Açılış akışı 60 FPS'te ve kusursuz çiziliyor; 5 dakikalık testte hiç kapanmadı. Sırada sözleşmeyi geçip ana menüye ve oyuna girmek var.
+Ana menüden bölümlere kadar oynanıyor, görüntü kusursuz. Nadiren maskeli (`vmaskmovps`) ya da henüz bölünmemiş bir 256-bit yazma oyunu Rosetta `EmulateForward` hatasıyla kapatabiliyor.
 
-![EA kullanıcı sözleşmesi ekranı, 60 FPS](../img/pvz-agreement.jpg)
-*EA kullanıcı sözleşmesi ekranı, 60 FPS*
+![Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS](../img/pvz-ingame.jpg)
+*Oyun içi: ilk bölüm, ilk tohumu ekme, 117 FPS*
+
+![EA kullanıcı sözleşmesi ekranı](../img/pvz-agreement.jpg)
+*EA kullanıcı sözleşmesi ekranı*
 
 ## Adım adım
 
@@ -20,8 +23,8 @@ Açılış akışı 60 FPS'te ve kusursuz çiziliyor; 5 dakikalık testte hiç k
 | ✅ | **MSAA sample locations** | Oyun 4x MSAA'da standart dışı örnek noktaları kullanıyor; VK_EXT_sample_locations ile uygulanıyor. Main artık upstream'in uygulamasını kullanıyor. |
 | ✅ | **MSAA bellek boyutu** | 4x MSAA hedefinin boyutu 2 MB fazla hesaplanıyordu ve küçük bir görüntüyle çakışıyordu; AddrLib'in GFX10 kuralıyla düzeltildi. |
 | ✅ | **Rosetta + AVX çökmesi** | Upstream #4194 ile çözüldü; exe'de 53.718 yazma bölündü. |
-| 🔧 | **Sözleşme ekranı** | Cross ile ilerleme komutu sözleşmeyi geçmiyor; menü gezintisi için girdi senaryosu ayarlanacak. |
-| ⏭️ | **Ana menü ve oyun** | Oyun içi çizim ve performans. |
+| ✅ | **Ana menü ve oyun** | Elle oynandı: ana menü ~120 FPS, oyun içi 120 Hz ekranda 70–120 FPS. |
+| 🔧 | **Nadir Rosetta çökmesi** | `vmaskmovps` yazmaları ve relinker'ın henüz bölmediği bazı 256-bit yazmalar izlenen bir sayfaya denk gelince hâlâ çöküyor. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
