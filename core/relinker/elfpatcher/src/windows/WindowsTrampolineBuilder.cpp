@@ -32,7 +32,7 @@ void WindowsTrampolineBuilder::Build(const std::vector<Codegen::TrampolineSite>&
     std::vector<std::uint8_t> bytes;
     for (const auto& site : sites) {
         const auto siteRva = image.GetRva(site.Address, site.Length);
-        if (site.Length < kJmpRel32.Size || site.OriginalBytes.size() != site.Length || site.Body.size() < kJmpRel32.Size || site.ReturnBranchOffset > site.Body.size() - kJmpRel32.Size || site.Body[site.ReturnBranchOffset] != kJmpRel32.Bytes[0])
+        if (site.Length < kJmpRel32.Size || site.OriginalBytes.size() != site.Length || !Codegen::StubBodyIsValid(site.Body, site.ReturnBranchOffset))
             throw Domain::RelinkerException("Invalid AMD-only trampoline site", siteRva);
         auto& section = findSection(sections, siteRva, site.Length);
         const auto offset = static_cast<std::ptrdiff_t>(siteRva - section.Rva);
@@ -43,11 +43,13 @@ void WindowsTrampolineBuilder::Build(const std::vector<Codegen::TrampolineSite>&
         const auto bodyOffset = bytes.size();
         bytes.insert(bytes.end(), site.Body.begin(), site.Body.end());
         Codegen::ApplyStubRelocations(std::span<std::uint8_t>(bytes.data() + bodyOffset, site.ReturnBranchOffset), site.Relocations, siteRva, stubRva, site.Offset);
-        const auto returnRva = CheckedRva(siteRva + site.Length);
-        const auto displacement = static_cast<std::int64_t>(returnRva) - (static_cast<std::int64_t>(stubRva) + static_cast<std::int64_t>(site.ReturnBranchOffset + kJmpRel32.Size));
-        if (displacement < std::numeric_limits<std::int32_t>::min() || displacement > std::numeric_limits<std::int32_t>::max())
-            throw Domain::RelinkerException("AMD-only stub return exceeds rel32 range", returnRva);
-        Io::WriteU32(bytes, bodyOffset + site.ReturnBranchOffset + 1, static_cast<std::uint32_t>(displacement));
+        if (Codegen::StubHasReturnBranch(site.Body, site.ReturnBranchOffset)) {
+            const auto returnRva = CheckedRva(siteRva + site.Length);
+            const auto displacement = static_cast<std::int64_t>(returnRva) - (static_cast<std::int64_t>(stubRva) + static_cast<std::int64_t>(site.ReturnBranchOffset + kJmpRel32.Size));
+            if (displacement < std::numeric_limits<std::int32_t>::min() || displacement > std::numeric_limits<std::int32_t>::max())
+                throw Domain::RelinkerException("AMD-only stub return exceeds rel32 range", returnRva);
+            Io::WriteU32(bytes, bodyOffset + site.ReturnBranchOffset + 1, static_cast<std::uint32_t>(displacement));
+        }
         WindowsStubEmitter jump(siteRva);
         jump.Rip({0xe9}, stubRva);
         const auto jumpBytes = jump.TakeBytes();

@@ -20,8 +20,7 @@ public:
     ) const = 0;
 
     [[nodiscard]] virtual std::optional<Amd64OnlyMatch> MatchSequence(
-        std::span<const std::span<const std::uint8_t>> instructions,
-        std::span<const std::uint8_t> trailing
+        std::span<const std::span<const std::uint8_t>> instructions
     ) const = 0;
 };
 

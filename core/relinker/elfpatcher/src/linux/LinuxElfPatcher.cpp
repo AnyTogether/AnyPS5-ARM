@@ -37,7 +37,7 @@ void LinuxElfPatcher::_appendTrampoline(
     const std::function<std::uint64_t(std::uint64_t)>& vaddrOfExtraBlockOffset) const
 {
     using namespace Codegen::Amd64OnlySubstitutionTable;
-    if (site.Length < kJmpRel32.Size || site.OriginalBytes.size() != site.Length || site.Body.size() < kJmpRel32.Size || site.ReturnBranchOffset > site.Body.size() - kJmpRel32.Size || site.Body[site.ReturnBranchOffset] != kJmpRel32.Bytes[0])
+    if (site.Length < kJmpRel32.Size || site.OriginalBytes.size() != site.Length || !Codegen::StubBodyIsValid(site.Body, site.ReturnBranchOffset))
         throw Domain::RelinkerException("Invalid AMD-only trampoline site", site.Offset);
     if (site.Offset > extraBlockOffset || site.Length > extraBlockOffset - site.Offset)
         throw Domain::RelinkerException("AMD-only instruction is outside the original image", site.Offset);
@@ -55,11 +55,15 @@ void LinuxElfPatcher::_appendTrampoline(
     const auto inRange = [](const std::int64_t displacement) {
         return displacement >= std::numeric_limits<std::int32_t>::min() && displacement <= std::numeric_limits<std::int32_t>::max();
     };
-    const auto returnDisplacement = static_cast<std::int64_t>(site.Address + site.Length) - static_cast<std::int64_t>(bodyVaddr + site.ReturnBranchOffset + kJmpRel32.Size);
     const auto jumpDisplacement = static_cast<std::int64_t>(bodyVaddr) - static_cast<std::int64_t>(site.Address + kJmpRel32.Size);
-    if (!inRange(returnDisplacement) || !inRange(jumpDisplacement))
+    if (!inRange(jumpDisplacement))
         throw Domain::RelinkerException("AMD-only stub exceeds rel32 range", site.Offset);
-    _byteWriter->WriteU32(buf, static_cast<std::size_t>(bodyOff + site.ReturnBranchOffset + 1), static_cast<std::uint32_t>(returnDisplacement));
+    if (Codegen::StubHasReturnBranch(site.Body, site.ReturnBranchOffset)) {
+        const auto returnDisplacement = static_cast<std::int64_t>(site.Address + site.Length) - static_cast<std::int64_t>(bodyVaddr + site.ReturnBranchOffset + kJmpRel32.Size);
+        if (!inRange(returnDisplacement))
+            throw Domain::RelinkerException("AMD-only stub exceeds rel32 range", site.Offset);
+        _byteWriter->WriteU32(buf, static_cast<std::size_t>(bodyOff + site.ReturnBranchOffset + 1), static_cast<std::uint32_t>(returnDisplacement));
+    }
 
     std::fill_n(buf.begin() + static_cast<std::ptrdiff_t>(site.Offset), site.Length, kNop1.Bytes[0]);
     buf[static_cast<std::size_t>(site.Offset)] = kJmpRel32.Bytes[0];

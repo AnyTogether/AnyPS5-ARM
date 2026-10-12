@@ -447,8 +447,12 @@ void ripRelativeBodies() {
     require(Bytes(moved->StubBody.begin() + static_cast<std::ptrdiff_t>(start), moved->StubBody.begin() + static_cast<std::ptrdiff_t>(moved->ReturnBranchOffset)) == Bytes{0x90, 0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00}, "Moved RIP-relative LEA was not copied with a cleared displacement");
     require(relocated(*moved, start + 4, start + 8, 4 + 8 + 0x10), "Moved RIP-relative LEA has the wrong relocation");
     const std::vector<std::span<const std::uint8_t>> sequence = {extrq, message};
-    const auto pair = matcher->MatchSequence(sequence, {});
+    const auto pair = matcher->MatchSequence(sequence);
     require(pair && pair->Relocations.size() == 1 && pair->Relocations[0].SiteTarget == 4 + 8 + 0x12345678, "RIP-relative operand in a sequence is not relative to the site start");
+    for (const Bytes& trap : {Bytes{0xCC}, Bytes{0xCD, 0x03}, Bytes{0xF4}}) {
+        const std::vector<std::span<const std::uint8_t>> trapping = {extrq, trap};
+        requireFailure([&] { (void)matcher->MatchSequence(trapping); }, "A trap was moved into a sequence stub");
+    }
 }
 
 void stubRelocations() {
@@ -596,11 +600,10 @@ void converterSha1() {
         0xC3};
     std::copy(text.begin(), text.end(), file.begin() + 0x200);
     const auto result = converter->Convert(file, {segmentHeader(text.size())});
-    require(result.Trampolines.size() == 3 && result.Reports.size() == 3 && result.Bytes == file, "SHA-1 sites were not lowered through stubs");
-    require(result.Trampolines[0].Offset == 0x200 && result.Trampolines[0].Length == 5 && result.Reports[0].InstructionName == "SHA1RNDS4", "SHA1RNDS4 was not lowered as one site");
-    require(result.Trampolines[1].Offset == 0x205 && result.Trampolines[1].Length == 8 && result.Reports[1].InstructionName == "SHA1NEXTE", "SHA1NEXTE did not absorb the following SHA1MSG1");
-    const auto& message = result.Trampolines[2];
-    require(message.Offset == 0x211 && message.Length == 5 && result.Reports[2].InstructionName == "SHA1MSG2", "SHA1MSG2 did not absorb the following instruction");
+    require(result.Trampolines.size() == 2 && result.Reports.size() == 2 && result.Bytes == file, "SHA-1 sites were not lowered through stubs");
+    require(result.Trampolines[0].Offset == 0x200 && result.Trampolines[0].Length == 13 && result.Reports[0].InstructionName == "SHA1RNDS4", "SHA1RNDS4 did not merge the adjacent SHA1NEXTE and SHA1MSG1 into its stub");
+    const auto& message = result.Trampolines[1];
+    require(message.Offset == 0x211 && message.Length == 5 && result.Reports[1].InstructionName == "SHA1MSG2", "SHA1MSG2 did not absorb the following instruction");
     require(message.Body[message.ReturnBranchOffset - 1] == 0x90 && message.Body[message.ReturnBranchOffset] == 0xE9, "Absorbed instruction does not run before the return jump");
     auto beforeReturn = file;
     beforeReturn[0x215] = 0xC3;
@@ -608,13 +611,13 @@ void converterSha1() {
     auto memoryForm = file;
     memoryForm[0x214] = 0x28;
     const auto memoryResult = converter->Convert(memoryForm, {segmentHeader(text.size())});
-    require(memoryResult.Trampolines.size() == 3 && memoryResult.Reports[2].InstructionName == "SHA1MSG2", "SHA-1 memory form was not lowered through a stub");
+    require(memoryResult.Trampolines.size() == 2 && memoryResult.Reports[1].InstructionName == "SHA1MSG2", "SHA-1 memory form was not lowered through a stub");
     auto ripRelative = file;
     const Bytes ripMessage = {0x0F, 0x38, 0xCA, 0x2D, 0xF0, 0xFF, 0xFF, 0xFF, 0xC3};
     std::copy(ripMessage.begin(), ripMessage.end(), ripRelative.begin() + 0x211);
     const auto ripResult = converter->Convert(ripRelative, {segmentHeader(text.size() + 3)});
-    require(ripResult.Trampolines.size() == 3 && ripResult.Bytes == ripRelative && ripResult.Reports[2].InstructionName == "SHA1MSG2", "SHA-1 RIP-relative form was not lowered through a stub");
-    const auto& ripSite = ripResult.Trampolines[2];
+    require(ripResult.Trampolines.size() == 2 && ripResult.Bytes == ripRelative && ripResult.Reports[1].InstructionName == "SHA1MSG2", "SHA-1 RIP-relative form was not lowered through a stub");
+    const auto& ripSite = ripResult.Trampolines[1];
     require(ripSite.Offset == 0x211 && ripSite.Length == 8 && ripSite.Relocations.size() == 1 && ripSite.Relocations[0].SiteTarget == 8 - 16 && ripSite.Relocations[0].InstructionEnd <= ripSite.ReturnBranchOffset, "SHA-1 RIP-relative site was recorded without its relocation");
 }
 
@@ -704,8 +707,9 @@ void converterRosetta() {
     require(result.Bytes == expected, "RDSEED or CLWB was replaced with the wrong bytes");
     auto beforeReturn = file;
     beforeReturn[0x207] = 0xC3;
-    const auto kept = converter->Convert(beforeReturn, {segmentHeader(text.size())});
-    require(kept.KeptCount == 1 && kept.Trampolines.empty() && kept.ReplacedCount == 2, "RDPID without room for a jump was not kept");
+    const auto hosted = converter->Convert(beforeReturn, {segmentHeader(text.size())});
+    require(hosted.KeptCount == 0 && hosted.Trampolines.size() == 1 && hosted.ReplacedCount == 2, "RDPID before a return was not hosted with the return");
+    require(hosted.Trampolines[0].Offset == 0x203 && hosted.Trampolines[0].Length == 5 && hosted.Trampolines[0].Body == Bytes{0xB9, 0, 0, 0, 0, 0xC3} && hosted.Trampolines[0].ReturnBranchOffset == 6, "RDPID stub does not end with the moved return");
     const auto intel = Codegen::MakeAmd64OnlyConverter()->Convert(file, {segmentHeader(text.size())});
     require(intel.Reports.empty() && intel.Bytes == file, "The Intel target converted RDSEED, RDPID or CLWB");
 }
@@ -906,15 +910,11 @@ void converterWideStore() {
         0xC3};
     std::copy(text.begin(), text.end(), file.begin() + 0x200);
     const auto result = converter->Convert(file, {segmentHeader(text.size())});
-    require(result.Trampolines.size() == 2 && result.KeptCount == 1 && result.ReplacedCount == 0 && result.Reports.size() == 3 && result.Bytes == file, "256-bit stores were not lowered through two stubs with one kept");
-    const auto& absorbed = result.Trampolines[0];
+    require(result.Trampolines.size() == 1 && result.KeptCount == 0 && result.ReplacedCount == 0 && result.Reports.size() == 1 && result.Bytes == file, "256-bit stores were not lowered through one stub");
+    const auto& chain = result.Trampolines[0];
     const Bytes add = {0x48, 0x83, 0xC1, 0x01};
-    require(absorbed.Offset == 0x200 && absorbed.Length == 8 && result.Reports[0].InstructionName == "VMOVUPS" && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, "4-byte store did not absorb the following instruction");
-    require(Bytes(absorbed.Body.begin(), absorbed.Body.begin() + 11) == Bytes{0xC5, 0xF8, 0x11, 0x07, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01} && Bytes(absorbed.Body.begin() + static_cast<std::ptrdiff_t>(absorbed.ReturnBranchOffset - add.size()), absorbed.Body.begin() + static_cast<std::ptrdiff_t>(absorbed.ReturnBranchOffset)) == add, "Split store does not run before the absorbed instruction");
-    const auto& pair = result.Trampolines[1];
-    require(pair.Offset == 0x208 && pair.Length == 9 && result.Reports[1].InstructionName == "VMOVUPS" && result.Reports[1].Offset == 0x208, "Consecutive 256-bit stores were not lowered into one stub");
-    require(pair.Body == Bytes{0xC5, 0xF8, 0x11, 0x06, 0xC4, 0xE3, 0x7D, 0x19, 0x46, 0x10, 0x01, 0xC5, 0xF8, 0x11, 0x4E, 0x20, 0xC4, 0xE3, 0x7D, 0x19, 0x4E, 0x30, 0x01, 0xE9, 0x00, 0x00, 0x00, 0x00} && pair.ReturnBranchOffset == 23, "Two-store sequence body holds the wrong halves");
-    require(result.Reports[2].InstructionName == "VMOVUPS" && result.Reports[2].Lowering == Codegen::Amd64OnlyLowering::Kept && result.Reports[2].Offset == 0x211, "Store before a return was not reported as kept");
+    require(chain.Offset == 0x200 && chain.Length == 21 && result.Reports[0].InstructionName == "VMOVUPS" && result.Reports[0].Offset == 0x200 && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, "4-byte store did not absorb the following instruction and merge the stores after it");
+    require(chain.Body == Bytes{0xC5, 0xF8, 0x11, 0x07, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01, 0x48, 0x83, 0xC1, 0x01, 0xC5, 0xF8, 0x11, 0x06, 0xC4, 0xE3, 0x7D, 0x19, 0x46, 0x10, 0x01, 0xC5, 0xF8, 0x11, 0x4E, 0x20, 0xC4, 0xE3, 0x7D, 0x19, 0x4E, 0x30, 0x01, 0xC5, 0xF8, 0x11, 0x00, 0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01, 0xE9, 0x00, 0x00, 0x00, 0x00} && chain.ReturnBranchOffset == 49, "Chained stub does not hold the split stores and the absorbed instruction in order");
     const auto intel = Codegen::MakeAmd64OnlyConverter()->Convert(file, {segmentHeader(text.size())});
     require(intel.Reports.empty() && intel.Trampolines.empty() && intel.Bytes == file, "The Intel target converted a 256-bit store");
     Bytes branchInto(0x300, 0xCC);
@@ -936,6 +936,122 @@ void converterWideStore() {
     std::copy(rexThenSegment.begin(), rexThenSegment.end(), resetRex.begin() + 0x200);
     const auto dropped = converter->Convert(resetRex, {segmentHeader(rexThenSegment.size())});
     require(dropped.Trampolines.size() == 1 && dropped.KeptCount == 0 && dropped.Trampolines[0].Length == 6 && Bytes(dropped.Trampolines[0].Body.begin(), dropped.Trampolines[0].Body.begin() + 13) == Bytes{0x64, 0xC5, 0xF8, 0x11, 0x07, 0x64, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01}, "Store with a REX that a later prefix resets was not split with the segment override alone");
+}
+
+void converterShortStoreHosting() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    const auto convert = [&](const Bytes& text) {
+        Bytes file(0x300, 0xCC);
+        std::copy(text.begin(), text.end(), file.begin() + 0x200);
+        auto result = converter->Convert(file, {segmentHeader(text.size())});
+        require(result.ReplacedCount != 0 || result.Bytes == file, "Hosting a short store changed the segment bytes");
+        return result;
+    };
+    const auto hosted = [&](const Bytes& text, const std::size_t offset, const std::size_t length, const char* message) {
+        const auto result = convert(text);
+        require(result.Trampolines.size() == 1 && result.KeptCount == 0 && result.ReplacedCount == 0 && result.Reports.size() == 1 && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, message);
+        const auto& site = result.Trampolines[0];
+        require(site.Offset == offset && site.Address == 0x1000 + (offset - 0x200) && site.Length == length && site.OriginalBytes == Bytes(text.begin() + static_cast<std::ptrdiff_t>(offset - 0x200), text.begin() + static_cast<std::ptrdiff_t>(offset - 0x200 + length)), message);
+        return result;
+    };
+    const auto kept = [&](const Bytes& text, const char* message) {
+        const auto result = convert(text);
+        require(result.Trampolines.empty() && result.KeptCount == 1 && result.Reports.size() == 1 && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Kept && result.Reports[0].InstructionName == "VMOVUPS", message);
+    };
+    const auto resolved = [](const Codegen::TrampolineSite& site, const Codegen::StubRelocation& relocation) {
+        auto body = site.Body;
+        Codegen::ApplyStubRelocations(body, site.Relocations, site.Address, 0x5000, 0);
+        return 0x5000 + static_cast<std::int64_t>(relocation.InstructionEnd) + read<std::int32_t>(body, relocation.DisplacementOffset);
+    };
+    const Bytes store = {0xC5, 0xFC, 0x11, 0x07};
+    const Bytes low = {0xC5, 0xF8, 0x11, 0x07};
+    const Bytes high = {0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01};
+    const Bytes returnBranch = {0xE9, 0, 0, 0, 0};
+    const Bytes mov = {0x48, 0x89, 0xF8};
+    const Bytes call = {0xE8, 0, 0, 0, 0};
+    const auto join = [](std::initializer_list<Bytes> parts) {
+        Bytes joined;
+        for (const auto& part : parts) joined.insert(joined.end(), part.begin(), part.end());
+        return joined;
+    };
+
+    const auto merged = hosted(join({store, {0xC5, 0xFC, 0x11, 0x0E}, {0xC3}}), 0x200, 8, "Two adjacent stores were not merged into one stub");
+    require(merged.Trampolines[0].Body == join({low, high, {0xC5, 0xF8, 0x11, 0x0E}, {0xC4, 0xE3, 0x7D, 0x19, 0x4E, 0x10, 0x01}, returnBranch}) && merged.Trampolines[0].ReturnBranchOffset == 22, "Merged stub does not hold both split stores in order before the return branch");
+
+    const auto chain = convert(join({store, {0xC5, 0xFC, 0x11, 0x0E}, {0xC5, 0xFC, 0x11, 0x10}, {0xC3}, {0xEB, 0xF9}}));
+    require(chain.Trampolines.size() == 2 && chain.KeptCount == 0 && chain.Trampolines[0].Length == 8 && chain.Trampolines[1].Offset == 0x208 && chain.Trampolines[1].Length == 5 && chain.Trampolines[1].Body.back() == 0xC3, "Merging did not stop before the store that a branch targets, which then took its return");
+
+    const Bytes load = {0xC5, 0xFC, 0x10, 0x06};
+    const auto resumed = convert(join({store, load, {0xC5, 0xFC, 0x11, 0x00}, {0x90}, {0xC3}, {0xEB, 0xFC}}));
+    require(resumed.Trampolines.size() == 1 && resumed.KeptCount == 0 && resumed.Trampolines[0].Length == 12 && resumed.Trampolines[0].Body == join({low, high, load, {0xC5, 0xF8, 0x11, 0x00}, {0xC4, 0xE3, 0x7D, 0x19, 0x40, 0x10, 0x01}, returnBranch}), "Merging did not resume after the absorbed load, stranding the store before the label");
+
+    const auto returning = hosted(join({mov, store, {0xC3}}), 0x203, 5, "Store before a return was not hosted with the return");
+    require(returning.Trampolines[0].Body == join({low, high, {0xC3}}) && returning.Trampolines[0].ReturnBranchOffset == 12 && returning.Trampolines[0].Relocations.empty() && !Codegen::StubHasReturnBranch(returning.Trampolines[0].Body, returning.Trampolines[0].ReturnBranchOffset), "Stub does not end with the moved return in place of the return branch");
+
+    const auto popping = hosted(join({store, {0xC2, 0x08, 0x00}}), 0x200, 7, "Store before a return with an immediate was not hosted");
+    require(popping.Trampolines[0].Body == join({low, high, {0xC2, 0x08, 0x00}}) && popping.Trampolines[0].ReturnBranchOffset == 14, "Stub does not end with the moved return imm16");
+
+    const auto shortJump = hosted(join({store, {0xEB, 0x02}, {0x90, 0x90, 0xC3}}), 0x200, 6, "Store before a jmp rel8 was not hosted with the jump");
+    const auto& shortJumpSite = shortJump.Trampolines[0];
+    require(shortJumpSite.Body == join({low, high, returnBranch}) && shortJumpSite.ReturnBranchOffset == 16 && shortJumpSite.Relocations.size() == 1 && shortJumpSite.Relocations[0].DisplacementOffset == 12 && shortJumpSite.Relocations[0].InstructionEnd == 16 && shortJumpSite.Relocations[0].SiteTarget == 8, "jmp rel8 was not re-emitted as a relocated jmp rel32 ending the stub");
+    require(resolved(shortJumpSite, shortJumpSite.Relocations[0]) == 0x1008, "Re-emitted jmp rel8 does not resolve to the original target");
+
+    const auto longJump = hosted(join({store, {0xE9, 0, 0, 0, 0}, {0xC3}}), 0x200, 9, "Store before a jmp rel32 was not hosted with the jump");
+    const auto& longJumpSite = longJump.Trampolines[0];
+    require(longJumpSite.Body == join({low, high, returnBranch}) && longJumpSite.ReturnBranchOffset == 16 && longJumpSite.Relocations.size() == 1 && longJumpSite.Relocations[0].SiteTarget == 9 && resolved(longJumpSite, longJumpSite.Relocations[0]) == 0x1009, "jmp rel32 was not re-emitted to the original target");
+
+    const auto conditional = hosted(join({store, {0x74, 0x02}, {0x90, 0x90, 0xC3}}), 0x200, 6, "Store before a jcc rel8 was not hosted with the branch");
+    const auto& conditionalSite = conditional.Trampolines[0];
+    require(conditionalSite.Body == join({low, high, {0x0F, 0x84, 0, 0, 0, 0}, returnBranch}) && conditionalSite.ReturnBranchOffset == 17 && conditionalSite.Relocations.size() == 1 && conditionalSite.Relocations[0].DisplacementOffset == 13 && conditionalSite.Relocations[0].InstructionEnd == 17 && conditionalSite.Relocations[0].SiteTarget == 8 && resolved(conditionalSite, conditionalSite.Relocations[0]) == 0x1008, "jcc rel8 was not re-emitted as a relocated jcc rel32 before the fall-through return branch");
+
+    const auto conditionalLong = hosted(join({store, {0x0F, 0x85, 0, 0, 0, 0}, {0xC3}}), 0x200, 10, "Store before a jcc rel32 was not hosted with the branch");
+    require(conditionalLong.Trampolines[0].Body == join({low, high, {0x0F, 0x85, 0, 0, 0, 0}, returnBranch}) && conditionalLong.Trampolines[0].Relocations.size() == 1 && conditionalLong.Trampolines[0].Relocations[0].SiteTarget == 10, "jcc rel32 was not re-emitted with its relocation");
+
+    kept(join({store, call, {0xC3}}), "Store followed by a call with nothing before it was not kept");
+    kept(join({store, {0xFF, 0xE0}}), "Store followed by an indirect jump with nothing before it was not kept");
+    kept(join({store, {0xE3, 0x00}, {0xC3}}), "Store followed by JRCXZ with nothing before it was not kept");
+
+    const auto leading = hosted(join({mov, store, call, {0xC3}}), 0x200, 7, "Store before a call was not hosted by absorbing the preceding instruction");
+    require(leading.Trampolines[0].Body == join({mov, low, high, returnBranch}) && leading.Trampolines[0].ReturnBranchOffset == 14 && leading.Reports[0].Offset == 0x203 && leading.Reports[0].OriginalLength == 4, "Absorbed leading instruction does not run first, or the report lost the store's offset");
+
+    const auto fewest = convert(join({{0x90}, mov, {0x0F, 0x01, 0xFC}, call, {0xC3}}));
+    require(fewest.Trampolines.size() == 1 && fewest.Trampolines[0].Offset == 0x201 && fewest.Trampolines[0].Length == 6 && fewest.Reports[0].InstructionName == "CLZERO" && fewest.Reports[0].Offset == 0x204, "Leading absorption did not take the fewest instructions that reach five bytes");
+    const auto two = convert(join({{0x98, 0x99}, {0x0F, 0x01, 0xFC}, call, {0xC3}}));
+    require(two.Trampolines.size() == 1 && two.Trampolines[0].Offset == 0x200 && two.Trampolines[0].Length == 5 && Bytes(two.Trampolines[0].Body.begin(), two.Trampolines[0].Body.begin() + 2) == Bytes{0x98, 0x99}, "Leading absorption of two instructions did not host CLZERO");
+
+    Bytes ripLoad = {0xC5, 0xFC, 0x10, 0x05, 0, 0, 0, 0};
+    write<std::int32_t>(ripLoad, 4, 0x100);
+    const auto ripLeading = hosted(join({ripLoad, store, call, {0xC3}}), 0x200, 12, "Store before a call was not hosted by absorbing the preceding RIP-relative load");
+    const auto& ripSite = ripLeading.Trampolines[0];
+    require(ripSite.Relocations.size() == 1 && ripSite.Relocations[0].DisplacementOffset == 4 && ripSite.Relocations[0].InstructionEnd == 8 && ripSite.Relocations[0].SiteTarget == 8 + 0x100 && Bytes(ripSite.Body.begin(), ripSite.Body.begin() + 8) == Bytes{0xC5, 0xFC, 0x10, 0x05, 0, 0, 0, 0} && resolved(ripSite, ripSite.Relocations[0]) == 0x1108, "Absorbed RIP-relative load was not relocated to its original operand");
+
+    kept(join({{0x90}, store, call, {0x90}, {0x74, 0xF4}, {0xC3}}), "Store that a branch targets was absorbed backwards");
+    kept(join({{0xEB, 0x09}, store, call, {0xC3}}), "Store after a jump absorbed the jump");
+    kept(join({{0xE8, 0x09, 0, 0, 0}, store, call, {0xC3}}), "Store after a call absorbed the call");
+    kept(join({{0xC3}, store, call, {0xC3}}), "Store after a return absorbed the return");
+    for (const Bytes& trap : {Bytes{0xCC}, Bytes{0xCD, 0x03}, Bytes{0xF4}})
+        kept(join({trap, store, call, {0xC3}}), "Store after int3, int imm8 or hlt absorbed the trap");
+    kept(join({store, {0xCC}, {0xC3}}), "Store before int3 moved the trap");
+    for (const Bytes& padding : {Bytes{0x90}, Bytes{0x66, 0x90}, Bytes{0x0F, 0x1F, 0x00}, Bytes{0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00}})
+        kept(join({padding, store, call, {0xC3}}), "Store after alignment padding absorbed the padding");
+    const auto afterPadding = hosted(join({{0x90}, mov, store, call, {0xC3}}), 0x201, 7, "Store after padding and a movable instruction was not hosted by that instruction alone");
+    require(afterPadding.Trampolines[0].Body == join({mov, low, high, returnBranch}), "Padding before the absorbed leading instruction changed the stub");
+    const auto exchange = hosted(join({{0x41, 0x90}, store, call, {0xC3}}), 0x200, 6, "XCHG r8d, eax was refused as padding");
+    require(Bytes(exchange.Trampolines[0].Body.begin(), exchange.Trampolines[0].Body.begin() + 2) == Bytes{0x41, 0x90}, "Absorbed XCHG does not run first in the stub");
+    const auto afterInPlace = convert(join({{0x66, 0x0F, 0xAE, 0x37}, store, call, {0xC3}}));
+    require(afterInPlace.Trampolines.empty() && afterInPlace.KeptCount == 1 && afterInPlace.ReplacedCount == 1, "Store after an in-place substitution absorbed the replaced instruction");
+    const auto afterStub = convert(join({{0xC5, 0xFC, 0x11, 0x0E}, {0x75, 0x09}, store, call, {0xC3}}));
+    require(afterStub.Trampolines.size() == 1 && afterStub.KeptCount == 1 && afterStub.Trampolines[0].Length == 6 && afterStub.Trampolines[0].Relocations.size() == 1, "Store after a site ending in a branch absorbed that site's bytes");
+
+    kept(join({mov, store, call, {0x74, 0xF3}, {0xC3}}), "Branch into the absorbed leading instruction was accepted");
+    const auto atFirstByte = hosted(join({mov, store, call, {0x74, 0xF2}, {0xC3}}), 0x200, 7, "Branch to the first byte of the absorbed leading instruction was refused");
+    require(atFirstByte.Trampolines[0].Body == join({mov, low, high, returnBranch}), "Extended site with a branch to its first byte was lowered wrongly");
+
+    const auto intel = Codegen::MakeAmd64OnlyConverter();
+    Bytes intelFile(0x300, 0xCC);
+    const Bytes intelText = join({mov, {0x66, 0x0F, 0x79, 0xCA}, {0xC3}});
+    std::copy(intelText.begin(), intelText.end(), intelFile.begin() + 0x200);
+    requireFailure([&] { (void)intel->Convert(intelFile, {segmentHeader(intelText.size())}); }, "The Intel target moved a return or a preceding instruction into a stub");
 }
 
 void converterStrayRex() {
@@ -1406,7 +1522,7 @@ void clzeroExecution() {
         {matcher->Match(plain.data(), plain.size()), false, 0, 0, "CLZERO stub"},
         {matcher->Match(addressSize32.data(), addressSize32.size()), true, 0x5A5A5A5A00000000ull, 0, "67h CLZERO stub"},
         {matcher->Match(plain.data(), plain.size(), add), false, 0, 64, "CLZERO stub with a trailing add"},
-        {matcher->MatchSequence(pair, {}), false, 0, 0, "CLZERO sequence stub"}};
+        {matcher->MatchSequence(pair), false, 0, 0, "CLZERO sequence stub"}};
     std::uint64_t xmmIn[16][2];
     for (unsigned reg = 0; reg < 16; ++reg) {
         xmmIn[reg][0] = 0x0101010101010101ull * (reg + 1);
@@ -1567,8 +1683,10 @@ WideStoreRun runWideStoreBody(const Codegen::Amd64OnlyMatch& match, const std::u
     auto body = match.StubBody;
     const auto ret = body.size();
     body.push_back(0xC3);
-    const auto displacement = static_cast<std::int32_t>(ret - (match.ReturnBranchOffset + 5));
-    std::memcpy(body.data() + match.ReturnBranchOffset + 1, &displacement, sizeof(displacement));
+    if (Codegen::StubHasReturnBranch(match.StubBody, match.ReturnBranchOffset)) {
+        const auto displacement = static_cast<std::int32_t>(ret - (match.ReturnBranchOffset + 5));
+        std::memcpy(body.data() + match.ReturnBranchOffset + 1, &displacement, sizeof(displacement));
+    }
     require(body.size() <= 4096, "Wide store stub does not fit in a page");
     auto* code = static_cast<std::uint8_t*>(mmap(nullptr, 3 * 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     require(code != MAP_FAILED, "cannot map executable memory for the wide store stub");
@@ -1658,6 +1776,12 @@ void wideStoreExecution() {
     const Bytes first = {0xC5, 0xFC, 0x11, 0x07};
     const Bytes second = {0xC5, 0xFC, 0x11, 0x4F, 0x20};
     const std::vector<std::span<const std::uint8_t>> pair = {first, second};
+    const Bytes ret = {0xC3};
+    const Bytes jne = {0x75, 0x00};
+    const Bytes leaRdi = {0x48, 0x8D, 0x7F, 0x20};
+    const std::vector<std::span<const std::uint8_t>> returning = {first, ret};
+    const std::vector<std::span<const std::uint8_t>> branching = {second, jne};
+    const std::vector<std::span<const std::uint8_t>> leading = {leaRdi, first};
     const std::vector<Case> cases = {
         {single({0xC5, 0xFC, 0x11, 0x47, 0x20}), {{0x20, 0}}, false, "VMOVUPS with a disp8"},
         {matcher->Match(first.data(), first.size(), lea), {{0, 0}}, false, "VMOVUPS [base] with an absorbed follower"},
@@ -1670,7 +1794,10 @@ void wideStoreExecution() {
         {single({0xC5, 0xFC, 0x2B, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTPS"},
         {single({0xC5, 0xFD, 0x2B, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTPD"},
         {single({0xC5, 0xFD, 0xE7, 0x47, 0x20}), {{0x20, 0}}, true, "VMOVNTDQ"},
-        {matcher->MatchSequence(pair, {}), {{0, 0}, {0x20, 1}}, false, "Two-store sequence"}};
+        {matcher->MatchSequence(pair), {{0, 0}, {0x20, 1}}, false, "Two-store sequence"},
+        {matcher->MatchSequence(returning), {{0, 0}}, false, "Store ending with the moved return"},
+        {matcher->MatchSequence(branching), {{0x20, 1}}, false, "Store followed by a conditional branch that falls through"},
+        {matcher->MatchSequence(leading), {{0x20, 0}}, false, "Store after an absorbed leading instruction"}};
     constexpr std::size_t kBufferSize = 3 * 4096;
     auto* buffer = static_cast<std::uint8_t*>(mmap(nullptr, kBufferSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     require(buffer != MAP_FAILED, "cannot map the wide store buffer");
@@ -1678,6 +1805,7 @@ void wideStoreExecution() {
     const std::vector<std::size_t> alignedTargets = {0, 4096 - 32, 8192};
     for (const auto& item : cases) {
         require(item.Match.has_value(), item.Name);
+        require(Codegen::StubHasReturnBranch(item.Match->StubBody, item.Match->ReturnBranchOffset) == (item.Match->StubBody.back() != 0xC3), item.Name);
         for (const auto target : item.Aligned ? alignedTargets : unalignedTargets) {
             std::memset(buffer, 0xA5, kBufferSize);
             const auto baseOffset = static_cast<std::int64_t>(target) - item.Writes[0].Offset;
@@ -1710,6 +1838,29 @@ void immediateFormExecution() {}
 void ripRelativeExecution() {}
 void wideStoreExecution() {}
 #endif
+
+void linuxFollowerPlacement() {
+    const auto headers = elfHeaders();
+    auto patcher = linuxPatcher();
+    const auto jumping = elfFixture({0xC5, 0xFC, 0x11, 0x07, 0xEB, 0x02, 0x90, 0x90, 0xC3});
+    const auto converted = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta)->Convert(jumping, {headers[0]});
+    require(converted.Trampolines.size() == 1 && converted.Trampolines[0].Length == 6 && converted.Trampolines[0].Relocations.size() == 1, "Store before a jmp rel8 was not lowered with the jump");
+    const auto output = patcher.Patch(converted.Bytes, headers, {}, 0, "$ORIGIN/libs", true, false, converted.Trampolines);
+    require(output[0x200] == 0xE9 && output[0x205] == 0x90, "Store and jump site was not replaced by a jump and a nop");
+    const auto stub = 0x1000 + 5 + static_cast<std::int64_t>(read<std::int32_t>(output, 0x201));
+    const auto bodyOffset = executableFileOffset(output, static_cast<std::uint64_t>(stub));
+    require(output[bodyOffset + 11] == 0xE9 && stub + 16 + read<std::int32_t>(output, bodyOffset + 12) == 0x1008, "Re-emitted jump at the stub end does not reach the original target");
+    const auto returning = elfFixture({0xC5, 0xFC, 0x11, 0x07, 0xC3});
+    const auto convertedReturn = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta)->Convert(returning, {headers[0]});
+    require(convertedReturn.Trampolines.size() == 1 && convertedReturn.Trampolines[0].Length == 5, "Store before a return was not lowered with the return");
+    const auto outputReturn = patcher.Patch(convertedReturn.Bytes, headers, {}, 0, "$ORIGIN/libs", true, false, convertedReturn.Trampolines);
+    const auto returnStub = 0x1000 + 5 + static_cast<std::int64_t>(read<std::int32_t>(outputReturn, 0x201));
+    const auto returnBody = executableFileOffset(outputReturn, static_cast<std::uint64_t>(returnStub));
+    require(Bytes(outputReturn.begin() + static_cast<std::ptrdiff_t>(returnBody), outputReturn.begin() + static_cast<std::ptrdiff_t>(returnBody + 12)) == Bytes{0xC5, 0xF8, 0x11, 0x07, 0xC4, 0xE3, 0x7D, 0x19, 0x47, 0x10, 0x01, 0xC3}, "Stub ending with the moved return was not placed as is");
+    auto invalid = convertedReturn.Trampolines;
+    invalid[0].ReturnBranchOffset = 11;
+    requireFailure([&] { (void)patcher.Patch(convertedReturn.Bytes, headers, {}, 0, "$ORIGIN/libs", true, false, invalid); }, "Return branch offset pointing at a return was accepted");
+}
 
 void scannerZeroTail() {
     const auto scanner = Codegen::MakeInstructionScanner();
@@ -1753,6 +1904,7 @@ int main() {
         wideStoreOperands();
         wideStoreBodies();
         converterWideStore();
+        converterShortStoreHosting();
         converterStrayRex();
         rewriterStrayRex();
     rewriterReferenceSites();
@@ -1760,6 +1912,7 @@ int main() {
         linuxPlacement();
         linuxRipRelativePlacement();
         linuxWideStorePlacement();
+        linuxFollowerPlacement();
         scannerZeroTail();
         std::cout << "AMD64-only converter tests passed\n";
     } catch (const std::exception& error) {

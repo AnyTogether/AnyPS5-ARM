@@ -324,7 +324,7 @@ void executeSha256(const Harness& harness, const Codegen::IAmd64OnlyInstructionM
     std::vector<Bytes> sites;
     for (const auto& step : steps) sites.push_back(encodeSha256(step));
     const std::vector<std::span<const std::uint8_t>> spans(sites.begin(), sites.end());
-    const auto match = steps.size() == 1 ? matcher.Match(sites[0].data(), sites[0].size()) : matcher.MatchSequence(spans, {});
+    const auto match = steps.size() == 1 ? matcher.Match(sites[0].data(), sites[0].size()) : matcher.MatchSequence(spans);
     require(match.has_value() && match->Lowering == Codegen::Amd64OnlyLowering::Trampoline, "SHA-256 was not lowered through a stub: " + describeSha256(steps));
     std::uint16_t written = 0;
     for (const auto& step : steps) written = static_cast<std::uint16_t>(written | (1u << step.Destination));
@@ -447,7 +447,7 @@ void executeSha1(const Harness& harness, const Codegen::IAmd64OnlyInstructionMat
     std::vector<Bytes> sites;
     for (const auto& step : steps) sites.push_back(encodeSha1(step));
     const std::vector<std::span<const std::uint8_t>> spans(sites.begin(), sites.end());
-    const auto match = steps.size() == 1 ? matcher.Match(sites[0].data(), sites[0].size()) : matcher.MatchSequence(spans, {});
+    const auto match = steps.size() == 1 ? matcher.Match(sites[0].data(), sites[0].size()) : matcher.MatchSequence(spans);
     require(match.has_value() && match->Lowering == Codegen::Amd64OnlyLowering::Trampoline, "SHA-1 was not lowered through a stub: " + describeSha1(steps));
     std::uint16_t written = 0;
     for (const auto& step : steps) written = static_cast<std::uint16_t>(written | (1u << step.Destination));
@@ -507,7 +507,7 @@ void clzeroExecution(const Harness& harness, const Codegen::IAmd64OnlyInstructio
     const std::vector<ClzeroCase> cases = {
         {matcher.Match(plain.data(), plain.size()), high, 0, "clzero"},
         {matcher.Match(addressSize32.data(), addressSize32.size()), low, 0x5A5A5A5A00000000ull, "67h clzero"},
-        {matcher.MatchSequence(pair, {}), high, 0, "clzero; clzero"}};
+        {matcher.MatchSequence(pair), high, 0, "clzero; clzero"}};
     const std::array<std::uint64_t, 4> flags = {0x202, 0x203, 0x246, 0xAC7};
     for (const auto& item : cases) {
         require(item.Match.has_value() && item.Match->Lowering == Codegen::Amd64OnlyLowering::Trampoline, "CLZERO was not lowered through a stub: " + item.Name);

@@ -203,9 +203,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
     };
     for (const auto& site : image.Trampolines) {
         if (site.Length < kJmpRel32.Size || site.OriginalBytes.size() != site.Length ||
-            site.Body.size() < kJmpRel32.Size ||
-            site.ReturnBranchOffset > site.Body.size() - kJmpRel32.Size ||
-            site.Body[site.ReturnBranchOffset] != kJmpRel32.Bytes[0])
+            !Codegen::StubBodyIsValid(site.Body, site.ReturnBranchOffset))
             throw Domain::RelinkerException("Invalid AMD-only guest trampoline site", site.Offset);
         if (site.Offset > image.Bytes.size() || site.Length > image.Bytes.size() - site.Offset)
             throw Domain::RelinkerException("AMD-only guest instruction is outside the original image", site.Offset);
@@ -227,15 +225,16 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
         const auto stubOffset = bytes.size();
         const auto stubAddress = checkedAdd(extraAddress, stubOffset - extraOffset, site.Offset);
         checkedAdd(stubAddress, site.Body.size(), site.Offset);
-        const auto returnAddress = checkedAdd(site.Address, site.Length, site.Offset);
-        const auto stubReturn = checkedAdd(stubAddress, site.ReturnBranchOffset + kJmpRel32.Size, site.Offset);
         const auto siteNext = checkedAdd(site.Address, kJmpRel32.Size, site.Offset);
-        const auto returnDisplacement = displacement(returnAddress, stubReturn, site.Offset);
         const auto siteDisplacement = displacement(stubAddress, siteNext, site.Offset);
         bytes.insert(bytes.end(), site.Body.begin(), site.Body.end());
         Codegen::ApplyStubRelocations(std::span<std::uint8_t>(bytes.data() + stubOffset, site.ReturnBranchOffset), site.Relocations, site.Address, stubAddress, site.Offset);
-        Io::WriteU32(bytes, stubOffset + site.ReturnBranchOffset + 1,
-                     static_cast<std::uint32_t>(returnDisplacement));
+        if (Codegen::StubHasReturnBranch(site.Body, site.ReturnBranchOffset)) {
+            const auto returnAddress = checkedAdd(site.Address, site.Length, site.Offset);
+            const auto stubReturn = checkedAdd(stubAddress, site.ReturnBranchOffset + kJmpRel32.Size, site.Offset);
+            Io::WriteU32(bytes, stubOffset + site.ReturnBranchOffset + 1,
+                         static_cast<std::uint32_t>(displacement(returnAddress, stubReturn, site.Offset)));
+        }
         std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(site.Offset), site.Length, kNop1.Bytes[0]);
         bytes[static_cast<std::size_t>(site.Offset)] = kJmpRel32.Bytes[0];
         Io::WriteU32(bytes, static_cast<std::size_t>(site.Offset + 1),

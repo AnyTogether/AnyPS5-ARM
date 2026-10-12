@@ -4,6 +4,8 @@
 #include <codegen/x86/Amd64OnlySubstitutionTable.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/x86/IAmd64OnlyInstructionMatcher.hpp>
+#include <codegen/x86/StubBodyBuilder.hpp>
+#include <codegen/x86/X64OpcodeConstants.hpp>
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -14,6 +16,13 @@
 namespace Codegen {
 
 namespace {
+
+bool _isPadding(const std::span<const std::uint8_t> instruction, const DecodedInstructionInfo& info) {
+    using namespace X64OpcodeConstants;
+    if (info.IsTwoByteOpcode)
+        return info.Opcode == TwoByteNopModRm;
+    return info.Opcode == OneByteNop && std::all_of(instruction.begin(), instruction.begin() + static_cast<std::ptrdiff_t>(info.OpcodeOffset), [](const std::uint8_t byte) { return byte == PrefixOperandSize; });
+}
 
 template<typename TOperation>
 auto _atFileOffset(const Domain::FileByteOffset base, const TOperation& operation) {
@@ -26,7 +35,7 @@ auto _atFileOffset(const Domain::FileByteOffset base, const TOperation& operatio
 
 class Amd64OnlyConverter : public IAmd64OnlyConverter {
 public:
-    explicit Amd64OnlyConverter(const Amd64OnlyTarget target) : _matcher(MakeAmd64OnlyInstructionMatcher(target)) {}
+    explicit Amd64OnlyConverter(const Amd64OnlyTarget target) : _target(target), _matcher(MakeAmd64OnlyInstructionMatcher(target)) {}
 
     [[nodiscard]] ConvertResult Convert(
         std::vector<std::uint8_t> fileBytes,
@@ -40,8 +49,24 @@ private:
         Amd64OnlyMatch Substitution;
     };
 
+    struct SitePlan {
+        std::size_t First;
+        std::size_t End;
+        std::vector<std::span<const std::uint8_t>> Instructions;
+    };
+
+    Amd64OnlyTarget _target;
     std::unique_ptr<IAmd64OnlyInstructionMatcher> _matcher;
     std::unique_ptr<IInstructionScanner> _scanner = MakeInstructionScanner();
+
+    [[nodiscard]] SitePlan _planSite(
+        const std::vector<std::uint8_t>& seg,
+        const std::vector<InstructionMatch>& matches,
+        std::size_t index,
+        const Domain::ProgramHeader& ph,
+        const std::set<std::uint64_t>& branchTargets,
+        std::size_t coveredEnd
+    ) const;
 
     void _convertSegment(
         std::vector<std::uint8_t>& fileBytes,
@@ -72,6 +97,80 @@ std::set<std::uint64_t> Amd64OnlyConverter::_collectBranchTargets(
             targets.insert(static_cast<std::uint64_t>(target));
     }
     return targets;
+}
+
+Amd64OnlyConverter::SitePlan Amd64OnlyConverter::_planSite(
+    const std::vector<std::uint8_t>& seg,
+    const std::vector<InstructionMatch>& matches,
+    const std::size_t index,
+    const Domain::ProgramHeader& ph,
+    const std::set<std::uint64_t>& branchTargets,
+    const std::size_t coveredEnd
+) const {
+    constexpr auto kJumpSize = Amd64OnlySubstitutionTable::kJmpRel32.Size;
+    const X64InstructionDecoder decoder;
+    const auto fileOffset = static_cast<Domain::FileByteOffset>(ph.Offset + matches[index].Offset);
+    const auto bytesOf = [&](const std::size_t at) { return std::span<const std::uint8_t>(seg.data() + matches[at].Offset, matches[at].Length); };
+    const auto matchOf = [&](const std::size_t at) { return _matcher->Match(seg.data() + matches[at].Offset, matches[at].Length); };
+    const auto decode = [&](const std::size_t at) { return decoder.DecodeInstruction(seg.data() + matches[at].Offset, matches[at].Length); };
+    const auto follows = [&](const std::size_t at) { return at < matches.size() && matches[at].Offset == matches[at - 1].Offset + matches[at - 1].Length; };
+    const auto targetInside = [&](const std::size_t at) {
+        const auto start = ph.MappedAddress + matches[at].Offset;
+        const auto hit = branchTargets.lower_bound(start);
+        return hit != branchTargets.end() && *hit < start + matches[at].Length;
+    };
+
+    SitePlan plan{index, index + 1, {bytesOf(index)}};
+    std::size_t length = matches[index].Length;
+    const auto take = [&] {
+        length += matches[plan.End].Length;
+        plan.Instructions.push_back(bytesOf(plan.End++));
+    };
+    const auto mergeAdjacent = [&] {
+        while (follows(plan.End) && !targetInside(plan.End)) {
+            const auto following = matchOf(plan.End);
+            if (!following.has_value() || following->Lowering != Amd64OnlyLowering::Trampoline)
+                return;
+            take();
+        }
+    };
+    mergeAdjacent();
+    while (length < kJumpSize) {
+        if (!follows(plan.End)) {
+            if (_target != Amd64OnlyTarget::Rosetta)
+                throw CodegenException("AMD-only instruction too short for a jump and not followed by an instruction", fileOffset);
+            break;
+        }
+        if (targetInside(plan.End) || matchOf(plan.End).has_value())
+            break;
+        const auto info = decode(plan.End);
+        if (CanMoveIntoStub(info)) {
+            take();
+            if (_target == Amd64OnlyTarget::Rosetta)
+                mergeAdjacent();
+            continue;
+        }
+        if (_target == Amd64OnlyTarget::Rosetta && CanEndStub(info))
+            take();
+        break;
+    }
+    if (length >= kJumpSize)
+        return plan;
+    if (_target != Amd64OnlyTarget::Rosetta)
+        throw CodegenException("AMD-only instruction too short for a jump is followed by an instruction that cannot move", ph.Offset + matches[plan.End].Offset);
+
+    while (length < kJumpSize) {
+        if (plan.First == 0 || plan.First == coveredEnd || !follows(plan.First))
+            throw CodegenException("AMD-only instruction too short for a jump has no preceding instruction that can move", fileOffset);
+        const auto previous = plan.First - 1;
+        const auto info = decode(previous);
+        if (!CanMoveIntoStub(info) || matchOf(previous).has_value() || _isPadding(bytesOf(previous), info))
+            throw CodegenException("AMD-only instruction too short for a jump is preceded by an instruction that cannot move", ph.Offset + matches[previous].Offset);
+        length += matches[previous].Length;
+        plan.Instructions.insert(plan.Instructions.begin(), bytesOf(previous));
+        plan.First = previous;
+    }
+    return plan;
 }
 
 void Amd64OnlyConverter::_convertSegment(
@@ -107,13 +206,13 @@ void Amd64OnlyConverter::_convertSegment(
     const auto branchTargets = needsBranchTargets ? _collectBranchTargets(seg, matches, ph) : std::set<std::uint64_t>{};
 
     std::set<std::size_t> consumed;
+    std::size_t coveredEnd = 0;
     for (const auto& item : pending) {
         if (consumed.contains(item.Index))
             continue;
         const auto& match = item.Instruction;
         const auto& substitution = item.Substitution;
         const auto fileOffset = static_cast<Domain::FileByteOffset>(ph.Offset + match.Offset);
-        const auto address = static_cast<Domain::VirtualAddress>(ph.MappedAddress + match.Offset);
         std::size_t replacementLength = 0;
 
         switch (substitution.Lowering) {
@@ -123,47 +222,29 @@ void Amd64OnlyConverter::_convertSegment(
             std::copy(substitution.ReplacementBytes.begin(), substitution.ReplacementBytes.end(), seg.begin() + static_cast<std::ptrdiff_t>(match.Offset));
             replacementLength = substitution.ReplacementBytes.size();
             ++result.ReplacedCount;
+            coveredEnd = item.Index + 1;
             break;
         }
         case Amd64OnlyLowering::Trampoline: {
-            std::vector<std::size_t> taken;
             try {
-                std::size_t siteLength = match.Length;
+                const auto plan = _planSite(seg, matches, item.Index, ph, branchTargets, coveredEnd);
                 auto stub = substitution;
-                if (siteLength < Amd64OnlySubstitutionTable::kJmpRel32.Size) {
-                    const X64InstructionDecoder decoder;
-                    std::vector<std::span<const std::uint8_t>> sequence{std::span<const std::uint8_t>(seg.data() + match.Offset, match.Length)};
-                    std::size_t trailingBytes = 0;
-                    for (auto next = item.Index + 1; siteLength < Amd64OnlySubstitutionTable::kJmpRel32.Size; ++next) {
-                        if (next >= matches.size() || matches[next].Offset != match.Offset + siteLength)
-                            throw CodegenException("AMD-only instruction too short for a jump and not followed by an instruction", fileOffset);
-                        const auto& following = matches[next];
-                        const std::span<const std::uint8_t> bytes(seg.data() + following.Offset, following.Length);
-                        const auto info = decoder.DecodeInstruction(bytes.data(), bytes.size());
-                        const bool amdOnly = _matcher->Match(bytes.data(), bytes.size()).has_value();
-                        if (amdOnly && trailingBytes == 0) {
-                            sequence.push_back(bytes);
-                            taken.push_back(next);
-                        } else if (amdOnly || info.FlowKind != ControlFlowKind::Sequential || info.HasBranchTarget) {
-                            throw CodegenException("AMD-only instruction too short for a jump is followed by an instruction that cannot move", ph.Offset + following.Offset);
-                        } else {
-                            trailingBytes += following.Length;
-                        }
-                        siteLength += following.Length;
-                    }
-                    const std::span<const std::uint8_t> trailing(seg.data() + match.Offset + siteLength - trailingBytes, trailingBytes);
-                    auto relocated = _atFileOffset(fileOffset, [&] { return _matcher->MatchSequence(sequence, trailing); });
+                if (plan.Instructions.size() > 1) {
+                    auto relocated = _atFileOffset(fileOffset, [&] { return _matcher->MatchSequence(plan.Instructions); });
                     if (!relocated.has_value() || relocated->Lowering != Amd64OnlyLowering::Trampoline)
                         throw CodegenException("AMD-only instruction sequence has no out-of-line lowering", fileOffset);
                     stub = std::move(*relocated);
                 }
-                const auto hit = branchTargets.upper_bound(address);
-                if (hit != branchTargets.end() && *hit < address + siteLength)
+                const auto siteOffset = matches[plan.First].Offset;
+                const auto siteLength = static_cast<std::size_t>(matches[plan.End - 1].Offset + matches[plan.End - 1].Length - siteOffset);
+                const auto siteAddress = static_cast<Domain::VirtualAddress>(ph.MappedAddress + siteOffset);
+                const auto hit = branchTargets.upper_bound(siteAddress);
+                if (hit != branchTargets.end() && *hit < siteAddress + siteLength)
                     throw CodegenException("Branch enters an AMD-only instruction", ph.Offset + (*hit - ph.MappedAddress));
-                const auto begin = seg.begin() + static_cast<std::ptrdiff_t>(match.Offset);
+                const auto begin = seg.begin() + static_cast<std::ptrdiff_t>(siteOffset);
                 result.Trampolines.push_back({
-                    fileOffset,
-                    address,
+                    static_cast<Domain::FileByteOffset>(ph.Offset + siteOffset),
+                    siteAddress,
                     siteLength,
                     std::vector<std::uint8_t>(begin, begin + static_cast<std::ptrdiff_t>(siteLength)),
                     stub.StubBody,
@@ -171,7 +252,9 @@ void Amd64OnlyConverter::_convertSegment(
                     stub.Relocations
                 });
                 replacementLength = stub.StubBody.size();
-                consumed.insert(taken.begin(), taken.end());
+                for (auto covered = plan.First; covered < plan.End; ++covered)
+                    consumed.insert(covered);
+                coveredEnd = plan.End;
             } catch (const CodegenException&) {
                 if (!substitution.Optional)
                     throw;

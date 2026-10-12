@@ -1,6 +1,7 @@
 #include <codegen/x86/StubBodyBuilder.hpp>
 #include <codegen/x86/Amd64OnlySubstitutionTable.hpp>
 #include <codegen/x86/X64OpcodeConstants.hpp>
+#include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/CodegenException.hpp>
 #include <limits>
 
@@ -94,6 +95,38 @@ void ApplyStubRelocations(const std::span<std::uint8_t> body, const std::span<co
         for (std::size_t index = 0; index < Disp32Size; ++index)
             body[relocation.DisplacementOffset + index] = static_cast<std::uint8_t>(value >> (index * 8));
     }
+}
+
+bool CanMoveIntoStub(const DecodedInstructionInfo& info) {
+    using namespace X64OpcodeConstants;
+    if (info.FlowKind != ControlFlowKind::Sequential || info.HasBranchTarget)
+        return false;
+    return info.IsTwoByteOpcode || (info.Opcode != OneByteInt3 && info.Opcode != OneByteInt && info.Opcode != OneByteHlt);
+}
+
+bool CanEndStub(const DecodedInstructionInfo& info) {
+    using namespace X64OpcodeConstants;
+    if (info.FlowKind == ControlFlowKind::Return)
+        return !info.IsTwoByteOpcode && (info.Opcode == OneByteRetNear || info.Opcode == OneByteRetImm16);
+    if (info.OpcodeOffset != 0)
+        return false;
+    if (info.FlowKind == ControlFlowKind::UnconditionalJump)
+        return !info.IsTwoByteOpcode && (info.Opcode == OneByteJmpRel32 || info.Opcode == OneByteJmpRel8);
+    if (info.FlowKind == ControlFlowKind::ConditionalBranch)
+        return info.IsTwoByteOpcode ? info.Opcode >= TwoByteJccRel32Min && info.Opcode <= TwoByteJccRel32Max : info.Opcode >= OneByteJccRel8Min && info.Opcode <= OneByteJccRel8Max;
+    return false;
+}
+
+bool StubHasReturnBranch(const std::span<const std::uint8_t> body, const std::size_t returnBranchOffset) {
+    return returnBranchOffset < body.size();
+}
+
+bool StubBodyIsValid(const std::span<const std::uint8_t> body, const std::size_t returnBranchOffset) {
+    if (body.empty() || returnBranchOffset > body.size())
+        return false;
+    if (!StubHasReturnBranch(body, returnBranchOffset))
+        return true;
+    return body.size() - returnBranchOffset >= kJmpRel32.Size && body[returnBranchOffset] == kJmpRel32.Bytes[0];
 }
 
 void EmitSse(std::vector<std::uint8_t>& out, const std::uint8_t prefix, const std::initializer_list<std::uint8_t> opcode, const std::uint8_t dst, const std::uint8_t src) {
@@ -229,13 +262,40 @@ void StubBodyBuilder::Move(const std::span<const std::uint8_t> instruction, cons
     Advance(instruction.size());
 }
 
+void StubBodyBuilder::Branch(const std::span<const std::uint8_t> instruction) {
+    using namespace X64OpcodeConstants;
+    if (_ended)
+        throw CodegenException("Stub already ended with a return or a jump");
+    const auto info = X64InstructionDecoder{}.DecodeInstruction(instruction.data(), instruction.size());
+    if (info.Length != instruction.size() || !CanEndStub(info))
+        throw CodegenException("Instruction cannot end a stub");
+    if (info.FlowKind == ControlFlowKind::Return) {
+        Raw(instruction);
+        _ended = true;
+        Advance(instruction.size());
+        return;
+    }
+    const auto siteTarget = static_cast<std::int64_t>(_siteOffset + instruction.size()) + info.BranchDisp;
+    if (info.FlowKind == ControlFlowKind::UnconditionalJump) {
+        _bytes.push_back(OneByteJmpRel32);
+        _ended = true;
+    } else {
+        _bytes.insert(_bytes.end(), {TwoByteOpcodeEscape, static_cast<std::uint8_t>(TwoByteJccRel32Min | (info.Opcode & JccConditionMask))});
+    }
+    const auto displacementOffset = _bytes.size();
+    _bytes.insert(_bytes.end(), Disp32Size, 0);
+    _relocations.push_back({displacementOffset, _bytes.size(), siteTarget});
+    Advance(instruction.size());
+}
+
 void StubBodyBuilder::Advance(const std::size_t length) {
     _siteOffset += length;
 }
 
 LoweredBody StubBodyBuilder::Finish() {
     const auto returnBranchOffset = _bytes.size();
-    _bytes.insert(_bytes.end(), kJmpRel32.Bytes, kJmpRel32.Bytes + kJmpRel32.Size);
+    if (!_ended)
+        _bytes.insert(_bytes.end(), kJmpRel32.Bytes, kJmpRel32.Bytes + kJmpRel32.Size);
     std::vector<std::size_t> constantOffsets;
     for (const auto& constant : _constants) {
         while (_bytes.size() % kStubAlignment != 0)
@@ -249,7 +309,8 @@ LoweredBody StubBodyBuilder::Finish() {
         for (std::size_t index = 0; index < 4; ++index)
             _bytes[fixup.DisplacementOffset + index] = static_cast<std::uint8_t>(value >> (index * 8));
     }
-    return {std::move(_bytes), returnBranchOffset, std::move(_relocations)};
+    const auto recordedOffset = _ended ? _bytes.size() : returnBranchOffset;
+    return {std::move(_bytes), recordedOffset, std::move(_relocations)};
 }
 
 }

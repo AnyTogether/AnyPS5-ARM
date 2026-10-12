@@ -23,8 +23,8 @@ const Bytes kCode = {
     0x66, 0x48, 0x0F, 0x7E, 0xD0,
     0xC3,
 };
-constexpr std::uint64_t kSites[] = {10, 16};
-constexpr std::size_t kSiteLength = 6;
+constexpr std::uint64_t kSite = 10;
+constexpr std::size_t kSiteLength = 12;
 
 std::uint64_t expected(const std::uint64_t value, const std::uint64_t destination) {
     return (destination & ~0xFF0000ull) | (((value >> 8) & 0xFF) << 16);
@@ -41,17 +41,15 @@ int main(const int argc, char** argv) {
         WriteFile(input, MakeExecutable(kCode));
         const auto run = RunRelinker(argv[1], {"--skip-sce-module", "--to-intel", input.string(), output.string()}, directory.Path() / "relinker.log");
         require(run.ExitCode == 0, "Relinker failed:\n" + run.Output);
-        require(run.Output.find("Intel conversion: 0 in place, 2 stubs") != std::string::npos, "Relinker did not report two stubs:\n" + run.Output);
+        require(run.Output.find("Intel conversion: 0 in place, 1 stubs") != std::string::npos, "Relinker did not report one merged stub for the adjacent SSE4a sites:\n" + run.Output);
 
         const MappedImage image(ReadFile(output));
-        for (const auto site : kSites) {
-            const auto* bytes = image.At<const std::uint8_t>(site);
-            require(bytes[0] == 0xE9, "SSE4a site was not replaced by a jump");
-            for (std::size_t index = 5; index < kSiteLength; ++index) require(bytes[index] == 0x90, "SSE4a site tail is not padded with NOPs");
-            std::int32_t displacement;
-            std::memcpy(&displacement, bytes + 1, sizeof(displacement));
-            require(site + 5 + displacement >= kCodeSize, "SSE4a stub is inside the original code segment");
-        }
+        const auto* bytes = image.At<const std::uint8_t>(kSite);
+        require(bytes[0] == 0xE9, "Adjacent SSE4a sites were not replaced by one jump");
+        for (std::size_t index = 5; index < kSiteLength; ++index) require(bytes[index] == 0x90, "Merged SSE4a site tail is not padded with NOPs");
+        std::int32_t displacement;
+        std::memcpy(&displacement, bytes + 1, sizeof(displacement));
+        require(kSite + 5 + displacement >= kCodeSize, "SSE4a stub is inside the original code segment");
 
         const auto function = image.At<std::uint64_t(std::uint64_t, std::uint64_t)>(0);
         for (const auto [value, destination] : {std::pair{0x1122334455667788ull, 0x0123456789ABCDEFull}, {0ull, ~0ull}, {~0ull, 0ull}, {0x9E3779B97F4A7C15ull, 0x0F1E2D3C4B5A6978ull}})

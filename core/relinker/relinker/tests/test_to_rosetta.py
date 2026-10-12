@@ -1,4 +1,4 @@
-"""Check that --to-rosetta lowers what Rosetta lacks, splits 256-bit stores and keeps a store with no room for its jump, and that --to-intel and a plain relink leave them alone."""
+"""Check that --to-rosetta lowers what Rosetta lacks, splits 256-bit stores, hosts a short store with the return that follows it and keeps one that nothing can host, and that --to-intel and a plain relink leave them alone."""
 
 from pathlib import Path
 import struct
@@ -16,9 +16,12 @@ VMOVUPS_YMM = bytes.fromhex("c5fc1107")
 ADD_RCX = bytes.fromhex("4883c101")
 VMOVUPS_XMM = bytes.fromhex("c5f81107")
 VEXTRACTF128 = bytes.fromhex("c4e37d19471001")
-SITES = VMOVUPS_YMM + ADD_RCX + RDSEED + CLWB + VMOVUPS_YMM + b"\xc3"
-LOWERED = RDRAND + NOP4 + VMOVUPS_YMM + b"\xc3"
+CALL = bytes.fromhex("e800000000")
+RET = b"\xc3"
+SITES = VMOVUPS_YMM + ADD_RCX + RDSEED + CLWB + VMOVUPS_YMM + CALL + VMOVUPS_YMM + RET
+LOWERED = RDRAND + NOP4 + VMOVUPS_YMM + CALL
 SPLIT = VMOVUPS_XMM + VEXTRACTF128 + ADD_RCX + b"\xe9"
+RETURNING = VMOVUPS_XMM + VEXTRACTF128 + RET
 
 
 def executable():
@@ -43,19 +46,19 @@ def main():
             result, output = relink(relinker, directory, "keep" + "".join(options), *options)
             assert result.returncode == 0, (options, result.stdout, result.stderr)
             data = output.read_bytes()
-            assert SITES in data and LOWERED not in data and SPLIT not in data, f"{options or 'a plain relink'} changed RDSEED, CLWB or the 256-bit store"
+            assert SITES in data and LOWERED not in data and SPLIT not in data and RETURNING not in data, f"{options or 'a plain relink'} changed RDSEED, CLWB or the 256-bit stores"
         for options in (("--to-rosetta",), ("--to-rosetta", "--to-intel")):
             result, output = relink(relinker, directory, "lower" + "".join(options), *options)
             assert result.returncode == 0, (options, result.stdout, result.stderr)
             data = output.read_bytes()
-            assert LOWERED in data and SPLIT in data and SITES not in data and VMOVUPS_YMM + ADD_RCX not in data, f"{options} did not lower RDSEED and CLWB or split the 256-bit store"
-            assert "VMOVUPS -> stub at 1 sites" in result.stdout and "VMOVUPS kept at 1 sites" in result.stdout and "Intel conversion: 2 in place, 1 stubs, 1 kept" in result.stdout and "kept: no room for a jump" not in result.stdout, result.stdout
+            assert LOWERED in data and SPLIT in data and RETURNING in data and SITES not in data and VMOVUPS_YMM + ADD_RCX not in data and VMOVUPS_YMM + RET not in data, f"{options} did not lower RDSEED and CLWB, split the 256-bit stores or host the store before the return"
+            assert "VMOVUPS -> stub at 2 sites" in result.stdout and "VMOVUPS kept at 1 sites" in result.stdout and "Intel conversion: 2 in place, 2 stubs, 1 kept" in result.stdout and "kept: no room for a jump" not in result.stdout, result.stdout
         for options, lowered in ((("--macos",), False), (("--macos", "--to-intel"), False), (("--macos", "--to-rosetta"), True)):
             result, output = relink(relinker, directory, "macos" + "".join(options), *options)
             assert result.returncode == 0, (options, result.stdout, result.stderr)
             data = output.read_bytes()
             assert data[:4] == bytes.fromhex("cffaedfe"), f"{options} did not write a Mach-O"
-            assert (LOWERED in data and SPLIT in data and SITES not in data) if lowered else (SITES in data and LOWERED not in data and SPLIT not in data), f"{options} {'did not lower' if lowered else 'changed'} RDSEED, CLWB and the 256-bit store"
+            assert (LOWERED in data and SPLIT in data and RETURNING in data and SITES not in data) if lowered else (SITES in data and LOWERED not in data and SPLIT not in data and RETURNING not in data), f"{options} {'did not lower' if lowered else 'changed'} RDSEED, CLWB and the 256-bit stores"
         result, _ = relink(relinker, directory, "windows", "--to-rosetta", "--windows")
         assert result.returncode != 0 and "--to-rosetta conflicts with --windows" in result.stdout + result.stderr, "--to-rosetta together with --windows was accepted"
     print("--to-rosetta integration tests passed")
