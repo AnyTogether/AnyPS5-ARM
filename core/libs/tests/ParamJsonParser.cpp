@@ -90,11 +90,34 @@ static void CheckNumberSyntax(const std::filesystem::path& path) {
     }
 }
 
+static void CheckUtf8(const std::filesystem::path& path) {
+    const std::string prefix = R"({"titleId":"PPSA00000","localizedParameters":{"en-US":{"titleName":")";
+    const std::string suffix = R"("}}})";
+    for (const auto& title : {std::string("ASCII"), std::string("\xC2\x80"), std::string("\xE3\x82\xB2\xE3\x83\xBC\xE3\x83\xA0"),
+                              std::string("\xF0\x9F\x8E\xAE"), std::string("\xF4\x8F\xBF\xBF")}) {
+        Require(ParseText(path, prefix + title + suffix).title == title, "Valid UTF-8 title changed");
+    }
+    Require(ParseText(path, prefix + R"(\uD83C\uDFAE)" + suffix).title == "\xF0\x9F\x8E\xAE", "Escaped title changed");
+    for (const auto& title : {std::string("\x80"), std::string("\xC0\xAF"), std::string("\xC1\xBF"), std::string("\xC2"),
+                              std::string("\xE0\x80\xAF"), std::string("\xED\xA0\x80"), std::string("\xE3\x82"),
+                              std::string("\xF0\x80\x80\xAF"), std::string("\xF4\x90\x80\x80"), std::string("\xF5\x80\x80\x80"),
+                              std::string("\xFE"), std::string("\xFF"), std::string("\xC2x"), std::string("\xE3\x82x")}) {
+        bool rejected = false;
+        try { ParseText(path, prefix + title + suffix); } catch (const std::exception&) { rejected = true; }
+        Require(rejected, "Accepted malformed UTF-8 title");
+    }
+    bool rejected = false;
+    try { ParseText(path, std::string("{\"") + "\x80" + R"(":0,)" + prefix.substr(1) + "Valid" + suffix); }
+    catch (const std::exception&) { rejected = true; }
+    Require(rejected, "Accepted malformed UTF-8 object key");
+}
+
 int main() {
     const auto path = std::filesystem::temp_directory_path() / ("anyps5-param-json-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
     int result = 0;
     try {
+        CheckUtf8(path);
         CheckNumberSyntax(path);
         const std::pair<const char*, std::uint64_t> sizes[] = {
             {"", 0}, {"0", 0}, {"-0", 0}, {"0.25", 0}, {"0e3", 0}, {"0E+3", 0}, {"-0e-3", 0}, {"4096", 4096},

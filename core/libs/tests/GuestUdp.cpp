@@ -68,6 +68,13 @@ int main() {
     Require(getsockopt_nid_postfix(sender, 0xffff, 0x20, &option, &optionSize) == 0 && option != 0);
     Require(setsockopt_nid_postfix(sender, 0xffff, 12345, &enabled, sizeof(enabled)) == -1);
     Require(*__error_nid_postfix() == 42);
+#ifndef _WIN32
+    const int unconnected = socket_nid_postfix(2, 2, 0);
+    Require(unconnected >= 0);
+    Require(sendto_nid_postfix(unconnected, "x", 1, 0, nullptr, 0) == -1);
+    Require(*__error_nid_postfix() == 39);
+    Require(close_nid_postfix(unconnected) == 0);
+#endif
     const int unsized = socket_nid_postfix(2, 2, 0);
     std::array<unsigned char, 16> unsizedAddress{0, 2, 0, 0, 127, 0, 0, 1};
     Require(unsized >= 0 && bind_nid_postfix(unsized, unsizedAddress.data(), unsizedAddress.size()) == 0);

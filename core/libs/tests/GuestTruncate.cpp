@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +11,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 extern "C" {
@@ -74,8 +77,12 @@ int main() {
     Require(SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_NORMAL));
 #else
     std::filesystem::permissions(file, std::filesystem::perms::owner_read);
-    RequireFailure(truncate_nid_postfix(path.c_str(), 1), GuestEacces);
-    Require(sceKernelTruncate_nid_postfix(path.c_str(), 1) == SceKernelErrorBase + GuestEacces);
+    if (::geteuid() != 0) {
+        RequireFailure(truncate_nid_postfix(path.c_str(), 1), GuestEacces);
+        Require(sceKernelTruncate_nid_postfix(path.c_str(), 1) == SceKernelErrorBase + GuestEacces);
+    } else {
+        std::fprintf(stderr, "running as root, which ignores file permissions: the read-only cases not tested\n");
+    }
     std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
 #endif
     Require(Contents(file) == "locked");

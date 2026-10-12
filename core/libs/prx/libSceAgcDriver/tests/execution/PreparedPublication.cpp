@@ -10,6 +10,7 @@
 #include <future>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <thread>
 
 namespace {
@@ -277,6 +278,28 @@ void Registration(AgcDriver::VulkanDevice& device) {
     Require(registry->at(0x10000).back() == metadata, "changed shader metadata was treated as identical");
 }
 
+void TransactionLock() {
+    ShaderSnapshot shader{};
+    const auto publish = [&] {
+        ShaderPreparationTransaction other;
+        other.Edit(shader).rectangleRequested = true;
+        other.Commit();
+    };
+    std::optional<ShaderPreparationTransaction> open(std::in_place);
+    auto unread = std::async(std::launch::async, publish);
+    const bool unblocked = unread.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+    if (!unblocked) open.reset();
+    unread.get();
+    Require(unblocked, "an open transaction that read nothing blocked another one");
+    static_cast<void>(open->Read(shader));
+    auto waiting = std::async(std::launch::async, publish);
+    const bool excluded = waiting.wait_for(std::chrono::milliseconds(200)) == std::future_status::timeout;
+    open->Commit();
+    open.reset();
+    waiting.get();
+    Require(excluded, "a transaction ran beside one that had read prepared state");
+}
+
 }
 
 int main() {
@@ -284,6 +307,7 @@ int main() {
         Transactions();
         HeaderSelection();
         FusedHullHeaderSelection();
+        TransactionLock();
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         Registration(*device);

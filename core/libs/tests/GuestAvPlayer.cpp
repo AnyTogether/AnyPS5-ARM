@@ -723,6 +723,8 @@ void TestPlayback() {
     Check(sceAvPlayerStreamCount(player) == OperationFailed, "stream count without a source");
     Check(!sceAvPlayerIsActive(player), "active without a source");
     Check(sceAvPlayerAddSource(player, "/app0/missing.mp4") == OperationFailed, "missing file accepted");
+    Check(sceAvPlayerAddSource(player, "/app0/missing/../avplayer.mp4") == OperationFailed, "missing parent accepted");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4/../avplayer.mp4") == OperationFailed, "file parent accepted");
     Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "add source failed");
     Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == OperationFailed, "second source accepted");
     Check(WaitFor([&] { return events.Seen(EventReady); }), "ready event missing");

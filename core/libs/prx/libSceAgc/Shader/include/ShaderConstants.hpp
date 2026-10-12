@@ -19,6 +19,7 @@ constexpr std::uint32_t VGT_SHADER_STAGES_EN = 0x2D5u;
 constexpr std::uint32_t VGT_PRIMITIVE_TYPE = 0x242u;
 
 constexpr std::uint32_t GE_CNTL = 0x25Bu;
+constexpr std::uint32_t GE_USER_VGPR1 = 0x25Cu;
 constexpr std::uint32_t GE_USER_VGPR_EN = 0x262u;
 constexpr std::uint32_t GE_PC_ALLOC = 0x260u;
 

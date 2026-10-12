@@ -235,7 +235,7 @@ public:
             const auto found = views.find(base);
             if (found != views.end()) {
                 auto& view = found->second;
-                const auto stop = std::min(end, base + pageBytes);
+                const auto stop = std::min(std::min(end, base + pageBytes), nextClean == cleanRanges.end() ? end : nextClean->first);
                 if (view.protection == PAGE_NOACCESS) return false;
                 const bool pinned = view.page->pins != 0;
                 if (pinned || view.seen != view.page->generation) {
@@ -255,8 +255,8 @@ public:
                         if (!VirtualProtect(reinterpret_cast<void*>(alias), pageBytes, protection, &previous)) fail("arm shared memory write tracking");
                         other.armed = true;
                     }
-                    view.seen = view.page->generation;
-                    rememberClean(base, base + pageBytes);
+                    if (cursor == base && stop == base + pageBytes) view.seen = view.page->generation;
+                    rememberClean(cursor, stop);
                 }
                 cursor = stop;
             } else {

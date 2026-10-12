@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <exception>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -102,6 +103,75 @@ void requireExactPostDominators(const ControlFlowGraph& graph, const char* name)
             throw std::runtime_error(std::string(name) + ": block " + std::to_string(block.id) + " has " + std::to_string(block.postDominators.size()) + " post-dominators, expected " + std::to_string(expected.size()));
         }
     }
+}
+
+void requireDominatedMerges(const ControlFlowGraph& graph, const char* name) {
+    for (const auto& block : graph.blocks) {
+        const auto merge = block.terminator.mergeBlock;
+        if (merge != InvalidControlFlowId && !graph.Dominates(block.id, merge)) {
+            throw std::runtime_error(std::string(name) + ": header " + std::to_string(block.id) + " does not dominate its merge " + std::to_string(merge));
+        }
+    }
+}
+
+using Routes = std::map<std::uint32_t, bool>;
+
+std::uint32_t originalBlock(const ControlFlowGraph& graph, std::uint32_t blockId, Routes& routes) {
+    for (std::size_t step = 0; step <= graph.blocks.size(); ++step) {
+        const auto& block = graph.FindBlock(blockId);
+        const auto& terminator = block.terminator;
+        if (block.instructionBegin != block.instructionEnd) return blockId;
+        if (terminator.gotoValue >= 0) routes[terminator.gotoVariable] = terminator.gotoValue != 0;
+        if (terminator.kind == TerminatorKind::Branch) {
+            blockId = terminator.trueBlock;
+        } else if (terminator.kind == TerminatorKind::ConditionalBranch && terminator.condition == BranchCondition::GotoVariable && routes.contains(terminator.gotoVariable)) {
+            blockId = routes.at(terminator.gotoVariable) ? terminator.trueBlock : terminator.falseBlock;
+        } else {
+            break;
+        }
+    }
+    throw std::runtime_error("block " + std::to_string(blockId) + " does not lead to an original block");
+}
+
+void requireOriginalBranches(const ControlFlowGraph& graph, const std::vector<std::vector<std::uint32_t>>& successors, const char* name) {
+    std::vector<bool> seen(successors.size(), false);
+    Routes entryRoutes;
+    std::vector<std::pair<std::uint32_t, Routes>> pending{{originalBlock(graph, graph.entryBlock, entryRoutes), entryRoutes}};
+    std::vector<std::pair<std::uint32_t, Routes>> visited;
+    while (!pending.empty()) {
+        auto state = std::move(pending.back());
+        pending.pop_back();
+        if (std::find(visited.begin(), visited.end(), state) != visited.end()) continue;
+        visited.push_back(state);
+        const auto& block = graph.FindBlock(state.first);
+        const auto original = block.instructionBegin / 2;
+        std::vector<std::uint32_t> branchTargets;
+        if (block.terminator.kind == TerminatorKind::Branch) branchTargets = {block.terminator.trueBlock};
+        if (block.terminator.kind == TerminatorKind::ConditionalBranch) branchTargets = {block.terminator.trueBlock, block.terminator.falseBlock};
+        std::vector<std::uint32_t> targets;
+        for (const auto target : branchTargets) {
+            auto routes = state.second;
+            const auto reached = originalBlock(graph, target, routes);
+            targets.push_back(graph.FindBlock(reached).instructionBegin / 2);
+            pending.emplace_back(reached, std::move(routes));
+        }
+        if (targets != successors[original]) {
+            throw std::runtime_error(std::string(name) + ": block " + std::to_string(original) + " no longer branches to its original targets");
+        }
+        seen[original] = true;
+    }
+    if (std::find(seen.begin(), seen.end(), false) != seen.end()) {
+        throw std::runtime_error(std::string(name) + ": an original block is missing");
+    }
+}
+
+void requireStructuredLoop(const std::vector<std::vector<std::uint32_t>>& successors, const char* name) {
+    auto graph = makeGraph(successors);
+    Structurizer{}.Structurize(graph);
+    requireExactPostDominators(graph, name);
+    requireStructuredBranches(graph, name);
+    requireDominatedMerges(graph, name);
+    requireOriginalBranches(graph, successors, name);
 }
 
 std::vector<std::vector<std::uint32_t>> originalPostDominators(const ControlFlowGraph& graph) {
@@ -210,6 +280,13 @@ void requireOriginalDominanceSets(ControlFlowGraph graph, const char* name) {
 
 int main() {
     try {
+        auto largeBlocks = makeGraph({{1}, {2, 3}, {1, 4}, {5, 6}, {1, 7}, {8, 7}, {9, 4}, {10}, {6, 10}, {10}, {}});
+        for (auto& block : largeBlocks.blocks) block.estimatedSpirvWords = 1000u;
+        Structurizer{}.Structurize(largeBlocks);
+        requireStructuredBranches(largeBlocks, "large loop exit blocks retain the baseline result");
+        auto exitJunction = makeGraph({{1}, {2, 3}, {9}, {4, 6}, {5, 9}, {1}, {7, 8}, {9}, {1}, {}});
+        Structurizer{}.Structurize(exitJunction);
+        requireStructuredBranches(exitJunction, "shared loop exit junctions retain structured branches");
         auto nested = makeGraph({{1}, {2}, {5, 3}, {5, 4}, {7}, {6, 7}, {}, {1}});
         Structurizer{}.Structurize(nested);
         requireExactPostDominators(nested, "nested selections");
@@ -238,17 +315,19 @@ int main() {
         Structurizer{}.Structurize(innerEndingExit);
         requireExactPostDominators(innerEndingExit, "an inner loop exit that ends the program");
         requireStructuredBranches(innerEndingExit, "an inner loop exit that ends the program");
+        requireStructuredLoop({{1}, {2, 4}, {3, 4}, {4, 5}, {1, 6}, {1}, {}}, "nested selections in a loop with two latches");
+        requireStructuredLoop({{1}, {5, 2}, {5, 3}, {6, 4}, {7, 5}, {8, 1}, {1}, {1}, {}}, "nested selections on the false side in a loop with three latches");
+        requireStructuredLoop({{1}, {2, 5}, {3, 4}, {5, 6}, {5}, {1, 7}, {1}, {}}, "an if-else in a loop whose one arm continues");
+        requireStructuredLoop({{1}, {2}, {3, 4}, {2, 5}, {}, {1}}, "an inner loop that returns or continues its outer loop");
+        requireStructuredLoop({{1}, {2, 3}, {4, 5}, {}, {3, 6}, {1}, {2}}, "an inner loop that leaves both loops or continues its outer loop");
+        requireStructuredLoop({{1, 3}, {2, 4}, {3, 1}, {4}, {}}, "a loop whose latch exits into a block the branch before the loop also reaches");
+        requireStructuredLoop({{1, 2}, {3, 2}, {4}, {4, 1}, {}}, "a loop whose header exits into a block the branch before the loop also reaches");
+        requireStructuredLoop({{1, 2}, {4}, {3, 1}, {4, 2}, {}}, "a loop whose header exits into a block the branch before the loop reaches first");
         auto earlyReturn = makeGraph({{2, 1}, {4, 2}, {3, 5}, {5}, {}, {}});
         Structurizer{}.Structurize(earlyReturn);
         requireExactPostDominators(earlyReturn, "an early return inside a selection that joins its parent's merge");
         requireStructuredBranches(earlyReturn, "an early return inside a selection that joins its parent's merge");
-        for (const auto& block : earlyReturn.blocks) {
-            const auto merge = block.terminator.mergeBlock;
-            if (merge != InvalidControlFlowId && !earlyReturn.Dominates(block.id, merge)) {
-                std::fprintf(stderr, "an early return inside a selection: header %u does not dominate its merge %u\n", block.id, merge);
-                return 1;
-            }
-        }
+        requireDominatedMerges(earlyReturn, "an early return inside a selection that joins its parent's merge");
         std::vector<std::vector<std::uint32_t>> diamonds;
         for (std::uint32_t diamond = 0; diamond < 50u; ++diamond) {
             const auto head = diamond * 3u;
@@ -260,6 +339,7 @@ int main() {
         auto chain = makeGraph(diamonds);
         Structurizer{}.Structurize(chain);
         requireExactPostDominators(chain, "a chain of fifty selections");
+        requireStructuredLoop({{1}, {2, 8}, {3, 5}, {4, 8}, {7}, {6, 7}, {7, 8}, {1}, {}}, "nested selections sharing a loop continuation");
         auto sharedDiscard = makeGraph({{5, 1}, {4, 2}, {7, 3}, {7, 4}, {5}, {7, 6}, {}, {}});
         const std::vector<std::uint32_t> sharedDiscardWords{444, 1944, 68, 1128, 8, 2084, 148, 28};
         for (auto& block : sharedDiscard.blocks) {

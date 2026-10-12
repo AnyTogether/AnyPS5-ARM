@@ -151,6 +151,7 @@ struct SpirvEmitterState {
     std::uint32_t ldsBufferBase = 0;
     std::uint32_t numWorkgroupsVariable = 0;
     std::array<std::uint32_t, 2> scratchVariable {};
+    std::array<std::uint32_t, 2> vectorWindowVariable {};
     std::array<std::uint32_t, ImageBindingCount> imageVariables {};
     std::uint32_t samplerVariable = 0;
     std::uint32_t mainFunc = 0;

@@ -6,10 +6,10 @@
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include <atomic>
 #include <deque>
-#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 // No network is emulated: contexts, templates and requests can be created, but any request
 // that would touch the network fails with the library's network error.
@@ -18,9 +18,48 @@ static constexpr int ERROR_NOT_FOUND = static_cast<int>(0x80436025);
 static constexpr int ERROR_INVALID_VALUE = static_cast<int>(0x804361FE);
 static constexpr int ERROR_INVALID_ID = static_cast<int>(0x817B1100);
 static constexpr int ERROR_NULL_POINTER = static_cast<int>(0x817B1225);
+
+enum class Http2Kind : std::uint8_t { Context, Template, Request, CookieBox };
+
+struct Http2Handle {
+    Http2Kind kind;
+    int owner;
+    std::size_t poolSize;
+};
+
 static std::atomic<int> g_nextHandle{1};
-static std::mutex g_poolsMutex;
-static std::map<int, size_t> g_pools;
+static std::mutex g_handlesMutex;
+static std::unordered_map<int, Http2Handle> g_handles;
+
+static Http2Handle* FindHandle(int id, Http2Kind kind) {
+    const auto entry = g_handles.find(id);
+    return entry != g_handles.end() && entry->second.kind == kind ? &entry->second : nullptr;
+}
+
+static Http2Handle* FindAnyHandle(int id) {
+    const auto entry = g_handles.find(id);
+    return entry != g_handles.end() ? &entry->second : nullptr;
+}
+
+static std::vector<int> ReleaseOwnedHandles(int owner) {
+    std::vector<int> owned;
+    for (const auto& entry : g_handles) {
+        if (entry.second.owner == owner) owned.push_back(entry.first);
+    }
+    std::vector<int> removed;
+    for (const int id : owned) {
+        const std::vector<int> descendants = ReleaseOwnedHandles(id);
+        removed.insert(removed.end(), descendants.begin(), descendants.end());
+        g_handles.erase(id);
+        removed.push_back(id);
+    }
+    return removed;
+}
+
+static bool HandleIsLive(int id) {
+    std::lock_guard lock(g_handlesMutex);
+    return FindAnyHandle(id) != nullptr;
+}
 
 struct Http2MemoryPoolStats {
     size_t pool_size;
@@ -32,21 +71,33 @@ struct Http2MemoryPoolStats {
 static std::mutex g_completionsMutex;
 static std::unordered_map<int, std::deque<Http2AsyncResult>> g_completions;
 
+static void EraseCompletions(const std::vector<int>& ids) {
+    std::lock_guard lock(g_completionsMutex);
+    for (const int id : ids) g_completions.erase(id);
+}
+
 // Every asynchronous operation fails with the network error as soon as it is issued; its
 // completion is queued for sceHttp2WaitAsync and announced on the caller's event queue.
 static int CompleteAsync(int req_id, const Http2AsyncOption* kqueue_option, const void* option) {
     if (kqueue_option == nullptr || option != nullptr) return ERROR_INVALID_VALUE;
+    bool queued = false;
     {
-        std::lock_guard lock(g_completionsMutex);
-        Http2AsyncResult completion{};
-        completion.req_id = req_id;
-        completion.result = ERROR_NETWORK;
-        g_completions[req_id].push_back(completion);
+        std::lock_guard handlesLock(g_handlesMutex);
+        if (FindHandle(req_id, Http2Kind::Request) != nullptr) {
+            std::lock_guard completionsLock(g_completionsMutex);
+            Http2AsyncResult completion{};
+            completion.req_id = req_id;
+            completion.result = ERROR_NETWORK;
+            g_completions[req_id].push_back(completion);
+            queued = true;
+        }
     }
+    if (!queued) return ERROR_INVALID_ID;
     const int triggered = EqueueTriggerEvent_nid_postfix(kqueue_option->equeue, static_cast<uintptr_t>(kqueue_option->user_event_id), EVFILT_USER, kqueue_option->user_data);
     if (triggered != 0) {
         std::lock_guard lock(g_completionsMutex);
-        g_completions[req_id].pop_back();
+        const auto pending = g_completions.find(req_id);
+        if (pending != g_completions.end() && !pending->second.empty()) pending->second.pop_back();
         return triggered;
     }
     return 0;
@@ -63,29 +114,46 @@ int APS5_VABI sceHttp2AddRequestHeader(int id, const char* name, const char* val
 }
 
 int APS5_VABI sceHttp2CreateRequestWithURL(int tmpl_id, const char* method, const char* url, uint64_t content_length) {
-    (void)tmpl_id;
     (void)method;
     (void)url;
     (void)content_length;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock(g_handlesMutex);
+    if (FindHandle(tmpl_id, Http2Kind::Template) == nullptr) return ERROR_INVALID_ID;
+    const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    g_handles[id] = {Http2Kind::Request, tmpl_id, 0};
+    return id;
 }
 
 int APS5_VABI sceHttp2CreateTemplate(int lib_http2_ctx_id, const char* user_agent, int http_ver, int is_auto_proxy_conf) {
-    (void)lib_http2_ctx_id;
     (void)user_agent;
     (void)http_ver;
     (void)is_auto_proxy_conf;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock(g_handlesMutex);
+    if (FindHandle(lib_http2_ctx_id, Http2Kind::Context) == nullptr) return ERROR_INVALID_ID;
+    const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    g_handles[id] = {Http2Kind::Template, lib_http2_ctx_id, 0};
+    return id;
 }
 
 int APS5_VABI sceHttp2DeleteRequest(int req_id) {
-    std::lock_guard lock(g_completionsMutex);
-    g_completions.erase(req_id);
+    {
+        std::lock_guard lock(g_handlesMutex);
+        if (FindHandle(req_id, Http2Kind::Request) == nullptr) return ERROR_INVALID_ID;
+        g_handles.erase(req_id);
+    }
+    EraseCompletions({req_id});
     return 0;
 }
 
 int APS5_VABI sceHttp2DeleteTemplate(int tmpl_id) {
-    (void)tmpl_id;
+    std::vector<int> removed;
+    {
+        std::lock_guard lock(g_handlesMutex);
+        if (FindHandle(tmpl_id, Http2Kind::Template) == nullptr) return ERROR_INVALID_ID;
+        removed = ReleaseOwnedHandles(tmpl_id);
+        g_handles.erase(tmpl_id);
+    }
+    EraseCompletions(removed);
     return 0;
 }
 
@@ -114,8 +182,8 @@ int APS5_VABI sceHttp2Init(int libnet_mem_id, int libssl_ctx_id, size_t pool_siz
     (void)libssl_ctx_id;
     (void)max_concurrent_request;
     const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
-    std::lock_guard lock(g_poolsMutex);
-    g_pools[id] = pool_size;
+    std::lock_guard lock(g_handlesMutex);
+    g_handles[id] = {Http2Kind::Context, 0, pool_size};
     return id;
 }
 
@@ -223,26 +291,29 @@ int APS5_VABI sceHttp2SetTimeOut(int id, uint32_t usec) {
 }
 
 int APS5_VABI sceHttp2SslDisableOption(int id, uint32_t ssl_flags) {
-    (void)id;
     (void)ssl_flags;
-    return 0;
+    return HandleIsLive(id) ? 0 : ERROR_INVALID_ID;
 }
 
 int APS5_VABI sceHttp2SslEnableOption(int id, uint32_t ssl_flags) {
-    (void)id;
     (void)ssl_flags;
-    return 0;
+    return HandleIsLive(id) ? 0 : ERROR_INVALID_ID;
 }
 
 int APS5_VABI sceHttp2SetMinSslVersion(int id, uint32_t ssl_version) {
-    (void)id;
     (void)ssl_version;
-    return 0;
+    return HandleIsLive(id) ? 0 : ERROR_INVALID_ID;
 }
 
 int APS5_VABI sceHttp2Term(int lib_http2_ctx_id) {
-    std::lock_guard lock(g_poolsMutex);
-    g_pools.erase(lib_http2_ctx_id);
+    std::vector<int> removed;
+    {
+        std::lock_guard lock(g_handlesMutex);
+        if (FindHandle(lib_http2_ctx_id, Http2Kind::Context) == nullptr) return ERROR_INVALID_ID;
+        removed = ReleaseOwnedHandles(lib_http2_ctx_id);
+        g_handles.erase(lib_http2_ctx_id);
+    }
+    EraseCompletions(removed);
     return 0;
 }
 
@@ -250,6 +321,10 @@ int APS5_VABI sceHttp2WaitAsync(int req_id, Http2AsyncResult* result, uint32_t* 
     // Operations complete when they are issued, so there is never anything to wait for.
     (void)timeout;
     if (result == nullptr || option != nullptr) return ERROR_INVALID_VALUE;
+    {
+        std::lock_guard handlesLock(g_handlesMutex);
+        if (FindHandle(req_id, Http2Kind::Request) == nullptr) NotImplemented_nid_no_patch("sceHttp2WaitAsync: waiting on a request that was deleted or never created");
+    }
     std::lock_guard lock(g_completionsMutex);
     const auto pending = g_completions.find(req_id);
     if (pending == g_completions.end() || pending->second.empty()) return ERROR_NOT_FOUND;
@@ -265,13 +340,13 @@ int APS5_VABI sceHttp2AbortRequest(int req_id) {
 
 int APS5_VABI sceHttp2GetMemoryPoolStats(int lib_http2_ctx_id, Http2MemoryPoolStats* stats) {
     if (stats == nullptr) return ERROR_NULL_POINTER;
-    std::lock_guard lock(g_poolsMutex);
-    const auto pool = g_pools.find(lib_http2_ctx_id);
-    if (pool == g_pools.end()) {
+    std::lock_guard lock(g_handlesMutex);
+    const Http2Handle* handle = FindHandle(lib_http2_ctx_id, Http2Kind::Context);
+    if (handle == nullptr) {
         std::memset(stats, 0, sizeof(*stats));
         return ERROR_INVALID_ID;
     }
-    *stats = {pool->second, 0, 0, 0};
+    *stats = {handle->poolSize, 0, 0, 0};
     return 0;
 }
 
@@ -281,8 +356,11 @@ int APS5_VABI sceHttp2CookieFlush(int id) {
 }
 
 int APS5_VABI sceHttp2CreateCookieBox(int lib_http2_ctx_id) {
-    (void)lib_http2_ctx_id;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard lock(g_handlesMutex);
+    if (FindHandle(lib_http2_ctx_id, Http2Kind::Context) == nullptr) return ERROR_INVALID_ID;
+    const int id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    g_handles[id] = {Http2Kind::CookieBox, lib_http2_ctx_id, 0};
+    return id;
 }
 
 int APS5_VABI sceHttp2SetCookieBox(int id, int cookie_box_id) {

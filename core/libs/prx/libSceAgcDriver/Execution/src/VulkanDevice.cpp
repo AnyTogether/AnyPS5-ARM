@@ -2,6 +2,9 @@
 #include "prx/libSceAgcDriver/Graphics/include/PipelineSpecialization.hpp"
 #include "prx/libSceAgcDriver/Execution/include/CaptureTrace.hpp"
 #include "BdaAbi.hpp"
+#if ANYPS5_ENABLE_SPIRV_TOOLS
+#include "SpirvBackend/SpirvOptimizer.hpp"
+#endif
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
@@ -15,6 +18,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayFormat.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GpuColorTransfer.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
@@ -68,6 +72,50 @@ void check(VkResult result, const char* operation) {
 
 void require(bool condition, const char* reason) {
     if (!condition) throw std::runtime_error(std::string("Vulkan presentation: ") + reason);
+}
+
+bool CoreVulkanCapability(std::uint32_t capability) {
+    switch (capability) {
+        case spv::CapabilityMatrix:
+        case spv::CapabilityShader:
+        case spv::CapabilityInputAttachment:
+        case spv::CapabilitySampled1D:
+        case spv::CapabilityImage1D:
+        case spv::CapabilitySampledBuffer:
+        case spv::CapabilityImageBuffer:
+        case spv::CapabilityImageQuery:
+        case spv::CapabilityDerivativeControl:
+        case spv::CapabilityStorageImageExtendedFormats:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void CreateComputePipeline(VkDevice device, PFN_vkCreateComputePipelines create, VkPipelineCache cache, VkShaderModule module, VkPipelineLayout layout, VkPipelineCreateFlags flags, VkPipelineShaderStageCreateFlags stageFlags, const VkSpecializationInfo* specialization, std::uint32_t subgroupSize, VkPipeline* pipeline) {
+    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    info.flags = flags;
+    info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    info.stage.flags = stageFlags;
+    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    info.stage.module = module;
+    info.stage.pName = "main";
+    info.stage.pSpecializationInfo = specialization;
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT};
+    subgroup.requiredSubgroupSize = subgroupSize;
+    if (subgroupSize != 0) info.stage.pNext = &subgroup;
+    info.layout = layout;
+    check(create(device, cache, 1, &info, nullptr, pipeline), "vkCreateComputePipelines");
+}
+
+bool CaptureComputePipeline(std::size_t words) {
+    const char* minimum = std::getenv("APS5_DUMP_COMPUTE_MIN_WORDS");
+    if (minimum == nullptr) return true;
+    std::uint32_t threshold = 0;
+    const auto end = minimum + std::strlen(minimum);
+    const auto parsed = std::from_chars(minimum, end, threshold);
+    require(parsed.ec == std::errc{} && parsed.ptr == end && threshold <= ComputePipelineCapture::MaxSpirvWords, "APS5_DUMP_COMPUTE_MIN_WORDS must be an integer from 0 through 8388608");
+    return words >= threshold;
 }
 
 // The ShaderResources content cache dispatches share with recorded draws: Graphics::ResourceCache,
@@ -178,6 +226,7 @@ struct WorkgroupMemory {
 };
 
 struct VulkanDevice::State {
+    bool compileOnly = false;
     void* library = nullptr;
     PFN_vkGetInstanceProcAddr instanceProc = nullptr;
     PFN_vkGetDeviceProcAddr deviceProc = nullptr;
@@ -221,6 +270,9 @@ struct VulkanDevice::State {
     // graphics stages, and compute workgroups wider than a wave).
     bool descriptorIndexing = false;
     bool storageBufferUpdateAfterBind = false;
+    bool descriptorBindingPartiallyBound = false;
+    bool descriptorBindingVariableDescriptorCount = false;
+    bool runtimeDescriptorArray = false;
     VkPhysicalDeviceDescriptorIndexingPropertiesEXT descriptorIndexingProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT};
     bool imageInt64Atomics = false;
     bool bufferInt64Atomics = false;
@@ -568,6 +620,10 @@ struct VulkanDevice::State {
 
     ~State() {
         contextReady = false;
+        if (compileOnly && device != VK_NULL_HANDLE) {
+            reinterpret_cast<PFN_vkDestroyDevice>(deviceProc(device, "vkDestroyDevice"))(device, nullptr);
+            device = VK_NULL_HANDLE;
+        }
         if (device != VK_NULL_HANDLE) {
             const auto idle = reinterpret_cast<PFN_vkDeviceWaitIdle>(deviceProc(device, "vkDeviceWaitIdle"))(device);
             if (idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST) std::terminate();
@@ -599,6 +655,7 @@ struct VulkanDevice::State {
             // belong to this device and must be destroyed while it lives.
             Graphics::ClearCachedPipelines(device);
             Graphics::ClearDepthSurfaces(device);
+            Graphics::ClearMultisampleTargets(device);
             {
                 std::lock_guard pipelines(computePipelinesMutex);
                 computePipelines.clear();
@@ -657,7 +714,165 @@ struct VulkanDevice::State {
     }
 };
 
-VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_unique<State>()), serial([] { static std::atomic<std::uint64_t> serials{0}; return serials.fetch_add(1, std::memory_order_relaxed) + 1; }()) {
+ComputePipelineReplayResult VulkanDevice::ReplayComputePipeline(const ComputePipelineCapture& capture, std::span<const std::byte> initialCache) {
+    require(state->compileOnly, "pipeline replay requires a compile-only device");
+    const auto start = std::chrono::steady_clock::now();
+    const auto elapsed = [](auto since) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since).count(); };
+    capture.Validate();
+    require(initialCache.size() <= 64u * 1024u * 1024u, "replay pipeline cache exceeds 64 MiB");
+    if (!initialCache.empty()) {
+        require(initialCache.size() >= 32, "replay pipeline cache header is truncated");
+        const auto word = [&](std::size_t offset) {
+            std::uint32_t result = 0;
+            for (unsigned shift = 0; shift < 32; shift += 8) result |= std::to_integer<std::uint32_t>(initialCache[offset++]) << shift;
+            return result;
+        };
+        require(word(0) >= 32 && word(0) <= initialCache.size() && word(4) == VK_PIPELINE_CACHE_HEADER_VERSION_ONE, "unsupported replay pipeline cache header");
+        require(word(8) == state->properties.vendorID && word(12) == state->properties.deviceID, "replay pipeline cache belongs to another device");
+        for (std::size_t index = 0; index < VK_UUID_SIZE; ++index) require(std::to_integer<std::uint8_t>(initialCache[16 + index]) == state->properties.pipelineCacheUUID[index], "replay pipeline cache UUID differs from the driver");
+    }
+    require((capture.flags & VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR) == 0 || state->pipelineExecutableInfo, "captured pipeline statistics feature is not enabled");
+    if (capture.requiredSubgroupSize != 0) {
+        VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(state->physical, &properties);
+        require(state->computeWave32 && capture.requiredSubgroupSize >= subgroup.minSubgroupSize && capture.requiredSubgroupSize <= subgroup.maxSubgroupSize && (subgroup.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0, "captured required subgroup size is unsupported");
+    }
+    const auto target = Target();
+    require(capture.spirv[1] <= target.spirvVersion, "captured SPIR-V version exceeds enabled device support");
+    for (std::size_t cursor = 5; cursor < capture.spirv.size(); cursor += capture.spirv[cursor] >> 16u) {
+        const auto count = capture.spirv[cursor] >> 16u;
+        if ((capture.spirv[cursor] & 0xffffu) == spv::OpCapability) {
+            require(count == 2 && (CoreVulkanCapability(capture.spirv[cursor + 1]) || std::ranges::find(target.supportedCapabilities, capture.spirv[cursor + 1]) != target.supportedCapabilities.end()), "captured SPIR-V capability is not enabled");
+        }
+    }
+#if ANYPS5_ENABLE_SPIRV_TOOLS
+    static_cast<void>(ShaderRecompiler::ValidateAndOptimizeSpirv(capture.spirv, target.vulkanVersion, target.spirvVersion, target.nonConstantImageOffsets, false));
+#else
+    throw std::runtime_error("compute pipeline replay requires ANYPS5_ENABLE_SPIRV_TOOLS=ON");
+#endif
+    ShaderRecompiler::RecompileResult shader;
+    shader.spirv = capture.spirv;
+    for (const auto& value : capture.specialization) shader.specialization.push_back({value.id, value.value});
+    const Graphics::PipelineSpecialization specialization(shader);
+    const auto& limits = state->properties.limits;
+    require(capture.sets.size() <= limits.maxBoundDescriptorSets, "captured descriptor sets exceed device limits");
+    for (const auto& range : capture.pushConstants) require(range.offset + range.size <= limits.maxPushConstantsSize, "captured push constants exceed device limits");
+    struct ReplayObjects {
+        VkDevice device;
+        PFN_vkDestroyDescriptorSetLayout destroySetLayout;
+        PFN_vkDestroyPipelineCache destroyCache;
+        std::vector<VkDescriptorSetLayout> sets;
+        VkPipelineCache cache = VK_NULL_HANDLE;
+        ~ReplayObjects() {
+            for (auto layout : sets) destroySetLayout(device, layout, nullptr);
+            if (cache != VK_NULL_HANDLE) destroyCache(device, cache, nullptr);
+        }
+    } replay{state->device, state->DeviceFunction<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout"), state->DeviceFunction<PFN_vkDestroyPipelineCache>("vkDestroyPipelineCache"), {}};
+    ComputePipelineObjects objects;
+    objects.device = state->device;
+    objects.destroyModule = state->DeviceFunction<PFN_vkDestroyShaderModule>("vkDestroyShaderModule");
+    objects.destroyLayout = state->DeviceFunction<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout");
+    objects.destroyPipeline = state->DeviceFunction<PFN_vkDestroyPipeline>("vkDestroyPipeline");
+    ComputePipelineReplayResult result;
+    result.deviceName = state->properties.deviceName;
+    result.vendorId = state->properties.vendorID;
+    result.deviceId = state->properties.deviceID;
+    result.driverVersion = state->properties.driverVersion;
+    result.apiVersion = state->properties.apiVersion;
+    std::copy_n(state->properties.pipelineCacheUUID, VK_UUID_SIZE, result.pipelineCacheUuid.begin());
+    result.initialCacheBytes = initialCache.size();
+    auto phase = std::chrono::steady_clock::now();
+    VkPipelineCacheCreateInfo cacheInfo{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    cacheInfo.initialDataSize = initialCache.size();
+    cacheInfo.pInitialData = initialCache.data();
+    check(state->DeviceFunction<PFN_vkCreatePipelineCache>("vkCreatePipelineCache")(state->device, &cacheInfo, nullptr, &replay.cache), "vkCreatePipelineCache replay");
+    result.cacheMilliseconds = elapsed(phase);
+    phase = std::chrono::steady_clock::now();
+    VkShaderModuleCreateInfo moduleInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    moduleInfo.codeSize = capture.spirv.size() * sizeof(std::uint32_t);
+    moduleInfo.pCode = capture.spirv.data();
+    check(state->DeviceFunction<PFN_vkCreateShaderModule>("vkCreateShaderModule")(state->device, &moduleInfo, nullptr, &objects.module), "vkCreateShaderModule replay");
+    result.moduleMilliseconds = elapsed(phase);
+    phase = std::chrono::steady_clock::now();
+    std::array<std::array<std::uint64_t, 4>, 2> descriptorCounts{};
+    bool hasUpdateAfterBindLayout = false;
+    for (const auto& layout : capture.sets) {
+        const bool updateAfterBind = (layout.flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
+        hasUpdateAfterBindLayout |= updateAfterBind;
+        require(!updateAfterBind || state->storageBufferUpdateAfterBind, "captured update-after-bind descriptors are unsupported");
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+        std::vector<VkDescriptorBindingFlags> flags;
+        std::uint32_t variableCount = 0;
+        for (const auto& binding : layout.bindings) {
+            require((binding.flags & VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) == 0 || state->descriptorBindingPartiallyBound, "captured partially-bound descriptors are unsupported");
+            require((binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) == 0 || state->descriptorBindingVariableDescriptorCount, "captured variable descriptor count is unsupported");
+            if ((binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0) variableCount = binding.count;
+            bindings.push_back({binding.binding, binding.type, binding.count, binding.stages, nullptr});
+            flags.push_back(binding.flags);
+            const std::size_t kind = binding.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? 0 : binding.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ? 1 : binding.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? 2 : 3;
+            descriptorCounts[updateAfterBind ? 1 : 0][kind] += binding.count;
+        }
+        VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlags{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+        bindingFlags.bindingCount = static_cast<std::uint32_t>(flags.size());
+        bindingFlags.pBindingFlags = flags.data();
+        VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        info.pNext = std::ranges::any_of(flags, [](auto value) { return value != 0; }) ? &bindingFlags : nullptr;
+        info.flags = layout.flags;
+        info.bindingCount = static_cast<std::uint32_t>(bindings.size());
+        info.pBindings = bindings.data();
+        VkDescriptorSetVariableDescriptorCountLayoutSupport variableSupport{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT};
+        VkDescriptorSetLayoutSupport support{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT, variableCount != 0 ? &variableSupport : nullptr};
+        state->DeviceFunction<PFN_vkGetDescriptorSetLayoutSupport>("vkGetDescriptorSetLayoutSupport")(state->device, &info, &support);
+        require(support.supported == VK_TRUE, "captured descriptor set layout is unsupported");
+        require(variableCount <= variableSupport.maxVariableDescriptorCount, "captured variable descriptor count exceeds layout support");
+        VkDescriptorSetLayout handle = VK_NULL_HANDLE;
+        check(state->DeviceFunction<PFN_vkCreateDescriptorSetLayout>("vkCreateDescriptorSetLayout")(state->device, &info, nullptr, &handle), "vkCreateDescriptorSetLayout replay");
+        replay.sets.push_back(handle);
+    }
+    const std::array<std::uint32_t, 4> regularLimits{std::min(limits.maxDescriptorSetStorageBuffers, limits.maxPerStageDescriptorStorageBuffers), std::min(limits.maxDescriptorSetSampledImages, limits.maxPerStageDescriptorSampledImages), std::min(limits.maxDescriptorSetStorageImages, limits.maxPerStageDescriptorStorageImages), std::min(limits.maxDescriptorSetSamplers, limits.maxPerStageDescriptorSamplers)};
+    const auto& indexed = state->descriptorIndexingProperties;
+    const std::array<std::uint32_t, 4> indexedLimits{std::min(indexed.maxDescriptorSetUpdateAfterBindStorageBuffers, indexed.maxPerStageDescriptorUpdateAfterBindStorageBuffers), std::min(indexed.maxDescriptorSetUpdateAfterBindSampledImages, indexed.maxPerStageDescriptorUpdateAfterBindSampledImages), std::min(indexed.maxDescriptorSetUpdateAfterBindStorageImages, indexed.maxPerStageDescriptorUpdateAfterBindStorageImages), std::min(indexed.maxDescriptorSetUpdateAfterBindSamplers, indexed.maxPerStageDescriptorUpdateAfterBindSamplers)};
+    std::uint64_t regularResources = 0;
+    std::uint64_t indexedResources = 0;
+    for (std::size_t kind = 0; kind < regularLimits.size(); ++kind) {
+        require(descriptorCounts[0][kind] <= regularLimits[kind], "captured pipeline descriptors exceed device limits");
+        require(!hasUpdateAfterBindLayout || descriptorCounts[0][kind] + descriptorCounts[1][kind] <= indexedLimits[kind], "captured update-after-bind pipeline descriptors exceed device limits");
+        if (kind != 3) {
+            regularResources += descriptorCounts[0][kind];
+            indexedResources += descriptorCounts[0][kind] + descriptorCounts[1][kind];
+        }
+    }
+    require(regularResources <= limits.maxPerStageResources && (!hasUpdateAfterBindLayout || indexedResources <= indexed.maxPerStageUpdateAfterBindResources), "captured pipeline resources exceed device limits");
+    VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layoutInfo.setLayoutCount = static_cast<std::uint32_t>(replay.sets.size());
+    layoutInfo.pSetLayouts = replay.sets.data();
+    layoutInfo.pushConstantRangeCount = static_cast<std::uint32_t>(capture.pushConstants.size());
+    layoutInfo.pPushConstantRanges = capture.pushConstants.data();
+    check(state->DeviceFunction<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(state->device, &layoutInfo, nullptr, &objects.layout), "vkCreatePipelineLayout replay");
+    result.layoutMilliseconds = elapsed(phase);
+    phase = std::chrono::steady_clock::now();
+    CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), replay.cache, objects.module, objects.layout, capture.flags, capture.stageFlags, specialization.Info(), capture.requiredSubgroupSize, &objects.pipeline);
+    result.pipelineMilliseconds = elapsed(phase);
+    phase = std::chrono::steady_clock::now();
+    const auto getCache = state->DeviceFunction<PFN_vkGetPipelineCacheData>("vkGetPipelineCacheData");
+    std::size_t cacheBytes = 0;
+    check(getCache(state->device, replay.cache, &cacheBytes, nullptr), "vkGetPipelineCacheData size replay");
+    require(cacheBytes <= 64u * 1024u * 1024u, "exported replay pipeline cache exceeds 64 MiB");
+    result.cache.resize(cacheBytes);
+    check(getCache(state->device, replay.cache, &cacheBytes, result.cache.data()), "vkGetPipelineCacheData replay");
+    result.cache.resize(cacheBytes);
+    result.cacheMilliseconds += elapsed(phase);
+    result.totalMilliseconds = elapsed(start);
+    return result;
+}
+
+VulkanDevice::VulkanDevice(const PresentationWindow* window) : VulkanDevice(window, false) {}
+
+VulkanDevice::VulkanDevice(CompileOnly) : VulkanDevice(nullptr, true) {}
+
+VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) : state(std::make_unique<State>()), serial([] { static std::atomic<std::uint64_t> serials{0}; return serials.fetch_add(1, std::memory_order_relaxed) + 1; }()) {
+    state->compileOnly = compileOnly;
     APS5_LOG_OUT("VulkanDevice constructor window=%p", static_cast<const void*>(window));
 #ifdef _WIN32
     state->library = SDL_LoadObject("vulkan-1.dll");
@@ -996,10 +1211,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &hostProperties};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
         state->hostImportAlignment = hostProperties.minImportedHostPointerAlignment;
-        Graphics::SetHostImportWindow(8ull << 20u);
+        if (!compileOnly) Graphics::SetHostImportWindow(8ull << 20u);
 #ifdef _WIN32
         // Imported pages are locked; locking is bounded by the process working-set minimum.
-        if (const char* value = std::getenv("APS5_WORKING_SET_MIB")) {
+        if (const char* value = std::getenv("APS5_WORKING_SET_MIB"); value != nullptr && !compileOnly) {
             const SIZE_T bytes = static_cast<SIZE_T>(std::strtoull(value, nullptr, 10)) << 20u;
             if (!SetProcessWorkingSetSizeEx(GetCurrentProcess(), bytes, bytes * 2, QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE)) std::fprintf(stderr, "[gpu] SetProcessWorkingSetSizeEx failed: %lu\n", GetLastError());
         }
@@ -1177,13 +1392,16 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
         state->descriptorIndexing = descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing == VK_TRUE && descriptorIndexingFeatures.shaderStorageImageArrayNonUniformIndexing == VK_TRUE;
         state->storageBufferUpdateAfterBind = descriptorIndexingFeatures.descriptorBindingStorageBufferUpdateAfterBind == VK_TRUE;
+        state->descriptorBindingPartiallyBound = compileOnly && descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE;
+        state->descriptorBindingVariableDescriptorCount = compileOnly && descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount == VK_TRUE;
+        state->runtimeDescriptorArray = compileOnly && descriptorIndexingFeatures.runtimeDescriptorArray == VK_TRUE;
         if (state->storageBufferUpdateAfterBind) {
             VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &state->descriptorIndexingProperties};
             state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
         }
     }
     descriptorIndexingFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT};
-    if (state->descriptorIndexing || state->storageBufferUpdateAfterBind) deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+    if (state->descriptorIndexing || state->storageBufferUpdateAfterBind || state->descriptorBindingPartiallyBound || state->descriptorBindingVariableDescriptorCount || state->runtimeDescriptorArray) deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
     if (state->descriptorIndexing) {
         descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
         descriptorIndexingFeatures.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
@@ -1193,6 +1411,13 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         state->spirvExtensions.push_back("SPV_EXT_descriptor_indexing");
     }
     descriptorIndexingFeatures.descriptorBindingStorageBufferUpdateAfterBind = state->storageBufferUpdateAfterBind ? VK_TRUE : VK_FALSE;
+    descriptorIndexingFeatures.descriptorBindingPartiallyBound = state->descriptorBindingPartiallyBound ? VK_TRUE : VK_FALSE;
+    descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = state->descriptorBindingVariableDescriptorCount ? VK_TRUE : VK_FALSE;
+    descriptorIndexingFeatures.runtimeDescriptorArray = state->runtimeDescriptorArray ? VK_TRUE : VK_FALSE;
+    if (state->runtimeDescriptorArray) {
+        state->capabilities.push_back(spv::CapabilityRuntimeDescriptorArray);
+        if (!state->descriptorIndexing) state->spirvExtensions.push_back("SPV_EXT_descriptor_indexing");
+    }
     state->samplerAnisotropy = true;
     state->textureCompressionBC = true;
     deviceInfo.pEnabledFeatures = &enabled;
@@ -1260,7 +1485,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
         imageRobustnessFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &imageRobustnessFeatures;
     }
-    if (state->descriptorIndexing || state->storageBufferUpdateAfterBind) {
+    if (state->descriptorIndexing || state->storageBufferUpdateAfterBind || state->descriptorBindingPartiallyBound || state->descriptorBindingVariableDescriptorCount || state->runtimeDescriptorArray) {
         descriptorIndexingFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &descriptorIndexingFeatures;
     }
@@ -1340,6 +1565,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window) : state(std::make_u
     auto shaderProfile = std::make_unique<const ShaderDeviceProfile>(buildTarget(), deviceInfo, state->properties.limits);
     check(state->InstanceFunction<PFN_vkCreateDevice>("vkCreateDevice")(selected, &deviceInfo, nullptr, &state->device), "vkCreateDevice");
     state->shaderProfile = std::move(shaderProfile);
+    if (compileOnly) return;
     state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, family, 0, &state->queue);
     APS5_LOG_OUT("Vulkan device ready device=%p queue=%p family=%u", reinterpret_cast<void*>(state->device), reinterpret_cast<void*>(state->queue), family);
     VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -1471,6 +1697,14 @@ bool OpportunisticReap() {
     return enabled;
 }
 
+}
+
+void VulkanDevice::StoreIdleResults(bool reapFirst) {
+    if (!Graphics::StorageTexture::AnyPending()) return;
+    GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Flush);
+    std::lock_guard gpuLock(GuestMemory::GpuMutex());
+    Graphics::StorageTexture::FlushAllPending("idle");
+    SubmitRecorded(reapFirst);
 }
 
 void VulkanDevice::SubmitRecorded(bool reapFirst) {
@@ -3877,20 +4111,39 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         layoutInfo.pushConstantRangeCount = pushStages != 0 ? 1 : 0;
         layoutInfo.pPushConstantRanges = pushStages != 0 ? &push : nullptr;
         check(state->DeviceFunction<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(state->device, &layoutInfo, nullptr, &objects->layout), "vkCreatePipelineLayout");
-        VkComputePipelineCreateInfo pipelineInfo{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-        pipelineInfo.flags = (context.pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
-        pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipelineInfo.stage.module = objects->module;
-        pipelineInfo.stage.pName = "main";
+        const VkPipelineCreateFlags pipelineFlags = (context.pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
         const Graphics::PipelineSpecialization specialization(shader);
-        pipelineInfo.stage.pSpecializationInfo = specialization.Info();
-        VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT requiredSubgroup{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT};
-        requiredSubgroup.requiredSubgroupSize = std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize);
-        if (state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize)) pipelineInfo.stage.pNext = &requiredSubgroup;
-        pipelineInfo.layout = objects->layout;
+        const auto subgroupSize = state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize) ? std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize) : 0u;
+        if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
+            ComputePipelineCapture capture;
+            capture.spirv = shader.spirv;
+            ComputeDescriptorSetLayout resourcesLayout;
+            resourcesLayout.flags = resources->LayoutUpdateAfterBind() ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0;
+            const auto layoutBindings = resources->LayoutBindings();
+            const auto bindingFlags = resources->LayoutBindingFlags();
+            require(layoutBindings.size() == bindingFlags.size(), "compute capture binding flag count differs from layout");
+            for (std::size_t index = 0; index < layoutBindings.size(); ++index) {
+                const auto& binding = layoutBindings[index];
+                require(binding.pImmutableSamplers == nullptr, "compute capture does not support immutable samplers");
+                resourcesLayout.bindings.push_back({binding.binding, binding.descriptorType, binding.descriptorCount, binding.stageFlags, bindingFlags[index]});
+            }
+            capture.sets.push_back(std::move(resourcesLayout));
+            if (shader.workgroupMemoryDwords != 0) capture.sets.push_back({0, {{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0}}});
+            if (pushStages != 0) capture.pushConstants.push_back(push);
+            for (const auto& value : shader.specialization) capture.specialization.push_back({value.id, value.value});
+            capture.requiredSubgroupSize = subgroupSize;
+            capture.flags = pipelineFlags;
+            capture.deviceName = state->properties.deviceName;
+            capture.vendorId = state->properties.vendorID;
+            capture.deviceId = state->properties.deviceID;
+            capture.driverVersion = state->properties.driverVersion;
+            capture.apiVersion = state->properties.apiVersion;
+            std::copy_n(state->properties.pipelineCacheUUID, VK_UUID_SIZE, capture.pipelineCacheUuid.begin());
+            const auto path = capture.Write(directory);
+            std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
+        }
         if (profile && shader.spirv.size() > 100000) std::fprintf(stderr, "[dispatch] creating a pipeline for %zu SPIR-V words (program 0x%llx)\n", shader.spirv.size(), static_cast<unsigned long long>(programAddress));
-        check(state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines")(state->device, context.pipelineCache, 1, &pipelineInfo, nullptr, &objects->pipeline), "vkCreateComputePipelines");
+        CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, 0, specialization.Info(), subgroupSize, &objects->pipeline);
         objects->destroyModule(objects->device, objects->module, nullptr);
         objects->module = VK_NULL_HANDLE;
         Graphics::LogPipelineStatistics_nid_no_patch(context, objects->pipeline);

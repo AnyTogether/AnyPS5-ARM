@@ -25,8 +25,10 @@ int main(int argc, char** argv) {
     Require(argc == 2);
     constexpr int argumentInvalid = static_cast<int>(0x804E0902);
     constexpr int initialized = static_cast<int>(0x804E0905);
+    constexpr int notInitialized = static_cast<int>(0x804E0901);
     const auto appType = static_cast<std::int32_t>(std::strtoul(argv[1], nullptr, 16));
     std::vector<std::uint8_t> memory(0x40000, 0xAA);
+    Require(sceVoiceQoSEnd() == notInitialized);
     Require(sceVoiceQoSInit(nullptr, 0x40000, appType) == argumentInvalid);
     Require(sceVoiceQoSInit(nullptr, 0, appType) == argumentInvalid);
     for (std::uint32_t size : {0u, 1u, 0x100u, 0x3FFFFu, 0x40001u, 0x80000u, 0xFFFFFFFFu}) Require(sceVoiceQoSInit(memory.data(), size, appType) == argumentInvalid);
@@ -75,7 +77,6 @@ int main(int argc, char** argv) {
     Require(sceVoiceQoSDeleteLocalEndpoint(local) == argumentInvalid);
     Require(sceVoiceQoSDeleteRemoteEndpoint(remote) == 0);
 
-    constexpr int notInitialized = static_cast<int>(0x804E0901);
     Require(sceVoiceQoSCreateRemoteEndpoint(&remote) == 0);
     Require(sceVoiceQoSEnd() == 0);
     Require(sceVoiceQoSEnd() == notInitialized);
@@ -84,4 +85,10 @@ int main(int argc, char** argv) {
     Require(sceVoiceQoSInit(memory.data(), 0x40000, appType) == 0);
     Require(sceVoiceQoSDeleteRemoteEndpoint(remote) == argumentInvalid);
     Require(sceVoiceQoSEnd() == 0);
+    Require(sceVoiceQoSEnd() == notInitialized);
+    Require(sceVoiceQoSInit(nullptr, 0x40000, appType) == argumentInvalid);
+    Require(sceVoiceQoSInit(memory.data(), 0x40000, appType) == 0);
+    Require(sceVoiceQoSInit(memory.data(), 0x40000, appType) == initialized);
+    Require(sceVoiceQoSEnd() == 0);
+    Require(sceVoiceQoSEnd() == notInitialized);
 }

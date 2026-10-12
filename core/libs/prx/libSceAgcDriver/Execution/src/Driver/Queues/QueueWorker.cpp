@@ -6,6 +6,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/WorkerSampler.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
+#include <algorithm>
 #include <cstdlib>
 
 namespace AgcDriver::DriverDetail {
@@ -80,6 +81,24 @@ void Driver::run(std::uint32_t id) noexcept {
     try {
         for (;;) {
             submission = Submission{};
+            struct Running {
+                std::atomic<std::uint32_t>& count;
+                std::atomic<std::uint64_t>& idleEpoch;
+                std::condition_variable& changed;
+                bool active = false;
+                Running(std::atomic<std::uint32_t>& count, std::atomic<std::uint64_t>& idleEpoch, std::condition_variable& changed)
+                    : count(count), idleEpoch(idleEpoch), changed(changed) {}
+                void Start() {
+                    count.fetch_add(1, std::memory_order_acq_rel);
+                    active = true;
+                }
+                ~Running() {
+                    if (active && count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                        idleEpoch.fetch_add(1, std::memory_order_release);
+                        changed.notify_all();
+                    }
+                }
+            } running{runningWorkers, idleEpoch, changed};
             static const bool traceGpu = std::getenv("APS5_TRACE_GPU") != nullptr;
             {
                 PerformanceContext timingContext(id == 0 ? frameTiming() : FrameTiming::Async());
@@ -91,6 +110,10 @@ void Driver::run(std::uint32_t id) noexcept {
                 workerQueued() = &worker.queued;
                 if (traceGpu && pending.empty()) std::fprintf(stderr, "[gpu] %.1f idle queue=0x%x\n", TraceMs(), id);
                 const auto ready = [&] { return failure || stopping || !pending.empty(); };
+                const auto allQueuesIdle = [&] {
+                    return runningWorkers.load(std::memory_order_acquire) == 0
+                        && std::all_of(workers.begin(), workers.end(), [](const auto& item) { return item.second.pending.empty(); });
+                };
                 const auto poll = [&](const auto& done) {
 #ifdef _WIN32
                     lock.unlock();
@@ -104,9 +127,21 @@ void Driver::run(std::uint32_t id) noexcept {
 
                 while (!ready()) {
                     if (!completionsPending() || (id != 0 && Graphics::Recorder::PendingCompletionLabels() == 0)) {
+                        const auto idleEpochAtCheck = idleEpoch.load(std::memory_order_acquire);
+                        const bool storeIdleResults = id == 0 && allQueuesIdle() && !completionsPending();
+                        lock.unlock();
+                        if (storeIdleResults) {
+                            if (const auto localDevice = device.Load()) localDevice->StoreIdleResults();
+                        }
+                        lock.lock();
+                        if (ready()) break;
+                        if (id == 0 && allQueuesIdle() && !completionsPending()
+                            && (!storeIdleResults || idleEpoch.load(std::memory_order_acquire) != idleEpochAtCheck)) continue;
                         if (id == 0) queue0Dormant.store(true, std::memory_order_relaxed);
-                        changed.wait(lock, ready);
+                        const auto idleEpochAtWait = idleEpoch.load(std::memory_order_acquire);
+                        changed.wait(lock, [&] { return ready() || (id == 0 && idleEpoch.load(std::memory_order_acquire) != idleEpochAtWait); });
                         if (id == 0) queue0Dormant.store(false, std::memory_order_relaxed);
+                        if (id == 0 && !ready() && idleEpoch.load(std::memory_order_acquire) != idleEpochAtWait) continue;
                         break;
                     }
                     if (poll(ready)) break;
@@ -133,16 +168,10 @@ void Driver::run(std::uint32_t id) noexcept {
                 if (APS5_ENABLE_TIMING_LOG) submission.orderedAt = std::chrono::steady_clock::now();
                 timing.Mark("dequeue_order");
                 worker.queued.fetch_sub(1, std::memory_order_acq_rel);
+                running.Start();
                 if (profile && submission.enqueuedAt != std::chrono::steady_clock::time_point{}) costs.dequeueNs += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - submission.enqueuedAt).count());
             }
-            {
-                struct Running {
-                    std::atomic<std::uint32_t>& count;
-                    explicit Running(std::atomic<std::uint32_t>& count) : count(count) { count.fetch_add(1, std::memory_order_acq_rel); }
-                    ~Running() { count.fetch_sub(1, std::memory_order_acq_rel); }
-                } running{runningWorkers};
-                execute(submission);
-            }
+            execute(submission);
             if (traceGpu) std::fprintf(stderr, "[gpu] %.1f done serial=%llu queue=0x%x\n", TraceMs(), static_cast<unsigned long long>(submission.serial), id);
             const auto completeStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             PerformanceContext completionContext(id == 0 ? frameTiming() : FrameTiming::Async());

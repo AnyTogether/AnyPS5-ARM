@@ -1,9 +1,11 @@
 #include "prx/libSceAgcDriver/Submit/include/Acb.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <stdexcept>
 #include <thread>
@@ -20,6 +22,10 @@ struct alignas(64) LabelState {
 
 void Require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+void DelayExit() {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 
 std::array<std::uint32_t, 5> WriteData(volatile std::uint32_t* destination) {
@@ -59,7 +65,7 @@ void CheckShutdownCancellation() {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     for (const auto& state : states) {
         Require(state.label == 0, "unsatisfied label was unexpectedly signalled");
         Require(state.after == 0 && state.queued == 0, "unsatisfied wait completed before shutdown");
@@ -77,7 +83,14 @@ void CheckShutdownCancellation() {
 
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--resolution-shutdown") == 0) {
+        AgcDriverWaitIdle_nid_postfix();
+        LibcRegisterShutdown_nid_postfix(DelayExit);
+        LibcRequestExit_nid_postfix(0);
+        AgcDriverResolveShaderAbi_nid_postfix(nullptr, {}, {});
+        return 1;
+    }
     try {
         CheckShutdownCancellation();
         std::puts("unsatisfied label waits cancelled cleanly at shutdown");

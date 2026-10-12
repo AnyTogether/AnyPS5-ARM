@@ -7,6 +7,7 @@
 #include <array>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <iostream>
 
 extern "C" int APS5_VABI sceAgcLinkShaders(ShaderRegister*, ShaderRegister*, const void*, const Shader*, const Shader*, std::uint32_t);
@@ -47,6 +48,30 @@ void OptionalGeometryOutputRegister(ShaderSpecialRegs& special, const Shader& ve
     Require(rejectedMissingGeometryOutput);
     special.vgt_shader_stages_en.value = 0;
     special.vgt_gs_out_prim_type = {VGT_GS_OUT_PRIM_TYPE, 2};
+}
+
+void HandBuiltUserVgprRegister() {
+    using namespace ShaderRegs;
+    ShaderSpecialRegs handBuilt{};
+    handBuilt.ge_cntl = {GE_CNTL, 0x100u};
+    handBuilt.vgt_shader_stages_en = {VGT_SHADER_STAGES_EN, 0x2412010u};
+    handBuilt.vgt_gs_out_prim_type = {0x2ceu, 2};
+    handBuilt.ge_user_vgpr_en = {GE_USER_VGPR1, 0};
+    Shader preRaster{};
+    preRaster.type = static_cast<std::uint8_t>(ShaderBinaryType::Gs);
+    preRaster.specials = &handBuilt;
+    std::array<ShaderRegister, 2> context{};
+    std::array<ShaderRegister, 3> primitive{};
+    preparations = 0;
+    Require(sceAgcCreatePrimState(context.data(), primitive.data(), nullptr, &preRaster, 4) == 0);
+    Require(context[0].offset == VGT_SHADER_STAGES_EN && context[0].value == 0x2412010u && context[1].offset == VGT_GS_OUT_PRIM_TYPE && context[1].value == static_cast<std::uint32_t>(GsOutputPrimitiveType::Triangles));
+    Require(primitive[0].offset == GE_CNTL && primitive[0].value == 0x100u && primitive[1].offset == GE_USER_VGPR1 && primitive[1].value == 0 && primitive[2].offset == VGT_PRIMITIVE_TYPE && primitive[2].value == 4);
+    Require(preparations == 1 && stageCount == 1 && preparedPrimitive[1].offset == GE_USER_VGPR1 && preparedPrimitive[1].value == 0);
+    handBuilt.ge_cntl.offset = 0x25cu;
+    std::string message;
+    try { static_cast<void>(sceAgcCreatePrimState(context.data(), primitive.data(), nullptr, &preRaster, 4)); }
+    catch (const std::runtime_error& error) { message = error.what(); }
+    Require(message.find("GE_CNTL") != std::string::npos && message.find("0x25c") != std::string::npos);
 }
 }
 
@@ -168,6 +193,7 @@ int main() {
         Require(sceAgcCreateInterpolantMapping_0100(interpolants.data(), &vertex, nullptr) == 0);
         Require(preparations == 0 && mappings == 0 && links == 0);
         OptionalGeometryOutputRegister(special, vertex, hull);
+        HandBuiltUserVgprRegister();
         std::cout << "shader helper preparation tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

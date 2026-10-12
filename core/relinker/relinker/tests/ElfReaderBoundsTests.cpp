@@ -1,0 +1,229 @@
+#include <relinker/parsing/ElfReader.hpp>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using Bytes = std::vector<std::uint8_t>;
+
+template<typename TValue>
+void Write(Bytes& bytes, const std::size_t offset, const TValue value) {
+    if (offset > bytes.size() || sizeof(value) > bytes.size() - offset) throw std::runtime_error("Invalid fixture offset");
+    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+}
+
+Bytes Fixture() {
+    Bytes bytes(0x300);
+    const std::uint8_t magic[] = {0x7f, 'E', 'L', 'F', 2, 1, 1};
+    std::memcpy(bytes.data(), magic, sizeof(magic));
+    Write<std::uint16_t>(bytes, 16, 3);
+    Write<std::uint16_t>(bytes, 18, 62);
+    Write<std::uint32_t>(bytes, 20, 1);
+    Write<std::uint64_t>(bytes, 32, 64);
+    Write<std::uint64_t>(bytes, 40, 128);
+    Write<std::uint16_t>(bytes, 52, 64);
+    Write<std::uint16_t>(bytes, 54, 56);
+    Write<std::uint16_t>(bytes, 56, 1);
+    Write<std::uint16_t>(bytes, 58, 64);
+    Write<std::uint16_t>(bytes, 60, 3);
+    Write<std::uint16_t>(bytes, 62, 2);
+    Write<std::uint32_t>(bytes, 64, 1);
+    Write<std::uint64_t>(bytes, 72, 0x240);
+    Write<std::uint64_t>(bytes, 80, 0x1000);
+    Write<std::uint64_t>(bytes, 96, 32);
+    Write<std::uint64_t>(bytes, 104, 64);
+    Write<std::uint32_t>(bytes, 192, 1);
+    Write<std::uint32_t>(bytes, 196, 1);
+    Write<std::uint64_t>(bytes, 216, 0x240);
+    Write<std::uint64_t>(bytes, 224, 32);
+    Write<std::uint64_t>(bytes, 240, 8);
+    Write<std::uint64_t>(bytes, 248, 24);
+    Write<std::uint32_t>(bytes, 256, 7);
+    Write<std::uint32_t>(bytes, 260, 3);
+    Write<std::uint64_t>(bytes, 280, 0x200);
+    const char strings[] = "\0.text\0.shstrtab";
+    Write<std::uint64_t>(bytes, 288, sizeof(strings));
+    std::memcpy(bytes.data() + 0x200, strings, sizeof(strings));
+    return bytes;
+}
+
+void Require(const bool condition) {
+    if (!condition) throw std::runtime_error("Unexpected parsed value");
+}
+
+void RejectSections(Bytes bytes) {
+    try {
+        Relinker::ElfReader(std::move(bytes)).ReadSectionHeaders();
+    } catch (const Relinker::RelinkerException&) {
+        return;
+    }
+    throw std::runtime_error("Invalid section metadata was accepted");
+}
+
+void RejectAddress(Bytes bytes, const std::uint64_t address) {
+    try {
+        Relinker::ElfReader(std::move(bytes)).TranslateVirtualAddress(address);
+    } catch (const Relinker::RelinkerException&) {
+        return;
+    }
+    throw std::runtime_error("Invalid file mapping was accepted");
+}
+
+}
+
+int main() {
+    const std::vector<std::pair<std::string, std::function<void()>>> cases = {
+        {"section entry size field", [] {
+            const auto sections = Relinker::ElfReader(Fixture()).ReadSectionHeaders();
+            Require(sections.size() == 3 && sections[1].Name == ".text" && sections[1].EntrySize == 24);
+        }},
+        {"section header stride", [] {
+            for (const std::uint16_t stride : {0, 56, 65}) {
+                auto bytes = Fixture();
+                Write(bytes, 58, stride);
+                RejectSections(std::move(bytes));
+            }
+        }},
+        {"section name table index", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 62, 3);
+            RejectSections(std::move(bytes));
+        }},
+        {"section name table type", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 260, 1);
+            RejectSections(std::move(bytes));
+        }},
+        {"section name table range", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 288, 0x200);
+            RejectSections(std::move(bytes));
+        }},
+        {"section name offset", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 192, 64);
+            bytes[0x240] = 'X';
+            RejectSections(std::move(bytes));
+        }},
+        {"section name terminator", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 288, 5);
+            RejectSections(std::move(bytes));
+        }},
+        {"section header table truncation", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 62, 0);
+            bytes.resize(128 + 3 * 64 - 1);
+            RejectSections(std::move(bytes));
+        }},
+        {"translation program header stride", [] {
+            for (const std::uint16_t stride : {0, 48, 64}) {
+                auto bytes = Fixture();
+                Write(bytes, 54, stride);
+                RejectAddress(std::move(bytes), 0x1008);
+            }
+        }},
+        {"translation virtual boundary", [] {
+            auto bytes = Fixture();
+            const auto start = std::numeric_limits<std::uint64_t>::max() - 31;
+            Write(bytes, 80, start);
+            Require(Relinker::ElfReader(std::move(bytes)).TranslateVirtualAddress(start + 16) == 0x250);
+        }},
+        {"translation overflowing file offset", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 72, std::numeric_limits<std::uint64_t>::max() - 3);
+            RejectAddress(std::move(bytes), 0x1008);
+        }},
+        {"translation file mapping range", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 72, 0x2f0);
+            RejectAddress(std::move(bytes), 0x1008);
+        }},
+        {"empty and absent name tables", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 62, 0);
+            const auto unnamed = Relinker::ElfReader(bytes).ReadSectionHeaders();
+            Require(unnamed.size() == 3 && unnamed[1].Name.empty());
+            Write<std::uint16_t>(bytes, 62, 2);
+            Write<std::uint64_t>(bytes, 288, 0);
+            Write<std::uint32_t>(bytes, 192, 0);
+            Write<std::uint32_t>(bytes, 256, 0);
+            const auto empty = Relinker::ElfReader(std::move(bytes)).ReadSectionHeaders();
+            Require(empty.size() == 3 && empty[1].Name.empty());
+        }},
+        {"section name at table boundary", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 192, 17);
+            RejectSections(std::move(bytes));
+        }},
+        {"section name table offset overflow", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 280, std::numeric_limits<std::uint64_t>::max() - 3);
+            RejectSections(std::move(bytes));
+        }},
+        {"section table offset overflow", [] {
+            auto bytes = Fixture();
+            Write<std::uint16_t>(bytes, 62, 0);
+            Write<std::uint64_t>(bytes, 40, std::numeric_limits<std::uint64_t>::max() - 31);
+            RejectSections(std::move(bytes));
+        }},
+        {"valid string table suffix and final null", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 192, 2);
+            Write<std::uint32_t>(bytes, 256, 16);
+            const auto sections = Relinker::ElfReader(std::move(bytes)).ReadSectionHeaders();
+            Require(sections[1].Name == "text" && sections[2].Name.empty());
+        }},
+        {"ELF without section or program tables", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 32, 0);
+            Write<std::uint64_t>(bytes, 40, 0);
+            Write<std::uint16_t>(bytes, 54, 0);
+            Write<std::uint16_t>(bytes, 56, 0);
+            Write<std::uint16_t>(bytes, 58, 0);
+            Write<std::uint16_t>(bytes, 60, 0);
+            Write<std::uint16_t>(bytes, 62, 0);
+            const Relinker::ElfReader reader(bytes);
+            Require(reader.ReadProgramHeaders().empty() && reader.ReadSectionHeaders().empty());
+            RejectAddress(std::move(bytes), 0);
+        }},
+        {"translation truncated program header table", [] {
+            auto bytes = Fixture();
+            std::memcpy(bytes.data() + 0x2c8, bytes.data() + 64, 56);
+            Write<std::uint64_t>(bytes, 32, 0x2c8);
+            Write<std::uint16_t>(bytes, 56, 2);
+            RejectAddress(std::move(bytes), 0x1008);
+        }},
+        {"translation below segment and at virtual maximum", [] {
+            RejectAddress(Fixture(), 0x0fff);
+            auto bytes = Fixture();
+            const auto maximum = std::numeric_limits<std::uint64_t>::max();
+            Write(bytes, 80, maximum - 31);
+            Require(Relinker::ElfReader(std::move(bytes)).TranslateVirtualAddress(maximum) == 0x25f);
+        }},
+        {"ordinary translations and zero fill", [] {
+            const Relinker::ElfReader reader(Fixture());
+            Require(reader.TranslateVirtualAddress(0x1000) == 0x240);
+            Require(reader.TranslateVirtualAddress(0x101f) == 0x25f);
+            RejectAddress(Fixture(), 0x1020);
+        }},
+    };
+    std::size_t failures = 0;
+    for (const auto& [name, test] : cases) {
+        try {
+            test();
+            std::cout << "PASS: " << name << '\n';
+        } catch (const std::exception& error) {
+            ++failures;
+            std::cerr << "FAIL: " << name << ": " << error.what() << '\n';
+        }
+    }
+    return failures == 0 ? 0 : 1;
+}

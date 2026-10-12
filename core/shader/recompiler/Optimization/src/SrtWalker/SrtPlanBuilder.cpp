@@ -103,9 +103,7 @@ void PlanBuilder::PatchReads() {
         IrValue& flat = builder.Emit(IrOpcode::ReadConst, IrType::U32, {&resource, &slotConstant});
         block->RemoveInstruction(&flat);
         block->InsertInstructionBefore(patch.inst, &flat);
-        for (const auto& use : std::vector<IrUse>(patch.inst->OperandUses())) {
-            use.user->ReplaceArgument(use.operand, &flat);
-        }
+        patch.inst->ReplaceAllUsesWith(&flat);
         for (auto& info : _program.Metadata().blockInfo) {
             if (info.condition != nullptr && info.condition->Resolve() == patch.inst) {
                 info.condition = &flat;

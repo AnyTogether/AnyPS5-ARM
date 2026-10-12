@@ -20,6 +20,7 @@ extern "C" void* APS5_VABI dlopen_nid_postfix(const char* path, int flags);
 
 namespace {
 
+constexpr int SCE_SYSMODULE_ERROR_INVALID_VALUE = static_cast<int>(0x805A1000);
 constexpr int SCE_SYSMODULE_ERROR_UNLOADED = static_cast<int>(0x805A1001);
 constexpr int kRtldNow = 2;
 
@@ -117,7 +118,7 @@ int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t
 
 int APS5_VABI sceSysmoduleIsLoaded(std::uint16_t id) {
     if (id == 0) {
-        throw std::runtime_error("sceSysmoduleIsLoaded: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
@@ -134,7 +135,7 @@ int APS5_VABI sceSysmoduleIsLoaded(std::uint16_t id) {
 
 int APS5_VABI sceSysmoduleLoadModule(std::uint16_t id) {
     if (id == 0) {
-        throw std::runtime_error("sceSysmoduleLoadModule: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
@@ -151,7 +152,7 @@ int APS5_VABI sceSysmoduleLoadModuleInternalWithArg(std::uint32_t id, int argc, 
     (void)argv;
     (void)unk;
     if ((id & 0x7fffffffu) == 0) {
-        throw std::runtime_error("sceSysmoduleLoadModuleInternalWithArg: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         throw std::runtime_error(std::string("sceSysmoduleLoadModuleInternalWithArg: unknown id ") + std::to_string(id));
@@ -166,7 +167,7 @@ int APS5_VABI sceSysmoduleLoadModuleInternalWithArg(std::uint32_t id, int argc, 
 
 int APS5_VABI sceSysmoduleUnloadModule(std::uint16_t id) {
     if (id == 0) {
-        throw std::runtime_error("sceSysmoduleUnloadModule: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
@@ -183,7 +184,7 @@ int APS5_VABI sceSysmoduleUnloadModule(std::uint16_t id) {
 
 int APS5_VABI sceSysmoduleLoadModuleInternal(std::uint32_t id) {
     if ((id & 0x7fffffffu) == 0) {
-        throw std::runtime_error("sceSysmoduleLoadModuleInternal: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         throw std::runtime_error(std::string("sceSysmoduleLoadModuleInternal: unknown id ") + std::to_string(id));
@@ -195,7 +196,7 @@ int APS5_VABI sceSysmoduleLoadModuleInternal(std::uint32_t id) {
 
 int APS5_VABI sceSysmoduleUnloadModuleInternal(std::uint32_t id) {
     if ((id & 0x7fffffffu) == 0) {
-        throw std::runtime_error("sceSysmoduleUnloadModuleInternal: invalid id 0");
+        return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
     if (!findModuleName(id)) {
         throw std::runtime_error(std::string("sceSysmoduleUnloadModuleInternal: unknown id ") + std::to_string(id));

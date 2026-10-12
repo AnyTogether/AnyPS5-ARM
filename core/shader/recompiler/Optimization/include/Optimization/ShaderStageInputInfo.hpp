@@ -127,6 +127,7 @@ struct ShaderVertexInputInfo {
     int fetchBufferReg = 0;
     int buffersNum = 0;
     std::uint32_t scratchSizeDwords = 0;
+    std::uint32_t hostSubgroupSize = 64;
     std::uint32_t paClVsOutCntl = 0;
     ShaderClipSpaceTransform clipSpace;
     ShaderMeshInputInfo mesh;

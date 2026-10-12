@@ -1,4 +1,3 @@
-#include <atomic>
 #include <algorithm>
 #include <cstdint>
 #include <cstddef>
@@ -15,7 +14,9 @@
 #endif
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
+#include "prx/libc/include/CreationMask.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -36,8 +37,12 @@ constexpr int GuestEfault = 14;
 constexpr int GuestEinval = 22;
 constexpr int GuestEexist = 17;
 constexpr int GuestExdev = 18;
-
-std::atomic<std::uint16_t> creationMask{022};
+constexpr int GuestEdeadlk = 11;
+constexpr int GuestEagain = 35;
+constexpr int GuestEloop = 62;
+constexpr int GuestEnametoolong = 63;
+constexpr int GuestEnotempty = 66;
+constexpr int GuestEoverflow = 84;
 
 std::int64_t Fail(int error) {
     *__error_nid_postfix() = error;
@@ -45,7 +50,14 @@ std::int64_t Fail(int error) {
 }
 
 int GuestError(const std::error_code& error) {
-    const int value = error.default_error_condition().value();
+    const auto condition = error.default_error_condition();
+    if (condition == std::errc::resource_unavailable_try_again) return GuestEagain;
+    if (condition == std::errc::resource_deadlock_would_occur) return GuestEdeadlk;
+    if (condition == std::errc::too_many_symbolic_link_levels) return GuestEloop;
+    if (condition == std::errc::filename_too_long) return GuestEnametoolong;
+    if (condition == std::errc::directory_not_empty) return GuestEnotempty;
+    if (condition == std::errc::value_too_large) return GuestEoverflow;
+    const int value = condition.value();
     return value > 0 && value <= 34 ? value : GuestEio;
 }
 }
@@ -62,7 +74,7 @@ int APS5_VABI setsid_nid_postfix(void) {
 }
 
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t mask) {
-    return creationMask.exchange(static_cast<std::uint16_t>(mask & 07777));
+    return File::ExchangeCreationMask_nid_no_patch(mask);
 }
 
 int APS5_VABI _fstatfs_nid_postfix(int d, void* buf);
@@ -75,7 +87,8 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
     if (path == nullptr) return Fail(GuestEfault);
     if (*path == '\0') return Fail(GuestEnoent);
     if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
-    const auto native = ResolvePath_nid_no_patch(path);
+    std::filesystem::path native;
+    if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
 #ifdef _WIN32
     const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
@@ -99,8 +112,9 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std:
 int APS5_VABI link_nid_postfix(const char* existing, const char* created) {
     if (existing == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*existing == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
-    const auto source = ResolvePath_nid_no_patch(existing);
-    const auto destination = ResolvePath_nid_no_patch(created);
+    std::filesystem::path source, destination;
+    if (const int error = ResolvePathError_nid_no_patch(existing, source)) return static_cast<int>(Fail(error));
+    if (const int error = ResolvePathError_nid_no_patch(created, destination)) return static_cast<int>(Fail(error));
     std::error_code error;
     const auto status = std::filesystem::symlink_status(source, error);
     if (!std::filesystem::exists(status)) return static_cast<int>(Fail(GuestEnoent));
@@ -134,7 +148,8 @@ int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
         NotImplemented_nid_no_patch("symlink: absolute targets");
         return -1;
     }
-    const auto native = ResolvePath_nid_no_patch(created);
+    std::filesystem::path native;
+    if (const int error = ResolvePathError_nid_no_patch(created, native)) return static_cast<int>(Fail(error));
     std::error_code error;
 #ifdef _WIN32
     if (GetFileAttributesW(native.wstring().c_str()) != INVALID_FILE_ATTRIBUTES) return static_cast<int>(Fail(GuestEexist));

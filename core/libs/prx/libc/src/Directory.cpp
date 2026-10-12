@@ -1,5 +1,6 @@
 #include "prx/libc/include/GuestDirectory.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/FilesystemError.hpp"
 #include <dirent.h>
 #include <cerrno>
 #include <cstring>
@@ -79,7 +80,7 @@ void* APS5_VABI opendir_nid_postfix(const char* path) {
     if (!*path) { errno = 2; return nullptr; }
     try {
         auto directory = std::make_unique<Directory>();
-        directory->path = ResolvePath_nid_no_patch(path);
+        if (const int error = ResolvePathError_nid_no_patch(path, directory->path)) { errno = error; return nullptr; }
         directory->native = OpenNative(directory->path);
         if (!directory->native) { errno = DirectoryError(errno); return nullptr; }
         return directory.release();

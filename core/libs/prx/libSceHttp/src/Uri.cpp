@@ -182,7 +182,7 @@ int APS5_VABI sceHttpUriBuild(char* out, size_t* require, size_t prepare, const 
 
     std::string uri;
     if (option & URI_BUILD_WITH_SCHEME && !scheme.empty()) uri.append(scheme).push_back(':');
-    if (!src_element->opaque && option & URI_BUILD_WITH_HOSTNAME) uri.append("//");
+    if (!src_element->opaque) uri.append("//");
     uri.append(username);
     if (!password.empty()) uri.append(":").append(password);
     if (!username.empty() || !password.empty()) uri.push_back('@');

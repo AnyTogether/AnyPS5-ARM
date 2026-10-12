@@ -179,4 +179,34 @@ int APS5_VABI sceSslGetSubjectName(int sslCtxId, const void* cert, void** certNa
     return CertNameQuery(__func__, sslCtxId, cert, certName);
 }
 
+int APS5_VABI sceSslCreateConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslDeleteConnection(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslEnableVerifyOption(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslConnect(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslRead(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSslWrite(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

@@ -40,8 +40,9 @@ int APS5_VABI scePthreadSetaffinity(Pthread thread, KernelCpumask mask);
 KernelCpumask APS5_VABI sceKernelGetAvailableCpumask(void);
 int APS5_VABI getpid_nid_postfix(void);
 
-// The root and process sets hold every CPU the title may use; only the calling thread can be
-// named by thread id, since guest threads are not indexed by id.
+// The root set and the cpuset hold every CPU the title may use, and the process's own set is the
+// union of its live threads' masks; only the calling thread can be named by thread id, since guest
+// threads are not indexed by id.
 int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t id, std::size_t size, void* mask) {
     constexpr int LevelRoot = 1, LevelCpuset = 2, LevelWhich = 3;
     constexpr int WhichThread = 1, WhichProcess = 2;
@@ -59,6 +60,10 @@ int APS5_VABI cpuset_getaffinity_nid_postfix(int level, int which, std::int64_t 
     if (!mask) return fail(GuestEfault);
     KernelCpumask affinity = sceKernelGetAvailableCpumask();
     if (level == LevelWhich && which == WhichThread) scePthreadGetaffinity(scePthreadSelf(), &affinity);
+    else if (level == LevelWhich && which == WhichProcess) {
+        scePthreadSelf();
+        affinity = LiveGuestThreadsAffinity();
+    }
     std::memset(mask, 0, size);
     std::memcpy(mask, &affinity, sizeof(affinity));
     return 0;

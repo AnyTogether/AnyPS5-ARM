@@ -203,7 +203,7 @@ long double APS5_VABI strtold_nid_postfix(const char* str, char** endptr) {
 }
 
 int APS5_VABI atoi_nid_postfix(const char* str) {
-    return std::atoi(str);
+    return static_cast<int>(strtol_nid_postfix(str, nullptr, 10));
 }
 
 std::int64_t APS5_VABI atol_nid_postfix(const char* str) {
@@ -452,6 +452,25 @@ size_t APS5_VABI wcsspn_nid_postfix(const char16_t* s, const char16_t* accept) {
     size_t count = 0;
     while (s[count] != 0 && Contains(accept, s[count])) ++count;
     return count;
+}
+
+char16_t* APS5_VABI wcstok_nid_postfix(char16_t* text, const char16_t* delimiters, char16_t** last) {
+    if (text == nullptr) text = *last;
+    if (text == nullptr) return nullptr;
+    while (*text != 0 && Contains(delimiters, *text)) ++text;
+    if (*text == 0) {
+        *last = nullptr;
+        return nullptr;
+    }
+    char16_t* end = text;
+    while (*end != 0 && !Contains(delimiters, *end)) ++end;
+    if (*end == 0) {
+        *last = nullptr;
+    } else {
+        *end = 0;
+        *last = end + 1;
+    }
+    return text;
 }
 
 char16_t* APS5_VABI wmemset_nid_postfix(char16_t* s, char16_t c, size_t n) {

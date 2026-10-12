@@ -2,6 +2,7 @@
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <io/BufferUtils.hpp>
 #include <stdexcept>
+#include <limits>
 
 namespace Elfpatcher {
 
@@ -43,17 +44,32 @@ void SectionHeaderTableBuilder::WriteTable(
     const auto phOffset = Io::ReadU64(buf, kEhdrPhOffOffset);
     const auto phCount = Io::ReadU16(buf, kEhdrPhNumOffset);
     const auto phStride = Io::ReadU16(buf, kEhdrPhEntSizeOffset);
-    const auto mappedAddress = [&](std::uint64_t offset) {
+    if (phStride < 56 || phOffset > buf.size() || phCount > (buf.size() - phOffset) / phStride)
+        throw std::runtime_error("Output program header table is out of bounds");
+    const auto mappedAddress = [&](std::uint64_t offset, std::uint64_t sectionSize) {
+        if (offset > buf.size() || sectionSize > buf.size() - offset)
+            throw std::runtime_error("Allocated output section exceeds file");
         for (std::uint16_t index = 0; index < phCount; ++index) {
             const auto header = phOffset + index * phStride;
             if (Io::ReadU32(buf, header) != PT_LOAD) continue;
             const auto start = Io::ReadU64(buf, header + 8);
             const auto size = Io::ReadU64(buf, header + 32);
-            if (offset >= start && offset - start < size)
-                return Io::ReadU64(buf, header + 16) + offset - start;
+            if (offset >= start && offset - start <= size && sectionSize <= size - (offset - start)) {
+                const auto relative = offset - start;
+                const auto address = Io::ReadU64(buf, header + 16);
+                if (relative > std::numeric_limits<std::uint64_t>::max() - address ||
+                    sectionSize > std::numeric_limits<std::uint64_t>::max() - (address + relative))
+                    throw std::runtime_error("Allocated output section address overflowed");
+                return address + relative;
+            }
         }
         throw std::runtime_error("Allocated output section is outside load segments");
     };
+
+    const auto dynStrAddress = mappedAddress(request.DynStrOffset, request.DynStrSize);
+    const auto dynSymAddress = mappedAddress(request.DynSymOffset, request.DynSymSize);
+    const auto dynamicAddress = mappedAddress(request.DynamicSegmentOffset, request.DynamicSegmentSize);
+    const auto stubAddress = mappedAddress(request.StubOffset, request.StubSize);
 
     const auto shStrTabOff = static_cast<std::uint64_t>(buf.size());
     constexpr std::uint64_t shStrTabSize = sizeof(kShStrTabBlob);
@@ -65,10 +81,10 @@ void SectionHeaderTableBuilder::WriteTable(
 
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 0, 0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0);
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 1, kShStrTabNameOffset, SHT_STRTAB, 0, shStrTabOff, shStrTabOff, shStrTabSize, 0, 0, kNoSpecialAlignment, 0);
-    _writeSectionHeader(buf, shOff + kShdrEntrySize * 2, kDynStrNameOffset, SHT_STRTAB, SHF_ALLOC, mappedAddress(request.DynStrOffset), request.DynStrOffset, request.DynStrSize, 0, 0, kNoSpecialAlignment, 0);
-    _writeSectionHeader(buf, shOff + kShdrEntrySize * 3, kDynSymNameOffset, SHT_DYNSYM, SHF_ALLOC, mappedAddress(request.DynSymOffset), request.DynSymOffset, request.DynSymSize, kDynSymLinkToStrTab, kDynSymInfoFirstGlobal, kDynSymAlign, kSymEntrySize);
-    _writeSectionHeader(buf, shOff + kShdrEntrySize * 4, kDynamicNameOffset, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, mappedAddress(request.DynamicSegmentOffset), request.DynamicSegmentOffset, request.DynamicSegmentSize, kDynamicLinkToStrTab, 0, kDynSymAlign, kDynEntrySize);
-    _writeSectionHeader(buf, shOff + kShdrEntrySize * 5, kTextNameOffset, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, mappedAddress(request.StubOffset), request.StubOffset, request.StubSize, 0, 0, kNoSpecialAlignment, 0);
+    _writeSectionHeader(buf, shOff + kShdrEntrySize * 2, kDynStrNameOffset, SHT_STRTAB, SHF_ALLOC, dynStrAddress, request.DynStrOffset, request.DynStrSize, 0, 0, kNoSpecialAlignment, 0);
+    _writeSectionHeader(buf, shOff + kShdrEntrySize * 3, kDynSymNameOffset, SHT_DYNSYM, SHF_ALLOC, dynSymAddress, request.DynSymOffset, request.DynSymSize, kDynSymLinkToStrTab, kDynSymInfoFirstGlobal, kDynSymAlign, kSymEntrySize);
+    _writeSectionHeader(buf, shOff + kShdrEntrySize * 4, kDynamicNameOffset, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, dynamicAddress, request.DynamicSegmentOffset, request.DynamicSegmentSize, kDynamicLinkToStrTab, 0, kDynSymAlign, kDynEntrySize);
+    _writeSectionHeader(buf, shOff + kShdrEntrySize * 5, kTextNameOffset, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, stubAddress, request.StubOffset, request.StubSize, 0, 0, kNoSpecialAlignment, 0);
 
     _byteWriter->WriteU64(buf, kEhdrShOffOffset, shOff);
     _byteWriter->WriteU16(buf, kEhdrShEntSizeOffset, static_cast<std::uint16_t>(kShdrEntrySize));

@@ -39,13 +39,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="anyps5-module-dir-") as directory:
         work = Path(directory)
 
-        def convert(case, windows, options, executable=None):
+        def convert(case, windows, options, executable=None, cwd=None):
             (case / "sce_module").mkdir(parents=True, exist_ok=True)
             source = case / "input.elf"
             source.write_bytes(main_fixture() if executable is None else executable)
             output = case / ("output.exe" if windows else "output.elf")
             result = subprocess.run([str(relinker), *(["--windows"] if windows else []), *options, str(source), str(output)],
-                                    capture_output=True, text=True, timeout=30)
+                                    cwd=cwd, capture_output=True, text=True, timeout=30)
             return result, output
 
         for windows in (False, True):
@@ -101,6 +101,46 @@ def main():
 
             result, output = convert(case, windows, ["--skip-sce-module", "--module-dir", "Media/Plugins"])
             assert result.returncode != 0 and "conflicts with --skip-sce-module" in result.stderr, result.stderr
+
+            for index, (name, relative) in enumerate((("..plugins", "..plugins"), ("Media/../..plugins", "..plugins"),
+                                                       ("./..plugins/.", "..plugins"), ("Media/../Media/Plugins", "Media/Plugins"),
+                                                       ("Media/Plugins/", "Media/Plugins"))):
+                case = work / f"{windows}-relative-{index}"
+                (case / "Media" / "Plugins").mkdir(parents=True)
+                (case / "..plugins").mkdir()
+                source = case / relative / "plugin.prx"
+                original = bytes(module_with_symbol(True))
+                source.write_bytes(original)
+                result, output = convert(case, windows, ["--module-dir", name])
+                assert result.returncode == 0, (name, result.stdout, result.stderr)
+                artifact = case / "app0" / relative / "plugin.prx.guest.prx"
+                assert list(case.rglob("*.guest.prx")) == [artifact]
+                assert artifact.read_bytes().startswith(b"MZ" if windows else b"\x7fELF")
+                assert source.read_bytes() == original
+                if windows:
+                    assert "__aps5_guest_initialize" in pe_export_names(artifact.read_bytes()), name
+                else:
+                    assert not needed_libraries(output.read_bytes()), name
+                if windows and os.name == "nt":
+                    run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+                    assert run.returncode == 42, (run.returncode, run.stdout, run.stderr)
+
+            case = work / f"{windows}-rooted"
+            (case / "Media" / "Plugins").mkdir(parents=True)
+            (case / "..plugins").mkdir()
+            external = work / f"{windows}-external"
+            external.mkdir()
+            original = bytes(module_with_symbol(True))
+            for directory in (external, case / "..plugins"):
+                (directory / "plugin.prx").write_bytes(original)
+            rejected = [str(external), "../" + external.name, "Media/../../" + external.name]
+            if os.name == "nt":
+                rejected.extend((str(external)[len(external.drive):], case.drive + "..plugins", case.drive))
+            for name in rejected:
+                result, output = convert(case, windows, ["--module-dir", name], cwd=case)
+                assert result.returncode == 2 and "inside the guest module parent directory" in result.stderr, (name, result.stderr)
+                assert not output.exists() and not list(case.rglob("*.guest.prx"))
+                assert (external / "plugin.prx").read_bytes() == original
     print("Guest module directory option tests passed")
 
 

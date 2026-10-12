@@ -13,7 +13,40 @@ void TranslateControlFlowInstruction(IrBuilder& builder, const RdnaInstruction& 
 }
 
 void TranslationContext::sSubvectorLoop(const RdnaInstruction& inst, bool begin) {
-    throw std::runtime_error("GNM subvector loop instructions are not supported by this translator");
+    if (program.WaveSize() != 64u) {
+        throw std::runtime_error(std::string(begin ? "s_subvector_loop_begin" : "s_subvector_loop_end") + " in a wave" + std::to_string(program.WaveSize()) + " shader is not measured, only wave64 subvector loops are supported");
+    }
+    if (inst.destination.kind != RdnaOperandKind::ScalarRegister) {
+        throw std::runtime_error(std::string(begin ? "s_subvector_loop_begin" : "s_subvector_loop_end") + " with a destination that is not an SGPR is not measured");
+    }
+    const IrU32 execLo(ir.GetExecLo());
+    const IrU32 execHi(ir.GetExecHi());
+    const IrU32 counter = readRawU32(inst.destination);
+    const IrU32 zero(ir.Constant(0u));
+    IrU32 newExecLo = execLo;
+    IrU32 newExecHi = execHi;
+    IrU32 newCounter = counter;
+    if (begin) {
+        const IrU1 lowZero(ir.IEqual(execLo.Value(), zero.Value()));
+        const IrU1 highZero(ir.IEqual(execHi.Value(), zero.Value()));
+        const IrU1 execZero(ir.LogicalAnd(lowZero.Value(), highZero.Value()));
+        const IrU32 entered(ir.Select(lowZero.Value(), execLo.Value(), execHi.Value()));
+        newCounter = IrU32(ir.Select(execZero.Value(), counter.Value(), entered.Value()));
+        newExecHi = IrU32(ir.Select(ir.LogicalOr(execZero.Value(), lowZero.Value()), execHi.Value(), zero.Value()));
+        instructionBranchCondition = execZero;
+    } else {
+        const IrU1 highSet(ir.INotEqual(execHi.Value(), zero.Value()));
+        const IrU1 counterZero(ir.IEqual(counter.Value(), zero.Value()));
+        const IrU1 stay(ir.LogicalOr(highSet.Value(), counterZero.Value()));
+        newExecLo = IrU32(ir.Select(highSet.Value(), counter.Value(), ir.Select(counterZero.Value(), execLo.Value(), zero.Value())));
+        newExecHi = IrU32(ir.Select(stay.Value(), execHi.Value(), counter.Value()));
+        newCounter = IrU32(ir.Select(stay.Value(), counter.Value(), execLo.Value()));
+        instructionBranchCondition = IrU1(ir.LogicalNot(stay.Value()));
+    }
+    writeRawU32(inst.destination, newCounter);
+    ir.SetExecLo(newExecLo.Value());
+    ir.SetExecHi(newExecHi.Value());
+    ir.SetExec(threadBit({newExecLo, newExecHi}).Value());
 }
 
 // s_*_saveexec reads its source before it writes the old exec into the destination, so
@@ -293,31 +326,45 @@ void TranslationContext::sWqm(const RdnaInstruction& inst, bool wide) {
     ir.SetScc(ir.INotEqual(low.Value(), ir.Constant(0u)));
 }
 
-// M0 holds a uniform register offset. Vector registers are SSA values with fixed indices, so an indexed
-// access becomes a select over every register the program references at or past the base.
+struct RelativeWindowAccess {
+    IrValue* index = nullptr;
+    IrValue* inRange = nullptr;
+};
+
+RelativeWindowAccess relativeWindowAccess(IrBuilder& ir, const IrProgram& program, std::uint32_t reg, IrValue& offset, const char* name) {
+    const auto& metadata = program.Metadata();
+    if (metadata.vectorWindowSize == 0u || reg < metadata.vectorWindowBase) throw std::runtime_error(std::string(name) + " addresses a register outside the relative-addressing window");
+    const auto first = reg - metadata.vectorWindowBase;
+    IrValue& index = ir.Emit(IrOpcode::UMin32, IrType::U32, {&ir.IAdd(ir.Constant(first), offset), &ir.Constant(metadata.vectorWindowSize - 1u)});
+    return {&index, &ir.ULessThan(offset, ir.Constant(metadata.vectorWindowSize - first))};
+}
+
 IrU32 TranslationContext::readRelativeVector(const RdnaOperand& base, IrValue& offset, const char* name) {
     if (base.kind != RdnaOperandKind::VectorRegister) {
         throw std::runtime_error(std::string(name) + " source is not a vector register");
     }
-    IrU32 result(ir.GetVectorReg(static_cast<VectorReg>(base.reg)));
-    for (std::uint32_t reg = base.reg + 1u; reg < currentVectorLimit; ++reg) {
-        IrValue& hit = ir.IEqual(offset, ir.Constant(reg - base.reg));
-        result = IrU32(ir.Select(hit, ir.GetVectorReg(static_cast<VectorReg>(reg)), result.Value()));
-    }
-    return applyBitSourceModifiers(base, result);
+    const auto access = relativeWindowAccess(ir, program, base.reg, offset, name);
+    IrValue& loaded = ir.Emit(IrOpcode::LoadVectorWindow, IrType::U32, {access.index});
+    return applyBitSourceModifiers(base, IrU32(ir.Select(*access.inRange, loaded, ir.GetVectorReg(static_cast<VectorReg>(0)))));
 }
 
-void TranslationContext::writeRelativeVector(const RdnaOperand& base, IrValue& offset, IrU32 value, const char* name) {
+void TranslationContext::writeRelativeVector(const RdnaOperand& base, IrValue& offset, IrU32 value, const char* name, IrValue* enable) {
     const RdnaOperand& destination = base;
     if (destination.kind != RdnaOperandKind::VectorRegister) {
         throw std::runtime_error(std::string(name) + " destination is not a vector register");
     }
-    for (std::uint32_t reg = destination.reg; reg < currentVectorLimit; ++reg) {
-        RdnaOperand target = destination;
-        target.reg = reg;
-        IrValue& hit = ir.IEqual(offset, ir.Constant(reg - destination.reg));
-        writeRawU32(target, IrU32(ir.Select(hit, value.Value(), ir.GetVectorReg(static_cast<VectorReg>(reg)))));
+    const auto access = relativeWindowAccess(ir, program, destination.reg, offset, name);
+    IrValue& previous = ir.Emit(IrOpcode::LoadVectorWindow, IrType::U32, {access.index});
+    IrValue* merged = nullptr;
+    if (destination.dpp) {
+        const DppMoveFlags flags{destination.dpp8 ? DppMoveFlags::Lanes8 | destination.dppCtrl : destination.dppCtrl, static_cast<std::uint8_t>(destination.dppRowMask), static_cast<std::uint8_t>(destination.dppBankMask), destination.dppFetchInactive, destination.dppBoundCtrl};
+        merged = &ir.Emit(IrOpcode::DppUpdateU32, IrType::U32, {&value.Value(), &previous, &ir.GetExec()}, flags);
+    } else {
+        merged = &ir.Select(ir.GetExec(), value.Value(), previous);
     }
+    IrValue* written = access.inRange;
+    if (enable != nullptr) written = &ir.LogicalAnd(*written, *enable);
+    (void)ir.Emit(IrOpcode::StoreVectorWindow, IrType::Void, {access.index, &ir.Select(*written, *merged, previous)});
 }
 
 void TranslationContext::vMovrelsB32(const RdnaInstruction& inst) {
@@ -340,8 +387,9 @@ void TranslationContext::vMovrelsdB32(const RdnaInstruction& inst, bool split, b
         return;
     }
     const IrU32 previous = readRelativeVector(plainOperand(inst.destination), destinationOffset, name);
-    writeRelativeVector(inst.destination, destinationOffset, value, name);
-    writeRelativeVector(sourceAt(inst, 0u), sourceOffset, previous, name);
+    IrValue& bothInRange = ir.LogicalAnd(*relativeWindowAccess(ir, program, sourceAt(inst, 0u).reg, sourceOffset, name).inRange, *relativeWindowAccess(ir, program, inst.destination.reg, destinationOffset, name).inRange);
+    writeRelativeVector(inst.destination, destinationOffset, value, name, &bothInRange);
+    writeRelativeVector(sourceAt(inst, 0u), sourceOffset, previous, name, &bothInRange);
 }
 
 void TranslationContext::vSwapB32(const RdnaInstruction& inst) {

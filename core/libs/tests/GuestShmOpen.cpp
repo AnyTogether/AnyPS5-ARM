@@ -8,6 +8,7 @@
 #include <string>
 extern "C" {
 int APS5_VABI shm_open_nid_postfix(const char*, int, int);
+int APS5_VABI shm_unlink_nid_postfix(const char*);
 int APS5_VABI ftruncate_nid_postfix(int, std::int64_t);
 std::int64_t APS5_VABI pread_nid_postfix(int, void*, std::size_t, std::int64_t);
 std::int64_t APS5_VABI pwrite_nid_disambig1_nid_postfix(int, const void*, std::size_t, std::int64_t);
@@ -26,6 +27,9 @@ static void RequireError(const char* path, int flags, int error) {
     Require(shm_open_nid_postfix(path, flags, 0600) == -1);
     Require(*__error_nid_postfix() == error);
 }
+#ifndef __linux__
+// Linux names host POSIX shared memory, which the guest_named_shm tests cover; elsewhere a named
+// object lives in the process until shm_unlink.
 static void CheckNamed() {
     const char* const name = "/anyps5-shm";
     RequireError(name, 0x2, 2);
@@ -44,13 +48,9 @@ static void CheckNamed() {
     char back[sizeof(text)] = {};
     Require(pread_nid_postfix(reader, back, sizeof(back), 0x100) == static_cast<std::int64_t>(sizeof(back)));
     Require(std::memcmp(back, text, sizeof(text)) == 0);
-    bool refused = false;
-    try {
-        pwrite_nid_disambig1_nid_postfix(reader, text, sizeof(text), 0);
-    } catch (const std::runtime_error&) {
-        refused = true;
-    }
-    Require(refused);
+    *__error_nid_postfix() = 0;
+    Require(pwrite_nid_disambig1_nid_postfix(reader, text, sizeof(text), 0) == -1);
+    Require(*__error_nid_postfix() == 9);
     // Read-only O_TRUNC leaves the object alone; a read-write O_TRUNC empties it for every opener.
     const int readOnlyTruncate = shm_open_nid_postfix(name, 0x400, 0);
     Require(readOnlyTruncate >= 0);
@@ -64,8 +64,22 @@ static void CheckNamed() {
     for (const int descriptor : {creator, reader, readOnlyTruncate, truncating, other})
         Require(close_nid_postfix(descriptor) == 0);
     const int reopened = shm_open_nid_postfix(name, 0x2, 0);
-    Require(reopened >= 0 && close_nid_postfix(reopened) == 0);
+    Require(reopened >= 0);
+    // shm_unlink frees the name at once; an open descriptor stays usable.
+    Require(shm_unlink_nid_postfix(name) == 0);
+    RequireError(name, 0x2, 2);
+    Require(pread_nid_postfix(reopened, back, 1, 0) == 0);
+    Require(close_nid_postfix(reopened) == 0);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix(name) == -1 && *__error_nid_postfix() == 2);
+    *__error_nid_postfix() = 0;
+    Require(shm_unlink_nid_postfix("") == -1 && *__error_nid_postfix() == 22);
+    Require(shm_unlink_nid_postfix("/anyps5-shm-other") == 0);
+    const int recreated = shm_open_nid_postfix(name, 0xa02, 0600);
+    Require(recreated >= 0 && close_nid_postfix(recreated) == 0);
+    Require(shm_unlink_nid_postfix(name) == 0);
 }
+#endif
 int main() {
     *__error_nid_postfix() = 13;
     const int first = shm_open_nid_postfix(anonymous, 0x100202, 0600);
@@ -84,6 +98,11 @@ int main() {
     Require(pread_nid_postfix(first, &last, 1, 0x3fff) == 1 && last == 0);
     Require(pread_nid_postfix(first, &last, 1, 0x4000) == 0);
     Require(pread_nid_postfix(second, back, sizeof(back), 0) == 0);
+#ifdef __linux__
+    // A shared-memory write does not grow the object; macOS and Windows back it with a temporary file.
+    Require(pwrite_nid_disambig1_nid_postfix(third, text, sizeof(text), 0) == 0);
+#endif
+    Require(ftruncate_nid_postfix(third, 0x4000) == 0);
     Require(pwrite_nid_disambig1_nid_postfix(third, text, sizeof(text), 0) == static_cast<std::int64_t>(sizeof(text)));
     Require(close_nid_postfix(first) == 0 && close_nid_postfix(second) == 0 && close_nid_postfix(third) == 0);
     RequireInvalid(anonymous, 0x0);
@@ -94,5 +113,8 @@ int main() {
     RequireInvalid(anonymous, 0x2 | 0x4);
     RequireInvalid("/anyps5-shm", 0x1);
     RequireInvalid("/anyps5-shm", 0x202 | 0x8);
+    RequireInvalid("", 0x202);
+#ifndef __linux__
     CheckNamed();
+#endif
 }

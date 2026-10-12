@@ -27,6 +27,7 @@ constexpr int UMTX_OP_WAKE = 3;
 constexpr int UMTX_OP_WAIT_UINT = 11;
 constexpr int UMTX_OP_WAIT_UINT_PRIVATE = 15;
 constexpr int UMTX_OP_WAKE_PRIVATE = 16;
+constexpr int UMTX_OP_NWAKE_PRIVATE = 21;
 constexpr int UMTX_OP_MAX = 27;
 constexpr std::uint32_t UMTX_ABSTIME = 1;
 constexpr int GUEST_CLOCK_REALTIME = 0;
@@ -183,6 +184,21 @@ int UmtxWake(void* object, std::uint64_t count, bool isPrivate) {
     return 0;
 }
 
+int UmtxNwakePrivate(void* object, std::uint64_t value) {
+    const auto count = static_cast<std::int32_t>(value);
+    if (count <= 0) {
+        return 0;
+    }
+    if (object == nullptr) {
+        return GUEST_EFAULT;
+    }
+    const auto* addresses = static_cast<void* const*>(object);
+    for (std::int32_t index = 0; index < count; ++index) {
+        WakeAddress(reinterpret_cast<std::uintptr_t>(addresses[index]), std::numeric_limits<std::int32_t>::max(), true);
+    }
+    return 0;
+}
+
 }  // namespace
 
 extern "C" {
@@ -251,6 +267,9 @@ int APS5_VABI _umtx_op_nid_postfix(void* object, int operation, std::uint64_t va
         case UMTX_OP_WAKE:
         case UMTX_OP_WAKE_PRIVATE:
             error = UmtxWake(object, value, operation == UMTX_OP_WAKE_PRIVATE);
+            break;
+        case UMTX_OP_NWAKE_PRIVATE:
+            error = UmtxNwakePrivate(object, value);
             break;
         default:
             if (operation < 0 || operation >= UMTX_OP_MAX) {

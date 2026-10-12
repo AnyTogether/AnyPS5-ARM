@@ -1,10 +1,11 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <chrono>
 #include <thread>
 
 extern "C" {
@@ -21,8 +22,9 @@ int APS5_VABI sceHttpCreateEpoll(int, HttpEpollHandle*);
 int APS5_VABI sceHttpDestroyEpoll(int, HttpEpollHandle);
 int APS5_VABI sceHttpWaitRequest(HttpEpollHandle, HttpNBEvent*, int, int);
 int APS5_VABI sceHttpAbortWaitRequest(HttpEpollHandle);
+int APS5_VABI sceHttpInit_nid_postfix(int, int, std::uint64_t);
+int APS5_VABI sceHttpTerm_nid_postfix(int);
 int APS5_VABI sceHttpSetCookieEnabled(int, int);
-int APS5_VABI sceHttpSetRequestStatusCallback(int, void (*)(int, int, void*), void*);
 int APS5_VABI sceHttpReadData(int, void*, std::size_t);
 int APS5_VABI sceHttpCreateRequest2(int, const char*, const char*, std::uint64_t);
 int APS5_VABI sceHttpsEnableOption(int, std::uint32_t);
@@ -83,8 +85,19 @@ int main() {
     Require(sceHttpUriBuild(built, nullptr, required - 1, &element, buildAll) == outOfMemory);
     Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, buildAll) == 0);
     Require(Equal(built, "https://user:secret@example.com:8443/a/c?x=1&y=2#top"));
+    Require(sceHttpUriBuild(nullptr, &required, 0, &element, 0x01) == 0);
+    Require(required == sizeof("https://"));
+    std::memset(built, 'Z', sizeof(built));
+    Require(sceHttpUriBuild(built, nullptr, required - 1, &element, 0x01) == outOfMemory);
+    for (char c : built) Require(c == 'Z');
+    Require(sceHttpUriBuild(built, nullptr, required, &element, 0x01) == 0);
+    Require(Equal(built, "https://") && built[required] == 'Z');
+    Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, 0) == 0);
+    Require(Equal(built, "//"));
+    Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, 0x02) == 0);
+    Require(Equal(built, "//example.com"));
     Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, 0x08 | 0x40) == 0);
-    Require(Equal(built, "/a/c?x=1&y=2"));
+    Require(Equal(built, "///a/c?x=1&y=2"));
 
     Require(sceHttpUriParse(&element, "HTTP://Example.com/", pool, nullptr, sizeof(pool)) == 0);
     Require(element.port == 80 && Equal(element.username, "") && Equal(element.query, ""));
@@ -101,6 +114,10 @@ int main() {
     Require(Equal(element.username, "someone") && Equal(element.hostname, "example.com"));
     Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, buildAll) == 0);
     Require(Equal(built, "mailto:someone@example.com"));
+    Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, 0x01) == 0);
+    Require(Equal(built, "mailto:"));
+    Require(sceHttpUriBuild(built, nullptr, sizeof(built), &element, 0) == 0);
+    Require(Equal(built, ""));
 
     Require(sceHttpUriParse(&element, "/path/only?q", pool, nullptr, sizeof(pool)) == 0);
     Require(Equal(element.scheme, "") && Equal(element.hostname, "") && Equal(element.path, "/path/only"));
@@ -204,27 +221,66 @@ int main() {
     Require(sceHttpUriMerge(merged, base, "http://bad host/", &required, sizeof(merged), 0) == invalidUrl);
     Require(required == 123);
 
+    constexpr int beforeInit = static_cast<int>(0x80431001);
+    constexpr int aborted = static_cast<int>(0x80431080);
+    constexpr int invalidId = static_cast<int>(0x80431100);
     HttpEpollHandle epoll = nullptr;
-    Require(sceHttpCreateEpoll(1, nullptr) == invalidValue);
-    Require(sceHttpCreateEpoll(1, &epoll) == 0 && epoll != nullptr);
     HttpNBEvent events[2]{};
+    Require(sceHttpCreateEpoll(1, &epoll) == beforeInit);
+    Require(sceHttpAbortWaitRequest(nullptr) == beforeInit);
+    Require(sceHttpTerm_nid_postfix(1) == beforeInit);
+    const int context = sceHttpInit_nid_postfix(0, 0, 0x10000);
+    Require(context > 0);
+    Require(sceHttpCreateEpoll(-1, &epoll) == invalidId);
+    Require(sceHttpCreateEpoll(context, nullptr) == invalidValue);
+    Require(sceHttpCreateEpoll(context, &epoll) == 0 && epoll != nullptr);
     Require(sceHttpWaitRequest(epoll, events, 2, 0) == 0);
     Require(sceHttpWaitRequest(epoll, events, 2, 1000) == 0);
     Require(sceHttpWaitRequest(epoll, nullptr, 2, 0) == invalidValue);
     Require(sceHttpWaitRequest(epoll, events, 0, 0) == invalidValue);
     Require(sceHttpWaitRequest(nullptr, events, 2, 0) == invalidValue);
-    constexpr int aborted = static_cast<int>(0x80431080);
+    const auto unknownEpoll = reinterpret_cast<HttpEpollHandle>(&events);
     Require(sceHttpAbortWaitRequest(nullptr) == invalidValue);
-    Require(sceHttpAbortWaitRequest(epoll) == 0);
+    Require(sceHttpAbortWaitRequest(unknownEpoll) == invalidId);
+    Require(sceHttpWaitRequest(unknownEpoll, events, 2, -1) == invalidId);
+    Require(sceHttpDestroyEpoll(context, nullptr) == invalidValue);
+    Require(sceHttpDestroyEpoll(context, unknownEpoll) == invalidId);
+    Require(sceHttpDestroyEpoll(-1, epoll) == invalidId);
+
+    auto waitWokenBy = [&](auto wake) {
+        std::atomic<bool> started{false};
+        std::atomic<int> result{1};
+        std::thread waiter([&] {
+            started = true;
+            result = sceHttpWaitRequest(epoll, events, 2, -1);
+        });
+        while (!started) std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        Require(result == 1);
+        wake();
+        waiter.join();
+        return result.load();
+    };
+    Require(waitWokenBy([&] { Require(sceHttpAbortWaitRequest(epoll) == 0); }) == aborted);
     Require(sceHttpWaitRequest(epoll, events, 2, 0) == aborted);
-    Require(sceHttpWaitRequest(epoll, events, 2, 0) == 0);
-    std::thread aborter([epoll] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        Require(sceHttpAbortWaitRequest(epoll) == 0);
-    });
     Require(sceHttpWaitRequest(epoll, events, 2, -1) == aborted);
-    aborter.join();
-    Require(sceHttpDestroyEpoll(1, epoll) == 0);
+    Require(sceHttpDestroyEpoll(context, epoll) == 0);
+    Require(sceHttpAbortWaitRequest(epoll) == invalidId);
+    Require(sceHttpDestroyEpoll(context, epoll) == invalidId);
+
+    Require(sceHttpCreateEpoll(context, &epoll) == 0);
+    Require(waitWokenBy([&] { Require(sceHttpDestroyEpoll(context, epoll) == 0); }) == 0);
+
+    Require(sceHttpCreateEpoll(context, &epoll) == 0);
+    const int otherContext = sceHttpInit_nid_postfix(0, 0, 0x10000);
+    Require(otherContext > 0 && otherContext != context);
+    Require(sceHttpTerm_nid_postfix(otherContext) == 0);
+    Require(sceHttpTerm_nid_postfix(otherContext) == invalidId);
+    Require(sceHttpWaitRequest(epoll, events, 2, 0) == 0);
+    Require(waitWokenBy([&] { Require(sceHttpTerm_nid_postfix(context) == 0); }) == 0);
+    Require(sceHttpWaitRequest(epoll, events, 2, 0) == beforeInit);
+    Require(sceHttpTerm_nid_postfix(context) == beforeInit);
+
     Require(sceHttpSetCookieEnabled(1, 0) == 0);
     Require(sceHttpSetCookieEnabled(1, 1) == 0);
     Require(sceHttpSetCookieEnabled(1, 2) == invalidValue);

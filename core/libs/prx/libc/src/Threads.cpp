@@ -174,7 +174,7 @@ int APS5_VABI _Cnd_broadcast_nid_postfix(void** handle) {
 }
 
 // _Cnd_signal is exported by libSceAmpr, which shares the conditions created here.
-int LibcConditionSignal_nid_no_patch(void** handle) {
+int SignalCondition_nid_no_patch(void** handle) {
     ResolveCondition(handle, "_Cnd_signal")->native.notify_one();
     return threadSuccess;
 }

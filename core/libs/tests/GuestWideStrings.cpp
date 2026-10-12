@@ -19,6 +19,7 @@ const char16_t* APS5_VABI wcsrchr_nid_postfix(const char16_t* s, char16_t c);
 const char16_t* APS5_VABI wcsstr_nid_postfix(const char16_t* haystack, const char16_t* needle);
 const char16_t* APS5_VABI wcspbrk_nid_postfix(const char16_t* s, const char16_t* accept);
 std::size_t APS5_VABI wcsspn_nid_postfix(const char16_t* s, const char16_t* accept);
+char16_t* APS5_VABI wcstok_nid_postfix(char16_t* text, const char16_t* delimiters, char16_t** last);
 char16_t* APS5_VABI wmemset_nid_postfix(char16_t* s, char16_t c, std::size_t n);
 double APS5_VABI wcstod_nid_postfix(const char16_t* str, char16_t** endptr);
 float APS5_VABI wcstof_nid_postfix(const char16_t* str, char16_t** endptr);
@@ -95,6 +96,37 @@ int main() {
     require(wcspbrk_nid_postfix(haystack, u"xyz") == nullptr);
     require(wcsspn_nid_postfix(u"aabbc", u"ab") == 4);
     require(wcsspn_nid_postfix(u"abc", u"") == 0);
+
+    char16_t tokens[] = u",,one,,two;three,";
+    char16_t* last = tokens;
+    char16_t* token = wcstok_nid_postfix(tokens, u",", &last);
+    require(token == tokens + 2 && same(token, u"one", 4) && last == tokens + 6);
+    token = wcstok_nid_postfix(nullptr, u",;", &last);
+    require(token == tokens + 7 && same(token, u"two", 4) && last == tokens + 11);
+    token = wcstok_nid_postfix(nullptr, u",", &last);
+    require(token == tokens + 11 && same(token, u"three", 6) && last == tokens + 17);
+    require(wcstok_nid_postfix(nullptr, u",", &last) == nullptr && last == nullptr);
+    require(wcstok_nid_postfix(nullptr, u",", &last) == nullptr && last == nullptr);
+
+    char16_t tail[] = u"a b";
+    require(wcstok_nid_postfix(tail, u" ", &last) == tail && last == tail + 2);
+    require(wcstok_nid_postfix(nullptr, u" ", &last) == tail + 2 && same(tail, u"a\0b", 4) && last == nullptr);
+
+    char16_t onlyDelimiters[] = u";;";
+    last = onlyDelimiters;
+    require(wcstok_nid_postfix(onlyDelimiters, u";", &last) == nullptr && last == nullptr && same(onlyDelimiters, u";;", 3));
+
+    char16_t empty[] = u"";
+    last = empty;
+    require(wcstok_nid_postfix(empty, u";", &last) == nullptr && last == nullptr);
+
+    char16_t whole[] = u"word";
+    require(wcstok_nid_postfix(whole, u"", &last) == whole && last == nullptr && same(whole, u"word", 5));
+
+    char16_t wide[] = u"\u4e00\u3001\xd83d\xde00\u3001";
+    require(wcstok_nid_postfix(wide, u"\u3001", &last) == wide && same(wide, u"\u4e00\0", 2) && last == wide + 2);
+    require(wcstok_nid_postfix(nullptr, u"\u3001", &last) == wide + 2 && wide[2] == 0xd83d && wide[3] == 0xde00 && wide[4] == 0 && last == wide + 5);
+    require(wcstok_nid_postfix(nullptr, u"\u3001", &last) == nullptr && last == nullptr);
 
     const char16_t units[] = {u'x', 0, u'￿', u'y'};
     require(wmemchr_nid_postfix(units, u'￿', 4) == units + 2);

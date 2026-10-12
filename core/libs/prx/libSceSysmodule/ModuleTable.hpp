@@ -275,6 +275,7 @@ inline const std::unordered_map<std::uint32_t, const char*> kModuleTable = {
     {0x8000008c, "libSceHttp2"},
     {0x8000008d, "libSceNpGameIntent"},
     {0x8000008f, "libSceNpWebApi2"},
+    {0x80000094, "libSceAgc"},
     {0x80000098, "libScePosixForWebKit"},
     {0x8000009a, "libSceNpRemotePlaySessionSignaling"},
     {0x800000aa, "libicu"},

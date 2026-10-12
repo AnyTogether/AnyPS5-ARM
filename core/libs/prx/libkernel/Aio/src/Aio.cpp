@@ -11,6 +11,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libkernel/File/include/File.hpp"
+#include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 
 #ifndef _WIN32
@@ -28,6 +29,10 @@ constexpr std::int32_t AioRequestNumMax = 128;
 constexpr std::int32_t AioIdNumMax = 128;
 constexpr std::uint32_t AioWaitAnd = 1;
 constexpr std::uint32_t AioWaitOr = 2;
+constexpr std::int32_t AioSchedulingWindowMax = 128;
+constexpr std::int32_t AioDelayedCountMax = 128;
+constexpr std::uint32_t AioSplitSizeMax = 0x1000000;
+constexpr std::uint32_t AioSplitChunkSizeMax = 0x1000000;
 
 std::mutex g_mutex;
 std::array<std::int32_t, AioMaxQueues> g_states{};
@@ -76,7 +81,8 @@ std::int64_t NativePwrite(std::int32_t fd, const void* buf, std::size_t nbyte, s
     }
     return NativePositioned_nid_no_patch(fd, const_cast<void*>(buf), nbyte, offset, true);
 #else
-    return static_cast<std::int64_t>(::pwrite(fd, buf, nbyte, static_cast<off_t>(offset)));
+    const auto result = File::PwriteSharedMemory_nid_no_patch(fd, buf, nbyte, offset);
+    return result == -2 ? static_cast<std::int64_t>(::pwrite(fd, buf, nbyte, static_cast<off_t>(offset))) : result;
 #endif
 }
 
@@ -202,6 +208,20 @@ int APS5_VABI sceKernelAioInitializeImpl(void* param, int32_t size) {
 
 void APS5_VABI sceKernelAioInitializeParam(void* param) {
     if (param == nullptr) throw std::invalid_argument("sceKernelAioInitializeParam: param is null");
+}
+
+int APS5_VABI sceKernelAioSetParam(KernelAioSchedulingParam* param, int32_t schedulingWindowSize, int32_t delayedCountLimit, uint32_t enableSplit, uint32_t splitSize, uint32_t splitChunkSize) {
+    if (param == nullptr) throw std::invalid_argument("sceKernelAioSetParam: param is null");
+    if (schedulingWindowSize < 0 || schedulingWindowSize > AioSchedulingWindowMax) throw std::runtime_error("sceKernelAioSetParam: a scheduling window outside 0..128 is not modelled");
+    if (delayedCountLimit < 0 || delayedCountLimit > AioDelayedCountMax) throw std::runtime_error("sceKernelAioSetParam: a delayed count limit outside 0..128 is not modelled");
+    if (enableSplit > 1) throw std::runtime_error("sceKernelAioSetParam: a split flag other than 0 or 1 is not modelled");
+    if (splitSize > AioSplitSizeMax || splitChunkSize > AioSplitChunkSizeMax) throw std::runtime_error("sceKernelAioSetParam: a split size above 0x1000000 is not modelled");
+    param->schedulingWindowSize = schedulingWindowSize;
+    param->delayedCountLimit = delayedCountLimit;
+    param->enableSplit = enableSplit;
+    param->splitSize = splitSize;
+    param->splitChunkSize = splitChunkSize;
+    return 0;
 }
 
 int APS5_VABI sceKernelAioSubmitReadCommands(KernelAioRwRequest* req, int32_t size, int32_t prio, int32_t* id) {

@@ -11,6 +11,7 @@
 
 extern "C" {
 int APS5_VABI posix_memalign_nid_postfix(void**, std::size_t, std::size_t);
+void* APS5_VABI reallocf_nid_postfix(void*, std::size_t);
 void* APS5_VABI _Znwm_nid_postfix(std::size_t);
 void* APS5_VABI _ZnwmRKSt9nothrow_t_nid_postfix(std::size_t, const void*) noexcept;
 void* APS5_VABI _ZnamRKSt9nothrow_t_nid_postfix(std::size_t, const void*) noexcept;
@@ -148,6 +149,24 @@ int main(int argc, char** argv) {
         pointer = static_cast<unsigned char*>(ApplicationHeapReallocate_nid_no_patch(nullptr, 32));
         require(pointer != nullptr);
         ApplicationHeapFree_nid_no_patch(pointer);
+        pointer = static_cast<unsigned char*>(reallocf_nid_postfix(nullptr, 24));
+        require(pointer != nullptr && ApplicationHeapUsableSize_nid_no_patch(pointer) == 24);
+        std::memset(pointer, 0x3c, 24);
+        pointer = static_cast<unsigned char*>(reallocf_nid_postfix(pointer, 200));
+        require(pointer != nullptr && ApplicationHeapUsableSize_nid_no_patch(pointer) == 200);
+        for (unsigned i = 0; i < 24; ++i) require(pointer[i] == 0x3c);
+        pointer = static_cast<unsigned char*>(reallocf_nid_postfix(pointer, 9));
+        require(pointer != nullptr && ApplicationHeapUsableSize_nid_no_patch(pointer) == 9);
+        for (unsigned i = 0; i < 9; ++i) require(pointer[i] == 0x3c);
+        *__error_nid_postfix() = 0;
+        require(reallocf_nid_postfix(pointer, 0) == nullptr && *__error_nid_postfix() == 0);
+        reject([pointer] { ApplicationHeapUsableSize_nid_no_patch(pointer); });
+        pointer = static_cast<unsigned char*>(reallocf_nid_postfix(nullptr, 40));
+        require(pointer != nullptr);
+        require(reallocf_nid_postfix(pointer, SIZE_MAX - 4096) == nullptr && *__error_nid_postfix() == 12);
+        reject([pointer] { ApplicationHeapUsableSize_nid_no_patch(pointer); });
+        *__error_nid_postfix() = 0;
+        require(reallocf_nid_postfix(nullptr, SIZE_MAX) == nullptr && *__error_nid_postfix() == 12);
         for (std::size_t alignment : {16, 64, 4096}) {
             auto* aligned = ApplicationHeapAlign_nid_no_patch(alignment, 37);
             require(reinterpret_cast<std::uintptr_t>(aligned) % alignment == 0);
@@ -211,7 +230,14 @@ int main(int argc, char** argv) {
     require(frees == 6);
     _ZdlPvmSt11align_val_t_nid_postfix(nullptr, 37, 64);
     require(frees == 6);
+    require(reallocf_nid_postfix(storage.data(), 80) == storage.data() && lastSize == 80 && frees == 6);
+    require(reallocf_nid_postfix(storage.data(), 16) == storage.data() && lastSize == 16 && frees == 6);
+    require(reallocf_nid_postfix(storage.data(), 0) == nullptr && lastSize == 16 && frees == 7);
     fail = true;
+    *__error_nid_postfix() = 0;
+    require(reallocf_nid_postfix(storage.data(), 48) == nullptr && lastSize == 48 && frees == 8 && *__error_nid_postfix() == 12);
+    reject([] { ApplicationHeapReallocate_nid_no_patch(storage.data(), 48); });
+    require(frees == 8);
     require(_ZnwmRKSt9nothrow_t_nid_postfix(8, nullptr) == nullptr);
     require(_ZnamRKSt9nothrow_t_nid_postfix(8, nullptr) == nullptr);
     reject([] { _Znwm_nid_postfix(8); });

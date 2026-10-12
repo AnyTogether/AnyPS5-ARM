@@ -35,6 +35,8 @@
 #include <cstdio>
 #include <mutex>
 
+extern "C" std::uint64_t GuestImageSegmentBytes_nid_no_patch();
+
 namespace {
 
 constexpr size_t FLEXIBLE_MEMORY_SIZE = 448ULL * 1024 * 1024;
@@ -95,9 +97,11 @@ size_t _flexibleUsedLocked() {
 }
 
 int _mapFlexible(void** addr, size_t len, int prot, int flags) {
+    const size_t images = GuestImageSegmentBytes_nid_no_patch();
     std::lock_guard lock(g_flexibleLock);
-    if (len > FLEXIBLE_MEMORY_SIZE - std::min(FLEXIBLE_MEMORY_SIZE, _flexibleUsedLocked())) {
-        std::fprintf(stderr, "[memory] flexible memory exhausted: request 0x%zx with 0x%zx of 0x%zx in use\n", len, _flexibleUsedLocked(), static_cast<size_t>(FLEXIBLE_MEMORY_SIZE));
+    const size_t used = images + _flexibleUsedLocked();
+    if (len > FLEXIBLE_MEMORY_SIZE - std::min(FLEXIBLE_MEMORY_SIZE, used)) {
+        std::fprintf(stderr, "[memory] flexible memory exhausted: request 0x%zx with 0x%zx of 0x%zx in use\n", len, used, static_cast<size_t>(FLEXIBLE_MEMORY_SIZE));
         return SCE_KERNEL_ERROR_ENOMEM;
     }
     const int result = DoMapAnon(addr, len, prot, flags);
@@ -369,8 +373,9 @@ int APS5_VABI sceKernelIsStack(void* addr, void** start, void** end) {
 
 int APS5_VABI sceKernelAvailableFlexibleMemorySize(size_t* size) {
  if (!size) return SCE_KERNEL_ERROR_EINVAL;
+ const size_t images = GuestImageSegmentBytes_nid_no_patch();
  std::lock_guard lock(g_flexibleLock);
- *size = FLEXIBLE_MEMORY_SIZE - std::min(FLEXIBLE_MEMORY_SIZE, _flexibleUsedLocked());
+ *size = FLEXIBLE_MEMORY_SIZE - std::min(FLEXIBLE_MEMORY_SIZE, images + _flexibleUsedLocked());
  return 0;
 }
 

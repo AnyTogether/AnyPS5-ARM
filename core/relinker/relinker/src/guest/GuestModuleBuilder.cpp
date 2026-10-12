@@ -70,10 +70,11 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     if (hasPrx) directories.push_back(prx);
     std::vector<std::filesystem::path> runtimeDirectories;
     for (const auto& name : moduleDirectories) {
-        const auto relative = Io::NativePath(name);
-        if (relative.empty() || relative.is_absolute() || relative.lexically_normal().generic_string().starts_with(".."))
+        const auto relative = Io::NativePath(name).lexically_normal();
+        if (relative.empty() || relative.has_root_path() || *relative.begin() == "..")
             throw Domain::RelinkerException("--module-dir must be a directory inside the guest module parent directory: " + name);
-        const auto directory = (root / relative).lexically_normal();
+        auto directory = (root / relative).lexically_normal();
+        if (!directory.has_filename()) directory = directory.parent_path();
         if (!std::filesystem::is_directory(directory)) throw Domain::RelinkerException("Guest module path is not a directory: " + Io::Utf8Path(directory));
         if (std::find(directories.begin(), directories.end(), directory) != directories.end()) throw Domain::RelinkerException("Duplicate guest module directory: " + Io::Utf8Path(directory));
         directories.push_back(directory);
@@ -122,7 +123,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             return name == identity || name == identity + ".prx" || name == identity + ".sprx" || name == identity + ".suprx";
         });
     };
-    for (const auto& path : paths) discovered.emplace(path, GuestImageReader().Read(path, reader.Read(Io::Utf8Path(path))));
+    for (const auto& path : paths) discovered.emplace(path, GuestImageReader().Read(path, reader.Read(Io::Utf8Path(path)), windows));
     if (!unmatchedExclusions.empty()) throw Domain::RelinkerException("Excluded guest module file not found: " + *unmatchedExclusions.begin());
     std::sort(paths.begin(), paths.end());
     paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
@@ -344,7 +345,12 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         }
         for (const auto& header : codeHeaders) {
             const std::vector<std::uint8_t> code(image.Bytes.begin() + header.Offset, image.Bytes.begin() + header.Offset + header.FileSize);
-            syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, header.FileSize);
+            for (const auto offset : syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, header.FileSize)) {
+                if (offset > code.size() || code.size() - offset < 2u)
+                    throw Domain::RelinkerException("Syscall trap patch exceeds guest executable segment", header.MappedAddress + offset);
+                image.Bytes[header.Offset + offset] = 0x0F;
+                image.Bytes[header.Offset + offset + 1] = 0x0B;
+            }
         }
         const auto relativeDirectory = "app0/" + image.SourcePath.parent_path().lexically_relative(root).generic_string();
         const auto destination = outputDirectory / relativeDirectory;

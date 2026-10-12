@@ -11,6 +11,7 @@ namespace Cli {
 struct Args {
     bool showHelp = false;
     bool skipSyscallCheck = false;
+    bool trapSdkSyscallStubs = false;
     bool skipSceModule = false;
     bool toIntel = false;
     bool toRosetta = false;

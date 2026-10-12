@@ -57,10 +57,14 @@ int APS5_VABI sceUserServiceGetAccessibilityZoomFollowFocus(int user_id, int32_t
 }
 
 int APS5_VABI sceUserServiceGetAgeLevel(int user_id, uint32_t* age_level) {
- if (age_level == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
+ if (user_id != USER_SERVICE_INITIAL_USER_ID) {
+  return USER_SERVICE_ERROR_NOT_LOGGED_IN;
+ }
+ if (age_level == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- *age_level = 0;
+ constexpr std::uint32_t Unrestricted = 0xFFFFFFFFu;
+ *age_level = Unrestricted;
  return USER_SERVICE_OK;
 }
 

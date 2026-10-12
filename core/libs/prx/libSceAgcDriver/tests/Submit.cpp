@@ -629,6 +629,30 @@ void testProgramWorkgroupUse() {
     check(!AgcDriver::DriverDetail::ProgramUsesWorkgroup(entry, 2) && AgcDriver::DriverDetail::ProgramUsesWorkgroup(entry, 0), "the workgroup check did not start at the program's entry");
 }
 
+void testRegisteredVertexWorkgroupRouting() {
+    using namespace AgcDriver::DriverDetail;
+    ShaderSnapshot snapshot{0x20000, 0x30000, 2, {0xd8340000u, 0x00000100u, 0xbf810000u, 0xbf810000u}, {}};
+    snapshot.header.resize(sizeof(Shader));
+    const ShaderRegistry registry{{snapshot.codeAddress, {std::make_shared<const ShaderSnapshot>(std::move(snapshot))}}};
+    AgcDriver::QueueState queue{};
+    queue.shader = {{0xc8, 0x200}, {0xc9, 0}};
+    queue.context[0x2d5] = 0x2000;
+    check(VertexWorkgroupRequired(queue, registry), "a registered NGG vertex program using LDS did not need a workgroup");
+    for (const auto routing : {0u, 0x2020u, 0x2004u, 0x02002000u}) {
+        queue.context[0x2d5] = routing;
+        check(!VertexWorkgroupRequired(queue, registry), "legacy, geometry, tessellation or passthrough routing changed to an NGG vertex workgroup");
+    }
+    queue.context[0x2d5] = 0x2000;
+    auto unaligned = registry;
+    const auto aligned = unaligned.begin()->second.front();
+    ShaderSnapshot shifted{0x1ffff, 0x30000, 2, aligned->code, aligned->header};
+    unaligned.clear();
+    unaligned[shifted.codeAddress].push_back(std::make_shared<const ShaderSnapshot>(std::move(shifted)));
+    check(expectFailure([&] { static_cast<void>(VertexWorkgroupRequired(queue, unaligned)); }).find("not dword aligned") != std::string::npos, "an unaligned registered entry was accepted");
+    queue.shader[0xc9] = 0x100;
+    check(expectFailure([&] { static_cast<void>(VertexWorkgroupRequired(queue, registry)); }).find("reserved graphics program address") != std::string::npos, "reserved NGG program address bits were accepted");
+}
+
 void testWorkerFailure() {
     std::array<std::uint32_t, 5> words{0xc0031500, 1, 1, 1, 0x41};
     Packet packet{words.data(), static_cast<std::uint32_t>(words.size()), 0, {}};
@@ -722,6 +746,7 @@ int main() {
 #endif
         testProgramSnapshots();
         testProgramWorkgroupUse();
+        testRegisteredVertexWorkgroupRouting();
         testEvents();
         testValidation();
         testClearState();

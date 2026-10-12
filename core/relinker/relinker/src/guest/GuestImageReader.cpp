@@ -87,7 +87,7 @@ std::vector<std::string> GuestImageReader::ReadModuleNames(const std::vector<std
     return names;
 }
 
-GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes) const {
+GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes, const bool windows) const {
     const auto fail = [&](const std::string& message) { throw Domain::RelinkerException(path.string() + ": " + message); };
     const auto range = [&](std::uint64_t offset, std::uint64_t size) {
         if (offset > bytes.size() || size > bytes.size() - offset) {
@@ -204,19 +204,21 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
         if (!importModules.emplace(value >> 48, string(value & 0xffffffffu)).second) fail("Duplicate import module ID");
     std::vector<std::string> neededLibraries;
     for (const auto offset : needed) neededLibraries.push_back(string(offset));
-    std::set<std::string> exports;
+    std::map<std::string, std::size_t> exports;
     for (std::uint64_t offset = 0; offset < symSize; offset += 24) {
         auto name = string(Io::ReadU32(bytes, symOffset + offset));
         const auto library = Io::ReadU16(bytes, symOffset + offset + 6) == 0 ? Domain::ImportModule(name, importModules, neededLibraries) : std::string{};
         if (Io::ReadU16(bytes, symOffset + offset + 6) == 0 && library.empty()) {
             if (auto declared = Domain::DeclaredImportModule(name, importModules); !declared.empty()) image.Dynamic.UnmatchedImportModules.insert(std::move(declared));
         }
+        const auto qualifiedName = name;
         name = name.substr(0, name.find('#'));
         const auto info = bytes[symOffset + offset + 4];
         const auto visibility = bytes[symOffset + offset + 5];
         const auto section = Io::ReadU16(bytes, symOffset + offset + 6);
         const auto value = Io::ReadU64(bytes, symOffset + offset + 8);
         const auto size = Io::ReadU64(bytes, symOffset + offset + 16);
+        const GuestSymbol symbol{name, info, visibility, section, value, size, library, qualifiedName};
         if (offset == 0 && (info != 0 || visibility != 0 || section != 0 || value != 0 || size != 0 || !name.empty())) fail("Invalid null symbol");
         if (offset == 0) {
             image.Symbols.push_back({{}, 0, 0, 0, 0, 0});
@@ -224,7 +226,8 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
         }
         if (offset != 0 && ((info >> 4) > 2 || (visibility & ~3u) != 0 || ((info & 15) != 0 && (info & 15) != 1 && (info & 15) != 2 && (info & 15) != 6))) fail("Unsupported symbol attributes: " + name);
         if (section != 0 && (info >> 4) != 0 && visibility != 1 && visibility != 2) {
-            if (name.empty() || !exports.insert(name).second) fail("Duplicate or empty export after stripping #: " + name);
+            const auto [found, inserted] = exports.emplace(name, image.Symbols.size());
+            if (name.empty() || (!inserted && (!windows || !IdenticalOrdinaryFunctionExport(image.Symbols[found->second], symbol)))) fail("Duplicate or empty export after stripping #: " + name);
         }
         if ((info & 15) == 6 && section != 0 && (tls == nullptr || value > tls->MemorySize || size > tls->MemorySize - value)) fail("TLS symbol exceeds TLS segment: " + name);
         if (section != 0 && section != AbsoluteSection && (info & 15) != 6) {
@@ -234,7 +237,7 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
         if (image.Dynamic.DynStrData.size() > std::numeric_limits<std::uint32_t>::max()) fail("String table too large");
         Io::WriteU32(image.Dynamic.DynSymData, offset, static_cast<std::uint32_t>(image.Dynamic.DynStrData.size()));
         Io::AppendString(image.Dynamic.DynStrData, name);
-        image.Symbols.push_back({name, info, visibility, section, value, size, library});
+        image.Symbols.push_back(symbol);
     }
     if (tags.contains(14)) {
         image.Soname = string(tags.at(14));

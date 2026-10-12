@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBC_INCLUDE_FILESYSTEMERROR_HPP
 
 #include <system_error>
+#include "General.hpp"
 
 inline int FilesystemError(const std::error_code& error) {
     if (error == std::errc::no_such_file_or_directory) return 2;
@@ -20,6 +21,16 @@ inline int FilesystemError(const std::error_code& error) {
     if (error == std::errc::file_exists) return 17;
     if (error == std::errc::no_space_on_device) return 28;
     return 5;
+}
+
+inline int ResolvePathError_nid_no_patch(const char* path, std::filesystem::path& resolved) {
+    try {
+        resolved = ResolvePath_nid_no_patch(path);
+        return 0;
+    } catch (const std::filesystem::filesystem_error& error) {
+        if (error.code() == std::errc::illegal_byte_sequence) return 2;
+        return FilesystemError(error.code());
+    }
 }
 
 #endif

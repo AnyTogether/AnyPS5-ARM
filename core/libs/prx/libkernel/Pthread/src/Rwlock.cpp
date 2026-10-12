@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 static constexpr int SCE_OK = 0;
+static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
 static constexpr int SCE_KERNEL_ERROR_ENOMEM = 0x8002000C;
 static constexpr int SCE_KERNEL_ERROR_EDEADLK = 0x8002000B;
 static constexpr int SCE_KERNEL_ERROR_EBUSY = 0x80020010;
@@ -105,10 +106,14 @@ int APS5_VABI scePthreadRwlockUnlock(PthreadRwlock* rwlock) {
     if (OwnsWrite(lock)) {
         lock->_writer.store(std::thread::id{}, std::memory_order_release);
         lock->_lock.unlock();
-    } else {
-        lock->_readers.fetch_sub(1, std::memory_order_release);
-        lock->_lock.unlock_shared();
+        return SCE_OK;
     }
+    if (lock->_writer.load(std::memory_order_acquire) != std::thread::id{}) return SCE_KERNEL_ERROR_EPERM;
+    int readers = lock->_readers.load(std::memory_order_acquire);
+    do {
+        if (readers == 0) return SCE_KERNEL_ERROR_EPERM;
+    } while (!lock->_readers.compare_exchange_weak(readers, readers - 1, std::memory_order_acq_rel, std::memory_order_acquire));
+    lock->_lock.unlock_shared();
     return SCE_OK;
 }
 

@@ -247,9 +247,9 @@ void APS5_VABI _Mtx_destroy_nid_postfix(void** handle);
 int APS5_VABI _Mtx_lock_nid_postfix(void** handle);
 int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
 [[noreturn]] void APS5_VABI _ZSt9terminatev_nid_postfix();
-int LibcConditionSignal_nid_no_patch(void** handle);
 bool LibcTypeInfoCatch_nid_no_patch(const std::type_info* self, const std::type_info* thrown, void** object);
 int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t** source, std::size_t limit, void* state);
+int SignalCondition_nid_no_patch(void** handle);
 }
 
 // Vtables of the guest's pointer and function RTTI objects. libc's exception runtime tells RTTI kinds
@@ -960,7 +960,7 @@ void APS5_VABI _ZNSt4_Pad8_ReleaseEv_nid_postfix(ThreadPad* self) {
     if (!self) APS5_INVALID_ARG_EX;
     ThreadCall(_Mtx_lock_nid_postfix(&self->mutex), "locking the pad");
     self->started = true;
-    LibcConditionSignal_nid_no_patch(&self->condition);
+    SignalCondition_nid_no_patch(&self->condition);
     ThreadCall(_Mtx_unlock_nid_postfix(&self->mutex), "unlocking the pad");
 }
 
@@ -995,8 +995,8 @@ void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(ThreadPad* self, Pthrea
 // locale::id objects: 0 until the facet is first looked up, as libc's ids are.
 std::uint64_t _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix = 0;
 
-int APS5_VABI _Cnd_signal_nid_postfix(void** condition) {
-    return LibcConditionSignal_nid_no_patch(condition);
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle) {
+    return SignalCondition_nid_no_patch(handle);
 }
 
 void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void) {
@@ -1004,9 +1004,8 @@ void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void) {
 }
 
 // The name only labels the condition for debugging tools.
-int APS5_VABI _Cnd_init_with_name_nid_postfix(void** condition, const char* name) {
-    (void)name;
-    return _Cnd_init_nid_postfix(condition);
+int APS5_VABI _Cnd_init_with_name_nid_postfix(void** handle, const char*) {
+    return _Cnd_init_nid_postfix(handle);
 }
 
 int APS5_VABI _ZTVSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix(void) {

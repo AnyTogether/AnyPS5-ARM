@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 
@@ -10,9 +11,12 @@ int APS5_VABI scePthreadMutexInit(PthreadMutex* mutex, const PthreadMutexattr* a
 int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex);
 int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex);
 int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex);
+int APS5_VABI scePthreadMutexTrylock(PthreadMutex* mutex);
 int APS5_VABI scePthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr, const char* name);
 int APS5_VABI scePthreadCondDestroy(PthreadCond* cond);
 int APS5_VABI scePthreadCondTimedwait(PthreadCond* cond, PthreadMutex* mutex, unsigned int usec);
+int APS5_VABI scePthreadCondSignal(PthreadCond* cond);
+int APS5_VABI pthread_cond_reltimedwait_np_nid_postfix(PthreadCond* cond, PthreadMutex* mutex, unsigned int usec);
 int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *)(void*), void*, void*);
 void APS5_VABI __pthread_cxa_finalize_nid_postfix(void*);
 unsigned int APS5_VABI sceKernelSleep(unsigned int seconds);
@@ -23,6 +27,9 @@ static void APS5_VABI Cleanup(void*) { cleanupAt = 0; }
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_ETIMEDOUT = static_cast<int>(0x8002003C);
+static constexpr int SCE_KERNEL_ERROR_EBUSY = static_cast<int>(0x80020010);
+static constexpr int POSIX_EPERM = 1;
+static constexpr int POSIX_ETIMEDOUT = 60;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -39,7 +46,67 @@ static void* APS5_VABI Contender(void* arg) {
     return nullptr;
 }
 
+struct Signalled {
+    PthreadMutex mutex = nullptr;
+    PthreadCond cond = nullptr;
+    bool ready = false;
+    int trylock = SCE_OK;
+};
+
+static void* APS5_VABI Trylocker(void* arg) {
+    auto& signalled = *static_cast<Signalled*>(arg);
+    signalled.trylock = scePthreadMutexTrylock(&signalled.mutex);
+    return nullptr;
+}
+
+static void* APS5_VABI Signaller(void* arg) {
+    auto& signalled = *static_cast<Signalled*>(arg);
+    Require(scePthreadMutexLock(&signalled.mutex) == SCE_OK);
+    signalled.ready = true;
+    Require(scePthreadCondSignal(&signalled.cond) == SCE_OK);
+    Require(scePthreadMutexUnlock(&signalled.mutex) == SCE_OK);
+    return nullptr;
+}
+
+static void RequireHeldByCaller(Signalled& signalled) {
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, nullptr, Trylocker, &signalled, nullptr) == SCE_OK);
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+    Require(signalled.trylock == SCE_KERNEL_ERROR_EBUSY);
+}
+
+static void RelativeWait() {
+    Signalled signalled;
+    Require(scePthreadMutexInit(&signalled.mutex, nullptr, nullptr) == SCE_OK);
+    Require(scePthreadCondInit(&signalled.cond, nullptr, nullptr) == SCE_OK);
+
+    Require(pthread_cond_reltimedwait_np_nid_postfix(&signalled.cond, &signalled.mutex, 1000) == POSIX_EPERM);
+
+    Require(scePthreadMutexLock(&signalled.mutex) == SCE_OK);
+    const auto start = std::chrono::steady_clock::now();
+    Require(pthread_cond_reltimedwait_np_nid_postfix(&signalled.cond, &signalled.mutex, 50000) == POSIX_ETIMEDOUT);
+    Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
+    RequireHeldByCaller(signalled);
+    Require(pthread_cond_reltimedwait_np_nid_postfix(&signalled.cond, &signalled.mutex, 0) == POSIX_ETIMEDOUT);
+    RequireHeldByCaller(signalled);
+
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, nullptr, Signaller, &signalled, nullptr) == SCE_OK);
+    const auto waitStart = std::chrono::steady_clock::now();
+    while (!signalled.ready)
+        Require(pthread_cond_reltimedwait_np_nid_postfix(&signalled.cond, &signalled.mutex, 10000000) == 0);
+    Require(std::chrono::steady_clock::now() - waitStart < std::chrono::seconds(5));
+    RequireHeldByCaller(signalled);
+    Require(scePthreadMutexUnlock(&signalled.mutex) == SCE_OK);
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+
+    Require(scePthreadCondDestroy(&signalled.cond) == SCE_OK);
+    Require(scePthreadMutexDestroy(&signalled.mutex) == SCE_OK);
+}
+
 int main() {
+    RelativeWait();
+
     Context context;
     PthreadCond cond = nullptr;
     Require(scePthreadMutexInit(&context.mutex, nullptr, nullptr) == SCE_OK);

@@ -8,6 +8,7 @@ int APS5_VABI sceUserServiceGetForegroundUser(int* user_id);
 int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdList* user_id_list);
 int APS5_VABI sceUserServiceGetUserColor(int user_id, int* color);
 int APS5_VABI sceUserServiceGetNpAccountId(int user_id, std::uint64_t* account_id);
+int APS5_VABI sceUserServiceGetAgeLevel(int user_id, std::uint32_t* age_level);
 }
 
 namespace {
@@ -41,4 +42,15 @@ int main() {
     Require(sceUserServiceGetNpAccountId(123, &account_id) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
     Require(sceUserServiceGetNpAccountId(USER_SERVICE_INITIAL_USER_ID, &account_id) == USER_SERVICE_OK);
     Require(account_id == 0);
+
+    std::uint32_t age_level = 0x5a5a5a5au;
+    Require(sceUserServiceGetAgeLevel(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    const int absent_users[] = {0, USER_SERVICE_USER_ID_INVALID, 0xff, 0x12345678};
+    for (int user_id : absent_users) {
+        Require(sceUserServiceGetAgeLevel(user_id, &age_level) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+        Require(age_level == 0x5a5a5a5au);
+        Require(sceUserServiceGetAgeLevel(user_id, nullptr) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+    }
+    Require(sceUserServiceGetAgeLevel(USER_SERVICE_INITIAL_USER_ID, &age_level) == USER_SERVICE_OK);
+    Require(age_level == 0xffffffffu);
 }

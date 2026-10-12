@@ -7,6 +7,7 @@ std::uint32_t APS5_VABI sceRazorCpuIsCapturing(void);
 int APS5_VABI sceRazorCpuJobManagerDispatch(const void* args);
 int APS5_VABI sceRazorCpuJobManagerJob(const void* args);
 int APS5_VABI sceRazorCpuJobManagerSequence(const void* args);
+int APS5_VABI sceRazorCpuPushMarker(const char* label, std::uint32_t color, std::uint32_t flags);
 int APS5_VABI sceRazorCpuPushMarkerStatic(const char* name, std::uint32_t color, std::uint32_t flags);
 int APS5_VABI sceRazorCpuPopMarker(void);
 int APS5_VABI sceRazorCpuFlushOccurred(std::uint64_t* timeSpentInFlush);
@@ -28,6 +29,8 @@ int main() {
     Require(sceRazorCpuPushMarkerStatic("outer", 0x80ffffffu, 2) == 0);
     Require(sceRazorCpuPushMarkerStatic("inner", 0x80ffffffu, 2) == 0);
     Require(sceRazorCpuPopMarker() == 0);
+    Require(sceRazorCpuPopMarker() == 0);
+    Require(sceRazorCpuPushMarker("copied", 0xff00ff00u, 1) == 0);
     Require(sceRazorCpuPopMarker() == 0);
     Require(sceRazorCpuPushMarkerStatic("unbalanced", 0x80ffffffu, 2) == 0);
     Require(sceRazorCpuIsCapturing() == 0);

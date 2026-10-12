@@ -8,7 +8,7 @@
 namespace Cli {
 
 const char* Usage() {
-    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--skip-syscall-check] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
+    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
            "Example: relinker input.elf output.elf";
 }
 
@@ -23,6 +23,8 @@ Args ParseArgs(int argc, char* argv[]) {
             args.showHelp = true;
         } else if (arg == "--skip-syscall-check") {
             args.skipSyscallCheck = true;
+        } else if (arg == "--trap-sdk-syscall-stubs") {
+            args.trapSdkSyscallStubs = true;
         } else if (arg == "--skip-sce-module") {
             args.skipSceModule = true;
         } else if (arg == "--sce-module-path") {
@@ -79,6 +81,8 @@ Args ParseArgs(int argc, char* argv[]) {
     }
 
     if (args.skipSceModule && sceModulePathSpecified) throw std::runtime_error("--sce-module-path conflicts with --skip-sce-module");
+
+    if (args.skipSyscallCheck && args.trapSdkSyscallStubs) throw std::runtime_error("--skip-syscall-check conflicts with --trap-sdk-syscall-stubs");
 
     if (args.skipSceModule && !args.excludedSceModules.empty())
         throw std::runtime_error("--exclude-sce-module conflicts with --skip-sce-module");

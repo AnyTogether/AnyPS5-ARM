@@ -13,12 +13,14 @@
 
 extern "C" int APS5_VABI sceAgcCreateInterpolantMapping_0100(ShaderRegister* regs, const Shader* gs, const Shader* ps);
 extern "C" int APS5_VABI sceAgcUnknownCreateInterpolantMapping(ShaderRegister* regs, const Shader* gs, const Shader* ps);
+extern "C" int APS5_VABI sceAgcUnknown_vieBRwlh1Lw(ShaderRegister* regs, const Shader* gs, const Shader* ps);
 
 namespace {
 
 using Registers = std::array<ShaderRegister, 32>;
 const Shader* mappedPixel = nullptr;
 Registers preparedMapping{};
+std::size_t preparedCount = 0;
 unsigned mappings = 0;
 unsigned links = 0;
 
@@ -65,6 +67,11 @@ void testIdentity() {
     regs = filled();
     check(sceAgcUnknownCreateInterpolantMapping(regs.data(), nullptr, &ps) == 0, "mapping without inputs failed");
     checkIdentity(regs, 0, "mapping without inputs is not the identity");
+    regs = filled();
+    check(sceAgcUnknown_vieBRwlh1Lw(regs.data(), nullptr, &ps) == 0, "update without inputs failed");
+    check(preparedCount == 0u, "update without inputs prepared registers");
+    const auto untouched = filled();
+    check(std::memcmp(regs.data(), untouched.data(), sizeof(regs)) == 0, "update without inputs wrote registers");
 }
 
 void testMapping() {
@@ -99,11 +106,65 @@ void testMapping() {
     check(split[4].value == 0x03180002u, "full f16 interpolant mapping changed");
     checkIdentity(split, static_cast<std::uint32_t>(inputs.size()), "unused interpolants are not the identity");
 
+    auto update = filled();
+    const auto untouched = filled();
+    const std::size_t written = inputs.size() * sizeof(ShaderRegister);
+    check(sceAgcUnknown_vieBRwlh1Lw(update.data(), &gs, &ps) == 0, "update mapping failed");
+    check(preparedCount == inputs.size(), "update prepared registers past its inputs");
+    check(std::memcmp(update.data(), preparedMapping.data(), written) == 0, "prepared update differs from published registers");
+    check(std::memcmp(update.data(), split.data(), written) == 0, "update mapping differs from the split f16 mapping");
+    check(std::memcmp(update.data() + inputs.size(), untouched.data(), sizeof(update) - written) == 0, "update wrote past its inputs");
+
     auto regular = filled();
     check(sceAgcCreateInterpolantMapping_0100(regular.data(), &gs, &ps) == 0, "mapping failed");
     check(std::memcmp(regular.data(), preparedMapping.data(), sizeof(regular)) == 0, "prepared mapping differs from published registers");
     check(regular[3].value == split[3].value && regular[4].value == split[4].value, "mappings differ outside the high f16 half mode");
     checkIdentity(regular, static_cast<std::uint32_t>(inputs.size()), "unused interpolants are not the identity");
+}
+
+void testUpdateMapping() {
+    std::array<ShaderSemantic, 4> inputs{semantic(1, 0, 0), semantic(2, 0, 1), semantic(3, 0, 2), semantic(4, 0, 3)};
+    inputs[0].is_custom = 1;
+    inputs[0].default_value = 2;
+    inputs[1].default_value = 1;
+    inputs[1].default_value_hi = 1;
+    inputs[2].default_value_hi = 2;
+    inputs[3].is_custom = 1;
+    inputs[3].default_value = 3;
+    inputs[3].default_value_hi = 3;
+    std::array<ShaderSemantic, 3> outputs{semantic(1, 5, 0), semantic(2, 7, 1), semantic(4, 9, 3)};
+    Shader gs{};
+    gs.output_semantics = outputs.data();
+    gs.num_output_semantics = static_cast<std::uint16_t>(outputs.size());
+    Shader ps{};
+    ps.input_semantics = inputs.data();
+    ps.num_input_semantics = static_cast<std::uint32_t>(inputs.size());
+
+    auto update = filled();
+    const auto untouched = filled();
+    check(sceAgcUnknown_vieBRwlh1Lw(update.data(), &gs, &ps) == 0, "update mapping failed");
+    check(update[0].value == 0x00000625u, "custom interpolant update changed");
+    check(update[1].value == 0x01380107u, "low f16 half update changed");
+    check(update[2].value == 0x02480220u, "unmatched high f16 half update changed");
+    check(update[3].value == 0x03680709u, "full f16 interpolant update changed");
+    for (std::uint32_t i = 0; i < inputs.size(); ++i) {
+        check(update[i].offset == ShaderRegs::SPI_PS_INPUT_CNTL_0 + i, "updated register offset changed");
+    }
+    const std::size_t written = inputs.size() * sizeof(ShaderRegister);
+    check(std::memcmp(update.data() + inputs.size(), untouched.data(), sizeof(update) - written) == 0, "update wrote past its inputs");
+
+    auto create = filled();
+    check(sceAgcUnknownCreateInterpolantMapping(create.data(), &gs, &ps) == 0, "split f16 mapping failed");
+    check(std::memcmp(create.data(), update.data(), written) == 0, "update differs from the split f16 mapping");
+    checkIdentity(create, static_cast<std::uint32_t>(inputs.size()), "unused interpolants are not the identity");
+
+    for (const std::uint32_t index : {1u, 3u}) {
+        inputs[index].default_value = 0;
+        update = filled();
+        expectFailure([&] { sceAgcUnknown_vieBRwlh1Lw(update.data(), &gs, &ps); });
+        check(std::memcmp(update.data(), untouched.data(), sizeof(update)) == 0, "rejected update wrote registers");
+        inputs[index].default_value = inputs[index].default_value_hi;
+    }
 }
 
 void testRejections() {
@@ -117,18 +178,23 @@ void testRejections() {
     const auto saved = regs;
     expectFailure([&] { sceAgcCreateInterpolantMapping_0100(regs.data(), &gs, &ps); });
     expectFailure([&] { sceAgcUnknownCreateInterpolantMapping(regs.data(), &gs, &ps); });
+    expectFailure([&] { sceAgcUnknown_vieBRwlh1Lw(regs.data(), &gs, &ps); });
     check(std::memcmp(regs.data(), saved.data(), sizeof(regs)) == 0, "rejected mapping wrote registers");
     ps.num_input_semantics = 1;
     expectFailure([&] { sceAgcUnknownCreateInterpolantMapping(regs.data(), nullptr, &ps); });
     expectFailure([&] { sceAgcUnknownCreateInterpolantMapping(nullptr, &gs, &ps); });
+    expectFailure([&] { sceAgcUnknown_vieBRwlh1Lw(regs.data(), nullptr, &ps); });
+    expectFailure([&] { sceAgcUnknown_vieBRwlh1Lw(nullptr, &gs, &ps); });
+    expectFailure([&] { sceAgcUnknown_vieBRwlh1Lw(regs.data(), &gs, nullptr); });
 }
 
 }
 
 extern "C" void AgcDriverResolveShaderAbi_nid_postfix(const Shader* shader, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
-    check(shader != nullptr && context.size() == preparedMapping.size() && primitive.empty(), "invalid mapping preparation call");
+    check(shader != nullptr && context.size() <= preparedMapping.size() && primitive.empty(), "invalid mapping preparation call");
     mappedPixel = shader;
     std::copy(context.begin(), context.end(), preparedMapping.begin());
+    preparedCount = context.size();
     ++mappings;
 }
 
@@ -141,8 +207,9 @@ int main() {
     try {
         testIdentity();
         testMapping();
+        testUpdateMapping();
         testRejections();
-        check(mappings == 3u && links == 2u, "mapping preparation call count changed");
+        check(mappings == 7u && links == 5u, "mapping preparation call count changed");
         LibcRunShutdown_nid_postfix();
         std::puts("AGC interpolant mapping tests passed");
         return 0;

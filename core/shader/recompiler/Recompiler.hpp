@@ -176,6 +176,7 @@ struct ShaderFloatMode {
 inline constexpr std::uint32_t InterpolationQuiet = 1u;
 inline constexpr std::uint32_t InterpolationFlush32 = 2u;
 inline constexpr std::uint32_t InterpolationFlush16 = 4u;
+inline constexpr std::uint32_t InterpolationRound16Shift = 3u;
 
 struct GuestContext {
     std::uint32_t waveSize;

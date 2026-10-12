@@ -746,6 +746,42 @@ void sparseHeapTests(const Context& context, const BdaTestAccess& access) {
     releaseSparse(block, reserved);
 }
 
+void hostWriteWatchExclusionTests() {
+#ifdef _WIN32
+    if (AgcDriver::GuestMemory::WriteWatched()) {
+        std::uintptr_t arena = 0;
+        std::size_t arenaBytes = 0;
+        GuestArena::GuestArenaRange_nid_postfix(&arena, &arenaBytes);
+        bool found = false;
+        for (auto cursor = arena; cursor < arena + arenaBytes;) {
+            MEMORY_BASIC_INFORMATION info{};
+            Require(VirtualQuery(reinterpret_cast<void*>(cursor), &info, sizeof(info)) == sizeof(info), "cannot enumerate arena host holes");
+            if (GuestArena::GuestArenaHostRegionOverlaps_nid_postfix(cursor, 1)) {
+                Require(!AgcDriver::GuestMemory::Watched(cursor, 1), "an arena host hole was reported as write-watched");
+                Require(AgcDriver::GuestMemory::CollectWritesUncached(cursor, 1) == 0, "an arena host hole returned a write generation");
+                Require(!AgcDriver::GuestMemory::UnchangedSince(cursor, 1, 1), "an arena host hole passed an unchanged proof");
+                const std::array queries{AgcDriver::GuestMemory::UnchangedQuery{cursor, 1, 1}};
+                Require(!AgcDriver::GuestMemory::UnchangedSinceAll(queries), "an arena host hole passed a bulk unchanged proof");
+                found = true;
+                break;
+            }
+            const auto next = reinterpret_cast<std::uintptr_t>(info.BaseAddress) + info.RegionSize;
+            Require(next > cursor, "arena enumeration did not advance");
+            cursor = next;
+        }
+        Require(found, "write-watched arena contained no host exclusion to test");
+    }
+    std::vector<std::uint8_t> host(64, 0x31);
+    const auto address = reinterpret_cast<std::uintptr_t>(host.data());
+    Require(!AgcDriver::GuestMemory::Watched(address, host.size()), "ordinary host heap memory was reported as write-watched");
+    Require(AgcDriver::GuestMemory::CollectWritesUncached(address, host.size()) == 0, "ordinary host heap memory returned a guest write generation");
+    Require(!AgcDriver::GuestMemory::UnchangedSince(address, host.size(), 1), "ordinary host heap memory was proven unchanged");
+    const std::array queries{AgcDriver::GuestMemory::UnchangedQuery{address, host.size(), 1}};
+    Require(!AgcDriver::GuestMemory::UnchangedSinceAll(queries), "a host heap range passed a bulk unchanged proof");
+    Require(std::all_of(host.begin(), host.end(), [](std::uint8_t value) { return value == 0x31; }), "write-watch eligibility changed host bytes");
+#endif
+}
+
 void sparseHeapMirrorTests(const Context& context, const BdaTestAccess& access) {
 #ifdef _WIN32
     if (!GuestArena::GuestArenaAvailable_nid_postfix() || !GuestArena::GuestArenaWriteWatched_nid_postfix()) {
@@ -1077,6 +1113,7 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     gpuMappingTests(context);
     stridedOverhangTests(context, access);
     sparseHeapTests(context, access);
+    hostWriteWatchExclusionTests();
     sparseHeapMirrorTests(context, access);
     Require(AddressCopyOverflow({{0x1000, 0x3000, 0x2000, "uncommitted pages"}}, 0x2000).empty(), "copies within the limit were refused");
     const auto copies = AddressCopyOverflow({{0x1000, 0x2000, 0x1000, "not mirrored"}, {0x10000, 0x30000, 0x18000, "uncommitted pages"}}, 0x2000);

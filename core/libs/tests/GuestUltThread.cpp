@@ -22,6 +22,14 @@ int APS5_VABI _sceUltWaitingQueueResourcePoolCreate(void*, const char*, std::uin
 int APS5_VABI _sceUltSemaphoreCreate(void*, const char*, std::int32_t, void*, const void*, std::uint32_t);
 int APS5_VABI sceUltSemaphoreAcquire(void*, std::int32_t);
 int APS5_VABI sceUltSemaphoreRelease(void*, std::int32_t);
+int APS5_VABI _sceUltMutexOptParamInitialize(void*, std::uint32_t);
+int APS5_VABI _sceUltMutexCreate(void*, const char*, void*, const void*, std::uint32_t);
+int APS5_VABI sceUltMutexLock(void*);
+int APS5_VABI sceUltMutexUnlock(void*);
+int APS5_VABI _sceUltQueueDataResourcePoolCreate(void*, const char*, std::uint32_t, std::uint64_t, std::uint32_t, void*, void*, const void*, std::uint32_t);
+int APS5_VABI _sceUltQueueCreate(void*, const char*, std::uint64_t, void*, void*, const void*, std::uint32_t);
+int APS5_VABI sceUltQueuePush(void*, const void*);
+int APS5_VABI sceUltQueuePop(void*, void*);
 }
 
 static constexpr int Ok = 0;
@@ -150,6 +158,25 @@ static void UnderscoredCreate() {
     CHECK(_sceUltSemaphoreCreate(semaphore, "semaphore", 2, pool, nullptr, 0) == State);
     CHECK(sceUltSemaphoreAcquire(semaphore, 2) == Ok);
     CHECK(sceUltSemaphoreRelease(semaphore, 2) == Ok);
+    alignas(8) static std::uint8_t mutexOptParam[128];
+    alignas(8) static std::uint8_t mutex[256];
+    std::memset(mutexOptParam, 0xFF, sizeof(mutexOptParam));
+    CHECK(_sceUltMutexOptParamInitialize(nullptr, 0) == Null);
+    CHECK(_sceUltMutexOptParamInitialize(mutexOptParam, 0) == Ok);
+    CHECK(mutexOptParam[8] == 0 && mutexOptParam[15] == 0);
+    CHECK(_sceUltMutexCreate(nullptr, "mutex", pool, mutexOptParam, 0) == Null);
+    CHECK(_sceUltMutexCreate(mutex, "mutex", pool, mutexOptParam, 0) == Ok);
+    CHECK(sceUltMutexLock(mutex) == Ok);
+    CHECK(sceUltMutexUnlock(mutex) == Ok);
+    alignas(8) static std::uint8_t dataPool[512];
+    alignas(8) static std::uint8_t queue[512];
+    CHECK(_sceUltQueueDataResourcePoolCreate(nullptr, "data", 1, 8, 1, pool, nullptr, nullptr, 0) == Null);
+    CHECK(_sceUltQueueDataResourcePoolCreate(dataPool, "data", 1, 8, 1, pool, nullptr, nullptr, 0) == Ok);
+    CHECK(_sceUltQueueCreate(nullptr, "queue", 8, pool, dataPool, nullptr, 0) == Null);
+    CHECK(_sceUltQueueCreate(queue, "queue", 8, pool, dataPool, nullptr, 0) == Ok);
+    std::uint64_t value = 0x1122334455667788ull, output = 0;
+    CHECK(sceUltQueuePush(queue, &value) == Ok);
+    CHECK(sceUltQueuePop(queue, &output) == Ok && output == value);
 }
 
 int main(int argc, char** argv) {

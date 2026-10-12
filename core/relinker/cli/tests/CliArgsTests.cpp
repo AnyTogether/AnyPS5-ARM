@@ -52,7 +52,7 @@ void defaults() {
     const auto args = parse({"input.elf", "output.elf"});
     require(args.inputPath == "input.elf", "input path was not captured");
     require(args.outputPath == "output.elf", "output path was not captured");
-    require(!args.skipSyscallCheck && !args.skipSceModule && !args.toIntel && !args.writeRegistry &&
+    require(!args.skipSyscallCheck && !args.trapSdkSyscallStubs && !args.skipSceModule && !args.toIntel && !args.writeRegistry &&
         !args.toWindows && !args.lazyBinding && !args.autorun && !args.windowsDiagnostics && !args.windowsGui,
         "a flag defaulted to true");
     require(args.unusedFilterLevel == 0u, "unused filter level did not default to 0");
@@ -74,6 +74,13 @@ void booleanFlags() {
     require(args.windowsDiagnostics, "--windows-diagnostics was ignored");
     require(args.windowsGui, "--windows-gui was ignored");
     require(args.inputPath == "input.elf" && args.outputPath == "output.elf", "flags consumed the positional paths");
+}
+
+void trapSdkSyscallStubs() {
+    const auto args = parse({"--trap-sdk-syscall-stubs", "input.elf", "output.elf"});
+    require(args.trapSdkSyscallStubs, "--trap-sdk-syscall-stubs was ignored");
+    expectThrows({"--skip-syscall-check", "--trap-sdk-syscall-stubs", "input.elf", "output.elf"},
+        "--skip-syscall-check conflicts with --trap-sdk-syscall-stubs");
 }
 
 void positionalsInterleaveWithFlags() {
@@ -189,6 +196,7 @@ int main() {
     try {
         defaults();
         booleanFlags();
+        trapSdkSyscallStubs();
         positionalsInterleaveWithFlags();
         singleDashIsPositional();
         rpath();

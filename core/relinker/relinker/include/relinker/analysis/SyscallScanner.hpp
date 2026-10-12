@@ -6,7 +6,7 @@
 
 namespace Relinker {
 
-std::unique_ptr<ISyscallScanner> MakeSyscallScanner();
+std::unique_ptr<ISyscallScanner> MakeSyscallScanner(bool trapSdkStubs = false);
 std::unique_ptr<ISyscallScanner> MakeNullSyscallScanner();
 
 }

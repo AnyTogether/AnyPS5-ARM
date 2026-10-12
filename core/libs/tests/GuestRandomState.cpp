@@ -19,6 +19,10 @@ int* APS5_VABI __error_nid_postfix();
 double APS5_VABI erand48_nid_postfix(std::uint16_t*);
 std::int64_t APS5_VABI nrand48_nid_postfix(std::uint16_t*);
 std::int64_t APS5_VABI jrand48_nid_postfix(std::uint16_t*);
+double APS5_VABI drand48_nid_postfix();
+std::int64_t APS5_VABI lrand48_nid_postfix();
+std::int64_t APS5_VABI mrand48_nid_postfix();
+void APS5_VABI srand48_nid_postfix(std::int64_t);
 }
 
 static int failures = 0;
@@ -63,6 +67,13 @@ static void CheckRand48() {
     const double value = erand48_nid_postfix(top);
     Require(value >= 0.0 && value < 1.0, "erand48 stays below 1");
 
+    srand48_nid_postfix(0x1234abcd);
+    std::uint16_t expectedSeed[3] = {0x330e, 0xabcd, 0x1234};
+    Require(drand48_nid_postfix() == erand48_nid_postfix(expectedSeed), "drand48 matches erand48 on initialized seed");
+    Require(lrand48_nid_postfix() == nrand48_nid_postfix(expectedSeed), "lrand48 matches nrand48 on initialized seed");
+    Require(mrand48_nid_postfix() == jrand48_nid_postfix(expectedSeed), "mrand48 matches jrand48 on initialized seed");
+    Require(drand48_nid_postfix() == erand48_nid_postfix(expectedSeed), "drand48 fourth value matches erand48");
+
 #ifndef _WIN32
     std::uint16_t guest[3] = {0x1234, 0x5678, 0x9abc};
     unsigned short host[3] = {0x1234, 0x5678, 0x9abc};
@@ -70,6 +81,13 @@ static void CheckRand48() {
         Require(erand48_nid_postfix(guest) == ::erand48(host), "erand48 matches the host");
         Require(nrand48_nid_postfix(guest) == ::nrand48(host), "nrand48 matches the host");
         Require(jrand48_nid_postfix(guest) == ::jrand48(host), "jrand48 matches the host");
+    }
+    ::srand48(1234567);
+    srand48_nid_postfix(1234567);
+    for (int round = 0; round < 32; ++round) {
+        Require(drand48_nid_postfix() == ::drand48(), "drand48 matches the host");
+        Require(lrand48_nid_postfix() == ::lrand48(), "lrand48 matches the host");
+        Require(mrand48_nid_postfix() == ::mrand48(), "mrand48 matches the host");
     }
 #endif
 }

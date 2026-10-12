@@ -905,6 +905,45 @@ int DoMapAnon(void** addr, size_t len, int prot, int flags, size_t alignment) {
     return 0;
 }
 
+int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, int descriptor, std::uint64_t offset, size_t alignment) {
+    ValidateOutput(addr);
+    if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0 || (offset & (PS5_PAGE_SIZE - 1)) != 0 || len > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) || offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - len) return SCE_KERNEL_ERROR_EINVAL;
+#if defined(__linux__)
+    const bool shared = (flags & 3) == 1;
+    GuestAllocations::Mutation mutation;
+    const int placementFlags = flags & (GuestMapFixedFlag | 0x80 | 0x400000);
+    flags = PlaceHintInReservation(*addr, len, placementFlags);
+    if (FixedNoOverwriteConflict(mutation, *addr, len, flags)) return SCE_KERNEL_ERROR_ENOMEM;
+    ReplaceFixedOverlap(mutation, *addr, len, flags);
+    void* mapped = MapPlaced(*addr, len, PROT_NONE, flags, alignment);
+    GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(mapped, len);
+    const int nativeProtection = LinuxProtFromSce(prot);
+    const int nativeFlags = (shared ? MAP_SHARED : MAP_PRIVATE) | MAP_FIXED;
+    if (::mmap(mapped, len, nativeProtection, nativeFlags, descriptor, static_cast<off_t>(offset)) == MAP_FAILED) {
+        const int error = errno;
+        Unmap(mapped, len);
+        throw std::system_error(error, std::generic_category(), "map guest shared memory");
+    }
+    try {
+        mutation.Add(mapped, len, (prot & 3) != 0, (prot & 2) != 0, false);
+    } catch (...) {
+        Unmap(mapped, len);
+        throw;
+    }
+    *addr = mapped;
+    EraseReservations(mapped, len);
+    RecordProtection(mapped, len, prot);
+    Trace("map file %p+0x%zx offset=0x%llx prot=0x%x flags=0x%x", mapped, len, static_cast<unsigned long long>(offset), prot, flags);
+    return 0;
+#else
+    static_cast<void>(prot);
+    static_cast<void>(flags);
+    static_cast<void>(descriptor);
+    static_cast<void>(offset);
+    throw std::system_error(ENOTSUP, std::generic_category(), "file-backed guest mmap is not supported on this host");
+#endif
+}
+
 #ifdef __APPLE__
 std::uintptr_t GuestPageSkew(std::uintptr_t address) {
     struct Search {

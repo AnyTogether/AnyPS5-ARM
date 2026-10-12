@@ -16,6 +16,7 @@
 static int MakePipe(int* ends) { return ::_pipe(ends, 64, _O_BINARY); }
 static int ClosePipe(int end) { return ::_close(end); }
 #else
+#include <fcntl.h>
 #include <unistd.h>
 static int MakePipe(int* ends) { return ::pipe(ends); }
 static int ClosePipe(int end) { return ::close(end); }
@@ -59,6 +60,7 @@ static constexpr std::int64_t ErrorEbadf = static_cast<int>(0x80020009u);
 static constexpr std::int64_t ErrorEfault = static_cast<int>(0x8002000Eu);
 static constexpr std::int64_t ErrorEinval = static_cast<int>(0x80020016u);
 static constexpr std::int64_t ErrorEspipe = static_cast<int>(0x8002001Du);
+static constexpr std::int64_t ErrorEagain = static_cast<int>(0x80020023u);
 
 static std::string Contents(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
@@ -206,6 +208,11 @@ int main() {
     Require(std::memcmp(first, "xyz", 3) == 0);
     Require(sceKernelPreadv(ends[0], reads, 2, 0) == ErrorEspipe);
     Require(sceKernelPwritev(ends[1], message, 1, 0) == ErrorEspipe);
+#ifndef _WIN32
+    Require(::fcntl(ends[0], F_SETFL, ::fcntl(ends[0], F_GETFL) | O_NONBLOCK) == 0);
+    Require(sceKernelReadv(ends[0], reads, 2) == ErrorEagain);
+    Require(readv_nid_postfix(ends[0], reads, 2) == -1 && *__error_nid_postfix() == 35);
+#endif
     Require(ClosePipe(ends[0]) == 0 && ClosePipe(ends[1]) == 0);
 
     const int random = sceKernelOpen("/dev/urandom", 0, 0);

@@ -95,6 +95,8 @@ void SaveTypeWordLocked() {
     StoreWord(state.table, 0, static_cast<std::uint32_t>(word));
 }
 
+std::uint16_t g_rand48Seed[3]{0x330e, 0xabcd, 0x1234};
+
 std::uint64_t NextRand48(std::uint16_t* seed, const char* function) {
     if (seed == nullptr) throw std::invalid_argument(std::string(function) + ": null seed");
     constexpr std::uint64_t Multiplier = 0x5deece66dull;
@@ -122,6 +124,28 @@ std::int64_t APS5_VABI nrand48_nid_postfix(std::uint16_t* seed) {
 
 std::int64_t APS5_VABI jrand48_nid_postfix(std::uint16_t* seed) {
     return static_cast<std::int32_t>(static_cast<std::uint32_t>(NextRand48(seed, __func__) >> 16));
+}
+
+double APS5_VABI drand48_nid_postfix() {
+    std::lock_guard lock(g_randomLock);
+    return std::ldexp(static_cast<double>(NextRand48(g_rand48Seed, __func__)), -48);
+}
+
+std::int64_t APS5_VABI lrand48_nid_postfix() {
+    std::lock_guard lock(g_randomLock);
+    return static_cast<std::int64_t>(NextRand48(g_rand48Seed, __func__) >> 17);
+}
+
+std::int64_t APS5_VABI mrand48_nid_postfix() {
+    std::lock_guard lock(g_randomLock);
+    return static_cast<std::int32_t>(static_cast<std::uint32_t>(NextRand48(g_rand48Seed, __func__) >> 16));
+}
+
+void APS5_VABI srand48_nid_postfix(std::int64_t seedval) {
+    std::lock_guard lock(g_randomLock);
+    g_rand48Seed[0] = 0x330e;
+    g_rand48Seed[1] = static_cast<std::uint16_t>(static_cast<std::uint32_t>(seedval));
+    g_rand48Seed[2] = static_cast<std::uint16_t>(static_cast<std::uint32_t>(seedval) >> 16);
 }
 
 std::int64_t APS5_VABI random_nid_postfix() {

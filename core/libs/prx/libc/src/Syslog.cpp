@@ -19,6 +19,7 @@ constexpr int priorityMask = 0x07;
 constexpr int facilityMask = 0x3f8;
 constexpr int userFacility = 1 << 3;
 constexpr int internalLogPriority = 3 | 0x02 | 0x20 | 0x01;
+int logMask = 0xff;
 
 std::mutex& OutputMutex() {
     static std::mutex mutex;
@@ -26,7 +27,6 @@ std::mutex& OutputMutex() {
 }
 
 void Emit(int priority, const std::string& message) {
-    std::lock_guard lock(OutputMutex());
     std::fprintf(stderr, "[syslog:%d] %s", priority, message.c_str());
     if (message.empty() || message.back() != '\n') std::fputc('\n', stderr);
     std::fflush(stderr);
@@ -75,16 +75,28 @@ std::string Format(const char* format, VaList* args) {
 }
 
 extern "C" {
+int APS5_VABI setlogmask_nid_postfix(int mask) {
+    std::lock_guard lock(OutputMutex());
+    const int previous = logMask;
+    if (mask != 0) logMask = mask;
+    return previous;
+}
+
 void APS5_VABI vsyslog_nid_postfix(int priority, const char* format, VaList* args) {
     const int saved = *__error_nid_postfix();
+    std::lock_guard lock(OutputMutex());
     if (priority & ~(priorityMask | facilityMask)) {
-        char complaint[64];
-        std::snprintf(complaint, sizeof(complaint), "syslog: unknown facility/priority: %x", priority);
-        Emit(internalLogPriority, complaint);
+        if (logMask & (1 << (internalLogPriority & priorityMask))) {
+            char complaint[64];
+            std::snprintf(complaint, sizeof(complaint), "syslog: unknown facility/priority: %x", priority);
+            Emit(internalLogPriority, complaint);
+        }
         priority &= priorityMask | facilityMask;
     }
-    if ((priority & facilityMask) == 0) priority |= userFacility;
-    Emit(priority, format ? Format(ExpandErrorText(format, saved).c_str(), args) : std::string());
+    if (logMask & (1 << (priority & priorityMask))) {
+        if ((priority & facilityMask) == 0) priority |= userFacility;
+        Emit(priority, format ? Format(ExpandErrorText(format, saved).c_str(), args) : std::string());
+    }
     *__error_nid_postfix() = saved;
 }
 

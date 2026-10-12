@@ -32,10 +32,15 @@ std::atomic<std::uint64_t> commitGeneration{1};
 std::atomic<void (*)(std::uintptr_t, std::size_t, std::uint64_t)> privateMappingObserver{nullptr};
 #endif
 
-constexpr std::uintptr_t ArenaStart = 0x0000000200000000ull;
-constexpr std::uintptr_t SystemReservedStart = 0x00000007FFFFC000ull;
-constexpr std::uintptr_t SystemReservedEnd = 0x0000001000000000ull;
-constexpr std::uintptr_t ApplicationAreaEnd = 0x000000FC00000000ull;
+#ifdef ANYPS5_ENABLE_ASAN
+constexpr std::uintptr_t GuestArenaOffset = 0x0000100000000000ull;
+#else
+constexpr std::uintptr_t GuestArenaOffset = 0;
+#endif
+constexpr std::uintptr_t ArenaStart = 0x0000000200000000ull + GuestArenaOffset;
+constexpr std::uintptr_t SystemReservedStart = 0x00000007FFFFC000ull + GuestArenaOffset;
+constexpr std::uintptr_t SystemReservedEnd = 0x0000001000000000ull + GuestArenaOffset;
+constexpr std::uintptr_t ApplicationAreaEnd = 0x000000FC00000000ull + GuestArenaOffset;
 
 std::uintptr_t alignUp(std::uintptr_t value, std::size_t alignment) {
     return (value + alignment - 1) & ~(static_cast<std::uintptr_t>(alignment) - 1);
@@ -77,6 +82,21 @@ public:
         if (candidate > _end || bytes > _end - candidate) throw std::runtime_error("guest address space arena exhausted");
         _used.emplace(candidate, candidate + bytes);
         return reinterpret_cast<void*>(candidate);
+    }
+
+    std::uintptr_t HighestFree(std::size_t bytes, std::size_t alignment) {
+        if (_base == 0) throw std::runtime_error("guest address space arena is unavailable");
+        if (bytes == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0) throw std::invalid_argument("invalid guest arena window");
+        std::lock_guard lock(_lock);
+        auto limit = _end;
+        while (limit >= _base && bytes <= limit - _base) {
+            const auto candidate = (limit - bytes) & ~(alignment - 1);
+            if (candidate < _base) break;
+            const auto next = _used.lower_bound(candidate + bytes);
+            if (next == _used.begin() || std::prev(next)->second <= candidate) return candidate;
+            limit = std::prev(next)->first;
+        }
+        return 0;
     }
 
     bool MarkUsedForCommit(const void* pointer, std::size_t bytes) {
@@ -262,6 +282,10 @@ void* GuestArenaAllocate_nid_postfix(std::size_t bytes, std::size_t alignment) {
 
 void* GuestArenaAllocateAtOrAbove_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
     return Arena::Get().AllocateAtOrAbove(hint, bytes, alignment);
+}
+
+std::uintptr_t GuestArenaHighestFree_nid_no_patch(std::size_t bytes, std::size_t alignment) {
+    return Arena::Get().HighestFree(bytes, alignment);
 }
 
 void GuestArenaMarkUsed_nid_postfix(const void* pointer, std::size_t bytes) {

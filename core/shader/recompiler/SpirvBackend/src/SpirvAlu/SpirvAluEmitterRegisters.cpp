@@ -1,4 +1,5 @@
 #include "SpirvBackend/SpirvAluEmitter.hpp"
+#include "SpirvBackend/SpirvEmitterHelpers.hpp"
 #include "SpirvBackend/SpirvEmitterInstructions.hpp"
 #include <stdexcept>
 
@@ -42,6 +43,23 @@ void EmitGetVectorRegister(SpirvValueEmitContext& ctx, const IrValue& inst) {
 
 void EmitSetVectorRegister(SpirvValueEmitContext& ctx, const IrValue& inst) {
     EmitUnreachable(ctx, inst);
+}
+
+std::uint32_t VectorWindowElement(SpirvValueEmitContext& ctx, const IrValue& inst) {
+    auto& state = ctx.state;
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassFunction, TypeU32(state)), pointer, state.vectorWindowVariable.at(state.laneHalf), ctx.Arg(inst, 0u));
+    return pointer;
+}
+
+void EmitLoadVectorWindow(SpirvValueEmitContext& ctx, const IrValue& inst) {
+    const auto value = ctx.state.module.AllocateId();
+    ctx.state.module.AddFunction(spv::OpLoad, TypeU32(ctx.state), value, VectorWindowElement(ctx, inst));
+    ctx.Define(inst, value);
+}
+
+void EmitStoreVectorWindow(SpirvValueEmitContext& ctx, const IrValue& inst) {
+    ctx.state.module.AddFunction(spv::OpStore, VectorWindowElement(ctx, inst), ctx.Arg(inst, 1u));
 }
 
 void EmitGetGotoVariable(SpirvValueEmitContext& ctx, const IrValue& inst) {

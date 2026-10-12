@@ -18,6 +18,7 @@ std::int32_t APS5_VABI sceFiberReturnToThread(std::uint64_t, std::uint64_t*);
 std::int32_t APS5_VABI sceFiberGetSelf(FiberObject**);
 std::int32_t APS5_VABI sceFiberGetInfo(FiberObject*, FiberInfo*);
 std::int32_t APS5_VABI sceFiberGetThreadFramePointerAddress(std::uint64_t*);
+std::int32_t APS5_VABI _sceFiberGetThreadFramePointerAddress(std::uint64_t*);
 std::int32_t APS5_VABI sceFiberStartContextSizeCheck(std::uint32_t);
 std::int32_t APS5_VABI sceFiberStopContextSizeCheck(void);
 }
@@ -54,6 +55,9 @@ void APS5_VABI FirstEntry(std::uint64_t argOnInitialize, std::uint64_t argOnRun)
     std::uint64_t framePointer = 0;
     Require(sceFiberGetThreadFramePointerAddress(nullptr) == FiberErrorNull, "frame pointer null");
     Require(sceFiberGetThreadFramePointerAddress(&framePointer) == 0 && framePointer == g_threadFramePointer, "thread frame pointer");
+    framePointer = 0;
+    Require(_sceFiberGetThreadFramePointerAddress(nullptr) == FiberErrorNull, "underscore frame pointer null");
+    Require(_sceFiberGetThreadFramePointerAddress(&framePointer) == 0 && framePointer == g_threadFramePointer, "underscore thread frame pointer");
     volatile double carried = 1.5;
     std::uint64_t received = 0;
     Require(sceFiberSwitch(g_second, 200, &received) == 0, "switch to second fiber");
@@ -124,6 +128,7 @@ int main() {
     std::uint64_t returned = 0;
     std::uint64_t framePointer = 0;
     Require(sceFiberGetThreadFramePointerAddress(&framePointer) == FiberErrorPermission, "frame pointer outside a fiber");
+    Require(_sceFiberGetThreadFramePointerAddress(&framePointer) == FiberErrorPermission, "underscore frame pointer outside a fiber");
     Require(RunFirst(&returned) == 0 && returned == 250, "run first until second returns");
     Require(_mm_getcsr() == threadCsr, "thread MXCSR restored after the fibers");
     std::thread([&] {

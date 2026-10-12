@@ -2,15 +2,18 @@ import argparse
 import re
 import shutil
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def package(platform, build, output, version):
     if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version) or version.endswith("."):
         raise ValueError(f"Invalid release tag for asset filenames: {version}")
     libraries = sorted((build / "core/libs/libs").glob("*.prx"))
-    expected = {f"{directory.name}.prx" for directory in Path("core/libs/prx").iterdir() if directory.is_dir()}
+    expected = {f"{directory.name}.prx" for directory in (ROOT / "core/libs/prx").iterdir() if directory.is_dir() and not directory.name.startswith(".")}
     missing = expected - {library.name for library in libraries}
     if missing:
         raise RuntimeError(f"Missing patched libraries: {', '.join(sorted(missing))}")
@@ -24,25 +27,29 @@ def package(platform, build, output, version):
         if not file.is_file() or file.stat().st_size == 0:
             raise RuntimeError(f"Missing or empty release file: {file}")
     output.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(output / f"prx-{platform}-{version}.zip", "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for file in files:
-            archive.write(file, arcname=f"libs/{file.name}")
-    with tarfile.open(output / f"prx-{platform}-{version}.tar.gz", "w:gz", compresslevel=9) as archive:
-        for file in files:
-            archive.add(file, arcname=f"libs/{file.name}")
     asset = f"relinker-{version}.exe" if platform == "windows" else f"relinker-{version}"
-    shutil.copy2(binary, output / asset)
+    with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temporary:
+        staging = Path(temporary)
+        with zipfile.ZipFile(staging / f"prx-{platform}-{version}.zip", "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for file in files:
+                archive.write(file, arcname=f"libs/{file.name}")
+        with tarfile.open(staging / f"prx-{platform}-{version}.tar.gz", "w:gz", compresslevel=9, dereference=True) as archive:
+            for file in files:
+                archive.add(file, arcname=f"libs/{file.name}")
+        shutil.copy2(binary, staging / asset)
+        for file in sorted(staging.iterdir()):
+            file.replace(output / file.name)
 
 
 def collect_docs(source, output):
-    documents = sorted(source.rglob("*.md"))
+    documents = sorted(document for document in source.rglob("*.md") if document.is_file())
     if not documents:
         raise RuntimeError(f"No Markdown documents found in {source}")
-    names = set()
+    names = {file.name.casefold() for file in output.iterdir()} if output.exists() else set()
     for document in documents:
-        if document.name in names or (output / document.name).exists():
+        if document.name.casefold() in names:
             raise RuntimeError(f"Duplicate release asset name: {document.name}")
-        names.add(document.name)
+        names.add(document.name.casefold())
     output.mkdir(parents=True, exist_ok=True)
     for document in documents:
         shutil.copy2(document, output / document.name)

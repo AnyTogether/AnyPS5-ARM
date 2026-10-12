@@ -120,9 +120,16 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteWindows(const Relinker::GuestI
         return false;
     };
     std::map<std::string, std::uint32_t> exports;
+    std::map<std::string, const Relinker::GuestSymbol*> exportSymbols;
     PeSection tlsExports{".tlsrefs", nextRva, SectionRead | 0x40u, {}};
     for (const auto& symbol : guest.Symbols) {
-        if (symbol.Section == 0 || symbol.Section == Relinker::AbsoluteSection || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
+        if (symbol.Section == 0 || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
+        const auto [previous, inserted] = exportSymbols.emplace(symbol.Name, &symbol);
+        if (!inserted) {
+            if (!Relinker::IdenticalOrdinaryFunctionExport(*previous->second, symbol)) throw Domain::RelinkerException("Duplicate guest export: " + symbol.Name);
+            continue;
+        }
+        if (symbol.Section == Relinker::AbsoluteSection) continue;
         if (symbol.Section >= 0xff00) throw Domain::RelinkerException("Unsupported guest export section: " + symbol.Name);
         std::uint32_t rva = 0;
         if ((symbol.Info & 15) == 6) {

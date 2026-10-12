@@ -452,6 +452,10 @@ int32_t APS5_VABI sceFiberGetThreadFramePointerAddress(uint64_t* addr_frame_poin
     return SCE_OK;
 }
 
+int32_t APS5_VABI _sceFiberGetThreadFramePointerAddress(uint64_t* addr_frame_pointer) {
+    return sceFiberGetThreadFramePointerAddress(addr_frame_pointer);
+}
+
 int32_t APS5_VABI sceFiberStartContextSizeCheck(uint32_t flags) {
     if (flags != 0) return SCE_FIBER_ERROR_INVALID;
     bool expected = false;

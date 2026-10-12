@@ -2,9 +2,16 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/File/include/SharedMemory.hpp"
 #include <limits>
+#include <cerrno>
 #include <new>
 #include <stdexcept>
+#include <system_error>
+#if defined(__linux__)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI sceKernelMlock_nid_postfix(void* address, std::uint64_t length);
@@ -15,9 +22,16 @@ namespace {
 // FreeBSD/PS5 ABI values, independent of the host's errno and mmap constants.
 constexpr int GuestInvalid = 22;
 constexpr int GuestNoMemory = 12;
+constexpr int GuestBadDescriptor = 9;
+constexpr int GuestAccess = 13;
+constexpr int GuestIoError = 5;
 constexpr int GuestNotSupported = 45;
+constexpr int GuestShared = 0x1;
 constexpr int GuestPrivate = 0x2;
 constexpr int GuestAnonymous = 0x1000;
+constexpr int GuestMapFixed = 0x10;
+constexpr int GuestMapNoOverwrite = 0x80;
+constexpr int GuestMapNoCoalesce = 0x400000;
 constexpr int GuestSyncAsync = 0x1;
 constexpr int GuestSyncInvalidate = 0x2;
 constexpr int GuestAdviceCore = 9;
@@ -25,6 +39,25 @@ constexpr int GuestAdviceProtect = 10;
 constexpr std::uintptr_t GuestUserAddressEnd = 0x800000000000;
 constexpr int GuestAlignedSuper = 0x1000000;
 constexpr std::size_t SuperpageSize = std::size_t{1} << 21;
+
+#if defined(__linux__)
+class ScopedDescriptor {
+public:
+    explicit ScopedDescriptor(int value) noexcept : descriptor(fcntl(value, F_DUPFD_CLOEXEC, 0)), error(descriptor < 0 ? errno : 0) {}
+    ~ScopedDescriptor() {
+        const int savedError = errno;
+        if (descriptor >= 0) close(descriptor);
+        errno = savedError;
+    }
+    ScopedDescriptor(const ScopedDescriptor&) = delete;
+    ScopedDescriptor& operator=(const ScopedDescriptor&) = delete;
+    int Get() const noexcept { return descriptor; }
+    int Error() const noexcept { return error; }
+private:
+    int descriptor = -1;
+    int error = 0;
+};
+#endif
 
 bool RoundLength(std::size_t length, std::size_t& rounded) {
     constexpr auto mask = PS5_PAGE_SIZE - 1;
@@ -55,17 +88,60 @@ void* APS5_VABI mmap_nid_postfix(void* address, std::size_t length, int protecti
     std::size_t rounded;
     if (!RoundLength(length, rounded) || (protection & ~7) != 0)
         return failed(GuestInvalid);
-    if ((flags & ~GuestAlignedSuper) != (GuestPrivate | GuestAnonymous))
+    const int mappingFlags = flags & ~GuestAlignedSuper;
+    if (mappingFlags == (GuestPrivate | GuestAnonymous)) {
+        if (descriptor != -1 || offset != 0) return failed(GuestInvalid);
+        void* mapped = nullptr;
+        try {
+            const auto result = DoMapAnon(&mapped, rounded, protection, 0, (flags & GuestAlignedSuper) != 0 ? SuperpageSize : PS5_PAGE_SIZE);
+            if (result != 0) return failed(GuestNoMemory);
+            return mapped;
+        } catch (const std::bad_alloc&) {
+            return failed(GuestNoMemory);
+        } catch (const std::exception&) {
+            return failed(GuestNoMemory);
+        }
+    }
+    const int kind = mappingFlags & (GuestShared | GuestPrivate);
+    int placement = mappingFlags & (GuestMapFixed | GuestMapNoOverwrite | GuestMapNoCoalesce);
+    if ((mappingFlags & GuestAnonymous) != 0 ||
+        (kind != GuestShared && kind != GuestPrivate) ||
+        (mappingFlags & ~(GuestShared | GuestPrivate | GuestMapFixed | GuestMapNoOverwrite | GuestMapNoCoalesce)) != 0)
         return failed(GuestNotSupported);
-    if (descriptor != -1 || offset != 0)
+    if (descriptor < 0) return failed(GuestBadDescriptor);
+    if (offset < 0 || (static_cast<std::uint64_t>(offset) & (PS5_PAGE_SIZE - 1)) != 0 ||
+        rounded > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
+        static_cast<std::uint64_t>(offset) > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) - rounded)
         return failed(GuestInvalid);
-    // A non-fixed address is a hint; the kernel may choose another address.
-    (void)address;
+#if defined(__linux__)
+    const ScopedDescriptor pinnedDescriptor(descriptor);
+    if (pinnedDescriptor.Get() < 0) return failed(pinnedDescriptor.Error());
+    const int mappingDescriptor = pinnedDescriptor.Get();
+    const int descriptorFlags = fcntl(mappingDescriptor, F_GETFL);
+    if (descriptorFlags < 0) return failed(errno);
+    const int accessMode = descriptorFlags & O_ACCMODE;
+    if ((protection & 1) != 0 && accessMode == O_WRONLY) return failed(GuestAccess);
+    if (kind == GuestShared && (protection & 2) != 0 && accessMode == O_RDONLY) return failed(GuestAccess);
+    if (!File::IsSharedMemoryDescriptor_nid_no_patch(mappingDescriptor)) return failed(GuestNotSupported);
+#else
+    const int mappingDescriptor = descriptor;
+    if (!File::IsSharedMemoryDescriptor_nid_no_patch(mappingDescriptor)) return failed(GuestNotSupported);
+#endif
+    const std::size_t alignment = (flags & GuestAlignedSuper) != 0 ? SuperpageSize : PS5_PAGE_SIZE;
     void* mapped = nullptr;
     try {
-        const auto result = DoMapAnon(&mapped, rounded, protection, 0, (flags & GuestAlignedSuper) != 0 ? SuperpageSize : PS5_PAGE_SIZE);
-        if (result != 0) return failed(GuestNoMemory);
+        mapped = address;
+        const auto result = DoMapFileBacked_nid_no_patch(&mapped, rounded, protection, kind | placement, mappingDescriptor, static_cast<std::uint64_t>(offset), alignment);
+        if (result != 0) return failed(result == SCE_KERNEL_ERROR_EINVAL ? GuestInvalid : GuestNoMemory);
         return mapped;
+    } catch (const std::invalid_argument&) {
+        return failed(GuestInvalid);
+    } catch (const std::system_error& error) {
+        const int hostError = error.code().value();
+        if (hostError == ENOTSUP || hostError == EOPNOTSUPP) return failed(GuestNotSupported);
+        if (hostError == EACCES || hostError == EPERM) return failed(GuestAccess);
+        if (hostError == EBADF) return failed(GuestBadDescriptor);
+        return failed(hostError > 0 && hostError <= 34 ? hostError : GuestIoError);
     } catch (const std::bad_alloc&) {
         return failed(GuestNoMemory);
     } catch (const std::exception&) {
@@ -109,6 +185,9 @@ int APS5_VABI mprotect_nid_postfix(void* address, std::size_t length, int protec
         return 0;
     } catch (const std::bad_alloc&) {
         return failed(GuestNoMemory);
+    } catch (const std::system_error& error) {
+        const int hostError = error.code().value();
+        return failed(hostError == EACCES || hostError == EPERM ? GuestAccess : GuestInvalid);
     } catch (const std::exception&) {
         return failed(GuestInvalid);
     }

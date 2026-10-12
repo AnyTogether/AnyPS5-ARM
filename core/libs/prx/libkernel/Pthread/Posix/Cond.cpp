@@ -41,6 +41,10 @@ int APS5_VABI pthread_cond_timedwait_nid_postfix(PthreadCond* cond, PthreadMutex
     return toPosix(CondOperations::AbsoluteTimedwait(cond, mutex, abstime));
 }
 
+int APS5_VABI pthread_cond_reltimedwait_np_nid_postfix(PthreadCond* cond, PthreadMutex* mutex, KernelUseconds usec) {
+    return toPosix(scePthreadCondTimedwait(cond, mutex, usec));
+}
+
 int APS5_VABI pthread_cond_wait_nid_postfix(PthreadCond* cond, PthreadMutex* mutex) {
     return toPosix(scePthreadCondWait(cond, mutex));
 }

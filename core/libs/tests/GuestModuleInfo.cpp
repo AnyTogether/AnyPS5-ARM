@@ -114,5 +114,16 @@ int main(int argc, char** argv) {
     ModuleInfoEx unset{};
     unset.st_size = 0xf0000;
     Require(sceKernelGetModuleInfoFromAddr(reinterpret_cast<std::uintptr_t>(add), 2, &unset) == 0 && unset.st_size == sizeof(ModuleInfoEx));
+    const auto again = Query(add, 0);
+    Require(again.eh_frame_hdr_addr == info.eh_frame_hdr_addr && again.eh_frame_hdr_size == info.eh_frame_hdr_size);
+    Require(again.eh_frame_addr == info.eh_frame_addr && again.eh_frame_size == info.eh_frame_size);
     Require(dlclose_nid_postfix(module) == 0);
+    void* reloaded = dlopen_nid_postfix(argv[1], 2);
+    Require(reloaded != nullptr);
+    const void* reloadedAdd = dlsym_nid_postfix(reloaded, "GuestModuleAdd");
+    Require(reloadedAdd != nullptr);
+    const auto fresh = Query(reloadedAdd, 0);
+    Require(fresh.eh_frame_size == info.eh_frame_size && fresh.eh_frame_hdr_size == info.eh_frame_hdr_size);
+    Require(fresh.eh_frame_addr - fresh.segments[0].address == info.eh_frame_addr - info.segments[0].address);
+    Require(dlclose_nid_postfix(reloaded) == 0);
 }

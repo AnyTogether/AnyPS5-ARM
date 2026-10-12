@@ -35,6 +35,10 @@ void APS5_VABI _ZN3sce4Json6StringD1Ev(String*);
 const char* APS5_VABI _ZNK3sce4Json6String5c_strEv(const String*);
 std::size_t APS5_VABI _ZNK3sce4Json6String6lengthEv(const String*);
 void APS5_VABI _ZN3sce4Json5ArrayC1Ev(Array*);
+void APS5_VABI _ZN3sce4Json5ArrayC1ERKS1_(Array*, const Array*);
+void APS5_VABI _ZN3sce4Json5Array5clearEv(Array*);
+const Value* APS5_VABI _ZNK3sce4Json5Array5frontEv(const Array*);
+Value* APS5_VABI _ZNK3sce4Json5Array8iteratorptEv(const Iterator*);
 void APS5_VABI _ZN3sce4Json5ArrayD1Ev(Array*);
 void APS5_VABI _ZN3sce4Json5Array9push_backERKNS0_5ValueE(Array*, const Value*);
 Iterator* APS5_VABI _ZNK3sce4Json5Array5beginEv(Iterator*, const Array*);
@@ -75,6 +79,7 @@ Value* APS5_VABI _ZN3sce4Json5Value10referValueERKNS0_6StringE(Value*, const Str
 const Value* APS5_VABI _ZNK3sce4Json5ValueixEm(const Value*, std::size_t);
 int APS5_VABI _ZN3sce4Json5Value9serializeERNS0_6StringE(Value*, String*);
 int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPKcm(Value*, const char*, std::size_t);
+int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(Value*, int (APS5_VABI*)(char&, void*), void*);
 bool APS5_VABI _ZNK3sce4Json6Object5emptyEv(const Object*);
 std::size_t APS5_VABI _ZNK3sce4Json6Object4sizeEv(const Object*);
 const Object* APS5_VABI _ZNK3sce4Json5Value9getObjectEv(const Value*);
@@ -83,6 +88,7 @@ const Value* APS5_VABI _ZNK3sce4Json5Value8getValueEm(const Value*, std::size_t)
 const Value* APS5_VABI _ZNK3sce4Json5Value8getValueERKNS0_6StringE(const Value*, const String*);
 Value* APS5_VABI _ZN3sce4Json5Value10referValueEm(Value*, std::size_t);
 void APS5_VABI _ZN3sce4Json14InitParameter2C1Ev(void*);
+void APS5_VABI _ZN3sce4Json14InitParameter2C2Ev(void*);
 void APS5_VABI _ZN3sce4Json14InitParameter212setAllocatorEPNS0_12MemAllocatorEPv(void*, void*, void*);
 void APS5_VABI _ZN3sce4Json14InitParameter217setFileBufferSizeEm(void*, std::size_t);
 int APS5_VABI _ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(void*, const void*);
@@ -272,6 +278,24 @@ static void ObjectsAndArrays() {
     _ZNK3sce4Json5Array3endEv(&end, &array);
     for (; _ZNK3sce4Json5Array8iteratorneERKS2_(&it, &end); _ZN3sce4Json5Array8iteratorppEv(&it)) ++visited;
     Require(visited == 2);
+    Require(*_ZNK3sce4Json5Value10getBooleanEv(_ZNK3sce4Json5Array5frontEv(&array)));
+    _ZNK3sce4Json5Array5beginEv(&it, &array);
+    Require(_ZNK3sce4Json5Array8iteratorptEv(&it) == _ZNK3sce4Json5Array8iteratordeEv(&it));
+    Array copy{};
+    _ZN3sce4Json5ArrayC1ERKS1_(&copy, &array);
+    _ZN3sce4Json5Array5clearEv(&array);
+    Require(_ZNK3sce4Json5Array4sizeEv(&array) == 0);
+    bool threw = false;
+    try {
+        _ZNK3sce4Json5Array5frontEv(&array);
+    } catch (const std::out_of_range&) {
+        threw = true;
+    }
+    Require(threw);
+    Require(_ZNK3sce4Json5Array4sizeEv(&copy) == 2);
+    Require(*_ZNK3sce4Json5Value10getBooleanEv(_ZNK3sce4Json5Array5frontEv(&copy)));
+    Require(*_ZNK3sce4Json5Value7getRealEv(_ZNK3sce4Json5Array4backEv(&copy)) == 2.5);
+    _ZN3sce4Json5ArrayD1Ev(&copy);
     _ZN3sce4Json5ArrayD1Ev(&array);
 }
 
@@ -380,6 +404,43 @@ static void ValueAccess() {
     _ZN3sce4Json12MemAllocator11notifyErrorEimPv(&allocator, -1, 64, &userData);
 }
 
+static void InitParameter2BaseConstructor() {
+    alignas(16) std::uint8_t parameter[40];
+    std::memset(parameter, 0xff, sizeof(parameter));
+    _ZN3sce4Json14InitParameter2C1Ev(parameter);
+    alignas(16) std::uint8_t baseStorage[72];
+    std::memset(baseStorage, 0xff, sizeof(baseStorage));
+    auto* baseParameter = baseStorage + 16;
+    _ZN3sce4Json14InitParameter2C2Ev(baseParameter);
+    Require(std::memcmp(parameter, baseParameter, sizeof(parameter)) == 0);
+    void* defaultAllocator;
+    void* defaultUserData;
+    std::size_t defaultFileBufferSize;
+    std::memcpy(&defaultAllocator, baseParameter, sizeof(defaultAllocator));
+    std::memcpy(&defaultUserData, baseParameter + sizeof(void*), sizeof(defaultUserData));
+    std::memcpy(&defaultFileBufferSize, baseParameter + 2 * sizeof(void*), sizeof(defaultFileBufferSize));
+    Require(defaultAllocator == nullptr && defaultUserData == nullptr && defaultFileBufferSize == 0);
+    int allocator = 0;
+    int userData = 0;
+    _ZN3sce4Json14InitParameter212setAllocatorEPNS0_12MemAllocatorEPv(baseParameter, &allocator, &userData);
+    _ZN3sce4Json14InitParameter217setFileBufferSizeEm(baseParameter, 4096);
+    void* storedAllocator;
+    void* storedUserData;
+    std::size_t storedFileBufferSize;
+    std::memcpy(&storedAllocator, baseParameter, sizeof(storedAllocator));
+    std::memcpy(&storedUserData, baseParameter + sizeof(void*), sizeof(storedUserData));
+    std::memcpy(&storedFileBufferSize, baseParameter + 2 * sizeof(void*), sizeof(storedFileBufferSize));
+    Require(storedAllocator == &allocator && storedUserData == &userData && storedFileBufferSize == 4096);
+    for (std::size_t i = 0; i < 16; ++i) Require(baseStorage[i] == 0xff);
+    for (std::size_t i = 16 + sizeof(parameter); i < sizeof(baseStorage); ++i)
+        Require(baseStorage[i] == 0xff);
+    alignas(16) std::uint8_t initializer[16]{};
+    Require(_ZN3sce4Json11InitializerC1Ev(initializer) == 0);
+    Require(_ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E(initializer, baseParameter) == 0);
+    Require(_ZN3sce4Json11Initializer9terminateEv(initializer) == 0);
+    Require(_ZN3sce4Json11InitializerD1Ev(initializer) == 0);
+}
+
 static void ValueClear() {
     Value value{};
     _ZN3sce4Json5ValueC1Ev(&value);
@@ -417,6 +478,37 @@ static void ValueClear() {
     _ZN3sce4Json5ValueD1Ev(&value);
 }
 
+struct ReadState {
+    const char* text;
+    std::size_t position;
+    int calls;
+};
+
+static int APS5_VABI ReadNext(char& ch, void* context) {
+    auto* state = static_cast<ReadState*>(context);
+    ++state->calls;
+    if (state->text[state->position] == '\0') {
+        ch = '\0';
+        return -1;
+    }
+    ch = state->text[state->position++];
+    return 0;
+}
+
+static void StreamParse() {
+    Value root{};
+    _ZN3sce4Json5ValueC1Ev(&root);
+    ReadState valid{"{\"list\": [1, 2.5, true]}", 0, 0};
+    Require(_ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(&root, ReadNext, &valid) == 0);
+    Require(valid.calls == static_cast<int>(std::strlen(valid.text)) + 1);
+    Require(_ZNK3sce4Json5Value7getTypeEv(&root) == TypeObject);
+    ReadState invalid{"{\"list\": [1, 2.5", 0, 0};
+    Require(_ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(&root, ReadNext, &invalid) < 0);
+    ReadState trailing{"[1] 2", 0, 0};
+    Require(_ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(&root, ReadNext, &trailing) < 0);
+    _ZN3sce4Json5ValueD1Ev(&root);
+}
+
 int main() {
     ParseAndRoundTrip();
     NestingDepth();
@@ -424,5 +516,7 @@ int main() {
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallbackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     ValueAccess();
+    InitParameter2BaseConstructor();
     ValueClear();
+    StreamParse();
 }

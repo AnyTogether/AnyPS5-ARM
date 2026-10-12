@@ -15,6 +15,10 @@ int APS5_VABI sceHttp2SendRequest(int, const void*, std::size_t);
 int APS5_VABI sceHttp2SendRequestAsync(int, const void*, std::size_t, Http2AsyncOption*, void*);
 int APS5_VABI sceHttp2WaitAsync(int, Http2AsyncResult*, std::uint32_t*, void*);
 int APS5_VABI sceHttp2DeleteRequest(int);
+int APS5_VABI sceHttp2DeleteTemplate(int);
+int APS5_VABI sceHttp2SetMinSslVersion(int, std::uint32_t);
+int APS5_VABI sceHttp2SslEnableOption(int, std::uint32_t);
+int APS5_VABI sceHttp2SslDisableOption(int, std::uint32_t);
 int APS5_VABI sceHttp2Term(int);
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name);
 int APS5_VABI sceKernelDeleteEqueue(KernelEqueue eq);
@@ -39,6 +43,14 @@ int APS5_VABI sceHttp2WebSocketSetPingInterval();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static constexpr int InvalidId = static_cast<int>(0x817B1100);
+
+static void RequireSslSetters(int id, int expected) {
+    Require(sceHttp2SetMinSslVersion(id, 0) == expected);
+    Require(sceHttp2SslEnableOption(id, 0) == expected);
+    Require(sceHttp2SslDisableOption(id, 0) == expected);
+}
 
 template <typename TCall>
 static bool Throws(TCall call) {
@@ -72,6 +84,50 @@ int main() {
     Require(sceHttp2CookieFlush(context) == 0);
     Require(sceHttp2SendRequest(request, nullptr, 0) == static_cast<int>(0x80436063));
 
+    RequireSslSetters(0, InvalidId);
+    RequireSslSetters(-1, InvalidId);
+    RequireSslSetters(0x7fffffff, InvalidId);
+    RequireSslSetters(context, 0);
+    RequireSslSetters(box, 0);
+    RequireSslSetters(other, 0);
+    RequireSslSetters(tmpl, 0);
+    RequireSslSetters(request, 0);
+
+    const int doomedRequest = sceHttp2CreateRequestWithURL(tmpl, "GET", "https://example.com/doomed", 0);
+    Require(doomedRequest > 0);
+    Require(sceHttp2DeleteRequest(doomedRequest) == 0);
+    RequireSslSetters(doomedRequest, InvalidId);
+    Require(sceHttp2DeleteRequest(doomedRequest) == InvalidId);
+
+    const int doomedTemplate = sceHttp2CreateTemplate(context, "agent", 2, 0);
+    Require(doomedTemplate > 0);
+    const int doomedTemplateRequest = sceHttp2CreateRequestWithURL(doomedTemplate, "GET", "https://example.com/child", 0);
+    Require(doomedTemplateRequest > 0);
+    Require(sceHttp2DeleteTemplate(doomedTemplate) == 0);
+    RequireSslSetters(doomedTemplate, InvalidId);
+    RequireSslSetters(doomedTemplateRequest, InvalidId);
+    Require(sceHttp2DeleteTemplate(doomedTemplate) == InvalidId);
+
+    const int doomedContext = sceHttp2Init(1, 1, 0x2000, 4);
+    Require(doomedContext > 0);
+    const int doomedContextBox = sceHttp2CreateCookieBox(doomedContext);
+    const int doomedContextTemplate = sceHttp2CreateTemplate(doomedContext, "agent", 2, 0);
+    Require(doomedContextBox > 0 && doomedContextTemplate > 0);
+    const int doomedContextRequest = sceHttp2CreateRequestWithURL(doomedContextTemplate, "GET", "https://example.com/descendant", 0);
+    Require(doomedContextRequest > 0);
+    RequireSslSetters(doomedContext, 0);
+    Require(sceHttp2Term(doomedContext) == 0);
+    RequireSslSetters(doomedContext, InvalidId);
+    RequireSslSetters(doomedContextBox, InvalidId);
+    RequireSslSetters(doomedContextTemplate, InvalidId);
+    RequireSslSetters(doomedContextRequest, InvalidId);
+    Require(sceHttp2Term(doomedContext) == InvalidId);
+
+    const int freshContext = sceHttp2Init(1, 1, 0x2000, 4);
+    Require(freshContext > 0);
+    RequireSslSetters(freshContext, 0);
+    Require(sceHttp2Term(freshContext) == 0);
+
     KernelEqueue eq = 0;
     Require(sceKernelCreateEqueue(&eq, "http2") == 0);
     Require(sceKernelAddUserEventEdge(eq, request) == 0);
@@ -104,4 +160,58 @@ int main() {
     Require(sceHttp2DeleteRequest(request) == 0);
     Require(sceKernelDeleteEqueue(eq) == 0);
     Require(sceHttp2Term(context) == 0);
+
+    KernelEqueue templateEqueue = 0;
+    Require(sceKernelCreateEqueue(&templateEqueue, "http2-template") == 0);
+    const int cascadeContext = sceHttp2Init(1, 1, 0x3000, 4);
+    Require(cascadeContext > 0);
+    const int cascadeTemplate = sceHttp2CreateTemplate(cascadeContext, "agent", 2, 0);
+    Require(cascadeTemplate > 0);
+    const int cascadeRequest = sceHttp2CreateRequestWithURL(cascadeTemplate, "GET", "https://example.com/cascade", 0);
+    Require(cascadeRequest > 0);
+    Require(sceKernelAddUserEventEdge(templateEqueue, cascadeRequest) == 0);
+    Http2AsyncOption cascadeOption{};
+    cascadeOption.equeue = templateEqueue;
+    cascadeOption.user_event_id = cascadeRequest;
+    cascadeOption.user_data = &tag;
+    Require(sceHttp2SendRequestAsync(cascadeRequest, nullptr, 0, &cascadeOption, nullptr) == 0);
+    KernelEvent cascadeEvent{};
+    int cascadeCount = 0;
+    Require(sceKernelWaitEqueue(templateEqueue, &cascadeEvent, 1, &cascadeCount, &timeout) == 0 && cascadeCount == 1);
+    Require(sceHttp2DeleteTemplate(cascadeTemplate) == 0);
+    Require(Throws([&] { sceHttp2WaitAsync(cascadeRequest, &result, nullptr, nullptr); }));
+    Require(sceHttp2SendRequestAsync(cascadeRequest, nullptr, 0, &cascadeOption, nullptr) == InvalidId);
+    Require(Throws([&] { sceHttp2WaitAsync(cascadeRequest, &result, nullptr, nullptr); }));
+    Require(sceHttp2DeleteRequest(cascadeRequest) == InvalidId);
+    RequireSslSetters(cascadeRequest, InvalidId);
+    Require(sceHttp2Term(cascadeContext) == 0);
+    Require(sceKernelDeleteUserEvent(templateEqueue, cascadeRequest) == 0);
+    Require(sceKernelDeleteEqueue(templateEqueue) == 0);
+
+    KernelEqueue termEqueue = 0;
+    Require(sceKernelCreateEqueue(&termEqueue, "http2-term") == 0);
+    const int terminatedContext = sceHttp2Init(1, 1, 0x4000, 4);
+    Require(terminatedContext > 0);
+    const int terminatedTemplate = sceHttp2CreateTemplate(terminatedContext, "agent", 2, 0);
+    Require(terminatedTemplate > 0);
+    const int terminatedRequest = sceHttp2CreateRequestWithURL(terminatedTemplate, "GET", "https://example.com/terminated", 0);
+    Require(terminatedRequest > 0);
+    Require(sceKernelAddUserEventEdge(termEqueue, terminatedRequest) == 0);
+    Http2AsyncOption termOption{};
+    termOption.equeue = termEqueue;
+    termOption.user_event_id = terminatedRequest;
+    termOption.user_data = &tag;
+    Require(sceHttp2SendRequestAsync(terminatedRequest, nullptr, 0, &termOption, nullptr) == 0);
+    KernelEvent termEvent{};
+    int termCount = 0;
+    Require(sceKernelWaitEqueue(termEqueue, &termEvent, 1, &termCount, &timeout) == 0 && termCount == 1);
+    Require(sceHttp2Term(terminatedContext) == 0);
+    Require(sceHttp2SendRequestAsync(terminatedRequest, nullptr, 0, &termOption, nullptr) == InvalidId);
+    Require(Throws([&] { sceHttp2WaitAsync(terminatedRequest, &result, nullptr, nullptr); }));
+    Require(sceHttp2DeleteRequest(terminatedRequest) == InvalidId);
+    Require(sceHttp2DeleteTemplate(terminatedTemplate) == InvalidId);
+    RequireSslSetters(terminatedContext, InvalidId);
+    RequireSslSetters(terminatedRequest, InvalidId);
+    Require(sceKernelDeleteUserEvent(termEqueue, terminatedRequest) == 0);
+    Require(sceKernelDeleteEqueue(termEqueue) == 0);
 }

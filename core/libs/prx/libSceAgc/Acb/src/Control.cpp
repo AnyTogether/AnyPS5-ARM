@@ -13,10 +13,15 @@
 
 extern "C" {
 
-// unknown signature
-void* APS5_VABI sceAgcAcbAtomicGds_0900(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return nullptr;
+std::uint32_t* APS5_VABI sceAgcAcbAtomicGds_0900(CommandBuffer* buf, std::uint32_t control, std::uint32_t mode, std::uint32_t gdsOp, std::uint32_t src, std::uint16_t offset, std::uint16_t index, std::uint32_t mask, std::uint32_t data, std::uint64_t compareData, std::uint64_t extraData) {
+    const auto operation = (control & 0xffu) | ((control & 0x200u) << 7u) |
+        ((control & 0x20u) << 13u) | ((control & 0x40u) << 14u) |
+        ((control & 0x20u) == 0 && mode == 1 ? 0x20000u : 0u);
+    return Agc::Command::Emit(buf, 0x1du, {
+        operation, ((gdsOp & 1u) << 8u) | (src & 0x3fu), offset, index,
+        mask & 0x00ff00ffu, data, static_cast<std::uint32_t>(compareData),
+        static_cast<std::uint32_t>(compareData >> 32u), static_cast<std::uint32_t>(extraData),
+        static_cast<std::uint32_t>(extraData >> 32u)}, __func__);
 }
 
 std::uint32_t* APS5_VABI sceAgcAcbJump(CommandBuffer* buf, std::uint8_t cachePolicy, const std::uint32_t* target, std::uint32_t sizeInDwords) {

@@ -1,14 +1,18 @@
 #include <stdexcept>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <atomic>
 #include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <future>
 #include <mutex>
 #include <thread>
 #include <cstddef>
 #include <typeinfo>
+#include <windows.h>
 #include "../prx/libc/include/general/VabiMacros.hpp"
 
 extern "C" {
@@ -54,6 +58,73 @@ static void TestTypeInfoVtables() {
 }
 
 extern "C" void NotImplemented_nid_no_patch(const char*);
+
+static void RequireHandle(bool value) {
+    if (!value) throw std::runtime_error("child process setup failed");
+}
+
+[[gnu::noinline, noreturn]] static void ThrowUncaughtProbe() {
+    throw std::runtime_error("unhandled site probe");
+}
+
+static int RunThrowChild() {
+    std::fprintf(stderr, "probe %p\n", reinterpret_cast<const void*>(&ThrowUncaughtProbe));
+    std::fflush(stderr);
+    ThrowUncaughtProbe();
+    return 100;
+}
+
+static void testUnhandledThrowSite() {
+    SECURITY_ATTRIBUTES attributes{};
+    attributes.nLength = sizeof(attributes);
+    attributes.bInheritHandle = TRUE;
+    HANDLE readPipe = nullptr;
+    HANDLE writePipe = nullptr;
+    RequireHandle(CreatePipe(&readPipe, &writePipe, &attributes, 0) != 0);
+    RequireHandle(SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0) != 0);
+    std::array<wchar_t, 32768> image{};
+    RequireHandle(GetModuleFileNameW(nullptr, image.data(), static_cast<DWORD>(image.size())) != 0);
+    const wchar_t* argument = L"\" throw-uncaught";
+    std::array<wchar_t, 32768> command{};
+    const std::size_t imageLength = std::wcslen(image.data());
+    const std::size_t argumentLength = std::wcslen(argument);
+    RequireHandle(1 + imageLength + argumentLength + 1 < command.size());
+    command[0] = L'"';
+    std::memcpy(command.data() + 1, image.data(), imageLength * sizeof(wchar_t));
+    std::memcpy(command.data() + 1 + imageLength, argument, (argumentLength + 1) * sizeof(wchar_t));
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = writePipe;
+    startup.hStdError = writePipe;
+    PROCESS_INFORMATION child{};
+    RequireHandle(CreateProcessW(image.data(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child) != 0);
+    CloseHandle(writePipe);
+    CloseHandle(child.hThread);
+    std::array<char, 65536> output{};
+    std::size_t outputLength = 0;
+    DWORD chunk = 0;
+    while (outputLength < output.size() && ReadFile(readPipe, output.data() + outputLength, static_cast<DWORD>(output.size() - outputLength), &chunk, nullptr) != 0 && chunk != 0) {
+        outputLength += chunk;
+    }
+    CloseHandle(readPipe);
+    RequireHandle(WaitForSingleObject(child.hProcess, 20000) == WAIT_OBJECT_0);
+    DWORD exitCode = 0;
+    RequireHandle(GetExitCodeProcess(child.hProcess, &exitCode) != 0);
+    CloseHandle(child.hProcess);
+    output[outputLength < output.size() ? outputLength : output.size() - 1] = 0;
+    RequireHandle(exitCode == 0xC0000409);
+    const char* probeMarker = std::strstr(output.data(), "probe ");
+    RequireHandle(probeMarker != nullptr);
+    const auto probe = static_cast<std::uintptr_t>(std::strtoull(probeMarker + 6, nullptr, 16));
+    RequireHandle(probe != 0);
+    const char* marker = std::strstr(output.data(), "thrown from ");
+    RequireHandle(marker != nullptr);
+    const auto logged = static_cast<std::uintptr_t>(std::strtoull(marker + 13, nullptr, 16));
+    RequireHandle(logged != 0);
+    if (logged <= probe || logged - probe >= 0x1000) throw std::runtime_error("unhandled exception named the wrapper instead of the throw site");
+}
 
 static int destroyed;
 struct Guard { ~Guard() { ++destroyed; } };
@@ -177,8 +248,13 @@ static void testUnwindThroughGuestFrames() {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        if (std::strcmp(argv[1], "throw-uncaught") == 0) return RunThrowChild();
+        return 100;
+    }
     TestTypeInfoVtables();
+    testUnhandledThrowSite();
     testExceptionPointer();
     testFutureException();
     testMadeExceptionPointer();

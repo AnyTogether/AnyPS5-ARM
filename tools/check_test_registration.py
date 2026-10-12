@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 
 TEST_OUTPUT = r"tests[\\/]"
+COMMAND = re.compile(r"^\s*(add_test|set_tests_properties)\s*\(", re.M | re.I)
+ARGUMENT = re.compile(r'"(?:\\.|[^"\\])*"|\[(?P<equals>=*)\[.*?\](?P=equals)\]|[^\s()]+', re.S)
 
 KNOWN_UNRUN = set()
 
@@ -16,10 +18,10 @@ def built(build):
         path, _, rule = line.partition(": ")
         if "EXECUTABLE" not in rule:
             continue
-        found = re.match(rf"^{TEST_OUTPUT}([A-Za-z0-9_.]+)$", path)
+        found = re.match(rf"^{TEST_OUTPUT}(?:.*[\\/])?([^\\/]+)$", path)
         if not found:
             continue
-        name = found.group(1).rstrip(".")
+        name = found.group(1)
         if name.endswith(".exe"):
             name = name[:-4]
         if name:
@@ -27,16 +29,58 @@ def built(build):
     return names
 
 
+def commands(content):
+    parsed_until = 0
+    for command in COMMAND.finditer(content):
+        if command.start() < parsed_until:
+            continue
+        position, arguments = command.end(), []
+        while position < len(content):
+            if content[position].isspace():
+                position += 1
+                continue
+            if content[position] == ")":
+                parsed_until = position + 1
+                yield command.group(1).lower(), arguments
+                break
+            if content[position] == "#":
+                position = content.find("\n", position)
+                if position < 0:
+                    break
+                continue
+            token = ARGUMENT.match(content, position)
+            if token is None:
+                raise ValueError(f"invalid CTest argument at position {position}")
+            argument = token.group(0)
+            if argument.startswith('"'):
+                argument = re.sub(r"\\(.)", lambda match: {"n": "\n", "r": "\r", "t": "\t"}.get(match[1], match[1]), argument[1:-1], flags=re.S)
+            elif token.group("equals") is not None:
+                width = len(token.group("equals")) + 2
+                argument = argument[width:-width]
+            arguments.append(argument)
+            position = token.end()
+
+
 def registered(build):
     names = set()
     for file in Path(build).rglob("CTestTestfile.cmake"):
-        for line in file.read_text(errors="replace").splitlines():
-            found = re.match(r"\s*add_test\s*\((.*)\)\s*$", line)
-            if not found:
+        tests, disabled = {}, {}
+        for command, arguments in commands(file.read_text(encoding="utf-8", errors="replace")):
+            if command == "add_test" and arguments:
+                tests[arguments[0]] = arguments[1:]
+            elif command == "set_tests_properties" and "PROPERTIES" in arguments:
+                properties = arguments.index("PROPERTIES")
+                values = arguments[properties + 1:]
+                for key, value in zip(values[::2], values[1::2]):
+                    if key == "DISABLED":
+                        for name in arguments[:properties]:
+                            disabled[name] = value.upper() in ("1", "ON", "YES", "TRUE", "Y")
+        for test, arguments in tests.items():
+            if disabled.get(test, False):
                 continue
-            tokens = re.findall(r'"([^"]*)"|(\S+)', found.group(1))
-            for token in tokens[1:]:
-                argument = token[0] or token[1]
+            for index, argument in enumerate(arguments):
+                if index and (argument.startswith("-") or re.match(r"^[A-Za-z_]\w*=", argument)):
+                    continue
                 base = re.split(r"[\\/]", argument)[-1]
                 if base.endswith(".exe"):
                     base = base[:-4]

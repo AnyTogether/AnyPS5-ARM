@@ -16,6 +16,7 @@ namespace {
 
 constexpr unsigned MspaceThreadUnsafe = 1;
 constexpr std::uintptr_t Granule = 16;
+constexpr std::uintptr_t MinimumAlignment = 32;
 constexpr std::uintptr_t ArenaHeaderBytes = 64;
 
 struct Chunk {
@@ -60,7 +61,7 @@ void RemoveFree(Arena& arena, std::map<std::uintptr_t, Chunk>::iterator chunk) {
 
 void* Allocate(Arena* arena, std::size_t size, std::size_t alignment) {
     if (!arena) return nullptr;
-    alignment = std::max<std::size_t>(alignment, Granule);
+    alignment = std::max<std::size_t>(alignment, MinimumAlignment);
     const auto needed = AlignUp(std::max<std::size_t>(size, 1), Granule);
     if (needed < size || needed > std::numeric_limits<std::uintptr_t>::max() - alignment) {
         Error(12);

@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBC_INCLUDE_WINDOWSFORMATTING_HPP
 
 #include "SceTypes.hpp"
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <climits>
@@ -14,15 +15,43 @@
 
 namespace LibcDetail {
 
+enum class ArgumentClass : unsigned char { Integer, Double, LongDouble };
+
 class FormatArguments {
     VaList args;
+    std::vector<std::array<unsigned char, 16>> numbered;
+    size_t position = 1;
 
 public:
     explicit FormatArguments(const void* source) {
         std::memcpy(&args, source, sizeof(args));
     }
 
+    void Number(const std::vector<ArgumentClass>& classes) {
+        numbered.resize(classes.size());
+        for (size_t index = 0; index < classes.size(); ++index) {
+            const auto store = [&](auto value) { std::memcpy(numbered[index].data(), &value, sizeof(value)); };
+            if (classes[index] == ArgumentClass::LongDouble) store(Fetch<long double>());
+            else if (classes[index] == ArgumentClass::Double) store(Fetch<double>());
+            else store(Fetch<unsigned long long>());
+        }
+    }
+
+    void Seek(size_t index) { position = index; }
+
+    template<class T> T At(size_t index) {
+        if (index == 0 || index > numbered.size()) throw std::out_of_range("Format argument position out of range");
+        T value;
+        std::memcpy(&value, numbered[index - 1].data(), sizeof(value));
+        return value;
+    }
+
     template<class T> T Next() {
+        return numbered.empty() ? Fetch<T>() : At<T>(position++);
+    }
+
+private:
+    template<class T> T Fetch() {
         const void* address;
         if constexpr (std::is_same_v<T, double>) {
             if (args.fp_offset < 176) {
@@ -158,11 +187,67 @@ inline std::string FormatPointer(const std::string& spec, const void* pointer) {
     return std::string(padding, ' ') + "0x" + digits;
 }
 
+constexpr size_t maximumArgumentPosition = 99;
+
+inline size_t ArgumentPosition(const char*& format) {
+    const char* end = format;
+    while (*end >= '0' && *end <= '9') ++end;
+    if (end == format || *end != '$') return 0;
+    size_t position = 0;
+    for (const char* digit = format; digit != end && position <= maximumArgumentPosition; ++digit)
+        position = position * 10 + static_cast<size_t>(*digit - '0');
+    if (position == 0 || position > maximumArgumentPosition) throw std::invalid_argument("Format argument position out of range");
+    format = end + 1;
+    return position;
+}
+
+inline std::vector<ArgumentClass> NumberedArgumentClasses(const char* format) {
+    if (!std::strchr(format, '$')) return {};
+    std::vector<ArgumentClass> classes;
+    bool numbered = false;
+    size_t next = 1;
+    const auto take = [&](size_t position, ArgumentClass type) {
+        if (classes.size() < position) classes.resize(position);
+        classes[position - 1] = type;
+    };
+    while ((format = std::strchr(format, '%')) != nullptr) {
+        ++format;
+        if (*format == '%') {
+            ++format;
+            continue;
+        }
+        if (const size_t position = ArgumentPosition(format)) {
+            next = position;
+            numbered = true;
+        }
+        while (*format && std::strchr("-+ #0'123456789.*", *format)) {
+            if (*format++ != '*') continue;
+            const size_t position = ArgumentPosition(format);
+            if (position) numbered = true;
+            take(position ? position : next++, ArgumentClass::Integer);
+        }
+        bool longDouble = false;
+        while (*format && std::strchr("hljztL", *format)) longDouble = *format++ == 'L';
+        const char conversion = *format;
+        if (!conversion) break;
+        ++format;
+        if (std::strchr("aAeEfFgG", conversion)) take(next++, longDouble ? ArgumentClass::LongDouble : ArgumentClass::Double);
+        else if (std::strchr("diouxXcCsSpn", conversion)) take(next++, ArgumentClass::Integer);
+    }
+    if (!numbered) classes.clear();
+    return classes;
+}
+
 inline int FormatWindows(char* buffer, size_t size, const char* format, const void* source, std::string* complete = nullptr) {
     if (!format || !source) throw std::invalid_argument("Null formatting argument");
     const char* const formatStart = format;
     FormatArguments args(source);
+    args.Number(NumberedArgumentClasses(format));
     FormatOutput output(buffer, size, complete);
+    const auto star = [&] {
+        const size_t position = ArgumentPosition(format);
+        return position ? args.At<int>(position) : args.Next<int>();
+    };
     while (*format) {
         const char* literal = format;
         while (*format && *format != '%') ++format;
@@ -173,11 +258,13 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
             output.Append(format++, 1);
             continue;
         }
+        if (const size_t position = ArgumentPosition(format)) args.Seek(position);
         std::string spec = "%";
-        while (*format && std::strchr("-+ #0", *format)) spec += *format++;
+        for (; *format && std::strchr("-+ #0'", *format); ++format)
+            if (*format != '\'') spec += *format;
         if (*format == '*') {
             ++format;
-            const int width = args.Next<int>();
+            const int width = star();
             if (width < 0) spec += '-';
             spec += std::to_string(width < 0 ? -static_cast<long long>(width) : width);
         } else {
@@ -188,7 +275,7 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
             ++format;
             if (*format == '*') {
                 ++format;
-                const int precision = args.Next<int>();
+                const int precision = star();
                 if (precision >= 0) {
                     spec += "." + std::to_string(precision);
                     precisionLimit = static_cast<size_t>(precision);
@@ -232,6 +319,8 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
                 if (length == "h") value = static_cast<unsigned short>(value);
                 if (length == "hh") value = static_cast<unsigned char>(value);
             } else value = args.Next<unsigned long long>();
+            if (conversion == 'o' && value == 0 && precisionLimit == 0 && spec.find('#') != std::string::npos)
+                spec = spec.substr(0, spec.find('.')) + ".1";
             output.Value(spec + "ll" + conversion, value);
         } else if (std::strchr("aAeEfFgG", conversion)) {
             if (length == "L") {

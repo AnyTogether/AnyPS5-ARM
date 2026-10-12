@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "prx/libSceFont/include/FontInternal.hpp"
+#include "prx/libc/include/FilesystemError.hpp"
 
 namespace {
 
@@ -280,7 +281,11 @@ int APS5_VABI sceFontOpenFontFile(FontLibrary library, const char* path, std::ui
         return SCE_FONT_ERROR_INVALID_LIBRARY;
     }
     if (!pFontHandle) return SCE_FONT_ERROR_INVALID_PARAMETER;
-    const std::filesystem::path hostPath = path ? ResolvePath_nid_no_patch(path) : std::filesystem::path{};
+    std::filesystem::path hostPath;
+    if (path && ResolvePathError_nid_no_patch(path, hostPath) != 0) {
+        *pFontHandle = nullptr;
+        return SCE_FONT_ERROR_FS_OPEN_FAILED;
+    }
     const std::string hostPathString = hostPath.string();
     std::uint32_t libraryLock = 0;
     const int beginRc = BeginOpen(library, pFontHandle, libraryLock);

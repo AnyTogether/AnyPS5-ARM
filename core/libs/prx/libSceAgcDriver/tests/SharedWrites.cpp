@@ -122,6 +122,59 @@ void smallStores() {
     require(StoreOwnBytes(0, std::span<const std::byte>{}) == 0, "empty store produced a version");
 }
 
+void partialCollect() {
+    constexpr std::size_t page = 4096;
+    Mapping mapping(page * 4);
+    auto* data = static_cast<volatile std::byte*>(mapping.data);
+#ifdef _WIN32
+    void* alias = nullptr;
+    require(sceKernelMapDirectMemory(&alias, mapping.size, 3, 0, mapping.physical, 65536) == 0, "partial collect alias failed");
+#endif
+    require(WriteWatched(), "write tracking unavailable for partial collect");
+    const auto before = CollectWritesUncached(mapping.Address(), mapping.size);
+    require(before != 0, "partial collect range is not watched");
+    data[page * 3] = std::byte{91};
+    require(CollectWritesUncached(mapping.Address(), page) != 0, "prefix collect failed");
+    require(!UnchangedSinceCollected(mapping.Address() + page * 3, page, before), "partial collect lost a neighboring guest write");
+    const auto settled = CollectWritesUncached(mapping.Address(), mapping.size);
+    require(UnchangedSinceCollected(mapping.Address(), mapping.size, settled), "fully collected shared range remained dirty");
+#ifdef _WIN32
+    const auto collect = [&](void* view, std::size_t offset, std::size_t bytes, std::size_t capacity, bool clear) {
+        std::array<void*, 4> pages{};
+        std::size_t count = capacity;
+        const auto address = reinterpret_cast<std::uintptr_t>(view);
+        require(GuestArena::GuestArenaCollectWrites_nid_postfix(address + offset, bytes, pages.data(), &count, clear), "shared subpage collection failed");
+        std::vector<std::size_t> offsets;
+        for (std::size_t i = 0; i < count; ++i) offsets.push_back(reinterpret_cast<std::uintptr_t>(pages[i]) - address);
+        return offsets;
+    };
+    const std::vector<std::size_t> all{0, page, page * 2, page * 3};
+    collect(alias, 0, mapping.size, 4, true);
+    data[page * 3] = std::byte{92};
+    require(collect(mapping.data, 0, page, 4, false) == std::vector<std::size_t>{0}, "probe missed a shared write");
+    require(collect(mapping.data, 0, page, 4, false) == std::vector<std::size_t>{0}, "probe consumed a shared write");
+    require(collect(mapping.data, 0, page, 4, true) == std::vector<std::size_t>{0}, "prefix reset missed a shared write");
+    require(collect(alias, 0, mapping.size, 4, false) == all, "prefix reset consumed an alias write");
+    require(collect(mapping.data, page * 3, page, 4, true) == std::vector<std::size_t>{page * 3}, "prefix reset consumed a neighboring write");
+    require(collect(mapping.data, page * 3, page, 4, false).empty(), "reset subpage remained dirty");
+    require(collect(mapping.data, page, page * 2, 4, true) == std::vector<std::size_t>{page, page * 2}, "partial resets consumed intervening writes");
+    require(collect(mapping.data, 0, mapping.size, 4, false).empty(), "collected subpages remained dirty");
+    require(collect(alias, 0, mapping.size, 4, true) == all, "collecting one view consumed an alias write");
+    static_cast<volatile std::byte*>(alias)[page] = std::byte{93};
+    require(collect(mapping.data, page * 2, page, 4, true) == std::vector<std::size_t>{page * 2}, "alias write did not invalidate the other view");
+    require(collect(mapping.data, 0, mapping.size, 4, true) == std::vector<std::size_t>{0, page, page * 3}, "full collect after an interior reset did not preserve pending subpages");
+    require(collect(mapping.data, 0, mapping.size, 4, false).empty(), "full collect left pending subpages");
+    static_cast<volatile std::byte*>(alias)[page * 3] = std::byte{94};
+    require(collect(mapping.data, 0, mapping.size, 1, true) == std::vector<std::size_t>{0}, "limited collect returned the wrong prefix");
+    require(collect(mapping.data, 0, mapping.size, 4, false) == all, "limited collect consumed unreported writes");
+    require(collect(mapping.data, page, page * 3, 3, true) == std::vector<std::size_t>{page, page * 2, page * 3}, "limited collect continuation lost writes");
+    require(collect(mapping.data, 0, page, 1, true) == std::vector<std::size_t>{0}, "limited collect consumed its unreset prefix");
+    require(collect(mapping.data, 0, mapping.size, 4, false).empty(), "limited collection did not settle");
+    require(sceKernelMunmap(alias, mapping.size) == 0, "partial collect alias unmap failed");
+#endif
+    std::cout << "Partial shared write collection tests passed\n";
+}
+
 template<class TAction> void fails(TAction&& fn) {
     bool failed = false;
     try { fn(); } catch (const std::runtime_error&) { failed = true; }
@@ -212,7 +265,14 @@ void run() {
 
 int main(int argc, char** argv) {
     try {
-        if (argc == 2 && std::string_view(argv[1]) == "--benchmark") benchmark();
+        if (argc == 2 && std::string_view(argv[1]) == "--partial-collect") {
+            if (!WriteWatched()) {
+                std::cout << "Partial shared write collection skipped: write tracking unavailable\n";
+                return 77;
+            }
+            partialCollect();
+        }
+        else if (argc == 2 && std::string_view(argv[1]) == "--benchmark") benchmark();
         else if (argc == 2 && std::string_view(argv[1]) == "--benchmark-labels") benchmark(true);
         else if (argc == 2 && std::string_view(argv[1]) == "--benchmark-fallback") benchmark(false, false);
         else if (argc == 2 && std::string_view(argv[1]) == "--benchmark-labels-fallback") benchmark(true, false);

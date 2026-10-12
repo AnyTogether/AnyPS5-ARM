@@ -1,12 +1,158 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
-#include <algorithm>
+#include "prx/libc/include/HostEntropy.hpp"
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <random>
+#include <stdexcept>
+
+namespace {
+
+constexpr int FnmNomatch = 1;
+constexpr int FnmNoescape = 0x01;
+constexpr int FnmPathname = 0x02;
+constexpr int FnmPeriod = 0x04;
+constexpr int FnmLeadingDir = 0x08;
+constexpr int FnmCasefold = 0x10;
+
+enum class RangeResult { Match, NoMatch, Error };
+
+unsigned char FoldCase(unsigned char c, int flags) {
+    return (flags & FnmCasefold) && c >= 'A' && c <= 'Z' ? static_cast<unsigned char>(c - 'A' + 'a') : c;
+}
+
+RangeResult MatchRange(const char* pattern, unsigned char test, int flags, const char** next) {
+    const bool negate = *pattern == '!' || *pattern == '^';
+    if (negate) ++pattern;
+    test = FoldCase(test, flags);
+    bool ok = false;
+    const char* const origin = pattern;
+    for (;;) {
+        if (*pattern == ']' && pattern > origin) {
+            ++pattern;
+            break;
+        }
+        if (*pattern == '\0') return RangeResult::Error;
+        if (*pattern == '/' && (flags & FnmPathname)) return RangeResult::NoMatch;
+        if (*pattern == '\\' && !(flags & FnmNoescape)) ++pattern;
+        const unsigned char low = FoldCase(static_cast<unsigned char>(*pattern), flags);
+        if (*pattern != '\0') ++pattern;
+        if (*pattern == '-' && pattern[1] != '\0' && pattern[1] != ']') {
+            if (*++pattern == '\\' && !(flags & FnmNoescape)) ++pattern;
+            const unsigned char high = static_cast<unsigned char>(*pattern);
+            if (high == '\0') return RangeResult::Error;
+            ++pattern;
+            if (low <= test && test <= FoldCase(high, flags)) ok = true;
+        } else if (low == test) {
+            ok = true;
+        }
+    }
+    *next = pattern;
+    return ok == negate ? RangeResult::NoMatch : RangeResult::Match;
+}
+
+int MatchPattern(const char* pattern, const char* string, int flags) {
+    const char* const start = string;
+    const char* backtrackPattern = nullptr;
+    const char* backtrackString = nullptr;
+    const auto leadingPeriod = [&](const char* at) {
+        return *at == '.' && (flags & FnmPeriod) && (at == start || ((flags & FnmPathname) && at[-1] == '/'));
+    };
+    for (;;) {
+        const unsigned char pc = static_cast<unsigned char>(*pattern);
+        if (pc != '\0') ++pattern;
+        const unsigned char sc = static_cast<unsigned char>(*string);
+        bool mismatch = false;
+        bool literal = false;
+        unsigned char expected = pc;
+        switch (pc) {
+            case '\0':
+                if ((flags & FnmLeadingDir) && sc == '/') return 0;
+                if (sc == '\0') return 0;
+                mismatch = true;
+                break;
+            case '?':
+                if (sc == '\0') return FnmNomatch;
+                if ((sc == '/' && (flags & FnmPathname)) || leadingPeriod(string)) {
+                    mismatch = true;
+                    break;
+                }
+                ++string;
+                break;
+            case '*': {
+                char c = *pattern;
+                while (c == '*') c = *++pattern;
+                if (leadingPeriod(string)) {
+                    mismatch = true;
+                    break;
+                }
+                if (c == '\0') {
+                    if (flags & FnmPathname) return (flags & FnmLeadingDir) || std::strchr(string, '/') == nullptr ? 0 : FnmNomatch;
+                    return 0;
+                }
+                if (c == '/' && (flags & FnmPathname)) {
+                    string = std::strchr(string, '/');
+                    if (string == nullptr) return FnmNomatch;
+                    break;
+                }
+                backtrackPattern = pattern;
+                backtrackString = string;
+                break;
+            }
+            case '[': {
+                if (sc == '\0') return FnmNomatch;
+                if ((sc == '/' && (flags & FnmPathname)) || leadingPeriod(string)) {
+                    mismatch = true;
+                    break;
+                }
+                const char* next = nullptr;
+                const RangeResult result = MatchRange(pattern, sc, flags, &next);
+                if (result == RangeResult::Error) {
+                    literal = true;
+                } else if (result == RangeResult::Match) {
+                    pattern = next;
+                    ++string;
+                } else {
+                    mismatch = true;
+                }
+                break;
+            }
+            case '\\':
+                if (!(flags & FnmNoescape)) {
+                    expected = static_cast<unsigned char>(*pattern);
+                    if (expected == '\0') return FnmNomatch;
+                    ++pattern;
+                }
+                literal = true;
+                break;
+            default:
+                literal = true;
+                break;
+        }
+        if (literal) {
+            if (sc != '\0') ++string;
+            if (FoldCase(expected, flags) != FoldCase(sc, flags)) mismatch = true;
+        }
+        if (mismatch) {
+            if (backtrackPattern == nullptr) return FnmNomatch;
+            const unsigned char bc = static_cast<unsigned char>(*backtrackString);
+            if (bc == '\0') return FnmNomatch;
+            if (bc == '/' && (flags & FnmPathname)) return FnmNomatch;
+            ++backtrackString;
+            pattern = backtrackPattern;
+            string = backtrackString;
+        }
+    }
+}
+
+}
 
 extern "C" {
+
+int APS5_VABI fnmatch_nid_postfix(const char* pattern, const char* string, int flags) {
+    if (pattern == nullptr || string == nullptr) throw std::invalid_argument("fnmatch: null pattern or string");
+    return MatchPattern(pattern, string, flags);
+}
 
 char* APS5_VABI strcasestr_nid_postfix(const char* text, const char* needle) {
     if (*needle == '\0') return const_cast<char*>(text);
@@ -25,12 +171,7 @@ char* APS5_VABI strcasestr_nid_postfix(const char* text, const char* needle) {
 }
 
 void APS5_VABI arc4random_buf_nid_postfix(void* buffer, std::size_t size) {
-    static thread_local std::random_device device;
-    auto* bytes = static_cast<unsigned char*>(buffer);
-    for (std::size_t offset = 0; offset < size; offset += sizeof(unsigned int)) {
-        const unsigned int value = device();
-        std::memcpy(bytes + offset, &value, std::min(sizeof(value), size - offset));
-    }
+    HostEntropy_nid_no_patch(buffer, size);
 }
 
 std::uint32_t APS5_VABI arc4random_nid_postfix() {

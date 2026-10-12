@@ -529,6 +529,7 @@ std::size_t APS5_VABI _ZNK3sce4Json6String6lengthEv(const String* self) { return
 bool APS5_VABI _ZNK3sce4Json6StringeqEPKc(const String* self, const char* text) { return text != nullptr && *self->text == text; }
 
 void APS5_VABI _ZN3sce4Json5ArrayC1Ev(Array* self) { Construct(*self); }
+void APS5_VABI _ZN3sce4Json5ArrayC1ERKS1_(Array* self, const Array* other) { CopyArray(*self, *other); }
 void APS5_VABI _ZN3sce4Json5ArrayD1Ev(Array* self) { Destroy(*self); }
 void APS5_VABI _ZN3sce4Json5Array9push_backERKNS0_5ValueE(Array* self, const Value* value) {
     Value copy{};
@@ -539,6 +540,14 @@ ArrayIterator* APS5_VABI _ZNK3sce4Json5Array5beginEv(ArrayIterator* result, cons
 ArrayIterator* APS5_VABI _ZNK3sce4Json5Array3endEv(ArrayIterator* result, const Array* self) { result->it = self->items->end(); return result; }
 bool APS5_VABI _ZNK3sce4Json5Array5emptyEv(const Array* self) { return self->items->empty(); }
 std::size_t APS5_VABI _ZNK3sce4Json5Array4sizeEv(const Array* self) { return self->items->size(); }
+void APS5_VABI _ZN3sce4Json5Array5clearEv(Array* self) {
+    for (auto& item : *self->items) Destroy(item);
+    self->items->clear();
+}
+const Value* APS5_VABI _ZNK3sce4Json5Array5frontEv(const Array* self) {
+    if (self->items->empty()) throw std::out_of_range("sce::Json::Array::front: empty array");
+    return &self->items->front();
+}
 const Value* APS5_VABI _ZNK3sce4Json5Array4backEv(const Array* self) {
     if (self->items->empty()) throw std::out_of_range("sce::Json::Array::back: empty array");
     return &self->items->back();
@@ -546,6 +555,7 @@ const Value* APS5_VABI _ZNK3sce4Json5Array4backEv(const Array* self) {
 void APS5_VABI _ZN3sce4Json5Array8iteratorD1Ev(ArrayIterator* self) { (void)self; }
 ArrayIterator* APS5_VABI _ZN3sce4Json5Array8iteratorppEv(ArrayIterator* self) { ++self->it; return self; }
 Value* APS5_VABI _ZNK3sce4Json5Array8iteratordeEv(const ArrayIterator* self) { return &*self->it; }
+Value* APS5_VABI _ZNK3sce4Json5Array8iteratorptEv(const ArrayIterator* self) { return &*self->it; }
 bool APS5_VABI _ZNK3sce4Json5Array8iteratorneERKS2_(const ArrayIterator* self, const ArrayIterator* other) { return self->it != other->it; }
 
 void APS5_VABI _ZN3sce4Json6ObjectC1Ev(Object* self) { Construct(*self); }
@@ -755,6 +765,18 @@ int APS5_VABI _ZNK3sce4Json5Value8toStringERNS0_6StringE(const Value* self, Stri
     return 0;
 }
 
+using ParserReadCallback = int (APS5_VABI*)(char&, void*);
+
+int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPKcm(Value* out, const char* text, std::size_t size);
+
+int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(Value* out, ParserReadCallback read, void* context) {
+    if (read == nullptr) throw std::invalid_argument("sce::Json::Parser::parse: null read callback");
+    std::string text;
+    char ch = 0;
+    while (read(ch, context) == 0 && ch != '\0') text.push_back(ch);
+    return _ZN3sce4Json6Parser5parseERNS0_5ValueEPKcm(out, text.data(), text.size());
+}
+
 int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPKcm(Value* out, const char* text, std::size_t size) {
     if (text == nullptr) throw std::invalid_argument("sce::Json::Parser::parse: null text");
     Node parsed{};
@@ -836,4 +858,25 @@ int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
+
+int APS5_VABI _ZN3sce4Json5Value30setElementAccessFailureHandlerEPFviPKNS0_6StringEPKmPKS1_S8_PvES9_(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json5Value22setSpecialFloatHandlerEPFKS1_NS0_12FunctionTypeEdPS2_PvPbES5_(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json5Value22setTypeMismatchHandlerEPFRKS1_NS0_9ValueTypeEPS2_S5_PvES6_(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZNK3sce4Json5ValuecvbEv(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

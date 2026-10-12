@@ -17,6 +17,7 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -497,9 +498,10 @@ int main(int argc, char** argv) {
         const bool int64Atomics = TargetHasCapability(device->Target(), spv::CapabilityInt64Atomics);
         GuestBlock guest;
         std::size_t checked = 0;
-        const auto rows = Rows();
-        for (std::size_t index = part; index < rows.size(); index += parts) {
-            const Row& row = rows[index];
+        std::map<std::pair<Words, std::uint32_t>, std::size_t> shaders;
+        for (const Row& row : Rows()) {
+            const auto shader = shaders.emplace(std::pair{Kernel(row), row.waveSize}, shaders.size()).first->second;
+            if (shader % parts != part) continue;
             if (row.waveSize == 64u && !wave64) continue;
             if (row.atomic && row.width == 64u && !int64Atomics) continue;
             Run(*device, row, guest);

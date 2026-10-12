@@ -342,6 +342,8 @@ bool writesExec(const RdnaInstruction& inst) {
     case RdnaOpcode::SOrn1SaveexecB64:
     case RdnaOpcode::SAndn1WrexecB64:
     case RdnaOpcode::SAndn2WrexecB64:
+    case RdnaOpcode::SSubvectorLoopBegin:
+    case RdnaOpcode::SSubvectorLoopEnd:
         return true;
     default:
         return false;

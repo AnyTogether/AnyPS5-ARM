@@ -70,6 +70,12 @@ const Bytes kPrefixedClobberedStub = {
     0xC3,
 };
 
+const Bytes kSdkGenericStub = {
+    0x48, 0x89, 0xF8, 0x48, 0x89, 0xF7, 0x48, 0x89, 0xD6, 0x48, 0x89, 0xCA,
+    0x4D, 0x89, 0xC2, 0x4D, 0x89, 0xC8, 0x4C, 0x8B, 0x4C, 0x24, 0x08,
+    0x0F, 0x05, 0xC3,
+};
+
 std::string RunScanner(const std::string& binary, const Bytes& code) {
     const TempDirectory directory;
     const auto input = directory.Path() / "input.elf";
@@ -96,6 +102,35 @@ void RequireNoNumber(const std::string& binary, const Bytes& code, const std::st
             "Relinker reported a syscall number for the " + description + ":\n" + output);
 }
 
+void RequireSdkStubsAreTrapped(const std::string& binary) {
+    Bytes code = kConstantStub;
+    const auto numberedOffset = code.size() - 3u;
+    code.insert(code.end(), kSdkGenericStub.begin(), kSdkGenericStub.end());
+    const auto genericOffset = kConstantStub.size() + kSdkGenericStub.size() - 3u;
+    const TempDirectory directory;
+    const auto input = directory.Path() / "input.elf";
+    const auto output = directory.Path() / "output.elf";
+    WriteFile(input, MakeExecutable(code));
+    const auto run = RunRelinker(binary, {"--skip-sce-module", "--trap-sdk-syscall-stubs", input.string(), output.string()}, directory.Path() / "relinker.log");
+    require(run.ExitCode == 0, "Relinker did not trap known SDK syscall stubs:\n" + run.Output);
+    const auto relinked = ReadFile(output);
+    require(Read<std::uint16_t>(relinked, kCodeOffset + numberedOffset) == 0x0B0Fu,
+            "Relinker did not replace the numbered SDK syscall with UD2");
+    require(Read<std::uint16_t>(relinked, kCodeOffset + genericOffset) == 0x0B0Fu,
+            "Relinker did not replace the generic SDK syscall with UD2");
+}
+
+void RequireUnknownSyscallsStillFail(const std::string& binary) {
+    const TempDirectory directory;
+    const auto input = directory.Path() / "input.elf";
+    const auto output = directory.Path() / "output.elf";
+    WriteFile(input, MakeExecutable(kRegisterStub));
+    const auto run = RunRelinker(binary, {"--skip-sce-module", "--trap-sdk-syscall-stubs", input.string(), output.string()}, directory.Path() / "relinker.log");
+    require(run.ExitCode != 0, "Relinker accepted an unknown syscall in SDK-stub trap mode:\n" + run.Output);
+    require(run.Output.find("Forbidden syscall instruction at code offset 0x") != std::string::npos,
+            "Relinker did not report an unknown syscall in SDK-stub trap mode:\n" + run.Output);
+}
+
 }
 
 int main(const int argc, char** argv) {
@@ -114,6 +149,9 @@ int main(const int argc, char** argv) {
 
         RequireNumber(binary, kPrefixedConstantStub, "syscall number 9", "prefixed constant stub");
         RequireNoNumber(binary, kPrefixedClobberedStub, "prefixed stub whose intervening instruction writes rax");
+
+        RequireSdkStubsAreTrapped(binary);
+        RequireUnknownSyscallsStillFail(binary);
 
         std::cout << "syscall scanner tests passed\n";
         return 0;

@@ -529,6 +529,9 @@ constexpr VectorOpcodeInfo vop3Opcodes[] = {
     {0x311u, RdnaOpcode::VPackB32F16},
     {0x314u, RdnaOpcode::VLshlrevB16},
     {0x319u, RdnaOpcode::VSubrevI32},
+    {0x200u, RdnaOpcode::VInterpP1F32},
+    {0x201u, RdnaOpcode::VInterpP2F32},
+    {0x202u, RdnaOpcode::VInterpMovF32},
     {0x342u, RdnaOpcode::VInterpP1llF16},
     {0x343u, RdnaOpcode::VInterpP1lvF16},
     {0x344u, RdnaOpcode::VPermB32},
@@ -723,7 +726,6 @@ bool hasDppForm(RdnaOpcode opcode) {
 
 bool acceptsDpp8(RdnaOpcode opcode) {
     switch (opcode) {
-        case RdnaOpcode::VPkFmacF16:
         case RdnaOpcode::VMovrelsB32:
         case RdnaOpcode::VMovrelsdB32:
         case RdnaOpcode::VMovrelsd2B32:
@@ -736,6 +738,10 @@ bool isNativeVop3F16TernaryOpcode(RdnaOpcode opcode) {
     return opcode == RdnaOpcode::VMin3F16 || opcode == RdnaOpcode::VMax3F16 || opcode == RdnaOpcode::VMed3F16 ||
         opcode == RdnaOpcode::VDivFixupF16 ||
         opcode == RdnaOpcode::VFmaF16;
+}
+
+bool isNativeVop3F16PackOpcode(RdnaOpcode opcode) {
+    return opcode == RdnaOpcode::VPackB32F16 || opcode == RdnaOpcode::VCvtPknormI16F16 || opcode == RdnaOpcode::VCvtPknormU16F16;
 }
 
 bool isNativeVop3I16TernaryOpcode(RdnaOpcode opcode) {
@@ -1862,7 +1868,7 @@ void applyNativeVop3B16BinaryModifiers(RdnaInstruction& instruction, std::uint32
     instruction.destination.sdwaSel = (opSel & 0x8u) != 0u ? 5u : 4u;
 }
 
-void applyNativeVop3PackB32F16Modifiers(RdnaInstruction& instruction, std::uint32_t opSel, std::uint32_t abs, std::uint32_t neg) {
+void applyNativeVop3F16PackModifiers(RdnaInstruction& instruction, std::uint32_t opSel, std::uint32_t abs, std::uint32_t neg) {
     instruction.source0.opSel = (opSel & 0x1u) != 0u;
     instruction.source1.opSel = (opSel & 0x2u) != 0u;
     instruction.source0.negate = (neg & 0x1u) != 0u;
@@ -2016,7 +2022,7 @@ void checkNativeVop3Modifiers(RdnaOpcode opcode, bool permlane, bool carryInOut,
     if (carryInOut || scalarDst) {
         const bool floatCompare = scalarDst && isVopcFloatCompareOpcode(opcode);
         const bool divScale = opcode == RdnaOpcode::VDivScaleF32 || opcode == RdnaOpcode::VDivScaleF64;
-        if ((clamp != 0u && !isVop3BMadU64Opcode(opcode)) || (omod != 0u && !divScale) || (neg != 0u && !floatCompare && !divScale)) {
+        if ((clamp != 0u && !isVop3BMadU64Opcode(opcode) && !floatCompare) || (omod != 0u && !divScale) || (neg != 0u && !floatCompare && !divScale)) {
             throw std::invalid_argument("VOP3 source modifiers are not implemented");
         }
         return;
@@ -2051,7 +2057,7 @@ void checkNativeVop3Modifiers(RdnaOpcode opcode, bool permlane, bool carryInOut,
         }
         return;
     }
-    if (opcode == RdnaOpcode::VPackB32F16) {
+    if (isNativeVop3F16PackOpcode(opcode)) {
         if ((abs & ~0x3u) != 0u || (opSel & ~0x3u) != 0u || clamp != 0u || omod != 0u || (neg & ~0x3u) != 0u) {
             throw std::invalid_argument("VOP3 source modifiers are not implemented");
         }
@@ -2060,8 +2066,9 @@ void checkNativeVop3Modifiers(RdnaOpcode opcode, bool permlane, bool carryInOut,
     const bool sourceModifiers = supportsNativeVop3SourceModifiers(opcode);
     const bool resultModifiers = supportsNativeVop3ResultModifiers(opcode);
     const bool clampModifier = supportsNativeVop3Clamp(opcode);
+    const bool ignoresOutputModifiers = opcode == RdnaOpcode::VCvtI16F16;
     if (sourceModifiers) {
-        if (opSel != 0u || (omod != 0u && !resultModifiers) || (clamp != 0u && !clampModifier)) {
+        if (opSel != 0u || (omod != 0u && !resultModifiers && !ignoresOutputModifiers) || (clamp != 0u && !clampModifier && !ignoresOutputModifiers)) {
             throw std::invalid_argument("VOP3 source modifiers are not implemented");
         }
         return;
@@ -2112,6 +2119,47 @@ void decodeVop3F16Interpolation(RdnaInstruction& instruction, std::uint32_t vdst
         instruction.source3.opSel = high && !f16Result;
         instruction.sourceCount = 4;
     }
+}
+
+bool isVop3F32InterpolationOpcode(RdnaOpcode opcode) {
+    return opcode == RdnaOpcode::VInterpP1F32 || opcode == RdnaOpcode::VInterpP2F32 || opcode == RdnaOpcode::VInterpMovF32;
+}
+
+void decodeVop3F32Interpolation(RdnaInstruction& instruction, std::uint32_t vdst, std::uint32_t src0, std::uint32_t src1, std::uint32_t src2, std::uint32_t abs, std::uint32_t opSel, std::uint32_t clamp, std::uint32_t omod, std::uint32_t neg) {
+    const bool moves = instruction.op == RdnaOpcode::VInterpMovF32;
+    const RdnaOperand thirdSource = DecodeRdnaScalarSource(src2, instruction.programCounter);
+    if (thirdSource.kind != RdnaOperandKind::IntegerInlineConstant || thirdSource.value != 0u) {
+        throw std::invalid_argument("VOP3 interpolation third source is not the inline constant 0");
+    }
+    if ((abs & 0x5u) != 0u || (neg & 0x5u) != 0u || opSel != 0u || (src0 >> 8u) != 0u || (moves && (abs | neg) != 0u)) {
+        throw std::invalid_argument("VOP3 interpolation modifiers are not implemented");
+    }
+    if (moves) {
+        if (src1 >= 3u) {
+            throw std::invalid_argument("VOP3 interpolation source is not an interpolation parameter");
+        }
+    } else if (src1 < 256u) {
+        throw std::invalid_argument("VOP3 interpolation source is not a vector register");
+    }
+    instruction.destination = DecodeRdnaVectorGpr(vdst);
+    instruction.destination.clamp = clamp != 0u;
+    instruction.destination.omod = omod;
+    if (moves) {
+        instruction.source0.kind = RdnaOperandKind::IntegerInlineConstant;
+        instruction.source0.value = src1;
+        instruction.source0.signedVal = static_cast<std::int32_t>(src1);
+    } else {
+        instruction.source0 = DecodeRdnaVectorGpr(src1 - 256u);
+        instruction.source0.absolute = (abs & 0x2u) != 0u;
+        instruction.source0.negate = (neg & 0x2u) != 0u;
+    }
+    instruction.source1.kind = RdnaOperandKind::IntegerInlineConstant;
+    instruction.source1.value = src0 & 0x3fu;
+    instruction.source1.signedVal = static_cast<std::int32_t>(instruction.source1.value);
+    instruction.source2.kind = RdnaOperandKind::IntegerInlineConstant;
+    instruction.source2.value = (src0 >> 6u) & 0x3u;
+    instruction.source2.signedVal = static_cast<std::int32_t>(instruction.source2.value);
+    instruction.sourceCount = 3;
 }
 
 void applyNativeVop3SourceModifiers(RdnaInstruction& instruction, std::uint32_t abs, std::uint32_t neg) {
@@ -2278,6 +2326,10 @@ RdnaInstruction DecodeRdnaVop3(std::uint32_t programCounter, std::span<const std
         decodeVop3F16Interpolation(instruction, vdst, src0, src1, src2, abs, opSel, clamp, omod, neg);
         return instruction;
     }
+    if (isVop3F32InterpolationOpcode(instruction.op)) {
+        decodeVop3F32Interpolation(instruction, vdst, src0, src1, src2, abs, opSel, clamp, omod, neg);
+        return instruction;
+    }
 
     const bool carryInOut = (instruction.op == RdnaOpcode::VAddcU32 && opcode == 0x128u) ||
         (instruction.op == RdnaOpcode::VSubCoCiU32 && opcode == 0x129u) ||
@@ -2383,8 +2435,8 @@ RdnaInstruction DecodeRdnaVop3(std::uint32_t programCounter, std::span<const std
         applyNativeVop3AlignSelectors(instruction, opSel);
     } else if (isNativeVop3B16BinaryOpcode(instruction.op)) {
         applyNativeVop3B16BinaryModifiers(instruction, opSel);
-    } else if (instruction.op == RdnaOpcode::VPackB32F16) {
-        applyNativeVop3PackB32F16Modifiers(instruction, opSel, abs, neg);
+    } else if (isNativeVop3F16PackOpcode(instruction.op)) {
+        applyNativeVop3F16PackModifiers(instruction, opSel, abs, neg);
     } else if (nativeSourceModifiers) {
         applyNativeVop3SourceModifiers(instruction, abs, neg);
     }

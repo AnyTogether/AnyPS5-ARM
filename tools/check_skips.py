@@ -12,13 +12,15 @@ WINDOWS_PREFIX = "agc"
 
 def skips(path):
     for case in ET.parse(path).getroot().iter("testcase"):
-        if case.find("skipped") is None:
+        skipped = case.find("skipped")
+        if skipped is None:
             continue
         name = case.get("name")
         if not name:
-            continue
-        output = case.find("system-out")
-        yield name, (output.text or "") if output is not None else ""
+            raise ValueError(f"{path}: skipped testcase has no name")
+        output = ["skipped, " + reason for reason in (skipped.get("message", ""), skipped.text or "") if reason]
+        output += [case.findtext(channel) or "" for channel in ("system-out", "system-err")]
+        yield name, "\n".join(output)
 
 
 if __name__ == "__main__":
@@ -27,7 +29,10 @@ if __name__ == "__main__":
     parser.add_argument("--job", choices=("linux", "windows"), default="linux")
     parser.add_argument("--list", action="store_true", help="print the skipped tests and why the file says they skipped")
     args = parser.parse_args()
-    found = sorted(skips(args.junit))
+    try:
+        found = sorted(skips(args.junit))
+    except (OSError, ET.ParseError, ValueError) as error:
+        parser.error(str(error))
     if args.list:
         for name, output in found:
             reason = next((line.strip() for line in output.splitlines() if line.startswith("skipped")), "")

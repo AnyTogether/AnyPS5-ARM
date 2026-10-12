@@ -27,6 +27,8 @@ constexpr std::uint32_t Format8888Srgb = 130;
 constexpr std::uint32_t Type2D = 9;
 constexpr std::uint32_t FilterPoint = 0;
 constexpr std::uint32_t FilterBilinear = 1;
+constexpr std::uint32_t FilterAnisoBilinear = 3;
+constexpr std::uint32_t AnisoOverride = 1u << 29u;
 constexpr std::uint32_t ForceDegamma = 1u << 20u;
 
 alignas(256) std::array<float, Threads * 3> Input{};
@@ -57,8 +59,8 @@ std::array<std::uint32_t, 8> TextureDescriptor(std::uint32_t format) {
     };
 }
 
-std::array<std::uint32_t, 4> SamplerDescriptor(std::uint32_t filter, std::uint32_t forced) {
-    return {0x92u | forced, 0x00fff000u, (filter << 20u) | (filter << 22u) | (1u << 24u), 0u};
+std::array<std::uint32_t, 4> SamplerDescriptor(std::uint32_t filter, std::uint32_t forced, std::uint32_t filters) {
+    return {0x92u | forced, 0x00fff000u, (filter << 20u) | (filter << 22u) | (1u << 24u) | filters, 0u};
 }
 
 std::uint8_t Code8(std::uint32_t x, std::uint32_t y, std::uint32_t channel) {
@@ -92,12 +94,12 @@ float SrgbToLinear(std::uint8_t code) {
     return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
 
-std::array<float, Threads * 4> Sample(AgcDriver::VulkanDevice& device, std::uint32_t format, std::uint32_t filter, std::uint32_t forced) {
+std::array<float, Threads * 4> Sample(AgcDriver::VulkanDevice& device, std::uint32_t format, std::uint32_t filter, std::uint32_t forced, std::uint32_t filters = 0u) {
     std::vector<std::uint32_t> userData(20, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(sizeof(Input)));
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(sizeof(Output)));
     const auto texture = TextureDescriptor(format);
-    const auto sampler = SamplerDescriptor(filter, forced);
+    const auto sampler = SamplerDescriptor(filter, forced, filters);
     std::copy(input.begin(), input.end(), userData.begin());
     std::copy(output.begin(), output.end(), userData.begin() + 4);
     std::copy(texture.begin(), texture.end(), userData.begin() + 8);
@@ -118,9 +120,9 @@ std::array<float, Threads * 4> Sample(AgcDriver::VulkanDevice& device, std::uint
     return Output;
 }
 
-void RequireSame(const std::array<float, Threads * 4>& forced, const std::array<float, Threads * 4>& plain, const char* name) {
+void RequireSame(const std::array<float, Threads * 4>& forced, const std::array<float, Threads * 4>& plain, const char* name, const char* first = "through FORCE_DEGAMMA", const char* second = "without it") {
     for (std::uint32_t index = 0; index < forced.size(); ++index) {
-        Require(std::bit_cast<std::uint32_t>(forced[index]) == std::bit_cast<std::uint32_t>(plain[index]), std::string(name) + ": thread " + std::to_string(index / 4u) + " component " + std::to_string(index % 4u) + " sampled " + std::to_string(forced[index]) + " through FORCE_DEGAMMA, " + std::to_string(plain[index]) + " without it");
+        Require(std::bit_cast<std::uint32_t>(forced[index]) == std::bit_cast<std::uint32_t>(plain[index]), std::string(name) + ": thread " + std::to_string(index / 4u) + " component " + std::to_string(index % 4u) + " sampled " + std::to_string(forced[index]) + " " + first + ", " + std::to_string(plain[index]) + " " + second);
     }
 }
 
@@ -161,6 +163,7 @@ int main() {
         FillInput(false);
         const auto forcedBilinear = Sample(*device, Format8888Srgb, FilterBilinear, ForceDegamma);
         RequireSame(forcedBilinear, Sample(*device, Format8888Srgb, FilterBilinear, 0u), "8_8_8_8_SRGB, bilinear");
+        RequireSame(Sample(*device, Format8888Srgb, FilterAnisoBilinear, ForceDegamma, AnisoOverride), forcedBilinear, "8_8_8_8_SRGB, single level", "anisotropically under ANISO_OVERRIDE", "bilinearly");
         Reject(*device, Format8888UNorm, "guest format 56, which is not sRGB, is sampled through a sampler that forces sRGB decoding");
         std::puts("image sample force degamma tests passed");
         return 0;

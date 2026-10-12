@@ -18,6 +18,7 @@ public:
     void SetPixelInput(const ShaderPixelInputInfo* info, bool barycentricEnabled, bool hostOnly = false) { pixelInput = info; fragmentShaderBarycentricEnabled = barycentricEnabled; hostInterpolationOnly = hostOnly; }
     void SetFloatMode(const std::optional<ShaderFloatMode>& mode) { floatMode = mode; ieeeMode = mode.has_value() && mode->ieeeMode; }
     void SetRelaxedFloat(bool relaxed) { relaxedFloat = relaxed; }
+    void SetNativeFloat16(bool enabled) { nativeFloat16 = enabled; }
     void AddBranchCondition(const BasicBlock& source, BlockInfo& info);
     void TranslateCodeTableLoad(const RdnaInstruction& instruction, const ControlFlowGraph::CodeTableLoad& table);
 
@@ -147,6 +148,7 @@ private:
     bool dsBpermuteB32(const RdnaInstruction& inst);
     bool dsPermuteB32(const RdnaInstruction& inst);
     IrF32 selectF32(IrU1 condition, IrF32 trueValue, IrF32 falseValue);
+    IrU32 minMaxF16Bits(bool maxValue, IrU32 lhs, IrU32 rhs);
     IrU32 convertF32ToU32Saturated(IrF32 value, float upperBound, float safeUpper, std::uint32_t highResult);
     IrU32 convertF32ToI32Saturated(IrF32 value, float lowerBound, float upperBound, float safeUpper, std::uint32_t lowerResult, std::uint32_t upperResult);
     IrU32 convertFlooredF32ToI32(IrF32 source, IrF32 floored);
@@ -321,7 +323,7 @@ private:
     void vMovrelsdB32(const RdnaInstruction& inst, bool split, bool swap);
     void vSwapB32(const RdnaInstruction& inst);
     IrU32 readRelativeVector(const RdnaOperand& base, IrValue& offset, const char* name);
-    void writeRelativeVector(const RdnaOperand& base, IrValue& offset, IrU32 value, const char* name);
+    void writeRelativeVector(const RdnaOperand& base, IrValue& offset, IrU32 value, const char* name, IrValue* enable = nullptr);
     void vReadfirstlaneB32(const RdnaInstruction& inst);
     void vReadlaneB32(const RdnaInstruction& inst);
     void vWritelaneB32(const RdnaInstruction& inst);
@@ -347,6 +349,7 @@ private:
     bool relaxedFloat = false;
     std::optional<ShaderFloatMode> floatMode;
     bool ieeeMode = false;
+    bool nativeFloat16 = false;
     IrBuilder ir;
     IrBlock& block;
     IrU1 instructionBranchCondition;

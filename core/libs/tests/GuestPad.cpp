@@ -228,10 +228,14 @@ int main() {
     Require(scePadOpenExt(user, PAD_PORT_TYPE_SPECIAL, 1, wheel) == PAD_ERROR_INVALID_ARG);
     Require(scePadOpenExt(user, PAD_PORT_TYPE_SPECIAL, 0, nullptr) == PAD_ERROR_INVALID_ARG);
     Require(scePadGetHandle(user, 0, 0) == noHandle);
+    Require(scePadOpen_nid_postfix(user, PAD_PORT_TYPE_SPECIAL, 0, nullptr) == static_cast<int>(0x80920007));
+    Require(scePadGetHandle(user, 0, 0) == noHandle);
     const int handle = scePadOpen_nid_postfix(user, 0, 0, nullptr);
     Require(handle > 0);
     Require(scePadGetHandle(user, 0, 0) == handle);
-    Require(scePadGetHandle(user, 2, 0) == handle);
+    Require(scePadOpen_nid_postfix(user, PAD_PORT_TYPE_SPECIAL, 0, nullptr) == static_cast<int>(0x80920007));
+    Require(scePadGetHandle(user, PAD_PORT_TYPE_SPECIAL, 0) == noHandle);
+    Require(scePadGetHandle(user, 0, 0) == handle);
     CheckTiltCorrection(handle);
     CheckTouchContact();
     CheckReadQueue(handle);
@@ -242,7 +246,8 @@ int main() {
     CheckInjectedState(path);
     Require(scePadSetVibrationMode(handle, 1) == 0);
     Require(scePadSetVibrationMode(handle, 2) == 0);
-    Require(scePadSetVibrationMode(handle, 3) == PAD_ERROR_INVALID_ARG);
+    Require(scePadSetVibrationMode(handle, 3) == 0);
+    Require(scePadSetVibrationMode(handle, 4) == PAD_ERROR_INVALID_ARG);
     Require(scePadSetVibrationMode(handle, -1) == PAD_ERROR_INVALID_ARG);
     Require(scePadGetHandle(0xff, 16, 0) == handle);
     Require(scePadGetHandle(user, 16, 0) == noHandle);

@@ -14,6 +14,7 @@
 #endif
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
@@ -54,47 +55,9 @@ int NativeSendFlags(int flags) {
 }
 int NativeError() {
 #ifdef _WIN32
-    switch (WSAGetLastError()) {
-        case WSAEWOULDBLOCK: return 35;
-        case WSAEADDRINUSE: return 48;
-        case WSAEADDRNOTAVAIL: return 49;
-        case WSAEACCES: return 13;
-        case WSAEMSGSIZE: return 40;
-        case WSAENETUNREACH: return 51;
-        case WSAEHOSTUNREACH: return 65;
-        case WSAECONNRESET: return 54;
-        case WSAECONNABORTED: return 53;
-        case WSAEISCONN: return 56;
-        case WSAENOTCONN: return 57;
-        case WSAENOBUFS: return 55;
-        case WSAETIMEDOUT: return 60;
-        case WSAECONNREFUSED: return 61;
-        case WSAEINTR: return 4;
-        case WSAEINVAL: return 22;
-        case WSAESHUTDOWN: return 32;
-        default: return 5;
-    }
+    return GuestSockets::GuestErrorFromHost(WSAGetLastError());
 #else
-    switch (errno) {
-        case EAGAIN: return 35;
-        case EADDRINUSE: return 48;
-        case EADDRNOTAVAIL: return 49;
-        case EACCES: return 13;
-        case EMSGSIZE: return 40;
-        case ENETUNREACH: return 51;
-        case EHOSTUNREACH: return 65;
-        case ECONNREFUSED: return 61;
-        case ECONNRESET: return 54;
-        case ECONNABORTED: return 53;
-        case EISCONN: return 56;
-        case ENOTCONN: return 57;
-        case ENOBUFS: return 55;
-        case ETIMEDOUT: return 60;
-        case EINTR: return 4;
-        case EINVAL: return 22;
-        case EPIPE: return 32;
-        default: return 5;
-    }
+    return GuestSockets::GuestErrorFromHost(errno);
 #endif
 }
 struct Socket {
@@ -359,21 +322,6 @@ namespace {
 constexpr int GuestUnix = 1;
 constexpr int GuestCloseOnExec = 0x10000000;
 constexpr int GuestNonBlocking = 0x20000000;
-int PairError() {
-#ifdef _WIN32
-    switch (WSAGetLastError()) {
-        case WSAEMFILE: return 24;
-        default: return NativeError();
-    }
-#else
-    switch (errno) {
-        case EMFILE: return 24;
-        case ENFILE: return 23;
-        case ENOMEM: return 12;
-        default: return NativeError();
-    }
-#endif
-}
 int SetNonBlocking(Socket& socket) {
 #ifdef _WIN32
     unsigned long value = 1;
@@ -399,23 +347,23 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
     loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     const int nativeType = type == 1 ? SOCK_STREAM : SOCK_DGRAM;
     Socket first(::socket(AF_INET, nativeType, 0), 2, type);
-    if (first.value == Invalid) return PairError();
+    if (first.value == Invalid) return NativeError();
     const int exclusive = 1;
     setsockopt(first.value, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
-    if (bind(first.value, reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback))) return PairError();
+    if (bind(first.value, reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback))) return NativeError();
     sockaddr_in firstName{};
-    if (!LoopbackName(first.value, firstName)) return PairError();
+    if (!LoopbackName(first.value, firstName)) return NativeError();
     Socket second(::socket(AF_INET, nativeType, 0), 2, type);
-    if (second.value == Invalid) return PairError();
+    if (second.value == Invalid) return NativeError();
     if (type == 1) {
-        if (listen(first.value, 1)) return PairError();
-        if (connect(second.value, reinterpret_cast<sockaddr*>(&firstName), sizeof(firstName))) return PairError();
+        if (listen(first.value, 1)) return NativeError();
+        if (connect(second.value, reinterpret_cast<sockaddr*>(&firstName), sizeof(firstName))) return NativeError();
         sockaddr_in peer{};
         int peerSize = sizeof(peer);
         Socket accepted(accept(first.value, reinterpret_cast<sockaddr*>(&peer), &peerSize), 2, type);
-        if (accepted.value == Invalid) return PairError();
+        if (accepted.value == Invalid) return NativeError();
         sockaddr_in secondName{};
-        if (!LoopbackName(second.value, secondName)) return PairError();
+        if (!LoopbackName(second.value, secondName)) return NativeError();
         if (peer.sin_port != secondName.sin_port) return 53;
         const int noDelay = 1;
         setsockopt(second.value, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
@@ -426,11 +374,11 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
         accepted.value = Invalid;
         return 0;
     }
-    if (bind(second.value, reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback))) return PairError();
+    if (bind(second.value, reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback))) return NativeError();
     sockaddr_in secondName{};
-    if (!LoopbackName(second.value, secondName)) return PairError();
-    if (connect(first.value, reinterpret_cast<sockaddr*>(&secondName), sizeof(secondName))) return PairError();
-    if (connect(second.value, reinterpret_cast<sockaddr*>(&firstName), sizeof(firstName))) return PairError();
+    if (!LoopbackName(second.value, secondName)) return NativeError();
+    if (connect(first.value, reinterpret_cast<sockaddr*>(&secondName), sizeof(secondName))) return NativeError();
+    if (connect(second.value, reinterpret_cast<sockaddr*>(&firstName), sizeof(firstName))) return NativeError();
     pair[0] = first.value;
     pair[1] = second.value;
     first.value = Invalid;
@@ -441,7 +389,7 @@ int NativePair(int type, NativeSocket (&pair)[2]) {
 int NativePair(int type, NativeSocket (&pair)[2]) {
     const int nativeType = type == 1 ? SOCK_STREAM : type == 2 ? SOCK_DGRAM : SOCK_SEQPACKET;
     int native[2];
-    if (::socketpair(AF_UNIX, nativeType, 0, native)) return PairError();
+    if (::socketpair(AF_UNIX, nativeType, 0, native)) return NativeError();
     pair[0] = native[0];
     pair[1] = native[1];
     return 0;
@@ -670,6 +618,9 @@ std::int64_t APS5_VABI recv_nid_postfix(int descriptor, void* buffer, std::uint6
     if (!buffer && length) return Fail(14);
     const auto result = ::recv(socket->value, static_cast<char*>(buffer), static_cast<int>(length),
         flags & 2 ? MSG_PEEK : 0);
+#ifdef _WIN32
+    if (result < 0 && socket->type == 2 && WSAGetLastError() == WSAEMSGSIZE) return static_cast<std::int64_t>(length);
+#endif
     return result < 0 ? Fail(NativeError()) : result;
 }
 int APS5_VABI bind_nid_postfix(int descriptor, const void* address, std::uint32_t length) {
@@ -792,8 +743,11 @@ std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::u
     if ((!buffer && length) || (address && !addressLength)) return Fail(14);
     sockaddr_storage native{};
     socklen_t size = sizeof(native);
-    const auto result = ::recvfrom(socket->value, static_cast<char*>(buffer), static_cast<int>(length),
+    auto result = ::recvfrom(socket->value, static_cast<char*>(buffer), static_cast<int>(length),
         flags & 2 ? MSG_PEEK : 0, reinterpret_cast<sockaddr*>(&native), &size);
+#ifdef _WIN32
+    if (result < 0 && socket->type == 2 && WSAGetLastError() == WSAEMSGSIZE) result = static_cast<int>(length);
+#endif
     if (result < 0) return Fail(NativeError());
     if (address && socket->family == GuestUnix) {
         if (socket->type == 1) *addressLength = 0; else UnnamedAddress(address, addressLength);
@@ -893,6 +847,86 @@ std::int64_t APS5_VABI recvmsg_nid_postfix(int descriptor, GuestMsghdr* message,
     }
     message->controlLength = 0;
     return received;
+}
+struct GuestSendfileHeaders {
+    GuestIovec* headers;
+    int headerCount;
+    GuestIovec* trailers;
+    int trailerCount;
+};
+static_assert(sizeof(GuestSendfileHeaders) == 32 && offsetof(GuestSendfileHeaders, trailers) == 16);
+std::int64_t APS5_VABI sceKernelPread(int descriptor, void* buffer, std::size_t length, std::int64_t offset);
+static bool SendfileIovecs(const GuestIovec* iov, int count) {
+    if (!iov) return true;
+    if (count < 0 || count > 1024) return false;
+    std::uint64_t total = 0;
+    for (int i = 0; i < count; ++i) {
+        if (iov[i].length > INT_MAX - total) return false;
+        total += iov[i].length;
+    }
+    return true;
+}
+static int SendAll(const Socket& socket, const void* data, std::uint64_t length, std::int64_t& sent) {
+    if (!data && length) return 14;
+    const char* bytes = static_cast<const char*>(data);
+    while (length) {
+        const auto result = ::send(socket.value, bytes, static_cast<int>(std::min<std::uint64_t>(length, INT_MAX)), NativeSendFlags(GuestNoSignal));
+        if (result < 0) return NativeError();
+        bytes += result;
+        length -= static_cast<std::uint64_t>(result);
+        sent += result;
+    }
+    return 0;
+}
+static int SendIovecs(const Socket& socket, const GuestIovec* iov, int count, std::int64_t& sent) {
+    for (int i = 0; iov && i < count; ++i)
+        if (const int error = SendAll(socket, iov[i].base, iov[i].length, sent)) return error;
+    return 0;
+}
+int APS5_VABI sendfile_nid_postfix(int file, int descriptor, std::int64_t offset, std::uint64_t length,
+    const GuestSendfileHeaders* headers, std::int64_t* sbytes, int flags) {
+    (void)flags;
+    if (offset < 0) return Fail(22);
+    if (headers && (!SendfileIovecs(headers->headers, headers->headerCount) || !SendfileIovecs(headers->trailers, headers->trailerCount)))
+        return Fail(22);
+    std::vector<char> chunk;
+    try {
+        chunk.resize(0x10000);
+    } catch (const std::bad_alloc&) {
+        return Fail(12);
+    }
+    const auto read = [&](std::int64_t position, std::uint64_t remaining) {
+        const auto result = sceKernelPread(file, chunk.data(), static_cast<std::size_t>(std::min<std::uint64_t>(remaining, chunk.size())), position);
+        return result < 0 ? -(result & 0xffff) : result;
+    };
+    std::uint64_t remaining = length ? length : UINT64_MAX;
+    auto received = read(offset, remaining);
+    if (received == -9) return Fail(9);
+    std::int64_t sent = 0;
+    const auto finish = [&](int error) {
+        if (sbytes) *sbytes = sent;
+        return error ? Fail(error) : 0;
+    };
+    if (received < 0) return finish(received == -21 || received == -29 ? 22 : static_cast<int>(-received));
+    const auto socket = Lookup(descriptor);
+    if (!socket) return finish(9);
+    if (socket->type != 1) return finish(22);
+    sockaddr_storage peer{};
+    socklen_t size = sizeof(peer);
+    if (::getpeername(socket->value, reinterpret_cast<sockaddr*>(&peer), &size)) return finish(57);
+    if (headers)
+        if (const int error = SendIovecs(*socket, headers->headers, headers->headerCount, sent)) return finish(error);
+    while (received > 0) {
+        if (const int error = SendAll(*socket, chunk.data(), static_cast<std::uint64_t>(received), sent)) return finish(error);
+        offset += received;
+        remaining -= static_cast<std::uint64_t>(received);
+        if (remaining == 0) break;
+        received = read(offset, remaining);
+        if (received < 0) return finish(static_cast<int>(-received));
+    }
+    if (headers)
+        if (const int error = SendIovecs(*socket, headers->trailers, headers->trailerCount, sent)) return finish(error);
+    return finish(0);
 }
 int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t count, int timeout) {
     if (timeout < -1) return Fail(22);

@@ -3,6 +3,7 @@
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libkernel/Apr/include/AprCommandBuffer.hpp"
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -10,6 +11,8 @@
 #include <cstring>
 #include <fstream>
 #include <future>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -33,6 +36,8 @@ std::uint64_t APS5_VABI sceAmprMeasureCommandSizePopMarker();
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarker(const char*);
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeSetMarkerWithColor(const char*, std::uint32_t);
 int APS5_VABI sceKernelAprSubmitCommandBuffer(const Apr::CommandBufferObject*, std::uint32_t);
+int APS5_VABI sceKernelAprSubmitCommandBufferAndGetId(const Apr::CommandBufferObject*, std::uint32_t, std::uint32_t*);
+int APS5_VABI sceKernelAprWaitCommandBuffer(std::uint32_t);
 int APS5_VABI sceAmprCommandBufferWaitOnAddress(Apr::CommandBufferObject*, volatile std::uint64_t*, std::uint64_t, std::uint8_t, std::uint8_t);
 int APS5_VABI sceAmprCommandBufferWaitOnCounter(Apr::CommandBufferObject*, std::uint8_t, std::uint32_t, std::uint8_t, std::uint8_t);
 int APS5_VABI sceAmprCommandBufferWriteCounterOnCompletion(Apr::CommandBufferObject*, std::uint8_t, std::uint32_t);
@@ -299,6 +304,53 @@ void TestWaits() {
     auto submitted = std::async(std::launch::async, [&]() { return sceKernelAprSubmitCommandBuffer(&recorder.buffer, 0); });
     Require(submitted.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
     Require(submitted.get() == 0 && done == 1);
+}
+
+void TestWaitSatisfiedAfterSubmission() {
+    Recorder first;
+    Recorder second;
+    alignas(8) std::uint64_t flag = 0;
+    alignas(8) std::uint64_t done = 0;
+    alignas(8) std::uint64_t later = 0;
+    Require(sceAmprCommandBufferWaitOnAddress(&first.buffer, &flag, 1, 0, 0) == 0);
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&first.buffer, &done, 1) == 0);
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&second.buffer, &later, 2) == 0);
+    std::uint32_t firstId = 0;
+    auto submitted = std::async(std::launch::async, [&]() { return sceKernelAprSubmitCommandBufferAndGetId(&first.buffer, 0, &firstId); });
+    const bool returned = submitted.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    if (!returned) std::atomic_ref<std::uint64_t>(flag).store(1, std::memory_order_release);
+    Require(returned);
+    Require(submitted.get() == 0 && firstId != 0);
+    std::uint32_t secondId = 0;
+    Require(sceKernelAprSubmitCommandBufferAndGetId(&second.buffer, 0, &secondId) == 0 && secondId > firstId);
+    Require(std::atomic_ref<std::uint64_t>(done).load(std::memory_order_acquire) == 0);
+    Require(std::atomic_ref<std::uint64_t>(later).load(std::memory_order_acquire) == 0);
+    std::atomic_ref<std::uint64_t>(flag).store(1, std::memory_order_release);
+    Require(sceKernelAprWaitCommandBuffer(secondId) == 0);
+    Require(done == 1 && later == 2);
+    Require(sceKernelAprWaitCommandBuffer(firstId) == 0);
+}
+
+void TestAmmNotBehindAprWait() {
+    Recorder reader;
+    Recorder maps;
+    alignas(8) std::uint64_t flag = 0;
+    alignas(8) std::uint64_t done = 0;
+    Require(sceAmprCommandBufferWaitOnAddress(&reader.buffer, &flag, 1, 0, 0) == 0);
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&reader.buffer, &done, 1) == 0);
+    Require(sceAmprAmmCommandBufferConstructor(&maps.buffer) == 0);
+    Require(sceAmprCommandBufferWriteAddressOnCompletion(&maps.buffer, &flag, 1) == 0);
+    std::uint32_t readerId = 0;
+    Require(sceKernelAprSubmitCommandBufferAndGetId(&reader.buffer, 0, &readerId) == 0 && readerId != 0);
+    std::uint32_t mapsId = 0;
+    Require(sceAmprAmmSubmitCommandBuffer3(maps.memory.data(), maps.Offset(), 0, &mapsId) == 0 && mapsId != 0);
+    auto completed = std::async(std::launch::async, [&]() { return sceAmprAmmWaitCommandBufferCompletion(mapsId); });
+    const bool returned = completed.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    if (!returned) std::atomic_ref<std::uint64_t>(flag).store(1, std::memory_order_release);
+    Require(returned);
+    Require(completed.get() == 0);
+    Require(sceKernelAprWaitCommandBuffer(readerId) == 0);
+    Require(done == 1);
 }
 
 void TestCounters() {
@@ -576,7 +628,45 @@ void TestResolveFailures() {
     Require(sceKernelAprResolveFilepathsToIdsAndFileSizesForEach(paths, 2, ids, sizes, results) == 1);
     Require(results[0] == 0 && results[1] == static_cast<int>(0x80020002));
     Require(ids[1] == 0xffffffffu && sizes[0] == 4 && sizes[1] == 0);
+    for (const char* invalid : {"ampr_resolve_missing.bin/../ampr_resolve_existing.bin", "ampr_resolve_existing.bin/../ampr_resolve_existing.bin"}) {
+        Require(sceKernelAprResolveFilepathsToIds(&invalid, 1, ids, &failed) == -1);
+        Require(*__error_nid_postfix() == 2 && failed == 0 && ids[0] == 0xffffffffu);
+    }
     std::remove(paths[0]);
+}
+
+void TestMalformedCommandSizes() {
+    const auto requireFailure = [](Apr::Opcode opcode, std::uint32_t recordBytes, std::uint32_t bufferBytes, const char* expected) {
+        std::array<std::uint8_t, 16> memory{};
+        const Apr::CommandHeader header{opcode, recordBytes};
+        std::memcpy(memory.data(), &header, sizeof(header));
+        Apr::CommandBufferObject buffer{Apr::BufferType::Generic, 0, bufferBytes, 1, bufferBytes, memory.data()};
+        bool rejected = false;
+        try {
+            sceKernelAprSubmitCommandBuffer(&buffer, 0);
+        } catch (const std::runtime_error& error) {
+            rejected = std::string(error.what()).starts_with(expected);
+        }
+        Require(rejected);
+    };
+
+    requireFailure(Apr::Opcode::ReadFile, sizeof(Apr::CommandHeader), sizeof(Apr::CommandHeader), "APR: truncated command payload");
+    requireFailure(Apr::Opcode::WriteAddress, sizeof(Apr::CommandHeader), sizeof(Apr::CommandHeader), "APR: truncated command payload");
+    requireFailure(Apr::Opcode::Nop, std::numeric_limits<std::uint32_t>::max(), 2u * sizeof(Apr::CommandHeader), "APR: malformed command");
+
+    std::array<std::uint8_t, 2 * sizeof(Apr::CommandHeader)> memory{};
+    const Apr::CommandHeader first{Apr::Opcode::Nop, sizeof(Apr::CommandHeader)};
+    const Apr::CommandHeader overflowing{Apr::Opcode::Nop, std::numeric_limits<std::uint32_t>::max()};
+    std::memcpy(memory.data(), &first, sizeof(first));
+    std::memcpy(memory.data() + sizeof(first), &overflowing, sizeof(overflowing));
+    Apr::CommandBufferObject buffer{Apr::BufferType::Generic, 0, sizeof(memory), 2, sizeof(memory), memory.data()};
+    bool rejected = false;
+    try {
+        sceKernelAprSubmitCommandBuffer(&buffer, 0);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).starts_with("APR: malformed command");
+    }
+    Require(rejected);
 }
 
 void TestGatherScatter() {
@@ -691,7 +781,7 @@ void TestAmmRangesAboveHintedMaps() {
     std::size_t arenaBytes = 0;
     GuestArena::GuestArenaRange_nid_postfix(&arenaBase, &arenaBytes);
     // macOS has no guest arena; the ranges then sit wherever the host reserved them.
-    if (arenaBase != 0) Require(multimapEnd == arenaBase + arenaBytes);
+    if (arenaBase != 0) Require(start >= arenaBase && multimapEnd <= arenaBase + arenaBytes && heap + 4 * step <= start);
 
     for (std::uint64_t hint = heap + step; hint < heap + 4 * step; hint += step) {
         void* mapped = reinterpret_cast<void*>(hint);
@@ -1046,6 +1136,8 @@ int main() {
     TestSubmission();
     TestKernelEventQueue();
     TestWaits();
+    TestWaitSatisfiedAfterSubmission();
+    TestAmmNotBehindAprWait();
     TestCounters();
     TestRejectedWaitsAndCounters();
     TestNops();
@@ -1055,6 +1147,7 @@ int main() {
     TestConstructed();
     TestZeroFilledBuffer();
     TestResolveFailures();
+    TestMalformedCommandSizes();
     TestGatherScatter();
     TestAmmRangesAboveHintedMaps();
     TestAmm();

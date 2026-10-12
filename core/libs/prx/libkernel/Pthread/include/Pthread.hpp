@@ -83,6 +83,10 @@ static constexpr int DEFAULT_THREAD_PRIORITY = 700;
 static constexpr std::uint32_t CPU_CLOCK_BIT = 0x80000000u;
 static constexpr std::uint32_t CPU_CLOCK_PROCESS_BIT = 0x40000000u;
 static constexpr std::uint32_t CPU_CLOCK_ID_MASK = ~(CPU_CLOCK_BIT | CPU_CLOCK_PROCESS_BIT);
+static constexpr int GUEST_EXPLICIT_SCHED = 0;
+static constexpr int GUEST_INHERIT_SCHED = 4;
+static constexpr int GUEST_SCOPE_PROCESS = 0;
+static constexpr int GUEST_SCOPE_SYSTEM = 2;
 
 inline int GuestCpuFromHost(unsigned hostCpu, KernelCpumask threadAffinity) {
     KernelCpumask mask = threadAffinity & DEFAULT_THREAD_AFFINITY;
@@ -102,6 +106,7 @@ struct PthreadAttrPrivate {
     bool _affinityExplicit = false;
     std::size_t _guardsize = 0x1000;
     int _solosched = 0;
+    int _scope = GUEST_SCOPE_SYSTEM;
 };
 
 inline std::atomic<std::int64_t> nextThreadId{100000};
@@ -123,6 +128,7 @@ struct PthreadPrivate {
     std::atomic<int> waitCount{0};
     std::atomic<KernelCpumask> affinity{DEFAULT_THREAD_AFFINITY};
     std::atomic<int> priority{DEFAULT_THREAD_PRIORITY};
+    int scope = GUEST_SCOPE_SYSTEM;
     int cpuClockThread = 0;
 #ifndef _WIN32
     clockid_t hostCpuClock{};
@@ -155,5 +161,6 @@ void NoteGuestStackProtection(std::uintptr_t start, std::size_t bytes, bool read
 int GuestThreadCpuClockId(const PthreadPrivate* thread);
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos);
 void SetLiveGuestThreadsAffinity(KernelCpumask mask);
+KernelCpumask LiveGuestThreadsAffinity();
 
 #endif

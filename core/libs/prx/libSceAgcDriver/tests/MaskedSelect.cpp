@@ -34,6 +34,12 @@ struct Builder {
         return created;
     }
 
+    IrValue& truth() {
+        auto& created = program.CreateValue(IrOpcode::Void, IrType::Bool);
+        created.SetImmediateBool(true);
+        return created;
+    }
+
     IrValue& emit(IrOpcode opcode, IrType type, std::initializer_list<IrValue*> arguments, std::uint64_t flags = 0) {
         auto& created = program.CreateValue(opcode, type, flags);
         for (auto* argument : arguments) created.AddArgument(argument);
@@ -592,14 +598,24 @@ int main() {
         return b.eliminate() == 0u && !removed(written);
     });
 
-    const auto sample = [](IrShaderStage stage, std::uint32_t sampleFlags, IrOpcode opcode = IrOpcode::ImageSampleRaw) {
+    const auto wholeQuads = [](Builder& b, IrValue& live) -> IrValue& {
+        auto& ballot = b.emit(IrOpcode::Ballot, IrType::U32x4, {&live});
+        auto& allLow = b.emit(IrOpcode::Ballot, IrType::U32x4, {&b.truth()});
+        auto& allHigh = b.emit(IrOpcode::Ballot, IrType::U32x4, {&b.truth()});
+        auto& low = b.emit(IrOpcode::BitwiseAnd32, IrType::U32, {&b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&ballot, &b.constant(0u)}), &b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&allLow, &b.constant(0u)})});
+        auto& high = b.emit(IrOpcode::BitwiseAnd32, IrType::U32, {&b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&ballot, &b.constant(1u)}), &b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&allHigh, &b.constant(1u)})});
+        auto& wqm = b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {&low, &high})});
+        return b.threadBit(b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(0u)}), b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(1u)}));
+    };
+
+    const auto sample = [&](IrShaderStage stage, std::uint32_t sampleFlags, IrOpcode opcode = IrOpcode::ImageSampleRaw, bool wholeQuadExec = false) {
         Builder b;
         b.program.Resources().stage = stage;
         MemoryInfo memory;
         memory.kind = ResourceKind::Image;
         memory.imageSampleFlags = sampleFlags;
         b.program.Resources().memoryInfo.push_back(memory);
-        auto& exec = b.mask(16u);
+        auto& exec = wholeQuadExec ? wholeQuads(b, b.mask(16u)) : b.mask(16u);
         auto& old = b.lane();
         auto& written = b.select(exec, b.add(old, 1u), old);
         auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&written, &old});
@@ -618,6 +634,9 @@ int main() {
         return !sample(IrShaderStage::Pixel, 0u);
     });
 
+    passed &= run("an implicit-LOD pixel sample under whole quad mode reads no masked quad and drops the select", [&] {
+        return sample(IrShaderStage::Pixel, 0u, IrOpcode::ImageSampleRaw, true);
+    });
     passed &= run("an explicit-LOD sample reads only its lane and drops the select", [&] {
         return sample(IrShaderStage::Pixel, RdnaImageSampleFlagLevelZero) && sample(IrShaderStage::Mesh, 0u);
     });
@@ -695,6 +714,55 @@ int main() {
 
     passed &= run("an atomic keeps the select", [&] {
         return !guarded(IrOpcode::SharedAtomicIAdd32, true, false);
+    });
+
+    passed &= run("a write under whole quad mode read only by the lanes it was widened from drops the select in every stage", [&] {
+        const auto widened = [&](IrShaderStage stage) {
+            Builder b;
+            b.program.Resources().stage = stage;
+            auto& live = b.mask(16u);
+            auto& quads = wholeQuads(b, live);
+            auto& old = b.lane();
+            auto& written = b.select(quads, b.add(old, 1u), old);
+            auto& next = b.select(b.logicalAnd(live, b.mask(8u)), b.add(written, 2u), old);
+            b.keep(next);
+            return b.eliminate() != 0u && removed(written) && !removed(next);
+        };
+        return widened(IrShaderStage::Pixel) && widened(IrShaderStage::Compute);
+    });
+
+    passed &= run("a write under whole quad mode read by a lane outside the widened mask keeps the select in compute", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Compute;
+        auto& live = b.mask(16u);
+        auto& quads = wholeQuads(b, live);
+        auto& old = b.lane();
+        auto& written = b.select(quads, b.add(old, 1u), old);
+        auto& next = b.select(b.mask(32u), b.add(written, 2u), old);
+        b.keep(next);
+        return b.eliminate() == 0u && !removed(written);
+    });
+
+    passed &= run("a write under whole quad mode read only by the lanes it was widened from drops the select", [&] {
+        Builder b;
+        auto& live = b.mask(16u);
+        auto& quads = wholeQuads(b, live);
+        auto& old = b.lane();
+        auto& written = b.select(quads, b.add(old, 1u), old);
+        auto& next = b.select(b.logicalAnd(live, b.mask(8u)), b.add(written, 2u), old);
+        b.keep(next);
+        return b.eliminate() != 0u && removed(written) && !removed(next);
+    });
+
+    passed &= run("a write under whole quad mode read by other lanes keeps the select", [&] {
+        Builder b;
+        auto& live = b.mask(16u);
+        auto& quads = wholeQuads(b, live);
+        auto& old = b.lane();
+        auto& written = b.select(quads, b.add(old, 1u), old);
+        auto& next = b.select(b.mask(32u), b.add(written, 2u), old);
+        b.keep(next);
+        return b.eliminate() == 0u && !removed(written);
     });
 
     return passed ? 0 : 1;

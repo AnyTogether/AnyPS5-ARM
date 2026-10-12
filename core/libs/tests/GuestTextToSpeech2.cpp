@@ -3,33 +3,31 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <initializer_list>
 
 extern "C" {
 std::int32_t APS5_VABI sceTextToSpeech2Initialize(const void* param);
-std::int32_t APS5_VABI sceTextToSpeech2GetSystemStatus();
-std::int32_t APS5_VABI sceTextToSpeech2Open();
-std::int32_t APS5_VABI sceTextToSpeech2Speak();
-std::int32_t APS5_VABI sceTextToSpeech2Cancel();
-std::int32_t APS5_VABI sceTextToSpeech2GetSpeechStatus();
-std::int32_t APS5_VABI sceTextToSpeech2Close();
-std::int32_t APS5_VABI sceTextToSpeech2Terminate();
+int APS5_VABI sceTextToSpeech2Open();
+int APS5_VABI sceTextToSpeech2Cancel();
+int APS5_VABI sceTextToSpeech2Close();
+int APS5_VABI sceTextToSpeech2GetSpeechStatus();
+int APS5_VABI sceTextToSpeech2Speak();
+int APS5_VABI sceTextToSpeech2Terminate();
+int APS5_VABI sceTextToSpeech2GetSystemStatus();
 }
 
 int main() {
-    constexpr auto unsupported = static_cast<std::int32_t>(0x8002002D);
+    constexpr std::int32_t unsupported = static_cast<std::int32_t>(0x8002002D);
     const std::uint32_t param[12]{0x2000000, 0x26c};
     if (sceTextToSpeech2Initialize(param) != unsupported) {
         std::puts("TextToSpeech2: initialization did not report the unsupported operation");
         std::abort();
     }
-    using Call = std::int32_t (APS5_VABI*)();
-    for (const Call call : {sceTextToSpeech2GetSystemStatus, sceTextToSpeech2Open, sceTextToSpeech2Speak, sceTextToSpeech2Cancel,
-                            sceTextToSpeech2GetSpeechStatus, sceTextToSpeech2Close, sceTextToSpeech2Terminate}) {
-        if (call() != unsupported) {
-            std::puts("TextToSpeech2: a call after failed initialization did not report the unsupported operation");
-            std::abort();
-        }
+    if (sceTextToSpeech2Open() != unsupported || sceTextToSpeech2Cancel() != unsupported ||
+        sceTextToSpeech2Close() != unsupported || sceTextToSpeech2GetSpeechStatus() != unsupported ||
+        sceTextToSpeech2Speak() != unsupported || sceTextToSpeech2Terminate() != unsupported ||
+        sceTextToSpeech2GetSystemStatus() != unsupported) {
+        std::puts("TextToSpeech2: later calls did not report the unsupported operation");
+        std::abort();
     }
     std::puts("TextToSpeech2 tests passed");
     return 0;

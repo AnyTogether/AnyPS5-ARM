@@ -20,6 +20,30 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(group["done_names"], [])
             self.assertEqual(group["todo_names"], ["sceExampleSupportFormat"])
 
+    def test_stub_wrapper_calls_allow_whitespace(self):
+        for separator in ("", " ", "\t", "\n", " /* separator */ "):
+            with self.subTest(separator=separator), tempfile.TemporaryDirectory() as directory:
+                library = Path(directory) / "libSceExample"
+                library.mkdir()
+                (library / "Export.cpp").write_text(
+                    "static int Unsupported() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                    f"int APS5_VABI Pending() {{ return Unsupported{separator}(); }}\n")
+                group = progress.scan_library(library)
+                self.assertEqual(group["done_names"], [])
+                self.assertEqual(group["todo_names"], ["Pending"])
+
+    def test_stub_wrapper_names_match_whole_identifiers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(
+                "static int Unsupported() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                "static int NotUnsupported(int value) { return value * 2; }\n"
+                "int APS5_VABI Ready(int value) { return NotUnsupported(value); }\n")
+            group = progress.scan_library(library)
+            self.assertEqual(group["done_names"], ["Ready"])
+            self.assertEqual(group["todo_names"], [])
+
     def test_braces_in_literals_and_comments_do_not_delimit_bodies(self):
         with tempfile.TemporaryDirectory() as directory:
             library = Path(directory) / "libSceExample"

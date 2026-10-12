@@ -1,13 +1,17 @@
 #include "SceTypes.hpp"
 #include <array>
+#include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 extern "C" {
 int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
 int APS5_VABI clock_getres_nid_postfix(int clockId, KernelTimespec* res);
 int APS5_VABI sceKernelClockGettime(KernelClockid clockId, KernelTimespec* tp);
 int APS5_VABI sceKernelClockGetres(KernelClockid clockId, KernelTimespec* tp);
+int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sceKernelUsleep_nid_postfix(KernelUseconds microseconds);
 int APS5_VABI gettimeofday_nid_postfix(KernelTimeval* tv, KernelTimezone* tz);
 std::int64_t APS5_VABI _Xtime_get_ticks_nid_postfix();
@@ -31,6 +35,34 @@ static constexpr std::int64_t IDLE_LIMIT_NANOS = 100 * NANOS_PER_MILLISECOND;
 static constexpr std::int64_t GIVE_UP_NANOS = 10 * NANOS_PER_SECOND;
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static bool OmittedResolutionSucceeds() {
+    constexpr int clocks[] = {0, 1, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 3, 6, 9999, -1, INT_MIN, INT_MAX};
+    for (const int clock : clocks) {
+        *__error_nid_postfix() = 77;
+        try {
+            if (clock_getres_nid_postfix(clock, nullptr) == SCE_OK && *__error_nid_postfix() == 77) continue;
+        } catch (const std::runtime_error&) {
+        }
+        std::fprintf(stderr, "clock_getres(%d, nullptr) must succeed without changing errno\n", clock);
+        return false;
+    }
+    return true;
+}
+
+static void UnsupportedResolutionStillThrows() {
+    KernelTimespec resolution{-1, -1};
+    bool rejected = false;
+    try {
+        clock_getres_nid_postfix(3, &resolution);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    Require(rejected && resolution.tv_sec == -1 && resolution.tv_nsec == -1);
+    constexpr int fault = static_cast<int>(0x8002000eu);
+    Require(sceKernelClockGetres(GUEST_CLOCK_REALTIME, nullptr) == fault);
+    Require(sceKernelClockGetres(3, nullptr) == fault);
+}
 
 static KernelTimespec Read(int clockId) {
     KernelTimespec time{-1, -1};
@@ -168,6 +200,8 @@ static void CalendarConversionsInitializeTheirState() {
 }
 
 int main() {
+    if (!OmittedResolutionSucceeds()) return 1;
+    UnsupportedResolutionStillThrows();
     CalendarConversionsInitializeTheirState();
     SecondClockReportsWholeSeconds();
     KernelTimezone zone{-1, -1};

@@ -684,6 +684,7 @@ constexpr std::string_view NeutralSwitches[] = {
     "APS5_NO_FAILURE_MEMO",
     "APS5_NO_PERF_FRONTEND_PAIR",
     "APS5_NO_PERF_DOM_INTERSECTION",
+    "APS5_NO_PERF_ITERATION_SELECTION",
     "APS5_NO_RESULT_MEMO",
 };
 

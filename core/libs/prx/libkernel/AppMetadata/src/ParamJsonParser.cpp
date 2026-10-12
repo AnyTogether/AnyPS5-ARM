@@ -95,6 +95,27 @@ std::uint32_t parseHex4(const std::string& text, std::size_t& position) {
     return value;
 }
 
+void appendRawUtf8(const std::string& text, std::size_t& position, unsigned char first, std::string& result) {
+    unsigned count;
+    std::uint32_t codepoint;
+    std::uint32_t minimum;
+    if (first >= 0xC2 && first <= 0xDF) { count = 1; codepoint = first & 0x1F; minimum = 0x80; }
+    else if (first >= 0xE0 && first <= 0xEF) { count = 2; codepoint = first & 0x0F; minimum = 0x800; }
+    else if (first >= 0xF0 && first <= 0xF4) { count = 3; codepoint = first & 0x07; minimum = 0x10000; }
+    else throw std::runtime_error("invalid UTF-8 in param.json");
+    if (count > text.size() - position) throw std::runtime_error("truncated UTF-8 in param.json");
+    for (unsigned index = 0; index < count; ++index) {
+        const auto byte = static_cast<unsigned char>(text[position + index]);
+        if ((byte & 0xC0) != 0x80) throw std::runtime_error("invalid UTF-8 continuation in param.json");
+        codepoint = (codepoint << 6) | (byte & 0x3F);
+    }
+    if (codepoint < minimum || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+        throw std::runtime_error("invalid UTF-8 codepoint in param.json");
+    result.push_back(static_cast<char>(first));
+    result.append(text, position, count);
+    position += count;
+}
+
 std::string parseJsonString(const std::string& text, std::size_t& position) {
     expectChar(text, position, '"');
     std::string result;
@@ -103,7 +124,11 @@ std::string parseJsonString(const std::string& text, std::size_t& position) {
         const char c = text[position++];
         if (c == '"') break;
         if (static_cast<unsigned char>(c) < 0x20) throw std::runtime_error("control character in param.json string");
-        if (c != '\\') { result.push_back(c); continue; }
+        if (c != '\\') {
+            if (static_cast<unsigned char>(c) < 0x80) result.push_back(c);
+            else appendRawUtf8(text, position, static_cast<unsigned char>(c), result);
+            continue;
+        }
         if (position >= text.size()) throw std::runtime_error("unterminated escape in param.json");
         const char escape = text[position++];
         switch (escape) {

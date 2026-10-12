@@ -295,6 +295,97 @@ std::size_t recompile(const std::string& name, std::span<const std::uint32_t> co
     return result.spirv.size();
 }
 
+void verifyLargeLoopExitFallback() {
+    const std::vector<std::uint32_t> code{
+        0x060202ffu, 0x3f800000u, 0x060202ffu, 0x3f000000u, 0x060202ffu, 0x3f001000u, 0x060202ffu, 0x3f002000u,
+        0x060202ffu, 0x3f003000u, 0x060202ffu, 0x3f004000u, 0x060202ffu, 0x3f005000u, 0x060202ffu, 0x3f006000u,
+        0x060202ffu, 0x3f007000u, 0x060202ffu, 0x3f008000u, 0x060202ffu, 0x3f009000u, 0x060202ffu, 0x3f00a000u,
+        0x060202ffu, 0x3f00b000u, 0x060202ffu, 0x3f00c000u, 0x060202ffu, 0x3f00d000u, 0x060202ffu, 0x3f00e000u,
+        0x060202ffu, 0x3f00f000u, 0x060202ffu, 0x3f010000u, 0x060202ffu, 0x3f810000u, 0x060202ffu, 0x3f000010u,
+        0x060202ffu, 0x3f001010u, 0x060202ffu, 0x3f002010u, 0x060202ffu, 0x3f003010u, 0x060202ffu, 0x3f004010u,
+        0x060202ffu, 0x3f005010u, 0x060202ffu, 0x3f006010u, 0x060202ffu, 0x3f007010u, 0x060202ffu, 0x3f008010u,
+        0x060202ffu, 0x3f009010u, 0x060202ffu, 0x3f00a010u, 0x060202ffu, 0x3f00b010u, 0x060202ffu, 0x3f00c010u,
+        0x060202ffu, 0x3f00d010u, 0x060202ffu, 0x3f00e010u, 0x060202ffu, 0x3f00f010u, 0x060202ffu, 0x3f010010u,
+        0x7d880084u, 0xbf870025u, 0x060202ffu, 0x3f830000u, 0x060202ffu, 0x3f000030u, 0x060202ffu, 0x3f001030u,
+        0x060202ffu, 0x3f002030u, 0x060202ffu, 0x3f003030u, 0x060202ffu, 0x3f004030u, 0x060202ffu, 0x3f005030u,
+        0x060202ffu, 0x3f006030u, 0x060202ffu, 0x3f007030u, 0x060202ffu, 0x3f008030u, 0x060202ffu, 0x3f009030u,
+        0x060202ffu, 0x3f00a030u, 0x060202ffu, 0x3f00b030u, 0x060202ffu, 0x3f00c030u, 0x060202ffu, 0x3f00d030u,
+        0x060202ffu, 0x3f00e030u, 0x060202ffu, 0x3f00f030u, 0x060202ffu, 0x3f010030u, 0xbf820099u, 0x060202ffu,
+        0x3f820000u, 0x060202ffu, 0x3f000020u, 0x060202ffu, 0x3f001020u, 0x060202ffu, 0x3f002020u, 0x060202ffu,
+        0x3f003020u, 0x060202ffu, 0x3f004020u, 0x060202ffu, 0x3f005020u, 0x060202ffu, 0x3f006020u, 0x060202ffu,
+        0x3f007020u, 0x060202ffu, 0x3f008020u, 0x060202ffu, 0x3f009020u, 0x060202ffu, 0x3f00a020u, 0x060202ffu,
+        0x3f00b020u, 0x060202ffu, 0x3f00c020u, 0x060202ffu, 0x3f00d020u, 0x060202ffu, 0x3f00e020u, 0x060202ffu,
+        0x3f00f020u, 0x060202ffu, 0x3f010020u, 0x7d880085u, 0xbf87004cu, 0x060202ffu, 0x3f850000u, 0x060202ffu,
+        0x3f000050u, 0x060202ffu, 0x3f001050u, 0x060202ffu, 0x3f002050u, 0x060202ffu, 0x3f003050u, 0x060202ffu,
+        0x3f004050u, 0x060202ffu, 0x3f005050u, 0x060202ffu, 0x3f006050u, 0x060202ffu, 0x3f007050u, 0x060202ffu,
+        0x3f008050u, 0x060202ffu, 0x3f009050u, 0x060202ffu, 0x3f00a050u, 0x060202ffu, 0x3f00b050u, 0x060202ffu,
+        0x3f00c050u, 0x060202ffu, 0x3f00d050u, 0x060202ffu, 0x3f00e050u, 0x060202ffu, 0x3f00f050u, 0x060202ffu,
+        0x3f010050u, 0x7d880088u, 0xbf870001u, 0xbf82ff68u, 0x060202ffu, 0x3f870000u, 0x060202ffu, 0x3f000070u,
+        0x060202ffu, 0x3f001070u, 0x060202ffu, 0x3f002070u, 0x060202ffu, 0x3f003070u, 0x060202ffu, 0x3f004070u,
+        0x060202ffu, 0x3f005070u, 0x060202ffu, 0x3f006070u, 0x060202ffu, 0x3f007070u, 0x060202ffu, 0x3f008070u,
+        0x060202ffu, 0x3f009070u, 0x060202ffu, 0x3f00a070u, 0x060202ffu, 0x3f00b070u, 0x060202ffu, 0x3f00c070u,
+        0x060202ffu, 0x3f00d070u, 0x060202ffu, 0x3f00e070u, 0x060202ffu, 0x3f00f070u, 0x060202ffu, 0x3f010070u,
+        0xbf820027u, 0x060202ffu, 0x3f840000u, 0x060202ffu, 0x3f000040u, 0x060202ffu, 0x3f001040u, 0x060202ffu,
+        0x3f002040u, 0x060202ffu, 0x3f003040u, 0x060202ffu, 0x3f004040u, 0x060202ffu, 0x3f005040u, 0x060202ffu,
+        0x3f006040u, 0x060202ffu, 0x3f007040u, 0x060202ffu, 0x3f008040u, 0x060202ffu, 0x3f009040u, 0x060202ffu,
+        0x3f00a040u, 0x060202ffu, 0x3f00b040u, 0x060202ffu, 0x3f00c040u, 0x060202ffu, 0x3f00d040u, 0x060202ffu,
+        0x3f00e040u, 0x060202ffu, 0x3f00f040u, 0x060202ffu, 0x3f010040u, 0x7d880087u, 0xbf87ff43u, 0xbf82ff8du,
+        0x060202ffu, 0x3f860000u, 0x060202ffu, 0x3f000060u, 0x060202ffu, 0x3f001060u, 0x060202ffu, 0x3f002060u,
+        0x060202ffu, 0x3f003060u, 0x060202ffu, 0x3f004060u, 0x060202ffu, 0x3f005060u, 0x060202ffu, 0x3f006060u,
+        0x060202ffu, 0x3f007060u, 0x060202ffu, 0x3f008060u, 0x060202ffu, 0x3f009060u, 0x060202ffu, 0x3f00a060u,
+        0x060202ffu, 0x3f00b060u, 0x060202ffu, 0x3f00c060u, 0x060202ffu, 0x3f00d060u, 0x060202ffu, 0x3f00e060u,
+        0x060202ffu, 0x3f00f060u, 0x060202ffu, 0x3f010060u, 0xe0700000u, 0x80010100u, 0xbf810000u,
+    };
+    const std::string name("large loop-exit shader preserves the original guarded fallback");
+    static_cast<void>(verifyGraph(name, code));
+    static_cast<void>(recompile(name, code, 32u));
+    static_cast<void>(recompile(name, code, 64u));
+}
+
+void verifyNestedExitForwarders() {
+    constexpr auto none = InvalidControlFlowId;
+    constexpr std::array<std::array<std::uint32_t, 2>, 21> targets{{
+        {1, none}, {2, none}, {2, 3}, {2, 4}, {5, 6}, {1, 7}, {8, 9}, {10, none},
+        {11, 12}, {13, 14}, {1, 15}, {16, none}, {9, none}, {17, 18}, {19, none},
+        {16, none}, {none, none}, {16, none}, {15, 20}, {10, none}, {19, none},
+    }};
+    constexpr std::array<std::uint32_t, 21> order{0, 1, 2, 3, 4, 6, 9, 14, 19, 10, 15, 13, 18, 20, 17, 8, 12, 11, 5, 7, 16};
+    std::vector<std::uint32_t> code;
+    std::array<std::size_t, targets.size()> starts{};
+    std::vector<std::pair<std::size_t, std::uint32_t>> patches;
+    for (std::size_t at = 0; at < order.size(); ++at) {
+        const auto block = order[at];
+        starts[block] = code.size();
+        code.insert(code.end(), {0x060202ffu, 0x3f800000u + block * 0x10000u});
+        for (std::uint32_t padding = 0; padding < 17; ++padding) code.insert(code.end(), {0x060202ffu, 0x3f000000u + padding * 0x1000u + block * 0x10u});
+        const auto next = at + 1 < order.size() ? order[at + 1] : none;
+        const auto [first, second] = targets[block];
+        if (first == none) {
+            code.insert(code.end(), {0xe0700000u, 0x80010100u, 0xbf810000u});
+            continue;
+        }
+        if (second != none) {
+            code.push_back(0x7d880080u + block + 3u);
+            patches.emplace_back(code.size(), first);
+            code.push_back(0xbf870000u);
+        }
+        const auto branch = second != none ? second : first;
+        if (branch != next) {
+            patches.emplace_back(code.size(), branch);
+            code.push_back(0xbf820000u);
+        }
+    }
+    for (const auto& [instruction, target] : patches) {
+        const auto displacement = static_cast<std::int64_t>(starts[target]) - static_cast<std::int64_t>(instruction) - 1;
+        require(displacement >= -32768 && displacement <= 32767, "nested exit forwarder test branch is out of range");
+        code[instruction] |= static_cast<std::uint32_t>(displacement) & 0xffffu;
+    }
+    const std::string name("nested exit forwarders keep conditional selections structured");
+    static_cast<void>(verifyGraph(name, code));
+    static_cast<void>(recompile(name, code, 32u));
+    static_cast<void>(recompile(name, code, 64u));
+}
+
 void verifyProgram(const Program& program) {
     const std::string name(program.name);
     const auto result = verifyGraph(name, program.code);
@@ -409,6 +500,38 @@ int main(int argc, char** argv) {
         return failures == 0 ? 0 : 1;
     }
     const std::vector<Program> programs{
+        {"nested selections share a loop continuation", "Synthetic loop with two nested selections and a shared continue; the inner selection does not dominate the continuation.",
+         {0x060202ffu, 0x3f800000u, 0x060202ffu, 0x3f810000u, 0x7d880084u, 0xbf870001u, 0xbf820018u, 0x060202ffu, 0x3f820000u, 0x7d880085u, 0xbf87000cu, 0x060202ffu, 0x3f850000u, 0x7d880088u, 0xbf870003u, 0x060202ffu, 0x3f870000u, 0xbf82fff0u, 0x060202ffu, 0x3f860000u, 0x7d880089u, 0xbf87fff9u, 0xbf820008u, 0x060202ffu, 0x3f830000u, 0x7d880086u, 0xbf870001u, 0xbf820003u, 0x060202ffu, 0x3f840000u, 0xbf82fff0u, 0x060202ffu, 0x3f880000u, 0xe0700000u, 0x80000100u, 0xbf810000u}, Split::None},
+        {"reduced shared exit junction from the public CFG fuzz report", "Public reduced word stream from #2762; synthetic regression, not title data.",
+         {0x060202f2u, 0x060202f4u, 0x7d880084u, 0xbf870001u, 0xbf820011u, 0x060202ffu, 0x3f820000u, 0x7d880085u, 0xbf870005u,
+          0x060202ffu, 0x3f850000u, 0x7d880088u, 0xbf870009u, 0xbf82fff3u, 0x060202ffu, 0x3f840000u, 0x7d880087u, 0xbf870001u,
+          0xbf820003u, 0x060202ffu, 0x3f860000u, 0xbf82ffebu, 0x060202f6u, 0xe0700000u, 0x80010100u, 0xbf810000u}, Split::None},
+        {"both selection arms leave through a shared loop exit tail", R"(
+  v_mov_b32 v1, 0
+  s_mov_b32 s8, 0
+loop:
+  s_cmp_lt_u32 s8, 4
+  s_cbranch_scc0 done
+  s_cmp_eq_u32 s8, s2
+  s_cbranch_scc1 right
+  v_cmp_gt_u32 vcc, 8, v0
+  s_cbranch_vccz tail
+  v_add_nc_u32 v1, 1, v1
+  s_branch latch
+right:
+  v_cmp_gt_u32 vcc, 16, v0
+  s_cbranch_vccz tail
+  v_add_nc_u32 v1, 2, v1
+latch:
+  s_add_u32 s8, s8, 1
+  s_branch loop
+tail:
+  v_add_nc_u32 v1, 3, v1
+done:
+  buffer_store_dword v1, off, s[0:3], 0
+  s_endpgm)",
+         Store({0x7e020280u, 0xbe880380u, 0xbf0a8408u, 0xbf84000cu, 0xbf060208u, 0xbf850004u, 0x7d880088u, 0xbf860007u, 0x4a020281u,
+                0xbf820003u, 0x7d880090u, 0xbf860003u, 0x4a020282u, 0x80088108u, 0xbf82fff3u, 0x4a020283u}), Split::None},
         {"shared tail", R"(
   v_cmp_gt_u32 vcc, 16, v0
   s_cbranch_vccz outer_else
@@ -520,6 +643,69 @@ done:
   buffer_store_dword v1, off, s[0:3], 0
   s_endpgm)",
          Store({0xbe880380u, 0x7e020280u, 0x7d880008u, 0xbf860005u, 0x7d880088u, 0xbf870002u, 0x7d880084u, 0xbf870004u, 0x4a020281u, 0x4a020282u, 0xbf09c008u, 0xbf850002u, 0x80089008u, 0xbf82fff4u}), Split::None},
+        {"nested selections in a loop whose second latch continues from inside them", R"(
+  s_mov_b32 s8, 0
+  v_mov_b32 v1, 0
+  s_branch loop
+again:
+  v_add_nc_u32 v1, 2, v1
+  s_add_u32 s8, s8, 16
+loop:
+  s_cmp_eq_u32 s8, s2
+  s_cbranch_scc1 latch
+  v_cmp_gt_u32 vcc, 8, v0
+  s_cbranch_vccz latch
+  v_cmp_gt_u32 vcc, 4, v0
+  s_cbranch_vccnz again
+latch:
+  v_add_nc_u32 v1, 1, v1
+  s_add_u32 s8, s8, 16
+  s_cmp_lt_u32 s8, 64
+  s_cbranch_scc1 loop
+  buffer_store_dword v1, off, s[0:3], 0
+  s_endpgm)",
+         Store({0xbe880380u, 0x7e020280u, 0xbf820002u, 0x4a020282u, 0x80089008u, 0xbf060208u, 0xbf850004u, 0x7d880088u, 0xbf860002u, 0x7d880084u, 0xbf87fff8u, 0x4a020281u, 0x80089008u, 0xbf0ac008u, 0xbf85fff6u}), Split::None},
+        {"an inner loop that ends the program or continues its outer loop", R"(
+  v_mov_b32 v1, 0
+  s_mov_b32 s8, 0
+outer:
+  v_add_nc_u32 v1, 2, v1
+inner:
+  v_cmp_gt_u32 vcc, 8, v0
+  s_cbranch_vccz done
+  v_add_nc_u32 v1, 1, v1
+  s_add_u32 s8, s8, 16
+  s_cmp_lt_u32 s8, 64
+  s_cbranch_scc1 inner
+  s_mov_b32 s8, 0
+  s_branch outer
+done:
+  buffer_store_dword v1, off, s[0:3], 0
+  s_endpgm)",
+         Store({0x7e020280u, 0xbe880380u, 0x4a020282u, 0x7d880088u, 0xbf860006u, 0x4a020281u, 0x80089008u, 0xbf0ac008u, 0xbf85fffau, 0xbe880380u, 0xbf82fff7u}), Split::Route, 0},
+        {"an inner loop whose body leaves both loops", R"(
+  v_mov_b32 v1, 0
+  s_mov_b32 s8, 0
+outer:
+  s_cmp_lt_u32 s8, 64
+  s_cbranch_scc0 done
+inner:
+  v_cmp_gt_u32 vcc, 8, v0
+  s_cbranch_vccz latch
+  v_add_nc_u32 v1, 1, v1
+  s_add_u32 s8, s8, 16
+  s_cmp_eq_u32 s8, s2
+  s_cbranch_scc1 done
+  s_branch inner
+latch:
+  v_add_nc_u32 v1, 2, v1
+  s_add_u32 s8, s8, 16
+  s_branch outer
+done:
+  buffer_store_dword v1, off, s[0:3], 0
+  s_endpgm)",
+         Store({0x7e020280u, 0xbe880380u, 0xbf0ac008u, 0xbf84000au, 0x7d880088u, 0xbf860005u, 0x4a020281u, 0x80089008u, 0xbf060208u, 0xbf850004u,
+                0xbf82fff9u, 0x4a020282u, 0x80089008u, 0xbf82fff4u}), Split::Route, 0},
         {"loop exit to the end of the program beside a kill exit", R"(
   v_mov_b32 v1, 0
   s_mov_b64 s[20:21], exec
@@ -1060,6 +1246,8 @@ done:
     }
     try {
         verifyNullSwappc();
+        verifyLargeLoopExitFallback();
+        verifyNestedExitForwarders();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         ++failures;

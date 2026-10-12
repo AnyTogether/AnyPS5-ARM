@@ -12,6 +12,7 @@
 #include <mach/mach_vm.h>
 #else
 #include <cstdio>
+#include <sys/mman.h>
 #endif
 
 extern "C" {
@@ -24,6 +25,7 @@ int APS5_VABI mprotect_nid_postfix(void* address, std::size_t length, int protec
 static constexpr int SCE_OK = 0;
 static constexpr std::uintptr_t Page = 0x4000;
 static constexpr std::size_t GuardBytes = 0x10000;
+static constexpr std::size_t HostBytes = 0x40000;
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -68,6 +70,23 @@ static PageState QueryPage(std::uintptr_t address) {
 #endif
 }
 
+static void* MapHostPages() {
+#ifdef _WIN32
+    return VirtualAlloc(nullptr, HostBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+    void* mapped = mmap(nullptr, HostBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return mapped == MAP_FAILED ? nullptr : mapped;
+#endif
+}
+
+static void UnmapHostPages(void* pages) {
+#ifdef _WIN32
+    Require(VirtualFree(pages, 0, MEM_RELEASE) != 0);
+#else
+    Require(munmap(pages, HostBytes) == 0);
+#endif
+}
+
 static void* APS5_VABI Worker(void* arg) {
     auto& passed = *static_cast<std::atomic<bool>*>(arg);
     int local = 0;
@@ -96,6 +115,18 @@ static void* APS5_VABI Worker(void* arg) {
     static_cast<volatile unsigned char*>(start)[0] = 3;
     const auto outside = reinterpret_cast<std::uintptr_t>(start) & ~(Page - 1);
     if (outside >= Page) Require(mprotect_nid_postfix(reinterpret_cast<void*>(outside - Page), 2 * Page, 3) == -1);
+    if (outside >= 2 * Page) Require(mprotect_nid_postfix(reinterpret_cast<void*>(outside - 2 * Page), Page, 3) == -1);
+    const auto stackBytes = reinterpret_cast<std::uintptr_t>(end) - reinterpret_cast<std::uintptr_t>(start);
+    Require(mprotect_nid_postfix(start, stackBytes, 0xc2) == 0);
+    Require(QueryPage(low).writable);
+    static_cast<volatile unsigned char*>(start)[0] = 4;
+    Require(mprotect_nid_postfix(start, stackBytes, 3) == 0);
+    void* host = MapHostPages();
+    Require(host != nullptr);
+    Require(mprotect_nid_postfix(host, HostBytes, 1) == -1);
+    Require(QueryPage(reinterpret_cast<std::uintptr_t>(host)).writable);
+    static_cast<volatile unsigned char*>(host)[HostBytes - 1] = 5;
+    UnmapHostPages(host);
     passed.store(true);
     return nullptr;
 }

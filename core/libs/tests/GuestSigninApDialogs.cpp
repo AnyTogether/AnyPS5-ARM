@@ -38,11 +38,12 @@ struct Dialog {
     int (APS5_VABI* getResult)(void*);
     int (APS5_VABI* close)(void);
     int (APS5_VABI* terminate)(void);
+    int resultWords;
 };
 
 void Check(const Dialog& dialog) {
     std::int64_t param = 0;
-    std::int32_t result[2] = {-1, -1};
+    std::int32_t result[5] = {-1, -1, -1, -1, -1};
     Require(dialog.updateStatus() == kStatusNone);
     Require(dialog.open(&param) == kErrNotInitialized);
     Require(dialog.getResult(result) == kErrNotInitialized);
@@ -57,7 +58,8 @@ void Check(const Dialog& dialog) {
     Require(dialog.updateStatus() == kStatusFinished);
     Require(dialog.getResult(nullptr) == kErrArgNull);
     Require(dialog.getResult(result) == 0);
-    Require(result[0] == kResultUserCanceled && result[1] == -1);
+    Require(result[0] == kResultUserCanceled && result[dialog.resultWords] == -1);
+    for (int word = 1; word < dialog.resultWords; ++word) Require(result[word] == 0);
     Require(dialog.close() == 0);
     Require(dialog.terminate() == 0);
     Require(dialog.updateStatus() == kStatusNone);
@@ -67,8 +69,8 @@ void Check(const Dialog& dialog) {
 
 int main() {
     Check({sceSigninDialogInitialize, sceSigninDialogOpen, sceSigninDialogUpdateStatus, sceSigninDialogGetResult, sceSigninDialogClose,
-        sceSigninDialogTerminate});
+        sceSigninDialogTerminate, 4});
     Require(sceSigninDialogGetStatus() == kStatusNone);
     Check({sceNetCtlApDialogInitialize, sceNetCtlApDialogOpen, sceNetCtlApDialogUpdateStatus, sceNetCtlApDialogGetResult, sceNetCtlApDialogClose,
-        sceNetCtlApDialogTerminate});
+        sceNetCtlApDialogTerminate, 1});
 }

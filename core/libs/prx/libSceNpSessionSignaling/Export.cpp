@@ -91,4 +91,10 @@ int APS5_VABI sceNpSessionSignalingGetConnectionStatistics(void) {
 int APS5_VABI sceNpSessionSignalingGetConnectionFromPeerAddress(void) {
     return SCE_NP_SESSION_SIGNALING_ERROR_UNAVAILABLE;
 }
+
+int APS5_VABI sceNpSessionSignalingGetGroupFromSessionId(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

@@ -13,6 +13,7 @@ namespace PosixThread {
 constexpr int GUEST_ESRCH = 3;
 constexpr int GUEST_EFAULT = 14;
 constexpr int GUEST_EINVAL = 22;
+constexpr int GUEST_ENOTSUP = 45;
 constexpr int GUEST_ETIMEDOUT = 60;
 
 inline int ToErrno(int sceResult) {

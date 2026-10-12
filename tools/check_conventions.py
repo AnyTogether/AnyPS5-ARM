@@ -7,6 +7,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from pathlib import PurePosixPath
+from urllib.parse import unquote
 
 RULES = {
     "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md in the same pull request; #endif and namespace ends are always allowed"),
@@ -55,21 +56,26 @@ class Check:
         self.added = defaultdict(list)
         self.status = {}
         self.numstat = {}
-        self.tree = set(git("ls-tree", "-r", "--name-only", head).splitlines())
+        entries = [entry.split("\t", 1) for entry in git("ls-tree", "-rz", head).split("\0") if entry]
+        self.modes = {path: metadata.split()[0] for metadata, path in entries}
+        self.tree = set(self.modes)
         self.dirs = {str(parent) for path in self.tree for parent in PurePosixPath(path).parents}
-        for line in git("diff", "--name-status", "--no-renames", self.base, head).splitlines():
-            status, path = line.split("\t", 1)
+        statuses = git("diff", "--name-status", "--no-renames", "-z", self.base, head).split("\0")
+        for status, path in zip(statuses[::2], statuses[1::2]):
             self.status[path] = status
-        for line in git("diff", "--numstat", "--no-renames", self.base, head).splitlines():
+        for line in git("diff", "--numstat", "--no-renames", "-z", self.base, head).split("\0"):
+            if not line:
+                continue
             added, deleted, path = line.split("\t", 2)
             self.numstat[path] = (added, deleted)
-        path = None
-        for line in git("diff", "-U0", "--no-color", "--no-renames", "--no-prefix", self.base, head).splitlines():
-            if line.startswith("+++ "):
-                path = None if line == "+++ /dev/null" else line[4:].rstrip("\t")
+        paths = iter(self.status)
+        path, number = None, None
+        for line in git("diff", "-U0", "--no-color", "--no-renames", self.base, head).splitlines():
+            if line.startswith("diff --git "):
+                path, number = next(paths), None
             elif line.startswith("@@"):
                 number = int(re.search(r"\+(\d+)", line).group(1))
-            elif line.startswith("+") and path:
+            elif path and number is not None and line.startswith("+"):
                 self.added[path].append((number, line[1:]))
                 number += 1
 
@@ -141,6 +147,9 @@ class Check:
         for path, (added, deleted) in self.numstat.items():
             if path.startswith("3rdparty/"):
                 continue
+            if self.modes.get(path) == "160000":
+                self.report("system-dependency", path, 0, "submodule outside 3rdparty/")
+                continue
             suffix = PurePosixPath(path).suffix.lower()
             if self.status.get(path) != "D" and (added == "-" or suffix in IMAGES or not utf8(git("show", f"{self.head}:{path}", text=False))):
                 self.report("binary", path, 0)
@@ -188,10 +197,11 @@ def utf8(data):
 def links(path, text):
     result = []
     for target in LINK.findall(text):
-        if re.match(r"[a-z]+:|#", target):
+        if re.match(r"[A-Za-z][A-Za-z0-9+.-]*:|//|#", target):
             continue
         target = target.split("#", 1)[0].split("?", 1)[0]
-        result.append((target, posixpath.normpath(target.lstrip("/") if target.startswith("/") else str(PurePosixPath(path).parent / target))))
+        decoded = unquote(target)
+        result.append((target, posixpath.normpath(decoded.lstrip("/") if decoded.startswith("/") else str(PurePosixPath(path).parent / decoded))))
     return result
 
 
@@ -256,7 +266,8 @@ def output(check, repo):
         errors += level == "error"
         text = f"{message}" + (f": {detail}" if detail else "")
         if actions:
-            location = f" file={path},line={max(line, 1)}," if path else " "
+            escaped_path = path.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C")
+            location = f" file={escaped_path},line={max(line, 1)}," if path else " "
             print(f"::{level}{location}title={rule}::" + text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
         else:
             print(f"{path or '(pull request)'}{f':{line}' if line else ''}: {level}: [{rule}] {text}")

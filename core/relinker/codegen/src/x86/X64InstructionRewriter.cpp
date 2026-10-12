@@ -74,6 +74,18 @@ RewriteResult X64InstructionRewriter::Rewrite(
         throw CodegenException("Rewrite offset is out of bounds", request.Offset);
     }
 
+    const auto scanner = MakeInstructionScanner();
+    const auto matches = scanner->ScanCodeSection(codeSection, 0, codeSection.size());
+    bool instructionStart = false;
+    for (const auto& match : matches) {
+        if (match.Offset == request.Offset) {
+            instructionStart = true;
+            break;
+        }
+    }
+    if (!instructionStart)
+        throw CodegenException("Rewrite offset is not an instruction boundary", request.Offset);
+
     const X64InstructionDecoder decoder;
     const std::size_t decodedLength = decoder.Decode(codeSection.data() + offset, codeSection.size() - offset);
 
@@ -89,9 +101,6 @@ RewriteResult X64InstructionRewriter::Rewrite(
     rewritten.insert(rewritten.end(), codeSection.begin(), codeSection.begin() + offset);
     rewritten.insert(rewritten.end(), request.NewBytes.begin(), request.NewBytes.end());
     rewritten.insert(rewritten.end(), codeSection.begin() + offset + decodedLength, codeSection.end());
-
-    const auto scanner = MakeInstructionScanner();
-    const auto matches = scanner->ScanCodeSection(codeSection, 0, codeSection.size());
 
     std::vector<AddressAdjustment> adjustments;
 

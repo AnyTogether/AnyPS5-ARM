@@ -29,6 +29,7 @@ using TimedLock = int (APS5_VABI *)(PthreadRwlock*, const KernelTimespec*);
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EBUSY = 0x80020010;
+static constexpr int GUEST_EPERM = 1;
 static constexpr int GUEST_EDEADLK = 11;
 static constexpr int GUEST_EBUSY = 16;
 static constexpr int GUEST_EINVAL = 22;
@@ -223,6 +224,12 @@ int main() {
     Require(pthread_rwlock_timedrdlock_nid_postfix(&rwlock, &deadline) == GUEST_EDEADLK);
     Require(pthread_rwlock_timedwrlock_nid_postfix(&rwlock, &deadline) == GUEST_EDEADLK);
     Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(pthread_rwlock_tryrdlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
+    Require(pthread_rwlock_trywrlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
 
     Holder reader{&rwlock, false};
     Start(reader);
@@ -242,6 +249,7 @@ int main() {
 
     Holder writer{&rwlock, true};
     Start(writer);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
     Require(pthread_rwlock_tryrdlock_nid_postfix(&rwlock) == GUEST_EBUSY);
     Require(pthread_rwlock_trywrlock_nid_postfix(&rwlock) == GUEST_EBUSY);
     Require(pthread_rwlock_destroy_nid_postfix(&rwlock) == GUEST_EBUSY);
@@ -253,6 +261,7 @@ int main() {
     Require(pthread_rwlock_timedrdlock_nid_postfix(&rwlock, &deadline) == 0);
     Require(scePthreadJoin(writer.thread, nullptr) == SCE_OK);
     Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
 
     bool rejected = false;
     try { pthread_rwlock_timedrdlock_nid_postfix(&rwlock, nullptr); }

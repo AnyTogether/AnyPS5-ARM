@@ -1,4 +1,5 @@
 #include "../include/Pthread.hpp"
+#include "../include/ThreadLifecycle.hpp"
 #include "../include/WindowsThreadLocal.hpp"
 #include "prx/libc/include/General.hpp"
 #include <array>
@@ -32,8 +33,15 @@ static std::uint64_t g_lastSequence = FREE_KEY;
 
 struct ThreadValues {
     std::array<ThreadValue, MAX_KEYS> values{};
+    bool destroyed = false;
 
     ~ThreadValues() {
+        RunDestructors();
+    }
+
+    void RunDestructors() {
+        if (destroyed) return;
+        destroyed = true;
         for (int round = 0; round < DESTRUCTOR_ITERATIONS; ++round) {
             bool called = false;
             for (int key = 0; key < MAX_KEYS; ++key) {
@@ -52,6 +60,7 @@ struct ThreadValues {
             }
             if (!called) return;
         }
+        values = {};
     }
 };
 
@@ -62,6 +71,10 @@ static ThreadValues& Values() {
     static thread_local ThreadValues values;
     return values;
 #endif
+}
+
+void ThreadLifecycle::RunKeyDtors() {
+    Values().RunDestructors();
 }
 
 extern "C" {

@@ -2,6 +2,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -26,14 +27,16 @@ int APS5_VABI wcstombs_s_nid_postfix(std::size_t* result, char* destination, std
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI pthread_detach_nid_postfix(Pthread thread);
 int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
-int APS5_VABI _Cnd_init_with_name_nid_postfix(void** condition, const char* name);
-int APS5_VABI _Cnd_signal_nid_postfix(void** condition);
+int APS5_VABI _Cnd_init_nid_postfix(void** handle);
+int APS5_VABI _Cnd_init_with_name_nid_postfix(void** handle, const char* name);
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle);
+int APS5_VABI _Cnd_broadcast_nid_postfix(void** handle);
 int APS5_VABI _Cnd_wait_nid_postfix(void** condition, void** mutex);
-void APS5_VABI _Cnd_destroy_nid_postfix(void** condition);
-int APS5_VABI _Mtx_init_nid_postfix(void** mutex, int type);
-int APS5_VABI _Mtx_lock_nid_postfix(void** mutex);
-int APS5_VABI _Mtx_unlock_nid_postfix(void** mutex);
-void APS5_VABI _Mtx_destroy_nid_postfix(void** mutex);
+void APS5_VABI _Cnd_destroy_nid_postfix(void** handle);
+int APS5_VABI _Mtx_init_nid_postfix(void** handle, int type);
+int APS5_VABI _Mtx_lock_nid_postfix(void** handle);
+int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
+void APS5_VABI _Mtx_destroy_nid_postfix(void** handle);
 int APS5_VABI _Thrd_id_nid_postfix(void);
 int APS5_VABI scePthreadGetthreadid(void);
 [[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code);
@@ -218,48 +221,6 @@ static void TestWcstombs() {
     Require(result == Failed);
 }
 
-struct Signal {
-    void* condition = nullptr;
-    void* mutex = nullptr;
-    bool ready = false;
-    bool woken = false;
-};
-
-static void* APS5_VABI AwaitSignal(void* arg) {
-    auto& signal = *static_cast<Signal*>(arg);
-    Require(_Mtx_lock_nid_postfix(&signal.mutex) == ThrdSuccess);
-    signal.ready = true;
-    while (!signal.woken) Require(_Cnd_wait_nid_postfix(&signal.condition, &signal.mutex) == ThrdSuccess);
-    Require(_Mtx_unlock_nid_postfix(&signal.mutex) == ThrdSuccess);
-    return reinterpret_cast<void*>(static_cast<std::intptr_t>(_Thrd_id_nid_postfix()));
-}
-
-static void TestConditionSignal() {
-    Signal signal;
-    Require(_Cnd_init_with_name_nid_postfix(&signal.condition, "ampr condition") == ThrdSuccess && signal.condition != nullptr);
-    Require(_Mtx_init_nid_postfix(&signal.mutex, 1) == ThrdSuccess);
-    Pthread thread = nullptr;
-    Require(scePthreadCreate(&thread, nullptr, AwaitSignal, &signal, "signal") == 0);
-    for (;;) {
-        Require(_Mtx_lock_nid_postfix(&signal.mutex) == ThrdSuccess);
-        const bool ready = signal.ready;
-        if (ready) {
-            signal.woken = true;
-            Require(_Cnd_signal_nid_postfix(&signal.condition) == ThrdSuccess);
-        }
-        Require(_Mtx_unlock_nid_postfix(&signal.mutex) == ThrdSuccess);
-        if (ready) break;
-        std::this_thread::yield();
-    }
-    int code = 0;
-    Require(_Thrd_join_nid_postfix(thread, &code) == ThrdSuccess);
-    Require(code != 0 && code != _Thrd_id_nid_postfix());
-    Require(_Thrd_id_nid_postfix() == scePthreadGetthreadid());
-    _Cnd_destroy_nid_postfix(&signal.condition);
-    _Mtx_destroy_nid_postfix(&signal.mutex);
-    Require(signal.condition == nullptr);
-}
-
 static void TestThrowCppError() {
     const std::errc expected[] = {std::errc::device_or_resource_busy, std::errc::invalid_argument, std::errc::no_such_process, std::errc::not_enough_memory,
                                   std::errc::operation_not_permitted, std::errc::resource_deadlock_would_occur, std::errc::resource_unavailable_try_again};
@@ -356,9 +317,118 @@ static void TestTypeInfoVtables() {
     Require(!reinterpret_cast<TypeInfoCatch>(function[6])(&functionType, &otherFunctionType, &object, 0));
 }
 
+template<typename TException, typename TCall>
+static void RequireThrows(TCall call) {
+    try {
+        call();
+    } catch (const TException&) {
+        return;
+    }
+    std::abort();
+}
+
+struct SignalContext {
+    void* condition = nullptr;
+    void* mutex = nullptr;
+    int waiting = 0;
+    int tokens = 0;
+    int consumed = 0;
+    int wakeups = 0;
+};
+
+static void Lock(SignalContext& context) {
+    Require(_Mtx_lock_nid_postfix(&context.mutex) == ThrdSuccess);
+}
+
+static void Unlock(SignalContext& context) {
+    Require(_Mtx_unlock_nid_postfix(&context.mutex) == ThrdSuccess);
+}
+
+static void* APS5_VABI ConsumeToken(void* arg) {
+    auto& context = *static_cast<SignalContext*>(arg);
+    Lock(context);
+    ++context.waiting;
+    while (context.tokens == 0) {
+        Require(_Cnd_wait_nid_postfix(&context.condition, &context.mutex) == ThrdSuccess);
+        ++context.wakeups;
+    }
+    --context.tokens;
+    ++context.consumed;
+    Unlock(context);
+    return nullptr;
+}
+
+template<typename TPredicate>
+static void WaitUntil(SignalContext& context, TPredicate predicate) {
+    for (;;) {
+        Lock(context);
+        const bool done = predicate();
+        Unlock(context);
+        if (done) return;
+        std::this_thread::yield();
+    }
+}
+
+static void Signal(SignalContext& context) {
+    Lock(context);
+    ++context.tokens;
+    Require(_Cnd_signal_nid_postfix(&context.condition) == ThrdSuccess);
+    Unlock(context);
+}
+
+static void TestConditionSignal() {
+    SignalContext context;
+    context.condition = reinterpret_cast<void*>(std::uintptr_t{1});
+    Require(_Cnd_init_with_name_nid_postfix(&context.condition, "AmprSignal") == ThrdSuccess && context.condition != nullptr);
+    Require(_Mtx_init_nid_postfix(&context.mutex, 0) == ThrdSuccess);
+    Require(_Cnd_signal_nid_postfix(&context.condition) == ThrdSuccess);
+
+    const auto single = Start(ConsumeToken, &context);
+    WaitUntil(context, [&] { return context.waiting == 1; });
+    Signal(context);
+    Require(_Thrd_join_nid_postfix(single, nullptr) == ThrdSuccess);
+    Require(context.consumed == 1 && context.tokens == 0);
+
+    context.waiting = 0;
+    context.consumed = 0;
+    context.wakeups = 0;
+    const std::array<Pthread, 2> pair{Start(ConsumeToken, &context), Start(ConsumeToken, &context)};
+    WaitUntil(context, [&] { return context.waiting == 2; });
+    Signal(context);
+    WaitUntil(context, [&] { return context.consumed == 1; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Lock(context);
+    Require(context.consumed == 1 && context.wakeups == 1 && context.tokens == 0);
+    Unlock(context);
+    Signal(context);
+    for (auto thread : pair) Require(_Thrd_join_nid_postfix(thread, nullptr) == ThrdSuccess);
+    Require(context.consumed == 2 && context.tokens == 0);
+    Require(_Cnd_broadcast_nid_postfix(&context.condition) == ThrdSuccess);
+
+    RequireThrows<std::invalid_argument>([] { _Cnd_signal_nid_postfix(nullptr); });
+    void* empty = nullptr;
+    RequireThrows<std::invalid_argument>([&] { _Cnd_signal_nid_postfix(&empty); });
+    RequireThrows<std::invalid_argument>([&] { _Cnd_signal_nid_postfix(&context.mutex); });
+    RequireThrows<std::invalid_argument>([] { _Cnd_init_with_name_nid_postfix(nullptr, "AmprSignal"); });
+    _Cnd_destroy_nid_postfix(&context.condition);
+    Require(context.condition == nullptr);
+    RequireThrows<std::invalid_argument>([&] { _Cnd_signal_nid_postfix(&context.condition); });
+
+    void* unnamed = nullptr;
+    Require(_Cnd_init_with_name_nid_postfix(&unnamed, nullptr) == ThrdSuccess && unnamed != nullptr);
+    Require(_Cnd_signal_nid_postfix(&unnamed) == ThrdSuccess);
+    _Cnd_destroy_nid_postfix(&unnamed);
+    void* plain = nullptr;
+    Require(_Cnd_init_nid_postfix(&plain) == ThrdSuccess);
+    Require(_Cnd_signal_nid_postfix(&plain) == ThrdSuccess);
+    _Cnd_destroy_nid_postfix(&plain);
+    _Mtx_destroy_nid_postfix(&context.mutex);
+}
+
 int main() {
     Require(_ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix == 0);
     Require(_ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix == 0);
+    Require(_Thrd_id_nid_postfix() == scePthreadGetthreadid());
     TestConditionSignal();
     TestTypeInfoVtables();
     TestThrowCppError();

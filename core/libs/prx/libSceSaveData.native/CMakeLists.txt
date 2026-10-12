@@ -22,6 +22,15 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
     endif()
 
+    add_test_executable(guest_savedata_convert_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataConvert.cpp)
+    target_include_directories(guest_savedata_convert_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_savedata_convert_tests PRIVATE libSceSaveData.native libc)
+    add_test(NAME guest_savedata_convert COMMAND guest_savedata_convert_tests)
+    if(WIN32)
+        set_tests_properties(guest_savedata_convert PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
+    endif()
+
     add_test_executable(guest_savedata_mount_status_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataMountStatus.cpp)
     target_include_directories(guest_savedata_mount_status_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_savedata_mount_status_tests PRIVATE libSceSaveData.native libc)

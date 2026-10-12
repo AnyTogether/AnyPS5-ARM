@@ -54,6 +54,15 @@ class DependencyTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(pull_requests(body)[1]["depends"], {2})
 
+    def test_colon_declaration_stops_before_unrelated_prose(self):
+        for body in ("Depends on: #2. Related #3 covers something else.",
+                     "Depends on: #2; related #3 covers something else.",
+                     "Depends on: none; see issue #3.",
+                     "Depends on: #2, related work is in #3."):
+            with self.subTest(body=body):
+                expected = set() if "none" in body else {2}
+                self.assertEqual(pull_requests(body)[1]["depends"], expected)
+
     def test_checklist_declaration_keeps_precedence(self):
         for declaration, expected in (("#3", {3}), ("none", set())):
             body = "Previously: Depends on #2.\n\n- [x] Depends on: " + declaration

@@ -25,7 +25,15 @@ struct GuestSymbol {
     std::uint64_t Value;
     std::uint64_t Size;
     std::string Library;
+    std::string QualifiedName;
 };
+
+inline bool IdenticalOrdinaryFunctionExport(const GuestSymbol& left, const GuestSymbol& right) {
+    return left.Section != 0 && left.Section < 0xff00 && (left.Info >> 4) != 0 &&
+        left.Visibility != 1 && left.Visibility != 2 && (left.Info & 15) == 2 &&
+        left.Info == right.Info && left.Visibility == right.Visibility &&
+        left.Section == right.Section && left.Value == right.Value && left.Size == right.Size;
+}
 
 struct GuestImage {
     std::filesystem::path SourcePath;
@@ -49,7 +57,7 @@ struct GuestImage {
 class GuestImageReader {
 public:
     std::vector<std::string> ReadModuleNames(const std::vector<std::uint8_t>& bytes) const;
-    GuestImage Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes) const;
+    GuestImage Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes, bool windows = false) const;
 };
 
 struct GuestArtifact {

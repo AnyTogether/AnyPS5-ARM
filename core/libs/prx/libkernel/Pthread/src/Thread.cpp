@@ -256,6 +256,16 @@ void SetLiveGuestThreadsAffinity(KernelCpumask mask) {
     }
 }
 
+KernelCpumask LiveGuestThreadsAffinity() {
+    auto& registry = CpuClocks();
+    std::lock_guard lock(registry.lock);
+    KernelCpumask mask = 0;
+    for (const auto& [id, thread] : registry.threads) {
+        if (!thread->_finished.load(std::memory_order_acquire)) mask |= thread->affinity.load(std::memory_order_relaxed);
+    }
+    return mask;
+}
+
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos) {
     auto& registry = CpuClocks();
     std::lock_guard lock(registry.lock);
@@ -368,9 +378,11 @@ static void finishThread(PthreadPrivate* self, void* retval) {
     if (CurrentGuestState().finishing)
         throw std::runtime_error("Guest thread is already finishing");
     CurrentGuestState().finishing = true;
+    CurrentGuestState().exiting = true;
     UnregisterStack(self);
     if (const auto callback = threadDtors.load())
         callback();
+    ThreadLifecycle::RunKeyDtors();
     {
         std::unique_lock<std::mutex> lk(self->_join_mtx);
         self->_retval = retval;
@@ -557,6 +569,12 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     p->stackSize = attr ? (*attr)->_stacksize : DEFAULT_STACK_SIZE;
     if (attr) {
         p->priority.store((*attr)->_schedpriority, std::memory_order_relaxed);
+        if ((*attr)->_inheritsched != GUEST_INHERIT_SCHED)
+            p->scope = (*attr)->_scope;
+        else if (CurrentGuestState().current)
+            p->scope = CurrentGuestState().current->scope;
+    } else if (CurrentGuestState().current) {
+        p->scope = CurrentGuestState().current->scope;
     }
     if (name) p->name = name;
     std::promise<bool> start;

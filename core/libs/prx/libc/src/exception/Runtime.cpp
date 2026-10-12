@@ -229,7 +229,7 @@ void APS5_VABI __cxa_free_exception_nid_postfix(void* object) {
     std::free(allocation);
 }
 
-[[noreturn]] void APS5_VABI __cxa_throw_nid_postfix(void* object, std::type_info* type, void (*destructor)(void*)) {
+[[noreturn]] static void ThrowFromSite(void* object, std::type_info* type, void (*destructor)(void*), void* throwSite) {
     using namespace LibcException;
     auto* header = FromObject(object);
     header->type = type;
@@ -240,9 +240,13 @@ void APS5_VABI __cxa_free_exception_nid_postfix(void* object) {
     header->unwind.exception_cleanup = Cleanup;
     ++globals.uncaught;
     _Unwind_RaiseException_nid_postfix(&header->unwind);
-    RawLog("[libc] unhandled exception '%s' thrown from %p\n", type ? type->name() : "?", __builtin_return_address(0));
+    RawLog("[libc] unhandled exception '%s' thrown from %p\n", type ? type->name() : "?", throwSite);
     __cxa_begin_catch_nid_postfix(&header->unwind);
     InvokeTerminate(header->terminate);
+}
+
+[[noreturn]] void APS5_VABI __cxa_throw_nid_postfix(void* object, std::type_info* type, void (*destructor)(void*)) {
+    ThrowFromSite(object, type, destructor, __builtin_return_address(0));
 }
 
 LibcException::Header* __cxa_init_primary_exception_nid_postfix(void* object, std::type_info* type, void (*destructor)(void*)) {

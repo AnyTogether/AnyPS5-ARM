@@ -309,6 +309,24 @@ bool BindsDepthCompare(const ShaderRecompiler::RecompileResult& result) {
     });
 }
 
+void RunSrgbCubeZero(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, const char* name) {
+    FillCubeTexels();
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        CubeInput[tid * 4u + 0u] = 0.5f;
+        CubeInput[tid * 4u + 1u] = 1.0f;
+        CubeInput[tid * 4u + 2u] = 0.0f;
+        CubeInput[tid * 4u + 3u] = 0.0f;
+    }
+    Output.fill(-1.0f);
+    const auto result = Compile(device, format, sampler, CubeCode, false, true, true);
+    Require(!BindsDepthCompare(result), std::string(name) + " kept a depth-compare binding");
+    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(CubeCode.data()));
+    device.WaitIdle();
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        Require(Output[tid] == 0.0f, std::string(name) + ": thread " + std::to_string(tid) + " compared to " + std::to_string(Output[tid]) + ", expected 0");
+    }
+}
+
 void RunSrgbZero(AgcDriver::VulkanDevice& device, std::uint32_t format, const Sampler& sampler, const char* name, bool useCache, std::uint64_t expectedVariant) {
     Output.fill(-1.0f);
     const auto result = Compile(device, format, sampler, Code, useCache);
@@ -343,6 +361,12 @@ int main() {
         FillInput();
         RunCube(*device, {ClampEdge, FilterPoint}, "point cube, clamp to edge");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
+        for (std::uint32_t function = 0; function < 8u; ++function) {
+            const auto name = "bilinear 8_8_8_8 srgb cube function " + std::to_string(function);
+            RunSrgbCubeZero(*device, Format8888Srgb, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, false, function}, name.c_str());
+        }
+        RunSrgbCubeZero(*device, Format8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8 srgb cube without DISABLE_CUBE_WRAP");
+        RunSrgbCubeZero(*device, Format8_8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8_8 srgb cube without DISABLE_CUBE_WRAP");
         RunCube(*device, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, true}, "bilinear cube with DISABLE_CUBE_WRAP");
         Reject(*device, Format9995Float, {ClampEdge, FilterPoint}, "implemented only for float, unorm and snorm formats");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterAnisoBilinear}, "point or bilinear");
@@ -362,9 +386,6 @@ int main() {
                 }
             }
             if (useCache) Run(*device, {ClampEdge, FilterPoint}, "cached UNORM after sRGB", false, true, false, variant);
-        }
-        for (const auto format : {Format8Srgb, Format8_8Srgb, Format8888Srgb}) {
-            Reject(*device, format, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
         }
         Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap");

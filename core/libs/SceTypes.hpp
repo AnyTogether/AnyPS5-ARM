@@ -95,6 +95,14 @@ struct KernelAioRwRequest {
     std::int32_t fd;
 };
 
+struct KernelAioSchedulingParam {
+    std::int32_t schedulingWindowSize;
+    std::int32_t delayedCountLimit;
+    std::uint32_t enableSplit;
+    std::uint32_t splitSize;
+    std::uint32_t splitChunkSize;
+};
+
 struct KernelBatchMapEntry {
     void* start;
     std::uint64_t offset;
@@ -1307,7 +1315,7 @@ union NetCtlInfo { std::uint8_t opaque[256]; };
 
 using NetCtlCallback = void (*)(int, void*);
 
-struct HttpEpoll {};
+struct HttpEpoll;
 using HttpEpollHandle = HttpEpoll*;
 using HttpsCallback = int (*)(int, unsigned int, void* const*, int, void*);
 using HttpRedirectCallback = int (*)(int, std::int32_t, std::int32_t*, const char*, void*);
@@ -1617,6 +1625,13 @@ struct SaveDataBackup {
     std::uint8_t reserved[32];
 };
 
+struct SaveDataConvert {
+    std::int32_t user_id;
+    std::int32_t pad;
+    const SceSaveDataDirName* dir_name;
+    std::uint8_t unknown[48];
+};
+
 struct AppContentInitParam { char reserved[32]; };
 
 struct AppContentBootParam {
@@ -1634,6 +1649,19 @@ struct ContentExportInitParam2 {
     std::size_t buffer_size;
     std::int64_t reserved0;
     std::int64_t reserved1;
+};
+
+struct ContentExportParam {
+    char title[257];
+    char comment[257];
+    char content_type[65];
+};
+static_assert(sizeof(ContentExportParam) == 579);
+
+struct ContentExportCallbackParam {
+    std::size_t content_length;
+    void* func;
+    void* user_data;
 };
 
 struct ContentSearchInitParam { std::size_t memory_size; };

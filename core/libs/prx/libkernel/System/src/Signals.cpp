@@ -150,6 +150,37 @@ extern "C" unsigned int APS5_VABI GuestAlarm_nid_no_patch(unsigned int seconds) 
     return remaining;
 }
 
+struct GuestItimerval {
+    KernelTimeval interval;
+    KernelTimeval value;
+};
+static_assert(sizeof(GuestItimerval) == 32 && offsetof(GuestItimerval, value) == 16);
+
+extern "C" int APS5_VABI getitimer_nid_postfix(int which, GuestItimerval* output) {
+    if (which < 0 || which > 2) {
+        *__error_nid_postfix() = 22;
+        return -1;
+    }
+    if (which != 0) throw std::runtime_error("getitimer: CPU interval timers are not implemented");
+    if (output == nullptr) {
+        *__error_nid_postfix() = 14;
+        return -1;
+    }
+    GuestItimerval result{};
+    auto& alarms = Alarms();
+    {
+        std::lock_guard lock(alarms.lock);
+        const auto now = std::chrono::steady_clock::now();
+        if (alarms.deadline && *alarms.deadline > now) {
+            const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(*alarms.deadline - now).count();
+            result.value.tv_sec = micros / 1000000;
+            result.value.tv_usec = micros % 1000000;
+        }
+    }
+    *output = result;
+    return 0;
+}
+
 struct GuestStack {
     void* sp;
     std::size_t size;
@@ -255,6 +286,25 @@ int APS5_VABI sigtimedwait_nid_postfix(const GuestSignalSet* set, void* info, co
     (void)info;
     (void)timeout;
     NotImplemented_nid_no_patch("sigtimedwait: waiting for a pending signal");
+    return -1;
+}
+
+int APS5_VABI sigwaitinfo_nid_postfix(const GuestSignalSet* set, void* info) {
+    (void)set;
+    (void)info;
+    NotImplemented_nid_no_patch("sigwaitinfo: waiting for a pending signal");
+    return -1;
+}
+
+int APS5_VABI sigwait_nid_postfix(const GuestSignalSet* set, int* received) {
+    (void)set;
+    (void)received;
+    NotImplemented_nid_no_patch("sigwait: waiting for a pending signal");
+    return -1;
+}
+
+int APS5_VABI pause_nid_postfix(void) {
+    NotImplemented_nid_no_patch("pause: waiting for a delivered signal");
     return -1;
 }
 }

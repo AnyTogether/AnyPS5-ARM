@@ -34,7 +34,33 @@ struct MallocManagedSize {
 static void Require(bool value) {
     if (!value) { std::fputs("Mspace check failed\n", stderr); std::abort(); }
 }
+static void CheckAlignment() {
+    alignas(32) static std::array<unsigned char, 65536 + 16> storage{};
+    void* arena = sceLibcMspaceCreate_nid_postfix("aligned", storage.data() + 16, 65536, 0);
+    Require(arena != nullptr);
+    const auto aligned = [](const void* pointer) { return pointer && (reinterpret_cast<std::uintptr_t>(pointer) & 31u) == 0; };
+    void* blocks[64] = {};
+    for (std::size_t index = 0; index < 64; ++index) {
+        blocks[index] = sceLibcMspaceMalloc_nid_postfix(arena, index + 1);
+        Require(aligned(blocks[index]));
+        std::memset(blocks[index], 0xa5, index + 1);
+    }
+    void* zeroed = sceLibcMspaceCalloc_nid_postfix(arena, 3, 13);
+    Require(aligned(zeroed));
+    blocks[0] = sceLibcMspaceRealloc_nid_postfix(arena, blocks[0], 600);
+    Require(aligned(blocks[0]));
+    void* small = sceLibcMspaceMemalign_nid_postfix(arena, 16, 40);
+    Require(aligned(small));
+    void* moved = sceLibcMspaceReallocalign_nid_postfix(arena, nullptr, 40, 8);
+    Require(aligned(moved));
+    void* posix = nullptr;
+    Require(sceLibcMspacePosixMemalign_nid_postfix(arena, &posix, 8, 40) == 0 && aligned(posix));
+    for (void* block : blocks) sceLibcMspaceFree_nid_postfix(arena, block);
+    for (void* block : {zeroed, small, moved, posix}) sceLibcMspaceFree_nid_postfix(arena, block);
+    Require(sceLibcMspaceDestroy_nid_postfix(arena) == 0);
+}
 int main() {
+    CheckAlignment();
     alignas(16) std::array<unsigned char, 65536> storage{};
     void* arena = sceLibcMspaceCreate_nid_postfix("test", storage.data(), storage.size(), 0);
     Require(arena != nullptr);

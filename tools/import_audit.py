@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import re
 import struct
@@ -36,14 +37,14 @@ def unpack(layout, data, offset, path, what):
     return struct.unpack(layout, take(data, offset, struct.calcsize(layout), path, what))
 
 
-def cstring(data, offset, limit, path, what):
+def cstring(data, offset, limit, path, what, encoding="utf-8", errors="surrogateescape"):
     end = data.find(b"\0", offset, limit)
     if offset < 0 or offset >= limit or end < 0:
         raise AuditError(f"{path}: {what} at 0x{offset:x} is not a NUL-terminated string inside 0x{limit:x} bytes")
     try:
-        return data[offset:end].decode("utf-8")
+        return data[offset:end].decode(encoding, errors=errors)
     except UnicodeDecodeError as error:
-        raise AuditError(f"{path}: {what} at 0x{offset:x} is not UTF-8: {error}") from error
+        raise AuditError(f"{path}: {what} at 0x{offset:x} is not {encoding}: {error}") from error
 
 
 def uleb128(data, offset, path, what, region="file"):
@@ -62,9 +63,14 @@ def elf_exports(path, data):
     ident, section_offset, section_size, section_count = header[0], header[6], header[11], header[12]
     if ident[4] != 2 or ident[5] != 1 or section_size != 64:
         raise AuditError(f"{path}: only little-endian ELF64 with 64-byte section headers is supported (class {ident[4]}, data {ident[5]}, shentsize {section_size})")
+    if not section_offset:
+        raise AuditError(f"{path}: ELF exports without a section header table are not supported")
+    if not section_count:
+        section_count = unpack("<IIQQQQIIQQ", data, section_offset, path, "extended section count")[5]
+    take(data, section_offset, section_count * 64, path, "section header table")
     sections = [unpack("<IIQQQQIIQQ", data, section_offset + index * 64, path, f"section header {index}") for index in range(section_count)]
     names = set()
-    for section in sections:
+    for section_index, section in enumerate(sections):
         kind, offset, size, link, entry = section[1], section[4], section[5], section[6], section[9]
         if kind != 11:
             continue
@@ -72,10 +78,21 @@ def elf_exports(path, data):
             raise AuditError(f"{path}: invalid dynamic symbol table (entry size {entry}, size {size}, string table section {link})")
         strings_offset, strings_size = sections[link][4], sections[link][5]
         take(data, strings_offset, strings_size, path, "dynamic string table")
+        indexes = [candidate for candidate in sections if candidate[1] == 18 and candidate[6] == section_index]
+        if len(indexes) > 1:
+            raise AuditError(f"{path}: multiple extended section index tables for section {section_index}")
         for position in range(0, size, 24):
             name, info, other, index, _, _ = unpack("<IBBHQQ", data, offset + position, path, "dynamic symbol")
+            if index == 0xffff:
+                if not indexes or indexes[0][9] != 4 or indexes[0][5] != size // 24 * 4:
+                    raise AuditError(f"{path}: invalid or missing extended section index table for section {section_index}")
+                index = unpack("<I", data, indexes[0][4] + position // 24 * 4, path, "extended symbol section index")[0]
+                if index >= len(sections):
+                    raise AuditError(f"{path}: extended symbol section index {index} lies outside the section table")
+            elif 0 < index < 0xff00 and index >= len(sections):
+                raise AuditError(f"{path}: symbol section index {index} lies outside the section table")
             binding, visibility = info >> 4, other & 3
-            if index == 0 or binding not in (1, 2, 10) or visibility not in (0, 3):
+            if name == 0 or index == 0 or binding not in (1, 2, 10) or visibility not in (0, 3):
                 continue
             names.add(cstring(data, strings_offset + name, strings_offset + strings_size, path, "export name"))
     return names
@@ -93,12 +110,19 @@ def pe_exports(path, data):
     directory = PE_DIRECTORY_OFFSET[magic]
     if optional_size < directory + 8:
         raise AuditError(f"{path}: PE optional header of {optional_size} bytes has no export directory")
+    take(data, optional, optional_size, path, "PE optional header")
+    if unpack("<I", data, optional + directory - 4, path, "data directory count")[0] == 0:
+        raise AuditError(f"{path}: PE file declares no data directories")
+    headers_size = unpack("<I", data, optional + 60, path, "header size")[0]
     rva, size = unpack("<II", data, optional + directory, path, "export data directory")
     if not rva or size < 40:
         raise AuditError(f"{path}: PE file has no export table")
     sections = [unpack("<8sIIIIIIHHI", data, optional + optional_size + index * 40, path, f"PE section {index}") for index in range(section_count)]
 
     def to_offset(address, length):
+        if address < headers_size and length <= headers_size - address:
+            take(data, address, length, path, f"header data at RVA 0x{address:x}")
+            return address, min(headers_size, len(data))
         for section in sections:
             virtual, raw_size, raw_offset = section[2], section[3], section[4]
             if address < virtual:
@@ -107,19 +131,37 @@ def pe_exports(path, data):
             if relative >= raw_size or length > raw_size - relative:
                 continue
             take(data, raw_offset + relative, length, path, f"data at RVA 0x{address:x}")
-            return raw_offset + relative
+            return raw_offset + relative, min(raw_offset + raw_size, len(data))
         raise AuditError(f"{path}: RVA 0x{address:x} is not inside any section")
 
-    table = unpack("<IIHHIIIIIII", data, to_offset(rva, 40), path, "export directory")
-    name_count, names_rva = table[7], table[9]
+    table = unpack("<IIHHIIIIIII", data, to_offset(rva, 40)[0], path, "export directory")
+    function_count, name_count, functions_rva, names_rva, ordinals_rva = table[6:11]
     names = set()
     if not name_count:
         return names
-    names_offset = to_offset(names_rva, name_count * 4)
+    if not functions_rva or not names_rva or not ordinals_rva:
+        raise AuditError(f"{path}: named PE exports require address, name and ordinal tables")
+    functions_offset = to_offset(functions_rva, function_count * 4)[0]
+    names_offset = to_offset(names_rva, name_count * 4)[0]
+    ordinals_offset = to_offset(ordinals_rva, name_count * 2)[0]
+    previous_name = None
     for index in range(name_count):
         name_rva = unpack("<I", data, names_offset + index * 4, path, "export name RVA")[0]
-        offset = to_offset(name_rva, 1)
-        names.add(cstring(data, offset, len(data), path, "export name"))
+        offset, limit = to_offset(name_rva, 1)
+        name = cstring(data, offset, limit, path, "export name", "ASCII", "strict")
+        if previous_name is not None and name < previous_name:
+            raise AuditError(f"{path}: PE export name pointer table is not sorted")
+        previous_name = name
+        ordinal = unpack("<H", data, ordinals_offset + index * 2, path, "export ordinal")[0]
+        if ordinal >= function_count:
+            raise AuditError(f"{path}: export ordinal {ordinal} lies outside the address table ({function_count} entries)")
+        function_rva = unpack("<I", data, functions_offset + ordinal * 4, path, "export address")[0]
+        if not function_rva:
+            continue
+        if rva <= function_rva < rva + size:
+            offset, limit = to_offset(function_rva, 1)
+            cstring(data, offset, min(limit, offset + rva + size - function_rva), path, "export forwarder", "ASCII", "strict")
+        names.add(name)
     return names
 
 
@@ -146,7 +188,7 @@ def macho_exports(path, data):
     else:
         raise AuditError(f"{path}: Mach-O file has no export trie")
     trie = take(data, offset, size, path, "export trie")
-    names, seen, pending = set(), set(), [(0, "")] if size else []
+    names, seen, pending = set(), set(), [(0, b"")] if size else []
     while pending:
         node, prefix = pending.pop()
         if node in seen:
@@ -154,20 +196,21 @@ def macho_exports(path, data):
         seen.add(node)
         terminal, position = uleb128(trie, node, path, "terminal size", "export trie")
         if terminal:
-            names.add(prefix.removeprefix("_"))
+            names.add(prefix.decode("utf-8", "surrogateescape").removeprefix("_"))
             position += terminal
         children = take(trie, position, 1, path, "child count", "export trie")[0]
         position += 1
         for _ in range(children):
-            edge = cstring(trie, position, len(trie), path, "export trie edge")
-            position += len(edge.encode()) + 1
+            edge = cstring(trie, position, len(trie), path, "export trie edge").encode("utf-8", "surrogateescape")
+            position += len(edge) + 1
             child, position = uleb128(trie, position, path, "child offset", "export trie")
             pending.append((child, prefix + edge))
     return names
 
 
-def read_exports(path):
-    data = path.read_bytes()
+def read_exports(path, data=None):
+    if data is None:
+        data = path.read_bytes()
     if data[:4] == b"\x7fELF":
         return elf_exports(path, data)
     if data[:2] == b"MZ":
@@ -187,13 +230,22 @@ def directory_files(directory, pattern):
 def built_libraries(directories):
     exports = defaultdict(set)
     libraries = set()
+    images = {}
     for directory in directories:
         files = directory_files(directory, "*.prx")
         if not files:
             raise AuditError(f"{directory}: no .prx files; pass the directory the libs target builds (build/core/libs/libs)")
         for file in files:
+            data = file.read_bytes()
+            digest = hashlib.sha256(data).digest()
+            if file.name in images:
+                previous, fingerprint = images[file.name]
+                if digest != fingerprint:
+                    raise AuditError(f"ambiguous built library {file.name}: {previous} and {file} have different contents")
+                continue
+            images[file.name] = (file, digest)
             libraries.add(file.name)
-            for name in read_exports(file):
+            for name in read_exports(file, data):
                 exports[name].add(file.name)
     return {name: sorted(files) for name, files in exports.items()}, libraries
 
@@ -295,10 +347,10 @@ def attach_names(records, names):
             record["name_verified"] = nid_names.compute_nid(name) == record["nid"]
 
 
-def git_stamp():
+def git_stamp(source=ROOT):
     try:
-        commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-        dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip())
+        commit = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "-C", str(source), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip())
     except (OSError, subprocess.CalledProcessError):
         return None, None
     return commit, dirty
@@ -359,6 +411,14 @@ def main(argv=None):
     parser.add_argument("--json", type=Path, help="write the full result to this file")
     args = parser.parse_args(argv)
     try:
+        if args.json:
+            inputs = args.registries + ([Path(args.names)] if args.names else [])
+            inputs += [file for directory in args.libs for file in directory_files(directory, "*.prx")]
+            inputs += [file for directory in args.modules for file in directory_files(directory, "*")]
+            inputs += list(Path(args.source).rglob("*.cpp"))
+            output = args.json.resolve()
+            if any(output == path.resolve() or (args.json.exists() and args.json.samefile(path)) for path in inputs):
+                raise AuditError(f"{args.json}: JSON output would overwrite an input file")
         imports = [entry for registry in args.registries for entry in read_registry(registry)]
         exports, libraries = built_libraries(args.libs)
         modules = module_files(args.modules)
@@ -367,7 +427,7 @@ def main(argv=None):
             attach_names(records, load_names(args.names))
         summary = summarize(records, len(imports), missing)
         if args.json:
-            commit, dirty = git_stamp()
+            commit, dirty = git_stamp(Path(args.source))
             result = {"source_commit": commit, "source_dirty": dirty, "registries": [str(path) for path in args.registries], **summary, "imports": records}
             args.json.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except AuditError as error:

@@ -55,6 +55,7 @@ extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadsActive(CommandBuffer* b
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadComplete(CommandBuffer* buf, std::uint32_t streamId, std::uint32_t id);
 extern "C" std::uint32_t* APS5_VABI sceAgcAcbSetWorkloadStreamInactive(CommandBuffer* buf, std::uint32_t streamId);
 extern "C" int APS5_VABI sceAgcDebugRaiseException(std::uint32_t exceptionId);
+extern "C" std::uint32_t* APS5_VABI sceAgcAcbAtomicGds_0900(CommandBuffer* buf, std::uint32_t control, std::uint32_t mode, std::uint32_t gdsOp, std::uint32_t src, std::uint16_t offset, std::uint16_t index, std::uint32_t mask, std::uint32_t data, std::uint64_t compareData, std::uint64_t extraData);
 
 namespace {
 
@@ -527,6 +528,101 @@ void testWorkloads() {
     check(storage.buffer.cursor_up == storage.words.data() + 19, "invalid workload command advanced the cursor");
 }
 
+struct AtomicGdsAllocation {
+    Storage storage;
+    std::uint32_t capacity = 15;
+    std::uint32_t calls = 0;
+    bool accepted = true;
+};
+
+bool APS5_VABI growAtomicGds(CommandBuffer* buffer, std::uint32_t count, void* userData) {
+    auto& allocation = *static_cast<AtomicGdsAllocation*>(userData);
+    check(count == 15, "atomic GDS allocation omitted packet or reserved words");
+    ++allocation.calls;
+    if (!allocation.accepted) return false;
+    buffer->bottom = allocation.storage.words.data();
+    buffer->top = buffer->bottom + allocation.capacity;
+    buffer->cursor_up = buffer->bottom;
+    buffer->cursor_down = buffer->top;
+    return true;
+}
+
+void testAtomicGds() {
+    Storage storage;
+    storage.words.fill(0xdeadbeefu);
+    storage.buffer.cursor_up += 2;
+    auto* packet = sceAgcAcbAtomicGds_0900(&storage.buffer, 0xffffffffu, 1, 0xffffffffu, 0xffffffffu,
+        0xabcd, 0xfedc, 0x12345678u, 0x87654321u, 0xfedcba9876543210ull, 0x0123456789abcdefull);
+    const std::array<std::uint32_t, 11> expected{
+        0xc0091d00u, 0x001500ffu, 0x13fu, 0xabcdu, 0xfedcu, 0x00340078u,
+        0x87654321u, 0x76543210u, 0xfedcba98u, 0x89abcdefu, 0x01234567u};
+    check(packet == storage.words.data() + 2, "atomic GDS returned the wrong packet address");
+    check(std::equal(expected.begin(), expected.end(), packet), "atomic GDS packet or guest ABI mismatch");
+    check(storage.buffer.cursor_up == packet + expected.size(), "atomic GDS did not advance by eleven words");
+    check(storage.words[0] == 0xdeadbeefu && storage.words[1] == 0xdeadbeefu &&
+        std::all_of(storage.words.begin() + 13, storage.words.end(), [](auto word) { return word == 0xdeadbeefu; }),
+        "atomic GDS wrote outside its packet");
+
+    const std::array<std::array<std::uint32_t, 3>, 9> controls{{
+        {0, 0, 0}, {0, 1, 0x00020000u}, {0, 2, 0}, {0, 0xffffffffu, 0},
+        {0x20u, 1, 0x00040020u}, {0x40u, 1, 0x00120040u},
+        {0x200u, 1, 0x00030000u}, {0xfffffd00u, 0, 0}, {0xffu, 1, 0x001400ffu}}};
+    for (const auto& entry : controls) {
+        Storage controlStorage;
+        auto* controlPacket = sceAgcAcbAtomicGds_0900(&controlStorage.buffer, entry[0], entry[1],
+            0xfffffffeu, 0xffffffc0u, 0, 0, 0xff00ff00u, 0, 0, 0);
+        std::array<std::uint32_t, 11> controlExpected{};
+        controlExpected[0] = 0xc0091d00u;
+        controlExpected[1] = entry[2];
+        check(std::equal(controlExpected.begin(), controlExpected.end(), controlPacket), "atomic GDS control or field masking mismatch");
+    }
+
+    auto emit = [](CommandBuffer* buffer) {
+        return sceAgcAcbAtomicGds_0900(buffer, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    };
+    Storage exact;
+    exact.buffer.cursor_down = exact.words.data() + 15;
+    exact.buffer.reserved_dw = 4;
+    check(emit(&exact.buffer) == exact.words.data() && exact.buffer.cursor_up == exact.words.data() + 11,
+        "atomic GDS rejected an exact fit with reserved space");
+    const auto exactBefore = exact.words;
+    expectFailure([&] { emit(&exact.buffer); });
+    check(exact.words == exactBefore && exact.buffer.cursor_up == exact.words.data() + 11,
+        "atomic GDS overwrote reserved space");
+    Storage exhausted;
+    exhausted.buffer.cursor_down = exhausted.words.data() + 10;
+    const auto before = exhausted.words;
+    expectFailure([&] { emit(&exhausted.buffer); });
+    check(exhausted.words == before && exhausted.buffer.cursor_up == exhausted.words.data(),
+        "failed atomic GDS allocation modified the buffer");
+    expectFailure([&] { emit(nullptr); });
+
+    Storage noDown;
+    noDown.buffer.top = noDown.words.data() + 11;
+    noDown.buffer.cursor_down = nullptr;
+    check(emit(&noDown.buffer) == noDown.words.data() && noDown.buffer.cursor_up == noDown.buffer.top,
+        "atomic GDS did not honor a buffer with no down cursor");
+
+    AtomicGdsAllocation allocation;
+    CommandBuffer growing{nullptr, nullptr, nullptr, nullptr, growAtomicGds, &allocation, 4};
+    check(emit(&growing) == allocation.storage.words.data() && allocation.calls == 1 &&
+        growing.cursor_up == allocation.storage.words.data() + 11, "atomic GDS did not use the guest allocation callback");
+    const std::array<std::uint32_t, 11> zeroPacket{0xc0091d00u};
+    check(std::equal(zeroPacket.begin(), zeroPacket.end(), allocation.storage.words.begin()),
+        "atomic GDS callback allocation produced the wrong packet");
+    for (const bool accepted : {false, true}) {
+        AtomicGdsAllocation failure;
+        failure.accepted = accepted;
+        failure.capacity = 14;
+        const auto failureBefore = failure.storage.words;
+        CommandBuffer failed{nullptr, nullptr, nullptr, nullptr, growAtomicGds, &failure, 4};
+        expectFailure([&] { emit(&failed); });
+        check(failure.calls == 1 && failure.storage.words == failureBefore &&
+            failed.cursor_up == (accepted ? failure.storage.words.data() : nullptr),
+            "atomic GDS wrote a packet after failed or insufficient allocation");
+    }
+}
+
 void testDebugRaiseException() {
     int result = -1;
     try {
@@ -588,6 +684,7 @@ int main(int argc, char** argv) {
         testContextStateUnversioned();
         testAcquireMemEngine();
         testWorkloads();
+        testAtomicGds();
         testDebugRaiseException();
         testDefaults();
         LibcRunShutdown_nid_postfix();

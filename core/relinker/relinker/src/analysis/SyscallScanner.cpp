@@ -2,7 +2,10 @@
 #include <codegen/IInstructionScanner.hpp>
 #include <codegen/x86/DecodedInstruction.hpp>
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -18,6 +21,28 @@ static constexpr std::uint8_t SYSENTER_BYTE1 = 0x34;
 static constexpr std::uint8_t SYSRET_BYTE0 = 0x0F;
 static constexpr std::uint8_t SYSRET_BYTE1 = 0x07;
 static constexpr std::size_t SYSCALL_NUMBER_LOOKBACK = 8;
+
+static constexpr std::array<std::uint8_t, 23> SDK_GENERIC_SYSCALL_STUB{
+    0x48, 0x89, 0xF8, 0x48, 0x89, 0xF7, 0x48, 0x89, 0xD6, 0x48, 0x89, 0xCA,
+    0x4D, 0x89, 0xC2, 0x4D, 0x89, 0xC8, 0x4C, 0x8B, 0x4C, 0x24, 0x08,
+};
+
+static bool IsSdkSyscallStub(const std::vector<std::uint8_t>& code, const std::size_t syscallOffset) {
+    constexpr std::array<std::uint8_t, 3> numberLoad{0x48, 0xC7, 0xC0};
+    constexpr std::array<std::uint8_t, 3> argumentShuffle{0x49, 0x89, 0xCA};
+    if (syscallOffset <= code.size() && syscallOffset >= SDK_GENERIC_SYSCALL_STUB.size() && code.size() - syscallOffset >= 3u) {
+        const auto begin = code.begin() + static_cast<std::ptrdiff_t>(syscallOffset - SDK_GENERIC_SYSCALL_STUB.size());
+        if (std::equal(SDK_GENERIC_SYSCALL_STUB.begin(), SDK_GENERIC_SYSCALL_STUB.end(), begin)
+            && code[syscallOffset] == 0x0F && code[syscallOffset + 1] == 0x05 && code[syscallOffset + 2] == 0xC3)
+            return true;
+    }
+    if (syscallOffset > code.size() || syscallOffset < 10u || code.size() - syscallOffset < 3u)
+        return false;
+    const auto begin = code.begin() + static_cast<std::ptrdiff_t>(syscallOffset - 10u);
+    return std::equal(numberLoad.begin(), numberLoad.end(), begin)
+        && std::equal(argumentShuffle.begin(), argumentShuffle.end(), begin + 7)
+        && code[syscallOffset] == 0x0F && code[syscallOffset + 1] == 0x05 && code[syscallOffset + 2] == 0xC3;
+}
 
 enum class ForbiddenInstruction {
     None,
@@ -100,13 +125,18 @@ static std::optional<std::uint32_t> ConstantSyscallNumber(
 
 class SyscallScanner : public ISyscallScanner {
 public:
-    void ScanCodeSectionForSyscalls(
+    explicit SyscallScanner(const bool trapSdkStubs) : _trapSdkStubs(trapSdkStubs) {}
+
+    std::vector<std::size_t> ScanCodeSectionForSyscalls(
         const std::vector<std::uint8_t>& codeSection,
         FileByteOffset codeSectionOffset,
         FileByteOffset codeSectionSize) override;
+
+private:
+    bool _trapSdkStubs;
 };
 
-void SyscallScanner::ScanCodeSectionForSyscalls(
+std::vector<std::size_t> SyscallScanner::ScanCodeSectionForSyscalls(
     const std::vector<std::uint8_t>& codeSection,
     const FileByteOffset codeSectionOffset,
     const FileByteOffset codeSectionSize) {
@@ -115,6 +145,7 @@ void SyscallScanner::ScanCodeSectionForSyscalls(
     const auto scanner = Codegen::MakeInstructionScanner();
     const auto matches = scanner->ScanCodeSection(codeSection, codeSectionOffset, codeSectionSize);
 
+    std::vector<std::size_t> trapped;
     for (std::size_t index = 0; index < matches.size(); ++index) {
         const auto& match = matches[index];
         const std::size_t start = static_cast<std::size_t>(match.Offset - codeSectionOffset);
@@ -127,6 +158,12 @@ void SyscallScanner::ScanCodeSectionForSyscalls(
         if (kind == ForbiddenInstruction::None)
             continue;
 
+        if (_trapSdkStubs && kind == ForbiddenInstruction::Invocation && IsSdkSyscallStub(codeSection, opcode)) {
+            trapped.push_back(opcode);
+            std::cout << "Trapping SDK syscall instruction at code offset 0x" << std::hex << match.Offset << std::dec << '\n';
+            continue;
+        }
+
         std::ostringstream msg;
         msg << "Forbidden syscall instruction at code offset 0x" << std::hex << match.Offset;
 
@@ -136,19 +173,20 @@ void SyscallScanner::ScanCodeSectionForSyscalls(
 
         throw RelinkerException(msg.str(), match.Offset);
     }
+    return trapped;
 }
 
-std::unique_ptr<ISyscallScanner> MakeSyscallScanner() {
-    return std::make_unique<SyscallScanner>();
+std::unique_ptr<ISyscallScanner> MakeSyscallScanner(const bool trapSdkStubs) {
+    return std::make_unique<SyscallScanner>(trapSdkStubs);
 }
 
 class NullSyscallScanner : public ISyscallScanner {
 public:
-    void ScanCodeSectionForSyscalls(
+    std::vector<std::size_t> ScanCodeSectionForSyscalls(
         const std::vector<std::uint8_t>&,
         FileByteOffset,
         FileByteOffset
-    ) override {}
+    ) override { return {}; }
 };
 
 std::unique_ptr<ISyscallScanner> MakeNullSyscallScanner() {

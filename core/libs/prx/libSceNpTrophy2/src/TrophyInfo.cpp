@@ -10,7 +10,7 @@
 extern "C" {
 
 int APS5_VABI sceNpTrophy2GetTrophyInfo(int context, int handle, int trophy_id, NpTrophy2Details* details, NpTrophy2Data* data) {
-    if (details == nullptr || data == nullptr) {
+    if (details == nullptr && data == nullptr) {
         APS5_INVALID_ARG_EX;
     }
     (void)context;

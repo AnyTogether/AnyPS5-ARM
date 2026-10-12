@@ -22,6 +22,11 @@ std::int32_t APS5_VABI sceHmd2Close() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
 
+std::int32_t APS5_VABI sceHmd2GazeGetResult() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 std::int32_t APS5_VABI sceHmd2GazeGetResultForFoveatedRendering() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
@@ -42,12 +47,32 @@ std::int32_t APS5_VABI sceHmd2ReprojectionBeginFrame() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
 
+std::int32_t APS5_VABI sceHmd2ReprojectionDisableMirroring() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 std::int32_t APS5_VABI sceHmd2ReprojectionDisableVrMode() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
 
+std::int32_t APS5_VABI sceHmd2ReprojectionEnableMirroring() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 std::int32_t APS5_VABI sceHmd2ReprojectionEnableVrMode() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
+}
+
+std::int32_t APS5_VABI sceHmd2ReprojectionGetMirroringDisplayBufferSizeAlign() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+std::int32_t APS5_VABI sceHmd2ReprojectionGetMirroringWorkMemorySizeAlign() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 std::int32_t APS5_VABI sceHmd2ReprojectionGetPredictedDisplayTime() {
@@ -70,12 +95,32 @@ std::int32_t APS5_VABI sceHmd2ReprojectionSetAllowPositionalReprojection() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
 
+std::int32_t APS5_VABI sceHmd2ReprojectionSetMirroringOption() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+std::int32_t APS5_VABI sceHmd2ReprojectionSetParam() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 std::int32_t APS5_VABI sceHmd2ReprojectionSetParamWithBuffer() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
 }
 
 std::int32_t APS5_VABI sceHmd2ReprojectionSetRenderConfig() {
     return SCE_HMD2_ERROR_UNSUPPORTED_FEATURE;
+}
+
+std::int32_t APS5_VABI sceHmd2ReprojectionSetTiming() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+std::int32_t APS5_VABI sceHmd2ReprojectionTerminate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 std::int32_t APS5_VABI sceHmd2SetVibration() {

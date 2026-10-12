@@ -9,7 +9,6 @@
 
 extern "C" int APS5_VABI sceSaveDataTransferringMountPs4(const SaveDataTransferringMount*, SaveDataMountResult*);
 extern "C" int APS5_VABI sceSaveDataDirNameSearchPs4(const SaveDataDirNameSearchCond*, SaveDataDirNameSearchResult*);
-extern "C" int APS5_VABI sceSaveDataConvert(const void*);
 extern "C" int APS5_VABI sceSaveDataDirNameSearch(const SaveDataDirNameSearchCond*, SaveDataDirNameSearchResult*);
 
 namespace {
@@ -49,13 +48,6 @@ void TestTransferringMountPs4() {
     Check(result.mount_point.data[0] == '\0', "TransferringMountPs4 reports no mount point");
 }
 
-void TestConvert() {
-    constexpr int SaveDataErrorParameter = -2137063424;
-    unsigned char param[64]{};
-    Check(sceSaveDataConvert(param) == SaveDataErrorNotFound, "Convert finds no PS4 save data");
-    Check(sceSaveDataConvert(nullptr) == SaveDataErrorParameter, "Convert rejects a null parameter");
-}
-
 void TestDirNameSearchPs4() {
     SceSaveDataDirName names[4]{};
     std::memset(names, 0x5A, sizeof(names));
@@ -91,7 +83,6 @@ int main() {
 
     TestTransferringMountPs4();
     TestDirNameSearchPs4();
-    TestConvert();
 
     std::filesystem::current_path(previous);
     std::error_code error;

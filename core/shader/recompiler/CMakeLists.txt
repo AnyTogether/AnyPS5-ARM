@@ -246,6 +246,7 @@ function(add_shader_recompiler target runtimeTarget)
             SrgbUnormFormat
             ThreadOwned
             UnresolvableSwappcTarget
+            ValidateAndOptimizeSpirv
             FindUserDataCalls
             UserDataCalleeLength
             LinkUserDataCalls

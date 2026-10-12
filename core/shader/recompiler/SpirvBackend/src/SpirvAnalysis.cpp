@@ -48,6 +48,7 @@ bool LaneSource(const IrProgram& program, const IrValue& value) {
     case IrOpcode::WriteLane:
     case IrOpcode::DataAppend:
     case IrOpcode::DataConsume:
+    case IrOpcode::LoadVectorWindow:
         return true;
     case IrOpcode::GetBuiltin: {
         const auto* kind = value.Argument(0)->Resolve();

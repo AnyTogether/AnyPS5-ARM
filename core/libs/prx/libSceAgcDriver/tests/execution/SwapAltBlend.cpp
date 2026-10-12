@@ -31,6 +31,7 @@
 #include <iostream>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -52,6 +53,12 @@ constexpr std::uint32_t Float32Export = 9;
 alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
     0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
 };
+
+alignas(256) constexpr std::array<std::uint32_t, 9> StoringVertexCode{
+    0xe0382000, 0x80000005, 0xbf8c3f70, 0xe0700000, 0x80010000, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
+};
+
+alignas(256) std::array<std::uint32_t, 64> Stored{};
 
 constexpr std::array<std::array<float, 4>, 3> Triangle{{
     {-1.0f, -1.0f, 0.5f, 1.0f}, {3.0f, -1.0f, 0.5f, 1.0f}, {-1.0f, 3.0f, 0.5f, 1.0f}
@@ -163,16 +170,19 @@ VkPipelineColorBlendAttachmentState Blend(VkBlendFactor source, VkBlendFactor de
     return blend;
 }
 
-void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, const VkPipelineColorBlendAttachmentState& blend, std::span<const std::uint32_t> pixelCode) {
+void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, const VkPipelineColorBlendAttachmentState& blend, std::span<const std::uint32_t> pixelCode, std::span<const std::uint32_t> vertexCode = VertexCode) {
     const auto target = device.Target();
     constexpr std::uint32_t waveSize = 64;
-    std::vector<std::uint32_t> vertexUserData(4, 0u);
+    std::vector<std::uint32_t> vertexUserData(8, 0u);
     const auto address = reinterpret_cast<std::uintptr_t>(Triangle.data());
     const std::array<std::uint32_t, 4> vertexBuffer{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (16u << 16u), static_cast<std::uint32_t>(Triangle.size()), 0x01016facu};
     std::copy(vertexBuffer.begin(), vertexBuffer.end(), vertexUserData.begin());
-    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(VertexCode.data()), std::as_bytes(std::span(VertexCode))}}};
+    const auto stored = reinterpret_cast<std::uintptr_t>(Stored.data());
+    const std::array<std::uint32_t, 4> storeBuffer{static_cast<std::uint32_t>(stored), static_cast<std::uint32_t>((stored >> 32u) & 0xffffu), static_cast<std::uint32_t>(sizeof(Stored)), 0x01016facu};
+    std::copy(storeBuffer.begin(), storeBuffer.end(), vertexUserData.begin() + 4);
+    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(vertexCode.data()), std::as_bytes(vertexCode)}}};
     ShaderRecompiler::RecompileRequest vertex{
-        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(VertexCode.data()), VertexCode, 0, {}},
+        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(vertexCode.data()), vertexCode, 0, {}},
         {waveSize, 0, vertexUserData, std::nullopt, std::nullopt, ShaderRecompiler::ShaderVertexStageInfo{}, vertexMemory},
         target,
         {0, 0, 0, 64}
@@ -281,6 +291,18 @@ int main() {
             {"ONE + ONE_MINUS_SRC_ALPHA for color and alpha", Blend(VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD), false,
                 [&](float r, float g) { return std::array<float, 2>{x + r * (1.0f - w), w + g * (1.0f - w)}; }},
         }};
+        {
+            Fill(block, layout);
+            const auto color = DecodeTarget(block);
+            bool rejected = false;
+            try {
+                Draw(*device, color, cases[0].blend, Program(exported), StoringVertexCode);
+            } catch (const std::exception& error) {
+                rejected = std::string_view(error.what()).find("a draw whose shaders write memory") != std::string_view::npos;
+                if (!rejected) throw;
+            }
+            Require(rejected, "a split 8_8 SWAP_ALT draw whose vertex shader stores to memory was not rejected");
+        }
         for (const auto& test : cases) {
             const auto before = Fill(block, layout);
             const auto color = DecodeTarget(block);

@@ -16,6 +16,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
+#include "prx/libc/include/HostEntropy.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
@@ -32,7 +33,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -212,6 +212,12 @@ int APS5_VABI getpid_nid_postfix(void) {
     return static_cast<int>(pid);
 }
 
+int APS5_VABI getsid_nid_postfix(int pid) {
+    (void)pid;
+    NotImplemented_nid_no_patch("getsid: process sessions");
+    return -1;
+}
+
 int APS5_VABI getppid_nid_postfix(void) {
 #ifdef _WIN32
     const DWORD self = GetCurrentProcessId();
@@ -304,6 +310,13 @@ int APS5_VABI execvp_nid_postfix(const char* file, char* const* arguments) {
     return -1;
 }
 
+int APS5_VABI execv_nid_postfix(const char* path, char* const* arguments) {
+    (void)path;
+    (void)arguments;
+    NotImplemented_nid_no_patch("execv: executable replacement");
+    return -1;
+}
+
 int APS5_VABI sceKernelGetCurrentCpu(void) {
 #ifdef _WIN32
     PROCESSOR_NUMBER processor{};
@@ -350,11 +363,8 @@ void* APS5_VABI sceKernelGetProcParam(void) {
 
 int APS5_VABI sceKernelUuidCreate(std::uint32_t* uuid) {
     if (!uuid) return sceInvalidArgument;
-    static thread_local std::random_device device;
-    std::uniform_int_distribution<std::uint32_t> distribution;
     std::array<std::uint32_t, 4> value;
-    for (auto& word : value)
-        word = distribution(device);
+    HostEntropy_nid_no_patch(value.data(), sizeof(value));
     value[1] = (value[1] & 0x0fffffffu) | 0x40000000u;
     value[2] = (value[2] & 0xffffff3fu) | 0x80u;
     std::memcpy(uuid, value.data(), sizeof(value));

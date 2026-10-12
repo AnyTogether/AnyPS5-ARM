@@ -14,6 +14,18 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAmpr>")
     endif()
 
+    if(NOT APPLE)
+        add_test_executable(guest_amm_placement_tests ${LIBS_INCLUDE_DIR}/tests/GuestAmmPlacement.cpp)
+        target_include_directories(guest_amm_placement_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_amm_placement_tests PRIVATE libSceAmpr libkernel libc)
+        configure_windows_unwind(guest_amm_placement_tests)
+        add_test(NAME guest_amm_placement COMMAND guest_amm_placement_tests)
+        if(WIN32)
+            set_tests_properties(guest_amm_placement PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAmpr>")
+        endif()
+    endif()
+
     add_test_executable(guest_ampr_threads_tests ${LIBS_INCLUDE_DIR}/tests/GuestAmprThreads.cpp)
     target_include_directories(guest_ampr_threads_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_ampr_threads_tests PRIVATE libSceAmpr libkernel libc)

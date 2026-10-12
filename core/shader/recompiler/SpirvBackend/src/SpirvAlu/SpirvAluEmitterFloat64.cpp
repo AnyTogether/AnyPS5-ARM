@@ -223,6 +223,23 @@ std::uint32_t RoundToPrecision(SpirvEmitterState& state, std::uint32_t value, st
     return ToF64(state, Join(state, {rounded.low, Binary(state, spv::OpBitwiseOr, u32, Binary(state, spv::OpBitwiseAnd, u32, rounded.high, ConstantU32(state, 0x7fffffffu)), sign)}));
 }
 
+std::uint32_t RoundToPrecisionDirected(SpirvEmitterState& state, std::uint32_t value, std::uint32_t fractionBits, std::uint32_t smallestStep, std::uint32_t rounding) {
+    const auto bits = Split(state, FromF64(state, value));
+    const auto exponent = Unary(state, spv::OpBitcast, TypeI32(state), ExponentField(state, bits.high));
+    const auto step = Glsl(state, TypeI32(state), GLSLstd450SMax, Binary(state, spv::OpISub, TypeI32(state), exponent, ConstantI32(state, static_cast<std::int32_t>(fractionBits))), ConstantI32(state, static_cast<std::int32_t>(smallestStep)));
+    const auto unbiased = Binary(state, spv::OpISub, TypeI32(state), step, ConstantI32(state, 1023));
+    const auto scaled = Exact(state, spv::OpFMul, value, PowerOfTwo(state, Unary(state, spv::OpSNegate, TypeI32(state), unbiased)));
+    std::uint32_t integral = 0;
+    if (rounding == 3u) {
+        integral = Trunc(state, FromF64(state, scaled));
+    } else if (rounding == 2u) {
+        integral = Floor(state, FromF64(state, scaled));
+    } else {
+        integral = Unary(state, spv::OpFNegate, TypeF64(state), Floor(state, FromF64(state, Unary(state, spv::OpFNegate, TypeF64(state), scaled))));
+    }
+    return Exact(state, spv::OpFMul, integral, PowerOfTwo(state, unbiased));
+}
+
 std::uint32_t F32BitsOfRounded(SpirvEmitterState& state, std::uint32_t value) {
     const auto u32 = TypeU32(state);
     const auto bits = Split(state, FromF64(state, value));
@@ -265,12 +282,32 @@ std::uint32_t Interpolate(SpirvEmitterState& state, std::uint32_t delta, std::ui
     base = halfResult ? FlushDenormal32(state, base, flush32, 0x00800000u) : FlushDenormal32(state, base, flush16, 0x38800000u);
     const auto product = Exact(state, spv::OpFMul, FromF32Exact(state, delta), FromF32Exact(state, coordinate));
     const auto sum = AddRoundToOdd(state, product, FromF32Exact(state, base));
-    auto rounded = halfResult ? RoundToPrecision(state, sum, 10u, 999u) : RoundToPrecision(state, sum, 23u, 874u);
+    const std::uint32_t rounding16 = halfResult ? (mode >> InterpolationRound16Shift) & 3u : 0u;
+    auto rounded = halfResult ? (rounding16 == 0u ? RoundToPrecision(state, sum, 10u, 999u) : RoundToPrecisionDirected(state, sum, 10u, 999u, rounding16)) : RoundToPrecision(state, sum, 23u, 874u);
     if (halfResult) {
         const auto bits = Split(state, FromF64(state, rounded));
         const auto sign = Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x80000000u));
-        const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x7fffffffu)), ConstantU32(state, 0x40f00000u));
-        rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, ConstantU32(state, 0x40f00000u))}, bits)));
+        const auto magnitude = Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x7fffffffu));
+        if (rounding16 == 0u) {
+            const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), magnitude, ConstantU32(state, 0x40f00000u));
+            rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, ConstantU32(state, 0x40f00000u))}, bits)));
+        } else {
+            const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), magnitude, ConstantU32(state, 0x40effc00u));
+            const auto negative = Binary(state, spv::OpINotEqual, TypeBool(state), sign, ConstantU32(state, 0u));
+            auto limit = ConstantU32(state, 0x40effc00u);
+            if (rounding16 == 1u) limit = Select(state, u32, negative, ConstantU32(state, 0x40effc00u), ConstantU32(state, 0x40f00000u));
+            if (rounding16 == 2u) limit = Select(state, u32, negative, ConstantU32(state, 0x40f00000u), ConstantU32(state, 0x40effc00u));
+            rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, limit)}, bits)));
+            if (rounding16 == 2u) {
+                const auto boolean = TypeBool(state);
+                const auto zeroBits = [&](F64Bits value, std::uint32_t highMask) {
+                    return Binary(state, spv::OpLogicalAnd, boolean, Binary(state, spv::OpIEqual, boolean, Binary(state, spv::OpBitwiseAnd, u32, value.high, ConstantU32(state, highMask)), ConstantU32(state, 0u)), Binary(state, spv::OpIEqual, boolean, value.low, ConstantU32(state, 0u)));
+                };
+                const auto positiveZeros = Binary(state, spv::OpLogicalAnd, boolean, zeroBits(Split(state, FromF64(state, product)), 0xffffffffu), zeroBits(Split(state, FromF64(state, FromF32Exact(state, base))), 0xffffffffu));
+                const auto negativeZero = Binary(state, spv::OpLogicalAnd, boolean, zeroBits(Split(state, FromF64(state, sum)), 0x7fffffffu), Unary(state, spv::OpLogicalNot, boolean, positiveZeros));
+                rounded = ToF64(state, Join(state, SelectBits(state, negativeZero, {ConstantU32(state, 0u), ConstantU32(state, 0x80000000u)}, Split(state, FromF64(state, rounded)))));
+            }
+        }
     }
     const auto finite = F32BitsOfRounded(state, rounded);
     const auto inputs = std::array{Unary(state, spv::OpBitcast, u32, delta), Unary(state, spv::OpBitcast, u32, coordinate), Unary(state, spv::OpBitcast, u32, base)};

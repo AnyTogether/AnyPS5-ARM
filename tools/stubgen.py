@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -27,10 +29,12 @@ def parse_nids(path):
     nids = []
     seen = set()
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-        for line in f:
+        for number, line in enumerate(f, 1):
             nid = strip_nid_token(line)
             if not nid:
                 continue
+            if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:
+                raise ValueError(f"{path}:{number}: invalid NID {nid!r}")
             if nid in seen:
                 continue
             seen.add(nid)
@@ -167,6 +171,35 @@ def generate(module, nids, db, td_path=None, td_lib=None):
     return (code, td_text)
 
 
+def same_file(left, right):
+    left, right = Path(left), Path(right)
+    return left.resolve() == right.resolve() or (left.exists() and right.exists() and left.samefile(right))
+
+
+def write_outputs(outputs):
+    staged = []
+    umask = os.umask(0)
+    os.umask(umask)
+    try:
+        for filename, content in outputs:
+            path = Path(filename).resolve()
+            if path.is_dir():
+                raise IsADirectoryError(str(path))
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=path.parent, prefix=path.name + ".", suffix=".tmp", delete=False) as handle:
+                temporary = Path(handle.name)
+                staged.append((temporary, path))
+                handle.write(content)
+            if path.exists():
+                temporary.chmod(path.stat().st_mode & 0o7777)
+            else:
+                temporary.chmod(0o666 & ~umask)
+        for temporary, path in staged:
+            temporary.replace(path)
+    finally:
+        for temporary, path in staged:
+            temporary.unlink(missing_ok=True)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Generate AnyPS5 Export.cpp skeletons and TechnicalDebt lines")
     ap.add_argument("--module", required=True, help="target module name, e.g. libSceAmpr, used for UnknownNN prefix and default TechnicalDebt path core/libs/prx/MODULE/Export.cpp")
@@ -175,36 +208,36 @@ def main(argv=None):
     ap.add_argument("--out", required=False, default=None, help="output file for code, default stdout")
     ap.add_argument("--td-path", required=False, default=None, help="override file path used inside TechnicalDebt lines, default derived from module, relative to docs/dev")
     ap.add_argument("--td-lib", required=False, default=None, help="override lib label used inside TechnicalDebt lines, default derived from module")
-    ap.add_argument("--td-out", required=False, default=None, help="output file for TechnicalDebt lines, default stdout")
+    ap.add_argument("--td-out", required=False, default=None, help="output file for TechnicalDebt lines, default stderr when code uses stdout, otherwise stdout")
     ap.add_argument("--td-only", action="store_true", help="print only TechnicalDebt lines, no code")
     args = ap.parse_args(argv)
-    nids = parse_nids(args.nids)
-    db = {}
-    if args.db:
-        db = parse_db(args.db)
-    code, td = generate(args.module, nids, db, args.td_path, args.td_lib)
-    if args.td_only:
+    try:
+        if not args.td_only and args.out and args.td_out and same_file(args.out, args.td_out):
+            ap.error("--out and --td-out must name different files")
+        destinations = [args.td_out] if args.td_only else [args.out, args.td_out]
+        for destination in filter(None, destinations):
+            for source in filter(None, [args.nids, args.db]):
+                if same_file(destination, source):
+                    ap.error(f"output {destination!r} would overwrite input {source!r}")
+        nids = parse_nids(args.nids)
+        db = parse_db(args.db) if args.db else {}
+        code, td = generate(args.module, nids, db, args.td_path, args.td_lib)
+        outputs = []
+        if not args.td_only and args.out:
+            outputs.append((args.out, code))
         if args.td_out:
-            with open(args.td_out, "w", encoding="utf-8", newline="\n") as f:
-                f.write(td)
-        else:
+            outputs.append((args.td_out, td))
+        write_outputs(outputs)
+    except (OSError, ValueError) as error:
+        ap.error(str(error))
+    if args.td_only:
+        if not args.td_out:
             sys.stdout.write(td)
         return 0
-    if args.out:
-        with open(args.out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(code)
-    else:
+    if not args.out:
         sys.stdout.write(code)
-    if args.td_out:
-        with open(args.td_out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(td)
-    else:
-        if args.out:
-            sys.stdout.write(td)
-        else:
-            if td:
-                sys.stdout.write("\n")
-                sys.stdout.write(td)
+    if not args.td_out:
+        (sys.stdout if args.out else sys.stderr).write(td)
     return 0
 
 

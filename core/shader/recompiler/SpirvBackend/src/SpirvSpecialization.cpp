@@ -419,6 +419,12 @@ private:
             }
             return true;
         };
+        std::set<std::uint32_t> loopHeaders;
+        for (const auto& [label, indices] : blocks) {
+            for (const auto index : indices) {
+                if (Opcode(instructions[index]) == spv::OpLoopMerge) loopHeaders.insert(label);
+            }
+        }
         std::map<std::uint32_t, std::vector<std::uint32_t>> edges;
         for (const auto& [label, indices] : blocks) {
             auto& terminal = instructions[indices.back()];
@@ -427,7 +433,7 @@ private:
             bool loop = false;
             for (const auto index : indices) loop |= Opcode(instructions[index]) == spv::OpLoopMerge;
             if (!loop && op == spv::OpBranchConditional) {
-                if (const auto condition = value(terminal.at(1))) target = terminal.at(*condition != 0u ? 2u : 3u);
+                if (const auto condition = value(terminal.at(1)); condition.has_value() && !loopHeaders.contains(terminal.at(*condition != 0u ? 3u : 2u))) target = terminal.at(*condition != 0u ? 2u : 3u);
             } else if (!loop && op == spv::OpSwitch) {
                 if (const auto selector = value(terminal.at(1))) {
                     target = terminal.at(2);
