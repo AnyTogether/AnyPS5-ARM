@@ -4,7 +4,7 @@
 
 `PPSA99007 · PPSA99303` · PS5_Mesa (OpenGL / RADV) · `sceAgcDriverSubmitDcb`
 
-**Status:** 🟡 Quake II in game · Quake III needs data files · **FPS:** Quake II menu ~48, in game ~13
+**Status:** 🟡 Quake II in game · Quake III needs data files · **FPS:** Quake II menu ~48, in game ~40
 
 | Menu | In game (base1) |
 |---|---|
@@ -20,7 +20,7 @@ Both homebrew ports drive the GPU through Mesa, but they submit their command bu
 | ✅ | **Last provoking vertex** | MoltenVK has no `provokingVertexLast`. Draws that read flat inputs use a private index copy in which every triangle starts with its last vertex; the winding is kept. |
 | ✅ | **GL depth range** | Mesa's blitter uses a `[-1, 1]` depth range, and MoltenVK has no `depth_range_unrestricted`. The range is turned into equivalent zero-to-one clipping. |
 | ✅ | **Menu and in game** | Menu at ~48 FPS; base1 loads. |
-| 🔧 | **In-game speed** | ~13 FPS. Mesa rewrites the same streaming memory every frame, and every such store is a ~20 µs page fault under Rosetta. A change that removes those faults reaches ~40 FPS, but it breaks a test, so it is not on main yet. |
+| ✅ | **In-game speed** | 13 → ~40 FPS. Mesa rewrote the same streaming pages every frame, and each store was a ~20 µs Rosetta page fault (about 2000 per frame). Those pages now stay open and are compared instead (1e3aa1dc0); draw time fell from 51 to 4.4 ms per frame. The game asks for 120 Hz, so frames take three vblanks. |
 | ⏭️ | **Quake III** | Runs but opens no window: `baseq3/` holds only `zz-ps5-ui.pk3`. It needs `pak0.pk3` from your own copy plus `pak1–8.pk3` from the 1.32 point release. |
 
 ✅ done · 🔧 in progress · ⏭️ next

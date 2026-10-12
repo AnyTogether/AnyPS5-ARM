@@ -4,7 +4,7 @@
 
 `PPSA99007 · PPSA99303` · PS5_Mesa (OpenGL / RADV) · `sceAgcDriverSubmitDcb`
 
-**Durum:** 🟡 Quake II oyun içi · Quake III veri dosyası bekliyor · **FPS:** Quake II menü ~48, oyun içi ~13
+**Durum:** 🟡 Quake II oyun içi · Quake III veri dosyası bekliyor · **FPS:** Quake II menü ~48, oyun içi ~40
 
 | Menü | Oyun içi (base1) |
 |---|---|
@@ -20,7 +20,7 @@
 | ✅ | **Son köşe (provoking vertex)** | MoltenVK'da `provokingVertexLast` yok. Düz (flat) girdi okuyan çizimler, her üçgen son köşesiyle başlayacak şekilde ayrı bir index kopyasıyla çiziliyor; sarım yönü korunuyor. |
 | ✅ | **GL derinlik aralığı** | Mesa'nın blitter'ı `[-1, 1]` derinlik aralığı kullanıyor; MoltenVK `depth_range_unrestricted` desteklemiyor. Bu aralık eşdeğer sıfır-bir kırpmaya çevriliyor. |
 | ✅ | **Menü ve oyun içi** | Menü ~48 FPS, base1 açılıyor. |
-| 🔧 | **Oyun içi hız** | ~13 FPS. Mesa her karede aynı akış belleğini yeniden yazıyor ve her yazma Rosetta altında ~20 µs'lik bir sayfa hatası. Bu hataları kaldıran deneme ~40 FPS veriyor ama bir testi bozduğu için henüz ana dalda değil. |
+| ✅ | **Oyun içi hız** | 13 → ~40 FPS. Mesa her karede aynı akış sayfalarını yeniden yazıyordu ve her yazma ~20 µs'lik bir Rosetta sayfa hatasıydı (kare başına ~2000). Bu sayfalar artık açık bırakılıp karşılaştırılıyor (1e3aa1dc0); kare başına çizim süresi 51 ms'den 4,4 ms'ye indi. Oyun 120 Hz istediği için bir kare üç ekran yenilemesi sürüyor. |
 | ⏭️ | **Quake III** | Çalışıyor ama pencere açmıyor: `baseq3/` içinde yalnızca `zz-ps5-ui.pk3` var. Kendi kopyandan `pak0.pk3` ve 1.32 yamasındaki `pak1–8.pk3` gerekiyor. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
