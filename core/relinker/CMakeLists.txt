@@ -426,6 +426,8 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME guest_host_libc COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_host_libc.py $<TARGET_FILE:relinker>)
+        add_test(NAME macos_placeholder_exports COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_placeholder_exports.py $<TARGET_FILE:relinker>)
         add_library(guest_module_args_host SHARED elfpatcher/tests/GuestModuleArgsHost.cpp)
         target_include_directories(guest_module_args_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../libs)
         set_target_properties(guest_module_args_host PROPERTIES

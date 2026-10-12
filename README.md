@@ -11,7 +11,7 @@
 | ![Silksong](docs/games/img/silksong-ingame.jpg) | ![PvZ Replanted](docs/games/img/pvz-agreement.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
 | in game (first area), work in progress | opening screens at 60 fps, work in progress | 60 fps, playable | 60 fps, test title |
 
-**[Game status notebook / Oyun durum defteri →](docs/games/README.md)** one page per game with screenshots, the steps behind it and technical details, Stray and DOOM included.
+**[Game status notebook / Oyun durum defteri →](docs/games/README.md)** one page per game with screenshots, the steps behind it and technical details: DOOM (homebrew) plays too, Stray is in progress.
 
 <sub>MacBook Pro M3 Pro, macOS 26.6.2. The Unity titles still need the manual module steps described on their pages; AnyPS5.app does not do them yet.</sub>
 

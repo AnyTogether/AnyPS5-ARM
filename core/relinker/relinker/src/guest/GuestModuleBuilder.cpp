@@ -210,8 +210,37 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         Io::AppendString(strings, name + GuestSymbolSuffix);
     };
     // On macOS a guest export still wins over the host library an import declares: titles such as Stray bundle a
-    // libc.prx whose exports their other modules import from libSceLibcInternal.
-    const auto declaresHost = [&](const std::string& library) { return !windows && !macos && !library.empty() && findGuest(library) == guestNames.end(); };
+    // libc.prx whose exports their other modules import from libSceLibcInternal. A function export that only
+    // returns zero is a placeholder for that host library (homebrew libc.prx files export memset and snprintf
+    // so), and the host wins it, as the Windows loader's ZeroReturnExports do.
+    const auto returnsZero = [&](const GuestImage& image, const std::uint64_t address) {
+        for (const auto& header : image.Headers) {
+            if (header.Type != 1 || (header.Flags & 1) == 0 || address < header.MappedAddress || address - header.MappedAddress >= header.FileSize) continue;
+            const auto offset = header.Offset + (address - header.MappedAddress);
+            const auto available = std::min<std::uint64_t>(header.FileSize - (address - header.MappedAddress), image.Bytes.size() - std::min<std::uint64_t>(offset, image.Bytes.size()));
+            const auto matches = [&](const std::vector<std::uint8_t>& code) {
+                return code.size() <= available && std::equal(code.begin(), code.end(), image.Bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+            };
+            return matches({0x31, 0xc0, 0xc3}) || matches({0x66, 0x0f, 0xef, 0xc0, 0x31, 0xc0, 0xc3});
+        }
+        return false;
+    };
+    std::set<std::string> placeholderExports;
+    if (macos) {
+        for (const auto& [name, providers] : exports) {
+            const bool placeholder = !providers.empty() && std::all_of(providers.begin(), providers.end(), [&](const std::size_t provider) {
+                const auto& symbols = images[provider].Symbols;
+                const auto symbol = std::find_if(symbols.begin(), symbols.end(), [&](const auto& candidate) {
+                    return candidate.Name == name && candidate.Section != 0 && candidate.Section != AbsoluteSection && (candidate.Info >> 4) != 0 && candidate.Visibility != 1 && candidate.Visibility != 2;
+                });
+                return symbol != symbols.end() && (symbol->Info & 15) == 2 && returnsZero(images[provider], symbol->Value);
+            });
+            if (placeholder) placeholderExports.insert(name);
+        }
+    }
+    const auto declaresHost = [&](const std::string& library, const std::string& name) {
+        return !windows && (!macos || placeholderExports.contains(name)) && !library.empty() && findGuest(library) == guestNames.end();
+    };
     if (dynamic.DynSymData.size() % 24 != 0) throw Domain::RelinkerException("Invalid executable symbol table");
     std::vector<std::string> executableModules(dynamic.DynSymData.size() / 24);
     for (const auto* table : {&dynamic.RelaData, &dynamic.RelaPltData}) {
@@ -230,8 +259,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         const auto end = std::find(start, dynamic.DynStrData.end(), 0);
         if (end == dynamic.DynStrData.end()) throw Domain::RelinkerException("Unterminated executable symbol name");
         const std::string name(start, end);
-        if (declaresHost(executableModules[offset / 24])) continue;
         const std::string base = name.substr(0, name.find('#'));
+        if (declaresHost(executableModules[offset / 24], base)) continue;
         const auto shared = sharedExports.find(base);
         std::size_t needed = 0;
         if (shared != sharedExports.end()) {
@@ -260,7 +289,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         }
         for (std::size_t symbolIndex = 0; symbolIndex < images[index].Symbols.size(); ++symbolIndex) {
             const auto& symbol = images[index].Symbols[symbolIndex];
-            if (symbol.Section != 0 || symbol.Name.empty() || declaresHost(symbol.Library)) continue;
+            if (symbol.Section != 0 || symbol.Name.empty() || declaresHost(symbol.Library, symbol.Name)) continue;
             const auto declared = symbol.Library.empty() ? guestNames.end() : findGuest(symbol.Library);
             const auto shared = sharedExports.find(symbol.Name);
             if (shared == sharedExports.end() || declared == guestNames.end() || !shared->second.contains(declared->second))
@@ -300,7 +329,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             for (std::size_t index = 1; index < image.Symbols.size(); ++index) {
                 const auto& symbol = image.Symbols[index];
                 const bool exported = symbol.Section != 0 && (symbol.Info >> 4) != 0 && symbol.Visibility != 1 && symbol.Visibility != 2;
-                if (((symbol.Section == 0 && !declaresHost(symbol.Library)) || exported) && exports.contains(symbol.Name)) rename(image.Dynamic.DynSymData, image.Dynamic.DynStrData, index, symbol.Name);
+                if (((symbol.Section == 0 && !declaresHost(symbol.Library, symbol.Name)) || exported) && exports.contains(symbol.Name)) rename(image.Dynamic.DynSymData, image.Dynamic.DynStrData, index, symbol.Name);
             }
         }
     }
