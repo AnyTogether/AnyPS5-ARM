@@ -3,6 +3,7 @@
 #include "prx/libSceAgc/Command/include/Control.hpp"
 #include "prx/libSceAgc/Command/include/Memory.hpp"
 #include "prx/libSceAgc/Command/include/Packet.hpp"
+#include "prx/libSceAgc/DcbState/include/Display.hpp"
 #include "prx/libSceAgc/DcbState/include/Marker.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include <cstdint>
@@ -56,13 +57,7 @@ std::uint32_t* APS5_VABI sceAgcAcbWaitUntilSafeForRendering(CommandBuffer* buf, 
 }
 
 std::uint32_t* APS5_VABI sceAgcAcbSetFlip(CommandBuffer* buf, std::uint32_t videoOutHandle, std::int32_t displayBufferIndex, std::uint32_t flipMode, std::int64_t flipArg) {
-    (void)buf;
-    (void)videoOutHandle;
-    (void)displayBufferIndex;
-    (void)flipMode;
-    (void)flipArg;
-    NotImplemented_nid_no_patch(__func__);
-    return nullptr;
+    return Agc::Display::WriteFlip(buf, videoOutHandle, displayBufferIndex, flipMode, flipArg, __func__);
 }
 
 uint32_t* APS5_VABI sceAgcAcbPushMarker(CommandBuffer* buf, const char* str, uint32_t color) {

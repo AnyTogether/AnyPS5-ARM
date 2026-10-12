@@ -43,6 +43,9 @@ int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter*, i
 int APS5_VABI sceFontCreateWords(const FontMemory*, FontTextSource*, const void*, void**);
 int APS5_VABI sceFontDestroyWords(void**);
 int APS5_VABI sceFontWordsFindWordCharacters(void*, FontTextCharacter*, FontTextCharacter*, FontTextCharacter**, FontTextCharacter**);
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(FontTextCharacter*, FontTextCharacter*, FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes*);
 const void* APS5_VABI sceFontSelectLibraryFt(int);
 const void* APS5_VABI sceFontSelectRendererFt(int);
 int APS5_VABI sceFontFtSupportTrueType(FontLibrary);
@@ -260,6 +263,42 @@ static void TestGlyphObjects(const FontMemory& memory, FontHandle font, FontRend
     Require(sceFontDefineAttribute(font, 0x40, nullptr) == SCE_FONT_OK && sceFontUnbindRenderer(font) == SCE_FONT_OK);
 }
 
+static bool StepReads(const FontTextCodes& textCodes, char32_t code, const char32_t* order) {
+    return textCodes.Text.code == code && textCodes.Text.order == order;
+}
+
+static void TestTextCodes(const char32_t* codes, FontTextCharacter* characters) {
+    FontTextCodes textCodes{};
+    Require(sceFontTextCodesStepNext(&textCodes) == nullptr && sceFontTextCodesStepBack(&textCodes) == nullptr);
+    Require(sceFontTextCodesStepNext(nullptr) == nullptr && sceFontTextCodesStepBack(nullptr) == nullptr);
+    Require(sceFontCharactersRefersTextCodes(nullptr, nullptr, &textCodes) == nullptr);
+    Require(sceFontCharactersRefersTextCodes(&characters[0], nullptr, nullptr) == nullptr);
+    Require(sceFontCharactersRefersTextCodes(&characters[0], &characters[0], &textCodes) == nullptr);
+    Require(sceFontTextCodesStepNext(&textCodes) == nullptr && textCodes.Text.order == nullptr && textCodes.Text.code == 0);
+
+    Require(sceFontCharactersRefersTextCodes(&characters[0], &characters[3], &textCodes) == &textCodes && StepReads(textCodes, U'a', &codes[0]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U'b', &codes[1]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U' ', &codes[2]));
+    Require(sceFontTextCodesStepNext(&textCodes) == nullptr && StepReads(textCodes, U' ', &codes[2]));
+    Require(sceFontTextCodesStepNext(&textCodes) == nullptr && StepReads(textCodes, U' ', &codes[2]));
+    Require(sceFontTextCodesStepBack(&textCodes) == &textCodes && StepReads(textCodes, U'b', &codes[1]));
+    Require(sceFontTextCodesStepBack(&textCodes) == &textCodes && StepReads(textCodes, U'a', &codes[0]));
+    Require(sceFontTextCodesStepBack(&textCodes) == nullptr && StepReads(textCodes, U'a', &codes[0]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U'b', &codes[1]));
+    Require(sceFontCharactersRefersTextCodes(&characters[5], &characters[5], &textCodes) == nullptr && StepReads(textCodes, U'b', &codes[1]));
+
+    Require(sceFontCharactersRefersTextCodes(&characters[6], nullptr, &textCodes) == &textCodes && StepReads(textCodes, U'日', &codes[6]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U'本', &codes[7]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U' ', &codes[8]));
+    Require(sceFontTextCodesStepNext(&textCodes) == &textCodes && StepReads(textCodes, U'e', &codes[9]));
+    Require(sceFontTextCodesStepNext(&textCodes) == nullptr && StepReads(textCodes, U'e', &codes[9]));
+
+    Require(sceFontCharactersRefersTextCodes(&characters[4], nullptr, &textCodes) == &textCodes && StepReads(textCodes, U'c', &codes[4]));
+    Require(sceFontTextCodesStepBack(&textCodes) == &textCodes && StepReads(textCodes, U' ', &codes[3]));
+    Require(sceFontTextCodesStepBack(&textCodes) == &textCodes && StepReads(textCodes, U' ', &codes[2]));
+    Require(sceFontTextCodesStepBack(&textCodes) == &textCodes && StepReads(textCodes, U'b', &codes[1]));
+}
+
 static void TestWords(const FontMemory& memory, FontHandle font) {
     static const char32_t codes[] = U"ab  cd日本 e";
     Text text{codes, font};
@@ -302,6 +341,7 @@ static void TestWords(const FontMemory& memory, FontHandle font) {
     Require(sceFontDestroyWords(&words) == SCE_FONT_OK && words == nullptr);
     Require(sceFontDestroyWords(&words) == SCE_FONT_ERROR_INVALID_WORDS);
     Require(sceFontDestroyWords(nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    TestTextCodes(codes, characters);
     Require(sceFontDestroyString(&string) == SCE_FONT_OK);
 }
 

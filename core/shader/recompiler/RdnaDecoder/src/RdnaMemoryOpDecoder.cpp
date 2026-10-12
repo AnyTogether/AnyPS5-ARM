@@ -977,13 +977,8 @@ RdnaInstruction DecodeRdnaDs(std::uint32_t programCounter, std::span<const std::
     if (gds && (info.opcode == RdnaOpcode::DsSwizzleB32 || info.opcode == RdnaOpcode::DsBpermuteB32 || info.opcode == RdnaOpcode::DsPermuteB32 || info.opcode == RdnaOpcode::DsWriteAddtidB32 || info.opcode == RdnaOpcode::DsReadAddtidB32)) {
         throw std::runtime_error("DS lane operation is available only for LDS");
     }
-    if (info.opcode == RdnaOpcode::DsWrxchg2RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2RtnB64 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB64) {
-        if (offset0 == offset1) {
-            throw std::runtime_error("DS write exchange of one location through both offsets is not supported");
-        }
-        if (vdst + info.dataDwords > 256u) {
-            throw std::runtime_error("DS write exchange destination register range overflow");
-        }
+    if ((info.opcode == RdnaOpcode::DsWrxchg2RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2RtnB64 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB64) && vdst + info.dataDwords > 256u) {
+        throw std::runtime_error("DS write exchange destination register range overflow");
     }
     if (info.opcode == RdnaOpcode::DsWriteAddtidB32 && data1 != 0u) {
         throw std::runtime_error("DS write addtid data1 operand is not supported");

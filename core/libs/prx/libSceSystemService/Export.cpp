@@ -79,12 +79,13 @@ int APS5_VABI sceSystemServiceParamGetString(int paramId, char* buf, size_t bufS
   return SYSTEM_SERVICE_ERROR_PARAMETER;
  }
  if (paramId != SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME) {
-  NotImplemented_nid_no_patch("sceSystemServiceParamGetString: parameter other than the system name");
- }
- if (bufSize < SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH) {
-  NotImplemented_nid_no_patch("sceSystemServiceParamGetString: buffer shorter than 65 bytes");
+  return SYSTEM_SERVICE_ERROR_PARAMETER;
  }
  constexpr char SystemName[] = "PS5";
+ static_assert(sizeof(SystemName) <= SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH);
+ if (bufSize < sizeof(SystemName)) {
+  return SYSTEM_SERVICE_ERROR_PARAMETER;
+ }
  std::memcpy(buf, SystemName, sizeof(SystemName));
  return SYSTEM_SERVICE_OK;
 }

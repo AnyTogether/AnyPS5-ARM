@@ -155,10 +155,6 @@ int APS5_VABI sceAudioInOpen(int user_id, uint32_t type, uint32_t index, uint32_
     if (index != 0) return AUDIO_IN_ERROR_INVALID_PARAM;
     if (len != 128 && len != 256) return AUDIO_IN_ERROR_INVALID_SIZE;
     if (freq != 48000 && freq != 16000) return AUDIO_IN_ERROR_INVALID_FREQ;
-    if (param == 0x10) {
-        NotImplemented_nid_no_patch(__func__);
-        return 0;
-    }
     return openPort(len, freq, param);
 }
 

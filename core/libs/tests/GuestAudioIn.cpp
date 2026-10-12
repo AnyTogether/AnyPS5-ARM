@@ -44,6 +44,8 @@ void TestValidation() {
     Require(sceAudioInOpen(user, 0, 0, 256, 44100, 2) == invalidFreq);
     Require(sceAudioInOpen(user, 0, 0, 256, 48000, 3) == invalidParam);
     Require(sceAudioInOpen(user, 0, 0, 256, 48000, 0) == invalidParam);
+    Require(sceAudioInOpen(user, 0, 0, 256, 48000, 0x10) == invalidParam);
+    Require(sceAudioInOpen(user, 1, 0, 128, 16000, 0x10) == invalidParam);
     Require(sceAudioInHqOpen(user, 2, 0, 128, 48000, 2) == invalidType);
     Require(sceAudioInHqOpen(user, 0, 1, 128, 48000, 2) == invalidParam);
     Require(sceAudioInHqOpen(user, 0, 0, 256, 48000, 2) == invalidSize);

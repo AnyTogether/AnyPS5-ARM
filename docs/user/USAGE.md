@@ -154,7 +154,7 @@ relinker --registry source/input.elf app.elf
 python3 tools/import_audit.py app.registry.json app.libc.prx.guest.prx.registry.json --libs build/core/libs/libs --modules source/sce_module
 ```
 
-`--registry` writes `app.registry.json` for the executable and one `app.<module>.registry.json` for each converted bundled module; pass all of them. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
+`--registry` writes `app.registry.json` for the executable and one `app.<module>.registry.json` for each converted bundled module; pass all of them. `--libs` is the directory the `libs` target fills ([build instructions](../dev/BUILD.md)); the exports are read from the built `.prx` files, whether ELF, PE or Mach-O, so the result matches what the loader finds. Imports are counted once per NID and library, and every reference lands in exactly one class:
 
 | Class | Meaning |
 |-------|---------|

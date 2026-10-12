@@ -3,6 +3,7 @@
 #include "SpirvBackend/SpirvEmitterInstructions.hpp"
 #include "SpirvBackend/SpirvMemory/SpirvSubgroup.hpp"
 #include "SpirvBackend/SpirvBufferFormat.hpp"
+#include "FlatApertures.hpp"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>
@@ -335,9 +336,6 @@ const MemoryInfo& SharedMemory(SpirvValueEmitContext& ctx, const IrValue& inst) 
     }
     return mem;
 }
-
-constexpr std::uint32_t SharedApertureHigh = 0x80000000u;
-constexpr std::uint32_t PrivateApertureHigh = 0x70000000u;
 
 bool RoutesApertures(const SpirvEmitterState& state, const MemoryInfo& mem) {
     return mem.kind == ResourceKind::Flat && state.program.Resources().stage == IrShaderStage::Compute;

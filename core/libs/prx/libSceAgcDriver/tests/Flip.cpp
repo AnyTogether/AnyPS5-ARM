@@ -119,7 +119,7 @@ void testFlipAndBoundary() {
     expectFailure([&] { AgcDriverRegisterVideoOutput_nid_postfix(7, output); });
     std::array<std::uint32_t, 6> words{0xc004105c, 7, 0xfffffffeu, 1, 0, 0};
     Packet packet{words.data(), 6, 0, {}};
-    expectFailure([&] { sceAgcDriverSubmitAcb(0x20, &packet); });
+    check(expectFailure([&] { sceAgcDriverSubmitAcb(0x20, &packet); }).find("graphics packet in compute queue") != std::string::npos, "a compute-queue flip was not rejected as a graphics packet");
     words[0] = 0xc004105d;
     expectFailure([&] { sceAgcDriverSubmitDcb(&packet); });
     words[0] = 0xc004105c;

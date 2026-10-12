@@ -1,7 +1,9 @@
 #include "Translation/IntegerInstructions.hpp"
 #include "Translation/TranslationContext.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include <array>
 #include <stdexcept>
+#include <string>
 
 namespace ShaderRecompiler {
 
@@ -453,7 +455,16 @@ bool TranslationContext::vQsadU8(const RdnaInstruction& inst, bool masked, bool 
     };
     const std::array<IrU32, 2> accumulator = readU32Pair(sourceAt(inst, 2u));
     if (wide) {
-        const std::array<IrU32, 2> accumulatorHigh = readU32Pair(offsetOperand(sourceAt(inst, 2u), 2u));
+        const RdnaOperand& accumulatorSource = sourceAt(inst, 2u);
+        switch (accumulatorSource.kind) {
+            case RdnaOperandKind::SrcSharedBase:
+            case RdnaOperandKind::SrcSharedLimit:
+            case RdnaOperandKind::SrcPrivateBase:
+            case RdnaOperandKind::SrcPrivateLimit:
+                throw std::runtime_error("v_mqsad_u32_u8 at pc " + std::to_string(inst.programCounter) + " reads its 128-bit accumulator from " + RdnaOperandToString(accumulatorSource) + ", which has only two dwords");
+            default: break;
+        }
+        const std::array<IrU32, 2> accumulatorHigh = readU32Pair(offsetOperand(accumulatorSource, 2u));
         const IrU32 zero(ir.Constant(0u));
         writeU32Pair(inst.destination, {wideAdd(inst, sad(0u), zero, accumulator[0], false), wideAdd(inst, sad(8u), zero, accumulator[1], false)});
         writeU32Pair(offsetOperand(inst.destination, 2u),

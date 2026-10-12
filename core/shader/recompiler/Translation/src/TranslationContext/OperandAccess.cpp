@@ -1,3 +1,4 @@
+#include "FlatApertures.hpp"
 #include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "Translation/TranslationContext.hpp"
 #include <algorithm>
@@ -94,6 +95,11 @@ RdnaOperand TranslationContext::offsetOperand(const RdnaOperand& operand, std::u
             break;
         case RdnaOperandKind::VccHi:
         case RdnaOperandKind::ExecHi: throw std::runtime_error("TranslationContext::offsetOperand special-register operand offset is out of range");
+        case RdnaOperandKind::SrcSharedBase:
+        case RdnaOperandKind::SrcSharedLimit:
+        case RdnaOperandKind::SrcPrivateBase:
+        case RdnaOperandKind::SrcPrivateLimit:
+            throw std::runtime_error("TranslationContext::offsetOperand: dword " + std::to_string(offset) + " past the scalar aperture source " + RdnaOperandToString(operand) + " at pc " + std::to_string(currentProgramCounter) + " is not a register");
         default: return operand;
     }
     return result;
@@ -433,6 +439,18 @@ IrU32 TranslationContext::clampF16Bits(const RdnaOperand& operand, IrU32 bits) {
     return dx10Clamp() ? clamped : IrU32(ir.Select(ir.UGreaterThan(magnitude.Value(), ir.Constant(0x7c00u)), bits.Value(), clamped.Value()));
 }
 
+std::array<IrU32, 2> TranslationContext::apertureSourcePair(const RdnaOperand& operand) {
+    std::uint64_t value = 0u;
+    switch (operand.kind) {
+        case RdnaOperandKind::SrcSharedBase: value = SharedApertureBase; break;
+        case RdnaOperandKind::SrcSharedLimit: value = SharedApertureLimit; break;
+        case RdnaOperandKind::SrcPrivateBase: value = PrivateApertureBase; break;
+        case RdnaOperandKind::SrcPrivateLimit: value = PrivateApertureLimit; break;
+        default: throw std::runtime_error("TranslationContext::apertureSourcePair: " + RdnaOperandToString(operand) + " is not a scalar aperture source");
+    }
+    return {IrU32(ir.Constant(static_cast<std::uint32_t>(value))), IrU32(ir.Constant(static_cast<std::uint32_t>(value >> 32u)))};
+}
+
 IrU32 TranslationContext::readScalarCode(std::uint32_t code) {
     if (code < NumScalarRegs) {
         return IrU32(ir.GetScalarReg(static_cast<ScalarReg>(code)));
@@ -449,8 +467,7 @@ IrU32 TranslationContext::readScalarCode(std::uint32_t code) {
         case 235u:
         case 236u:
         case 237u:
-        case 238u:
-            throw std::runtime_error("TranslationContext::readScalarCode: the scalar aperture source " + RdnaOperandToString(DecodeRdnaScalarSource(code, 0u)) + " is not modelled");
+        case 238u: return apertureSourcePair(DecodeRdnaScalarSource(code, currentProgramCounter))[0];
         default: return IrU32(ir.Constant(0u));
     }
 }
@@ -483,8 +500,7 @@ IrU32 TranslationContext::readRawU32(const RdnaOperand& operand) {
         case RdnaOperandKind::SrcSharedBase:
         case RdnaOperandKind::SrcSharedLimit:
         case RdnaOperandKind::SrcPrivateBase:
-        case RdnaOperandKind::SrcPrivateLimit:
-            throw std::runtime_error("TranslationContext::readRawU32: the scalar aperture source " + RdnaOperandToString(operand) + " is not modelled");
+        case RdnaOperandKind::SrcPrivateLimit: return apertureSourcePair(operand)[0];
         default: throw std::runtime_error("TranslationContext::readRawU32 invalid decoded operand used as a raw U32 source");
     }
 }
