@@ -7,7 +7,11 @@ modules it wrote. --game is the title's own folder (sce_sys and its data), copie
 relinked modules. --libs is the patched prx directory (build/core/libs/libs) and --vulkan the macOS
 directory of a Vulkan SDK, whose loader and MoltenVK go into the bundle. The title's patches in
 tools/macos/patches (see tools/macos/game_patches.py) are applied to the bundled eboot unless
---no-game-patches is given, and the bundled MoltenVK gets the patch in tools/macos/moltenvk_patches.py. A title whose patches set its output resolution asks for it when it starts
+--no-game-patches is given, and the bundled MoltenVK gets the patch in tools/macos/moltenvk_patches.py.
+With that patch the launcher lets MoltenVK encode submissions on its own queue
+(MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0): its per-encoder walk over every device-address buffer, which
+raced the driver freeing finished batches' buffers, is gone, and vkQueueSubmit no longer encodes
+whole batches on the driver's thread. A title whose patches set its output resolution asks for it when it starts
 (APS5_RESOLUTION=WIDTHxHEIGHT answers in advance).
 
 The bundle runs without the SDK or environment variables:
@@ -66,6 +70,9 @@ if [ -f "$resolution_file" ]; then
     write_u32 "$resolution_width" "$width"
     write_u32 "$resolution_height" "$height"
 fi
+"""
+
+ASYNC_SUBMITS = """export MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS="${MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS:-0}"
 """
 
 START = """exec "$here/eboot" "$@" >> "$HOME/Library/Logs/AnyPS5/{title_id}.log" 2>&1
@@ -138,8 +145,8 @@ def package(relinked, game, libs, vulkan, input_config, bundle, patch=True):
         if not source.is_file():
             raise RuntimeError(f"Missing {name_in_sdk} in {vulkan / 'lib'}")
         shutil.copy2(source, macos / "libs" / name_in_sdk)
-    if patch:
-        print(f"libMoltenVK.dylib: {moltenvk_patches.apply(macos / 'libs' / 'libMoltenVK.dylib')}")
+    moltenvk_state = moltenvk_patches.apply(macos / "libs" / "libMoltenVK.dylib") if patch else "skipped: --no-game-patches"
+    print(f"libMoltenVK.dylib: {moltenvk_state}")
     manifest = json.loads((vulkan / "share" / "vulkan" / "icd.d" / "MoltenVK_icd.json").read_text())
     manifest["ICD"]["library_path"] = "../../../MacOS/libs/libMoltenVK.dylib"
     (resources / "vulkan" / "icd.d").mkdir(parents=True)
@@ -149,6 +156,8 @@ def package(relinked, game, libs, vulkan, input_config, bundle, patch=True):
         shutil.copy2(input_config, resources / "anyps5-input.ini")
 
     script = LAUNCHER.format(identifier=identifier, title_id=title_id)
+    if not moltenvk_state.startswith("skipped"):
+        script += ASYNC_SUBMITS
     fields = game_patches.resolution_fields(macos / "eboot", title_id) if patch else None
     if fields is not None:
         game_patches.set_resolution(macos / "eboot", fields, fields["default"])
