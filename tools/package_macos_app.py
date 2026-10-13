@@ -7,7 +7,7 @@ modules it wrote. --game is the title's own folder (sce_sys and its data), copie
 relinked modules. --libs is the patched prx directory (build/core/libs/libs) and --vulkan the macOS
 directory of a Vulkan SDK, whose loader and MoltenVK go into the bundle. The title's patches in
 tools/macos/patches (see tools/macos/game_patches.py) are applied to the bundled eboot unless
---no-game-patches is given. A title whose patches set its output resolution asks for it when it starts
+--no-game-patches is given, and the bundled MoltenVK gets the patch in tools/macos/moltenvk_patches.py. A title whose patches set its output resolution asks for it when it starts
 (APS5_RESOLUTION=WIDTHxHEIGHT answers in advance).
 
 The bundle runs without the SDK or environment variables:
@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "macos"))
 import game_patches
+import moltenvk_patches
 
 LAUNCHER = """#!/bin/sh
 # Starts the title from its game folder: AnyPS5 maps /app0 under the working directory.
@@ -137,6 +138,8 @@ def package(relinked, game, libs, vulkan, input_config, bundle, patch=True):
         if not source.is_file():
             raise RuntimeError(f"Missing {name_in_sdk} in {vulkan / 'lib'}")
         shutil.copy2(source, macos / "libs" / name_in_sdk)
+    if patch:
+        print(f"libMoltenVK.dylib: {moltenvk_patches.apply(macos / 'libs' / 'libMoltenVK.dylib')}")
     manifest = json.loads((vulkan / "share" / "vulkan" / "icd.d" / "MoltenVK_icd.json").read_text())
     manifest["ICD"]["library_path"] = "../../../MacOS/libs/libMoltenVK.dylib"
     (resources / "vulkan" / "icd.d").mkdir(parents=True)
@@ -182,7 +185,7 @@ def main():
     parser.add_argument("--libs", required=True, type=Path)
     parser.add_argument("--vulkan", required=True, type=Path)
     parser.add_argument("--input-config", type=Path)
-    parser.add_argument("--no-game-patches", action="store_true", help="leave the relinked eboot unpatched")
+    parser.add_argument("--no-game-patches", action="store_true", help="leave the relinked eboot and the bundled MoltenVK unpatched")
     parser.add_argument("bundle", type=Path)
     arguments = parser.parse_args()
     name, identifier = package(arguments.relinked, arguments.game, arguments.libs, arguments.vulkan, arguments.input_config, arguments.bundle, not arguments.no_game_patches)
