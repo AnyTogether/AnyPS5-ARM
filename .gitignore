@@ -99,6 +99,7 @@ downloads/
 
 *.json
 !demo/web/i18n/*.json
+!tools/macos/patches/*.json
 
 !/assets/*.jpg
 !/assets/*.png

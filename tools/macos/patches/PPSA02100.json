@@ -1,0 +1,14 @@
+{
+    "title": "Stray",
+    "patches": [
+        {
+            "name": "output-1080p",
+            "description": "Renders and presents at 1920x1080 instead of 3840x2160. The PS5 build sizes its window and back buffers from PS5.DefaultBackBufferWidth/Height (registered as 3840x2160, read-only), then resizes the window to the saved ResolutionSizeX/Y through r.SetRes, which it rewrites to 3840x2160. The first two edits register the cvars as 1920x1080; the third makes the r.SetRes sink skip the window resize.",
+            "edits": [
+                {"address": "0x1417e90d5", "original": "ba000f0000", "replacement": "ba80070000"},
+                {"address": "0x1417e9148", "original": "ba70080000", "replacement": "ba38040000"},
+                {"address": "0x14410675e", "original": "0f84d2000000", "replacement": "90e9d2000000"}
+            ]
+        }
+    ]
+}

@@ -4,9 +4,9 @@
 
 `PPSA02100` · Unreal Engine 4
 
-**Status:** 🔴 Does not start · Crashes at startup (regression) · **FPS:** —
+**Status:** 🟡 Main menu · Entering the game is not verified yet · **FPS:** ~18-20 in the main menu (M3 Pro, 1080p patch)
 
-The root cause of the earlier corruption is understood. Since the latest upstream merges, though, the game crashes already at startup. That regression is being investigated.
+The game starts again and reaches its main menu. The macOS package applies a 1080p output patch (see below); without it the PS5 build renders at 3840x2160 and the menu runs at ~11 FPS.
 
 ![Earlier run: with GPU results written back immediately, the save screen drew completely](img/stray-saveselect.jpg)
 *Earlier run: with GPU results written back immediately, the save screen drew completely*
@@ -18,8 +18,11 @@ The root cause of the earlier corruption is understood. Since the latest upstrea
 | ✅ | **160 GiB buffer crash** | Indices past every vertex record count are redirected to a single zero vertex (upstream PR #4292). |
 | ✅ | **Root cause: late write-back** | GPU results were written to memory late and overwrote memory the game had already reused. With immediate write-backs, menus and text drew completely (screenshot above). |
 | ✅ | **Write watch bug** | Memory mapped over a reservation was not watched (fixed upstream). |
-| 🔧 | **Startup regression** | While Unreal's allocator is being set up: atexit → the game's libc → malloc → an allocator that is not ready yet. It came with the latest merges; the responsible change still has to be found. |
-| ⏭️ | **Fast write-back fix** | A version that limits immediate write-backs to memory that cannot be watched is ready and will be tested. |
+| ✅ | **Startup regression** | Fixed: a quadratic shader pass and a blocked signal mask around thread creation. |
+| ✅ | **Shader arithmetic** | Pixel and compute shaders no longer turn every f32 add and mul into an unoptimized helper call under MoltenVK (the hottest shader: 17 → 5 ms). |
+| ✅ | **1080p output** | The PS5 build hardcodes 3840x2160 output. [tools/macos/patches/PPSA02100.json](../../tools/macos/patches/PPSA02100.json) sets it to 1920x1080; `tools/package_macos_app.py` applies it (`--no-game-patches` skips it). |
+| 🔧 | **Menu FPS** | At 1080p the driver thread is the limit (~52 ms per frame, GPU ~31 ms): GPU syncs, write-backs and queue submits. |
+| ⏭️ | **Entering the game** | Write-backs in game still have to be verified. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 
@@ -29,8 +32,8 @@ The root cause of the earlier corruption is understood. Since the latest upstrea
 |---|---|
 | Engine | `Unreal Engine 4` |
 | Split 256-bit stores | `211,077` |
-| Last working state | `Menu/save screen (with immediate write-back, ~0.4 FPS)` |
-| Now | `Segfault at startup` |
+| Output | `1920x1080 with the patch, 3840x2160 without` |
+| Now | `Main menu, ~18-20 FPS` |
 
 ## Links
 

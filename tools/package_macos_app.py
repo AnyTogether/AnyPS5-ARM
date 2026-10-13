@@ -1,11 +1,13 @@
 """Packages a title relinked with `relinker --macos` as a macOS application bundle.
 
-    python3 tools/package_macos_app.py --relinked <dir> [--game <dir>] --libs <dir> --vulkan <dir> [--input-config <file>] <Title.app>
+    python3 tools/package_macos_app.py --relinked <dir> [--game <dir>] --libs <dir> --vulkan <dir> [--input-config <file>] [--no-game-patches] <Title.app>
 
 --relinked is the relinker's output directory: the executable (eboot) and the app0/sce_module guest
 modules it wrote. --game is the title's own folder (sce_sys and its data), copied as app0 under the
 relinked modules. --libs is the patched prx directory (build/core/libs/libs) and --vulkan the macOS
-directory of a Vulkan SDK, whose loader and MoltenVK go into the bundle.
+directory of a Vulkan SDK, whose loader and MoltenVK go into the bundle. The title's patches in
+tools/macos/patches (see tools/macos/game_patches.py) are applied to the bundled eboot unless
+--no-game-patches is given.
 
 The bundle runs without the SDK or environment variables:
 
@@ -22,8 +24,12 @@ import json
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "macos"))
+import game_patches
 
 LAUNCHER = """#!/bin/sh
 # Starts the title from its game folder: AnyPS5 maps /app0 under the working directory.
@@ -61,7 +67,7 @@ def make_icon(png, resources):
     return "AppIcon"
 
 
-def package(relinked, game, libs, vulkan, input_config, bundle):
+def package(relinked, game, libs, vulkan, input_config, bundle, patch=True):
     executable = relinked / "eboot"
     if not executable.is_file():
         raise RuntimeError(f"No relinked executable: {executable}")
@@ -86,6 +92,9 @@ def package(relinked, game, libs, vulkan, input_config, bundle):
 
     shutil.copy2(executable, macos / "eboot")
     (macos / "eboot").chmod(0o755)
+    if patch:
+        for patch_name, state in game_patches.apply(macos / "eboot", title_id):
+            print(f"{title_id} patch {patch_name}: {state}")
     # The relinked executable loads its guest modules from @executable_path/app0/sce_module.
     (macos / "app0").symlink_to(Path("..") / "Resources" / "game" / "app0")
     libraries = sorted(libs.glob("*.prx"))
@@ -137,9 +146,10 @@ def main():
     parser.add_argument("--libs", required=True, type=Path)
     parser.add_argument("--vulkan", required=True, type=Path)
     parser.add_argument("--input-config", type=Path)
+    parser.add_argument("--no-game-patches", action="store_true", help="leave the relinked eboot unpatched")
     parser.add_argument("bundle", type=Path)
     arguments = parser.parse_args()
-    name, identifier = package(arguments.relinked, arguments.game, arguments.libs, arguments.vulkan, arguments.input_config, arguments.bundle)
+    name, identifier = package(arguments.relinked, arguments.game, arguments.libs, arguments.vulkan, arguments.input_config, arguments.bundle, not arguments.no_game_patches)
     print(f"{arguments.bundle}: {name} ({identifier})")
 
 

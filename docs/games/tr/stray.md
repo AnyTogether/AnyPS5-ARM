@@ -4,9 +4,9 @@
 
 `PPSA02100` · Unreal Engine 4
 
-**Durum:** 🔴 Açılmıyor · Başlangıçta kapanıyor (gerileme) · **FPS:** —
+**Durum:** 🟡 Ana menü · Oyuna giriş henüz doğrulanmadı · **FPS:** ana menüde ~18-20 (M3 Pro, 1080p yaması)
 
-Kök neden çözüldü ama son upstream birleştirmelerinden sonra oyun daha açılışta kapanıyor. Bu gerileme araştırılıyor.
+Oyun yeniden açılıyor ve ana menüye geliyor. macOS paketi 1080p çıkış yamasını uyguluyor (aşağıda); yama olmadan PS5 sürümü 3840x2160 çiziyor ve menü ~11 FPS'te kalıyor.
 
 ![Önceki deneme: GPU sonuçları anında yazılınca save ekranı tam çiziliyordu](../img/stray-saveselect.jpg)
 *Önceki deneme: GPU sonuçları anında yazılınca save ekranı tam çiziliyordu*
@@ -18,8 +18,11 @@ Kök neden çözüldü ama son upstream birleştirmelerinden sonra oyun daha aç
 | ✅ | **160 GiB buffer çökmesi** | Kayıt sayısını aşan indeksler tek bir sıfır vertex'e yönlendirildi (upstream'e PR #4292). |
 | ✅ | **Kök neden: geç write-back** | GPU sonuçları belleğe geç yazılıp oyunun yeniden kullandığı belleği eziyordu. Anında yazma modunda menüler ve yazılar tam çizildi (yukarıdaki görüntü). |
 | ✅ | **Yazma izleyicisi hatası** | Rezervasyonun üstüne map edilen bellek izlenmiyordu (upstream'de düzeltildi). |
-| 🔧 | **Başlangıç gerilemesi** | Unreal'ın bellek ayırıcısı kurulurken atexit → oyunun libc'si → malloc → henüz hazır olmayan ayırıcı. Son birleştirmelerle geldi; hangi değişiklik olduğu bulunacak. |
-| ⏭️ | **Hızlı write-back düzeltmesi** | Anında yazmayı yalnızca izlenemeyen bellekle sınırlayan sürüm hazır, test edilecek. |
+| ✅ | **Başlangıç gerilemesi** | Düzeltildi: karesel bir shader geçişi ve thread oluşturulurken engellenen sinyal maskesi. |
+| ✅ | **Shader aritmetiği** | Pixel ve compute shader'larda her f32 toplama ve çarpma MoltenVK altında artık optimize edilmeyen bir yardımcı çağrıya dönüşmüyor (en ağır shader: 17 → 5 ms). |
+| ✅ | **1080p çıkış** | PS5 sürümü 3840x2160 çıkışı sabit kodluyor. [tools/macos/patches/PPSA02100.json](../../../tools/macos/patches/PPSA02100.json) bunu 1920x1080 yapıyor; `tools/package_macos_app.py` uyguluyor (`--no-game-patches` atlıyor). |
+| 🔧 | **Menü FPS'i** | 1080p'de sınır sürücü iş parçacığı (frame başına ~52 ms, GPU ~31 ms): GPU senkronları, write-back'ler ve kuyruk gönderimleri. |
+| ⏭️ | **Oyuna giriş** | Oyun içindeki write-back'ler henüz doğrulanmadı. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
@@ -29,8 +32,8 @@ Kök neden çözüldü ama son upstream birleştirmelerinden sonra oyun daha aç
 |---|---|
 | Motor | `Unreal Engine 4` |
 | Bölünen 256-bit yazma | `211.077` |
-| Son çalışan durum | `Menü/save ekranı (anında write-back ile, ~0.4 FPS)` |
-| Şu an | `Açılışta segfault` |
+| Çıkış | `Yamayla 1920x1080, yamasız 3840x2160` |
+| Şu an | `Ana menü, ~18-20 FPS` |
 
 ## Bağlantılar
 
