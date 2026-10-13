@@ -61,16 +61,6 @@ public:
         const auto floatOne = constant(floatType, std::bit_cast<std::uint32_t>(1.0f));
 
         const auto invocation = load(intType, invocationId);
-        const auto first = result(spv::OpIEqual, boolType, invocation, intConstant(0));
-        const auto writeLevels = builder.AllocateId();
-        const auto afterLevels = builder.AllocateId();
-        emit(spv::OpSelectionMerge, afterLevels, spv::SelectionControlMaskNone);
-        emit(spv::OpBranchConditional, first, writeLevels, afterLevels);
-        emit(spv::OpLabel, writeLevels);
-        for (std::uint32_t i = 0; i < 4; i++) store(access(ptrOutputFloat, tessOuter, intConstant(i)), floatOne);
-        for (std::uint32_t i = 0; i < 2; i++) store(access(ptrOutputFloat, tessInner, intConstant(i)), floatOne);
-        emit(spv::OpBranch, afterLevels);
-        emit(spv::OpLabel, afterLevels);
 
         std::array<std::uint32_t, 3> positions {};
         for (std::uint32_t i = 0; i < positions.size(); i++) {
@@ -107,7 +97,24 @@ public:
         }
         const auto position3 = interpolate(positions[0], positions[1], positions[2], barycentric);
         valid = result(spv::OpLogicalAnd, boolType, valid, isFinite(position3));
-        rejectInvalidRectangle(valid);
+        const auto x0 = result(spv::OpCompositeExtract, floatType, positions[0], 0u);
+        const auto y0 = result(spv::OpCompositeExtract, floatType, positions[0], 1u);
+        const auto cross = result(spv::OpFSub, floatType,
+            result(spv::OpFMul, floatType, result(spv::OpFSub, floatType, result(spv::OpCompositeExtract, floatType, positions[1], 0u), x0), result(spv::OpFSub, floatType, result(spv::OpCompositeExtract, floatType, positions[2], 1u), y0)),
+            result(spv::OpFMul, floatType, result(spv::OpFSub, floatType, result(spv::OpCompositeExtract, floatType, positions[1], 1u), y0), result(spv::OpFSub, floatType, result(spv::OpCompositeExtract, floatType, positions[2], 0u), x0)));
+        const auto empty = result(spv::OpFOrdEqual, boolType, cross, constant(floatType, 0));
+        const auto level = result(spv::OpSelect, floatType, empty, constant(floatType, 0), floatOne);
+        const auto first = result(spv::OpIEqual, boolType, invocation, intConstant(0));
+        const auto writeLevels = builder.AllocateId();
+        const auto afterLevels = builder.AllocateId();
+        emit(spv::OpSelectionMerge, afterLevels, spv::SelectionControlMaskNone);
+        emit(spv::OpBranchConditional, first, writeLevels, afterLevels);
+        emit(spv::OpLabel, writeLevels);
+        for (std::uint32_t i = 0; i < 4; i++) store(access(ptrOutputFloat, tessOuter, intConstant(i)), level);
+        for (std::uint32_t i = 0; i < 2; i++) store(access(ptrOutputFloat, tessInner, intConstant(i)), level);
+        emit(spv::OpBranch, afterLevels);
+        emit(spv::OpLabel, afterLevels);
+        rejectInvalidRectangle(result(spv::OpLogicalOr, boolType, valid, empty));
         auto vertexIndex = result(spv::OpSelect, intType, edgeVertex[2], intConstant(2), intConstant(0));
         vertexIndex = result(spv::OpSelect, intType, edgeVertex[1], intConstant(1), vertexIndex);
         const auto fourth = result(spv::OpIEqual, boolType, invocation, intConstant(3));
