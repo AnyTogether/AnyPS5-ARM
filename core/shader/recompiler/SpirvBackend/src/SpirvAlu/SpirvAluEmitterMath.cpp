@@ -25,7 +25,6 @@ std::uint32_t Exact(SpirvEmitterState& state, std::uint32_t result) {
     return result;
 }
 
-// A guest add, sub or mul: exact unless the target lets the compiler fuse it (contractFloat).
 std::uint32_t Arithmetic(SpirvEmitterState& state, std::uint32_t result) {
     return state.contractFloat ? result : Exact(state, result);
 }
