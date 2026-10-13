@@ -243,6 +243,7 @@ struct SpirvTarget {
     // large shaders, which the Metal compiler then could not build.
     bool relaxedFloat = false;
     bool float64DenormPreserve = false;
+    bool meshAsCompute = false;
     bool registrationModules = false;
     std::uint32_t registrationWordLimit = 200000u;
     bool vertexSubgroups = true;
@@ -292,7 +293,10 @@ struct TessellationConfiguration {
     std::uint32_t outputTopology;
 };
 
+inline constexpr std::uint32_t MeshEmulationPushOffsetBytes = 88;
+inline constexpr std::uint32_t MeshEmulationPushBytes = 16;
 inline constexpr std::uint32_t MeshDrawPushOffsetBytes = 104;
+static_assert(MeshEmulationPushOffsetBytes + MeshEmulationPushBytes == MeshDrawPushOffsetBytes);
 inline constexpr std::uint32_t MeshDrawPushBytes = 24;
 inline constexpr std::uint32_t TessellationLevelPushOffsetBytes = 120;
 inline constexpr std::uint32_t TessellationLevelPushBytes = 8;
@@ -487,6 +491,13 @@ struct VertexInputPatch {
     bool operator==(const VertexInputPatch& other) const = default;
 };
 
+enum class MeshEmulationRole : std::uint32_t { None, Compute, Passthrough };
+
+struct MeshEmulationSlots {
+    std::uint32_t vertices;
+    std::uint32_t primitives;
+};
+
 struct CompiledShaderArtifact {
     std::vector<VertexInputPatch> vertexInputPatches;
     SharedSpirv spirv;
@@ -509,6 +520,7 @@ struct CompiledShaderArtifact {
     std::vector<std::uint32_t> parameterExports;
     std::vector<FragmentParameter> fragmentParameters;
     BarycentricEmulation barycentricEmulation;
+    MeshEmulationRole meshEmulation = MeshEmulationRole::None;
     std::uint64_t variantId = 0;
 };
 
@@ -546,6 +558,9 @@ struct RectListShaders {
 };
 
 [[nodiscard]] RectListShaders BuildRectListShaders(const RecompileResult& vertex, const RecompileResult& fragment, const SpirvTarget& target);
+
+[[nodiscard]] MeshEmulationSlots EmulatedMeshSlots(const MeshConfiguration& mesh);
+[[nodiscard]] RecompileResult BuildMeshPassthroughVertexShader(const RecompileResult& mesh, const RecompileResult& fragment, const SpirvTarget& target, bool layered);
 
 struct GeometryStageLimits {
     std::uint32_t maxGeometryInputComponents;

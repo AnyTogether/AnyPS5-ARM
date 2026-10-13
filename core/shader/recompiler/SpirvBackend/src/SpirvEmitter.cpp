@@ -215,7 +215,7 @@ std::uint32_t WaveLdsScope(const IrProgram& program, const ShaderWorkgroupInputI
 
 }
 
-SpirvEmitterState::SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo) : module(program.Resources().stage == IrShaderStage::Mesh ? 0x00010400u : 0x00010300u), program(program), inputInfo(inputInfo), requirements(AnalyzeProgramRequirements(program)) {
+SpirvEmitterState::SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo, bool meshAsCompute) : module(program.Resources().stage == IrShaderStage::Mesh && !meshAsCompute ? 0x00010400u : 0x00010300u), program(program), inputInfo(inputInfo), requirements(AnalyzeProgramRequirements(program)), meshAsCompute(meshAsCompute && program.Resources().stage == IrShaderStage::Mesh) {
 }
 
 SpirvValueEmitContext::SpirvValueEmitContext(SpirvEmitterState& state) : state(state) {
@@ -379,7 +379,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     }
     ValidateProgram(program, true);
     ValidateBdaTarget(program, target);
-    SpirvEmitterState state(program, inputInfo);
+    SpirvEmitterState state(program, inputInfo, target.meshAsCompute);
     state.module.RequireVersion(target.spirvVersion);
     state.spirvVersion = target.spirvVersion;
     state.supportedCapabilities = target.supportedCapabilities;
@@ -391,7 +391,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.fragmentDescriptorSet = target.fragmentDescriptorSet;
     state.contractFloat = target.contractFloat;
     state.hostSubgroupSize = target.subgroupSize;
-    state.singleLane = (target.subgroupStages & SubgroupStageBit(program.Resources().stage)) == 0u;
+    state.singleLane = (target.subgroupStages & SubgroupStageBit(state.meshAsCompute ? IrShaderStage::Compute : program.Resources().stage)) == 0u;
     state.singleSampleImages = std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStorageImageMultisample)) == target.supportedCapabilities.end();
     if (HostSubgroupSingleLane(state)) {
         state.requirements.subgroupBallot = false;
@@ -417,7 +417,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.bdaStopsInvocations = state.waveLdsScope == 0 && BdaInvocationsMayStop(program) && program.Resources().stage != IrShaderStage::Mesh;
     EmitModuleHeader(state, bindings);
     EmitProgram(state);
-    state.module.EmitEntryPoint(ExecutionModelForStage(state.program.Resources().stage), state.mainFunc, "main", state.interfaceVariables);
+    state.module.EmitEntryPoint(state.meshAsCompute ? static_cast<std::uint32_t>(spv::ExecutionModelGLCompute) : ExecutionModelForStage(state.program.Resources().stage), state.mainFunc, "main", state.interfaceVariables);
     return SplitContinueBodies(state.module.Finalize());
 }
 

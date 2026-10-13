@@ -179,7 +179,7 @@ Controllers that SDL recognizes, such as DualSense, DualShock and Xbox pads, wor
 
 - The game's code runs under Rosetta 2. Apple has announced that macOS 27 is the last release with full Rosetta support.
 - Games may stop at a function or GPU feature that is not implemented yet. See the [compatibility list](COMPATIBILITY.md).
-- MoltenVK has no geometry shaders, mesh shaders, 64-bit atomics or 64-bit floats. Draws that need geometry or mesh shaders are skipped; shaders that need the others do not run.
+- MoltenVK has no geometry shaders, mesh shaders, 64-bit atomics or 64-bit floats. Mesh-shader draws run as a compute shader followed by a pass-through vertex shader (`APS5_NO_MESH_EMULATION=1` skips them instead); indirect ones and draws that need geometry shaders are skipped, and shaders that need the others do not run.
 - Known costs of the macOS port are listed in [TechnicalDebt.md](../dev/TechnicalDebt.md).
 
 ### Documentation
@@ -374,7 +374,7 @@ SDL'in tanıdığı kollar (DualSense, DualShock, Xbox kolları gibi) kendiliği
 
 - Oyun kodu Rosetta 2 altında çalışıyor. Apple, macOS 27'nin tam Rosetta desteği olan son sürüm olacağını duyurdu.
 - Oyunlar henüz yazılmamış bir fonksiyona ya da GPU özelliğine takılıp durabilir. [Uyumluluk listesine](COMPATIBILITY.md#türkçe) bak.
-- MoltenVK'de geometry shader, mesh shader, 64-bit atomic ve 64-bit float yok. Geometry ya da mesh shader gerektiren çizimler atlanır; diğerlerini gerektiren shader'lar çalışmaz.
+- MoltenVK'de geometry shader, mesh shader, 64-bit atomic ve 64-bit float yok. Mesh shader çizimleri bir compute shader ve ardından bir geçiş vertex shader'ı olarak çalışır (`APS5_NO_MESH_EMULATION=1` bunları atlar); indirect olanlar ve geometry shader gerektiren çizimler atlanır, diğerlerini gerektiren shader'lar çalışmaz.
 - macOS sürümünün bilinen maliyetleri [TechnicalDebt.md](../dev/TechnicalDebt.md) dosyasında listelenir.
 
 ### Belgeler

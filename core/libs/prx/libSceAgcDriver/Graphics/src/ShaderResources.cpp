@@ -1344,7 +1344,7 @@ void ShaderResources::buildPrepare(std::span<const CompiledShader> shaders, cons
         for (const auto& shader : shaders) {
             Require(shader.program != nullptr, "missing compiled shader");
             ShaderRecompiler::RuntimeAbi::RequireVersion(shader.program->runtimeAbiVersion);
-            const VkShaderStageFlags flags = VulkanStage(shader.stage);
+            const VkShaderStageFlags flags = VulkanStage(shader);
             std::uint64_t stageStorageBuffers = 0;
             std::uint64_t stageResources = shader.stage == ShaderRecompiler::ShaderStage::Fragment ? colorAttachments : 0;
             Require(stageResources <= context.limits.maxPerStageResources, "shader descriptors exceed per-stage limits");
@@ -1539,7 +1539,7 @@ DescribedSetLayouts DescribeSetLayouts(const Context& context, std::span<const C
     std::uint64_t storageBuffers = 0;
     for (const auto& shader : shaders) {
         Require(shader.program != nullptr, "missing compiled shader");
-        const VkShaderStageFlags flags = VulkanStage(shader.stage);
+        const VkShaderStageFlags flags = VulkanStage(shader);
         std::uint64_t stageStorageBuffers = 0;
         std::uint64_t stageResources = 0;
         for (const auto& binding : shader.program->bindings) {

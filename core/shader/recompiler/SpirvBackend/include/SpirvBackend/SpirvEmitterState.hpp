@@ -76,7 +76,7 @@ struct MemoryResourceAccess {
 struct SpirvEmitterState {
     const ImageResource* runtimeImage = nullptr;
     std::uint32_t runtimeImageMetadata = 0u;
-    SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo);
+    SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo, bool meshAsCompute = false);
 
     SpirvModule module;
     const IrProgram& program;
@@ -96,6 +96,7 @@ struct SpirvEmitterState {
     bool registrationModules = false;
     bool fragmentDescriptorSet = false;
     bool contractFloat = false;
+    bool meshAsCompute = false;
     std::unordered_set<const IrValue*> sharedLaneValues;
     std::uint32_t laneHalf = 0;
     // The target's SPIR-V version and what the device accepts, for capabilities an emitter adds

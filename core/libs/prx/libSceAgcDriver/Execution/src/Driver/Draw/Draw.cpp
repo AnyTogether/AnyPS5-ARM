@@ -92,12 +92,15 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
 
     resolveDrawDecode(queue, submission, decode, registerKey, drawKey, profile);
     const auto& graphics = decode->state;
-    // The geometry path runs as mesh shaders. A device without them (MoltenVK) cannot draw it, so the
-    // draw is skipped (in Stray, the translucency lighting volume's layered draws).
     if (graphics.stages.mesh && !localDevice->MeshShaders()) {
-        static std::once_flag reported;
-        std::call_once(reported, [] { std::fprintf(stderr, "[gpu] the device has no mesh shaders; geometry-path draws are skipped\n"); });
-        return DrawVerdict::Nothing;
+        const auto& mesh = *graphics.stages.mesh;
+        const auto sharedBytes = static_cast<std::uint64_t>(mesh.ldsSizeDwords) * 4u + static_cast<std::uint64_t>(mesh.maxVertices) * 4u + 8u;
+        const char* reason = !localDevice->Target().meshAsCompute ? "geometry-path draws" : drawParameters.indirect ? "indirect geometry-path draws" : sharedBytes > localDevice->Target().maxWorkgroupSharedMemoryBytes ? "geometry-path draws whose workgroup memory exceeds the compute limit" : nullptr;
+        if (reason != nullptr) {
+            static std::once_flag reported;
+            std::call_once(reported, [reason] { std::fprintf(stderr, "[gpu] the device has no mesh shaders; %s are skipped\n", reason); });
+            return DrawVerdict::Nothing;
+        }
     }
     auto pixel = decode->pixel;
     std::vector<DrawProgram> programs = decode->programs;
@@ -270,6 +273,12 @@ DrawVerdict Driver::draw(QueueState& queue, std::span<const std::uint32_t> packe
         require(!graphics.rectList && graphics.stages.path == Graphics::ShaderPath::Vertex && programs.size() == 2 && programResults[0] != nullptr && stages.size() == 2, "a pixel shader that reads barycentrics without VK_KHR_fragment_shader_barycentric needs a vertex shader before it");
         results.push_back(ShaderRecompiler::BuildBarycentricGeometryShader(*programResults[0], *programResults[1], localDevice->Target(), localDevice->GeometryLimits()));
         stages.insert(stages.begin() + 1, Graphics::CompiledShader{Stage::Geometry, &results.back(), 0});
+    }
+    if (!programs.empty() && programResults.front() != nullptr && programResults.front()->meshEmulation == ShaderRecompiler::MeshEmulationRole::Compute) {
+        static const ShaderRecompiler::RecompileResult noFragment;
+        const auto* fragment = programResults.back() != nullptr && programs.back().binary.stage == Stage::Fragment ? programResults.back() : &noFragment;
+        results.push_back(ShaderRecompiler::BuildMeshPassthroughVertexShader(*programResults.front(), *fragment, localDevice->Target(), graphics.layerExports != 0));
+        stages.insert(stages.begin() + 1, Graphics::CompiledShader{Stage::Vertex, &results.back(), 0});
     }
     std::vector<Graphics::GuestMemorySnapshot> snapshots;
     const auto snapshot = [&] {

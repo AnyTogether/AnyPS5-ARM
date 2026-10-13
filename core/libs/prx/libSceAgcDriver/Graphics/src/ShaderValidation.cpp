@@ -50,6 +50,7 @@ struct Module {
     bool primitiveIndices = false;
     bool fragmentBarycentric = false;
     bool layerOutput = false;
+    bool computeStage = false;
     std::map<std::uint32_t, std::vector<std::uint32_t>> modes;
 
     const std::vector<std::uint32_t>& Type(std::uint32_t id) const {
@@ -99,7 +100,7 @@ struct Module {
         }
         if (value == spv::BuiltInSubgroupLocalInvocationId) {
             Require(input && Signature(type) == "u32", "invalid subgroup local invocation ID input");
-            Require((subgroup.supportedStages & VulkanStage(stage)) != 0 && (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0, "subgroup local invocation ID is unsupported for this shader stage");
+            Require((subgroup.supportedStages & (computeStage ? VK_SHADER_STAGE_COMPUTE_BIT : VulkanStage(stage))) != 0 && (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0, "subgroup local invocation ID is unsupported for this shader stage");
             return;
         }
         if ((value == spv::BuiltInTessLevelOuter || value == spv::BuiltInTessLevelInner) && (stage == Stage::TessellationControl || stage == Stage::TessellationEvaluation)) {
@@ -164,13 +165,15 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
     const bool evaluation = stage == Stage::TessellationEvaluation;
     const bool geometry = stage == Stage::Geometry;
     const bool rectListControl = state.rectList && control;
+    const bool meshCompute = mesh && shader.meshEmulation == ShaderRecompiler::MeshEmulationRole::Compute;
+    const bool passthrough = vertex && shader.meshEmulation == ShaderRecompiler::MeshEmulationRole::Passthrough;
     if (rectListControl) {
         Require(shader.bdaAbiVersion == ShaderRecompiler::BdaAbi::Version, "incompatible rect-list fault ABI version");
         Require(shader.bindings.size() == 1, "rect-list control shader must declare exactly one fault buffer");
         const auto& binding = shader.bindings.front();
         Require(binding.role == ShaderRecompiler::DescriptorRole::FaultBuffer && binding.kind == ShaderRecompiler::DescriptorKind::StorageBuffer && binding.descriptorSet == 0 && binding.count == 1 && binding.guestDescriptor.empty() && !binding.readOnly, "invalid rect-list fault buffer contract");
     }
-    const auto model = mesh ? spv::ExecutionModelMeshEXT : control ? spv::ExecutionModelTessellationControl : evaluation ? spv::ExecutionModelTessellationEvaluation : geometry ? spv::ExecutionModelGeometry : vertex ? spv::ExecutionModelVertex : spv::ExecutionModelFragment;
+    const auto model = meshCompute ? spv::ExecutionModelGLCompute : mesh ? spv::ExecutionModelMeshEXT : control ? spv::ExecutionModelTessellationControl : evaluation ? spv::ExecutionModelTessellationEvaluation : geometry ? spv::ExecutionModelGeometry : vertex ? spv::ExecutionModelVertex : spv::ExecutionModelFragment;
     const auto& words = shader.spirv;
 
     Require(words.size() >= 5, "SPIR-V header is truncated: " + std::to_string(words.size()) + " words");
@@ -180,6 +183,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
     Require(words[4] == 0, "unsupported SPIR-V schema: " + std::to_string(words[4]));
 
     Module module;
+    module.computeStage = meshCompute;
     std::uint32_t entries = 0;
     std::uint32_t memoryModels = 0;
     std::uint32_t entryPoint = 0;
@@ -216,7 +220,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                 }
                 const bool isSubgroupCapability = subgroupOperations != 0;
                 if (isSubgroupCapability) {
-                    Require((subgroup.supportedStages & VulkanStage(stage)) != 0, "subgroup capability " + std::to_string(instruction[1]) + " is unsupported for shader stage " + std::to_string(VulkanStage(stage)));
+                    Require((subgroup.supportedStages & (meshCompute ? VK_SHADER_STAGE_COMPUTE_BIT : VulkanStage(stage))) != 0, "subgroup capability " + std::to_string(instruction[1]) + " is unsupported for shader stage " + std::to_string(VulkanStage(stage)));
                     Require((subgroup.supportedOperations & subgroupOperations) == subgroupOperations, "device lacks operations for subgroup capability " + std::to_string(instruction[1]));
                 }
 
@@ -328,7 +332,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                     Require(fragment && fragmentShaderBarycentric, "SPV_KHR_fragment_shader_barycentric requires enabled fragmentShaderBarycentric in a fragment shader");
                     break;
                 }
-                Require(extension == "SPV_KHR_float_controls" || (imageInt64Atomics && extension == "SPV_EXT_shader_image_int64") || (viewportIndexLayer && extension == "SPV_EXT_shader_viewport_index_layer") || (mesh && (extension == "SPV_EXT_mesh_shader" || extension == "SPV_KHR_physical_storage_buffer")) || (descriptorIndexing && extension == "SPV_EXT_descriptor_indexing") || (shader.bdaAbiVersion == ShaderRecompiler::BdaAbi::Version && (extension == "SPV_KHR_physical_storage_buffer" || extension == "SPV_KHR_8bit_storage")), "unsupported SPIR-V extension");
+                Require(extension == "SPV_KHR_float_controls" || (imageInt64Atomics && extension == "SPV_EXT_shader_image_int64") || (viewportIndexLayer && extension == "SPV_EXT_shader_viewport_index_layer") || (mesh && (extension == "SPV_EXT_mesh_shader" || extension == "SPV_KHR_physical_storage_buffer")) || (passthrough && extension == "SPV_KHR_physical_storage_buffer") || (descriptorIndexing && extension == "SPV_EXT_descriptor_indexing") || (shader.bdaAbiVersion == ShaderRecompiler::BdaAbi::Version && (extension == "SPV_KHR_physical_storage_buffer" || extension == "SPV_KHR_8bit_storage")), "unsupported SPIR-V extension");
                 break;
             }
             case spv::OpDecorateId:
@@ -432,10 +436,14 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
         const auto local = module.modes.find(spv::ExecutionModeLocalSize);
         const bool paired = state.stages.vertexWaveSize == 64u && subgroup.subgroupSize == 32u && local != module.modes.end() && local->second == std::vector<std::uint32_t>{config.threadsPerGroup / 2u, 1, 1};
         mode(spv::ExecutionModeLocalSize, {paired ? config.threadsPerGroup / 2u : config.threadsPerGroup, 1, 1});
+        if (meshCompute) {
+            Require(module.modes.size() == 1, "unsupported emulated mesh execution mode");
+        } else {
         mode(spv::ExecutionModeOutputVertices, {config.maxVertices});
         mode(spv::ExecutionModeOutputPrimitivesEXT, {config.maxPrimitives});
         mode(spv::ExecutionModeOutputTrianglesEXT, {});
         Require(module.modes.size() == 4, "unsupported mesh execution mode");
+        }
     } else if (control) {
         Require(state.rectList || state.stages.tessellation.has_value(), "tessellation configuration is missing");
         mode(spv::ExecutionModeOutputVertices, {state.rectList ? 4u : state.stages.tessellation->outputControlPoints});
@@ -517,7 +525,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                 }
             }
         } else if (variable.storage == spv::StorageClassPushConstant) {
-            Require(!push && (!shader.pushConstants.empty() || mesh || (control && !rectListControl)) && (type[0] & 0xffffu) == spv::OpTypeStruct, "invalid push constant interface");
+            Require(!push && (!shader.pushConstants.empty() || mesh || passthrough || (control && !rectListControl)) && (type[0] & 0xffffu) == spv::OpTypeStruct, "invalid push constant interface");
             push = true;
             Require(type.size() == 3 && module.decorations[typeId].block, "push constant variable must be a Block struct with exactly one member");
             const auto offset = module.offsets.find({typeId, 0});
@@ -585,10 +593,10 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
         Require(shader.vertexAttributes.empty(), "vertex attribute metadata is invalid for this stage");
     }
     Require(descriptors.size() == shader.bindings.size(), "recompiler binding metadata contains undeclared resources");
-    Require(push == (!shader.pushConstants.empty() || mesh || (control && !rectListControl)), "recompiler push constant metadata disagrees with SPIR-V");
+    Require(push == (!shader.pushConstants.empty() || mesh || passthrough || (control && !rectListControl)), "recompiler push constant metadata disagrees with SPIR-V");
     for (const auto id : module.interface) Require(module.variables.contains(id), "entry point interface contains an unknown variable");
-    if (mesh) Require(module.primitiveIndices, "mesh shader does not export primitive indices");
-    if (stage == Stage::Vertex || mesh || evaluation || geometry) Require(module.position, "vertex shader does not export position");
+    if (mesh && !meshCompute) Require(module.primitiveIndices, "mesh shader does not export primitive indices");
+    if (stage == Stage::Vertex || (mesh && !meshCompute) || evaluation || geometry) Require(module.position, "vertex shader does not export position");
     return module;
 }
 
@@ -602,7 +610,9 @@ std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders,
     Require(state.stages.mesh.has_value() == mesh && state.stages.tessellation.has_value() == tessellation, "graphics stage configuration disagrees with its path");
     Require(!state.rectList || (state.stages.path == ShaderPath::Vertex && state.topology == VK_PRIMITIVE_TOPOLOGY_PATCH_LIST && state.cullMode == VK_CULL_MODE_NONE), "invalid rect-list pipeline state");
     const bool geometry = state.stages.path == ShaderPath::Vertex && !state.rectList && shaders.size() == 3u;
-    Require(geometry || shaders.size() == (tessellation || state.rectList ? 4u : 2u), "incorrect graphics stage count");
+    const bool emulated = mesh && !shaders.empty() && EmulatedMesh(shaders.front());
+    Require(geometry || shaders.size() == (tessellation || state.rectList ? 4u : emulated ? 3u : 2u), "incorrect graphics stage count");
+    Require(!emulated || shaders[1].program->meshEmulation == ShaderRecompiler::MeshEmulationRole::Passthrough, "an emulated mesh stage needs its pass-through vertex stage");
     if (geometry) {
         Require(shaders.back().program != nullptr && shaders.back().program->barycentricEmulation.active, "a geometry stage is generated only for emulated barycentrics");
         Require(state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "emulated barycentrics require triangle primitives");
@@ -611,7 +621,7 @@ std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders,
     static_cast<void>(AssemblePushConstants(shaders));
     Module previous;
     for (std::size_t i = 0; i < shaders.size(); ++i) {
-        const auto expected = state.rectList ? (i == 0 ? Stage::Vertex : tessStages[i]) : tessellation ? tessStages[i] : geometry && i == 1 ? Stage::Geometry : i == shaders.size() - 1 ? Stage::Fragment : state.stages.path == ShaderPath::Geometry ? Stage::Mesh : Stage::Vertex;
+        const auto expected = state.rectList ? (i == 0 ? Stage::Vertex : tessStages[i]) : tessellation ? tessStages[i] : geometry && i == 1 ? Stage::Geometry : emulated && i == 1 ? Stage::Vertex : i == shaders.size() - 1 ? Stage::Fragment : state.stages.path == ShaderPath::Geometry ? Stage::Mesh : Stage::Vertex;
         Require(shaders[i].program != nullptr, "missing compiled shader");
         Require(shaders[i].stage == expected, "graphics stage order disagrees");
         for (const auto& binding : shaders[i].program->bindings) Require(binding.descriptorSet == ShaderRecompiler::RuntimeAbi::DescriptorSet || (shaders[i].stage == ShaderRecompiler::ShaderStage::Fragment && binding.descriptorSet == ShaderRecompiler::RuntimeAbi::FragmentDescriptorSet), "graphics resource uses a descriptor set other than its stage's");

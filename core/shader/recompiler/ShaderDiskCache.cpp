@@ -338,6 +338,7 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Value(result.barycentricEmulation.active);
     writer.Value(result.barycentricEmulation.smooth);
     writer.Value(result.barycentricEmulation.linear);
+    writer.Value(static_cast<std::uint32_t>(result.meshEmulation));
 }
 
 void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
@@ -382,6 +383,10 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Value(result.barycentricEmulation.active);
     reader.Value(result.barycentricEmulation.smooth);
     reader.Value(result.barycentricEmulation.linear);
+    std::uint32_t meshEmulation = 0;
+    reader.Value(meshEmulation);
+    if (meshEmulation > static_cast<std::uint32_t>(MeshEmulationRole::Passthrough)) throw std::runtime_error("invalid mesh emulation role in the shader cache");
+    result.meshEmulation = static_cast<MeshEmulationRole>(meshEmulation);
     result.variantId = 0;
 }
 

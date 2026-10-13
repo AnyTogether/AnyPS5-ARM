@@ -3072,6 +3072,8 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.relaxedFloat = !exactFloat && (relaxedFloat || (state->moltenVk && state->window != nullptr));
     target.srgbDecodeFormats = state->srgbDecodeFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
+    static const bool meshEmulation = std::getenv("APS5_NO_MESH_EMULATION") == nullptr;
+    target.meshAsCompute = !state->meshShader && meshEmulation;
     if (state->meshShader) {
         const auto& mesh = state->meshLimits;
         target.mesh = ShaderRecompiler::MeshTargetLimits{{mesh.maxMeshWorkGroupSize[0], mesh.maxMeshWorkGroupSize[1], mesh.maxMeshWorkGroupSize[2]}, mesh.maxMeshWorkGroupInvocations, std::min(mesh.maxMeshSharedMemorySize, mesh.maxMeshPayloadAndSharedMemorySize), mesh.maxMeshOutputVertices, mesh.maxMeshOutputPrimitives, mesh.maxMeshOutputComponents, std::min(mesh.maxMeshOutputMemorySize, mesh.maxMeshPayloadAndOutputMemorySize), mesh.meshOutputPerVertexGranularity, mesh.meshOutputPerPrimitiveGranularity};

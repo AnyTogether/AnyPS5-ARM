@@ -148,8 +148,13 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
     const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Vertices.size()), 0, 1, 0, false};
     ShaderRecompiler::ShaderVertexStageInfo vertexInfo{};
     vertexInfo.paClVsOutCntl = LayerExport;
+    const bool emulated = mesh && target.meshAsCompute;
     std::vector<std::uint32_t> userData(mesh ? 12u : 4u, 0u);
     std::copy(vertexBuffer.begin(), vertexBuffer.end(), userData.begin() + (mesh ? 8 : 0));
+    if (mesh) {
+        const auto indices = AgcDriver::Graphics::MeshIndexBufferDescriptor(draw);
+        std::copy(indices.begin(), indices.end(), userData.begin() + ShaderRecompiler::MeshIndexBufferUserWord);
+    }
     const std::span<const std::uint32_t> code = mesh ? std::span<const std::uint32_t>(GeometryCode) : std::span<const std::uint32_t>(VertexCode);
     const auto stage = mesh ? ShaderStage::Mesh : ShaderStage::Vertex;
     const std::array<ShaderRecompiler::MemoryRegion, 1> geometryMemory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
@@ -157,7 +162,7 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
         {stage, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
         {64, 0, userData, std::nullopt, std::nullopt, vertexInfo, geometryMemory},
         target,
-        {0, 0, 0, mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : 64u}
+        {0, 0, 0, mesh ? (emulated ? ShaderRecompiler::MeshEmulationPushOffsetBytes : ShaderRecompiler::MeshDrawPushOffsetBytes) : 64u}
     };
     if (mesh) geometry.graphics = ShaderRecompiler::GraphicsCompileContext{0, {}, Subgroup, std::nullopt, {draw.indexAddress, draw.indexCount, draw.indexSize, draw.instanceCount}};
     geometry.useCache = false;
@@ -177,10 +182,14 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
     };
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
-    const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
-        {stage, &geometryResult, 0},
-        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(geometryPush, target)}
-    }};
+    std::vector<AgcDriver::Graphics::CompiledShader> shaders{{stage, &geometryResult, 0}};
+    ShaderRecompiler::RecompileResult passthrough;
+    if (emulated) {
+        Require(geometryResult.meshEmulation == ShaderRecompiler::MeshEmulationRole::Compute, "the mesh program was not compiled for emulation");
+        passthrough = ShaderRecompiler::BuildMeshPassthroughVertexShader(geometryResult, pixelResult, target, true);
+        shaders.push_back({ShaderStage::Vertex, &passthrough, 0});
+    }
+    shaders.push_back({ShaderStage::Fragment, &pixelResult, PixelPushOffset(geometryPush, target)});
 
     AgcDriver::Graphics::State state{};
     if (mesh) state.stages = {AgcDriver::Graphics::ShaderPath::Geometry, 0x20u, 64, 64, Subgroup, std::nullopt};
@@ -200,7 +209,7 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
     state.blendConstants = {};
-    if (mesh) {
+    if (mesh && !emulated) {
         Require(DeclaresLayer(geometryResult.spirv), "the mesh program declares no Layer output");
         VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         subgroup.subgroupSize = target.subgroupSize;
@@ -268,7 +277,11 @@ int main(int argc, char** argv) {
         Run(*device, color, false);
         Check(volume.Data(), color, "vertex draw");
         if (vertexOnly) std::puts("layered volume vertex draw tests passed");
-        else if (target.mesh.has_value()) Run(*device, color, true);
+        else if (target.meshAsCompute) {
+            std::memset(volume.Data(), Kept, color.bytes);
+            Run(*device, color, true);
+            Check(volume.Data(), color, "emulated mesh draw");
+        } else if (target.mesh.has_value()) Run(*device, color, true);
         else std::puts("mesh case skipped, the device has no VK_EXT_mesh_shader");
         std::puts("layered volume draw tests passed");
         return 0;

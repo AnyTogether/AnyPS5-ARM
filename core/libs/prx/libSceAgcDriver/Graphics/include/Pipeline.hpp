@@ -59,6 +59,8 @@ public:
     bool SplitsSecondChannel() const { return secondChannel != VK_NULL_HANDLE; }
     void ContinueSecondChannel(VkCommandBuffer commands) const;
     void PushConstants(VkCommandBuffer commands, VkShaderStageFlags stages, std::span<const std::byte, PipelinePushConstantBytes> bytes) const;
+    bool EmulatesMesh() const { return computePipeline != VK_NULL_HANDLE; }
+    void DispatchMesh(VkCommandBuffer commands, std::uint32_t groups, std::uint32_t instances) const;
     // Forgets the Vulkan objects without destroying them: for entries of a device that is already gone.
     void Abandon() noexcept;
 
@@ -80,6 +82,7 @@ private:
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipeline backFaces = VK_NULL_HANDLE;
     VkPipeline secondChannel = VK_NULL_HANDLE;
+    VkPipeline computePipeline = VK_NULL_HANDLE;
     std::size_t attachments = 0;
     std::size_t colorAttachments = 0;
     bool depthBounds = false;

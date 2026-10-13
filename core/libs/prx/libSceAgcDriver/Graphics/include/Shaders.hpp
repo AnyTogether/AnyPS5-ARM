@@ -53,16 +53,25 @@ inline VkShaderStageFlagBits VulkanStage(ShaderRecompiler::ShaderStage stage) {
     }
 }
 
+inline bool EmulatedMesh(const CompiledShader& shader) {
+    return shader.program != nullptr && shader.program->meshEmulation == ShaderRecompiler::MeshEmulationRole::Compute;
+}
+
+inline VkShaderStageFlagBits VulkanStage(const CompiledShader& shader) {
+    return EmulatedMesh(shader) ? VK_SHADER_STAGE_COMPUTE_BIT : VulkanStage(shader.stage);
+}
+
 inline VkPipelineStageFlags PipelineStages(std::span<const CompiledShader> shaders) {
     VkPipelineStageFlags result = 0;
     for (const auto& shader : shaders) {
-        switch (VulkanStage(shader.stage)) {
+        switch (VulkanStage(shader)) {
             case VK_SHADER_STAGE_VERTEX_BIT: result |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT; break;
             case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: result |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT; break;
             case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: result |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT; break;
             case VK_SHADER_STAGE_GEOMETRY_BIT: result |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT; break;
             case VK_SHADER_STAGE_MESH_BIT_EXT: result |= VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT; break;
             case VK_SHADER_STAGE_FRAGMENT_BIT: result |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT; break;
+            case VK_SHADER_STAGE_COMPUTE_BIT: result |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT; break;
             default: throw std::runtime_error("AGC graphics: invalid graphics pipeline stage");
         }
     }
@@ -73,7 +82,8 @@ inline VkShaderStageFlags PushConstantStages(std::span<const CompiledShader> sha
     VkShaderStageFlags result = 0;
     for (const auto& shader : shaders) {
         Require(shader.program != nullptr, "missing compiled shader");
-        if (!shader.program->pushConstants.empty() || shader.stage == ShaderRecompiler::ShaderStage::Mesh || shader.stage == ShaderRecompiler::ShaderStage::TessellationControl) result |= VulkanStage(shader.stage);
+        const bool passthrough = shader.program->meshEmulation == ShaderRecompiler::MeshEmulationRole::Passthrough;
+        if (!shader.program->pushConstants.empty() || passthrough || shader.stage == ShaderRecompiler::ShaderStage::Mesh || shader.stage == ShaderRecompiler::ShaderStage::TessellationControl) result |= VulkanStage(shader);
     }
     return result;
 }

@@ -244,6 +244,7 @@ private:
         append(key, value.subgroupStages);
         append(key, value.relaxedFloat);
         append(key, value.float64DenormPreserve);
+        append(key, value.meshAsCompute);
         append(key, value.registrationModules);
         append(key, value.registrationWordLimit);
         append(key, value.vertexSubgroups);

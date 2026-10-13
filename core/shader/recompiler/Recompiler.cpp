@@ -451,6 +451,7 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     targetOptions.fragmentDescriptorSet = request.target.registrationModules;
     const auto stage = program.Resources().stage;
     targetOptions.contractFloat = request.target.relaxedFloat && (stage == IrShaderStage::Pixel || stage == IrShaderStage::Compute);
+    targetOptions.meshAsCompute = request.target.meshAsCompute && stage == IrShaderStage::Mesh;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
@@ -464,6 +465,7 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
         result.spirv = spirvEmitter.Emit(program, inputInfo, bindings, targetOptions);
     }
     result.registrationModule = registration;
+    if (targetOptions.meshAsCompute) result.meshEmulation = MeshEmulationRole::Compute;
 
     result.bdaAbiVersion = program.Info().usesDma || program.Info().usesFaultBuffer ? request.target.bdaAbiVersion : 0u;
     result.memoryOffsetDword = bindings.layout.memoryOffsetDword;
@@ -776,6 +778,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         .parameterExports = artifact.parameterExports,
         .fragmentParameters = artifact.fragmentParameters,
         .barycentricEmulation = artifact.barycentricEmulation,
+        .meshEmulation = artifact.meshEmulation,
         .variantId = artifact.variantId
     };
     const auto plan = preparedBindingPlan(variant, snapshot, request.context.pixel ? std::span<const std::uint8_t>(request.context.pixel->targetExportMapping) : std::span<const std::uint8_t>{}, request.target.registrationModules);
