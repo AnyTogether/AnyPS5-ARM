@@ -8,6 +8,7 @@ int APS5_VABI sceHttp2Init(int, int, std::size_t, int);
 int APS5_VABI sceHttp2CreateTemplate(int, const char*, int, int);
 int APS5_VABI sceHttp2CreateRequestWithURL(int, const char*, const char*, std::uint64_t);
 int APS5_VABI sceHttp2CreateCookieBox(int);
+int APS5_VABI sceHttp2DeleteCookieBox(int);
 int APS5_VABI sceHttp2SetCookieBox(int, int);
 int APS5_VABI sceHttp2CookieFlush(int);
 int APS5_VABI sceHttp2SetRequestNoContentLength(int);
@@ -71,6 +72,11 @@ int main() {
     const int box = sceHttp2CreateCookieBox(context);
     const int other = sceHttp2CreateCookieBox(context);
     Require(box > 0 && other > 0 && box != other && box != context);
+    const int discarded = sceHttp2CreateCookieBox(context);
+    Require(discarded > 0 && discarded != box && discarded != other);
+    Require(sceHttp2DeleteCookieBox(discarded) == 0);
+    Require(sceHttp2DeleteCookieBox(discarded) == InvalidId);
+    Require(sceHttp2DeleteCookieBox(context) == InvalidId);
     const int tmpl = sceHttp2CreateTemplate(context, "agent", 2, 0);
     Require(tmpl > 0 && tmpl != box && tmpl != other);
     Require(sceHttp2SetResolveRetry(tmpl, 3) == 0);
@@ -119,6 +125,7 @@ int main() {
     Require(sceHttp2Term(doomedContext) == 0);
     RequireSslSetters(doomedContext, InvalidId);
     RequireSslSetters(doomedContextBox, InvalidId);
+    Require(sceHttp2DeleteCookieBox(doomedContextBox) == InvalidId);
     RequireSslSetters(doomedContextTemplate, InvalidId);
     RequireSslSetters(doomedContextRequest, InvalidId);
     Require(sceHttp2Term(doomedContext) == InvalidId);
@@ -159,6 +166,7 @@ int main() {
     Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == notFound);
     Require(sceHttp2DeleteRequest(request) == 0);
     Require(sceKernelDeleteEqueue(eq) == 0);
+    Require(sceHttp2DeleteCookieBox(box) == 0 && sceHttp2DeleteCookieBox(other) == 0);
     Require(sceHttp2Term(context) == 0);
 
     KernelEqueue templateEqueue = 0;

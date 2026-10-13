@@ -1,6 +1,5 @@
 #include <shared_mutex>
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
-#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
@@ -9,10 +8,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace AgcDriver::Graphics {
@@ -44,7 +46,7 @@ void recordCommands(const Context& context, Record&& record) {
 
 class MultisampleTarget {
 public:
-    MultisampleTarget(const Context& context, const ColorTarget& target) : context(context), target(target), cmask(target.cmaskAddress, target.cmaskBytes) {
+    MultisampleTarget(const Context& context, const ColorTarget& target) : context(context), target(target), cmask(target.cmaskAddress, target.cmaskBytes), colorFill(target) {
         this->context.bufferPool.reset();
         const auto samples = static_cast<VkSampleCountFlagBits>(target.samples);
         Require((context.limits.framebufferColorSampleCounts & samples) != 0, "the device cannot render color with the target's sample count");
@@ -106,8 +108,8 @@ public:
     MultisampleTarget& operator=(const MultisampleTarget&) = delete;
 
     void ApplyFastClear(const ColorTarget& use) {
-        if (!cmask.TakeClear()) return;
-        const auto clear = fastClearColor(use);
+        VkClearColorValue clear{};
+        if (!TakeMultisampledClear(cmask, colorFill, use, clear)) return;
         recordCommands(context, [&](VkCommandBuffer commands, Recorder* recorder) {
             RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
             const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -157,6 +159,7 @@ public:
     VkImageView view = VK_NULL_HANDLE;
     VkRenderPass resolvePass = VK_NULL_HANDLE;
     MultisampledCmask cmask;
+    MultisampledColorFill colorFill;
 
 private:
     void release() noexcept {
@@ -194,7 +197,16 @@ void guardReads(std::uint64_t address, std::size_t bytes) {
 }
 
 void guard(const Context& context, const ColorTarget& target) {
-    const auto bytes = std::max<std::uint64_t>(MultisampleSurfaceBytes(target.extent.width, target.extent.height, target.tileMode, target.elementBytes, target.samples, target.bytes), static_cast<std::uint64_t>(target.extent.width) * target.extent.height * target.elementBytes * target.samples);
+    auto bytes = std::max<std::uint64_t>(target.bytes * target.samples, static_cast<std::uint64_t>(target.extent.width) * target.extent.height * target.elementBytes * target.samples);
+    if (target.tileMode == ColorTileMode::RenderTarget && std::has_single_bit(target.elementBytes) && std::has_single_bit(target.samples)) {
+        const auto log2Samples = std::countr_zero(target.samples);
+        const auto log2Pixels = 16u - std::countr_zero(target.elementBytes) - log2Samples;
+        const auto log2Width = (log2Pixels + ((log2Samples & 1u) == 0u ? 1u : 0u)) / 2u;
+        const auto blockWidth = 1u << log2Width;
+        const auto blockHeight = 1u << (log2Pixels - log2Width);
+        const auto align = [](std::uint32_t extent, std::uint32_t block) { return (static_cast<std::uint64_t>(extent) + block - 1u) / block * block; };
+        bytes = align(target.extent.width, blockWidth) * align(target.extent.height, blockHeight) * target.elementBytes * target.samples;
+    }
     std::unique_lock lock(guardedMutex());
     guarded().push_back({context.device, target.address, bytes, target.samples});
     anyGuarded().store(true, std::memory_order_release);
@@ -273,6 +285,71 @@ bool MultisampledCmask::TakeClear() {
     return true;
 }
 
+std::uint64_t MultisampledColorBytes(const ColorTarget& target) {
+    const auto blockLog2 = target.tileMode == ColorTileMode::Standard4KB ? 12u : target.tileMode == ColorTileMode::Standard64KB || target.tileMode == ColorTileMode::RenderTarget ? 16u : 0u;
+    if (blockLog2 == 0 || !std::has_single_bit(target.elementBytes) || !std::has_single_bit(target.samples)) return 0;
+    const auto samplesLog2 = static_cast<std::uint32_t>(std::countr_zero(target.samples));
+    const auto elementsLog2 = blockLog2 - static_cast<std::uint32_t>(std::countr_zero(target.elementBytes)) - samplesLog2;
+    const auto widthLog2 = (elementsLog2 + ((samplesLog2 & 1u) == 0 ? 1u : 0u)) / 2u;
+    const std::uint64_t blockWidth = std::uint64_t{1} << widthLog2;
+    const std::uint64_t blockHeight = std::uint64_t{1} << (elementsLog2 - widthLog2);
+    return ((target.extent.width + blockWidth - 1) / blockWidth) * ((target.extent.height + blockHeight - 1) / blockHeight) << blockLog2;
+}
+
+bool MultisampledFillClearColor(const ColorTarget& target, std::uint32_t fill, VkClearColorValue& clear) {
+    const std::array<std::uint32_t, 4> pattern{fill, fill, fill, fill};
+    VkFormat unorm = VK_FORMAT_UNDEFINED;
+    switch (target.format) {
+        case VK_FORMAT_R8G8B8A8_SRGB: unorm = VK_FORMAT_R8G8B8A8_UNORM; break;
+        case VK_FORMAT_B8G8R8A8_SRGB: unorm = VK_FORMAT_B8G8R8A8_UNORM; break;
+        case VK_FORMAT_A8B8G8R8_SRGB_PACK32: unorm = VK_FORMAT_A8B8G8R8_UNORM_PACK32; break;
+        default: return ClearColorForTexel(target.format, target.elementBytes, pattern, clear);
+    }
+    if (!ClearColorForTexel(unorm, target.elementBytes, pattern, clear)) return false;
+    return std::all_of(clear.float32, clear.float32 + 3, [](float value) { return value == 0.0f || value == 1.0f; });
+}
+
+MultisampledColorFill::MultisampledColorFill(const ColorTarget& target) : address(target.address), bytes(MultisampledColorBytes(target)) {}
+
+void MultisampledColorFill::NoteFill(std::uint64_t fillAddress, std::size_t fillBytes, std::uint32_t pattern) {
+    if (bytes == 0 ? fillAddress > address || address >= fillAddress + fillBytes : fillAddress >= address + bytes || address >= fillAddress + fillBytes) return;
+    char text[192];
+    if (bytes == 0) {
+        std::snprintf(text, sizeof(text), "a fill of 0x%llx+0x%zx covers the color memory at 0x%llx of a multisampled target whose footprint is not modeled", static_cast<unsigned long long>(fillAddress), fillBytes, static_cast<unsigned long long>(address));
+        refusal = text;
+        return;
+    }
+    if (fillAddress > address || fillAddress + fillBytes < address + bytes) {
+        std::snprintf(text, sizeof(text), "a fill of 0x%llx+0x%zx partly covers the color memory 0x%llx+0x%llx of a multisampled target, leaving its samples mixed", static_cast<unsigned long long>(fillAddress), fillBytes, static_cast<unsigned long long>(address), static_cast<unsigned long long>(bytes));
+        refusal = text;
+        return;
+    }
+    refusal.clear();
+    filled = pattern;
+}
+
+std::optional<std::uint32_t> MultisampledColorFill::TakeFill() {
+    Require(refusal.empty(), refusal);
+    return std::exchange(filled, std::nullopt);
+}
+
+void MultisampledColorFill::Discard() {
+    refusal.clear();
+    filled.reset();
+}
+
+bool TakeMultisampledClear(MultisampledCmask& cmask, MultisampledColorFill& colorFill, const ColorTarget& use, VkClearColorValue& clear) {
+    if (cmask.TakeClear()) {
+        colorFill.Discard();
+        clear = fastClearColor(use);
+        return true;
+    }
+    const auto fill = colorFill.TakeFill();
+    if (!fill) return false;
+    Require(MultisampledFillClearColor(use, *fill, clear), "a fill over the color memory of a multisampled target has no exact clear value in its format");
+    return true;
+}
+
 VkImageView MultisampleTargetView(const Context& context, const ColorTarget& target) {
     std::lock_guard lock(targetsMutex());
     return acquire(context, target).view;
@@ -303,6 +380,7 @@ void ResolveMultisampleTarget(const Context& context, const ColorTarget& source,
 void NoteColorMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
     std::lock_guard lock(targetsMutex());
     for (const auto& target : targets()) {
+        target->colorFill.NoteFill(address, bytes, pattern);
         const auto before = target->cmask.Keys();
         target->cmask.NoteFill(address, bytes, pattern);
         if (before == DccKeys::Clear0000 || target->cmask.Keys() != DccKeys::Clear0000) continue;

@@ -77,6 +77,10 @@ int main() {
             } catch (const Codegen::CodegenException&) {
             }
         }
+        const auto threeDNow = parse("0f0f0d11223344a6");
+        const auto threeDNowInfo = decoder.DecodeInstruction(threeDNow.data(), threeDNow.size());
+        require(threeDNowInfo.HasModRm && threeDNowInfo.ModRmByte == 0x0d, "3DNow! ModRM was not reported");
+        require(threeDNowInfo.HasRipRelativeDisp && threeDNowInfo.RipRelativeDispOffset == 3, "3DNow! RIP-relative displacement was not reported");
         std::cout << "Decoder length tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

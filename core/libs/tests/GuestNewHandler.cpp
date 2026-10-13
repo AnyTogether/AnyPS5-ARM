@@ -4,7 +4,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <new>
+#include <stdexcept>
 
 extern "C" {
 using Handler = void (APS5_VABI*)();
@@ -14,6 +17,7 @@ void* APS5_VABI _Znwm_nid_postfix(std::size_t);
 void* APS5_VABI _Znam_nid_postfix(std::size_t);
 void* APS5_VABI _ZnwmRKSt9nothrow_t_nid_postfix(std::size_t, const void*) noexcept;
 void* APS5_VABI _ZnamRKSt9nothrow_t_nid_postfix(std::size_t, const void*) noexcept;
+void APS5_VABI _ZdlPv_nid_postfix(void*);
 }
 
 namespace {
@@ -85,7 +89,37 @@ bool Throws(TAction action) {
 
 }
 
-int main() {
+int RunDefaultHeap() {
+    std::array<void*, 10> none{};
+    ApplicationHeapRegister_nid_no_patch(none.data());
+    constexpr std::size_t huge = std::numeric_limits<std::size_t>::max();
+
+    REQUIRE(Throws([] { _Znwm_nid_postfix(huge); }));
+    REQUIRE(Throws([] { _Znam_nid_postfix(huge); }));
+    REQUIRE(_ZnwmRKSt9nothrow_t_nid_postfix(huge, nullptr) == nullptr);
+    REQUIRE(_ZnamRKSt9nothrow_t_nid_postfix(huge, nullptr) == nullptr);
+
+    handlerCalls = 0;
+    REQUIRE(_ZSt15set_new_handlerPFvvE_nid_postfix(&uninstallingHandler) == nullptr);
+    REQUIRE(Throws([] { _Znwm_nid_postfix(huge); }));
+    REQUIRE(handlerCalls == 3 && _ZSt15get_new_handlerv_nid_postfix() == nullptr);
+
+    handlerCalls = 0;
+    REQUIRE(_ZSt15set_new_handlerPFvvE_nid_postfix(&throwingHandler) == nullptr);
+    REQUIRE(_ZnwmRKSt9nothrow_t_nid_postfix(huge, nullptr) == nullptr && handlerCalls == 1);
+    REQUIRE(_ZSt15set_new_handlerPFvvE_nid_postfix(nullptr) == &throwingHandler);
+
+    void* small = _Znwm_nid_postfix(24);
+    REQUIRE(small != nullptr);
+    std::memset(small, 0x5a, 24);
+    _ZdlPv_nid_postfix(small);
+
+    std::puts("Guest new handler default heap checks passed");
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "default") == 0) return RunDefaultHeap();
     std::array<void*, 10> api{};
     api[0] = reinterpret_cast<void*>(&allocate);
     api[1] = reinterpret_cast<void*>(&release);

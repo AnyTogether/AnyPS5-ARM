@@ -3,6 +3,7 @@
 
 #include <codegen/CodegenTypes.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -12,14 +13,10 @@ class IInstructionScanner {
 public:
     virtual ~IInstructionScanner() = default;
 
-    [[nodiscard]] virtual std::vector<InstructionMatch> ScanCodeSection(
-        const std::vector<std::uint8_t>& codeSection,
-        Domain::FileByteOffset codeSectionOffset,
-        Domain::FileByteOffset codeSectionSize
-    ) const = 0;
+    [[nodiscard]] virtual std::vector<InstructionMatch> ScanCodeSection(const std::vector<std::uint8_t>& codeSection, Domain::FileByteOffset codeSectionOffset, Domain::FileByteOffset codeSectionSize) const = 0;
 };
 
-std::unique_ptr<IInstructionScanner> MakeInstructionScanner();
+std::unique_ptr<IInstructionScanner> MakeInstructionScanner(std::function<void(std::uint64_t, std::uint64_t)> progress = {});
 
 }
 

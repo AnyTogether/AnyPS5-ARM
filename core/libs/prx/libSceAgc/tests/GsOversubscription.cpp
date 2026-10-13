@@ -12,7 +12,6 @@
 #include <stdexcept>
 
 extern "C" int APS5_VABI sceAgcGetGsOversubscription(ShaderRegister* regs, const Shader* gs, std::uint32_t budget, float factor);
-extern "C" int APS5_VABI sceAgcGetGsPrimPayload(std::uint32_t* payload, const Shader* gs);
 
 namespace {
 
@@ -124,42 +123,6 @@ void testRejections() {
     check(std::memcmp(regs.data(), saved.data(), sizeof(regs)) == 0, "rejected call wrote registers");
 }
 
-std::uint32_t primPayload(const Shader* gs, const char* message) {
-    std::uint32_t payload = 0xccccccccu;
-    check(sceAgcGetGsPrimPayload(&payload, gs) == 0, message);
-    return payload;
-}
-
-void testPrimPayload() {
-    GsSetup setup;
-    makeGs(setup, 2u << 11u, 4, 3u << 2u, 0, 64, false);
-    check(primPayload(&setup.shader, "GS without an index export format query failed") == 0, "GS without an index export format reports a payload");
-    std::array<ShaderRegister, 3> cx{{{ShaderRegs::GE_PC_ALLOC, 0}, {ShaderRegs::SPI_SHADER_IDX_FORMAT, 2u}, {ShaderRegs::SPI_SHADER_IDX_FORMAT, 4u}}};
-    Shader shader{};
-    shader.cx_registers = cx.data();
-    shader.num_cx_registers = static_cast<std::uint8_t>(cx.size());
-    check(primPayload(&shader, "two-component index export query failed") == 8, "two-component index export does not give a payload of 8");
-    cx[1].value = 0xfffffff2u;
-    check(primPayload(&shader, "index export format with other bits query failed") == 8, "bits above the export format changed the payload");
-    cx[1].value = 4u;
-    check(primPayload(&shader, "four-component index export query failed") == 0, "four-component index export gives a payload");
-    cx[1].value = 1u;
-    check(primPayload(&shader, "one-component index export query failed") == 0, "one-component index export gives a payload");
-    cx[1].value = 0u;
-    cx[2].value = 2u;
-    check(primPayload(&shader, "later index export register query failed") == 0, "a later index export format register was read instead of the first");
-    shader.num_cx_registers = 0;
-    check(primPayload(&shader, "query without registers failed") == 0, "GS without context registers reports a payload");
-    shader.cx_registers = nullptr;
-    check(primPayload(&shader, "query with a null empty register array failed") == 0, "GS with a null empty register array reports a payload");
-    shader.num_cx_registers = 1;
-    std::uint32_t payload = 0xccccccccu;
-    expectFailure([&] { sceAgcGetGsPrimPayload(&payload, &shader); });
-    expectFailure([&] { sceAgcGetGsPrimPayload(nullptr, &setup.shader); });
-    expectFailure([&] { sceAgcGetGsPrimPayload(&payload, nullptr); });
-    check(payload == 0xccccccccu, "rejected payload query wrote its output");
-}
-
 }
 
 int main() {
@@ -169,7 +132,6 @@ int main() {
         testExportBound();
         testRegisterFields();
         testRejections();
-        testPrimPayload();
         LibcRunShutdown_nid_postfix();
         std::puts("AGC GS oversubscription tests passed");
         return 0;

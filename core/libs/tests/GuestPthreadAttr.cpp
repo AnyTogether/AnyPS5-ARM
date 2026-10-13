@@ -88,6 +88,8 @@ static void CheckStackSizeLimit() {
     Require(scePthreadAttrDestroy(&attr) == SCE_OK);
 }
 
+extern "C" int APS5_VABI scePthreadAttrSetsolosched(PthreadAttr* attr, int solosched);
+
 static void CheckSoloSched() {
     PthreadAttr attr = nullptr;
     Require(pthread_attr_setsolosched_np_nid_postfix(nullptr, 1) == GUEST_EINVAL);
@@ -95,10 +97,21 @@ static void CheckSoloSched() {
     Require(scePthreadAttrInit(&attr) == SCE_OK);
     int soloSched = -1;
     Require(scePthreadAttrGetsolosched(&attr, &soloSched) == SCE_OK && soloSched == 0);
-    Require(pthread_attr_setsolosched_np_nid_postfix(&attr, 1) == 0);
-    Require(scePthreadAttrGetsolosched(&attr, &soloSched) == SCE_OK && soloSched == 1);
+    Require(pthread_attr_setsolosched_np_nid_postfix(&attr, 16) == 0);
+    Require(scePthreadAttrGetsolosched(&attr, &soloSched) == SCE_OK && soloSched == 16);
+    constexpr int GuestEopnotsupp = 45;
+    constexpr int SceKernelErrorEopnotsupp = static_cast<int>(0x8002002Du);
+    for (int rejected : {-1, 1, 2, 4, 8, 15, 17, 32, 100, 0x7fffffff}) {
+        Require(pthread_attr_setsolosched_np_nid_postfix(&attr, rejected) == GuestEopnotsupp);
+        Require(scePthreadAttrSetsolosched(&attr, rejected) == SceKernelErrorEopnotsupp);
+        Require(scePthreadAttrGetsolosched(&attr, &soloSched) == SCE_OK && soloSched == 16);
+    }
     Require(pthread_attr_setsolosched_np_nid_postfix(&attr, 0) == 0);
     Require(scePthreadAttrGetsolosched(&attr, &soloSched) == SCE_OK && soloSched == 0);
+    PthreadAttr unset = nullptr;
+    Require(scePthreadAttrSetsolosched(&unset, 16) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadAttrSetsolosched(nullptr, 16) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadAttrGetsolosched(&unset, &soloSched) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadAttrDestroy(&attr) == SCE_OK);
     Require(pthread_attr_setsolosched_np_nid_postfix(&attr, 1) == GUEST_EINVAL);
 }

@@ -7,12 +7,25 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#ifdef __linux__
+#include <netpacket/packet.h>
+#endif
+#ifdef __APPLE__
+#include <net/route.h>
+#include <sys/socket.h>
+#include <sys/sysctl.h>
+#include <cerrno>
+#include <vector>
+#endif
 #endif
 #include <cstdint>
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <fstream>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #ifdef _WIN32
 #include <vector>
 #endif
@@ -78,9 +91,80 @@ static bool HostHasAddress(int family) {
 #endif
 }
 
+extern "C" std::uint64_t NetCtlReadByteCounter_nid_no_patch(const char* path) {
+    std::ifstream file(path);
+    std::uint64_t value = 0;
+    if (!(file >> value)) throw std::runtime_error(std::string("sceNetCtlGetIfStat: no byte counter in ") + path);
+    return value;
+}
+
+static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
+    sent = 0;
+    received = 0;
+#ifdef _WIN32
+    MIB_IF_TABLE2* table = nullptr;
+    if (GetIfTable2(&table) != NO_ERROR) throw std::runtime_error("sceNetCtlGetIfStat: the host interface table is unavailable");
+    for (ULONG index = 0; index < table->NumEntries; ++index) {
+        const auto& row = table->Table[index];
+        if (row.OperStatus != IfOperStatusUp || row.Type == IF_TYPE_SOFTWARE_LOOPBACK || !row.InterfaceAndOperStatusFlags.HardwareInterface) continue;
+        sent += row.OutOctets;
+        received += row.InOctets;
+    }
+    FreeMibTable(table);
+#elif defined(__linux__)
+    ifaddrs* interfaces = nullptr;
+    if (getifaddrs(&interfaces) != 0) throw std::runtime_error("sceNetCtlGetIfStat: the host interface list is unavailable");
+    for (auto* item = interfaces; item; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_PACKET) continue;
+        if (!(item->ifa_flags & IFF_UP) || (item->ifa_flags & IFF_LOOPBACK)) continue;
+        const std::string statistics = std::string("/sys/class/net/") + item->ifa_name + "/statistics/";
+        sent += NetCtlReadByteCounter_nid_no_patch((statistics + "tx_bytes").c_str());
+        received += NetCtlReadByteCounter_nid_no_patch((statistics + "rx_bytes").c_str());
+    }
+    freeifaddrs(interfaces);
+#elif defined(__APPLE__)
+    // NET_RT_IFLIST2 reports each interface with 64-bit byte counters (getifaddrs' if_data wraps at 4 GiB).
+    int request[] = {CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0};
+    std::vector<char> table;
+    for (;;) {
+        std::size_t size = 0;
+        if (::sysctl(request, 6, nullptr, &size, nullptr, 0) != 0)
+            throw std::runtime_error("sceNetCtlGetIfStat: the host interface table size is unavailable, errno=" + std::to_string(errno));
+        table.resize(size);
+        if (::sysctl(request, 6, table.data(), &size, nullptr, 0) == 0) {
+            table.resize(size);
+            break;
+        }
+        if (errno != ENOMEM)
+            throw std::runtime_error("sceNetCtlGetIfStat: the host interface table is unavailable, errno=" + std::to_string(errno));
+    }
+    for (std::size_t offset = 0; offset < table.size();) {
+        const auto* header = reinterpret_cast<const if_msghdr*>(table.data() + offset);
+        if (header->ifm_msglen == 0 || offset + header->ifm_msglen > table.size())
+            throw std::runtime_error("sceNetCtlGetIfStat: the host interface table is malformed");
+        offset += header->ifm_msglen;
+        if (header->ifm_type != RTM_IFINFO2) continue;
+        const auto* item = reinterpret_cast<const if_msghdr2*>(header);
+        if (!(item->ifm_flags & IFF_UP) || (item->ifm_flags & IFF_LOOPBACK)) continue;
+        sent += item->ifm_data.ifi_obytes;
+        received += item->ifm_data.ifi_ibytes;
+    }
+#else
+    throw std::runtime_error("sceNetCtlGetIfStat: host interface byte counters are not implemented on this platform");
+#endif
+}
+
 extern "C" {
 
 int APS5_VABI sceNetCtlCheckCallback(void) {
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetIfStat(NetCtlIfStat* stat) {
+    if (!stat) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    if (!HostHasAddress(AF_UNSPEC)) return SCE_NET_CTL_ERROR_NOT_CONNECTED;
+    *stat = {};
+    HostTraffic(stat->tx_bytes, stat->rx_bytes);
     return 0;
 }
 

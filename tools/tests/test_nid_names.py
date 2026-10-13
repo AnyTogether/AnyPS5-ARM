@@ -94,6 +94,38 @@ class DatabaseCacheTests(unittest.TestCase):
 class NidArgumentTests(unittest.TestCase):
     options = ["-h", "--help", "--db", "--nid", "--json"]
 
+    def test_invalid_nids_fail_before_database_or_source_access(self):
+        for nid in ("short", "ABCDEFGHIJKL", "ABCDEFGHIJ/", "ABCDEFGHIJ_", "ABCDEFGHIJ\u00e9", "", "--jsooon"):
+            with self.subTest(nid=nid):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as error, \
+                        patch.object(nid_names, "load_db", return_value={}) as database, \
+                        patch.object(nid_names, "collect_unknowns") as sources, \
+                        patch.object(nid_names, "collect_real_names", return_value=set()), \
+                        self.assertRaises(SystemExit) as exited:
+                    nid_names.main(["--nid=" + nid, "--json"])
+                self.assertEqual(exited.exception.code, 2)
+                self.assertIn("invalid NID", error.getvalue())
+                database.assert_not_called()
+                sources.assert_not_called()
+
+    def test_option_typo_in_nid_list_is_not_an_unknown_success(self):
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as error, \
+                patch.object(nid_names, "load_db", return_value={}) as database, \
+                patch.object(nid_names, "collect_real_names", return_value=set()), self.assertRaises(SystemExit) as exited:
+            nid_names.main(["--nid", "ZjtRqSMJwdw", "--jsooon"])
+        self.assertEqual(exited.exception.code, 2)
+        self.assertIn("--jsooon", error.getvalue())
+        database.assert_not_called()
+
+    def test_valid_unknown_nid_remains_a_successful_lookup(self):
+        output = io.StringIO()
+        with patch.object(nid_names, "load_db", return_value={}), \
+                patch.object(nid_names, "collect_real_names", return_value=set()), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(nid_names.main(["--nid=AAAAAAAAAA+", "--json"]), 0)
+        row, = json.loads(output.getvalue())["rows"]
+        self.assertEqual((row["nid"], row["status"]), ("AAAAAAAAAA+", "unknown"))
+
     def normalize(self, arguments):
         return nid_names.nid_arguments(arguments, self.options)
 

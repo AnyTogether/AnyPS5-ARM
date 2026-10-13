@@ -31,11 +31,6 @@ int APS5_VABI sceAudioOut2SetSystemDebugState(const AudioOut2SystemDebugStatePar
     return 0;
 }
 
-int APS5_VABI sceAudioOut2UserGetSupportedAttributes(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 // Lets system chat audio play alongside the title's output. The host has no chat audio to let through,
 // so there is nothing to change.
 int APS5_VABI sceAudioOut2EnableChat(void) {

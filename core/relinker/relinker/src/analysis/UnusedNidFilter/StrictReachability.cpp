@@ -163,7 +163,8 @@ private:
                 if (info.HasRipRelativeDisp) {
                     std::int32_t displacement;
                     std::memcpy(&displacement, input.Text.data() + offset + info.RipRelativeDispOffset, sizeof(displacement));
-                    const auto target = next + static_cast<VirtualAddress>(static_cast<std::int64_t>(displacement));
+                    auto target = next + static_cast<VirtualAddress>(static_cast<std::int64_t>(displacement));
+                    if (info.AddressSize32) target = static_cast<std::uint32_t>(target);
                     if (input.ImportSlots.contains(target)) region.Imports.insert(target);
                     if (!info.IsTwoByteOpcode && info.Opcode == 0x8D) {
                         addAddressTaken(target);

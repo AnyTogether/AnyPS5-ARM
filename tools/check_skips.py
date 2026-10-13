@@ -12,6 +12,8 @@ WINDOWS_PREFIX = "agc"
 
 def skips(path):
     for case in ET.parse(path).getroot().iter("testcase"):
+        if case.get("status") == "disabled":
+            raise ValueError(f"{path}: testcase {case.get('name')!r} is disabled and was not run")
         skipped = case.find("skipped")
         if skipped is None:
             continue

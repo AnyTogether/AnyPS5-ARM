@@ -57,7 +57,7 @@ static constexpr std::uint32_t StatfsVersion = 0x20030518;
 static constexpr int GuestEbadf = 9;
 static constexpr int GuestEfault = 14;
 static constexpr int GuestEinval = 22;
-static constexpr int FirstSocket = 0x10000000;
+static constexpr int DescriptorSetSize = 1024;
 
 static void RequireFailure(int descriptor, int error) {
     GuestStatfs fs;
@@ -116,7 +116,7 @@ int main() {
 
     int sockets[2];
     Require(socketpair_nid_postfix(1, 1, 0, sockets) == 0);
-    Require(sockets[0] >= FirstSocket);
+    Require(sockets[0] >= 0 && sockets[0] < DescriptorSetSize);
     RequireFailure(sockets[0], GuestEinval);
     Require(close_nid_postfix(sockets[0]) == 0);
     Require(close_nid_postfix(sockets[1]) == 0);

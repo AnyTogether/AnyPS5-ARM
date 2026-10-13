@@ -7,6 +7,8 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
+static constexpr int SCE_AGC_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80890001);
+
 extern "C" {
 
 int APS5_VABI sceAgcInit_0090(std::uint32_t* state, std::uint32_t version) {
@@ -16,6 +18,7 @@ int APS5_VABI sceAgcInit_0090(std::uint32_t* state, std::uint32_t version) {
 }
 
 int APS5_VABI sceAgcInit(std::uint32_t version) {
+    if (version >= 14) return SCE_AGC_ERROR_INVALID_ARGUMENT;
     Agc::Command::GetRegisterDefaults(version, false, __func__);
     Agc::Command::GetRegisterDefaults(version, true, __func__);
     return 0;

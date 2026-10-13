@@ -48,7 +48,7 @@ IrU1 TranslationContext::readMask(const RdnaOperand& operand) {
         }
         case RdnaOperandKind::ExecLo:
         case RdnaOperandKind::ExecHi: return IrU1(ir.GetExec());
-        case RdnaOperandKind::VccLo:
+        case RdnaOperandKind::VccLo: return IrU1(ir.GetVcc());
         case RdnaOperandKind::VccHi: return program.WaveSize() == 32u ? threadBit({readRawU32(operand), IrU32(ir.Constant(0u))}) : IrU1(ir.GetVcc());
         case RdnaOperandKind::Scc: return IrU1(ir.GetScc());
         case RdnaOperandKind::VccZ: return IrU1(ir.LogicalNot(ir.GetVcc()));
@@ -58,6 +58,19 @@ IrU1 TranslationContext::readMask(const RdnaOperand& operand) {
         case RdnaOperandKind::SrcPrivateBase:
         case RdnaOperandKind::SrcPrivateLimit: return threadBit(apertureSourcePair(operand));
         default: return IrU1(ir.INotEqual(readRawU32(operand).Value(), ir.Constant(0u)));
+    }
+}
+
+bool TranslationContext::maskLanesExact(const RdnaOperand& operand) {
+    switch (operand.kind) {
+        case RdnaOperandKind::ScalarRegister:
+        case RdnaOperandKind::ExecLo:
+        case RdnaOperandKind::VccLo:
+        case RdnaOperandKind::VccHi:
+        case RdnaOperandKind::LiteralConstant:
+        case RdnaOperandKind::IntegerInlineConstant:
+        case RdnaOperandKind::FloatInlineConstant: return true;
+        default: return false;
     }
 }
 
@@ -110,7 +123,12 @@ std::array<IrU32, 2> TranslationContext::writeMask(const RdnaOperand& operand, I
         case RdnaOperandKind::VccLo:
         case RdnaOperandKind::VccHi:
             if (!write64 && program.WaveSize() == 32u) {
-                writeRawU32(operand, mask[0]);
+                if (operand.kind != RdnaOperandKind::VccLo) {
+                    writeRawU32(operand, mask[0]);
+                    return mask;
+                }
+                ir.SetVccLo(mask[0].Value());
+                ir.SetVcc(value.Value());
                 return mask;
             }
             ir.SetVcc(value.Value());

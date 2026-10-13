@@ -86,6 +86,12 @@ ElfHeader ElfReader::ReadHeader() const {
     }
     if (_fileBuffer[4] != 2 || _fileBuffer[5] != 1 || _fileBuffer[6] != 1)
         throw RelinkerException("Expected little-endian ELF64 version 1");
+    if (_readU16At(0x12) != 62)
+        throw RelinkerException("Expected an x86-64 ELF");
+    if (_readU32At(0x14) != 1)
+        throw RelinkerException("Unsupported ELF object version: expected 1", 0x14);
+    if (_readU16At(0x34) != 64)
+        throw RelinkerException("Invalid ELF header size: expected 64 bytes", 0x34);
 
     ElfHeader header{};
     header.Machine = _readU16At(0x12);
@@ -126,6 +132,23 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
 
         headers.push_back(ph);
         offset += header.ProgramHeaderEntrySize;
+    }
+
+    for (auto& relro : headers) {
+        if (relro.Type != PT_OS_RELRO || relro.MemorySize == 0) continue;
+        bool covered = false;
+        for (const auto& load : headers) {
+            if (load.Type != PT_LOAD || load.MemorySize == 0) continue;
+            const bool overlaps = relro.MappedAddress < load.MappedAddress ? load.MappedAddress - relro.MappedAddress < relro.MemorySize : relro.MappedAddress - load.MappedAddress < load.MemorySize;
+            if (!overlaps) continue;
+            if (relro.MappedAddress < load.MappedAddress || relro.MemorySize > load.MemorySize - (relro.MappedAddress - load.MappedAddress))
+                throw RelinkerException("PT_SCE_RELRO partially overlaps a PT_LOAD segment", relro.MappedAddress);
+            covered = true;
+        }
+        if (!covered) {
+            relro.Type = PT_LOAD;
+            relro.Flags = PF_R | PF_W;
+        }
     }
 
     return headers;
@@ -259,18 +282,6 @@ std::vector<std::uint8_t> ElfReader::ReadSegment(const ProgramHeader& header) co
     return std::vector<std::uint8_t>(
         _fileBuffer.begin() + header.Offset,
         _fileBuffer.begin() + header.Offset + header.FileSize);
-}
-
-std::vector<ProgramHeader> ElfReader::ReadCodeSegments() const {
-    static constexpr std::uint32_t kPtLoad = 1;
-    static constexpr std::uint32_t kPfX = 0x1;
-    std::vector<ProgramHeader> result;
-    for (const auto& ph : ReadProgramHeaders()) {
-        if (ph.Type == kPtLoad && (ph.Flags & kPfX)) {
-            result.push_back(ph);
-        }
-    }
-    return result;
 }
 
 std::uint64_t ElfReader::GetFileSize() const {

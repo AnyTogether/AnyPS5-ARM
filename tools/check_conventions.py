@@ -10,14 +10,16 @@ from pathlib import PurePosixPath
 from urllib.parse import unquote
 
 RULES = {
-    "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md in the same pull request; #endif and namespace ends are always allowed"),
-    "silent-stub": ("error", "CONTRIBUTING.md#code", "Unimplemented exports call NotImplemented_nid_no_patch(__func__); silent stubs are listed in docs/dev/TechnicalDebt.md#silent-stubs, by their file or by name with a path in their library"),
+    "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md or docs/dev/debt/ in the same pull request; #endif and namespace ends are always allowed"),
+    "silent-stub": ("error", "CONTRIBUTING.md#code", "Unimplemented exports call NotImplemented_nid_no_patch(__func__); silent stubs are listed under Silent stubs in docs/dev/debt/<library>.md, by their file or by name with a path in their library"),
+    "debt-file": ("error", "CONTRIBUTING.md#documentation", "Technical debt about one library or component goes in docs/dev/debt/<name>.md, named after the first core/ path it links: <library> for core/libs/prx/<library>, otherwise <component> for core/<component>"),
     "duplicate-export": ("error", "CONTRIBUTING.md#code", "Already exported by another library: remove the copy, or use APS5_DUMMY_FUN if nothing is left"),
     "system-dependency": ("error", "CONTRIBUTING.md#code", "Third-party code is a submodule under 3rdparty/ built from source, not found on the system"),
     "title-specific": ("error", "CONTRIBUTING.md#code", "Implement the general behaviour, not what one title needs; title-specific code belongs in its sce_module"),
     "extension": ("error", "CONTRIBUTING.md#code", "Avoid non-standard extensions where standard C++ is enough"),
     "notes-file": ("error", "CONTRIBUTING.md#branches-and-pull-requests", "Notes, investigation and agent files go in the pull request, not in the repository"),
     "binary": ("error", "docs/dev/CONVENTIONS.md", "Only UTF-8 text files in the repository; images go in the gist comments"),
+    "ci-gate": ("error", "CONTRIBUTING.md#build-and-test", "A job that runs for pull requests needs a file filter: paths on the pull_request trigger, or needs eligibility and an if on its outputs"),
     "doc-link": ("error", "CONTRIBUTING.md#documentation", "Relative link to a file that does not exist"),
     "commit-subject": ("error", "docs/dev/CONVENTIONS.md", "Commit subject is not Conventional Commits"),
     "pr-title": ("error", "docs/dev/CONVENTIONS.md", "Pull request title is not Conventional Commits"),
@@ -28,6 +30,9 @@ CPP = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tga", ".dds"}
 NOTES = {".md", ".markdown", ".rst", ".log", ".patch", ".diff"}
 AGENT_FILES = {"AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", "copilot-instructions.md"}
+DEBT = "docs/dev/TechnicalDebt.md"
+DEBT_DIR = "docs/dev/debt/"
+DEBT_TARGET = re.compile(r"\]\((?:\.\./)+(core/[^)#\s]+)")
 
 CONVENTIONAL = re.compile(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: \S")
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
@@ -41,6 +46,7 @@ TITLE = re.compile(r"\b(PPSA|CUSA)\d{5}\b")
 EXTENSION = re.compile(r"__attribute__|__declspec|#\s*pragma\s+(?!once\b)")
 LINK = re.compile(r"\]\(([^)\s]+)")
 SECTION = re.compile(r"^###\s*(.+?)\s*$", re.M)
+KEY = re.compile(r"^( *)([A-Za-z0-9_-]+|'[^']*'|\"[^\"]*\"):(?:\s+(.*?))?\s*$")
 
 
 def git(*args, text=True):
@@ -56,7 +62,7 @@ class Check:
         self.added = defaultdict(list)
         self.status = {}
         self.numstat = {}
-        entries = [entry.split("\t", 1) for entry in git("ls-tree", "-rz", head).split("\0") if entry]
+        entries = [entry.split("\t", 1) for entry in git("ls-tree", "-rz", "--full-tree", head).split("\0") if entry]
         self.modes = {path: metadata.split()[0] for metadata, path in entries}
         self.tree = set(self.modes)
         self.dirs = {str(parent) for path in self.tree for parent in PurePosixPath(path).parents}
@@ -89,7 +95,7 @@ class Check:
         return git("show", f"{self.head}:{path}")
 
     def code(self):
-        debt = silent_stub_debt(self.show("docs/dev/TechnicalDebt.md")) if "docs/dev/TechnicalDebt.md" in self.tree else []
+        debt = [entry for path in sorted(self.tree) if is_debt(path) for entry in silent_stub_debt(self.show(path), path)]
         exports = {}
         for path, lines in self.files(lambda p: p.suffix in CPP):
             core = path.startswith("core/") and "tests" not in PurePosixPath(path).parts
@@ -116,14 +122,14 @@ class Check:
             for number, text in lines:
                 if "#" in STRINGS.sub('""', text) and not text.startswith("#!"):
                     self.report("comment", path, number)
-        if "docs/dev/TechnicalDebt.md" in self.status:
+        if any(is_debt(path) for path in self.status):
             self.findings = [finding for finding in self.findings if finding[0] != "comment"]
 
     def duplicates(self, exports):
         if not exports:
             return
         pattern = r"(^|[^[:alnum:]_])APS5_VABI[[:space:]]+(" + "|".join(exports) + r")[[:space:]]*\("
-        result = subprocess.run(["git", "grep", "-nE", pattern, self.head, "--", "core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
+        result = subprocess.run(["git", "grep", "-nE", "--full-name", pattern, self.head, "--", ":(top)core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
         for line in result.stdout.splitlines():
             _, path, number, text = line.split(":", 3)
             name = EXPORT.search(text).group(1)
@@ -170,9 +176,26 @@ class Check:
     def docs(self):
         for path, lines in self.files(lambda p: p.suffix == ".md"):
             for number, text in lines:
+                name = debt_name(text) if is_debt(path) and text.startswith("- ") else None
+                if name and path != f"{DEBT_DIR}{name}.md":
+                    self.report("debt-file", path, number, f"{DEBT_DIR}{name}.md")
                 for target, resolved in links(path, text):
                     if resolved not in self.tree and resolved not in self.dirs:
                         self.report("doc-link", path, number, target)
+
+    def workflows(self):
+        for path in sorted(self.status):
+            if self.status[path] == "D" or not re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", path):
+                continue
+            source = self.show(path).splitlines()
+            lines = [(number, KEY.match(re.sub(r"(^|\s)#.*", "", text))) for number, text in enumerate(source, 1)]
+            lines = [(number, len(match[1]), match[2].strip("'\""), match[3] or "") for number, match in lines if match]
+            triggers = [entry for entry in lines if entry[1] == 0 and entry[2] == "on"]
+            if not triggers or pull_request_filtered(lines, triggers[0]):
+                continue
+            for number, name, needs, condition in jobs(lines, source):
+                if name != "eligibility" and ("eligibility" not in needs or "needs.eligibility.outputs." not in condition):
+                    self.report("ci-gate", path, number, name)
 
     def commits(self):
         for line in git("log", "--no-merges", "--format=%h %s", f"{self.base}..{self.head}").splitlines():
@@ -216,7 +239,19 @@ def links(path, text):
     return result
 
 
-def silent_stub_debt(text):
+def is_debt(path):
+    return path == DEBT or (path.startswith(DEBT_DIR) and path.endswith(".md") and "/" not in path[len(DEBT_DIR):])
+
+
+def debt_name(text):
+    match = DEBT_TARGET.search(text)
+    if not match:
+        return None
+    parts = match.group(1).split("/")
+    return parts[3] if parts[1:3] == ["libs", "prx"] and len(parts) > 3 else parts[1]
+
+
+def silent_stub_debt(text, path=DEBT):
     debt = []
     section_level = 0
     for line in text.splitlines():
@@ -228,8 +263,50 @@ def silent_stub_debt(text):
             elif level <= section_level:
                 section_level = 0
         if section_level:
-            debt.append((line, links("docs/dev/TechnicalDebt.md", line)))
+            debt.append((line, links(path, line)))
     return debt
+
+
+def block(lines, start):
+    _, indent, _, _ = lines[start]
+    end = start + 1
+    while end < len(lines) and lines[end][1] > indent:
+        end += 1
+    return lines[start + 1:end]
+
+
+def pull_request_filtered(lines, trigger):
+    _, _, _, value = trigger
+    if value:
+        return "pull_request" not in re.findall(r"[A-Za-z_]+", value)
+    triggers = block(lines, lines.index(trigger))
+    for index, (_, indent, name, value) in enumerate(triggers):
+        if name == "pull_request" and indent == triggers[0][1]:
+            return any(entry[2] in ("paths", "paths-ignore") for entry in block(triggers, index))
+    return True
+
+
+def field(source, entry):
+    number, indent, _, value = entry
+    for line in (line for line in source[number:] if line.strip()):
+        if len(line) - len(line.lstrip(" ")) <= indent:
+            break
+        value += " " + line.strip()
+    return value
+
+
+def jobs(lines, source):
+    top = [index for index, entry in enumerate(lines) if entry[1] == 0 and entry[2] == "jobs"]
+    if not top:
+        return []
+    entries = block(lines, top[0])
+    result = []
+    for index, (number, indent, name, _) in enumerate(entries):
+        if indent != entries[0][1]:
+            continue
+        fields = {entry[2]: field(source, entry) for entry in block(entries, index) if entry[1] == indent + 2}
+        result.append((number, name, re.findall(r"[A-Za-z0-9_-]+", fields.get("needs", "")), fields.get("if", "")))
+    return result
 
 
 def listed(debt, name, path):
@@ -314,10 +391,11 @@ if __name__ == "__main__":
     check.build()
     check.repository()
     check.docs()
+    check.workflows()
     check.commits()
     pr = json.load(open(args.event, encoding="utf-8")).get("pull_request") if args.event else None
     if pr:
         check.pull_request(pr["title"], pr["body"])
     elif args.title is not None or args.body:
-        check.pull_request(args.title or "", open(args.body, encoding="utf-8").read() if args.body else "")
+        check.pull_request(args.title or "", open(args.body, encoding="utf-8-sig").read() if args.body else "")
     raise SystemExit(output(check, os.environ.get("GITHUB_REPOSITORY", "boykopovar/AnyPS5")))

@@ -31,6 +31,8 @@ std::size_t APS5_VABI mbstowcs_nid_postfix(std::uint16_t* dest, const char* src,
 char* APS5_VABI strtok_s_nid_postfix(char* str, const char* delim, char** context);
 int APS5_VABI __fpclassifyd_nid_postfix(double value);
 unsigned __int128 APS5_VABI __udivti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor);
+__int128 APS5_VABI __divti3_nid_postfix(__int128 dividend, __int128 divisor);
+unsigned __int128 APS5_VABI __umodti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor);
 SonyLconv* APS5_VABI localeconv_nid_postfix(void);
 int APS5_VABI sceAmprFpclassifyd(double value);
 unsigned int APS5_VABI _ZSt14_Random_devicev_nid_postfix();
@@ -82,6 +84,52 @@ int main() {
         SonyUdivti3(1, 0);
     } catch (const std::exception&) {
         trapped = true;
+    }
+    Require(trapped);
+
+    Require(__divti3_nid_postfix(100, 3) == 33);
+    Require(__divti3_nid_postfix(-100, 3) == -33);
+    Require(__divti3_nid_postfix(100, -3) == -33);
+    Require(__divti3_nid_postfix(-100, -3) == 33);
+    Require(SonyDivti3(0, 5) == 0);
+    const __int128 large = (__int128)1 << 100;
+    Require(SonyDivti3(large, 3) == large / 3);
+    Require(SonyDivti3(-large, 3) == -(large / 3));
+    Require(SonyDivti3(large, -3) == -(large / 3));
+    Require(SonyDivti3(-large, -3) == large / 3);
+    const __int128 minimum = (__int128)((unsigned __int128)1 << 127);
+    const __int128 maximum = (__int128)(((unsigned __int128)1 << 127) - 1);
+    Require(SonyDivti3(minimum, 1) == minimum);
+    Require(SonyDivti3(minimum, -1) == minimum);
+    Require(SonyDivti3(maximum, -1) == -maximum);
+    trapped = false;
+    try {
+        SonyDivti3(1, 0);
+    } catch (const std::exception&) {
+        trapped = true;
+    }
+    Require(trapped);
+
+    const unsigned __int128 unsignedMaximum = ~(unsigned __int128)0;
+    const unsigned __int128 largeDivisor = ((unsigned __int128)1 << 64) + 3;
+    Require(__umodti3_nid_postfix(100, 3) == 1);
+    Require(__umodti3_nid_postfix(0, 5) == 0);
+    Require(__umodti3_nid_postfix(3, 100) == 3);
+    Require(__umodti3_nid_postfix(unsignedMaximum, 1) == 0);
+    Require(__umodti3_nid_postfix(unsignedMaximum, unsignedMaximum) == 0);
+    Require(__umodti3_nid_postfix(largeDivisor, largeDivisor) == 0);
+    Require(__umodti3_nid_postfix(unsignedMaximum, 10) == 5);
+    Require(__umodti3_nid_postfix((unsigned __int128)1 << 100, 3) == 1);
+    Require(__umodti3_nid_postfix(unsignedMaximum, (unsigned __int128)1 << 64) == 0xFFFFFFFFFFFFFFFFull);
+    Require(__umodti3_nid_postfix(unsignedMaximum, largeDivisor) == 8);
+    Require(__umodti3_nid_postfix((unsigned __int128)1 << 127, largeDivisor) == 0x8000000000000006ull);
+    Require(__umodti3_nid_postfix(unsignedMaximum - 1, unsignedMaximum) == unsignedMaximum - 1);
+    Require(__umodti3_nid_postfix(unsignedMaximum, (unsigned __int128)1 << 127) == ((unsigned __int128)1 << 127) - 1);
+    trapped = false;
+    try {
+        __umodti3_nid_postfix(((unsigned __int128)0x1234 << 64) | 0x5678, 0);
+    } catch (const std::runtime_error& error) {
+        trapped = std::strcmp(error.what(), "__umodti3: integer divide by zero (0x00000000000012340000000000005678 % 0)") == 0;
     }
     Require(trapped);
 
@@ -144,6 +192,8 @@ int main() {
     Require(sceAmprMbstowcs(wide, "ABC", 8) == 3);
     Require(wide[0] == 65 && wide[1] == 66 && wide[2] == 67 && wide[3] == 0);
     Require(sceAmprMbstowcs(nullptr, "ABC", 8) == 3);
+    Require(sceAmprMbstowcs(nullptr, "ABC", 0) == 3 && sceAmprMbstowcs(nullptr, "ABC", 1) == 3);
+    Require(mbstowcs_nid_postfix(nullptr, "ABC", 0) == 3 && mbstowcs_nid_postfix(nullptr, "ABC", 1) == 3);
     Require(sceAmprMbstowcs(wide, "ABC", 2) == 2);
     Require(mbstowcs_nid_postfix(wide, "ABC", 8) == 3);
 

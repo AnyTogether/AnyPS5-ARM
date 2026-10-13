@@ -106,7 +106,11 @@ void DefineModule(SpirvEmitterState& state) {
     if (state.cullDistanceVariable != 0) {
         state.module.EmitCapability(spv::CapabilityCullDistance);
     }
-    if (state.layerVariable != 0) {
+    const bool layerExtension = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityShaderViewportIndexLayerEXT)) != state.supportedCapabilities.end();
+    if (state.layerVariable != 0 && layerExtension) {
+        state.module.EmitCapability(spv::CapabilityShaderViewportIndexLayerEXT);
+        state.module.EmitExtension("SPV_EXT_shader_viewport_index_layer");
+    } else if (state.layerVariable != 0) {
         state.module.RequireVersion(0x00010500u);
         state.module.EmitCapability(spv::CapabilityShaderLayer);
     }
@@ -185,7 +189,15 @@ void DefineModule(SpirvEmitterState& state) {
                 state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDepthGreater);
             }
         }
-        if (pixel.psEarlyZ && !pixel.psPixelKillEnable && !pixel.psDepthExportEnable && !pixel.psSampleMaskExportEnable && !pixel.psAlphaToCoverage) {
+        if (state.stencilRefVariable != 0) {
+            if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStencilExportEXT)) == state.supportedCapabilities.end()) {
+                throw std::runtime_error("a pixel shader that exports the stencil reference needs VK_EXT_shader_stencil_export, which the device lacks");
+            }
+            state.module.EmitCapability(spv::CapabilityStencilExportEXT);
+            state.module.EmitExtension("SPV_EXT_shader_stencil_export");
+            state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeStencilRefReplacingEXT);
+        }
+        if (pixel.psEarlyZ && !pixel.psPixelKillEnable && !pixel.psDepthExportEnable && !pixel.psSampleMaskExportEnable && !pixel.psStencilRefExportEnable && !pixel.psAlphaToCoverage) {
             state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeEarlyFragmentTests);
         }
         if (pixel.psOrderedPixelShader) {

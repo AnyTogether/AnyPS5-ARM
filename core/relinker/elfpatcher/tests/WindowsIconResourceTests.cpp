@@ -4,9 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,31 +27,13 @@ std::uint32_t readU32(const std::vector<std::uint8_t>& data, const std::size_t o
            static_cast<std::uint32_t>(data[offset + 2]) << 16 | static_cast<std::uint32_t>(data[offset + 3]) << 24;
 }
 
-void writeBytes(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream stream(path, std::ios::binary);
-    stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    require(static_cast<bool>(stream), "Cannot write " + path.string());
-}
-
-void requireEmpty(const Elfpatcher::Windows::WindowsIconResourceBuilder& builder, const std::filesystem::path& path, const std::string& name) {
-    std::vector<Elfpatcher::Windows::PeSection> sections;
-    const auto directory = builder.Build(path, sections, 0x10000);
-    require(sections.empty(), "Section added for " + name);
-    require(directory.Rva == 0 && directory.Size == 0, "Resource directory set for " + name);
-}
-
-void run(const std::filesystem::path& root) {
+void run() {
     const Elfpatcher::Windows::WindowsIconResourceBuilder builder;
 
-    requireEmpty(builder, {}, "an empty path");
-    requireEmpty(builder, root / "missing" / "icon0.png", "a missing icon");
-
-    const auto iconPath = root / "valid" / "icon0.png";
-    writeBytes(iconPath, Png);
+    const std::filesystem::path iconPath = "valid/icon0.png";
     const std::uint32_t nextRva = 0x50000;
     std::vector<Elfpatcher::Windows::PeSection> sections;
-    const auto directory = builder.Build(iconPath, sections, nextRva);
+    const auto directory = builder.Build(Png, iconPath, sections, nextRva);
     require(sections.size() == 1, "Expected one section");
     require(sections[0].Name == ".rsrc", "Unexpected section name: " + sections[0].Name);
     require(sections[0].Rva == nextRva, "Unexpected section RVA");
@@ -68,13 +48,12 @@ void run(const std::filesystem::path& root) {
     require(readU32(data, 174) == Png.size(), "Unexpected icon size in group entry");
     require(std::equal(Png.begin(), Png.end(), data.begin() + 184), "Icon bytes changed");
 
-    const auto badPath = root / "bad" / "icon0.png";
+    const auto badPath = std::filesystem::path("bad/icon0.png");
     auto truncated = Png;
     truncated.resize(40);
-    writeBytes(badPath, truncated);
     std::vector<Elfpatcher::Windows::PeSection> badSections;
     try {
-        builder.Build(badPath, badSections, nextRva);
+        builder.Build(truncated, badPath, badSections, nextRva);
     } catch (const Domain::RelinkerException& e) {
         require(std::string(e.what()).find(badPath.string()) != std::string::npos, std::string("Failure does not name the icon: ") + e.what());
         require(badSections.empty(), "Section added despite the failure");
@@ -86,15 +65,11 @@ void run(const std::filesystem::path& root) {
 }
 
 int main() {
-    const auto root = std::filesystem::temp_directory_path() / ("anyps5-icon-resource-tests-" + std::to_string(std::random_device{}()));
-    std::filesystem::remove_all(root);
     try {
-        run(root);
+        run();
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';
-        std::filesystem::remove_all(root);
         return 1;
     }
-    std::filesystem::remove_all(root);
     return 0;
 }

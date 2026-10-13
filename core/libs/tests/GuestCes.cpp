@@ -5,6 +5,8 @@
 
 extern "C" {
 const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1252(void);
+const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1251(void);
+int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 int APS5_VABI sceCesSbcToUtf8(const std::uint8_t*, std::uint8_t, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesUtf8ToSbc(const std::uint8_t*, std::uint32_t, std::uint32_t*, const std::uint8_t*, std::uint8_t*);
 }
@@ -80,4 +82,28 @@ int main() {
     Require(Utf8ToSbc(profile, "\xED\xA0\x80", 3) == invalidEncode);
     Require(Utf8ToSbc(profile, "\xE3\x81\x82", 3) == unassignedCode);
     Require(Utf8ToSbc(profile, "\xF0\x9F\x98\x80", 4) == unassignedCode);
+
+    const std::uint8_t* cyrillic = sceCesRefersUcsProfileCp1251();
+    Require(cyrillic != nullptr && cyrillic == sceCesRefersUcsProfileCp1251() && cyrillic != profile);
+    RequireSbcToUtf8(cyrillic, 'A', "A");
+    RequireSbcToUtf8(cyrillic, 0x88, "\xE2\x82\xAC");
+    RequireSbcToUtf8(cyrillic, 0xC0, "\xD0\x90");
+    RequireSbcToUtf8(cyrillic, 0xFF, "\xD1\x8F");
+    RequireSbcToUtf8(cyrillic, 0xA8, "\xD0\x81");
+    RequireSbcToUtf8(cyrillic, 0xB9, "\xE2\x84\x96");
+    RequireUtf8ToSbc(cyrillic, "\xD0\x9F", 0xCF);
+    RequireUtf8ToSbc(cyrillic, "\xD1\x91", 0xB8);
+    for (int sbc = 1; sbc < 256; ++sbc) {
+        std::uint8_t cp[4] = {};
+        std::uint32_t cpLength = 0;
+        std::uint8_t back = 0;
+        Require(sceCesSbcToUtf8(cyrillic, static_cast<std::uint8_t>(sbc), cp, sizeof(cp), &cpLength) == 0);
+        Require(sceCesUtf8ToSbc(cp, cpLength, &cpLength, cyrillic, &back) == 0 && back == sbc);
+    }
+    Require(Utf8ToSbc(cyrillic, "\xC3\xA9", 2) == unassignedCode);
+    Require(Utf8ToSbc(profile, "\xD0\x90", 2) == unassignedCode);
+
+    char context[256] = {};
+    Require(sceCesMbcsUcsContextInit(context, cyrillic) == 0);
+    Require(sceCesMbcsUcsContextInit(nullptr, cyrillic) == invalidParameter);
 }

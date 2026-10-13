@@ -12,6 +12,7 @@
 
 extern "C" {
 int APS5_VABI sceSaveDataDirNameSearch(const SaveDataDirNameSearchCond*, SaveDataDirNameSearchResult*);
+int APS5_VABI sceSaveDataDirNameSearch2(const SaveDataDirNameSearchCond*, SaveDataDirNameSearchResult*);
 int APS5_VABI sceSaveDataMount3(const SaveDataMount3*, SaveDataMountResult*);
 int APS5_VABI sceSaveDataUmount2(std::uint32_t, const SaveDataMountPoint*);
 int APS5_VABI sceSaveDataSetParam(const SaveDataMountPoint*, std::uint32_t, const void*, std::size_t);
@@ -71,6 +72,22 @@ static void SortByKey() {
     Require(Search(1, 1, 3, &hits) == Names{"SORT_A", "SORT_C", "SORT_B"}, "user parameters must sort descending");
     Require(Search(3, 0, 3, &hits) == Names{"SORT_B", "SORT_A", "SORT_C"}, "modification times must sort ascending");
     Require(Search(3, 1, 1, &hits) == Names{"SORT_C"} && hits == 3, "the newest save must come first in descending modification time");
+    SceSaveDataDirName pattern{};
+    std::snprintf(pattern.data, sizeof(pattern.data), "SORT_%%");
+    SaveDataDirNameSearchCond second{};
+    second.user_id = 1;
+    second.dir_name = &pattern;
+    second.key = 1;
+    second.order = 1;
+    std::array<SceSaveDataDirName, 3> secondNames{};
+    SaveDataDirNameSearchResult secondResult{};
+    secondResult.dir_names = secondNames.data();
+    secondResult.dir_names_num = 3;
+    Require(sceSaveDataDirNameSearch2(&second, &secondResult) == 0, "the second search failed");
+    Require(secondResult.hit_num == 3 && secondResult.set_num == 3, "the second search must return all three saves");
+    Require(std::string(secondNames[0].data) == "SORT_A" && std::string(secondNames[1].data) == "SORT_C" && std::string(secondNames[2].data) == "SORT_B", "the second search must sort like the first");
+    second.key = 6;
+    Require(sceSaveDataDirNameSearch2(&second, &secondResult) == SaveDataErrorParameter, "the second search must reject an unknown sort key");
     SaveDataDirNameSearchCond cond{};
     cond.user_id = 1;
     cond.key = 6;
@@ -79,6 +96,31 @@ static void SortByKey() {
     cond.key = 0;
     cond.order = 2;
     Require(sceSaveDataDirNameSearch(&cond, &result) == SaveDataErrorParameter, "an unknown sort order must be rejected");
+}
+
+static std::vector<std::string> SearchPattern(const char* text) {
+    SceSaveDataDirName pattern{};
+    std::snprintf(pattern.data, sizeof(pattern.data), "%s", text);
+    SaveDataDirNameSearchCond cond{};
+    cond.user_id = 1;
+    cond.dir_name = &pattern;
+    std::array<SceSaveDataDirName, 4> names{};
+    SaveDataDirNameSearchResult result{};
+    result.dir_names = names.data();
+    result.dir_names_num = static_cast<std::uint32_t>(names.size());
+    Require(sceSaveDataDirNameSearch(&cond, &result) == 0, "pattern search failed");
+    std::vector<std::string> found;
+    for (std::uint32_t i = 0; i < result.set_num; ++i) found.emplace_back(names[i].data);
+    return found;
+}
+
+static void TrailingWildcards() {
+    for (const char* name : std::array{"TRAIL", "TRAIL1"}) std::filesystem::create_directories(std::filesystem::path("_sd") / name);
+    using Names = std::vector<std::string>;
+    Require(SearchPattern("TRAIL%") == Names{"TRAIL", "TRAIL1"}, "a trailing % must also match no characters");
+    Require(SearchPattern("TRAIL%%") == Names{"TRAIL", "TRAIL1"}, "trailing %% must also match no characters");
+    Require(SearchPattern("TRAI_%") == Names{"TRAIL", "TRAIL1"}, "_ then % must match one character and then none");
+    Require(SearchPattern("TRAIL_%") == Names{"TRAIL1"}, "_ must still match exactly one character");
 }
 
 static void SearchAndMount() {
@@ -92,10 +134,22 @@ static void SearchAndMount() {
     SaveDataDirNameSearchResult result{};
     result.dir_names = reinterpret_cast<SceSaveDataDirName*>(buffer.data());
     result.dir_names_num = 2;
+    alignas(SaveDataSearchInfo) std::array<unsigned char, 112> infos;
+    infos.fill(0x21);
+    result.infos = reinterpret_cast<SaveDataSearchInfo*>(infos.data());
     Require(sceSaveDataDirNameSearch(&cond, &result) == 0, "search failed");
     Require(result.hit_num == 2 && result.set_num == 2, "search must return both saves");
     for (std::size_t i = 64; i < buffer.size(); ++i) {
         Require(buffer[i] == '!', "directory search overran two 32-byte guest records");
+    }
+    for (std::size_t i = 96; i < infos.size(); ++i) {
+        Require(infos[i] == 0x21, "directory search overran two 48-byte search infos");
+    }
+    for (std::size_t i = 0; i < 2; ++i) {
+        SaveDataSearchInfo info{};
+        std::memcpy(&info, infos.data() + i * 48, sizeof(info));
+        Require(info.blocks == 32768 && info.free_blocks == 32768, "search info must report the save's blocks and free blocks");
+        for (const auto byte : info.reserved) Require(byte == 0, "search info reserved bytes must be zero");
     }
     std::array<bool, 2> found{};
     for (int i = 0; i < 2; ++i) {
@@ -127,6 +181,7 @@ int main() {
     try {
         SearchAndMount();
         SortByKey();
+        TrailingWildcards();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         status = 1;

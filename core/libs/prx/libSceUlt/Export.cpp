@@ -239,6 +239,7 @@ std::uint64_t APS5_VABI sceUltQueueDataResourcePoolGetWorkAreaSize(std::uint32_t
 
 int APS5_VABI sceUltQueueDataResourcePoolCreate(void* pool, const char* name, std::uint32_t numData, std::uint64_t dataSize, std::uint32_t numQueueObject, void* waitingQueueResourcePool, void* workArea, const void* optParam, std::uint32_t buildVersion) {
     (void)name;
+    (void)optParam;
     (void)buildVersion;
     if (pool == nullptr) {
         return ULT_ERROR_NULL;
@@ -246,7 +247,6 @@ int APS5_VABI sceUltQueueDataResourcePoolCreate(void* pool, const char* name, st
     if ((reinterpret_cast<std::uintptr_t>(pool) & 7u) != 0) return ULT_ERROR_ALIGNMENT;
     if (numData == 0 || numQueueObject == 0 || dataSize == 0 ||
         dataSize > std::numeric_limits<std::size_t>::max() / numData) return ULT_ERROR_RANGE;
-    if (optParam != nullptr) NotImplemented_nid_no_patch("sceUltQueueDataResourcePoolCreate: optParam");
     std::lock_guard<std::mutex> lock(gMutex);
     if (waitingQueueResourcePool != nullptr && gResourcePools.find(waitingQueueResourcePool) == gResourcePools.end()) {
         return ULT_ERROR_INVALID;
@@ -283,13 +283,13 @@ int APS5_VABI sceUltQueueDataResourcePoolDestroy(void* pool) {
 
 int APS5_VABI sceUltQueueCreate(void* queue, const char* name, std::uint64_t dataSize, void* waitingQueueResourcePool, void* queueDataResourcePool, const void* optParam, std::uint32_t buildVersion) {
     (void)name;
+    (void)optParam;
     (void)buildVersion;
     if (queue == nullptr) {
         return ULT_ERROR_NULL;
     }
     if ((reinterpret_cast<std::uintptr_t>(queue) & 7u) != 0) return ULT_ERROR_ALIGNMENT;
     if (dataSize == 0) return ULT_ERROR_RANGE;
-    if (optParam != nullptr) NotImplemented_nid_no_patch("sceUltQueueCreate: optParam");
     auto state = std::make_shared<UltQueueState>();
     state->_dataSize = dataSize;
     std::lock_guard<std::mutex> lock(gMutex);

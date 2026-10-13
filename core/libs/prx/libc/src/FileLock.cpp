@@ -1,0 +1,83 @@
+#include "prx/libc/include/FileLock.hpp"
+
+#ifdef _WIN32
+
+#include <cerrno>
+#include <io.h>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <windows.h>
+
+namespace {
+
+constexpr int LockShared = 1;
+constexpr int LockExclusive = 2;
+constexpr int LockNonblocking = 4;
+constexpr int LockUnlock = 8;
+
+struct LockState {
+    std::mutex mutex;
+    int mode = 0;
+};
+
+std::mutex g_mutex;
+std::map<int, std::shared_ptr<LockState>> g_locks;
+
+std::shared_ptr<LockState> Materialize(int fd) {
+    const auto found = g_locks.find(fd);
+    if (found != g_locks.end()) return found->second;
+    return g_locks.emplace(fd, std::make_shared<LockState>()).first->second;
+}
+
+}
+
+extern "C" {
+
+int GuestFileLock_nid_no_patch(int fd, int operation) {
+    const int mode = operation & (LockShared | LockExclusive | LockUnlock);
+    if (mode != LockShared && mode != LockExclusive && mode != LockUnlock) {
+        errno = EINVAL;
+        ::SetLastError(ERROR_INVALID_PARAMETER);
+        return -1;
+    }
+    const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(fd));
+    if (handle == INVALID_HANDLE_VALUE) {
+        errno = EBADF;
+        ::SetLastError(ERROR_INVALID_HANDLE);
+        return -1;
+    }
+    const auto state = [&] {
+        std::lock_guard lock(g_mutex);
+        return Materialize(fd);
+    }();
+    std::lock_guard lock(state->mutex);
+    if (state->mode == mode) return 0;
+    if (state->mode != 0) {
+        OVERLAPPED overlapped{};
+        if (!::UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &overlapped)) return -1;
+        state->mode = 0;
+    }
+    if (mode == LockUnlock) return 0;
+    DWORD flags = mode == LockExclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0;
+    if (operation & LockNonblocking) flags |= LOCKFILE_FAIL_IMMEDIATELY;
+    OVERLAPPED overlapped{};
+    if (!::LockFileEx(handle, flags, 0, MAXDWORD, MAXDWORD, &overlapped)) return -1;
+    state->mode = mode;
+    return 0;
+}
+
+void GuestFileLockShare_nid_no_patch(int from, int to) {
+    std::lock_guard lock(g_mutex);
+    auto state = Materialize(from);
+    g_locks[to] = std::move(state);
+}
+
+void GuestFileLockForget_nid_no_patch(int fd) {
+    std::lock_guard lock(g_mutex);
+    g_locks.erase(fd);
+}
+
+}
+
+#endif

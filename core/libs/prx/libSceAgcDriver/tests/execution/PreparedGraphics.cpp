@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Graphics/include/PipelineLibrary.hpp"
 #include "VulkanTestDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparation.hpp"
 #include "SceShaders.hpp"
@@ -130,6 +131,30 @@ void Check(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ShaderPath path
     }
     const auto stages = PrepareGraphicsStages(prepared, target);
     Require(stages.size() == (tessellation ? 4u : 2u), "graphics preparation compiled the wrong stages");
+    if (!mesh && !tessellation && target.registrationModules) {
+        const auto prebuild = [&](const std::vector<PreparedGraphicsStage>& group, std::initializer_list<std::size_t> picked) {
+            std::vector<AgcDriver::Graphics::CompiledShader> shaders;
+            for (const auto index : picked) {
+                Require(group.at(index).registration != nullptr, "registration modules: a prepared stage has no registration result");
+                shaders.push_back({group[index].stage, group[index].registration.get(), group[index].pushOffset});
+            }
+            const auto before = AgcDriver::Graphics::PipelineLibraryCountersOf(device.Device());
+            Require(device.PrebuildGraphicsLibraries(prepared.state.stages, shaders), "registration modules: the shader libraries were not prebuilt");
+            const auto after = AgcDriver::Graphics::PipelineLibraryCountersOf(device.Device());
+            Require(after.linked == before.linked, "registration modules: a prebuild linked a pipeline");
+            return std::pair{after.built[1] - before.built[1], after.built[2] - before.built[2]};
+        };
+        const auto vertexOnly = prebuild(stages, {0u});
+        Require(vertexOnly.first == 1u, "registration modules: the vertex stage alone did not build its pre-rasterization library");
+        const auto pixelOnly = prebuild(stages, {1u});
+        Require(pixelOnly.second == 1u, "registration modules: the pixel stage alone did not build its fragment library");
+        const auto pair = prebuild(stages, {0u, 1u});
+        Require(pair.first == 0u && pair.second == 0u, "registration modules: the pair of stages did not find the libraries prebuilt one stage at a time");
+        const auto again = PrepareGraphicsStages(prepared, target);
+        Require(again.front().registration != stages.front().registration, "registration modules: the second preparation reused the first result object");
+        const auto repeated = prebuild(again, {0u, 1u});
+        Require(repeated.first == 0u && repeated.second == 0u, "registration modules: another materialization of the same stages did not find the prebuilt libraries");
+    }
     for (const auto& stage : stages) stage.snapshot->prepared->entries.push_back(stage.entry);
     const auto& pixelArtifact = GetPreparedArtifact(*stages.back().entry.handle);
     Require(!pixelArtifact.fragmentParameters.empty() && pixelArtifact.fragmentParameters.front().sourceLocation == 3u, "prepared fragment lost interpolant mapping");

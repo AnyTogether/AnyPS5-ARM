@@ -1,0 +1,437 @@
+#ifndef CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_PERFORMANCETRACE_HPP
+#define CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_PERFORMANCETRACE_HPP
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <charconv>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace AgcDriver {
+
+class VulkanDevice;
+
+class TraceWindow {
+public:
+    using Clock = std::chrono::steady_clock;
+    enum class Edge { None, Open, Close };
+
+    static std::optional<TraceWindow> Parse(const char* frames, const char* seconds) {
+        if (frames == nullptr && seconds == nullptr) return std::nullopt;
+        if (frames != nullptr && seconds != nullptr) throw std::invalid_argument("APS5_TRACE_FRAMES and APS5_TRACE_SECONDS cannot be set together");
+        const std::string_view name = frames != nullptr ? "APS5_TRACE_FRAMES" : "APS5_TRACE_SECONDS";
+        const std::string_view text = frames != nullptr ? frames : seconds;
+        const auto colon = text.find(':');
+        std::uint64_t start = 0;
+        std::uint64_t length = 0;
+        if (colon == std::string_view::npos || !number(text.substr(0, colon), start) || !number(text.substr(colon + 1), length) || length == 0)
+            throw std::invalid_argument(std::string(name) + "=" + std::string(text) + " is not <start>:<length> with a length above 0");
+        return TraceWindow(frames != nullptr, start, length);
+    }
+
+    Edge Present(std::uint64_t present, Clock::duration elapsed) {
+        if (state == State::Closed) return Edge::None;
+        if (state == State::Waiting) {
+            if (frames ? present < start : wholeSeconds(elapsed) < start) return Edge::None;
+            state = State::Open;
+            openedPresent = present;
+            openedAt = elapsed;
+            return Edge::Open;
+        }
+        if (frames ? present - openedPresent < length : wholeSeconds(elapsed - openedAt) < length) return Edge::None;
+        state = State::Closed;
+        return Edge::Close;
+    }
+
+    std::string Describe() const {
+        return std::string(frames ? "frames " : "seconds ") + std::to_string(start) + ":" + std::to_string(length);
+    }
+
+private:
+    enum class State { Waiting, Open, Closed };
+
+    TraceWindow(bool frames, std::uint64_t start, std::uint64_t length) : frames(frames), start(start), length(length) {}
+
+    static bool number(std::string_view text, std::uint64_t& value) {
+        const auto end = text.data() + text.size();
+        const auto [last, error] = std::from_chars(text.data(), end, value);
+        return !text.empty() && error == std::errc{} && last == end;
+    }
+
+    static std::uint64_t wholeSeconds(Clock::duration elapsed) {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count());
+    }
+
+    bool frames;
+    std::uint64_t start;
+    std::uint64_t length;
+    State state = State::Waiting;
+    std::uint64_t openedPresent = 0;
+    Clock::duration openedAt{};
+};
+
+class TraceThread {
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr std::size_t DefaultCapacity = 262144;
+    static constexpr Clock::duration MinimumSlice = std::chrono::microseconds(20);
+
+    struct Slice {
+        const char* scope;
+        const char* stage;
+        Clock::time_point begin;
+        Clock::duration length;
+    };
+
+    struct Total {
+        const char* scope;
+        const char* stage;
+        Clock::duration length;
+        std::uint64_t count;
+    };
+
+    struct Snapshot {
+        std::string name;
+        std::span<const Slice> slices;
+        std::vector<Total> totals;
+        bool dropped = false;
+    };
+
+    TraceThread(std::string name, const std::atomic<std::uint64_t>& presents, std::size_t capacity = DefaultCapacity)
+        : name(std::move(name)), presents(presents), slices(std::make_unique<Slice[]>(capacity)), capacity(capacity) {}
+
+    TraceThread(const TraceThread&) = delete;
+    TraceThread& operator=(const TraceThread&) = delete;
+
+    void Add(const char* scope, const char* stage, Clock::time_point begin, Clock::time_point end) {
+        const auto length = end - begin;
+        account(scope, stage, length);
+        const auto present = presents.load(std::memory_order_relaxed);
+        if (!sampled || present != sampledPresent) {
+            if (sampled) append({nullptr, nullptr, sampleBegin, folded});
+            sampled = true;
+            sampledPresent = present;
+            sampleBegin = begin;
+            folded = {};
+        }
+        if (length < MinimumSlice) folded += length;
+        else append({scope, stage, begin, length});
+    }
+
+    Snapshot Collect() const {
+        Snapshot snapshot{name, {slices.get(), used.load(std::memory_order_acquire)}, {}, false};
+        for (const auto& entry : entries) {
+            const auto* scope = entry.scope.load(std::memory_order_acquire);
+            if (scope == nullptr) continue;
+            snapshot.totals.push_back({scope, entry.stage.load(std::memory_order_relaxed), Clock::duration(entry.length.load(std::memory_order_relaxed)), entry.count.load(std::memory_order_relaxed)});
+        }
+        snapshot.dropped = dropped.load(std::memory_order_relaxed);
+        return snapshot;
+    }
+
+private:
+    struct Entry {
+        std::atomic<const char*> scope{nullptr};
+        std::atomic<const char*> stage{nullptr};
+        std::atomic<Clock::rep> length{0};
+        std::atomic<std::uint64_t> count{0};
+    };
+
+    void append(const Slice& slice) {
+        const auto index = used.load(std::memory_order_relaxed);
+        if (index == capacity) {
+            dropped.store(true, std::memory_order_relaxed);
+            return;
+        }
+        slices[index] = slice;
+        used.store(index + 1, std::memory_order_release);
+    }
+
+    void account(const char* scope, const char* stage, Clock::duration length) {
+        const auto key = reinterpret_cast<std::uintptr_t>(scope) ^ (reinterpret_cast<std::uintptr_t>(stage) >> 3);
+        const auto hash = static_cast<std::size_t>((static_cast<std::uint64_t>(key) * 0x9e3779b97f4a7c15ull) >> 55);
+        for (std::size_t probe = 0; probe < entries.size(); ++probe) {
+            auto& entry = entries[(hash + probe) % entries.size()];
+            const auto* current = entry.scope.load(std::memory_order_relaxed);
+            if (current == nullptr) {
+                entry.stage.store(stage, std::memory_order_relaxed);
+                entry.scope.store(scope, std::memory_order_release);
+            } else if (current != scope || entry.stage.load(std::memory_order_relaxed) != stage) {
+                continue;
+            }
+            entry.length.store(entry.length.load(std::memory_order_relaxed) + length.count(), std::memory_order_relaxed);
+            entry.count.store(entry.count.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+            return;
+        }
+        dropped.store(true, std::memory_order_relaxed);
+    }
+
+    const std::string name;
+    const std::atomic<std::uint64_t>& presents;
+    const std::unique_ptr<Slice[]> slices;
+    const std::size_t capacity;
+    std::atomic<std::size_t> used{0};
+    std::atomic<bool> dropped{false};
+    std::array<Entry, 512> entries;
+    bool sampled = false;
+    std::uint64_t sampledPresent = 0;
+    Clock::time_point sampleBegin{};
+    Clock::duration folded{};
+};
+
+struct TraceSummary {
+    std::string commit;
+    std::optional<bool> dirty;
+    std::vector<std::pair<std::string, std::string>> environment;
+    std::string gpu;
+    std::string driver;
+    std::string os;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::string window;
+    std::uint64_t firstPresent = 0;
+    double gpuBusyMs = 0;
+    std::string trace;
+};
+
+struct TraceGpuRange {
+    const char* name;
+    double beginNs;
+    double endNs;
+};
+
+struct TraceClockSample {
+    double gpuNs = 0;
+    std::chrono::steady_clock::time_point cpu{};
+};
+
+class TraceFormat {
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr std::array<std::string_view, 5> WorkerBusyScopes{"Driver.Packet", "Driver.Suspend", "Driver.EndSubmission", "Driver.Rewind", "Driver.Completion"};
+    static constexpr std::string_view WorkerWaitScope = "Driver.WorkerWait";
+    static constexpr std::string_view WorkerPrefix = "queue worker ";
+    static constexpr std::size_t TopPhases = 8;
+
+    static void AppendString(std::string& output, std::string_view text) {
+        output += '"';
+        for (const char character : text) {
+            const auto byte = static_cast<unsigned char>(character);
+            if (character == '"' || character == '\\') {
+                output += '\\';
+                output += character;
+            } else if (byte < 0x20 || byte >= 0x7f) {
+                char escaped[8];
+                std::snprintf(escaped, sizeof escaped, "\\u%04x", static_cast<unsigned>(byte));
+                output += escaped;
+            } else {
+                output += character;
+            }
+        }
+        output += '"';
+    }
+
+    static std::string Name(const char* scope, const char* stage) {
+        return stage == nullptr ? std::string(scope) : std::string(scope) + "." + stage;
+    }
+
+    static std::string Events(std::uint64_t process, Clock::time_point origin, std::span<const TraceThread::Snapshot> threads, std::size_t presenter, std::span<const Clock::time_point> presents, std::uint64_t firstPresent) {
+        std::string output = "{\"traceEvents\":[\n";
+        bool first = true;
+        const auto event = [&](std::string_view name, const char* phase, Clock::time_point at, std::size_t tid) {
+            if (!first) output += ",\n";
+            first = false;
+            output += "{\"name\":";
+            AppendString(output, name);
+            char text[96];
+            std::snprintf(text, sizeof text, ",\"ph\":\"%s\",\"ts\":%.3f,\"pid\":%llu,\"tid\":%llu", phase, microseconds(at - origin), static_cast<unsigned long long>(process), static_cast<unsigned long long>(tid));
+            output += text;
+        };
+        event("process_name", "M", origin, 0);
+        output += ",\"args\":{\"name\":\"AnyPS5\"}}";
+        for (std::size_t index = 0; index < threads.size(); ++index) {
+            const auto& thread = threads[index];
+            const auto tid = index + 1;
+            event("thread_name", "M", origin, tid);
+            output += ",\"args\":{\"name\":";
+            AppendString(output, thread.name);
+            output += "}}";
+            std::vector<TraceThread::Slice> slices(thread.slices.begin(), thread.slices.end());
+            std::stable_sort(slices.begin(), slices.end(), [](const auto& a, const auto& b) { return a.begin != b.begin ? a.begin < b.begin : a.length > b.length; });
+            const auto folded = thread.name + " folded";
+            for (const auto& slice : slices) {
+                char text[64];
+                if (slice.scope == nullptr) {
+                    event(folded, "C", slice.begin, tid);
+                    std::snprintf(text, sizeof text, ",\"args\":{\"ms\":%.3f}}", milliseconds(slice.length));
+                } else {
+                    event(Name(slice.scope, slice.stage), "X", slice.begin, tid);
+                    std::snprintf(text, sizeof text, ",\"dur\":%.3f}", microseconds(slice.length));
+                }
+                output += text;
+            }
+        }
+        for (std::size_t index = 0; index + 1 < presents.size(); ++index) {
+            event("present", "i", presents[index], presenter + 1);
+            output += ",\"s\":\"g\",\"args\":{\"present\":" + std::to_string(firstPresent + index) + "}}";
+        }
+        output += "\n]}\n";
+        return output;
+    }
+
+    static std::vector<TraceThread::Slice> GpuSlices(std::span<const TraceGpuRange> ranges, const TraceClockSample& first, const TraceClockSample& last, Clock::time_point origin) {
+        const double gpuSpan = last.gpuNs - first.gpuNs;
+        const double scale = gpuSpan > 0 ? std::chrono::duration<double, std::nano>(last.cpu - first.cpu).count() / gpuSpan : 1.0;
+        const auto map = [&](double gpuNs) { return first.cpu + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double, std::nano>((gpuNs - first.gpuNs) * scale)); };
+        std::vector<TraceThread::Slice> slices;
+        for (const auto& range : ranges) {
+            const auto begin = map(range.beginNs);
+            const auto end = map(range.endNs);
+            if (end <= begin || begin < origin) continue;
+            slices.push_back({range.name, nullptr, begin, end - begin});
+        }
+        return slices;
+    }
+
+    static std::string Summary(const TraceSummary& summary, std::span<const TraceThread::Snapshot> threads, std::span<const Clock::time_point> presents) {
+        const auto count = presents.empty() ? std::size_t{0} : presents.size() - 1;
+        const auto span = presents.empty() ? Clock::duration{} : presents.back() - presents.front();
+        std::vector<double> frames;
+        for (std::size_t index = 1; index < presents.size(); ++index) frames.push_back(milliseconds(presents[index] - presents[index - 1]));
+        std::sort(frames.begin(), frames.end());
+        const auto percentile = [&](double fraction) { return frames.empty() ? 0.0 : frames[std::min(frames.size() - 1, static_cast<std::size_t>(fraction * static_cast<double>(frames.size())))]; };
+        const double perPresent = count != 0 ? 1.0 / static_cast<double>(count) : 0.0;
+
+        std::string output = "{\"commit\":";
+        AppendString(output, summary.commit);
+        output += ",\"dirty\":";
+        output += summary.dirty.has_value() ? (*summary.dirty ? "true" : "false") : "null";
+        output += ",\"env\":{";
+        for (std::size_t index = 0; index < summary.environment.size(); ++index) {
+            if (index != 0) output += ',';
+            AppendString(output, summary.environment[index].first);
+            output += ':';
+            AppendString(output, summary.environment[index].second);
+        }
+        output += "},\"gpu\":";
+        AppendString(output, summary.gpu);
+        output += ",\"driver\":";
+        AppendString(output, summary.driver);
+        output += ",\"os\":";
+        AppendString(output, summary.os);
+        output += ",\"resolution\":";
+        AppendString(output, std::to_string(summary.width) + "x" + std::to_string(summary.height));
+        output += ",\"window\":{\"spec\":";
+        AppendString(output, summary.window);
+        output += ",\"first_present\":" + std::to_string(summary.firstPresent);
+        output += ",\"ms\":" + number(milliseconds(span)) + "}";
+        output += ",\"presents\":" + std::to_string(count);
+        output += ",\"frame_ms\":{\"p50\":" + number(percentile(0.5)) + ",\"p90\":" + number(percentile(0.9)) + ",\"p99\":" + number(percentile(0.99)) + ",\"max\":" + number(frames.empty() ? 0.0 : frames.back()) + "}";
+        output += ",\"gpu_busy_ms_per_present\":" + number(summary.gpuBusyMs * perPresent);
+
+        output += ",\"worker_busy_pct\":{";
+        bool firstWorker = true;
+        std::map<std::string, Clock::duration> phases;
+        bool dropped = false;
+        for (const auto& thread : threads) {
+            dropped = dropped || thread.dropped;
+            Clock::duration busy{};
+            for (const auto& total : thread.totals) {
+                const std::string_view scope = total.scope;
+                if (total.stage == nullptr && std::find(WorkerBusyScopes.begin(), WorkerBusyScopes.end(), scope) != WorkerBusyScopes.end()) busy += total.length;
+                if (scope != WorkerWaitScope) phases[Name(total.scope, total.stage)] += total.length;
+            }
+            if (!thread.name.starts_with(WorkerPrefix)) continue;
+            if (!firstWorker) output += ',';
+            firstWorker = false;
+            AppendString(output, thread.name);
+            output += ':' + number(span != Clock::duration{} ? 100.0 * static_cast<double>(busy.count()) / static_cast<double>(span.count()) : 0.0);
+        }
+        output += "},\"top_phases_ms_per_frame\":{";
+        std::vector<std::pair<std::string, Clock::duration>> top(phases.begin(), phases.end());
+        std::stable_sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+        for (std::size_t index = 0; index < top.size() && index < TopPhases; ++index) {
+            if (index != 0) output += ',';
+            AppendString(output, top[index].first);
+            output += ':' + number(milliseconds(top[index].second) * perPresent);
+        }
+        output += "},\"trace_dropped\":";
+        output += dropped ? "true" : "false";
+        output += ",\"trace\":";
+        AppendString(output, summary.trace);
+        output += "}\n";
+        return output;
+    }
+
+private:
+    static double microseconds(Clock::duration elapsed) {
+        return std::chrono::duration<double, std::micro>(elapsed).count();
+    }
+
+    static double milliseconds(Clock::duration elapsed) {
+        return std::chrono::duration<double, std::milli>(elapsed).count();
+    }
+
+    static std::string number(double value) {
+        char text[32];
+        std::snprintf(text, sizeof text, "%.3f", value);
+        return text;
+    }
+};
+
+class PerformanceTrace {
+public:
+    static bool Configured() {
+        static const bool configured = std::getenv("APS5_TRACE_FRAMES") != nullptr || std::getenv("APS5_TRACE_SECONDS") != nullptr;
+        return configured;
+    }
+
+    static void BindThread(const char* name, std::size_t capacity = TraceThread::DefaultCapacity);
+    static void Present(std::uint32_t width, std::uint32_t height, const VulkanDevice* device);
+
+    static void GpuRange(const char* name, double beginNs, double endNs) {
+        if (!Recording()) return;
+        std::lock_guard lock(gpuMutex);
+        if (gpuRanges.size() == gpuRanges.capacity()) {
+            gpuDropped = true;
+            return;
+        }
+        gpuRanges.push_back({name, beginNs, endNs});
+    }
+
+    static bool Recording() {
+        return recording.load(std::memory_order_relaxed);
+    }
+
+    static TraceThread* Thread() {
+        return local;
+    }
+
+    static void StopOutput();
+
+private:
+    inline static std::atomic<bool> recording{false};
+    inline static std::atomic<std::uint64_t> presentCount{0};
+    inline static thread_local TraceThread* local = nullptr;
+    inline static std::mutex gpuMutex;
+    inline static std::vector<TraceGpuRange> gpuRanges;
+    inline static bool gpuDropped = false;
+};
+
+}
+
+#endif

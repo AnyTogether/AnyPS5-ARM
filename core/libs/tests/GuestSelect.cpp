@@ -25,6 +25,12 @@ extern "C" {
 int APS5_VABI select_nid_postfix(int, void*, void*, void*, const void*);
 int APS5_VABI pipe_nid_postfix(int*);
 int APS5_VABI close_nid_postfix(int);
+int APS5_VABI socket_nid_postfix(int, int, int);
+int APS5_VABI bind_nid_postfix(int, const void*, std::uint32_t);
+int APS5_VABI getsockname_nid_postfix(int, void*, std::uint32_t*);
+int APS5_VABI connect_nid_postfix(int, const void*, std::uint32_t);
+std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
+std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 std::int64_t APS5_VABI write_nid_postfix(int, const char*, std::int64_t);
 std::int64_t APS5_VABI read_nid_postfix(int, void*, std::uint64_t);
 int* APS5_VABI __error_nid_postfix();
@@ -104,6 +110,44 @@ int main() {
         GuestTimeval limit{0, 50000};
         Require(select_nid_postfix(GuestDescriptorLimit + 1, read.words.data(), nullptr, nullptr, &limit) == -1);
         Require(*__error_nid_postfix() == GuestEinval);
+    }
+
+    {
+        int pipe[2]{-1, -1};
+        Require(pipe_nid_postfix(pipe) == 0);
+        const int receiver = socket_nid_postfix(2, 2, 0);
+        const int sender = socket_nid_postfix(2, 2, 0);
+        Require(receiver >= 0 && receiver < GuestDescriptorLimit && sender >= 0 && sender < GuestDescriptorLimit);
+        std::array<unsigned char, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+        Require(bind_nid_postfix(receiver, address.data(), address.size()) == 0);
+        std::uint32_t size = address.size();
+        Require(getsockname_nid_postfix(receiver, address.data(), &size) == 0);
+        Require(connect_nid_postfix(sender, address.data(), address.size()) == 0);
+        const int highest = receiver > pipe[0] ? receiver : pipe[0];
+        GuestDescriptorSet idle{};
+        idle.Add(receiver);
+        idle.Add(pipe[0]);
+        GuestTimeval none{0, 0};
+        Require(select_nid_postfix(highest + 1, idle.words.data(), nullptr, nullptr, &none) == 0);
+        Require(!idle.Has(receiver) && !idle.Has(pipe[0]));
+        const char byte = 'm';
+        Require(send_nid_postfix(sender, &byte, 1, 0) == 1);
+        Require(write_nid_postfix(pipe[1], &byte, 1) == 1);
+        GuestDescriptorSet read{};
+        GuestTimeval limit{2, 0};
+        const auto start = std::chrono::steady_clock::now();
+        int ready = 0;
+        while (ready < 2 && std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
+            read = {};
+            read.Add(receiver);
+            read.Add(pipe[0]);
+            ready = select_nid_postfix(highest + 1, read.words.data(), nullptr, nullptr, &limit);
+        }
+        Require(ready == 2 && read.Has(receiver) && read.Has(pipe[0]));
+        char buffer[1]{};
+        Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0) == 1 && buffer[0] == byte);
+        Require(read_nid_postfix(pipe[0], buffer, sizeof(buffer)) == 1 && buffer[0] == byte);
+        for (const int descriptor : {receiver, sender, pipe[0], pipe[1]}) Require(close_nid_postfix(descriptor) == 0);
     }
 
     Require(close_nid_postfix(reader) == 0);

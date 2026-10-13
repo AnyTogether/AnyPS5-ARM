@@ -17,6 +17,9 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelGetdents(int, char*, int);
 int APS5_VABI sceKernelGetdirentries(int, char*, int, std::int64_t*);
+int APS5_VABI getdents_nid_postfix(int, char*, int);
+int APS5_VABI getdirentries_nid_postfix(int, char*, int, std::int64_t*);
+int* APS5_VABI __error_nid_postfix();
 }
 
 static void Check(bool value, int line) {
@@ -27,15 +30,15 @@ static void Check(bool value, int line) {
 }
 #define Require(value) Check((value), __LINE__)
 
-int main() {
+static void CheckName(const std::u8string& utf8Name) {
     const auto root = std::filesystem::temp_directory_path() /
         ("anyps5-directory-buffer-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Require(std::filesystem::create_directory(root));
-    const std::string name = "a-long-directory-entry-name.bin";
-    { std::ofstream file(root / name); Require(static_cast<bool>(file)); }
+    const std::string name(utf8Name.begin(), utf8Name.end());
+    { std::ofstream file(root / std::filesystem::path(utf8Name)); Require(static_cast<bool>(file)); }
     const int directory = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
     Require(directory >= 0);
-    std::array<char, 256> buffer;
+    std::array<char, 512> buffer;
     buffer.fill('x');
     std::int64_t base = -1;
     Require(sceKernelGetdirentries(directory, buffer.data(), 8, &base) == SCE_KERNEL_ERROR_EINVAL);
@@ -54,9 +57,60 @@ int main() {
     const int recordSize = static_cast<int>((8 + name.size() + 1 + 3) & ~std::size_t{3});
     Require(sceKernelGetdirentries(directory, buffer.data(), recordSize, &base) == recordSize);
     Require(std::strcmp(buffer.data() + 8, name.c_str()) == 0);
+    Require(static_cast<unsigned char>(buffer[7]) == name.size());
+    std::uint16_t storedSize = 0;
+    std::memcpy(&storedSize, buffer.data() + 4, sizeof(storedSize));
+    Require(storedSize == recordSize);
+    const auto rootUtf8 = root.u8string();
+    const std::string enumeratedPath = std::string(rootUtf8.begin(), rootUtf8.end()) + '/' + (buffer.data() + 8);
+    const int file = sceKernelOpen(enumeratedPath.c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(file >= 0 && sceKernelClose(file) == 0);
     Require(sceKernelGetdents(directory, buffer.data(), 8) == 0);
     Require(sceKernelGetdents(directory, buffer.data(), 256) == 0);
     Require(sceKernelClose(directory) == 0);
     Require(sceKernelGetdents(-1, buffer.data(), 256) == SCE_KERNEL_ERROR_ENOTDIR);
     std::filesystem::remove_all(root);
+}
+
+static void CheckOversizedName() {
+    const auto root = std::filesystem::temp_directory_path() /
+        ("anyps5-directory-name-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directory(root));
+    std::u8string name;
+    for (int i = 0; i < 86; ++i) name += u8"\u30bb";
+    { std::ofstream file(root / std::filesystem::path(name)); Require(static_cast<bool>(file)); }
+    const int directory = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Require(directory >= 0);
+    std::array<char, 512> buffer;
+    buffer.fill('x');
+    Require(sceKernelGetdents(directory, buffer.data(), static_cast<int>(buffer.size())) == 24);
+    Require(std::strcmp(buffer.data() + 8, ".") == 0);
+    Require(std::strcmp(buffer.data() + 20, "..") == 0);
+    Require(std::all_of(buffer.begin() + 24, buffer.end(), [](char byte) { return byte == 'x'; }));
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        buffer.fill('x');
+        Require(sceKernelGetdents(directory, buffer.data(), static_cast<int>(buffer.size())) == SCE_KERNEL_ERROR_ENAMETOOLONG);
+        Require(std::all_of(buffer.begin(), buffer.end(), [](char byte) { return byte == 'x'; }));
+    }
+    *__error_nid_postfix() = 0;
+    Require(getdents_nid_postfix(directory, buffer.data(), static_cast<int>(buffer.size())) == -1);
+    Require(*__error_nid_postfix() == 63);
+    *__error_nid_postfix() = 0;
+    std::int64_t base = -1;
+    Require(getdirentries_nid_postfix(directory, buffer.data(), static_cast<int>(buffer.size()), &base) == -1);
+    Require(*__error_nid_postfix() == 63);
+    Require(std::all_of(buffer.begin(), buffer.end(), [](char byte) { return byte == 'x'; }));
+    Require(sceKernelClose(directory) == 0);
+    std::filesystem::remove_all(root);
+}
+
+int main() {
+    CheckName(u8"a-long-directory-entry-name.bin");
+    CheckName(u8"caf\u00e9-music.bin");
+    CheckName(u8"\u30bb\u30fc\u30d6-music.bin");
+    CheckName(u8"\U0001f3ae-music.bin");
+    std::u8string longest;
+    for (int i = 0; i < 85; ++i) longest += u8"\u30bb";
+    CheckName(longest);
+    CheckOversizedName();
 }

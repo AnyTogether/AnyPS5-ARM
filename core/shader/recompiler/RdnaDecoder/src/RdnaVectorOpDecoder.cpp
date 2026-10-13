@@ -1932,7 +1932,7 @@ bool supportsNativeVop3SourceModifiers(RdnaOpcode opcode) {
 }
 
 bool supportsNativeVop3ResultModifiers(RdnaOpcode opcode) {
-    if (isVop1FloatResultOpcode(opcode)) {
+    if (isVop1FloatResultOpcode(opcode) || isNativeVop3F16TernaryOpcode(opcode)) {
         return true;
     }
     switch (opcode) {
@@ -1946,7 +1946,6 @@ bool supportsNativeVop3ResultModifiers(RdnaOpcode opcode) {
         case RdnaOpcode::VMacF32:
         case RdnaOpcode::VMadF32:
         case RdnaOpcode::VFmaF32:
-        case RdnaOpcode::VFmaF16:
         case RdnaOpcode::VAddF16:
         case RdnaOpcode::VSubF16:
         case RdnaOpcode::VSubrevF16:

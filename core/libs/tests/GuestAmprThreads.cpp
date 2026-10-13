@@ -39,7 +39,6 @@ int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
 void APS5_VABI _Mtx_destroy_nid_postfix(void** handle);
 int APS5_VABI _Thrd_id_nid_postfix(void);
 int APS5_VABI scePthreadGetthreadid(void);
-[[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code);
 void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(void* pad);
 void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(void* pad);
 void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(void* pad, Pthread* thread);
@@ -219,27 +218,6 @@ static void TestWcstombs() {
 
     Require(wcstombs_s_nid_postfix(&result, nullptr, 0, wide, 0) == GuestEilseq);
     Require(result == Failed);
-}
-
-static void TestThrowCppError() {
-    const std::errc expected[] = {std::errc::device_or_resource_busy, std::errc::invalid_argument, std::errc::no_such_process, std::errc::not_enough_memory,
-                                  std::errc::operation_not_permitted, std::errc::resource_deadlock_would_occur, std::errc::resource_unavailable_try_again};
-    for (int code = 0; code < 7; ++code) {
-        bool caught = false;
-        try {
-            _ZSt16_Throw_Cpp_errori_nid_postfix(code);
-        } catch (const std::system_error& error) {
-            caught = error.code() == std::make_error_code(expected[code]);
-        }
-        Require(caught);
-    }
-    bool rejected = false;
-    try {
-        _ZSt16_Throw_Cpp_errori_nid_postfix(7);
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    Require(rejected);
 }
 
 struct Pad {
@@ -431,7 +409,6 @@ int main() {
     Require(_Thrd_id_nid_postfix() == scePthreadGetthreadid());
     TestConditionSignal();
     TestTypeInfoVtables();
-    TestThrowCppError();
     TestPad();
     TestThreadJoin();
     TestThreadSleep();

@@ -1,3 +1,5 @@
+#include <atomic>
+#include <cstdio>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -20,6 +22,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <io.h>
 #else
 #include <ctime>
 #include <fcntl.h>
@@ -259,6 +262,38 @@ int SetWorkingDirectory(WorkingDirectory& state, const std::filesystem::path& re
 }
 }
 
+#ifndef _WIN32
+namespace {
+std::mutex g_hostStandardErrorMutex;
+std::atomic<int> g_hostStandardError{-1};
+}
+
+extern "C" int KeepHostStandardError_nid_no_patch() {
+    const std::lock_guard lock(g_hostStandardErrorMutex);
+    if (const int kept = g_hostStandardError.load(); kept >= 0) return kept;
+    const int kept = ::fcntl(2, F_DUPFD_CLOEXEC, 3);
+    if (kept < 0) {
+        if (errno == EBADF) return -1;
+        throw std::system_error(errno, std::generic_category(), "Keeping the host standard error");
+    }
+    std::FILE* const stream = ::fdopen(kept, "w");
+    if (stream == nullptr) {
+        const int error = errno;
+        ::close(kept);
+        throw std::system_error(error, std::generic_category(), "Keeping the host standard error");
+    }
+    std::setvbuf(stream, nullptr, _IONBF, 0);
+    std::fflush(stderr);
+    stderr = stream;
+    g_hostStandardError.store(kept);
+    return kept;
+}
+
+extern "C" int HostStandardError_nid_no_patch() {
+    return g_hostStandardError.load();
+}
+#endif
+
 extern "C" void AddPathAlias_nid_no_patch(const char* guestPrefix, const char* hostPath) {
     if (guestPrefix == nullptr || hostPath == nullptr) {
         APS5_INVALID_ARG_EX;
@@ -353,6 +388,13 @@ extern "C" std::filesystem::path ResolvePath_nid_no_patch(const char* path) {
     return Resolve(state, path);
 }
 
+extern "C" std::filesystem::path RelinkedModulePath_nid_no_patch(const std::filesystem::path& path) {
+    auto relinked = path;
+    relinked += ".guest.prx";
+    std::error_code error;
+    return std::filesystem::is_regular_file(relinked, error) ? relinked : path;
+}
+
 extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {
     if (resolved == nullptr) return 14;
     auto& state = Directories();
@@ -408,6 +450,63 @@ extern "C" char* APS5_VABI getcwd_nid_postfix(char* buffer, std::size_t size) {
     } catch (const std::bad_alloc&) { errno = 12; return nullptr; }
       catch (const std::filesystem::filesystem_error& error) { errno = DirectoryFailure(error.code()); return nullptr; }
 }
+
+#ifdef _WIN32
+extern "C" int WindowsOpenError_nid_no_patch(unsigned long error) {
+    switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_INVALID_DRIVE:
+    case ERROR_BAD_NETPATH:
+    case ERROR_BAD_NET_NAME:
+    case ERROR_BAD_PATHNAME:
+    case ERROR_FILENAME_EXCED_RANGE:
+        return ENOENT;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
+    case ERROR_WRITE_PROTECT:
+    case ERROR_NETWORK_ACCESS_DENIED:
+    case ERROR_CANNOT_MAKE:
+    case ERROR_DRIVE_LOCKED:
+        return EACCES;
+    case ERROR_FILE_EXISTS:
+    case ERROR_ALREADY_EXISTS:
+        return EEXIST;
+    case ERROR_TOO_MANY_OPEN_FILES:
+        return EMFILE;
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+        return ENOMEM;
+    case ERROR_DISK_FULL:
+        return ENOSPC;
+    default:
+        return EINVAL;
+    }
+}
+
+extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handler(_invalid_parameter_handler);
+static DWORD StandardHandleId(int descriptor) {
+    return descriptor == 0 ? STD_INPUT_HANDLE : descriptor == 1 ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE;
+}
+extern "C" void* HostStandardHandle_nid_no_patch(int descriptor) {
+    if (descriptor < 0 || descriptor > 2) return nullptr;
+    const HANDLE current = GetStdHandle(StandardHandleId(descriptor));
+    if (current == nullptr || current == INVALID_HANDLE_VALUE) return nullptr;
+    const auto previous = _set_thread_local_invalid_parameter_handler([](const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, std::uintptr_t) {});
+    const auto owned = ::_get_osfhandle(descriptor);
+    _set_thread_local_invalid_parameter_handler(previous);
+    if (reinterpret_cast<HANDLE>(owned) != current) return current;
+    HANDLE kept = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), current, GetCurrentProcess(), &kept, 0, TRUE, DUPLICATE_SAME_ACCESS))
+        throw std::runtime_error("Cannot keep the host standard handle of descriptor " + std::to_string(descriptor));
+    return kept;
+}
+extern "C" void KeepStandardHandle_nid_no_patch(int descriptor, void* handle) {
+    if (handle != nullptr && !SetStdHandle(StandardHandleId(descriptor), handle))
+        throw std::runtime_error("Cannot keep the host standard handle of descriptor " + std::to_string(descriptor));
+}
+#endif
 
 extern "C" void NotImplemented_nid_no_patch(const char* funcName) {
     throw std::runtime_error(std::string(funcName) + " not implemented");

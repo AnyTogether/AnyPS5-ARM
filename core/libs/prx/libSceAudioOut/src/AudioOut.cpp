@@ -35,6 +35,7 @@ static constexpr std::uint64_t DRAIN_TIMEOUT_US = 200000;
 static constexpr std::uint64_t DRAIN_SLEEP_US = 1000;
 static constexpr int MONITOR_TYPE_HDMI = 1;
 static constexpr std::uint32_t HDMI_MONITOR_INFO_SIZE = 0x180;
+static constexpr std::uint32_t EX_MONITOR_INFO_MIN_SIZE = 0xA0;
 
 enum class Format {
     Unknown,
@@ -499,6 +500,11 @@ int APS5_VABI sceAudioOutGetPortState(int handle, AudioOutPortState* state) {
     return 0;
 }
 
+int APS5_VABI sceAudioOutDeviceIdOpen() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceAudioOutSysClose() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -557,8 +563,17 @@ int APS5_VABI sceAudioOutExConfigureOutput() {
     return 0;
 }
 
-int APS5_VABI sceAudioOutExGetMonitorInfo() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceAudioOutExGetMonitorInfo(int type, int index, void* info, std::uint32_t size) {
+    if (type != 0 || index != 0) {
+        throw std::runtime_error("sceAudioOutExGetMonitorInfo: monitor " + std::to_string(type) + ", " + std::to_string(index) + " not supported");
+    }
+    if (size < EX_MONITOR_INFO_MIN_SIZE) {
+        throw std::runtime_error("sceAudioOutExGetMonitorInfo: size " + std::to_string(size) + " not supported");
+    }
+    if (info == nullptr) {
+        return -2144993276;
+    }
+    std::memset(info, 0, size);
     return 0;
 }
 

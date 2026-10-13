@@ -1,0 +1,200 @@
+#include "TestProgress.hpp"
+#include <relinker/pipeline/Conversion.hpp>
+#include <relinker/analysis/SyscallScanner.hpp>
+#include <relinker/analysis/CodeInstructionCollector.hpp>
+#include <io/BufferUtils.hpp>
+#include <codegen/IAmd64OnlyConverter.hpp>
+#include <algorithm>
+#include <array>
+#include <iostream>
+#include <stdexcept>
+
+namespace {
+
+void require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+
+template<typename TAction>
+void reject(TAction action) {
+    try { action(); } catch (const Domain::RelinkerException&) { return; }
+    throw std::runtime_error("Invalid conversion was accepted");
+}
+
+std::vector<std::uint8_t> fixture() {
+    std::vector<std::uint8_t> bytes(0x3000);
+    const std::array<std::uint8_t, 7> magic{0x7f, 'E', 'L', 'F', 2, 1, 1};
+    std::copy(magic.begin(), magic.end(), bytes.begin());
+    Io::WriteU16(bytes, 16, 3);
+    Io::WriteU16(bytes, 18, 62);
+    Io::WriteU32(bytes, 20, 1);
+    Io::WriteU64(bytes, 24, 0x1000);
+    Io::WriteU64(bytes, 32, 64);
+    Io::WriteU16(bytes, 52, 64);
+    Io::WriteU16(bytes, 54, 56);
+    Io::WriteU16(bytes, 56, 8);
+    Io::WriteU16(bytes, 58, 64);
+    const auto header = [&](std::size_t index, unsigned type, unsigned flags, unsigned offset, unsigned size) {
+        const auto at = 64 + index * 56;
+        Io::WriteU32(bytes, at, type);
+        Io::WriteU32(bytes, at + 4, flags);
+        Io::WriteU64(bytes, at + 8, offset);
+        Io::WriteU64(bytes, at + 16, offset);
+        Io::WriteU64(bytes, at + 24, offset);
+        Io::WriteU64(bytes, at + 32, size);
+        Io::WriteU64(bytes, at + 40, size);
+        Io::WriteU64(bytes, at + 48, 8);
+    };
+    header(0, 1, 5, 0x1000, 8);
+    header(1, 1, 6, 0x2000, 0x1000);
+    for (std::size_t index = 3; index < 8; ++index) header(index, 0x6fffff01, 0, 0, 0);
+    bytes[0x1000] = 0xc3;
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 9> tags{{{5, 0x2600}, {10, 1}, {6, 0x2620}, {11, 24}, {7, 0x2700}, {8, 0}, {9, 24}, {4, 0x2680}, {0, 0}}};
+    header(2, 2, 6, 0x2000, tags.size() * 16);
+    for (std::size_t index = 0; index < tags.size(); ++index) {
+        Io::WriteU64(bytes, 0x2000 + index * 16, tags[index].first);
+        Io::WriteU64(bytes, 0x2008 + index * 16, tags[index].second);
+    }
+    Io::WriteU32(bytes, 0x2680, 1);
+    Io::WriteU32(bytes, 0x2684, 1);
+    return bytes;
+}
+
+Relinker::ConversionInput input() {
+    Relinker::ConversionInput result;
+    result.Executable = fixture();
+    result.InputPath = "virtual/title/custom-name.bin";
+    result.OutputPath = "virtual/output/title";
+    result.ModuleRoot = "virtual/title";
+    return result;
+}
+
+void convert() {
+    TestProgress progress;
+    const Relinker::Conversion converter(progress);
+    for (const auto target : {Relinker::TargetSystem::Windows, Relinker::TargetSystem::Linux}) {
+        Relinker::ConversionOptions options;
+        options.Target = target;
+        options.ToIntel = true;
+        auto source = input();
+        source.Modules.push_back({"virtual/title/sce_module/plugin.prx", fixture()});
+        const auto output = converter.Convert(std::move(source), options);
+        require(output.Executable.size() > 64, "No executable returned");
+        require(output.Executable.front() == (target == Relinker::TargetSystem::Windows ? 'M' : 0x7f), "Wrong target format");
+        require(output.Modules.size() == 1, "Module was not converted");
+        require(output.Modules.front().Path.generic_string() == "virtual/output/app0/sce_module/plugin.prx.guest.prx", "Wrong module layout");
+        require(output.Modules.front().Bytes.front() == output.Executable.front(), "Wrong module format");
+        require(progress.Events.back().Stage == Domain::ProgressStage::Executable && progress.Events.back().Completed == 1, "Conversion did not finish");
+        for (const auto& event : progress.Events) require(event.Completed <= event.Total, "Invalid counters");
+        if (target == Relinker::TargetSystem::Windows) {
+            std::uint64_t previous = 0;
+            bool intermediate = false;
+            for (const auto& event : progress.Events) {
+                if (event.Stage != Domain::ProgressStage::Image) continue;
+                require(event.Input == "virtual/title/custom-name.bin", "Lost image input identity");
+                require(event.Total == 10000 && event.Completed >= previous, "Image progress moved backwards");
+                intermediate |= event.Completed > 0 && event.Completed < event.Total;
+                previous = event.Completed;
+            }
+            require(intermediate && previous == 10000, "Missing image progress");
+        }
+        progress.Events.clear();
+    }
+    auto source = input();
+    source.Modules.push_back({"virtual/escaped.prx", fixture()});
+    reject([&] { converter.Convert(source, {}); });
+    source = input();
+    source.Modules.push_back({"virtual/title/sce_module/plugin.prx", fixture()});
+    source.Modules.push_back(source.Modules.front());
+    reject([&] { converter.Convert(source, {}); });
+    source = input();
+    source.Icon = std::vector<std::uint8_t>{};
+    Relinker::ConversionOptions windows;
+    windows.Target = Relinker::TargetSystem::Windows;
+    reject([&] { converter.Convert(source, windows); });
+    source = input();
+    source.Executable = {};
+    reject([&] { converter.Convert(source, {}); });
+    require(progress.Events.back().Completed != 1 || progress.Events.back().Stage != Domain::ProgressStage::Executable, "Failed conversion reported completion");
+}
+
+void scanning() {
+    TestProgress progress;
+    const auto scanner = Relinker::MakeSyscallScanner(progress);
+    std::vector<std::uint8_t> code(150000, 0x90);
+    require(scanner->ScanCodeSectionForSyscalls(code, 0, code.size(), "sample.prx").empty(), "Unexpected syscall trap");
+    require(std::any_of(progress.Events.begin(), progress.Events.end(), [](const auto& event) { return event.Completed > 0 && event.Completed < event.Total; }), "Only start and finish were reported");
+    for (const auto& event : progress.Events) require(event.Input == "sample.prx", "Lost scanner input identity");
+    progress.Events.clear();
+    Domain::ProgramHeader header{};
+    header.Type = 1;
+    header.Flags = 1;
+    header.FileSize = code.size();
+    header.MemorySize = code.size();
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Intel, [&](auto completed, auto total) { progress.Report({Domain::ProgressStage::Lowering, "sample.prx", completed, total}); });
+    require(converter->Convert(code, {header}).Bytes == code, "Progress changed instruction conversion");
+    std::uint64_t previous = 0;
+    for (const auto& event : progress.Events) {
+        require(event.Completed >= previous && event.Completed <= event.Total, "Instruction conversion progress moved backwards");
+        previous = event.Completed;
+    }
+    require(previous == progress.Events.back().Total, "Instruction conversion progress did not finish");
+    reject([&] { scanner->ScanCodeSectionForSyscalls(code, 0, (std::uint64_t{1} << 32) + code.size()); });
+    auto image = code;
+    image.resize(code.size() + 64, 0x90);
+    image.back() = 0xc3;
+    Io::WriteU64(image, 24, 64);
+    header.Offset = 64;
+    header.MappedAddress = 64;
+    previous = 0;
+    std::size_t updates = 0;
+    const auto instructions = Relinker::CodeInstructionCollector().Collect(image, {header}, [&](auto completed, auto total) {
+        require(completed >= previous && completed <= total, "Image analysis progress moved backwards");
+        previous = completed;
+        ++updates;
+    });
+    require(instructions.size() == code.size(), "Progress changed image code analysis");
+    require(updates > 10 && previous == 10000, "Missing intermediate image analysis progress");
+    code[70000] = 0x0f;
+    code[70001] = 0x05;
+    progress.Events.clear();
+    reject([&] { scanner->ScanCodeSectionForSyscalls(code, 0, code.size()); });
+    require(progress.Events.back().Completed < progress.Events.back().Total, "Failed scan reported completion");
+}
+
+class CancellingProgress final : public Domain::IProgress {
+public:
+    Domain::ProgressStage Stage = Domain::ProgressStage::Decode;
+    void Report(const Domain::ProgressEvent& event) override {
+        if (event.Stage == Stage && event.Completed > 0) throw std::runtime_error("cancelled");
+    }
+    void Message(std::string_view) override {}
+};
+
+void cancellation() {
+    for (const auto stage : {Domain::ProgressStage::Decode, Domain::ProgressStage::Image}) {
+        CancellingProgress progress;
+        progress.Stage = stage;
+        Relinker::ConversionOptions options;
+        options.Target = Relinker::TargetSystem::Windows;
+        try { Relinker::Conversion(progress).Convert(input(), options); }
+        catch (const std::runtime_error& error) {
+            require(std::string(error.what()) == "cancelled", "Callback exception was replaced");
+            continue;
+        }
+        throw std::runtime_error("Callback exception was swallowed");
+    }
+}
+
+}
+
+int main() {
+    try {
+        convert();
+        scanning();
+        cancellation();
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}

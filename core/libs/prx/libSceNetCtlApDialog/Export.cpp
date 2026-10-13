@@ -16,8 +16,14 @@ constexpr int COMMON_DIALOG_ERROR_ALREADY_INITIALIZED = static_cast<int>(0x80B80
 constexpr int COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<int>(0x80B80005u);
 constexpr int COMMON_DIALOG_ERROR_BUSY = static_cast<int>(0x80B80007u);
 constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
-// The host owns its network connection; the access point dialog has nothing to configure and ends canceled.
 constexpr int COMMON_DIALOG_RESULT_USER_CANCELED = 1;
+
+struct SceNetCtlApDialogResult {
+ std::int32_t result = COMMON_DIALOG_RESULT_USER_CANCELED;
+ std::uint8_t reserved[36] = {};
+};
+
+static_assert(sizeof(SceNetCtlApDialogResult) == 40);
 
 std::atomic<int> g_status{COMMON_DIALOG_STATUS_NONE};
 
@@ -47,6 +53,7 @@ int APS5_VABI sceNetCtlApDialogOpen(const void* param) {
 
 int APS5_VABI sceNetCtlApDialogClose(void) {
  if (g_status.load() == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+ g_status = COMMON_DIALOG_STATUS_FINISHED;
  return 0;
 }
 
@@ -54,13 +61,17 @@ int APS5_VABI sceNetCtlApDialogUpdateStatus(void) {
  return g_status.load();
 }
 
+int APS5_VABI sceNetCtlApDialogGetStatus(void) {
+ return g_status.load();
+}
+
 int APS5_VABI sceNetCtlApDialogGetResult(void* result) {
  const int status = g_status.load();
  if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
- if (result == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
  if (status != COMMON_DIALOG_STATUS_FINISHED) return COMMON_DIALOG_ERROR_NOT_FINISHED;
- const std::int32_t canceled = COMMON_DIALOG_RESULT_USER_CANCELED;
- std::memcpy(result, &canceled, sizeof(canceled));
+ if (result == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+ const SceNetCtlApDialogResult dialogResult{};
+ std::memcpy(result, &dialogResult, sizeof(dialogResult));
  return 0;
 }
 

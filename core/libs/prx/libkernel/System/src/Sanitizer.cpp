@@ -6,6 +6,10 @@ int APS5_VABI sceKernelIsAddressSanitizerEnabled(void) {
     return 0;
 }
 
+int APS5_VABI sceKernelIsThreadSanitizerEnabled(void) {
+    return 0;
+}
+
 MallocReplace* APS5_VABI sceKernelGetSanitizerMallocReplaceExternal(void) {
     static MallocReplace replacement{};
     return &replacement;

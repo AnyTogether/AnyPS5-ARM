@@ -2,6 +2,9 @@
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include <algorithm>
+#if defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -39,6 +42,20 @@ int CopyOut(const void* value, std::size_t size, void* oldValue, std::size_t* ol
         return -1;
     }
     return 0;
+}
+
+std::string HostCpuModel() {
+#if defined(__x86_64__) || defined(__i386__)
+    if (__get_cpuid_max(0x80000000, nullptr) < 0x80000004) return {};
+    unsigned int brand[12] = {};
+    for (unsigned int leaf = 0; leaf < 3; ++leaf)
+        __get_cpuid(0x80000002 + leaf, &brand[leaf * 4], &brand[leaf * 4 + 1], &brand[leaf * 4 + 2], &brand[leaf * 4 + 3]);
+    std::string model(reinterpret_cast<const char*>(brand), strnlen(reinterpret_cast<const char*>(brand), sizeof(brand)));
+    model.erase(0, model.find_first_not_of(' '));
+    return model;
+#else
+    return {};
+#endif
 }
 
 }
@@ -101,6 +118,15 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         const int value = static_cast<int>(processors);
         return CopyOut(&value, sizeof(value), oldValue, oldLength);
     }
+    if (nameLength == 2 && name[0] == 6 && name[1] == 2) {
+        if (newValue != nullptr) {
+            *__error_nid_postfix() = 1;
+            return -1;
+        }
+        static const std::string model = HostCpuModel();
+        if (model.empty()) throw std::runtime_error(std::string(__func__) + ": the host CPU has no CPUID brand string for hw.model");
+        return CopyOut(model.c_str(), model.size() + 1, oldValue, oldLength);
+    }
     if (nameLength == 2 && name[0] == 6 && name[1] == 5) {
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
@@ -128,6 +154,21 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         static constexpr char path[] = "/app0/eboot.bin";
         return CopyOut(path, sizeof(path), oldValue, oldLength);
     }
+    if (nameLength == 2 && name[0] == 1 && name[1] == 37) {
+        if (newValue != nullptr) {
+            *__error_nid_postfix() = 1;
+            return -1;
+        }
+        if (oldLength == nullptr) return 0;
+        const std::size_t count = std::min(*oldLength, static_cast<std::size_t>(256));
+        if (oldValue != nullptr) {
+            static std::random_device device;
+            auto* bytes = static_cast<std::uint8_t*>(oldValue);
+            for (std::size_t i = 0; i < count; ++i) bytes[i] = static_cast<std::uint8_t>(device());
+        }
+        *oldLength = count;
+        return 0;
+    }
     std::string mib;
     for (std::uint32_t i = 0; i < nameLength; ++i) mib += (i == 0 ? "" : ".") + std::to_string(name[i]);
     throw std::runtime_error(std::string(__func__) + ": unsupported MIB " + mib);
@@ -145,6 +186,10 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
     if (std::strcmp(name, "kern.proc.pathname") == 0) {
         *__error_nid_postfix() = 22;
         return -1;
+    }
+    if (std::strcmp(name, "kern.arandom") == 0) {
+        static constexpr int mib[] = {1, 37};
+        return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
     }
     if (std::strcmp(name, "kern.rng_pseudo") == 0) {
         if (newValue != nullptr) {
@@ -167,6 +212,10 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
     }
     if (std::strcmp(name, "hw.ncpu") == 0) {
         static constexpr int mib[] = {6, 3};
+        return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
+    }
+    if (std::strcmp(name, "hw.model") == 0) {
+        static constexpr int mib[] = {6, 2};
         return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
     }
     if (std::strcmp(name, "hw.physmem") == 0) {

@@ -886,6 +886,43 @@ void converterWideStoreWindows() {
     requireFailure([&] { (void)convert(withStore(far, tail)); }, "A 256-bit store whose movable neighbours are all beyond a short jump was kept");
 }
 
+void converterJumpTableTargets() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    const Bytes leaTable = {0x48, 0x8D, 0x0D, 0xF9, 0x1F, 0x00, 0x00};
+    const Bytes dispatch = {0x48, 0x63, 0x04, 0x81, 0x48, 0x01, 0xC8, 0xFF, 0xE0, 0x48, 0x83, 0xC1, 0x01, 0xC5, 0xFC, 0x11, 0x07, 0x48, 0x83, 0xC2, 0x01, 0xC3};
+    const Bytes store = {0xC5, 0xFC, 0x11, 0x07};
+    const Domain::ProgramHeader code{1, 5, 0x200, 0x1000, 0, 29, 29, 16};
+    const Domain::ProgramHeader data{1, 4, 0x300, 0x3000, 0, 0x40, 0x40, 16};
+    const auto table = [](const std::uint64_t base, const std::vector<std::uint64_t>& targets) {
+        Bytes bytes;
+        for (const auto target : targets) {
+            const auto relative = static_cast<std::uint32_t>(target - base);
+            for (std::size_t byte = 0; byte < 4; ++byte)
+                bytes.push_back(static_cast<std::uint8_t>(relative >> (byte * 8)));
+        }
+        return bytes;
+    };
+    const auto convert = [&](const Bytes& first, const std::vector<std::pair<std::size_t, Bytes>>& placed, const std::vector<Domain::ProgramHeader>& headers) {
+        Bytes file(0x400, 0xCC);
+        std::copy(first.begin(), first.end(), file.begin() + 0x200);
+        std::copy(dispatch.begin(), dispatch.end(), file.begin() + 0x207);
+        for (const auto& [offset, bytes] : placed)
+            std::copy(bytes.begin(), bytes.end(), file.begin() + static_cast<std::ptrdiff_t>(offset));
+        return converter->Convert(file, headers);
+    };
+    const auto placedAt = [](const Codegen::ConvertResult& result, const Domain::FileByteOffset offset) {
+        return result.Trampolines.size() == 1 && result.Trampolines[0].Offset == offset && result.Trampolines[0].Length == 8;
+    };
+
+    require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1018})}, {0x330, store}}, {code, data}), 0x210), "A 256-bit store moved the instruction after it although a jump table enters that instruction");
+    require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1019, 0x1018})}}, {code, data}), 0x214), "A jump table was read past an entry that does not start an instruction");
+    require(placedAt(convert({0x48, 0x8B, 0x0D, 0xF9, 0x1F, 0x00, 0x00}, {{0x300, table(0x3000, {0x1010, 0x1018})}}, {code, data}), 0x214), "A jump table was read at an address loaded rather than formed by LEA");
+    require(placedAt(convert({0x48, 0x8D, 0x0D, 0xF7, 0x1F, 0x00, 0x00}, {{0x2FE, table(0x2FFE, {0x1018})}}, {code, data}), 0x214), "A jump table was read at an address outside every segment");
+    require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010})}, {0x380, table(0x3000, {0x1018})}}, {code, data, {0x61000000, 4, 0x380, 0x3000, 0, 0x10, 0x10, 16}}), 0x214), "A jump table was read from a segment that is not loaded");
+    require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1018})}, {0x3A0, store}}, {code, data, {2, 5, 0x3A0, 0x2000, 0, 4, 4, 16}}), 0x210), "A segment that is not loaded was converted");
+    requireFailure([&] { (void)convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1018})}}, {code, {1, 4, 0x300, 0x3000, 0, 0x1000, 0x1000, 16}}); }, "A jump table was read from a segment that exceeds the file");
+}
+
 void converterRosetta() {
     const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
     Bytes file(0x300, 0xCC);
@@ -1637,6 +1674,7 @@ int main() {
         converterRosetta();
         wideStoreSplit();
         converterWideStoreWindows();
+        converterJumpTableTargets();
         converterReciprocal();
         converterStrayRex();
         rewriterStrayRex();

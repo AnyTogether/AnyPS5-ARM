@@ -321,9 +321,25 @@ std::optional<std::size_t> packedField(std::uint32_t offset, std::uint32_t count
     return static_cast<std::size_t>(field - packedFields.begin());
 }
 
+bool isPackedAncillary(const IrValue& builtin) {
+    auto& kind = resolveArg(builtin, 0);
+    return isImmediate(kind, IrType::U32) && static_cast<StageInputKind>(kind.ImmediateU32()) == StageInputKind::PackedAncillary;
+}
+
+IrValue& insertBefore(IrProgram& program, IrValue& next, IrOpcode opcode, IrValue& lhs, IrValue& rhs) {
+    IrValue& created = program.CreateValue(opcode, IrType::U32);
+    created.AddArgument(&lhs);
+    created.AddArgument(&rhs);
+    next.Parent()->InsertInstructionBefore(&next, &created);
+    return created;
+}
+
+IrValue& insertBuiltin(IrProgram& program, IrBuilder& builder, IrValue& next, StageInputKind kind) {
+    return insertBefore(program, next, IrOpcode::GetBuiltin, builder.Constant(static_cast<std::uint32_t>(kind)), builder.Constant(0u));
+}
+
 void lowerPackedAncillary(IrProgram& program, IrBuilder& builder, IrValue& ancillary) {
-    auto& kind = resolveArg(ancillary, 0);
-    if (!isImmediate(kind, IrType::U32) || static_cast<StageInputKind>(kind.ImmediateU32()) != StageInputKind::PackedAncillary) {
+    if (!isPackedAncillary(ancillary)) {
         return;
     }
     const std::vector<IrUse> uses = ancillary.OperandUses();
@@ -361,32 +377,31 @@ void lowerPackedAncillary(IrProgram& program, IrBuilder& builder, IrValue& ancil
         }
         demanded[*packedField(resolveArg(*use.user, 1).ImmediateU32(), resolveArg(*use.user, 2).ImmediateU32())] = true;
     }
-    // A reader of other bits or of the word itself (often a register the shader reuses for a float,
-    // GTA III Definitive Edition) gets the word rebuilt from its known fields; the other bits read as zero.
-    std::vector<IrUse> opaque;
     if (!whole) {
         std::vector<IrUse> extracts;
-        for (const IrUse& use : direct) (extractsField(use) ? extracts : opaque).push_back(use);
+        const auto collectExtracts = [&](const auto& self, IrValue& value) -> void {
+            for (const IrUse& use : value.OperandUses()) {
+                if (use.user->Opcode() == IrOpcode::Identity) {
+                    self(self, *use.user);
+                } else if (extractsField(use)) {
+                    extracts.push_back(use);
+                }
+            }
+        };
+        collectExtracts(collectExtracts, ancillary);
         direct = std::move(extracts);
+        forwarded.clear();
     }
     std::array<IrValue*, 2> fields {};
     const auto field = [&](std::size_t index) -> IrValue& {
+        if (fields[index] == nullptr && index == 1u) fields[index] = &builder.Constant(0u);
         if (fields[index] == nullptr) {
-            const auto builtin = index == 0u ? StageInputKind::SampleId : StageInputKind::Layer;
-            IrValue& created = program.CreateValue(IrOpcode::GetBuiltin, IrType::U32);
-            created.AddArgument(&builder.Constant(static_cast<std::uint32_t>(builtin)));
-            created.AddArgument(&builder.Constant(0u));
-            ancillary.Parent()->InsertInstructionBefore(&ancillary, &created);
-            fields[index] = &created;
+            fields[index] = &insertBuiltin(program, builder, ancillary, StageInputKind::SampleId);
         }
         return *fields[index];
     };
     const auto emit = [&](IrOpcode opcode, IrValue& lhs, IrValue& rhs) -> IrValue& {
-        IrValue& created = program.CreateValue(opcode, IrType::U32);
-        created.AddArgument(&lhs);
-        created.AddArgument(&rhs);
-        ancillary.Parent()->InsertInstructionBefore(&ancillary, &created);
-        return created;
+        return insertBefore(program, ancillary, opcode, lhs, rhs);
     };
     IrValue* packed = nullptr;
     const auto packedWord = [&]() -> IrValue& {
@@ -402,7 +417,6 @@ void lowerPackedAncillary(IrProgram& program, IrBuilder& builder, IrValue& ancil
         return *packed;
     };
     for (const IrUse& use : forwarded) use.user->ReplaceArgument(use.operand, &packedWord());
-    for (const IrUse& use : opaque) use.user->ReplaceArgument(use.operand, &packedWord());
     for (const IrUse& use : direct) {
         IrValue& user = *use.user;
         auto& offset = resolveArg(user, 1);
@@ -485,10 +499,6 @@ bool ConstantFolder::tryFoldValue(IrProgram& program, IrValue& value) const {
                 replaceWith(value, builder.Constant(static_cast<std::uint32_t>(operand.ImmediateU16())));
                 return true;
             }
-            if (operand.Opcode() == IrOpcode::ConvertU16U32) {
-                replaceWith(value, *operand.Argument(0));
-                return true;
-            }
             return false;
         }
         case IrOpcode::ConvertU8U32: {
@@ -503,10 +513,6 @@ bool ConstantFolder::tryFoldValue(IrProgram& program, IrValue& value) const {
             auto& operand = resolveArg(value, 0);
             if (isImmediate(operand, IrType::U8)) {
                 replaceWith(value, builder.Constant(static_cast<std::uint32_t>(operand.ImmediateU8())));
-                return true;
-            }
-            if (operand.Opcode() == IrOpcode::ConvertU8U32) {
-                replaceWith(value, *operand.Argument(0));
                 return true;
             }
             return false;
@@ -854,6 +860,24 @@ void ConstantFolder::Fold(IrProgram& program, std::span<IrBlock* const> blocks) 
 
 void ConstantFolder::Fold(IrProgram& program) const {
     Fold(program, program.BlockOrder());
+}
+
+bool ConstantFolder::ComposePackedAncillary(IrProgram& program) const {
+    std::vector<IrValue*> words;
+    for (IrBlock* block : program.BlockOrder()) {
+        for (IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() == IrOpcode::GetBuiltin && inst->HasUses() && isPackedAncillary(*inst)) {
+                words.push_back(inst);
+            }
+        }
+    }
+    IrBuilder builder(program);
+    for (IrValue* word : words) {
+        IrValue& primitive = insertBuiltin(program, builder, *word, StageInputKind::RasterPrimitive);
+        IrValue& sample = insertBefore(program, *word, IrOpcode::ShiftLeftLogical32, insertBuiltin(program, builder, *word, StageInputKind::SampleId), builder.Constant(8u));
+        word->ReplaceAllUsesWith(&insertBefore(program, *word, IrOpcode::BitwiseOr32, primitive, sample));
+    }
+    return !words.empty();
 }
 
 }

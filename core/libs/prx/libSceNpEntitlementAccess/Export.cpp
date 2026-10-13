@@ -2,7 +2,6 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
-#include "prx/libc/include/specifics/macos/ExecutablePath.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -13,6 +12,8 @@
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 static constexpr int SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER = static_cast<int>(0x80558003);
@@ -30,7 +31,14 @@ std::filesystem::path EntitlementsPath() {
     if (length == 0 || length == MAX_PATH) throw std::runtime_error("NpEntitlementAccess: cannot locate the executable");
     return std::filesystem::path(module).parent_path() / "anyps5-entitlements.ini";
 #elif defined(__APPLE__)
-    return MacOsExecutablePath().parent_path() / "anyps5-entitlements.ini";
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> executable(size);
+    std::error_code error;
+    std::filesystem::path path;
+    if (_NSGetExecutablePath(executable.data(), &size) == 0) path = std::filesystem::canonical(executable.data(), error);
+    if (path.empty()) throw std::runtime_error("NpEntitlementAccess: cannot locate the executable");
+    return path.parent_path() / "anyps5-entitlements.ini";
 #else
     return std::filesystem::read_symlink("/proc/self/exe").parent_path() / "anyps5-entitlements.ini";
 #endif
@@ -153,15 +161,17 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo(void) {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 
-// The title always runs as the full game (see the SKU flag), never as a game trial.
-int APS5_VABI sceNpEntitlementAccessGetPftFlag(uint32_t* pft_flag) {
-    if (!pft_flag) return SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER;
-    *pft_flag = 0;
+int APS5_VABI sceNpEntitlementAccessGetPftFlag(uint32_t* flag) {
+    constexpr int errorParameter = static_cast<int>(0x817D0002);
+    if (!flag) return errorParameter;
+    *flag = 0;
     return 0;
 }
 
-int APS5_VABI sceNpEntitlementAccessGetGameTrialsFlag(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceNpEntitlementAccessGetGameTrialsFlag(uint32_t* flag) {
+    constexpr int errorParameter = static_cast<int>(0x817D0002);
+    if (!flag) return errorParameter;
+    *flag = 0;
     return 0;
 }
 

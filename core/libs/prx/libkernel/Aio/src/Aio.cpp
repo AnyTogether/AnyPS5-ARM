@@ -6,10 +6,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/SharedMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
@@ -273,7 +273,7 @@ int APS5_VABI sceKernelAioWaitRequests(int32_t* id, int32_t num, int32_t* state,
             const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();
             if (elapsed > static_cast<std::int64_t>(*usec)) return SCE_KERNEL_ERROR_ETIMEDOUT;
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        PreciseSleepUs(10);
     }
 }
 
@@ -298,7 +298,7 @@ int APS5_VABI sceKernelAioWaitRequest(int32_t id, int32_t* state, uint32_t* usec
                 return SCE_KERNEL_ERROR_ETIMEDOUT;
             }
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        PreciseSleepUs(10);
     }
 }
 

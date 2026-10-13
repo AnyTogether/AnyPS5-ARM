@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -19,16 +20,24 @@ namespace {
 constexpr std::int64_t PatchIndexCount = 256;
 constexpr std::int64_t LocalVertexIndexCount = 8192;
 constexpr std::int64_t TriangleFactorBytes = 16;
+constexpr std::int64_t QuadFactorBytes = 24;
 constexpr std::int64_t AddressLimit = 0xffffffffll;
 
 struct Affine {
     std::int64_t vertex = 0;
     std::int64_t relative = 0;
     std::int64_t constant = 0;
+    bool dynamic = false;
+    std::int64_t dynamicScale = 0;
+    const IrValue* dynamicRoot = nullptr;
 
-    [[nodiscard]] bool Scalar() const { return vertex == 0 && relative == 0; }
+    [[nodiscard]] bool Scalar() const { return vertex == 0 && relative == 0 && !dynamic; }
     bool operator==(const Affine& other) const = default;
 };
+
+bool Same(const Affine& left, const Affine& right) {
+    return !left.dynamic && !right.dynamic && left == right;
+}
 
 [[noreturn]] void Fail(const char* reason, std::uint32_t pc) {
     char text[256];
@@ -106,10 +115,12 @@ class AddressEvaluator {
 public:
     AddressEvaluator(std::uint32_t vertexCount, std::int64_t relativeCount) : vertexCount(vertexCount), relativeCount(relativeCount) {}
 
-    std::optional<Affine> Evaluate(IrValue* value, IrValue* predicate) {
-        memo.clear();
+    std::optional<Affine> Evaluate(IrValue* value, IrValue* predicate, bool allowDynamic = false) {
+        strictMemo.clear();
+        dynamicMemo.clear();
+        independence.clear();
         active = predicate;
-        return evaluate(value);
+        return evaluate(value, allowDynamic);
     }
 
     bool IsInvocation(IrValue* value) {
@@ -129,16 +140,19 @@ private:
     [[nodiscard]] std::int64_t lastVertex() const { return vertexCount == 0 ? 0 : static_cast<std::int64_t>(vertexCount) - 1; }
 
     [[nodiscard]] std::optional<Affine> bounded(const Affine& value) const {
+        if (value.dynamic) return value;
         if (Lowest(value) < 0 || Highest(value) > AddressLimit) return std::nullopt;
         return value;
     }
 
     [[nodiscard]] std::optional<Affine> scale(const Affine& value, std::int64_t factor) const {
-        if (factor < 0 || factor >= (1ll << 31)) return std::nullopt;
-        return bounded({value.vertex * factor, value.relative * factor, value.constant * factor});
+        if (factor < 0 || factor >= (1ll << 31) || std::abs(value.dynamicScale) * factor > AddressLimit) return std::nullopt;
+        if (value.dynamic && factor == 0) return Affine{};
+        return bounded({value.vertex * factor, value.relative * factor, value.constant * factor, value.dynamic, value.dynamicScale * factor, value.dynamicRoot});
     }
 
     [[nodiscard]] std::optional<std::pair<Affine, Affine>> split(const Affine& value, std::int64_t divisor) const {
+        if (value.dynamic) return std::nullopt;
         Affine high;
         Affine low;
         (value.vertex % divisor == 0 ? high.vertex : low.vertex) = value.vertex;
@@ -158,6 +172,7 @@ private:
     }
 
     [[nodiscard]] std::optional<Affine> mask(const Affine& value, std::int64_t bits) const {
+        if (value.dynamic) return std::nullopt;
         if (value.Scalar()) return Affine{0, 0, value.constant & bits};
         const auto width = std::bit_width(static_cast<std::uint64_t>(bits));
         if (width >= 32) return bits == AddressLimit ? std::optional(value) : std::nullopt;
@@ -169,27 +184,61 @@ private:
     }
 
     [[nodiscard]] std::optional<Affine> disjoint(const Affine& high, const Affine& low) const {
-        if (Lowest(low) < 0) return std::nullopt;
+        if (high.dynamic || low.dynamic || Lowest(low) < 0) return std::nullopt;
         const auto divisor = 1ll << std::bit_width(static_cast<std::uint64_t>(Highest(low)));
         if (high.vertex % divisor != 0 || high.relative % divisor != 0 || high.constant % divisor != 0) return std::nullopt;
         return bounded({high.vertex + low.vertex, high.relative + low.relative, high.constant + low.constant});
     }
 
-    std::optional<Affine> evaluate(IrValue* raw) {
+    bool independentOfRelative(IrValue* raw) {
+        IrValue* start = raw->Resolve();
+        if (const auto found = independence.find(start); found != independence.end()) return found->second;
+        std::vector<IrValue*> pending{start};
+        std::unordered_set<IrValue*> visited;
+        bool independent = true;
+        while (independent && !pending.empty()) {
+            IrValue* value = pending.back();
+            pending.pop_back();
+            if (value == nullptr || value->HasImmediate() || !visited.insert(value).second) continue;
+            if (IsBase(value, TessellationBaseKind::RelativeIndex)) {
+                independent = false;
+                break;
+            }
+            if (value != start) {
+                if (const auto known = evaluate(value, false)) {
+                    independent = known->relative == 0;
+                    continue;
+                }
+            }
+            if (active != nullptr && value->Opcode() == IrOpcode::SelectU32 && Implies(active, value->Argument(0))) {
+                pending.push_back(value->Argument(1)->Resolve());
+                continue;
+            }
+            for (std::size_t index = 0; index < value->ArgumentCount(); ++index) {
+                if (IrValue* argument = value->Argument(index)) pending.push_back(argument->Resolve());
+            }
+        }
+        independence[start] = independent;
+        return independent;
+    }
+
+    std::optional<Affine> evaluate(IrValue* raw, bool dynamic) {
         IrValue* value = raw->Resolve();
         if (value->HasImmediate()) {
             if (value->Type() != IrType::U32) return std::nullopt;
             return Affine{0, 0, value->ImmediateU32()};
         }
+        auto& memo = dynamic ? dynamicMemo : strictMemo;
         if (const auto found = memo.find(value); found != memo.end()) return found->second;
         memo.emplace(value, std::nullopt);
-        const auto result = compute(value);
+        auto result = compute(value, dynamic);
+        if (!result && dynamic && independentOfRelative(value)) result = Affine{0, 0, 0, true, 1, value};
         memo[value] = result;
         return result;
     }
 
-    std::optional<Affine> compute(IrValue* value) {
-        const auto argument = [&](std::size_t index) { return evaluate(value->Argument(index)); };
+    std::optional<Affine> compute(IrValue* value, bool dynamic) {
+        const auto argument = [&](std::size_t index) { return evaluate(value->Argument(index), dynamic); };
         const auto scalar = [&](std::size_t index) -> std::optional<std::int64_t> {
             const auto operand = argument(index);
             if (!operand || !operand->Scalar()) return std::nullopt;
@@ -206,7 +255,21 @@ private:
             const auto rhs = argument(1);
             if (!lhs || !rhs) return std::nullopt;
             const std::int64_t sign = value->Opcode() == IrOpcode::IAdd32 ? 1 : -1;
-            return bounded({lhs->vertex + sign * rhs->vertex, lhs->relative + sign * rhs->relative, lhs->constant + sign * rhs->constant});
+            Affine sum{lhs->vertex + sign * rhs->vertex, lhs->relative + sign * rhs->relative, lhs->constant + sign * rhs->constant, lhs->dynamic || rhs->dynamic, lhs->dynamicScale, lhs->dynamicRoot};
+            if (rhs->dynamic && !lhs->dynamic) {
+                sum.dynamicScale = sign * rhs->dynamicScale;
+                sum.dynamicRoot = rhs->dynamicRoot;
+            } else if (rhs->dynamic && lhs->dynamicRoot != nullptr && lhs->dynamicRoot == rhs->dynamicRoot) {
+                sum.dynamicScale = lhs->dynamicScale + sign * rhs->dynamicScale;
+                if (sum.dynamicScale == 0) {
+                    sum.dynamic = false;
+                    sum.dynamicRoot = nullptr;
+                }
+            } else if (rhs->dynamic) {
+                sum.dynamicScale = std::gcd(lhs->dynamicScale, rhs->dynamicScale);
+                sum.dynamicRoot = nullptr;
+            }
+            return bounded(sum);
         }
         case IrOpcode::IMul32: {
             const auto lhs = argument(0);
@@ -257,7 +320,7 @@ private:
             if (active != nullptr && Implies(active, value->Argument(0))) return argument(1);
             const auto lhs = argument(1);
             const auto rhs = argument(2);
-            return lhs && rhs && *lhs == *rhs ? lhs : std::nullopt;
+            return lhs && rhs && Same(*lhs, *rhs) ? lhs : std::nullopt;
         }
         default:
             break;
@@ -266,15 +329,17 @@ private:
         const auto first = argument(0);
         for (std::size_t index = 1; first && index < value->ArgumentCount(); ++index) {
             const auto other = argument(index);
-            if (!other || !(*other == *first)) return std::nullopt;
+            if (!other || !Same(*other, *first)) return std::nullopt;
         }
-        return first;
+        return first && !first->dynamic ? first : std::nullopt;
     }
 
     std::uint32_t vertexCount;
     std::int64_t relativeCount;
     IrValue* active = nullptr;
-    std::unordered_map<IrValue*, std::optional<Affine>> memo;
+    std::unordered_map<IrValue*, std::optional<Affine>> strictMemo;
+    std::unordered_map<IrValue*, std::optional<Affine>> dynamicMemo;
+    std::unordered_map<IrValue*, bool> independence;
 };
 
 bool FirstInvocationOnly(IrValue* raw, AddressEvaluator& evaluator, std::unordered_set<IrValue*>& path) {
@@ -319,6 +384,8 @@ struct Access {
     Affine address;
     IrValue* predicate = nullptr;
     std::uint32_t pc = 0;
+    IrValue* addressValue = nullptr;
+    std::uint32_t memoryOffset = 0;
 };
 
 std::uint32_t ComponentCount(IrOpcode opcode) {
@@ -425,10 +492,12 @@ private:
                     address = memory.offen ? inst->Argument(2) : nullptr;
                 }
                 if (address != nullptr) {
-                    const auto evaluated = evaluator.Evaluate(address, access.predicate);
+                    const auto evaluated = evaluator.Evaluate(address, access.predicate, access.kind == TessellationAttribute::ControlInput);
                     if (!evaluated) Fail("the tessellation ring or LDS address is not affine in the control point and relative patch", flags.pc);
                     access.address = *evaluated;
+                    access.addressValue = address;
                 }
+                access.memoryOffset = memory.offset;
                 access.address.constant += memory.offset;
                 if ((access.address.constant & 3) != 0) Fail("unaligned tessellation ring or LDS address", flags.pc);
                 accesses.push_back(access);
@@ -447,6 +516,7 @@ private:
         for (const auto& access : accesses) {
             if (access.kind == TessellationAttribute::LocalOutput) agree(localStride, access.address.relative, access.pc);
             if (access.kind == TessellationAttribute::ControlInput && access.address.vertex != 0) agree(localStride, access.address.vertex, access.pc);
+            if (access.kind == TessellationAttribute::ControlInput && access.address.dynamic && access.address.relative > 0 && access.address.relative % inputs == 0) agree(localStride, access.address.relative / inputs, access.pc);
             if (access.kind == TessellationAttribute::ControlOutput && access.address.vertex != 0) agree(controlStride, access.address.vertex, access.pc);
             if (access.kind == TessellationAttribute::EvaluationInput) {
                 if (access.address.relative <= 0 || access.address.relative % outputs != 0) Fail("domain shader reads of patch constants or other patches are unsupported", access.pc);
@@ -466,6 +536,7 @@ private:
             case TessellationAttribute::ControlInput:
                 if (localStride == 0u) Fail("the hull shader reads no LDS per control point, so the local stride is unknown", access.pc);
                 if ((address.vertex != 0 && address.vertex != localStride) || address.relative != inputs * localStride || address.constant < 0 || end + address.vertex * (outputs - 1) > inputs * localStride) Fail("the hull shader reads LDS outside its patch", access.pc);
+                if (address.dynamic && (address.dynamicScale == 0 || address.dynamicScale % localStride != 0)) Fail("the hull shader reads LDS at a computed offset that is not a whole number of control points", access.pc);
                 break;
             case TessellationAttribute::ControlOutput:
                 if (address.vertex == 0) {
@@ -483,15 +554,25 @@ private:
             case TessellationAttribute::EvaluationInput:
                 if (address.constant < 0 || end > outputs * controlStride) Fail("the domain shader reads off-chip memory outside its patch's control points", access.pc);
                 break;
-            case TessellationAttribute::Factor:
-                if (tessellation.domain != 1u || address.vertex != 0 || address.relative != TriangleFactorBytes || address.constant < 0 || end > TriangleFactorBytes) Fail("the hull shader writes tessellation factors outside its patch's triangle factors", access.pc);
+            case TessellationAttribute::Factor: {
+                const bool quads = tessellation.domain == 2u;
+                const auto factorBytes = quads ? QuadFactorBytes : TriangleFactorBytes;
+                if ((tessellation.domain != 1u && !quads) || address.vertex != 0 || address.relative != factorBytes || address.constant < 0 || end > factorBytes) Fail(quads ? "the hull shader writes tessellation factors outside its patch's quad factors" : "the hull shader writes tessellation factors outside its patch's triangle factors", access.pc);
                 requireFirstInvocation(access);
                 break;
+            }
             case TessellationAttribute::PatchOutput:
                 break;
             }
         }
         if (patchStride && (*patchStride == 0 || std::abs(*patchStride) < patchHighest - patchLowest)) Fail("patch-constant records of neighbouring patches overlap", 0u);
+    }
+
+    bool dynamicInputAddress(IrValue* user, IrValue* value) {
+        if (user->Opcode() != IrOpcode::GetTessellationAttribute || user->Argument(1)->Resolve() != value->Resolve()) return false;
+        if (!IsImmediate(user->Argument(0), static_cast<std::uint32_t>(TessellationAttribute::ControlInput))) return false;
+        const auto address = evaluator.Evaluate(value, user->Argument(2), true);
+        return address && address->dynamic && address->relative == static_cast<std::int64_t>(tessellation.inputControlPoints) * localStride;
     }
 
     void requireRelativeIndependence(const std::vector<IrValue*>& bases) {
@@ -518,6 +599,7 @@ private:
                 default:
                     break;
                 }
+                if (dynamicInputAddress(user, value)) continue;
                 const auto address = evaluator.Evaluate(value, nullptr);
                 if (!address || address->relative != 0) Fail("the relative patch or vertex index is used outside a tessellation ring or LDS address", 0u);
             }
@@ -543,6 +625,7 @@ private:
     }
 
     IrValue& componentAddress(const Access& access, std::uint32_t component) {
+        if (access.address.dynamic) return insert(access, IrOpcode::IAdd32, IrType::U32, {access.addressValue, &constant(access.memoryOffset + 4u * component)});
         IrValue& offset = constant(static_cast<std::uint32_t>(access.address.constant) + 4u * component);
         if (access.kind != TessellationAttribute::ControlInput || access.address.vertex == 0) return offset;
         IrValue& invocation = insert(access, IrOpcode::GetBuiltin, IrType::U32, {&constant(static_cast<std::uint32_t>(StageInputKind::InvocationId)), &constant(0u)});

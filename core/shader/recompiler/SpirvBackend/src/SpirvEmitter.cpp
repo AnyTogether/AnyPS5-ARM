@@ -277,10 +277,9 @@ std::uint32_t SpirvValueEmitContext::Ballot(const IrValue* predicate) {
 }
 
 std::uint32_t SpirvValueEmitContext::FirstLane(std::uint32_t ballot) {
-    if (state.singleLane) return ConstantU32(state, 0u);
     if (otherHalf == nullptr) {
         const auto result = state.module.AllocateId();
-        state.module.AddFunction(spv::OpGroupNonUniformBallotFindLSB, TypeU32(state), result, ConstantU32(state, spv::ScopeSubgroup), ballot);
+        EmitSubgroupBallotFindLsb(state, result, ballot);
         return result;
     }
     const auto low = state.module.AllocateId();
@@ -388,15 +387,17 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.nonConstantImageOffsets = target.nonConstantImageOffsets;
     state.narrowSubgroupClock = target.narrowSubgroupClock;
     state.float64DenormPreserve = target.float64DenormPreserve;
+    state.registrationModules = target.registrationModules;
+    state.fragmentDescriptorSet = target.fragmentDescriptorSet;
     state.hostSubgroupSize = target.subgroupSize;
     state.singleLane = (target.subgroupStages & SubgroupStageBit(program.Resources().stage)) == 0u;
     state.singleSampleImages = std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStorageImageMultisample)) == target.supportedCapabilities.end();
-    state.splitSubgroup = !state.singleLane && program.WaveSize() == 32u && target.subgroupSize > 32u;
-    if (state.singleLane) {
+    if (HostSubgroupSingleLane(state)) {
         state.requirements.subgroupBallot = false;
         state.requirements.subgroupShuffle = false;
         state.requirements.subgroupLocalInvocationId = false;
     }
+    state.splitSubgroup = !HostSubgroupSingleLane(state) && program.WaveSize() == 32u && target.subgroupSize > 32u;
     if (state.splitSubgroup && (state.requirements.subgroupBallot || state.requirements.subgroupShuffle)) state.requirements.subgroupLocalInvocationId = true;
     const auto* workgroup = ShaderWorkgroupInputFor(state);
     state.laneCount = workgroup != nullptr && program.WaveSize() == 64u && workgroup->hostSubgroupSize == 32u ? 2u : 1u;

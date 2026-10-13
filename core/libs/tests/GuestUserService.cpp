@@ -9,6 +9,12 @@ int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdL
 int APS5_VABI sceUserServiceGetUserColor(int user_id, int* color);
 int APS5_VABI sceUserServiceGetNpAccountId(int user_id, std::uint64_t* account_id);
 int APS5_VABI sceUserServiceGetAgeLevel(int user_id, std::uint32_t* age_level);
+int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceGetAccessibilityPressAndHoldDelay(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceGetAccessibilityTriggerEffect(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceGetAccessibilityVibration(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceGetAccessibilityZoomEnabled(int user_id, std::int32_t* value);
+int APS5_VABI sceUserServiceGetAccessibilityZoomFollowFocus(int user_id, std::int32_t* value);
 }
 
 namespace {
@@ -53,4 +59,28 @@ int main() {
     }
     Require(sceUserServiceGetAgeLevel(USER_SERVICE_INITIAL_USER_ID, &age_level) == USER_SERVICE_OK);
     Require(age_level == 0xffffffffu);
+
+    struct Setting {
+        int (APS5_VABI *get)(int, std::int32_t*);
+        std::int32_t value;
+    };
+    const Setting settings[] = {
+        {sceUserServiceGetAccessibilityChatTranscription, 0},
+        {sceUserServiceGetAccessibilityPressAndHoldDelay, 0},
+        {sceUserServiceGetAccessibilityTriggerEffect, 1},
+        {sceUserServiceGetAccessibilityVibration, 1},
+        {sceUserServiceGetAccessibilityZoomEnabled, 0},
+        {sceUserServiceGetAccessibilityZoomFollowFocus, 1},
+    };
+    for (const Setting& setting : settings) {
+        std::int32_t value = 0x5a5a5a5a;
+        Require(setting.get(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+        for (int user_id : absent_users) {
+            Require(setting.get(user_id, &value) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+            Require(value == 0x5a5a5a5a);
+            Require(setting.get(user_id, nullptr) == USER_SERVICE_ERROR_NOT_LOGGED_IN);
+        }
+        Require(setting.get(USER_SERVICE_INITIAL_USER_ID, &value) == USER_SERVICE_OK);
+        Require(value == setting.value);
+    }
 }

@@ -4,8 +4,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
 int APS5_VABI close_nid_postfix(int);
@@ -26,8 +29,12 @@ static constexpr int GetDescriptorFlags = 1;
 static constexpr int SetDescriptorFlags = 2;
 static constexpr int GetFlags = 3;
 static constexpr int SetFlags = 4;
+static constexpr int OldGetLock = 7;
+static constexpr int OldSetLock = 8;
+static constexpr int OldSetLockWait = 9;
 static constexpr int GetLock = 11;
 static constexpr int SetLock = 12;
+static constexpr int SetLockWait = 13;
 static constexpr int ReadAhead = 15;
 static constexpr int DarwinReadAhead = 16;
 static constexpr int DuplicateCloseOnExec = 17;
@@ -39,11 +46,19 @@ static constexpr int Append = 8;
 static constexpr int ReadAheadFlag = 0x200;
 static constexpr int CreateReadWrite = 0x202;
 static constexpr int CreateWriteAppend = 0x209;
+static constexpr int OpenDirectory = 0x20000;
+static constexpr std::int16_t ReadLock = 1;
+static constexpr std::int16_t Unlock = 2;
+static constexpr std::int16_t WriteLock = 3;
+static constexpr std::int16_t FromStart = 0;
+static constexpr std::int16_t FromCurrent = 1;
+static constexpr std::int16_t FromEnd = 2;
 static constexpr int GuestEbadf = 9;
 static constexpr int GuestEfault = 14;
 static constexpr int GuestEinval = 22;
 static constexpr int GuestEnotty = 25;
 static constexpr int GuestEagain = 35;
+static constexpr int GuestEoverflow = 84;
 static constexpr std::uint64_t NonblockingRequest = 0x8004667e;
 static constexpr std::uint64_t ReadableRequest = 0x4004667f;
 static constexpr std::uint64_t WindowSizeRequest = 0x40087468;
@@ -141,10 +156,6 @@ static void FileFlagsRoundTrip() {
     Require(sceKernelFcntl(file, DuplicateCommand, -1) == SceEinval);
     RequireFailure(fcntl_nid_postfix(file, 99), GuestEinval);
     RequireFailure(fcntl_nid_postfix(file, GetLock, nullptr), GuestEfault);
-#ifdef _WIN32
-    GuestLock lock{0, 0, 0, 3, 0, 0};
-    Require(ThrowsWith([file, &lock] { fcntl_nid_postfix(file, SetLock, &lock); }, "fcntl: record locks are not implemented on Windows"));
-#else
     GuestLock lock{0, 0, 0, 3, 0, 0};
     Require(fcntl_nid_postfix(file, SetLock, &lock) == 0);
     GuestLock probe{0, 0, 0, 1, 0, 0};
@@ -153,7 +164,6 @@ static void FileFlagsRoundTrip() {
     Require(fcntl_nid_postfix(file, SetLock, &lock) == 0);
     lock.type = 7;
     RequireFailure(fcntl_nid_postfix(file, SetLock, &lock), GuestEinval);
-#endif
 
     for (const int descriptor : {closing, duplicate, file}) Require(close_nid_postfix(descriptor) == 0);
     RequireFailure(fcntl_nid_postfix(file, GetDescriptorFlags), GuestEbadf);
@@ -175,6 +185,137 @@ static void FileFlagsRoundTrip() {
     Require(ThrowsWith([appending] { fcntl_nid_postfix(appending, SetFlags, Append | 0x80); }, "fcntl: changing O_FSYNC on a file is not implemented"));
     Require(sceKernelClose(appending) == 0);
     std::remove("kernel_fcntl_probe.bin");
+}
+
+static bool NoConflict(int fd, GuestLock request) {
+    const GuestLock asked = request;
+    if (fcntl_nid_postfix(fd, GetLock, &request) != 0) return false;
+    return request.type == Unlock && request.start == asked.start && request.length == asked.length && request.pid == asked.pid && request.whence == asked.whence && request.system == asked.system;
+}
+
+static void RecordLocksBelongToTheProcess() {
+    const int file = sceKernelOpen("kernel_fcntl_locks.bin", CreateReadWrite, 0644);
+    Require(file >= 0);
+    Require(write_nid_postfix(file, "0123456789", 10) == 10);
+
+    GuestLock whole{0, 0, 0, WriteLock, FromStart, 0};
+    Require(fcntl_nid_postfix(file, SetLock, &whole) == 0);
+    Require(NoConflict(file, {4, 2, 0, WriteLock, FromStart, 77}));
+    GuestLock middle{2, 3, 0, ReadLock, FromStart, 0};
+    Require(fcntl_nid_postfix(file, SetLock, &middle) == 0);
+    GuestLock tail{5, 0, 0, Unlock, FromStart, 0};
+    Require(fcntl_nid_postfix(file, SetLock, &tail) == 0);
+    GuestLock merged{0, 10, 0, WriteLock, FromStart, 0};
+    Require(fcntl_nid_postfix(file, SetLockWait, &merged) == 0);
+    Require(NoConflict(file, {0, 0, 0, WriteLock, FromStart, 0}));
+
+    const int other = sceKernelOpen("kernel_fcntl_locks.bin", ReadWrite, 0);
+    Require(other >= 0);
+    GuestLock same{0, 10, 0, WriteLock, FromStart, 0};
+    Require(fcntl_nid_postfix(other, SetLock, &same) == 0);
+    Require(fcntl_nid_postfix(other, SetLockWait, &same) == 0);
+    Require(NoConflict(other, {0, 0, 0, WriteLock, FromStart, 0}));
+
+    int threadSet = -1;
+    int threadWait = -1;
+    bool threadSeesNoConflict = false;
+    std::thread thread([&] {
+        GuestLock request{3, 4, 0, WriteLock, FromStart, 0};
+        threadSet = fcntl_nid_postfix(other, SetLock, &request);
+        threadWait = fcntl_nid_postfix(file, SetLockWait, &request);
+        threadSeesNoConflict = NoConflict(file, {0, 0, 0, WriteLock, FromStart, 0});
+    });
+    thread.join();
+    Require(threadSet == 0 && threadWait == 0 && threadSeesNoConflict);
+
+    Require(sceKernelLseek(file, 6, 0) == 6);
+    GuestLock current{-2, 0, 0, ReadLock, FromCurrent, 5};
+    Require(fcntl_nid_postfix(file, GetLock, &current) == 0);
+    Require(current.type == Unlock && current.start == 4 && current.whence == FromCurrent && current.length == 0 && current.system == 5);
+    GuestLock end{-3, 0, 0, WriteLock, FromEnd, 0};
+    Require(fcntl_nid_postfix(file, SetLock, &end) == 0);
+    GuestLock backwards{5, -5, 0, ReadLock, FromStart, 0};
+    Require(fcntl_nid_postfix(file, SetLock, &backwards) == 0);
+
+    unsigned char old[32];
+    std::memset(old, 0xa5, sizeof(old));
+    GuestLock oldLock{0, 1, 0, WriteLock, FromStart, 0};
+    std::memcpy(old, &oldLock, 24);
+    Require(fcntl_nid_postfix(file, OldSetLock, old) == 0);
+    Require(fcntl_nid_postfix(file, OldSetLockWait, old) == 0);
+    Require(fcntl_nid_postfix(file, OldGetLock, old) == 0);
+    std::memcpy(&oldLock, old, 24);
+    Require(oldLock.type == Unlock && oldLock.start == 0 && oldLock.length == 1);
+    for (std::size_t index = 24; index < sizeof(old); ++index) Require(old[index] == 0xa5);
+
+    GuestLock badType{0, 0, 0, 0, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &badType), GuestEinval);
+    badType.type = 4;
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &badType), GuestEinval);
+    badType.type = 7;
+    RequireFailure(fcntl_nid_postfix(file, GetLock, &badType), GuestEinval);
+    GuestLock negative{-1, 0, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &negative), GuestEinval);
+    GuestLock beforeStart{0, -1, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &beforeStart), GuestEinval);
+    GuestLock pastStart{5, -6, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &pastStart), GuestEinval);
+    GuestLock unknownWhence{0, 0, 0, WriteLock, 3, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &unknownWhence), GuestEinval);
+    Require(sceKernelFcntl(file, SetLock, &unknownWhence) == SceEinval);
+
+    const int reader = sceKernelOpen("kernel_fcntl_locks.bin", ReadOnly, 0);
+    Require(reader >= 0);
+    GuestLock write{0, 0, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(reader, SetLock, &write), GuestEbadf);
+    RequireFailure(fcntl_nid_postfix(reader, SetLockWait, &write), GuestEbadf);
+    Require(sceKernelFcntl(reader, SetLock, &write) == SceEbadf);
+    Require(NoConflict(reader, write));
+    GuestLock read{0, 0, 0, ReadLock, FromStart, 0};
+    Require(fcntl_nid_postfix(reader, SetLock, &read) == 0);
+    const int writer = sceKernelOpen("kernel_fcntl_locks.bin", WriteOnly, 0);
+    Require(writer >= 0);
+    RequireFailure(fcntl_nid_postfix(writer, SetLock, &read), GuestEbadf);
+    Require(fcntl_nid_postfix(writer, SetLock, &write) == 0);
+    GuestLock release{0, 0, 0, Unlock, FromStart, 0};
+    Require(fcntl_nid_postfix(writer, SetLock, &release) == 0);
+    Require(fcntl_nid_postfix(reader, SetLock, &release) == 0);
+
+#ifdef _WIN32
+    Require(NoConflict(file, {0, 0, 0, Unlock, FromStart, 0}));
+    GuestLock tooLong{std::numeric_limits<std::int64_t>::max(), 2, 0, WriteLock, FromStart, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &tooLong), GuestEoverflow);
+    RequireFailure(fcntl_nid_postfix(file, GetLock, &tooLong), GuestEoverflow);
+    GuestLock pastEnd{std::numeric_limits<std::int64_t>::max(), 0, 0, WriteLock, FromEnd, 0};
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &pastEnd), GuestEoverflow);
+    GuestLock pastCurrent{std::numeric_limits<std::int64_t>::max(), 0, 0, ReadLock, FromCurrent, 0};
+    Require(fcntl_nid_postfix(reader, SetLock, &pastCurrent) == 0);
+    pastCurrent.type = WriteLock;
+    Require(sceKernelLseek(reader, 1, 0) == 1);
+    RequireFailure(fcntl_nid_postfix(reader, SetLock, &pastCurrent), GuestEoverflow);
+    GuestLock writeBeforeWhence{0, 0, 0, WriteLock, 3, 0};
+    RequireFailure(fcntl_nid_postfix(reader, SetLock, &writeBeforeWhence), GuestEbadf);
+    RequireFailure(fcntl_nid_postfix(reader, GetLock, &writeBeforeWhence), GuestEinval);
+
+    std::filesystem::create_directory("kernel_fcntl_locks_dir");
+    const int directory = sceKernelOpen("kernel_fcntl_locks_dir", OpenDirectory, 0);
+    Require(directory >= 0);
+    Require(fcntl_nid_postfix(directory, SetLock, &read) == 0);
+    RequireFailure(fcntl_nid_postfix(directory, SetLock, &write), GuestEbadf);
+    Require(NoConflict(directory, {0, 0, 0, WriteLock, FromCurrent, 0}));
+    GuestLock directoryEnd{0, 0, 0, ReadLock, FromEnd, 0};
+    Require(ThrowsWith([directory, &directoryEnd] { fcntl_nid_postfix(directory, SetLock, &directoryEnd); }, "fcntl: a record lock from the end on a directory is not implemented"));
+    Require(close_nid_postfix(directory) == 0);
+    std::filesystem::remove("kernel_fcntl_locks_dir");
+#endif
+
+    for (const int descriptor : {writer, reader, other}) Require(close_nid_postfix(descriptor) == 0);
+    Require(fcntl_nid_postfix(file, SetLock, &whole) == 0);
+    Require(NoConflict(file, {0, 0, 0, WriteLock, FromStart, 0}));
+    Require(close_nid_postfix(file) == 0);
+    RequireFailure(fcntl_nid_postfix(file, SetLock, &whole), GuestEbadf);
+    RequireFailure(fcntl_nid_postfix(file, GetLock, &whole), GuestEbadf);
+    std::remove("kernel_fcntl_locks.bin");
 }
 
 static void PipeFlagsRoundTrip() {
@@ -236,6 +377,7 @@ static void StandardInputFlags() {
 int main() {
     SocketsKeepTheirPath();
     FileFlagsRoundTrip();
+    RecordLocksBelongToTheProcess();
     PipeFlagsRoundTrip();
     StandardInputFlags();
     return 0;

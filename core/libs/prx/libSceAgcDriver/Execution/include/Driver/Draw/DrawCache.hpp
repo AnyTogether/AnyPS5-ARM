@@ -38,6 +38,9 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
 struct PreparedGraphicsStage {
     std::shared_ptr<const ShaderSnapshot> snapshot;
     PreparedShaders::Entry entry;
+    ShaderRecompiler::ShaderStage stage = ShaderRecompiler::ShaderStage::Vertex;
+    std::uint32_t pushOffset = 0;
+    std::shared_ptr<const ShaderRecompiler::RecompileResult> registration;
 };
 
 std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decoded, const ShaderRecompiler::SpirvTarget& target);

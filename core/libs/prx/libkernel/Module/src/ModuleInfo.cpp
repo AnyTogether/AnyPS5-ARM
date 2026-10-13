@@ -252,6 +252,24 @@ std::uint64_t GuestSegmentBytes() {
     dl_iterate_phdr(AddGuestSegmentBytes, &bytes);
     return bytes;
 }
+
+#ifdef __APPLE__
+// A macOS image's native handle is a dlopen handle, which carries no path: the image holding its
+// address names it, and the executable stands for the main program as Linux's unnamed image does.
+bool SystemImage(const GuestImage& image) {
+    Dl_info symbol{};
+    if (!::dladdr(reinterpret_cast<const void*>(image.address), &symbol) || symbol.dli_fname == nullptr)
+        throw std::runtime_error("module info: no image holds a loaded guest image's address");
+    if (symbol.dli_fbase == _dyld_get_image_header(0)) return false;
+    return !std::string_view(symbol.dli_fname).ends_with(GuestModuleSuffix);
+}
+#else
+bool SystemImage(const GuestImage& image) {
+    const auto* name = static_cast<const link_map*>(image.native)->l_name;
+    const std::string_view path = name ? name : "";
+    return !path.empty() && !path.ends_with(GuestModuleSuffix);
+}
+#endif
 #else
 bool SectionNamed(const IMAGE_SECTION_HEADER& section, const char* name) {
     return std::strncmp(reinterpret_cast<const char*>(section.Name), name, IMAGE_SIZEOF_SHORT_NAME) == 0;
@@ -388,7 +406,45 @@ std::uint64_t GuestSegmentBytes() {
     }
     return bytes;
 }
+
+bool SystemImage(const GuestImage& image) {
+    if (image.address == reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr))) return false;
+    constexpr std::wstring_view suffix = L".guest.prx";
+    const auto path = ModulePath(reinterpret_cast<HMODULE>(image.address));
+    return path.size() < suffix.size() || CompareStringOrdinal(path.data() + path.size() - suffix.size(), static_cast<int>(suffix.size()), suffix.data(), static_cast<int>(suffix.size()), TRUE) != CSTR_EQUAL;
+}
 #endif
+
+int FillModuleInfo(KernelModule handle, ModuleInfo* info, bool titleOnly) {
+    if (!info) return SCE_KERNEL_ERROR_EFAULT;
+    if (info->st_size != sizeof(ModuleInfo)) return SCE_KERNEL_ERROR_EINVAL;
+    for (const auto& image : GuestImages()) {
+        if (ModuleIdForImage_nid_no_patch(image.native) != handle) continue;
+        if (titleOnly && SystemImage(image)) return SCE_KERNEL_ERROR_EPERM;
+        ModuleInfo result{};
+        result.st_size = sizeof(ModuleInfo);
+#ifdef _WIN32
+        if (!Fill(image.address, result)) return SCE_KERNEL_ERROR_ESRCH;
+#else
+        ImageSearch<ModuleInfo> search{image.address, &result, false};
+        dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+        if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
+#endif
+        *info = result;
+        return 0;
+    }
+    return SCE_KERNEL_ERROR_ESRCH;
+}
+
+int FillModuleList(KernelModule* handles, std::size_t count, std::size_t* actual, bool titleOnly) {
+    if (!handles || !actual) return SCE_KERNEL_ERROR_EFAULT;
+    auto images = GuestImages();
+    if (titleOnly) std::erase_if(images, SystemImage);
+    for (std::size_t i = 0; i < images.size() && i < count; ++i) handles[i] = ModuleIdForImage_nid_no_patch(images[i].native);
+    if (images.size() > count) return SCE_KERNEL_ERROR_ENOMEM;
+    *actual = images.size();
+    return 0;
+}
 
 }
 
@@ -423,32 +479,48 @@ int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, M
 }
 
 int APS5_VABI sceKernelGetModuleList(KernelModule* handles, std::size_t count, std::size_t* actual) {
-    if (!handles || !actual) return SCE_KERNEL_ERROR_EFAULT;
-    const auto images = GuestImages();
-    for (std::size_t i = 0; i < images.size() && i < count; ++i) handles[i] = ModuleIdForImage_nid_no_patch(images[i].native);
-    if (images.size() > count) return SCE_KERNEL_ERROR_ENOMEM;
-    *actual = images.size();
-    return 0;
+    return FillModuleList(handles, count, actual, false);
+}
+
+int APS5_VABI sceKernelGetModuleList2(KernelModule* handles, std::size_t count, std::size_t* actual) {
+    return FillModuleList(handles, count, actual, true);
 }
 
 int APS5_VABI sceKernelGetModuleInfo(KernelModule handle, ModuleInfo* info) {
-    if (!info) return SCE_KERNEL_ERROR_EFAULT;
-    if (info->st_size != sizeof(ModuleInfo)) return SCE_KERNEL_ERROR_EINVAL;
-    for (const auto& image : GuestImages()) {
-        if (ModuleIdForImage_nid_no_patch(image.native) != handle) continue;
-        ModuleInfo result{};
-        result.st_size = sizeof(ModuleInfo);
+    return FillModuleInfo(handle, info, false);
+}
+
+int APS5_VABI sceKernelGetModuleInfo2(KernelModule handle, ModuleInfo* info) {
+    return FillModuleInfo(handle, info, true);
+}
+
+std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** address, std::size_t* size) {
+    if (!address || !size) throw std::invalid_argument("sceKernelGetLibkernelTextLocation: null argument");
+    const auto images = GuestImages();
+    if (images.empty()) throw std::runtime_error("sceKernelGetLibkernelTextLocation: the main program is not loaded");
+    ModuleInfo info{};
 #ifdef _WIN32
-        if (!Fill(image.address, result)) return SCE_KERNEL_ERROR_ESRCH;
+    const bool found = Fill(images.front().address, info);
 #else
-        ImageSearch<ModuleInfo> search{image.address, &result, false};
-        dl_iterate_phdr(FindImage<ModuleInfo>, &search);
-        if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
+    ImageSearch<ModuleInfo> search{images.front().address, &info, false};
+    dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+    const bool found = search.found;
 #endif
-        *info = result;
-        return 0;
-    }
-    return SCE_KERNEL_ERROR_ESRCH;
+    if (!found || info.segment_count == 0)
+        throw std::runtime_error("sceKernelGetLibkernelTextLocation: the main program has no segments");
+    *address = reinterpret_cast<void*>(static_cast<std::uintptr_t>(info.segments[0].address));
+    *size = info.segments[0].size;
+    return 0;
+}
+
+std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(InternalSegmentInfo* result) {
+    if (!result) throw std::invalid_argument("sceKernelInternalMemoryGetModuleSegmentInfo: result is null");
+    void* address = nullptr;
+    std::size_t size = 0;
+    const auto status = sceKernelGetLibkernelTextLocation_nid_postfix(&address, &size);
+    if (status != 0) return status;
+    *result = {reinterpret_cast<std::uintptr_t>(address), size};
+    return 0;
 }
 
 std::uint64_t GuestImageSegmentBytes_nid_no_patch() {

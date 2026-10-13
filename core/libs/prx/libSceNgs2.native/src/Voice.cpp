@@ -486,6 +486,18 @@ int APS5_VABI sceNgs2PanGetVolumeMatrix(Ngs2PanWork* work, const Ngs2PanParam* p
     return Ngs2PanGetVolumeMatrix(work, params, num_params, matrix_format, out_volume_matrix);
 }
 
+int APS5_VABI sceNgs2GeomResetListenerParam(Ngs2GeomListenerParam* out_listener_param) {
+    return Ngs2GeomResetListenerParam(out_listener_param);
+}
+
+int APS5_VABI sceNgs2GeomCalcListener(const Ngs2GeomListenerParam* param, Ngs2GeomListenerWork* outWork, std::uint32_t flags) {
+    return Ngs2GeomCalcListener(param, outWork, flags);
+}
+
+int APS5_VABI sceNgs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
+    return Ngs2GeomResetSourceParam(out_source_param);
+}
+
 }
 
 #pragma GCC visibility pop

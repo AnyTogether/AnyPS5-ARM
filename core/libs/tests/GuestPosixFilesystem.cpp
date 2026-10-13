@@ -1,5 +1,4 @@
 #include "prx/libc/include/General.hpp"
-#include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -111,7 +110,7 @@ int main() {
         Require(close_nid_postfix(pipe) == 0);
     }
     const int socket = socket_nid_postfix(2, 2, 0);
-    Require(socket >= GuestSockets::FirstDescriptor);
+    Require(socket >= 0 && socket < 1024);
     Require(isatty_nid_postfix(socket) == 0 && *__error_nid_postfix() == 25);
     Require(close_nid_postfix(socket) == 0);
     Require(isatty_nid_postfix(socket) == 0 && *__error_nid_postfix() == 9);

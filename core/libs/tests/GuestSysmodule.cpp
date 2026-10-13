@@ -43,7 +43,10 @@ constexpr std::uint16_t kUltModuleId = 0x0007;
 constexpr int kInvalidValue = static_cast<int>(0x805A1000);
 constexpr int kModuleUnloaded = static_cast<int>(0x805A1001);
 constexpr std::uint32_t kInternalFlag = 0x80000000u;
+constexpr std::uint16_t kAcmModuleId = 0x010b;
 constexpr std::uint16_t kTrophy2ModuleId = 0x0110;
+constexpr std::uint16_t kVoiceChatModuleId = 0x0114;
+constexpr std::uint16_t kPsmlModuleId = 0x0137;
 constexpr std::uint32_t kAgcModuleId = 0x80000094;
 
 #ifdef __linux__
@@ -131,6 +134,13 @@ int main() {
     Require(sceSysmoduleUnloadModule(kUltModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kUltModuleId) == kModuleUnloaded);
 
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleUnloadModule(kAcmModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kAcmModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kAcmModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAcmModuleId) == kModuleUnloaded);
+
     constexpr std::uint16_t kShareModuleId = 0x010f;
     Require(sceSysmoduleIsLoaded(kShareModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModule(kShareModuleId) == 0);
@@ -147,6 +157,20 @@ int main() {
     Require(sceSysmoduleUnloadModuleInternal(kTrophy2ModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kTrophy2ModuleId) == kModuleUnloaded);
     Require(sceSysmoduleUnloadModuleInternal(kTrophy2ModuleId) == kModuleUnloaded);
+
+    Require(sceSysmoduleIsLoaded(kVoiceChatModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleUnloadModule(kVoiceChatModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kVoiceChatModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kVoiceChatModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kVoiceChatModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kVoiceChatModuleId) == kModuleUnloaded);
+
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleUnloadModule(kPsmlModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kPsmlModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == 0);
+    Require(sceSysmoduleUnloadModule(kPsmlModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kPsmlModuleId) == kModuleUnloaded);
 
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == kModuleUnloaded);
     Require(sceSysmoduleLoadModuleInternal(kAgcModuleId) == 0);
@@ -177,4 +201,22 @@ int main() {
     Require(symbol != nullptr);
     Require(sceSysmoduleUnloadModule(kFiberModuleId) == 0);
     Require(sceSysmoduleGetModuleHandleInternal(kFiberModuleId, &handle) == kModuleUnloaded);
+
+    constexpr std::uint16_t kAudioPropagationModuleId = 0x0120;
+    std::int32_t audioPropagationHandle = -1;
+    Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == kModuleUnloaded);
+    Require(audioPropagationHandle == -1);
+
+    Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleLoadModule(kAudioPropagationModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == 0);
+    Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == 0);
+    Require(audioPropagationHandle >= 0);
+    void* audioPropagationSymbol = nullptr;
+    Require(sceKernelDlsym(audioPropagationHandle, "sceAudioPropagationSystemCreate", &audioPropagationSymbol) == 0);
+    Require(audioPropagationSymbol != nullptr);
+
+    Require(sceSysmoduleUnloadModule(kAudioPropagationModuleId) == 0);
+    Require(sceSysmoduleIsLoaded(kAudioPropagationModuleId) == kModuleUnloaded);
+    Require(sceSysmoduleGetModuleHandleInternal(kAudioPropagationModuleId, &audioPropagationHandle) == kModuleUnloaded);
 }

@@ -17,6 +17,8 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelGetdents(int, char*, int);
 std::int64_t APS5_VABI sceKernelLseek(int, std::int64_t, int);
+int APS5_VABI dup_nid_postfix(int);
+int APS5_VABI dup2_nid_postfix(int, int);
 }
 
 static void Check(bool value, int line) {
@@ -103,6 +105,23 @@ int main() {
     Require(sceKernelGetdents(directory, tiny.data(), static_cast<int>(tiny.size())) < 0);
     Require(sceKernelLseek(directory, 0, 0) == 0);
     Require(ReadAll(directory) == (std::set<std::string>{".", "..", "a", "b", "c", "d"}));
+
+    Require(sceKernelLseek(directory, 0, 0) == 0);
+    Require(sceKernelGetdents(directory, two.data(), static_cast<int>(two.size())) == 24);
+    const int duplicate = dup_nid_postfix(directory);
+    Require(duplicate >= 0 && duplicate != directory);
+    Require(sceKernelLseek(duplicate, 0, 1) == 2);
+    Require(ReadAll(duplicate) == (std::set<std::string>{"a", "b", "c", "d"}));
+    Require(sceKernelLseek(directory, 0, 1) == sceKernelLseek(duplicate, 0, 1));
+    Require(sceKernelLseek(directory, 0, 0) == 0);
+    Require(sceKernelLseek(duplicate, 0, 1) == 0);
+    const int target = sceKernelOpen((root / "a").string().c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(target >= 0);
+    Require(dup2_nid_postfix(duplicate, target) == target);
+    Require(sceKernelClose(duplicate) == 0);
+    Require(ReadAll(target) == (std::set<std::string>{".", "..", "a", "b", "c", "d"}));
+    Require(sceKernelLseek(directory, 0, 1) == sceKernelLseek(target, 0, 1));
+    Require(sceKernelClose(target) == 0);
 
     Require(sceKernelClose(directory) == 0);
 

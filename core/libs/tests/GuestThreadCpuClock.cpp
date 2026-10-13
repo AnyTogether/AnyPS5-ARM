@@ -12,11 +12,13 @@ int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
 int APS5_VABI clock_getres_nid_postfix(int clockId, KernelTimespec* res);
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
+int APS5_VABI sceKernelClockGettime(KernelClockid clockId, KernelTimespec* tp);
 int* APS5_VABI __error_nid_postfix();
 }
 
 static constexpr int GUEST_EFAULT = 14;
 static constexpr int GUEST_EINVAL = 22;
+static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 static constexpr int GUEST_CLOCK_MONOTONIC = 4;
 static constexpr int GUEST_CLOCK_THREAD_CPUTIME_ID = 14;
 static constexpr std::int64_t NANOS_PER_SECOND = 1000000000LL;
@@ -99,6 +101,9 @@ static void OtherThreadClockReadsThatThread() {
     KernelTimespec time{-1, -1};
     *__error_nid_postfix() = 0;
     Require(clock_gettime_nid_postfix(clockId, &time) == -1);
+    Require(*__error_nid_postfix() == GUEST_EINVAL);
+    *__error_nid_postfix() = 0;
+    Require(sceKernelClockGettime(clockId, &time) == SCE_KERNEL_ERROR_EINVAL);
     Require(*__error_nid_postfix() == GUEST_EINVAL);
 }
 

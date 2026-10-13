@@ -376,7 +376,8 @@ void emitEntryPrologue(IrProgram& program, IrBlock& entryBlock, const TranslateO
         }
     } else if (options.stage == ShaderStageKind::Vertex) {
         if (options.userDataBaseRegister >= 8u) {
-            const std::uint32_t lanes = options.waveSize == 64u && options.inputInfo.vertex->hostSubgroupSize == 32u ? 32u : options.waveSize;
+            const auto hostLanes = options.inputInfo.vertex->hostSubgroupSize;
+            const std::uint32_t lanes = hostLanes == 1u ? 1u : options.waveSize == 64u && hostLanes == 32u ? 32u : options.waveSize;
             entryIr.SetScalarReg(static_cast<ScalarReg>(3), entryIr.Constant(lanes | (lanes << 8u)));
         }
         setVector(static_cast<VectorReg>(5), drawIndex(StageInputKind::VertexIndex));
@@ -414,6 +415,7 @@ IrProgram InstructionTranslator::Translate(const RdnaProgram& decoded, const Con
     IrProgram program;
     program.SetWaveSize(options.waveSize);
     std::uint32_t windowBase = NumVectorRegs;
+    bool indexedWrites = false;
     for (const auto& cfgBlock : cfg.blocks) {
         for (std::uint32_t index = cfgBlock.instructionBegin; index < cfgBlock.instructionEnd; index++) {
             const auto& instruction = decoded.instructions[index];
@@ -424,20 +426,24 @@ IrProgram InstructionTranslator::Translate(const RdnaProgram& decoded, const Con
                     break;
                 case RdnaOpcode::VMovreldB32:
                     windowBase = std::min(windowBase, instruction.destination.reg);
+                    indexedWrites = true;
                     break;
                 case RdnaOpcode::VMovrelsdB32:
                 case RdnaOpcode::VMovrelsd2B32:
                 case RdnaOpcode::VSwaprelB32:
                     windowBase = std::min({windowBase, instruction.source0.reg, instruction.destination.reg});
+                    indexedWrites = true;
                     break;
                 default:
                     break;
             }
         }
     }
-    if (windowBase < vectorLimit) {
+    const bool ancillaryWindow = options.stage == ShaderStageKind::Pixel && options.inputInfo.pixel != nullptr && options.inputInfo.pixel->psAncillary && options.inputInfo.pixel->psInputVgpr[static_cast<std::uint32_t>(PixelInput::Ancillary)] >= windowBase;
+    if (windowBase < vectorLimit && !ancillaryWindow) {
         program.Metadata().vectorWindowBase = windowBase;
         program.Metadata().vectorWindowSize = vectorLimit - windowBase;
+        program.Metadata().vectorWindowIndexedWrites = indexedWrites;
     }
     program.Resources().stage = toIrShaderStage(options.stage);
     program.Resources().shaderHash = options.shaderHash;
@@ -500,6 +506,13 @@ IrProgram InstructionTranslator::Translate(const RdnaProgram& decoded, const Con
     emitEntryPrologue(program, *blocks.front(), options);
     if (program.Metadata().vectorWindowSize != 0u) {
         vectorLimit = program.Metadata().vectorWindowBase + program.Metadata().vectorWindowSize;
+    }
+    if (ancillaryWindow) {
+        for (const IrValue* instruction : blocks.front()->Instructions()) {
+            if (instruction->Opcode() == IrOpcode::SetVectorRegister) {
+                vectorLimit = std::max(vectorLimit, instruction->Argument(0)->Register().index + 1u);
+            }
+        }
     }
 
     for (const auto& cfgBlock : cfg.blocks) {

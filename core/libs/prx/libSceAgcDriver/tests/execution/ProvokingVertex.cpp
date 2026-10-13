@@ -50,7 +50,7 @@ ShaderRecompiler::RecompileResult GuestPixel(const ShaderRecompiler::SpirvTarget
     request.context.waveSize = 64;
     request.context.pixel = pixel;
     request.target = target;
-    request.layout.pushConstantSizeBytes = 128;
+    request.layout = PixelPushLayout(0u, target);
     request.useCache = false;
     auto result = ShaderRecompiler::Recompile(request);
     result.variantId = 3;
@@ -115,7 +115,7 @@ int main() {
         const auto guestPixel = GuestPixel(device->Target());
         const std::array<AgcDriver::Graphics::CompiledShader, 2> guestShaders{{
             {ShaderRecompiler::ShaderStage::Vertex, &vertex, 0},
-            {ShaderRecompiler::ShaderStage::Fragment, &guestPixel, 0}
+            {ShaderRecompiler::ShaderStage::Fragment, &guestPixel, PixelPushOffset(0u, device->Target())}
         }};
         for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP}) Run(*device, topology, guestShaders, true, "guest P0");
         std::puts(device->ProvokingVertexLast() ? "provoking vertex rendering tests passed: GLSL and guest P0, triangle list and strip, first/last/first" : "provoking vertex rendering tests passed through the last-vertex-first index rewrite: GLSL and guest P0, triangle list and strip, first/last/first");

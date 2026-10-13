@@ -1,0 +1,8 @@
+# libSceNpSessionSignaling technical debt
+
+### Unknown function info
+
+- [sceNpSessionSignalingGetConnectionFromPeerAddress](../../../core/libs/prx/libSceNpSessionSignaling/Export.cpp) (libSceNpSessionSignaling) - imported by PPSA01289 and added without an implementation; unknown signature
+- [sceNpSessionSignalingGetMemoryInfo](../../../core/libs/prx/libSceNpSessionSignaling/Export.cpp) (libSceNpSessionSignaling) - unknown signature
+- [sceNpSessionSignalingGetConnectionStatistics](../../../core/libs/prx/libSceNpSessionSignaling/Export.cpp) (libSceNpSessionSignaling) - unknown signature
+- [sceNpSessionSignalingGetConnectionStatus](../../../core/libs/prx/libSceNpSessionSignaling/Export.cpp) (libSceNpSessionSignaling) - `(int32 context id, int32 connection id, int32* status, SceNetInAddr* peer address, uint16* peer port)` is ASTRO BOT's (PPSA21564 01.007.000) call at 0x30622B: the context id from a 32-bit field, the connection id, three stack outputs, a negative result taken as an error, then the address passed to `sceNetInetNtop(AF_INET, ...)` and the port to `sceNetNtohs`. It matches PS4's `sceNpSignalingGetConnectionStatus`. The title reaches it only for a connection id from the signaling library, which offline never hands one out. No session ever activates offline, so every connection id answers `CONN_NOT_FOUND` (0x8055330C, from [shadPS4](https://github.com/shadps4-emu/shadPS4/blob/64d198190fa05d37cbb1fa29c50f967c376fce55/src/core/libraries/np/np_error.h)) without writing the outputs, and a null status answers `INVALID_ARGUMENT`. The context id is not checked, as contexts are not tracked. The console's answer for an unknown context or connection is unverified

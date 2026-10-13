@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <ctime>
 #include <mutex>
-#include <shared_mutex>
 #include <string>
 #include <thread>
 #ifndef _WIN32
@@ -50,15 +49,11 @@ struct PthreadRwlockattrPrivate {
 };
 
 struct PthreadRwlockPrivate {
-    // TODO(technical debt): winpthreads initializes a static rwlock on first use and fails a
-    // concurrent first lock with EINVAL, which shared_timed_mutex ignores. Initialize it here.
-    PthreadRwlockPrivate() {
-        _lock.lock();
-        _lock.unlock();
-    }
-    std::shared_timed_mutex _lock;
+    std::mutex _state;
+    TimedWait::Condition _changed;
     std::atomic<std::thread::id> _writer;
     std::atomic<int> _readers{0};
+    int _waitingWriters = 0;
 };
 
 struct PthreadCondattrPrivate {
@@ -162,5 +157,6 @@ int GuestThreadCpuClockId(const PthreadPrivate* thread);
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos);
 void SetLiveGuestThreadsAffinity(KernelCpumask mask);
 KernelCpumask LiveGuestThreadsAffinity();
+bool GuestThreadIsLive(const PthreadPrivate* thread);
 
 #endif

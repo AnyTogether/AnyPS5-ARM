@@ -179,6 +179,7 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
             const auto label = Pm4::DecodeLabelWrite(packet);
             if (!label) break;
             NoteLabel(labels, label->address, label->Bytes());
+            writes.emplace_back(label->address, label->address + label->Bytes().size());
         } else if (opcode != 0x3f && opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
             if (Pm4::AccessesMemory(header)) break;
             try {

@@ -9,6 +9,7 @@ extern "C" {
 int APS5_VABI sceSharePlayInitialize(void*, std::size_t);
 int APS5_VABI sceSharePlayTerminate(void);
 int APS5_VABI sceSharePlayGetCurrentConnectionInfoA(SharePlayConnectionInfoA*);
+int APS5_VABI sceSharePlayProhibitController(int);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -38,4 +39,9 @@ int main() {
     Require(info.hostOnlineId.data[0] == 0 && info.visitorOnlineId.data[0] == 0 && info.hostOnlineId.pad[2] == 0);
     Require(info.hostUserId == -1 && info.visitorUserId == -1);
     Require(sceSharePlayGetCurrentConnectionInfoA(nullptr) == static_cast<int>(0x810E0001));
+    Require(sceSharePlayProhibitController(1) == 0);
+    Require(sceSharePlayProhibitController(1) == 0);
+    Require(sceSharePlayProhibitController(0) == 0);
+    Require(Throws([] { sceSharePlayProhibitController(2); }));
+    Require(Throws([] { sceSharePlayProhibitController(-1); }));
 }

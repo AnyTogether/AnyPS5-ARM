@@ -69,7 +69,7 @@ endforeach()
 
 add_test_executable(agc_command_tests EXCLUDE_FROM_ALL tests/Commands.cpp)
 target_include_directories(agc_command_tests PRIVATE ${LIBS_INCLUDE_DIR})
-target_link_libraries(agc_command_tests PRIVATE libSceAgc libc)
+target_link_libraries(agc_command_tests PRIVATE libSceAgc libSceAgcDriver libc)
 configure_windows_unwind(agc_command_tests)
 if(BUILD_TESTING)
     set_target_properties(agc_command_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
@@ -289,6 +289,22 @@ if(BUILD_TESTING)
     add_test(NAME agc_gs_oversubscription_tests COMMAND agc_gs_oversubscription_tests)
     if(WIN32)
         set_tests_properties(agc_gs_oversubscription_tests PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
+add_test_executable(agc_gs_prim_payload_tests EXCLUDE_FROM_ALL
+        tests/GsPrimPayload.cpp
+        Shader/src/GsPrimPayload.cpp
+)
+target_include_directories(agc_gs_prim_payload_tests PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(agc_gs_prim_payload_tests PRIVATE libc)
+configure_windows_unwind(agc_gs_prim_payload_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_gs_prim_payload_tests PROPERTIES EXCLUDE_FROM_ALL FALSE)
+    add_test(NAME agc_gs_prim_payload_tests COMMAND agc_gs_prim_payload_tests)
+    if(WIN32)
+        set_tests_properties(agc_gs_prim_payload_tests PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
 endif()

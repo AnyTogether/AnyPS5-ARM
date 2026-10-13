@@ -230,6 +230,45 @@ inline VertexCopyPlan PlanVertexCopies(std::span<const VertexFetch> fetches) {
     return plan;
 }
 
+inline std::optional<std::uint32_t> ZeroFetchVertex(std::span<const ShaderRecompiler::VertexAttribute> attributes) {
+    std::uint32_t zeroFrom = 0;
+    for (const auto& attribute : attributes) {
+        const auto stride = (attribute.resource.fields[1] >> 16u) & 0x3fffu;
+        if (NullVertexDescriptor(attribute) || attribute.fetchIndex != 0 || stride == 0) continue;
+        if (VertexBufferOutOfBoundsSelect(attribute) > 1u) return std::nullopt;
+        zeroFrom = std::max(zeroFrom, attribute.resource.fields[2]);
+    }
+    return zeroFrom;
+}
+
+inline std::optional<std::uint32_t> ClampDrawIndices(std::span<std::byte> indices, std::uint32_t indexSize, bool skipRestart, std::uint32_t limit) {
+    Require(indexSize == 2 || indexSize == 4, "unsupported index size");
+    const auto restartIndex = indexSize == 2 ? 0xffffu : 0xffffffffu;
+    std::optional<std::uint32_t> highest;
+    for (std::size_t offset = 0; offset + indexSize <= indices.size(); offset += indexSize) {
+        std::uint32_t index = 0;
+        if (indexSize == 2) {
+            std::uint16_t value = 0;
+            std::memcpy(&value, indices.data() + offset, sizeof(value));
+            index = value;
+        } else {
+            std::memcpy(&index, indices.data() + offset, sizeof(index));
+        }
+        if (skipRestart && index == restartIndex) continue;
+        if (index > limit) {
+            index = limit;
+            if (indexSize == 2) {
+                const auto value = static_cast<std::uint16_t>(index);
+                std::memcpy(indices.data() + offset, &value, sizeof(value));
+            } else {
+                std::memcpy(indices.data() + offset, &index, sizeof(index));
+            }
+        }
+        highest = std::max(highest.value_or(0u), index);
+    }
+    return highest;
+}
+
 inline std::optional<std::uint32_t> HighestDrawIndex(std::span<const std::byte> indices, std::uint32_t indexSize, bool skipRestart) {
     Require(indexSize == 2 || indexSize == 4, "unsupported index size");
     const auto restartIndex = indexSize == 2 ? 0xffffu : 0xffffffffu;

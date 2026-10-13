@@ -1,37 +1,26 @@
 #include "prx/libSceAgc/DcbState/include/Workload.hpp"
 
 #include "prx/libSceAgc/Command/include/Packet.hpp"
-#include <algorithm>
+#include "prx/libSceAgcDriver/Resource/include/Registration.hpp"
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
-// Workload states only steer the console's GPU scheduler, which has no counterpart here, so each
-// command is a NOP carrying its arguments: it keeps the command buffer layout the title expects.
 namespace {
 
-std::uint32_t* WriteWorkloadsActive(CommandBuffer* buf, std::uint32_t streamId, const std::uint32_t* workloadIds, std::uint32_t workloadCount, const char* function) {
-    Agc::Command::Require(workloadCount <= 0x3ffeu, function, "too many workloads");
-    if (workloadCount != 0) Agc::Command::CheckAddress(reinterpret_cast<std::uintptr_t>(workloadIds), 4, function);
-    auto* packet = Agc::Command::WriteNop(buf, workloadCount + 3u, function);
-    packet[1] = streamId;
-    packet[2] = workloadCount;
-    std::copy_n(workloadIds, workloadCount, packet + 3);
-    return packet;
-}
+constexpr std::uint32_t OpcodeNop = 0x10;
+constexpr std::uint32_t ActivePacketWords = 18;
+constexpr std::uint32_t CompletePacketWords = 12;
+constexpr std::uint32_t MaxWorkloadId = 63;
+constexpr std::uint32_t MaxActiveCount = 63;
 
-std::uint32_t* WriteWorkloadComplete(CommandBuffer* buf, std::uint32_t streamId, std::uint32_t workloadId, const char* function) {
-    auto* packet = Agc::Command::WriteNop(buf, 3, function);
-    packet[1] = streamId;
-    packet[2] = workloadId;
-    return packet;
-}
-
-std::uint32_t* WriteWorkloadStreamInactive(CommandBuffer* buf, std::uint32_t streamId, const char* function) {
-    auto* packet = Agc::Command::WriteNop(buf, 2, function);
-    packet[1] = streamId;
-    return packet;
+uint32_t* NewPacket(CommandBuffer* buf, std::uint32_t words, const char* function) {
+ auto* packet = Agc::Command::Allocate(buf, words, function);
+ std::memset(packet, 0, words * sizeof(std::uint32_t));
+ packet[0] = Agc::Command::Header(OpcodeNop, words, 0);
+ return packet;
 }
 
 }
@@ -39,27 +28,37 @@ std::uint32_t* WriteWorkloadStreamInactive(CommandBuffer* buf, std::uint32_t str
 extern "C" {
 
 uint32_t* APS5_VABI sceAgcDcbSetWorkloadComplete(CommandBuffer* buf, uint32_t stream_id, uint32_t workload_id) {
-    return WriteWorkloadComplete(buf, stream_id, workload_id, __func__);
+ if (buf == nullptr || workload_id > MaxWorkloadId || !AgcDriverWorkloadStreamRegistered_nid_postfix(stream_id)) return nullptr;
+ const std::uint64_t clearMask = ~(std::uint64_t{1} << workload_id);
+ auto* packet = NewPacket(buf, CompletePacketWords, __func__);
+ packet[1] = stream_id;
+ packet[2] = workload_id;
+ packet[3] = static_cast<std::uint32_t>(clearMask);
+ packet[4] = static_cast<std::uint32_t>(clearMask >> 32);
+ return packet;
 }
 
 uint32_t* APS5_VABI sceAgcDcbSetWorkloadsActive(CommandBuffer* buf, uint32_t stream_id, const uint32_t* workload_ids, uint32_t workload_count) {
-    return WriteWorkloadsActive(buf, stream_id, workload_ids, workload_count, __func__);
+ if (buf == nullptr || workload_ids == nullptr || workload_count == 0 || workload_count > MaxActiveCount || !AgcDriverWorkloadStreamRegistered_nid_postfix(stream_id)) return nullptr;
+ std::uint64_t mask = 0;
+ for (std::uint32_t index = 0; index < workload_count; ++index) {
+  const auto id = workload_ids[index];
+  if (id > MaxWorkloadId) return nullptr;
+  const std::uint64_t bit = std::uint64_t{1} << id;
+  if ((mask & bit) != 0) return nullptr;
+  mask |= bit;
+ }
+ auto* packet = NewPacket(buf, ActivePacketWords, __func__);
+ packet[1] = stream_id;
+ packet[2] = static_cast<std::uint32_t>(mask);
+ packet[3] = static_cast<std::uint32_t>(mask >> 32);
+ return packet;
 }
 
-uint32_t* APS5_VABI sceAgcDcbSetWorkloadStreamInactive(CommandBuffer* buf, uint32_t stream_id) {
-    return WriteWorkloadStreamInactive(buf, stream_id, __func__);
-}
-
-uint32_t* APS5_VABI sceAgcAcbSetWorkloadComplete(CommandBuffer* buf, uint32_t stream_id, uint32_t workload_id) {
-    return WriteWorkloadComplete(buf, stream_id, workload_id, __func__);
-}
-
-uint32_t* APS5_VABI sceAgcAcbSetWorkloadsActive(CommandBuffer* buf, uint32_t stream_id, const uint32_t* workload_ids, uint32_t workload_count) {
-    return WriteWorkloadsActive(buf, stream_id, workload_ids, workload_count, __func__);
-}
-
-uint32_t* APS5_VABI sceAgcAcbSetWorkloadStreamInactive(CommandBuffer* buf, uint32_t stream_id) {
-    return WriteWorkloadStreamInactive(buf, stream_id, __func__);
+uint32_t* APS5_VABI sceAgcDcbSetWorkloadStreamInactive(CommandBuffer* buf, uint32_t streamId) {
+ if (buf == nullptr || !AgcDriverWorkloadStreamRegistered_nid_postfix(streamId)) return nullptr;
+ NotImplemented_nid_no_patch(__func__);
+ return nullptr;
 }
 
 }

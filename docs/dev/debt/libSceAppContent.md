@@ -1,0 +1,12 @@
+# libSceAppContent technical debt
+
+### Unknown function info
+
+- [sceAppContentDownloadDataGetAvailableSpaceKb](../../../core/libs/prx/libSceAppContent/Export.cpp) (libSceAppContent) - a title whose `param.json` declares `downloadDataSize` 0 gets 0 KB and OK; the console's behaviour for a title without a download data area is unverified (it may return an error instead). KytyPS5 does not special-case it, and shadPS4 stubs 1048576 KB
+- [sceAppContentGetAddcontDownloadProgress](../../../core/libs/prx/libSceAppContent/Export.cpp) (libSceAppContent) - imported by PPSA08755, which fails to load without it; added without an implementation because its behavior is unverified. [SharpProspero](https://github.com/SvenGDK/SharpProspero) lists `(uint32_t serviceLabel, entitlementLabel, SceAppContentAddcontDownloadProgress*)`, but no PS5 reference gives the progress layout or the error codes
+- [sceAppContentDownloadDataFormat](../../../core/libs/prx/libSceAppContent/Export.cpp) (libSceAppContent) - empties the `/download0` directory, creating it if needed. Imported by PPSA01317. A null mount point returns `PARAMETER` as `sceAppContentTemporaryDataFormat` does, and another mount point throws as in `sceAppContentDownloadDataGetAvailableSpaceKb`; the console's error codes for both and its behaviour with files still open are unverified
+
+### Functional
+
+- [Additional content](../../../core/libs/prx/libSceAppContent/Export.cpp) (libSceAppContent) is not installed or mounted: `sceAppContentAddcontMount` answers `NOT_FOUND` for every entitlement label and `sceAppContentAddcontUnmount` for every mount point, as no add-content mount is ever handed out; `sceAppContentGetAddcontInfo` answers `DRM_NO_ENTITLEMENT` for every label and `sceAppContentGetAddcontInfoList` reports 0 entries
+- [Temporary app-content storage](../../../core/libs/prx/libSceAppContent/Export.cpp) tracks one `/temp0` mount, preserves its files on unmount, and rejects new path resolutions until remount. Mount, format, space-query and unmount errors follow [fpPS4](https://github.com/red-prig/fpPS4/blob/04cefd43e6fddd1ab033e7980cd356d14c964905/sys/sys_path.pas); the pointer ABI is also declared by [SharpProspero](https://github.com/SvenGDK/SharpProspero/blob/main/src/SharpProspero/Interop/AppContent/AppContent.cs). Existing open host descriptors remain usable after unmount; console behaviour with open files is unverified. Host filesystem failures still throw.

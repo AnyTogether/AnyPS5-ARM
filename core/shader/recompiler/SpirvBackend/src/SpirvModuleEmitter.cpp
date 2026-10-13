@@ -45,6 +45,9 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
     if (kind == StageInputKind::DispatchThreadLimit) {
         return EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.DispatchThreadLimitDword() + component);
     }
+    if (kind == StageInputKind::RasterPrimitive) {
+        return state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::RasterPrimitive, static_cast<std::uint32_t>(RasterPrimitive::Triangle));
+    }
     if (state.laneCount == 2 && (kind == StageInputKind::LocalInvocationId || kind == StageInputKind::GlobalInvocationId)) {
         const auto* workgroup = ShaderWorkgroupInputFor(state);
         if (workgroup == nullptr) {
@@ -502,6 +505,10 @@ std::uint32_t MeshOutputType(SpirvEmitterState& state, StageOutputKind kind) {
 
 namespace {
 
+std::uint32_t TessellationOuterFactors(const SpirvEmitterState& state) {
+    return state.inputInfo.vertex->tess.domain == 2u ? 4u : 3u;
+}
+
 std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& inst) {
     auto& state = ctx.state;
     const auto kind = static_cast<TessellationAttribute>(inst.Argument(0)->ImmediateU32());
@@ -517,11 +524,12 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
             throw std::runtime_error("tessellation factor index must be immediate");
         }
         const auto index = inst.Argument(1)->ImmediateU32() / 4u;
-        const bool outer = index < 3u;
-        if (index >= 4u) {
+        const auto outerFactors = TessellationOuterFactors(state);
+        const bool outer = index < outerFactors;
+        if (index >= outerFactors + (outerFactors == 4u ? 2u : 1u)) {
             throw std::runtime_error("tessellation factor index out of range");
         }
-        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, storage, TypeF32(state)), pointer, outer ? variable : state.tessInnerVariable, ConstantU32(state, outer ? index : index - 3u));
+        state.module.AddFunction(spv::OpAccessChain, TypePointer(state, storage, TypeF32(state)), pointer, outer ? variable : state.tessInnerVariable, ConstantU32(state, outer ? index : index - outerFactors));
         return pointer;
     }
     auto address = ctx.Arg(inst, 1);
@@ -531,11 +539,17 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
     const bool local = kind == TessellationAttribute::LocalOutput || kind == TessellationAttribute::ControlInput;
     const auto stride = local ? state.program.Metadata().tessellationLocalStride : state.program.Metadata().tessellationControlStride;
     const auto type = TypePointer(state, storage, TypeU32(state));
+    const auto inPatch = [&](std::uint32_t vertex) {
+        if (kind != TessellationAttribute::ControlInput) return vertex;
+        const auto clamped = state.module.AllocateId();
+        state.module.AddFunction(spv::OpExtInst, TypeU32(state), clamped, GlslStd450(state), GLSLstd450UMin, vertex, ConstantU32(state, state.inputInfo.vertex->tess.inputControlPoints - 1u));
+        return clamped;
+    };
     const auto* sum = inst.Argument(1);
     const auto* scaled = sum->Opcode() == IrOpcode::IAdd32 ? sum->Argument(0) : nullptr;
     if (kind == TessellationAttribute::ControlInput && scaled != nullptr && sum->Argument(1)->HasImmediate() && scaled->Opcode() == IrOpcode::IMul32 && scaled->Argument(1)->HasImmediate() && scaled->Argument(1)->ImmediateU32() == stride) {
         const auto constant = sum->Argument(1)->ImmediateU32();
-        const auto vertex = EmitBinaryU32(state, spv::OpIAdd, ctx.Arg(*scaled, 0), ConstantU32(state, constant / stride));
+        const auto vertex = inPatch(EmitBinaryU32(state, spv::OpIAdd, ctx.Arg(*scaled, 0), ConstantU32(state, constant / stride)));
         state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, ConstantU32(state, constant % stride / 16u), ConstantU32(state, constant % 16u / 4u));
         return pointer;
     }
@@ -545,7 +559,7 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
     if (kind == TessellationAttribute::LocalOutput || kind == TessellationAttribute::PatchOutput) {
         state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, attribute, component);
     } else {
-        const auto vertex = kind == TessellationAttribute::ControlOutput ? EmitLaneId(state) : EmitBinaryU32(state, spv::OpUDiv, address, ConstantU32(state, stride));
+        const auto vertex = kind == TessellationAttribute::ControlOutput ? EmitLaneId(state) : inPatch(EmitBinaryU32(state, spv::OpUDiv, address, ConstantU32(state, stride)));
         state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, attribute, component);
     }
     return pointer;
@@ -619,16 +633,16 @@ void DefineTessellationInterfaces(SpirvEmitterState& state) {
 
 void DefineTessellationExecutionModes(SpirvEmitterState& state) {
     const auto& tess = state.inputInfo.vertex->tess;
-    if (tess.domain != 1u || tess.partitioning != 2u || tess.outputTopology != 2u) {
+    if ((tess.domain != 1u && tess.domain != 2u) || tess.partitioning != 2u || (tess.outputTopology != 2u && tess.outputTopology != 3u)) {
         throw std::runtime_error("unsupported tessellation domain, partitioning, or output topology");
     }
     state.module.EmitCapability(spv::CapabilityTessellation);
     if (state.program.Resources().stage == IrShaderStage::TessellationControl) {
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputVertices, tess.outputControlPoints);
     } else {
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeTriangles);
+        state.module.AddExecutionMode(state.mainFunc, tess.domain == 2u ? spv::ExecutionModeQuads : spv::ExecutionModeTriangles);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeSpacingFractionalOdd);
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeVertexOrderCw);
+        state.module.AddExecutionMode(state.mainFunc, tess.outputTopology == 3u ? spv::ExecutionModeVertexOrderCcw : spv::ExecutionModeVertexOrderCw);
     }
 }
 
@@ -1211,21 +1225,45 @@ std::uint32_t EmitGetTessellationAttribute(SpirvValueEmitContext& ctx, const IrV
     });
 }
 
+namespace {
+
+std::uint32_t TessellationLevel(SpirvEmitterState& state, std::uint32_t index) {
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypePushConstantElementPointer(state), pointer, state.pushConstantVariable, ConstantU32(state, 0u), ConstantU32(state, TessellationLevelPushOffsetBytes / 4u + index));
+    const auto word = state.module.AllocateId();
+    state.module.AddFunction(spv::OpLoad, TypeU32(state), word, pointer);
+    const auto level = state.module.AllocateId();
+    state.module.AddFunction(spv::OpBitcast, TypeF32(state), level, word);
+    return level;
+}
+
+std::uint32_t TessellationLevelBound(SpirvEmitterState& state, std::uint32_t level, std::uint32_t operation, float limit) {
+    const auto bounded = state.module.AllocateId();
+    state.module.AddFunction(spv::OpExtInst, TypeF32(state), bounded, GlslStd450(state), operation, level, ConstantF32Value(state, limit));
+    return bounded;
+}
+
+}
+
 void EmitSetTessellationAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
     EmitIfCondition(ctx.state, ctx.Arg(inst, 3), [&]() {
         auto value = ctx.Arg(inst, 2);
         if (inst.Argument(0)->ImmediateU32() == static_cast<std::uint32_t>(TessellationAttribute::Factor)) {
             auto& state = ctx.state;
-            const bool outer = inst.Argument(1)->HasImmediate() && inst.Argument(1)->ImmediateU32() / 4u < 3u;
+            if (state.program.Resources().stage != IrShaderStage::TessellationControl || state.pushConstantVariable == 0u) ctx.Fail(inst, "writes tessellation factors outside a hull program");
+            const bool outer = inst.Argument(1)->HasImmediate() && inst.Argument(1)->ImmediateU32() / 4u < TessellationOuterFactors(state);
+            const auto minimum = TessellationLevel(state, 0u);
+            const auto lowest = outer ? minimum : TessellationLevelBound(state, minimum, GLSLstd450FMax, 1.0f);
             const auto floating = state.module.AllocateId();
             state.module.AddFunction(spv::OpBitcast, TypeF32(state), floating, value);
-            const auto lower = ConstantF32Value(state, outer ? 0.0f : 1.0f);
             const auto inside = state.module.AllocateId();
-            state.module.AddFunction(spv::OpFOrdGreaterThan, TypeBool(state), inside, floating, lower);
+            state.module.AddFunction(spv::OpFOrdGreaterThan, TypeBool(state), inside, floating, ConstantF32Value(state, outer ? 0.0f : 1.0f));
+            const auto raised = state.module.AllocateId();
+            state.module.AddFunction(spv::OpExtInst, TypeF32(state), raised, GlslStd450(state), GLSLstd450FMax, floating, lowest);
             const auto clamped = state.module.AllocateId();
-            state.module.AddFunction(spv::OpExtInst, TypeF32(state), clamped, GlslStd450(state), GLSLstd450FMin, floating, ConstantF32Value(state, 63.0f));
+            state.module.AddFunction(spv::OpExtInst, TypeF32(state), clamped, GlslStd450(state), GLSLstd450FMin, raised, TessellationLevelBound(state, TessellationLevel(state, 1u), GLSLstd450FMin, 63.0f));
             value = state.module.AllocateId();
-            state.module.AddFunction(spv::OpSelect, TypeF32(state), value, inside, clamped, outer ? floating : lower);
+            state.module.AddFunction(spv::OpSelect, TypeF32(state), value, inside, clamped, outer ? floating : lowest);
         }
         ctx.state.module.AddFunction(spv::OpStore, TessellationPointer(ctx, inst), value);
     });
@@ -1250,7 +1288,7 @@ std::uint32_t EmitGetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) 
         const auto component = inst.Argument(1)->ImmediateU32();
         if (state.inputInfo.vertex == nullptr || !state.inputInfo.vertex->fetchEmbedded || component >= 4u) ctx.Fail(inst, "invalid prepared vertex attribute");
         const auto first = PipelineSpecialization::VertexBase + attribute * PipelineSpecialization::VertexWords;
-        const auto selector = state.module.SpecializationConstant(TypeU32(state), first + component, component + 4u);
+        const auto selector = state.registrationModules ? EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, TypeU32(state), EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.RuntimeStateDword() + RuntimeAbi::StateVertexSelectors + attribute / RuntimeAbi::VertexSelectorsPerDword), ConstantU32(state, attribute % RuntimeAbi::VertexSelectorsPerDword * 16u + component * 3u)), 7u) : state.module.SpecializationConstant(TypeU32(state), first + component, component + 4u);
         const auto one = state.module.SpecializationConstant(TypeU32(state), first + 4u, 0x3f800000u);
         auto value = Select(state, TypeU32(state), Binary(state, spv::OpIEqual, TypeBool(state), selector, ConstantU32(state, 1u)), one, ConstantU32(state, 0u));
         for (std::uint32_t channel = 0; channel < 4u; ++channel) value = Select(state, TypeU32(state), Binary(state, spv::OpIEqual, TypeBool(state), selector, ConstantU32(state, channel + 4u)), EmitAttributeValue(state, attribute, channel), value);
@@ -1298,6 +1336,12 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
                 state.module.AddFunction(spv::OpBitcast, TypeF32(state), f32, raw);
                 state.module.AddFunction(spv::OpStore, state.depthVariable, f32);
             }
+            if ((exp.en & 2u) != 0u && state.stencilRefVariable != 0u) {
+                const auto raw = ExportRawComponent(ctx, data, 1);
+                const auto value = state.module.AllocateId();
+                state.module.AddFunction(spv::OpBitcast, TypeI32(state), value, raw);
+                state.module.AddFunction(spv::OpStore, state.stencilRefVariable, value);
+            }
             if ((exp.en & 4u) != 0u && state.sampleMaskVariable != 0u) {
                 const auto raw = ExportRawComponent(ctx, data, 2);
                 const auto value = state.module.AllocateId();
@@ -1319,7 +1363,7 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
             if (exp.index >= 8u) throw std::runtime_error("fragment export target exceeds the runtime mapping table");
             std::array<std::uint32_t, 4> components{};
             for (std::uint32_t component = 0; component < components.size(); ++component) {
-                const auto index = state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::ExportBase + exp.index * 4u + component, component);
+                const auto index = state.registrationModules ? EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, TypeU32(state), EmitShaderDataDwordLoad(state, state.program.Metadata().bindings.RuntimeStateDword() + RuntimeAbi::StateExportMappings + exp.index / 4u), ConstantU32(state, exp.index % 4u * 8u + component * 2u)), 3u) : state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::ExportBase + exp.index * 4u + component, component);
                 components[component] = state.module.AllocateId();
                 state.module.AddFunction(spv::OpVectorExtractDynamic, uintOutput ? TypeU32(state) : TypeF32(state), components[component], value, index);
             }

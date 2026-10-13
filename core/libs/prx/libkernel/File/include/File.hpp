@@ -25,4 +25,8 @@ std::int64_t NativePositioned_nid_no_patch(int descriptor, void* buf, std::size_
 
 bool DescriptorIsOpen_nid_no_patch(int descriptor);
 
+namespace File {
+int HostStandardError();
+}
+
 #endif

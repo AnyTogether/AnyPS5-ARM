@@ -69,6 +69,22 @@ class FetchTests(unittest.TestCase):
             "+refs/heads/main:refs/pr/base", f"+{'a' * 40}:refs/pr/7", f"+{'b' * 40}:refs/pr/9",
         )
 
+    def test_batches_large_sets_of_pull_request_heads(self):
+        prs = {
+            number: {
+                "ref": f"refs/pr/{number}", "sha": f"{number:040x}",
+                "author": "contributor", "depends": set(),
+            }
+            for number in range(250)
+        }
+        with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
+                patch.object(pr_overlap, "git", return_value="") as git:
+            pr_overlap.fetch("main", prs)
+        self.assertEqual(git.call_count, 3)
+        self.assertEqual([len(call.args) - 4 for call in git.call_args_list], [100, 100, 51])
+        self.assertEqual(git.call_args_list[0].args[4], "+refs/heads/main:refs/pr/base")
+        self.assertEqual(git.call_args_list[-1].args[-1], "+00000000000000000000000000000000000000f9:refs/pr/249")
+
 
 if __name__ == "__main__":
     unittest.main()

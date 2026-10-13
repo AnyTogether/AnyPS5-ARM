@@ -129,7 +129,10 @@ IrU32 TranslationContext::readU16LaneRaw(const RdnaOperand& operand, bool highLa
 }
 
 IrU32 TranslationContext::readU16LaneAsU32(const RdnaOperand& operand, bool highLane, bool signExtend) {
-    const IrU32 raw = readU16LaneRaw(operand, highLane ? operand.opSelHi : operand.opSel);
+    IrU32 raw = readU16LaneRaw(operand, highLane ? operand.opSelHi : operand.opSel);
+    if (highLane ? operand.negateHi : operand.negate) {
+        raw = IrU32(ir.BitwiseXor(raw.Value(), ir.Constant(0x8000u)));
+    }
     if (!signExtend) {
         return raw;
     }

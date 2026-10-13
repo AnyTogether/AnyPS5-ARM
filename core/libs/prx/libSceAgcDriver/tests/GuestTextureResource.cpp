@@ -160,7 +160,26 @@ void RunGuestTextureResourceTests() {
 
     Fields twoD = base;
     twoD.depth = 1;
+    rejectFields(twoD, "custom pitch other than its default pitch");
+    twoD.tileModeRaw = 0x09;
     rejectFields(twoD, "nonzero depth or base array");
+    Fields pitched = base;
+    pitched.width = 72;
+    pitched.height = 72;
+    pitched.depth = 127;
+    result = DecodeTextureResource(pack(pitched));
+    Require(result.dimension == TextureDimension::k2D && result.width == 72 && result.depthOrLastArray == 0, "linear 2D descriptor with its default pitch in DEPTH decoded incorrectly");
+    pitched.width = 8;
+    pitched.height = 8;
+    pitched.depth = 63;
+    result = DecodeTextureResource(pack(pitched));
+    Require(result.width == 8 && result.depthOrLastArray == 0, "linear 2D descriptor with a one-unit default pitch decoded incorrectly");
+    pitched.depth = 127;
+    rejectFields(pitched, "custom pitch other than its default pitch");
+    pitched.depth = 63;
+    pitched.maxMip = 1;
+    pitched.lastLevel = 1;
+    rejectFields(pitched, "custom pitch other than its default pitch");
     twoD = base;
     twoD.baseArray = 1;
     rejectFields(twoD, "nonzero depth or base array");

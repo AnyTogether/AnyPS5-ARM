@@ -6,14 +6,13 @@
 #include "../include/Mutex.hpp"
 #include "Common.hpp"
 #include <atomic>
-#include <chrono>
-#include <limits>
 #include <stdexcept>
 #include <string>
 
 namespace {
 
 constexpr int POSIX_EINVAL = 22;
+constexpr int GUEST_REALTIME_CLOCK = 0;
 constexpr int POSIX_PRIO_PROTECT = 2;
 constexpr int POSIX_SCHED_RR = 3;
 constexpr std::uintptr_t POSIX_ADAPTIVE_MUTEX_INITIALIZER = 1;
@@ -62,12 +61,10 @@ int APS5_VABI pthread_mutex_lock_nid_postfix(PthreadMutex* mutex) {
 
 int APS5_VABI pthread_mutex_timedlock_nid_postfix(PthreadMutex* mutex, const KernelTimespec* abstime) {
     if (!abstime) throw std::runtime_error("pthread_mutex_timedlock: null abstime");
-    if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000) return POSIX_EINVAL;
     _initializeStatic(mutex, __func__);
-    const auto deadline = std::chrono::seconds(abstime->tv_sec) + std::chrono::nanoseconds(abstime->tv_nsec);
-    const auto now = std::chrono::system_clock::now().time_since_epoch();
-    const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
-    const auto usec = remaining <= 0 ? 0 : remaining >= std::numeric_limits<KernelUseconds>::max() ? std::numeric_limits<KernelUseconds>::max() : static_cast<KernelUseconds>(remaining);
+    if (scePthreadMutexTrylock(mutex) == 0) return 0;
+    KernelUseconds usec = 0;
+    if (!PosixThread::RelativeMicroseconds(GUEST_REALTIME_CLOCK, abstime, &usec)) return POSIX_EINVAL;
     return PosixThread::ToErrno(scePthreadMutexTimedlock(mutex, usec));
 }
 

@@ -167,6 +167,12 @@ int main(int argc, char** argv) {
         reject([pointer] { ApplicationHeapUsableSize_nid_no_patch(pointer); });
         *__error_nid_postfix() = 0;
         require(reallocf_nid_postfix(nullptr, SIZE_MAX) == nullptr && *__error_nid_postfix() == 12);
+        void* empty = ApplicationHeapAllocate_nid_no_patch(0);
+        require(empty != nullptr);
+        ApplicationHeapFree_nid_no_patch(empty);
+        empty = ApplicationHeapReallocate_nid_no_patch(nullptr, 0);
+        require(empty != nullptr);
+        ApplicationHeapFree_nid_no_patch(empty);
         for (std::size_t alignment : {16, 64, 4096}) {
             auto* aligned = ApplicationHeapAlign_nid_no_patch(alignment, 37);
             require(reinterpret_cast<std::uintptr_t>(aligned) % alignment == 0);

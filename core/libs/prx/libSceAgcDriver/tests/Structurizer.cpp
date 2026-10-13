@@ -328,6 +328,13 @@ int main() {
         requireExactPostDominators(earlyReturn, "an early return inside a selection that joins its parent's merge");
         requireStructuredBranches(earlyReturn, "an early return inside a selection that joins its parent's merge");
         requireDominatedMerges(earlyReturn, "an early return inside a selection that joins its parent's merge");
+        const std::vector<std::vector<std::uint32_t>> elseReturnSuccessors{{1, 2}, {4}, {3, 4}, {}, {5, 6}, {7}, {7}, {}};
+        auto elseReturn = makeGraph(elseReturnSuccessors);
+        Structurizer{}.Structurize(elseReturn);
+        requireExactPostDominators(elseReturn, "an early return in one arm of a selection whose other arm reaches the same merge");
+        requireStructuredBranches(elseReturn, "an early return in one arm of a selection whose other arm reaches the same merge");
+        requireDominatedMerges(elseReturn, "an early return in one arm of a selection whose other arm reaches the same merge");
+        requireOriginalBranches(elseReturn, elseReturnSuccessors, "an early return in one arm of a selection whose other arm reaches the same merge");
         std::vector<std::vector<std::uint32_t>> diamonds;
         for (std::uint32_t diamond = 0; diamond < 50u; ++diamond) {
             const auto head = diamond * 3u;

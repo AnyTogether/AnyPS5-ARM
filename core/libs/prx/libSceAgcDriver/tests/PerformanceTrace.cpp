@@ -1,0 +1,221 @@
+#include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
+#include "prx/libSceAgcDriver/Execution/include/TraceFile.hpp"
+#include "zlib.h"
+#include <fstream>
+#include <iostream>
+#include <iterator>
+
+namespace {
+
+using AgcDriver::TraceFormat;
+using AgcDriver::TraceThread;
+using AgcDriver::TraceWindow;
+using Clock = std::chrono::steady_clock;
+using Edge = TraceWindow::Edge;
+using std::chrono::microseconds;
+using std::chrono::milliseconds;
+
+void Check(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+
+void WindowByFrames() {
+    auto window = TraceWindow::Parse("3:2", nullptr).value();
+    std::vector<Edge> edges;
+    for (std::uint64_t present = 0; present < 8; ++present) edges.push_back(window.Present(present, std::chrono::seconds(present)));
+    Check(edges == std::vector<Edge>{Edge::None, Edge::None, Edge::None, Edge::Open, Edge::None, Edge::Close, Edge::None, Edge::None}, "frame window opened or closed at the wrong present");
+    Check(window.Describe() == "frames 3:2", "frame window description changed");
+}
+
+void WindowBySeconds() {
+    auto window = TraceWindow::Parse(nullptr, "2:1").value();
+    std::vector<Edge> edges;
+    for (const auto elapsed : {milliseconds(0), milliseconds(1999), milliseconds(2000), milliseconds(2999), milliseconds(3000), milliseconds(5000)})
+        edges.push_back(window.Present(0, elapsed));
+    Check(edges == std::vector<Edge>{Edge::None, Edge::None, Edge::Open, Edge::None, Edge::Close, Edge::None}, "seconds window opened or closed at the wrong present");
+    Check(window.Describe() == "seconds 2:1", "seconds window description changed");
+}
+
+void WindowRejects() {
+    Check(!TraceWindow::Parse(nullptr, nullptr).has_value(), "a window was made without a switch");
+    for (const auto* text : {"5", "a:1", "1:0", "1:", ":1", "1:2:3", "-1:2"}) {
+        bool rejected = false;
+        try { TraceWindow::Parse(text, nullptr); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        Check(rejected, "a malformed window was accepted");
+    }
+    bool rejected = false;
+    try { TraceWindow::Parse("1:1", "1:1"); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    Check(rejected, "frames and seconds were accepted together");
+}
+
+void BufferCap() {
+    std::atomic<std::uint64_t> presents{1};
+    TraceThread thread("queue worker 0x0", presents, 2);
+    const auto origin = Clock::now();
+    for (int index = 0; index < 3; ++index) thread.Add("Driver.Packet", nullptr, origin + milliseconds(index), origin + milliseconds(index) + microseconds(30));
+    const auto snapshot = thread.Collect();
+    Check(snapshot.slices.size() == 2 && snapshot.dropped, "a full buffer did not stop and set the dropped flag");
+    Check(snapshot.totals.size() == 1 && snapshot.totals[0].count == 3 && snapshot.totals[0].length == microseconds(90), "totals missed a slice past the cap");
+}
+
+void FoldShortSlices() {
+    std::atomic<std::uint64_t> presents{1};
+    TraceThread thread("queue worker 0x0", presents, 16);
+    const auto origin = Clock::now();
+    thread.Add("Driver.Packet", nullptr, origin, origin + microseconds(5));
+    thread.Add("Driver.Packet", "draw", origin + microseconds(5), origin + microseconds(10));
+    thread.Add("Driver.Draw", nullptr, origin + microseconds(10), origin + microseconds(40));
+    presents.store(2);
+    thread.Add("Driver.Completion", nullptr, origin + microseconds(50), origin + microseconds(90));
+    const auto snapshot = thread.Collect();
+    Check(snapshot.slices.size() == 3 && !snapshot.dropped, "short slices were written or long ones lost");
+    Check(std::string_view(snapshot.slices[0].scope) == "Driver.Draw", "the first long slice is missing");
+    Check(snapshot.slices[1].scope == nullptr && snapshot.slices[1].begin == origin && snapshot.slices[1].length == microseconds(10), "the folded sample of the previous present is wrong");
+    Check(std::string_view(snapshot.slices[2].scope) == "Driver.Completion", "the slice after the present is missing");
+    Check(snapshot.totals.size() == 4, "totals did not keep scope and stage apart");
+    for (const auto& total : snapshot.totals) Check(total.count == 1, "a total counted a slice twice");
+}
+
+void EscapeStrings() {
+    std::string output;
+    TraceFormat::AppendString(output, "a\"b\\c\n\xe9");
+    Check(output == "\"a\\\"b\\\\c\\u000a\\u00e9\"", "string escaping is not valid JSON");
+}
+
+void EventsShape() {
+    const auto origin = Clock::now();
+    const std::vector<TraceThread::Slice> slices{
+        {"Driver.Packet", nullptr, origin + microseconds(10), microseconds(30)},
+        {"Driver.Packet", "draw", origin + microseconds(12), microseconds(25)},
+        {nullptr, nullptr, origin, milliseconds(2)},
+    };
+    const std::vector<TraceThread::Snapshot> threads{{"queue worker 0x0", slices, {}, false}};
+    const std::vector<Clock::time_point> presents{origin, origin + milliseconds(16)};
+    const auto json = TraceFormat::Events(7, origin, threads, 0, presents, 5);
+    const std::string expected =
+        "{\"traceEvents\":[\n"
+        "{\"name\":\"process_name\",\"ph\":\"M\",\"ts\":0.000,\"pid\":7,\"tid\":0,\"args\":{\"name\":\"AnyPS5\"}},\n"
+        "{\"name\":\"thread_name\",\"ph\":\"M\",\"ts\":0.000,\"pid\":7,\"tid\":1,\"args\":{\"name\":\"queue worker 0x0\"}},\n"
+        "{\"name\":\"queue worker 0x0 folded\",\"ph\":\"C\",\"ts\":0.000,\"pid\":7,\"tid\":1,\"args\":{\"ms\":2.000}},\n"
+        "{\"name\":\"Driver.Packet\",\"ph\":\"X\",\"ts\":10.000,\"pid\":7,\"tid\":1,\"dur\":30.000},\n"
+        "{\"name\":\"Driver.Packet.draw\",\"ph\":\"X\",\"ts\":12.000,\"pid\":7,\"tid\":1,\"dur\":25.000},\n"
+        "{\"name\":\"present\",\"ph\":\"i\",\"ts\":0.000,\"pid\":7,\"tid\":1,\"s\":\"g\",\"args\":{\"present\":5}}\n"
+        "]}\n";
+    Check(json == expected, "trace events changed shape");
+}
+
+void SummaryFields() {
+    const auto origin = Clock::now();
+    AgcDriver::TraceSummary summary;
+    summary.commit = "abc";
+    summary.dirty = false;
+    summary.environment = {{"APS5_TRACE_FRAMES", "3:2"}};
+    summary.gpu = "GPU";
+    summary.driver = "Driver 1";
+    summary.os = "OS 1";
+    summary.width = 1920;
+    summary.height = 1080;
+    summary.window = "frames 3:2";
+    summary.firstPresent = 3;
+    summary.gpuBusyMs = 20;
+    summary.trace = "aps5-trace-abc-7.json.gz";
+    const std::vector<TraceThread::Snapshot> threads{
+        {"queue worker 0x0", {}, {{"Driver.Packet", nullptr, milliseconds(12), 4}, {"Driver.WorkerWait", nullptr, milliseconds(8), 4}, {"Driver.Completion", nullptr, milliseconds(2), 4}, {"Driver.Packet", "draw", milliseconds(10), 2}}, false},
+        {"presenter", {}, {{"Driver.Present", nullptr, milliseconds(6), 2}, {"Driver.Present", "inflight_wait", milliseconds(4), 2}}, false},
+    };
+    const std::vector<Clock::time_point> presents{origin, origin + milliseconds(16), origin + milliseconds(40)};
+    const auto line = TraceFormat::Summary(summary, threads, presents);
+    const std::string expected =
+        "{\"commit\":\"abc\",\"dirty\":false,\"env\":{\"APS5_TRACE_FRAMES\":\"3:2\"},\"gpu\":\"GPU\",\"driver\":\"Driver 1\",\"os\":\"OS 1\","
+        "\"resolution\":\"1920x1080\",\"window\":{\"spec\":\"frames 3:2\",\"first_present\":3,\"ms\":40.000},\"presents\":2,"
+        "\"frame_ms\":{\"p50\":24.000,\"p90\":24.000,\"p99\":24.000,\"max\":24.000},\"gpu_busy_ms_per_present\":10.000,"
+        "\"worker_busy_pct\":{\"queue worker 0x0\":35.000},"
+        "\"top_phases_ms_per_frame\":{\"Driver.Packet\":6.000,\"Driver.Packet.draw\":5.000,\"Driver.Present\":3.000,\"Driver.Present.inflight_wait\":2.000,\"Driver.Completion\":1.000},"
+        "\"trace_dropped\":false,\"trace\":\"aps5-trace-abc-7.json.gz\"}\n";
+    Check(line == expected, "summary line changed");
+    auto dropped = threads;
+    dropped[1].dropped = true;
+    Check(TraceFormat::Summary(summary, dropped, presents).find("\"trace_dropped\":true") != std::string::npos, "a dropped thread did not mark the summary");
+}
+
+void GpuClock() {
+    const auto origin = Clock::now();
+    const AgcDriver::TraceClockSample first{1000.0, origin + microseconds(10)};
+    const AgcDriver::TraceClockSample last{41000.0, origin + microseconds(30)};
+    const std::vector<AgcDriver::TraceGpuRange> ranges{{"batch", 5000.0, 9000.0}, {"draw", 6000.0, 7000.0}, {"batch", -39000.0, -30000.0}, {"copy", 8000.0, 8000.0}};
+    const auto slices = TraceFormat::GpuSlices(ranges, first, last, origin);
+    Check(slices.size() == 2, "a GPU range before the window or without length was kept");
+    Check(std::string_view(slices[0].scope) == "batch" && slices[0].stage == nullptr && slices[0].begin == origin + microseconds(12) && slices[0].length == microseconds(2), "a GPU range was not mapped between the two calibrations");
+    Check(std::string_view(slices[1].scope) == "draw" && slices[1].begin == origin + std::chrono::nanoseconds(12500) && slices[1].length == std::chrono::nanoseconds(500), "a nested GPU range was not mapped");
+    const AgcDriver::TraceClockSample same{1000.0, origin + microseconds(10)};
+    Check(TraceFormat::GpuSlices(ranges, same, same, origin)[0].begin == origin + microseconds(14), "one calibration does not map at the CPU rate");
+}
+
+void GzipFile() {
+    std::string text;
+    for (int index = 0; index < 20000; ++index) text += "{\"name\":\"Driver.Packet\",\"ph\":\"X\",\"ts\":" + std::to_string(index) + "}\n";
+    const auto stem = "aps5-trace-test-" + std::to_string(Clock::now().time_since_epoch().count());
+    const auto path = std::filesystem::temp_directory_path() / (stem + ".json.gz");
+    AgcDriver::TraceFile::WriteGzip(path, text);
+    std::ifstream input(path, std::ios::binary);
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    input.close();
+    std::filesystem::remove(path);
+    Check(bytes.size() > 18 && bytes[0] == 0x1f && bytes[1] == 0x8b && bytes[2] == 8 && bytes[3] == 0, "the gzip header is wrong");
+    z_stream stream{};
+    Check(inflateInit2(&stream, -MAX_WBITS) == Z_OK, "inflateInit2 failed");
+    std::string inflated(text.size() + 1, 0);
+    stream.next_in = const_cast<Bytef*>(bytes.data() + 10);
+    stream.avail_in = static_cast<uInt>(bytes.size() - 18);
+    stream.next_out = reinterpret_cast<Bytef*>(inflated.data());
+    stream.avail_out = static_cast<uInt>(inflated.size());
+    const int status = inflate(&stream, Z_FINISH);
+    inflated.resize(inflated.size() - stream.avail_out);
+    const bool consumed = stream.avail_in == 0;
+    inflateEnd(&stream);
+    Check(status == Z_STREAM_END && consumed, "the deflate stream does not end at the trailer");
+    Check(inflated == text, "the gzip file does not hold the text");
+    const auto word = [&](std::size_t at) {
+        std::uint32_t value = 0;
+        for (unsigned index = 0; index < 4; ++index) value |= static_cast<std::uint32_t>(bytes[at + index]) << (8 * index);
+        return value;
+    };
+    Check(word(bytes.size() - 8) == crc32(0, reinterpret_cast<const Bytef*>(text.data()), static_cast<uInt>(text.size())), "the CRC-32 is wrong");
+    Check(word(bytes.size() - 4) == text.size(), "the size is wrong");
+}
+
+void AppendLines() {
+    const auto path = std::filesystem::temp_directory_path() / ("aps5-summary-test-" + std::to_string(Clock::now().time_since_epoch().count()) + ".jsonl");
+    AgcDriver::TraceFile::AppendLine(path, "{\"presents\":1}\n");
+    AgcDriver::TraceFile::AppendLine(path, "{\"presents\":2}\n");
+    std::ifstream input(path, std::ios::binary);
+    const std::string written((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    input.close();
+    std::filesystem::remove(path);
+    Check(written == "{\"presents\":1}\n{\"presents\":2}\n", "summary lines were not appended");
+}
+
+}
+
+int main() {
+    try {
+        WindowByFrames();
+        WindowBySeconds();
+        WindowRejects();
+        BufferCap();
+        FoldShortSlices();
+        EscapeStrings();
+        EventsShape();
+        SummaryFields();
+        GpuClock();
+        GzipFile();
+        AppendLines();
+        std::cout << "performance trace tests passed\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}

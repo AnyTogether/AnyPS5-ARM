@@ -323,7 +323,7 @@ public:
 #ifdef _WIN32
         static_cast<void>(start);
         const auto size = static_cast<std::uint64_t>(bytes);
-        section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE, static_cast<DWORD>(size >> 32), static_cast<DWORD>(size), nullptr);
+        section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE, static_cast<DWORD>(size >> 32), static_cast<DWORD>(size), nullptr);
         if (!section) {
             const auto error = static_cast<int>(GetLastError());
             char message[96];
@@ -415,6 +415,70 @@ struct DirectMapping {
 };
 
 std::map<std::uintptr_t, DirectMapping> g_directMappings;
+struct PhysicalSpan {
+    std::uint64_t end;
+    std::vector<std::uintptr_t> bases;
+};
+
+std::map<std::uint64_t, PhysicalSpan> g_physicalSpans;
+
+void SplitPhysicalSpan(std::uint64_t at) {
+    auto span = g_physicalSpans.upper_bound(at);
+    if (span == g_physicalSpans.begin()) return;
+    --span;
+    if (span->first == at || span->second.end <= at) return;
+    g_physicalSpans.emplace_hint(std::next(span), at, PhysicalSpan{span->second.end, span->second.bases});
+    span->second.end = at;
+}
+
+std::map<std::uintptr_t, DirectMapping>::iterator InsertMapping(std::uintptr_t base, DirectMapping mapping) {
+    const auto [inserted, added] = g_directMappings.emplace(base, std::move(mapping));
+    if (!added) throw std::runtime_error("direct mapping inserted over a live one");
+    const auto first = inserted->second.phys;
+    const auto last = first + (inserted->second.end - base);
+    SplitPhysicalSpan(first);
+    SplitPhysicalSpan(last);
+    auto span = g_physicalSpans.lower_bound(first);
+    for (auto cursor = first; cursor < last; ++span) {
+        if (span == g_physicalSpans.end() || span->first > cursor) span = g_physicalSpans.emplace_hint(span, cursor, PhysicalSpan{span == g_physicalSpans.end() ? last : std::min(last, span->first), {}});
+        auto& bases = span->second.bases;
+        bases.insert(std::upper_bound(bases.begin(), bases.end(), base), base);
+        cursor = span->second.end;
+    }
+    return inserted;
+}
+
+std::map<std::uintptr_t, DirectMapping>::iterator RemoveMapping(std::map<std::uintptr_t, DirectMapping>::iterator mapping) {
+    const auto base = mapping->first;
+    const auto first = mapping->second.phys;
+    const auto last = first + (mapping->second.end - base);
+    for (auto span = g_physicalSpans.lower_bound(first); span != g_physicalSpans.end() && span->first < last;) {
+        auto& bases = span->second.bases;
+        bases.erase(std::lower_bound(bases.begin(), bases.end(), base));
+        span = bases.empty() ? g_physicalSpans.erase(span) : std::next(span);
+    }
+    for (auto span = g_physicalSpans.lower_bound(first); span != g_physicalSpans.end() && span->first <= last;) {
+        if (span != g_physicalSpans.begin()) {
+            const auto before = std::prev(span);
+            if (before->second.end == span->first && before->second.bases == span->second.bases) {
+                before->second.end = span->second.end;
+                span = g_physicalSpans.erase(span);
+                continue;
+            }
+        }
+        ++span;
+    }
+    return g_directMappings.erase(mapping);
+}
+
+std::vector<std::uintptr_t> MappingsSharingPhys(std::uint64_t first, std::uint64_t last) {
+    std::vector<std::uintptr_t> bases;
+    for (auto span = g_physicalSpans.lower_bound(first); span != g_physicalSpans.end() && span->first < last; ++span) bases.insert(bases.end(), span->second.bases.begin(), span->second.bases.end());
+    if (auto span = g_physicalSpans.lower_bound(first); span != g_physicalSpans.begin() && (--span)->second.end > first) bases.insert(bases.end(), span->second.bases.begin(), span->second.bases.end());
+    std::sort(bases.begin(), bases.end());
+    bases.erase(std::unique(bases.begin(), bases.end()), bases.end());
+    return bases;
+}
 
 void EraseMappings(std::uintptr_t start, std::uintptr_t end) {
     auto it = g_directMappings.lower_bound(start);
@@ -422,29 +486,27 @@ void EraseMappings(std::uintptr_t start, std::uintptr_t end) {
     while (it != g_directMappings.end() && it->first < end) {
         const auto base = it->first;
         const auto mapping = it->second;
-        it = g_directMappings.erase(it);
-        if (base < start) g_directMappings.emplace(base, DirectMapping{start, mapping.phys, mapping.memoryType, mapping.backing});
-        if (mapping.end > end) it = g_directMappings.emplace(end, DirectMapping{mapping.end, mapping.phys + end - base, mapping.memoryType, mapping.backing}).first;
+        it = RemoveMapping(it);
+        if (base < start) InsertMapping(base, DirectMapping{start, mapping.phys, mapping.memoryType, mapping.backing});
+        if (mapping.end > end) it = InsertMapping(end, DirectMapping{mapping.end, mapping.phys + end - base, mapping.memoryType, mapping.backing});
     }
 }
 
 void ErasePhysMappings(std::uint64_t first, std::uint64_t last) {
-    for (auto it = g_directMappings.begin(); it != g_directMappings.end();) {
-        const auto base = it->first;
+    for (const auto base : MappingsSharingPhys(first, last)) {
+        const auto it = g_directMappings.find(base);
+        if (it == g_directMappings.end()) continue;
         const auto mapping = it->second;
         const auto mappingLast = mapping.phys + (mapping.end - base);
-        if (mapping.phys >= last || mappingLast <= first) {
-            ++it;
-            continue;
-        }
-        it = g_directMappings.erase(it);
+        if (mapping.phys >= last || mappingLast <= first) continue;
+        RemoveMapping(it);
         if (mapping.phys < first) {
             const auto keep = first - mapping.phys;
-            g_directMappings.emplace(base, DirectMapping{base + keep, mapping.phys, mapping.memoryType, mapping.backing});
+            InsertMapping(base, DirectMapping{base + keep, mapping.phys, mapping.memoryType, mapping.backing});
         }
         if (mappingLast > last) {
             const auto skip = last - mapping.phys;
-            it = g_directMappings.emplace(base + skip, DirectMapping{mapping.end, last, mapping.memoryType, mapping.backing}).first;
+            InsertMapping(base + skip, DirectMapping{mapping.end, last, mapping.memoryType, mapping.backing});
         }
     }
 }
@@ -467,7 +529,8 @@ void WatchMapping(std::uintptr_t address, std::size_t len) {
     for (auto added = g_directMappings.lower_bound(address); added != g_directMappings.end() && added->first < end; ++added) {
         const auto addedPhys = added->second.phys;
         const auto addedPhysEnd = addedPhys + (added->second.end - added->first);
-        for (const auto& [base, other] : g_directMappings) {
+        for (const auto base : MappingsSharingPhys(addedPhys, addedPhysEnd)) {
+            const auto& other = g_directMappings.at(base);
             if ((base >= address && base < end) || other.backing != added->second.backing) continue;
             const auto first = std::max(addedPhys, other.phys);
             const auto last = std::min(addedPhysEnd, other.phys + (other.end - base));
@@ -549,7 +612,7 @@ void AddMapping(std::uintptr_t address, std::size_t len, std::uint64_t phys, int
             bytes += PS5_PAGE_SIZE;
         }
         page.backing->Map(address + offset, bytes, page.offset, nativeProt);
-        g_directMappings.emplace(address + offset, DirectMapping{address + offset + bytes, phys + offset, page.backing->MemoryType(), page.backing});
+        InsertMapping(address + offset, DirectMapping{address + offset + bytes, phys + offset, page.backing->MemoryType(), page.backing});
         offset += bytes;
     }
 #if defined(__linux__) || defined(__APPLE__)
@@ -944,6 +1007,29 @@ int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, i
 #endif
 }
 
+int DoMapShared(void** addr, size_t len, int prot, HostSharedMemory object) {
+    ValidateOutput(addr);
+    if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0) return SCE_KERNEL_ERROR_EINVAL;
+    const auto nativeProtection = LinuxProtFromSce(prot);
+    GuestAllocations::Mutation mutation;
+    void* mapped = MapPlaced(*addr, len, PROT_NONE, 0, PS5_PAGE_SIZE);
+    try {
+#ifdef _WIN32
+        GuestArena::GuestArenaMap_nid_postfix(mapped, len, object, 0, WinProtFromPosix(nativeProtection));
+#else
+        if (::mmap(mapped, len, nativeProtection, MAP_SHARED | MAP_FIXED, object, 0) == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map shared memory");
+#endif
+        mutation.Add(mapped, len, (prot & 3) != 0, (prot & 2) != 0, false);
+    } catch (...) {
+        Unmap(mapped, len);
+        throw;
+    }
+    *addr = mapped;
+    RecordProtection(mapped, len, prot);
+    Trace("map shared %p+0x%zx prot=0x%x", mapped, len, prot);
+    return 0;
+}
+
 #ifdef __APPLE__
 std::uintptr_t GuestPageSkew(std::uintptr_t address) {
     struct Search {
@@ -1050,13 +1136,13 @@ int DoMtypeprotect(const void* addr, size_t len, int type, int prot) {
         while (it != g_directMappings.end() && it->first < end) {
             const auto base = it->first;
             const auto mapping = it->second;
-            it = g_directMappings.erase(it);
-            if (base < first) g_directMappings.emplace(base, DirectMapping{first, mapping.phys, mapping.memoryType, mapping.backing});
+            it = RemoveMapping(it);
+            if (base < first) InsertMapping(base, DirectMapping{first, mapping.phys, mapping.memoryType, mapping.backing});
             const auto low = std::max(base, first);
             const auto high = std::min(mapping.end, end);
-            g_directMappings.emplace(low, DirectMapping{high, mapping.phys + low - base, type, mapping.backing});
+            InsertMapping(low, DirectMapping{high, mapping.phys + low - base, type, mapping.backing});
             physical.emplace_back(mapping.phys + low - base, high - low);
-            if (mapping.end > end) it = g_directMappings.emplace(end, DirectMapping{mapping.end, mapping.phys + end - base, mapping.memoryType, mapping.backing}).first;
+            if (mapping.end > end) it = InsertMapping(end, DirectMapping{mapping.end, mapping.phys + end - base, mapping.memoryType, mapping.backing});
         }
     }
     for (const auto& [phys, bytes] : physical) DirectMemoryRetype(static_cast<int64_t>(phys), bytes, type);
@@ -1169,7 +1255,8 @@ std::vector<DirectMemoryView> DirectMemoryViews(int64_t start, size_t len) {
     const auto last = first + len;
     std::vector<DirectMemoryView> views;
     std::lock_guard lock(g_directLock);
-    for (const auto& [base, mapping] : g_directMappings) {
+    for (const auto base : MappingsSharingPhys(first, last)) {
+        const auto& mapping = g_directMappings.at(base);
         const auto mappingLast = mapping.phys + (mapping.end - base);
         if (mapping.phys >= last || mappingLast <= first) continue;
         const auto viewStart = base + (std::max(first, mapping.phys) - mapping.phys);

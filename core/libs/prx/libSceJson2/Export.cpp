@@ -899,4 +899,33 @@ int APS5_VABI _ZNK3sce4Json5ValuecvbEv(void) {
     return 0;
 }
 
+int APS5_VABI _ZN3sce4Json6Object4PairC1ERKNS0_6StringERKNS0_5ValueE() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json6Object4PairD1Ev() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json6Object6insertERKNS1_4PairE() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json5Array8iteratorppEi() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json5Array8iteratoraSERKS2_() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZN3sce4Json5Array8iteratorC1Ev() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
 }

@@ -26,6 +26,8 @@ std::string normalizeRunPath(std::string path) {
         path = ".";
     if (path.starts_with("$ORIGIN\\"))
         path.erase(0, 8);
+    if (path.empty())
+        path = ".";
     if (path.find('$') != std::string::npos)
         throw Domain::RelinkerException("Unsupported variable in Windows run path");
     if (path.back() != '\\')
@@ -387,20 +389,31 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
             writeString(resolvedPaths[index]);
         }
 
+        std::vector<std::size_t> missingOptional;
+        std::optional<std::size_t> probeFailed;
+        if (index >= guestModules.size() && !imported[index]) {
+            code.Emit({0x48, 0x89, 0xf1});
+            call("GetFileAttributesW");
+            code.Emit({0x83, 0xf8, 0xff});
+            const auto exists = code.Branch({0x0f, 0x85});
+            captureLastError();
+            code.Emit({0x83, 0xf8, 2});
+            missingOptional.push_back(code.Branch({0x0f, 0x84}));
+            code.Emit({0x83, 0xf8, 3});
+            missingOptional.push_back(code.Branch({0x0f, 0x84}));
+            probeFailed = code.Branch({0xe9});
+            code.PatchBranch(exists, code.GetRva());
+        }
+
         code.Emit({0x48, 0x89, 0xf1, 0x31, 0xd2, 0x41, 0xb8, 0, 0x11, 0, 0});
         call("LoadLibraryExW");
         code.Emit({0x48, 0x85, 0xc0});
         const auto loadSucceeded = code.Branch({0x0f, 0x85});
         captureLastError();
-        std::optional<std::size_t> unusedMissing;
-        if (index >= guestModules.size() && !imported[index]) {
-            code.Rip({0x8b, 0x05}, lastError);
-            code.Emit({0x83, 0xf8, 0x7e});
-            unusedMissing = code.Branch({0x0f, 0x84});
-        }
         if (dependencyDiagnostics) {
             writeString(loadFailed, true);
         }
+        if (probeFailed) code.PatchBranch(*probeFailed, code.GetRva());
         writeString(failedModule, true);
         writeString(resolvedPaths[index], true);
         writeString(newline, true);
@@ -417,9 +430,9 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         if (dependencyDiagnostics) {
             writeString(loaded);
         }
-        if (unusedMissing) {
+        if (!missingOptional.empty()) {
             const auto next = code.Branch({0xe9});
-            code.PatchBranch(*unusedMissing, code.GetRva());
+            for (const auto branch : missingOptional) code.PatchBranch(branch, code.GetRva());
             if (dependencyDiagnostics) writeString(skippedModule, true);
             code.PatchBranch(next, code.GetRva());
         }
@@ -447,6 +460,21 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         const auto resolved = code.Branch({0x0f, 0x85});
         code.Emit({0x48, 0x83, 0xc7, 4, 0xff, 0xcd});
         code.Rip({0x0f, 0x85}, search);
+        if (imports[index].Weak) {
+            code.Emit({0x31, 0xc0});
+            const auto writeWeak = code.GetRva();
+            if (imports[index].Addend != 0) {
+                code.Emit({0x48, 0xba});
+                code.U64(imports[index].Addend);
+                code.Emit({0x48, 0x01, 0xd0});
+            }
+            guestStartup.WriteImport(code, imports[index], handles);
+            const auto weakDone = code.Branch({0xe9});
+            code.PatchBranch(resolved, code.GetRva());
+            code.Rip({0xe9}, writeWeak);
+            code.PatchBranch(weakDone, code.GetRva());
+            continue;
+        }
         if (lazyBinding) {
             lazyUnresolvedImports.push_back(index);
             const auto skipGotWrite = code.Branch({0xe9});

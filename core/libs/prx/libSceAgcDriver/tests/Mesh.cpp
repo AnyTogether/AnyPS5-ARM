@@ -184,13 +184,13 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(PixelCode.data()), PixelCode, 0, {}},
         {64, 0, {}, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
-        {0, 0, meshPush, ShaderRecompiler::MeshDrawPushOffsetBytes - meshPush},
+        target.fixedPushSlots ? PixelPushLayout(meshPush, target) : ShaderRecompiler::BindingLayout{0, 0, meshPush, ShaderRecompiler::MeshDrawPushOffsetBytes - meshPush},
         std::nullopt
     };
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Mesh, &meshResult, 0},
-        {ShaderStage::Fragment, &pixelResult, meshPush}
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(meshPush, target)}
     }};
 
     AgcDriver::Graphics::State state{};

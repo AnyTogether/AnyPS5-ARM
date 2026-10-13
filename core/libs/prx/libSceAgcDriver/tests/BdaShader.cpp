@@ -121,3 +121,15 @@ std::vector<std::uint32_t> MakeBdaStoreTestShader(std::uint64_t address, std::ui
 #endif
     return shader;
 }
+
+std::vector<std::uint32_t> MakeBdaWriteTestShader(std::uint64_t address, std::uint32_t value, std::uint32_t bits, bool coherent) {
+    using namespace ShaderRecompiler;
+    auto shader = MakeShader(address, coherent, true, [&](SpirvValueEmitContext& ctx, const IrValue& instruction, std::uint32_t base) {
+        EmitBdaWrite(ctx, instruction, base, ConstantU32(ctx.state, value), bits);
+        return std::vector<std::uint32_t>{ConstantU32(ctx.state, 1u)};
+    }, 0u, true);
+#if ANYPS5_ENABLE_SPIRV_TOOLS
+    shader = ValidateAndOptimizeSpirv(shader, VK_API_VERSION_1_1, shader[1], false, false);
+#endif
+    return shader;
+}

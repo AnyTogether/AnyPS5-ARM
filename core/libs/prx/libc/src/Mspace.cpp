@@ -22,7 +22,6 @@ constexpr std::uintptr_t ArenaHeaderBytes = 64;
 struct Chunk {
     std::uintptr_t end;
     bool used;
-    std::size_t requested;
 };
 
 struct Arena {
@@ -51,7 +50,7 @@ Arena* Find(void* handle) {
 }
 
 void AddFree(Arena& arena, std::uintptr_t start, std::uintptr_t end) {
-    arena.chunks[start] = {end, false, 0};
+    arena.chunks[start] = {end, false};
     arena.free.emplace(end - start, start);
 }
 
@@ -62,7 +61,7 @@ void RemoveFree(Arena& arena, std::map<std::uintptr_t, Chunk>::iterator chunk) {
 void* Allocate(Arena* arena, std::size_t size, std::size_t alignment) {
     if (!arena) return nullptr;
     alignment = std::max<std::size_t>(alignment, MinimumAlignment);
-    const auto needed = AlignUp(std::max<std::size_t>(size, 1), Granule);
+    const auto needed = AlignUp(std::max<std::size_t>(size, 1), MinimumAlignment);
     if (needed < size || needed > std::numeric_limits<std::uintptr_t>::max() - alignment) {
         Error(12);
         return nullptr;
@@ -78,7 +77,7 @@ void* Allocate(Arena* arena, std::size_t size, std::size_t alignment) {
         if (aligned > start) AddFree(*arena, start, aligned);
         const auto finish = aligned + needed;
         if (finish < end) AddFree(*arena, finish, end);
-        arena->chunks[aligned] = {finish, true, size};
+        arena->chunks[aligned] = {finish, true};
         arena->inUse += needed;
         arena->peakInUse = std::max(arena->peakInUse, arena->inUse);
         return reinterpret_cast<void*>(aligned);
@@ -216,14 +215,11 @@ void* APS5_VABI sceLibcMspaceRealloc_nid_postfix(void* handle, void* pointer, st
     std::map<std::uintptr_t, Chunk>::iterator chunk;
     if (!FindUsed(arena, pointer, chunk)) return nullptr;
     if (!size) { Release(*arena, chunk); return nullptr; }
-    const auto needed = AlignUp(size, Granule);
+    const auto needed = AlignUp(size, MinimumAlignment);
     if (needed < size) { Error(12); return nullptr; }
     const auto start = chunk->first;
     const auto capacity = chunk->second.end - start;
-    if (needed <= capacity) {
-        chunk->second.requested = size;
-        return pointer;
-    }
+    if (needed <= capacity) return pointer;
     const auto next = std::next(chunk);
     if (next != arena->chunks.end() && !next->second.used && next->first == chunk->second.end && next->second.end - start >= needed) {
         const auto nextEnd = next->second.end;
@@ -233,13 +229,12 @@ void* APS5_VABI sceLibcMspaceRealloc_nid_postfix(void* handle, void* pointer, st
         if (finish < nextEnd) AddFree(*arena, finish, nextEnd);
         arena->inUse += needed - capacity;
         arena->peakInUse = std::max(arena->peakInUse, arena->inUse);
-        arena->chunks[start] = {finish, true, size};
+        arena->chunks[start] = {finish, true};
         return pointer;
     }
-    const auto previousSize = chunk->second.requested;
     void* result = Allocate(arena, size, Granule);
     if (result) {
-        std::memcpy(result, pointer, previousSize);
+        std::memcpy(result, pointer, std::min<std::size_t>(capacity, size));
         Release(*arena, arena->chunks.find(start));
     }
     return result;
@@ -281,14 +276,11 @@ void* APS5_VABI sceLibcMspaceReallocalign_nid_postfix(void* handle, void* pointe
     const auto needed = AlignUp(size, Granule);
     if (needed < size) { Error(12); return nullptr; }
     const auto start = chunk->first;
-    if (needed <= chunk->second.end - start && (start & (effective - 1)) == 0) {
-        chunk->second.requested = size;
-        return pointer;
-    }
-    const auto previousSize = chunk->second.requested;
+    const auto capacity = chunk->second.end - start;
+    if (needed <= capacity && (start & (effective - 1)) == 0) return pointer;
     void* result = Allocate(arena, size, effective);
     if (result) {
-        std::memcpy(result, pointer, std::min(previousSize, size));
+        std::memcpy(result, pointer, std::min<std::size_t>(capacity, size));
         Release(*arena, arena->chunks.find(start));
     }
     return result;

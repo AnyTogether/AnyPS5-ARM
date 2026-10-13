@@ -334,4 +334,9 @@ int APS5_VABI scePadUnknown_n3kSX62fgNo() {
     return 0;
 }
 
+int APS5_VABI scePadVrControllerGetTriggerEffectStates(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

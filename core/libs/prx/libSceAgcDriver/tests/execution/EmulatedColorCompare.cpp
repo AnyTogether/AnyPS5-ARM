@@ -25,6 +25,9 @@ using ShaderRecompiler::ShaderStage;
 constexpr std::uint32_t Threads = 32;
 constexpr std::uint32_t Side = 2;
 constexpr std::uint32_t Format8888UNorm = 56;
+constexpr std::uint32_t Format8UNorm = 1;
+constexpr std::uint32_t Format8_8UNorm = 14;
+constexpr std::uint32_t Format1616UNorm = 23;
 constexpr std::uint32_t Format9995Float = 132;
 constexpr std::uint32_t Format8Srgb = 128;
 constexpr std::uint32_t Format8_8Srgb = 129;
@@ -34,6 +37,7 @@ constexpr std::uint32_t Format32Float = 22;
 constexpr std::uint32_t Type2D = 9;
 constexpr std::uint32_t TypeCube = 11;
 constexpr std::uint32_t LessEqual = 3;
+constexpr std::uint32_t GreaterEqual = 6;
 constexpr std::uint32_t ClampWrap = 0;
 constexpr std::uint32_t ClampMirror = 1;
 constexpr std::uint32_t ClampEdge = 2;
@@ -121,14 +125,14 @@ std::array<std::uint32_t, 4> SamplerDescriptor(const Sampler& sampler) {
 
 void FillTexels() {
     Texels.fill(0);
-    const auto descriptor = TextureDescriptor(Format8888UNorm);
+    const auto descriptor = TextureDescriptor(Format1616UNorm);
     const auto surface = AgcDriver::Graphics::DescribeSurface(AgcDriver::Graphics::DecodeTextureResource(descriptor));
     const auto& mip = surface.mips.at(0);
     for (std::uint32_t y = 0; y < Side; ++y) {
         for (std::uint32_t x = 0; x < Side; ++x) {
             auto* texel = Texels.data() + mip.tiledOffset + y * mip.pitchBytes + x * 4u;
             texel[0] = Red[y * Side + x];
-            texel[1] = 0x11;
+            texel[1] = Red[y * Side + x];
             texel[2] = 0x22;
             texel[3] = 0xff;
         }
@@ -137,7 +141,7 @@ void FillTexels() {
 
 void FillCubeTexels() {
     Texels.fill(0);
-    const auto descriptor = TextureDescriptor(Format8888UNorm, true);
+    const auto descriptor = TextureDescriptor(Format1616UNorm, true);
     const auto surface = AgcDriver::Graphics::DescribeSurface(AgcDriver::Graphics::DecodeTextureResource(descriptor));
     Require(surface.layers == 6u && surface.guestBytes <= Texels.size(), "cube descriptor did not expose six faces within texture storage");
     const auto& mip = surface.mips.at(0);
@@ -146,6 +150,7 @@ void FillCubeTexels() {
             for (std::uint32_t x = 0; x < Side; ++x) {
                 auto* texel = Texels.data() + surface.GuestLayerOffset(face) + mip.tiledOffset + y * mip.pitchBytes + x * 4u;
                 texel[0] = static_cast<std::uint8_t>(face == 0u ? 255u : 0u);
+                texel[1] = texel[0];
                 texel[3] = 0xffu;
             }
         }
@@ -240,7 +245,7 @@ ShaderRecompiler::RecompileResult Compile(AgcDriver::VulkanDevice& device, std::
 std::uint64_t Run(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char* name, bool offsets = false, bool useCache = false, bool array = false, std::uint64_t expectedVariant = 0) {
     Output.fill(-1.0f);
     const std::span<const std::uint32_t> code = offsets ? std::span<const std::uint32_t>(OffsetCode) : array ? std::span<const std::uint32_t>(ArrayCode) : std::span<const std::uint32_t>(Code);
-    const auto result = Compile(device, Format8888UNorm, sampler, code, useCache);
+    const auto result = Compile(device, Format1616UNorm, sampler, code, useCache);
     if (expectedVariant != 0) Require(result.cacheHit && result.variantId == expectedVariant, std::string(name) + " did not reuse the compiled comparison artifact");
     for (const auto& binding : result.bindings) {
         Require(binding.role != ShaderRecompiler::DescriptorRole::GuestSamplers, "emulated comparison retained a sampler binding");
@@ -264,7 +269,7 @@ void RunChannels(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t>
     const Sampler sampler{ClampEdge, FilterBilinear};
     Swizzle = Select(channels[0], channels[1], channels[2], channels[3]);
     Output.fill(-2.0f);
-    const auto result = Compile(device, Format8888UNorm, sampler, code);
+    const auto result = Compile(device, Format1616UNorm, sampler, code);
     Swizzle = 0xfacu;
     device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
     device.WaitIdle();
@@ -291,7 +296,7 @@ void RunCube(AgcDriver::VulkanDevice& device, const Sampler& sampler, const char
         CubeInput[tid * 4u + 3u] = 0.0f;
     }
     Output.fill(-1.0f);
-    const auto result = Compile(device, Format8888UNorm, sampler, CubeCode, false, true, true);
+    const auto result = Compile(device, Format1616UNorm, sampler, CubeCode, false, true, true);
     for (const auto& binding : result.bindings) {
         Require(binding.role != ShaderRecompiler::DescriptorRole::GuestSamplers, "cube emulated comparison retained a sampler binding");
         Require(std::all_of(binding.imageSamplers.begin(), binding.imageSamplers.end(), [](auto mask) { return mask == 0u; }), "cube emulated comparison retained an unused sampler association");
@@ -360,7 +365,7 @@ int main() {
         FillTexels();
         FillInput();
         RunCube(*device, {ClampEdge, FilterPoint}, "point cube, clamp to edge");
-        Reject(*device, Format8888UNorm, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
+        Reject(*device, Format1616UNorm, {ClampEdge, FilterBilinear}, "bilinear cube comparison requires DISABLE_CUBE_WRAP", CubeCode, true, true);
         for (std::uint32_t function = 0; function < 8u; ++function) {
             const auto name = "bilinear 8_8_8_8 srgb cube function " + std::to_string(function);
             RunSrgbCubeZero(*device, Format8888Srgb, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, false, function}, name.c_str());
@@ -369,8 +374,13 @@ int main() {
         RunSrgbCubeZero(*device, Format8_8Srgb, {ClampEdge, FilterBilinear}, "bilinear 8_8 srgb cube without DISABLE_CUBE_WRAP");
         RunCube(*device, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, true}, "bilinear cube with DISABLE_CUBE_WRAP");
         Reject(*device, Format9995Float, {ClampEdge, FilterPoint}, "implemented only for float, unorm and snorm formats");
-        Reject(*device, Format8888UNorm, {ClampEdge, FilterAnisoBilinear}, "point or bilinear");
-        Reject(*device, Format8888UNorm, {ClampEdge, FilterAnisoPoint}, "point or bilinear");
+        for (std::uint32_t function = 0; function < 8u; ++function) {
+            const auto name = "bilinear 8_8_8_8 unorm cube function " + std::to_string(function);
+            RunSrgbCubeZero(*device, Format8888UNorm, {ClampEdge, FilterBilinear, BorderBlack, 0u, 0u, false, function}, name.c_str());
+        }
+        RunSrgbCubeZero(*device, Format8888UNorm, {ClampEdge, FilterAnisoBilinear, BorderBlack, 0u, 0u, false, GreaterEqual}, "anisotropic bilinear 8_8_8_8 unorm cube without DISABLE_CUBE_WRAP");
+        Reject(*device, Format1616UNorm, {ClampEdge, FilterAnisoBilinear}, "point or bilinear");
+        Reject(*device, Format1616UNorm, {ClampEdge, FilterAnisoPoint}, "point or bilinear");
         FillTexels();
         Require(BindsDepthCompare(Compile(*device, Format32Float, {ClampEdge, FilterBilinear})), "an R32 float texture left the native comparison path");
         Require(!BindsDepthCompare(Compile(*device, Format8888UNorm, {ClampEdge, FilterBilinear})), "a color texture kept a depth-compare binding");
@@ -386,6 +396,15 @@ int main() {
                 }
             }
             if (useCache) Run(*device, {ClampEdge, FilterPoint}, "cached UNORM after sRGB", false, true, false, variant);
+        }
+        for (const auto format : {Format8UNorm, Format8_8UNorm, Format8888UNorm}) {
+            for (std::uint32_t function = 0; function < 8u; ++function) {
+                for (const auto filter : {FilterPoint, FilterBilinear, FilterAnisoBilinear}) {
+                    if (format != Format8888UNorm && function != LessEqual) continue;
+                    const auto name = "8-bit unorm format " + std::to_string(format) + " function " + std::to_string(function) + " filter " + std::to_string(filter);
+                    RunSrgbZero(*device, format, {ClampEdge, filter, BorderBlack, 0u, 0u, false, function}, name.c_str(), false, 0u);
+                }
+            }
         }
         Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap");

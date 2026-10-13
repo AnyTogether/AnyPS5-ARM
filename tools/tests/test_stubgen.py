@@ -12,9 +12,10 @@ import stubgen
 
 
 class StubgenTests(unittest.TestCase):
-    def test_default_debt_link_resolves_from_docs_dev(self):
+    def test_default_debt_link_resolves_from_the_library_debt_file(self):
         _, td = stubgen.generate("libkernel", ["AC1FtjqMCL0"], {})
-        found = check_conventions.links("docs/dev/TechnicalDebt.md", td.strip())
+        self.assertEqual(check_conventions.debt_name(td), "libkernel")
+        found = check_conventions.links("docs/dev/debt/libkernel.md", td.strip())
         self.assertTrue(found)
         for item in found:
             self.assertEqual(item[1], "core/libs/prx/libkernel/Unimplemented.cpp")

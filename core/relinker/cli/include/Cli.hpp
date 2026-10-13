@@ -29,6 +29,7 @@ struct Args {
     std::string runPath = "$ORIGIN/libs";
     std::set<std::string> excludedSceModules;
     std::vector<std::string> moduleDirectories;
+    std::vector<std::string> executables;
 };
 
 Args ParseArgs(int argc, char* argv[]);

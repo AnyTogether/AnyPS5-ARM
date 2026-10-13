@@ -262,6 +262,9 @@ int main() {
         {"Thu, 01 Mar 2024 12:34:56 ", 0, march, 0},
         {"Thu, 01 Mar 2024 12:34:567 EST", 0, march, 0},
         {"Thu, 01 Mar 2024 12:34 EST", 0, at(2024, 3, 1, 12, 34, 0), 0},
+        {"Thu, 29 Feb 2024 12:34", badParse, untouched, 0},
+        {"Thu, 01 Mar 2024 12:34", badParse, untouched, 0},
+        {"Thu, 29 Feb 2024 12:34 ", 0, at(2024, 2, 29, 12, 34, 0), 0},
         {"Thu, 01 Mar 2024 12:34EST", badParse, untouched, 0},
         {"Thu, 01 Mar 2024 1:2:3 EST", 0, at(2024, 3, 1, 1, 2, 3), -300},
         {"Thu, 01 Mar 2024 26:00:00 GMT", badParse, untouched, 0},
@@ -297,6 +300,35 @@ int main() {
         tick.tick = untouched;
         Require(sceRtcParseDateTime(&tick, dateTime.text) == dateTime.result);
         Require(tick.tick == dateTime.local - static_cast<std::uint64_t>(dateTime.minutes * 60000000));
+    }
+
+    const struct {
+        const char* name;
+        std::int64_t minutes;
+    } additionalZones[] = {
+        {"SWT", 60}, {"MEZ", 60}, {"WETDST", 60}, {"METDST", 120}, {"EETDST", 180},
+        {"AESST", 660}, {"ACSST", 630}, {"CAST", 570}, {"CADT", 630}, {"SAST", 570}, {"SADT", 630}, {"WST", 480}, {"WDT", 540},
+    };
+    for (const auto& zone : additionalZones) {
+        char text[80];
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %s", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        char lower[16]{};
+        for (std::size_t i = 0; zone.name[i] != 0; ++i) lower[i] = static_cast<char>(zone.name[i] + ('a' - 'A'));
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %s", lower);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %sextra", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        std::snprintf(text, sizeof(text), "Wed, 01 Mar 2000 08:09:10 %s", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == at(2000, 3, 1, 8, 9, 10) - static_cast<std::uint64_t>(zone.minutes * 60000000));
     }
 
     RtcTick source{leapDayTick};

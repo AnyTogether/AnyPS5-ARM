@@ -19,6 +19,7 @@ int* APS5_VABI __error_nid_postfix();
 int APS5_VABI sceAppContentGetAddcontInfo(uint32_t, const NpUnifiedEntitlementLabel*, void*);
 int APS5_VABI sceAppContentGetAddcontInfoList(uint32_t, void*, uint32_t, uint32_t*);
 int APS5_VABI sceAppContentDownloadDataGetAvailableSpaceKb(const AppContentMountPoint*, size_t*);
+int APS5_VABI sceAppContentDownloadDataFormat(const AppContentMountPoint*);
 int APS5_VABI sceAppContentAppParamGetInt(uint32_t, int32_t*);
 int APS5_VABI sceAppContentAddcontEnqueueDownload(uint32_t, const NpUnifiedEntitlementLabel*);
 }
@@ -48,6 +49,16 @@ int main() {
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, &availableKb) == 0);
     Require(availableKb == 0);
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, nullptr) == ErrorParameter);
+    const auto downloadData = ResolvePath_nid_no_patch("/download0");
+    Require(sceAppContentDownloadDataFormat(&download) == 0);
+    Require(std::filesystem::is_directory(downloadData) && std::filesystem::is_empty(downloadData));
+    std::filesystem::create_directory(downloadData / "cache");
+    { std::ofstream file(downloadData / "cache" / "old.bin"); file << "downloaded"; }
+    { std::ofstream file(downloadData / "index.dat"); file << "downloaded"; }
+    Require(sceAppContentDownloadDataFormat(nullptr) == ErrorParameter);
+    Require(std::filesystem::exists(downloadData / "index.dat"));
+    Require(sceAppContentDownloadDataFormat(&download) == 0);
+    Require(std::filesystem::is_directory(downloadData) && std::filesystem::is_empty(downloadData));
 
     const int32_t expectedParams[] = {3, 23566, -7, 0, 2147483647};
     for (uint32_t id = 0; id < 5; ++id) {

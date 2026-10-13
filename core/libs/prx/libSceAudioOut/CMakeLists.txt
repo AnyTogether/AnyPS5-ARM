@@ -73,6 +73,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
     endif()
 
+    add_test_executable(audio_out_ex_monitor_info_tests tests/AudioOutExMonitorInfo.cpp)
+    target_include_directories(audio_out_ex_monitor_info_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(audio_out_ex_monitor_info_tests PRIVATE libSceAudioOut libc)
+    configure_windows_unwind(audio_out_ex_monitor_info_tests)
+    add_test(NAME audio_out_ex_monitor_info COMMAND audio_out_ex_monitor_info_tests)
+    if(WIN32)
+        set_tests_properties(audio_out_ex_monitor_info PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
+    endif()
+
     add_test_executable(audio_out2_latency_tests tests/AudioOut2Latency.cpp)
     target_include_directories(audio_out2_latency_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(audio_out2_latency_tests PRIVATE libSceAudioOut libc)
@@ -117,7 +127,7 @@ if(BUILD_TESTING)
     configure_windows_unwind(audio_out2_timing_tests)
     add_test(NAME audio_out2_timing COMMAND audio_out2_timing_tests)
     if(WIN32)
-        set_tests_properties(audio_out2_timing PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(audio_out2_timing PROPERTIES RUN_SERIAL TRUE ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
     endif()
 endif()

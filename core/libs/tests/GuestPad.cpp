@@ -65,8 +65,34 @@ static void CheckInputCommands() {
     Require(commands.Buttons(1001000) == 0);
     write("2 16384 200");
     Require(commands.Buttons(1101000) == 0);
+    write("5 0 300 0 128 255 64");
+    const auto tilted = commands.Poll(1201000);
+    Require(tilted.buttons == 0 && tilted.hasSticks);
+    Require(tilted.sticks[0] == 0 && tilted.sticks[1] == 128 && tilted.sticks[2] == 255 && tilted.sticks[3] == 64);
+    Require(!commands.Poll(1501000).hasSticks);
+    write("6 16384 300");
+    const auto pressed = commands.Poll(1601000);
+    Require(pressed.buttons == 0x4000 && !pressed.hasSticks);
+    const Pad::InputCommandFile::Input none;
+    write("7 16384 300 128 128");
+    Require(commands.Poll(1901000) == none);
+    write("7 16384 300 128 128 128 256");
+    Require(commands.Poll(2001000) == none);
+    write("7 16384 300 128 128 128 128 128");
+    Require(commands.Poll(2101000) == none);
+    write("7 16384 300 128 128 128 up");
+    Require(commands.Poll(2201000) == none);
+    write("7 16384 300 +");
+    Require(commands.Poll(2301000) == none);
+    write("7 16384 300 4294967296");
+    Require(commands.Poll(2401000) == none);
+    write("7 16384 300 128 128 128 128x");
+    Require(commands.Poll(2501000) == none);
+    write("7 8192 300 1 2 3 4");
+    const auto accepted = commands.Poll(2601000);
+    Require(accepted.buttons == 0x2000 && accepted.hasSticks && accepted.sticks[3] == 4);
     std::filesystem::remove(path);
-    Require(commands.Buttons(1201000) == 0);
+    Require(commands.Buttons(3001000) == 0);
     Pad::InputCommandFile disabled(nullptr);
     Require(disabled.Buttons(0) == 0);
 }
@@ -92,6 +118,24 @@ static void CheckTiltCorrection(int handle) {
     Require(SettleOrientationW() == 1.0f);
     Require(scePadSetTiltCorrectionState(handle, true) == PAD_OK);
     Require(SettleOrientationW() < 0.999f);
+    PadPublishInput_nid_postfix(PadInputState{});
+}
+
+static void CheckAngularVelocityDeadband(int handle) {
+    PadInputState moving;
+    moving.hasMotion = true;
+    moving.accel = {0.0f, 9.80665f, 0.0f};
+    moving.gyro = {0.01f, 0.0175f, -0.017f};
+    PadPublishInput_nid_postfix(moving);
+    PadData data{};
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(data.angular_velocity_x == 0.01f && data.angular_velocity_y == 0.0175f && data.angular_velocity_z == -0.017f);
+    Require(scePadSetAngularVelocityDeadbandState(handle, true) == PAD_OK);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(data.angular_velocity_x == 0.0f && data.angular_velocity_y == 0.0175f && data.angular_velocity_z == 0.0f);
+    Require(scePadSetAngularVelocityDeadbandState(handle, false) == PAD_OK);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(data.angular_velocity_x == 0.01f && data.angular_velocity_z == -0.017f);
     PadPublishInput_nid_postfix(PadInputState{});
 }
 
@@ -218,6 +262,24 @@ static void CheckInjectedState(const std::filesystem::path& path) {
     const auto released = Pad::ReadState();
     Require(released.buttons == 0x2000 && released.analog_buttons_l2 == 0);
     Require(released.timestamp > pressed.timestamp);
+    physical.sticks[3] = 17;
+    PadPublishInput_nid_postfix(physical);
+    const auto still = Pad::ReadState();
+    std::ofstream(path) << "2 0 300 200 0 128 128\n";
+    PadData moved{};
+    const auto stickDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        moved = Pad::ReadState();
+        if (moved.left_stick_x == 200) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (std::chrono::steady_clock::now() < stickDeadline);
+    Require(moved.left_stick_x == 200 && moved.left_stick_y == 0);
+    Require(moved.right_stick_x == 128 && moved.right_stick_y == 128);
+    Require(moved.buttons == 0x2000 && moved.timestamp > still.timestamp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(310));
+    const auto centred = Pad::ReadState();
+    Require(centred.left_stick_x == 42 && centred.right_stick_y == 17);
+    Require(centred.timestamp > moved.timestamp);
     PadPublishInput_nid_postfix(PadInputState{});
 }
 
@@ -254,6 +316,7 @@ int main() {
     Require(scePadGetHandle(user, PAD_PORT_TYPE_SPECIAL, 0) == noHandle);
     Require(scePadGetHandle(user, 0, 0) == handle);
     CheckTiltCorrection(handle);
+    CheckAngularVelocityDeadband(handle);
     CheckTouchContact();
     CheckPartialTrigger();
     CheckReadQueue(handle);
@@ -275,6 +338,7 @@ int main() {
     Require(scePadSetVibrationTriggerEffectWeakWhileEmbeddedMicInUse(true) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle, false) == 0);
     Require(scePadSetAngularVelocityDeadbandState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadSetAngularVelocityDeadbandState(handle + 1, true) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
     Require(scePadSetAngularVelocityBiasCorrectionState(handle + 1, false) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadOpenExt(user, PAD_PORT_TYPE_STANDARD, 0, wheel) == handle);

@@ -1,4 +1,5 @@
 #include "GraphicsTests.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include <cstring>
 #include <string>
@@ -170,6 +171,18 @@ void RunTextureDetilerTests(const Context& context, const TextureDetilerTestAcce
     detiler.Dispatch(commands, TextureTileMode::kD4KBX, 4, source, 0, destination, 0, layout, false, 0, false, {.pipeBankXor = 0xa00u});
     Require(decodePush(access.lastDispatch().pushConstants).pipeBankXor == 0xa00u, "the window's pipe/bank XOR did not reach the detiling shader");
     Require(equationSpecialization[0] == 4 && equationSpecialization[1] == 4096 && equationSpecialization[2] == 2, "SW_4KB_D_X detiling must select the equation family over 4 KiB blocks");
+
+    {
+        const auto mip = ComputeColorTargetMipLayout(ColorTileMode::RenderTarget, 4, 1024, 1024, 11, 4);
+        Require(mip.width == 64 && mip.height == 64 && mip.tail, "the first packed render-target mip has the wrong extent");
+        Require(mip.tiledOffset == 0 && mip.tiledSize == 65536 && mip.tailX == 64 && mip.tailY == 0, "the first packed render-target mip lost its shared-block origin");
+        Require(mip.pitchBytes == 256 && mip.linearSize == 16384, "packed render-target mips must use tightly packed transfer rows");
+        const auto next = ComputeColorTargetMipLayout(ColorTileMode::RenderTarget, 4, 1024, 1024, 11, 5);
+        Require(next.width == 32 && next.height == 32 && next.tail && next.tiledOffset == 0 && next.tiledSize == 65536 && next.tailX == 0 && next.tailY == 64, "the next packed render-target mip lost its shared-block origin");
+        const auto regular = ComputeColorTargetMipLayout(ColorTileMode::RenderTarget, 4, 1024, 1024, 11, 3);
+        Require(!regular.tail && regular.width == 128 && regular.height == 128 && regular.tiledOffset == 0 && regular.tiledSize == 65536, "a regular render-target mip must be relative to its own target buffer");
+        reject([] { ComputeColorTargetMipLayout(ColorTileMode::RenderTarget, 4, 1024, 1024, 11, 11); }, "outside its surface");
+    }
 
     reject([&] { detiler.Dispatch(VK_NULL_HANDLE, TextureTileMode::kStandard4KB, 4, source, 0, destination, 0, layout, 0); }, "active command buffer");
     reject([&] { detiler.Dispatch(commands, TextureTileMode::kStandard4KB, 4, VK_NULL_HANDLE, 0, destination, 0, layout, 0); }, "source and destination buffers");

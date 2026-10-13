@@ -280,6 +280,12 @@ struct ModuleInfoForUnwind {
     std::uint64_t seg0_size;
 };
 
+struct InternalSegmentInfo {
+    std::uint64_t address;
+    std::uint64_t size;
+};
+static_assert(sizeof(InternalSegmentInfo) == 0x10);
+
 struct MallocReplace {
     std::uint64_t size = sizeof(MallocReplace);
     void* malloc_initialize = nullptr;
@@ -1313,6 +1319,13 @@ struct NetCtlNatInfo { std::uint8_t opaque[128]; };
 
 union NetCtlInfo { std::uint8_t opaque[256]; };
 
+struct NetCtlIfStat {
+    std::uint32_t device;
+    std::uint64_t tx_bytes;
+    std::uint64_t rx_bytes;
+    std::uint32_t reserved[8];
+};
+
 using NetCtlCallback = void (*)(int, void*);
 
 struct HttpEpoll;
@@ -1502,7 +1515,12 @@ struct SaveDataMountInfo {
 
 struct SceSaveDataTitleId { char data[10]; char pad[2]; };
 struct SceSaveDataDirName { char data[32]; };
-struct SaveDataSearchInfo { std::uint8_t opaque[128]; };
+struct SaveDataSearchInfo {
+    std::uint64_t blocks;
+    std::uint64_t free_blocks;
+    std::uint8_t reserved[32];
+};
+static_assert(sizeof(SaveDataSearchInfo) == 48);
 struct SaveDataMemoryData { void* buf; std::size_t buf_size; std::size_t offset; };
 
 struct SaveDataMount3 {
@@ -1665,6 +1683,35 @@ struct ContentExportCallbackParam {
 };
 
 struct ContentSearchInitParam { std::size_t memory_size; };
+
+struct ContentSearchColumnValue {
+    std::uint32_t size;
+    std::int64_t value;
+};
+
+struct ContentSearchContentColumn {
+    std::int32_t column_type;
+    std::int32_t column_operator;
+    const ContentSearchColumnValue* value;
+    std::int32_t logical_connector;
+};
+
+struct ContentSearchContentColumnSet {
+    const ContentSearchContentColumn* columns;
+    std::int32_t columns_length;
+    std::int32_t logical_connector;
+};
+
+struct ContentSearchContentOrderByCondition {
+    std::int32_t column_type;
+    std::int32_t sort_type;
+};
+
+static_assert(sizeof(ContentSearchColumnValue) == 16);
+static_assert(sizeof(ContentSearchContentColumn) == 24);
+static_assert(offsetof(ContentSearchContentColumn, logical_connector) == 16);
+static_assert(sizeof(ContentSearchContentColumnSet) == 16);
+static_assert(sizeof(ContentSearchContentOrderByCondition) == 8);
 
 struct PngEncCreateParam {
     std::uint32_t this_size;

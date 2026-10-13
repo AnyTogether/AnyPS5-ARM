@@ -46,4 +46,8 @@ double APS5_VABI libcCyberUnknown08(double base, int exponent) {
     return reciprocal ? 1.0 / result : result;
 }
 
+APS5_EXPORT("H2e8t5ScQGc", libc___cxa_finalize);
+void APS5_VABI libc___cxa_finalize(void* dsoHandle) {
+    CxaFinalize_nid_no_patch(dsoHandle);
+}
 }

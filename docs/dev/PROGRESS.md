@@ -12,6 +12,10 @@ For these wrappers, the JSON group adds `shared_sources` with the source library
 
 A library with no scanned definitions and no shared sources, such as one whose `Export.cpp` only has `APS5_DUMMY_FUN` because its functions are implemented in another library, is listed as having no exports instead of `0/0`. It is left out of the map.
 
+## History
+
+[`tools/progress_history.py`](../../tools/progress_history.py) measures the first-parent history of `main` with the same rules as `progress.py` and writes `history.json`, `history.svg` (shown in the README) and `history.html` (the chart with a tooltip per day plus a table, linked from the end of the progress page). It takes one point per day, at the last commit of the day, and skips commits whose tree lacks the scanned paths. The chart compacts as days accumulate: up to 31 days it labels every day, up to 150 days one label per Monday, beyond that one per month; points (and their tooltips) are drawn up to 45 days, after which the table and `history.json` keep every day. Old trees are measured with today's counting rules and instruction list, so the series is comparable but not what the page showed on that day. The workflow checks out the full history for it.
+
 ## Comparisons
 
 Comparisons identify functions by library and name. When a head group becomes a shared-source wrapper, its previous definitions are compared under the source library's identity. Removing a duplicate implementation is reported as sharing sources, without reporting the retained functions as removed.
@@ -25,6 +29,7 @@ Implemented definitions are also classified as behaviourally empty when their bo
 ```sh
 python3 tools/tests/test_progress.py
 python3 tools/progress.py /tmp/anyps5-progress
+python3 tools/tests/test_progress_history.py
 ```
 
 The regressions check that adding test callbacks leaves counts and comparisons unchanged, including when a callback shares a pending function's name or a wrapper uses shared sources. They also create a source library and a copied wrapper, move the wrapper to a shared builder, check output labels and totals, then verify real regressions and removals are still reported. With `BUILD_TESTING=ON` and Python available, CTest registers them as `progress_report`.

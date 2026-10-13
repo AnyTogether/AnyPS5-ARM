@@ -11,6 +11,8 @@ extern "C" {
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
 int APS5_VABI scePthreadDetach(Pthread thread);
+int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value);
+int APS5_VABI pthread_detach_nid_postfix(Pthread thread);
 void APS5_VABI scePthreadExit(void* retval);
 Pthread APS5_VABI scePthreadSelf();
 int APS5_VABI scePthreadGetthreadid(void);
@@ -50,6 +52,9 @@ static bool StackContains(Pthread thread, const void* address) {
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EINVAL = 0x80020016;
 static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
+static constexpr int SCE_KERNEL_ERROR_EDEADLK = 0x8002000b;
+static constexpr int GUEST_EDEADLK = 11;
+static constexpr int GUEST_EINVAL = 22;
 static constexpr int MUTEX_TYPE_RECURSIVE = 2;
 static constexpr int PTHREAD_CANCEL_ENABLE = 0;
 static constexpr int PTHREAD_CANCEL_ASYNCHRONOUS = 2;
@@ -103,6 +108,8 @@ struct WorkerContext {
     PthreadMutex* mutex = nullptr;
     int unlockResult = 0;
     bool testcancelReturned = false;
+    int sceJoinSelf = 0;
+    int posixJoinSelf = 0;
 };
 
 static void* APS5_VABI Worker(void* arg) {
@@ -114,6 +121,8 @@ static void* APS5_VABI Worker(void* arg) {
     int local = 0;
     context.workerStackReported = StackContains(context.selfFromWorker, &local);
     context.unlockResult = scePthreadMutexUnlock(context.mutex);
+    context.sceJoinSelf = scePthreadJoin(context.selfFromWorker, nullptr);
+    context.posixJoinSelf = pthread_join_nid_postfix(context.selfFromWorker, nullptr);
     int oldState = -1;
     int oldType = -1;
     context.testcancelReturned = scePthreadSetcancelstate(PTHREAD_CANCEL_ENABLE, &oldState) == SCE_OK &&
@@ -137,6 +146,10 @@ int main() {
     Require(StackContains(mainSelf, &local));
     Require(scePthreadJoin(mainSelf, nullptr) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadDetach(mainSelf) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadJoin(nullptr, nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadDetach(nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(pthread_join_nid_postfix(nullptr, nullptr) == GUEST_EINVAL);
+    Require(pthread_detach_nid_postfix(nullptr) == GUEST_EINVAL);
 
     PthreadMutexattr attr = nullptr;
     Require(scePthreadMutexattrInit(&attr) == SCE_OK);
@@ -163,6 +176,8 @@ int main() {
     Require(context.workerThreadId == static_cast<int>(context.workerTid));
     Require(context.workerPosixThreadId == context.workerThreadId && context.workerPosixThreadId != static_cast<int>(mainTid));
     Require(context.unlockResult == SCE_KERNEL_ERROR_EPERM);
+    Require(context.sceJoinSelf == SCE_KERNEL_ERROR_EDEADLK);
+    Require(context.posixJoinSelf == GUEST_EDEADLK);
     Require(context.workerStackReported);
     Require(context.testcancelReturned);
 

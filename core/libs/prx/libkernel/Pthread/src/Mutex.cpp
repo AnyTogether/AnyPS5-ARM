@@ -111,7 +111,7 @@ int APS5_VABI scePthreadMutexattrInit(PthreadMutexattr* attr) {
 
 int APS5_VABI scePthreadMutexattrDestroy(PthreadMutexattr* attr) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     delete *attr;
     *attr = nullptr;
     return 0;
@@ -119,7 +119,7 @@ int APS5_VABI scePthreadMutexattrDestroy(PthreadMutexattr* attr) {
 
 int APS5_VABI scePthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     switch (type) {
     case 1: (*attr)->type = MutexType::ErrorCheck; break;
     case 2: (*attr)->type = MutexType::Recursive; break;
@@ -132,21 +132,19 @@ int APS5_VABI scePthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
 
 int APS5_VABI scePthreadMutexattrSetprotocol(PthreadMutexattr* attr, int protocol) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     constexpr int PrioNone = 0;
-    constexpr int PrioInherit = 1;
-    if (protocol != PrioNone && protocol != PrioInherit)
-        throw std::invalid_argument("Mutex priority protection is unsupported");
+    constexpr int PrioProtect = 2;
+    if (protocol < PrioNone || protocol > PrioProtect)
+        return SCE_KERNEL_ERROR_EINVAL;
     return 0;
 }
 
 int APS5_VABI scePthreadMutexInit(PthreadMutex* mutex, const PthreadMutexattr* attr, const char*) {
     if (!mutex)
         throw std::invalid_argument("Mutex pointer is null");
-    if (attr && !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
     auto replacement = std::make_unique<PthreadMutexPrivate>();
-    if (attr)
+    if (attr && *attr)
         replacement->_type = (*attr)->type;
     std::lock_guard lock(initializationMutex);
     std::atomic_ref<PthreadMutex>(*mutex).store(replacement.release(), std::memory_order_release);
@@ -158,7 +156,7 @@ int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex) {
         throw std::invalid_argument("Mutex pointer is null");
     std::lock_guard lock(initializationMutex);
     if (*mutex == destroyedMutex())
-        throw std::runtime_error("Mutex has already been destroyed");
+        return SCE_KERNEL_ERROR_EINVAL;
     if (*mutex == adaptiveInitializer()) {
         std::atomic_ref<PthreadMutex>(*mutex).store(destroyedMutex(), std::memory_order_release);
         return 0;

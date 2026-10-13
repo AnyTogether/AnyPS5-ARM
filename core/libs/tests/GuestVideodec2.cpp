@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include "prx/libc/include/General.hpp"
 #include "H264Fixture.hpp"
@@ -444,6 +446,171 @@ void testDecode(bool lengthPrefixed) {
     checkThrows([&] { sceVideodec2DeleteDecoder_nid_postfix(handle); });
 }
 
+std::uint64_t createDecoder(std::uint32_t codec, std::uint32_t profile) {
+    const DecoderConfigInfo config{sizeof(DecoderConfigInfo), 1, codec, profile, 0, static_cast<std::int32_t>(Width), static_cast<std::int32_t>(Height), 4, 1};
+    DecoderMemoryInfo memory{sizeof(DecoderMemoryInfo)};
+    check(sceVideodec2QueryDecoderMemoryInfo_nid_postfix(&config, &memory) == 0, "memory query failed");
+    std::uint64_t handle = 0;
+    check(sceVideodec2CreateDecoder_nid_postfix(&config, &memory, &handle) == 0, "decoder creation failed");
+    return handle;
+}
+
+AvcPictureInfo query(std::vector<std::uint8_t>& buffer) {
+    OutputInfo output{sizeof(OutputInfo)};
+    output.frameBuffer = buffer.data();
+    AvcPictureInfo info{sizeof(AvcPictureInfo)};
+    check(sceVideodec2GetAvcPictureInfo_nid_postfix(&output, &info, nullptr) == 0, "picture info query failed");
+    return info;
+}
+
+bool owned(std::vector<std::uint8_t>& buffer, std::uint64_t pts) {
+    const auto info = query(buffer);
+    return info.isValid && info.ptsData == pts;
+}
+
+std::uint64_t publishAvc(std::uint64_t handle, std::uint64_t base, std::vector<std::uint8_t>& buffer) {
+    const auto units = accessUnits(false);
+    std::size_t pictures = 0;
+    const auto take = [&](const OutputInfo& output) {
+        if (!output.isValid) return false;
+        check(owned(buffer, base + DisplayOrderUnits[pictures]), "picture info does not follow the latest publication");
+        ++pictures;
+        return true;
+    };
+    for (std::size_t unit = 0; unit < units.size(); ++unit) {
+        const InputData input{sizeof(InputData), units[unit].data(), units[unit].size(), base + unit, unit, base + unit};
+        FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size(), false};
+        OutputInfo output{sizeof(OutputInfo)};
+        check(sceVideodec2Decode_nid_postfix(handle, &input, &frame, &output) == 0, "decode failed");
+        take(output);
+    }
+    for (;;) {
+        FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size(), false};
+        OutputInfo output{sizeof(OutputInfo)};
+        check(sceVideodec2Flush_nid_postfix(handle, &frame, &output) == 0, "flush failed");
+        if (!take(output)) break;
+    }
+    check(pictures == PictureHashes.size(), "missing pictures after flush");
+    return base + DisplayOrderUnits[pictures - 1];
+}
+
+void publishClip(std::uint64_t handle, const std::vector<std::vector<std::uint8_t>>& units, std::vector<std::uint8_t>& buffer) {
+    for (std::size_t unit = 0; unit < units.size(); ++unit) {
+        const InputData input{sizeof(InputData), units[unit].data(), units[unit].size(), unit, unit, 0};
+        FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size(), false};
+        OutputInfo output{sizeof(OutputInfo)};
+        check(sceVideodec2Decode_nid_postfix(handle, &input, &frame, &output) == 0, "decode failed");
+    }
+    for (;;) {
+        FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size(), false};
+        OutputInfo output{sizeof(OutputInfo)};
+        check(sceVideodec2Flush_nid_postfix(handle, &frame, &output) == 0, "flush failed");
+        if (!output.isValid) break;
+    }
+}
+
+std::uint64_t frameBufferBytes() {
+    const DecoderConfigInfo config{sizeof(DecoderConfigInfo), 1, 1, 100, 0, static_cast<std::int32_t>(Width), static_cast<std::int32_t>(Height), 4, 1};
+    DecoderMemoryInfo memory{sizeof(DecoderMemoryInfo)};
+    check(sceVideodec2QueryDecoderMemoryInfo_nid_postfix(&config, &memory) == 0, "memory query failed");
+    return memory.maxFrameBufferSize;
+}
+
+void testPictureOwnership() {
+    std::vector<std::uint8_t> shared(frameBufferBytes()), other(frameBufferBytes());
+    {
+        const auto older = createDecoder(1, 100);
+        const auto newer = createDecoder(1, 100);
+        publishAvc(older, 1000, shared);
+        const auto latest = publishAvc(newer, 5000, shared);
+        check(owned(shared, latest), "an older decoder answered for a buffer a newer decoder wrote last");
+        check(sceVideodec2Reset_nid_postfix(newer) == 0, "reset failed");
+        check(!query(shared).isValid, "a stale picture survived the reset of the decoder that last wrote the buffer");
+        check(sceVideodec2DeleteDecoder_nid_postfix(older) == 0 && sceVideodec2DeleteDecoder_nid_postfix(newer) == 0, "delete failed");
+    }
+    {
+        const auto older = createDecoder(1, 100);
+        const auto newer = createDecoder(1, 100);
+        publishAvc(older, 1000, shared);
+        publishAvc(newer, 5000, shared);
+        check(sceVideodec2DeleteDecoder_nid_postfix(newer) == 0, "delete failed");
+        check(!query(shared).isValid, "a stale picture survived the deletion of the decoder that last wrote the buffer");
+        check(sceVideodec2DeleteDecoder_nid_postfix(older) == 0, "delete failed");
+    }
+    {
+        const auto older = createDecoder(1, 100);
+        const auto newer = createDecoder(1, 100);
+        publishAvc(older, 1000, shared);
+        const auto latest = publishAvc(newer, 5000, shared);
+        check(sceVideodec2Reset_nid_postfix(older) == 0, "reset failed");
+        check(owned(shared, latest), "resetting a decoder that no longer owns the buffer dropped its picture");
+        check(sceVideodec2DeleteDecoder_nid_postfix(older) == 0, "delete failed");
+        check(owned(shared, latest), "deleting a decoder that no longer owns the buffer dropped its picture");
+        check(sceVideodec2DeleteDecoder_nid_postfix(newer) == 0, "delete failed");
+        check(!query(shared).isValid, "a deleted decoder still owns its picture");
+    }
+    {
+        const auto older = createDecoder(1, 100);
+        const auto newer = createDecoder(1, 100);
+        publishAvc(newer, 5000, shared);
+        const auto latest = publishAvc(older, 1000, shared);
+        const auto third = createDecoder(1, 100);
+        const auto separate = publishAvc(third, 9000, other);
+        check(owned(shared, latest) && owned(other, separate), "distinct buffers are not independent");
+        check(sceVideodec2Reset_nid_postfix(older) == 0, "reset failed");
+        check(!query(shared).isValid && owned(other, separate), "resetting one buffer's owner changed another buffer");
+        check(sceVideodec2DeleteDecoder_nid_postfix(older) == 0 && sceVideodec2DeleteDecoder_nid_postfix(newer) == 0 && sceVideodec2DeleteDecoder_nid_postfix(third) == 0, "delete failed");
+    }
+    for (const auto codec : {CodecHevc, CodecVp9}) {
+        const auto units = codec == CodecHevc ? hevcUnits(HevcStream.data(), HevcStream.size()) : ivfFrames();
+        const auto avc = createDecoder(1, 100);
+        const auto foreign = createDecoder(codec, codec == CodecHevc ? 1 : 0);
+        publishAvc(avc, 1000, shared);
+        publishClip(foreign, units, shared);
+        checkThrows([&] { query(shared); });
+        check(sceVideodec2DeleteDecoder_nid_postfix(avc) == 0, "delete failed");
+        const auto newer = createDecoder(1, 100);
+        const auto latest = publishAvc(newer, 5000, shared);
+        check(owned(shared, latest), "a decoder of another codec answered for an AVC picture");
+        check(sceVideodec2DeleteDecoder_nid_postfix(foreign) == 0 && sceVideodec2DeleteDecoder_nid_postfix(newer) == 0, "delete failed");
+    }
+}
+
+void testConcurrentOwnership() {
+    std::vector<std::uint8_t> shared(frameBufferBytes());
+    const auto keeper = createDecoder(1, 100);
+    const auto kept = publishAvc(keeper, 1000, shared);
+    std::atomic<bool> done = false;
+    std::string failure;
+    std::thread reader([&] {
+        try {
+            while (!done.load()) {
+                const auto info = query(shared);
+                check(!info.isValid || info.ptsData == kept || (info.ptsData >= 5000 && info.ptsData < 5000 + PictureHashes.size()), "a query returned metadata no decoder published");
+            }
+        } catch (const std::exception& error) {
+            failure = error.what();
+        }
+    });
+    try {
+        for (int round = 0; round < 8; ++round) {
+            const auto writer = createDecoder(1, 100);
+            publishAvc(writer, 5000, shared);
+            if (round % 2 == 0) check(sceVideodec2Reset_nid_postfix(writer) == 0, "reset failed");
+            check(sceVideodec2DeleteDecoder_nid_postfix(writer) == 0, "delete failed");
+            check(!query(shared).isValid, "a removed writer left its picture behind");
+        }
+    } catch (...) {
+        done = true;
+        reader.join();
+        throw;
+    }
+    done = true;
+    reader.join();
+    check(failure.empty(), failure);
+    check(sceVideodec2DeleteDecoder_nid_postfix(keeper) == 0, "delete failed");
+}
+
 }
 
 int main() {
@@ -475,6 +642,8 @@ int main() {
         testClip(CodecHevc, 1, hevcLengthPrefixed, HevcHashes);
         testClip(CodecVp9, 0, ivfFrames(), Vp9Hashes);
         testTenBit();
+        testPictureOwnership();
+        testConcurrentOwnership();
         std::puts("Videodec2 tests passed");
         return 0;
     } catch (const std::exception& error) {

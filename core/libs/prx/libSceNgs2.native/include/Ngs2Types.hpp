@@ -36,6 +36,7 @@ static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_INUSE = 1;
 static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_PLAYING = 2;
 static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_PAUSED = 4;
 static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_STOPPED = 8;
+static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_EMPTY = 0x20;
 
 static constexpr std::uint32_t SCE_NGS2_VOICE_PARAM_MATRIX_LEVELS = 0x0001;
 static constexpr std::uint32_t SCE_NGS2_VOICE_PARAM_PORT_VOLUME = 0x0002;
@@ -611,6 +612,7 @@ struct Ngs2GeomVector {
     float y;
     float z;
 };
+static_assert(sizeof(Ngs2GeomVector) == 12);
 
 struct Ngs2GeomCone {
     float inner_level;
@@ -618,6 +620,7 @@ struct Ngs2GeomCone {
     float outer_level;
     float outer_angle;
 };
+static_assert(sizeof(Ngs2GeomCone) == 16);
 
 struct Ngs2GeomRolloff {
     std::uint32_t model;
@@ -625,6 +628,7 @@ struct Ngs2GeomRolloff {
     float rolloff_factor;
     float reference_distance;
 };
+static_assert(sizeof(Ngs2GeomRolloff) == 16);
 
 struct Ngs2GeomListenerParam {
     Ngs2GeomVector position;
@@ -668,10 +672,11 @@ struct Ngs2GeomA3dAttribute {
     float volume;
     std::uint32_t reserved[4];
 };
+static_assert(sizeof(Ngs2GeomA3dAttribute) == 32);
 
 struct Ngs2GeomAttribute {
     float pitch_ratio;
-    float levels[8 * 8];
+    float level[64];
     Ngs2GeomA3dAttribute a3d_attrib;
     std::uint32_t reserved[4];
 };

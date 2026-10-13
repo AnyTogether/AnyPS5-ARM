@@ -8,9 +8,13 @@
 #include <filesystem>
 #include <fstream>
 #include <source_location>
+#include <stdexcept>
 #include <string>
 #ifdef _WIN32
 #include <windows.h>
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#endif
 #endif
 #ifdef __linux__
 #include <cerrno>
@@ -23,6 +27,7 @@ int APS5_VABI _fstatfs_nid_postfix(int, void*);
 int APS5_VABI open_nid_postfix(const char*, int, int);
 int APS5_VABI close_nid_postfix(int);
 std::int64_t APS5_VABI readlink_nid_postfix(const char*, char*, std::size_t);
+std::int64_t APS5_VABI pathconf_nid_postfix(const char*, int);
 int APS5_VABI fchdir_nid_postfix(int);
 int APS5_VABI chdir_nid_postfix(const char*);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
@@ -32,6 +37,10 @@ int APS5_VABI setsid_nid_postfix(void);
 int APS5_VABI link_nid_postfix(const char*, const char*);
 int APS5_VABI symlink_nid_postfix(const char*, const char*);
 int APS5_VABI openat_nid_postfix(int, const char*, int, ...);
+int APS5_VABI unlinkat_nid_postfix(int, const char*, int);
+std::int64_t APS5_VABI readlinkat_nid_postfix(int, const char*, char*, std::size_t);
+int APS5_VABI mkdirat_nid_postfix(int, const char*, std::uint16_t);
+int APS5_VABI renameat_nid_postfix(int, const char*, int, const char*);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
@@ -48,6 +57,48 @@ int Error() {
     return *__error_nid_postfix();
 }
 
+bool PathconfThrows(const char* path, int name) {
+    try {
+        pathconf_nid_postfix(path, name);
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+void CheckPathconf(const std::filesystem::path& root, const std::string& file) {
+    const auto directory = root.generic_string();
+    for (const auto& path : {file, directory}) {
+        Require(pathconf_nid_postfix(path.c_str(), 1) == 32767);
+        Require(pathconf_nid_postfix(path.c_str(), 4) == 255);
+        Require(pathconf_nid_postfix(path.c_str(), 5) == 1024);
+        Require(pathconf_nid_postfix(path.c_str(), 6) == 512);
+        Require(pathconf_nid_postfix(path.c_str(), 7) == 1);
+        Require(pathconf_nid_postfix(path.c_str(), 8) == 1);
+        Require(pathconf_nid_postfix(path.c_str(), 12) == 64);
+        *__error_nid_postfix() = 0;
+        Require(pathconf_nid_postfix(path.c_str(), 15) == -1 && Error() == 0);
+        Require(pathconf_nid_postfix(path.c_str(), 18) == 1024);
+        Require(pathconf_nid_postfix(path.c_str(), 54) == 0);
+        Require(pathconf_nid_postfix(path.c_str(), 55) == 0);
+    }
+    for (const int name : {0, 11, 61, 62, 65, -1})
+        Require(pathconf_nid_postfix(file.c_str(), name) == -1 && Error() == 22);
+    for (const int name : {2, 3, 9, 10, 14, 16, 17, 21, 53, 59, 60, 63, 64})
+        Require(PathconfThrows(file.c_str(), name));
+    const auto missing = (root / "missing").string();
+    Require(pathconf_nid_postfix(missing.c_str(), 4) == -1 && Error() == 2);
+    Require(pathconf_nid_postfix(missing.c_str(), 0) == -1 && Error() == 2);
+    Require(pathconf_nid_postfix((root / "missing" / "file").string().c_str(), 4) == -1 && Error() == 2);
+    Require(pathconf_nid_postfix("", 4) == -1 && Error() == 2);
+    Require(pathconf_nid_postfix(nullptr, 4) == -1 && Error() == 14);
+    const auto longName = directory + "/" + std::string(256, 'n');
+    Require(pathconf_nid_postfix(longName.c_str(), 4) == -1 && Error() == 63);
+    Require(pathconf_nid_postfix((directory + "/missing/" + std::string(256, 'n')).c_str(), 4) == -1 && Error() == 2);
+    const auto longPath = directory + "/" + std::string(1024, 'p');
+    Require(pathconf_nid_postfix(longPath.c_str(), 4) == -1 && Error() == 63);
+}
+
 int main() {
     Require(setsid_nid_postfix() == -1 && Error() == 1);
     Require(umask_nid_postfix(0) == 022);
@@ -58,6 +109,7 @@ int main() {
     Require(std::filesystem::create_directory(root));
     const auto file = (root / "file.txt").string();
     std::ofstream(file).put('x');
+    CheckPathconf(root, file);
     const int descriptor = open_nid_postfix(file.c_str(), 0, 0);
     Require(descriptor >= 0);
     unsigned char viaPublic[472] = {};
@@ -101,6 +153,18 @@ int main() {
         Require(readlink_nid_postfix(link.c_str(), nullptr, 0) == 0);
         Require(readlink_nid_postfix(link.c_str(), nullptr, sizeof(buffer)) == -1 && Error() == 14);
         Require(readlink_nid_postfix((root / "LINK").string().c_str(), buffer, sizeof(buffer)) == 14);
+        const int linkDir = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+        Require(linkDir >= 0);
+        std::memset(buffer, '#', sizeof(buffer));
+        Require(readlinkat_nid_postfix(linkDir, "link", buffer, sizeof(buffer)) == 14);
+        Require(std::memcmp(buffer, "sub/target.txt", 14) == 0 && buffer[14] == '#');
+        Require(readlinkat_nid_postfix(linkDir, "link", buffer, 3) == 3 && std::memcmp(buffer, "sub", 3) == 0);
+        Require(readlinkat_nid_postfix(linkDir, "link", nullptr, 0) == 0);
+        Require(readlinkat_nid_postfix(linkDir, "link", nullptr, sizeof(buffer)) == -1 && Error() == 14);
+        const auto guestLink = "/" + root.filename().string() + "/link";
+        Require(readlinkat_nid_postfix(-1, guestLink.c_str(), buffer, sizeof(buffer)) == 14 && std::memcmp(buffer, "sub/target.txt", 14) == 0);
+        Require(readlinkat_nid_postfix(-100, link.c_str(), buffer, sizeof(buffer)) == 14 && std::memcmp(buffer, "sub/target.txt", 14) == 0);
+        Require(sceKernelClose(linkDir) == 0);
 #ifndef _WIN32
         std::filesystem::create_symlink("loopB", root / "loopA");
         std::filesystem::create_symlink("loopA", root / "loopB");
@@ -161,6 +225,33 @@ int main() {
         Require(symlink_nid_postfix("missing.bin", dangling.c_str()) == 0);
         Require((GetFileAttributesW(std::filesystem::path(dangling).wstring().c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
         Require(symlink_nid_postfix("missing.bin", dangling.c_str()) == -1 && Error() == 17);
+        Require(readlink_nid_postfix(symbolic.c_str(), buffer, sizeof(buffer)) == 12 && std::memcmp(buffer, "original.bin", 12) == 0);
+        Require(readlink_nid_postfix(dangling.c_str(), buffer, sizeof(buffer)) == 11 && std::memcmp(buffer, "missing.bin", 11) == 0);
+        const auto nested = (root / "nested").string();
+        Require(symlink_nid_postfix("sub/target.txt", nested.c_str()) == 0);
+        std::memset(buffer, '#', sizeof(buffer));
+        Require(readlink_nid_postfix(nested.c_str(), buffer, sizeof(buffer)) == 14);
+        Require(std::memcmp(buffer, "sub/target.txt", 14) == 0 && buffer[14] == '#');
+        Require(readlink_nid_postfix(nested.c_str(), buffer, 3) == 3 && std::memcmp(buffer, "sub", 3) == 0);
+        Require(readlink_nid_postfix(nested.c_str(), nullptr, 0) == 0);
+        Require(readlink_nid_postfix(nested.c_str(), nullptr, sizeof(buffer)) == -1 && Error() == 14);
+        const auto accented = (root / "accented").string();
+        Require(symlink_nid_postfix("a\xc3\xa7\xc3\xa3o.bin", accented.c_str()) == 0);
+        Require(readlink_nid_postfix(accented.c_str(), buffer, sizeof(buffer)) == 10 && std::memcmp(buffer, "a\xc3\xa7\xc3\xa3o.bin", 10) == 0);
+        Require(std::filesystem::create_directory(root / "sub"));
+        const auto directoryLink = (root / "directory-link").string();
+        Require(symlink_nid_postfix("sub", directoryLink.c_str()) == 0);
+        Require(readlink_nid_postfix(directoryLink.c_str(), buffer, sizeof(buffer)) == 3 && std::memcmp(buffer, "sub", 3) == 0);
+        const auto absolute = std::filesystem::absolute(root / "absolute");
+        Require(CreateSymbolicLinkW(absolute.wstring().c_str(), std::filesystem::absolute(original).wstring().c_str(),
+            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+        bool refused = false;
+        try {
+            readlink_nid_postfix((root / "absolute").string().c_str(), buffer, sizeof(buffer));
+        } catch (const std::runtime_error& failure) {
+            refused = std::string(failure.what()) == "readlink of a Windows reparse point other than a relative symbolic link not implemented";
+        }
+        Require(refused);
 #else
         Require(std::filesystem::is_symlink(std::filesystem::symlink_status(symbolic)));
         Require(readlink_nid_postfix(symbolic.c_str(), buffer, sizeof(buffer)) == 12 && std::memcmp(buffer, "original.bin", 12) == 0);
@@ -196,10 +287,123 @@ int main() {
     const int plain = sceKernelOpen(file.c_str(), SCE_KERNEL_O_RDONLY, 0);
     Require(plain >= 0);
     Require(openat_nid_postfix(plain, "file.txt", SCE_KERNEL_O_RDONLY) == -1 && Error() == 20);
+    Require(readlinkat_nid_postfix(base, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 22);
+    Require(readlinkat_nid_postfix(base, "missing.bin", buffer, sizeof(buffer)) == -1 && Error() == 2);
+    Require(readlinkat_nid_postfix(plain, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 20);
+    Require(readlinkat_nid_postfix(-1, "file.txt", buffer, sizeof(buffer)) == -1 && Error() == 9);
+    Require(readlinkat_nid_postfix(base, nullptr, buffer, sizeof(buffer)) == -1 && Error() == 14);
+    Require(readlinkat_nid_postfix(base, "", buffer, sizeof(buffer)) == -1 && Error() == 2);
+    Require(readlinkat_nid_postfix(-1, guestFile.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
+    Require(readlinkat_nid_postfix(-100, file.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
+    Require(mkdirat_nid_postfix(base, "dir", 0700) == 0 && std::filesystem::is_directory(root / "dir"));
+    Require(mkdirat_nid_postfix(base, "dir", 0700) == -1 && Error() == 17);
+    Require(mkdirat_nid_postfix(base, "file.txt", 0700) == -1 && Error() == 17);
+    Require(mkdirat_nid_postfix(base, "missing/child", 0700) == -1 && Error() == 2);
+    Require(mkdirat_nid_postfix(base, "file.txt/child", 0700) == -1 && Error() == 20);
+    Require(mkdirat_nid_postfix(base, "slash_dir/", 0700) == 0 && std::filesystem::is_directory(root / "slash_dir"));
+    const auto guestSubdir = "/" + root.filename().string() + "/abs_dir";
+    Require(mkdirat_nid_postfix(-1, guestSubdir.c_str(), 0700) == 0 && std::filesystem::is_directory(root / "abs_dir"));
+    const auto cwdDir = (root / "cwd_dir").string();
+    Require(mkdirat_nid_postfix(-100, cwdDir.c_str(), 0700) == 0 && std::filesystem::is_directory(root / "cwd_dir"));
+    Require(mkdirat_nid_postfix(plain, "child", 0700) == -1 && Error() == 20);
+    Require(mkdirat_nid_postfix(-1, "child", 0700) == -1 && Error() == 9);
+    Require(mkdirat_nid_postfix(base, nullptr, 0700) == -1 && Error() == 14);
+    Require(mkdirat_nid_postfix(base, "", 0700) == -1 && Error() == 2);
+    const std::string longName(256, 'a');
+    Require(mkdirat_nid_postfix(base, longName.c_str(), 0700) == -1 && Error() == 63);
+    Require(mkdirat_nid_postfix(base, "dir/../dotdot_dir", 0700) == 0 && std::filesystem::is_directory(root / "dotdot_dir"));
+    Require(unlinkat_nid_postfix(plain, "file.txt", 0) == -1 && Error() == 20);
+    Require(unlinkat_nid_postfix(-1, "file.txt", 0) == -1 && Error() == 9);
     Require(sceKernelClose(plain) == 0);
+    Require(unlinkat_nid_postfix(base, "file.txt", 1) == -1 && Error() == 22);
+    Require(unlinkat_nid_postfix(base, nullptr, 1) == -1 && Error() == 22);
+    Require(unlinkat_nid_postfix(base, nullptr, 0) == -1 && Error() == 14);
+    Require(unlinkat_nid_postfix(base, "", 0) == -1 && Error() == 2);
+    Require(unlinkat_nid_postfix(base, "missing.bin", 0) == -1 && Error() == 2);
+    Require(unlinkat_nid_postfix(base, "missing.bin", 0x800) == -1 && Error() == 2);
+    Require(unlinkat_nid_postfix(base, "missing/child", 0) == -1 && Error() == 2);
+    Require(unlinkat_nid_postfix(base, "file.txt/child", 0) == -1 && Error() == 20);
+    Require(unlinkat_nid_postfix(base, "file.txt/child", 0x800) == -1 && Error() == 20);
+    Require(unlinkat_nid_postfix(base, "file.txt/", 0) == -1 && Error() == 20);
+    Require(unlinkat_nid_postfix(base, longName.c_str(), 0) == -1 && Error() == 63);
+    Require(unlinkat_nid_postfix(base, "file.txt", 0x800) == -1 && Error() == 20);
+    Require(unlinkat_nid_postfix(base, ".", 0x800) == -1 && Error() == 22);
+    Require(unlinkat_nid_postfix(base, "..", 0x800) == -1 && Error() == 22);
+    Require(unlinkat_nid_postfix(base, ".", 0) == -1 && Error() == 1);
+    std::filesystem::create_directory(root / "usub");
+    Require(unlinkat_nid_postfix(base, "usub", 0) == -1 && Error() == 1);
+    std::filesystem::create_directory(root / "nonempty");
+    { std::ofstream out(root / "nonempty" / "f.bin"); out << 'x'; }
+    Require(unlinkat_nid_postfix(base, "nonempty", 0x800) == -1 && Error() == 66);
+    Require(unlinkat_nid_postfix(base, "nonempty/f.bin", 0) == 0 && !std::filesystem::exists(root / "nonempty" / "f.bin"));
+    Require(unlinkat_nid_postfix(base, "nonempty", 0x800) == 0 && !std::filesystem::exists(root / "nonempty"));
+    { std::ofstream out(root / "to_unlink.bin"); out << 'x'; }
+    Require(unlinkat_nid_postfix(base, "to_unlink.bin", 0) == 0 && !std::filesystem::exists(root / "to_unlink.bin"));
+    { std::ofstream out(root / "dotdot.bin"); out << 'x'; }
+    Require(unlinkat_nid_postfix(base, "usub/../dotdot.bin", 0) == 0 && !std::filesystem::exists(root / "dotdot.bin"));
+    std::filesystem::create_directory(root / "uslash_sub");
+    Require(unlinkat_nid_postfix(base, "uslash_sub/", 0x800) == 0 && !std::filesystem::exists(root / "uslash_sub"));
+    Require(unlinkat_nid_postfix(base, "usub", 0x800) == 0 && !std::filesystem::exists(root / "usub"));
+    { std::ofstream out(root / "abs.bin"); out << 'x'; }
+    const auto guestAbsFile = "/" + root.filename().string() + "/abs.bin";
+    Require(unlinkat_nid_postfix(-1, guestAbsFile.c_str(), 0) == 0 && !std::filesystem::exists(root / "abs.bin"));
+    std::filesystem::create_directory(root / "unlink_abs_dir");
+    const auto guestAbsDir = "/" + root.filename().string() + "/unlink_abs_dir";
+    Require(unlinkat_nid_postfix(-1, guestAbsDir.c_str(), 0x800) == 0 && !std::filesystem::exists(root / "unlink_abs_dir"));
+    { std::ofstream out(root / "cwd.bin"); out << 'x'; }
+    Require(unlinkat_nid_postfix(-100, (root / "cwd.bin").string().c_str(), 0) == 0 && !std::filesystem::exists(root / "cwd.bin"));
+    std::filesystem::create_directory(root / "unlink_cwd_dir");
+    Require(unlinkat_nid_postfix(-100, (root / "unlink_cwd_dir").string().c_str(), 0x800) == 0 && !std::filesystem::exists(root / "unlink_cwd_dir"));
     Require(openat_nid_postfix(-1, "file.txt", SCE_KERNEL_O_RDONLY) == -1 && Error() == 9);
     Require(openat_nid_postfix(base, nullptr, SCE_KERNEL_O_RDONLY) == -1 && Error() == 14);
     Require(openat_nid_postfix(base, "", SCE_KERNEL_O_RDONLY) == -1 && Error() == 2);
+    Require(renameat_nid_postfix(base, nullptr, base, "renamed.txt") == -1 && Error() == 14);
+    Require(renameat_nid_postfix(base, "made.bin", base, nullptr) == -1 && Error() == 14);
+    Require(renameat_nid_postfix(base, "", base, "renamed.txt") == -1 && Error() == 2);
+    Require(renameat_nid_postfix(base, "made.bin", base, "") == -1 && Error() == 2);
+    const int bad = sceKernelOpen(file.c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(bad >= 0);
+    Require(renameat_nid_postfix(-1, "made.bin", base, "renamed.txt") == -1 && Error() == 9);
+    Require(renameat_nid_postfix(base, "made.bin", -1, "renamed.txt") == -1 && Error() == 9);
+    Require(renameat_nid_postfix(bad, "made.bin", base, "renamed.txt") == -1 && Error() == 20);
+    Require(renameat_nid_postfix(base, "made.bin", bad, "renamed.txt") == -1 && Error() == 20);
+    Require(sceKernelClose(bad) == 0);
+    const auto longPart = std::string(256, 'y');
+    Require(renameat_nid_postfix(base, longPart.c_str(), base, "renamed.txt") == -1 && Error() == 63);
+    Require(renameat_nid_postfix(base, "made.bin", base, longPart.c_str()) == -1 && Error() == 63);
+    Require(renameat_nid_postfix(base, ".", base, "renamed.txt") == -1 && Error() == 22);
+    Require(renameat_nid_postfix(base, "..", base, "renamed.txt") == -1 && Error() == 22);
+    Require(renameat_nid_postfix(base, "made.bin", base, ".") == -1 && Error() == 22);
+    Require(renameat_nid_postfix(base, "made.bin", base, "..") == -1 && Error() == 22);
+    Require(renameat_nid_postfix(base, "missing.bin", base, "renamed.txt") == -1 && Error() == 2);
+    Require(renameat_nid_postfix(base, "made.bin", base, "renamed.bin") == 0);
+    Require(!std::filesystem::exists(root / "made.bin"));
+    Require(std::filesystem::is_regular_file(root / "renamed.bin"));
+    Require(renameat_nid_postfix(base, "renamed.bin", base, "renamed.bin") == 0);
+    const auto subPath = root / "sub_dir";
+    std::filesystem::create_directory(subPath);
+    Require(renameat_nid_postfix(base, "renamed.bin", base, "sub_dir") == -1 && Error() == 21);
+    Require(renameat_nid_postfix(base, "sub_dir", base, "renamed.bin") == -1 && Error() == 20);
+    Require(renameat_nid_postfix(base, "sub_dir", base, "sub_renamed") == 0);
+    Require(!std::filesystem::exists(subPath));
+    Require(std::filesystem::is_directory(root / "sub_renamed"));
+    const int subFd = sceKernelOpen((root / "sub_renamed").string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Require(subFd >= 0);
+    Require(renameat_nid_postfix(base, "renamed.bin", subFd, "nested.bin") == 0);
+    Require(!std::filesystem::exists(root / "renamed.bin"));
+    Require(std::filesystem::is_regular_file(root / "sub_renamed" / "nested.bin"));
+    Require(renameat_nid_postfix(base, "sub_renamed", subFd, "child") == -1 && Error() == 22);
+    const auto otherDir = root / "other_dir";
+    std::filesystem::create_directory(otherDir);
+    { std::ofstream stream(otherDir / "item.txt"); }
+    Require(renameat_nid_postfix(base, "sub_renamed", base, "other_dir") == -1 && Error() == 66);
+    Require(renameat_nid_postfix(subFd, "nested.bin/", base, "back.bin") == -1 && Error() == 20);
+    Require(renameat_nid_postfix(subFd, "nested.bin", base, "nonexistent/") == -1 && Error() == 20);
+    Require(renameat_nid_postfix(subFd, "nested.bin", base, "made.bin") == 0);
+    Require(std::filesystem::is_regular_file(root / "made.bin"));
+    Require(sceKernelClose(subFd) == 0);
+    Require(renameat_nid_postfix(-100, (root / "made.bin").string().c_str(), -100, (root / "final.bin").string().c_str()) == 0);
+    Require(std::filesystem::is_regular_file(root / "final.bin"));
     Require(sceKernelClose(base) == 0);
     std::filesystem::remove_all(root);
     return 0;

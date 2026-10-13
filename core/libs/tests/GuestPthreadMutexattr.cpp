@@ -1,4 +1,5 @@
 #include "SceTypes.hpp"
+#include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
 #include <stdexcept>
@@ -15,6 +16,9 @@ int APS5_VABI pthread_mutex_init_nid_postfix(PthreadMutex* mutex, const PthreadM
 int APS5_VABI pthread_mutex_lock_nid_postfix(PthreadMutex* mutex);
 int APS5_VABI pthread_mutex_unlock_nid_postfix(PthreadMutex* mutex);
 int APS5_VABI pthread_mutex_destroy_nid_postfix(PthreadMutex* mutex);
+int APS5_VABI pthread_mutex_timedlock_nid_postfix(PthreadMutex* mutex, const KernelTimespec* abstime);
+int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
+int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
 int APS5_VABI sched_get_priority_max_nid_postfix(int policy);
 }
 
@@ -34,6 +38,25 @@ static bool Throws(Call call) {
         return true;
     }
     return false;
+}
+
+static constexpr KernelTimespec INVALID_DEADLINE{0, 1000000000};
+
+static void* APS5_VABI TimedlockInvalidDeadline(void* arg) {
+    auto* mutex = static_cast<PthreadMutex*>(arg);
+    return reinterpret_cast<void*>(static_cast<std::intptr_t>(pthread_mutex_timedlock_nid_postfix(mutex, &INVALID_DEADLINE)));
+}
+
+static void CheckTimedlockInvalidDeadline() {
+    PthreadMutex mutex = nullptr;
+    Require(pthread_mutex_init_nid_postfix(&mutex, nullptr) == 0);
+    Require(pthread_mutex_timedlock_nid_postfix(&mutex, &INVALID_DEADLINE) == 0);
+    Pthread thread{};
+    void* result = nullptr;
+    Require(scePthreadCreate(&thread, nullptr, TimedlockInvalidDeadline, &mutex, nullptr) == 0);
+    Require(scePthreadJoin(thread, &result) == 0 && reinterpret_cast<std::intptr_t>(result) == GUEST_EINVAL);
+    Require(pthread_mutex_unlock_nid_postfix(&mutex) == 0);
+    Require(pthread_mutex_destroy_nid_postfix(&mutex) == 0);
 }
 
 static void CheckType() {
@@ -56,6 +79,7 @@ static void CheckType() {
 
 int main() {
     CheckType();
+    CheckTimedlockInvalidDeadline();
     PthreadMutexattr attr = nullptr;
     Require(pthread_mutexattr_init_nid_postfix(&attr) == 0);
     int ceiling = -1;

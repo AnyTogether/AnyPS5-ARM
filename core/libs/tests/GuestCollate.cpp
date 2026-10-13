@@ -128,21 +128,28 @@ int main() {
 
     const std::string longText = "collation of a longer text";
     require(Vtable(facet).transform(&result, collate, longText.data(), longText.data() + longText.size()) == &result);
-    require(allocations == 2 && lastSize == longText.size() + 1 && result.pointer == lastAllocation);
-    require(result.size == longText.size() && result.capacity == longText.size() && std::string(result.pointer) == longText);
+    require(allocations == 2 && lastSize == 32 && result.pointer == lastAllocation);
+    require(result.size == longText.size() && result.capacity == 31 && std::string(result.pointer) == longText);
     std::free(result.pointer);
 
-    const std::string largest(4094, 'z');
-    require(Vtable(facet).transform(&result, collate, largest.data(), largest.data() + largest.size()) == &result);
-    require(allocations == 3 && lastSize == 4095 && result.capacity == 4094 && std::string(result.pointer) == largest);
+    const std::string largestSmall(4079, 'z');
+    require(Vtable(facet).transform(&result, collate, largestSmall.data(), largestSmall.data() + largestSmall.size()) == &result);
+    require(allocations == 3 && lastSize == 4080 && result.pointer == lastAllocation && result.capacity == 4079 && std::string(result.pointer) == largestSmall);
     std::free(result.pointer);
 
-    const std::string tooLong(4095, 'z');
-    reject([&] { Vtable(facet).transform(&result, collate, tooLong.data(), tooLong.data() + tooLong.size()); });
+    const std::string smallestLarge(4080, 'y');
+    require(Vtable(facet).transform(&result, collate, smallestLarge.data(), smallestLarge.data() + smallestLarge.size()) == &result);
+    const auto raw = reinterpret_cast<std::uintptr_t>(lastAllocation);
+    const auto aligned = reinterpret_cast<std::uintptr_t>(result.pointer);
+    require(allocations == 4 && lastSize == 4096 + 0x27);
+    require(aligned % 0x20 == 0 && aligned >= raw + 8 && aligned <= raw + 0x27 && reinterpret_cast<void**>(result.pointer)[-1] == lastAllocation);
+    require(result.size == 4080 && result.capacity == 4095 && std::string(result.pointer) == smallestLarge);
+    std::free(lastAllocation);
+
     const std::string embedded("a\0b", 3);
     reject([&] { Vtable(facet).transform(&result, collate, embedded.data(), embedded.data() + embedded.size()); });
     reject([&] { Vtable(facet).transform(nullptr, collate, text, text + 1); });
-    require(allocations == 3);
+    require(allocations == 4);
 
     Vtable(facet).facet.retain(facet);
     Vtable(facet).facet.retain(facet);
@@ -174,7 +181,7 @@ int main() {
     reject([&] { _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(&wide, &frenchPointer); });
     require(wide == nullptr && _ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(nullptr, classic) == 1);
     require(_ZNSt7collateIwE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(&wide, classic) == 1);
-    require(wide != nullptr && allocations == 4 && lastSize == sizeof(GuestLocale::CollateFacet) && lastAllocation == wide);
+    require(wide != nullptr && allocations == 5 && lastSize == sizeof(GuestLocale::CollateFacet) && lastAllocation == wide);
     const auto& wideVtable = *reinterpret_cast<const WideVtable*>(wide->vtable);
     const auto* wideCollate = reinterpret_cast<const GuestLocale::CollateFacet*>(wide);
     const auto wideCompare = [&](const Wide& left, const Wide& right) {
@@ -190,10 +197,10 @@ int main() {
     std::memset(&wideResult, 0xcd, sizeof(wideResult));
     const Wide seven = u"seven!!";
     require(wideVtable.transform(&wideResult, wideCollate, seven.data(), seven.data() + seven.size()) == &wideResult);
-    require(wideResult.size == 7 && wideResult.capacity == 7 && Wide(wideResult.buffer) == seven && allocations == 4);
+    require(wideResult.size == 7 && wideResult.capacity == 7 && Wide(wideResult.buffer) == seven && allocations == 5);
     const Wide eight = u"eight!!!";
     require(wideVtable.transform(&wideResult, wideCollate, eight.data(), eight.data() + eight.size()) == &wideResult);
-    require(allocations == 5 && lastSize == 18 && wideResult.pointer == lastAllocation && wideResult.capacity == 8 && Wide(wideResult.pointer) == eight);
+    require(allocations == 6 && lastSize == 18 && wideResult.pointer == lastAllocation && wideResult.capacity == 8 && Wide(wideResult.pointer) == eight);
     std::free(wideResult.pointer);
     const Wide wideEmbedded(u"a\0b", 3);
     reject([&] { wideVtable.transform(&wideResult, wideCollate, wideEmbedded.data(), wideEmbedded.data() + wideEmbedded.size()); });

@@ -96,11 +96,13 @@ def main():
             assert elf[offset:offset + size] == image[offset:offset + size], "eh_frame_hdr bytes changed"
             assert all(header[0] != PT_SCE_VERSION for header in headers), headers
 
-        result, elf = relink(relinker, directory, "full-slots", fixture(6))
-        headers = program_headers(elf)
-        assert all(header[0] != PT_GNU_EH_FRAME for header in headers), headers
-        assert len(headers) == 6, headers
+        source = Path(directory) / "full-slots.elf"
+        output = Path(directory) / "full-slots.out"
+        source.write_bytes(fixture(6))
+        result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=20)
+        assert result.returncode == 2, result
         assert "No free program header slot for PT_GNU_EH_FRAME" in result.stderr, result.stderr
+        assert not output.exists(), "Executable written without exception metadata"
 
         image = fixture(6, with_frame=False)
         table_end = 64 + 6 * 56
@@ -119,7 +121,8 @@ def main():
             source.write_bytes(image)
             result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=20)
             assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
-            assert "Not enough program header slots: need 6, available 5" in result.stderr, result.stderr
+            expected = "No free program header slot for PT_GNU_EH_FRAME" if with_frame else "Not enough program header slots: need 6, available 5"
+            assert expected in result.stderr, result.stderr
             assert not output.exists(), "Insufficient program header slots must not produce an executable"
             assert source.read_bytes() == image, "Input changed while rejecting insufficient program header slots"
 

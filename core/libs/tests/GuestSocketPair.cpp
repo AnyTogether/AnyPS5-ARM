@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -10,11 +11,27 @@ struct PollDescriptor {
     short revents;
 };
 
+struct Iovec {
+    void* base;
+    std::uint64_t length;
+};
+
+struct Msghdr {
+    void* name;
+    std::uint32_t nameLength;
+    Iovec* iov;
+    int iovLength;
+    void* control;
+    std::uint32_t controlLength;
+    int flags;
+};
+
 extern "C" {
 int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 std::int64_t APS5_VABI recvfrom_nid_postfix(int, void*, std::uint64_t, int, void*, std::uint32_t*);
+std::int64_t APS5_VABI recvmsg_nid_postfix(int, Msghdr*, int);
 int APS5_VABI getsockname_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI getpeername_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI shutdown_nid_postfix(int, int);
@@ -34,7 +51,7 @@ constexpr int CloseOnExec = 0x10000000;
 constexpr int NonBlocking = 0x20000000;
 constexpr int NoSignal = 0x20000;
 constexpr int Peek = 2;
-constexpr int FirstSocket = 0x10000000;
+constexpr int DescriptorSetSize = 1024;
 constexpr short In = 0x1;
 constexpr short Out = 0x4;
 constexpr short Hup = 0x10;
@@ -73,7 +90,7 @@ static bool Unnamed(int descriptor, int (APS5_VABI *query)(int, void*, std::uint
 int main() {
     int pair[2] = {-1, -1};
     Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
-    Require(pair[0] >= FirstSocket && pair[1] >= FirstSocket && pair[0] != pair[1]);
+    Require(pair[0] >= 0 && pair[0] < DescriptorSetSize && pair[1] >= 0 && pair[1] < DescriptorSetSize && pair[0] != pair[1]);
     Require(Exchange(pair[0], pair[1], "one way"));
     Require(Exchange(pair[1], pair[0], "other way"));
     Require(Unnamed(pair[0], getsockname_nid_postfix) && Unnamed(pair[1], getpeername_nid_postfix));
@@ -134,6 +151,22 @@ int main() {
     Require(send_nid_postfix(pair[0], "bb", 2, 0) == 2);
     Require(recv_nid_postfix(pair[1], datagram, sizeof(datagram), 0) == 1);
     Require(recv_nid_postfix(pair[1], datagram, sizeof(datagram), 0) == 2);
+    Require(send_nid_postfix(pair[0], "record", 6, 0) == 6);
+    Require(send_nid_postfix(pair[0], "next", 4, 0) == 4);
+    char part[2]{};
+    Iovec piece{part, sizeof(part)};
+    Msghdr message{nullptr, 0, &piece, 1, nullptr, 0, -1};
+    const auto truncated = recvmsg_nid_postfix(pair[1], &message, 0);
+    if (truncated != 2 || message.flags != 0x10) {
+        std::fprintf(stderr, "recvmsg of a 6-byte SOCK_SEQPACKET record into 2 bytes returned %lld with msg_flags 0x%x, expected 2 with MSG_TRUNC (0x10)\n",
+            static_cast<long long>(truncated), static_cast<unsigned>(message.flags));
+        std::abort();
+    }
+    Require(std::memcmp(part, "re", 2) == 0);
+    char whole[8]{};
+    piece = {whole, sizeof(whole)};
+    message.flags = -1;
+    Require(recvmsg_nid_postfix(pair[1], &message, 0) == 4 && message.flags == 0 && std::memcmp(whole, "next", 4) == 0);
     Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
 #endif
 

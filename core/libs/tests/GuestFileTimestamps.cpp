@@ -12,9 +12,11 @@
 
 extern "C" {
 int APS5_VABI utimes_nid_postfix(const char*, const KernelTimeval*);
+int APS5_VABI lutimes_nid_postfix(const char*, const KernelTimeval*);
 int APS5_VABI futimes_nid_postfix(int, const KernelTimeval*);
 int APS5_VABI sceKernelUtimes_nid_postfix(const char*, const KernelTimeval*);
 int APS5_VABI stat_nid_postfix(const char*, FileStat*);
+int APS5_VABI lstat_nid_postfix(const char*, FileStat*);
 int APS5_VABI sceKernelFstat(int, FileStat*);
 std::int64_t APS5_VABI fstat_nid_disambig1_nid_postfix(int, FileStat*);
 int APS5_VABI open_nid_postfix(const char*, int, int);
@@ -72,6 +74,8 @@ int main() {
     CheckTimes(path, fd, second);
     Require(sceKernelUtimes_nid_postfix(path.c_str(), first) == 0, "sceKernelUtimes fractional timestamp");
     CheckTimes(path, fd, first);
+    Require(lutimes_nid_postfix(path.c_str(), second) == 0, "lutimes fractional timestamp");
+    CheckTimes(path, fd, second);
 
     for (int index = 0; index < 2; ++index) {
         for (const auto micros : {-1LL, 1000000LL}) {
@@ -80,7 +84,8 @@ int main() {
             Require(utimes_nid_postfix(path.c_str(), invalid) == -1 && *__error_nid_postfix() == 22, "utimes rejects invalid microseconds");
             Require(futimes_nid_postfix(fd, invalid) == -1 && *__error_nid_postfix() == 22, "futimes rejects invalid microseconds");
             Require(sceKernelUtimes_nid_postfix(path.c_str(), invalid) == static_cast<int>(0x80020016u), "sceKernelUtimes rejects invalid microseconds");
-            CheckTimes(path, fd, first);
+            Require(lutimes_nid_postfix(path.c_str(), invalid) == -1 && *__error_nid_postfix() == 22, "lutimes rejects invalid microseconds");
+            CheckTimes(path, fd, second);
         }
     }
 
@@ -137,6 +142,35 @@ int main() {
     Require(close_nid_postfix(directoryFd) == 0, "close directory descriptor");
 
     Require(utimes_nid_postfix((root / "missing").string().c_str(), first) == -1 && *__error_nid_postfix() == 2, "missing path reports ENOENT");
+    Require(lutimes_nid_postfix(nullptr, first) == -1 && *__error_nid_postfix() == 14, "lutimes rejects null path");
+    Require(lutimes_nid_postfix("", first) == -1 && *__error_nid_postfix() == 2, "lutimes rejects empty path");
+    Require(lutimes_nid_postfix((root / "missing").string().c_str(), first) == -1 && *__error_nid_postfix() == 2, "lutimes missing path reports ENOENT");
+    Require(utimes_nid_postfix(path.c_str(), second) == 0, "utimes target to second");
+    std::error_code symlinkError;
+    const auto linkPath = (root / "link.txt").string();
+    std::filesystem::create_symlink(path, linkPath, symlinkError);
+    if (!symlinkError) {
+        Require(lutimes_nid_postfix(linkPath.c_str(), first) == 0, "lutimes modifies symlink");
+        FileStat targetStatus{};
+        Require(stat_nid_postfix(path.c_str(), &targetStatus) == 0 && Same(targetStatus.st_mtim, second[1]), "target file unchanged");
+#ifdef _WIN32
+        const HANDLE handle = CreateFileW(std::filesystem::path(linkPath).c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        Require(handle != INVALID_HANDLE_VALUE, "open symlink");
+        FILETIME modified{};
+        Require(GetFileTime(handle, nullptr, nullptr, &modified), "get symlink time");
+        CloseHandle(handle);
+        const auto ticks = [](FILETIME time) {
+            return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+        };
+        Require(ticks(modified) == static_cast<std::uint64_t>(first[1].tv_sec + 11644473600LL) * 10000000 + first[1].tv_usec * 10,
+            "symlink mtime updated");
+#else
+        FileStat linkStatus{};
+        Require(lstat_nid_postfix(linkPath.c_str(), &linkStatus) == 0 && Same(linkStatus.st_mtim, first[1]), "symlink mtime updated");
+#endif
+    }
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0, "create pipe");
     FileStat pipeStatus{};

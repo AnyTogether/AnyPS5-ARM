@@ -134,9 +134,10 @@ class QuotedPathTests(unittest.TestCase):
 
 class SilentStubSectionTests(unittest.TestCase):
     path = "core/libs/prx/libSceExample/Export.cpp"
-    entry = f"- [Existing limitation](../../{path}) - console layout is unknown.\n"
+    entry = f"- [Existing limitation](../../../{path}) - console layout is unknown.\n"
+    library_debt = "docs/dev/debt/libSceExample.md"
 
-    def check_stub(self, debt_text):
+    def check_stub(self, debt_text, debt_path=library_debt):
         checker = Path(__file__).resolve().parents[1] / "check_conventions.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -160,7 +161,8 @@ class SilentStubSectionTests(unittest.TestCase):
             git("commit", "-qm", "docs: record technical debt")
             source = root / self.path
             source.write_text("int APS5_VABI sceExample() { return 0; }\n", encoding="utf-8")
-            debt.write_text(debt_text, encoding="utf-8")
+            (root / debt_path).parent.mkdir(parents=True, exist_ok=True)
+            (root / debt_path).write_text(debt_text, encoding="utf-8")
             git("add", ".")
             git("commit", "-qm", "feat: add example export")
             env = {key: value for key, value in os.environ.items()
@@ -171,44 +173,76 @@ class SilentStubSectionTests(unittest.TestCase):
                 cwd=root, capture_output=True, text=True, env=env, timeout=10,
             )
 
-    def require_rejected(self, debt):
-        result = self.check_stub(debt)
+    def require_rejected(self, debt, debt_path=library_debt):
+        result = self.check_stub(debt, debt_path)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("[silent-stub]", result.stdout)
         self.assertNotIn("[doc-link]", result.stdout)
+        self.assertNotIn("[debt-file]", result.stdout)
 
-    def require_accepted(self, debt):
-        result = self.check_stub(debt)
+    def require_accepted(self, debt, debt_path=library_debt):
+        result = self.check_stub(debt, debt_path)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("All conventions checks passed", result.stdout)
 
     def test_debt_outside_silent_stubs_does_not_exempt_export(self):
         for section in ("Build", "Unknown function info", "Functional"):
             with self.subTest(section=section):
-                self.require_rejected(f"# Project technical debt\n\n### {section}\n\n{self.entry}")
+                self.require_rejected(f"# libSceExample technical debt\n\n### {section}\n\n{self.entry}")
 
     def test_entries_after_silent_stubs_do_not_exempt_export(self):
         for heading in ("# Other debt", "## Other debt", "### Functional"):
             with self.subTest(heading=heading):
-                self.require_rejected(f"# Project technical debt\n\n### Silent stubs\n\n{heading}\n\n{self.entry}")
+                self.require_rejected(f"# libSceExample technical debt\n\n### Silent stubs\n\n{heading}\n\n{self.entry}")
 
     def test_file_entry_in_silent_stubs_exempts_export(self):
-        self.require_accepted(f"# Project technical debt\n\n### Silent stubs\n\n{self.entry}")
+        self.require_accepted(f"# libSceExample technical debt\n\n### Silent stubs\n\n{self.entry}")
 
     def test_named_entry_in_same_library_exempts_export(self):
-        entry = "- sceExample: [reference](../../core/libs/prx/libSceExample/Reference.hpp)\n"
-        self.require_accepted(f"# Project technical debt\n\n### Silent stubs\n\n{entry}")
+        entry = "- sceExample: [reference](../../../core/libs/prx/libSceExample/Reference.hpp)\n"
+        self.require_accepted(f"# libSceExample technical debt\n\n### Silent stubs\n\n{entry}")
 
     def test_named_entry_in_another_library_does_not_exempt_export(self):
-        entry = "- sceExample: [reference](../../core/libs/prx/libSceOther/Reference.hpp)\n"
-        self.require_rejected(f"# Project technical debt\n\n### Silent stubs\n\n{entry}")
+        entry = "- sceExample: [reference](../../../core/libs/prx/libSceOther/Reference.hpp)\n"
+        self.require_rejected(f"# libSceOther technical debt\n\n### Silent stubs\n\n{entry}", "docs/dev/debt/libSceOther.md")
 
     def test_different_function_in_same_library_does_not_exempt_export(self):
-        entry = "- sceExampleOther: [reference](../../core/libs/prx/libSceExample/Reference.hpp)\n"
-        self.require_rejected(f"# Project technical debt\n\n### Silent stubs\n\n{entry}")
+        entry = "- sceExampleOther: [reference](../../../core/libs/prx/libSceExample/Reference.hpp)\n"
+        self.require_rejected(f"# libSceExample technical debt\n\n### Silent stubs\n\n{entry}")
 
     def test_subsection_in_silent_stubs_keeps_exemption(self):
-        self.require_accepted(f"# Project technical debt\n\n### Silent stubs\n\n#### Dialogs\n\n{self.entry}")
+        self.require_accepted(f"# libSceExample technical debt\n\n### Silent stubs\n\n#### Dialogs\n\n{self.entry}")
+
+    def test_entry_in_the_index_still_exempts_export(self):
+        entry = self.entry.replace("../../../", "../../")
+        result = self.check_stub(f"# Project technical debt\n\n### Silent stubs\n\n{entry}", "docs/dev/TechnicalDebt.md")
+        self.assertNotIn("[silent-stub]", result.stdout)
+
+    def test_library_entry_in_the_index_is_rejected(self):
+        entry = self.entry.replace("../../../", "../../")
+        result = self.check_stub(f"# Project technical debt\n\n### Silent stubs\n\n{entry}", "docs/dev/TechnicalDebt.md")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/dev/TechnicalDebt.md:5: error: [debt-file]", result.stdout)
+        self.assertIn("docs/dev/debt/libSceExample.md", result.stdout)
+
+    def test_library_entry_in_another_library_file_is_rejected(self):
+        result = self.check_stub(f"# libSceOther technical debt\n\n### Silent stubs\n\n{self.entry}", "docs/dev/debt/libSceOther.md")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/dev/debt/libSceOther.md:5: error: [debt-file]", result.stdout)
+
+    def test_component_entry_goes_in_the_component_file(self):
+        result = self.check_stub(f"# shader technical debt\n\n### Functional\n\n- [Example](../../../{self.path}) - gap.\n".replace("libs/prx/libSceExample", "shader"), "docs/dev/debt/shader.md")
+        self.assertNotIn("[debt-file]", result.stdout + result.stderr)
+
+    def test_entry_goes_with_its_first_core_link(self):
+        entry = f"- [Recompiler](../../../core/shader/Example.cpp) - needs [a driver feature](../../../{self.path}).\n"
+        result = self.check_stub(f"# libSceExample technical debt\n\n### Functional\n\n{entry}")
+        self.assertIn("docs/dev/debt/libSceExample.md:5: error: [debt-file]", result.stdout)
+        self.assertIn("docs/dev/debt/shader.md", result.stdout)
+
+    def test_entry_without_a_core_link_stays_in_the_index(self):
+        result = self.check_stub("# Project technical debt\n\n### Build\n\n- A toolchain limitation.\n", "docs/dev/TechnicalDebt.md")
+        self.assertNotIn("[debt-file]", result.stdout + result.stderr)
 
 
 class PullRequestTemplateTests(unittest.TestCase):
@@ -335,6 +369,27 @@ class RepositoryChecksTests(unittest.TestCase):
         check = Check("HEAD~1", "HEAD")
         check.code()
         self.assertIn(("comment", "core/example.cpp", 3, ""), check.findings)
+
+    def test_checks_from_a_subdirectory_see_the_whole_repository(self):
+        definition = "int APS5_VABI sceFooBar(int a, int b) { return a + b; }\n"
+        first = self.root / "core/libs/prx/libSceA/Export.cpp"
+        first.parent.mkdir(parents=True)
+        first.write_text(definition, encoding="utf-8")
+        (self.root / "tools").mkdir()
+        (self.root / "tools/tool.py").write_text("print()\n", encoding="utf-8")
+        self.commit()
+        second = self.root / "core/libs/prx/libSceB/Export.cpp"
+        second.parent.mkdir(parents=True)
+        second.write_text(definition, encoding="utf-8")
+        (self.root / "docs").mkdir()
+        (self.root / "docs/guide.md").write_text("[export](../core/libs/prx/libSceA/Export.cpp)\n", encoding="utf-8")
+        self.commit()
+        os.chdir(self.root / "tools")
+        check = Check("HEAD~1", "HEAD")
+        check.code()
+        check.docs()
+        self.assertEqual(check.findings,
+                         [("duplicate-export", "core/libs/prx/libSceB/Export.cpp", 1, "sceFooBar is also in libSceA")])
 
     def test_submodule_outside_thirdparty_reports_without_crashing(self):
         head = self.git("rev-parse", "HEAD")

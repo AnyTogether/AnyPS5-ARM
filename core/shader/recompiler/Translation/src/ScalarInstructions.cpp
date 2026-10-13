@@ -9,9 +9,39 @@ void TranslateScalarInstruction(IrBuilder& builder, const RdnaInstruction& instr
     throw std::runtime_error("TranslateScalarInstruction not implemented");
 }
 
+template <typename TWord>
+bool TranslationContext::sU32Mask(const RdnaInstruction& inst, IrOpcode logicalOpcode, bool binary, bool negateRhs, bool negateResult, TWord&& word) {
+    const auto& destination = inst.destination;
+    const auto execOrVcc = [](const RdnaOperand& operand) { return operand.kind == RdnaOperandKind::ExecLo || operand.kind == RdnaOperandKind::VccLo; };
+    const bool involved = execOrVcc(destination) || execOrVcc(sourceAt(inst, 0u)) || (binary && execOrVcc(sourceAt(inst, 1u)));
+    const bool exact = maskLanesExact(sourceAt(inst, 0u)) && (!binary || maskLanesExact(sourceAt(inst, 1u)));
+    if (program.WaveSize() != 32u || !involved || !exact || (destination.kind != RdnaOperandKind::ScalarRegister && !execOrVcc(destination))) return word();
+    IrU1 lane = binary ? u64MaskBinary(inst, logicalOpcode, negateRhs, negateResult) : readMask(sourceAt(inst, 0u));
+    if (!binary && negateResult) lane = IrU1(ir.LogicalNot(lane.Value()));
+    IrU1 valid = readMaskValid(sourceAt(inst, 0u));
+    if (binary) valid = IrU1(ir.LogicalAnd(valid.Value(), readMaskValid(sourceAt(inst, 1u)).Value()));
+    const bool result = word();
+    switch (destination.kind) {
+    case RdnaOperandKind::ExecLo:
+        ir.SetExec(lane.Value());
+        break;
+    case RdnaOperandKind::VccLo:
+        ir.SetVcc(lane.Value());
+        break;
+    default: {
+        const auto reg = static_cast<ScalarReg>(destination.reg);
+        ir.SetThreadBitScalarReg(reg, lane.Value());
+        ir.SetScalarMaskTag(reg, valid.Value());
+        break;
+    }
+    }
+    return result;
+}
+
 bool TranslationContext::emitScalar(const RdnaInstruction& inst) {
     switch (inst.op) {
     case RdnaOpcode::SMovB32:
+        return sU32Mask(inst, IrOpcode::LogicalAnd, false, false, false, [&] { movB32(inst, false); return true; });
     case RdnaOpcode::SMovkI32:
         movB32(inst, false);
         return true;
@@ -281,13 +311,13 @@ bool TranslationContext::emitScalar(const RdnaInstruction& inst) {
     case RdnaOpcode::SMulHiI32:
         return simpleInteger(inst, IrOpcode::SMulHi, IrType::U32, false, false, false);
     case RdnaOpcode::SAndB32:
-        return simpleInteger(inst, IrOpcode::BitwiseAnd32, IrType::U32, false, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalAnd, true, false, false, [&] { return simpleInteger(inst, IrOpcode::BitwiseAnd32, IrType::U32, false, false, true); });
     case RdnaOpcode::SOrB32:
-        return simpleInteger(inst, IrOpcode::BitwiseOr32, IrType::U32, false, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalOr, true, false, false, [&] { return simpleInteger(inst, IrOpcode::BitwiseOr32, IrType::U32, false, false, true); });
     case RdnaOpcode::SXorB32:
-        return simpleInteger(inst, IrOpcode::BitwiseXor32, IrType::U32, false, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalXor, true, false, false, [&] { return simpleInteger(inst, IrOpcode::BitwiseXor32, IrType::U32, false, false, true); });
     case RdnaOpcode::SNotB32:
-        return simpleInteger(inst, IrOpcode::BitwiseNot32, IrType::U32, false, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalAnd, false, false, true, [&] { return simpleInteger(inst, IrOpcode::BitwiseNot32, IrType::U32, false, false, true); });
     case RdnaOpcode::SBrevB32:
         return simpleInteger(inst, IrOpcode::BitReverse32, IrType::U32, false, false, false);
     case RdnaOpcode::SBrevB64: {
@@ -345,15 +375,15 @@ bool TranslationContext::emitScalar(const RdnaInstruction& inst) {
     case RdnaOpcode::SLshrB64:
         return simpleInteger(inst, IrOpcode::ShiftRightLogical64, IrType::U64, false, false, true);
     case RdnaOpcode::SAndn2B32:
-        return composedIntegerBinary(inst, IrOpcode::BitwiseAnd32, true, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalAnd, true, true, false, [&] { return composedIntegerBinary(inst, IrOpcode::BitwiseAnd32, true, false, true); });
     case RdnaOpcode::SOrn2B32:
-        return composedIntegerBinary(inst, IrOpcode::BitwiseOr32, true, false, true);
+        return sU32Mask(inst, IrOpcode::LogicalOr, true, true, false, [&] { return composedIntegerBinary(inst, IrOpcode::BitwiseOr32, true, false, true); });
     case RdnaOpcode::SNandB32:
-        return composedIntegerBinary(inst, IrOpcode::BitwiseAnd32, false, true, true);
+        return sU32Mask(inst, IrOpcode::LogicalAnd, true, false, true, [&] { return composedIntegerBinary(inst, IrOpcode::BitwiseAnd32, false, true, true); });
     case RdnaOpcode::SNorB32:
-        return composedIntegerBinary(inst, IrOpcode::BitwiseOr32, false, true, true);
+        return sU32Mask(inst, IrOpcode::LogicalOr, true, false, true, [&] { return composedIntegerBinary(inst, IrOpcode::BitwiseOr32, false, true, true); });
     case RdnaOpcode::SXnorB32:
-        return composedIntegerBinary(inst, IrOpcode::BitwiseXor32, false, true, true);
+        return sU32Mask(inst, IrOpcode::LogicalXor, true, false, true, [&] { return composedIntegerBinary(inst, IrOpcode::BitwiseXor32, false, true, true); });
     case RdnaOpcode::SFf0I32B64:
         return sFfI32B64(inst, true);
     case RdnaOpcode::SFf1I32B64:

@@ -16,6 +16,10 @@ int APS5_VABI dlclose_nid_postfix(void*);
 int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t, int, ModuleInfoEx*);
 int APS5_VABI sceKernelGetModuleList(KernelModule*, std::size_t, std::size_t*);
 int APS5_VABI sceKernelGetModuleInfo(KernelModule, ModuleInfo*);
+int APS5_VABI sceKernelGetModuleList2(KernelModule*, std::size_t, std::size_t*);
+int APS5_VABI sceKernelGetModuleInfo2(KernelModule, ModuleInfo*);
+std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void**, std::size_t*);
+std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(InternalSegmentInfo*);
 }
 static void Require(bool value) { if (!value) std::abort(); }
 template<typename TFunction>
@@ -94,6 +98,20 @@ int main(int argc, char** argv) {
         Require(sceKernelGetModuleInfo(handle, &listed) == 0 && listed.name[0] != '\0');
         if (handle == self.id) Require(std::string(listed.name) == self.name);
     }
+    ModuleInfo program{};
+    program.st_size = sizeof(ModuleInfo);
+    Require(sceKernelGetModuleInfo(self.id, &program) == 0 && program.segment_count > 0);
+    void* textAddress = nullptr;
+    std::size_t textSize = 0;
+    Require(sceKernelGetLibkernelTextLocation_nid_postfix(&textAddress, &textSize) == 0);
+    Require(reinterpret_cast<std::uintptr_t>(textAddress) == program.segments[0].address);
+    Require(textSize == program.segments[0].size);
+    Require(ThrowsInvalidArgument([&] { sceKernelGetLibkernelTextLocation_nid_postfix(nullptr, &textSize); }));
+    Require(ThrowsInvalidArgument([&] { sceKernelGetLibkernelTextLocation_nid_postfix(&textAddress, nullptr); }));
+    InternalSegmentInfo segment{};
+    Require(sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(&segment) == 0);
+    Require(segment.address == program.segments[0].address && segment.size == program.segments[0].size);
+    Require(ThrowsInvalidArgument([] { sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(nullptr); }));
     for (const std::uint64_t size : {0x158, 0x1a8, 0x1b0, 0x200, 0}) {
         ModuleInfo sized{};
         sized.st_size = size;
@@ -105,6 +123,36 @@ int main(int argc, char** argv) {
     unknown.st_size = sizeof(ModuleInfo);
     Require(sceKernelGetModuleInfo(info.id, &unknown) == SCE_KERNEL_ERROR_ESRCH);
     Require(sceKernelGetModuleInfo(-1, &unknown) == SCE_KERNEL_ERROR_ESRCH && unknown.name[0] == '\0');
+    std::vector<KernelModule> titleHandles(handles.size() + 1, -1);
+    std::size_t titleCount = 0;
+    Require(sceKernelGetModuleList2(titleHandles.data(), titleHandles.size(), &titleCount) == 0);
+    Require(titleCount >= 1 && titleCount < count && titleHandles[titleCount] == -1);
+    titleHandles.resize(titleCount);
+    Require(titleHandles.front() == self.id);
+    for (const auto handle : titleHandles) {
+        Require(std::count(handles.begin(), handles.end(), handle) == 1);
+        ModuleInfo title{}, listed{};
+        title.st_size = listed.st_size = sizeof(ModuleInfo);
+        Require(sceKernelGetModuleInfo2(handle, &title) == 0 && sceKernelGetModuleInfo(handle, &listed) == 0);
+        Require(std::string(title.name) == listed.name && title.segment_count == listed.segment_count);
+    }
+    std::size_t titleUntouched = 99;
+    Require(sceKernelGetModuleList2(titleHandles.data(), titleCount - 1, &titleUntouched) == SCE_KERNEL_ERROR_ENOMEM && titleUntouched == 99);
+    Require(sceKernelGetModuleList2(nullptr, 0, &titleUntouched) == SCE_KERNEL_ERROR_EFAULT);
+    Require(sceKernelGetModuleList2(titleHandles.data(), titleHandles.size(), nullptr) == SCE_KERNEL_ERROR_EFAULT);
+    for (const auto handle : handles) {
+        if (std::count(titleHandles.begin(), titleHandles.end(), handle) != 0) continue;
+        ModuleInfo system{};
+        system.st_size = sizeof(ModuleInfo);
+        system.name[0] = 'x';
+        Require(sceKernelGetModuleInfo2(handle, &system) == SCE_KERNEL_ERROR_EPERM && system.name[0] == 'x');
+        Require(sceKernelGetModuleInfo2(handle, nullptr) == SCE_KERNEL_ERROR_EFAULT);
+        system.st_size = 0x158;
+        Require(sceKernelGetModuleInfo2(handle, &system) == SCE_KERNEL_ERROR_EINVAL);
+    }
+    ModuleInfo absent{};
+    absent.st_size = sizeof(ModuleInfo);
+    Require(sceKernelGetModuleInfo2(-1, &absent) == SCE_KERNEL_ERROR_ESRCH && absent.name[0] == 0);
     int local = 0;
     Query(&local, SCE_KERNEL_ERROR_ESRCH);
     Require(sceKernelGetModuleInfoFromAddr(reinterpret_cast<std::uintptr_t>(add), 2, nullptr) == SCE_KERNEL_ERROR_EFAULT);

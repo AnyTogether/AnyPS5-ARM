@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <numbers>
@@ -9,6 +8,8 @@
 #include "prx/libc/include/General.hpp"
 #include "Ngs2Internal.hpp"
 
+static constexpr float DEFAULT_SOUND_SPEED = 343.0f;
+
 namespace {
 
 constexpr std::uint32_t APPLY_SOURCE_ANGLE = 1u << 0;
@@ -16,11 +17,8 @@ constexpr std::uint32_t APPLY_SOURCE_DOPPLER = 1u << 1;
 constexpr std::uint32_t APPLY_VOLUME_MATRIX = 1u << 2;
 constexpr std::uint32_t APPLY_A3D_ATTRIBUTE = 1u << 3;
 constexpr std::uint32_t APPLY_A3D_AMBISONICS = 1u << 4;
-constexpr std::uint32_t COORDINATE_RIGHT_HANDED = 1;
 constexpr std::uint32_t ROLLOFF_CLAMPED_INVERSE = 3;
 constexpr std::uint32_t ROLLOFF_MODELS = 6;
-constexpr float DEFAULT_SOUND_SPEED = 340.0f;
-constexpr float DEFAULT_MAX_DISTANCE = 10000.0f;
 
 struct Vec {
     float x;
@@ -34,10 +32,6 @@ Vec Of(const Ngs2GeomVector& v) {
 
 float Dot(const Vec& a, const Vec& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-Vec Cross(const Vec& a, const Vec& b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 float Length(const Vec& v) {
@@ -119,66 +113,57 @@ void ValidateSource(const Ngs2GeomSourceParam& source) {
 
 }
 
-#pragma GCC visibility push(default)
+int Ngs2GeomCalcListener(const Ngs2GeomListenerParam* param, Ngs2GeomListenerWork* outWork, std::uint32_t flags) {
+    if (param == nullptr) APS5_INVALID_ARG_EX;
+    if (outWork == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
+    if (flags != 0) throw std::runtime_error("NGS2: listener coordinate flags are unsupported");
+    if (param->position.x != 0.0f || param->position.y != 0.0f || param->position.z != 0.0f)
+        throw std::runtime_error("NGS2: listener translation is unsupported");
+    if (param->orient_front.x != 0.0f || param->orient_front.y != 0.0f || param->orient_front.z != 1.0f ||
+        param->orient_up.x != 0.0f || param->orient_up.y != 1.0f || param->orient_up.z != 0.0f)
+        throw std::runtime_error("NGS2: non-default listener orientation is unsupported");
+    if (!std::isfinite(param->velocity.x) || !std::isfinite(param->velocity.y) || !std::isfinite(param->velocity.z)) APS5_INVALID_ARG_EX;
+    if (!std::isfinite(param->sound_speed) || param->sound_speed <= 0.0f) APS5_INVALID_ARG_EX;
+    Ngs2GeomListenerWork work{};
+    for (std::size_t i = 0; i < 4; i++) work.matrix[i][i] = 1.0f;
+    work.velocity = param->velocity;
+    work.sound_speed = param->sound_speed;
+    *outWork = work;
+    return SCE_NGS2_OK;
+}
 
-extern "C" {
-
-int APS5_VABI sceNgs2GeomResetListenerParam(Ngs2GeomListenerParam* out_listener_param) {
+int Ngs2GeomResetListenerParam(Ngs2GeomListenerParam* out_listener_param) {
     if (out_listener_param == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     *out_listener_param = {};
-    out_listener_param->orient_front = {0.0f, 0.0f, 1.0f};
-    out_listener_param->orient_up = {0.0f, 1.0f, 0.0f};
+    out_listener_param->orient_front.z = 1.0f;
+    out_listener_param->orient_up.y = 1.0f;
     out_listener_param->sound_speed = DEFAULT_SOUND_SPEED;
     return SCE_NGS2_OK;
 }
 
-int APS5_VABI sceNgs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
+int Ngs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
     if (out_source_param == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     *out_source_param = {};
-    out_source_param->direction = {0.0f, 0.0f, 1.0f};
-    out_source_param->cone = {1.0f, 360.0f, 1.0f, 360.0f};
-    out_source_param->rolloff = {0, DEFAULT_MAX_DISTANCE, 1.0f, 1.0f};
+    out_source_param->direction.z = 1.0f;
+    out_source_param->cone.inner_level = 1.0f;
+    out_source_param->cone.inner_angle = 360.0f;
+    out_source_param->cone.outer_level = 1.0f;
+    out_source_param->cone.outer_angle = 360.0f;
+    out_source_param->rolloff.max_distance = 1000000.0f;
+    out_source_param->rolloff.rolloff_factor = 1.0f;
+    out_source_param->rolloff.reference_distance = 1.0f;
     out_source_param->doppler_factor = 1.0f;
     out_source_param->fbw_level = 1.0f;
+    out_source_param->lfe_level = 1.0f;
     out_source_param->max_level = 1.0f;
     out_source_param->num_speakers = 2;
     out_source_param->matrix_format = 2;
     return SCE_NGS2_OK;
 }
 
-// flags bit 0 selects a right-handed scene, where the listener's right is front x up; in a
-// left-handed one it is up x front.
-int APS5_VABI sceNgs2GeomCalcListener(const Ngs2GeomListenerParam* param, Ngs2GeomListenerWork* out_work, uint32_t flags) {
-    if (param == nullptr || (flags & ~COORDINATE_RIGHT_HANDED) != 0) APS5_INVALID_ARG_EX;
-    if (out_work == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
-    const Vec position = Of(param->position);
-    const Vec front = Of(param->orient_front);
-    const Vec up = Of(param->orient_up);
-    const bool rightHanded = (flags & COORDINATE_RIGHT_HANDED) != 0;
-    const Vec right = rightHanded ? Cross(front, up) : Cross(up, front);
-    const float frontLength = Length(front);
-    const float rightLength = Length(right);
-    if (!Finite(position) || !Finite(front) || !Finite(up) || !Finite(Of(param->velocity)) || !(frontLength > 0.0f) ||
-        !(rightLength > 1e-6f * frontLength * Length(up)) || !(param->sound_speed > 0.0f)) {
-        APS5_INVALID_ARG_EX;
-    }
-    const Vec x = Scale(right, 1.0f / rightLength);
-    const Vec z = Scale(front, 1.0f / frontLength);
-    const Vec y = rightHanded ? Cross(x, z) : Cross(z, x);
-    *out_work = {};
-    const Vec axes[3] = {x, y, z};
-    for (int row = 0; row < 3; row++) {
-        out_work->matrix[row][0] = axes[row].x;
-        out_work->matrix[row][1] = axes[row].y;
-        out_work->matrix[row][2] = axes[row].z;
-        out_work->matrix[row][3] = -Dot(axes[row], position);
-    }
-    out_work->matrix[3][3] = 1.0f;
-    out_work->velocity = param->velocity;
-    out_work->sound_speed = param->sound_speed;
-    out_work->coordinate = flags & COORDINATE_RIGHT_HANDED;
-    return SCE_NGS2_OK;
-}
+#pragma GCC visibility push(default)
+
+extern "C" {
 
 // Fills only what the flags ask for. The volume matrix is the one of a point (mono) source, levels
 // [0, matrix_format), panned by sceNgs2PanGetVolumeMatrix over num_speakers; without the source angle
@@ -207,8 +192,8 @@ int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2G
         if (source->radius > 0.0f && distance < source->radius) focus = distance / source->radius;
         else if (distance == 0.0f) focus = 0.0f;
         const Ngs2PanParam pan{angle, focus, source->fbw_level * level, source->lfe_level * level};
-        std::fill(std::begin(out_attrib->levels), std::end(out_attrib->levels), 0.0f);
-        Ngs2PanGetVolumeMatrix(&work, &pan, 1, source->matrix_format, out_attrib->levels);
+        std::fill(std::begin(out_attrib->level), std::end(out_attrib->level), 0.0f);
+        Ngs2PanGetVolumeMatrix(&work, &pan, 1, source->matrix_format, out_attrib->level);
     }
     if ((flags & APPLY_A3D_ATTRIBUTE) != 0) {
         out_attrib->a3d_attrib.position = {position.x, position.y, position.z};

@@ -147,6 +147,7 @@ struct Decoder {
 
 std::mutex lock;
 std::map<std::uint64_t, std::shared_ptr<Decoder>> decoders;
+std::map<const void*, std::uint64_t> pictureOwners;
 std::uint64_t nextDecoder = 1;
 std::uint64_t nextQueue = 1;
 
@@ -266,7 +267,7 @@ bool WriteNv12(Decoder& decoder, const AVFrame& frame, std::uint8_t* target, std
     return sws_scale(decoder.scaler, frame.data, frame.linesize, 0, frame.height, planes, strides) == frame.height;
 }
 
-void EmitDecoded(Decoder& decoder, FrameBuffer* frame, OutputInfo* output) {
+void EmitDecoded(std::uint64_t handle, Decoder& decoder, FrameBuffer* frame, OutputInfo* output) {
     output->isValid = false;
     output->isErrorFrame = false;
     output->pictureCount = 0;
@@ -302,6 +303,8 @@ void EmitDecoded(Decoder& decoder, FrameBuffer* frame, OutputInfo* output) {
         output->framePitchInBytes = pitch;
     }
     decoder.pictures[frame->frameBuffer] = timestamps;
+    std::lock_guard guard(lock);
+    if (decoders.contains(handle)) pictureOwners[frame->frameBuffer] = handle;
 }
 
 }
@@ -358,6 +361,7 @@ int APS5_VABI sceVideodec2CreateDecoder_nid_postfix(const DecoderConfigInfo* con
 int APS5_VABI sceVideodec2DeleteDecoder_nid_postfix(std::uint64_t handle) {
     std::lock_guard guard(lock);
     if (decoders.erase(handle) == 0) throw std::runtime_error("Videodec2: invalid decoder handle");
+    std::erase_if(pictureOwners, [handle](const auto& owner) { return owner.second == handle; });
     return 0;
 }
 
@@ -383,7 +387,7 @@ int APS5_VABI sceVideodec2Decode_nid_postfix(std::uint64_t handle, const InputDa
     packet->pts = decoder.nextKey;
     decoder.inputs.emplace(decoder.nextKey++, picture);
     Send(decoder, packet);
-    EmitDecoded(decoder, frame, output);
+    EmitDecoded(handle, decoder, frame, output);
     return 0;
 }
 
@@ -397,7 +401,7 @@ int APS5_VABI sceVideodec2Flush_nid_postfix(std::uint64_t handle, FrameBuffer* f
         Send(decoder, nullptr);
         decoder.flushing = true;
     }
-    EmitDecoded(decoder, frame, output);
+    EmitDecoded(handle, decoder, frame, output);
     return 0;
 }
 
@@ -407,6 +411,10 @@ int APS5_VABI sceVideodec2Reset_nid_postfix(std::uint64_t handle) {
     auto& decoder = *found;
     std::lock_guard guard(decoder.mutex);
     decoder.pictures.clear();
+    {
+        std::lock_guard ownersGuard(lock);
+        std::erase_if(pictureOwners, [handle](const auto& owner) { return owner.second == handle; });
+    }
     avcodec_flush_buffers(decoder.context);
     decoder.ready.clear();
     decoder.inputs.clear();
@@ -417,15 +425,18 @@ int APS5_VABI sceVideodec2Reset_nid_postfix(std::uint64_t handle) {
 int APS5_VABI sceVideodec2GetPictureInfo_nid_postfix(const OutputInfo* output, AvcPictureInfo* first, void* second) {
     (void)second;
     if (!output || !first) throw std::runtime_error("Videodec2: invalid argument pointer");
-    std::vector<std::shared_ptr<Decoder>> all;
-    {
+    const auto owner = [output]() -> std::uint64_t {
         std::lock_guard guard(lock);
-        for (const auto& [handle, decoder] : decoders) all.push_back(decoder);
-    }
-    for (const auto& decoder : all) {
+        const auto found = pictureOwners.find(output->frameBuffer);
+        return found != pictureOwners.end() ? found->second : 0;
+    };
+    for (auto handle = owner(); handle != 0; handle = owner()) {
+        const auto decoder = FindDecoder(handle);
+        if (!decoder) continue;
         std::lock_guard guard(decoder->mutex);
+        if (owner() != handle) continue;
         const auto found = decoder->pictures.find(output->frameBuffer);
-        if (found == decoder->pictures.end()) continue;
+        if (found == decoder->pictures.end()) throw std::runtime_error("Videodec2: owned picture is missing");
         if (decoder->codec != CodecAvc) throw std::runtime_error("Videodec2: picture info is only implemented for H.264");
         const auto& picture = found->second;
         first->isValid = true;

@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -19,6 +21,7 @@ constexpr std::uint32_t FormatR32Uint = 20;
 constexpr std::uint32_t FormatR32Float = 22;
 constexpr std::uint32_t FormatR11G11B10Float = 36;
 constexpr std::uint32_t FormatR8G8B8A8Unorm = 56;
+constexpr std::uint32_t TileStandard64KB = 0x9;
 constexpr std::uint32_t TileDepth64KB = 0x18;
 constexpr std::uint32_t TileRenderTarget64KB = 0x1b;
 constexpr std::uint32_t Type2D = 9;
@@ -31,7 +34,10 @@ THandle newHandle() {
     return reinterpret_cast<THandle>(nextHandle += 0x10);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL createImage(VkDevice, const VkImageCreateInfo*, const VkAllocationCallbacks*, VkImage* image) {
+VkFormat lastImageFormat = VK_FORMAT_UNDEFINED;
+
+VKAPI_ATTR VkResult VKAPI_CALL createImage(VkDevice, const VkImageCreateInfo* info, const VkAllocationCallbacks*, VkImage* image) {
+    lastImageFormat = info->format;
     *image = newHandle<VkImage>();
     return VK_SUCCESS;
 }
@@ -97,6 +103,16 @@ VKAPI_ATTR void VKAPI_CALL formatProperties(VkPhysicalDevice, VkFormat, VkFormat
     properties->optimalTilingFeatures = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 }
 
+VKAPI_ATTR void VKAPI_CALL formatPropertiesWithoutD16S8(VkPhysicalDevice, VkFormat format, VkFormatProperties* properties) {
+    *properties = {};
+    if (format != VK_FORMAT_D16_UNORM_S8_UINT) properties->optimalTilingFeatures = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+}
+
+VKAPI_ATTR void VKAPI_CALL formatPropertiesOnlyD32S8(VkPhysicalDevice, VkFormat format, VkFormatProperties* properties) {
+    *properties = {};
+    if (format == VK_FORMAT_D32_SFLOAT_S8_UINT) properties->optimalTilingFeatures = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+}
+
 PFN_vkVoidFunction VKAPI_CALL deviceProc(VkDevice, const char* name) {
     static const std::map<std::string_view, PFN_vkVoidFunction> table{
         {"vkCreateImage", reinterpret_cast<PFN_vkVoidFunction>(createImage)},
@@ -151,6 +167,57 @@ std::shared_ptr<Texture> lookup(const Context& context, const View& view) {
     return DepthSurfaceTexture(context, words, DecodeTextureResource(words), VkComponentMapping{});
 }
 
+void TestD16StencilFallback(const Context& context) {
+    Require(HostDepthFormat(context, VK_FORMAT_D16_UNORM_S8_UINT) == VK_FORMAT_D16_UNORM_S8_UINT && HostDepthBiasConstant(context, VK_FORMAT_D16_UNORM_S8_UINT, 2.0f) == 2.0f, "a device with D16_UNORM_S8_UINT must keep it and its depth bias");
+    static int withoutTag = 0;
+    Context without = context;
+    without.physical = reinterpret_cast<VkPhysicalDevice>(&withoutTag);
+    without.formatProperties = formatPropertiesWithoutD16S8;
+    constexpr std::uint64_t d16s8 = 0x70000000;
+    constexpr std::uint64_t d16s8Stencil = 0x70800000;
+    Require(HostDepthFormat(without, VK_FORMAT_D16_UNORM_S8_UINT) == VK_FORMAT_D24_UNORM_S8_UINT, "a device without D16_UNORM_S8_UINT must store it as D24_UNORM_S8_UINT");
+    Require(HostDepthFormat(without, VK_FORMAT_D32_SFLOAT_S8_UINT) == VK_FORMAT_D32_SFLOAT_S8_UINT && HostDepthFormat(without, VK_FORMAT_D16_UNORM) == VK_FORMAT_D16_UNORM, "only D16_UNORM_S8_UINT is replaced");
+    DepthSurfaceView(without, {d16s8, d16s8Stencil, {256, 256}, VK_FORMAT_D16_UNORM_S8_UINT, 1.0f, 0});
+    Require(lastImageFormat == VK_FORMAT_D24_UNORM_S8_UINT, "a D16_UNORM_S8_UINT surface was not created as D24_UNORM_S8_UINT on a device without it");
+    Require(lookup(without, {d16s8, FormatR16Unorm, 256, 256}) != nullptr, "an R16 view of a D16 surface stored as D24 must still sample its depth plane");
+    Require(lookup(without, {d16s8Stencil, FormatR8Uint, 256, 256}) != nullptr, "an 8-bit view of the stencil plane of a D16 surface stored as D24 must sample it");
+    Require(HostDepthBiasConstant(without, VK_FORMAT_D16_UNORM_S8_UINT, 2.0f) == 512.0f, "a 16-bit depth bias must be scaled by 256 for D24 storage");
+    Require(HostDepthBiasConstant(without, VK_FORMAT_D32_SFLOAT_S8_UINT, 2.0f) == 2.0f, "a D32 depth bias must not be scaled");
+    const auto refused = [&](const View& view) {
+        try {
+            lookup(without, view);
+        } catch (const std::runtime_error& error) {
+            return std::string_view(error.what()).find("a depth plane that the device stores in another depth format is not implemented") != std::string_view::npos;
+        }
+        return false;
+    };
+    Require(refused({d16s8, FormatR16Unorm, 256, 256, TileDepth64KB, Type2DArray, 1}), "two slices of a D16 surface stored as D24 must be refused, as the plane copy would read the wider image as 16-bit texels");
+    Require(refused({d16s8, FormatR16Uint, 256, 256, TileStandard64KB}), "an R16_UINT view of a D16 surface stored as D24 must be refused");
+    std::string storageError;
+    try {
+        const auto words = tsharp({d16s8, FormatR16Unorm, 256, 256});
+        DepthSurfaceStorage(without, words, DecodeTextureResource(words), 0);
+    } catch (const std::runtime_error& error) {
+        storageError = error.what();
+    }
+    Require(storageError.find("depth plane") != std::string::npos && storageError.find("stored as") != std::string::npos, "storage access to the depth plane of a D16 surface stored as D24 must throw");
+    ClearDepthSurfaces(without.device);
+
+    static int onlyTag = 0;
+    Context only = context;
+    only.physical = reinterpret_cast<VkPhysicalDevice>(&onlyTag);
+    only.formatProperties = formatPropertiesOnlyD32S8;
+    Require(HostDepthFormat(only, VK_FORMAT_D16_UNORM_S8_UINT) == VK_FORMAT_D32_SFLOAT_S8_UINT, "a device with neither D16 nor D24 stencil formats must store D16_UNORM_S8_UINT as D32_SFLOAT_S8_UINT");
+    Require(HostDepthBiasConstant(only, VK_FORMAT_D16_UNORM_S8_UINT, 0.0f) == 0.0f, "a zero depth bias needs no scaling");
+    bool threw = false;
+    try {
+        HostDepthBiasConstant(only, VK_FORMAT_D16_UNORM_S8_UINT, 2.0f);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "a constant 16-bit depth bias on D32_SFLOAT_S8_UINT storage must throw");
+}
+
 }
 
 void RunDepthSurfaceReuseTests() {
@@ -163,6 +230,8 @@ void RunDepthSurfaceReuseTests() {
     context.memory.memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     context.limits.maxFramebufferWidth = 16384;
     context.limits.maxFramebufferHeight = 16384;
+    context.limits.maxFramebufferLayers = 1;
+    TestD16StencilFallback(context);
     constexpr std::uint64_t depth32 = 0x40000000;
     constexpr std::uint64_t depth16 = 0x50000000;
     constexpr std::uint64_t depthStencil = 0x60000000;
@@ -191,6 +260,27 @@ void RunDepthSurfaceReuseTests() {
     Require(lookup(context, {depthStencil, FormatR32Float, 320, 180}) != nullptr, "an R32F view must sample the older surface's depth plane when a newer surface's stencil plane reuses its address");
     Require(lookup(context, {depthStencil, FormatR8Uint, 320, 180}) != nullptr, "an 8-bit view must sample the newer surface's stencil plane at a reused address");
     Require(lookup(context, {reusedDepth, FormatR32Float, 320, 180}) != nullptr, "the newer surface's own depth plane must still be found");
+
+    const auto storageAliasesDepth = [&](const Context& owner, const View& view) {
+        const auto words = tsharp(view);
+        return DepthSurfaceAt(owner, words, DecodeTextureResource(words));
+    };
+    Require(storageAliasesDepth(context, {depth32, FormatR32Float, 384, 384}), "storage access to the actual D32 plane must remain rejected");
+    Require(storageAliasesDepth(context, {depth16, FormatR16Uint, 256, 256}), "raw D16 storage access must remain rejected");
+    Require(!storageAliasesDepth(context, {depth32, FormatR32Float, 128, 128}), "temporary memory reused at a different extent is not a depth storage alias");
+    Require(!storageAliasesDepth(context, {depth32, FormatR11G11B10Float, 384, 384}), "temporary memory reused for a color format is not a depth storage alias");
+    Require(!storageAliasesDepth(context, {depth32, FormatR32Uint, 384, 384, TileRenderTarget64KB}), "raw integer color memory without a depth layout is not a depth storage alias");
+    auto otherDevice = context;
+    static int otherDeviceTag = 0;
+    otherDevice.device = reinterpret_cast<VkDevice>(&otherDeviceTag);
+    Require(!storageAliasesDepth(otherDevice, {depth32, FormatR32Float, 384, 384}), "a depth surface on another device must not block a storage lookup");
+
+    constexpr std::uint64_t stencil16 = 0x60000000;
+    DepthSurfaceView(context, {depth16, stencil16, {128, 128}, VK_FORMAT_D16_UNORM_S8_UINT, 1.0f, 0});
+    Require(!storageAliasesDepth(context, {depth16, FormatR16Unorm, 256, 256}), "an older depth extent at the same address must not override the newest surface");
+    Require(storageAliasesDepth(context, {depth16, FormatR16Unorm, 128, 128}), "the newest depth extent must still reject actual storage access");
+    Require(storageAliasesDepth(context, {stencil16, FormatR8Uint, 128, 128}), "storage access to the actual stencil plane must remain rejected");
+    Require(!storageAliasesDepth(context, {stencil16, FormatR11G11B10Float, 128, 128}), "a stencil address reused for color is not a stencil storage alias");
 
     ClearDepthSurfaces(context.device);
 }

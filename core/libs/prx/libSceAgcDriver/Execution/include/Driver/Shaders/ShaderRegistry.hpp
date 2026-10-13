@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Execution/include/QueueState.hpp"
 #include <array>
 #include <optional>
+#include <span>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -66,6 +67,7 @@ struct PreparedShaders : PreparedShaderState {
     std::mutex mutex;
     std::condition_variable settled;
     std::exception_ptr failure;
+    std::atomic<bool> demanded{false};
     bool pending = false;
 };
 
@@ -84,6 +86,7 @@ struct ShaderSnapshot {
     std::shared_ptr<PreparedShaders> prepared = std::make_shared<PreparedShaders>();
     std::shared_ptr<const RegisteredShaderState> registeredState;
     std::shared_ptr<std::atomic<std::uint8_t>> workgroupUse = std::make_shared<std::atomic<std::uint8_t>>(0u);
+    std::shared_ptr<std::atomic<std::uint8_t>> positionVectorUse = std::make_shared<std::atomic<std::uint8_t>>(0u);
 };
 
 
@@ -92,6 +95,9 @@ std::shared_ptr<const ShaderSnapshot> ProgramSnapshot(const ShaderRegistry& shad
 void NoteRawGraphicsDraw();
 bool RawGraphicsDrawn();
 bool ProgramUsesWorkgroup(const ShaderSnapshot& snapshot, std::size_t codeOffset);
+// The PA_CL_VS_OUT_CNTL position export bits a vertex program is compiled with: none for a program
+// without pos1..pos3 exports, so its artifact does not depend on them.
+std::uint32_t PositionExportLayout(const ShaderSnapshot* snapshot, std::size_t codeOffset, std::span<const std::uint32_t> code, std::uint32_t paClVsOutCntl);
 bool VertexWorkgroupRequired(const QueueState& queue, const ShaderRegistry& registry);
 
 std::shared_ptr<const ShaderRecompiler::SourceHandle> PrepareShaderWithDiagnostics(const ShaderRecompiler::RecompileRequest& request, ShaderRecompiler::ShaderPreparationContext* preparation = nullptr);
@@ -102,7 +108,9 @@ std::optional<ShaderRecompiler::ShaderFloatMode> RegisteredFloatMode(const Shade
 std::shared_ptr<const ShaderSnapshot> RegisteredHeader(const ShaderRegistry& registry, const Shader* shader);
 std::shared_ptr<const ShaderSnapshot> RegisteredProgram(const ShaderRegistry& registry, std::uint64_t address, std::initializer_list<std::uint8_t> types);
 void PublishRegisteredShader(std::shared_ptr<ShaderRegistry>& registry, const std::shared_ptr<const ShaderSnapshot>& snapshot);
-void SubmitRegistrationPreparation(std::function<void()> task);
+void SubmitRegistrationPreparation(std::function<void()> task, const PreparedShaders* prepared = nullptr);
+void PrioritizeRegistrationPreparation(PreparedShaders& prepared);
+void SubmitLibraryPrebuild(std::function<void()> task);
 void CloseRegistrationPreparation();
 
 void ResolvePreparedGraphics(const ShaderSnapshot& front, const std::shared_ptr<const ShaderSnapshot>& fragment, std::uint32_t primitiveType, const ShaderRecompiler::SpirvTarget& target);

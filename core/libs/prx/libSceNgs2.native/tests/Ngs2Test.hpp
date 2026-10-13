@@ -39,6 +39,9 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t, Ngs2VoiceState*, size_t);
 int APS5_VABI sceNgs2VoiceGetStateFlags(uintptr_t, uint32_t*);
 int APS5_VABI sceNgs2VoiceGetPortInfo(uintptr_t, uint32_t, Ngs2VoicePortInfo*, size_t);
 int APS5_VABI sceNgs2VoiceQueryInfo(uintptr_t, uint32_t, void*, size_t);
+int APS5_VABI sceNgs2GeomResetListenerParam(Ngs2GeomListenerParam*);
+int APS5_VABI sceNgs2GeomCalcListener(const Ngs2GeomListenerParam*, Ngs2GeomListenerWork*, std::uint32_t);
+int APS5_VABI sceNgs2GeomResetSourceParam(Ngs2GeomSourceParam*);
 }
 
 inline void Check(bool value, int line) {

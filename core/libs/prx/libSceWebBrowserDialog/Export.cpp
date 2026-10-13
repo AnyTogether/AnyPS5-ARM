@@ -28,6 +28,8 @@ int APS5_VABI sceWebBrowserDialogInitialize(void) {
 
 int APS5_VABI sceWebBrowserDialogTerminate(void) {
     int expected = 1;
+    if (g_status.compare_exchange_strong(expected, 0)) return 0;
+    expected = COMMON_DIALOG_STATUS_FINISHED;
     if (!g_status.compare_exchange_strong(expected, 0)) throw std::logic_error("sceWebBrowserDialogTerminate: not initialized or still running");
     return 0;
 }

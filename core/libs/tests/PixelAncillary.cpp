@@ -3,6 +3,7 @@
 #include "Optimization/DeadCodeEliminator.hpp"
 #include "Optimization/MaskedSelectEliminator.hpp"
 #include "Optimization/ShaderInfoCollector.hpp"
+#include "Recompiler.hpp"
 #include <array>
 #include <cstdint>
 #include <stdexcept>
@@ -18,8 +19,22 @@ struct Row {
     std::uint32_t sample;
     std::uint32_t layer;
     bool frontFacing;
+    RasterPrimitive primitive = RasterPrimitive::Triangle;
 };
 constexpr std::array<Row, 6> Rows {{{0u, 0u, false}, {0u, 0u, true}, {15u, 0x1FFFu, false}, {15u, 0x1FFFu, true}, {0u, 0x1FFFu, true}, {15u, 0u, false}}};
+
+static std::uint32_t Evaluate(const IrValue* value, const Row& row);
+static void RequireField(const IrValue& user, StageInputKind kind, std::uint32_t fieldOffset, std::uint32_t count) {
+    if (kind == StageInputKind::Layer) {
+        for (const Row& row : Rows) Require(Evaluate(&user, row) == 0u);
+        return;
+    }
+    const IrValue* field = user.Argument(0)->Resolve();
+    Require(field->Opcode() == IrOpcode::GetBuiltin);
+    Require(static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == kind);
+    Require(user.Argument(1)->Resolve()->ImmediateU32() == fieldOffset);
+    Require(user.Argument(2)->Resolve()->ImmediateU32() == count);
+}
 
 static IrBlock& Begin(IrProgram& program) {
     program.Resources().stage = IrShaderStage::Pixel;
@@ -78,11 +93,7 @@ static void ExtractVector(std::uint32_t offset, std::uint32_t count, StageInputK
     static_cast<void>(builder.Emit(IrOpcode::ReferenceU32, IrType::Void, {&user}));
     static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
     Lower(program);
-    const IrValue* field = user.Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin);
-    Require(static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == kind);
-    Require(user.Argument(1)->Resolve()->ImmediateU32() == fieldOffset);
-    Require(user.Argument(2)->Resolve()->ImmediateU32() == count);
+    RequireField(user, kind, fieldOffset, count);
 }
 
 static void ExtractVectorMaskedCopy(std::uint32_t offset, std::uint32_t count, StageInputKind kind, std::uint32_t fieldOffset) {
@@ -107,21 +118,24 @@ static void ExtractVectorMaskedCopy(std::uint32_t offset, std::uint32_t count, S
     static_cast<void>(builder.Emit(IrOpcode::ReferenceU32, IrType::Void, {&copy}));
     static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
     ConstantFolder().Fold(program);
-    const IrValue* field = user.Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin);
-    Require(static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == kind);
-    Require(user.Argument(1)->Resolve()->ImmediateU32() == fieldOffset);
-    Require(user.Argument(2)->Resolve()->ImmediateU32() == count);
+    RequireField(user, kind, fieldOffset, count);
 }
 static void Extract(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, StageInputKind kind, std::uint32_t fieldOffset) {
     IrProgram program;
     auto& user = Build(program, opcode, offset, count);
     Lower(program);
-    const IrValue* field = user.Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin);
-    Require(static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == kind);
-    Require(user.Argument(1)->Resolve()->ImmediateU32() == fieldOffset);
-    Require(user.Argument(2)->Resolve()->ImmediateU32() == count);
+    RequireField(user, kind, fieldOffset, count);
+}
+static void Refused(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool throughSelect = false) {
+    IrProgram program;
+    static_cast<void>(Build(program, opcode, offset, count, throughSelect));
+    try {
+        Lower(program);
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()).find("unsupported live use") != std::string::npos);
+        return;
+    }
+    Require(false);
 }
 static std::uint32_t BitField(std::uint32_t word, std::uint32_t offset, std::uint32_t count, bool isSigned) {
     const std::uint32_t mask = count == 32u ? ~0u : (1u << count) - 1u;
@@ -142,6 +156,7 @@ static std::uint32_t Evaluate(const IrValue* value, const Row& row) {
                 case StageInputKind::SampleId: return row.sample;
                 case StageInputKind::Layer: return row.layer;
                 case StageInputKind::FrontFacing: return row.frontFacing ? 1u : 0u;
+                case StageInputKind::RasterPrimitive: return static_cast<std::uint32_t>(row.primitive);
                 default: break;
             }
             break;
@@ -157,7 +172,7 @@ static std::uint32_t Evaluate(const IrValue* value, const Row& row) {
     throw std::runtime_error("packed pixel ancillary evaluation reached an unsupported value");
 }
 static std::uint32_t PackedWord(const Row& row) {
-    return UnmodelledBits | (row.sample << 8u) | (row.layer << 16u);
+    return UnmodelledBits | (row.sample << 8u);
 }
 static void Values(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool throughSelect) {
     IrProgram program;
@@ -179,11 +194,7 @@ static void LateFold() {
     IrValue& user = builder.Emit(IrOpcode::BitFieldUExtract, IrType::U32, {&ancillary, &offset, &count});
     End(builder, user);
     Lower(program);
-    const IrValue* field = user.Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin);
-    Require(static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == StageInputKind::Layer);
-    Require(user.Argument(1)->Resolve()->ImmediateU32() == 0u);
-    Require(user.Argument(2)->Resolve()->ImmediateU32() == 11u);
+    RequireField(user, StageInputKind::Layer, 0u, 11u);
     for (const Row& row : Rows) {
         Require(Evaluate(&user, row) == BitField(PackedWord(row), 16u, 11u, false));
     }
@@ -232,30 +243,16 @@ static void MergedValues(IrOpcode opcode, std::uint32_t offset, std::uint32_t co
         Require(Evaluate(&user, row) == BitField(word, offset, count, opcode == IrOpcode::BitFieldSExtract));
     }
 }
-// A reader of other bits, or of the word itself, gets the word rebuilt from its known fields: the
-// other bits read as zero, and no packed ancillary input is left.
-static std::uint32_t RebuiltWord(const Row& row) {
-    return (row.sample << 8u) | (row.layer << 16u);
-}
-static std::uint32_t Apply(IrOpcode opcode, std::uint32_t word, std::uint32_t offset, std::uint32_t count) {
-    return opcode == IrOpcode::BitwiseOr32 ? word | offset : BitField(word, offset, count, opcode == IrOpcode::BitFieldSExtract);
-}
-static void RequireNoPackedWord(IrProgram& program) {
-    for (const auto& block : program.Blocks()) {
-        for (const IrValue* inst : block->Instructions()) {
-            Require(inst->Opcode() != IrOpcode::GetBuiltin || static_cast<StageInputKind>(inst->Argument(0)->Resolve()->ImmediateU32()) != StageInputKind::PackedAncillary);
-        }
-    }
-}
-static void Opaque(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool throughSelect = false) {
+static void MergedRefused(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool loop) {
     IrProgram program;
-    auto& user = Build(program, opcode, offset, count, throughSelect);
-    Lower(program);
-    RequireNoPackedWord(program);
-    for (const Row& row : Rows) {
-        const std::uint32_t word = throughSelect && !row.frontFacing ? SelectOther : RebuiltWord(row);
-        Require(Evaluate(&user, row) == Apply(opcode, word, offset, count));
+    static_cast<void>(Merged(program, opcode, offset, count, loop));
+    try {
+        Lower(program);
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()).find("unsupported live use") != std::string::npos);
+        return;
     }
+    Require(false);
 }
 // The word carried through a select into a layer extract is rebuilt from the layer alone: reading the
 // sample ID would turn on per-sample shading.
@@ -267,16 +264,6 @@ static void ForwardedLayerOnly() {
         for (const IrValue* inst : block->Instructions()) {
             Require(inst->Opcode() != IrOpcode::GetBuiltin || static_cast<StageInputKind>(inst->Argument(0)->Resolve()->ImmediateU32()) != StageInputKind::SampleId);
         }
-    }
-}
-static void MergedOpaque(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool loop) {
-    IrProgram program;
-    auto& user = Merged(program, opcode, offset, count, loop);
-    Lower(program);
-    RequireNoPackedWord(program);
-    for (const Row& row : Rows) {
-        const std::uint32_t word = row.frontFacing ? RebuiltWord(row) : SelectOther;
-        Require(Evaluate(&user, row) == Apply(opcode, word, offset, count));
     }
 }
 enum class HelperRead { Export, FullWaveExport, DataTestExport, Ballot };
@@ -330,36 +317,41 @@ static HelperProgram HelperOnly(IrProgram& program, HelperRead read, std::uint32
     static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
     return HelperProgram {&written, &layer, &value};
 }
-static void LowerMasked(IrProgram& program) {
+static void LowerMasked(IrProgram& program, bool compose = false) {
     ConstantFolder().Fold(program);
     DeadCodeEliminator().RemoveIdentities(program);
     DeadCodeEliminator().Eliminate(program);
     static_cast<void>(MaskedSelectEliminator().Eliminate(program));
     DeadCodeEliminator().Eliminate(program);
+    if (compose && ConstantFolder().ComposePackedAncillary(program)) DeadCodeEliminator().Eliminate(program);
     const ShaderPixelInputInfo pixel {};
     ShaderInfoCollector().Collect(program, ShaderStageInputInfo {nullptr, &pixel, nullptr});
 }
 static void HelperLanesOnly(std::uint32_t chain = 0u) {
     IrProgram program;
     const HelperProgram built = HelperOnly(program, HelperRead::Export, chain);
-    LowerMasked(program);
+    LowerMasked(program, true);
+    Require(!program.Info().rasterPrimitive);
     for (const IrBlock* block : program.BlockOrder()) {
         for (const IrValue* inst : block->Instructions()) {
             Require(inst->Opcode() != IrOpcode::GetBuiltin || static_cast<StageInputKind>(inst->Argument(0)->Resolve()->ImmediateU32()) != StageInputKind::PackedAncillary);
         }
     }
     Require(built.written->Parent() == nullptr);
-    const IrValue* field = built.layer->Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin && static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == StageInputKind::Layer);
+    RequireField(*built.layer, StageInputKind::Layer, 0u, 11u);
     const IrValue* entryValue = built.exported->Argument(0)->Resolve();
     Require(entryValue->HasImmediate() && entryValue->ImmediateU32() == SelectOther);
 }
-// Where helper lanes may read the whole word, it is rebuilt from the typed inputs instead of refused.
-static void HelperLanesRebuilt(HelperRead read, std::uint32_t chain = 0u) {
+static void HelperLanesRefused(HelperRead read, std::uint32_t chain = 0u) {
     IrProgram program;
     static_cast<void>(HelperOnly(program, read, chain));
-    LowerMasked(program);
-    RequireNoPackedWord(program);
+    try {
+        LowerMasked(program);
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()).find("unsupported live use") != std::string::npos);
+        return;
+    }
+    Require(false);
 }
 enum class LoopRead { ExportAfter, ExportInside, UniformLoop, RevivedExportInside };
 
@@ -432,16 +424,80 @@ static void HelperLoopOnly(LoopRead read) {
         }
     }
     Require(built.written->Parent() == nullptr);
-    const IrValue* field = built.layer->Argument(0)->Resolve();
-    Require(field->Opcode() == IrOpcode::GetBuiltin && static_cast<StageInputKind>(field->Argument(0)->Resolve()->ImmediateU32()) == StageInputKind::Layer);
+    RequireField(*built.layer, StageInputKind::Layer, 0u, 11u);
     const IrValue* entryValue = built.exported->Argument(0)->Resolve();
     Require(entryValue->HasImmediate() && entryValue->ImmediateU32() == SelectOther);
 }
-static void HelperLoopRebuilt(LoopRead read) {
+static void HelperLoopRefused(LoopRead read) {
     IrProgram program;
     static_cast<void>(HelperLoop(program, read));
-    LowerMasked(program);
-    RequireNoPackedWord(program);
+    try {
+        LowerMasked(program);
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()).find("unsupported live use") != std::string::npos);
+        return;
+    }
+    Require(false);
+}
+static bool BuiltinRemains(const IrProgram& program, StageInputKind kind) {
+    for (const IrBlock* block : program.BlockOrder()) {
+        for (const IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() == IrOpcode::GetBuiltin && static_cast<StageInputKind>(inst->Argument(0)->Resolve()->ImmediateU32()) == kind) return true;
+        }
+    }
+    return false;
+}
+static bool AncillaryRemains(const IrProgram& program) {
+    return BuiltinRemains(program, StageInputKind::PackedAncillary);
+}
+static void ExportedWholeWord() {
+    IrProgram program;
+    auto& entry = Begin(program);
+    auto& body = program.CreateBlock();
+    auto& merge = program.CreateBlock();
+    program.BlockOrder().push_back(&body);
+    program.BlockOrder().push_back(&merge);
+    entry.AddBranch(&body);
+    entry.AddBranch(&merge);
+    body.AddBranch(&merge);
+    IrBuilder builder(program);
+    builder.SetInsertionPoint(entry);
+    IrValue& helper = builder.Emit(IrOpcode::GetBuiltin, IrType::U32, {&builder.Constant(static_cast<std::uint32_t>(StageInputKind::HelperInvocation)), &builder.Constant(0u)});
+    IrValue& live = builder.IEqual(helper, builder.Constant(0u));
+    IrValue& ancillary = AncillaryBuiltin(builder);
+    IrValue& tested = builder.INotEqual(builder.Select(FrontFacingBuiltin(builder), builder.Constant(7u), builder.Constant(0u)), builder.Constant(0u));
+    builder.SetInsertionPoint(body);
+    IrValue& written = builder.Select(live, builder.Constant(SelectOther), ancillary);
+    IrValue& carried = program.CreateValue(IrOpcode::Phi, IrType::U32);
+    merge.AppendInstruction(&carried);
+    carried.AddPhiOperand(&entry, &ancillary);
+    carried.AddPhiOperand(&body, &written);
+    builder.SetInsertionPoint(merge);
+    const auto channel = [&](float value) -> IrValue& {
+        IrValue& half = builder.ConstantF32(value);
+        return builder.Select(tested, builder.Emit(IrOpcode::PackFloat2x16Rtz, IrType::U32, {&half, &half}), carried);
+    };
+    IrValue& data = builder.Emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&channel(0.25f), &channel(0.75f), &builder.Constant(0u), &builder.Constant(0u)});
+    program.Metadata().exportInfo.push_back(ExportInfo {.kind = ExportTargetKind::Mrt, .index = 0u, .en = 0xFu, .done = true, .vm = true});
+    static_cast<void>(builder.Emit(IrOpcode::SetAttribute, IrType::Void, {&data, &live}, ExportFlags {0u, 0u}));
+    static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
+    LowerMasked(program, true);
+    Require(!AncillaryRemains(program) && program.Info().rasterPrimitive);
+    Require(!BuiltinRemains(program, StageInputKind::Layer));
+    const IrValue* word = carried.Argument(0)->Resolve();
+    constexpr std::array<Row, 5> words {{{0u, 0u, false, RasterPrimitive::Triangle}, {0u, 0u, false, RasterPrimitive::Rectangle}, {0u, 0u, false, RasterPrimitive::Line}, {15u, 0x1FFFu, false, RasterPrimitive::Point}, {3u, 0x7FFu, false, RasterPrimitive::Triangle}}};
+    for (const Row& row : words) {
+        Require(Evaluate(word, row) == (static_cast<std::uint32_t>(row.primitive) | (row.sample << 8u)));
+    }
+}
+static void WholeWordReplacesRefusal(HelperRead read) {
+    IrProgram program;
+    const HelperProgram built = HelperOnly(program, read);
+    LowerMasked(program, true);
+    Require(!AncillaryRemains(program) && program.Info().rasterPrimitive);
+    Require(built.written->Parent() != nullptr);
+    const Row row {9u, 0x123u, false, RasterPrimitive::Rectangle};
+    Require(Evaluate(built.written->Argument(2), row) == (3u | (9u << 8u)));
 }
 enum class StartingQuad { Kept, BallotAfterBranch, BallotOfOtherLanes, ComputeStage };
 
@@ -500,11 +556,16 @@ static void StartingQuadOutsidePixel() {
     const IrValue* value = StartingQuadExported(program, StartingQuad::ComputeStage);
     Require(value != nullptr && value->Opcode() == IrOpcode::SelectU32);
 }
-static void StartingQuadRebuilt(StartingQuad shape) {
+static void StartingQuadRefused(StartingQuad shape) {
     IrProgram program;
     static_cast<void>(StartingQuadMasked(program, shape));
-    Lower(program);
-    RequireNoPackedWord(program);
+    try {
+        Lower(program);
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()).find("unsupported live use") != std::string::npos);
+        return;
+    }
+    Require(false);
 }
 int main() {
     Extract(IrOpcode::BitFieldUExtract, 8u, 4u, StageInputKind::SampleId, 0u);
@@ -526,38 +587,42 @@ int main() {
     ExtractVectorMaskedCopy(16u, 11u, StageInputKind::Layer, 0u);
     ExtractVectorMaskedCopy(8u, 4u, StageInputKind::SampleId, 0u);
     ExtractVector(8u, 4u, StageInputKind::SampleId, 0u);
-    Opaque(IrOpcode::BitwiseOr32, 1u, 0u);
-    Opaque(IrOpcode::BitwiseOr32, 1u, 0u, true);
-    Opaque(IrOpcode::BitFieldUExtract, 2u, 4u);
-    Opaque(IrOpcode::BitFieldUExtract, 10u, 4u);
-    Opaque(IrOpcode::BitFieldUExtract, 13u, 2u);
-    Opaque(IrOpcode::BitFieldUExtract, 16u, 14u);
-    Opaque(IrOpcode::BitFieldUExtract, 0u, 2u);
-    Opaque(IrOpcode::BitFieldUExtract, 7u, 1u);
-    Opaque(IrOpcode::BitFieldUExtract, 12u, 4u);
-    Opaque(IrOpcode::BitFieldUExtract, 29u, 1u);
-    Opaque(IrOpcode::BitFieldUExtract, 8u, 0u);
-    Opaque(IrOpcode::BitFieldUExtract, 0u, 2u, true);
-    Opaque(IrOpcode::BitFieldSExtract, 12u, 4u, true);
+    Refused(IrOpcode::BitwiseOr32, 1u, 0u);
+    Refused(IrOpcode::BitwiseOr32, 1u, 0u, true);
+    Refused(IrOpcode::BitFieldUExtract, 2u, 4u);
+    Refused(IrOpcode::BitFieldUExtract, 10u, 4u);
+    Refused(IrOpcode::BitFieldUExtract, 13u, 2u);
+    Refused(IrOpcode::BitFieldUExtract, 16u, 14u);
+    Refused(IrOpcode::BitFieldUExtract, 0u, 2u);
+    Refused(IrOpcode::BitFieldUExtract, 7u, 1u);
+    Refused(IrOpcode::BitFieldUExtract, 12u, 4u);
+    Refused(IrOpcode::BitFieldUExtract, 29u, 1u);
+    Refused(IrOpcode::BitFieldUExtract, 8u, 0u);
+    Refused(IrOpcode::BitFieldUExtract, 0u, 2u, true);
+    Refused(IrOpcode::BitFieldSExtract, 12u, 4u, true);
     MergedValues(IrOpcode::BitFieldUExtract, 8u, 4u, false);
     MergedValues(IrOpcode::BitFieldUExtract, 16u, 13u, false);
     MergedValues(IrOpcode::BitFieldSExtract, 20u, 9u, false);
     MergedValues(IrOpcode::BitFieldUExtract, 16u, 11u, true);
-    MergedOpaque(IrOpcode::BitwiseOr32, 1u, 0u, false);
-    MergedOpaque(IrOpcode::BitFieldUExtract, 12u, 4u, false);
-    MergedOpaque(IrOpcode::BitFieldUExtract, 0u, 2u, true);
+    MergedRefused(IrOpcode::BitwiseOr32, 1u, 0u, false);
+    MergedRefused(IrOpcode::BitFieldUExtract, 12u, 4u, false);
+    MergedRefused(IrOpcode::BitFieldUExtract, 0u, 2u, true);
     HelperLanesOnly();
     HelperLanesOnly(6000u);
-    HelperLanesRebuilt(HelperRead::FullWaveExport);
-    HelperLanesRebuilt(HelperRead::DataTestExport);
-    HelperLanesRebuilt(HelperRead::Ballot);
-    HelperLanesRebuilt(HelperRead::FullWaveExport, 6000u);
+    HelperLanesRefused(HelperRead::FullWaveExport);
+    HelperLanesRefused(HelperRead::DataTestExport);
+    HelperLanesRefused(HelperRead::Ballot);
+    HelperLanesRefused(HelperRead::FullWaveExport, 6000u);
     HelperLoopOnly(LoopRead::ExportAfter);
     HelperLoopOnly(LoopRead::ExportInside);
     HelperLoopOnly(LoopRead::UniformLoop);
-    HelperLoopRebuilt(LoopRead::RevivedExportInside);
+    HelperLoopRefused(LoopRead::RevivedExportInside);
+    ExportedWholeWord();
+    WholeWordReplacesRefusal(HelperRead::FullWaveExport);
+    WholeWordReplacesRefusal(HelperRead::DataTestExport);
+    WholeWordReplacesRefusal(HelperRead::Ballot);
     StartingQuadOnly();
-    StartingQuadRebuilt(StartingQuad::BallotAfterBranch);
-    StartingQuadRebuilt(StartingQuad::BallotOfOtherLanes);
+    StartingQuadRefused(StartingQuad::BallotAfterBranch);
+    StartingQuadRefused(StartingQuad::BallotOfOtherLanes);
     StartingQuadOutsidePixel();
 }

@@ -4,13 +4,16 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "Optimization/ResourceProgram.hpp"
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <chrono>
 #include <future>
 #include <cstring>
 #include <iostream>
+#include <latch>
 #include <optional>
+#include <semaphore>
 #include <thread>
 
 namespace {
@@ -300,6 +303,41 @@ void TransactionLock() {
     Require(excluded, "a transaction ran beside one that had read prepared state");
 }
 
+void PreparationPriority(bool beforeSubmit) {
+    const auto workers = std::max(2u, std::thread::hardware_concurrency() / 2u);
+    std::barrier started(static_cast<std::ptrdiff_t>(workers + 1u));
+    std::counting_semaphore<> release(0);
+    std::latch finished(static_cast<std::ptrdiff_t>(workers));
+    for (unsigned index = 0; index < workers; ++index) {
+        SubmitRegistrationPreparation([&] {
+            started.arrive_and_wait();
+            release.acquire();
+            finished.count_down();
+        });
+    }
+    started.arrive_and_wait();
+    PreparedShaders prepared;
+    std::atomic<unsigned> order{0};
+    std::promise<unsigned> background;
+    std::promise<unsigned> demanded;
+    auto backgroundDone = background.get_future();
+    auto demandedDone = demanded.get_future();
+    SubmitRegistrationPreparation([&] { background.set_value(order.fetch_add(1u)); });
+    if (beforeSubmit) PrioritizeRegistrationPreparation(prepared);
+    SubmitRegistrationPreparation([&] { demanded.set_value(order.fetch_add(1u)); }, &prepared);
+    if (!beforeSubmit) {
+        PrioritizeRegistrationPreparation(prepared);
+        PrioritizeRegistrationPreparation(prepared);
+    }
+    release.release();
+    const bool settled = demandedDone.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    const bool backgroundSettled = backgroundDone.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    release.release(static_cast<std::ptrdiff_t>(workers - 1u));
+    finished.wait();
+    Require(settled && backgroundSettled, "preparation queue did not complete its work");
+    Require(demandedDone.get() == 0u && backgroundDone.get() == 1u && order.load() == 2u, "demanded preparation waited behind background work or ran twice");
+}
+
 }
 
 int main() {
@@ -308,6 +346,8 @@ int main() {
         HeaderSelection();
         FusedHullHeaderSelection();
         TransactionLock();
+        PreparationPriority(false);
+        PreparationPriority(true);
         auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         Registration(*device);

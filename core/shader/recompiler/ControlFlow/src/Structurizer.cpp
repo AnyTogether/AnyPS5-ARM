@@ -755,7 +755,7 @@ bool splitSharedMergeBlock(ControlFlowGraph& graph, std::uint32_t merge, const s
     return true;
 }
 
-bool splitOneReturnJoin(ControlFlowGraph& graph) {
+bool splitOneReturnJoin(ControlFlowGraph& graph, bool relaxReturnJoins) {
     for (const auto& block : graph.blocks) {
         if (block.terminator.kind != TerminatorKind::ConditionalBranch || findInnermostContainingLoop(graph, block.id) != nullptr || findSelectionMerge(graph, block) != InvalidControlFlowId) {
             continue;
@@ -763,9 +763,9 @@ bool splitOneReturnJoin(ControlFlowGraph& graph) {
         const auto returns = [&](std::uint32_t target) { return graph.Dominates(block.id, target) && hasLinearPathToTerminal(graph, target); };
         const auto joinsEnclosing = [&](std::uint32_t target) {
             const auto& predecessors = graph.FindBlock(target).predecessors;
-            return !graph.Dominates(block.id, target) && std::all_of(predecessors.begin(), predecessors.end(), [&](std::uint32_t predecessor) {
+            return !graph.Dominates(block.id, target) && (relaxReturnJoins || std::all_of(predecessors.begin(), predecessors.end(), [&](std::uint32_t predecessor) {
                 return graph.Dominates(block.id, predecessor) || graph.Dominates(predecessor, block.id);
-            });
+            }));
         };
         const auto trueTarget = block.terminator.trueBlock;
         const auto falseTarget = block.terminator.falseBlock;
@@ -1455,24 +1455,39 @@ void tarjanVisit(TarjanState& state, std::uint32_t blockId) {
 void Structurizer::Structurize(ControlFlowGraph& graph) const {
     const auto original = graph;
     try {
-        structurize(graph, false, false, false);
+        structurizeAttempts(graph, false);
+    } catch (const std::runtime_error&) {
+        const auto error = std::current_exception();
+        graph = original;
+        try {
+            structurizeAttempts(graph, true);
+        } catch (const std::runtime_error&) {
+            std::rethrow_exception(error);
+        }
+    }
+}
+
+void Structurizer::structurizeAttempts(ControlFlowGraph& graph, bool relaxReturnJoins) const {
+    const auto original = graph;
+    try {
+        structurize(graph, false, false, false, relaxReturnJoins);
         if (!hasStructuredConstructs(graph)) throw std::runtime_error("CFG does not have structured constructs");
     } catch (const std::runtime_error&) {
         graph = original;
         try {
-            structurize(graph, true, false, false);
+            structurize(graph, true, false, false, relaxReturnJoins);
             if (!hasStructuredConstructs(graph)) throw std::runtime_error("CFG does not have structured constructs");
         } catch (const std::runtime_error&) {
             const auto error = std::current_exception();
             graph = original;
             try {
-                structurize(graph, false, true, false);
+                structurize(graph, false, true, false, relaxReturnJoins);
                 if (hasStructuredConstructs(graph)) return;
             } catch (const std::runtime_error&) {
             }
             graph = original;
             try {
-                structurize(graph, false, true, true);
+                structurize(graph, false, true, true, relaxReturnJoins);
             } catch (const std::runtime_error&) {
                 std::rethrow_exception(error);
             }
@@ -1494,14 +1509,14 @@ void Structurizer::privatizeSharedReturns(ControlFlowGraph& graph) const {
     }
 }
 
-void Structurizer::structurize(ControlFlowGraph& graph, bool privatizeReturns, bool routeLeavingExits, bool routeSharedExits) const {
+void Structurizer::structurize(ControlFlowGraph& graph, bool privatizeReturns, bool routeLeavingExits, bool routeSharedExits, bool relaxReturnJoins) const {
     recomputeAnalyses(graph);
     verifyReducibility(graph);
     if (privatizeReturns) {
         privatizeSharedReturns(graph);
     }
     canonicalizeNaturalLoops(graph, routeLeavingExits, routeSharedExits);
-    splitSharedMergeBlocks(graph, routeLeavingExits, routeSharedExits);
+    splitSharedMergeBlocks(graph, routeLeavingExits, routeSharedExits, relaxReturnJoins);
     isolateSemanticLoopHeaders(graph);
     orderByDominance(graph);
     clearStructuredTerminators(graph);
@@ -1795,13 +1810,13 @@ void Structurizer::canonicalizeNaturalLoops(ControlFlowGraph& graph, bool routeL
     throw std::runtime_error("CFG loop canonicalization exceeded rewrite budget");
 }
 
-void Structurizer::splitSharedMergeBlocks(ControlFlowGraph& graph, bool routeLeavingExits, bool routeSharedExits) const {
+void Structurizer::splitSharedMergeBlocks(ControlFlowGraph& graph, bool routeLeavingExits, bool routeSharedExits, bool relaxReturnJoins) const {
     const auto originalBlockCount = static_cast<std::uint32_t>(graph.blocks.size());
     const auto splitBudget = std::max<std::uint32_t>(16u, originalBlockCount * 4u);
     const auto programWords = estimatedSpirvWords(graph, allBlockIds(originalBlockCount));
     SplitBudget budget{programWords, std::max(CloneWordLimit, programWords / CloneBudgetDivisor), std::max(CloneWordLimit, programWords), nextGotoVariable(graph)};
     for (std::uint32_t splits = 0; splits < splitBudget; ++splits) {
-        if (!splitOneLoopMerge(graph) && !splitOneSelectionMerge(graph, budget, [this](ControlFlowGraph& candidate) { recomputeAnalyses(candidate); }, routeLeavingExits, routeSharedExits) && !splitOneReturnJoin(graph)) {
+        if (!splitOneLoopMerge(graph) && !splitOneSelectionMerge(graph, budget, [this](ControlFlowGraph& candidate) { recomputeAnalyses(candidate); }, routeLeavingExits, routeSharedExits) && !splitOneReturnJoin(graph, relaxReturnJoins)) {
             return;
         }
         rebuildPredecessors(graph);

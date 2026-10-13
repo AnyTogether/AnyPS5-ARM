@@ -17,7 +17,7 @@ static uint64_t g_nextEqueue = 1;
 
 extern "C" {
 
-KernelEqueuePrivate::KernelEqueuePrivate(KernelEqueue handle) : m_handle(handle) {}
+KernelEqueuePrivate::KernelEqueuePrivate(KernelEqueue handle, bool reportOncePerWait) : m_handle(handle), m_reportOncePerWait(reportOncePerWait) {}
 
 KernelEqueuePrivate::~KernelEqueuePrivate() {
     Close();
@@ -105,7 +105,7 @@ void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock,
     for (const auto& e : m_events) {
         if (e.filter.pollFunc == nullptr) continue;
         const int descriptor = static_cast<int>(e.event.ident);
-        if (descriptor < GuestSockets::FirstDescriptor || reinterpret_cast<std::uintptr_t>(e.filter.data) > 1) {
+        if (!GuestSockets::IsOpen(descriptor) || reinterpret_cast<std::uintptr_t>(e.filter.data) > 1) {
             repoll = true;
             continue;
         }
@@ -126,17 +126,10 @@ void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock,
     }
 }
 
-int KernelEqueuePrivate::GetTriggeredEvents(KernelEvent* ev, int num) {
-    std::unique_lock lock(m_mutex);
-    if (m_closed) {
-        return SCE_KERNEL_ERROR_EBADF;
-    }
-    TriggerExpiredTimers(MonotonicNs());
-    PollEvents();
-    return CollectTriggered(ev, num);
-}
-
 int KernelEqueuePrivate::CollectTriggered(KernelEvent* ev, int num) {
+    if (m_reportOncePerWait) {
+        return CollectOncePerWait(ev, num);
+    }
     int ret = 0;
     for (auto it = m_events.begin(); it != m_events.end() && ret < num;) {
         auto& e = *it;
@@ -166,12 +159,60 @@ int KernelEqueuePrivate::CollectTriggered(KernelEvent* ev, int num) {
     return ret;
 }
 
-int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros) {
+int KernelEqueuePrivate::CollectOncePerWait(KernelEvent* ev, int num) {
+    int ret = 0;
+    std::list<KernelEqueueEvent> requeued;
+    for (auto it = m_events.begin(); it != m_events.end() && ret < num;) {
+        auto& e = *it;
+        if (!e.triggered) {
+            ++it;
+            continue;
+        }
+        ev[ret++] = e.event;
+        if ((e.event.flags & EV_ONESHOT) != 0) {
+            if (e.filter.deleteEventFunc != nullptr) {
+                auto owner = e.filter.owner;
+                e.filter.deleteEventFunc(m_handle, &e);
+            }
+            it = m_events.erase(it);
+            continue;
+        }
+        if (e.filter.resetFunc != nullptr) {
+            e.filter.resetFunc(&e);
+        } else if ((e.event.flags & EV_CLEAR) != 0) {
+            e.triggered = false;
+            e.event.fflags = 0;
+            e.event.data = 0;
+        }
+        const auto next = std::next(it);
+        if (e.triggered) {
+            requeued.splice(requeued.end(), m_events, it);
+        }
+        it = next;
+    }
+    m_events.splice(m_events.end(), requeued);
+    return ret;
+}
+
+int KernelEqueuePrivate::GetTriggeredEvents(KernelEvent* ev, int num) {
     std::unique_lock lock(m_mutex);
     if (m_closed) {
         return SCE_KERNEL_ERROR_EBADF;
     }
-    const std::uint64_t deadline = TimedWait::DeadlineNanos(micros);
+    TriggerExpiredTimers(MonotonicNs());
+    PollEvents();
+    return CollectTriggered(ev, num);
+}
+
+int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros) {
+    return WaitForEventsUntil(ev, num, micros == 0 ? 0 : TimedWait::DeadlineNanos(micros));
+}
+
+int KernelEqueuePrivate::WaitForEventsUntil(KernelEvent* ev, int num, std::uint64_t deadline) {
+    std::unique_lock lock(m_mutex);
+    if (m_closed) {
+        return SCE_KERNEL_ERROR_EBADF;
+    }
     for (;;) {
         TriggerExpiredTimers(MonotonicNs());
         const bool polling = PollEvents();
@@ -182,7 +223,7 @@ int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros
         if (m_closed) {
             return SCE_KERNEL_ERROR_EBADF;
         }
-        if (micros == 0) {
+        if (deadline == 0) {
             uint32_t timerWait = 0;
             const bool hasTimer = NextTimerWaitMicros(MonotonicNs(), &timerWait);
             const std::uint64_t wake = hasTimer ? TimedWait::NowNanos() + static_cast<std::uint64_t>(timerWait) * 1000ULL : 0;
@@ -262,6 +303,32 @@ int KernelEqueuePrivate::TriggerEvent(uintptr_t ident, int16_t filter, void* tri
     return EQUEUE_OK;
 }
 
+bool KernelEqueuePrivate::HasEvent(uintptr_t ident, int16_t filter) {
+    std::unique_lock lock(m_mutex);
+    return std::any_of(m_events.begin(), m_events.end(), [ident, filter](const auto& e) {
+        return e.event.ident == ident && e.event.filter == filter;
+    });
+}
+
+int KernelEqueuePrivate::EditEvent(uintptr_t ident, int16_t filter, const std::function<void(KernelEqueueEvent&)>& edit) {
+    std::unique_lock lock(m_mutex);
+    if (m_closed) {
+        return SCE_KERNEL_ERROR_EBADF;
+    }
+    auto it = std::find_if(m_events.begin(), m_events.end(),
+        [ident, filter](const auto& e) {
+            return e.event.ident == ident && e.event.filter == filter;
+        }
+    );
+    if (it == m_events.end()) {
+        return SCE_KERNEL_ERROR_ENOENT;
+    }
+    edit(*it);
+    m_cond.NotifyOne();
+    WakePollers();
+    return EQUEUE_OK;
+}
+
 int KernelEqueuePrivate::DeleteEvent(uintptr_t ident, int16_t filter) {
     std::unique_lock lock(m_mutex);
     if (m_closed) {
@@ -286,10 +353,20 @@ int KernelEqueuePrivate::DeleteEvent(uintptr_t ident, int16_t filter) {
 
 void KernelEqueuePrivate::RemoveDescriptorEvents(uintptr_t ident) {
     std::unique_lock lock(m_mutex);
-    const auto removed = std::erase_if(m_events, [ident](const auto& e) {
-        return e.event.ident == ident && (e.event.filter == EVFILT_READ || e.event.filter == EVFILT_WRITE);
-    });
-    if (removed != 0) {
+    bool removed = false;
+    for (auto it = m_events.begin(); it != m_events.end();) {
+        if (it->event.ident != ident || (it->event.filter != EVFILT_READ && it->event.filter != EVFILT_WRITE && it->event.filter != EVFILT_VNODE)) {
+            ++it;
+            continue;
+        }
+        if (it->filter.deleteEventFunc != nullptr) {
+            auto owner = it->filter.owner;
+            it->filter.deleteEventFunc(m_handle, &*it);
+        }
+        it = m_events.erase(it);
+        removed = true;
+    }
+    if (removed) {
         WakePollers();
     }
 }
@@ -327,16 +404,6 @@ int APS5_VABI EqueueDeleteEvent_nid_postfix(KernelEqueue eq, uintptr_t ident, in
     return owner->DeleteEvent(ident, filter);
 }
 
-
-int APS5_VABI kqueue_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI kevent_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 int APS5_VABI sceKernelCreateEqueue(KernelEqueue* eq, const char* name) {
     if (eq == nullptr || name == nullptr) {
@@ -585,20 +652,13 @@ bool PollFile(KernelEqueueEvent* e) {
 }
 
 static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* udata, int16_t filter) {
-    const bool socket = fd >= GuestSockets::FirstDescriptor;
-    if (socket ? !GuestSockets::IsOpen(fd) : !DescriptorIsOpen_nid_no_patch(fd)) {
+    const bool socket = GuestSockets::IsOpen(fd);
+    if (!socket && !DescriptorIsOpen_nid_no_patch(fd)) {
         return SCE_KERNEL_ERROR_EBADF;
     }
-    KernelEqueueEvent event{};
-    event.event.ident = static_cast<uintptr_t>(fd);
-    event.event.filter = filter;
-    event.event.flags = EV_ADD;
-    event.event.udata = udata;
+    auto event = EqueueDescriptorEvent(fd, filter, EV_ADD, udata);
     event.filter.data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(size));
     event.filter.pollFunc = socket ? PollSocket : PollFile;
-    event.filter.resetFunc = [](KernelEqueueEvent* e) {
-        e->triggered = false;
-    };
     return EqueueAddEvent_nid_postfix(eq, event);
 }
 
@@ -620,7 +680,30 @@ int APS5_VABI sceKernelDeleteWriteEvent(KernelEqueue eq, int fd) {
 
 }
 
+KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata) {
+    KernelEqueueEvent event{};
+    event.event.ident = static_cast<uintptr_t>(descriptor);
+    event.event.filter = filter;
+    event.event.flags = flags;
+    event.event.udata = udata;
+    event.filter.pollFunc = [](KernelEqueueEvent* e) {
+        std::int64_t data = 0;
+        bool eof = false;
+        if (!GuestSockets::Ready(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
+            return false;
+        }
+        e->event.data = static_cast<intptr_t>(data);
+        e->event.flags = static_cast<uint16_t>(eof ? (e->event.flags | EV_EOF) : (e->event.flags & ~EV_EOF));
+        return true;
+    };
+    event.filter.resetFunc = [](KernelEqueueEvent* e) {
+        e->triggered = false;
+    };
+    return event;
+}
+
 void EqueueDescriptorClosed(int descriptor) {
+    KqueueDescriptorClosed(descriptor);
     std::vector<KernelEqueueRef> owners;
     {
         std::unique_lock lock(g_equeueMutex);

@@ -12,12 +12,15 @@
 
 extern "C" {
 int APS5_VABI sceSaveDataConvert(const SaveDataConvert*);
+int APS5_VABI sceSaveDataGetConvertProgress(float*);
 int APS5_VABI sceSaveDataInitialize3(const void*);
+int APS5_VABI sceSaveDataTerminate();
 }
 
 namespace {
 
 constexpr int SaveDataErrorParameter = -2137063424;
+constexpr int SaveDataErrorNotInitialized = -2137063423;
 constexpr int SaveDataErrorNotFound = -2137063416;
 
 int failures = 0;
@@ -53,16 +56,32 @@ int main() {
     const auto previous = std::filesystem::current_path();
     std::filesystem::current_path(work);
 
+    float progress = 0.0f;
+    Check(sceSaveDataGetConvertProgress(&progress) == SaveDataErrorNotInitialized, "query before initialize fails with not initialized");
     Check(sceSaveDataInitialize3(nullptr) == 0, "SaveData initializes");
+    Check(sceSaveDataGetConvertProgress(&progress) == 0, "get convert progress succeeds");
+    Check(progress == 0.0f, "convert progress reports 0.0f initially");
+    Check(sceSaveDataGetConvertProgress(nullptr) == SaveDataErrorParameter, "null progress pointer is rejected");
+    Check(Convert("missing", sizeof("missing")) == SaveDataErrorNotFound, "a missing save is not found");
+    Check(sceSaveDataGetConvertProgress(&progress) == 0, "get convert progress succeeds after failed convert");
+    Check(progress < 1.0f, "convert progress is below 1.0f after failed convert");
+    Check(progress == 0.0f, "convert progress reports 0.0f after failed convert");
     Check(Convert("kept", sizeof("kept")) == 0, "an existing save converts");
     Check(Read(kept) == std::vector<char>{'d', 'a', 't', 'a'}, "the converted save keeps its files");
+    Check(sceSaveDataGetConvertProgress(&progress) == 0, "get convert progress succeeds after successful convert");
+    Check(progress == 1.0f, "convert progress reports 1.0f after successful convert");
     Check(Convert("missing", sizeof("missing")) == SaveDataErrorNotFound, "a missing save is not found");
+    Check(sceSaveDataGetConvertProgress(&progress) == 0, "get convert progress succeeds after subsequent failed convert");
+    Check(progress < 1.0f, "convert progress drops below 1.0f after subsequent failed convert");
+    Check(progress == 0.0f, "convert progress reports 0.0f after subsequent failed convert");
     for (const char* invalid : {"../kept", "", ".", "..", "a\\b", "c:d"}) {
         Check(Convert(invalid, std::strlen(invalid) + 1) == SaveDataErrorParameter, std::string("\"") + invalid + "\" is rejected");
     }
     char unterminated[sizeof(SceSaveDataDirName::data)];
     std::memset(unterminated, 'a', sizeof(unterminated));
     Check(Convert(unterminated, sizeof(unterminated)) == SaveDataErrorParameter, "an unterminated name is rejected");
+    Check(sceSaveDataTerminate() == 0, "SaveData terminates");
+    Check(sceSaveDataGetConvertProgress(&progress) == SaveDataErrorNotInitialized, "query after terminate fails with not initialized");
 
     std::filesystem::current_path(previous);
     std::error_code error;

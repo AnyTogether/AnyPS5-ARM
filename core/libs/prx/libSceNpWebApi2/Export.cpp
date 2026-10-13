@@ -36,6 +36,11 @@ int APS5_VABI sceNpWebApi2AddHttpRequestHeader(int64_t request_id, const char* f
     return 0;
 }
 
+int APS5_VABI sceNpWebApi2AddWebTraceTag() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 void APS5_VABI sceNpWebApi2CheckTimeout(void) {
 }
 
@@ -166,6 +171,14 @@ int APS5_VABI sceNpWebApi2PushEventCreatePushContext() {
 }
 
 int APS5_VABI sceNpWebApi2PushEventDeleteFilter() {
+    return 0;
+}
+
+int APS5_VABI sceNpWebApi2PushEventSetHandleTimeout(int lib_ctx_id, int handle_id, uint32_t timeout) {
+    (void)handle_id;
+    (void)timeout;
+    std::lock_guard lock(g_poolsMutex);
+    if (!g_pools.contains(lib_ctx_id)) throw std::invalid_argument("sceNpWebApi2PushEventSetHandleTimeout: unknown context");
     return 0;
 }
 

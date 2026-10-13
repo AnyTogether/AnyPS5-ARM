@@ -1,5 +1,6 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Queues/WorkerAffinity.hpp"
+#include "prx/libSceAgcDriver/Execution/include/TracyZone.hpp"
 #include "prx/libc/include/CpuTopology.hpp"
 #include <cstdlib>
 
@@ -20,6 +21,7 @@ std::uint64_t WorkerAffinityMask() {
 }
 
 void PinWorkerThread(const char* role) {
+    TracyZone::NameThread(role);
     const auto mask = WorkerAffinityMask();
     if (mask == 0) return;
     static std::once_flag summary;

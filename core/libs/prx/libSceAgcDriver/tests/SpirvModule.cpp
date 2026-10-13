@@ -1,8 +1,10 @@
 #include "SpirvBackend/SpirvModule.hpp"
 #include "SpirvBackend/SpirvSpecialization.hpp"
+#include <array>
 #include <cstdio>
 #include <map>
 #include <set>
+#include <string>
 #include <spirv/unified1/spirv.hpp>
 #include <vector>
 
@@ -223,7 +225,68 @@ void testStructExtractsAreNotShuffled() {
     }
 }
 
+std::vector<std::uint32_t> foldedSwitchModule(std::uint32_t deadSum, std::array<std::uint32_t, 3> localSize) {
+    const auto op = [](std::uint32_t count, spv::Op code) { return (count << 16u) | static_cast<std::uint32_t>(code); };
+    return {
+        spv::MagicNumber, 0x00010300u, 0u, 40u, 0u,
+        op(2, spv::OpCapability), spv::CapabilityShader,
+        op(3, spv::OpMemoryModel), spv::AddressingModelLogical, spv::MemoryModelGLSL450,
+        op(6, spv::OpEntryPoint), spv::ExecutionModelGLCompute, 11u, 0x6e69616du, 0u, 10u,
+        op(6, spv::OpExecutionMode), 11u, spv::ExecutionModeLocalSize, localSize[0], localSize[1], localSize[2],
+        op(2, spv::OpTypeVoid), 1u,
+        op(4, spv::OpTypeInt), 2u, 32u, 0u,
+        op(4, spv::OpTypePointer), 4u, spv::StorageClassPrivate, 2u,
+        op(3, spv::OpTypeFunction), 5u, 1u,
+        op(4, spv::OpConstant), 2u, 6u, 2u,
+        op(4, spv::OpConstant), 2u, 7u, 10u,
+        op(4, spv::OpConstant), 2u, 8u, 20u,
+        op(4, spv::OpVariable), 4u, 10u, spv::StorageClassPrivate,
+        op(5, spv::OpFunction), 1u, 11u, 0u, 5u,
+        op(2, spv::OpLabel), 12u,
+        op(5, spv::OpIAdd), 2u, deadSum, 6u, 7u,
+        op(5, spv::OpIMul), 2u, 14u, deadSum, 7u,
+        op(3, spv::OpSelectionMerge), 20u, spv::SelectionControlMaskNone,
+        op(7, spv::OpSwitch), 6u, 15u, 1u, 16u, 2u, 17u,
+        op(2, spv::OpLabel), 15u,
+        op(3, spv::OpStore), 10u, 7u,
+        op(2, spv::OpBranch), 20u,
+        op(2, spv::OpLabel), 16u,
+        op(3, spv::OpStore), 10u, 8u,
+        op(2, spv::OpBranch), 20u,
+        op(2, spv::OpLabel), 17u,
+        op(3, spv::OpStore), 10u, 14u,
+        op(2, spv::OpBranch), 20u,
+        op(2, spv::OpLabel), 20u,
+        op(1, spv::OpReturn),
+        op(1, spv::OpFunctionEnd),
+    };
+}
+
+void checkFoldedSwitch(const std::vector<std::uint32_t>& words, std::uint32_t deadSum, const char* what) {
+    const auto specialized = ShaderRecompiler::SpecializeSpirv(words);
+    const auto counts = opcodeCounts(specialized);
+    std::set<std::uint32_t> constants;
+    bool storesFolded = false;
+    for (std::size_t cursor = 5; cursor < specialized.size(); cursor += specialized[cursor] >> 16u) {
+        if ((specialized[cursor] >> 16u) == 0u) break;
+        const auto opcode = specialized[cursor] & 0xffffu;
+        if (opcode == spv::OpConstant) constants.insert(specialized[cursor + 2u]);
+        if (opcode == spv::OpStore && specialized[cursor + 2u] == 14u) storesFolded = true;
+    }
+    const std::string context = std::string(" (") + what + ")";
+    check(!counts.contains(spv::OpUnreachable), ("blocks the folded switch left unreachable were kept" + context).c_str());
+    check(counts.at(spv::OpLabel) == 3u, ("the specialized function does not have exactly its three live blocks" + context).c_str());
+    check(storesFolded && constants.contains(14u), ("the folded product the live case stores is missing" + context).c_str());
+    check(!constants.contains(deadSum), ("a folded constant without uses was kept" + context).c_str());
+}
+
+void testFoldingLeavesNoDeadBlocksOrConstants() {
+    checkFoldedSwitch(foldedSwitchModule(13u, {1u, 1u, 1u}), 13u, "no literal names a dead id");
+    checkFoldedSwitch(foldedSwitchModule(32u, {15u, 16u, 1u}), 32u, "the OpTypeInt width and the LocalSize literals equal the dead ids");
+}
+
 int main() {
+    testFoldingLeavesNoDeadBlocksOrConstants();
     testStructExtractsAreNotShuffled();
     testRepeatedTypesShareOneId();
     testOperandShapesDoNotCollide();

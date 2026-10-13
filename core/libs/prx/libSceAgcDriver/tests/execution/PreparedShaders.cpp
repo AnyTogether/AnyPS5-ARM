@@ -200,7 +200,11 @@ void FailureCapture(AgcDriver::VulkanDevice& device) {
 #else
     Require(unsetenv("APS5_DUMP_SHADERS") == 0, "cannot disable shader capture");
 #endif
-    Require(failure([&] { static_cast<void>(AgcDriver::DriverDetail::PrepareShaderWithDiagnostics(request)); }) == expected, "disabled shader capture changed the preparation failure");
+    std::ostringstream prefix;
+    prefix << "shader 0x" << std::hex << request.shader.codeAddress << " stage " << static_cast<unsigned>(request.shader.stage) << ": ";
+    const auto diagnosed = failure([&] { static_cast<void>(AgcDriver::DriverDetail::PrepareShaderWithDiagnostics(request)); });
+    Require(diagnosed.rfind(prefix.str(), 0) == 0, "diagnosed failure names no shader address and stage");
+    Require(diagnosed.substr(prefix.str().size()) == expected, "diagnosed failure changed the reason");
     Require(!std::ifstream(path, std::ios::binary).is_open(), "disabled shader capture created a request");
 #ifdef _WIN32
     Require(_putenv_s("APS5_DUMP_SHADERS", "1") == 0, "cannot enable shader capture");
@@ -208,12 +212,14 @@ void FailureCapture(AgcDriver::VulkanDevice& device) {
     Require(setenv("APS5_DUMP_SHADERS", "1", 1) == 0, "cannot enable shader capture");
 #endif
     const auto actual = failure([&] { static_cast<void>(AgcDriver::DriverDetail::PrepareShaderWithDiagnostics(request)); });
+    std::ostringstream dumpedPrefix;
+    dumpedPrefix << "shader 0x" << std::hex << request.shader.codeAddress << " stage " << static_cast<unsigned>(request.shader.stage) << " (" << path << "): ";
+    Require(actual == dumpedPrefix.str() + expected, "enabled shader capture changed the diagnosed failure");
 #ifdef _WIN32
     Require(_putenv_s("APS5_DUMP_SHADERS", saved.c_str()) == 0, "cannot restore shader capture");
 #else
     Require((previous != nullptr ? setenv("APS5_DUMP_SHADERS", saved.c_str(), 1) : unsetenv("APS5_DUMP_SHADERS")) == 0, "cannot restore shader capture");
 #endif
-    Require(actual == expected, "shader capture changed the preparation failure");
     std::ifstream file(path, std::ios::binary);
     std::ostringstream text;
     text << file.rdbuf();
@@ -480,10 +486,12 @@ void Registration(bool indirect) {
     Shader copy = header.shader;
     copy.user_data = reinterpret_cast<ShaderUserData*>(&copy);
     AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, {});
-    alignas(Shader) std::array<std::byte, sizeof(Shader)> padded{};
-    std::memcpy(padded.data(), &copy, sizeof(Shader));
+    alignas(Shader) std::array<std::byte, sizeof(Shader) + 4> padded{};
+    auto* unaligned = padded.data() + 4;
+    Require(reinterpret_cast<std::uintptr_t>(unaligned) % alignof(Shader) != 0, "shader ABI test header is unexpectedly aligned");
+    std::memcpy(unaligned, &copy, sizeof(Shader));
     padded.back() = std::byte{0x7d};
-    AgcDriverResolveShaderAbi_nid_postfix(reinterpret_cast<Shader*>(padded.data()), {}, {});
+    AgcDriverResolveShaderAbi_nid_postfix(reinterpret_cast<Shader*>(unaligned), {}, {});
     copy.target ^= 1u;
     ExpectFailure([&] { AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, {}); }, "replaced shader header");
     header.registers[1].value |= 0x100u;

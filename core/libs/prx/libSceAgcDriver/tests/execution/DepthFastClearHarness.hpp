@@ -4,6 +4,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "Recompiler.hpp"
+#include "VulkanTestDevice.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -96,7 +97,7 @@ inline Shaders Compile(AgcDriver::VulkanDevice& device) {
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(PixelCode.data()), PixelCode, 0, {}},
         {32, 0, pixelUserData, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
-        {0, 0, shaders.vertexPush, 128 - shaders.vertexPush}
+        PixelPushLayout(shaders.vertexPush, target)
     };
     fragment.useCache = false;
     shaders.pixel = ShaderRecompiler::Recompile(fragment);
@@ -107,7 +108,7 @@ inline std::uint32_t Draw(AgcDriver::VulkanDevice& device, const Shaders& compil
     Pixels.fill(std::byte{0});
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Vertex, &compiled.vertex, 0},
-        {ShaderStage::Fragment, &compiled.pixel, compiled.vertexPush}
+        {ShaderStage::Fragment, &compiled.pixel, PixelPushOffset(compiled.vertexPush, device.Target())}
     }};
     AgcDriver::Graphics::State state{};
     state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, 32u, 32u, std::nullopt, std::nullopt};

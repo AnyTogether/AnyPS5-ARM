@@ -13,6 +13,7 @@ LIMITATIONS = [
     "skipped, the device lacks fragmentShaderPixelInterlock",
     "skipped, the device lacks geometryShader",
     "skipped, the device lacks shaderSubgroupClock",
+    "skipped, the device lacks VK_EXT_shader_stencil_export",
     "skipped, the device does not import guest memory",
     "skipped, the device imports no host memory",
     "skipped, the device flushes f64 subnormals without DenormPreserve",
@@ -33,6 +34,20 @@ OTHER = [
 
 
 class CheckSkipsTests(unittest.TestCase):
+    def test_disabled_tests_fail_in_both_jobs_including_agc(self):
+        xml = '<testsuite><testcase name="agc_disabled" status="disabled"/></testsuite>'
+        with tempfile.TemporaryDirectory() as directory:
+            junit = Path(directory) / "junit.xml"
+            junit.write_text(xml, encoding="utf-8")
+            for job in ("linux", "windows"):
+                with self.subTest(job=job):
+                    result = subprocess.run(
+                        [sys.executable, "-I", str(TOOL), str(junit), "--job", job],
+                        capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("agc_disabled", result.stderr)
+                    self.assertIn("disabled", result.stderr)
+
     def test_device_limitations_match(self):
         for message in LIMITATIONS:
             with self.subTest(message=message):
@@ -67,6 +82,17 @@ class SkipReportTests(unittest.TestCase):
             path = Path(directory) / "ctest.xml"
             path.write_text(content, encoding="utf-8")
             return list(check_skips.skips(path))
+
+    def test_ctest_disabled_status_is_not_silently_ignored(self):
+        with self.assertRaisesRegex(ValueError, "disabled.*not run"):
+            self.skipped('<testsuite><testcase name="coverage" status="disabled"/></testsuite>')
+
+    def test_device_message_does_not_excuse_a_disabled_test(self):
+        with self.assertRaisesRegex(ValueError, "disabled.*not run"):
+            self.skipped('<testsuite><testcase name="gpu" status="disabled"><skipped message="no display"/></testcase></testsuite>')
+
+    def test_running_test_without_skipped_marker_is_not_a_skip(self):
+        self.assertEqual(self.skipped('<testsuite><testcase name="coverage" status="run"/></testsuite>'), [])
 
     def test_skip_message_preserves_the_device_reason(self):
         found = self.skipped('<testsuite><testcase name="gpu"><skipped message="the device has no required extension"/></testcase></testsuite>')

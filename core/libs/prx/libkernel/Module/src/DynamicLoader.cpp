@@ -3,13 +3,16 @@
 #include "prx/libkernel/Module/ModuleArgs.hpp"
 #include <nid/NidCompute.hpp>
 #include <array>
+#include <condition_variable>
 #include <filesystem>
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <string>
-#include <set>
+#include <stdexcept>
+#include <system_error>
 #include <vector>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -119,30 +122,54 @@ char* APS5_VABI dlerror_nid_postfix() {
 static void InitializeDeferredModule(HMODULE native) {
     using Entry = int (APS5_VABI *)(std::size_t, const void*, void*);
     using Initializer = void (APS5_VABI *)(int, char**, char**);
+    constexpr auto initializing = std::numeric_limits<std::uint32_t>::max();
     static std::mutex initializedLock;
-    static std::set<HMODULE> initialized;
-    const auto* table = reinterpret_cast<const std::uint32_t*>(GetProcAddress(native, "__aps5_guest_initialize"));
+    static std::condition_variable initializedChanged;
+    auto* table = reinterpret_cast<std::uint32_t*>(GetProcAddress(native, "__aps5_guest_initialize"));
     if (!table) return;
-    {
-        std::lock_guard lock(initializedLock);
-        if (!initialized.insert(native).second) return;
+    const auto owner = GetCurrentThreadId();
+    std::unique_lock lock(initializedLock);
+    while (table[1] == initializing) {
+        if (table[0] == 0) throw std::runtime_error("dlopen: deferred module initialization failed");
+        if (table[0] == owner) return;
+        initializedChanged.wait(lock);
     }
-    auto* base = reinterpret_cast<std::uint8_t*>(native);
-    const auto* pending = static_cast<const PendingModuleArgs*>(__aps5_get_pending_module_args_nid_no_patch());
-    if (table[0] != 0) __aps5_set_module_init_result_nid_no_patch(reinterpret_cast<Entry>(base + table[0])(pending->args, pending->argp, nullptr));
-    for (std::uint32_t index = 0; index < table[1]; ++index) {
-        const auto initializer = *reinterpret_cast<Initializer*>(base + table[2 + index]);
-        if (initializer) initializer(0, nullptr, nullptr);
+    const auto entry = table[0];
+    const auto count = table[1];
+    if (entry == 0 && count == 0) return;
+    DWORD protection = 0;
+    if (!VirtualProtect(table, 2 * sizeof(*table), PAGE_READWRITE, &protection))
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "open deferred module initialization metadata");
+    table[0] = owner;
+    table[1] = initializing;
+    lock.unlock();
+    const auto finish = [&](bool succeeded) {
+        lock.lock();
+        table[0] = 0;
+        table[1] = succeeded ? 0 : initializing;
+        DWORD previous = 0;
+        const bool restored = VirtualProtect(table, 2 * sizeof(*table), protection, &previous);
+        const auto error = restored ? ERROR_SUCCESS : GetLastError();
+        if (!restored) table[1] = initializing;
+        lock.unlock();
+        initializedChanged.notify_all();
+        if (!restored) throw std::system_error(static_cast<int>(error), std::system_category(), "restore deferred module initialization metadata");
+    };
+    try {
+        auto* base = reinterpret_cast<std::uint8_t*>(native);
+        const auto* pending = static_cast<const PendingModuleArgs*>(__aps5_get_pending_module_args_nid_no_patch());
+        if (entry != 0) __aps5_set_module_init_result_nid_no_patch(reinterpret_cast<Entry>(base + entry)(pending->args, pending->argp, nullptr));
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto initializer = *reinterpret_cast<Initializer*>(base + table[2 + index]);
+            if (initializer) initializer(0, nullptr, nullptr);
+        }
+    } catch (...) {
+        finish(false);
+        throw;
     }
+    finish(true);
 }
 #endif
-
-static std::filesystem::path RelinkedModulePath(const std::filesystem::path& path) {
-    auto relinked = path;
-    relinked += ".guest.prx";
-    std::error_code error;
-    return std::filesystem::is_regular_file(relinked, error) ? relinked : path;
-}
 
 void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
     if ((flags & ~0x103) || (flags & 3) == 0 || (flags & 3) == 3) {
@@ -157,7 +184,7 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             module->owned = false;
         } else {
             if (!*path) { Error("dlopen: empty module path"); return nullptr; }
-            const auto resolved = RelinkedModulePath(ResolvePath_nid_no_patch(path));
+            const auto resolved = RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path));
             module->native = LoadLibraryExW(resolved.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
             if (module->native) InitializeDeferredModule(static_cast<HMODULE>(module->native));
         }
@@ -167,7 +194,7 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             Error(message); return nullptr;
         }
 #else
-        const auto resolved = path ? RelinkedModulePath(ResolvePath_nid_no_patch(path)).string() : std::string{};
+        const auto resolved = path ? RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path)).string() : std::string{};
         const int nativeFlags = ((flags & 3) == 1 ? RTLD_LAZY : RTLD_NOW) |
             ((flags & 0x100) ? RTLD_GLOBAL : RTLD_LOCAL);
         module->native = ::dlopen(path ? resolved.c_str() : nullptr, nativeFlags);

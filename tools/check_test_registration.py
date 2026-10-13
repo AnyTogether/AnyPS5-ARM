@@ -4,14 +4,24 @@ import subprocess
 from pathlib import Path
 
 TEST_OUTPUT = r"tests[\\/]"
-COMMAND = re.compile(r"^\s*(add_test|set_tests_properties)\s*\(", re.M | re.I)
+COMMAND = re.compile(r"^\s*(add_test|set_tests_properties|subdirs)\s*\(", re.M | re.I)
 ARGUMENT = re.compile(r'"(?:\\.|[^"\\])*"|\[(?P<equals>=*)\[.*?\](?P=equals)\]|[^\s()]+', re.S)
 
 KNOWN_UNRUN = set()
 
 
 def built(build):
-    listed = subprocess.run(["ninja", "-C", str(build), "-t", "targets", "all"],
+    program, generator = None, None
+    for line in (Path(build) / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+        if line.startswith("CMAKE_MAKE_PROGRAM:"):
+            program = line.partition("=")[2]
+        elif line.startswith("CMAKE_GENERATOR:"):
+            generator = line.partition("=")[2]
+    if generator not in ("Ninja", "Ninja Multi-Config"):
+        raise ValueError(f"test registration audit requires a Ninja generator, got {generator!r}")
+    if not program or program.endswith("-NOTFOUND"):
+        raise FileNotFoundError(f"CMAKE_MAKE_PROGRAM is not set in {Path(build) / 'CMakeCache.txt'}")
+    listed = subprocess.run([program, "-C", str(build), "-t", "targets", "all"],
                             capture_output=True, text=True, check=True).stdout
     names = set()
     for line in listed.splitlines():
@@ -63,10 +73,19 @@ def commands(content):
 
 def registered(build):
     names = set()
-    for file in Path(build).rglob("CTestTestfile.cmake"):
+    pending = [Path(build).resolve()]
+    visited = set()
+    while pending:
+        directory = pending.pop().resolve()
+        file = directory / "CTestTestfile.cmake"
+        if directory in visited or not file.is_file():
+            continue
+        visited.add(directory)
         tests, disabled = {}, {}
         for command, arguments in commands(file.read_text(encoding="utf-8", errors="replace")):
-            if command == "add_test" and arguments:
+            if command == "subdirs":
+                pending.extend(directory / argument for argument in arguments)
+            elif command == "add_test" and arguments:
                 tests[arguments[0]] = arguments[1:]
             elif command == "set_tests_properties" and "PROPERTIES" in arguments:
                 properties = arguments.index("PROPERTIES")

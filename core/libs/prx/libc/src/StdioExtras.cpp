@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <stdexcept>
 
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
@@ -29,6 +30,9 @@ void* Allocate(std::size_t size) {
         } catch (const std::bad_alloc&) {
             handler = g_newHandler.load();
             if (handler == nullptr) throw;
+        } catch (const std::length_error&) {
+            handler = g_newHandler.load();
+            if (handler == nullptr) throw std::bad_alloc();
         }
         handler();
     }

@@ -28,7 +28,8 @@ bool isRipRelativeFF(const std::vector<std::uint8_t>& text, const Codegen::Instr
             std::uint8_t modrm = text[cur + 1];
             std::uint8_t mod = (modrm >> ModRmModShift) & ModRmModMask;
             std::uint8_t rm = modrm & ModRmRmMask;
-            return mod == ModRmModIndirect && rm == ModRmRmRipRelative;
+            const auto operation = (modrm >> ModRmRegShift) & ModRmRegMask;
+            return mod == ModRmModIndirect && rm == ModRmRmRipRelative && (operation >= 2 && operation <= 6);
         }
         break;
     }

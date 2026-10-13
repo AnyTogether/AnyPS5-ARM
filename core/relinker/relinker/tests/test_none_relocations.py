@@ -79,13 +79,37 @@ def main():
                         if target == "windows" and os.name == "nt" and not has_import:
                             run = subprocess.run([str(output)], capture_output=True, timeout=20)
                             assert run.returncode == 42, (name, level, run.returncode, run.stderr)
-        source = work / "invalid-relative.elf"
-        source.write_bytes(image_with_relocations([noop, (0x300, (1 << 32) | 8, 0x210)], False, False))
-        output = work / "invalid-relative.exe"
-        result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
-                                capture_output=True, text=True, timeout=20)
-        assert result.returncode == 2 and "RELATIVE relocation has a nonzero symbol index" in result.stderr
-        assert not output.exists()
+        for sce in (False, True):
+            image = image_with_relocations([noop, (0x300, (1 << 32) | 8, 0x210)], sce, False)
+            struct.pack_into("<IBBHQQ", image, 0x638, 0, 3, 0, 0, 0, 0)
+            struct.pack_into("<qQ", image, 0x470, 0x6100003f, 48)
+            struct.pack_into("<QQ", image, 152, 0x90, 0x90)
+            source = work / f"{sce}-section-relative.elf"
+            source.write_bytes(image)
+            for target, options in (("linux", []), ("windows", ["--windows"]), ("macos", ["--macos"])):
+                for level in (0, 1):
+                    output = work / f"{sce}-section-relative-{target}-{level}.out"
+                    result = subprocess.run([str(relinker), "--skip-sce-module", f"unused-filter={level}", *options,
+                                             str(source), str(output)], capture_output=True, text=True, timeout=20)
+                    assert result.returncode == 0, (sce, target, level, result.stdout, result.stderr)
+                    data = output.read_bytes()
+                    if target == "linux":
+                        tags, _ = dynamic_strings(data)
+                        start = file_offset(data, loads(data), tags[7])
+                        assert [struct.unpack_from("<QQq", data, offset) for offset in range(start, start + tags[8], 24)] == [relative]
+                    if target == "windows" and os.name == "nt":
+                        run = subprocess.run([str(output)], capture_output=True, timeout=20)
+                        assert run.returncode == 42, (sce, level, run.returncode, run.stderr)
+        for name, symbol in (("notype", (0, 0, 0, 0, 0, 0)), ("valued-section", (0, 3, 0, 0, 0x10, 0))):
+            image = image_with_relocations([noop, (0x300, (1 << 32) | 8, 0x210)], False, False)
+            struct.pack_into("<IBBHQQ", image, 0x638, *symbol)
+            source = work / f"invalid-relative-{name}.elf"
+            source.write_bytes(image)
+            output = work / f"invalid-relative-{name}.exe"
+            result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 2 and "RELATIVE relocation has a nonzero symbol index" in result.stderr, (name, result.stderr)
+            assert not output.exists()
     print("No-op executable relocation tests passed")
 
 

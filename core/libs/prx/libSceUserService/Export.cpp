@@ -6,54 +6,41 @@
 #include <cstring>
 #include "prx/libSceUserService/UserService.hpp"
 
+static int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t value) {
+ if (user_id != USER_SERVICE_INITIAL_USER_ID) {
+  return USER_SERVICE_ERROR_NOT_LOGGED_IN;
+ }
+ if (setting == nullptr) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+ }
+ *setting = value;
+ return USER_SERVICE_OK;
+}
+
 extern "C" {
 
 int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, int32_t* chat_transcription) {
- if (chat_transcription == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *chat_transcription = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, chat_transcription, 0);
 }
 
 int APS5_VABI sceUserServiceGetAccessibilityPressAndHoldDelay(int user_id, int32_t* press_and_hold_delay) {
- if (press_and_hold_delay == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *press_and_hold_delay = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, press_and_hold_delay, 0);
 }
 
 int APS5_VABI sceUserServiceGetAccessibilityTriggerEffect(int user_id, int32_t* trigger_effect) {
- if (trigger_effect == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *trigger_effect = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, trigger_effect, 1);
 }
 
 int APS5_VABI sceUserServiceGetAccessibilityVibration(int user_id, int32_t* vibration) {
- if (vibration == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *vibration = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, vibration, 1);
 }
 
 int APS5_VABI sceUserServiceGetAccessibilityZoomEnabled(int user_id, int32_t* zoom_enabled) {
- if (zoom_enabled == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *zoom_enabled = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, zoom_enabled, 0);
 }
 
 int APS5_VABI sceUserServiceGetAccessibilityZoomFollowFocus(int user_id, int32_t* zoom_follow_focus) {
- if (zoom_follow_focus == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
-  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
- }
- *zoom_follow_focus = 0;
- return USER_SERVICE_OK;
+ return ReportAccessibilitySetting(user_id, zoom_follow_focus, 1);
 }
 
 int APS5_VABI sceUserServiceGetAgeLevel(int user_id, uint32_t* age_level) {
@@ -121,10 +108,14 @@ int APS5_VABI sceUserServiceGetLoginUserIdList(UserServiceLoginUserIdList* user_
 }
 
 int APS5_VABI sceUserServiceGetUserName(int user_id, char* name, size_t size) {
- if (name == nullptr || user_id != USER_SERVICE_INITIAL_USER_ID) {
+ if (name == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
+ if (user_id != USER_SERVICE_INITIAL_USER_ID) {
+  return USER_SERVICE_ERROR_UNKNOWN_USER;
+ }
  if (size < USER_SERVICE_MAX_USER_NAME_LENGTH + 1) {
+  std::memset(name, 0, size);
   return USER_SERVICE_ERROR_BUFFER_TOO_SHORT;
  }
  std::strncpy(name, USER_SERVICE_INITIAL_USER_NAME, size);

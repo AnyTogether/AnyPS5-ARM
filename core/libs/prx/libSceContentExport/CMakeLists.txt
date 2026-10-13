@@ -15,7 +15,7 @@ if(BUILD_TESTING)
 
     add_test_executable(guest_content_unimplemented_tests ${LIBS_INCLUDE_DIR}/tests/GuestContentUnimplemented.cpp)
     target_include_directories(guest_content_unimplemented_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(guest_content_unimplemented_tests PRIVATE libSceContentSearch libSceContentDelete libc)
+    target_link_libraries(guest_content_unimplemented_tests PRIVATE libSceContentDelete libc)
     configure_windows_unwind(guest_content_unimplemented_tests)
     add_test(NAME guest_content_unimplemented COMMAND guest_content_unimplemented_tests)
     if(WIN32)

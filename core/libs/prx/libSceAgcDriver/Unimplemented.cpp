@@ -3,14 +3,15 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
-// Submit validation is a development-kit feature: retail drivers answer every validation call with
-// this error and neither read nor write their arguments.
-constexpr int AgcDriverDebugUnavailable = static_cast<int>(0x8a6c1000u);
+namespace {
+
+constexpr int DEBUG_UNAVAILABLE = static_cast<int>(0x8A6C1000);
+
+}
 
 extern "C" {
 
-// A retail console reports this status as 1 without inspecting anything.
-int APS5_VABI sceAgcDriverGetShaderDebuggingStatus(void) {
+int APS5_VABI sceAgcDriverGetShaderDebuggingStatus() {
     return 1;
 }
 
@@ -19,29 +20,36 @@ int APS5_VABI sceAgcDriverRegisterDefaultOwner(uint32_t* owner_handle) {
     return static_cast<int>(0x8A6C9018);
 }
 
-int APS5_VABI sceAgcDriverSetValidationErrorOutputFrequency(std::uint32_t frequency) {
+int APS5_VABI sceAgcDriverSetValidationErrorOutputFrequency(uint32_t frequency) {
     (void)frequency;
-    return AgcDriverDebugUnavailable;
+    return DEBUG_UNAVAILABLE;
 }
 
-int APS5_VABI sceAgcDriverSetSubmitValidationMode(std::uint32_t mode) {
+int APS5_VABI sceAgcDriverSetSubmitValidationMode(uint32_t mode) {
     (void)mode;
-    return AgcDriverDebugUnavailable;
+    return DEBUG_UNAVAILABLE;
 }
 
 int APS5_VABI sceAgcDriverGetSubmitValidationConfig(void* config) {
     (void)config;
-    return AgcDriverDebugUnavailable;
+    return DEBUG_UNAVAILABLE;
 }
 
-int APS5_VABI sceAgcDriverGetSubmitValidationMode(std::uint32_t* mode) {
+int APS5_VABI sceAgcDriverGetSubmitValidationMode(uint32_t* mode) {
     (void)mode;
-    return AgcDriverDebugUnavailable;
+    return DEBUG_UNAVAILABLE;
 }
 
 int APS5_VABI sceAgcDriverSetSubmitValidationConfig(const void* config) {
     (void)config;
-    return AgcDriverDebugUnavailable;
+    return DEBUG_UNAVAILABLE;
+}
+
+int APS5_VABI sceAgcDriverGetHsOffchipParam(uint16_t* first, uint16_t* second) {
+    (void)first;
+    (void)second;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 }

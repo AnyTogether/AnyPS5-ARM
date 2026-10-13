@@ -93,6 +93,15 @@ int APS5_VABI sceAppContentAppParamGetInt(uint32_t param_id, int32_t* value) {
     }
 }
 
+int APS5_VABI sceAppContentDownloadDataFormat(const AppContentMountPoint* mount_point) {
+    if (!mount_point) return SCE_APP_CONTENT_ERROR_PARAMETER;
+    if (std::strncmp(mount_point->data, DOWNLOAD_MOUNT_POINT, sizeof(mount_point->data)) != 0) APS5_INVALID_ARG_EX;
+    const auto directory = ResolvePath_nid_no_patch(DOWNLOAD_MOUNT_POINT);
+    if (std::filesystem::create_directories(directory)) RecordWrittenPath_nid_no_patch(directory);
+    ClearDirectory(directory);
+    return 0;
+}
+
 int APS5_VABI sceAppContentDownloadDataGetAvailableSpaceKb(const AppContentMountPoint* mount_point, size_t* available_space_kb) {
     if (!available_space_kb) return SCE_APP_CONTENT_ERROR_PARAMETER;
     if (!mount_point || std::strncmp(mount_point->data, DOWNLOAD_MOUNT_POINT, sizeof(mount_point->data)) != 0) APS5_INVALID_ARG_EX;

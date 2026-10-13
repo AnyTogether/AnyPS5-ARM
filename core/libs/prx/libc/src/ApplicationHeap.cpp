@@ -176,7 +176,7 @@ void ApplicationHeapFree_nid_no_patch(void* pointer) {
 }
 
 void* ApplicationHeapReallocate_nid_no_patch(void* pointer, std::size_t bytes) {
-    if (bytes == 0) {
+    if (bytes == 0 && pointer != nullptr) {
         ApplicationHeapFree_nid_no_patch(pointer);
         return nullptr;
     }

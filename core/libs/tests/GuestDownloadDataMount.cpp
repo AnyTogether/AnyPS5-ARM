@@ -11,6 +11,10 @@ int main(int argc, char** argv) {
     Require(argc == 2);
     const std::string_view mode = argv[1];
     Require(std::filesystem::is_directory("download0") == (mode == "declared"));
+    const bool data = std::filesystem::is_directory("data");
+    std::filesystem::remove_all("data");
+    Require(data == (mode != "missing"));
+    if (mode == "missing") return 0;
     if (mode == "invalid") {
         bool rejected = false;
         try {

@@ -8,7 +8,7 @@
 
 extern "C" {
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
-int APS5_VABI sceRudpTerminate();
+int APS5_VABI sceRudpEnd();
 int APS5_VABI sceRudpProcessEvents();
 int APS5_VABI sceRudpNetFlush();
 int APS5_VABI sceRudpGetMaxSegmentSize(std::uint16_t*);
@@ -43,7 +43,7 @@ int main() {
     std::uint16_t segment[3] = {0, 0, 0x5a5a};
     CHECK(sceRudpGetMaxSegmentSize(&segment[1]) == 0);
     CHECK(segment[0] == 0 && segment[1] == 1410 && segment[2] == 0x5a5a);
-    CHECK(sceRudpTerminate() == 0);
+    CHECK(sceRudpEnd() == 0);
 
     segmentSize = 0x5a5a;
     CHECK(sceRudpGetMaxSegmentSize(&segmentSize) == notInitialized);

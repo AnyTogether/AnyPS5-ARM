@@ -1119,6 +1119,29 @@ early_exit:
          {0x7e020280u, 0xbf06c002u, 0xbf850003u, 0x4a020081u, 0xbf068003u, 0xbf850006u, 0x7d880088u, 0xbf870001u, 0x4a020282u, 0xe0700000u,
           0x80000100u, 0xbf810000u, 0xbefe0480u, 0xbf810000u},
          Split::None},
+        {"early exit arm beside a parent arm that reaches the same merge", R"(
+  v_mov_b32 v1, 0
+  s_cmp_eq_u32 s2, 64
+  s_cbranch_scc1 other
+  v_add_nc_u32 v1, 1, v0
+  s_cmp_eq_u32 s3, 0
+  s_cbranch_scc1 early_exit
+join:
+  v_cmp_gt_u32 vcc, 8, v0
+  s_cbranch_vccnz store
+  v_add_nc_u32 v1, 2, v1
+store:
+  buffer_store_dword v1, off, s[0:3], 0
+  s_endpgm
+other:
+  v_add_nc_u32 v1, 3, v0
+  s_branch join
+early_exit:
+  s_mov_b64 exec, 0
+  s_endpgm)",
+         {0x7e020280u, 0xbf06c002u, 0xbf850009u, 0x4a020081u, 0xbf068003u, 0xbf850008u, 0x7d880088u, 0xbf870001u, 0x4a020282u, 0xe0700000u,
+          0x80000100u, 0xbf810000u, 0x4a020083u, 0xbf82fff8u, 0xbefe0480u, 0xbf810000u},
+         Split::None},
         {"return block entered from the return block after it", R"(
   v_mov_b32 v1, 0
   s_cmp_eq_u32 s2, 64

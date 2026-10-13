@@ -12,6 +12,7 @@
 extern "C" {
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI strerror_r_nid_postfix(int error, char* buffer, std::size_t length);
+int APS5_VABI vsnprintf_nid_postfix(char* buffer, std::size_t size, const char* format, VaList* args);
 }
 
 namespace {
@@ -59,15 +60,10 @@ std::string Format(const char* format, VaList* args) {
     LibcDetail::FormatWindows(nullptr, 0, format, args, &buffer);
     return buffer;
 #else
-    std::va_list copy;
-    va_copy(copy, *reinterpret_cast<std::va_list*>(args));
-    const int size = std::vsnprintf(nullptr, 0, format, copy);
-    va_end(copy);
+    const int size = vsnprintf_nid_postfix(nullptr, 0, format, args);
     if (size <= 0) return {};
     std::string buffer(static_cast<std::size_t>(size) + 1, '\0');
-    va_copy(copy, *reinterpret_cast<std::va_list*>(args));
-    std::vsnprintf(buffer.data(), buffer.size(), format, copy);
-    va_end(copy);
+    vsnprintf_nid_postfix(buffer.data(), buffer.size(), format, args);
     buffer.resize(static_cast<std::size_t>(size));
     return buffer;
 #endif

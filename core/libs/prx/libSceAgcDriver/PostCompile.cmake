@@ -10,25 +10,25 @@ add_custom_command(
     VERBATIM
 )
 
-foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests agc_driver_bda_device_tests agc_driver_mesh_tests)
+foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests agc_driver_bda_device_tests)
     if(TARGET ${agcTarget})
         target_sources(${agcTarget} PRIVATE Graphics/src/BufferPool.cpp)
     endif()
 endforeach()
 
-foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests agc_driver_mesh_tests)
+foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests)
     if(TARGET ${agcTarget})
         target_sources(${agcTarget} PRIVATE Graphics/src/TextureDetilerDescriptors.cpp Graphics/src/TextureCache.cpp)
     endif()
 endforeach()
 
-foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests agc_driver_bda_device_tests agc_driver_mesh_tests)
+foreach(agcTarget IN ITEMS libSceAgcDriver agc_driver_visual_test agc_driver_graphics_tests agc_driver_bda_device_tests)
     if(TARGET ${agcTarget})
         target_sources(${agcTarget} PRIVATE Graphics/src/GpuColorTransfer.cpp ${agcColorTransferHeader})
     endif()
 endforeach()
 
-target_sources(agc_driver_bda_device_tests PRIVATE tests/ColorTransferTests.cpp Graphics/src/ColorTargetLayout.cpp Execution/src/GuestMemory.cpp)
+target_sources(agc_driver_bda_device_tests PRIVATE tests/ColorTransferTests.cpp Graphics/src/ColorTargetLayout.cpp Graphics/src/TextureTiling.cpp Graphics/src/TextureFormat.cpp Execution/src/GuestMemory.cpp)
 target_include_directories(agc_driver_bda_device_tests PRIVATE ${agcTextureDetileGeneratedRoot})
 
 if(TARGET agc_driver_visual_test)

@@ -56,6 +56,17 @@ const bool g_downloadDataMounted = [] {
     }
 }();
 
+const bool g_dataMounted = [] {
+    try {
+        const auto run = std::filesystem::current_path();
+        if (!std::filesystem::exists(run / "app0" / "sce_sys" / "param.json")) return false;
+        std::filesystem::create_directories(run / "data");
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}();
+
 void ensureIconLoaded() {
     if (g_iconAttempted) return;
     g_iconAttempted = true;

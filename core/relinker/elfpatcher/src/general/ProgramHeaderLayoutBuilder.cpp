@@ -3,7 +3,7 @@
 #include <domain/Types.hpp>
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
+
 #include <limits>
 #include <string>
 #include <vector>
@@ -148,8 +148,7 @@ std::uint16_t ProgramHeaderLayoutBuilder::WriteLayout(
 
     const bool keepFrames = kept.size() + kSyntheticProgramHeaderCount <= request.PhNum;
     if (!keepFrames && frameCount > 0) {
-        std::erase_if(kept, [](const Domain::ProgramHeader& ph) { return ph.Type == PT_GNU_EH_FRAME; });
-        std::cerr << "WARNING: No free program header slot for PT_GNU_EH_FRAME; C++ exceptions thrown in the executable cannot be caught.\n";
+        throw Domain::RelinkerException("No free program header slot for PT_GNU_EH_FRAME");
     }
     _sortLoadHeaders(kept);
 

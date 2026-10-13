@@ -53,7 +53,7 @@ def main():
         alignment = max(segment[7] for segment in segments)
         if alignment != 0x4000 or first[3] % alignment != 0 or first[7] != alignment:
             raise AssertionError(("first PT_LOAD is not aligned to the largest segment alignment", segments))
-        assert "output.elf\nlibs/\n    *.prx\napp0/" in result.stdout, result.stdout
+        assert "  |-- output.elf\n  |-- libs/\n        |-- *.prx (system libraries)\n  |-- app0/" in result.stdout, result.stdout
         named_exe = Path(directory) / "linux.EXE"
         warning = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(named_exe)], capture_output=True, text=True, timeout=20)
         assert warning.returncode == 0, (warning.stdout, warning.stderr)

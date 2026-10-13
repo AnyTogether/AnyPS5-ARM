@@ -91,22 +91,38 @@ void AppendPadded(std::u16string& out, const std::u16string& text, bool left, in
 std::u16string FormatWide(const char16_t* format, VaList* source, bool secure = false) {
     if (format == nullptr || source == nullptr) throw std::invalid_argument("Null formatting argument");
     LibcDetail::FormatArguments args(source);
+    const char16_t* const start = format;
+    std::string ascii;
+    for (const char16_t* unit = format; *unit != 0; ++unit) ascii.push_back(*unit < 0x80 ? static_cast<char>(*unit) : '?');
+    args.Number(LibcDetail::NumberedArgumentClasses(ascii.c_str()));
+    const auto position = [&] {
+        const char* cursor = ascii.c_str() + (format - start);
+        const std::size_t found = LibcDetail::ArgumentPosition(cursor);
+        format = start + (cursor - ascii.c_str());
+        return found;
+    };
+    const auto star = [&] {
+        const std::size_t found = position();
+        return found ? args.At<int>(found) : args.Next<int>();
+    };
     std::u16string out;
     while (*format) {
         if (*format != u'%') { out.push_back(*format++); continue; }
         ++format;
         if (*format == u'%') { out.push_back(*format++); continue; }
+        if (const std::size_t found = position()) args.Seek(found);
         std::string spec = "%";
         bool left = false;
         int width = 0;
         int precision = -1;
-        while (In(*format, "-+ #0")) {
+        while (In(*format, "-+ #0'")) {
             if (*format == u'-') left = true;
-            spec += static_cast<char>(*format++);
+            if (*format != u'\'') spec += static_cast<char>(*format);
+            ++format;
         }
         if (*format == u'*') {
             ++format;
-            width = args.Next<int>();
+            width = star();
             if (width < 0) { left = true; spec += '-'; width = -width; }
             spec += std::to_string(width);
         } else {
@@ -117,7 +133,7 @@ std::u16string FormatWide(const char16_t* format, VaList* source, bool secure = 
             precision = 0;
             if (*format == u'*') {
                 ++format;
-                precision = args.Next<int>();
+                precision = star();
                 if (precision >= 0) spec += "." + std::to_string(precision);
             } else {
                 spec += '.';

@@ -1,4 +1,5 @@
 #include <elfpatcher/windows/WindowsRelocationBuilder.hpp>
+#include <elfpatcher/general/ElfConstants.hpp>
 #include <io/BufferUtils.hpp>
 #include <map>
 
@@ -38,13 +39,18 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
             if (Io::ReadU16(dynamicSection.DynSymData, symbolOffset + 6) != 0)
                 throw Domain::RelinkerException("Defined symbols require explicit relocation support", target);
             const auto name = ReadString(dynamicSection.DynStrData, Io::ReadU32(dynamicSection.DynSymData, symbolOffset));
-            if (name.empty())
+            if (name.empty() && dynamicSection.DynSymData[symbolOffset + 4] >> 4 != STB_WEAK)
                 throw Domain::RelinkerException("Empty import symbol name", target);
             if (type != 1 && addend != 0)
                 throw Domain::RelinkerException("GLOB_DAT/JUMP_SLOT relocation has a nonzero addend", target);
             image.RequireWritable(target, 8);
+            if (name.empty()) {
+                image.WritePointer(target, addend);
+                continue;
+            }
             image.WritePointer(target, 0);
             result.Imports.push_back({name, rva, addend});
+            result.Imports.back().Weak = (dynamicSection.DynSymData[symbolOffset + 4] >> 4) == STB_WEAK;
             if (const auto module = dynamicSection.ImportModules.find(target); module != dynamicSection.ImportModules.end())
                 result.Imports.back().Library = module->second;
         }

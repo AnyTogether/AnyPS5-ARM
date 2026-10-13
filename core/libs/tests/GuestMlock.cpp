@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -20,10 +21,26 @@ int APS5_VABI sceKernelReserveVirtualRange(void**, std::size_t, int, std::size_t
 int APS5_VABI sceKernelMunmap(void*, std::size_t);
 int APS5_VABI mlock_nid_postfix(const void*, std::size_t);
 int APS5_VABI munlock_nid_postfix(const void*, std::size_t);
+int APS5_VABI mlockall_nid_postfix(int);
 int* APS5_VABI __error_nid_postfix();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static void RequireLockAllInvalid(int flags) {
+    *__error_nid_postfix() = 0;
+    Require(mlockall_nid_postfix(flags) == -1 && *__error_nid_postfix() == 22);
+}
+
+static void RequireLockAllUnsupported(int flags) {
+    bool rejected = false;
+    try {
+        mlockall_nid_postfix(flags);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    Require(rejected);
+}
 
 #if defined(__linux__)
 static std::size_t LockedKilobytes() {
@@ -114,5 +131,13 @@ int main() {
     Require(mlock_nid_postfix(mapped, page) == -1 && *__error_nid_postfix() == 12);
     *__error_nid_postfix() = 0;
     Require(munlock_nid_postfix(mapped, page) == -1 && *__error_nid_postfix() == 12);
+
+    RequireLockAllInvalid(0);
+    RequireLockAllInvalid(4);
+    RequireLockAllInvalid(1 | 4);
+    RequireLockAllInvalid(-1);
+    RequireLockAllUnsupported(1);
+    RequireLockAllUnsupported(2);
+    RequireLockAllUnsupported(1 | 2);
     return 0;
 }

@@ -19,11 +19,14 @@ GuestTm* APS5_VABI libc_localtime_nid_postfix(const std::int64_t*);
 GuestTm* APS5_VABI localtime_nid_postfix(const std::int64_t*);
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const std::int64_t*, GuestTm*);
 GuestTm* APS5_VABI localtime_s_nid_postfix(const std::int64_t*, GuestTm*);
+char* APS5_VABI asctime_nid_postfix(const GuestTm*);
 std::int64_t APS5_VABI mktime_nid_postfix(GuestTm*);
 std::size_t APS5_VABI strftime_nid_postfix(char*, std::size_t, const char*, const GuestTm*);
 void APS5_VABI tzset_nid_postfix(void);
 char* APS5_VABI ctime_nid_postfix(const std::int64_t*);
 int* APS5_VABI __error_nid_postfix();
+double APS5_VABI libc_difftime_nid_postfix(std::int64_t, std::int64_t);
+double APS5_VABI difftime_nid_postfix(std::int64_t, std::int64_t);
 }
 
 using Converter = GuestTm* (APS5_VABI *)(const std::int64_t*);
@@ -68,6 +71,17 @@ static void CheckConcurrent(Converter convert, BufferedConverter buffered, const
     Require(convert(&invalid) == nullptr, "Unrepresentable time was accepted");
 }
 
+static GuestTm UtcTime(std::int64_t timer) {
+    GuestTm utc{};
+    Require(gmtime_s_nid_postfix(&timer, &utc) == &utc, "UTC conversion failed");
+    return utc;
+}
+
+static void CheckAsctime(const GuestTm& brokenDown, const char* expected) {
+    const char* text = asctime_nid_postfix(&brokenDown);
+    Require(text != nullptr && std::strcmp(text, expected) == 0, "asctime did not format the broken-down time");
+}
+
 struct UtcCase {
     std::int64_t timer;
     int year;
@@ -90,6 +104,17 @@ static void CheckUtc(const UtcCase& expected) {
         "UTC calendar fields are wrong");
     Require(utc.tm_gmtoff == 0, "UTC conversion did not reset tm_gmtoff");
     Require(utc.tm_zone != nullptr && std::strcmp(utc.tm_zone, "UTC") == 0, "UTC conversion did not set tm_zone");
+}
+
+struct DifferenceCase {
+    std::int64_t time1;
+    std::int64_t time0;
+    double seconds;
+};
+
+static void CheckDifference(const DifferenceCase& expected) {
+    Require(libc_difftime_nid_postfix(expected.time1, expected.time0) == expected.seconds
+        && difftime_nid_postfix(expected.time1, expected.time0) == expected.seconds, "difftime did not return time1 - time0");
 }
 
 static void CheckFormat(const GuestTm& guest, const char* format, const char* expected) {
@@ -227,6 +252,50 @@ static void CheckLiteralConversions() {
     Require(buffer[0] == 'x' && buffer[1] == 'y', "strftime wrote to a zero-size buffer");
 }
 
+static void CheckLocalRange() {
+    constexpr std::array<std::int64_t, 10> timers{-1, -7200, -7201, -86400, -2208988800, -12622780801, -62135596800, 32535216000, 40000000000, 253402300799};
+    for (const std::int64_t timer : timers) {
+        GuestTm local{};
+        *__error_nid_postfix() = 0;
+        Require(localtime_s_nid_postfix(&timer, &local) == &local && local.tm_gmtoff == 7200, "Local conversion rejected a time outside 1970 to 3000");
+        Require(Equal(local, UtcTime(timer + 7200)), "Local conversion outside 1970 to 3000 has the wrong calendar fields");
+        Require(local.tm_zone != nullptr && std::strlen(local.tm_zone) > 0, "Local conversion outside 1970 to 3000 did not set tm_zone");
+        GuestTm normalized = local;
+        normalized.tm_wday = -1;
+        normalized.tm_yday = -1;
+        Require(mktime_nid_postfix(&normalized) == timer && Equal(normalized, local), "mktime did not invert localtime outside 1970 to 3000");
+        Require(*__error_nid_postfix() == 0, "A local conversion outside 1970 to 3000 set errno");
+        const GuestTm* shared = localtime_nid_postfix(&timer);
+        Require(shared != nullptr && Equal(*shared, local), "localtime rejected a time outside 1970 to 3000");
+        Require(ctime_nid_postfix(&timer)[0] != '?', "ctime rejected a time outside 1970 to 3000");
+    }
+    GuestTm beforeEpoch{};
+    beforeEpoch.tm_year = 70;
+    beforeEpoch.tm_mon = -1;
+    beforeEpoch.tm_mday = 1;
+    beforeEpoch.tm_isdst = -1;
+    Require(mktime_nid_postfix(&beforeEpoch) == -2685600 && beforeEpoch.tm_year == 69 && beforeEpoch.tm_mon == 11 && beforeEpoch.tm_mday == 1
+        && beforeEpoch.tm_wday == 1 && beforeEpoch.tm_yday == 334, "mktime did not normalize a month before 1970");
+    GuestTm afterLimit{};
+    afterLimit.tm_year = 1200;
+    afterLimit.tm_mon = 17;
+    afterLimit.tm_mday = 15;
+    afterLimit.tm_hour = 12;
+    afterLimit.tm_isdst = -1;
+    const std::int64_t late = mktime_nid_postfix(&afterLimit);
+    Require(late == 35705181600 && afterLimit.tm_year == 1201 && afterLimit.tm_mon == 5 && afterLimit.tm_mday == 15 && afterLimit.tm_hour == 12
+        && Equal(afterLimit, UtcTime(late + 7200)), "mktime did not normalize a month after 3000");
+    GuestTm farDay{};
+    farDay.tm_year = 70;
+    farDay.tm_mday = -36500;
+    farDay.tm_isdst = -1;
+    const std::int64_t early = mktime_nid_postfix(&farDay);
+    Require(early == -3153693600 && farDay.tm_mday >= 1 && Equal(farDay, UtcTime(early + 7200)), "mktime did not normalize a day before 1970");
+    const std::int64_t overflow = std::numeric_limits<std::int64_t>::min();
+    GuestTm scratch{};
+    Require(localtime_s_nid_postfix(&overflow, &scratch) == nullptr, "Unrepresentable negative local time was accepted");
+}
+
 int main() {
 #ifdef _WIN32
     _putenv_s("TZ", "UTC-2");
@@ -248,6 +317,14 @@ int main() {
     const std::int64_t underflow = std::numeric_limits<std::int64_t>::min();
     GuestTm scratch{};
     Require(gmtime_s_nid_postfix(&underflow, &scratch) == nullptr, "Unrepresentable negative time was accepted");
+
+    CheckAsctime(UtcTime(0), "Thu Jan  1 00:00:00 1970\n");
+    CheckAsctime(UtcTime(-2208988801), "Sun Dec 31 23:59:59 1899\n");
+    CheckAsctime(UtcTime(-30610224000), "Wed Jan  1 00:00:00 1000\n");
+    GuestTm pastMonthEnd = UtcTime(983404800);
+    pastMonthEnd.tm_mon = 1;
+    pastMonthEnd.tm_mday = 29;
+    CheckAsctime(pastMonthEnd, "Thu Feb 29 00:00:00 2001\n");
 
     const std::int64_t epoch = 0;
     GuestTm local{};
@@ -273,6 +350,21 @@ int main() {
     Require(std::strcmp(ctime_nid_postfix(&underflow), "??? ??? ?? ??:??:?? ????\n") == 0 && *__error_nid_postfix() == 22,
         "ctime of an unrepresentable time did not report it");
 
+    constexpr std::int64_t latest = std::numeric_limits<std::int64_t>::max();
+    constexpr std::int64_t earliest = std::numeric_limits<std::int64_t>::min();
+    constexpr std::array<DifferenceCase, 9> differenceCases{{
+        {10, 3, 7.0},
+        {3, 10, -7.0},
+        {0, -1, 1.0},
+        {-1, 0, -1.0},
+        {-86400, -172800, 86400.0},
+        {latest, latest - 1, 1.0},
+        {earliest + 1, earliest, 1.0},
+        {latest, earliest, 0x1p64},
+        {earliest, latest, -0x1p64},
+    }};
+    for (const auto& differenceCase : differenceCases) CheckDifference(differenceCase);
+
     GuestTm utc{};
     Require(gmtime_s_nid_postfix(&epoch, &utc) == &utc, "UTC epoch conversion failed");
     char formatted[64]{};
@@ -280,6 +372,7 @@ int main() {
         && std::strcmp(formatted, "1970-01-01 00:00:00") == 0, "strftime did not read the guest tm");
 
     CheckFreeBsdConversions();
+    CheckLocalRange();
     CheckLiteralConversions();
 
     CheckConcurrent(libc_gmtime_nid_postfix, gmtime_s_nid_postfix, "Concurrent libc_gmtime returned another thread's date");

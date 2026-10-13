@@ -7,8 +7,8 @@ extern "C" {
 using GuestRudpEventHandler = void(APS5_VABI*)(int, int, int, void*);
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
 int APS5_VABI sceRudpCreateContext(GuestRudpEventHandler, void*, int*);
-int APS5_VABI sceRudpEnd(int);
-int APS5_VABI sceRudpTerminate();
+int APS5_VABI sceRudpTerminate(int);
+int APS5_VABI sceRudpEnd();
 int APS5_VABI sceRudpGetNumberOfPacketsToRead(int);
 int APS5_VABI sceRudpGetSizeWritable(int);
 int APS5_VABI sceRudpGetSizeReadable(int);
@@ -46,10 +46,10 @@ int main() {
     Require(sceRudpGetNumberOfPacketsToRead(context) == 0);
     Require(sceRudpGetSizeWritable(context) == notAcceptable);
     Require(sceRudpGetSizeReadable(context) == notAcceptable);
-    Require(sceRudpEnd(context) == 0);
+    Require(sceRudpTerminate(context) == 0);
     Require(sceRudpGetNumberOfPacketsToRead(context) == invalidContext);
     Require(sceRudpGetSizeWritable(context) == invalidContext);
     Require(sceRudpGetSizeReadable(context) == invalidContext);
-    Require(sceRudpTerminate() == 0);
+    Require(sceRudpEnd() == 0);
     return 0;
 }

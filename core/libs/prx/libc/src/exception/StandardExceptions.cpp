@@ -1,7 +1,10 @@
 #include "prx/libc/include/exceptions/Runtime.hpp"
+#include <cstdio>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <stdexcept>
+#include <string>
 
 namespace LibcException {
 struct TypeRecord { const void* const* vtable; const char* name; const TypeRecord* base; };
@@ -119,6 +122,40 @@ ExceptionObject* Assign(ExceptionObject* object, const ExceptionObject* source) 
     object->vtable = &table.destroy;
     __cxa_throw_nid_postfix(object, reinterpret_cast<std::type_info*>(const_cast<TypeRecord*>(table.type)), [](void* p) { DestroyPlain(static_cast<ExceptionObject*>(p)); });
 }
+
+struct CategoryObject { const void* vtable; };
+struct ErrorCode { int value; const CategoryObject* category; };
+struct SystemErrorObject { ExceptionObject base; ErrorCode code; };
+static_assert(sizeof(ErrorCode) == 16 && sizeof(SystemErrorObject) == 32 && offsetof(SystemErrorObject, code) == 16);
+struct CppError { int value; const char* message; };
+
+const TypeRecord ErrorCategoryType {ClassTypeVtable + 2, "St14error_category", nullptr};
+const TypeRecord GenericCategoryType {SingleTypeVtable + 2, "St23_Generic_error_category", &ErrorCategoryType};
+static void APS5_VABI GenericCategoryDestroy_nid_no_patch(CategoryObject*) {}
+static void APS5_VABI GenericCategoryDelete_nid_no_patch(CategoryObject*) {
+    throw std::invalid_argument("std::_Generic_error_category: the generic category object is not heap allocated");
+}
+static const char* APS5_VABI GenericCategoryName_nid_no_patch(const CategoryObject*) { return "generic"; }
+static void* APS5_VABI GenericCategoryMessage_nid_no_patch(void* result, const CategoryObject*, int) {
+    NotImplemented_nid_no_patch("std::_Generic_error_category::message");
+    return result;
+}
+static ErrorCode APS5_VABI GenericCategoryCondition_nid_no_patch(const CategoryObject* self, int value) { return {value, self}; }
+static bool APS5_VABI GenericCategoryEquivalentCondition_nid_no_patch(const CategoryObject* self, int value, const ErrorCode* condition) {
+    return condition->category == self && condition->value == value;
+}
+static bool APS5_VABI GenericCategoryEquivalentCode_nid_no_patch(const CategoryObject* self, const ErrorCode* code, int value) {
+    return code->category == self && code->value == value;
+}
+const void* const GenericCategoryVtable[] {
+    nullptr, &GenericCategoryType,
+    reinterpret_cast<const void*>(GenericCategoryDestroy_nid_no_patch), reinterpret_cast<const void*>(GenericCategoryDelete_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryName_nid_no_patch), reinterpret_cast<const void*>(GenericCategoryMessage_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCode_nid_no_patch)
+};
+const CategoryObject GenericCategory {GenericCategoryVtable + 2};
 }
 
 extern "C" {
@@ -271,9 +308,19 @@ void APS5_VABI _ZNSt12system_errorD1Ev_nid_postfix(LibcException::ExceptionObjec
 void APS5_VABI _ZNSt12system_errorD2Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
 void APS5_VABI _ZNSt12system_errorD0Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DeleteMessage(self); }
 const char* APS5_VABI _ZNKSt12system_error4whatEv_nid_postfix(const LibcException::ExceptionObject* self) { return LibcException::MessageWhat(self); }
-void APS5_VABI _ZNSt12system_errorC1ERKS__nid_postfix(LibcException::ExceptionObject* self, const LibcException::ExceptionObject* source) { LibcException::Copy(self, source, _ZTVSt12system_error_nid_postfix); }
-void APS5_VABI _ZNSt12system_errorC2ERKS__nid_postfix(LibcException::ExceptionObject* self, const LibcException::ExceptionObject* source) { LibcException::Copy(self, source, _ZTVSt12system_error_nid_postfix); }
-LibcException::ExceptionObject* APS5_VABI _ZNSt12system_erroraSERKS__nid_postfix(LibcException::ExceptionObject* self, const LibcException::ExceptionObject* source) { return LibcException::Assign(self, source); }
+void APS5_VABI _ZNSt12system_errorC1ERKS__nid_postfix(LibcException::SystemErrorObject* self, const LibcException::SystemErrorObject* source) {
+    LibcException::Copy(&self->base, &source->base, _ZTVSt12system_error_nid_postfix);
+    self->code = source->code;
+}
+void APS5_VABI _ZNSt12system_errorC2ERKS__nid_postfix(LibcException::SystemErrorObject* self, const LibcException::SystemErrorObject* source) {
+    LibcException::Copy(&self->base, &source->base, _ZTVSt12system_error_nid_postfix);
+    self->code = source->code;
+}
+LibcException::SystemErrorObject* APS5_VABI _ZNSt12system_erroraSERKS__nid_postfix(LibcException::SystemErrorObject* self, const LibcException::SystemErrorObject* source) {
+    LibcException::Assign(&self->base, &source->base);
+    self->code = source->code;
+    return self;
+}
 
 LibcException::TypeRecord _ZTISt11regex_error_nid_postfix {LibcException::SingleTypeVtable + 2, "St11regex_error", &_ZTISt13runtime_error_nid_postfix};
 LibcException::ExceptionVtable _ZTVSt11regex_error_nid_postfix {0, &_ZTISt11regex_error_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
@@ -290,6 +337,10 @@ LibcException::ExceptionVtable _ZTVSt11range_error_nid_postfix {0, &_ZTISt11rang
 void APS5_VABI _ZNSt11range_errorD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
 void APS5_VABI _ZNSt11range_errorD2Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
 void APS5_VABI _ZNSt11range_errorD0Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DeleteMessage(self); }
+
+LibcException::TypeRecord _ZTISt14overflow_error_nid_postfix {LibcException::SingleTypeVtable + 2, "St14overflow_error", &_ZTISt13runtime_error_nid_postfix};
+LibcException::ExceptionVtable _ZTVSt14overflow_error_nid_postfix {0, &_ZTISt14overflow_error_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
+void APS5_VABI _ZNSt14overflow_errorD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
 
 LibcException::TypeRecord _ZTINSt8ios_base7failureE_nid_postfix {LibcException::SingleTypeVtable + 2, "NSt8ios_base7failureE", &_ZTISt12system_error_nid_postfix};
 LibcException::ExceptionVtable _ZTVNSt8ios_base7failureE_nid_postfix {0, &_ZTINSt8ios_base7failureE_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
@@ -315,6 +366,27 @@ const char* APS5_VABI _ZNKSt8ios_base7failure4whatEv_nid_postfix(const LibcExcep
     LibcException::Construct(&object->base, _ZTVSt11regex_error_nid_postfix, "regular expression error");
     object->code = code;
     __cxa_throw_nid_postfix(object, reinterpret_cast<std::type_info*>(&_ZTISt11regex_error_nid_postfix),
+        reinterpret_cast<decltype(LibcException::Header::destructor)>(LibcException::DestroyGuestMessage_nid_no_patch));
+}
+[[noreturn]] void ThrowCppError_nid_no_patch(int code) {
+    static constexpr LibcException::CppError errors[] {
+        {16, "device or resource busy"},
+        {22, "invalid argument"},
+        {3, "no such process"},
+        {12, "not enough memory"},
+        {1, "operation not permitted"},
+        {11, "resource deadlock would occur"},
+        {35, "resource unavailable try again"}
+    };
+    if (code < 0 || code >= static_cast<int>(std::size(errors)))
+        throw std::out_of_range("_Throw_Cpp_error: " + std::to_string(code) + " is not a _Cpp_error code");
+    const auto& error = errors[code];
+    char message[128];
+    std::snprintf(message, sizeof(message), "%s: %s", error.message, error.message);
+    auto* object = static_cast<LibcException::SystemErrorObject*>(__cxa_allocate_exception_nid_postfix(sizeof(LibcException::SystemErrorObject)));
+    LibcException::Construct(&object->base, _ZTVSt12system_error_nid_postfix, message);
+    object->code = {error.value, &LibcException::GenericCategory};
+    __cxa_throw_nid_postfix(object, reinterpret_cast<std::type_info*>(&_ZTISt12system_error_nid_postfix),
         reinterpret_cast<decltype(LibcException::Header::destructor)>(LibcException::DestroyGuestMessage_nid_no_patch));
 }
 }

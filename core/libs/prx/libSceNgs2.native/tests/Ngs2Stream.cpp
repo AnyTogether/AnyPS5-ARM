@@ -158,10 +158,37 @@ static void TestSilenceBlock() {
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 
+static void TestDrainedStreamReportsEmpty() {
+    const auto system = CreateSystem();
+    const auto master = Mastering(system, 1);
+    const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
+    const auto voice = StreamVoice(rack, 0, master);
+    const std::vector<std::int16_t> pcm(4, 16384);
+    constexpr std::uint32_t playing = SCE_NGS2_VOICE_STATE_FLAG_INUSE | SCE_NGS2_VOICE_STATE_FLAG_PLAYING;
+
+    AddBlock(voice, pcm.data(), pcm.size() * 2, 4, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_RESET | SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE);
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+    RenderI16(system);
+    Require(Flags(voice) == (playing | SCE_NGS2_VOICE_STATE_FLAG_EMPTY));
+
+    const std::vector<std::int16_t> longer(Grain * 2, 8192);
+    AddBlock(voice, longer.data(), longer.size() * 2, Grain * 2, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE);
+    const auto out = RenderI16(system);
+    Require(out[0] == 8192);
+    Require(Flags(voice) == playing);
+
+    AddBlock(voice, pcm.data(), pcm.size() * 2, 4, 0);
+    RenderI16(system);
+    RenderI16(system);
+    Require((Flags(voice) & SCE_NGS2_VOICE_STATE_FLAG_EMPTY) == 0);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 int main() {
     TestStreamEndsAtDeclaredSamples();
     TestStreamClosedBeforeDeclaredSamples();
     TestStreamRejections();
     TestSilenceBlock();
+    TestDrainedStreamReportsEmpty();
     return 0;
 }

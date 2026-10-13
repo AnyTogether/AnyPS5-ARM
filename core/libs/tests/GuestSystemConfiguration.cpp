@@ -86,6 +86,26 @@ static void CheckPhysicalMemorySysctl() {
     Require(sysctl_nid_postfix(mib, 2, &value, &length, &value, sizeof(value)) == -1 && *__error_nid_postfix() == 1);
     Require(sysctlbyname_nid_postfix("hw.physmem", &value, &length, &value, sizeof(value)) == -1 && *__error_nid_postfix() == 1);
 }
+#if defined(__x86_64__) || defined(__i386__)
+static void CheckModelSysctl() {
+    const int mib[] = {6, 2};
+    *__error_nid_postfix() = 13;
+    std::size_t length = 0;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length > 1);
+    const std::size_t size = length;
+    char model[128] = {};
+    length = sizeof(model);
+    Require(sysctlbyname_nid_postfix("hw.model", model, &length, nullptr, 0) == 0 && length == size);
+    Require(std::strlen(model) + 1 == size && model[0] != ' ');
+    Require(*__error_nid_postfix() == 13);
+    char truncated[4] = {};
+    length = sizeof(truncated);
+    Require(sysctl_nid_postfix(mib, 2, truncated, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    Require(length == sizeof(truncated) && std::memcmp(truncated, model, sizeof(truncated)) == 0);
+    length = sizeof(model);
+    Require(sysctlbyname_nid_postfix("hw.model", model, &length, model, size) == -1 && *__error_nid_postfix() == 1);
+}
+#endif
 static void CheckMachdepCachelineSizeSysctl() {
     *__error_nid_postfix() = 13;
     int value = 0x5a5a5a5a;
@@ -194,14 +214,53 @@ static void CheckSdkVersionSysctl() {
     length = sizeof(version);
     Require(sysctlbyname_nid_postfix("kern.sdk_version", &version, &length, &version, sizeof(version)) == -1 && *__error_nid_postfix() == 1);
 }
+static void CheckArandomSysctl() {
+    const int mib[] = {1, 37};
+    *__error_nid_postfix() = 13;
+    std::size_t length = 0;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length == 0);
+    length = 64;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length == 64);
+    length = 300;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length == 256);
+    Require(sysctl_nid_postfix(mib, 2, nullptr, nullptr, nullptr, 0) == 0);
+    Require(*__error_nid_postfix() == 13);
+    unsigned char first[64] = {};
+    unsigned char second[64] = {};
+    length = sizeof(first);
+    Require(sysctl_nid_postfix(mib, 2, first, &length, nullptr, 0) == 0 && length == sizeof(first));
+    length = sizeof(second);
+    Require(sysctl_nid_postfix(mib, 2, second, &length, nullptr, 0) == 0 && length == sizeof(second));
+    Require(std::memcmp(first, second, sizeof(first)) != 0);
+    Require(*__error_nid_postfix() == 13);
+    unsigned char named[64] = {};
+    length = sizeof(named);
+    Require(sysctlbyname_nid_postfix("kern.arandom", named, &length, nullptr, 0) == 0 && length == sizeof(named));
+    Require(*__error_nid_postfix() == 13);
+    length = sizeof(first);
+    Require(sysctl_nid_postfix(mib, 2, first, &length, first, sizeof(first)) == -1 && *__error_nid_postfix() == 1);
+    *__error_nid_postfix() = 13;
+    unsigned char big[300] = {};
+    length = sizeof(big);
+    Require(sysctl_nid_postfix(mib, 2, big, &length, nullptr, 0) == 0 && length == 256);
+    unsigned char small[16] = {};
+    length = sizeof(small);
+    Require(sysctl_nid_postfix(mib, 2, small, &length, nullptr, 0) == 0 && length == sizeof(small));
+    Require(sysctl_nid_postfix(mib, 2, first, nullptr, nullptr, 0) == 0);
+    Require(*__error_nid_postfix() == 13);
+}
 int main() {
     CheckProcessorCountSysctl();
     CheckPhysicalMemorySysctl();
+#if defined(__x86_64__) || defined(__i386__)
+    CheckModelSysctl();
+#endif
     CheckMachdepCachelineSizeSysctl();
     CheckPathnameSysctl();
     CheckSystemSwVersion();
     CheckPseudoRandomSysctl();
     CheckSdkVersionSysctl();
+    CheckArandomSysctl();
     *__error_nid_postfix() = 13;
     Require(sysconf_nid_postfix(47) == 0x4000);
     Require(getpagesize_nid_postfix() == sysconf_nid_postfix(47));

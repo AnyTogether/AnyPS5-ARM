@@ -1,25 +1,193 @@
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 #include "prx/libc/include/Shutdown.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
+#include "prx/libc/include/specifics/macos/ExecutablePath.hpp"
+
+namespace {
+
+constexpr char MainExecutable[] = "/app0/eboot.bin";
+constexpr char ApplicationRoot[] = "/app0/";
+constexpr char MainExecutableVariable[] = "APS5_EBOOT";
+#if defined(_WIN32)
+constexpr wchar_t MainExecutableVariableWide[] = L"APS5_EBOOT";
+#endif
+
+[[noreturn]] void UnconvertedExecutable(const std::string& message) {
+    NotImplemented_nid_no_patch(("sceSystemServiceLoadExec: " + message).c_str());
+    std::abort();
+}
+
+std::string ConvertedExecutableName(const char* path) {
+    std::string_view relative(path);
+    if (!relative.starts_with(ApplicationRoot)) UnconvertedExecutable(std::string("executables outside /app0 (") + path + ")");
+    relative.remove_prefix(std::size(ApplicationRoot) - 1);
+    std::string name;
+    while (true) {
+        const std::size_t separator = relative.find('/');
+        const std::string_view component = relative.substr(0, separator);
+        if (component.empty() || component == "." || component == "..") UnconvertedExecutable(std::string("a path with an empty, . or .. component (") + path + ")");
+        name += (name.empty() ? "" : ".") + std::string(component);
+        if (separator == std::string_view::npos) return name;
+        relative.remove_prefix(separator + 1);
+    }
+}
+
+#if defined(_WIN32)
+std::wstring Utf16(const std::string& text) {
+    if (text.empty()) return {};
+    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0) throw std::runtime_error("sceSystemServiceLoadExec: argument is not valid UTF-8");
+    std::wstring wide(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
+    return wide;
+}
+
+std::wstring QuotedArgument(const std::wstring& argument) {
+    if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring::npos) return argument;
+    std::wstring quoted = L"\"";
+    for (std::size_t index = 0;; ++index) {
+        std::size_t backslashes = 0;
+        while (index < argument.size() && argument[index] == L'\\') {
+            ++backslashes;
+            ++index;
+        }
+        if (index == argument.size()) {
+            quoted.append(backslashes * 2, L'\\');
+            break;
+        }
+        quoted.append(argument[index] == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
+        quoted.push_back(argument[index]);
+    }
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+struct HostLaunch {
+    std::wstring executable;
+    std::wstring commandLine;
+};
+
+HostLaunch PrepareLaunch(const char* path, const char* const* arguments) {
+    std::wstring own(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, own.data(), static_cast<DWORD>(own.size()));
+    if (length == 0 || length >= own.size()) {
+        throw std::runtime_error("sceSystemServiceLoadExec: GetModuleFileNameW failed with error " + std::to_string(GetLastError()));
+    }
+    own.resize(length);
+    HostLaunch launch;
+    const std::filesystem::path ownPath(own);
+    if (std::strcmp(path, MainExecutable) == 0) {
+        std::wstring main(32768, L'\0');
+        const DWORD mainLength = GetEnvironmentVariableW(MainExecutableVariableWide, main.data(), static_cast<DWORD>(main.size()));
+        launch.executable = mainLength > 0 && mainLength < main.size() ? main.substr(0, mainLength) : own;
+    } else {
+        const auto target = ownPath.parent_path() / (Utf16(ConvertedExecutableName(path)) + ownPath.extension().wstring());
+        if (!std::filesystem::is_regular_file(target)) {
+            UnconvertedExecutable(std::string(path) + " without its converted executable; relink with --executable " + (path + std::size(ApplicationRoot) - 1));
+        }
+        launch.executable = target.wstring();
+    }
+    if (GetEnvironmentVariableW(MainExecutableVariableWide, nullptr, 0) == 0 && !SetEnvironmentVariableW(MainExecutableVariableWide, own.c_str())) {
+        throw std::runtime_error(std::string("sceSystemServiceLoadExec: cannot set ") + MainExecutableVariable);
+    }
+    launch.commandLine = L"\"" + launch.executable + L"\"";
+    for (std::size_t index = 0; arguments != nullptr && arguments[index] != nullptr; ++index) {
+        launch.commandLine += L" " + QuotedArgument(Utf16(arguments[index]));
+    }
+    return launch;
+}
+
+void StartHostExecutable(HostLaunch& launch) {
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(launch.executable.c_str(), launch.commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process)) {
+        throw std::runtime_error("sceSystemServiceLoadExec: CreateProcessW failed with error " + std::to_string(GetLastError()));
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+}
+#elif defined(__linux__) || defined(__APPLE__)
+struct HostLaunch {
+    std::string executable;
+    std::vector<std::string> arguments;
+};
+
+HostLaunch PrepareLaunch(const char* path, const char* const* arguments) {
+#if defined(__APPLE__)
+    const auto own = MacOsExecutablePath();
+#else
+    std::error_code error;
+    const auto own = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (error) throw std::runtime_error("sceSystemServiceLoadExec: cannot read /proc/self/exe: " + error.message());
+#endif
+    HostLaunch launch;
+    if (std::strcmp(path, MainExecutable) == 0) {
+        const char* main = std::getenv(MainExecutableVariable);
+        launch.executable = main != nullptr && *main != '\0' ? main : own.string();
+    } else {
+        const auto target = own.parent_path() / (ConvertedExecutableName(path) + own.extension().string());
+        if (!std::filesystem::is_regular_file(target)) {
+            UnconvertedExecutable(std::string(path) + " without its converted executable; relink with --executable " + (path + std::size(ApplicationRoot) - 1));
+        }
+        launch.executable = target.string();
+    }
+    if (setenv(MainExecutableVariable, own.c_str(), 0) != 0) {
+        throw std::runtime_error(std::string("sceSystemServiceLoadExec: cannot set ") + MainExecutableVariable);
+    }
+    launch.arguments.push_back(launch.executable);
+    for (std::size_t index = 0; arguments != nullptr && arguments[index] != nullptr; ++index) launch.arguments.emplace_back(arguments[index]);
+    return launch;
+}
+
+void StartHostExecutable(HostLaunch& launch) {
+    std::vector<char*> argv;
+    for (auto& argument : launch.arguments) argv.push_back(argument.data());
+    argv.push_back(nullptr);
+    ::execv(launch.executable.c_str(), argv.data());
+    throw std::runtime_error("sceSystemServiceLoadExec: execv failed: " + std::string(std::strerror(errno)));
+}
+#else
+struct HostLaunch {};
+
+HostLaunch PrepareLaunch(const char*, const char* const*) {
+    UnconvertedExecutable("starting an executable on this host");
+}
+
+void StartHostExecutable(HostLaunch&) {}
+#endif
+
+}
 
 extern "C" {
 
 int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* arguments) {
     if (!path || !*path) return SYSTEM_SERVICE_ERROR_PARAMETER;
-    if (std::strcmp(path, "exit") != 0) {
-        NotImplemented_nid_no_patch("sceSystemServiceLoadExec: executable replacement");
-    }
-    (void)arguments;
+    if (std::strcmp(path, "exit") == 0) LibcExit_nid_no_patch(0);
+    auto launch = PrepareLaunch(path, arguments);
     LibcRunShutdown_nid_postfix();
-    std::exit(0);
+    std::fflush(nullptr);
+    StartHostExecutable(launch);
+    LibcTerminate_nid_no_patch(0);
 }
 
 int APS5_VABI sceSystemServiceDisableNoticeScreenSkipFlagAutoSet(void) {
@@ -128,7 +296,7 @@ int APS5_VABI sceSystemServiceLaunchPlayerDialog(const void* param) {
  return SYSTEM_SERVICE_OK;
 }
 
-// System overlays (browser, activities, tournaments, controller settings) do not exist on the host.
+// System overlays (browser, tournaments) do not exist on the host.
 int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri, void* param) {
  (void)uri;
  (void)param;
@@ -148,7 +316,7 @@ int APS5_VABI sceSystemServiceDisableMusicPlayer(void) {
 }
 
 int APS5_VABI sceSystemServiceOpenChallengeActivity(void) {
- return SCE_KERNEL_ERROR_EOPNOTSUPP;
+ return SYSTEM_SERVICE_OK;
 }
 
 int APS5_VABI sceSystemServiceOpenTournamentOccurrence(void) {
@@ -160,7 +328,7 @@ int APS5_VABI sceSystemServiceReenableMusicPlayer(void) {
 }
 
 int APS5_VABI sceSystemServiceShowControllerSettings(void) {
- return SCE_KERNEL_ERROR_EOPNOTSUPP;
+ return SYSTEM_SERVICE_OK;
 }
 
 int APS5_VABI sceSystemServiceGetAppIdOfRunningBigApp(void) {

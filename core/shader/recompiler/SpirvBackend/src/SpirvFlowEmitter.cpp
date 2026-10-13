@@ -215,6 +215,11 @@ void EmitStructuredTerminator(SpirvValueEmitContext& ctx, const IrProgram& progr
                 const std::string message = "branch condition " + std::string(IrOpcodeName(resolved->Opcode())) + " of block " + std::to_string(info.id) + " (defined in " + where + ") was not emitted before the branch";
                 ctx.Fail(message.c_str());
             }
+            if (ctx.Label(trueBlock) == ctx.Label(falseBlock)) {
+                if (term.loopHeader) emitMerge();
+                state.module.AddFunction(spv::OpBranch, ctx.Label(trueBlock));
+                return;
+            }
             auto condition = EmitBranchCondition(ctx, info);
             if (state.loopGuardLimit != 0 && term.trueBlock != term.falseBlock) {
                 if (IsLoopMerge(program, term.trueBlock)) condition = GuardLoopExit(state, info, condition, true);

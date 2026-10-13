@@ -62,6 +62,7 @@ struct ResourceBlock {
     IrValue* condition = nullptr;
     std::vector<std::uint32_t> successors;
     std::vector<std::uint32_t> sources;
+    std::vector<std::uint32_t> images;
 };
 
 }

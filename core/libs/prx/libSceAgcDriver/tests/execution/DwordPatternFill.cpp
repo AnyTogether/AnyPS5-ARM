@@ -55,6 +55,12 @@ void MatchTests() {
     Require(!MatchDwordPatternFill(packet, Code, UserData(Output.data(), 1024, 250, 4), compute), "a count of whole dwords not filling 16-byte units matched");
     Require(!MatchDwordPatternFill(packet, Code, UserData(Output.data() + 1, 1024, 256, 4), compute), "an unaligned destination matched");
     Require(!MatchDwordPatternFill(packet, Code, UserData(Output.data(), 1024, 256, 4, 0x00814004u), compute), "an add-tid descriptor matched");
+    for (const std::uint32_t format : {0x00015004u, 0x00016004u}) {
+        Require(MatchDwordPatternFill(packet, Code, UserData(Output.data(), 1024, 256, 4, format), compute).has_value(), "a 32-bit output format was refused");
+    }
+    for (const std::uint32_t format : {0x00005004u, 0x0000b004u, 0x0000d004u, 0x0001b004u, 0x00027facu, 0x0004b004u}) {
+        Require(!MatchDwordPatternFill(packet, Code, UserData(Output.data(), 1024, 256, 4, format), compute), "an output format whose elements are not one 32-bit value matched");
+    }
     auto extra = data;
     extra.push_back(0);
     Require(!MatchDwordPatternFill(packet, Code, extra, compute), "a different user SGPR count matched (the group id moves)");

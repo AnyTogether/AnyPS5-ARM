@@ -10,12 +10,6 @@ int APS5_VABI sceSigninDialogGetStatus(void);
 int APS5_VABI sceSigninDialogGetResult(void* result);
 int APS5_VABI sceSigninDialogClose(void);
 int APS5_VABI sceSigninDialogTerminate(void);
-int APS5_VABI sceNetCtlApDialogInitialize(void);
-int APS5_VABI sceNetCtlApDialogOpen(const void* param);
-int APS5_VABI sceNetCtlApDialogUpdateStatus(void);
-int APS5_VABI sceNetCtlApDialogGetResult(void* result);
-int APS5_VABI sceNetCtlApDialogClose(void);
-int APS5_VABI sceNetCtlApDialogTerminate(void);
 }
 
 namespace {
@@ -71,6 +65,4 @@ int main() {
     Check({sceSigninDialogInitialize, sceSigninDialogOpen, sceSigninDialogUpdateStatus, sceSigninDialogGetResult, sceSigninDialogClose,
         sceSigninDialogTerminate, 4});
     Require(sceSigninDialogGetStatus() == kStatusNone);
-    Check({sceNetCtlApDialogInitialize, sceNetCtlApDialogOpen, sceNetCtlApDialogUpdateStatus, sceNetCtlApDialogGetResult, sceNetCtlApDialogClose,
-        sceNetCtlApDialogTerminate, 1});
 }

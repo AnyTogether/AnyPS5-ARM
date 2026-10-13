@@ -17,7 +17,9 @@ def main():
         checked = 0
         for index, module_directory in enumerate(("sce_module", "prx")):
             for label, run_path in (("default", None), ("origin", "$ORIGIN"),
-                                    ("custom", "$ORIGIN/host libs"), ("absolute", str(work / "absolute libs"))):
+                                    ("custom", "$ORIGIN/host libs"), ("absolute", str(work / "absolute libs")),
+                                    ("list", "$ORIGIN/first:$ORIGIN/second"),
+                                    ("list-bare", "$ORIGIN:$ORIGIN/libs:$ORIGIN")):
                 case = work / f"{index}-{label}"
                 source = case / "input" / "input.elf"
                 source.parent.mkdir(parents=True)
@@ -41,8 +43,10 @@ def main():
                     assert 0 <= offset < len(strings) and end >= 0, (tags, strings)
                     actual = strings[offset:end].decode()
                     configured = run_path if run_path is not None else "$ORIGIN/libs"
-                    expected = Path(configured.replace("$ORIGIN", str(output.parent))).resolve()
-                    resolved = Path(actual.replace("$ORIGIN", str(artifact.parent))).resolve()
+                    configured_paths = configured.split(":") if label.startswith("list") else [configured]
+                    actual_paths = actual.split(":") if label.startswith("list") else [actual]
+                    expected = [Path(path.replace("$ORIGIN", str(output.parent))).resolve() for path in configured_paths]
+                    resolved = [Path(path.replace("$ORIGIN", str(artifact.parent))).resolve() for path in actual_paths]
                     if resolved != expected or (label == "absolute" and actual != run_path):
                         failures.append((str(relative), label, actual, str(resolved), str(expected)))
                     checked += 1

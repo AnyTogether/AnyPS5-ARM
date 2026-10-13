@@ -50,9 +50,26 @@ std::uint32_t DescriptorElementPointer(SpirvEmitterState& state, std::uint32_t r
     }
     const auto pointer = state.module.AllocateId();
     const bool heap = kind == DescriptorBindingKind::Samplers || ImageBindingResourceClass(kind) != ImageResourceClass::None;
-    const auto index = heap ? state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::DescriptorIndex(static_cast<std::uint32_t>(kind), arrayIndex), arrayIndex) : ConstantU32(state, arrayIndex);
+    const auto index = heap && !state.registrationModules ? state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::DescriptorIndex(static_cast<std::uint32_t>(kind), arrayIndex), arrayIndex) : ConstantU32(state, arrayIndex);
     state.module.AddFunction(spv::OpAccessChain, resultPtrType, pointer, variableId, index);
     return pointer;
+}
+
+std::uint32_t RuntimeImageDword(SpirvEmitterState& state, std::uint32_t resource, std::uint32_t member) {
+    const auto index = state.runtimeImageMetadata != 0u ? state.runtimeImageMetadata : ConstantU32(state, resource);
+    const auto dword = Binary(state, spv::OpIAdd, TypeU32(state), ConstantU32(state, state.program.Metadata().bindings.ImageMetadataDword() + member), Binary(state, spv::OpIMul, TypeU32(state), index, ConstantU32(state, sizeof(RuntimeAbi::ResourceMetadata) / sizeof(std::uint32_t))));
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state), pointer, state.shaderDataStorageVariable, ConstantU32(state, 0u), dword);
+    const auto value = state.module.AllocateId();
+    state.module.AddFunction(spv::OpLoad, TypeU32(state), value, pointer);
+    return value;
+}
+
+std::uint32_t RuntimeMipCount(SpirvEmitterState& state, std::uint32_t resource) {
+    const auto word = RuntimeImageDword(state, resource, offsetof(RuntimeAbi::ResourceMetadata, descriptor) / sizeof(std::uint32_t) + 3u);
+    const auto first = EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, TypeU32(state), word, ConstantU32(state, 12u)), 0xfu);
+    const auto last = EmitAndConstant(state, Binary(state, spv::OpShiftRightLogical, TypeU32(state), word, ConstantU32(state, 16u)), 0xfu);
+    return Binary(state, spv::OpIAdd, TypeU32(state), Binary(state, spv::OpISub, TypeU32(state), last, first), ConstantU32(state, 1u));
 }
 
 std::uint32_t TableImageIndex(SpirvEmitterState& state, DescriptorBindingKind kind, std::uint32_t resource) {
@@ -242,6 +259,7 @@ void EmitStorageImageWrite(SpirvEmitterState& state, std::uint32_t resource, std
     if (image.mipCount == 0u) {
         ExitDescriptorBindingFailure(state, kind, resource, "dynamic storage image has no mip descriptors");
     }
+    const auto count = state.registrationModules ? RuntimeMipCount(state, resource) : state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::MipCountBase + resource, image.mipCount);
     const auto mergeLabel = state.module.AllocateId();
     std::vector<std::uint32_t> labels(image.mipCount);
     std::vector<std::uint32_t> words{spv::OpSwitch, mipLod, mergeLabel};
@@ -254,7 +272,6 @@ void EmitStorageImageWrite(SpirvEmitterState& state, std::uint32_t resource, std
     state.module.AddFunction(std::span<const std::uint32_t>(words));
     for (std::uint32_t mip = 0; mip < image.mipCount; mip++) {
         EmitLabel(state, labels[mip]);
-        const auto count = state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::MipCountBase + resource, image.mipCount);
         const auto active = Binary(state, spv::OpULessThan, TypeBool(state), ConstantU32(state, mip), count);
         const auto writeLabel = state.module.AllocateId();
         const auto nextLabel = state.module.AllocateId();

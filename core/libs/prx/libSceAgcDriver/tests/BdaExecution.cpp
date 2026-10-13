@@ -9,6 +9,7 @@
 #include <limits>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -345,15 +346,16 @@ void RunBdaStoreExecutionTests(const Context& context) {
     constexpr std::uint32_t writable = Abi::Read | Abi::Write;
     const Abi::Header header{Abi::Version, 2, sizeof(Abi::Range), 0};
     std::array<Abi::Range, 2> ranges{};
+    bool runtime = false;
     const auto run = [&](const char* name, std::uint64_t address, std::uint32_t bits, bool coherent, const std::array<std::uint8_t, 5>& expected, std::initializer_list<std::uint64_t> writtenAddresses, Abi::FaultReason reason = {}, std::uint64_t faultAddress = 0, std::uint32_t faultBytes = 0) {
-        const std::string label = std::string("BDA store ") + name + (coherent ? " coherent: " : ": ");
+        const std::string label = std::string(runtime ? "BDA runtime write " : "BDA store ") + name + (coherent ? " coherent: " : ": ");
         std::memset(first.Bytes().data(), 0xcd, first.Bytes().size());
         std::memset(second.Bytes().data(), 0xcd, second.Bytes().size());
         std::memcpy(table.Bytes().data(), &header, sizeof(header));
         std::memcpy(table.Bytes().data() + sizeof(header), ranges.data(), sizeof(ranges));
         std::memset(fault.Bytes().data(), 0, fault.Bytes().size());
         std::memset(output.Bytes().data(), 0, output.Bytes().size());
-        Pipeline pipeline(context, MakeBdaStoreTestShader(address, 0xa1b2c3d4u, bits, coherent), {&table, &fault, &output});
+        Pipeline pipeline(context, runtime ? MakeBdaWriteTestShader(address, 0xa1b2c3d4u, bits, coherent) : MakeBdaStoreTestShader(address, 0xa1b2c3d4u, bits, coherent), {&table, &fault, &output});
         pipeline.Run(1);
         std::array<std::uint8_t, 5> actual{};
         std::memcpy(actual.data(), first.Bytes().data(), 2);
@@ -387,7 +389,8 @@ void RunBdaStoreExecutionTests(const Context& context) {
         std::memcpy(&completed, output.Bytes().data(), sizeof(completed));
         Require(completed == 1, label + "store did not finish its per-byte accesses");
     };
-    for (const bool coherent : {false, true}) {
+    for (const auto& [coherent, writes] : std::initializer_list<std::pair<bool, bool>>{{false, false}, {false, true}, {true, false}, {true, true}}) {
+        runtime = writes;
         ranges = {{{guest, guest + 2, first.DeviceAddress(), writable, 0}, {guest + 2, guest + 5, second.DeviceAddress(), writable, 0}}};
         run("byte", guest + 1, 8, coherent, {0xcd, 0xd4, 0xcd, 0xcd, 0xcd}, {guest + 1});
         run("split short", guest + 1, 16, coherent, {0xcd, 0xd4, 0xc3, 0xcd, 0xcd}, {guest + 1, guest + 2});

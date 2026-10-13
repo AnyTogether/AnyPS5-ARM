@@ -8,7 +8,7 @@
 namespace Cli {
 
 const char* Usage() {
-    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
+    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--executable <path>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
            "Example: relinker input.elf output.elf";
 }
 
@@ -40,6 +40,9 @@ Args ParseArgs(int argc, char* argv[]) {
             if (i + 1 >= argc)
                 throw std::runtime_error("--module-dir requires a directory");
             args.moduleDirectories.push_back(argv[++i]);
+        } else if (arg == "--executable") {
+            if (i + 1 >= argc || std::string(argv[i + 1]).empty() || std::string(argv[i + 1]).starts_with("--")) throw std::runtime_error("--executable requires a nonempty path");
+            args.executables.push_back(argv[++i]);
         } else if (arg == "--to-intel") {
             args.toIntel = true;
         } else if (arg == "--to-rosetta") {
@@ -71,6 +74,8 @@ Args ParseArgs(int argc, char* argv[]) {
             args.windowsGui = true;
         } else if (arg.rfind("--", 0) == 0 || arg == "unused-filter") {
             throw std::runtime_error("unknown option: " + arg);
+        } else if (arg.empty()) {
+            throw std::runtime_error("input and output paths must be nonempty");
         } else if (args.inputPath.empty()) {
             args.inputPath = arg;
         } else if (args.outputPath.empty()) {
@@ -89,6 +94,9 @@ Args ParseArgs(int argc, char* argv[]) {
 
     if (args.skipSceModule && !args.moduleDirectories.empty())
         throw std::runtime_error("--module-dir conflicts with --skip-sce-module");
+
+    if (args.skipSceModule && !args.executables.empty())
+        throw std::runtime_error("--executable conflicts with --skip-sce-module");
 
     if (args.toWindows && args.toMacos)
         throw std::runtime_error("--windows conflicts with --macos");

@@ -8,8 +8,6 @@ extern "C" {
 int APS5_VABI sceNetShowIfconfig();
 int APS5_VABI scePadUnknown_n3kSX62fgNo();
 int APS5_VABI _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_();
-int APS5_VABI kqueue_nid_postfix();
-int APS5_VABI kevent_nid_postfix();
 }
 
 namespace {
@@ -23,8 +21,6 @@ const Export exports[] = {
     {"sceNetShowIfconfig", sceNetShowIfconfig},
     {"scePadUnknown_n3kSX62fgNo", scePadUnknown_n3kSX62fgNo},
     {"_ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_", _ZN3sce4Json5Value21setNullAccessCallBackEPFRKS1_NS0_9ValueTypeEPS2_PvES6_},
-    {"kqueue_nid_postfix", kqueue_nid_postfix},
-    {"kevent_nid_postfix", kevent_nid_postfix},
 };
 
 bool ReportsNotImplemented(const Export& entry) {

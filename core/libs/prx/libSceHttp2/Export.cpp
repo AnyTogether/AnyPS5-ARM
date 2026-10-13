@@ -363,6 +363,13 @@ int APS5_VABI sceHttp2CreateCookieBox(int lib_http2_ctx_id) {
     return id;
 }
 
+int APS5_VABI sceHttp2DeleteCookieBox(int cookie_box_id) {
+    std::lock_guard lock(g_handlesMutex);
+    if (FindHandle(cookie_box_id, Http2Kind::CookieBox) == nullptr) return ERROR_INVALID_ID;
+    g_handles.erase(cookie_box_id);
+    return 0;
+}
+
 int APS5_VABI sceHttp2SetCookieBox(int id, int cookie_box_id) {
     (void)id;
     (void)cookie_box_id;

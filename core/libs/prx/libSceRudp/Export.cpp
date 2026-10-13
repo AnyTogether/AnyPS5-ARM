@@ -77,15 +77,7 @@ int APS5_VABI sceRudpGetStatus(void* status, std::size_t size) {
     return 0;
 }
 
-int APS5_VABI sceRudpEnd(int ctx_id) {
-    std::lock_guard<std::mutex> lk(g_mutex);
-    if (!g_inited) {
-        return RUDP_ERROR_NOT_INITIALIZED;
-    }
-    return g_ctx.erase(ctx_id) != 0 ? 0 : RUDP_ERROR_INVALID_CONTEXT_ID;
-}
-
-int APS5_VABI sceRudpTerminate(void) {
+int APS5_VABI sceRudpEnd(void) {
     std::lock_guard<std::mutex> lk(g_mutex);
     if (!g_inited) {
         return RUDP_ERROR_NOT_INITIALIZED;
@@ -93,6 +85,14 @@ int APS5_VABI sceRudpTerminate(void) {
     g_inited = false;
     g_ctx.clear();
     return 0;
+}
+
+int APS5_VABI sceRudpTerminate(int ctx_id) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (!g_inited) {
+        return RUDP_ERROR_NOT_INITIALIZED;
+    }
+    return g_ctx.erase(ctx_id) != 0 ? 0 : RUDP_ERROR_INVALID_CONTEXT_ID;
 }
 
 int APS5_VABI sceRudpEnableInternalIOThread(uint32_t stack_size, uint32_t priority) {

@@ -32,6 +32,7 @@ int APS5_VABI accept_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI fcntl_nid_postfix(int, int, ...);
 int APS5_VABI poll_nid_postfix(PollDescriptor*, std::uint32_t, int);
 int APS5_VABI close_nid_postfix(int);
+int APS5_VABI sceKernelClose(int);
 std::int64_t APS5_VABI read_nid_postfix(int, void*, std::uint64_t);
 std::int64_t APS5_VABI write_nid_postfix(int, const char*, std::int64_t);
 std::int64_t APS5_VABI _read_nid_postfix(int, void*, std::size_t);
@@ -177,6 +178,8 @@ int main() {
     Require(pwrite_nid_disambig1_nid_postfix(server, request, 1, 0) == -1 && *__error_nid_postfix() == 9);
     Require(preadv_nid_postfix(server, positionedIov, 1, 0) == -1 && *__error_nid_postfix() == 9);
     Require(pwritev_nid_postfix(server, positionedIov, 1, 0) == -1 && *__error_nid_postfix() == 9);
-    Require(close_nid_postfix(listener) == 0);
+    Require(sceKernelClose(listener) == 0);
+    Require(sceKernelClose(listener) == KernelBadDescriptor);
+    Require(close_nid_postfix(listener) == -1 && *__error_nid_postfix() == 9);
     return 0;
 }

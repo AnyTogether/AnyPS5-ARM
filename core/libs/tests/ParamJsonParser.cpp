@@ -1,5 +1,6 @@
 #include "prx/libkernel/AppMetadata/include/ParamJsonParser.hpp"
 #include <chrono>
+#include <clocale>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -33,6 +34,37 @@ static ParsedParamJson ParseText(const std::filesystem::path& path, const std::s
     return parseParamJson(path);
 }
 
+static void CheckNumericLocale(const std::filesystem::path& path) {
+    struct RestoreLocale {
+        std::string previous = std::setlocale(LC_NUMERIC, nullptr);
+        ~RestoreLocale() { std::setlocale(LC_NUMERIC, previous.c_str()); }
+    } restore;
+    bool commaLocale = false;
+    for (const auto* name : {"French", "French_France.1252", "fr_FR.UTF-8", "de_DE.UTF-8"}) {
+        if (std::setlocale(LC_NUMERIC, name) != nullptr && std::string(std::localeconv()->decimal_point) == ",") {
+            commaLocale = true;
+            break;
+        }
+    }
+    if (!commaLocale) {
+#ifdef _WIN32
+        throw std::runtime_error("No Windows comma-decimal locale available for regression");
+#else
+        std::cout << "Comma-decimal locale regression unavailable on this host\n";
+        return;
+#endif
+    }
+    for (const auto& [number, expected] : {std::pair{"1.25e3", std::uint64_t{1250}},
+            std::pair{"0.5e3", std::uint64_t{500}}, std::pair{"12.75e2", std::uint64_t{1275}},
+            std::pair{"1.25", std::uint64_t{1}}}) {
+        Require(ParseSize(path, number).downloadDataSizeMiB == expected,
+            std::string("JSON number depends on host locale: ") + number);
+    }
+    bool rejected = false;
+    try { ParseSize(path, "-0.5"); } catch (const std::exception&) { rejected = true; }
+    Require(rejected, "Negative fractional size was accepted under comma locale");
+}
+
 static void CheckUserDefinedParams(const std::filesystem::path& path) {
     const auto parsed = ParseText(path, R"({"titleId":"PPSA23566","localizedParameters":{"en-US":{"titleName":"Example"}},)"
                                         R"("userDefinedParam1":23566,"userDefinedParam3":-7,"userDefinedParam4":2147483647})");
@@ -46,6 +78,23 @@ static void CheckUserDefinedParams(const std::filesystem::path& path) {
             rejected = true;
         }
         Require(rejected, std::string("Accepted invalid user defined param: ") + text);
+    }
+}
+
+static void CheckNesting(const std::filesystem::path& path) {
+    const std::string prefix = R"({"titleId":"PPSA00000","localizedParameters":{"en-US":{"titleName":"Example"}},"extra":)";
+    const auto nested = [&](std::size_t arrays) {
+        return prefix + std::string(arrays, '[') + std::string(arrays, ']') + "}";
+    };
+    Require(ParseText(path, nested(511)).title == "Example", "Nesting within the limit rejected");
+    for (const std::size_t arrays : {std::size_t{512}, std::size_t{513}, std::size_t{100000}}) {
+        bool rejected = false;
+        try {
+            ParseText(path, nested(arrays));
+        } catch (const std::runtime_error& error) {
+            rejected = std::string(error.what()).find("nested too deeply") != std::string::npos;
+        }
+        Require(rejected, "Excessive nesting not rejected: " + std::to_string(arrays));
     }
 }
 
@@ -130,6 +179,7 @@ int main() {
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
     int result = 0;
     try {
+        CheckNumericLocale(path);
         CheckUtf8(path);
         CheckNumberSyntax(path);
         const std::pair<const char*, std::uint64_t> sizes[] = {
@@ -153,6 +203,7 @@ int main() {
         CheckLanguages(path);
         CheckUserDefinedParams(path);
         CheckOutputPermission(path);
+        CheckNesting(path);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         result = 1;

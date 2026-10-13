@@ -35,4 +35,17 @@ if(BUILD_TESTING)
         set_tests_properties(guest_ampr_threads PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAmpr>")
     endif()
+
+    if(MINGW)
+        enable_language(ASM)
+        add_test_executable(guest_ampr_cpp_error_tests
+            ${LIBS_INCLUDE_DIR}/tests/GuestAmprCppError.cpp
+            ${LIBS_INCLUDE_DIR}/tests/GuestAmprCppError.S)
+        target_include_directories(guest_ampr_cpp_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_ampr_cpp_error_tests PRIVATE libSceAmpr libkernel libc)
+        configure_windows_unwind(guest_ampr_cpp_error_tests)
+        add_test(NAME guest_ampr_cpp_error COMMAND guest_ampr_cpp_error_tests)
+        set_tests_properties(guest_ampr_cpp_error PROPERTIES TIMEOUT 10 ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAmpr>")
+    endif()
 endif()

@@ -1209,11 +1209,8 @@ std::uint32_t LockedLdsUpdate(SpirvEmitterState& state, std::uint32_t type, std:
     state.module.AddFunction(spv::OpSelectionMerge, pendingMerge, spv::SelectionControlMaskNone);
     state.module.AddFunction(spv::OpBranchConditional, done, pendingMerge, pending);
     EmitLabel(state, pending);
-    auto elected = ConstantBool(state, true);
-    if (!state.singleLane) {
-        elected = state.module.AllocateId();
-        state.module.AddFunction(spv::OpGroupNonUniformElect, TypeBool(state), elected, ConstantU32(state, spv::ScopeSubgroup));
-    }
+    const auto elected = state.module.AllocateId();
+    EmitSubgroupElect(state, elected);
     state.module.AddFunction(spv::OpSelectionMerge, servedMerge, spv::SelectionControlMaskNone);
     state.module.AddFunction(spv::OpBranchConditional, elected, attempt, servedMerge);
     EmitLabel(state, attempt);
@@ -1242,9 +1239,8 @@ std::uint32_t LockedLdsUpdate(SpirvEmitterState& state, std::uint32_t type, std:
     EmitLabel(state, pendingMerge);
     state.module.AddFunction(spv::OpPhi, TypeBool(state), doneNext, served, servedMerge, done, body);
     state.module.AddFunction(spv::OpPhi, type, resultNext, servedResult, servedMerge, result, body);
-    const auto pendingLane = Unary(state, spv::OpLogicalNot, TypeBool(state), doneNext);
-    auto ballot = state.singleLane ? EmitSingleLaneBallot(state, pendingLane) : state.module.AllocateId();
-    if (!state.singleLane) state.module.AddFunction(spv::OpGroupNonUniformBallot, TypeU32Vector(state, 4u), ballot, ConstantU32(state, spv::ScopeSubgroup), pendingLane);
+    const auto ballot = state.module.AllocateId();
+    EmitSubgroupBallot(state, ballot, Unary(state, spv::OpLogicalNot, TypeBool(state), doneNext));
     std::uint32_t remaining = ConstantU32(state, 0u);
     for (std::uint32_t component = 0; component < 4u; ++component) {
         const auto word = state.module.AllocateId();

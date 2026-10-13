@@ -63,16 +63,23 @@ bool EvaluateRuntimeSourcesImpl(const IrResourcePlan& program, std::span<const s
     Evaluator evaluator(program, runtime, cleanFlatSlots, &cleanEvaluator);
     std::vector<std::uint8_t> active;
     if (evaluateFlat) {
-        active.assign(program.descriptorSources.size(), 1u);
+        active.assign(program.descriptorSources.size() + program.info.images.size(), 1u);
     }
     if (evaluateFlat && !program.controlFlow.empty()) {
         for (const auto& block : program.controlFlow) {
             for (const auto source : block.sources) {
                 active.at(source) = 0u;
             }
+            for (const auto image : block.images) {
+                active.at(program.descriptorSources.size() + image) = 0u;
+            }
         }
         std::vector<std::uint8_t> visited(program.controlFlow.size());
         std::vector<std::uint32_t> pending {0};
+        InaccessibleRead conditionRead;
+        std::uint32_t conditionNullRoots = 0;
+        cleanEvaluator.ReportInaccessibleReads(&conditionRead);
+        cleanEvaluator.ReportNullRootReads(&conditionNullRoots);
         while (!pending.empty()) {
             const auto index = pending.back();
             pending.pop_back();
@@ -84,14 +91,20 @@ bool EvaluateRuntimeSourcesImpl(const IrResourcePlan& program, std::span<const s
             for (const auto source : block.sources) {
                 active[source] = 1u;
             }
+            for (const auto image : block.images) {
+                active[program.descriptorSources.size() + image] = 1u;
+            }
             std::uint32_t condition = 0;
-            const bool cleanEvaluable = block.condition != nullptr && runtime.readSpecializationMemory != nullptr && cleanEvaluator.Evaluate(block.condition, condition);
+            const auto nullRootsBefore = conditionNullRoots;
+            const bool cleanEvaluable = block.condition != nullptr && runtime.readSpecializationMemory != nullptr && cleanEvaluator.Evaluate(block.condition, condition) && conditionNullRoots == nullRootsBefore;
             if (cleanEvaluable) {
                 pending.push_back(block.successors[condition != 0u ? 0u : 1u]);
             } else {
                 pending.insert(pending.end(), block.successors.begin(), block.successors.end());
             }
         }
+        cleanEvaluator.ReportInaccessibleReads(nullptr);
+        cleanEvaluator.ReportNullRootReads(nullptr);
     }
     InaccessibleRead inaccessible;
     std::uint32_t nullRoots = 0;

@@ -2,19 +2,25 @@
 #define ELFPATCHER_WINDOWS_WINDOWSELFPATCHER_HPP
 
 #include <elfpatcher/general/IElfPatcher.hpp>
+#include <optional>
+#include <functional>
 #include <filesystem>
 
 namespace Elfpatcher::Windows {
 
 class WindowsPePatcher : public IElfPatcher {
 public:
-    explicit WindowsPePatcher(bool windowsGui = false, std::filesystem::path iconPath = {});
+    explicit WindowsPePatcher(bool windowsGui = false, std::optional<std::vector<std::uint8_t>> icon = std::nullopt, std::filesystem::path iconName = "icon0.png", std::function<void(std::uint64_t, std::uint64_t)> progress = {});
+    const std::string& GetDiagnostics() const;
 
     std::vector<std::uint8_t> Patch(const std::vector<std::uint8_t>& sourceElf, const std::vector<Domain::ProgramHeader>& originalHeaders, const Domain::SysVDynamicSection& dynamicSection, std::uint64_t originalPltGotVaddr, const std::string& runPath, bool lazyBinding, bool dependencyDiagnostics, const std::vector<Codegen::TrampolineSite>& trampolines) override;
 
 private:
-    bool _windowsGui;
-    std::filesystem::path _iconPath;
+    std::function<void(std::uint64_t, std::uint64_t)> progress;
+    bool windowsGui;
+    std::optional<std::vector<std::uint8_t>> icon;
+    std::string diagnostics;
+    std::filesystem::path iconName;
 };
 
 }

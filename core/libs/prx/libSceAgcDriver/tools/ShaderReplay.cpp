@@ -41,6 +41,7 @@ bool g_disassemble = false;
 bool g_assembly = false;
 bool g_memory = false;
 bool g_spirv = false;
+bool g_prepare = false;
 bool g_graph = false;
 bool g_maintenance8 = false;
 // The driver sets relaxedFloat on MoltenVK with a window; requests do not carry it.
@@ -115,6 +116,16 @@ bool Replay(const char* path) {
         std::printf("  resource analysis failed: %s\n", FirstLine(error.what()).c_str());
         return false;
     }
+    if (g_prepare) {
+        try {
+            const auto handle = ShaderRecompiler::PrepareShader(request.request);
+            std::printf("  prepared: %zu SPIR-V words\n", ShaderRecompiler::GetPreparedArtifact(*handle).spirv.Words().size());
+            return true;
+        } catch (const std::exception& error) {
+            std::printf("  prepare failed: %s\n", FirstLine(error.what()).c_str());
+            return false;
+        }
+    }
     try {
         if (g_maintenance8) request.request.target.nonConstantImageOffsets = true;
         if (g_relaxed) request.request.target.relaxedFloat = true;
@@ -155,7 +166,7 @@ bool Replay(const char* path) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: agc_shader_replay [--dis] [--asm] [--cfg] [--mem] [--spv] [--code] [--maintenance8] [--relaxed] <shader.req>...\n  the driver writes shader_<address>.req files when APS5_DUMP_SHADERS is set\n");
+        std::fprintf(stderr, "usage: agc_shader_replay [--dis] [--asm] [--cfg] [--mem] [--spv] [--prepare] [--code] [--maintenance8] [--relaxed] <shader.req>...\n  the driver writes shader_<address>.req files when APS5_DUMP_SHADERS is set\n");
         return 2;
     }
     int failures = 0;
@@ -186,6 +197,10 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--code") {
             g_code = true;
+            continue;
+        }
+        if (std::string(argv[i]) == "--prepare") {
+            g_prepare = true;
             continue;
         }
         if (std::string(argv[i]) == "--spv") {

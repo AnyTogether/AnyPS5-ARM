@@ -1,5 +1,6 @@
 #include "prx/libc/include/GuestLocale.hpp"
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <cwchar>
 #include <climits>
@@ -25,6 +26,8 @@ int APS5_VABI _Mbtowcx_nid_postfix(std::uint16_t* dst, const char* src, std::siz
 int APS5_VABI _Wctombx_nid_postfix(char* dst, std::uint16_t src, std::mbstate_t* st);
 void APS5_VABI _Locksyslock_nid_postfix();
 void APS5_VABI _Unlocksyslock_nid_postfix();
+std::uint32_t APS5_VABI _Towctrans_nid_postfix(std::uint32_t wc, std::uint64_t desc);
+int* APS5_VABI __error_nid_postfix();
 
 }
 
@@ -206,6 +209,28 @@ static void CheckStandardStreams() {
     for (const auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321);
 }
 
+static void CheckWideCaseTranslation() {
+    const auto* lower = _Getptolower_nid_postfix();
+    const auto* upper = _Getptoupper_nid_postfix();
+    Require(_Towctrans_nid_postfix(u'A', 1) == u'a' && _Towctrans_nid_postfix(u'a', 2) == u'A');
+    *__error_nid_postfix() = 0;
+    for (std::uint32_t value = 0; value < 256; ++value) {
+        Require(_Towctrans_nid_postfix(value, 1) == static_cast<std::uint32_t>(lower[value]));
+        Require(_Towctrans_nid_postfix(value, 2) == static_cast<std::uint32_t>(upper[value]));
+    }
+    const std::uint32_t uncased[] = {0x100u, 0x391u, 0x3b1u, 0xffffu, 0xffffffffu};
+    for (const std::uint32_t value : uncased) {
+        Require(_Towctrans_nid_postfix(value, 1) == value && _Towctrans_nid_postfix(value, 2) == value);
+    }
+    Require(*__error_nid_postfix() == 0);
+    const std::uint64_t invalidDescriptors[] = {0, 3};
+    for (const std::uint64_t descriptor : invalidDescriptors) {
+        *__error_nid_postfix() = 0;
+        Require(_Towctrans_nid_postfix(u'A', descriptor) == u'A' && _Towctrans_nid_postfix(u'7', descriptor) == u'7');
+        Require(*__error_nid_postfix() == 22);
+    }
+}
+
 int main() {
     CheckGuestCalls();
     CheckLocinfoAlignment();
@@ -213,6 +238,7 @@ int main() {
     CheckCharacterConversions();
     CheckStreamDestruction();
     CheckStandardStreams();
+    CheckWideCaseTranslation();
     _Locksyslock_nid_postfix();
     _Locksyslock_nid_postfix();
     _Unlocksyslock_nid_postfix();

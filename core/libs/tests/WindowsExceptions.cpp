@@ -248,6 +248,28 @@ static void testUnwindThroughGuestFrames() {
     }
 }
 
+static int onceDestroyed;
+struct OnceGuard { ~OnceGuard() { ++onceDestroyed; } };
+static void ThrowThroughOnce(int depth) {
+    OnceGuard guard;
+    if (depth) { ThrowThroughOnce(depth - 1); return; }
+    std::once_flag flag;
+    std::call_once(flag, [] { throw std::runtime_error("through runtime frames"); });
+}
+
+static void testUnwindThroughRuntimeModules() {
+    for (int depth : {0, 1, 7, 64}) {
+        onceDestroyed = 0;
+        try {
+            ThrowThroughOnce(depth);
+            throw std::logic_error("call_once did not propagate");
+        } catch (const std::runtime_error& error) {
+            if (std::strcmp(error.what(), "through runtime frames")) throw;
+        }
+        if (onceDestroyed != depth + 1) throw std::runtime_error("unwinding through runtime DLL frames skipped a destructor");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1) {
         if (std::strcmp(argv[1], "throw-uncaught") == 0) return RunThrowChild();
@@ -260,6 +282,7 @@ int main(int argc, char** argv) {
     testMadeExceptionPointer();
     testUncaughtExceptions();
     testUnwindThroughGuestFrames();
+    testUnwindThroughRuntimeModules();
     try {
         Rethrow();
         return 1;

@@ -59,6 +59,7 @@ int main() {
     std::thread([] { Require(setlogmask_nid_postfix(0xff) == 0x55); }).join();
     Require(setlogmask_nid_postfix(0) == 0xff);
     syslog_nid_postfix(7, "mask shared across threads");
+    syslog_nid_postfix(7, "wide %ls %d %S", u"guest", 5, u"text");
     std::fflush(stderr);
 #ifdef _WIN32
     Require(::_dup2(saved, ::_fileno(stderr)) == 0 && ::_close(saved) == 0);
@@ -83,7 +84,8 @@ int main() {
         "[syslog:18] level 2\n"
         "[syslog:20] level 4\n"
         "[syslog:22] level 6\n"
-        "[syslog:15] mask shared across threads\n";
+        "[syslog:15] mask shared across threads\n"
+        "[syslog:15] wide guest 5 text\n";
     Require(length == std::strlen(expected) && std::strcmp(text, expected) == 0);
     Require(std::fclose(captured) == 0);
 }

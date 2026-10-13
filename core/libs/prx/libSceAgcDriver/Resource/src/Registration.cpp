@@ -2,14 +2,26 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <mutex>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
 // Resource registration feeds GPU debugging tools, none of which are attached; the game treats this code as benign.
 static constexpr int SCE_AGC_ERROR_RESOURCE_REGISTRATION_UNAVAILABLE = static_cast<int>(0x8A6C9018);
 static constexpr uint32_t RESOURCE_REGISTRATION_MAX_NAME_LENGTH = 0xfc;
+static constexpr uint32_t WORKLOAD_STREAM_MIN_ID = 1;
+static constexpr uint32_t WORKLOAD_STREAM_MAX_ID = 31;
+
+static std::mutex g_workloadStreamLock;
+static uint32_t g_workloadStreams = 0;
 
 extern "C" {
+
+bool AgcDriverWorkloadStreamRegistered_nid_postfix(uint32_t streamId) {
+    if (streamId < WORKLOAD_STREAM_MIN_ID || streamId > WORKLOAD_STREAM_MAX_ID) return false;
+    std::lock_guard lock(g_workloadStreamLock);
+    return (g_workloadStreams & (1u << streamId)) != 0;
+}
 
 int APS5_VABI sceAgcDriverRegisterOwner(uint32_t* owner_handle, const char* name) {
     (void)owner_handle;
@@ -37,8 +49,10 @@ int APS5_VABI sceAgcDriverRegisterMultipleResources(uint32_t* resourceHandle, ui
 }
 
 int APS5_VABI sceAgcDriverRegisterWorkloadStream(uint32_t stream_id, const void* stream) {
- (void)stream_id;
- (void)stream;
+ if (stream != nullptr && stream_id >= WORKLOAD_STREAM_MIN_ID && stream_id <= WORKLOAD_STREAM_MAX_ID) {
+  std::lock_guard lock(g_workloadStreamLock);
+  g_workloadStreams |= 1u << stream_id;
+ }
  return 0;
 }
 
@@ -69,7 +83,10 @@ int APS5_VABI sceAgcDriverUnregisterAllResourcesForOwner(uint32_t owner_handle) 
 }
 
 int APS5_VABI sceAgcDriverUnregisterWorkloadStream(uint32_t stream_id) {
-    (void)stream_id;
+    if (stream_id >= WORKLOAD_STREAM_MIN_ID && stream_id <= WORKLOAD_STREAM_MAX_ID) {
+        std::lock_guard lock(g_workloadStreamLock);
+        g_workloadStreams &= ~(1u << stream_id);
+    }
     return 0;
 }
 

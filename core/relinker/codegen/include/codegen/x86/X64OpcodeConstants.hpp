@@ -170,6 +170,7 @@ inline constexpr std::uint8_t TwoByteGrp6 = 0x00;
 inline constexpr std::uint8_t TwoByteLar = 0x02;
 inline constexpr std::uint8_t TwoByteLsl = 0x03;
 inline constexpr std::uint8_t TwoBytePrefetchw = 0x0D;
+inline constexpr std::uint8_t TwoByte3DNow = 0x0F;
 inline constexpr std::uint8_t TwoByteMovCrDrMin = 0x20;
 inline constexpr std::uint8_t TwoByteMovCrDrMax = 0x23;
 inline constexpr std::uint8_t TwoBytePopcnt = 0xB8;

@@ -169,8 +169,16 @@ void APS5_VABI _Unlocksyslock_nid_postfix() {
     g_sysLock.unlock();
 }
 
+__int128 APS5_VABI __divti3_nid_postfix(__int128 dividend, __int128 divisor) {
+    return SonyDivti3(dividend, divisor);
+}
+
 unsigned __int128 APS5_VABI __udivti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor) {
     return SonyUdivti3(dividend, divisor);
+}
+
+unsigned __int128 APS5_VABI __umodti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor) {
+    return SonyUmodti3(dividend, divisor);
 }
 
 }

@@ -160,6 +160,9 @@ def main(argv=None):
     arguments = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(nid_arguments(arguments, options))
     requested_nids = any(option_name(argument, options) == "--nid" for argument in arguments)
+    for nid in args.nid or []:
+        if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:
+            parser.error(f"invalid NID {nid!r}: expected 11 characters from A-Z, a-z, 0-9, + or -")
 
     db_path = Path(args.db) if args.db else DEFAULT_CACHE
     try:

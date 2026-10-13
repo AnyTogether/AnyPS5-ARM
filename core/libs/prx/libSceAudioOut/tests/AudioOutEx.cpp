@@ -7,7 +7,6 @@
 extern "C" {
 int APS5_VABI sceAudioOutExClose();
 int APS5_VABI sceAudioOutExConfigureOutput();
-int APS5_VABI sceAudioOutExGetMonitorInfo();
 int APS5_VABI sceAudioOutExOpen();
 }
 
@@ -28,7 +27,6 @@ static bool ReportsNotImplemented(ExFunction function, const char* name) {
 int main() {
     bool passed = ReportsNotImplemented(sceAudioOutExClose, "sceAudioOutExClose");
     passed = ReportsNotImplemented(sceAudioOutExConfigureOutput, "sceAudioOutExConfigureOutput") && passed;
-    passed = ReportsNotImplemented(sceAudioOutExGetMonitorInfo, "sceAudioOutExGetMonitorInfo") && passed;
     passed = ReportsNotImplemented(sceAudioOutExOpen, "sceAudioOutExOpen") && passed;
     return passed ? 0 : 1;
 }

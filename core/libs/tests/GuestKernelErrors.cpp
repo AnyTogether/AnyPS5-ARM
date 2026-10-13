@@ -90,13 +90,7 @@ int main() {
     Require(scePthreadMutexattrSettype(&attr, 5) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadMutexattrSetprotocol(&attr, PRIO_NONE) == SCE_OK);
     Require(scePthreadMutexattrSetprotocol(&attr, PRIO_INHERIT) == SCE_OK);
-    bool protectionRejected = false;
-    try {
-        scePthreadMutexattrSetprotocol(&attr, PRIO_PROTECT);
-    } catch (const std::invalid_argument&) {
-        protectionRejected = true;
-    }
-    Require(protectionRejected);
+    Require(scePthreadMutexattrSetprotocol(&attr, PRIO_PROTECT) == SCE_OK);
     PthreadMutex mutex = nullptr;
     Require(scePthreadMutexInit(&mutex, &attr, nullptr) == SCE_OK);
     Require(scePthreadMutexattrDestroy(&attr) == SCE_OK);

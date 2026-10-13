@@ -9,6 +9,7 @@ from pathlib import Path
 
 from test_guest_intel_trampolines import main_fixture
 from test_guest_module_directories import module_with_symbol, needed_libraries
+from test_guest_tls import data_directory, guest_with_tls
 
 
 def check_native_load_paths(output, libraries):
@@ -32,19 +33,19 @@ def check_native_load_paths(output, libraries):
         raise AssertionError(f'RVA {rva:#x} has no file data')
 
     descriptor = file_offset(struct.unpack_from('<I', pe, optional + 112 + 8)[0])
-    load_library_iat = None
+    slots = {}
     while any(pe[descriptor:descriptor + 20]):
         lookup, _, _, _, iat = struct.unpack_from('<IIIII', pe, descriptor)
         index = 0
         while (name_rva := struct.unpack_from('<Q', pe, file_offset((lookup or iat) + index * 8))[0]):
             if not name_rva & (1 << 63):
                 name_offset = file_offset(name_rva) + 2
-                name = pe[name_offset:pe.index(b'\0', name_offset)]
-                if name == b'LoadLibraryExW':
-                    load_library_iat = iat + index * 8
+                slots[pe[name_offset:pe.index(b'\0', name_offset)]] = iat + index * 8
             index += 1
         descriptor += 20
+    load_library_iat = slots.get(b'LoadLibraryExW')
     assert load_library_iat is not None, 'LoadLibraryExW is not imported'
+    attributes_iat = slots.get(b'GetFileAttributesW')
 
     data_rva, data = sections[b'.startup']
     code_rva, code = sections[b'.entry']
@@ -60,11 +61,20 @@ def check_native_load_paths(output, libraries):
     path_loads.sort()
     for index, (start, library) in enumerate(path_loads):
         end = path_loads[index + 1][0] if index + 1 < len(path_loads) else len(code)
-        calls = [offset for offset in range(start, end - 5)
-                 if code[offset:offset + 2] == b'\xff\x15'
-                 and code_rva + offset + 6 + struct.unpack_from('<i', code, offset + 2)[0] == load_library_iat]
+        def calls_through(slot):
+            return [offset for offset in range(start, end - 5)
+                    if code[offset:offset + 2] == b'\xff\x15'
+                    and code_rva + offset + 6 + struct.unpack_from('<i', code, offset + 2)[0] == slot]
+
+        calls = calls_through(load_library_iat)
         assert calls, f'{library}: loader path does not reach a LoadLibraryExW call'
         assert code[calls[0] - 11:calls[0]] == b'\x48\x89\xf1\x31\xd2\x41\xb8\x00\x11\x00\x00', library
+        probes = [offset for offset in calls_through(attributes_iat) if offset < calls[0]]
+        assert len(probes) == 1, f'{library}: optional provider is not probed with GetFileAttributesW before LoadLibraryExW'
+        probe = probes[0]
+        assert code[probe - 3:probe] == b'\x48\x89\xf1' and code[probe + 6:probe + 11] == b'\x83\xf8\xff\x0f\x85', library
+        assert probe + 15 + struct.unpack_from('<i', code, probe + 11)[0] == calls[0] - 11, \
+            f'{library}: a present optional provider does not continue to LoadLibraryExW'
 
 
 def dynamic(image, offset, phoff, tags):
@@ -291,6 +301,7 @@ def main():
         case = work / 'unscoped-native-import'
         (case / 'prx').mkdir(parents=True)
         (case / 'libs').mkdir()
+        (case / 'prx' / 'tls.prx').write_bytes(guest_with_tls(True))
         native_provider = native_output.parent / 'app0' / 'prx' / 'b.prx.guest.prx'
         (case / 'libs' / 'available.prx').write_bytes(native_provider.read_bytes())
         source = case / 'input.elf'
@@ -302,6 +313,15 @@ def main():
         if os.name == 'nt':
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode == 22 and 'unused.prx' not in run.stderr, (run.returncode, run.stdout, run.stderr)
+
+        broken = (case / 'app0' / 'prx' / 'tls.prx.guest.prx').read_bytes()
+        assert data_directory(broken, 1)[0] and broken.count(b'KERNEL32.dll\0') == 1
+        broken = broken.replace(b'KERNEL32.dll\0', b'APS5MISS.dll\0')
+        (case / 'libs' / 'unused.prx').write_bytes(broken)
+        if os.name == 'nt':
+            run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+            assert run.returncode != 0 and 'Failed to load module:' in run.stderr and 'unused.prx' in run.stderr and 'GetLastError: 126' in run.stderr, (run.returncode, run.stdout, run.stderr)
+            assert 'nothing is imported from it' not in run.stderr, run.stderr
 
         check_internal_guest_libc(convert, work, relinker)
 

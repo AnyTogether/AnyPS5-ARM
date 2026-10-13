@@ -3,6 +3,42 @@
 #include <cerrno>
 #include <filesystem>
 #include <new>
+#ifdef _WIN32
+#include <cstddef>
+#include <cstring>
+#include <vector>
+#include <windows.h>
+#endif
+
+std::error_code RenameNative_nid_no_patch(const std::filesystem::path& source, const std::filesystem::path& destination, [[maybe_unused]] bool replacesFile) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+#ifdef _WIN32
+    if (replacesFile) {
+        const auto target = fs::absolute(destination, error);
+        if (error) return error;
+        struct RenameInfo { DWORD flags; HANDLE root; DWORD nameBytes; WCHAR name[1]; };
+        static_assert(sizeof(RenameInfo) == sizeof(FILE_RENAME_INFO) && offsetof(RenameInfo, name) == offsetof(FILE_RENAME_INFO, FileName));
+        if (target.native().size() > (MAXDWORD - sizeof(RenameInfo)) / sizeof(wchar_t)) return std::make_error_code(std::errc::filename_too_long);
+        const auto nameBytes = target.native().size() * sizeof(wchar_t);
+        std::vector<std::byte> buffer(sizeof(RenameInfo) + nameBytes);
+        auto* info = reinterpret_cast<RenameInfo*>(buffer.data());
+        constexpr DWORD replaceExisting = 0x00000001, posixSemantics = 0x00000002, ignoreReadOnly = 0x00000040;
+        const auto attributes = GetFileAttributesW(destination.c_str());
+        info->flags = replaceExisting | posixSemantics | (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY) ? ignoreReadOnly : 0);
+        info->nameBytes = static_cast<DWORD>(nameBytes);
+        std::memcpy(info->name, target.c_str(), nameBytes);
+        const auto handle = CreateFileW(source.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) return std::error_code(static_cast<int>(GetLastError()), std::system_category());
+        constexpr auto renameInfoEx = static_cast<FILE_INFO_BY_HANDLE_CLASS>(22);
+        if (!SetFileInformationByHandle(handle, renameInfoEx, info, static_cast<DWORD>(buffer.size()))) error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+        CloseHandle(handle);
+        return error;
+    }
+#endif
+    fs::rename(source, destination, error);
+    return error;
+}
 
 static int RenamePath_nid_no_patch(const std::filesystem::path& source, const std::filesystem::path& destination) {
     constexpr int GuestEnoent = 2;
@@ -62,12 +98,11 @@ static int RenamePath_nid_no_patch(const std::filesystem::path& source, const st
     }
 #endif
 
-    error.clear();
-    fs::rename(source, destination, error);
+    error = RenameNative_nid_no_patch(source, destination, destinationExists && !sourceIsDirectory && !destinationIsDirectory);
     return error ? FilesystemError(error) : 0;
 }
 
-extern "C" int APS5_VABI rename_nid_postfix(const char* from, const char* to) {
+extern "C" int RenameGuestPath_nid_no_patch(const char* from, const char* to) {
     if (!from || !to) { errno = 14; return -1; }
     if (!*from || !*to) { errno = 2; return -1; }
     try {
@@ -83,4 +118,8 @@ extern "C" int APS5_VABI rename_nid_postfix(const char* from, const char* to) {
         errno = FilesystemError(error.code());
         return -1;
     }
+}
+
+extern "C" int APS5_VABI rename_nid_postfix(const char* from, const char* to) {
+    return RenameGuestPath_nid_no_patch(from, to);
 }

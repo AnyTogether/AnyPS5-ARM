@@ -19,9 +19,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <list>
+#include <atomic>
 #include <pthread.h>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include "RdnaDecoder/RdnaInstructionDecoder.hpp"
@@ -29,13 +32,25 @@
 namespace AgcDriver::DriverDetail {
 
 std::shared_ptr<const ShaderRecompiler::SourceHandle> PrepareShaderWithDiagnostics(const ShaderRecompiler::RecompileRequest& request, ShaderRecompiler::ShaderPreparationContext* preparation) {
+    std::exception_ptr failure;
+    std::string dump;
     try {
-        return ShaderRecompiler::PrepareShader(request, preparation);
+        auto handle = ShaderRecompiler::PrepareShader(request, preparation);
+        return handle;
     } catch (...) {
+        failure = std::current_exception();
         try {
-            if (std::getenv("APS5_DUMP_SHADERS") != nullptr) static_cast<void>(Driver::dumpRequest(request.shader.codeAddress, request));
+            if (std::getenv("APS5_DUMP_SHADERS") != nullptr) dump = Driver::dumpRequest(request.shader.codeAddress, request);
         } catch (...) {}
-        throw;
+    }
+    try {
+        std::rethrow_exception(failure);
+    } catch (const std::exception& error) {
+        std::ostringstream where;
+        where << "shader 0x" << std::hex << request.shader.codeAddress << " stage " << static_cast<unsigned>(request.shader.stage);
+        if (!dump.empty()) where << " (" << dump << ")";
+        where << ": ";
+        throw std::runtime_error(where.str() + error.what());
     }
 }
 
@@ -126,6 +141,7 @@ bool RawGraphicsDrawn() {
 namespace {
 
 void AwaitRegisteredPreparation(PreparedShaders& prepared, std::unique_lock<std::mutex>& lock) {
+    if (prepared.pending) PrioritizeRegistrationPreparation(prepared);
     prepared.settled.wait(lock, [&] { return !prepared.pending; });
     if (prepared.failure != nullptr) std::rethrow_exception(prepared.failure);
 }
@@ -150,6 +166,23 @@ bool ProgramUsesWorkgroup(const ShaderSnapshot& snapshot, std::size_t codeOffset
     });
     if (codeOffset == 0) snapshot.workgroupUse->store(used ? Used : Unused, std::memory_order_release);
     return used;
+}
+
+std::uint32_t PositionExportLayout(const ShaderSnapshot* snapshot, std::size_t codeOffset, std::span<const std::uint32_t> code, std::uint32_t paClVsOutCntl) {
+    constexpr std::uint8_t Unknown = 0, Unused = 1, Used = 2;
+    const auto bits = paClVsOutCntl & Graphics::PositionExportLayoutBits;
+    if (bits == 0) return 0;
+    const bool cached = snapshot != nullptr && codeOffset == 0;
+    if (cached) {
+        const auto use = snapshot->positionVectorUse->load(std::memory_order_acquire);
+        if (use != Unknown) return use == Used ? bits : 0;
+    }
+    const auto decoded = ShaderRecompiler::RdnaInstructionDecoder{}.Decode(code);
+    const bool used = std::any_of(decoded.instructions.begin(), decoded.instructions.end(), [](const auto& instruction) {
+        return instruction.family == ShaderRecompiler::RdnaInstructionFamily::EXP && instruction.exportTarget >= 0x0du && instruction.exportTarget <= 0x0fu && instruction.exportEnableMask != 0;
+    });
+    if (cached) snapshot->positionVectorUse->store(used ? Used : Unused, std::memory_order_release);
+    return used ? bits : 0;
 }
 
 
@@ -284,6 +317,13 @@ bool FusedHullHeader(const ShaderSnapshot& snapshot, Shader used, const Shader& 
     return true;
 }
 
+static Shader GuestShaderFields(const Shader* shader) {
+    GuestMemory::CheckRange(shader, sizeof(Shader), 1);
+    Shader fields;
+    std::memcpy(&fields, static_cast<const void*>(shader), sizeof(Shader));
+    return fields;
+}
+
 bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     if (snapshot.headerAddress == reinterpret_cast<std::uintptr_t>(shader)) return true;
     if (snapshot.header.size() < sizeof(Shader)) return false;
@@ -297,7 +337,7 @@ bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
 }
 
 std::shared_ptr<const ShaderSnapshot> RegisteredHeader(const ShaderRegistry& registry, const Shader* shader) {
-    const auto found = registry.find(reinterpret_cast<std::uintptr_t>(const_cast<const void*>(shader->code)));
+    const auto found = registry.find(reinterpret_cast<std::uintptr_t>(const_cast<const void*>(GuestShaderFields(shader).code)));
     if (found == registry.end()) return {};
     for (const auto& snapshot : found->second) {
         if (snapshot->headerAddress == reinterpret_cast<std::uintptr_t>(shader)) return snapshot;
@@ -357,6 +397,10 @@ namespace {
 void ReportPreparedAtUse(const ShaderSnapshot& snapshot, const ShaderRecompiler::RecompileRequest& request) {
     if (snapshot.codeAddress == NullPixelProgramAddress() && request.shader.stage == ShaderRecompiler::ShaderStage::Fragment && request.context.waveSize == 32u) {
         APS5_LOG_ERR("The null pixel program has no wave%u artifact for this draw; preparing it at draw", request.context.waveSize);
+        return;
+    }
+    if (request.context.vertex && (request.context.vertex->paClVsOutCntl & (1u << 18u)) != 0) {
+        APS5_LOG_OUT_DEBUG("Shader 0x%llx is drawn into a layered target; preparing its layered variant at draw", static_cast<unsigned long long>(snapshot.codeAddress));
         return;
     }
     if (!snapshot.header.empty()) {
@@ -578,6 +622,7 @@ struct RegisteredPreparation {
     std::array<ShaderRecompiler::MemoryRegion, 2> memory{};
     std::optional<ShaderRecompiler::RecompileRequest> request;
     std::vector<std::uint64_t> abiKey;
+    std::shared_ptr<VulkanDevice> prebuildDevice;
 };
 
 std::unique_ptr<RegisteredPreparation> PlanRegistered(const ShaderSnapshot& snapshot, const VulkanDevice& device, const QueueState& state, bool registration, bool* deferred = nullptr) {
@@ -662,7 +707,11 @@ std::unique_ptr<RegisteredPreparation> PlanRegistered(const ShaderSnapshot& snap
         if (firstUser == 0) userCount += 8;
     }
     plan->userData.resize(userCount);
-    if (stage != Stage::Compute && stage != Stage::Fragment && snapshot.type != 6) vertex = Graphics::DecodeVertexStageInfo(snapshot.header, snapshot.headerAddress, plan->userData, nullptr, true, 8u - firstUser);
+    if (stage != Stage::Compute && stage != Stage::Fragment && snapshot.type != 6) {
+        vertex = Graphics::DecodeVertexStageInfo(snapshot.header, snapshot.headerAddress, plan->userData, nullptr, true, 8u - firstUser);
+        const auto outputs = state.context.find(0x207u);
+        if (vertex && outputs != state.context.end()) vertex->paClVsOutCntl = PositionExportLayout(&snapshot, codeOffset, std::span(snapshot.code).subspan(codeOffset), outputs->second);
+    }
     plan->swappc = {vertex.has_value(), firstUser, userCount};
     if (deferred != nullptr) {
         if (const auto counter = ShaderRecompiler::UnresolvableSwappcTarget(plan->decoded, &plan->swappc)) {
@@ -674,8 +723,21 @@ std::unique_ptr<RegisteredPreparation> PlanRegistered(const ShaderSnapshot& snap
     plan->memory = {{{snapshot.codeAddress, std::as_bytes(std::span(snapshot.code))}, {snapshot.headerAddress, snapshot.header}}};
     auto& request = plan->request.emplace(ShaderRecompiler::RecompileRequest{{stage, address, code, snapshot.headerAddress, snapshot.header}, {wave, firstUser, plan->userData, compute, pixel, vertex, plan->memory, RegisteredFloatMode(snapshot)}, stage == Stage::Compute ? device.ComputeTarget(wave) : device.Target(), {0, 0, 0, 128}, graphics});
     if (graphics && graphics->mesh) request.layout.pushConstantSizeBytes = ShaderRecompiler::MeshDrawPushOffsetBytes;
+    if (graphics && graphics->tessellation) request.layout.pushConstantSizeBytes = ShaderRecompiler::TessellationLevelPushOffsetBytes;
     if (pixel && device.GraphicsPipelineLibraries()) request.layout.pushConstantOffsetBytes = Graphics::FixedPushOffset(Stage::Fragment);
     return plan;
+}
+
+void PrebuildStageLibrary(const std::shared_ptr<VulkanDevice>& device, const Graphics::ShaderStages& stages, ShaderRecompiler::ShaderStage stage, std::shared_ptr<const ShaderRecompiler::RecompileResult> result, std::uint32_t pushOffset) {
+    if (result == nullptr || (stage != ShaderRecompiler::ShaderStage::Vertex && stage != ShaderRecompiler::ShaderStage::Fragment)) return;
+    SubmitLibraryPrebuild([device, stages, stage, result = std::move(result), pushOffset] {
+        const std::array<Graphics::CompiledShader, 1> shaders{{{stage, result.get(), pushOffset}}};
+        try {
+            static_cast<void>(device->PrebuildGraphicsLibraries(stages, shaders));
+        } catch (const std::exception& error) {
+            APS5_LOG_OUT("shader library prebuild skipped: %s", error.what());
+        }
+    });
 }
 
 std::vector<PreparedShaders::Entry> PrepareRegistered(RegisteredPreparation& plan) {
@@ -687,6 +749,13 @@ std::vector<PreparedShaders::Entry> PrepareRegistered(RegisteredPreparation& pla
         entries.push_back({plan.codeOffset, PrepareShaderWithDiagnostics(request, &preparation)});
     };
     append();
+    if (plan.prebuildDevice != nullptr && request.target.registrationModules && request.shader.stage == ShaderRecompiler::ShaderStage::Fragment) {
+        try {
+            PrebuildStageLibrary(plan.prebuildDevice, {Graphics::ShaderPath::Vertex, 0u, 32u, request.context.waveSize, {}, {}}, request.shader.stage, ShaderRecompiler::RegistrationResult(request, *entries.front().handle), request.layout.pushConstantOffsetBytes);
+        } catch (const std::exception& error) {
+            APS5_LOG_OUT("shader library prebuild skipped: %s", error.what());
+        }
+    }
     if (request.context.compute) {
         request.context.compute->partialThreads = {1, 1, 1};
         append();
@@ -705,21 +774,65 @@ std::vector<PreparedShaders::Entry> PrepareRegistered(const ShaderSnapshot& snap
 class RegistrationPreparePool {
 public:
     static RegistrationPreparePool& Instance() {
-        static auto* pool = new RegistrationPreparePool();
+        static auto* pool = [] {
+            auto* created = new RegistrationPreparePool(std::max(2u, std::thread::hardware_concurrency() / 2u));
+            PreparationSlot().store(created);
+            return created;
+        }();
         return *pool;
     }
 
-    void Submit(std::function<void()> task) {
+    static RegistrationPreparePool* Existing() {
+        return PreparationSlot().load();
+    }
+
+    static RegistrationPreparePool& Prebuild() {
+        static auto* pool = [] {
+            const char* text = std::getenv("APS5_PREBUILD_THREADS");
+            auto* created = new RegistrationPreparePool(text != nullptr ? std::max(1u, static_cast<unsigned>(std::strtoul(text, nullptr, 10))) : 1u);
+            PrebuildSlot().store(created);
+            return created;
+        }();
+        return *pool;
+    }
+
+    static RegistrationPreparePool* ExistingPrebuild() {
+        return PrebuildSlot().load();
+    }
+
+private:
+    static std::atomic<RegistrationPreparePool*>& PreparationSlot() {
+        static std::atomic<RegistrationPreparePool*> slot{nullptr};
+        return slot;
+    }
+
+    static std::atomic<RegistrationPreparePool*>& PrebuildSlot() {
+        static std::atomic<RegistrationPreparePool*> slot{nullptr};
+        return slot;
+    }
+
+public:
+
+    void Submit(std::function<void()> task, const PreparedShaders* prepared = nullptr) {
         {
             std::unique_lock lock(mutex);
             if (threads != 0 && !closed) {
-                tasks.push_back(std::move(task));
+                if (prepared != nullptr && prepared->demanded.load()) tasks.push_front({std::move(task), prepared});
+                else tasks.push_back({std::move(task), prepared});
                 lock.unlock();
                 ready.notify_one();
                 return;
             }
         }
         task();
+    }
+
+    void Prioritize(const PreparedShaders& prepared) {
+        std::lock_guard lock(mutex);
+        const auto found = std::ranges::find_if(tasks, [&](const auto& task) { return task.prepared == &prepared; });
+        if (found == tasks.end()) return;
+        if (std::getenv("APS5_TRACE_PREPARATION_WAIT") != nullptr) std::fprintf(stderr, "[shader-prepare] demanded queued task at position %zu of %zu\n", static_cast<std::size_t>(std::distance(tasks.begin(), found)), tasks.size());
+        std::rotate(tasks.begin(), found, std::next(found));
     }
 
     void Close() {
@@ -729,8 +842,7 @@ public:
     }
 
 private:
-    RegistrationPreparePool() {
-        const auto count = std::max(2u, std::thread::hardware_concurrency() / 2u);
+    explicit RegistrationPreparePool(unsigned count) {
         pthread_attr_t attributes;
         pthread_attr_init(&attributes);
         pthread_attr_setstacksize(&attributes, 64u << 20u);
@@ -746,8 +858,9 @@ private:
 
     static void* Main(void* argument) {
         auto& pool = *static_cast<RegistrationPreparePool*>(argument);
+        if (PerformanceTrace::Configured()) PerformanceTrace::BindThread("shader prepare", TraceThread::DefaultCapacity / 8);
         for (;;) {
-            std::function<void()> task;
+            Task task;
             {
                 std::unique_lock lock(pool.mutex);
                 pool.ready.wait(lock, [&] { return !pool.tasks.empty(); });
@@ -755,8 +868,8 @@ private:
                 pool.tasks.pop_front();
                 ++pool.running;
             }
-            task();
-            task = nullptr;
+            task.function();
+            task = {};
             {
                 std::lock_guard lock(pool.mutex);
                 --pool.running;
@@ -766,10 +879,15 @@ private:
         return nullptr;
     }
 
+    struct Task {
+        std::function<void()> function;
+        const PreparedShaders* prepared = nullptr;
+    };
+
     std::mutex mutex;
     std::condition_variable ready;
     std::condition_variable idle;
-    std::deque<std::function<void()>> tasks;
+    std::deque<Task> tasks;
     unsigned threads = 0;
     unsigned running = 0;
     bool closed = false;
@@ -781,6 +899,7 @@ bool AsyncRegistrationPrepare() {
 }
 
 void PrepareRegisteredInBackground(std::shared_ptr<const ShaderSnapshot> snapshot, std::shared_ptr<RegisteredPreparation> plan) {
+    const auto* preparedKey = snapshot->prepared.get();
     SubmitRegistrationPreparation([snapshot = std::move(snapshot), plan = std::move(plan)] {
         PerformanceContext timingContext(FrameTiming::Preparation());
         std::vector<PreparedShaders::Entry> entries;
@@ -802,17 +921,27 @@ void PrepareRegisteredInBackground(std::shared_ptr<const ShaderSnapshot> snapsho
             prepared.pending = false;
         }
         prepared.settled.notify_all();
-    });
+    }, preparedKey);
 }
 
 }
 
-void SubmitRegistrationPreparation(std::function<void()> task) {
-    RegistrationPreparePool::Instance().Submit(std::move(task));
+void SubmitRegistrationPreparation(std::function<void()> task, const PreparedShaders* prepared) {
+    RegistrationPreparePool::Instance().Submit(std::move(task), prepared);
+}
+
+void PrioritizeRegistrationPreparation(PreparedShaders& prepared) {
+    prepared.demanded.store(true);
+    if (auto* pool = RegistrationPreparePool::Existing()) pool->Prioritize(prepared);
+}
+
+void SubmitLibraryPrebuild(std::function<void()> task) {
+    RegistrationPreparePool::Prebuild().Submit(std::move(task));
 }
 
 void CloseRegistrationPreparation() {
     RegistrationPreparePool::Instance().Close();
+    if (auto* prebuild = RegistrationPreparePool::ExistingPrebuild()) prebuild->Close();
 }
 
 std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decoded, const ShaderRecompiler::SpirvTarget& target) {
@@ -842,7 +971,7 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
     std::vector<PreparedGraphicsStage> prepared;
     std::uint32_t pushOffset = 0;
     const bool fixedSlots = target.fixedPushSlots;
-    const auto capacity = decoded.state.stages.mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : Graphics::PipelinePushSlotBytes;
+    const auto capacity = decoded.state.stages.mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : decoded.state.stages.tessellation ? ShaderRecompiler::TessellationLevelPushOffsetBytes : Graphics::PipelinePushSlotBytes;
     for (std::size_t index = 0; index < decoded.programs.size(); ++index) {
         if (decoded.roles[index] == ShaderRecompiler::ProgramRole::GeometryBack) continue;
         const auto& program = decoded.programs[index];
@@ -850,6 +979,7 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
         const auto wave = fragment ? decoded.state.stages.fragmentWaveSize : decoded.state.stages.vertexWaveSize;
         std::optional<ShaderRecompiler::ShaderVertexStageInfo> vertex;
         if (!fragment) vertex = Graphics::DecodeVertexStageInfo(program.binary.header, program.binary.headerAddress, program.userData, nullptr, true, 8u - program.firstUserSgpr);
+        if (vertex) vertex->paClVsOutCntl = PositionExportLayout(program.snapshot.get(), program.codeOffset, program.binary.code, decoded.state.paClVsOutCntl) | decoded.state.layerExports;
         pushOffset = Graphics::StagePushOffset(pushOffset, program.binary.stage, fixedSlots);
         const auto offset = pushOffset;
         const auto room = (fixedSlots && fragment ? Graphics::PipelinePushSlotBytes : capacity) - pushOffset % Graphics::PipelinePushSlotBytes;
@@ -869,7 +999,15 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
         }
         const auto bytes = handle->artifact->bindings.pushConstantSizeBytes;
         require(bytes <= room, "prepared graphics stages exceed the push constant block");
-        prepared.push_back({program.snapshot, {program.codeOffset, handle}});
+        std::shared_ptr<const ShaderRecompiler::RecompileResult> registration;
+        if (target.registrationModules) {
+            try {
+                registration = ShaderRecompiler::RegistrationResult(request, *handle);
+            } catch (const std::exception& error) {
+                APS5_LOG_OUT("shader library prebuild skipped: %s", error.what());
+            }
+        }
+        prepared.push_back({program.snapshot, {program.codeOffset, handle}, program.binary.stage, offset, std::move(registration)});
         pushOffset += bytes;
     }
     transaction.Commit();
@@ -889,8 +1027,8 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
         std::lock_guard lock(mutex);
         registry = shaders;
         for (const auto* shader : stages) {
-            GuestMemory::CheckRange(shader, sizeof(Shader), alignof(Shader));
-            const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(shader->code));
+            const auto fields = GuestShaderFields(shader);
+            const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(fields.code));
             require(registry != nullptr && registry->contains(address), "graphics ABI refers to an unregistered shader");
             const auto selected = RegisteredHeader(*registry, shader);
             require(selected != nullptr, "graphics ABI refers to a replaced shader header");
@@ -901,10 +1039,10 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
             registered.shader.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.shader.insert_or_assign(offset, value); });
             registered.context.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.context.insert_or_assign(offset, value); });
             registered.userConfig.ForEach([&](std::uint32_t offset, std::uint32_t value) { state.userConfig.insert_or_assign(offset, value); });
-            if (shader->type != snapshot.type) {
-                const std::size_t count = shader->num_sh_registers;
-                GuestMemory::CheckRange(shader->sh_registers, count * sizeof(ShaderRegister), alignof(ShaderRegister));
-                for (std::size_t index = 0; index < count; ++index) state.shader.insert_or_assign(shader->sh_registers[index].offset, shader->sh_registers[index].value);
+            if (fields.type != snapshot.type) {
+                const std::size_t count = fields.num_sh_registers;
+                GuestMemory::CheckRange(fields.sh_registers, count * sizeof(ShaderRegister), alignof(ShaderRegister));
+                for (std::size_t index = 0; index < count; ++index) state.shader.insert_or_assign(fields.sh_registers[index].offset, fields.sh_registers[index].value);
             }
         }
     }
@@ -939,6 +1077,11 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
         if (stage.snapshot->type == 1) continue;
         ResolvePreparedGraphics(*stage.snapshot, {}, primitiveType == state.userConfig.end() ? 0u : primitiveType->second, localDevice->Target());
     }
+    if (decoded.state.stages.path == Graphics::ShaderPath::Vertex) {
+        for (const auto& stage : prepared) {
+            if (stage.registration != nullptr) PrebuildStageLibrary(localDevice, decoded.state.stages, stage.stage, stage.registration, stage.pushOffset);
+        }
+    }
     PreparedShaderState::GraphicsAbi abi{key, registry, {}};
     for (const auto& stage : prepared) abi.stages.push_back(stage.snapshot);
     auto& graphicsAbis = transaction.Edit(*owner).graphicsAbis;
@@ -952,8 +1095,8 @@ void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegist
     PerformanceTimer timing("Shader.ResolveAbi");
     ShaderPreparationTransaction transaction;
     CheckFailure();
-    GuestMemory::CheckRange(shader, sizeof(Shader), alignof(Shader));
-    if (shader->type != 0 && shader->type != 1) {
+    const auto fields = GuestShaderFields(shader);
+    if (fields.type != 0 && fields.type != 1) {
         const std::array<const Shader*, 1> stages{shader};
         ResolveGraphicsStagesAbi(stages, context, primitive);
         transaction.Commit();
@@ -962,7 +1105,7 @@ void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegist
     std::shared_ptr<const ShaderSnapshot> snapshot;
     {
         std::lock_guard lock(mutex);
-        const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(shader->code));
+        const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(fields.code));
         require(shaders != nullptr && shaders->contains(address), "static ABI refers to an unregistered shader");
         snapshot = RegisteredHeader(*shaders, shader);
         require(snapshot != nullptr, "static ABI refers to a replaced shader header");
@@ -979,14 +1122,20 @@ void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegist
     struct RegisteredAbiKeyStorage {};
     auto& key = HostThreadLocal<std::vector<std::uint64_t>, RegisteredAbiKeyStorage>();
     BuildRegisteredAbiKey(state, *localDevice, key);
+    const auto prepare = [&] {
+        const auto plan = PlanRegistered(*snapshot, *localDevice, state, false);
+        if (plan == nullptr) return std::vector<PreparedShaders::Entry>{};
+        plan->prebuildDevice = localDevice;
+        return PrepareRegistered(*plan);
+    };
     const bool committedAbi = CommittedAbi(*snapshot, key);
-    auto entries = committedAbi ? std::vector<PreparedShaders::Entry>{} : PrepareRegistered(*snapshot, *localDevice, state, false);
+    auto entries = committedAbi ? std::vector<PreparedShaders::Entry>{} : prepare();
     const auto& registeredAbis = transaction.Read(*snapshot).registeredAbis;
     if (std::ranges::find(registeredAbis, key) != registeredAbis.end()) {
         transaction.Commit();
         return;
     }
-    if (committedAbi) entries = PrepareRegistered(*snapshot, *localDevice, state, false);
+    if (committedAbi) entries = prepare();
     auto& prepared = transaction.Edit(*snapshot);
     for (auto& entry : entries) {
         const auto duplicate = std::ranges::any_of(prepared.entries, [&](const auto& existing) { return existing.handle->artifact == entry.handle->artifact; });
@@ -1023,10 +1172,8 @@ void Driver::ResolveGraphicsAbi(const Shader* vertex, const Shader* pixel, std::
     std::shared_ptr<const ShaderSnapshot> fragment;
     {
         std::lock_guard lock(mutex);
-        GuestMemory::CheckRange(vertex, sizeof(Shader), alignof(Shader));
-        GuestMemory::CheckRange(pixel, sizeof(Shader), alignof(Shader));
         const auto lookup = [&](const Shader* shader) {
-            const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(shader->code));
+            const auto address = reinterpret_cast<std::uintptr_t>(const_cast<const void*>(GuestShaderFields(shader).code));
             require(shaders != nullptr && shaders->contains(address), "rectangle ABI refers to an unregistered shader");
             const auto snapshot = RegisteredHeader(*shaders, shader);
             require(snapshot != nullptr, "rectangle ABI refers to a replaced shader header");
@@ -1173,6 +1320,7 @@ void Driver::RegisterShader(const Shader* shader) {
     std::shared_ptr<RegisteredPreparation> preparation;
     if (AsyncRegistrationPrepare()) {
         preparation = PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred);
+        if (preparation != nullptr) preparation->prebuildDevice = localDevice;
         if (preparation != nullptr && (snapshot.type == 0 || snapshot.type == 1)) BuildRegisteredAbiKey(registered, *localDevice, preparation->abiKey);
         snapshot.prepared->pending = preparation != nullptr;
     } else {

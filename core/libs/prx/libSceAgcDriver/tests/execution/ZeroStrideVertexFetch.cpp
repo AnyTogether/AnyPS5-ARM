@@ -37,11 +37,14 @@ struct Case {
     std::uint32_t records;
     bool inRange;
     const char* what;
+    std::uint32_t selectors = 0xfacu;
 };
+
+std::vector<std::uint32_t> registrationModule;
 
 std::array<std::uint32_t, 4> VertexBufferDescriptor(const Case& value) {
     const auto address = reinterpret_cast<std::uintptr_t>(Element.data());
-    return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu), value.records, 0x0104dfacu | (value.select << 28u)};
+    return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu), value.records, (0x0104dfacu & ~0xfffu) | value.selectors | (value.select << 28u)};
 }
 
 std::array<std::uint32_t, 4> OutputDescriptor() {
@@ -74,6 +77,10 @@ void Draw(AgcDriver::VulkanDevice& device, const Case& value) {
     vertexRequest.useCache = false;
     const auto vertexResult = ShaderRecompiler::Recompile(vertexRequest);
     Require(vertexResult.vertexAttributes.size() == 1u, std::string(value.what) + ": the fetch did not become a vertex attribute");
+    if (device.Target().registrationModules) {
+        if (registrationModule.empty()) registrationModule = vertexResult.spirv.Words();
+        Require(vertexResult.spirv.Words() == registrationModule, std::string(value.what) + ": registration modules: the V# specialized the vertex module");
+    }
     const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
 
     ShaderRecompiler::ShaderPixelStageInfo pixel{};
@@ -120,7 +127,9 @@ void Draw(AgcDriver::VulkanDevice& device, const Case& value) {
 void Check(const Case& value) {
     for (std::uint32_t vertex = 0; vertex < Vertices; ++vertex) {
         for (std::uint32_t component = 0; component < 4u; ++component) {
-            const auto expected = value.inRange ? std::bit_cast<std::uint32_t>(Element[component]) : 0u;
+            const auto selector = (value.selectors >> (component * 3u)) & 7u;
+            const auto selected = selector >= 4u ? std::bit_cast<std::uint32_t>(Element[selector - 4u]) : selector == 1u ? std::bit_cast<std::uint32_t>(1.0f) : 0u;
+            const auto expected = value.inRange || selector < 4u ? selected : 0u;
             const auto actual = Output[vertex * 4u + component];
             Require(actual == expected, std::string(value.what) + ": vertex " + std::to_string(vertex) + " v" + std::to_string(8u + component) + " is " + std::to_string(actual) + ", expected " + std::to_string(expected));
         }
@@ -133,12 +142,14 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
-        constexpr std::array<Case, 5> cases{{
+        constexpr std::array<Case, 7> cases{{
             {2u, 1u, true, "OOB_SELECT 2, one record"},
             {2u, 0u, false, "OOB_SELECT 2, no records"},
             {3u, 16u, true, "OOB_SELECT 3, whole element in range"},
             {3u, 0u, false, "OOB_SELECT 3, no records"},
             {0u, 16u, true, "OOB_SELECT 0, whole element in range"},
+            {3u, 16u, true, "OOB_SELECT 3, selectors W Z 1 0", 7u | (6u << 3u) | (1u << 6u) | (0u << 9u)},
+            {3u, 0u, false, "OOB_SELECT 3, no records, selectors W Z 1 0", 7u | (6u << 3u) | (1u << 6u) | (0u << 9u)},
         }};
         for (const auto& value : cases) {
             Draw(*device, value);

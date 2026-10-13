@@ -133,6 +133,15 @@ void excludeConflictsWithSkip() {
     expectThrows({"--exclude-sce-module", "m", "--skip-sce-module", "input.elf", "output.elf"}, message);
 }
 
+void executables() {
+    const auto args = parse({"--executable", "picker/picker.bin", "input.elf", "--executable", "es-de/es-de.bin", "output.elf"});
+    require(args.executables == std::vector<std::string>{"picker/picker.bin", "es-de/es-de.bin"}, "--executable paths were not recorded in order");
+    expectThrows({"--executable"}, "--executable requires a nonempty path");
+    expectThrows({"--executable", "", "input.elf", "output.elf"}, "--executable requires a nonempty path");
+    expectThrows({"--executable", "--registry", "input.elf", "output.elf"}, "--executable requires a nonempty path");
+    expectThrows({"--skip-sce-module", "--executable", "picker.bin", "input.elf", "output.elf"}, "--executable conflicts with --skip-sce-module");
+}
+
 void unusedFilter() {
     for (const auto& value : {std::string("0"), std::string("1"), std::string("2")}) {
         const auto args = parse({"unused-filter=" + value, "input.elf", "output.elf"});
@@ -161,6 +170,13 @@ void unusedFilterBareWordIsUnknown() {
 void unknownOption() {
     expectThrows({"--nonexistent", "input.elf", "output.elf"}, "unknown option: --nonexistent");
     expectThrows({"--", "input.elf", "output.elf"}, "unknown option: --");
+}
+
+void emptyPositionals() {
+    for (const auto& arguments : std::vector<std::vector<std::string>>{
+            {"", "input.elf", "output.elf"}, {"input.elf", "", "output.elf"},
+            {"", "output.elf"}, {"input.elf", ""}})
+        expectThrows(arguments, "input and output paths must be nonempty");
 }
 
 void tooManyPositionals() {
@@ -206,11 +222,13 @@ int main() {
         excludeSceModuleConsumesNextTokenVerbatim();
         excludeSceModuleWithoutValue();
         excludeConflictsWithSkip();
+        executables();
         unusedFilter();
         unusedFilterRejectsBadValues();
         unusedFilterRejectsDuplicates();
         unusedFilterBareWordIsUnknown();
         unknownOption();
+        emptyPositionals();
         tooManyPositionals();
         windowsDiagnosticsRequiresWindows();
         windowsGuiRequiresWindows();

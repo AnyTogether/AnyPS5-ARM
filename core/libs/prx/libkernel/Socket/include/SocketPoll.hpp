@@ -25,3 +25,5 @@ extern "C" void KernelSetSocketCloser_nid_no_patch(KernelSocketPoll::Closer clos
 extern "C" bool KernelCloseSocket_nid_no_patch(int descriptor, int* error);
 extern "C" void KernelSetSocketOptionSetter_nid_no_patch(KernelSocketPoll::OptionSetter setter);
 extern "C" bool KernelSetSocketOption_nid_no_patch(int descriptor, int level, int option, const void* value, std::uint32_t length, int* error);
+extern "C" int KernelReserveSocketNumber_nid_no_patch(std::uintptr_t native);
+extern "C" void KernelReleaseSocketNumber_nid_no_patch(int number);
