@@ -24,6 +24,10 @@ struct SpirvTargetOptions {
     bool float64DenormPreserve = false;
     bool registrationModules = false;
     bool fragmentDescriptorSet = false;
+    // f32 add, sub and mul without NoContraction: SPIRV-Cross (MoltenVK) emits each NoContraction
+    // operation as a call to an optnone helper, which tripled the GPU time of large compute and
+    // pixel shaders.
+    bool contractFloat = false;
 };
 
 class SpirvEmitter {

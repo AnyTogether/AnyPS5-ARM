@@ -449,6 +449,10 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     targetOptions.float64DenormPreserve = request.target.float64DenormPreserve;
     targetOptions.registrationModules = registration;
     targetOptions.fragmentDescriptorSet = request.target.registrationModules;
+    // Stages that compute positions keep exact arithmetic: a position must come out bit-identical
+    // in every program that computes it (a depth prepass and the equal-tested pass after it).
+    const auto stage = program.Resources().stage;
+    targetOptions.contractFloat = request.target.relaxedFloat && (stage == IrShaderStage::Pixel || stage == IrShaderStage::Compute);
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;

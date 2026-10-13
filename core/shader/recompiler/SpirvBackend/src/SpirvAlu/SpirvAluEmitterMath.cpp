@@ -25,6 +25,11 @@ std::uint32_t Exact(SpirvEmitterState& state, std::uint32_t result) {
     return result;
 }
 
+// A guest add, sub or mul: exact unless the target lets the compiler fuse it (contractFloat).
+std::uint32_t Arithmetic(SpirvEmitterState& state, std::uint32_t result) {
+    return state.contractFloat ? result : Exact(state, result);
+}
+
 Pair ExtractPair(SpirvEmitterState& state, std::uint32_t value) {
     Pair result{state.module.AllocateId(), state.module.AllocateId()};
     state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), result.low, value, 0u);
@@ -1342,15 +1347,15 @@ std::uint32_t EmitFPUnordGreaterThanEqual32(SpirvEmitterState& state, std::uint3
 }
 
 std::uint32_t EmitFPAdd32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
-    return Exact(state, EmitNative<spv::OpFAdd, IrType::F32>(state, arg0, arg1));
+    return Arithmetic(state, EmitNative<spv::OpFAdd, IrType::F32>(state, arg0, arg1));
 }
 
 std::uint32_t EmitFPSub32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
-    return Exact(state, EmitNative<spv::OpFSub, IrType::F32>(state, arg0, arg1));
+    return Arithmetic(state, EmitNative<spv::OpFSub, IrType::F32>(state, arg0, arg1));
 }
 
 std::uint32_t EmitFPMul32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
-    return Exact(state, EmitNative<spv::OpFMul, IrType::F32>(state, arg0, arg1));
+    return Arithmetic(state, EmitNative<spv::OpFMul, IrType::F32>(state, arg0, arg1));
 }
 
 std::uint32_t EmitAddU32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1) {
