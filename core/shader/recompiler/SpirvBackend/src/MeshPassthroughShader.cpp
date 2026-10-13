@@ -27,34 +27,28 @@ struct Parameter {
 
 class PassthroughEmitter {
 public:
-    PassthroughEmitter(std::uint32_t version, std::uint32_t recordSlots, const std::vector<Parameter>& parameters, bool layered) : builder(version), recordSlots(recordSlots), parameters(parameters), layered(layered) {
+    PassthroughEmitter(std::uint32_t version, std::uint32_t recordSlots, const std::vector<Parameter>& parameters, bool layered) : builder(version), version(version), recordSlots(recordSlots), parameters(parameters), layered(layered) {
     }
 
     std::vector<std::uint32_t> Emit() {
         builder.EmitCapability(spv::CapabilityShader);
-        builder.EmitCapability(spv::CapabilityInt64);
-        builder.EmitCapability(spv::CapabilityPhysicalStorageBufferAddresses);
-        builder.EmitExtension("SPV_KHR_physical_storage_buffer");
         if (layered) {
             builder.EmitCapability(spv::CapabilityShaderViewportIndexLayerEXT);
             builder.EmitExtension("SPV_EXT_shader_viewport_index_layer");
         }
-        builder.AddMemoryModel(spv::AddressingModelPhysicalStorageBuffer64, spv::MemoryModelGLSL450);
+        builder.AddMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
 
         voidType = type(spv::OpTypeVoid);
         boolType = type(spv::OpTypeBool);
         uintType = type(spv::OpTypeInt, 32u, 0u);
         intType = type(spv::OpTypeInt, 32u, 1u);
-        ulongType = type(spv::OpTypeInt, 64u, 0u);
         floatType = type(spv::OpTypeFloat, 32u);
         vec4Type = type(spv::OpTypeVector, floatType, 4u);
         uvec4Type = type(spv::OpTypeVector, uintType, 4u);
         const auto functionType = type(spv::OpTypeFunction, voidType);
 
-        const auto words = type(spv::OpTypeArray, uintType, uintConstant(32u));
-        builder.AddAnnotation(spv::OpDecorate, words, spv::DecorationArrayStride, 4u);
-        const auto block = builder.DecoratedType(spv::OpTypeStruct, {{spv::OpMemberDecorate, {0u, spv::DecorationOffset, 0u}}, {spv::OpDecorate, {spv::DecorationBlock}}}, words);
-        push = builder.DefineGlobalVariable(pointer(spv::StorageClassPushConstant, block), spv::StorageClassPushConstant);
+        vertexRecords = recordBuffer(0u, vec4Type);
+        primitiveRecords = recordBuffer(1u, uvec4Type);
 
         main = builder.AllocateId();
         vertexIndex = addInterface(spv::StorageClassInput, intType);
@@ -77,7 +71,7 @@ public:
         const auto index = result(spv::OpBitcast, uintType, load(intType, vertexIndex));
         const auto primitive = result(spv::OpUDiv, uintType, index, uintConstant(3u));
         const auto corner = result(spv::OpUMod, uintType, index, uintConstant(3u));
-        const auto record = loadRecord(uvec4Type, address(1u), primitive, 1u, 0u);
+        const auto record = loadRecord(uvec4Type, primitiveRecords, primitive, 1u, 0u);
         const auto flags = result(spv::OpCompositeExtract, uintType, record, 3u);
         const auto culled = result(spv::OpINotEqual, boolType, result(spv::OpBitwiseAnd, uintType, flags, uintConstant(0x80000000u)), uintConstant(0u));
         const auto first = result(spv::OpCompositeExtract, uintType, record, 0u);
@@ -85,13 +79,12 @@ public:
         const auto third = result(spv::OpCompositeExtract, uintType, record, 2u);
         const auto chosen = result(spv::OpSelect, uintType, result(spv::OpIEqual, boolType, corner, uintConstant(0u)), first, result(spv::OpSelect, uintType, result(spv::OpIEqual, boolType, corner, uintConstant(1u)), second, third));
         const auto vertex = result(spv::OpSelect, uintType, culled, uintConstant(0u), chosen);
-        const auto vertices = address(0u);
-        const auto loaded = loadRecord(vec4Type, vertices, vertex, recordSlots, 0u);
+        const auto loaded = loadRecord(vec4Type, vertexRecords, vertex, recordSlots, 0u);
         const auto zero = constant(floatType, 0u);
         const auto origin = result(spv::OpCompositeConstruct, vec4Type, zero, zero, zero, constant(floatType, std::bit_cast<std::uint32_t>(1.0f)));
         store(position, result(spv::OpSelect, vec4Type, culled, origin, loaded));
         for (std::size_t i = 0; i < parameters.size(); ++i) {
-            const auto value = parameters[i].missing ? result(spv::OpCompositeConstruct, vec4Type, zero, zero, zero, zero) : loadRecord(vec4Type, vertices, vertex, recordSlots, parameters[i].slot);
+            const auto value = parameters[i].missing ? result(spv::OpCompositeConstruct, vec4Type, zero, zero, zero, zero) : loadRecord(vec4Type, vertexRecords, vertex, recordSlots, parameters[i].slot);
             store(outputs[i], value);
         }
         if (layered) store(layer, result(spv::OpBitcast, intType, result(spv::OpBitwiseAnd, uintType, flags, uintConstant(0x7ffu))));
@@ -133,38 +126,32 @@ private:
         return variable;
     }
 
-    std::uint32_t pushWord(std::uint32_t dword) {
-        const auto element = result(spv::OpAccessChain, pointer(spv::StorageClassPushConstant, uintType), push, uintConstant(0u), uintConstant(dword));
-        return result(spv::OpUConvert, ulongType, load(uintType, element));
+    std::uint32_t recordBuffer(std::uint32_t binding, std::uint32_t elementType) {
+        const auto records = builder.DecoratedType(spv::OpTypeRuntimeArray, {{spv::OpDecorate, {spv::DecorationArrayStride, 16u}}}, elementType);
+        const auto block = builder.DecoratedType(spv::OpTypeStruct, {{spv::OpMemberDecorate, {0u, spv::DecorationOffset, 0u}}, {spv::OpDecorate, {spv::DecorationBlock}}}, records);
+        const auto variable = builder.DefineGlobalVariable(pointer(spv::StorageClassStorageBuffer, block), spv::StorageClassStorageBuffer);
+        builder.AddAnnotation(spv::OpDecorate, variable, spv::DecorationDescriptorSet, MeshEmulationDescriptorSet);
+        builder.AddAnnotation(spv::OpDecorate, variable, spv::DecorationBinding, binding);
+        builder.AddAnnotation(spv::OpDecorate, variable, spv::DecorationNonWritable);
+        if (version >= 0x00010400u) interfaces.push_back(variable);
+        return variable;
     }
 
-    std::uint32_t address(std::uint32_t pair) {
-        const auto first = MeshEmulationPushOffsetBytes / 4u + pair * 2u;
-        const auto high = result(spv::OpShiftLeftLogical, ulongType, pushWord(first + 1u), uintConstant(32u));
-        return result(spv::OpBitwiseOr, ulongType, pushWord(first), high);
-    }
-
-    std::uint32_t loadRecord(std::uint32_t valueType, std::uint32_t base, std::uint32_t record, std::uint32_t slots, std::uint32_t slot) {
+    std::uint32_t loadRecord(std::uint32_t valueType, std::uint32_t buffer, std::uint32_t record, std::uint32_t slots, std::uint32_t slot) {
         const auto entry = result(spv::OpIAdd, uintType, result(spv::OpIMul, uintType, record, uintConstant(slots)), uintConstant(slot));
-        const auto offset = result(spv::OpIMul, ulongType, result(spv::OpUConvert, ulongType, entry), constant64(16u));
-        const auto element = result(spv::OpConvertUToPtr, pointer(spv::StorageClassPhysicalStorageBuffer, valueType), result(spv::OpIAdd, ulongType, base, offset));
-        const auto value = builder.AllocateId();
-        builder.AddFunction(spv::OpLoad, valueType, value, element, spv::MemoryAccessAlignedMask, 16u);
-        return value;
-    }
-
-    std::uint32_t constant64(std::uint32_t value) {
-        return builder.Constant(spv::OpConstant, ulongType, value, 0u);
+        return load(valueType, result(spv::OpAccessChain, pointer(spv::StorageClassStorageBuffer, valueType), buffer, uintConstant(0u), entry));
     }
 
     SpirvModule builder;
+    std::uint32_t version;
     std::uint32_t recordSlots;
     const std::vector<Parameter>& parameters;
     bool layered;
     std::vector<std::uint32_t> interfaces;
     std::vector<std::uint32_t> outputs;
     std::uint32_t main = 0;
-    std::uint32_t push = 0;
+    std::uint32_t vertexRecords = 0;
+    std::uint32_t primitiveRecords = 0;
     std::uint32_t vertexIndex = 0;
     std::uint32_t position = 0;
     std::uint32_t layer = 0;
@@ -172,7 +159,6 @@ private:
     std::uint32_t boolType = 0;
     std::uint32_t uintType = 0;
     std::uint32_t intType = 0;
-    std::uint32_t ulongType = 0;
     std::uint32_t floatType = 0;
     std::uint32_t vec4Type = 0;
     std::uint32_t uvec4Type = 0;
@@ -188,7 +174,6 @@ RecompileResult BuildMeshPassthroughVertexShader(const RecompileResult& mesh, co
     require(mesh.meshEmulation == MeshEmulationRole::Compute, "the mesh program was not compiled as a compute shader");
     require(target.spirvVersion >= 0x00010300u && target.spirvVersion <= 0x00010500u, "unsupported SPIR-V target version");
     const auto supports = [&](spv::Capability capability) { return std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(capability)) != target.supportedCapabilities.end(); };
-    require(supports(spv::CapabilityInt64), "the device has no shaderInt64");
     require(!layered || supports(spv::CapabilityShaderViewportIndexLayerEXT), "a layered draw needs VK_EXT_shader_viewport_index_layer");
     std::vector<Parameter> parameters;
     std::set<std::uint32_t> locations;

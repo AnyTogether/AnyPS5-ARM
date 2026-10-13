@@ -162,7 +162,7 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
         {stage, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
         {64, 0, userData, std::nullopt, std::nullopt, vertexInfo, geometryMemory},
         target,
-        {0, 0, 0, mesh ? (emulated ? ShaderRecompiler::MeshEmulationPushOffsetBytes : ShaderRecompiler::MeshDrawPushOffsetBytes) : 64u}
+        {0, 0, 0, mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : 64u}
     };
     if (mesh) geometry.graphics = ShaderRecompiler::GraphicsCompileContext{0, {}, Subgroup, std::nullopt, {draw.indexAddress, draw.indexCount, draw.indexSize, draw.instanceCount}};
     geometry.useCache = false;

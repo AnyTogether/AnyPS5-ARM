@@ -51,6 +51,7 @@ struct DeviceFunctions {
     PFN_vkCmdBindPipeline cmdBindPipeline = nullptr;
     PFN_vkCmdBindDescriptorSets cmdBindDescriptorSets = nullptr;
     PFN_vkCmdPushConstants cmdPushConstants = nullptr;
+    PFN_vkCmdPushDescriptorSetKHR cmdPushDescriptorSet = nullptr;
     PFN_vkCmdDispatch cmdDispatch = nullptr;
     PFN_vkCmdDispatchIndirect cmdDispatchIndirect = nullptr;
     PFN_vkCmdBeginRenderPass cmdBeginRenderPass = nullptr;
@@ -146,6 +147,7 @@ struct Context {
     bool nonSeamlessCubeMap = false;
     bool conservativeRasterization = false;
     bool meshWave32 = false;
+    bool pushDescriptor = false;
     VkBuffer emptyBuffer = VK_NULL_HANDLE;
     // The device's list of recorded dispatches whose copied written buffers await a CPU write-back
     // (VulkanDevice's State::copiedWriters; the draw counterpart is DrawCopiedWriters): an indirect

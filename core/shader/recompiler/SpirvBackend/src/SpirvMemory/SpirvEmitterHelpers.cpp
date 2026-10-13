@@ -137,9 +137,9 @@ void CheckBindings(const IrProgram& program, const CompiledBindingLayout& bindin
     }
 }
 
-void EmitBaseHeader(SpirvModule& module, const IrProgram& program) {
+void EmitBaseHeader(SpirvModule& module, const IrProgram& program, bool meshAsCompute) {
     module.EmitCapability(spv::CapabilityShader);
-    const bool physical = program.Info().usesDma || program.Resources().stage == IrShaderStage::Mesh;
+    const bool physical = program.Info().usesDma || (program.Resources().stage == IrShaderStage::Mesh && !meshAsCompute);
     if (physical) {
         module.EmitCapability(spv::CapabilityInt64);
         module.EmitCapability(spv::CapabilityPhysicalStorageBufferAddresses);

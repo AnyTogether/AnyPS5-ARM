@@ -83,6 +83,8 @@ private:
     VkPipeline backFaces = VK_NULL_HANDLE;
     VkPipeline secondChannel = VK_NULL_HANDLE;
     VkPipeline computePipeline = VK_NULL_HANDLE;
+    VkDescriptorSetLayout meshBuffersLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout emptySetLayout = VK_NULL_HANDLE;
     std::size_t attachments = 0;
     std::size_t colorAttachments = 0;
     bool depthBounds = false;

@@ -467,6 +467,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
     } else Require(module.modes.empty(), "unsupported vertex execution mode");
     std::set<std::pair<std::uint32_t, std::uint32_t>> descriptors;
     std::map<std::pair<std::uint32_t, std::uint32_t>, bool> bufferViews;
+    std::set<std::uint32_t> meshBuffers;
     bool push = false;
     for (const auto& [id, variable] : module.variables) {
         if (variable.storage == spv::StorageClassFunction || variable.storage == spv::StorageClassPrivate) continue;
@@ -525,7 +526,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
                 }
             }
         } else if (variable.storage == spv::StorageClassPushConstant) {
-            Require(!push && (!shader.pushConstants.empty() || mesh || passthrough || (control && !rectListControl)) && (type[0] & 0xffffu) == spv::OpTypeStruct, "invalid push constant interface");
+            Require(!push && (!shader.pushConstants.empty() || mesh || (control && !rectListControl)) && (type[0] & 0xffffu) == spv::OpTypeStruct, "invalid push constant interface");
             push = true;
             Require(type.size() == 3 && module.decorations[typeId].block, "push constant variable must be a Block struct with exactly one member");
             const auto offset = module.offsets.find({typeId, 0});
@@ -550,6 +551,12 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
             const auto capacity = ShaderRecompiler::RuntimeAbi::HeapCapacity(heap);
             const auto count = module.constants.find(type[3]);
             Require(binding->count != 0u && binding->count <= capacity && count != module.constants.end() && count->second == binding->count, "typed heap array length disagrees with compact binding");
+        } else if ((meshCompute || passthrough) && variable.storage == spv::StorageClassStorageBuffer && decoration.set == ShaderRecompiler::MeshEmulationDescriptorSet) {
+            Require(decoration.binding && *decoration.binding < (meshCompute ? 3u : 2u) && meshBuffers.insert(*decoration.binding).second, "invalid emulated mesh record buffer binding");
+            const auto& block = module.Type(typeId);
+            Require(block.size() == 3 && (block[0] & 0xffffu) == spv::OpTypeStruct && module.decorations[typeId].block && (module.Type(block[2])[0] & 0xffffu) == spv::OpTypeRuntimeArray, "emulated mesh record buffer must be a Block struct of one runtime array");
+            const auto member = module.offsets.find({typeId, 0});
+            Require(member != module.offsets.end() && member->second == 0, "emulated mesh record buffer member must have offset zero");
         } else {
             Require(variable.storage == spv::StorageClassStorageBuffer && decoration.set && decoration.binding, "unsupported or unbound shader resource");
             const auto key = std::make_pair(*decoration.set, *decoration.binding);
@@ -593,7 +600,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
         Require(shader.vertexAttributes.empty(), "vertex attribute metadata is invalid for this stage");
     }
     Require(descriptors.size() == shader.bindings.size(), "recompiler binding metadata contains undeclared resources");
-    Require(push == (!shader.pushConstants.empty() || mesh || passthrough || (control && !rectListControl)), "recompiler push constant metadata disagrees with SPIR-V");
+    Require(push == (!shader.pushConstants.empty() || mesh || (control && !rectListControl)), "recompiler push constant metadata disagrees with SPIR-V");
     for (const auto id : module.interface) Require(module.variables.contains(id), "entry point interface contains an unknown variable");
     if (mesh && !meshCompute) Require(module.primitiveIndices, "mesh shader does not export primitive indices");
     if (stage == Stage::Vertex || (mesh && !meshCompute) || evaluation || geometry) Require(module.position, "vertex shader does not export position");

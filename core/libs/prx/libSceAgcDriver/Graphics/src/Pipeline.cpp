@@ -383,12 +383,29 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         }
         // A descriptor set layout with the same bindings as this one is compatible with the pipeline
         // layout, so later draws bind their own ShaderResources' set under it.
-        const std::array<VkDescriptorSetLayout, 2> setLayouts{resources.main, resources.fragment};
+        std::array<VkDescriptorSetLayout, 3> setLayouts{resources.main, resources.fragment, VK_NULL_HANDLE};
+        if (emulated) {
+            const auto createSetLayout = [&](std::span<const VkDescriptorSetLayoutBinding> bindings, VkDescriptorSetLayoutCreateFlags flags) {
+                VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+                info.flags = flags;
+                info.bindingCount = static_cast<std::uint32_t>(bindings.size());
+                info.pBindings = bindings.data();
+                VkDescriptorSetLayout created = VK_NULL_HANDLE;
+                Check(context.Function<PFN_vkCreateDescriptorSetLayout>("vkCreateDescriptorSetLayout")(context.device, &info, nullptr, &created), "vkCreateDescriptorSetLayout emulated mesh");
+                return created;
+            };
+            std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+            for (std::uint32_t binding = 0; binding < bindings.size(); ++binding) bindings[binding] = {binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+            meshBuffersLayout = createSetLayout(bindings, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
+            if (!resources.split) emptySetLayout = createSetLayout({}, 0);
+            setLayouts[ShaderRecompiler::RuntimeAbi::FragmentDescriptorSet] = resources.split ? resources.fragment : emptySetLayout;
+            setLayouts[ShaderRecompiler::MeshEmulationDescriptorSet] = meshBuffersLayout;
+        }
         const VkPushConstantRange push{pushStages, 0, PipelinePushSlotBytes};
         const std::array<VkPushConstantRange, 2> slots{{{pushStagesOf(context), 0, PipelinePushSlotBytes}, {VK_SHADER_STAGE_FRAGMENT_BIT, PipelinePushSlotBytes, PipelinePushSlotBytes}}};
         VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         layoutInfo.flags = resources.split ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0;
-        layoutInfo.setLayoutCount = resources.split ? 2u : 1u;
+        layoutInfo.setLayoutCount = emulated ? 3u : resources.split ? 2u : 1u;
         layoutInfo.pSetLayouts = setLayouts.data();
         layoutInfo.pushConstantRangeCount = dynamicRendering ? static_cast<std::uint32_t>(slots.size()) : pushStages != 0 ? 1 : 0;
         layoutInfo.pPushConstantRanges = dynamicRendering ? slots.data() : pushStages != 0 ? &push : nullptr;
@@ -616,6 +633,8 @@ void Pipeline::release() noexcept {
     if (computePipeline) context.Function<PFN_vkDestroyPipeline>("vkDestroyPipeline")(context.device, computePipeline, nullptr);
     if (renderPass) context.Function<PFN_vkDestroyRenderPass>("vkDestroyRenderPass")(context.device, renderPass, nullptr);
     if (layout) context.Function<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout")(context.device, layout, nullptr);
+    if (meshBuffersLayout) context.Function<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")(context.device, meshBuffersLayout, nullptr);
+    if (emptySetLayout) context.Function<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")(context.device, emptySetLayout, nullptr);
     for (auto module : _modules) {
         if (module) context.Function<PFN_vkDestroyShaderModule>("vkDestroyShaderModule")(context.device, module, nullptr);
     }
@@ -625,6 +644,8 @@ void Pipeline::release() noexcept {
     computePipeline = VK_NULL_HANDLE;
     renderPass = VK_NULL_HANDLE;
     layout = VK_NULL_HANDLE;
+    meshBuffersLayout = VK_NULL_HANDLE;
+    emptySetLayout = VK_NULL_HANDLE;
     _modules.clear();
 }
 

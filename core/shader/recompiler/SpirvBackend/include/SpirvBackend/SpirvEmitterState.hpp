@@ -163,6 +163,7 @@ struct SpirvEmitterState {
     std::uint32_t meshGuestFunc = 0;
     std::uint32_t meshAllocation = 0;
     std::uint32_t meshPrimitiveData = 0;
+    std::array<std::uint32_t, 3> meshEmulationBuffers{};
     std::uint32_t meshPrimitives = 0;
     std::uint32_t meshCull = 0;
     std::uint32_t entryLabel = 0;

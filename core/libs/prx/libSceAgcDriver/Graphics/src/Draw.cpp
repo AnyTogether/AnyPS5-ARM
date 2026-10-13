@@ -1648,7 +1648,7 @@ struct RecordedDraw {
     VkShaderStageFlags pushStages = 0;
 };
 
-void pushDrawConstants(const Pipeline& pipeline, VkCommandBuffer commands, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const ShaderResources& resources, const std::array<std::byte, PipelinePushConstantBytes>* bytes, VkShaderStageFlags stages, VkDeviceAddress meshArguments = 0, bool restartTable = false, std::array<VkDeviceAddress, 2> meshRecords = {}) {
+void pushDrawConstants(const Pipeline& pipeline, VkCommandBuffer commands, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const ShaderResources& resources, const std::array<std::byte, PipelinePushConstantBytes>* bytes, VkShaderStageFlags stages, VkDeviceAddress meshArguments = 0, bool restartTable = false) {
     auto block = bytes != nullptr ? *bytes : AssemblePushConstants(shaders);
     if (bytes == nullptr) {
         resources.PatchPushConstants(block);
@@ -1670,8 +1670,6 @@ void pushDrawConstants(const Pipeline& pipeline, VkCommandBuffer commands, const
     static_assert(ShaderRecompiler::MeshDrawPushOffsetBytes + ShaderRecompiler::MeshDrawPushBytes == PipelinePushSlotBytes);
     std::memcpy(block.data() + ShaderRecompiler::MeshDrawPushOffsetBytes, words.data(), sizeof(words));
     if (pipeline.EmulatesMesh()) {
-        static_assert(sizeof(meshRecords) == ShaderRecompiler::MeshEmulationPushBytes);
-        std::memcpy(block.data() + ShaderRecompiler::MeshEmulationPushOffsetBytes, meshRecords.data(), sizeof(meshRecords));
         pipeline.PushConstants(commands, stages, block);
         return;
     }
@@ -1762,15 +1760,26 @@ void captureInputs(const Context& context, Recorder& recorder, VkCommandBuffer c
     });
 }
 
-std::array<VkDeviceAddress, 2> recordMeshEmulation(const Context& context, VkCommandBuffer commands, Recorder& recorder, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const DrawInputs& inputs, const RecordedDraw& record, const ShaderResources& resources, const std::shared_ptr<ShaderResources::DrawBindings>& drawBindings, const std::function<void(std::uint32_t)>& countBarrier) {
+void pushMeshBuffers(const Context& context, VkCommandBuffer commands, VkPipelineBindPoint bindPoint, VkPipelineLayout layout, const std::array<VkBuffer, 3>& buffers) {
+    std::array<VkDescriptorBufferInfo, 3> infos{};
+    std::array<VkWriteDescriptorSet, 3> writes{};
+    for (std::uint32_t binding = 0; binding < buffers.size(); ++binding) {
+        infos[binding] = {buffers[binding], 0, VK_WHOLE_SIZE};
+        writes[binding] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, VK_NULL_HANDLE, binding, 0, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &infos[binding], nullptr};
+    }
+    context.Resolved(&DeviceFunctions::cmdPushDescriptorSet, "vkCmdPushDescriptorSetKHR")(commands, bindPoint, layout, ShaderRecompiler::MeshEmulationDescriptorSet, static_cast<std::uint32_t>(writes.size()), writes.data());
+}
+
+std::array<VkBuffer, 3> recordMeshEmulation(const Context& context, VkCommandBuffer commands, Recorder& recorder, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const DrawInputs& inputs, const RecordedDraw& record, const ShaderResources& resources, const std::shared_ptr<ShaderResources::DrawBindings>& drawBindings, const std::shared_ptr<Buffer>& meshArguments, const std::function<void(std::uint32_t)>& countBarrier) {
     Require(record.pipeline->EmulatesMesh(), "an emulated mesh draw got a pipeline without its compute stage");
     const auto slots = ShaderRecompiler::EmulatedMeshSlots(*state.stages.mesh);
     const auto groups = static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount;
     const auto recordWords = static_cast<std::uint64_t>(inputs.emulatedMesh->parameterExports.size()) + 1u;
-    constexpr VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    constexpr VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     auto vertices = std::make_shared<Buffer>(context, static_cast<std::size_t>(groups * slots.vertices * recordWords * 16u), usage);
     auto primitives = std::make_shared<Buffer>(context, static_cast<std::size_t>(groups * slots.primitives * 16u), usage);
-    const std::array<VkDeviceAddress, 2> addresses{vertices->DeviceAddress(), primitives->DeviceAddress()};
+    auto arguments = meshArguments != nullptr ? meshArguments : std::make_shared<Buffer>(context, ShaderRecompiler::MeshArgumentBytes, usage);
+    const std::array<VkBuffer, 3> buffers{vertices->Handle(), primitives->Handle(), arguments->Handle()};
     const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_UNIFORM_READ_BIT};
     context.Resolved(&DeviceFunctions::cmdPipelineBarrier, "vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &before, 0, nullptr, 0, nullptr);
     countBarrier(1);
@@ -1782,14 +1791,16 @@ std::array<VkDeviceAddress, 2> recordMeshEmulation(const Context& context, VkCom
     } else {
         resources.Bind(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.pipeline->Layout());
     }
-    pushDrawConstants(*record.pipeline, commands, state, draw, shaders, resources, record.pushBytes, record.pushStages, 0, !inputs.restartTable.empty(), addresses);
+    pushMeshBuffers(context, commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.pipeline->Layout(), buffers);
+    pushDrawConstants(*record.pipeline, commands, state, draw, shaders, resources, record.pushBytes, record.pushStages, meshArguments != nullptr ? meshArguments->DeviceAddress() : 0, !inputs.restartTable.empty());
     record.pipeline->DispatchMesh(commands, inputs.meshGroups, draw.instanceCount);
     const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT};
     context.Resolved(&DeviceFunctions::cmdPipelineBarrier, "vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &after, 0, nullptr, 0, nullptr);
     countBarrier(1);
     recorder.Keep(std::move(vertices));
     recorder.Keep(std::move(primitives));
-    return addresses;
+    recorder.Keep(std::move(arguments));
+    return buffers;
 }
 
 void recordDraw(const Context& context, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, DrawInputs& inputs, RecordedDraw& record, DrawOutcome& outcome, DrawTimer& timer, double& ownWaitedMs) {
@@ -1860,7 +1871,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     }
     std::unique_ptr<DeviceBuffer> scratch;
     std::shared_ptr<Buffer> meshArguments;
-    std::array<VkDeviceAddress, 2> meshRecords{};
+    std::array<VkBuffer, 3> meshBuffers{};
     VkBuffer argumentBuffer = VK_NULL_HANDLE;
     VkDeviceSize argumentOffset = 0;
     bool rewritten = false;
@@ -1884,7 +1895,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         } else if (gpuIndirect) {
             rewritten = recordIndirectArguments(context, commands, recorder, true, *record.indirect, scratch, argumentBuffer, argumentOffset, countBarrier);
         }
-        if (inputs.emulatedMesh != nullptr) meshRecords = recordMeshEmulation(context, commands, *recorder, state, draw, shaders, inputs, record, resources, drawBindings, countBarrier);
+        if (inputs.emulatedMesh != nullptr) meshBuffers = recordMeshEmulation(context, commands, *recorder, state, draw, shaders, inputs, record, resources, drawBindings, meshArguments, countBarrier);
         // Earlier recorded work (dispatches, the previous draw) wrote the images in the general
         // layout, which a lean draw renders in: no transitions.
         APS5_LOG_OUT_DEBUG("Beginning pipeline renderExtent=%ux%u", state.renderExtent.width, state.renderExtent.height);
@@ -1900,7 +1911,8 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         resources.Bind(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout());
     }
     APS5_LOG_CHARS_OUT_DEBUG("Resources bound");
-    pushDrawConstants(*record.pipeline, commands, state, draw, shaders, resources, record.pushBytes, record.pushStages, meshArguments != nullptr ? meshArguments->DeviceAddress() : 0, !inputs.restartTable.empty(), meshRecords);
+    if (inputs.emulatedMesh != nullptr) pushMeshBuffers(context, commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout(), meshBuffers);
+    pushDrawConstants(*record.pipeline, commands, state, draw, shaders, resources, record.pushBytes, record.pushStages, meshArguments != nullptr ? meshArguments->DeviceAddress() : 0, !inputs.restartTable.empty());
     APS5_LOG_CHARS_OUT_DEBUG("Push constants recorded");
     recordDrawCommands(context, commands, state, draw, inputs, record.indirect, argumentBuffer, argumentOffset);
     if (record.pipeline->SplitsFaces()) {

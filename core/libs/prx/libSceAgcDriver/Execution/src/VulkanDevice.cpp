@@ -321,6 +321,7 @@ struct VulkanDevice::State {
     bool drawIndirectFirstInstance = false;
     bool multiDrawIndirect = false;
     bool drawIndirectCount = false;
+    bool pushDescriptor = false;
     // The device's resolved entry points (Graphics::DeviceFunctions) and the Graphics::Context
     // built once after setup (see graphicsContext); the context's pool reference is dropped before
     // the pool at teardown.
@@ -1260,6 +1261,8 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     // without it resolves such draws on the CPU.
     state->drawIndirectCount = hasExtension(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
     if (state->drawIndirectCount) deviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+    state->pushDescriptor = hasExtension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+    if (state->pushDescriptor) deviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     state->memoryBudget = hasExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
     // Guest memory is host memory: importing it lets address-based shaders use it in place instead of
     // copying every registered allocation per draw.
@@ -3073,7 +3076,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.srgbDecodeFormats = state->srgbDecodeFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
     static const bool meshEmulation = std::getenv("APS5_NO_MESH_EMULATION") == nullptr;
-    target.meshAsCompute = !state->meshShader && meshEmulation;
+    target.meshAsCompute = !state->meshShader && state->pushDescriptor && meshEmulation;
     if (state->meshShader) {
         const auto& mesh = state->meshLimits;
         target.mesh = ShaderRecompiler::MeshTargetLimits{{mesh.maxMeshWorkGroupSize[0], mesh.maxMeshWorkGroupSize[1], mesh.maxMeshWorkGroupSize[2]}, mesh.maxMeshWorkGroupInvocations, std::min(mesh.maxMeshSharedMemorySize, mesh.maxMeshPayloadAndSharedMemorySize), mesh.maxMeshOutputVertices, mesh.maxMeshOutputPrimitives, mesh.maxMeshOutputComponents, std::min(mesh.maxMeshOutputMemorySize, mesh.maxMeshPayloadAndOutputMemorySize), mesh.meshOutputPerVertexGranularity, mesh.meshOutputPerPrimitiveGranularity};
@@ -3172,6 +3175,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.nonSeamlessCubeMap = state->nonSeamlessCubeMap;
     context.conservativeRasterization = state->conservativeRasterization;
     context.meshWave32 = state->meshWave32;
+    context.pushDescriptor = state->pushDescriptor;
     context.provokingVertexLast = state->provokingVertexLast;
     context.graphicsPipelineLibrary = state->graphicsPipelineLibrary;
     context.pipelineLinkTimeOptimization = state->pipelineLinkTimeOptimization;

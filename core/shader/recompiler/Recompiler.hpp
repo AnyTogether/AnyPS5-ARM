@@ -293,10 +293,8 @@ struct TessellationConfiguration {
     std::uint32_t outputTopology;
 };
 
-inline constexpr std::uint32_t MeshEmulationPushOffsetBytes = 88;
-inline constexpr std::uint32_t MeshEmulationPushBytes = 16;
+inline constexpr std::uint32_t MeshEmulationDescriptorSet = 2;
 inline constexpr std::uint32_t MeshDrawPushOffsetBytes = 104;
-static_assert(MeshEmulationPushOffsetBytes + MeshEmulationPushBytes == MeshDrawPushOffsetBytes);
 inline constexpr std::uint32_t MeshDrawPushBytes = 24;
 inline constexpr std::uint32_t TessellationLevelPushOffsetBytes = 120;
 inline constexpr std::uint32_t TessellationLevelPushBytes = 8;
