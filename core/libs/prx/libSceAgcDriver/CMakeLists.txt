@@ -1372,7 +1372,8 @@ if(BUILD_TESTING)
         else()
             add_test(NAME ${preparedTest} COMMAND agc_driver_prepared_shaders_tests)
         endif()
-        set_tests_properties(${preparedTest} PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1" SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # Registration preparation is off by default on small macOS hosts; these tests are about it.
+        set_tests_properties(${preparedTest} PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_REGISTRATION_PREPARE=1" SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         if(preparedMode STREQUAL "uncached")
             set_property(TEST ${preparedTest} APPEND PROPERTY ENVIRONMENT "APS5_NO_DISPATCH_CACHE=1")
         elseif(preparedMode STREQUAL "registered_workgroup_sync")
@@ -1389,6 +1390,11 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(agc_driver_compute_user_data_calls_registered PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    foreach(preparedExecution IN ITEMS agc_driver_prepared_graphics agc_driver_prepared_publication agc_driver_prepared_exports agc_driver_prepared_unregistered_graphics)
+        if(TEST ${preparedExecution})
+            set_property(TEST ${preparedExecution} APPEND PROPERTY ENVIRONMENT "APS5_REGISTRATION_PREPARE=1")
+        endif()
+    endforeach()
     set_tests_properties(agc_driver_prepared_shaders
         agc_driver_prepared_shaders_indirect agc_driver_prepared_shaders_uncached
         agc_driver_prepared_shaders_debug agc_driver_prepared_shaders_debug_failure

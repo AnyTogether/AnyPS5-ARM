@@ -10,6 +10,9 @@
 #include "prx/libSceAgcDriver/Execution/include/ShaderPreparationScope.hpp"
 #include "CompiledVariant.hpp"
 #include "Optimization/ResourceProgram.hpp"
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -893,6 +896,24 @@ private:
     bool closed = false;
 };
 
+// Whether shaders are prepared when the title registers them. Each prepared shader keeps its resource
+// plan, and a title that registers thousands keeps them all: Stray's ~3000 held ~6.5 GB, which an
+// 18 GB Mac cannot spare next to the title. Without it a shader is prepared at its first use.
+// APS5_REGISTRATION_PREPARE=0 or 1 decides; by default it is off on macOS hosts with less than
+// 32 GiB of memory and on everywhere else.
+bool RegistrationPrepareEnabled() {
+    static const bool enabled = [] {
+        if (const char* text = std::getenv("APS5_REGISTRATION_PREPARE")) return std::strcmp(text, "0") != 0;
+#ifdef __APPLE__
+        std::uint64_t memory = 0;
+        std::size_t size = sizeof(memory);
+        if (sysctlbyname("hw.memsize", &memory, &size, nullptr, 0) == 0 && memory < (std::uint64_t{32} << 30u)) return false;
+#endif
+        return true;
+    }();
+    return enabled;
+}
+
 bool AsyncRegistrationPrepare() {
     static const bool sync = std::getenv("APS5_SYNC_SHADER_PREPARE") != nullptr;
     return !sync;
@@ -1318,7 +1339,9 @@ void Driver::RegisterShader(const Shader* shader) {
     registered.context = snapshot.registeredState->context;
     registered.userConfig = snapshot.registeredState->userConfig;
     std::shared_ptr<RegisteredPreparation> preparation;
-    if (AsyncRegistrationPrepare()) {
+    if (!RegistrationPrepareEnabled()) {
+        // Prepared at its first use.
+    } else if (AsyncRegistrationPrepare()) {
         preparation = PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred);
         if (preparation != nullptr) preparation->prebuildDevice = localDevice;
         if (preparation != nullptr && (snapshot.type == 0 || snapshot.type == 1)) BuildRegisteredAbiKey(registered, *localDevice, preparation->abiKey);
