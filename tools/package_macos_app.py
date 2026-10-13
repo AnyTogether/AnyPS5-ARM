@@ -7,7 +7,8 @@ modules it wrote. --game is the title's own folder (sce_sys and its data), copie
 relinked modules. --libs is the patched prx directory (build/core/libs/libs) and --vulkan the macOS
 directory of a Vulkan SDK, whose loader and MoltenVK go into the bundle. The title's patches in
 tools/macos/patches (see tools/macos/game_patches.py) are applied to the bundled eboot unless
---no-game-patches is given.
+--no-game-patches is given. A title whose patches set its output resolution asks for it when it starts
+(APS5_RESOLUTION=WIDTHxHEIGHT answers in advance).
 
 The bundle runs without the SDK or environment variables:
 
@@ -38,7 +39,38 @@ export VK_DRIVER_FILES="${{VK_DRIVER_FILES:-$here/../Resources/vulkan/icd.d/Molt
 export ANYPS5_SHADER_CACHE_DIR="${{ANYPS5_SHADER_CACHE_DIR:-$HOME/Library/Caches/{identifier}/shader_cache}}"
 mkdir -p "$ANYPS5_SHADER_CACHE_DIR" "$HOME/Library/Logs/AnyPS5"
 cd "$here/../Resources/game" || exit 1
-exec "$here/eboot" "$@" >> "$HOME/Library/Logs/AnyPS5/{title_id}.log" 2>&1
+"""
+
+# Asks for the output resolution when the title has one (Resources/resolution.txt, written by package)
+# and writes it into the eboot's values. APS5_RESOLUTION=WIDTHxHEIGHT skips the question; the last
+# choice is remembered per title.
+RESOLUTION_CHOICE = r"""resolution_file="$here/../Resources/resolution.txt"
+if [ -f "$resolution_file" ]; then
+    . "$resolution_file"
+    saved="$HOME/Library/Application Support/AnyPS5/@TITLE_ID@.resolution"
+    choice="${APS5_RESOLUTION:-}"
+    if [ -z "$choice" ]; then
+        preset="$(cat "$saved" 2>/dev/null)"
+        case " $resolution_choices " in *" $preset "*) ;; *) preset="$resolution_default" ;; esac
+        list=""
+        for item in $resolution_choices; do list="$list${list:+, }\"$item\""; done
+        choice="$(osascript -e "choose from list {$list} with title \"AnyPS5\" with prompt \"Output resolution\" default items {\"$preset\"} OK button name \"Start\"")" || exit 0
+        [ "$choice" = false ] && exit 0
+        mkdir -p "$(dirname "$saved")"
+        printf '%s\n' "$choice" > "$saved"
+    fi
+    width="${choice%%x*}"
+    height="${choice#*x}"
+    case "$width$height" in *[!0-9]*|"") echo "AnyPS5: not a WIDTHxHEIGHT resolution: $choice" >&2; exit 1 ;; esac
+    write_u32() {
+        printf "$(printf '\\%03o\\%03o\\%03o\\%03o' $(($2 & 255)) $(($2 >> 8 & 255)) $(($2 >> 16 & 255)) $(($2 >> 24 & 255)))" | dd of="$here/eboot" bs=1 seek="$1" count=4 conv=notrunc 2>/dev/null
+    }
+    write_u32 "$resolution_width" "$width"
+    write_u32 "$resolution_height" "$height"
+fi
+"""
+
+START = """exec "$here/eboot" "$@" >> "$HOME/Library/Logs/AnyPS5/{title_id}.log" 2>&1
 """
 
 
@@ -116,8 +148,15 @@ def package(relinked, game, libs, vulkan, input_config, bundle, patch=True):
     if input_config is not None:
         shutil.copy2(input_config, resources / "anyps5-input.ini")
 
+    script = LAUNCHER.format(identifier=identifier, title_id=title_id)
+    fields = game_patches.resolution_fields(macos / "eboot", title_id) if patch else None
+    if fields is not None:
+        game_patches.set_resolution(macos / "eboot", fields, fields["default"])
+        offsets = dict(fields["fields"])
+        (resources / "resolution.txt").write_text(f"resolution_default={fields['default']}\nresolution_choices='{' '.join(fields['choices'])}'\nresolution_width={offsets['width']}\nresolution_height={offsets['height']}\n")
+        script += RESOLUTION_CHOICE.replace("@TITLE_ID@", title_id)
     launcher = macos / "launch"
-    launcher.write_text(LAUNCHER.format(identifier=identifier, title_id=title_id))
+    launcher.write_text(script + START.format(title_id=title_id))
     launcher.chmod(0o755)
     icon = make_icon(app0 / "sce_sys" / "icon0.png", resources)
     info = {

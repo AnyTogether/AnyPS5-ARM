@@ -20,7 +20,7 @@ Oyun yeniden açılıyor ve ana menüye geliyor. macOS paketi 1080p çıkış ya
 | ✅ | **Yazma izleyicisi hatası** | Rezervasyonun üstüne map edilen bellek izlenmiyordu (upstream'de düzeltildi). |
 | ✅ | **Başlangıç gerilemesi** | Düzeltildi: karesel bir shader geçişi ve thread oluşturulurken engellenen sinyal maskesi. |
 | ✅ | **Shader aritmetiği** | Pixel ve compute shader'larda her f32 toplama ve çarpma MoltenVK altında artık optimize edilmeyen bir yardımcı çağrıya dönüşmüyor (en ağır shader: 17 → 5 ms). |
-| ✅ | **1080p çıkış** | PS5 sürümü 3840x2160 çıkışı sabit kodluyor. [tools/macos/patches/PPSA02100.json](../../../tools/macos/patches/PPSA02100.json) bunu 1920x1080 yapıyor; `tools/package_macos_app.py` uyguluyor (`--no-game-patches` atlıyor). |
+| ✅ | **Çıkış çözünürlüğü** | PS5 sürümü 3840x2160 çıkışı sabit kodluyor. `tools/package_macos_app.py`'nin uyguladığı [tools/macos/patches/PPSA02100.json](../../../tools/macos/patches/PPSA02100.json) ile (`--no-game-patches` atlıyor) uygulama açılırken 720p, 900p, 1080p (varsayılan), 1440p ya da 4K soruyor; `APS5_RESOLUTION=1280x720` önceden cevaplıyor. 720p'de menü ~19-24 FPS. |
 | 🔧 | **Menü FPS'i** | 1080p'de sınır sürücü iş parçacığı (frame başına ~52 ms, GPU ~31 ms): GPU senkronları, write-back'ler ve kuyruk gönderimleri. |
 | ⏭️ | **Oyuna giriş** | Oyun içindeki write-back'ler henüz doğrulanmadı. |
 

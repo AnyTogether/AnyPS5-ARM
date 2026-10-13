@@ -20,7 +20,7 @@ The game starts again and reaches its main menu. The macOS package applies a 108
 | ✅ | **Write watch bug** | Memory mapped over a reservation was not watched (fixed upstream). |
 | ✅ | **Startup regression** | Fixed: a quadratic shader pass and a blocked signal mask around thread creation. |
 | ✅ | **Shader arithmetic** | Pixel and compute shaders no longer turn every f32 add and mul into an unoptimized helper call under MoltenVK (the hottest shader: 17 → 5 ms). |
-| ✅ | **1080p output** | The PS5 build hardcodes 3840x2160 output. [tools/macos/patches/PPSA02100.json](../../tools/macos/patches/PPSA02100.json) sets it to 1920x1080; `tools/package_macos_app.py` applies it (`--no-game-patches` skips it). |
+| ✅ | **Output resolution** | The PS5 build hardcodes 3840x2160 output. With [tools/macos/patches/PPSA02100.json](../../tools/macos/patches/PPSA02100.json), applied by `tools/package_macos_app.py` (`--no-game-patches` skips it), the bundle asks for 720p, 900p, 1080p (default), 1440p or 4K when it starts; `APS5_RESOLUTION=1280x720` answers in advance. At 720p the menu runs at ~19-24 FPS. |
 | 🔧 | **Menu FPS** | At 1080p the driver thread is the limit (~52 ms per frame, GPU ~31 ms): GPU syncs, write-backs and queue submits. |
 | ⏭️ | **Entering the game** | Write-backs in game still have to be verified. |
 
