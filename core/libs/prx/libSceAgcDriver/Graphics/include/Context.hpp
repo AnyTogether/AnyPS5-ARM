@@ -28,6 +28,10 @@ class SamplerCache;
 class ShaderResources;
 class PlaceholderImages;
 
+struct UnrenderableDraw : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 inline void Require(bool condition, const std::string& reason) {
     if (!condition) throw std::runtime_error("AGC graphics: " + reason);
 }

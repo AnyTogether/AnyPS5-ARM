@@ -11,6 +11,8 @@
 #include "prx/libSceAgcDriver/Eq/include/Event.hpp"
 #include <cstdlib>
 #include <functional>
+#include <mutex>
+#include <set>
 #include <shared_mutex>
 
 namespace AgcDriver::DriverDetail {
@@ -283,6 +285,13 @@ void Driver::execute(const Submission& submission) {
                     } else if (traceDraws) {
                         std::fprintf(stderr, "[draw] target 0x%llx mask 0x%x ok\n",static_cast<unsigned long long>(color), readRegister(queue.context, 0x8e));
                     }
+                } catch (const Graphics::UnrenderableDraw& error) {
+                    CaptureTrace::Log("draw-skipped submission=%llu offset=%zu reason=%.256s", static_cast<unsigned long long>(submission.serial), cursor, error.what());
+                    countSkip(Graphics::DrawSkip::Thrown);
+                    static std::mutex reportedMutex;
+                    static std::set<std::string> reported;
+                    std::lock_guard lock(reportedMutex);
+                    if (reported.insert(error.what()).second) std::fprintf(stderr, "[gpu] draw skipped: %s\n", error.what());
                 } catch (const std::exception& error) {
                     CaptureTrace::Log("draw-error submission=%llu offset=%zu reason=%.256s", static_cast<unsigned long long>(submission.serial), cursor, error.what());
                     countSkip(Graphics::DrawSkip::Thrown);
