@@ -587,8 +587,13 @@ std::uint32_t emulatedCompareState(const ShaderInfo& info, const ResourceSnapsho
 void materializeTables(const IrResourcePlan& plan, ResourceSnapshot& snapshot, const std::vector<TableResolution>& tables) {
     for (std::uint32_t i = 0u; i < plan.info.buffers.size(); ++i) {
         const auto decoded = decodeBufferDescriptor(snapshot.buffers.at(i));
-        if (decoded.Type() != 0u) throw std::runtime_error("buffer descriptor uses an unsupported type");
-        if (plan.stage != IrShaderStage::Compute && decoded.AddTid()) throw std::runtime_error("buffer ADD_TID is only valid for compute shaders");
+        const bool otherType = decoded.Type() != 0u;
+        if (otherType || (plan.stage != IrShaderStage::Compute && decoded.AddTid())) {
+            static std::atomic<bool> reportedType{false};
+            static std::atomic<bool> reportedAddTid{false};
+            if (!(otherType ? reportedType : reportedAddTid).exchange(true)) std::fprintf(stderr, "[recompiler] a %s buffer descriptor (%08x %08x %08x %08x) is bound as a null buffer\n", otherType ? "non-buffer" : "graphics-stage ADD_TID", decoded.fields[0], decoded.fields[1], decoded.fields[2], decoded.fields[3]);
+            for (std::uint32_t dword = 0; dword < 4u; ++dword) snapshot.buffers.at(i).dwords[dword] = 0u;
+        }
     }
     if (snapshot.flattenedSrt.size() != plan.srtReads.size()) throw std::runtime_error("runtime SRT size differs from the static interface");
     for (std::uint32_t i = 0u; i < plan.info.images.size(); ++i) {
@@ -827,7 +832,7 @@ std::uint32_t ResourceMaterializer::RuntimeImageMode(const ImageResource& image,
     for (const auto& mode : modes) message += " " + describe(mode.numericClass, mode.dimension, mode.conversionFormat, mode.packedFormat, mode.cube, mode.depthBits, mode.depthUnorm16, mode.srgbDecode);
     char words[96];
     std::snprintf(words, sizeof(words), "; T# %08x %08x %08x %08x %08x %08x %08x %08x", descriptor.dwords[0], descriptor.dwords[1], descriptor.dwords[2], descriptor.dwords[3], descriptor.dwords[4], descriptor.dwords[5], descriptor.dwords[6], descriptor.dwords[7]);
-    throw std::runtime_error(message + words);
+    throw UnsupportedResourceBinding(message + words);
 }
 
 std::uint32_t ResourceMaterializer::EmulatedCompareState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index) {

@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <string_view>
 #include <vector>
@@ -294,6 +295,10 @@ struct TessellationConfiguration {
 };
 
 inline constexpr std::uint32_t MeshEmulationDescriptorSet = 2;
+struct UnsupportedResourceBinding : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 inline constexpr std::uint32_t MeshDrawPushOffsetBytes = 104;
 inline constexpr std::uint32_t MeshDrawPushBytes = 24;
 inline constexpr std::uint32_t TessellationLevelPushOffsetBytes = 120;

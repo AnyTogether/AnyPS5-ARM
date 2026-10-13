@@ -773,7 +773,7 @@ void verifyInvocationIsolation() {
     bool rejected = false;
     try { static_cast<void>(Recompile(request.request)); }
     catch (const std::runtime_error&) { rejected = true; }
-    require(rejected, "an unsupported buffer descriptor type was accepted");
+    require(!rejected, "a buffer descriptor of another type was rejected instead of bound as a null buffer");
 }
 
 void verifyBufferAlignmentSpecialization() {

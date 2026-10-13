@@ -17,6 +17,18 @@
 
 namespace AgcDriver::DriverDetail {
 
+namespace {
+
+void reportSkippedWork(const char* kind, const char* reason) {
+    static std::mutex reportedMutex;
+    static std::set<std::string> reported;
+    std::lock_guard lock(reportedMutex);
+    if (reported.insert(reason).second) std::fprintf(stderr, "[gpu] %s skipped: %s\n", kind, reason);
+}
+
+}
+
+
 template <typename TWork>
 void Driver::timed(double WorkerProfile::*bucket, TWork&& work) {
     static thread_local WorkerProfile profile;
@@ -239,8 +251,12 @@ void Driver::execute(const Submission& submission) {
                 gateOpened() = false;
                 timed(&WorkerProfile::dispatchMs, [&] { resolveGroupAhead(submission, queue, cursor); });
             }
-            if (opcode == 0x15) timed(&WorkerProfile::dispatchMs, [&] { dispatch(queue, packet, submission); });
-            else timed(&WorkerProfile::dispatchMs, [&] { dispatchIndirect(queue, packet, submission); });
+            try {
+                if (opcode == 0x15) timed(&WorkerProfile::dispatchMs, [&] { dispatch(queue, packet, submission); });
+                else timed(&WorkerProfile::dispatchMs, [&] { dispatchIndirect(queue, packet, submission); });
+            } catch (const ShaderRecompiler::UnsupportedResourceBinding& error) {
+                reportSkippedWork("dispatch", error.what());
+            }
             Graphics::Recorder::CountRecordedWork();
             finishDispatchPacket(opcode == 0x16);
         } else if (opcode == 0x3c || opcode == 0x93) {
@@ -288,10 +304,11 @@ void Driver::execute(const Submission& submission) {
                 } catch (const Graphics::UnrenderableDraw& error) {
                     CaptureTrace::Log("draw-skipped submission=%llu offset=%zu reason=%.256s", static_cast<unsigned long long>(submission.serial), cursor, error.what());
                     countSkip(Graphics::DrawSkip::Thrown);
-                    static std::mutex reportedMutex;
-                    static std::set<std::string> reported;
-                    std::lock_guard lock(reportedMutex);
-                    if (reported.insert(error.what()).second) std::fprintf(stderr, "[gpu] draw skipped: %s\n", error.what());
+                    reportSkippedWork("draw", error.what());
+                } catch (const ShaderRecompiler::UnsupportedResourceBinding& error) {
+                    CaptureTrace::Log("draw-skipped submission=%llu offset=%zu reason=%.256s", static_cast<unsigned long long>(submission.serial), cursor, error.what());
+                    countSkip(Graphics::DrawSkip::Thrown);
+                    reportSkippedWork("draw", error.what());
                 } catch (const std::exception& error) {
                     CaptureTrace::Log("draw-error submission=%llu offset=%zu reason=%.256s", static_cast<unsigned long long>(submission.serial), cursor, error.what());
                     countSkip(Graphics::DrawSkip::Thrown);
