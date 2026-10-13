@@ -41,9 +41,6 @@ mkdir -p "$ANYPS5_SHADER_CACHE_DIR" "$HOME/Library/Logs/AnyPS5"
 cd "$here/../Resources/game" || exit 1
 """
 
-# Asks for the output resolution when the title has one (Resources/resolution.txt, written by package)
-# and writes it into the eboot's values. APS5_RESOLUTION=WIDTHxHEIGHT skips the question; the last
-# choice is remembered per title.
 RESOLUTION_CHOICE = r"""resolution_file="$here/../Resources/resolution.txt"
 if [ -f "$resolution_file" ]; then
     . "$resolution_file"
