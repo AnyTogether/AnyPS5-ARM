@@ -3366,6 +3366,14 @@ void textureCacheBudgetTests() {
     Require(TextureCacheBudget(memory) == 2 * GiB, "a heap past memoryHeapCount or a host heap counted toward the texture caches");
     memory.memoryHeapCount = 3;
     Require(TextureCacheBudget(memory) == 6 * GiB, "a 24 GiB device-local heap does not give 6 GiB of cached textures");
+    VkPhysicalDeviceMemoryProperties shared{};
+    shared.memoryHeapCount = 1;
+    shared.memoryHeaps[0] = {18 * GiB, VK_MEMORY_HEAP_DEVICE_LOCAL_BIT};
+    Require(TextureCacheBudget(shared) == 18 * GiB / 8u, "an 18 GiB heap shared with the system does not give an eighth of it to the texture caches");
+    shared.memoryHeaps[0].size = 6 * GiB;
+    Require(TextureCacheBudget(shared) == 1 * GiB, "a 6 GiB shared heap does not keep the 1 GiB floor");
+    shared.memoryHeaps[0].flags = 0;
+    Require(TextureCacheBudget(shared) == 2 * GiB, "a single host heap was taken for shared device memory");
 }
 
 void sampledTextureBudgetTests() {
@@ -3392,6 +3400,15 @@ void sampledTextureBudgetTests() {
     memory.memoryHeaps[0].flags = 0;
     memory.memoryHeaps[2].flags = 0;
     Require(SampledTextureBudget(memory, &reported, 0) == 2 * GiB, "a device without a device-local heap does not keep 2 GiB of sampled textures");
+    VkPhysicalDeviceMemoryProperties shared{};
+    shared.memoryHeapCount = 1;
+    shared.memoryHeaps[0] = {18 * GiB, VK_MEMORY_HEAP_DEVICE_LOCAL_BIT};
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT system{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    system.heapBudget[0] = 13 * GiB + 512 * MiB;
+    system.heapUsage[0] = 2 * GiB;
+    Require(SampledTextureBudget(shared, &system, 0) == 18 * GiB / 8u, "a shared heap's budget let the sampled cache grow past an eighth of the heap");
+    system.heapUsage[0] = 12 * GiB;
+    Require(SampledTextureBudget(shared, &system, 0) == 2 * GiB, "a full shared heap does not keep the sampled cache at the 2 GiB floor under the eighth");
 }
 
 void sampledBudgetReportTests() {

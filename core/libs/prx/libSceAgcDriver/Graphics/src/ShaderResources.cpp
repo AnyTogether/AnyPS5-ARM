@@ -900,7 +900,19 @@ std::shared_ptr<StorageTexture> cachedStorageTexture(const Context& context, std
 
 }
 
+namespace {
+
+// A device whose only heap is device-local shares the system memory with the title (Apple GPUs under
+// MoltenVK report one heap): a cached texture there is a second copy of guest memory in the same RAM,
+// so the caches take an eighth of the heap instead of a quarter, with a 1 GiB floor.
+bool sharesSystemMemory(const VkPhysicalDeviceMemoryProperties& memory) {
+    return memory.memoryHeapCount == 1 && (memory.memoryHeaps[0].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+}
+
+}
+
 std::uint64_t TextureCacheBudget(const VkPhysicalDeviceMemoryProperties& memory) {
+    if (sharesSystemMemory(memory)) return std::max<std::uint64_t>(1024ull << 20u, memory.memoryHeaps[0].size / 8u);
     const auto heap = largestDeviceLocalHeap(memory);
     return std::max<std::uint64_t>(2048ull << 20u, heap ? memory.memoryHeaps[*heap].size / 4u : 0u);
 }
@@ -911,7 +923,9 @@ std::uint64_t SampledTextureBudget(const VkPhysicalDeviceMemoryProperties& memor
     const auto budget = reported->heapBudget[*heap];
     const auto usage = reported->heapUsage[*heap];
     const auto reserved = usage - std::min<std::uint64_t>(usage, textureBytes) + TextureCacheBudget(memory) + budget / 8u;
-    return std::max<std::uint64_t>(2048ull << 20u, budget > reserved ? budget - reserved : 0u);
+    const auto sampled = std::max<std::uint64_t>(2048ull << 20u, budget > reserved ? budget - reserved : 0u);
+    // On shared memory the heap budget is the system's: what it leaves is the title's own memory.
+    return sharesSystemMemory(memory) ? std::min(sampled, TextureCacheBudget(memory)) : sampled;
 }
 
 bool SampledBudgetReportDue(std::uint64_t reported, std::uint64_t budget, std::chrono::steady_clock::duration sinceReport) {
