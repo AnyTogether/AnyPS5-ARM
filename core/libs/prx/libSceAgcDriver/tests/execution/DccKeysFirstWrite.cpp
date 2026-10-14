@@ -627,6 +627,9 @@ void RunSharedImport(AgcDriver::VulkanDevice& device, std::uint8_t* block) {
 
 int main() {
     try {
+#ifdef __APPLE__
+        setenv("APS5_DEFER_UNWATCHED_WRITEBACK", "1", 1);
+#endif
         std::optional<GuestBlock> block;
         std::optional<GuestBlock> watched;
         std::optional<GuestBlock> untracked;

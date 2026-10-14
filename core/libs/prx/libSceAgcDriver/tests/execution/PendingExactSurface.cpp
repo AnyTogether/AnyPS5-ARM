@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <memory>
@@ -87,6 +88,9 @@ std::string Describe(const std::shared_ptr<StorageTexture>& image) {
 
 int main() {
     try {
+#ifdef __APPLE__
+        setenv("APS5_DEFER_UNWATCHED_WRITEBACK", "1", 1);
+#endif
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         std::vector<std::uint32_t> storage((BlockBytes + 0x10000u) / 4u);

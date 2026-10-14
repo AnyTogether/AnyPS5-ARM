@@ -2803,6 +2803,22 @@ void StorageTexture::MarkDirty() {
     markLayersPending(0, trackedLayers);
 }
 
+bool StorageTexture::storesAtOnce() const {
+#ifdef __APPLE__
+    static const bool deferred = std::getenv("APS5_DEFER_UNWATCHED_WRITEBACK") != nullptr;
+    return !deferred && GuestMemory::WriteWatched() && !GuestMemory::Watched(descriptor.baseAddress, static_cast<std::size_t>(guestBytes));
+#else
+    return false;
+#endif
+}
+
+bool StorageTexture::allPendingSaved() const {
+    for (std::uint32_t layer = 0; layer < trackedLayers; ++layer) {
+        if (layerPending[layer] && !layerOriginal[layer]) return false;
+    }
+    return true;
+}
+
 bool StorageTexture::anyLayerPending() const {
     return std::any_of(layerPending.begin(), layerPending.end(), [](bool pending) { return pending; });
 }
@@ -2833,6 +2849,19 @@ void StorageTexture::markLayersPending(std::uint32_t first, std::uint32_t count)
     if (eager) {
         WriteBack();
         return;
+    }
+    if (storesAtOnce() && allPendingSaved()) {
+        deferUnsaved = true;
+        struct Restore {
+            bool& flag;
+            ~Restore() { flag = false; }
+        } restore{deferUnsaved};
+        const auto stored = layerPending;
+        WriteBack();
+        if (!anyLayerPending()) {
+            captureGuestBytes(&stored);
+            return;
+        }
     }
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
@@ -4107,6 +4136,7 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
             else keep.emplace_back(from, to);
         }
     }
+    if (unsavedOutsideWatch && deferUnsaved) return;
     // Debug aid: APS5_TRACE_FLUSH also names the blocks a write-back leaves to the CPU.
     static const bool traceKept = std::getenv("APS5_TRACE_FLUSH") != nullptr;
     if (traceKept && skippedAny) {

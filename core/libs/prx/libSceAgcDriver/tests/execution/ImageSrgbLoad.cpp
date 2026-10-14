@@ -232,6 +232,9 @@ int main() {
 #else
         setenv("APS5_SRGB_SHADER_DECODE", "1", 1);
 #endif
+#ifdef __APPLE__
+        setenv("APS5_DEFER_UNWATCHED_WRITEBACK", "1", 1);
+#endif
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         CheckLoad(*device, LoadXyzw, 0xfu, Srgb8_8, SwizzleXY01, "8_8_SRGB image_load dmask:0xf X Y 0 1");

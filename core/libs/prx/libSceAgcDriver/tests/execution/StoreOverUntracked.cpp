@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <mutex>
@@ -292,6 +293,9 @@ Outcome Run(const Case& test) {
 
 int main() {
     try {
+#ifdef __APPLE__
+        setenv("APS5_DEFER_UNWATCHED_WRITEBACK", "1", 1);
+#endif
         {
             const auto device = OpenVulkanTestDevice();
             if (!device) return VulkanTestSkipped;
