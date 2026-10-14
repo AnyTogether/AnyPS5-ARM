@@ -5,6 +5,7 @@
 #ifdef __APPLE__
 #include "prx/libkernel/File/include/File.hpp"
 #endif
+#include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
 #include "prx/libkernel/Socket/include/SocketSelectDeadline.hpp"
@@ -14,7 +15,6 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <thread>
 #include <string>
 #include <vector>
 
@@ -236,7 +236,7 @@ int APS5_VABI select_nid_postfix(int nfds, void* readfds, void* writefds, void* 
         }
         if (devicesReady) waitMilliseconds = 0;
         if (groups.empty()) {
-            if (waitMilliseconds > 0) std::this_thread::sleep_for(std::chrono::milliseconds(waitMilliseconds));
+            if (waitMilliseconds > 0) PreciseSleepUntil(std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(waitMilliseconds)));
         } else {
             const int slice = groups.size() == 1 ? waitMilliseconds : std::min(waitMilliseconds, SelectPollSliceMilliseconds);
             const auto sliceEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitMilliseconds);

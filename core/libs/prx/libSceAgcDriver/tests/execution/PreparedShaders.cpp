@@ -397,6 +397,12 @@ void SharedCodeHeaders() {
     Shader copy = vertex.shader;
     copy.user_data = nullptr;
     AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, primitive);
+    auto moved = vertex.registers;
+    copy.sh_registers = moved.data();
+    AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, primitive);
+    moved[2].value ^= 2u;
+    ExpectFailure([&] { AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, primitive); }, "replaced shader header");
+    copy.sh_registers = vertex.shader.sh_registers;
     copy.target ^= 1u;
     ExpectFailure([&] { AgcDriverResolveShaderAbi_nid_postfix(&copy, {}, primitive); }, "replaced shader header");
     std::vector<std::uint32_t> commands;

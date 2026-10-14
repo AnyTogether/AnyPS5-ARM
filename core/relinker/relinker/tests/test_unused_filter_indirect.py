@@ -51,18 +51,42 @@ def load_slot(address):
     return b"\x48\x8b\x05" + rel(address + 7, SLOT) + b"\xc3"
 
 
-def run(relinker, work, name, image):
+def run(relinker, work, name, image, level=1):
     source = work / (name + ".elf")
     output = work / (name + ".out")
     source.write_bytes(image)
-    result = subprocess.run([str(relinker), "--skip-sce-module", "--registry", "unused-filter=1",
+    result = subprocess.run([str(relinker), "--skip-sce-module", "--registry", f"unused-filter={level}",
                              str(source), str(output)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0 and output.exists(), (name, result.returncode, result.stdout, result.stderr)
     registry = json.loads(output.with_suffix(".registry.json").read_text())
     kept = len(registry)
     assert kept in (0, 1) and all(entry["nid"] == "foo" for entry in registry), (name, registry)
-    assert f"CFG/GOT filtering: 1 -> {kept};" in result.stdout, (name, result.stdout)
+    if level == 1:
+        assert f"CFG/GOT filtering: 1 -> {kept};" in result.stdout, (name, result.stdout)
     return kept == 1
+
+
+def exported_fixture(binding, defined, sections):
+    image = build(at_offset([(0, b"\xc3"), (0x40, load_slot(FUNCTION))]))
+    strings = b"\0foo\0lib.so\0exported\0"
+    image[0x600:0x600 + len(strings)] = strings
+    struct.pack_into("<Q", image, 0x408, 5)
+    struct.pack_into("<Q", image, 0x400 + 2 * 16 + 8, len(strings))
+    struct.pack_into("<Q", image, 0x400 + 8 * 16 + 8, 72)
+    import_index = 2 if binding == 0 else 1
+    export_index = 1 if binding == 0 else 2
+    struct.pack_into("<IBBHQQ", image, 0x620 + import_index * 24, 1, 0x12, 0, 0, 0, 0)
+    struct.pack_into("<IBBHQQ", image, 0x620 + export_index * 24, 12, (binding << 4) | 2, 0,
+                     1 if defined else 0, FUNCTION if defined else 0, 8 if defined else 0)
+    struct.pack_into("<Q", image, 0x708, (import_index << 32) | 6)
+    if sections:
+        image.extend(bytes(4 * 64))
+        struct.pack_into("<Q", image, 40, 0x1200)
+        struct.pack_into("<H", image, 60, 4)
+        struct.pack_into("<IIQQQQIIQQ", image, 0x1240, 0, 1, 6, CODE, CODE, 0x200, 0, 0, 16, 0)
+        struct.pack_into("<IIQQQQIIQQ", image, 0x1280, 0, 11, 2, 0x620, 0x620, 72, 3, import_index, 8, 24)
+        struct.pack_into("<IIQQQQIIQQ", image, 0x12c0, 0, 3, 2, 0x600, 0x600, len(strings), 0, 0, 1, 0)
+    return image
 
 
 def cases():
@@ -100,6 +124,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix="anyps5-unused-filter-indirect-") as directory:
         failures = [name for name, expected, image in cases()
                     if run(relinker, Path(directory), name, image) != expected]
+        for sections in (False, True):
+            for kind, binding, defined in (("global", 1, True), ("weak", 2, True),
+                                           ("local", 0, True), ("undefined", 1, False)):
+                for level in (0, 1, 2):
+                    name = f"exported-{kind}-sections-{sections}-filter-{level}"
+                    expected = level != 1 or (binding in (1, 2) and defined)
+                    if run(relinker, Path(directory), name, exported_fixture(binding, defined, sections), level) != expected:
+                        failures.append(name)
         assert not failures, failures
     print("Unused filter indirect tests passed")
 

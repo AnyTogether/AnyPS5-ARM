@@ -7,7 +7,7 @@ import tempfile
 from ctypes import wintypes
 from pathlib import Path
 
-from test_guest_intel_trampolines import main_fixture
+from guest_import_fixtures import dynamic, executable
 from test_guest_module_directories import module_with_symbol, needed_libraries
 from test_guest_tls import data_directory, guest_with_tls
 
@@ -112,12 +112,6 @@ def imported_symbols_by_dll(path):
     return imports
 
 
-def dynamic(image, offset, phoff, tags):
-    for index, tag in enumerate(tags + [(0, 0)]):
-        struct.pack_into('<qQ', image, offset + index * 16, *tag)
-    struct.pack_into('<QQ', image, phoff + 32, (len(tags) + 1) * 16, (len(tags) + 1) * 16)
-
-
 def provider(value, soname=None, code=None):
     image = module_with_symbol(True)
     code = code or b'\xb8' + struct.pack('<I', value) + b'\xc3'
@@ -184,32 +178,6 @@ def consumer(owner, symbol='shared#A#B', expected=22, module_name=None):
     dynamic(image, 0x600, 176, tags)
     code = b'\xff\x15' + struct.pack('<i', 0x2320 - 0x1016) + bytes([0x83, 0xf8, expected, 0x74, 2, 0x0f, 0x0b, 0xc3])
     image[0x410:0x410 + len(code)] = code
-    return image
-
-
-def executable(owner, symbol='shared#A#B', module_name=None, extra_dependencies=()):
-    image = main_fixture()
-    struct.pack_into('<I', image, 68, 7)
-    strings = b'\0' + symbol.encode() + b'\0' + owner.encode() + b'\0'
-    owner_offset = len(symbol) + 2
-    module_offset = owner_offset
-    if module_name is not None:
-        module_offset = len(strings)
-        strings += module_name.encode() + b'\0'
-    dependency_offsets = []
-    for dependency in extra_dependencies:
-        dependency_offsets.append(len(strings))
-        strings += dependency.encode() + b'\0'
-    image[0x4800:0x4800 + len(strings)] = strings
-    tags = [(5, 0x4800), (10, len(strings)), (6, 0x4880), (11, 24),
-            (4, 0x4840), (7, 0x4900), (8, 24), (9, 24),
-            (1, owner_offset), (0x61000045, (1 << 48) | module_offset)]
-    tags.extend((1, offset) for offset in dependency_offsets)
-    dynamic(image, 0x4600, 120, tags)
-    struct.pack_into('<IIIII', image, 0x4840, 1, 2, 1, 0, 0)
-    struct.pack_into('<IBBHQQ', image, 0x4898, 1, 0x12, 0, 0, 0, 0)
-    struct.pack_into('<QQq', image, 0x4900, 0x4a20, (1 << 32) | 6, 0)
-    image[0x4000:0x4007] = b'\xff\x15' + struct.pack('<i', 0x4a20 - 0x4006) + b'\xc3'
     return image
 
 

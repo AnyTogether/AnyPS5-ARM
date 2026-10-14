@@ -192,7 +192,7 @@ class StrictNidFilter : public IUnusedNidFilter {
 
 public:
     explicit StrictNidFilter(Domain::IProgress& progress) : progress(progress) {}
-    std::vector<NidReference> Filter(const std::vector<NidReference>& nidRefs, const std::vector<std::uint8_t>& elfBytes, const std::vector<std::uint8_t>& textSection, VirtualAddress textVAddr) override {
+    std::vector<NidReference> Filter(const std::vector<NidReference>& nidRefs, const std::vector<std::uint8_t>& elfBytes, const std::vector<std::uint8_t>& textSection, VirtualAddress textVAddr, const std::vector<VirtualAddress>&) override {
         const StrictImage image(elfBytes);
         const auto input = image.Build(nidRefs, textSection, textVAddr);
         const auto analysis = UnusedNidFilter::AnalyzeStrictReachability(input);

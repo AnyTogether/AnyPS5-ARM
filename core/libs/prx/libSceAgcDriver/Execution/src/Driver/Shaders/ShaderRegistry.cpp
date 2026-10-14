@@ -327,6 +327,17 @@ static Shader GuestShaderFields(const Shader* shader) {
     return fields;
 }
 
+static bool RelocatedRegisters(const ShaderSnapshot& snapshot, Shader used, const Shader& registered) {
+    const auto* bound = used.sh_registers;
+    used.sh_registers = registered.sh_registers;
+    if (std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) != 0) return false;
+    const auto address = reinterpret_cast<std::uintptr_t>(registered.sh_registers);
+    const std::size_t bytes = registered.num_sh_registers * sizeof(ShaderRegister);
+    if (bytes == 0 || bound == nullptr || address < snapshot.headerAddress || address - snapshot.headerAddress > snapshot.header.size() || snapshot.header.size() - (address - snapshot.headerAddress) < bytes) return false;
+    GuestMemory::CheckRange(bound, bytes, alignof(ShaderRegister));
+    return std::memcmp(static_cast<const void*>(bound), snapshot.header.data() + (address - snapshot.headerAddress), bytes) == 0;
+}
+
 bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     if (snapshot.headerAddress == reinterpret_cast<std::uintptr_t>(shader)) return true;
     if (snapshot.header.size() < sizeof(Shader)) return false;
@@ -336,7 +347,7 @@ bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     std::memcpy(&used, static_cast<const void*>(shader), sizeof(Shader));
     std::memcpy(&registered, snapshot.header.data(), sizeof(Shader));
     used.user_data = registered.user_data;
-    return std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) == 0 || FusedHullHeader(snapshot, used, registered);
+    return std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) == 0 || RelocatedRegisters(snapshot, used, registered) || FusedHullHeader(snapshot, used, registered);
 }
 
 std::shared_ptr<const ShaderSnapshot> RegisteredHeader(const ShaderRegistry& registry, const Shader* shader) {

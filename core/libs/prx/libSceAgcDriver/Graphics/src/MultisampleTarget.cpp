@@ -402,6 +402,15 @@ void ResolveMultisampleTarget(const Context& context, const ColorTarget& source,
     destination.MarkDirty();
 }
 
+bool MultisampledColorFillAbsorbs(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
+    if (bytes == 0) return false;
+    std::lock_guard lock(targetsMutex());
+    return std::any_of(targets().begin(), targets().end(), [&](const auto& target) {
+        VkClearColorValue clear{};
+        return target->active->load(std::memory_order_acquire) && target->target.address == address && MultisampledColorBytes(target->target) == bytes && MultisampledFillClearColor(target->target, pattern, clear);
+    });
+}
+
 void NoteColorMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
     std::lock_guard lock(targetsMutex());
     for (const auto& target : targets()) {

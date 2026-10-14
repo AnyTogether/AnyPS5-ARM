@@ -446,6 +446,24 @@ void RunGuestTextureResourceTests() {
     Require(!MatchesGuestDimension(Shape::Image3D, TextureDimension::k2DArray), "3D shape must never match a guest dimension");
     Require(!MatchesGuestDimension(Shape::Image3D, TextureDimension::kCube), "3D shape must never match a guest dimension");
 
+    const auto layered = [](TextureDimension dimension, std::uint32_t lastLayer, std::uint32_t baseArray = 0) {
+        GuestTextureResource resource{};
+        resource.dimension = dimension;
+        resource.depthOrLastArray = lastLayer;
+        resource.baseArray = baseArray;
+        return resource;
+    };
+    const auto twoSlices = layered(TextureDimension::k2DArray, 1);
+    Require(ArrayLayersServeView(twoSlices, layered(TextureDimension::k2D, 0)), "a 2D texture must view the first layer of a 2D array color surface (slice-0 view with MIP0_DEPTH 1)");
+    Require(ArrayLayersServeView(twoSlices, twoSlices), "a 2D array must view the same 2D array");
+    Require(ArrayLayersServeView(layered(TextureDimension::k2DArray, 3), twoSlices), "a 2D array must view the first layers of a larger 2D array");
+    Require(!ArrayLayersServeView(twoSlices, layered(TextureDimension::k2DArray, 3)), "a 2D array view must not reach past the surface's layers");
+    Require(!ArrayLayersServeView(twoSlices, layered(TextureDimension::k2D, 0, 1)), "a 2D view of a later layer must not be served by the array's first layer");
+    Require(ArrayLayersServeView(layered(TextureDimension::k2D, 0), layered(TextureDimension::k2D, 0)), "a 2D texture must view the same 2D surface");
+    Require(!ArrayLayersServeView(layered(TextureDimension::k2D, 0), twoSlices), "a 2D surface must not serve a 2D array view");
+    Require(!ArrayLayersServeView(layered(TextureDimension::k3D, 1), layered(TextureDimension::k2D, 0)), "a 3D surface's first slice must not serve a 2D texture");
+    Require(!ArrayLayersServeView(layered(TextureDimension::kCube, 5), layered(TextureDimension::k2D, 0)), "a cube's first face must not serve a 2D texture");
+
     Fields streamed = base;
     streamed.minLodWarn = 0xabc;
     streamed.mipStatsCntEn = true;

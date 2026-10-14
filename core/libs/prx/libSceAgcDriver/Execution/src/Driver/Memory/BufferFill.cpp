@@ -252,7 +252,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
     static std::array<double, FillPhaseCount> fillPhaseMs{};
     static std::array<double, 8> holdByCoverMs{};
     static std::array<std::uint64_t, 8> holdByCover{};
-    static std::uint64_t flushes = 0, flushed = 0;
+    static std::uint64_t flushes = 0, flushed = 0, absorbedFills = 0, absorbedBytes = 0;
     static auto fillReport = std::chrono::steady_clock::now();
     ++fills;
     filledBytes += bytes;
@@ -302,19 +302,23 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         fillClearCount(coverage, bytes, pattern, discarded, cleared, refusal);
         noteForeignWriter(base, base + bytes, queueId);
 
-        if (!cleared) {
+        const bool uniform = pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3];
+        const bool absorbed = !cleared && uniform && coverage.cover == Graphics::StorageTexture::FillCover::None && Graphics::MultisampledColorFillAbsorbs(base, bytes, pattern[0]);
+        if (absorbed) {
+            ++absorbedFills;
+            absorbedBytes += bytes;
+        } else if (!cleared) {
             ++flushes;
 
             if (Graphics::StorageTexture::FlushPending(base, bytes, nullptr, "buffer fill", Graphics::PublishScope::PartialUnits)) ++flushed;
         }
         phase(FillFlush);
-        const bool stored = cleared || localDevice->FillBuffer(base, bytes, pattern);
+        const bool stored = cleared || absorbed || localDevice->FillBuffer(base, bytes, pattern);
         phase(FillDevice);
-        if (stored && !cleared) {
+        if (stored && !cleared && !absorbed) {
             if (const auto filled = KeysFillMemo(pattern, uniformKeysFill, memoryFill.has_value())) Graphics::NoteKeysFillOnGpu(base, bytes, *filled);
         }
-        if (profile && stored && !cleared) {
-            const bool uniform = pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3];
+        if (profile && stored && !cleared && !absorbed) {
             ++(uniform ? uniformFills : patternFills);
             (uniform ? uniformBytes : patternBytes) += bytes;
             if (!uniform) chainCopies += static_cast<std::uint64_t>(std::bit_width((bytes / 16) - 1));
@@ -331,7 +335,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
             for (std::size_t done = 0; done < bytes; done += chunk) GuestMemory::Write(base + done, std::span<const std::byte>(block).first(std::min(chunk, bytes - done)), 16);
             phase(FillCpu);
         }
-        if (pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3]) {
+        if (uniform) {
             Graphics::NoteDepthMetadataFill(base, bytes, pattern[0]);
             Graphics::NoteColorMetadataFill(base, bytes, pattern[0]);
         }
@@ -349,6 +353,9 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
                     std::snprintf(text, sizeof(text), " %s %.0f", fillPhaseNames[i], fillPhaseMs[i]);
                     line += text;
                 }
+                char absorbedText[128];
+                std::snprintf(absorbedText, sizeof(absorbedText), "; multisampled clears not stored %llu (%.0f MiB)", static_cast<unsigned long long>(absorbedFills), static_cast<double>(absorbedBytes) / 1048576.0);
+                line += absorbedText;
                 line += "; hold by cover (count/ms):";
                 for (std::size_t i = 0; i < coverNames.size(); ++i) {
                     std::snprintf(text, sizeof(text), " %s %llu/%.0f", coverNames[i], static_cast<unsigned long long>(holdByCover[i]), holdByCoverMs[i]);

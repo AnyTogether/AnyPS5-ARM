@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <tuple>
+#include <utility>
 #include <domain/ImportModule.hpp>
 
 namespace Relinker {
@@ -376,6 +377,31 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
 
     validationPolicy->ValidateSyscallAbsence();
 
+    std::vector<std::pair<ByteCount, std::string>> exportedSymbols;
+    std::vector<VirtualAddress> exportedFunctions;
+    if (hasTag(DT_OS_SYMTABSZ)) {
+        const auto symbolBytes = getTagValue(DT_OS_SYMTABSZ);
+        if (symbolBytes % symEntSize != 0 || dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
+            throw RelinkerException("Invalid executable dynamic symbol table size");
+        for (ByteCount off = symEntSize; off < symbolBytes; off += symEntSize) {
+            const auto* symbol = raw.data() + dynSymTabOffset + off;
+            std::uint16_t section = 0;
+            std::memcpy(&section, symbol + 6, sizeof(section));
+            if (section == 0 || (symbol[4] >> 4) == 0 || (symbol[5] & 3) == 1 || (symbol[5] & 3) == 2) continue;
+            std::uint32_t sourceName = 0;
+            std::memcpy(&sourceName, symbol, sizeof(sourceName));
+            auto name = readCStr(sourceName);
+            name.resize(name.find('#') == std::string::npos ? name.size() : name.find('#'));
+            exportedSymbols.emplace_back(off, std::move(name));
+            const auto binding = symbol[4] >> 4;
+            if ((binding == STB_GLOBAL || binding == STB_WEAK) && (symbol[4] & 15) == STT_FUNC) {
+                VirtualAddress address = 0;
+                std::memcpy(&address, symbol + 8, sizeof(address));
+                exportedFunctions.push_back(address);
+            }
+        }
+    }
+
     progress.Report({Domain::ProgressStage::Imports, {}, 0, 1});
     const std::size_t originalNidCount = nidRefs.size();
     const auto originalNidRefs = nidRefs;
@@ -403,7 +429,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             { std::ostringstream message; message << "CFG/GOT filtering skipped: multiple executable segments are not modeled; "
                       << nonPltCount << " -> " << nonPltCount << "; filtered=0\n"; progress.Message(message.str()); }
         } else {
-            nonPltRefs = unusedNidFilter->Filter(nonPltRefs, raw, textSection, textVAddr);
+            nonPltRefs = unusedNidFilter->Filter(nonPltRefs, raw, textSection, textVAddr, exportedFunctions);
             if (nonPltRefs.size() > nonPltCount) throw RelinkerException("Unused NID filter increased the reference count");
             { std::ostringstream message; message << "CFG/GOT filtering: " << nonPltCount << " -> " << nonPltRefs.size() << "; filtered=" << nonPltCount - nonPltRefs.size() << "\n"; progress.Message(message.str()); }
         }
@@ -434,26 +460,14 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         if (auto declared = Domain::DeclaredImportModule(ref.Nid, importModules); !declared.empty()) dynSection.UnmatchedImportModules.insert(std::move(declared));
     }
 
-    if (hasTag(DT_OS_SYMTABSZ)) {
-        const auto symbolBytes = getTagValue(DT_OS_SYMTABSZ);
-        if (symbolBytes % symEntSize != 0 || dynSymTabOffset > raw.size() || symbolBytes > raw.size() - dynSymTabOffset)
-            throw RelinkerException("Invalid executable dynamic symbol table size");
-        for (ByteCount off = symEntSize; off < symbolBytes; off += symEntSize) {
-            const auto* symbol = raw.data() + dynSymTabOffset + off;
-            std::uint16_t section = 0;
-            std::memcpy(&section, symbol + 6, sizeof(section));
-            if (section == 0 || (symbol[4] >> 4) == 0 || (symbol[5] & 3) == 1 || (symbol[5] & 3) == 2) continue;
-            std::uint32_t sourceName = 0;
-            std::memcpy(&sourceName, symbol, sizeof(sourceName));
-            auto name = readCStr(sourceName);
-            name.resize(name.find('#') == std::string::npos ? name.size() : name.find('#'));
-            const auto nameOffset = static_cast<std::uint32_t>(dynSection.DynStrData.size());
-            dynSection.DynStrData.insert(dynSection.DynStrData.end(), name.begin(), name.end());
-            dynSection.DynStrData.push_back(0);
-            const auto position = dynSection.DynSymData.size();
-            dynSection.DynSymData.insert(dynSection.DynSymData.end(), symbol, symbol + symEntSize);
-            std::memcpy(dynSection.DynSymData.data() + position, &nameOffset, sizeof(nameOffset));
-        }
+    for (const auto& [off, name] : exportedSymbols) {
+        const auto* symbol = raw.data() + dynSymTabOffset + off;
+        const auto nameOffset = static_cast<std::uint32_t>(dynSection.DynStrData.size());
+        dynSection.DynStrData.insert(dynSection.DynStrData.end(), name.begin(), name.end());
+        dynSection.DynStrData.push_back(0);
+        const auto position = dynSection.DynSymData.size();
+        dynSection.DynSymData.insert(dynSection.DynSymData.end(), symbol, symbol + symEntSize);
+        std::memcpy(dynSection.DynSymData.data() + position, &nameOffset, sizeof(nameOffset));
     }
 
     auto appendRela = [&](std::vector<std::uint8_t>& buf, std::uint64_t offset, std::uint64_t info, std::int64_t addend) {

@@ -235,4 +235,11 @@ bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, Texture
     throw std::runtime_error("AGC graphics: MatchesGuestDimension encountered an unknown descriptor image shape");
 }
 
+bool ArrayLayersServeView(const GuestTextureResource& surface, const GuestTextureResource& view) {
+    if (view.dimension == surface.dimension && view.depthOrLastArray == surface.depthOrLastArray) return true;
+    if (surface.dimension != TextureDimension::k2DArray) return false;
+    if (view.dimension == TextureDimension::k2D) return view.baseArray == 0;
+    return view.dimension == TextureDimension::k2DArray && view.depthOrLastArray <= surface.depthOrLastArray;
+}
+
 }

@@ -1,0 +1,35 @@
+import struct
+
+from test_guest_intel_trampolines import main_fixture
+
+
+def dynamic(image, offset, phoff, tags):
+    for index, tag in enumerate(tags + [(0, 0)]):
+        struct.pack_into('<qQ', image, offset + index * 16, *tag)
+    struct.pack_into('<QQ', image, phoff + 32, (len(tags) + 1) * 16, (len(tags) + 1) * 16)
+
+
+def executable(owner, symbol='shared#A#B', module_name=None, extra_dependencies=()):
+    image = main_fixture()
+    struct.pack_into('<I', image, 68, 7)
+    strings = b'\0' + symbol.encode() + b'\0' + owner.encode() + b'\0'
+    owner_offset = len(symbol) + 2
+    module_offset = owner_offset
+    if module_name is not None:
+        module_offset = len(strings)
+        strings += module_name.encode() + b'\0'
+    dependency_offsets = []
+    for dependency in extra_dependencies:
+        dependency_offsets.append(len(strings))
+        strings += dependency.encode() + b'\0'
+    image[0x4800:0x4800 + len(strings)] = strings
+    tags = [(5, 0x4800), (10, len(strings)), (6, 0x4880), (11, 24),
+            (4, 0x4840), (7, 0x4900), (8, 24), (9, 24),
+            (1, owner_offset), (0x61000045, (1 << 48) | module_offset)]
+    tags.extend((1, offset) for offset in dependency_offsets)
+    dynamic(image, 0x4600, 120, tags)
+    struct.pack_into('<IIIII', image, 0x4840, 1, 2, 1, 0, 0)
+    struct.pack_into('<IBBHQQ', image, 0x4898, 1, 0x12, 0, 0, 0, 0)
+    struct.pack_into('<QQq', image, 0x4900, 0x4a20, (1 << 32) | 6, 0)
+    image[0x4000:0x4007] = b'\xff\x15' + struct.pack('<i', 0x4a20 - 0x4006) + b'\xc3'
+    return image
