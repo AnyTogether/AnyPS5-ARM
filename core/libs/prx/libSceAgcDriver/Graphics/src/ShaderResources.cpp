@@ -2858,16 +2858,16 @@ DescriptorCache::Stats DescriptorCache::Counters() const {
 
 std::size_t ShaderResources::addGuestBuffer(std::span<const std::uint32_t> words, const ColorTarget* target, std::uint64_t indexAddress, std::size_t indexBytes, bool written, bool atomic, bool read) {
     Require(words.size() == 4, "buffer descriptor must contain four DWORDs");
-    Require((words[1] & 0x40000000u) == 0, "buffer descriptor has reserved bits set");
+    if ((words[1] & 0x40000000u) != 0) throw UnrenderableDraw("AGC graphics: buffer descriptor has reserved bits set");
     const ShaderRecompiler::ShaderBufferResource descriptor{{words[0], words[1], words[2], words[3]}};
-    Require(descriptor.Type() == 0u, "buffer descriptor uses an unsupported type");
+    if (descriptor.Type() != 0u) throw UnrenderableDraw("AGC graphics: buffer descriptor uses an unsupported type");
     const auto address = descriptor.Base48();
     const auto byteSize = descriptor.GetSize();
     if (byteSize == 0 || address == 0) {
         allocations.push_back({0, EmptyBufferBytes, false, nullptr, ShaderRecompiler::DescriptorRole::GuestBuffers, false});
         return allocations.size() - 1;
     }
-    Require(byteSize <= context.limits.maxStorageBufferRange, "shader buffer exceeds descriptor range limit");
+    if (byteSize > context.limits.maxStorageBufferRange) throw UnrenderableDraw("AGC graphics: shader buffer exceeds descriptor range limit");
     Require(byteSize <= std::numeric_limits<std::size_t>::max(), "shader buffer size exceeds host address space");
     auto size = static_cast<std::size_t>(byteSize);
     if (const std::uint64_t stride = descriptor.Stride(); stride != 0) {
