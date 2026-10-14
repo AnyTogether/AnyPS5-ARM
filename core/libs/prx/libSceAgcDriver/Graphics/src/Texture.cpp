@@ -1794,8 +1794,8 @@ bool StorageTexture::Refresh() {
 }
 
 DccKeys StorageTexture::ProvedKeys() const {
-    std::optional<DccKeys> keys;
-    if (descriptor.dccAddress != 0 && uploadedKeys == DccKeys::Uncompressed) keys = WaitForKeyWriters(descriptor, guestBytes);
+    auto keys = PendingFillKeys(descriptor, guestBytes);
+    if (!keys.has_value() && descriptor.dccAddress != 0 && uploadedKeys == DccKeys::Uncompressed) keys = WaitForKeyWriters(descriptor, guestBytes);
     if (keys.has_value()) keyProof = {};
     else keys = ProvedClearKeys(descriptor, guestBytes, keyProof);
     if (IsDccClear(filledKeys) && *keys != filledKeys && !anyLayerPending()) filledKeys = DccKeys::Uncompressed;
@@ -1970,7 +1970,12 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
         }
         refreshGeneration();
     };
-    uploadedKeys = ProvedClearKeys(descriptor, guestBytes, keyProof);
+    if (const auto predicted = PendingFillKeys(descriptor, guestBytes)) {
+        uploadedKeys = *predicted;
+        keyProof = {};
+    } else {
+        uploadedKeys = ProvedClearKeys(descriptor, guestBytes, keyProof);
+    }
     filledKeys = DccKeys::Uncompressed;
     VkClearColorValue clearValue{};
     if (IsDccClear(uploadedKeys) && ClearColorFor(storageFormat, uploadedKeys, clearValue)) {

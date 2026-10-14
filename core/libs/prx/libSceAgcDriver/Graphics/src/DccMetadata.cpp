@@ -729,6 +729,46 @@ bool PendingFillsLeaveUncompressed(const Recorder& recorder, const GuestTextureR
 
 }
 
+std::optional<DccKeys> PendingFillKeys(const GuestTextureResource& resource, std::uint64_t guestBytes) {
+    const auto count = static_cast<std::size_t>(guestBytes / KeyBytes);
+    const auto begin = resource.dccAddress;
+    if (begin == 0 || count == 0 || !GuestMemory::GpuMutex().HeldByThisThread()) return std::nullopt;
+    auto* recorder = Recorder::Active();
+    if (recorder == nullptr || !recorder->PendingWriteOverlaps(begin, count) || AnyShadowedOverlaps(begin, count)) return std::nullopt;
+    auto writes = recorder->PendingWritesOver(begin, count);
+    std::sort(writes.begin(), writes.end(), [](const Recorder::PendingWrite& a, const Recorder::PendingWrite& b) { return a.note > b.note; });
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> unwritten{{begin, begin + count}};
+    int value = -1;
+    for (const auto& write : writes) {
+        if (unwritten.empty()) break;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> rest;
+        bool covered = false;
+        for (const auto& [from, to] : unwritten) {
+            if (write.end <= from || to <= write.begin) {
+                rest.emplace_back(from, to);
+                continue;
+            }
+            covered = true;
+            if (from < write.begin) rest.emplace_back(from, write.begin);
+            if (write.end < to) rest.emplace_back(write.end, to);
+        }
+        unwritten = std::move(rest);
+        if (!covered) continue;
+        if (write.value < 0 || (value >= 0 && value != write.value)) return std::nullopt;
+        value = write.value;
+    }
+    if (!unwritten.empty() || value < 0) return std::nullopt;
+    const auto keys = EncodedKeys(resource, ByteKeys(static_cast<std::uint8_t>(value)));
+    switch (keys) {
+        case DccKeys::Uncompressed:
+        case DccKeys::Clear0000:
+        case DccKeys::Clear0001:
+        case DccKeys::Clear1110:
+        case DccKeys::Clear1111: return keys;
+        default: return std::nullopt;
+    }
+}
+
 std::optional<DccKeys> WaitForKeyWriters(const GuestTextureResource& resource, std::uint64_t guestBytes) {
     const auto count = static_cast<std::size_t>(guestBytes / KeyBytes);
     const auto metaAddress = resource.dccAddress;

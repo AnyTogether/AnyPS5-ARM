@@ -338,12 +338,12 @@ void Run(AgcDriver::VulkanDevice& device, std::uint8_t* block) {
     Require(fill(0, KeyBytes, 0x10), "the comp-to-single fill of the keys was not recorded");
     readPending(DccKeys::ClearSingle, true, "a pending comp-to-single fill of the keys");
     Require(fill(0, KeyBytes / 2, 0x00) && fill(KeyBytes / 2, KeyBytes / 2, 0x00), "the 0000 fills of the key halves were not recorded");
-    readPending(DccKeys::Clear0000, true, "pending 0000 fills over both halves of the keys");
+    readPending(DccKeys::Clear0000, false, "pending 0000 fills over both halves of the keys");
     Require(fill(0, KeyBytes / 2, 0x40), "the 0001 fill of the first key half was not recorded");
     Dispatch(device, ClearKeysCode, clearTailData, false);
     readPending(DccKeys::Uncompressed, true, "a pending 0001 fill over half the keys and a kernel's 0000 store over the other half");
     Require(fill(0, KeyBytes, 0x10) && fill(0, KeyBytes, 0x00), "the 0x10 and 0000 fills of the keys were not recorded");
-    readPending(DccKeys::Clear0000, true, "a pending 0x10 fill of the keys overwritten by a pending 0000 fill");
+    readPending(DccKeys::Clear0000, false, "a pending 0x10 fill of the keys overwritten by a pending 0000 fill");
     Require(fill(KeyBytes / 2, KeyBytes / 2, 0x10), "the 0x10 fill of the second key half was not recorded");
     device.WaitIdle();
     Require(fill(0, KeyBytes / 2, 0x00), "the 0000 fill of the first key half was not recorded");

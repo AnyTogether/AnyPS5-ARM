@@ -30,6 +30,8 @@ struct LoadedDwordFill {
 
 std::optional<LoadedDwordFill> MatchLoadedDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute);
 
+std::optional<DwordPatternFill> MatchZeroDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute);
+
 }
 
 #endif
