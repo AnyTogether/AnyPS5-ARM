@@ -10,6 +10,7 @@ extern "C" {
 int APS5_VABI sceAppContentInitialize(const AppContentInitParam*, AppContentBootParam*);
 int APS5_VABI sceAppContentAddcontMount(uint32_t, const NpUnifiedEntitlementLabel*, AppContentMountPoint*);
 int APS5_VABI sceAppContentAddcontUnmount(const AppContentMountPoint*);
+int APS5_VABI sceAppContentAddcontEnqueueDownload(uint32_t, const NpUnifiedEntitlementLabel*);
 int APS5_VABI sceAppContentTemporaryDataMount2(uint32_t, AppContentMountPoint*);
 int APS5_VABI sceAppContentTemporaryDataUnmount(const AppContentMountPoint*);
 int APS5_VABI sceAppContentTemporaryDataFormat(const AppContentMountPoint*);
@@ -21,7 +22,6 @@ int APS5_VABI sceAppContentGetAddcontInfoList(uint32_t, void*, uint32_t, uint32_
 int APS5_VABI sceAppContentDownloadDataGetAvailableSpaceKb(const AppContentMountPoint*, size_t*);
 int APS5_VABI sceAppContentDownloadDataFormat(const AppContentMountPoint*);
 int APS5_VABI sceAppContentAppParamGetInt(uint32_t, int32_t*);
-int APS5_VABI sceAppContentAddcontEnqueueDownload(uint32_t, const NpUnifiedEntitlementLabel*);
 }
 
 static constexpr int ErrorParameter = static_cast<int>(0x80D90002);
@@ -83,6 +83,10 @@ int main() {
     std::memcpy(mountPoint.data, "/addcont0", 10);
     Require(sceAppContentAddcontUnmount(&mountPoint) == ErrorNotFound);
     Require(sceAppContentAddcontUnmount(nullptr) == ErrorParameter);
+    Require(sceAppContentAddcontEnqueueDownload(0, &label) == ErrorNotFound);
+    Require(sceAppContentAddcontEnqueueDownload(7, &label) == ErrorNotFound);
+    Require(sceAppContentAddcontEnqueueDownload(0, nullptr) == ErrorParameter);
+    Require(sceAppContentAddcontMount(0, &label, &mountPoint) == ErrorNotFound);
 
     std::filesystem::create_directory(directory / "temp0");
     { std::ofstream file(directory / "temp0" / "old.txt"); file << "previous run"; }
@@ -135,8 +139,6 @@ int main() {
     Require(std::memcmp(info, untouchedInfo, sizeof(info)) == 0);
     Require(sceAppContentGetAddcontInfo(0, nullptr, info) == ErrorParameter);
     Require(sceAppContentGetAddcontInfo(0, &label, nullptr) == ErrorParameter);
-    Require(sceAppContentAddcontEnqueueDownload(0, &label) == ErrorDrmNoEntitlement);
-    Require(sceAppContentAddcontEnqueueDownload(0, nullptr) == ErrorParameter);
 
     uint32_t hitNum = 0x5a5a5a5a;
     Require(sceAppContentGetAddcontInfoList(0, nullptr, 0, &hitNum) == 0);

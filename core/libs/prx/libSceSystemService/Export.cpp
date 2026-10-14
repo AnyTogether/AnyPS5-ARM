@@ -51,6 +51,12 @@ std::string ConvertedExecutableName(const char* path) {
     }
 }
 
+void RequireExecutableBeside(const std::filesystem::path& directory, const std::filesystem::path& target, const char* guestPath) {
+    if (target.lexically_normal().parent_path() != directory.lexically_normal()) {
+        UnconvertedExecutable(std::string("an executable outside /app0 (") + guestPath + ")");
+    }
+}
+
 #if defined(_WIN32)
 std::wstring Utf16(const std::string& text) {
     if (text.empty()) return {};
@@ -101,6 +107,7 @@ HostLaunch PrepareLaunch(const char* path, const char* const* arguments) {
         launch.executable = mainLength > 0 && mainLength < main.size() ? main.substr(0, mainLength) : own;
     } else {
         const auto target = ownPath.parent_path() / (Utf16(ConvertedExecutableName(path)) + ownPath.extension().wstring());
+        RequireExecutableBeside(ownPath.parent_path(), target, path);
         if (!std::filesystem::is_regular_file(target)) {
             UnconvertedExecutable(std::string(path) + " without its converted executable; relink with --executable " + (path + std::size(ApplicationRoot) - 1));
         }
@@ -146,6 +153,7 @@ HostLaunch PrepareLaunch(const char* path, const char* const* arguments) {
         launch.executable = main != nullptr && *main != '\0' ? main : own.string();
     } else {
         const auto target = own.parent_path() / (ConvertedExecutableName(path) + own.extension().string());
+        RequireExecutableBeside(own.parent_path(), target, path);
         if (!std::filesystem::is_regular_file(target)) {
             UnconvertedExecutable(std::string(path) + " without its converted executable; relink with --executable " + (path + std::size(ApplicationRoot) - 1));
         }

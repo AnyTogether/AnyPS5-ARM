@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -108,10 +109,11 @@ void SleepNanosCoarse(std::uint64_t nanos) {
 struct Waiter {
     HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     HANDLE timer = CreateHighResolutionTimer();
-    HANDLE sleepTimers[3]{};
+    HANDLE sleepTimers[2]{};
     Waiter* previous = nullptr;
     Waiter* next = nullptr;
     Waiter* nested = nullptr;
+    const void* key = nullptr;
     bool queued = false;
     bool busy = false;
 
@@ -239,6 +241,111 @@ void Condition::NotifyAll() {
     }
 }
 
+namespace {
+
+struct alignas(64) ParkBucket {
+    std::mutex lock;
+    Waiter* head = nullptr;
+    Waiter* tail = nullptr;
+    std::atomic<int> parked{0};
+};
+
+ParkBucket parkBuckets[256];
+
+ParkBucket& ParkBucketFor(const void* key) {
+    return parkBuckets[(reinterpret_cast<std::uintptr_t>(key) * 0x9E3779B97F4A7C15ULL) >> 56];
+}
+
+struct DeliveryDeferral {
+    DeliveryDeferral() { WaitState().bound->fetch_add(1, std::memory_order_seq_cst); }
+    ~DeliveryDeferral() { WaitState().bound->fetch_sub(1, std::memory_order_seq_cst); }
+};
+
+void UnlinkParked(ParkBucket& bucket, Waiter* waiter) {
+    if (waiter->previous) waiter->previous->next = waiter->next;
+    else bucket.head = waiter->next;
+    if (waiter->next) waiter->next->previous = waiter->previous;
+    else bucket.tail = waiter->previous;
+    waiter->previous = nullptr;
+    waiter->next = nullptr;
+    waiter->queued = false;
+}
+
+bool LeavePark(ParkBucket& bucket, Waiter* waiter) {
+    bool signaled;
+    {
+        DeliveryDeferral deferral;
+        std::lock_guard lock(bucket.lock);
+        signaled = !waiter->queued;
+        if (!signaled) UnlinkParked(bucket, waiter);
+    }
+    if (signaled) WaitForSingleObject(waiter->event, 0);
+    return signaled;
+}
+
+void ReleaseParked(ParkBucket& bucket, Waiter* waiter) {
+    bucket.parked.fetch_sub(1, std::memory_order_seq_cst);
+    waiter->busy = false;
+    DrainApcs();
+}
+
+}  // namespace
+
+void SpinPause() {
+    YieldProcessor();
+}
+
+Waiter* BeginPark(const void* key) {
+    auto& bucket = ParkBucketFor(key);
+    Waiter* waiter;
+    {
+        DeliveryDeferral deferral;
+        waiter = AcquireWaiter();
+        waiter->key = key;
+        bucket.parked.fetch_add(1, std::memory_order_seq_cst);
+        std::lock_guard lock(bucket.lock);
+        waiter->queued = true;
+        waiter->next = nullptr;
+        waiter->previous = bucket.tail;
+        if (bucket.tail) bucket.tail->next = waiter;
+        else bucket.head = waiter;
+        bucket.tail = waiter;
+    }
+    DrainApcs();
+    return waiter;
+}
+
+bool FinishPark(const void* key, Waiter* waiter, const std::uint64_t* deadlineNanos) {
+    auto& bucket = ParkBucketFor(key);
+    bool signaled = deadlineNanos ? WaitEventUntil(waiter, *deadlineNanos) : AlertableWait(1, &waiter->event, INFINITE) == WAIT_OBJECT_0;
+    if (!signaled) signaled = LeavePark(bucket, waiter);
+    ReleaseParked(bucket, waiter);
+    if (!signaled && !deadlineNanos) throw std::runtime_error("TimedWait: an untimed parked wait ended without a wake");
+    return signaled;
+}
+
+void CancelPark(const void* key, Waiter* waiter) {
+    auto& bucket = ParkBucketFor(key);
+    LeavePark(bucket, waiter);
+    ReleaseParked(bucket, waiter);
+}
+
+void Unpark(const void* key) {
+    auto& bucket = ParkBucketFor(key);
+    if (bucket.parked.load(std::memory_order_seq_cst) == 0) return;
+    {
+        DeliveryDeferral deferral;
+        std::lock_guard lock(bucket.lock);
+        for (Waiter* waiter = bucket.head; waiter; waiter = waiter->next) {
+            if (waiter->key != key) continue;
+            UnlinkParked(bucket, waiter);
+            SetEvent(waiter->event);
+            break;
+        }
+    }
+    DrainApcs();
+}
+
 #else
 
 void Condition::NotifyOne() {
@@ -309,17 +416,6 @@ void SleepUntil(std::uint64_t deadlineNanos) {
 #else
     const std::uint64_t now = NowNanos();
     if (deadlineNanos > now) SleepNanos(deadlineNanos - now);
-#endif
-}
-
-void PollSleepUntil(std::uint64_t deadlineNanos) {
-#ifdef _WIN32
-    const std::uint64_t now = NowNanos();
-    if (deadlineNanos <= now) return;
-    const HANDLE timer = ThreadTimer(2);
-    if (!TimerWait(timer, deadlineNanos - now)) AlertableSleep(WholeMilliseconds(deadlineNanos - now));
-#else
-    SleepUntil(deadlineNanos);
 #endif
 }
 

@@ -1,4 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/GuestLocale.hpp"
+#include "prx/libc/include/ApplicationHeap.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -29,7 +32,7 @@ static constexpr Expected Errors[] {
     {12, "not enough memory: not enough memory"},
     {1, "operation not permitted: operation not permitted"},
     {11, "resource deadlock would occur: resource deadlock would occur"},
-    {35, "resource unavailable try again: resource unavailable try again"}
+    {35, "resource unavailable try again: operation would block"}
 };
 
 extern "C" {
@@ -41,6 +44,7 @@ extern const unsigned char _ZTISt12system_error_nid_postfix[];
 void APS5_VABI _ZNSt12system_errorC1ERKS__nid_postfix(SystemError* self, const SystemError* source);
 SystemError* APS5_VABI _ZNSt12system_erroraSERKS__nid_postfix(SystemError* self, const SystemError* source);
 void APS5_VABI _ZNSt12system_errorD1Ev_nid_postfix(SystemError* self);
+void APS5_VABI _ZdlPv_nid_postfix(void* pointer);
 void APS5_VABI GuestCatch(int code);
 
 const void* FixtureCatchType = nullptr;
@@ -86,14 +90,11 @@ static void CheckCategory(const SystemError& error) {
     Require(equivalentCode(category, &error.code, error.code.value), 28);
     Require(!equivalentCode(category, &error.code, error.code.value + 1), 29);
     Require(!equivalentCode(category, &foreign, error.code.value), 30);
-    bool messageThrew = false;
-    try {
-        unsigned char result[32] {};
-        Slot<CategoryMessage>(category->vtable, 3)(result, category, error.code.value);
-    } catch (const std::runtime_error&) {
-        messageThrew = true;
-    }
-    Require(messageThrew, 31);
+    GuestLocale::String result {};
+    Require(Slot<CategoryMessage>(category->vtable, 3)(&result, category, error.code.value) == &result, 33);
+    const char* data = result.capacity <= 15 ? result.buffer : result.pointer;
+    Require(std::strcmp(data, std::strstr(FixtureExpected->what, ": ") + 2) == 0, 34);
+    if (result.capacity > 15) _ZdlPv_nid_postfix(result.pointer);
     bool deleteThrew = false;
     try {
         Slot<CategoryDelete>(category->vtable, 1)(category);
@@ -148,6 +149,8 @@ static void CheckOutOfRange(int code) {
 }
 
 int main() {
+    const std::array<void*, 10> api {};
+    ApplicationHeapRegister_nid_no_patch(api.data());
     FixtureOtherType = _ZTISt11logic_error_nid_postfix;
     for (int code = 0; code < static_cast<int>(std::size(Errors)); ++code) Catch(_ZTISt12system_error_nid_postfix, code);
     Catch(_ZTISt13runtime_error_nid_postfix, 5);

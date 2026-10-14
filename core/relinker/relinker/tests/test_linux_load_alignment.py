@@ -54,6 +54,16 @@ def main():
         if alignment != 0x4000 or first[3] % alignment != 0 or first[7] != alignment:
             raise AssertionError(("first PT_LOAD is not aligned to the largest segment alignment", segments))
         assert "  |-- output.elf\n  |-- libs/\n        |-- *.prx (system libraries)\n  |-- app0/" in result.stdout, result.stdout
+
+        malformed = fixture()
+        struct.pack_into("<Q", malformed, 64 + 40, 0x0fff)
+        source.write_bytes(malformed)
+        output.unlink()
+        result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)],
+                                capture_output=True, text=True, timeout=20)
+        assert result.returncode == 2 and "PT_LOAD file size exceeds memory size" in result.stderr and not output.exists(), result
+
+        source.write_bytes(fixture())
         named_exe = Path(directory) / "linux.EXE"
         warning = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(named_exe)], capture_output=True, text=True, timeout=20)
         assert warning.returncode == 0, (warning.stdout, warning.stderr)

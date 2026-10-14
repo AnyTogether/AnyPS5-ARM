@@ -12,6 +12,11 @@ on:
         description: Pull request number to build
         required: true
         type: string
+      linux:
+        description: Also build and test on Linux
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -214,7 +219,7 @@ jobs:
 
   linux:
     needs: eligibility
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.eligibility.outputs.full == 'true' }}
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.linux)) && needs.eligibility.outputs.full == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -241,6 +246,15 @@ jobs:
           evict-old-files: job
       - name: Install lavapipe and the SDL audio and XRandR development files
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev
+      - id: mesa
+        run: |
+          echo "version=$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" >> "$GITHUB_OUTPUT"
+          echo "cpu=$(grep -m1 '^flags' /proc/cpuinfo | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        with:
+          path: .mesa-shader-cache
+          key: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-${{ github.sha }}
+          restore-keys: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-
       - run: cmake -S . -B build $CONFIGURE -DANYPS5_ENABLE_SPIRV_TOOLS=ON
       - name: Check that every test executable is registered with ctest
         run: python3 tools/check_test_registration.py build
@@ -250,6 +264,12 @@ jobs:
         env:
           ANYPS5_REQUIRE_VULKAN: 1
           GALLIUM_OVERRIDE_CPU_CAPS: avx
+          MESA_SHADER_CACHE_DIR: ${{ github.workspace }}/.mesa-shader-cache
+      - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: .mesa-shader-cache
+          key: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-${{ github.sha }}
       - run: python3 tools/check_skips.py build/ctest.xml
       - name: Report tests slower than 30 s
         if: ${{ !cancelled() }}
@@ -304,7 +324,7 @@ jobs:
           save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           evict-old-files: job
       - shell: cmd
-        run: cmake -S . -B build %CONFIGURE% "-DANYPS5_AGC_EXECUTION_TESTS=F64FmaSubnormals;RegistrationPrepareShutdown"
+        run: cmake -S . -B build %CONFIGURE% "-DANYPS5_AGC_EXECUTION_TESTS=F16ToF32Unpack;F64FmaSubnormals;RegistrationPrepareShutdown"
       - name: Check that every test executable is registered with ctest
         shell: cmd
         run: python tools/check_test_registration.py build

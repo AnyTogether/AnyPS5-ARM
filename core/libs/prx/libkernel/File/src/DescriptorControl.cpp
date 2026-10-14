@@ -89,6 +89,8 @@ constexpr std::int16_t FromStart = 0;
 constexpr std::int16_t FromCurrent = 1;
 constexpr std::int16_t FromEnd = 2;
 
+constexpr std::uint32_t CloseOnExecRequest = 0x20006601;
+constexpr std::uint32_t KeepOnExecRequest = 0x20006602;
 constexpr std::uint32_t NonblockingRequest = 0x8004667e;
 constexpr std::uint32_t ReadableRequest = 0x4004667f;
 constexpr std::uint32_t RequestIn = 0x80000000u;
@@ -532,6 +534,10 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
     if ((command & RequestIn) && length != 0 && argument == nullptr) return Fail(GuestEfault);
     const auto kind = Classify(fd, "ioctl");
     if (!kind) return Fail(GuestEbadf);
+    if (command == CloseOnExecRequest || command == KeepOnExecRequest) {
+        SetCloseOnExec(fd, command == CloseOnExecRequest);
+        return 0;
+    }
     if (command == NonblockingRequest) {
         const bool enable = *static_cast<const int*>(argument) != 0;
         return ChangeStatus(fd, *kind, Nonblocking, enable ? Nonblocking : 0, "ioctl");
@@ -565,6 +571,7 @@ void ShareDescriptor(int from, int to) {
     auto status = Materialize(from).status;
     g_entries[to] = Entry{false, std::move(status)};
 #ifdef _WIN32
+    File::SharePositionedTransfer(from, to);
     GuestFileLockShare_nid_no_patch(from, to);
 #endif
 }

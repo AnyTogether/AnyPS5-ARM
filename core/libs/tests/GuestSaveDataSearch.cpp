@@ -1,10 +1,12 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -16,6 +18,7 @@ int APS5_VABI sceSaveDataDirNameSearch2(const SaveDataDirNameSearchCond*, SaveDa
 int APS5_VABI sceSaveDataMount3(const SaveDataMount3*, SaveDataMountResult*);
 int APS5_VABI sceSaveDataUmount2(std::uint32_t, const SaveDataMountPoint*);
 int APS5_VABI sceSaveDataSetParam(const SaveDataMountPoint*, std::uint32_t, const void*, std::size_t);
+int APS5_VABI sceSaveDataGetMountInfo(const SaveDataMountPoint*, SaveDataMountInfo*);
 }
 
 static constexpr int SaveDataErrorParameter = -2137063424;
@@ -123,6 +126,42 @@ static void TrailingWildcards() {
     Require(SearchPattern("TRAIL_%") == Names{"TRAIL1"}, "_ must still match exactly one character");
 }
 
+static std::uint32_t SearchTitle(const char* titleId, bool second) {
+    SceSaveDataTitleId title{};
+    std::snprintf(title.data, sizeof(title.data), "%s", titleId != nullptr ? titleId : "");
+    SceSaveDataDirName pattern{};
+    std::snprintf(pattern.data, sizeof(pattern.data), "OTHER_%%");
+    SaveDataDirNameSearchCond cond{};
+    cond.user_id = 1;
+    cond.title_id = titleId != nullptr ? &title : nullptr;
+    cond.dir_name = &pattern;
+    std::array<SceSaveDataDirName, 1> names{};
+    names[0].data[0] = '!';
+    SaveDataDirNameSearchResult result{};
+    result.dir_names = names.data();
+    result.dir_names_num = 1;
+    result.hit_num = 7;
+    result.set_num = 7;
+    Require((second ? sceSaveDataDirNameSearch2(&cond, &result) : sceSaveDataDirNameSearch(&cond, &result)) == 0, "title search failed");
+    Require(result.set_num == std::min<std::uint32_t>(result.hit_num, 1), "title search must set the names it found");
+    Require(result.set_num == 1 ? std::string(names[0].data) == "OTHER_A" : names[0].data[0] == '!', "title search returned the wrong name");
+    return result.hit_num;
+}
+
+static void OtherTitle() {
+    std::filesystem::create_directories("app0/sce_sys");
+    std::FILE* param = std::fopen("app0/sce_sys/param.json", "wb");
+    Require(param != nullptr, "param.json was not created");
+    std::fputs("{\"titleId\":\"PPSA00000\",\"localizedParameters\":{\"en-US\":{\"titleName\":\"Example\"}}}", param);
+    std::fclose(param);
+    std::filesystem::create_directories(std::filesystem::path("_sd") / "OTHER_A");
+    for (const bool second : {false, true}) {
+        Require(SearchTitle(nullptr, second) == 1, "a search without a title id must find the running title's save");
+        Require(SearchTitle("PPSA00000", second) == 1, "a search for the running title must find its save");
+        Require(SearchTitle("PPSA17221", second) == 0, "a search for another title must find none of the running title's saves");
+    }
+}
+
 static void SearchAndMount() {
     const std::array names{std::string(31, 'A'), std::string(31, 'B')};
     for (const auto& name : names) std::filesystem::create_directories(std::filesystem::path("_sd") / name);
@@ -171,6 +210,68 @@ static void SearchAndMount() {
     }
 }
 
+static void CreateSized(const char* name, std::uint64_t blocks, std::size_t bytes) {
+    SceSaveDataDirName dirName{};
+    std::snprintf(dirName.data, sizeof(dirName.data), "%s", name);
+    SaveDataMount3 mount{};
+    mount.user_id = 1;
+    mount.dir_name = &dirName;
+    mount.blocks = blocks;
+    mount.mount_mode = 2 | 4;
+    SaveDataMountResult mounted{};
+    Require(sceSaveDataMount3(&mount, &mounted) == 0, "creating a sized save failed");
+    if (bytes != 0) {
+        std::ofstream file(std::filesystem::path("_sd") / name / "data", std::ios::binary);
+        file << std::string(bytes, 'x');
+    }
+    Require(sceSaveDataUmount2(0, &mounted.mount_point) == 0, "unmount failed");
+}
+
+static std::vector<SaveDataSearchInfo> SizeSearch(std::uint32_t key, std::vector<std::string>& found) {
+    SceSaveDataDirName pattern{};
+    std::snprintf(pattern.data, sizeof(pattern.data), "SIZE_%%");
+    SaveDataDirNameSearchCond cond{};
+    cond.user_id = 1;
+    cond.dir_name = &pattern;
+    cond.key = key;
+    std::array<SceSaveDataDirName, 2> names{};
+    std::array<SaveDataSearchInfo, 2> infos{};
+    SaveDataDirNameSearchResult result{};
+    result.dir_names = names.data();
+    result.dir_names_num = 2;
+    result.infos = infos.data();
+    Require(sceSaveDataDirNameSearch(&cond, &result) == 0 && result.set_num == 2, "the sized search must return both saves");
+    found.clear();
+    for (const auto& name : names) found.emplace_back(name.data);
+    return {infos.begin(), infos.end()};
+}
+
+static void SaveSize() {
+    CreateSized("SIZE_A", 200, 0);
+    CreateSized("SIZE_B", 96, 40000);
+    std::vector<std::string> found;
+    auto infos = SizeSearch(0, found);
+    Require(found == std::vector<std::string>{"SIZE_A", "SIZE_B"}, "the sized saves must sort by name");
+    Require(infos[0].blocks == 200 && infos[0].free_blocks == 200, "an empty save must report all its blocks free");
+    Require(infos[1].blocks == 96 && infos[1].free_blocks == 94, "a save must report the blocks it was created with, less those its files take");
+    SizeSearch(2, found);
+    Require(found == std::vector<std::string>{"SIZE_B", "SIZE_A"}, "saves must sort by blocks");
+    infos = SizeSearch(5, found);
+    Require(found == std::vector<std::string>{"SIZE_B", "SIZE_A"} && infos[0].free_blocks < infos[1].free_blocks, "saves must sort by free blocks");
+    SceSaveDataDirName dirName{};
+    std::snprintf(dirName.data, sizeof(dirName.data), "SIZE_B");
+    SaveDataMount3 mount{};
+    mount.user_id = 1;
+    mount.dir_name = &dirName;
+    mount.mount_mode = 1;
+    SaveDataMountResult mounted{};
+    Require(sceSaveDataMount3(&mount, &mounted) == 0, "mounting the sized save failed");
+    SaveDataMountInfo info{};
+    Require(sceSaveDataGetMountInfo(&mounted.mount_point, &info) == 0, "mount info failed");
+    Require(info.blocks == 96 && info.free_blocks == 94, "mount info must report the save's blocks and free blocks");
+    Require(sceSaveDataUmount2(0, &mounted.mount_point) == 0, "unmount failed");
+}
+
 int main() {
     const auto previous = std::filesystem::current_path();
     const auto root = std::filesystem::temp_directory_path() /
@@ -181,7 +282,9 @@ int main() {
     try {
         SearchAndMount();
         SortByKey();
+        OtherTitle();
         TrailingWildcards();
+        SaveSize();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         status = 1;

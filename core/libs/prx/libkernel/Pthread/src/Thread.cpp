@@ -5,6 +5,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libc/include/CpuTopology.hpp"
+#include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <limits>
 #include <map>
 #include <utility>
+#include <vector>
 #include <string>
 #include <future>
 #include <memory>
@@ -77,6 +79,101 @@ static GuestThreadState& CurrentGuestState() {
 static std::mutex stackLock;
 static std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>> liveStacks;
 static std::map<std::uintptr_t, std::size_t> protectedStackPages;
+#if defined(__linux__)
+struct GuestStackMapping {
+    std::uintptr_t mappingEnd;
+    std::uintptr_t stackStart;
+    std::uintptr_t stackEnd;
+};
+static std::mutex guestStackMappingsLock;
+static std::map<std::uintptr_t, GuestStackMapping> guestStackMappings;
+
+static void RegisterGuestStackMapping(PthreadPrivate* thread) {
+    const auto mappingStart = reinterpret_cast<std::uintptr_t>(thread->guestStack);
+    const auto stackStart = reinterpret_cast<std::uintptr_t>(thread->stackAddress);
+    std::lock_guard lock(guestStackMappingsLock);
+    guestStackMappings[mappingStart] = {mappingStart + thread->guestStackBytes, stackStart, stackStart + thread->stackSize};
+}
+
+static void UnregisterGuestStackMapping(void* mapping) {
+    std::lock_guard lock(guestStackMappingsLock);
+    guestStackMappings.erase(reinterpret_cast<std::uintptr_t>(mapping));
+}
+#endif
+
+#if defined(__linux__)
+static constexpr std::size_t GUEST_STACK_GUARD = PS5_PAGE_SIZE;
+
+struct RetiredStack {
+    void* address;
+    std::size_t bytes;
+    int hostTid;
+};
+
+static std::mutex retiredStacksLock;
+static std::vector<RetiredStack> retiredStacks;
+
+static void AllocateGuestStack(PthreadPrivate* thread, std::size_t usableBytes) {
+    const std::size_t bytes = (usableBytes + PS5_PAGE_SIZE - 1) / PS5_PAGE_SIZE * PS5_PAGE_SIZE + GUEST_STACK_GUARD;
+    void* stack = nullptr;
+    if (DoMapAnon(&stack, bytes, 3, 0) != 0)
+        throw std::runtime_error("scePthreadCreate: cannot map the guest thread stack");
+    if (DoMprotect(stack, GUEST_STACK_GUARD, 0) != 0) {
+        DoMunmap(stack, bytes);
+        throw std::runtime_error("scePthreadCreate: cannot protect the guest thread stack guard");
+    }
+    thread->guestStack = stack;
+    thread->guestStackBytes = bytes;
+}
+
+static void FreeGuestStack(PthreadPrivate* thread) {
+    if (thread->guestStack == nullptr) return;
+    void* const mapping = thread->guestStack;
+    UnregisterGuestStackMapping(mapping);
+    DoMunmap(thread->guestStack, thread->guestStackBytes);
+    thread->guestStack = nullptr;
+    thread->guestStackBytes = 0;
+}
+
+static bool HostThreadGone(int hostTid) {
+    if (hostTid == 0) return false;
+    char path[48];
+    std::snprintf(path, sizeof(path), "/proc/self/task/%d", hostTid);
+    return access(path, F_OK) != 0;
+}
+
+static void ReapRetiredStacks() {
+    std::vector<RetiredStack> ready;
+    {
+        std::lock_guard lock(retiredStacksLock);
+        for (auto it = retiredStacks.begin(); it != retiredStacks.end();) {
+            if (HostThreadGone(it->hostTid)) {
+                ready.push_back(*it);
+                it = retiredStacks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (const auto& stack : ready) {
+        UnregisterGuestStackMapping(stack.address);
+        DoMunmap(stack.address, stack.bytes);
+    }
+}
+
+static void RetireGuestStack(PthreadPrivate* thread) {
+    if (thread->guestStack == nullptr) return;
+    {
+        std::lock_guard lock(retiredStacksLock);
+        retiredStacks.push_back({thread->guestStack, thread->guestStackBytes, thread->hostTid});
+    }
+    thread->guestStack = nullptr;
+    thread->guestStackBytes = 0;
+}
+#else
+static void FreeGuestStack(PthreadPrivate*) {}
+static void RetireGuestStack(PthreadPrivate*) {}
+#endif
 
 static bool HostStackLimits(std::uintptr_t* low, std::uintptr_t* high) {
 #ifdef _WIN32
@@ -187,6 +284,24 @@ bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintpt
     return false;
 }
 
+bool GuestThreadStackHostRangeOverlaps(std::uintptr_t start, std::uintptr_t end) {
+#if defined(__linux__)
+    std::lock_guard lock(guestStackMappingsLock);
+    auto it = guestStackMappings.upper_bound(start);
+    if (it != guestStackMappings.begin()) --it;
+    for (; it != guestStackMappings.end() && it->first < end; ++it) {
+        const auto mappingStart = it->first;
+        const auto& stack = it->second;
+        if (start < stack.stackStart && end > mappingStart) return true;
+        if (start < stack.mappingEnd && end > stack.stackEnd) return true;
+    }
+#else
+    (void)start;
+    (void)end;
+#endif
+    return false;
+}
+
 struct CpuClockRegistry {
     std::mutex lock;
     std::map<int, PthreadPrivate*> threads;
@@ -205,6 +320,9 @@ PthreadPrivate::PthreadPrivate(const PthreadAttrPrivate* attr) : _finished(false
     const auto* parent = CurrentGuestState().current;
     const KernelCpumask inherited = parent ? parent->affinity.load(std::memory_order_relaxed) : registry.processAffinity;
     affinity.store(attr && attr->_affinityExplicit ? attr->_affinity : inherited, std::memory_order_relaxed);
+    constexpr int ExplicitSched = 0;
+    const int inheritedPolicy = parent ? parent->schedPolicy.load(std::memory_order_relaxed) : schedPolicy.load(std::memory_order_relaxed);
+    schedPolicy.store(attr && attr->_inheritsched == ExplicitSched ? attr->_schedpolicy : inheritedPolicy, std::memory_order_relaxed);
     if (registry.nextThread > static_cast<int>(CPU_CLOCK_ID_MASK))
         throw std::runtime_error("Guest thread CPU clock identifiers are exhausted");
     cpuClockThread = registry.nextThread++;
@@ -266,6 +384,15 @@ bool GuestThreadIsLive(const PthreadPrivate* thread) {
     for (const auto& [id, live] : registry.threads) {
         if (live != thread) continue;
         return !live->_finished.load(std::memory_order_acquire);
+    }
+    return false;
+}
+
+bool LiveGuestThreadExists(std::int64_t tid) {
+    auto& registry = CpuClocks();
+    std::lock_guard lock(registry.lock);
+    for (const auto& [id, thread] : registry.threads) {
+        if (!thread->_finished.load(std::memory_order_acquire) && thread->tid == tid) return true;
     }
     return false;
 }
@@ -543,6 +670,10 @@ static void* StartNativeThread(void* opaque) {
             throw std::runtime_error("Cannot query guest thread stack");
         self->stackAddress = reinterpret_cast<void*>(high - reserve - self->stackSize);
         self->threadId = std::this_thread::get_id();
+#if defined(__linux__)
+        self->hostTid = static_cast<int>(gettid());
+        RegisterGuestStackMapping(self);
+#endif
         args->initialized.set_value();
     } catch (...) {
         args->initialized.set_exception(std::current_exception());
@@ -626,12 +757,22 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
     sigset_t creatorMask;
     pthread_sigmask(SIG_SETMASK, nullptr, &creatorMask);
     args->signalMask = creatorMask;
+#if defined(__linux__)
+    ReapRetiredStacks();
+    AllocateGuestStack(p.get(), nativeStack);
+#endif
     auto native = std::make_unique<NativeThreadArgs>(NativeThreadArgs{std::move(args), start.get_future(), {}});
     auto initialized = native->initialized.get_future();
     pthread_attr_t nativeAttr;
-    if (const int result = pthread_attr_init(&nativeAttr); result != 0)
+    if (const int result = pthread_attr_init(&nativeAttr); result != 0) {
+        FreeGuestStack(p.get());
         throw std::system_error(result, std::generic_category(), "Creating guest thread");
+    }
+#if defined(__linux__)
+    int created = pthread_attr_setstack(&nativeAttr, static_cast<char*>(p->guestStack) + GUEST_STACK_GUARD, p->guestStackBytes - GUEST_STACK_GUARD);
+#else
     int created = pthread_attr_setstacksize(&nativeAttr, nativeStack);
+#endif
     if (created == 0) {
         // SIGSEGV and SIGBUS stay open: they are synchronous, and a fault while they are blocked is
         // never delivered (a write-watched page then faults forever). Under Rosetta the creator's
@@ -646,18 +787,22 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
         pthread_sigmask(SIG_SETMASK, &creatorMask, nullptr);
     }
     pthread_attr_destroy(&nativeAttr);
-    if (created != 0)
+    if (created != 0) {
+        FreeGuestStack(p.get());
         throw std::system_error(created, std::generic_category(), "Creating guest thread");
+    }
     native.release();
     try {
         initialized.get();
         if (detached) {
             if (const int result = pthread_detach(p->hostThread); result != 0)
                 throw std::system_error(result, std::generic_category(), "Detaching guest thread");
+            RetireGuestStack(p.get());
         }
     } catch (...) {
         start.set_value(false);
         pthread_join(p->hostThread, nullptr);
+        FreeGuestStack(p.get());
         throw;
     }
     auto* published = p.release();
@@ -686,6 +831,7 @@ int APS5_VABI scePthreadJoin(Pthread thread, void** retval) {
 #else
     if (const int result = pthread_join(thread->hostThread, nullptr); result != 0)
         throw std::system_error(result, std::generic_category(), "Joining guest thread");
+    FreeGuestStack(thread);
     if (retval) *retval = thread->_retval;
     ReleaseThread(thread);
 #endif
@@ -701,6 +847,7 @@ int APS5_VABI scePthreadDetach(Pthread thread) {
 #else
     if (const int result = pthread_detach(thread->hostThread); result != 0)
         throw std::system_error(result, std::generic_category(), "Detaching guest thread");
+    RetireGuestStack(thread);
     ReleaseThread(thread);
 #endif
     return SCE_OK;

@@ -98,6 +98,28 @@ static void CheckNesting(const std::filesystem::path& path) {
     }
 }
 
+static void CheckFlexibleMemorySize(const std::filesystem::path& path) {
+    const std::string prefix = R"({"titleId":"PPSA00000","localizedParameters":{"en-US":{"titleName":"Example"}})";
+    Require(!ParseText(path, prefix + "}").flexibleMemorySizeBytes, "Absent kernel changed the default budget");
+    Require(!ParseText(path, prefix + R"(,"kernel":{}})").flexibleMemorySizeBytes, "Absent flexible size changed the default budget");
+    for (const auto bytes : {std::uint64_t{16384}, std::uint64_t{838860800}, std::uint64_t{18446744073709535232ull}}) {
+        const auto parsed = ParseText(path, prefix + R"(,"kernel":{"flexibleMemorySize":)" + std::to_string(bytes) + "}}");
+        Require(parsed.flexibleMemorySizeBytes == bytes, "Incorrect flexible memory size in bytes");
+    }
+    for (const auto* value : {"0", "-0", "-16384", "1", "16385", "838860800.0", "8e8", "true", "null", "\"838860800\"", "18446744073709551616"}) {
+        bool rejected = false;
+        try { ParseText(path, prefix + R"(,"kernel":{"flexibleMemorySize":)" + value + "}}"); }
+        catch (const std::runtime_error&) { rejected = true; }
+        Require(rejected, std::string("Accepted invalid flexible memory size: ") + value);
+    }
+    for (const auto* value : {"null", "true", "[]", "1", "\"kernel\""}) {
+        bool rejected = false;
+        try { ParseText(path, prefix + R"(,"kernel":)" + value + "}"); }
+        catch (const std::runtime_error&) { rejected = true; }
+        Require(rejected, "Accepted a non-object kernel");
+    }
+}
+
 static void CheckLanguages(const std::filesystem::path& path) {
     const auto nested = ParseText(path, "{\r\n  \"localizedParameters\": {\r\n    \"defaultLanguage\": \"en-GB\",\r\n"
                                         "    \"en-GB\": { \"titleName\": \"British\" }\r\n  },\r\n  \"titleId\": \"PPSA00001\"\r\n}\r\n");
@@ -181,6 +203,7 @@ int main() {
     try {
         CheckNumericLocale(path);
         CheckUtf8(path);
+        CheckFlexibleMemorySize(path);
         CheckNumberSyntax(path);
         const std::pair<const char*, std::uint64_t> sizes[] = {
             {"", 0}, {"0", 0}, {"-0", 0}, {"0.25", 0}, {"0e3", 0}, {"0E+3", 0}, {"-0e-3", 0}, {"4096", 4096},

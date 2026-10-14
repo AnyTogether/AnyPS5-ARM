@@ -55,6 +55,7 @@ std::atomic<std::uint64_t> generation{1};
 std::atomic<void (*)(std::uintptr_t, std::size_t)> invalidator{nullptr};
 std::atomic<bool (*)(std::uintptr_t, std::size_t)> pinWaiter{nullptr};
 std::atomic<void (*)(const Mapped&, std::uint64_t)> gpuMapObserver{nullptr};
+std::atomic<void (*)(std::uintptr_t, std::size_t)> unmapObserver{nullptr};
 std::atomic<std::uint32_t> gpuMapObserverCalls{0};
 
 std::chrono::milliseconds pinWait() {
@@ -455,9 +456,10 @@ void GuestAllocationsRemove_nid_postfix(void* mutation, const void* pointer) {
     const auto exact = ranges.find(range.address);
     if (exact != ranges.end() && exact->second->allocationBytes == exact->second->bytes) {
         ranges.erase(exact);
-        return;
+    } else {
+        std::erase_if(ranges, [&](const auto& entry) { return entry.second->allocationAddress == range.address; });
     }
-    std::erase_if(ranges, [&](const auto& entry) { return entry.second->allocationAddress == range.address; });
+    if (const auto observer = unmapObserver.load(std::memory_order_acquire)) observer(range.address, range.bytes);
 }
 
 namespace {
@@ -560,10 +562,16 @@ void GuestAllocationsUnmap_nid_postfix(void* mutation, const void* pointer, std:
         const bool last = !allocationRemains(range, patch);
         apply(reinterpret_cast<const void*>(cursor), pieceEnd - cursor, reinterpret_cast<const void*>(range.allocationAddress), last);
         applyPatch(patch);
+        if (const auto observer = unmapObserver.load(std::memory_order_acquire)) observer(cursor, pieceEnd - cursor);
         any = true;
         cursor = pieceEnd;
     }
     require(any, "unmap address is not registered");
+    if (const auto observer = unmapObserver.load(std::memory_order_acquire)) observer(reinterpret_cast<std::uintptr_t>(pointer), bytes);
+}
+
+void GuestAllocationsSetUnmapObserver_nid_postfix(void (*callback)(std::uintptr_t, std::size_t)) {
+    unmapObserver.store(callback, std::memory_order_release);
 }
 
 Lease GuestAllocationsAcquire_nid_postfix() {

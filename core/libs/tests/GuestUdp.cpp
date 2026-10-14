@@ -118,7 +118,7 @@ int main() {
     char vectorSecond[sizeof(vectorTail)]{};
     Iovec vectorInput[]{{vectorFirst, sizeof(vectorFirst)}, {vectorSecond, sizeof(vectorSecond)}};
     Require(sceKernelReadv(receiver, vectorInput, 2) == sizeof(vectorHead) + sizeof(vectorTail) - 1);
-    Require(std::strcmp(vectorFirst, "atomic ") == 0 && std::strcmp(vectorSecond, "datagram") == 0);
+    Require(std::memcmp(vectorFirst, "atomic ", sizeof(vectorFirst)) == 0 && std::strcmp(vectorSecond, "datagram") == 0);
     int enabled = 1;
     Require(setsockopt_nid_postfix(sender, 0xffff, 0x20, &enabled, sizeof(enabled)) == 0);
     int option = 0;

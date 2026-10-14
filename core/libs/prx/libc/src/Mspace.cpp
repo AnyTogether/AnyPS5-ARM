@@ -261,6 +261,10 @@ void* APS5_VABI sceLibcMspaceMemalign_nid_postfix(void* handle, std::size_t alig
     return Allocate(Find(handle), size, alignment);
 }
 
+void* APS5_VABI sceLibcMspaceAlignedAlloc_nid_postfix(void* handle, std::size_t alignment, std::size_t size) {
+    return sceLibcMspaceMemalign_nid_postfix(handle, alignment, size);
+}
+
 void* APS5_VABI sceLibcMspaceReallocalign_nid_postfix(void* handle, void* pointer, std::size_t size, std::size_t alignment) {
     if (alignment == 0 || (alignment & (alignment - 1))) {
         Error(22);

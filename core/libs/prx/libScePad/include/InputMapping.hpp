@@ -11,7 +11,6 @@
 
 namespace Pad {
 
-inline constexpr int MousePollIntervalMs = 33;
 inline constexpr int WheelPressDurationMs = 80;
 inline constexpr double DefaultMouseSensitivity = 1.0;
 inline constexpr double MaxMouseSensitivity = 10.0;
@@ -21,6 +20,12 @@ struct InputSettings {
     int leftStickDeadzonePercent = 0;
     int rightStickDeadzonePercent = 0;
     double mouseSensitivity = DefaultMouseSensitivity;
+    double mouseVerticalScale = 1.0;
+    double mouseCurve = 1.0;
+    double mouseDeadzoneOffset = 0.2;
+    double mouseMaxSpeed = 1.0;
+    double mouseSmoothingMs = 10.0;
+    double mouseDecayMs = 30.0;
 };
 
 struct InputConfiguration {

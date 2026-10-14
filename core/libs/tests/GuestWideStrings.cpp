@@ -1,8 +1,13 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <climits>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 
 extern "C" {
 const char16_t* APS5_VABI wmemchr_nid_postfix(const char16_t* s, char16_t c, std::size_t n);
@@ -13,6 +18,7 @@ std::size_t APS5_VABI wcslen_nid_postfix(const char16_t* s);
 int APS5_VABI wcscmp_nid_postfix(const char16_t* s1, const char16_t* s2);
 int APS5_VABI wcsncmp_nid_postfix(const char16_t* s1, const char16_t* s2, std::size_t n);
 char16_t* APS5_VABI wcscpy_nid_postfix(char16_t* dest, const char16_t* src);
+char16_t* APS5_VABI wcscat_nid_postfix(char16_t* dest, const char16_t* src);
 char16_t* APS5_VABI wcsncpy_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 const char16_t* APS5_VABI wcschr_nid_postfix(const char16_t* s, char16_t c);
 const char16_t* APS5_VABI wcsrchr_nid_postfix(const char16_t* s, char16_t c);
@@ -68,6 +74,14 @@ int main() {
     wmemset_nid_postfix(buffer, 0xaaaa, 8);
     require(wcscpy_nid_postfix(buffer, u"wide") == buffer);
     require(same(buffer, u"wide", 5) && buffer[5] == 0xaaaa);
+
+    char16_t concatenated[8];
+    wmemset_nid_postfix(concatenated, 0xaaaa, 8);
+    concatenated[0] = 0;
+    require(wcscat_nid_postfix(concatenated, u"ab") == concatenated);
+    require(wcscat_nid_postfix(concatenated, u"世") == concatenated);
+    const char16_t expectedConcatenated[] = {u'a', u'b', u'世', 0, 0xaaaa};
+    require(same(concatenated, expectedConcatenated, 5));
 
     wmemset_nid_postfix(buffer, 0xaaaa, 8);
     require(wcsncpy_nid_postfix(buffer, u"ab", 5) == buffer);
@@ -173,6 +187,13 @@ int main() {
     require(wcstof_nid_postfix(u"0.25", nullptr) == 0.25f);
     const char16_t* half = u"-1.5é";
     require(wcstold_nid_postfix(half, &end) == -1.5L && end == half + 4);
+    const char16_t* wideNan = u" -nan(0x123)é";
+    require(std::bit_cast<std::uint64_t>(wcstod_nid_postfix(wideNan, &end)) == 0xfff8000000000000u && end == wideNan + 12);
+    require(std::bit_cast<std::uint32_t>(wcstof_nid_postfix(wideNan, &end)) == 0xffc00000u && end == wideNan + 12);
+    const long double wideExtended = wcstold_nid_postfix(wideNan, &end);
+    std::uint64_t significand;
+    std::memcpy(&significand, &wideExtended, sizeof(significand));
+    require(std::isnan(wideExtended) && std::signbit(wideExtended) && significand == 0xc000000000000000u && end == wideNan + 12);
 
     require(wcscoll_nid_postfix(u"a", u"b") < 0);
     require(wcscoll_nid_postfix(u"￿", u"a") > 0);
@@ -181,7 +202,33 @@ int main() {
     char16_t transformed[8];
     wmemset_nid_postfix(transformed, 0xaaaa, 8);
     require(wcsxfrm_nid_postfix(transformed, u"wide", 8) == 4 && same(transformed, u"wide", 5) && transformed[5] == 0xaaaa);
+    wmemset_nid_postfix(transformed, 0xaaaa, 8);
     require(wcsxfrm_nid_postfix(transformed, u"much too long", 4) == 13);
+    if (!same(transformed, u"muc", 4)) std::fputs("wcsxfrm did not copy and terminate its truncated result\n", stderr);
+    require(same(transformed, u"muc", 4) && transformed[4] == 0xaaaa);
     require(wcsxfrm_nid_postfix(nullptr, u"abc", 0) == 3);
+    struct TransformCase {
+        const char16_t* source;
+        std::size_t count;
+        std::size_t length;
+        const char16_t* expected;
+        std::size_t written;
+    };
+    for (const TransformCase test : {
+        TransformCase{u"wide", 0, 4, u"", 0},
+        TransformCase{u"wide", 1, 4, u"", 1},
+        TransformCase{u"wide", 4, 4, u"wid", 4},
+        TransformCase{u"wide", 5, 4, u"wide", 5},
+        TransformCase{u"", 0, 0, u"", 0},
+        TransformCase{u"", 1, 0, u"", 1},
+        TransformCase{u"", 8, 0, u"", 1},
+        TransformCase{u"\x7fff\x8000\xffff\xd83d\xde00", 4, 5, u"\x7fff\x8000\xffff", 4},
+        TransformCase{u"\x7fff\x8000\xffff\xd83d\xde00", 6, 5, u"\x7fff\x8000\xffff\xd83d\xde00", 6}
+    }) {
+        wmemset_nid_postfix(transformed, 0xaaaa, 8);
+        require(wcsxfrm_nid_postfix(transformed, test.source, test.count) == test.length);
+        require(same(transformed, test.expected, test.written));
+        for (std::size_t index = test.written; index < 8; ++index) require(transformed[index] == 0xaaaa);
+    }
     return 0;
 }

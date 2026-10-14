@@ -34,6 +34,7 @@ std::stop_source shutdownSource;
 std::atomic<bool> exitRequested{false};
 std::atomic<bool> exitStarted{false};
 using GuestExitCallback = void (APS5_VABI*)();
+thread_local bool runningExit = false;
 
 void APS5_VABI RunGuestExitCallback(void* callback) {
     reinterpret_cast<GuestExitCallback>(callback)();
@@ -116,8 +117,12 @@ extern "C" {
 
 [[noreturn]] void LibcExit_nid_no_patch(int code) {
     exitRequested.store(true);
-    if (exitStarted.exchange(true)) LibcAwaitExit_nid_postfix();
-    LibcRunShutdown_nid_postfix();
+    if (exitStarted.exchange(true)) {
+        if (!runningExit) LibcAwaitExit_nid_postfix();
+    } else {
+        runningExit = true;
+        LibcRunShutdown_nid_postfix();
+    }
 #ifdef __APPLE__
     // exit runs the guest images' finalizers, and on macOS one in PPSA02929's libc.prx waits forever,
     // so the exit is bounded.

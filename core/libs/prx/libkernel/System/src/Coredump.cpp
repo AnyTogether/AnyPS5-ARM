@@ -24,6 +24,10 @@ static int attachOutsideCoredumpHandler(const char* function, const void* mem, s
     return SCE_COREDUMP_ERROR_NOT_IN_COREDUMP_HANDLER;
 }
 
+static void requireTextOutsideHandler(const char* function, const char* argument, const char* text) {
+    if (text == nullptr) throw std::runtime_error(std::string(function) + ": null " + argument + " outside the core dump handler");
+}
+
 extern "C" {
 
 int APS5_VABI sceCoredumpRegisterCoredumpHandler(uint64_t handler, size_t stack_size, uint64_t context) {
@@ -46,10 +50,10 @@ int APS5_VABI sceKernelDebugWriteCppExceptionInfo(const void* exception, uint64_
 }
 
 
-// No core dump is ever written (see above), so attachments are checked and then have nothing to join.
 int APS5_VABI sceCoredumpAttachUserFile(uint32_t userValue, const char* path) {
     (void)userValue;
-    return path == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
+    requireTextOutsideHandler(__func__, "path", path);
+    return SCE_COREDUMP_ERROR_NOT_IN_COREDUMP_HANDLER;
 }
 
 int APS5_VABI sceCoredumpGetStopInfoGpu_Agc(void) {
@@ -57,10 +61,11 @@ int APS5_VABI sceCoredumpGetStopInfoGpu_Agc(void) {
     return 0;
 }
 
-int APS5_VABI sceCoredumpAttachMemoryRegionAsUserFile(uint32_t userValue, const void* memory, size_t size, const char* name) {
+int APS5_VABI sceCoredumpAttachMemoryRegionAsUserFile(uint32_t userValue, const void* mem, size_t size, const char* name) {
     (void)userValue;
-    (void)size;
-    return memory == nullptr || name == nullptr ? SCE_KERNEL_ERROR_EINVAL : 0;
+    requireRegionOutsideHandler(__func__, mem, size);
+    requireTextOutsideHandler(__func__, "name", name);
+    return SCE_COREDUMP_ERROR_NOT_IN_COREDUMP_HANDLER;
 }
 
 int APS5_VABI sceCoredumpSetUserDataType(void) {

@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -137,8 +138,7 @@ int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
     while (state.cursor < state.entries.size()) {
         const auto& [name, type] = state.entries[state.cursor];
         if (name.size() > 255) {
-            if (used == 0) return SCE_KERNEL_ERROR_ENAMETOOLONG;
-            break;
+            throw std::runtime_error("Directory entry name exceeds the guest 255-byte limit");
         }
         const std::size_t record = (8 + name.size() + 1 + 3) & ~std::size_t{3};
         if (used + record > static_cast<std::size_t>(nbytes)) {

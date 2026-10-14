@@ -106,6 +106,8 @@ private:
         append(key, tessellation != nullptr);
         if (tessellation == nullptr) return;
         for (const auto value : {tessellation->inputControlPoints, tessellation->outputControlPoints, tessellation->domain, tessellation->partitioning, tessellation->outputTopology}) append(key, value);
+        if (request.shader.stage == ShaderStage::Local) return;
+        append(key, tessellation->patchesPerGroup);
     }
 
     template<typename TValue>
@@ -248,6 +250,7 @@ private:
         append(key, value.registrationModules);
         append(key, value.registrationWordLimit);
         append(key, value.vertexSubgroups);
+        append(key, value.float16DenormPreserve);
     }
 };
 

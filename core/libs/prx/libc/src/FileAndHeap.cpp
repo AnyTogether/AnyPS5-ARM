@@ -274,29 +274,11 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
     }
     std::filesystem::path fpath;
     if (const int error = ResolvePathError_nid_no_patch(filename, fpath)) { errno = error; return nullptr; }
-    const auto abs_path = fpath.string();
     std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(OpenNative(fpath, parsed->native), std::fclose);
     if (!handle) {
         const int error = errno;
-        if (error == ENOENT || (parsed->exclusive && error == EEXIST)) {
-            errno = error;
-            return nullptr;
-        }
-        const auto reason = std::strerror(error);
-        std::error_code ec;
-        std::filesystem::path sibling;
-        for (const auto& entry : std::filesystem::directory_iterator(fpath.parent_path(), ec)) {
-            if (ec) break;
-            if (entry.path().stem() == fpath.stem() && entry.path().extension() != fpath.extension()) {
-                sibling = std::filesystem::absolute(entry.path());
-                break;
-            }
-        }
-        if (!sibling.empty()) {
-            // APS5_LOG_OUT("%s: \"%s\": %s. Sibling: \"%s\"", FOPEN_MSG_NOT_FOUND, abs_path.c_str(), reason, sibling.filename().string().c_str());
-            return nullptr;
-        }
-        throw std::runtime_error(std::string(__func__) + ": " + FOPEN_MSG_OPEN_FAILED + ": \"" + abs_path + "\": " + reason);
+        errno = error;
+        return nullptr;
     }
     // APS5_LOG_OUT("success: \"%s\"", abs_path.c_str());
     if (parsed->append) static_cast<void>(std::fseek(handle.get(), 0, SEEK_END));

@@ -1,5 +1,6 @@
 add_library(libSceAudioOut SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOutSdl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2Context.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2PadMix.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2Port.cpp
@@ -23,6 +24,17 @@ endif()
 configure_windows_unwind(libSceAudioOut)
 
 if(BUILD_TESTING)
+    add_test_executable(audio_out_initialization_tests tests/AudioOutInitialization.cpp src/AudioOutSdl.cpp)
+    target_include_directories(audio_out_initialization_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_SDL2_INCLUDE_DIR})
+    target_link_libraries(audio_out_initialization_tests PRIVATE libc)
+    configure_windows_unwind(audio_out_initialization_tests)
+    add_test(NAME audio_out_initialization COMMAND audio_out_initialization_tests)
+    set_tests_properties(audio_out_initialization PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(audio_out_initialization PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+
     add_test_executable(audio_out2_pad_mix_tests tests/AudioOut2PadMix.cpp src/AudioOut2PadMix.cpp)
     target_include_directories(audio_out2_pad_mix_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(audio_out2_pad_mix_tests PRIVATE libc)

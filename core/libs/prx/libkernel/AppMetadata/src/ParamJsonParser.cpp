@@ -1,4 +1,5 @@
 #include "prx/libkernel/AppMetadata/include/ParamJsonParser.hpp"
+#include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 
 #include <cstdint>
 #include <charconv>
@@ -313,6 +314,20 @@ ParsedParamJson parseParamJson(const std::filesystem::path& paramJsonPath) {
         if (attribute->type != JsonType::Number || number.find_first_of("-.eE") != std::string::npos) throw std::runtime_error("param.json attribute3 is not an unsigned integer");
         const auto parsed = std::from_chars(number.data(), number.data() + number.size(), result.attribute3);
         if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size()) throw std::runtime_error("param.json attribute3 exceeds uint32 range");
+    }
+    if (const JsonValue* kernel = findObjectMember(root, "kernel")) {
+        if (const JsonValue* flexible = findObjectMember(*kernel, "flexibleMemorySize")) {
+            const auto& number = flexible->numberText;
+            if (flexible->type != JsonType::Number || number.find_first_of("-.eE") != std::string::npos)
+                throw std::runtime_error("param.json kernel.flexibleMemorySize is not an unsigned integer");
+            std::uint64_t bytes = 0;
+            const auto parsed = std::from_chars(number.data(), number.data() + number.size(), bytes);
+            if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size())
+                throw std::runtime_error("param.json kernel.flexibleMemorySize exceeds uint64 range");
+            if (bytes == 0 || (bytes & (PS5_PAGE_SIZE - 1)) != 0)
+                throw std::runtime_error("param.json kernel.flexibleMemorySize must be a positive multiple of 16 KiB");
+            result.flexibleMemorySizeBytes = bytes;
+        }
     }
     if (const JsonValue* downloadData = findObjectMember(root, "downloadDataSize")) {
         if (downloadData->type != JsonType::Number || downloadData->numberValue < 0) throw std::runtime_error("param.json downloadDataSize is not a size");

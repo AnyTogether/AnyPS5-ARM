@@ -130,6 +130,9 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
         ph.MemorySize = _readU64At(offset + 0x28);
         ph.Alignment = _readU64At(offset + 0x30);
 
+        if (ph.Type == PT_LOAD && ph.FileSize > ph.MemorySize)
+            throw RelinkerException("PT_LOAD file size exceeds memory size", ph.Offset);
+
         headers.push_back(ph);
         offset += header.ProgramHeaderEntrySize;
     }

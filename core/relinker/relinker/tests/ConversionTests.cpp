@@ -3,6 +3,7 @@
 #include <relinker/analysis/SyscallScanner.hpp>
 #include <relinker/analysis/CodeInstructionCollector.hpp>
 #include <io/BufferUtils.hpp>
+#include <io/NativePath.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
 #include <algorithm>
 #include <array>
@@ -162,6 +163,33 @@ void scanning() {
     require(progress.Events.back().Completed < progress.Events.back().Total, "Failed scan reported completion");
 }
 
+class FailingProgress final : public Domain::IProgress {
+public:
+    std::string InputPath;
+    void Report(const Domain::ProgressEvent&) override {
+        Domain::RelinkerException error("diagnostic context", 0x1234);
+        error.InputPath = InputPath;
+        throw error;
+    }
+    void Message(std::string_view) override {}
+};
+
+void diagnosticContext() {
+    for (const bool specific : {false, true}) {
+        FailingProgress progress;
+        if (specific) progress.InputPath = "virtual/title/sce_module/plugin.prx";
+        const auto source = input();
+        try { Relinker::Conversion(progress).Convert(source, {}); }
+        catch (const Domain::RelinkerException& error) {
+            require(error.InputPath == (specific ? progress.InputPath : Io::Utf8Path(source.InputPath)), "Wrong diagnostic input path");
+            require(error.FailureOffset == 0x1234, "Diagnostic offset changed");
+            require(std::string(error.what()) == "diagnostic context", "Diagnostic message changed");
+            continue;
+        }
+        throw std::runtime_error("Diagnostic failure was swallowed");
+    }
+}
+
 class CancellingProgress final : public Domain::IProgress {
 public:
     Domain::ProgressStage Stage = Domain::ProgressStage::Decode;
@@ -192,6 +220,7 @@ int main() {
     try {
         convert();
         scanning();
+        diagnosticContext();
         cancellation();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

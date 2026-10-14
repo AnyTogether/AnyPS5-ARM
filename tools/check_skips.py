@@ -7,7 +7,20 @@ DEVICE_LIMITATION = re.compile(r"skipped,.*(subgroup|the device (has no|reports|
 
 NO_DISPLAY = re.compile(r"skipped,.*no display", re.IGNORECASE)
 
+HIGH_REFRESH_LIMITATION = re.compile(r"current display does not provide 120 Hz", re.IGNORECASE)
+
 WINDOWS_PREFIX = "agc"
+
+
+def high_refresh_limitation(output):
+    reasons = []
+    for line in output.splitlines():
+        reason = line.strip()
+        if reason.lower().startswith("skipped,"):
+            reason = reason[len("skipped,"):].strip()
+        if reason:
+            reasons.append(reason)
+    return bool(reasons) and all(HIGH_REFRESH_LIMITATION.fullmatch(reason) for reason in reasons)
 
 
 def skips(path):
@@ -41,11 +54,11 @@ if __name__ == "__main__":
             print(f"{name}: {reason}")
         raise SystemExit
     if args.job == "windows":
-        unexpected = [name for name, output in found if not name.startswith(WINDOWS_PREFIX) and not NO_DISPLAY.search(output)]
-        expected = f"any {WINDOWS_PREFIX}* test, which the runner has no Vulkan driver for, or a test that reports no display or Vulkan device"
+        unexpected = [name for name, output in found if not name.startswith(WINDOWS_PREFIX) and not NO_DISPLAY.search(output) and not high_refresh_limitation(output)]
+        expected = f"any {WINDOWS_PREFIX}* test, which the runner has no Vulkan driver for, or a test that reports no display or Vulkan device or a display without a 120 Hz mode"
     else:
-        unexpected = [name for name, output in found if not DEVICE_LIMITATION.search(output)]
-        expected = "any test that reports the device limitation it needs, such as narrow subgroups, a missing extension or no display for a Vulkan window"
+        unexpected = [name for name, output in found if not DEVICE_LIMITATION.search(output) and not high_refresh_limitation(output)]
+        expected = "any test that reports the device limitation it needs, such as narrow subgroups, a missing extension, no display for a Vulkan window or a display without a 120 Hz mode"
     for name in unexpected:
         print(f"error: {name} skipped")
     if unexpected:

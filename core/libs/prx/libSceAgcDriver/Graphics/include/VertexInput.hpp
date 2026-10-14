@@ -183,6 +183,13 @@ inline std::size_t VertexBufferReadSize(const ShaderRecompiler::VertexAttribute&
     return static_cast<std::size_t>(required);
 }
 
+inline std::size_t VertexBufferReadOffset(const ShaderRecompiler::VertexAttribute& attribute, std::uint32_t firstVertex, std::uint32_t firstInstance) {
+    Require(attribute.fetchIndex <= 1, "unsupported vertex fetch index");
+    const auto stride = (attribute.resource.fields[1] >> 16u) & 0x3fffu;
+    const auto index = attribute.fetchIndex == 0 ? firstVertex : firstInstance;
+    return static_cast<std::size_t>(static_cast<std::uint64_t>(stride) * index);
+}
+
 struct VertexFetch {
     std::uint64_t begin;
     std::uint64_t end;

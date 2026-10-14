@@ -126,7 +126,13 @@ Pad::InputBinding parseBinding(const InputAction& action, std::string_view sourc
 enum class InputSetting {
     LeftStickDeadzone,
     RightStickDeadzone,
-    MouseSensitivity
+    MouseSensitivity,
+    MouseVerticalScale,
+    MouseCurve,
+    MouseDeadzoneOffset,
+    MouseMaxSpeed,
+    MouseSmoothingMs,
+    MouseDecayMs
 };
 
 struct InputSettingName {
@@ -137,7 +143,13 @@ struct InputSettingName {
 constexpr auto settingNames = std::array{
     InputSettingName{"LeftStickDeadzone", InputSetting::LeftStickDeadzone},
     InputSettingName{"RightStickDeadzone", InputSetting::RightStickDeadzone},
-    InputSettingName{"MouseSensitivity", InputSetting::MouseSensitivity}
+    InputSettingName{"MouseSensitivity", InputSetting::MouseSensitivity},
+    InputSettingName{"MouseVerticalScale", InputSetting::MouseVerticalScale},
+    InputSettingName{"MouseCurve", InputSetting::MouseCurve},
+    InputSettingName{"MouseDeadzoneOffset", InputSetting::MouseDeadzoneOffset},
+    InputSettingName{"MouseMaxSpeed", InputSetting::MouseMaxSpeed},
+    InputSettingName{"MouseSmoothingMs", InputSetting::MouseSmoothingMs},
+    InputSettingName{"MouseDecayMs", InputSetting::MouseDecayMs}
 };
 
 const InputSettingName* findSetting(std::string_view name) {
@@ -168,11 +180,33 @@ double parseMouseSensitivity(std::string_view value) {
     return parsed;
 }
 
+std::string formatNumber(double value) {
+    std::array<char, 32> buffer{};
+    const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    return std::string(buffer.data(), result.ptr);
+}
+
+double parseNumber(std::string_view value, std::string_view name, double minimum, double maximum) {
+    double parsed = 0.0;
+    const auto end = value.data() + value.size();
+    const auto result = std::from_chars(value.data(), end, parsed);
+    if (value.empty() || result.ec != std::errc{} || result.ptr != end || !std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
+        throw std::runtime_error(std::string(name) + " must be a number from " + formatNumber(minimum) + " to " + formatNumber(maximum));
+    }
+    return parsed;
+}
+
 void applySetting(Pad::InputSettings& settings, InputSetting setting, std::string_view value) {
     switch (setting) {
         case InputSetting::LeftStickDeadzone: settings.leftStickDeadzonePercent = parseDeadzonePercent(value); break;
         case InputSetting::RightStickDeadzone: settings.rightStickDeadzonePercent = parseDeadzonePercent(value); break;
         case InputSetting::MouseSensitivity: settings.mouseSensitivity = parseMouseSensitivity(value); break;
+        case InputSetting::MouseVerticalScale: settings.mouseVerticalScale = parseNumber(value, "mouse vertical scale", 0.1, 10.0); break;
+        case InputSetting::MouseCurve: settings.mouseCurve = parseNumber(value, "mouse curve", 0.2, 5.0); break;
+        case InputSetting::MouseDeadzoneOffset: settings.mouseDeadzoneOffset = parseNumber(value, "mouse deadzone offset", 0.0, 0.9); break;
+        case InputSetting::MouseMaxSpeed: settings.mouseMaxSpeed = parseNumber(value, "mouse max speed", 0.1, 10.0); break;
+        case InputSetting::MouseSmoothingMs: settings.mouseSmoothingMs = parseNumber(value, "mouse smoothing", 0.0, 500.0); break;
+        case InputSetting::MouseDecayMs: settings.mouseDecayMs = parseNumber(value, "mouse decay", 1.0, 1000.0); break;
     }
 }
 

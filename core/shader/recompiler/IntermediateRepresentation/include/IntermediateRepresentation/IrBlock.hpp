@@ -5,9 +5,36 @@
 #include <cstdint>
 #include <array>
 #include <list>
+#include <memory>
 #include <vector>
 
 namespace ShaderRecompiler {
+
+template<std::size_t Size>
+class IrSsaValues {
+public:
+    IrValue*& operator[](std::size_t index) {
+        if (storage == nullptr) storage = std::make_unique<std::array<IrValue*, Size>>();
+        return (*storage)[index];
+    }
+
+    IrValue* operator[](std::size_t index) const { return values()[index]; }
+    bool HasStorage() const { return storage != nullptr; }
+    void fill(IrValue* value) {
+        if (value == nullptr) { storage.reset(); return; }
+        if (storage == nullptr) storage = std::make_unique<std::array<IrValue*, Size>>();
+        storage->fill(value);
+    }
+    auto begin() const { return values().begin(); }
+    auto end() const { return values().end(); }
+
+private:
+    const std::array<IrValue*, Size>& values() const {
+        static const std::array<IrValue*, Size> empty{};
+        return storage != nullptr ? *storage : empty;
+    }
+    std::unique_ptr<std::array<IrValue*, Size>> storage;
+};
 
 class IrBlock {
 public:
@@ -29,10 +56,10 @@ public:
     void AddPredecessor(IrBlock* block);
     void AddSuccessor(IrBlock* block);
 
-    std::array<IrValue*, NumScalarRegs> ssaScalarValues{};
-    std::array<IrValue*, NumScalarRegs> ssaThreadBitScalarValues{};
-    std::array<IrValue*, NumScalarRegs> ssaScalarMaskTags{};
-    std::array<IrValue*, NumVectorRegs> ssaVectorValues{};
+    IrSsaValues<NumScalarRegs> ssaScalarValues{};
+    IrSsaValues<NumScalarRegs> ssaThreadBitScalarValues{};
+    IrSsaValues<NumScalarRegs> ssaScalarMaskTags{};
+    IrSsaValues<NumVectorRegs> ssaVectorValues{};
 
     [[nodiscard]] const std::vector<IrBlock*>& Predecessors() const;
     [[nodiscard]] const std::vector<IrBlock*>& Successors() const;

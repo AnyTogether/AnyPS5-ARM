@@ -163,14 +163,14 @@ def apply_change(root, base, new, index_text):
         _, section, item, name = entry
         entries = load(name).setdefault(section, [])
         moved = relink(item, INDEX, debt_file(name))
-        position = len(entries)
+        position = 0 if anchor is None else len(entries)
         if anchor is not None and anchor[1] == section and anchor[3] == name:
             anchored = relink(anchor[2], INDEX, debt_file(name))
             if anchored in entries:
                 position = entries.index(anchored) + 1
         entries.insert(position, moved)
 
-    matcher = difflib.SequenceMatcher(None, [entry[2] for entry in before], [entry[2] for entry in after], autojunk=False)
+    matcher = difflib.SequenceMatcher(None, [entry[1:3] for entry in before], [entry[1:3] for entry in after], autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue

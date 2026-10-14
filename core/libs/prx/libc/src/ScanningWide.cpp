@@ -13,6 +13,14 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/WindowsFormatting.hpp"
 
+#ifdef _WIN32
+#define APS5_VA_BEGIN(last) __builtin_sysv_va_list args; __builtin_sysv_va_start(args, last)
+#define APS5_VA_END() __builtin_sysv_va_end(args)
+#else
+#define APS5_VA_BEGIN(last) std::va_list args; va_start(args, last)
+#define APS5_VA_END() va_end(args)
+#endif
+
 extern "C" int APS5_VABI iswspace_nid_postfix(std::uint32_t c);
 extern "C" std::size_t APS5_VABI wcrtomb_nid_postfix(char* destination, std::uint16_t value, void* state);
 
@@ -122,15 +130,9 @@ Fit FloatFit(std::string_view text) {
     return Fit::Valid;
 }
 
-std::size_t IntegerSize(const std::string& length) {
-    if (length.empty()) return sizeof(std::int32_t);
-    if (length == "hh") return sizeof(std::int8_t);
-    if (length == "h") return sizeof(std::int16_t);
-    if (length == "l" || length == "ll" || length == "j" || length == "z" || length == "t") return sizeof(std::int64_t);
-    throw std::invalid_argument("swscanf_s: invalid integer length modifier " + length);
-}
-
 class WideScanner {
+    const char* const name;
+    const bool sized;
     const char16_t* const start;
     const char16_t* input;
     const char16_t* format;
@@ -139,8 +141,8 @@ class WideScanner {
     bool converted = false;
 
 public:
-    WideScanner(const char16_t* buffer, const char16_t* formatText, const void* source)
-        : start(buffer), input(buffer), format(formatText), args(source) {}
+    WideScanner(const char* function, bool withSizes, const char16_t* buffer, const char16_t* formatText, const void* source)
+        : name(function), sized(withSizes), start(buffer), input(buffer), format(formatText), args(source) {}
 
     int Run() {
         while (*format != 0) {
@@ -162,6 +164,18 @@ public:
     }
 
 private:
+    [[noreturn]] void Fail(const std::string& message) const {
+        throw std::invalid_argument(std::string(name) + ": " + message);
+    }
+
+    std::size_t IntegerSize(const std::string& length) const {
+        if (length.empty()) return sizeof(std::int32_t);
+        if (length == "hh") return sizeof(std::int8_t);
+        if (length == "h") return sizeof(std::int16_t);
+        if (length == "l" || length == "ll" || length == "j" || length == "z" || length == "t") return sizeof(std::int64_t);
+        Fail("invalid integer length modifier " + length);
+    }
+
     void SkipSpace() {
         while (*input != 0 && IsSpace(*input)) ++input;
     }
@@ -185,7 +199,7 @@ private:
             const std::size_t limit = (std::numeric_limits<std::size_t>::max() - digit) / 10;
             directive.width = directive.width > limit ? std::numeric_limits<std::size_t>::max() : directive.width * 10 + digit;
         }
-        if (format != digits && directive.width == 0) throw std::invalid_argument("swscanf_s: zero field width");
+        if (format != digits && directive.width == 0) Fail("zero field width");
         if (*format == u'h' || *format == u'l') {
             directive.length += static_cast<char>(*format++);
             if (*format == directive.length[0]) directive.length += static_cast<char>(*format++);
@@ -193,7 +207,7 @@ private:
             directive.length += static_cast<char>(*format++);
         }
         directive.conversion = *format;
-        if (directive.conversion == 0) throw std::invalid_argument("swscanf_s: incomplete conversion specification");
+        if (directive.conversion == 0) Fail("incomplete conversion specification");
         ++format;
         if (directive.conversion == u'[') {
             directive.setExcluded = *format == u'^';
@@ -201,10 +215,10 @@ private:
             directive.setBegin = format;
             if (*format == u']') ++format;
             while (*format != 0 && *format != u']') ++format;
-            if (*format == 0) throw std::invalid_argument("swscanf_s: unterminated scanset");
+            if (*format == 0) Fail("unterminated scanset");
             directive.setEnd = format++;
             for (const char16_t* member = directive.setBegin + 1; member + 1 < directive.setEnd; ++member) {
-                if (*member == u'-') throw std::invalid_argument("swscanf_s: scanset range is implementation-defined");
+                if (*member == u'-') Fail("scanset range is implementation-defined");
             }
         }
         return directive;
@@ -230,7 +244,7 @@ private:
         case u'c':
         case u'[': return Text(directive);
         case u'n': return Count(directive);
-        default: throw std::invalid_argument("swscanf_s: unsupported conversion " + std::to_string(directive.conversion));
+        default: Fail("unsupported conversion " + std::to_string(directive.conversion));
         }
     }
 
@@ -271,7 +285,7 @@ private:
     Outcome Float(const Directive& directive) {
         static_assert(sizeof(long double) == 16 && std::numeric_limits<long double>::digits == 64);
         if (!directive.length.empty() && directive.length != "l" && directive.length != "L")
-            throw std::invalid_argument("swscanf_s: invalid floating length modifier " + directive.length);
+            Fail("invalid floating length modifier " + directive.length);
         void* target = nullptr;
         if (!directive.suppress && (target = args.Next<void*>()) == nullptr) return Outcome::Violation;
         SkipSpace();
@@ -312,12 +326,12 @@ private:
 
     Outcome Text(const Directive& directive) {
         if (!directive.length.empty() && directive.length != "l")
-            throw std::invalid_argument("swscanf_s: invalid string length modifier " + directive.length);
+            Fail("invalid string length modifier " + directive.length);
         void* target = nullptr;
         std::size_t capacity = 0;
         if (!directive.suppress) {
             target = args.Next<void*>();
-            capacity = args.Next<unsigned int>();
+            if (sized) capacity = args.Next<unsigned int>();
             if (target == nullptr) return Outcome::Violation;
         }
         if (directive.conversion == u's') SkipSpace();
@@ -343,7 +357,7 @@ private:
         }
         const std::size_t terminator = directive.conversion == u'c' ? 0 : 1;
         if (directive.length == "l") {
-            if (item.size() + terminator > capacity) return Truncated(target, capacity, true);
+            if (sized && item.size() + terminator > capacity) return Truncated(target, capacity, true);
             std::memcpy(target, item.data(), item.size() * sizeof(char16_t));
             if (terminator != 0) static_cast<char16_t*>(target)[item.size()] = 0;
         } else {
@@ -351,10 +365,10 @@ private:
             for (const char16_t unit : item) {
                 char byte[8];
                 const std::size_t written = wcrtomb_nid_postfix(byte, unit, nullptr);
-                if (written == static_cast<std::size_t>(-1)) throw std::invalid_argument("swscanf_s: wide character has no single-byte form");
+                if (written == static_cast<std::size_t>(-1)) Fail("wide character has no single-byte form");
                 bytes.append(byte, written);
             }
-            if (bytes.size() + terminator > capacity) return Truncated(target, capacity, false);
+            if (sized && bytes.size() + terminator > capacity) return Truncated(target, capacity, false);
             std::memcpy(target, bytes.data(), bytes.size());
             if (terminator != 0) static_cast<char*>(target)[bytes.size()] = 0;
         }
@@ -364,7 +378,7 @@ private:
     }
 
     Outcome Count(const Directive& directive) {
-        if (directive.suppress || directive.width != 0) throw std::invalid_argument("swscanf_s: %n with suppression or width");
+        if (directive.suppress || directive.width != 0) Fail("%n with suppression or width");
         const std::size_t size = IntegerSize(directive.length);
         void* target = args.Next<void*>();
         if (target == nullptr) return Outcome::Violation;
@@ -378,29 +392,28 @@ private:
 
 extern "C" {
 
-int APS5_VABI swscanf_s_nid_postfix(const char16_t* buffer, const char16_t* format, ...) {
+int APS5_VABI swscanf_nid_postfix(const char16_t* buffer, const char16_t* format, ...) {
     if (buffer == nullptr || format == nullptr) return EOF;
-#ifdef _WIN32
-    __builtin_sysv_va_list args;
-    __builtin_sysv_va_start(args, format);
-#else
-    std::va_list args;
-    va_start(args, format);
-#endif
+    APS5_VA_BEGIN(format);
     try {
-        const int result = WideScanner(buffer, format, args).Run();
-#ifdef _WIN32
-        __builtin_sysv_va_end(args);
-#else
-        va_end(args);
-#endif
+        const int result = WideScanner("swscanf", false, buffer, format, args).Run();
+        APS5_VA_END();
         return result;
     } catch (...) {
-#ifdef _WIN32
-        __builtin_sysv_va_end(args);
-#else
-        va_end(args);
-#endif
+        APS5_VA_END();
+        throw;
+    }
+}
+
+int APS5_VABI swscanf_s_nid_postfix(const char16_t* buffer, const char16_t* format, ...) {
+    if (buffer == nullptr || format == nullptr) return EOF;
+    APS5_VA_BEGIN(format);
+    try {
+        const int result = WideScanner("swscanf_s", true, buffer, format, args).Run();
+        APS5_VA_END();
+        return result;
+    } catch (...) {
+        APS5_VA_END();
         throw;
     }
 }

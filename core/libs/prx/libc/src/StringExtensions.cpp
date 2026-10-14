@@ -127,11 +127,12 @@ char* APS5_VABI strtok_r_nid_postfix(char* text, const char* delimiters, char** 
     if (text == nullptr) return nullptr;
     text += std::strspn(text, delimiters);
     if (*text == '\0') {
-        *state = text;
+        *state = nullptr;
         return nullptr;
     }
     char* end = text + std::strcspn(text, delimiters);
     if (*end != '\0') *end++ = '\0';
+    else end = nullptr;
     *state = end;
     return text;
 }

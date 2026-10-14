@@ -30,6 +30,7 @@ struct IrProgramMetadata {
     std::uint32_t vectorWindowSize = 0;
     bool vectorWindowIndexedWrites = false;
     std::uint32_t tessellationControlStride = 0;
+    std::uint32_t tessellationPatchStride = 0;
 };
 
 }

@@ -206,6 +206,57 @@ void missingPositionals() {
     expectUsage({"--rpath", "/libs"});
 }
 
+void windowsFixedBase() {
+    require(!parse({"--windows", "input.elf", "output.exe"}).windowsFixedBase, "fixed base was enabled by default");
+    for (const auto& value : {"0x400000", "0X400000", "4194304"}) {
+        const auto args = parse({"--windows-fixed-base", value, "--windows", "input.elf", "output.exe"});
+        require(args.windowsFixedBase == 0x400000, "fixed base was parsed incorrectly");
+    }
+    require(parse({"--windows", "--windows-fixed-base", "0x400000000", "input.elf", "output.exe"}).windowsFixedBase == 0x400000000, "fixed base was truncated to 32 bits");
+    for (const auto& value : {"0", "0x10000", "0x400001", "0x", "-4194304", "+4194304", " 4194304", "0x400000junk", "18446744073709551616", "0x800000000000"})
+        expectThrows({"--windows", "--windows-fixed-base", value, "input.elf", "output.exe"}, "--windows-fixed-base requires a 64 KiB-aligned address from 0x20000 through 0x7fffffff0000");
+    expectThrows({"--windows-fixed-base"}, "--windows-fixed-base requires an address");
+    expectThrows({"--windows-fixed-base", "--windows"}, "--windows-fixed-base requires an address");
+    expectThrows({"--windows-fixed-base", "0x400000", "input.elf", "output.exe"}, "--windows-fixed-base requires --windows");
+    expectThrows({"--macos", "--windows-fixed-base", "0x400000", "input.elf", "output.exe"}, "--windows-fixed-base requires --windows");
+    expectThrows({"--windows", "--windows-fixed-base", "0x400000", "--windows-fixed-base", "0x800000", "input.elf", "output.exe"}, "--windows-fixed-base cannot be repeated");
+}
+
+}
+
+void moduleDirectories() {
+    const auto args = parse({"--module-dir", "Media/Plugins", "input.elf", "--module-dir", "extra", "output.elf"});
+    require(args.moduleDirectories == std::vector<std::string>{"Media/Plugins", "extra"}, "--module-dir directories were not recorded in order");
+    require(args.inputPath == "input.elf" && args.outputPath == "output.elf", "--module-dir consumed a positional path");
+    expectThrows({"--module-dir"}, "--module-dir requires a directory");
+    expectThrows({"--skip-sce-module", "--module-dir", "Media/Plugins", "input.elf", "output.elf"}, "--module-dir conflicts with --skip-sce-module");
+    expectThrows({"--module-dir", "Media/Plugins", "--skip-sce-module", "input.elf", "output.elf"}, "--module-dir conflicts with --skip-sce-module");
+}
+
+void sceModulePath() {
+    const auto args = parse({"--sce-module-path", "modules", "input.elf", "output.elf"});
+    require(args.sceModulePath == "modules", "--sce-module-path value was not captured");
+    expectThrows({"--sce-module-path"}, "--sce-module-path requires a nonempty path");
+    expectThrows({"--sce-module-path", "", "input.elf", "output.elf"}, "--sce-module-path requires a nonempty path");
+    expectThrows({"--sce-module-path", "--registry", "input.elf", "output.elf"}, "--sce-module-path requires a nonempty path");
+    expectThrows({"--sce-module-path", "a", "--sce-module-path", "b", "input.elf", "output.elf"}, "--sce-module-path must be specified once");
+    expectThrows({"--skip-sce-module", "--sce-module-path", "modules", "input.elf", "output.elf"}, "--sce-module-path conflicts with --skip-sce-module");
+    expectThrows({"--sce-module-path", "modules", "--skip-sce-module", "input.elf", "output.elf"}, "--sce-module-path conflicts with --skip-sce-module");
+}
+
+void targetSelection() {
+    const auto macos = parse({"--macos", "input.elf", "output.elf"});
+    require(macos.toMacos && !macos.toWindows, "--macos did not select only the macOS target");
+    const auto rosetta = parse({"--to-rosetta", "input.elf", "output.elf"});
+    require(rosetta.toRosetta && rosetta.toIntel, "--to-rosetta did not imply --to-intel");
+    const auto rosettaOnMacos = parse({"--macos", "--to-rosetta", "input.elf", "output.elf"});
+    require(rosettaOnMacos.toMacos && rosettaOnMacos.toRosetta && rosettaOnMacos.toIntel, "--to-rosetta was rejected with --macos");
+    const std::string targetConflict = "--windows conflicts with --macos";
+    expectThrows({"--windows", "--macos", "input.elf", "output.elf"}, targetConflict);
+    expectThrows({"--macos", "--windows", "input.elf", "output.elf"}, targetConflict);
+    const std::string rosettaConflict = "--to-rosetta conflicts with --windows";
+    expectThrows({"--windows", "--to-rosetta", "input.elf", "output.elf"}, rosettaConflict);
+    expectThrows({"--to-rosetta", "--windows", "input.elf", "output.elf"}, rosettaConflict);
 }
 
 int main() {
@@ -222,6 +273,9 @@ int main() {
         excludeSceModuleConsumesNextTokenVerbatim();
         excludeSceModuleWithoutValue();
         excludeConflictsWithSkip();
+        moduleDirectories();
+        sceModulePath();
+        targetSelection();
         executables();
         unusedFilter();
         unusedFilterRejectsBadValues();
@@ -233,6 +287,7 @@ int main() {
         windowsDiagnosticsRequiresWindows();
         windowsGuiRequiresWindows();
         missingPositionals();
+        windowsFixedBase();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

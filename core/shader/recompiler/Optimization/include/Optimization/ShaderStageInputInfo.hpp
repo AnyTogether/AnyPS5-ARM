@@ -112,6 +112,7 @@ struct ShaderTessellationInputInfo {
     std::uint32_t domain = 0;
     std::uint32_t partitioning = 0;
     std::uint32_t outputTopology = 0;
+    std::uint32_t patchesPerGroup = 256;
 };
 
 struct ShaderVertexInputInfo {

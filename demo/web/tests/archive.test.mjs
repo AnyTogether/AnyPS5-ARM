@@ -1,0 +1,141 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { register } from "node:module";
+
+register("./cdn-loader.mjs", import.meta.url, { data: { url: process.env.ANYPS5_TEST_ZIP_URL, path: process.env.ANYPS5_TEST_ZIP_PATH } });
+
+const site = name => pathToFileURL(path.join(process.argv[2], name)).href;
+const { Archive, memoryEstimate, MEMORY_LIMIT, packageArchive } = await import(site("archive.mjs"));
+const { BlobReader, BlobWriter, Uint8ArrayReader, Uint8ArrayWriter, ZipReader, ZipWriter } = await import(process.env.ANYPS5_TEST_ZIP_URL);
+const { default: createRelinker } = await import(site("native/relinker_wasm.mjs"));
+const native = await createRelinker();
+const executable = new Uint8Array(await readFile(path.join(process.argv[3], "main.elf")));
+const module = new Uint8Array(await readFile(path.join(process.argv[3], "module.elf")));
+const resource = new Uint8Array(2 * 1024 * 1024).fill(65);
+
+async function zip(entries) {
+  const output = new BlobWriter("application/zip");
+  const writer = new ZipWriter(output, { zip64: true, level: 9, useWebWorkers: false, useCompressionStream: false });
+  for (const [name, bytes, options] of entries) await writer.add(name, bytes ? new Uint8ArrayReader(bytes) : undefined, options);
+  return writer.close();
+}
+
+const source = await zip([["title/", null, { directory: true }], ["title/program.dat", executable], ["title/sce_module/library.prx.esbak", module], ["title/sce_module/library.prx", new Uint8Array([79, 21, 61, 29])], ["title/sce_module/library.prx.esbak.guest.prx", new Uint8Array([77, 90, 0, 0])], ["title/sce_sys/param.json", new TextEncoder().encode("{}")], ["title/shaders/example.frag", executable], ["title/content/resource.bin", resource]]);
+const folder = [
+  { path: "title/program.dat", file: new Blob([executable]) },
+  { path: "title/sce_module/library.prx.esbak", file: new Blob([module]) },
+  { path: "title/sce_module/library.prx", file: new Blob([new Uint8Array([79, 21, 61, 29])]) },
+  { path: "title/sce_module/library.prx.esbak.guest.prx", file: new Blob([new Uint8Array([77, 90, 0, 0])]) },
+  { path: "title/sce_sys/param.json", file: new Blob(["{}"]) },
+  { path: "title/shaders/example.frag", file: new Blob([executable]) },
+  { path: "title/content/resource.bin", file: new Blob([resource]) }
+];
+for (const [kind, selected] of [["ZIP", source], ["folder", folder]]) {
+for (const target of ["windows", "linux"]) {
+  const archive = new Archive(selected);
+  const summary = await archive.inspect(() => {});
+  assert.equal(summary.name, "program.dat");
+  assert.equal(summary.root, "title/");
+  assert.equal(summary.modules, 1);
+  assert.equal(summary.selectedBytes, executable.length + module.length);
+  const input = await archive.conversionInput(target, false, () => {});
+  assert.equal(input.modules.length, 1);
+  assert.deepEqual(input.executable, executable);
+  assert.equal(input.modules[0].name, "sce_module/library.prx.esbak");
+  const events = [];
+  const converted = native.Convert(input, event => events.push(event));
+  assert.equal(converted.ok, true, converted.error);
+  assert.equal(converted.executable[0], target === "windows" ? 77 : 127);
+  if (target === "windows") {
+    const image = new DataView(converted.executable.buffer, converted.executable.byteOffset, converted.executable.byteLength);
+    assert.equal(image.getUint16(image.getUint32(60, true) + 24 + 68, true), 3);
+  }
+  assert(events.some(event => event.stage === 6 && event.completed > 0));
+  const libraries = await zip([["libs/system.prx", new Uint8Array([1, 2, 3])]]);
+  const chunks = [];
+  let maxChunk = 0;
+  const destination = new WritableStream({ async write(chunk) {
+    maxChunk = Math.max(maxChunk, chunk.length);
+    chunks.push(chunk.slice());
+    await new Promise(resolve => setTimeout(resolve, 1));
+  } });
+  await packageArchive(archive, converted, input.outputName, libraries, destination, () => {});
+  await destination.close();
+  const reader = new ZipReader(new BlobReader(new Blob(chunks)));
+  const entries = await reader.getEntries();
+  const byName = new Map(entries.map(entry => [entry.filename, entry]));
+  assert(byName.has(input.outputName));
+  assert(byName.has("libs/system.prx"));
+  assert.deepEqual(await byName.get("app0/shaders/example.frag").getData(new Uint8ArrayWriter(), { checkSignature: true }), executable);
+  assert.deepEqual(await byName.get("app0/sce_module/library.prx.esbak.guest.prx").getData(new Uint8ArrayWriter(), { checkSignature: true }), converted.modules[0].bytes);
+  assert.deepEqual(await byName.get("app0/sce_module/library.prx").getData(new Uint8ArrayWriter(), { checkSignature: true }), new Uint8Array([79, 21, 61, 29]));
+  assert.deepEqual(await byName.get("app0/program.dat").getData(new Uint8ArrayWriter(), { checkSignature: true }), executable);
+  assert.deepEqual(await byName.get("app0/content/resource.bin").getData(new Uint8ArrayWriter(), { checkSignature: true }), resource);
+  assert.equal((byName.get(input.outputName).externalFileAttributes >>> 16) & 0o777, 0o755);
+  assert(maxChunk < resource.length);
+  const saved = new Map();
+  let active = false;
+  let directoryChunk = 0;
+  await packageArchive(archive, converted, input.outputName, libraries, {
+    async directory(name) { saved.set(name, null); },
+    async file(name) {
+      assert.equal(active, false);
+      active = true;
+      const pieces = [];
+      return new WritableStream({
+        async write(chunk) {
+          directoryChunk = Math.max(directoryChunk, chunk.length);
+          pieces.push(chunk.slice());
+          await new Promise(resolve => setTimeout(resolve, 1));
+        },
+        async close() {
+          saved.set(name, new Uint8Array(await new Blob(pieces).arrayBuffer()));
+          active = false;
+        }
+      });
+    }
+  }, () => {}, true);
+  assert.equal(active, false);
+  assert(directoryChunk < resource.length);
+  assert.equal(saved.size, entries.length);
+  for (const entry of entries) {
+    assert(saved.has(entry.filename));
+    if (!entry.directory) assert.deepEqual(saved.get(entry.filename), await entry.getData(new Uint8ArrayWriter(), { checkSignature: true }));
+  }
+  await reader.close();
+  await archive.close();
+  console.log(`${kind}, ${target}: conversion, original files, modules, permissions, streamed ZIP and directory output verified`);
+}
+}
+
+for (const [entries, error] of [
+  [[["one", executable], ["two", executable]], /exactly one/u],
+  [[["readme", new Uint8Array([1])]], /exactly one/u],
+  [[["app", executable], ["..\/escape", resource]], /Unsafe ZIP/u],
+  [[["app", executable], ["APP", resource]], /Duplicate ZIP/u],
+  [[["app", executable], ["folder", resource], ["folder/file", resource]], /also used as a folder/u],
+  [[["app", executable], ["link", resource, { versionMadeBy: 0x31e, externalFileAttributes: (0o120777 << 16) >>> 0 }]], /Links and special/u]
+]) {
+  const archive = new Archive(await zip(entries));
+  await assert.rejects(archive.inspect(() => {}), error);
+  await archive.close();
+}
+const missing = new Archive(await zip([["any-name", executable]]));
+assert.equal((await missing.inspect(() => {})).warnings.length, 2);
+await missing.close();
+assert(memoryEstimate(200 * 1024 ** 3, 1024, 1024, 100) > MEMORY_LIMIT);
+const invalid = native.Convert({ target: "unsupported" }, () => {});
+assert.equal(invalid.ok, false);
+console.log("Archive validation, missing-folder warnings and large-download budget verified");
+
+const workerMessages = [];
+globalThis.self = { postMessage: message => workerMessages.push(message) };
+await import(site("worker.mjs"));
+await self.onmessage({ data: { type: "convert", target: "windows", mode: "disk" } });
+assert.equal(workerMessages.length, 1);
+assert.equal(workerMessages[0].type, "error");
+assert.match(workerMessages[0].message, /browsers block DLL creation/u);
+delete globalThis.self;
+console.log("Windows folder output rejected before conversion or file writes");

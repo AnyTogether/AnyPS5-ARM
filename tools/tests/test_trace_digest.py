@@ -64,6 +64,19 @@ class TraceDigestTests(unittest.TestCase):
     def test_summary_is_the_line_of_this_trace(self):
         self.assertEqual(self.result()["summary"]["trace"], "aps5-trace-abc-7.json.gz")
 
+    def test_explicit_summary_selects_the_matching_trace(self):
+        summary = Path(self.directory.name) / "relocated-summary.jsonl"
+        other = dict(SUMMARY, trace="other.json.gz", presents=99)
+        summary.write_text(json.dumps(SUMMARY) + "\n" + json.dumps(other) + "\n", encoding="utf-8")
+        selected = trace_digest.load_summary(summary, self.trace)
+        self.assertEqual(selected["trace"], self.trace.name)
+        self.assertEqual(selected["presents"], 3)
+
+    def test_explicit_summary_without_matching_trace_is_not_used(self):
+        summary = Path(self.directory.name) / "unrelated-summary.jsonl"
+        summary.write_text(json.dumps(dict(SUMMARY, trace="other.json.gz")) + "\n", encoding="utf-8")
+        self.assertIsNone(trace_digest.load_summary(summary, self.trace))
+
     def test_frames_end_at_the_window(self):
         result = self.result()
         self.assertEqual(result["frames"], 3)

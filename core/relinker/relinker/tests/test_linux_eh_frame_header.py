@@ -38,8 +38,9 @@ def program_headers(elf):
     headers = [struct.unpack_from("<IIQQQQQQ", elf, phoff + index * phentsize) for index in range(phnum)]
     phdr = next(header for header in headers if header[0] == 6)
     assert phdr[5:7] == (phnum * phentsize, phnum * phentsize), ("PT_PHDR must cover every output header", phdr, phnum)
-    header_load = next(header for header in headers if header[0] == PT_LOAD and header[2] == 0)
-    assert header_load[5:7] == (phoff + phnum * phentsize, phoff + phnum * phentsize), ("Header PT_LOAD must cover every output header", header_load, phnum)
+    assert phdr[2] == phoff, ("PT_PHDR must name the program header table", phdr, phoff)
+    table_load = [header for header in headers if header[0] == PT_LOAD and header[2] <= phoff and phoff + phnum * phentsize <= header[2] + header[5]]
+    assert len(table_load) == 1 and phdr[3] == table_load[0][3] + phoff - table_load[0][2], ("A PT_LOAD must map every output header at PT_PHDR", table_load, phdr)
     return headers
 
 
@@ -96,13 +97,16 @@ def main():
             assert elf[offset:offset + size] == image[offset:offset + size], "eh_frame_hdr bytes changed"
             assert all(header[0] != PT_SCE_VERSION for header in headers), headers
 
-        source = Path(directory) / "full-slots.elf"
-        output = Path(directory) / "full-slots.out"
-        source.write_bytes(fixture(6))
-        result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=20)
-        assert result.returncode == 2, result
-        assert "No free program header slot for PT_GNU_EH_FRAME" in result.stderr, result.stderr
-        assert not output.exists(), "Executable written without exception metadata"
+        image = fixture(6)
+        table_end = 64 + 6 * 56
+        image[table_end:table_end + 56] = bytes([0xa5]) * 56
+        result, elf = relink(relinker, directory, "full-slots", image)
+        headers = program_headers(elf)
+        assert [header for header in headers if header[0] == PT_GNU_EH_FRAME] == [EH_FRAME_HEADER], headers
+        assert len(headers) == 7, headers
+        assert struct.unpack_from("<Q", elf, 0x20)[0] >= len(image), "The grown program header table must be moved past the input"
+        assert "PT_GNU_EH_FRAME" not in result.stderr, result.stderr
+        assert elf[table_end:table_end + 56] == image[table_end:table_end + 56], "Bytes after the input program header table changed"
 
         image = fixture(6, with_frame=False)
         table_end = 64 + 6 * 56
@@ -114,17 +118,14 @@ def main():
         assert elf[table_end:table_end + 56] == image[table_end:table_end + 56], "Bytes after the program header table changed"
 
         for with_frame in (False, True):
-            source = Path(directory) / ("insufficient-slots-" + str(with_frame) + ".elf")
-            output = source.with_suffix(".out")
             image = fixture(5, with_frame=with_frame)
             image[64 + 5 * 56:64 + 6 * 56] = bytes([0xa5]) * 56
-            source.write_bytes(image)
-            result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=20)
-            assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
-            expected = "No free program header slot for PT_GNU_EH_FRAME" if with_frame else "Not enough program header slots: need 6, available 5"
-            assert expected in result.stderr, result.stderr
-            assert not output.exists(), "Insufficient program header slots must not produce an executable"
-            assert source.read_bytes() == image, "Input changed while rejecting insufficient program header slots"
+            result, elf = relink(relinker, directory, "few-slots-" + str(with_frame), image)
+            headers = program_headers(elf)
+            assert len(headers) == (7 if with_frame else 6), headers
+            assert [header for header in headers if header[0] == PT_GNU_EH_FRAME] == ([EH_FRAME_HEADER] if with_frame else []), headers
+            assert struct.unpack_from("<Q", elf, 0x20)[0] >= len(image), "The grown program header table must be moved past the input"
+            assert elf[64 + 5 * 56:64 + 6 * 56] == image[64 + 5 * 56:64 + 6 * 56], "Bytes after the input program header table changed"
 
         image = fixture(5, with_frame=False)
         headers = image[64:64 + 4 * 56]

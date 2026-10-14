@@ -60,6 +60,7 @@ The [pull request template](.github/pull_request_template.md) is the checklist f
 - The PR overlap comment lists open pull requests that change the same lines or exports; agree with their authors which one goes first and declare it with `Depends on`.
 - Run the tests before opening the pull request and describe what was tested (OS, title or homebrew).
 - A pull request that claims a change in speed shows the summary lines of `main` and of the change, from the same machine and scene, and attaches the traces, captured as the [Performance report](.github/ISSUE_TEMPLATE/performance.yml) issue form describes. A slow scene is reported with the same form.
+- Changes to the AGC driver, the shader recompiler or VideoOut name each GPU the GPU tests ran on (vendor, model, driver, OS) on the `GPUs tested` checklist line. CI runs these tests only on lavapipe, and hardware drivers fail where lavapipe and other vendors pass, so a reviewer can ask for a run on another vendor before merging.
 - Investigation notes, reports, screenshots and logs go in the pull request, not in the repository. Images for documentation go in the [gist](https://gist.github.com/boykopovar/0e53f2e1426f29ecd41e3b51540b8a90) comments.
 - Say whether the change was written with AI assistance. The author of the pull request is responsible for every line of it.
 

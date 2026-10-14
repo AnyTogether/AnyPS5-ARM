@@ -81,8 +81,7 @@ std::uint32_t ScriptedButtons() {
 PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 }
 
-PadInput::PadInput(Pad::InputConfiguration configuration)
-    : bindings(std::move(configuration.bindings)), settings(configuration.settings), pressed(bindings.size()), wheelReleaseTimes(bindings.size()) {
+PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
     openFirstAvailableController();
 }
 
@@ -176,13 +175,10 @@ void PadInput::applyOutput() {
 }
 
 void PadInput::setMouseMode(bool enabled) {
+    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
     if (SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE) != 0) throw std::runtime_error(std::string("Pad: relative mouse mode failed: ") + SDL_GetError());
-    int deltaX = 0;
-    int deltaY = 0;
-    SDL_GetRelativeMouseState(&deltaX, &deltaY);
-    mouseEnabled = enabled;
-    mouseStick = {128, 128};
-    nextMousePoll = std::chrono::steady_clock::now() + std::chrono::milliseconds(Pad::MousePollIntervalMs);
+    keyboardMouse.SetMouseMode(enabled);
 }
 
 PadInputState PadInput::sampleController() const {
@@ -224,8 +220,8 @@ PadInputState PadInput::sampleController() const {
     const auto stick = [this](SDL_GameControllerAxis xAxis, SDL_GameControllerAxis yAxis, int deadzonePercent) {
         return Pad::StickWithDeadzone(SDL_GameControllerGetAxis(controller, xAxis), SDL_GameControllerGetAxis(controller, yAxis), deadzonePercent);
     };
-    const auto left = stick(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, settings.leftStickDeadzonePercent);
-    const auto right = stick(SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, settings.rightStickDeadzonePercent);
+    const auto left = stick(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, keyboardMouse.Configuration().settings.leftStickDeadzonePercent);
+    const auto right = stick(SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, keyboardMouse.Configuration().settings.rightStickDeadzonePercent);
     result.sticks = {left[0], left[1], right[0], right[1]};
     switch (SDL_GameControllerGetType(controller)) {
         case SDL_CONTROLLER_TYPE_PS5: result.deviceKind = 1; break;
@@ -277,51 +273,21 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
         publish();
         return;
     }
-    if (event.type == SDL_WINDOWEVENT && (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST || event.window.event == SDL_WINDOWEVENT_CLOSE)) {
-        std::fill(pressed.begin(), pressed.end(), false);
-        std::fill(wheelReleaseTimes.begin(), wheelReleaseTimes.end(), std::chrono::steady_clock::time_point{});
-        if (mouseEnabled) setMouseMode(false);
+    if (event.type == SDL_WINDOWEVENT) {
+        if (keyboardMouse.HandleEvent(event, std::chrono::steady_clock::now()).releaseMouse) setMouseMode(false);
         publish();
         return;
     }
     // APS5_NO_PAD_INPUT=1 keeps a measurement run from reacting to keys or mouse buttons that reach
     // its window (a stray press advances the title into another stage).
     static const bool ignoreInput = std::getenv("APS5_NO_PAD_INPUT") != nullptr;
-    if (ignoreInput && event.type == SDL_MOUSEWHEEL) return;
-    if (event.type == SDL_MOUSEWHEEL) {
-        int direction = (event.wheel.y > 0) - (event.wheel.y < 0);
-        if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) direction = -direction;
-        if (direction == 0) return;
-        const auto releaseTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(Pad::WheelPressDurationMs);
-        for (std::size_t index = 0; index < bindings.size(); ++index) {
-            const auto& binding = bindings[index];
-            if (binding.wheelDirection == 0) continue;
-            pressed[index] = binding.wheelDirection == direction;
-            wheelReleaseTimes[index] = pressed[index] ? releaseTime : std::chrono::steady_clock::time_point{};
-        }
-        publish();
-        return;
-    }
-    const bool keyboard = event.type == SDL_KEYDOWN || event.type == SDL_KEYUP;
-    const bool mouse = event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
-    if (!keyboard && !mouse) return;
-    if (ignoreInput) return;
-    if (keyboard && event.key.repeat != 0) return;
-    const bool down = event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN;
-    for (std::size_t index = 0; index < bindings.size(); ++index) {
-        const auto& binding = bindings[index];
-        const bool matches = keyboard
-            ? binding.key != SDL_SCANCODE_UNKNOWN && binding.key == event.key.keysym.scancode
-            : binding.mouseButton != Pad::MouseButton::None && binding.mouseButton == static_cast<Pad::MouseButton>(event.button.button);
-
-        if (!matches) continue;
-        if (binding.control == Pad::InputControl::ToggleFullscreen) {
-            if (keyboard && down && !pressed[index] && window.Handle() != nullptr && event.key.windowID == SDL_GetWindowID(window.Handle())) window.ToggleFullscreen();
-        }
-        if (binding.control == Pad::InputControl::ToggleMouse && down && !pressed[index]) setMouseMode(!mouseEnabled);
-        pressed[index] = down;
-    }
-    publish();
+    const bool input = event.type == SDL_MOUSEWHEEL || event.type == SDL_MOUSEMOTION || event.type == SDL_KEYDOWN || event.type == SDL_KEYUP ||
+        event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
+    if (!input || ignoreInput) return;
+    const auto requests = keyboardMouse.HandleEvent(event, std::chrono::steady_clock::now());
+    if (requests.toggleFullscreen && window.Handle() != nullptr && event.key.windowID == SDL_GetWindowID(window.Handle())) window.ToggleFullscreen();
+    if (requests.toggleMouse) setMouseMode(!keyboardMouse.MouseMode());
+    if (event.type != SDL_MOUSEMOTION) publish();
 }
 
 void PadInput::Update() {
@@ -332,87 +298,19 @@ void PadInput::Update() {
         scripted = buttons;
         publish();
     }
-    if (controller != nullptr) {
-        controllerState = sampleController();
-        publish();
-    }
-    const auto now = std::chrono::steady_clock::now();
-    bool released = false;
-    for (std::size_t index = 0; index < bindings.size(); ++index) {
-        if (bindings[index].wheelDirection == 0 || !pressed[index] || now < wheelReleaseTimes[index]) continue;
-        pressed[index] = false;
-        wheelReleaseTimes[index] = {};
-        released = true;
-    }
-    if (released) publish();
-    if (!mouseEnabled) return;
-    if (SDL_GetKeyboardFocus() == nullptr) {
-        std::fill(pressed.begin(), pressed.end(), false);
-        std::fill(wheelReleaseTimes.begin(), wheelReleaseTimes.end(), std::chrono::steady_clock::time_point{});
+    if (controller != nullptr) controllerState = sampleController();
+    if (keyboardMouse.MouseMode() && SDL_GetKeyboardFocus() == nullptr) {
+        keyboardMouse.Release();
         setMouseMode(false);
         publish();
         return;
     }
-    if (now < nextMousePoll) return;
-    nextMousePoll = now + std::chrono::milliseconds(Pad::MousePollIntervalMs);
-    int deltaX = 0;
-    int deltaY = 0;
-    SDL_GetRelativeMouseState(&deltaX, &deltaY);
-    mouseStick = {128, 128};
-    if (deltaX != 0 || deltaY != 0) {
-        const double distance = std::hypot(deltaX, deltaY);
-        const double scale = std::clamp(distance * settings.mouseSensitivity + 16.0, 64.0, 128.0) / distance;
-        const auto mapAxis = [scale](int delta) { return static_cast<std::uint8_t>(std::clamp(128L + std::lround(delta * scale), 0L, 255L)); };
-        mouseStick = {mapAxis(deltaX), mapAxis(deltaY)};
-    }
-    publish();
+    const bool changed = keyboardMouse.Advance(std::chrono::steady_clock::now());
+    if (controller != nullptr || keyboardMouse.MouseMode() || changed) publish();
 }
 
 void PadInput::publish() {
-    PadInputState state;
-    state.buttons = controllerState.buttons | ScriptedButtons();
-    state.sticks = controllerState.sticks;
-    state.analogButtonsL2 = controllerState.analogButtonsL2;
-    state.analogButtonsR2 = controllerState.analogButtonsR2;
-    state.hasMotion = controllerState.hasMotion;
-    state.accel = controllerState.accel;
-    state.gyro = controllerState.gyro;
-    state.touch = controllerState.touch;
-    state.deviceKind = controllerState.deviceKind;
-
-    std::array<bool, 4> negative{};
-    std::array<bool, 4> positive{};
-    for (std::size_t index = 0; index < bindings.size(); ++index) {
-        if (!pressed[index]) continue;
-        const auto& binding = bindings[index];
-        switch (binding.control) {
-            case Pad::InputControl::Button:
-                state.buttons |= static_cast<std::uint32_t>(binding.button);
-                if (binding.button == Pad::PadButton::L2) state.analogButtonsL2 = 255;
-                if (binding.button == Pad::PadButton::R2) state.analogButtonsR2 = 255;
-                break;
-            case Pad::InputControl::LeftStickLeft: negative[0] = true; break;
-            case Pad::InputControl::LeftStickRight: positive[0] = true; break;
-            case Pad::InputControl::LeftStickUp: negative[1] = true; break;
-            case Pad::InputControl::LeftStickDown: positive[1] = true; break;
-            case Pad::InputControl::RightStickLeft: negative[2] = true; break;
-            case Pad::InputControl::RightStickRight: positive[2] = true; break;
-            case Pad::InputControl::RightStickUp: negative[3] = true; break;
-            case Pad::InputControl::RightStickDown: positive[3] = true; break;
-            case Pad::InputControl::TouchLeft: state.touchLeft = true; break;
-            case Pad::InputControl::TouchRight: state.touchRight = true; break;
-            case Pad::InputControl::ToggleMouse: break;
-            case Pad::InputControl::ToggleFullscreen: break;
-        }
-    }
-    for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {
-        if (negative[axis] || positive[axis]) state.sticks[axis] = negative[axis] == positive[axis] ? 128 : negative[axis] ? 0 : 255;
-    }
-    if (mouseEnabled) {
-        state.sticks[2] = mouseStick[0];
-        state.sticks[3] = mouseStick[1];
-    }
-    if (state.analogButtonsL2 != 0) state.buttons |= static_cast<std::uint32_t>(Pad::PadButton::L2);
-    if (state.analogButtonsR2 != 0) state.buttons |= static_cast<std::uint32_t>(Pad::PadButton::R2);
+    auto state = keyboardMouse.Compose(controllerState);
+    state.buttons |= ScriptedButtons();
     PadPublishInput_nid_postfix(state);
 }

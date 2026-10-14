@@ -36,6 +36,7 @@ struct ShaderInfo {
     bool usesFaultBuffer = false;
     bool dispatchThreadLimit = false;
     bool rasterPrimitive = false;
+    bool layerExported = false;
 
     bool operator==(const ShaderInfo& other) const = default;
 };

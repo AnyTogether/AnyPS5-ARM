@@ -48,7 +48,7 @@ std::vector<std::uint8_t> MacOsMachOPatcher::Patch(const std::vector<std::uint8_
     Windows::WindowsLoadImage image(sourceElf, originalHeaders);
     if (originalPltGotVaddr != 0)
         image.GetRva(originalPltGotVaddr, 8);
-    const auto relocations = Windows::WindowsRelocationBuilder().Apply(image, dynamicSection);
+    const auto relocations = Windows::WindowsRelocationBuilder().Apply(image, dynamicSection, originalHeaders);
 
     MacOsImageInput input;
     input.Executable = true;

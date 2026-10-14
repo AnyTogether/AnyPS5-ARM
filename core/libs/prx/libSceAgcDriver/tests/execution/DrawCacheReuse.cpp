@@ -18,6 +18,7 @@ namespace {
 
 using AgcDriver::Graphics::Require;
 using AgcDriver::DriverDetail::DrawMiss;
+using AgcDriver::DriverDetail::DrawKeySightings;
 
 alignas(256) constexpr std::array<std::uint32_t, 8> VertexCode{0x7e000208u, 0x7e020280u, 0x7e040280u, 0x7e0602f2u, 0xf80008cfu, 0x03020100u, 0xbf810000u, 0xbf810000u};
 alignas(256) constexpr std::array<std::uint32_t, 8> PixelCode{0x7e000200u, 0x7e020280u, 0xf800180fu, 0x00010100u, 0xbf810000u, 0xbf810000u, 0xbf810000u, 0xbf810000u};
@@ -48,7 +49,7 @@ void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::ini
     commands.insert(commands.end(), payload);
 }
 
-std::vector<std::uint32_t> DrawTwice() {
+std::vector<std::uint32_t> DrawThrice() {
     const auto color = reinterpret_cast<std::uintptr_t>(ColorMemory.data());
     const auto vertex = reinterpret_cast<std::uintptr_t>(VertexCode.data());
     const auto pixel = reinterpret_cast<std::uintptr_t>(PixelCode.data());
@@ -83,28 +84,41 @@ std::vector<std::uint32_t> DrawTwice() {
     for (const auto& [offset, value] : shader) Append(commands, 0x76, {offset, value});
     Append(commands, 0x2d, {3, 2});
     Append(commands, 0x2d, {3, 2});
+    Append(commands, 0x2d, {3, 2});
     return commands;
 }
 
-void SecondDrawHitsTheCache(bool libraries) {
+void ThirdDrawHitsTheCache(bool libraries) {
     Registered(VertexHeader, VertexCode.data(), sizeof(VertexCode), 2);
     Registered(PixelHeader, PixelCode.data(), sizeof(PixelCode), 1);
-    auto commands = DrawTwice();
+    auto commands = DrawThrice();
     Packet packet{commands.data(), static_cast<std::uint32_t>(commands.size()), 0, {}};
     Require(sceAgcDriverSubmitDcb(&packet) == 0, "the draw submission failed");
     AgcDriverWaitIdle_nid_postfix();
     const auto counters = AgcDriver::DriverDetail::Driver::Get().DrawCacheCounters();
     const auto mode = std::string(libraries ? "with" : "without") + " graphics pipeline libraries";
     const auto layout = counters.misses[static_cast<std::size_t>(DrawMiss::Layout)];
-    Require(counters.lookups == 2 && counters.absent == 1, mode + ": the two draws made " + std::to_string(counters.lookups) + " draw-cache lookups (" + std::to_string(counters.absent) + " without an entry), expected 2 lookups with 1 absent");
+    Require(counters.lookups == 3 && counters.absent == 2, mode + ": the three draws made " + std::to_string(counters.lookups) + " draw-cache lookups (" + std::to_string(counters.absent) + " without an entry), expected 3 lookups with 2 absent");
+    Require(counters.inserts == 1, mode + ": the three draws inserted " + std::to_string(counters.inserts) + " draw entries, expected 1: a key is cached the second time it is seen");
     Require(layout == 0, mode + ": the repeated draw missed the draw cache on its push offset (" + std::to_string(layout) + " layout misses)");
     Require(counters.hits == 1, mode + ": the repeated draw did not reuse the cached draw (" + std::to_string(counters.hits) + " hits)");
+}
+
+void SightingsKeepCollidingKeys() {
+    DrawKeySightings sightings(DrawKeySightings::Ways);
+    Require(!sightings.SeenBefore(0) && sightings.SeenBefore(0), "draw key 0 was not admitted at its second sight");
+    Require(!sightings.SeenBefore(11) && !sightings.SeenBefore(12), "an unseen draw key was admitted");
+    Require(sightings.SeenBefore(11) && sightings.SeenBefore(12) && sightings.SeenBefore(11), "two keys in one bucket, drawn in turn, were not admitted at their second sight");
+    Require(!sightings.SeenBefore(13) && !sightings.SeenBefore(14), "an unseen draw key was admitted");
+    Require(!sightings.SeenBefore(0), "the oldest key of a full bucket was kept over the newest");
+    Require(sightings.SeenBefore(12) && sightings.SeenBefore(13) && sightings.SeenBefore(14), "a full bucket lost a key newer than the one it replaced");
 }
 
 }
 
 int main() {
     try {
+        SightingsKeepCollidingKeys();
         bool libraries = false;
         {
             const auto device = OpenVulkanTestDevice();
@@ -112,7 +126,7 @@ int main() {
             libraries = device->GraphicsPipelineLibraries();
         }
         if (!libraries && std::getenv("APS5_NO_GPL") == nullptr) return VulkanTestSkipped;
-        SecondDrawHitsTheCache(libraries);
+        ThirdDrawHitsTheCache(libraries);
         AgcDriverShutdown_nid_postfix();
         std::cout << "A repeated draw reused the cached draw " << (libraries ? "with" : "without") << " graphics pipeline libraries\n";
         return 0;

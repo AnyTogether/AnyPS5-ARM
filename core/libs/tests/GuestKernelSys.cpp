@@ -30,6 +30,7 @@ std::int64_t APS5_VABI readlink_nid_postfix(const char*, char*, std::size_t);
 std::int64_t APS5_VABI pathconf_nid_postfix(const char*, int);
 int APS5_VABI fchdir_nid_postfix(int);
 int APS5_VABI chdir_nid_postfix(const char*);
+int APS5_VABI chroot_nid_postfix(const char*);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
@@ -41,6 +42,7 @@ int APS5_VABI unlinkat_nid_postfix(int, const char*, int);
 std::int64_t APS5_VABI readlinkat_nid_postfix(int, const char*, char*, std::size_t);
 int APS5_VABI mkdirat_nid_postfix(int, const char*, std::uint16_t);
 int APS5_VABI renameat_nid_postfix(int, const char*, int, const char*);
+int APS5_VABI fchmodat_nid_postfix(int, const char*, int, int);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
@@ -62,6 +64,15 @@ bool PathconfThrows(const char* path, int name) {
         pathconf_nid_postfix(path, name);
     } catch (const std::runtime_error&) {
         return true;
+    }
+    return false;
+}
+
+bool ChrootThrows(const std::string& path) {
+    try {
+        chroot_nid_postfix(path.c_str());
+    } catch (const std::runtime_error& error) {
+        return std::strstr(error.what(), path.c_str()) != nullptr;
     }
     return false;
 }
@@ -215,6 +226,39 @@ int main() {
     Require(sceKernelClose(directory) == 0);
     Require(fchdir_nid_postfix(directory) == -1 && Error() == 9);
     Require(chdir_nid_postfix("/") == 0);
+    Require(chroot_nid_postfix(nullptr) == -1 && Error() == 14);
+    Require(chroot_nid_postfix("") == -1 && Error() == 2);
+    Require(chroot_nid_postfix((root / "missing").string().c_str()) == -1 && Error() == 2);
+    Require(chroot_nid_postfix(file.c_str()) == -1 && Error() == 20);
+    Require(chroot_nid_postfix((root / "file.txt" / "child").string().c_str()) == -1 && Error() == 20);
+    Require(chroot_nid_postfix((file + "/").c_str()) == -1 && Error() == 20);
+    Require(chroot_nid_postfix((root / "file.txt" / "..").string().c_str()) == -1 && Error() == 20);
+    Require(chroot_nid_postfix((root / std::string(256, 'n')).string().c_str()) == -1 && Error() == 63);
+    Require(chroot_nid_postfix(("/" + std::string(1024, 'p')).c_str()) == -1 && Error() == 63);
+    Require(ChrootThrows(root.string()));
+    Require(ChrootThrows("/" + root.filename().string() + "/."));
+    const auto guestRoot = "/" + root.filename().string();
+    const auto chrootFile = guestRoot + "/file.txt";
+    const int top = sceKernelOpen("/", SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Require(top >= 0);
+    Require(chdir_nid_postfix(guestRoot.c_str()) == 0);
+    Require(fchdir_nid_postfix(top) == 0 && chroot_nid_postfix(".") == 0);
+    Require(getcwd_nid_postfix(directoryPath, sizeof(directoryPath)) == directoryPath && std::strcmp(directoryPath, "/") == 0);
+    Require(sceKernelClose(top) == 0);
+    Require(chroot_nid_postfix("/") == 0 && chroot_nid_postfix("/..") == 0 && chroot_nid_postfix("//./") == 0);
+    Require(chdir_nid_postfix(guestRoot.c_str()) == 0);
+    Require(chroot_nid_postfix("..") == 0 && chroot_nid_postfix("../..") == 0);
+    Require(getcwd_nid_postfix(directoryPath, sizeof(directoryPath)) == directoryPath && guestRoot == directoryPath);
+    Require(ChrootThrows("."));
+    for (const auto& path : {std::string("file.txt"), chrootFile, "/../../.." + chrootFile, "../.." + chrootFile}) {
+        const int opened = sceKernelOpen(path.c_str(), SCE_KERNEL_O_RDONLY, 0);
+        char byte = 0;
+        Require(opened >= 0 && sceKernelRead(opened, &byte, 1) == 1 && byte == 'x');
+        Require(sceKernelClose(opened) == 0);
+    }
+    Require(chdir_nid_postfix("/") == 0);
+    Require(getcwd_nid_postfix(directoryPath, sizeof(directoryPath)) == directoryPath && std::strcmp(directoryPath, "/") == 0);
+    Require(readlink_nid_postfix(file.c_str(), buffer, sizeof(buffer)) == -1 && Error() == 22);
     const auto symbolic = (root / "symbolic").string();
     const int created = symlink_nid_postfix("original.bin", symbolic.c_str());
     if (created == 0) {
@@ -404,6 +448,22 @@ int main() {
     Require(sceKernelClose(subFd) == 0);
     Require(renameat_nid_postfix(-100, (root / "made.bin").string().c_str(), -100, (root / "final.bin").string().c_str()) == 0);
     Require(std::filesystem::is_regular_file(root / "final.bin"));
+    Require(fchmodat_nid_postfix(base, "file.txt", 0600, 0x0200) == 0);
+    Require(fchmodat_nid_postfix(-100, (root / "file.txt").string().c_str(), 0644, 0) == 0);
+#ifndef _WIN32
+    Require((std::filesystem::status(root / "file.txt").permissions() & std::filesystem::perms::all) ==
+        (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write | std::filesystem::perms::group_read | std::filesystem::perms::others_read));
+#endif
+    Require(fchmodat_nid_postfix(base, "missing.bin", 0600, 0) == -1 && Error() == 2);
+    Require(fchmodat_nid_postfix(base, nullptr, 0600, 0) == -1 && Error() == 14);
+    Require(fchmodat_nid_postfix(base, "", 0600, 0) == -1 && Error() == 2);
+    Require(fchmodat_nid_postfix(base, "file.txt", 0600, 0x4000) == -1 && Error() == 22);
+    Require(fchmodat_nid_postfix(-1, "file.txt", 0600, 0) == -1 && Error() == 9);
+#ifndef _WIN32
+    Require(symlink_nid_postfix("loop", (root / "loop").string().c_str()) == 0);
+    Require(fchmodat_nid_postfix(base, "loop/x", 0600, 0) == -1 && Error() == 62);
+    Require(fchmodat_nid_postfix(base, longName.c_str(), 0600, 0) == -1 && Error() == 63);
+#endif
     Require(sceKernelClose(base) == 0);
     std::filesystem::remove_all(root);
     return 0;

@@ -1,3 +1,4 @@
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -38,6 +39,33 @@ std::string AsciiPrefix(const char16_t* text) {
     return prefix;
 }
 
+bool IsNanSubject(const char* text) {
+    while (*text == ' ' || (*text >= '\t' && *text <= '\r')) ++text;
+    if (*text == '+' || *text == '-') ++text;
+    return *text == 'n' || *text == 'N';
+}
+
+double QuietNan(double value, const char* text) {
+    const auto bits = std::bit_cast<std::uint64_t>(value);
+    if ((bits & 0x7ff0000000000000u) != 0x7ff0000000000000u || !IsNanSubject(text)) return value;
+    return std::bit_cast<double>((bits & 0x8000000000000000u) | 0x7ff8000000000000u);
+}
+
+float QuietNan(float value, const char* text) {
+    const auto bits = std::bit_cast<std::uint32_t>(value);
+    if ((bits & 0x7f800000u) != 0x7f800000u || !IsNanSubject(text)) return value;
+    return std::bit_cast<float>((bits & 0x80000000u) | 0x7fc00000u);
+}
+
+long double QuietNan(long double value, const char* text) {
+    std::uint16_t exponent;
+    std::memcpy(&exponent, reinterpret_cast<const unsigned char*>(&value) + sizeof(std::uint64_t), sizeof(exponent));
+    if ((exponent & 0x7fffu) != 0x7fffu || !IsNanSubject(text)) return value;
+    const std::uint64_t significand = 0xc000000000000000u;
+    std::memcpy(&value, &significand, sizeof(significand));
+    return value;
+}
+
 template<typename TParse>
 auto ParseAsciiPrefix(const char16_t* text, char16_t** end, TParse parse) {
     const std::string prefix = AsciiPrefix(text);
@@ -67,7 +95,7 @@ TFloat ParseFloat(const char* text, char** end, TFloat (*parse)(const char*, cha
     char* parsedEnd = nullptr;
     const TFloat value = parse(text, &parsedEnd);
     if (end != nullptr) *end = parsedEnd;
-    return parsedEnd == text ? TFloat{0} : value;
+    return parsedEnd == text ? TFloat{0} : QuietNan(value, text);
 }
 
 }
@@ -419,6 +447,11 @@ char16_t* APS5_VABI wcscpy_nid_postfix(char16_t* dest, const char16_t* src) {
     return dest;
 }
 
+char16_t* APS5_VABI wcscat_nid_postfix(char16_t* dest, const char16_t* src) {
+    std::memcpy(dest + Length(dest), src, (Length(src) + 1) * sizeof(char16_t));
+    return dest;
+}
+
 char16_t* APS5_VABI wcsncpy_nid_postfix(char16_t* dest, const char16_t* src, size_t n) {
     size_t index = 0;
     for (; index < n && src[index] != 0; ++index) dest[index] = src[index];
@@ -536,7 +569,11 @@ int APS5_VABI wcscoll_nid_postfix(const char16_t* first, const char16_t* second)
 
 size_t APS5_VABI wcsxfrm_nid_postfix(char16_t* destination, const char16_t* source, size_t count) {
     const size_t length = Length(source);
-    if (length < count) std::memcpy(destination, source, (length + 1) * sizeof(char16_t));
+    if (count != 0) {
+        const size_t copied = length < count ? length : count - 1;
+        std::memcpy(destination, source, copied * sizeof(char16_t));
+        destination[copied] = 0;
+    }
     return length;
 }
 

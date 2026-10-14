@@ -1,10 +1,16 @@
 import argparse
+import importlib.util
 import json
 import os
 import re
 import sys
 from html import escape
 from pathlib import Path
+
+tokenizer_spec = importlib.util.spec_from_file_location("anyps5_cpp_tokenizer", Path(__file__).with_name("nid_names.py"))
+tokenizer = importlib.util.module_from_spec(tokenizer_spec)
+tokenizer_spec.loader.exec_module(tokenizer)
+CPP_TOKEN = tokenizer.CPP_TOKEN
 
 ROOT = Path(__file__).resolve().parent.parent
 PRX = ROOT / "core" / "libs" / "prx"
@@ -20,7 +26,6 @@ STUB_WRAPPER = re.compile(
     r"^[ \t]*(?:static\s+)?(?:\[\[noreturn\]\]\s+)?(?:(?!APS5_VABI)[\w:<>,\s*&])+?[\s*&]"
     r"(?!(?:if|while|for|switch|catch|return|else)\b)(\w+)\s*\([^;{]*\)\s*"
     r"(?:const\s*)?(?:noexcept\s*)?(?:->\s*[\w:<>*&\s]+?)?\{", re.M)
-NON_CODE = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
 DISCARD = re.compile(r"\(void\)\s*\w+\s*;")
 EMPTY_RETURN = re.compile(r"return\s*;")
 CONST_RETURN = re.compile(r"return\s+(?:[+-]?\s*(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*|\w+|\"(?:\\.|[^\"\\])*\")\s*;")
@@ -73,14 +78,15 @@ DONE_COLOR, TODO_COLOR, BORDER, TEXT = "#2ea043", "#6e7681", "#0d1117", "#ffffff
 
 
 def blank(match):
-    if match.group(0).startswith(('"', "'")):
+    if match.group("code") is not None:
+        return match.group()
+    if match.group("comment") is None:
         return "LITERAL"
-    return re.sub(r"[^\n]", " ", match.group(0))
+    return re.sub(r"[^\n]", " ", match.group())
 
 
 def code(text):
-    return NON_CODE.sub(blank, text)
-
+    return CPP_TOKEN.sub(blank, text.replace("\\\n", "").replace("\\\r\n", ""))
 
 def body_end(text, start):
     depth = 0
@@ -158,7 +164,7 @@ def scan_library(path):
         wrappers = inert_wrappers(text)
         for match in DEFINITION.finditer(text):
             name = match.group(1)
-            if name.endswith("_nid_no_patch"):
+            if name.endswith(("_nid_no_patch", "_nid_no_patch_cut")):
                 continue
             body = text[match.end() - 1:body_end(text, match.end() - 1)]
             if any(call.group(1) in calls for call in CALL.finditer(body)):
@@ -172,7 +178,7 @@ def scan_library(path):
              "done_names": sorted(done), "todo_names": sorted(todo), "inert_names": sorted(inert)}
     if not (done or todo):
         cmake = path / "CMakeLists.txt"
-        texts = [(CMAKE_SHARED, cmake.read_text())] if cmake.is_file() else []
+        texts = [(CMAKE_SHARED, cmake.read_text(encoding="utf-8", errors="ignore"))] if cmake.is_file() else []
         texts += [(SOURCE_SHARED, source.read_text(errors="ignore")) for source in sorted(path.glob("*.cpp"))]
         owners = [m[1] for pattern, content in texts for m in pattern.finditer(content)]
         owners = [o for o in owners if o != path.name and (path.parent / o).is_dir()]
@@ -197,12 +203,12 @@ def camel(name):
 
 def collect_shaders():
     isa = {}
-    for line in ISA.read_text().splitlines():
+    for line in ISA.read_text(encoding="utf-8", errors="ignore").splitlines():
         if line and not line.startswith("#"):
             name, encoding = line.split()
             isa[name] = encoding
     by_camel = {camel(name): name for name in isa}
-    enum = re.search(r"enum class RdnaOpcode[^{]*\{(.*?)\};", OPCODES.read_text(), re.S).group(1)
+    enum = re.search(r"enum class RdnaOpcode[^{]*\{(.*?)\};", OPCODES.read_text(encoding="utf-8", errors="ignore"), re.S).group(1)
     opcodes = [o for o in re.findall(r"^\s*([A-Z]\w*)\s*[,=]", enum, re.M) if o not in OPCODE_SENTINELS]
     supported, extra = set(), []
     for opcode in opcodes:
@@ -443,6 +449,6 @@ if __name__ == "__main__":
     (output / "badge-libraries.svg").write_text(badge("libraries*", libraries))
     (output / "badge-shaders.svg").write_text(badge("shaders", shaders))
     (output / "progress.svg").write_text(render(libraries, shaders))
-    (output / "index.html").write_text(summary(libraries, shaders))
+    (output / "progress.html").write_text(summary(libraries, shaders))
     print(f'libraries {libraries["done"]}/{libraries["total"]} ({libraries["percent"]}%)')
     print(f'shaders {shaders["done"]}/{shaders["total"]} ({shaders["percent"]}%)')

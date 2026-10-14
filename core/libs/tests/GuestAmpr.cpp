@@ -651,6 +651,70 @@ void TestZeroFilledBuffer() {
     std::remove(path);
 }
 
+void TestReadPastEndOfFileZeroFills() {
+    const std::filesystem::path directory = "ampr_read_past_end";
+    std::filesystem::remove_all(directory);
+    Require(std::filesystem::create_directory(directory));
+    const auto file = directory / "settings.ini";
+    {
+        std::ofstream stream(file, std::ios::binary);
+        for (std::size_t offset = 0; offset < 64; ++offset) stream.put(static_cast<char>(FileByte(offset)));
+    }
+    const std::string filePath = file.generic_string();
+    const char* path = filePath.c_str();
+    std::uint32_t fileId = 0;
+    std::uint64_t size = 0;
+    std::uint32_t failed = 0;
+    Require(sceKernelAprResolveFilepathsToIdsAndFileSizes(&path, 1, &fileId, &size, &failed) == 0 && size == 64);
+    {
+        std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+        for (std::size_t offset = 1; offset < size; ++offset) stream.put(static_cast<char>(FileByte(offset)));
+    }
+
+    std::array<std::uint8_t, 64> whole;
+    std::array<std::uint8_t, 24> continued;
+    std::array<std::uint8_t, 16> atEnd;
+    std::array<std::uint8_t, 16> pastEnd;
+    whole.fill(0xA5);
+    continued.fill(0xA5);
+    atEnd.fill(0xA5);
+    pastEnd.fill(0xA5);
+    Recorder recorder;
+    Require(sceAmprAprCommandBufferReadFile(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, fileId, whole.data(), size, 0) == 0);
+    Require(sceAmprAprCommandBufferReadFileScatter(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, continued.data(), 16) == 0);
+    Require(sceAmprAprCommandBufferReadFileGather(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, 8, 0) == 0);
+    Require(sceAmprAprCommandBufferReadFile(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, fileId, atEnd.data(), atEnd.size(), size - 1) == 0);
+    Require(sceAmprAprCommandBufferReadFile(&recorder.buffer, &recorder.gatherState, &recorder.scatterState, fileId, pastEnd.data(), pastEnd.size(), 4096) == 0);
+    Require(sceKernelAprSubmitCommandBuffer(&recorder.buffer, 0) == 0);
+    Require(MatchesFile(whole.data(), 1, size - 1) && whole[size - 1] == 0);
+    for (std::size_t index = 0; index < 16; ++index) Require(continued[index] == 0);
+    Require(MatchesFile(continued.data() + 16, 1, 8));
+    for (const auto byte : atEnd) Require(byte == 0);
+    for (const auto byte : pastEnd) Require(byte == 0);
+    std::filesystem::remove_all(directory);
+}
+
+void TestReadAtUnseekableOffsetThrows() {
+    const char* path = "ampr_unseekable_offset.bin";
+    { std::ofstream file(path, std::ios::binary); file << "data"; }
+    std::uint32_t fileId = 0;
+    std::uint32_t failed = 0;
+    Require(sceKernelAprResolveFilepathsToIds(&path, 1, &fileId, &failed) == 0);
+    std::array<std::uint8_t, 4> data{};
+    const Apr::ReadFileCommand command{{Apr::Opcode::ReadFile, sizeof(Apr::ReadFileCommand)}, fileId, 0, reinterpret_cast<std::uint64_t>(data.data()), data.size(), std::uint64_t{1} << 63u};
+    alignas(8) std::array<std::uint8_t, sizeof(command)> memory{};
+    std::memcpy(memory.data(), &command, sizeof(command));
+    Apr::CommandBufferObject buffer{Apr::BufferType::Generic, 0, sizeof(memory), 1, sizeof(memory), memory.data()};
+    bool rejected = false;
+    try {
+        sceKernelAprSubmitCommandBuffer(&buffer, 0);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("returned 0 of 4 bytes") != std::string::npos;
+    }
+    Require(rejected);
+    std::remove(path);
+}
+
 void TestResolveFailures() {
     const char* paths[]{"ampr_resolve_existing.bin", "ampr_resolve_missing.bin"};
     { std::ofstream file(paths[0], std::ios::binary); file << "data"; }
@@ -1404,6 +1468,8 @@ int main() {
     TestClearBuffer();
     TestConstructed();
     TestZeroFilledBuffer();
+    TestReadPastEndOfFileZeroFills();
+    TestReadAtUnseekableOffsetThrows();
     TestResolveFailures();
     TestMalformedCommandSizes();
     TestResolveSymbolicLink();

@@ -1,10 +1,13 @@
 #include "prx/libc/include/exceptions/Runtime.hpp"
+#include "prx/libc/include/GuestLocale.hpp"
 #include <cstdio>
 #include <iterator>
 #include <limits>
 #include <regex>
 #include <stdexcept>
 #include <string>
+
+extern "C" void* APS5_VABI _Znwm_nid_postfix(std::size_t size);
 
 namespace LibcException {
 struct TypeRecord { const void* const* vtable; const char* name; const TypeRecord* base; };
@@ -129,6 +132,86 @@ struct SystemErrorObject { ExceptionObject base; ErrorCode code; };
 static_assert(sizeof(ErrorCode) == 16 && sizeof(SystemErrorObject) == 32 && offsetof(SystemErrorObject, code) == 16);
 struct CppError { int value; const char* message; };
 
+static const char* GenericErrorMessage(int value) {
+    static constexpr CppError errors[] {
+        {1, "operation not permitted"},
+        {2, "no such file or directory"},
+        {3, "no such process"},
+        {4, "interrupted"},
+        {5, "io error"},
+        {6, "no such device or address"},
+        {7, "argument list too long"},
+        {8, "executable format error"},
+        {9, "bad file descriptor"},
+        {10, "no child process"},
+        {11, "resource deadlock would occur"},
+        {12, "not enough memory"},
+        {13, "permission denied"},
+        {14, "bad address"},
+        {16, "device or resource busy"},
+        {17, "file exists"},
+        {18, "cross device link"},
+        {19, "no such device"},
+        {20, "not a directory"},
+        {21, "is a directory"},
+        {22, "invalid argument"},
+        {23, "too many files open in system"},
+        {24, "too many files open"},
+        {25, "inappropriate io control operation"},
+        {26, "text file busy"},
+        {27, "file too large"},
+        {28, "no space on device"},
+        {29, "invalid seek"},
+        {30, "read only file system"},
+        {31, "too many links"},
+        {32, "broken pipe"},
+        {33, "argument out of domain"},
+        {34, "result out of range"},
+        {35, "operation would block"},
+        {36, "operation in progress"},
+        {37, "connection already in progress"},
+        {38, "not a socket"},
+        {39, "destination address required"},
+        {40, "message size"},
+        {41, "wrong protocol type"},
+        {42, "no protocol option"},
+        {43, "protocol not supported"},
+        {45, "not supported"},
+        {47, "address family not supported"},
+        {48, "address in use"},
+        {49, "address not available"},
+        {50, "network down"},
+        {51, "network unreachable"},
+        {52, "network reset"},
+        {53, "connection aborted"},
+        {54, "connection reset"},
+        {55, "no buffer space"},
+        {56, "already connected"},
+        {57, "not connected"},
+        {60, "timed out"},
+        {61, "connection refused"},
+        {62, "too many symbolic link levels"},
+        {63, "filename too long"},
+        {65, "host unreachable"},
+        {66, "directory not empty"},
+        {77, "no lock available"},
+        {78, "function not supported"},
+        {82, "identifier removed"},
+        {83, "no message"},
+        {84, "value too large"},
+        {85, "operation canceled"},
+        {86, "illegal byte sequence"},
+        {89, "bad message"},
+        {91, "no link"},
+        {92, "protocol error"},
+        {95, "state not recoverable"},
+        {96, "owner dead"}
+    };
+    for (const auto& error : errors)
+        if (error.value == value) return error.message;
+    return nullptr;
+}
+
 const TypeRecord ErrorCategoryType {ClassTypeVtable + 2, "St14error_category", nullptr};
 const TypeRecord GenericCategoryType {SingleTypeVtable + 2, "St23_Generic_error_category", &ErrorCategoryType};
 static void APS5_VABI GenericCategoryDestroy_nid_no_patch(CategoryObject*) {}
@@ -136,8 +219,18 @@ static void APS5_VABI GenericCategoryDelete_nid_no_patch(CategoryObject*) {
     throw std::invalid_argument("std::_Generic_error_category: the generic category object is not heap allocated");
 }
 static const char* APS5_VABI GenericCategoryName_nid_no_patch(const CategoryObject*) { return "generic"; }
-static void* APS5_VABI GenericCategoryMessage_nid_no_patch(void* result, const CategoryObject*, int) {
-    NotImplemented_nid_no_patch("std::_Generic_error_category::message");
+static GuestLocale::String* APS5_VABI GenericCategoryMessage_nid_no_patch(GuestLocale::String* result, const CategoryObject*, int value) {
+    if (!result) throw std::invalid_argument("std::_Generic_error_category::message: null result");
+    const char* message = GenericErrorMessage(value);
+    if (!message) message = "unknown error";
+    const auto length = std::strlen(message);
+    const auto capacity = length | std::size_t{15};
+    char* storage = length <= 15 ? result->buffer : static_cast<char*>(_Znwm_nid_postfix(capacity + 1));
+    std::memcpy(storage, message, length + 1);
+    result->reserved = 0;
+    if (length > 15) result->pointer = storage;
+    result->size = length;
+    result->capacity = capacity;
     return result;
 }
 static ErrorCode APS5_VABI GenericCategoryCondition_nid_no_patch(const CategoryObject* self, int value) { return {value, self}; }
@@ -159,6 +252,16 @@ const CategoryObject GenericCategory {GenericCategoryVtable + 2};
 }
 
 extern "C" {
+const char* APS5_VABI _ZSt13_Syserror_mapi_nid_postfix(int value) {
+    return LibcException::GenericErrorMessage(value);
+}
+const LibcException::CategoryObject* APS5_VABI _ZSt16generic_categoryv_nid_postfix() {
+    return &LibcException::GenericCategory;
+}
+GuestLocale::String* APS5_VABI _ZNKSt23_Generic_error_category7messageEi_nid_postfix(
+    GuestLocale::String* result, const LibcException::CategoryObject* self, int value) {
+    return LibcException::GenericCategoryMessage_nid_no_patch(result, self, value);
+}
 LibcException::TypeRecord _ZTISt8ios_base_nid_postfix {LibcException::ClassTypeVtable + 2, "St8ios_base", nullptr};
 LibcException::TypeRecord _ZTISt9exception_nid_postfix {LibcException::ClassTypeVtable + 2, "St9exception", nullptr};
 LibcException::ExceptionVtable _ZTVSt9exception_nid_postfix {0, &_ZTISt9exception_nid_postfix, LibcException::GuestDestroyPlain_nid_no_patch, LibcException::GuestDeletePlain_nid_no_patch, LibcException::GuestPlainWhat_nid_no_patch};
@@ -382,7 +485,7 @@ const char* APS5_VABI _ZNKSt8ios_base7failure4whatEv_nid_postfix(const LibcExcep
         throw std::out_of_range("_Throw_Cpp_error: " + std::to_string(code) + " is not a _Cpp_error code");
     const auto& error = errors[code];
     char message[128];
-    std::snprintf(message, sizeof(message), "%s: %s", error.message, error.message);
+    std::snprintf(message, sizeof(message), "%s: %s", error.message, LibcException::GenericErrorMessage(error.value));
     auto* object = static_cast<LibcException::SystemErrorObject*>(__cxa_allocate_exception_nid_postfix(sizeof(LibcException::SystemErrorObject)));
     LibcException::Construct(&object->base, _ZTVSt12system_error_nid_postfix, message);
     object->code = {error.value, &LibcException::GenericCategory};

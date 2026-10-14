@@ -342,11 +342,32 @@ int main() {
     char* firstState = nullptr;
     char* secondState = nullptr;
     Require(std::strcmp(strtok_r_nid_postfix(first, ",", &firstState), "a") == 0);
+    Require(firstState == first + 3);
     Require(std::strcmp(strtok_r_nid_postfix(second, ":", &secondState), "x") == 0);
+    Require(secondState == second + 2);
     Require(std::strcmp(strtok_r_nid_postfix(nullptr, ",", &firstState), "b") == 0);
+    Require(firstState == first + 6);
     Require(strtok_r_nid_postfix(nullptr, ",", &firstState) == nullptr);
+    if (firstState != nullptr) std::fputs("strtok_r retained the state after exhausting delimiters\n", stderr);
+    Require(firstState == nullptr);
     Require(strtok_r_nid_postfix(nullptr, ",", &firstState) == nullptr);
     Require(std::strcmp(strtok_r_nid_postfix(nullptr, "", &secondState), "y") == 0);
+    Require(secondState == nullptr);
+    char tokenEnd[8] = "last";
+    char* finishedState = first;
+    *__error_nid_postfix() = 77;
+    Require(strtok_r_nid_postfix(tokenEnd, ",", &finishedState) == tokenEnd && finishedState == nullptr);
+    tokenEnd[4] = 'x';
+    tokenEnd[5] = '\0';
+    Require(strtok_r_nid_postfix(nullptr, ",", &finishedState) == nullptr && finishedState == nullptr);
+    for (const char* input : {"", ",", ",,,"}) {
+        char noTokens[8];
+        std::strcpy(noTokens, input);
+        finishedState = first;
+        Require(strtok_r_nid_postfix(noTokens, ",", &finishedState) == nullptr && finishedState == nullptr);
+        Require(strtok_r_nid_postfix(nullptr, ",", &finishedState) == nullptr);
+    }
+    Require(*__error_nid_postfix() == 77);
     char hostTokens[] = "host:next";
     Require(std::strcmp(std::strtok(hostTokens, ":"), "host") == 0);
     char guestTokens[] = ",one,,two:three";

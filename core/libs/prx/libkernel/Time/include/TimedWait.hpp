@@ -16,37 +16,45 @@ std::uint64_t DeadlineNanos(std::uint64_t microseconds);
 std::uint64_t RemainingMicros(std::uint64_t deadlineNanos);
 void SleepNanos(std::uint64_t nanos);
 void SleepUntil(std::uint64_t deadlineNanos);
-void PollSleepUntil(std::uint64_t deadlineNanos);
-
-constexpr std::uint64_t LOCK_BULK_NANOS = 40000000ULL;
-constexpr std::uint64_t LOCK_POLL_NANOS = 500000ULL;
-constexpr std::uint64_t LOCK_TAIL_NANOS = 1000000ULL;
-
-template <class TTryLock, class TTryLockFor>
-bool AcquireUntil(std::uint64_t deadlineNanos, TTryLock tryLock, TTryLockFor tryLockFor) {
-    if (Coarse()) return tryLockFor(RemainingMicros(deadlineNanos));
-    for (;;) {
-        if (tryLock()) return true;
-        const std::uint64_t now = NowNanos();
-        if (now >= deadlineNanos) return false;
-        const std::uint64_t remaining = deadlineNanos - now;
-#ifdef _WIN32
-        if (remaining > LOCK_TAIL_NANOS) {
-            PollSleepUntil(now + (remaining < LOCK_POLL_NANOS ? remaining : LOCK_POLL_NANOS));
-            continue;
-        }
-#else
-        if (remaining > LOCK_BULK_NANOS) {
-            if (tryLockFor((remaining - LOCK_BULK_NANOS) / 1000ULL)) return true;
-            continue;
-        }
-#endif
-        if (remaining <= LOCK_TAIL_NANOS) SleepUntil(deadlineNanos);
-        else PollSleepUntil(now + LOCK_POLL_NANOS);
-    }
-}
 
 struct Waiter;
+
+#ifdef _WIN32
+constexpr unsigned PARK_SPINS = 1000;
+
+void SpinPause();
+Waiter* BeginPark(const void* key);
+bool FinishPark(const void* key, Waiter* waiter, const std::uint64_t* deadlineNanos);
+void CancelPark(const void* key, Waiter* waiter);
+void Unpark(const void* key);
+
+template <class TTryLock>
+bool ParkAcquire(const void* key, TTryLock tryLock, const std::uint64_t* deadlineNanos) {
+    for (unsigned spin = 0; spin < PARK_SPINS; ++spin) {
+        if (tryLock()) return true;
+        SpinPause();
+    }
+    for (;;) {
+        Waiter* waiter = BeginPark(key);
+        if (tryLock()) {
+            CancelPark(key, waiter);
+            return true;
+        }
+        if (!FinishPark(key, waiter, deadlineNanos)) return tryLock();
+        if (tryLock()) return true;
+    }
+}
+#endif
+
+template <class TTryLock, class TTryLockFor>
+bool AcquireUntil(const void* key, std::uint64_t deadlineNanos, TTryLock tryLock, TTryLockFor tryLockFor) {
+#ifdef _WIN32
+    if (!Coarse()) return ParkAcquire(key, tryLock, &deadlineNanos);
+#endif
+    static_cast<void>(key);
+    static_cast<void>(tryLock);
+    return tryLockFor(RemainingMicros(deadlineNanos));
+}
 
 class Condition {
 public:

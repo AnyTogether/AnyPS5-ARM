@@ -3,6 +3,17 @@ target_include_directories(libSceSystemService PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceSystemService)
 
 if(BUILD_TESTING)
+    if(WIN32)
+        add_test_executable(guest_system_service_path_boundary_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemServicePathBoundary.cpp)
+        target_include_directories(guest_system_service_path_boundary_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_system_service_path_boundary_tests PRIVATE libSceSystemService libc)
+        configure_windows_unwind(guest_system_service_path_boundary_tests)
+        add_test(NAME guest_system_service_path_boundary COMMAND guest_system_service_path_boundary_tests)
+        set_tests_properties(guest_system_service_path_boundary PROPERTIES TIMEOUT 20)
+        set_tests_properties(guest_system_service_path_boundary PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+
     add_test_executable(guest_system_exit_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemExit.cpp)
     target_include_directories(guest_system_exit_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_system_exit_tests PRIVATE libSceSystemService libc)
@@ -13,14 +24,17 @@ if(BUILD_TESTING)
     add_test(NAME guest_immediate_exit COMMAND guest_system_exit_tests --immediate)
     add_test(NAME guest_return_from_main COMMAND guest_system_exit_tests --return-from-main)
     add_test(NAME guest_system_relaunch COMMAND guest_system_exit_tests --relaunch-driver)
+    add_test(NAME guest_nested_exit COMMAND guest_system_exit_tests --nested-exit-driver)
     set_tests_properties(guest_system_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest shutdown and atexit completed")
     set_tests_properties(guest_quick_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest quick_exit handlers completed")
     set_tests_properties(guest_system_relaunch PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest relaunch completed" TIMEOUT 30)
+    set_tests_properties(guest_nested_exit PROPERTIES
+        PASS_REGULAR_EXPRESSION "Guest nested exit completed" TIMEOUT 30)
     if(WIN32)
-        set_tests_properties(guest_system_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_system_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch guest_nested_exit PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_system_service_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemService.cpp)

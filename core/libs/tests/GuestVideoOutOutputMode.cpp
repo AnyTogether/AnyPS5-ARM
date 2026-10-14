@@ -23,6 +23,7 @@ static constexpr int MAIN_BUS = 0;
 static constexpr int INVALID_VALUE = static_cast<int>(0x80290001);
 static constexpr int INVALID_ADDRESS = static_cast<int>(0x80290002);
 static constexpr int INVALID_HANDLE = static_cast<int>(0x8029000B);
+static constexpr int RESOURCE_BUSY = static_cast<int>(0x80290009);
 static constexpr int UNSUPPORTED_OUTPUT_MODE = static_cast<int>(0x80290016);
 static constexpr int UNKNOWN_OUTPUT_MODE = static_cast<int>(0x8029001E);
 
@@ -52,6 +53,7 @@ int main() {
         return 77;
     }
     Require(handle > 0);
+    Require(sceVideoOutOpen(SYSTEM_USER, MAIN_BUS, 0, nullptr) == RESOURCE_BUSY);
     Require(sceVideoOutIsOutputSupported(handle, 1, &options, nullptr, 0) == 1);
     Require(sceVideoOutIsOutputSupported(handle, 1, nullptr, nullptr, 0) == 1);
     const int highFrameRate = sceVideoOutIsOutputSupported(handle, 15, &options, nullptr, 0);

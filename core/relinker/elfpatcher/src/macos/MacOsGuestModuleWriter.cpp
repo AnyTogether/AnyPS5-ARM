@@ -3,6 +3,7 @@
 #include <elfpatcher/windows/WindowsLoadImage.hpp>
 #include <elfpatcher/windows/WindowsPeFormat.hpp>
 #include <io/BufferUtils.hpp>
+#include <io/NativePath.hpp>
 #include <algorithm>
 #include <map>
 
@@ -121,7 +122,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
     try {
         return WriteMacOsImage(input);
     } catch (Domain::RelinkerException& error) {
-        error.InputPath = guest.SourcePath.string();
+        if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(guest.SourcePath);
         throw;
     }
 }

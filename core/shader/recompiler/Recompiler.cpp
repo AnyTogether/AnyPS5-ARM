@@ -117,6 +117,8 @@ std::uint32_t DeviceMemoryLdsBytes(const RecompileRequest& request) {
     return bytes + 4u > request.target.maxWorkgroupSharedMemoryBytes ? static_cast<std::uint32_t>(bytes) : 0u;
 }
 
+std::atomic<std::uint64_t> frontEndBuilds{0};
+
 }
 
 struct PreparedControlFlow {
@@ -156,11 +158,16 @@ std::shared_ptr<const PreparedControlFlow> ShaderPreparationContext::AcquireFron
     return prepared;
 }
 
+std::uint64_t FrontEndBuilds() {
+    return frontEndBuilds.load(std::memory_order_relaxed);
+}
+
 IrProgram PrepareResourceProgram(const RecompileRequest& request) {
     return PrepareResourceProgram(request, nullptr);
 }
 
 IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparationContext* preparation) {
+    frontEndBuilds.fetch_add(1, std::memory_order_relaxed);
     ShaderPreparationContext local;
     const auto frontend = (preparation != nullptr ? *preparation : local).AcquireFrontend(request);
     const auto stageKind = toShaderStageKind(request.shader.stage);
@@ -328,14 +335,27 @@ public:
 };
 
 struct ResourceProgram {
-    explicit ResourceProgram(const RecompileRequest& request, ShaderPreparationContext* preparation = nullptr) : program(std::make_unique<IrProgram>(PrepareResourceProgram(request, preparation))), plan(std::make_shared<const IrResourcePlan>(ResourceMaterializer{}.ExtractPlan(*program))) {}
+    explicit ResourceProgram(const RecompileRequest& request, ShaderPreparationContext* preparation = nullptr, bool reclaim = true) : program(std::make_unique<IrProgram>(PrepareResourceProgram(request, preparation))) {
+        const auto clearRegisterState = [](const auto& storage) {
+            for (const auto& block : storage) {
+                block->ssaScalarValues.fill(nullptr);
+                block->ssaVectorValues.fill(nullptr);
+                block->ssaThreadBitScalarValues.fill(nullptr);
+                block->ssaScalarMaskTags.fill(nullptr);
+            }
+        };
+        clearRegisterState(program->Blocks());
+        clearRegisterState(program->Resources().blockStorage);
+        if (reclaim) program->ReclaimUnusedValues();
+        plan = std::make_shared<const IrResourcePlan>(ResourceMaterializer{}.ExtractPlan(*program));
+    }
 
     std::unique_ptr<IrProgram> program;
     std::shared_ptr<const IrResourcePlan> plan;
 };
 
 std::shared_ptr<const IrResourcePlan> makeResourcePlan(const RecompileRequest& request) {
-    return ResourceProgram(request).plan;
+    return ResourceProgram(request, nullptr, false).plan;
 }
 
 struct SourceKeyHash {
@@ -354,7 +374,15 @@ bool FailureMemo() {
     return memo;
 }
 
-std::shared_ptr<SourceEntry> getSource(const RecompileRequest& request, ShaderPreparationContext* preparation = nullptr) {
+bool diskPlans() {
+    static const bool enabled = [] {
+        const char* dumpIr = std::getenv("APS5_DUMP_IR");
+        return std::getenv("APS5_NO_PERF_DISK_PLANS") == nullptr && (dumpIr == nullptr || *dumpIr == '\0');
+    }();
+    return enabled && ShaderDiskCache::Enabled() && !DebugProbeActive();
+}
+
+std::shared_ptr<SourceEntry> getSource(const RecompileRequest& request, ShaderPreparationContext* preparation = nullptr, bool reclaim = true) {
     static PrimedSharedMutex mutex;
     // Entries whose code hashes alike share a bucket; the code comparison picks the right one.
     static std::unordered_map<std::vector<std::uint64_t>, std::vector<std::shared_ptr<SourceEntry>>, SourceKeyHash> sources;
@@ -397,13 +425,26 @@ std::shared_ptr<SourceEntry> getSource(const RecompileRequest& request, ShaderPr
         std::lock_guard lock(source->mutex);
         if (source->plan == nullptr) {
             if (FailureMemo() && source->planFailure) std::rethrow_exception(source->planFailure);
-            try {
-                ResourceProgram resource(request, preparation);
-                source->plan = std::move(resource.plan);
-                source->program = std::move(resource.program);
-            } catch (...) {
-                if (FailureMemo()) source->planFailure = std::current_exception();
-                throw;
+            const bool disk = diskPlans();
+            std::vector<std::byte> planKey;
+            if (disk) {
+                ShaderDiskCache::BuildPlanKey(request, HostSubgroupSize(request), planKey);
+                IrResourcePlan loaded;
+                if (ShaderDiskCache::LoadPlan(planKey, loaded)) {
+                    loaded.shaderHash = request.shader.codeAddress;
+                    source->plan = std::make_shared<const IrResourcePlan>(std::move(loaded));
+                }
+            }
+            if (source->plan == nullptr) {
+                try {
+                    ResourceProgram resource(request, preparation, reclaim);
+                    source->plan = std::move(resource.plan);
+                    source->program = std::move(resource.program);
+                } catch (...) {
+                    if (FailureMemo()) source->planFailure = std::current_exception();
+                    throw;
+                }
+                if (disk) ShaderDiskCache::StorePlan(std::move(planKey), source->plan);
             }
         }
     }
@@ -452,6 +493,7 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     const auto stage = program.Resources().stage;
     targetOptions.contractFloat = request.target.relaxedFloat && (stage == IrShaderStage::Pixel || stage == IrShaderStage::Compute);
     targetOptions.meshAsCompute = request.target.meshAsCompute && stage == IrShaderStage::Mesh;
+    targetOptions.float16DenormPreserve = request.target.float16DenormPreserve;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;
@@ -655,7 +697,7 @@ struct RegistrationModuleEntry {
 std::shared_ptr<const SpecializedModule> registrationModule(std::uint64_t variantId, std::span<const std::uint32_t> moduleKey, const std::function<std::shared_ptr<const SpecializedModule>()>& specialize) {
     std::vector<std::uint64_t> key{variantId};
     key.insert(key.end(), moduleKey.begin(), moduleKey.end());
-    static std::shared_mutex mutex;
+    static PrimedSharedMutex mutex;
     static std::map<std::vector<std::uint64_t>, std::shared_ptr<RegistrationModuleEntry>> modules;
     std::shared_ptr<RegistrationModuleEntry> entry;
     {
@@ -794,6 +836,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         for (const auto packing : request.context.pixel->targetExportPacking) moduleKey.push_back(static_cast<std::uint32_t>(packing));
         moduleKey.push_back(request.context.pixel->dualSourceBlend ? 1u : 0u);
         if (variant.info.info.rasterPrimitive) moduleKey.push_back(static_cast<std::uint32_t>(request.context.pixel->rasterPrimitive));
+        if (variant.info.info.layerExported) moduleKey.push_back(request.context.pixel->layerExported ? 1u : 0u);
     }
     result.vertexAttributes.reserve(result.vertexInputs.size());
     std::array<std::uint32_t, ShaderVertexStageInfo::MaxResources> vertexClasses{};
@@ -841,6 +884,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
                 for (std::uint32_t target = 0; target < request.context.pixel->targetExportPacking.size(); ++target) constants.push_back({PipelineSpecialization::ExportPackingBase + target, moduleKey[index++]});
                 constants.push_back({PipelineSpecialization::DualSourceBlend, moduleKey[index++]});
                 if (variant.info.info.rasterPrimitive) constants.push_back({PipelineSpecialization::RasterPrimitive, moduleKey[index++]});
+                if (variant.info.info.layerExported) constants.push_back({PipelineSpecialization::LayerExported, moduleKey[index++]});
             }
             if (!artifact.vertexInputPatches.empty()) {
                 for (const auto& input : result.vertexInputs) {
@@ -1042,6 +1086,7 @@ std::uint64_t snapshotHash(const RecompileRequest& request, const ResourceSnapsh
         for (const auto packing : request.context.pixel->targetExportPacking) mix(static_cast<std::uint64_t>(packing));
         mix(request.context.pixel->dualSourceBlend);
         mix(static_cast<std::uint64_t>(request.context.pixel->rasterPrimitive));
+        mix(request.context.pixel->layerExported);
     }
     if (request.context.vertex) {
         const auto& vertex = *request.context.vertex;
@@ -1204,7 +1249,7 @@ std::shared_ptr<const SourceHandle> PrepareShader(const RecompileRequest& reques
     return recompileReporting(request, [&]() -> std::shared_ptr<const SourceHandle> {
         static_cast<void>(RequestInputInfo(request));
         auto handle = std::make_shared<SourceHandle>();
-        handle->source = getSource(request, preparation);
+        handle->source = getSource(request, preparation, false);
         RecompileCacheKey::BuildInterface(request, handle->staticKey);
         handle->staticKey.push_back(HostSubgroupSize(request));
         bool cacheHit = false;

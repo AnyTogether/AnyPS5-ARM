@@ -145,22 +145,14 @@ void run(AgcDriver::VulkanDevice& device, ColorTileMode mode, const std::string&
     expect(device, color, [](std::uint32_t x, std::uint32_t y) { return y < 4 ? Drawn : y >= 8 && x >= 24 ? Clear : Stale; }, name + " fast-cleared bottom edge tiles under a draw of the top rows");
 }
 
-void invalidCode(AgcDriver::VulkanDevice& device) {
+void unknownCode(AgcDriver::VulkanDevice& device) {
     const auto color = target(ColorTileMode::RenderTarget);
     prepare(color, [](std::uint32_t tileX, std::uint32_t tileY) { return tileX == 2 && tileY == 0; }, 3);
     eliminate(device, color);
-    {
-        std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
-        device.WaitIdle();
-    }
+    expect(device, color, [](std::uint32_t, std::uint32_t) { return Stale; }, "a tile with CMASK code 3 eliminated");
     prepare(color, [](std::uint32_t, std::uint32_t) { return true; });
-    try {
-        eliminate(device, color);
-    } catch (const std::runtime_error& error) {
-        Require(std::string(error.what()).find("were recorded, which are not a single-sample fast-clear code") != std::string::npos, std::string("unexpected failure: ") + error.what());
-        return;
-    }
-    throw std::runtime_error("a CMASK code 3 read by the GPU pass did not throw");
+    eliminate(device, color);
+    expect(device, color, [](std::uint32_t, std::uint32_t) { return Clear; }, "fast-cleared target eliminated after a CMASK code 3");
 }
 
 }
@@ -182,7 +174,7 @@ int main() {
         }
         run(*device, ColorTileMode::Linear, "linear");
         run(*device, ColorTileMode::RenderTarget, "SW_64KB_R_X");
-        invalidCode(*device);
+        unknownCode(*device);
         device->WaitIdle();
         device.reset();
         {

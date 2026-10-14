@@ -29,23 +29,6 @@ extern "C" {
 }
 
 
-// H+8UBOwfScI is the NID of __powidf2 (sce_symbols aerolib.csv): the compiler runtime's
-// double raised to an int power, computed by square-and-multiply as compiler-rt powidf2.c does.
-APS5_EXPORT("H+8UBOwfScI", libcCyberUnknown08);
-double APS5_VABI libcCyberUnknown08(double base, int exponent) {
-    const bool reciprocal = exponent < 0;
-    double result = 1.0;
-    while (true) {
-        if (exponent & 1)
-            result *= base;
-        exponent /= 2;
-        if (exponent == 0)
-            break;
-        base *= base;
-    }
-    return reciprocal ? 1.0 / result : result;
-}
-
 APS5_EXPORT("H2e8t5ScQGc", libc___cxa_finalize);
 void APS5_VABI libc___cxa_finalize(void* dsoHandle) {
     CxaFinalize_nid_no_patch(dsoHandle);

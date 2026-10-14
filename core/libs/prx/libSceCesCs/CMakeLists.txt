@@ -1,14 +1,17 @@
-add_library(libSceCesCs SHARED EXCLUDE_FROM_ALL Export.cpp)
-target_include_directories(libSceCesCs PRIVATE ${LIBS_INCLUDE_DIR})
-configure_windows_unwind(libSceCesCs)
+include(${CMAKE_CURRENT_SOURCE_DIR}/CesLibrary.cmake)
+add_sce_ces_library(libSceCesCs)
 
 if(BUILD_TESTING)
     add_test_executable(guest_ces_tests ${LIBS_INCLUDE_DIR}/tests/GuestCes.cpp)
     target_include_directories(guest_ces_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_ces_tests PRIVATE libSceCesCs)
     add_test(NAME guest_ces COMMAND guest_ces_tests)
+    add_test_executable(guest_ces_module_tests ${LIBS_INCLUDE_DIR}/tests/GuestCes.cpp)
+    target_include_directories(guest_ces_module_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_ces_module_tests PRIVATE libSceCesCs-module)
+    add_test(NAME guest_ces_module COMMAND guest_ces_module_tests)
     if(WIN32)
-        set_tests_properties(guest_ces PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_ces guest_ces_module PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceCesCs>")
     endif()
 endif()

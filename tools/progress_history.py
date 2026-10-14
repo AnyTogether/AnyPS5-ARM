@@ -116,7 +116,7 @@ def page(points):
         f'<p>One point per day with commits on <code>main</code>, taken at the last commit of the day. Every point is measured '
         f'with the current <a href="{progress.SOURCE}/tools/progress.py">tools/progress.py</a> rules and instruction list, '
         'so the series is comparable across days. Hover a point for the exact numbers. Raw numbers: <a href="history.json">history.json</a>. '
-        '<a href="./">Back to the current progress</a>.</p>',
+        '<a href="progress.html">Back to the current progress</a>.</p>',
         '<table><tr><th>Date</th>' + "".join(f'<th>{escape(label)}</th><th>%</th>' for _, label, _ in SERIES) + '</tr>',
         rows,
         '</table>',

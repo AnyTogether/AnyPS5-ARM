@@ -20,13 +20,16 @@ struct Row {
     std::uint32_t layer;
     bool frontFacing;
     RasterPrimitive primitive = RasterPrimitive::Triangle;
+    bool layerExported = false;
 };
-constexpr std::array<Row, 6> Rows {{{0u, 0u, false}, {0u, 0u, true}, {15u, 0x1FFFu, false}, {15u, 0x1FFFu, true}, {0u, 0x1FFFu, true}, {15u, 0u, false}}};
+constexpr std::array<Row, 10> Rows {{{0u, 0u, false}, {0u, 0u, true}, {15u, 0x1FFFu, false}, {15u, 0x1FFFu, true}, {0u, 0x1FFFu, true}, {15u, 0u, false},
+    {0u, 0x1FFFu, false, RasterPrimitive::Triangle, true}, {15u, 0x1FFFu, true, RasterPrimitive::Triangle, true}, {15u, 3u, false, RasterPrimitive::Triangle, true}, {0u, 0u, true, RasterPrimitive::Triangle, true}}};
 
 static std::uint32_t Evaluate(const IrValue* value, const Row& row);
+static std::uint32_t BitField(std::uint32_t word, std::uint32_t offset, std::uint32_t count, bool isSigned);
 static void RequireField(const IrValue& user, StageInputKind kind, std::uint32_t fieldOffset, std::uint32_t count) {
     if (kind == StageInputKind::Layer) {
-        for (const Row& row : Rows) Require(Evaluate(&user, row) == 0u);
+        for (const Row& row : Rows) Require(Evaluate(&user, row) == (row.layerExported ? BitField(row.layer, fieldOffset, count, user.Opcode() == IrOpcode::BitFieldSExtract) : 0u));
         return;
     }
     const IrValue* field = user.Argument(0)->Resolve();
@@ -157,11 +160,13 @@ static std::uint32_t Evaluate(const IrValue* value, const Row& row) {
                 case StageInputKind::Layer: return row.layer;
                 case StageInputKind::FrontFacing: return row.frontFacing ? 1u : 0u;
                 case StageInputKind::RasterPrimitive: return static_cast<std::uint32_t>(row.primitive);
+                case StageInputKind::LayerExported: return row.layerExported ? 1u : 0u;
                 default: break;
             }
             break;
         case IrOpcode::ShiftLeftLogical32: return Evaluate(value->Argument(0), row) << Evaluate(value->Argument(1), row);
         case IrOpcode::BitwiseOr32: return Evaluate(value->Argument(0), row) | Evaluate(value->Argument(1), row);
+        case IrOpcode::IMul32: return Evaluate(value->Argument(0), row) * Evaluate(value->Argument(1), row);
         case IrOpcode::BitFieldUExtract:
         case IrOpcode::BitFieldSExtract:
             return BitField(Evaluate(value->Argument(0), row), Evaluate(value->Argument(1), row), Evaluate(value->Argument(2), row), value->Opcode() == IrOpcode::BitFieldSExtract);
@@ -172,7 +177,7 @@ static std::uint32_t Evaluate(const IrValue* value, const Row& row) {
     throw std::runtime_error("packed pixel ancillary evaluation reached an unsupported value");
 }
 static std::uint32_t PackedWord(const Row& row) {
-    return UnmodelledBits | (row.sample << 8u);
+    return UnmodelledBits | (row.sample << 8u) | (row.layerExported ? row.layer << 16u : 0u);
 }
 static void Values(IrOpcode opcode, std::uint32_t offset, std::uint32_t count, bool throughSelect) {
     IrProgram program;
@@ -483,11 +488,12 @@ static void ExportedWholeWord() {
     static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
     LowerMasked(program, true);
     Require(!AncillaryRemains(program) && program.Info().rasterPrimitive);
-    Require(!BuiltinRemains(program, StageInputKind::Layer));
+    Require(BuiltinRemains(program, StageInputKind::LayerExported));
     const IrValue* word = carried.Argument(0)->Resolve();
-    constexpr std::array<Row, 5> words {{{0u, 0u, false, RasterPrimitive::Triangle}, {0u, 0u, false, RasterPrimitive::Rectangle}, {0u, 0u, false, RasterPrimitive::Line}, {15u, 0x1FFFu, false, RasterPrimitive::Point}, {3u, 0x7FFu, false, RasterPrimitive::Triangle}}};
+    constexpr std::array<Row, 7> words {{{0u, 0u, false, RasterPrimitive::Triangle}, {0u, 0u, false, RasterPrimitive::Rectangle}, {0u, 0u, false, RasterPrimitive::Line}, {15u, 0x1FFFu, false, RasterPrimitive::Point}, {3u, 0x7FFu, false, RasterPrimitive::Triangle},
+        {15u, 0x7FFu, false, RasterPrimitive::Point, true}, {3u, 5u, false, RasterPrimitive::Triangle, true}}};
     for (const Row& row : words) {
-        Require(Evaluate(word, row) == (static_cast<std::uint32_t>(row.primitive) | (row.sample << 8u)));
+        Require(Evaluate(word, row) == (static_cast<std::uint32_t>(row.primitive) | (row.sample << 8u) | (row.layerExported ? row.layer << 16u : 0u)));
     }
 }
 static void WholeWordReplacesRefusal(HelperRead read) {

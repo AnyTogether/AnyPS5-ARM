@@ -1,6 +1,7 @@
 #include <relinker/analysis/CodeInstructionCollector.hpp>
 #include <relinker/analysis/UnusedNidFilter/IControlFlowGraph.hpp>
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
+#include <relinker/analysis/SceCodeExtent.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/CodegenException.hpp>
 #include <io/BufferUtils.hpp>
@@ -53,8 +54,9 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
         }
         throw Domain::RelinkerException("Code analysis: unmapped address", address);
     };
+    auto codeHeaders = headers;
     const auto isCode = [&](std::uint64_t address) {
-        for (const auto& header : headers) if (header.Type == 1 && (header.Flags & 1) != 0 && address >= header.MappedAddress && address - header.MappedAddress < header.FileSize) return true;
+        for (const auto& header : codeHeaders) if (header.Type == 1 && (header.Flags & 1) != 0 && address >= header.MappedAddress && address - header.MappedAddress < header.FileSize) return true;
         return false;
     };
     std::map<std::uint64_t, std::uint64_t> tags;
@@ -91,6 +93,21 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
         range(offset, size);
         return offset;
     };
+    if (sceBase) {
+        const auto unwindFunctions = UnusedNidFilter::ReadExceptionFunctions(bytes, headers, {}, {});
+        for (auto& header : codeHeaders) {
+            if (header.Type != 1 || (header.Flags & 1) == 0) continue;
+            range(header.Offset, header.FileSize);
+            const std::span<const std::uint8_t> segment(bytes.data() + header.Offset, header.FileSize);
+            const auto end = FindSceCodeEnd(segment, header.MappedAddress, unwindFunctions, value(3, 0x61000027).value_or(0), value(2, 0x6100002d).value_or(0)).value_or(header.MappedAddress + header.FileSize);
+            auto begin = header.MappedAddress;
+            for (const auto& interpreter : headers)
+                if (interpreter.Type == 3 && interpreter.MappedAddress >= begin && interpreter.MappedAddress < end) begin = interpreter.MappedAddress + std::min(interpreter.FileSize, end - interpreter.MappedAddress);
+            header.Offset += begin - header.MappedAddress;
+            header.MappedAddress = begin;
+            header.FileSize = end - begin;
+        }
+    }
     std::set<std::uint64_t> roots;
     std::map<std::uint64_t, std::uint64_t> functions;
     const auto addRoot = [&](std::uint64_t address) { if (isCode(address)) roots.insert(address); };
@@ -344,11 +361,11 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
     }
     std::size_t previousRoots = 0;
     std::unordered_set<Domain::VirtualAddress> decodedInstructions;
-    std::vector<std::unordered_set<Domain::VirtualAddress>> sectionReachable(headers.size());
+    std::vector<std::unordered_set<Domain::VirtualAddress>> sectionReachable(codeHeaders.size());
     do {
         previousRoots = roots.size();
-        for (std::size_t i = 0; i < headers.size(); ++i) {
-            const auto& header = headers[i];
+        for (std::size_t i = 0; i < codeHeaders.size(); ++i) {
+            const auto& header = codeHeaders[i];
             if (header.Type != 1 || (header.Flags & 1) == 0 || header.FileSize == 0) continue;
             range(header.Offset, header.FileSize);
             std::vector<std::uint64_t> entries;

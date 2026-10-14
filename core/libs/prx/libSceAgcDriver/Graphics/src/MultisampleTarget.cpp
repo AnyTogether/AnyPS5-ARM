@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libc/include/GuestAllocations.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -153,6 +154,7 @@ public:
     }
 
     Context context;
+    std::shared_ptr<std::atomic<bool>> active = std::make_shared<std::atomic<bool>>(true);
     ColorTarget target;
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -175,10 +177,19 @@ struct GuardedRange {
     std::uint64_t address;
     std::uint64_t bytes;
     std::uint32_t samples;
+    std::shared_ptr<std::atomic<bool>> active;
+};
+
+class PrimedSharedMutex : public std::shared_mutex {
+public:
+    PrimedSharedMutex() {
+        lock();
+        unlock();
+    }
 };
 
 std::shared_mutex& guardedMutex() {
-    static std::shared_mutex mutex;
+    static PrimedSharedMutex mutex;
     return mutex;
 }
 
@@ -196,7 +207,17 @@ void guardReads(std::uint64_t address, std::size_t bytes) {
     RequireNoMultisampleTarget(address, bytes, "a CPU read");
 }
 
-void guard(const Context& context, const ColorTarget& target) {
+void retireUnmapped(std::uintptr_t address, std::size_t bytes) {
+    std::unique_lock lock(guardedMutex());
+    std::erase_if(guarded(), [&](const auto& range) {
+        if (range.address < address || range.address - address > bytes || range.bytes > bytes - (range.address - address)) return false;
+        range.active->store(false, std::memory_order_release);
+        return true;
+    });
+    anyGuarded().store(!guarded().empty(), std::memory_order_release);
+}
+
+void guard(const Context& context, const ColorTarget& target, const std::shared_ptr<std::atomic<bool>>& active) {
     auto bytes = std::max<std::uint64_t>(target.bytes * target.samples, static_cast<std::uint64_t>(target.extent.width) * target.extent.height * target.elementBytes * target.samples);
     if (target.tileMode == ColorTileMode::RenderTarget && std::has_single_bit(target.elementBytes) && std::has_single_bit(target.samples)) {
         const auto log2Samples = std::countr_zero(target.samples);
@@ -208,10 +229,13 @@ void guard(const Context& context, const ColorTarget& target) {
         bytes = align(target.extent.width, blockWidth) * align(target.extent.height, blockHeight) * target.elementBytes * target.samples;
     }
     std::unique_lock lock(guardedMutex());
-    guarded().push_back({context.device, target.address, bytes, target.samples});
+    guarded().push_back({context.device, target.address, bytes, target.samples, active});
     anyGuarded().store(true, std::memory_order_release);
     static std::once_flag installed;
-    std::call_once(installed, [] { GuestMemory::SetReadGuard(&guardReads); });
+    std::call_once(installed, [] {
+        GuestMemory::SetReadGuard(&guardReads);
+    });
+    GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(&retireUnmapped);
 }
 
 std::mutex& targetsMutex() {
@@ -226,14 +250,15 @@ std::vector<std::unique_ptr<MultisampleTarget>>& targets() {
 
 MultisampleTarget& acquire(const Context& context, const ColorTarget& use) {
     for (const auto& target : targets()) {
+        if (!target->active->load(std::memory_order_acquire)) continue;
         if (target->context.device != context.device || !sameTarget(target->target, use)) continue;
         target->cmask.CheckAddress(use.cmaskAddress);
         target->ApplyFastClear(use);
         return *target;
     }
     targets().push_back(std::make_unique<MultisampleTarget>(context, use));
-    guard(context, use);
     auto& created = *targets().back();
+    guard(context, use, created.active);
     if (use.cmaskFastClear) created.cmask.SeedKeys(CurrentDccKeys(use.cmaskAddress, static_cast<std::uint64_t>(use.cmaskBytes) * 256u));
     created.ApplyFastClear(use);
     return created;
@@ -380,6 +405,7 @@ void ResolveMultisampleTarget(const Context& context, const ColorTarget& source,
 void NoteColorMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern) {
     std::lock_guard lock(targetsMutex());
     for (const auto& target : targets()) {
+        if (!target->active->load(std::memory_order_acquire)) continue;
         target->colorFill.NoteFill(address, bytes, pattern);
         const auto before = target->cmask.Keys();
         target->cmask.NoteFill(address, bytes, pattern);
@@ -395,6 +421,7 @@ void ClearMultisampleTargets(VkDevice device) {
     std::unique_lock guardLock(guardedMutex());
     std::erase_if(guarded(), [&](const auto& range) { return range.device == device; });
     anyGuarded().store(!guarded().empty(), std::memory_order_release);
+    if (guarded().empty()) GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(nullptr);
 }
 
 void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const char* access) {

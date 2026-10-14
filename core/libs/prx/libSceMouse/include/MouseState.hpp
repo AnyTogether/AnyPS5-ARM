@@ -16,6 +16,7 @@ struct MouseInputEvent {
 };
 
 namespace Mouse {
+bool IsOpen();
 int Initialize();
 int Open(int userId, std::int32_t type, std::int32_t index, const MouseOpenParam* param);
 int Close(std::int32_t handle);
@@ -24,5 +25,6 @@ void Publish(const MouseInputEvent& event);
 }
 
 extern "C" void MousePublishInput_nid_postfix(const MouseInputEvent& event);
+extern "C" bool MouseIsOpen_nid_postfix();
 
 #endif

@@ -146,6 +146,11 @@ void TestMasteringGetState() {
     Require(states.Word(0) == 7 && states.UntouchedFrom(4), "a refused states id must not write the states");
 }
 
+void TestEnableChat() {
+    Require(sceAudioOut2EnableChat() == 0, "enabling chat must be accepted");
+    Require(sceAudioOut2EnableChat() == 0, "enabling chat again must be accepted");
+}
+
 }
 
 int main() {
@@ -155,6 +160,6 @@ int main() {
     TestMasteringTerm();
     TestMasteringSetParam();
     TestMasteringGetState();
-    Require(sceAudioOut2EnableChat() == 0, "chat audio must be allowed");
+    TestEnableChat();
     return 0;
 }

@@ -21,6 +21,10 @@ int main() {
         const Elfpatcher::SectionHeaderTableRequest valid{128, 8, 136, 24, 160, 16, 176, 16};
         auto bytes = Fixture(); builder.WriteTable(bytes, valid);
         const auto table = Io::ReadU64(bytes, 40);
+        Require(Io::ReadU64(bytes, table + 64 + 8) == 0);
+        Require(Io::ReadU64(bytes, table + 64 + 16) == 0);
+        Require(Io::ReadU64(bytes, table + 64 + 24) == 512);
+        Require(Io::ReadU64(bytes, table + 64 + 32) != 0);
         Require(Io::ReadU64(bytes, table + 2 * 64 + 16) == 0x1000);
         auto empty = valid; empty.StubOffset = 384; empty.StubSize = 0;
         bytes = Fixture(); builder.WriteTable(bytes, empty);

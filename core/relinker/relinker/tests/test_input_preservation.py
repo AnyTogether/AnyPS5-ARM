@@ -142,6 +142,26 @@ def check_registry_after_failed_patch(relinker, work):
     assert not (case / "app0").exists()
 
 
+def check_output_directory(relinker, work):
+    for windows in (False, True):
+        for existing in (False, True):
+            case = work / f"output-directory-{windows}-{existing}"
+            (case / "sce_module").mkdir(parents=True)
+            (case / "sce_module" / "sample.prx").write_bytes(guest_fixture(PLAIN_SITE))
+            source = case / "input.elf"
+            source.write_bytes(main_fixture())
+            target = case / "output"
+            if existing:
+                target.mkdir()
+            output = str(target) if existing else str(target) + os.sep
+            options = ["--windows"] if windows else []
+            result = subprocess.run([str(relinker), *options, str(source), output], cwd=case,
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 2 and "Executable output is a directory" in result.stderr, (result.stdout, result.stderr)
+            assert not (case / "app0").exists() and not (target / "app0").exists()
+            assert target.exists() == existing
+
+
 def check_desktop_inputs(relinker, work):
     for desktop in (False, True):
         for bundled in (False, True):
@@ -204,6 +224,7 @@ def main():
         check_diagnostic_inputs(relinker, work)
         check_desktop_inputs(relinker, work)
         check_registry_after_failed_patch(relinker, work)
+        check_output_directory(relinker, work)
         for windows in (False, True):
             options = ["--windows"] if windows else []
             check_registry_inputs(relinker, work, windows)

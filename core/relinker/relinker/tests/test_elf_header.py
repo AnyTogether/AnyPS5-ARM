@@ -95,6 +95,16 @@ def main():
             result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)],
                                     capture_output=True, text=True, timeout=20)
             assert result.returncode == 2 and error in result.stderr and not output.exists(), (name, result)
+
+        relocatable = main_fixture()
+        struct.pack_into("<H", relocatable, 16, 1)
+        source = Path(directory) / "relocatable.elf"
+        output = Path(directory) / "relocatable.out"
+        source.write_bytes(relocatable)
+        result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)],
+                                capture_output=True, text=True, timeout=20)
+        assert result.returncode == 2 and "ET_REL relocatable inputs are not supported" in result.stderr and not output.exists(), result
+
         identification_cases(relinker, directory)
         structural_cases(relinker, directory)
     print("ELF header tests passed")

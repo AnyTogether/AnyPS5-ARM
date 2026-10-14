@@ -27,6 +27,10 @@ class ExportTests(unittest.TestCase):
     def test_added_definitions_are_exports(self):
         self.assertEqual(pr_overlap.exports(DIFF), {"mlock_nid_postfix", "sceKernelRead", "getpid_nid_postfix", "sceNpUniversalDataSystemCreateEvent"})
 
+    def test_cut_helpers_are_not_export_overlaps(self):
+        diff = DIFF + '+void APS5_VABI Helper_nid_no_patch_cut() {\n'
+        self.assertEqual(pr_overlap.exports(diff), pr_overlap.exports(DIFF))
+
     def test_declarations_are_not_exports(self):
         self.assertTrue(TRAILING.endswith(";   \n"))
         found = pr_overlap.exports(DIFF)

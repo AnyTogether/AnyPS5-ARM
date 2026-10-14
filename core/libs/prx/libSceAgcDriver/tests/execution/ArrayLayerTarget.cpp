@@ -165,22 +165,23 @@ void RequireOutput(std::uint32_t inside, std::uint32_t outside, const std::strin
     }
 }
 
-AgcDriver::Graphics::ColorTarget DecodeTarget(std::uint64_t address, std::uint32_t slice, std::uint32_t swizzleMode) {
+AgcDriver::Graphics::ColorTarget DecodeTarget(std::uint64_t address, std::uint32_t slice, std::uint32_t swizzleMode, bool collapsed) {
     AgcDriver::Registers cx;
     cx[0x318] = static_cast<std::uint32_t>(address >> 8u);
     cx[0x31b] = slice | (slice << 13u);
     cx[0x31c] = Color32FloatInfo;
     cx[0x31d] = 0;
     cx[0x3b0] = ((Side - 1u) << 14u) | (Side - 1u);
-    cx[0x3b8] = (TiledAttrib3 & ~(0x1fu << 14u)) | (swizzleMode << 14u) | (Layers - 1u);
+    cx[0x3b8] = (TiledAttrib3 & ~(0x1fu << 14u)) | (swizzleMode << 14u) | (collapsed ? 0u : Layers - 1u);
     cx[0x390] = static_cast<std::uint32_t>(address >> 40u);
     const auto color = AgcDriver::Graphics::DecodeColorBuffer(cx, 0);
     Require(color.format == VK_FORMAT_R32_SFLOAT && color.bytes == LayerBytes && color.address == address + slice * LayerBytes, "the COLOR_32 float view did not decode as a 128x128 R32 slice of the array");
-    Require(color.arrayAddress == address && color.arrayLastSlice == Layers - 1u && color.arraySlice == slice, "the color view did not keep its array and slice");
+    if (collapsed) Require(color.arrayAddress == 0 && color.arrayLastSlice == 0, "a collapsed slice view unexpectedly describes a whole array");
+    else Require(color.arrayAddress == address && color.arrayLastSlice == Layers - 1u && color.arraySlice == slice, "the color view did not keep its array and slice");
     return color;
 }
 
-void DrawSlice(AgcDriver::VulkanDevice& device, std::uint64_t surface, std::uint32_t slice, std::uint32_t swizzleMode) {
+void DrawSlice(AgcDriver::VulkanDevice& device, std::uint64_t surface, std::uint32_t slice, std::uint32_t swizzleMode, bool collapsed) {
     const auto target = device.Target();
     constexpr std::uint32_t waveSize = 64;
     std::size_t at = 0;
@@ -207,7 +208,7 @@ void DrawSlice(AgcDriver::VulkanDevice& device, std::uint64_t surface, std::uint
     const auto vertexResult = ShaderRecompiler::Recompile(vertex);
     const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
 
-    const auto color = DecodeTarget(surface, slice, swizzleMode);
+    const auto color = DecodeTarget(surface, slice, swizzleMode, collapsed);
     VkPipelineColorBlendAttachmentState blend{};
     blend.colorWriteMask = 0xf;
     AgcDriver::Graphics::State state{};
@@ -246,29 +247,31 @@ void DrawSlice(AgcDriver::VulkanDevice& device, std::uint64_t surface, std::uint
     device.WaitIdle();
 }
 
-void Run(AgcDriver::VulkanDevice& device, std::uint8_t* texels, std::uint32_t swizzleMode) {
+void Run(AgcDriver::VulkanDevice& device, std::uint8_t* texels, std::uint32_t swizzleMode, bool collapsed = false, std::uint32_t slice = 1) {
     const auto surface = AddressOf(texels);
     std::fill_n(reinterpret_cast<std::uint32_t*>(texels), SurfaceBytes / 4u, Initial);
     AgcDriver::GuestMemory::CollectWrites(surface, SurfaceBytes);
     AgcDriver::GuestMemory::BumpCollectEpoch();
     std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
     const auto drawn = std::bit_cast<std::uint32_t>(Drawn);
-    DrawSlice(device, surface, 1, swizzleMode);
-    const auto pending = StorageTexture::FindPending(surface, SurfaceBytes);
-    Require(pending != nullptr && pending->Descriptor().dimension == TextureDimension::k2DArray && pending->Descriptor().baseAddress == surface && pending->Descriptor().depthOrLastArray == Layers - 1u, "the draw into slice 1 did not render into the image of its array");
-    LoadLayer(device, surface, 1, swizzleMode);
-    RequireOutput(drawn, Initial, "slice 1 read through the array after the draw");
-    for (const std::uint32_t other : {0u, 2u, 3u}) {
+    DrawSlice(device, surface, slice, swizzleMode, collapsed);
+    const auto pending = StorageTexture::FindPending(collapsed ? surface + slice * LayerBytes : surface, collapsed ? LayerBytes : SurfaceBytes);
+    if (collapsed) Require(pending != nullptr && pending->Descriptor().dimension == TextureDimension::k2D && pending->Descriptor().baseAddress == surface + slice * LayerBytes, "a collapsed slice did not render into its shifted surface");
+    else Require(pending != nullptr && pending->Descriptor().dimension == TextureDimension::k2DArray && pending->Descriptor().baseAddress == surface && pending->Descriptor().depthOrLastArray == Layers - 1u, "the draw into slice 1 did not render into the image of its array");
+    LoadLayer(device, surface, slice, swizzleMode);
+    RequireOutput(drawn, Initial, "slice " + std::to_string(slice) + " read through the array after the draw");
+    for (std::uint32_t other = 0; other < Layers; ++other) {
+        if (other == slice) continue;
         LoadLayer(device, surface, other, swizzleMode);
-        RequireOutput(Initial, Initial, "slice " + std::to_string(other) + " after the draw into slice 1");
+        RequireOutput(Initial, Initial, "slice " + std::to_string(other) + " after the draw into slice " + std::to_string(slice));
     }
     StorageTexture::FlushPending(surface, SurfaceBytes, nullptr, "test");
     device.WaitIdle();
     AgcDriver::Graphics::ClearCachedTextures(device.Device());
     AgcDriver::GuestMemory::CollectWrites(surface, SurfaceBytes);
     AgcDriver::GuestMemory::BumpCollectEpoch();
-    LoadLayer(device, surface, 1, swizzleMode);
-    RequireOutput(drawn, Initial, "slice 1 uploaded again from guest memory");
+    LoadLayer(device, surface, slice, swizzleMode);
+    RequireOutput(drawn, Initial, "slice " + std::to_string(slice) + " uploaded again from guest memory");
     AgcDriver::Graphics::ClearCachedTextures(device.Device());
 }
 
@@ -281,6 +284,7 @@ int main() {
         if (!device) return VulkanTestSkipped;
         Run(*device, block.Data(), TileR64KBX);
         Run(*device, block.Data(), static_cast<std::uint32_t>(AgcDriver::Graphics::ColorTileMode::D64KBX));
+        for (std::uint32_t slice = 1; slice < Layers; ++slice) Run(*device, block.Data(), TileR64KBX, true, slice);
         std::puts("array layer target tests passed");
         return 0;
     } catch (const std::exception& error) {

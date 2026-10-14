@@ -4,6 +4,7 @@
 #include "SceTypes.hpp"
 #include <array>
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <climits>
@@ -152,6 +153,15 @@ inline void AppendUtf8(std::string& utf8, char32_t code) {
         utf8 += static_cast<char>(0x80 | ((code >> 6) & 0x3f));
         utf8 += static_cast<char>(0x80 | (code & 0x3f));
     }
+}
+
+inline std::string NanSpec(const std::string& spec) {
+    std::string result = "%";
+    std::size_t index = 1;
+    for (; index < spec.size() && std::strchr("-+ #0", spec[index]); ++index)
+        if (spec[index] == '-' && result.size() == 1) result += '-';
+    for (; index < spec.size() && spec[index] >= '0' && spec[index] <= '9'; ++index) result += spec[index];
+    return result + 's';
 }
 
 inline std::string FormatPointer(const std::string& spec, const void* pointer) {
@@ -327,13 +337,18 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
                 spec = spec.substr(0, spec.find('.')) + ".1";
             output.Value(spec + "ll" + conversion, value);
         } else if (std::strchr("aAeEfFgG", conversion)) {
+            const char* nan = conversion >= 'a' ? "nan" : "NAN";
             if (length == "L") {
                 static_assert(sizeof(long double) == 16);
                 static_assert(std::numeric_limits<long double>::digits == 64);
-                output.Value(spec + "L" + conversion, args.Next<long double>());
+                const long double value = args.Next<long double>();
+                if (std::isnan(value)) output.Value(NanSpec(spec), nan);
+                else output.Value(spec + "L" + conversion, value);
             } else {
                 if (!length.empty() && length != "l") throw std::invalid_argument("Invalid floating length");
-                output.Value(spec + conversion, args.Next<double>());
+                const double value = args.Next<double>();
+                if (std::isnan(value)) output.Value(NanSpec(spec), nan);
+                else output.Value(spec + conversion, value);
             }
         } else if (conversion == 'c' && (length.empty() || length == "h")) {
             output.Value(spec + conversion, args.Next<int>());

@@ -20,6 +20,7 @@
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI getpid_nid_postfix();
+extern "C" std::uint64_t APS5_VABI sceKernelGetTscFrequency(void);
 
 struct SceKernelSystemSwVersion {
     std::uint64_t size;
@@ -44,6 +45,10 @@ int CopyOut(const void* value, std::size_t size, void* oldValue, std::size_t* ol
     return 0;
 }
 
+bool IsLeafMib(const int* name) {
+    return (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5)) || (name[0] == 1 && name[1] == 37);
+}
+
 std::string HostCpuModel() {
 #if defined(__x86_64__) || defined(__i386__)
     if (__get_cpuid_max(0x80000000, nullptr) < 0x80000004) return {};
@@ -66,6 +71,9 @@ std::int64_t APS5_VABI sysconf_nid_postfix(int name) {
     const int saved = *__error_nid_postfix();
     std::int64_t result = -1;
     switch (name) {
+        case 3: // _SC_CLK_TCK
+            result = 128;
+            break;
         case 47: // _SC_PAGESIZE
             result = PS5_PAGE_SIZE;
             break;
@@ -127,7 +135,7 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         if (model.empty()) throw std::runtime_error(std::string(__func__) + ": the host CPU has no CPUID brand string for hw.model");
         return CopyOut(model.c_str(), model.size() + 1, oldValue, oldLength);
     }
-    if (nameLength == 2 && name[0] == 6 && name[1] == 5) {
+    if (nameLength == 2 && name[0] == 6 && (name[1] == 5 || name[1] == 12)) {
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
             return -1;
@@ -138,12 +146,12 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         return CopyOut(&physmem, sizeof(physmem), oldValue, oldLength);
     }
     if (nameLength >= 3 && name[0] == 1 && name[1] == 14 && name[2] == 12) {
-        if (nameLength != 4) {
-            *__error_nid_postfix() = 22;
-            return -1;
-        }
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
+            return -1;
+        }
+        if (nameLength != 4) {
+            *__error_nid_postfix() = 22;
             return -1;
         }
         const int pid = name[3];
@@ -169,6 +177,10 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         *oldLength = count;
         return 0;
     }
+    if (nameLength > 2 && IsLeafMib(name)) {
+        *__error_nid_postfix() = 20;
+        return -1;
+    }
     std::string mib;
     for (std::uint32_t i = 0; i < nameLength; ++i) mib += (i == 0 ? "" : ".") + std::to_string(name[i]);
     throw std::runtime_error(std::string(__func__) + ": unsupported MIB " + mib);
@@ -184,8 +196,8 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
         return -1;
     }
     if (std::strcmp(name, "kern.proc.pathname") == 0) {
-        *__error_nid_postfix() = 22;
-        return -1;
+        static constexpr int mib[] = {1, 14, 12};
+        return sysctl_nid_postfix(mib, 3, oldValue, oldLength, newValue, newLength);
     }
     if (std::strcmp(name, "kern.arandom") == 0) {
         static constexpr int mib[] = {1, 37};
@@ -202,6 +214,11 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
         for (std::size_t i = 0; i < *oldLength; ++i) bytes[i] = static_cast<std::uint8_t>(device());
         return 0;
     }
+    if (std::strcmp(name, "vm.overcommit") == 0) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": setting vm.overcommit");
+        static constexpr int overcommit = 0;
+        return CopyOut(&overcommit, sizeof(overcommit), oldValue, oldLength);
+    }
     if (std::strcmp(name, "kern.sdk_version") == 0) {
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
@@ -209,6 +226,14 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
         }
         static constexpr std::uint32_t sdkVersion = 0x01000000;
         return CopyOut(&sdkVersion, sizeof(sdkVersion), oldValue, oldLength);
+    }
+    if (std::strcmp(name, "machdep.tsc_freq") == 0) {
+        if (newValue != nullptr) {
+            *__error_nid_postfix() = 1;
+            return -1;
+        }
+        const std::uint64_t frequency = sceKernelGetTscFrequency();
+        return CopyOut(&frequency, sizeof(frequency), oldValue, oldLength);
     }
     if (std::strcmp(name, "hw.ncpu") == 0) {
         static constexpr int mib[] = {6, 3};
@@ -220,6 +245,10 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
     }
     if (std::strcmp(name, "hw.physmem") == 0) {
         static constexpr int mib[] = {6, 5};
+        return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
+    }
+    if (std::strcmp(name, "hw.realmem") == 0) {
+        static constexpr int mib[] = {6, 12};
         return sysctl_nid_postfix(mib, 2, oldValue, oldLength, newValue, newLength);
     }
     throw std::runtime_error(std::string(__func__) + ": unsupported name " + name);

@@ -76,6 +76,19 @@ struct DrawEntryCounters {
     std::chrono::steady_clock::time_point lastReport = std::chrono::steady_clock::now();
 };
 
+class DrawKeySightings {
+public:
+    static constexpr std::size_t Ways = 4;
+    explicit DrawKeySightings(std::size_t keys);
+    bool SeenBefore(std::uint64_t key);
+
+private:
+    std::vector<std::uint64_t> keys;
+    std::vector<std::uint8_t> filled;
+    std::vector<std::uint8_t> next;
+    std::size_t bucketMask = 0;
+};
+
 enum class DrawVerdict { Drawn, Nothing, Rejected };
 
 struct StageCapture {

@@ -3,6 +3,7 @@
 #include <io/NativePath.hpp>
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 
 namespace Cli {
 
@@ -37,7 +38,7 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
     }
     std::vector<std::filesystem::path> paths;
     std::set<std::string> unmatchedExclusions = excludedModules;
-    const auto isElf = [](const std::filesystem::path& path) {
+    const auto isElf = [](const std::filesystem::path& path, bool& self) {
         std::ifstream stream(path, std::ios::binary);
         if (!stream) throw Domain::RelinkerException("Cannot read guest candidate: " + Io::Utf8Path(path));
         char magic[4]{};
@@ -45,6 +46,7 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
         if (stream.bad()) throw Domain::RelinkerException("Cannot read guest candidate magic: " + Io::Utf8Path(path));
         if (stream.gcount() != 4) return false;
         const auto byte = [&](const std::size_t index) { return static_cast<unsigned char>(magic[index]); };
+        self = (byte(0) == 0x4f && byte(1) == 0x15 && byte(2) == 0x3d && byte(3) == 0x1d) || (byte(0) == 0x54 && byte(1) == 0x14 && byte(2) == 0xf5 && byte(3) == 0xee);
         return byte(0) == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
     };
     for (const auto& directory : directories) {
@@ -57,7 +59,11 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
             }
             if (!entry.is_regular_file()) continue;
             if (std::filesystem::equivalent(entry.path(), inputPath)) continue;
-            if (isElf(entry.path())) paths.push_back(entry.path());
+            bool self = false;
+            if (isElf(entry.path(), self)) paths.push_back(entry.path());
+            else if (self)
+                std::cout << "Skipping SELF container: " << entry.path().lexically_relative(root).generic_string()
+                          << " (unwrap it before relinking)\n";
         }
     }
     if (!unmatchedExclusions.empty()) throw Domain::RelinkerException("Excluded guest module file not found: " + *unmatchedExclusions.begin());

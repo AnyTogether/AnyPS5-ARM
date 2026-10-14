@@ -117,6 +117,7 @@ std::shared_ptr<DrawDecode> Driver::decodeDraw(const QueueState& queue, const Su
     product->pixel.alphaToCoverage = product->state.alphaToCoverage;
     if (product->pixel.ancillary) product->pixel.rasterPrimitive = Graphics::RasterPrimitiveOf(product->state);
     if (const auto localDevice = device.Load(); localDevice != nullptr) localDevice->NormalizeUnobservedViewportDepth(product->state, product->pixel);
+    if (product->pixel.ancillary) product->pixel.layerExported = product->state.layerExports != 0;
     return product;
 }
 

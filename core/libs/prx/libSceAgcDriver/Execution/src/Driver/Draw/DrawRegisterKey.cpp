@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawRegisterKey.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdlib>
@@ -6,36 +7,69 @@
 
 namespace AgcDriver::DriverDetail {
 
+namespace {
+
+bool runtimeRegister(std::uint32_t offset) {
+    return offset - 0x00cu < 32u || offset - 0x08cu < 32u || offset - 0x10cu < 32u || offset == 0x082u || offset == 0x083u || offset == 0x102u || offset == 0x103u;
+}
+
+const auto& registerMasks() {
+    static const auto masks = [] {
+        std::array<std::vector<std::uint64_t>, 3> bits;
+        for (const auto& range : Graphics::DrawKeyRegisters) {
+            auto& bank = bits[static_cast<std::size_t>(range.bank)];
+            bank.resize(std::max(bank.size(), (static_cast<std::size_t>(range.first) + range.count + 63) / 64));
+            for (auto offset = range.first; offset < range.first + range.count; ++offset) {
+                if (range.bank == Graphics::RegisterBank::Shader && runtimeRegister(offset)) continue;
+                bank[offset / 64] |= std::uint64_t{1} << (offset % 64);
+            }
+        }
+        std::array<std::shared_ptr<const Registers::Mask>, 3> result;
+        for (std::size_t i = 0; i < bits.size(); ++i) result[i] = std::make_shared<const Registers::Mask>(std::move(bits[i]));
+        return result;
+    }();
+    return masks;
+}
+
+}
+
+std::uint64_t RegisterStateKey(const QueueState& queue, bool allUserWords, bool incremental) {
+    const auto& masks = registerMasks();
+    const auto fingerprint = [&](const Registers& registers, Graphics::RegisterBank bank) {
+        const auto& mask = masks[static_cast<std::size_t>(bank)];
+        return incremental ? registers.Fingerprint(mask) : registers.RecomputeFingerprint(*mask);
+    };
+    auto shape = (0xcbf29ce484222325ull ^ fingerprint(queue.context, Graphics::RegisterBank::Context)) * 0x100000001b3ull;
+    shape = (shape ^ fingerprint(queue.shader, Graphics::RegisterBank::Shader)) * 0x100000001b3ull;
+    shape = (shape ^ fingerprint(queue.userConfig, Graphics::RegisterBank::UserConfig)) * 0x100000001b3ull;
+    auto exact = shape;
+    const auto words = [&](std::uint32_t base, std::uint32_t count) {
+        for (auto it = queue.shader.lower_bound(base); it != queue.shader.end() && it->first < base + count; ++it) {
+            exact = (exact ^ it->first) * 0x100000001b3ull;
+            exact = (exact ^ it->second) * 0x100000001b3ull;
+        }
+    };
+    for (const auto base : {0x00cu, 0x08cu, 0x10cu}) {
+        const auto resources = queue.shader.find(base - 1);
+        const auto count = resources == queue.shader.end() ? 0u : ((resources->second >> 1u) & 0x1fu) | (((resources->second >> 27u) & 1u) << 5u);
+        words(base, allUserWords ? 32u : std::min(count, 32u));
+    }
+    words(0x082u, 2);
+    words(0x102u, 2);
+    return exact;
+}
+
+
 std::uint64_t Driver::drawRegisterKey(const QueueState& queue, const ShaderRegistry& registry, std::uint64_t deviceSerial) {
     static const bool allUserWords = std::getenv("APS5_DRAW_KEY_ALL_USER_WORDS") != nullptr;
-    std::uint64_t key = 0xcbf29ce484222325ull;
+    static const bool verify = std::getenv("APS5_VERIFY_REGISTER_KEYS") != nullptr;
+    auto key = RegisterStateKey(queue, allUserWords);
+    if (verify && key != RegisterStateKey(queue, allUserWords, false)) throw std::runtime_error("incremental register fingerprint disagrees with full state");
     const auto mix = [&](std::uint64_t value) {
         key ^= value;
         key *= 0x100000001b3ull;
     };
-    const auto userEnd = [&](std::uint32_t base) {
-        if (allUserWords) return base + 32u;
-        const auto resources = queue.shader.find(base - 1);
-        if (resources == queue.shader.end()) return base;
-        const auto count = ((resources->second >> 1u) & 0x1fu) | (((resources->second >> 27u) & 1u) << 5u);
-        return base + std::min(count, 32u);
-    };
-    const std::array<std::pair<std::uint32_t, std::uint32_t>, 3> users{{{0x00cu, userEnd(0x00cu)}, {0x08cu, userEnd(0x08cu)}, {0x10cu, userEnd(0x10cu)}}};
-    const auto unread = [&](std::uint32_t offset) {
-        return std::any_of(users.begin(), users.end(), [&](const auto& user) { return offset >= user.second && offset < user.first + 32u; });
-    };
     mix(deviceSerial);
-    for (const auto& range : Graphics::DrawKeyRegisters) {
-        const auto& bank = range.bank == Graphics::RegisterBank::Context ? queue.context : range.bank == Graphics::RegisterBank::Shader ? queue.shader : queue.userConfig;
-        mix((static_cast<std::uint64_t>(range.bank) << 32u) | range.first);
-        const auto end = range.first + range.count;
-        const bool shader = range.bank == Graphics::RegisterBank::Shader;
-        for (auto it = bank.lower_bound(range.first); it != bank.end() && it->first < end; ++it) {
-            if (shader && unread(it->first)) continue;
-            mix(it->first);
-            mix(it->second);
-        }
-    }
     for (const auto base : {0x008u, 0x088u, 0x0c8u, 0x108u, 0x148u}) {
         const auto low = queue.shader.find(base);
         const auto high = queue.shader.find(base + 1);
@@ -84,7 +118,7 @@ bool Driver::sameDecode(const DrawDecode& a, const DrawDecode& b) {
     const auto sameTess = [](const std::optional<ShaderRecompiler::TessellationConfiguration>& x, const std::optional<ShaderRecompiler::TessellationConfiguration>& y) {
         if (x.has_value() != y.has_value()) return false;
         if (!x) return true;
-        return x->inputControlPoints == y->inputControlPoints && x->outputControlPoints == y->outputControlPoints && x->domain == y->domain && x->partitioning == y->partitioning && x->outputTopology == y->outputTopology;
+        return x->inputControlPoints == y->inputControlPoints && x->outputControlPoints == y->outputControlPoints && x->domain == y->domain && x->partitioning == y->partitioning && x->outputTopology == y->outputTopology && x->patchesPerGroup == y->patchesPerGroup;
     };
     if (s.stages.path != t.stages.path || s.stages.registerValue != t.stages.registerValue || s.stages.vertexWaveSize != t.stages.vertexWaveSize || s.stages.fragmentWaveSize != t.stages.fragmentWaveSize || !sameMesh(s.stages.mesh, t.stages.mesh) || !sameTess(s.stages.tessellation, t.stages.tessellation)) return false;
     if (!sameColor(s.color, t.color) || s.colors.size() != t.colors.size() || s.blends.size() != t.blends.size()) return false;

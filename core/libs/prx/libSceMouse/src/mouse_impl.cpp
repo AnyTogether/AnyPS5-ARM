@@ -27,6 +27,11 @@ void enqueue(const MouseData& data) {
 
 namespace Mouse {
 
+bool IsOpen() {
+    std::lock_guard lock(mouseMutex);
+    return opened;
+}
+
 int Initialize() {
     std::lock_guard lock(mouseMutex);
     initialized = true;

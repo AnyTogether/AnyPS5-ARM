@@ -428,11 +428,105 @@ struct ScalarType {
     bool boolean;
 };
 
+template <typename T>
+class IdTable {
+public:
+    void Reset(std::size_t bound) {
+        items.assign(bound, T{});
+        present.assign(bound, 0u);
+        count = 0;
+    }
+    bool contains(std::uint32_t id) const { return id < present.size() && present[id] != 0u; }
+    const T* find(std::uint32_t id) const { return contains(id) ? &items[id] : nullptr; }
+    const T& at(std::uint32_t id) const {
+        if (!contains(id)) throw std::out_of_range("prepared SPIR-V id has no entry");
+        return items[id];
+    }
+    T& at(std::uint32_t id) {
+        if (!contains(id)) throw std::out_of_range("prepared SPIR-V id has no entry");
+        return items[id];
+    }
+    bool emplace(std::uint32_t id, T value) {
+        check(id);
+        if (present[id] != 0u) return false;
+        items[id] = std::move(value);
+        present[id] = 1u;
+        ++count;
+        return true;
+    }
+    T& operator[](std::uint32_t id) {
+        check(id);
+        if (present[id] == 0u) {
+            items[id] = T{};
+            present[id] = 1u;
+            ++count;
+        }
+        return items[id];
+    }
+    void erase(std::uint32_t id) {
+        if (!contains(id)) return;
+        present[id] = 0u;
+        items[id] = T{};
+        --count;
+    }
+    std::size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    class Iterator {
+    public:
+        Iterator(IdTable& table, std::uint32_t id) : table(table), id(id) { skip(); }
+        std::pair<std::uint32_t, T&> operator*() const { return {id, table.items[id]}; }
+        Iterator& operator++() {
+            ++id;
+            skip();
+            return *this;
+        }
+        bool operator!=(const Iterator& other) const { return id != other.id; }
+
+    private:
+        void skip() {
+            while (id < table.present.size() && table.present[id] == 0u) ++id;
+        }
+        IdTable& table;
+        std::uint32_t id;
+    };
+    Iterator begin() { return Iterator(*this, 0u); }
+    Iterator end() { return Iterator(*this, static_cast<std::uint32_t>(present.size())); }
+
+private:
+    void check(std::uint32_t id) const {
+        if (id >= present.size()) throw std::runtime_error("prepared SPIR-V id exceeds the module bound");
+    }
+    std::vector<T> items;
+    std::vector<std::uint8_t> present;
+    std::size_t count = 0;
+};
+
+class IdSet {
+public:
+    void Reset(std::size_t bound) { present.assign(bound, 0u); }
+    bool contains(std::uint32_t id) const { return id < present.size() && present[id] != 0u; }
+    bool insert(std::uint32_t id) {
+        if (id >= present.size()) throw std::runtime_error("prepared SPIR-V id exceeds the module bound");
+        if (present[id] != 0u) return false;
+        present[id] = 1u;
+        return true;
+    }
+
+private:
+    std::vector<std::uint8_t> present;
+};
+
 class Specialization {
 public:
     explicit Specialization(std::span<const std::uint32_t> words) {
         if (words.size() < 5u || words[0] != spv::MagicNumber) throw std::runtime_error("invalid prepared SPIR-V header");
         header.assign(words.begin(), words.begin() + 5);
+        bound = header[3];
+        types.Reset(bound);
+        values.Reset(bound);
+        resultTypes.Reset(bound);
+        vectorTypes.Reset(bound);
+        removed.Reset(bound);
         for (std::size_t cursor = 5; cursor < words.size();) {
             const auto count = words[cursor] >> 16u;
             if (count == 0u || count > words.size() - cursor) throw std::runtime_error("truncated prepared SPIR-V instruction");
@@ -479,15 +573,15 @@ public:
 
 private:
     std::optional<std::uint32_t> value(std::uint32_t id) const {
-        const auto found = values.find(id);
-        return found != values.end() ? std::optional(found->second) : std::nullopt;
+        const auto* found = values.find(id);
+        return found != nullptr ? std::optional(*found) : std::nullopt;
     }
 
     std::optional<std::uint32_t> evaluate(const Instruction& instruction) const {
         const auto op = Opcode(instruction);
         if (instruction.size() < 4u) return std::nullopt;
-        const auto type = types.find(instruction[1]);
-        if (type == types.end() || type->second.width > 32u) return std::nullopt;
+        const auto* type = types.find(instruction[1]);
+        if (type == nullptr || type->width > 32u) return std::nullopt;
         const auto left = value(instruction[3]);
         if (!left) return std::nullopt;
         if (op == spv::OpCopyObject) return left;
@@ -505,8 +599,8 @@ private:
         case spv::OpBitwiseAnd: return *left & *right;
         case spv::OpBitwiseOr: return *left | *right;
         case spv::OpBitwiseXor: return *left ^ *right;
-        case spv::OpShiftRightLogical: return *right < type->second.width ? std::optional(*left >> *right) : std::nullopt;
-        case spv::OpShiftLeftLogical: return *right < type->second.width ? std::optional(*left << *right) : std::nullopt;
+        case spv::OpShiftRightLogical: return *right < type->width ? std::optional(*left >> *right) : std::nullopt;
+        case spv::OpShiftLeftLogical: return *right < type->width ? std::optional(*left << *right) : std::nullopt;
         case spv::OpIEqual: return *left == *right;
         case spv::OpINotEqual: return *left != *right;
         case spv::OpULessThan: return *left < *right;
@@ -532,7 +626,8 @@ private:
     bool fold() {
         bool changed = false;
         bool function = false;
-        std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> extracts;
+        IdTable<std::pair<std::uint32_t, std::uint32_t>> extracts;
+        extracts.Reset(bound);
         for (auto& instruction : instructions) {
             if (instruction.empty()) continue;
             auto op = Opcode(instruction);
@@ -554,14 +649,14 @@ private:
             op = Opcode(instruction);
             if (op == spv::OpCompositeExtract && instruction.size() == 5u) extracts.emplace(instruction[2], std::pair{instruction[3], instruction[4]});
             if (op == spv::OpCompositeConstruct && instruction.size() == 7u) {
-                const auto first = extracts.find(instruction[3]);
-                bool shuffle = first != extracts.end() && vectorTypes.contains(instruction[1]) && resultTypes.contains(first->second.first) && vectorTypes.contains(resultTypes.at(first->second.first));
+                const auto* first = extracts.find(instruction[3]);
+                bool shuffle = first != nullptr && vectorTypes.contains(instruction[1]) && resultTypes.contains(first->first) && vectorTypes.contains(resultTypes.at(first->first));
                 for (std::size_t index = 4; shuffle && index < instruction.size(); ++index) {
-                    const auto found = extracts.find(instruction[index]);
-                    shuffle = found != extracts.end() && found->second.first == first->second.first;
+                    const auto* found = extracts.find(instruction[index]);
+                    shuffle = found != nullptr && found->first == first->first;
                 }
                 if (shuffle) {
-                    const auto source = first->second.first;
+                    const auto source = first->first;
                     bool identity = resultTypes.contains(source) && resultTypes.at(source) == instruction[1];
                     Instruction replacement = Make(spv::OpVectorShuffle, {instruction[1], instruction[2], source, source});
                     for (std::size_t index = 3; index < instruction.size(); ++index) {
@@ -587,7 +682,8 @@ private:
     }
 
     bool prune() {
-        std::map<std::uint32_t, std::vector<std::size_t>> blocks;
+        IdTable<std::vector<std::size_t>> blocks;
+        blocks.Reset(bound);
         std::vector<std::uint32_t> entries;
         std::uint32_t block = 0;
         bool entry = false;
@@ -622,7 +718,8 @@ private:
             }
             return true;
         };
-        std::set<std::uint32_t> loopHeaders;
+        IdSet loopHeaders;
+        loopHeaders.Reset(bound);
         std::map<std::uint32_t, std::uint32_t> continueHeaders;
         for (const auto& [label, indices] : blocks) {
             for (const auto index : indices) {
@@ -631,7 +728,8 @@ private:
                 continueHeaders.emplace(instructions[index].at(2), label);
             }
         }
-        std::map<std::uint32_t, std::vector<std::uint32_t>> edges;
+        IdTable<std::vector<std::uint32_t>> edges;
+        edges.Reset(bound);
         for (const auto& [label, indices] : blocks) {
             auto& terminal = instructions[indices.back()];
             auto op = Opcode(terminal);
@@ -668,18 +766,19 @@ private:
             else if (op == spv::OpBranchConditional) successors = {terminal.at(2), terminal.at(3)};
             else if (op == spv::OpSwitch) {
                 successors.push_back(terminal.at(2));
-                const auto selectorType = resultTypes.find(terminal.at(1));
-                const auto stride = selectorType != resultTypes.end() && types.contains(selectorType->second) && types.at(selectorType->second).width == 64u ? 3u : 2u;
+                const auto* selectorType = resultTypes.find(terminal.at(1));
+                const auto stride = selectorType != nullptr && types.contains(*selectorType) && types.at(*selectorType).width == 64u ? 3u : 2u;
                 for (std::size_t index = 3; index + stride <= terminal.size(); index += stride) successors.push_back(terminal[index + stride - 1u]);
             }
         }
-        std::set<std::uint32_t> live;
+        IdSet live;
+        live.Reset(bound);
         auto pending = entries;
         while (!pending.empty()) {
             const auto label = pending.back();
             pending.pop_back();
             if (!blocks.contains(label)) throw std::runtime_error("prepared branch references a missing block");
-            if (!live.insert(label).second) continue;
+            if (!live.insert(label)) continue;
             const auto& successors = edges.at(label);
             pending.insert(pending.end(), successors.begin(), successors.end());
         }
@@ -730,14 +829,15 @@ private:
         return changed;
     }
 
-    std::set<std::uint32_t> referencedIds() const {
-        std::set<std::uint32_t> referenced;
+    IdSet referencedIds() const {
+        IdSet referenced;
+        referenced.Reset(bound);
         for (const auto& instruction : instructions) {
             if (instruction.empty()) continue;
             std::uint32_t switchLiteralWords = 1u;
             if (Opcode(instruction) == spv::OpSwitch && instruction.size() > 1u) {
-                const auto selectorType = resultTypes.find(instruction[1]);
-                if (selectorType != resultTypes.end() && types.contains(selectorType->second) && types.at(selectorType->second).width == 64u) switchLiteralWords = 2u;
+                const auto* selectorType = resultTypes.find(instruction[1]);
+                if (selectorType != nullptr && types.contains(*selectorType) && types.at(*selectorType).width == 64u) switchLiteralWords = 2u;
             }
             VisitIdOperands(instruction, switchLiteralWords, [&](std::size_t index) { referenced.insert(instruction[index]); });
         }
@@ -807,7 +907,8 @@ private:
     }
 
     bool propagateCopies() {
-        std::map<std::uint32_t, std::uint32_t> copies;
+        IdTable<std::uint32_t> copies;
+        copies.Reset(bound);
         for (const auto& instruction : instructions) {
             if (Opcode(instruction) != spv::OpCopyObject) continue;
             if (instruction.size() != 4u) throw std::runtime_error("invalid prepared copy instruction");
@@ -852,7 +953,8 @@ private:
     }
 
     void removeDeadComputations() {
-        std::map<std::uint32_t, std::size_t> definitions;
+        IdTable<std::size_t> definitions;
+        definitions.Reset(bound);
         std::vector<std::uint32_t> pending;
         bool function = false;
         for (std::size_t index = 0; index < instructions.size(); ++index) {
@@ -878,13 +980,14 @@ private:
             const auto resultIndex = hasResult ? (hasType ? 2u : 1u) : 0u;
             for (std::size_t operand = 1; operand < instruction.size(); ++operand) if (operand != resultIndex) pending.push_back(instruction[operand]);
         }
-        std::set<std::uint32_t> live;
+        IdSet live;
+        live.Reset(bound);
         while (!pending.empty()) {
             const auto id = pending.back();
             pending.pop_back();
-            const auto found = definitions.find(id);
-            if (found == definitions.end() || !live.insert(id).second) continue;
-            const auto& instruction = instructions[found->second];
+            const auto* found = definitions.find(id);
+            if (found == nullptr || !live.insert(id)) continue;
+            const auto& instruction = instructions[*found];
             if (!VisitInputs(instruction, [&](std::size_t operand) { pending.push_back(instruction[operand]); })) throw std::runtime_error("missing prepared pure instruction operands");
         }
         for (const auto& [id, index] : definitions) {
@@ -897,11 +1000,12 @@ private:
     std::vector<std::uint32_t> header;
     std::vector<Instruction> instructions;
     std::vector<Instruction> constants;
-    std::map<std::uint32_t, ScalarType> types;
-    std::map<std::uint32_t, std::uint32_t> values;
-    std::map<std::uint32_t, std::uint32_t> resultTypes;
-    std::set<std::uint32_t> vectorTypes;
-    std::set<std::uint32_t> removed;
+    std::uint32_t bound = 0;
+    IdTable<ScalarType> types;
+    IdTable<std::uint32_t> values;
+    IdTable<std::uint32_t> resultTypes;
+    IdSet vectorTypes;
+    IdSet removed;
 };
 
 }

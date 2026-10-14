@@ -1,11 +1,14 @@
+#include <atomic>
 #include <cstdint>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "AudioOut2Internal.hpp"
 
-static constexpr int SCE_AUDIO_OUT2_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80260502);
 static constexpr int USER_ID_SYSTEM = 0xFF;
 static constexpr std::uint32_t MIN_SUPPORTED_3D_LATENCY = 1;
 static constexpr std::uint32_t MAX_SUPPORTED_3D_LATENCY = 2;
+
+static std::atomic<bool> g_chatEnabled{false};
 
 extern "C" {
 
@@ -34,6 +37,7 @@ int APS5_VABI sceAudioOut2SetSystemDebugState(const AudioOut2SystemDebugStatePar
 // Lets system chat audio play alongside the title's output. The host has no chat audio to let through,
 // so there is nothing to change.
 int APS5_VABI sceAudioOut2EnableChat(void) {
+    if (!g_chatEnabled.exchange(true)) AUDIOOUT2_TRACE("t=%.3f EnableChat: chat audio is allowed alongside the title's; the host mixes no chat audio\n", AudioOut2TraceSeconds());
     return 0;
 }
 

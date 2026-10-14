@@ -72,7 +72,7 @@ class StubGeneratorTests(unittest.TestCase):
             nids.write_text("AAAAAAAAAAA\n", encoding="utf-8")
             original = "AAAAAAAAAAA sceExample\n"
             database.write_text(original, encoding="utf-8")
-            output.hardlink_to(database)
+            os.link(database, output)
             arguments = ["--module", "libSceExample", "--nids", str(nids), "--db", str(database), "--out", str(output)]
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                 stubgen.main(arguments)

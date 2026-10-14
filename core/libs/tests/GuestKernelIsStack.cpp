@@ -9,9 +9,11 @@ int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
 int APS5_VABI sceKernelIsStack(void* addr, void** start, void** end);
 int APS5_VABI sceKernelMapFlexibleMemory(void** addr, std::size_t len, int prot, int flags);
 int APS5_VABI sceKernelMunmap(std::uint64_t addr, std::size_t len);
+int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInfo* info, std::uint64_t infoSize);
 }
 
 static constexpr int SCE_OK = 0;
+static constexpr std::uintptr_t APPLICATION_AREA_END = 0x000000FC00000000ull;
 static constexpr int SCE_KERNEL_ERROR_EACCES = static_cast<int>(0x8002000d);
 static int global = 0;
 
@@ -24,6 +26,8 @@ struct WorkerContext {
     void* start = nullptr;
     void* end = nullptr;
     int result = -1;
+    VirtualQueryInfo region{};
+    int regionResult = -1;
 };
 
 static void* APS5_VABI Worker(void* arg) {
@@ -31,6 +35,7 @@ static void* APS5_VABI Worker(void* arg) {
     int local = 0;
     context.local = &local;
     context.result = sceKernelIsStack(&local, &context.start, &context.end);
+    context.regionResult = sceKernelVirtualQuery(&local, 0, &context.region, sizeof(context.region));
     context.queried.store(true);
     while (!context.release.load()) {}
     return nullptr;
@@ -55,6 +60,11 @@ int main() {
     while (!context.queried.load()) {}
     Require(context.result == SCE_OK);
     Require(context.start <= context.local && context.local < context.end);
+    Require(context.regionResult == SCE_OK);
+    Require(context.region.start <= reinterpret_cast<std::uintptr_t>(context.local) && reinterpret_cast<std::uintptr_t>(context.local) < context.region.end);
+#if defined(__linux__)
+    Require(reinterpret_cast<std::uintptr_t>(context.local) < APPLICATION_AREA_END);
+#endif
     Require(sceKernelIsStack(&local, &start, &end) == SCE_OK);
     Require(context.end <= start || context.start >= end);
     void* workerStart = nullptr;

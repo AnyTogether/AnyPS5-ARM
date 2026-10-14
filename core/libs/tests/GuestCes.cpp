@@ -9,6 +9,7 @@ const std::uint8_t* APS5_VABI sceCesRefersUcsProfileCp1251(void);
 int APS5_VABI sceCesMbcsUcsContextInit(void*, const void*);
 int APS5_VABI sceCesSbcToUtf8(const std::uint8_t*, std::uint8_t, std::uint8_t*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceCesUtf8ToSbc(const std::uint8_t*, std::uint32_t, std::uint32_t*, const std::uint8_t*, std::uint8_t*);
+void* APS5_VABI sceCesUcsProfileInitSJis1997Cp932(void*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -106,4 +107,9 @@ int main() {
     char context[256] = {};
     Require(sceCesMbcsUcsContextInit(context, cyrillic) == 0);
     Require(sceCesMbcsUcsContextInit(nullptr, cyrillic) == invalidParameter);
+
+    char sheet[256] = {};
+    Require(sceCesUcsProfileInitSJis1997Cp932(sheet) == sheet);
+    Require(sceCesUcsProfileInitSJis1997Cp932(nullptr) == nullptr);
+    Require(sceCesMbcsUcsContextInit(context, sheet) == 0);
 }

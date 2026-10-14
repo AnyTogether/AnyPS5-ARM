@@ -3,6 +3,7 @@
 #include "prx/libc/include/GuestHeap.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -119,6 +120,10 @@ static bool CheckWidePrecision() {
     Require(snprintf_nid_postfix(output, sizeof(output), "[%ls]", static_cast<const char16_t*>(nullptr)) == 8 && std::strcmp(output, "[(null)]") == 0);
     Require(snprintf_nid_postfix(output, sizeof(output), "a%lcb%C", 0, 0) == 4 && std::memcmp(output, "a\0b\0", 5) == 0);
     Require(FormatList(output, sizeof(output), "%%ls:%2$d:%1$d", 3, 7) == 7 && std::strcmp(output, "%ls:7:3") == 0);
+    Require(FormatList(output, sizeof(output), "%ls[%f][%+f][% F][%5.1e]", u"", -NAN, -NAN, NAN, -NAN) == 22
+        && std::strcmp(output, "[nan][nan][NAN][  nan]") == 0);
+    Require(FormatList(output, sizeof(output), "%ls[%-6g][%06a][%LG][%+f]", u"", NAN, -NAN, -static_cast<long double>(NAN), -INFINITY) == 27
+        && std::strcmp(output, "[nan   ][   nan][NAN][-inf]") == 0);
     for (std::size_t capacity = 0; capacity <= 6; ++capacity) {
         std::memset(output, '!', sizeof(output));
         int count = -1;

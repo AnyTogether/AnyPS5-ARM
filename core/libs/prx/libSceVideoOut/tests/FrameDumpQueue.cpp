@@ -96,31 +96,52 @@ void checkDump(std::span<const char> dump, std::span<const std::byte> decoded) {
 void testDumpQueue() {
     const int handle = sceVideoOutOpen(255, 0, 0, nullptr);
     auto cfg = VideoOutDriver::Get().GetConfig(handle);
-    std::vector<std::byte> allocation(static_cast<std::size_t>((Width + 127) / 128) * ((Height + 127) / 128) * 65536 + 65535);
-    const auto address = reinterpret_cast<std::uintptr_t>(allocation.data());
-    const std::span<std::byte> storage{allocation.data() + ((65536u - (address & 65535u)) & 65535u), allocation.size() - 65535u};
-    const AgcDriver::DisplayBuffer display{reinterpret_cast<std::uint64_t>(storage.data()), 0x8000000000000000ull, Width, Height};
-    check(AgcDriver::DisplayBufferSize(display) == storage.size(), "incorrect padded display footprint");
-    for (std::uint32_t y = 0; y < Height; ++y) {
-        for (std::uint32_t x = 0; x < Width; ++x) {
-            const auto offset = AgcDriver::DisplayBufferOffset(display, x, y);
-            storage[offset] = static_cast<std::byte>(x & 255u);
-            storage[offset + 1] = static_cast<std::byte>(y & 255u);
-            storage[offset + 2] = static_cast<std::byte>((x >> 8u) | ((y >> 8u) << 4u));
-            storage[offset + 3] = std::byte{255};
+    constexpr auto tiledBytes = static_cast<std::size_t>((Width + 127) / 128) * ((Height + 127) / 128) * 65536;
+    constexpr auto linearBytes = static_cast<std::size_t>(Width) * Height * 4;
+    const auto makeStorage = [](std::size_t bytes, std::vector<std::byte>& allocation) {
+        allocation.resize(bytes + 65535);
+        const auto address = reinterpret_cast<std::uintptr_t>(allocation.data());
+        auto* aligned = allocation.data() + ((65536u - (address & 65535u)) & 65535u);
+        return std::span<std::byte>{aligned, bytes};
+    };
+    std::vector<std::byte> tiledAllocation;
+    std::vector<std::byte> linearAllocation;
+    const auto tiledStorage = makeStorage(tiledBytes, tiledAllocation);
+    const auto linearStorage = makeStorage(linearBytes, linearAllocation);
+    const AgcDriver::DisplayBuffer tiled{reinterpret_cast<std::uint64_t>(tiledStorage.data()), 0x8000000000000000ull, Width, Height};
+    const AgcDriver::DisplayBuffer linear{reinterpret_cast<std::uint64_t>(linearStorage.data()), 0x8000000000000000ull, Width, Height, 1};
+    check(AgcDriver::DisplayBufferSize(tiled) == tiledStorage.size(), "incorrect padded tiled display footprint");
+    check(AgcDriver::DisplayBufferSize(linear) == linearStorage.size(), "incorrect linear display footprint");
+    const auto fill = [](const AgcDriver::DisplayBuffer& display, std::span<std::byte> storage) {
+        for (std::uint32_t y = 0; y < Height; ++y) {
+            for (std::uint32_t x = 0; x < Width; ++x) {
+                const auto offset = AgcDriver::DisplayBufferOffset(display, x, y);
+                storage[offset] = static_cast<std::byte>(x & 255u);
+                storage[offset + 1] = static_cast<std::byte>(y & 255u);
+                storage[offset + 2] = static_cast<std::byte>((x >> 8u) | ((y >> 8u) << 4u));
+                storage[offset + 3] = std::byte{255};
+            }
         }
-    }
-    const auto decoded = AgcDriver::ReadDisplayBuffer(display);
-    VideoOutBuffers buffer{storage.data(), nullptr, {nullptr, nullptr}};
-    VideoOutBufferAttribute2 attribute{};
-    sceVideoOutSetBufferAttribute2(&attribute, display.pixelFormat, 0, Width, Height, 0, 0, 0);
-    check(sceVideoOutRegisterBuffers2(handle, 0, 0, &buffer, 1, &attribute, 0, nullptr) == 0, "buffer registration failed");
+    };
+    fill(tiled, tiledStorage);
+    fill(linear, linearStorage);
+    const auto tiledPixels = AgcDriver::ReadDisplayBuffer(tiled);
+    const auto linearPixels = AgcDriver::ReadDisplayBuffer(linear);
+    VideoOutBuffers tiledBuffer{tiledStorage.data(), nullptr, {nullptr, nullptr}};
+    VideoOutBuffers linearBuffer{linearStorage.data(), nullptr, {nullptr, nullptr}};
+    VideoOutBufferAttribute2 tiledAttribute{};
+    VideoOutBufferAttribute2 linearAttribute{};
+    sceVideoOutSetBufferAttribute2(&tiledAttribute, tiled.pixelFormat, 0, Width, Height, 0, 0, 0);
+    sceVideoOutSetBufferAttribute2(&linearAttribute, linear.pixelFormat, 1, Width, Height, 0, 0, 0);
+    check(sceVideoOutRegisterBuffers2(handle, 0, 0, &tiledBuffer, 1, &tiledAttribute, 0, nullptr) == 0, "tiled buffer registration failed");
+    check(sceVideoOutRegisterBuffers2(handle, 1, 1, &linearBuffer, 1, &linearAttribute, 0, nullptr) == 0, "linear buffer registration failed");
     const HeldDump first(0);
     const HeldDump last(Frames - 1);
     std::exception_ptr failure;
     try {
         for (int frame = 0; frame < Frames; ++frame) {
-            check(sceVideoOutSubmitFlip(handle, 0, 1, frame) == 0, "the flip was not accepted");
+            const int index = frame % 2;
+            check(sceVideoOutSubmitFlip(handle, index, 1, frame) == 0, "the flip was not accepted");
             std::unique_lock lock(cfg->mutex);
             check(cfg->vblankCond.wait_for(lock, std::chrono::seconds(15), [&] { return (cfg->failure && cfg->flipStatus.flipPendingNum == 0) || cfg->flipStatus.count == static_cast<std::uint64_t>(frame) + 1; }), "the flip did not complete");
             if (cfg->failure) std::rethrow_exception(cfg->failure);
@@ -130,11 +151,13 @@ void testDumpQueue() {
     }
     const auto firstDump = first.Release();
     if (failure) std::rethrow_exception(failure);
-    checkDump(firstDump, decoded);
+    checkDump(firstDump, tiledPixels);
     const auto lastDump = last.Release();
-    checkDump(lastDump, decoded);
-    for (int frame = 1; frame < Frames - 1; ++frame) checkDump(readDump(frame), decoded);
+    checkDump(lastDump, linearPixels);
+    checkDump(readDump(1), linearPixels);
+    checkDump(readDump(2), tiledPixels);
     sceVideoOutUnregisterBuffers(handle, 0);
+    sceVideoOutUnregisterBuffers(handle, 1);
     sceVideoOutClose(handle);
     LibcRunShutdown_nid_postfix();
 }

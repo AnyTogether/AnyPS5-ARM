@@ -106,11 +106,15 @@ void PipelineCache::load(std::vector<std::byte>& initialData) {
 void PipelineCache::save(bool final) {
     const auto getData = context.Function<PFN_vkGetPipelineCacheData>("vkGetPipelineCacheData");
     std::size_t size = 0;
-    if (getData(context.device, cache, &size, nullptr) != VK_SUCCESS || size == 0 || size == savedBytes) return;
-    std::vector<std::byte> file(sizeof(FileHeader) + size);
-    const auto result = getData(context.device, cache, &size, file.data() + sizeof(FileHeader));
-    if (result != VK_SUCCESS && result != VK_INCOMPLETE) return;
-    file.resize(sizeof(FileHeader) + size);
+    std::vector<std::byte> file;
+    {
+        auto synchronizationLock = synchronization.LockForSnapshot();
+        if (getData(context.device, cache, &size, nullptr) != VK_SUCCESS || size == 0 || size == savedBytes) return;
+        file.resize(sizeof(FileHeader) + size);
+        const auto result = getData(context.device, cache, &size, file.data() + sizeof(FileHeader));
+        if (result != VK_SUCCESS && result != VK_INCOMPLETE) return;
+        file.resize(sizeof(FileHeader) + size);
+    }
     const FileHeader header{FileMagic, FileFormat, size, ShaderRecompiler::HashBytes(std::span(file).subspan(sizeof(FileHeader)))};
     std::memcpy(file.data(), &header, sizeof(header));
     const auto started = std::chrono::steady_clock::now();

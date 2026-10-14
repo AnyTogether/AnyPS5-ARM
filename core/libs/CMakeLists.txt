@@ -45,7 +45,7 @@ target_include_directories(nid_patcher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/nid/i
 target_compile_features(nid_patcher PRIVATE cxx_std_20)
 
 if(MINGW)
-    target_link_options(nid_patcher PRIVATE -static -static-libgcc -static-libstdc++)
+    target_link_options(nid_patcher PRIVATE -municode -static -static-libgcc -static-libstdc++)
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_FLAGS -fno-asynchronous-unwind-tables)
     check_cxx_source_compiles("#ifdef __USING_SJLJ_EXCEPTIONS__\n#error\n#endif\nint main() { return 0; }" ANYPS5_MINGW_DWARF_EXCEPTIONS)
@@ -201,23 +201,49 @@ if(BUILD_TESTING)
         set_tests_properties(guest_posix_scalar_io PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(nid_buffer_validation_tests nid/tests/BufferValidation.cpp)
+    target_include_directories(nid_buffer_validation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/nid/include)
+    target_compile_features(nid_buffer_validation_tests PRIVATE cxx_std_20)
+    if(MINGW)
+        target_compile_options(nid_buffer_validation_tests PRIVATE -fasynchronous-unwind-tables)
+    endif()
+    add_test(NAME nid_buffer_validation COMMAND nid_buffer_validation_tests)
+    set_tests_properties(nid_buffer_validation PROPERTIES TIMEOUT 10)
+
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME nid_gnu_hash COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_gnu_hash.py $<TARGET_FILE:nid_patcher>)
         add_test(NAME nid_patcher_macho COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_macho_nids.py $<TARGET_FILE:nid_patcher>)
+        add_test(NAME nid_patcher_native_paths COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_native_paths.py $<TARGET_FILE:nid_patcher>)
+        set_tests_properties(nid_patcher_native_paths PROPERTIES TIMEOUT 20)
     endif()
     add_test_executable(patched_libraries_tests tests/PatchedLibraries.cpp)
     add_dependencies(patched_libraries_tests libs)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME nid_pe_references COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_pe_references.py $<TARGET_FILE:nid_patcher>)
+    endif()
     if(MINGW)
         target_compile_options(patched_libraries_tests PRIVATE -fasynchronous-unwind-tables)
         target_link_options(patched_libraries_tests PRIVATE -static -static-libgcc -static-libstdc++)
     endif()
     add_test(NAME patched_libraries COMMAND patched_libraries_tests ${PATCHED_DIR})
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME nid_elf_layout COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_elf_layout.py $<TARGET_FILE:nid_patcher>)
+    endif()
     add_test_executable(guest_kernel_sys_tests tests/GuestKernelSys.cpp)
     target_include_directories(guest_kernel_sys_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_kernel_sys_tests PRIVATE libkernel_sys libkernel libc)
     configure_windows_unwind(guest_kernel_sys_tests)
     add_test(NAME guest_kernel_sys COMMAND guest_kernel_sys_tests)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME nid_verneed COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_verneed.py $<TARGET_FILE:nid_patcher>)
+    endif()
     if(WIN32)
         set_tests_properties(guest_kernel_sys PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
@@ -241,6 +267,10 @@ if(BUILD_TESTING)
     target_link_libraries(guest_offline_imports_tests PRIVATE libSceHttp libSceNpEntitlementAccess libSceRudp libc)
     configure_windows_unwind(guest_offline_imports_tests)
     add_test(NAME guest_offline_imports COMMAND guest_offline_imports_tests)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME nid_shared_strings COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_shared_strings.py $<TARGET_FILE:nid_patcher>)
+    endif()
     if(WIN32)
         set_tests_properties(guest_offline_imports PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHttp>")
@@ -461,6 +491,16 @@ if(BUILD_TESTING)
         set_tests_properties(guest_posix_random PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
+
+    add_test_executable(MemoryPoolTest
+        tests/MemoryPoolTest.cpp
+        prx/libkernel/DirectMemory/MemoryPool.cpp
+    )
+    target_include_directories(MemoryPoolTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    if(MINGW)
+        target_compile_options(MemoryPoolTest PRIVATE -fasynchronous-unwind-tables)
+    endif()
+    add_test(NAME MemoryPoolTest COMMAND MemoryPoolTest)
 
     add_test_executable(guest_acm_tests tests/GuestAcm.cpp)
     target_include_directories(guest_acm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

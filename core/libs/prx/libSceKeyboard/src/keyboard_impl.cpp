@@ -29,7 +29,7 @@ KeyboardData snapshot() {
     KeyboardData data{};
     data.timestamp = sceKernelGetProcessTime();
     data.connected = connected;
-    data.length = keyCount;
+    data.length = std::max(keyCount, 1);
     data.led = led;
     data.modifier_key = modifiers;
     std::copy_n(keys.begin(), keyCount, data.key_code);

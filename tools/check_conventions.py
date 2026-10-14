@@ -6,8 +6,11 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nid_names import CPP_TOKEN
 
 RULES = {
     "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md or docs/dev/debt/ in the same pull request; #endif and namespace ends are always allowed"),
@@ -29,14 +32,13 @@ RULES = {
 CPP = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tga", ".dds"}
 NOTES = {".md", ".markdown", ".rst", ".log", ".patch", ".diff"}
-AGENT_FILES = {"AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", "copilot-instructions.md"}
+AGENT_FILES = {"agents.md", "claude.md", "gemini.md", ".cursorrules", "copilot-instructions.md"}
 DEBT = "docs/dev/TechnicalDebt.md"
 DEBT_DIR = "docs/dev/debt/"
 DEBT_TARGET = re.compile(r"\]\((?:\.\./)+(core/[^)#\s]+)")
 
 CONVENTIONAL = re.compile(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: \S")
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
-TOKENS = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
 ALLOWED_COMMENT = re.compile(r"^\s*(#\s*endif\b|}\s*;?\s*//\s*(end\s+)?namespace\b)")
 EXPORT = re.compile(r"\bAPS5_VABI\s+(\w+)\s*\(")
 STUB_BODY = re.compile(r"^(?:\(void\)\s*\w+\s*;|static_cast<void>\(\s*\w+\s*\)\s*;)*"
@@ -45,7 +47,7 @@ SYSTEM_DEPENDENCY = re.compile(r"\b(find_package\s*\((?!\s*(Python3|Threads|Git)
 TITLE = re.compile(r"\b(PPSA|CUSA)\d{5}\b")
 EXTENSION = re.compile(r"__attribute__|__declspec|#\s*pragma\s+(?!once\b)")
 LINK = re.compile(r"\]\(([^)\s]+)")
-SECTION = re.compile(r"^###\s*(.+?)\s*$", re.M)
+SECTION = re.compile(r"^###(?!#)\s*(.+?)\s*$", re.M)
 KEY = re.compile(r"^( *)([A-Za-z0-9_-]+|'[^']*'|\"[^\"]*\"):(?:\s+(.*?))?\s*$")
 
 
@@ -76,7 +78,7 @@ class Check:
             self.numstat[path] = (added, deleted)
         paths = iter(self.status)
         path, number = None, None
-        for line in git("diff", "-U0", "--no-color", "--no-renames", self.base, head).splitlines():
+        for line in git("diff", "-U0", "--no-color", "--no-renames", self.base, head).split("\n"):
             if line.startswith("diff --git "):
                 path, number = next(paths), None
             elif line.startswith("@@"):
@@ -99,9 +101,10 @@ class Check:
         exports = {}
         for path, lines in self.files(lambda p: p.suffix in CPP):
             core = path.startswith("core/") and "tests" not in PurePosixPath(path).parts
-            source = None
+            source = self.show(path).split("\n")
+            masked = cpp_text("\n".join(source), preserve_comments=True).split("\n")
             for number, text in lines:
-                bare = STRINGS.sub('""', text)
+                bare = masked[number - 1]
                 if ("//" in bare or "/*" in bare) and not ALLOWED_COMMENT.match(bare):
                     self.report("comment", path, number)
                 if EXTENSION.search(bare):
@@ -109,7 +112,7 @@ class Check:
                 if core and TITLE.search(text):
                     self.report("title-specific", path, number, TITLE.search(text).group(0))
                 match = EXPORT.search(bare)
-                if match and path.startswith("core/libs/prx/") and not match.group(1).endswith("_nid_no_patch"):
+                if match and core and path.startswith("core/libs/prx/") and not match.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
                     source = source or self.show(path).splitlines()
                     body = function_body(source, number - 1)
                     if body is None:
@@ -130,11 +133,11 @@ class Check:
             return
         pattern = r"(^|[^[:alnum:]_])APS5_VABI[[:space:]]+(" + "|".join(exports) + r")[[:space:]]*\("
         result = subprocess.run(["git", "grep", "-nE", "--full-name", pattern, self.head, "--", ":(top)core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
-        for line in result.stdout.splitlines():
+        for line in filter(None, result.stdout.split("\n")):
             _, path, number, text = line.split(":", 3)
             name = EXPORT.search(text).group(1)
             own, own_number = exports[name]
-            if library(path) != library(own) and function_body(self.show(path).splitlines(), int(number) - 1) is not None:
+            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(self.show(path).splitlines(), int(number) - 1) is not None:
                 self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def build(self):
@@ -324,16 +327,25 @@ def library(path):
 
 def allowed_notes(path):
     p = PurePosixPath(path)
-    if p.name in AGENT_FILES:
+    if p.name.lower() in AGENT_FILES:
         return False
     if p.suffix.lower() not in NOTES:
         return None
     return path in ("README.md", "CONTRIBUTING.md") or p.parts[0] == ".github" or p.parts[:2] in (("docs", "dev"), ("docs", "user"))
 
 
+def cpp_text(text, preserve_comments=False):
+    def mask(match):
+        if match.group("code") is not None or preserve_comments and match.group("comment") is not None:
+            return match.group()
+        blank = re.sub(r"[^\n]", " ", match.group())
+        return blank if match.group("comment") is not None else '""' + blank[2:]
+
+    return CPP_TOKEN.sub(mask, text)
+
+
 def function_body(lines, start):
-    text = "\n".join(lines[start:start + 400])
-    text = TOKENS.sub(lambda match: "" if match.group(0).startswith("/") else '""', text)
+    text = cpp_text("\n".join(lines[start:start + 400]))
     brace, semicolon = text.find("{"), text.find(";")
     if brace < 0 or 0 <= semicolon < brace:
         return None

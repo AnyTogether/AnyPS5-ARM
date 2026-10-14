@@ -1,6 +1,7 @@
 #include "GraphicsTests.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include <array>
@@ -46,6 +47,20 @@ void srgbDecodeTests() {
     context.srgbDecodeFormats = srgb8 | srgb8_8;
     Require(SampledTextureFormat(context, 128) == VK_FORMAT_R8_UNORM, "8_SRGB decoded in the shader must be viewed as R8_UNORM");
     Require(SampledTextureFormat(context, 130) == VK_FORMAT_R8G8B8A8_SRGB && SampledTextureFormat(context, 14) == VK_FORMAT_R8G8_UNORM && SampledTextureFormat(context, 170) == VK_FORMAT_BC1_RGBA_SRGB_BLOCK, "formats without a shader decode must keep their views");
+}
+
+void srgbTwinTests() {
+    constexpr std::uint32_t srgb8 = 1u;
+    constexpr std::uint32_t srgb8_8 = 2u;
+    Context context{};
+    Require(SrgbTwinFormat(context, VK_FORMAT_R8_UNORM) == VK_FORMAT_R8_SRGB && SrgbTwinFormat(context, VK_FORMAT_R8G8_UNORM) == VK_FORMAT_R8G8_SRGB, "a device that samples R8_SRGB and R8G8_SRGB must give R8 and R8G8 their sRGB twins");
+    context.srgbDecodeFormats = srgb8_8;
+    Require(SrgbTwinFormat(context, VK_FORMAT_R8G8_UNORM) == VK_FORMAT_UNDEFINED, "a device that decodes 8_8_SRGB in the shader must not give R8G8 an sRGB twin");
+    Require(SrgbTwinFormat(context, VK_FORMAT_R8_UNORM) == VK_FORMAT_R8_SRGB, "R8 must keep its sRGB twin when only 8_8_SRGB is decoded in the shader");
+    context.srgbDecodeFormats = srgb8 | srgb8_8;
+    Require(SrgbTwinFormat(context, VK_FORMAT_R8_UNORM) == VK_FORMAT_UNDEFINED, "a device that decodes 8_SRGB in the shader must not give R8 an sRGB twin");
+    Require(SrgbTwinFormat(context, VK_FORMAT_R8G8B8A8_UNORM) == VK_FORMAT_R8G8B8A8_SRGB && SrgbTwinFormat(context, VK_FORMAT_BC7_UNORM_BLOCK) == VK_FORMAT_BC7_SRGB_BLOCK, "formats without a shader decode must keep their sRGB twins");
+    Require(SrgbTwinFormat(context, VK_FORMAT_R32_SFLOAT) == VK_FORMAT_UNDEFINED, "formats without an sRGB counterpart have no twin");
 }
 
 template<typename TAction>
@@ -146,12 +161,22 @@ void packedFloatDccClearTests() {
 
 void RunTextureFormatTests() {
     srgbDecodeTests();
+    srgbTwinTests();
     packedChannelTests();
     Require(ResolveTextureFormat(1) == VK_FORMAT_R8_UNORM, "format 1 must resolve to R8_UNORM");
     Require(ResolveTextureFormat(2) == VK_FORMAT_R8_SNORM, "format 2 must resolve to R8_SNORM");
     Require(BytesPerElement(1) == 1u, "format 1 must be one byte wide");
     Require(!IsBlockCompressed(1), "format 1 must not be block compressed");
     Require(BlockWidth(1) == 1u && BlockHeight(1) == 1u, "format 1 must have a one-texel block");
+
+    Require(ResolveTextureFormat(50) == VK_FORMAT_A2B10G10R10_UNORM_PACK32, "format 50 must resolve to A2B10G10R10_UNORM");
+    Require(ResolveTextureFormat(51) == VK_FORMAT_A2B10G10R10_SNORM_PACK32, "format 51 must resolve to A2B10G10R10_SNORM");
+    Require(ResolveTextureFormat(54) == VK_FORMAT_A2B10G10R10_UINT_PACK32, "format 54 must resolve to A2B10G10R10_UINT");
+    Require(ResolveTextureFormat(55) == VK_FORMAT_A2B10G10R10_SINT_PACK32, "format 55 must resolve to A2B10G10R10_SINT");
+    for (const std::uint32_t format : {50u, 51u, 54u, 55u}) Require(BytesPerElement(format) == 4u && !IsBlockCompressed(format), "packed 10-bit format " + std::to_string(format) + " must be four bytes and not block compressed");
+    Require(ShaderRecompiler::SampledTextureNumericClass(ShaderRecompiler::IrBufferFormat::Format10_10_10_2SNorm) == ShaderRecompiler::IrTextureNumericClass::Float, "format 51 must sample as float");
+    Require(ShaderRecompiler::SampledTextureNumericClass(ShaderRecompiler::IrBufferFormat::Format10_10_10_2SInt) == ShaderRecompiler::IrTextureNumericClass::Sint, "format 55 must sample as signed integer");
+    Require(ShaderRecompiler::SampledTextureNumericClass(ShaderRecompiler::IrBufferFormat::Format10_10_10_2UInt) == ShaderRecompiler::IrTextureNumericClass::Uint, "format 54 must sample as unsigned integer");
 
     Require(ResolveTextureFormat(56) == VK_FORMAT_R8G8B8A8_UNORM, "format 56 must resolve to R8G8B8A8_UNORM");
     Require(BytesPerElement(56) == 4u, "format 56 must be four bytes wide");

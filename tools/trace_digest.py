@@ -67,7 +67,7 @@ def load_summary(path, trace_path):
         return None
     lines = [json.loads(line) for line in candidate.read_text(encoding="utf-8").splitlines() if line.strip()]
     for line in reversed(lines):
-        if path or line.get("trace") == Path(trace_path).name:
+        if line.get("trace") == Path(trace_path).name:
             return line
     return None
 

@@ -23,6 +23,7 @@
 extern "C" int APS5_VABI sceSystemServiceLoadExec(const char*, const char* const*);
 extern "C" int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle);
 extern "C" void APS5_VABI _Exit_nid_postfix(int);
+extern "C" void APS5_VABI exit_nid_postfix(int);
 extern "C" void APS5_VABI catchReturnFromMain_nid_postfix(int);
 using GuestQuickExitCallback = void (APS5_VABI*)();
 extern "C" int APS5_VABI at_quick_exit_nid_postfix(GuestQuickExitCallback);
@@ -76,9 +77,11 @@ void AppendMarker(const std::string& line) {
 }
 void MainShutdown() { AppendMarker("shutdown"); }
 void SecondaryShutdown() { AppendMarker("secondary shutdown"); }
-int RunRelaunchingChild(const std::filesystem::path& self) {
+void APS5_VABI RemainingHandler(void*) { AppendMarker("remaining handler"); }
+void APS5_VABI ExitingHandler(void*) { exit_nid_postfix(7); }
+int RunChild(const std::filesystem::path& self, const char* mode) {
 #ifdef _WIN32
-    std::wstring commandLine = L"\"" + self.wstring() + L"\" --relaunch";
+    std::wstring commandLine = L"\"" + self.wstring() + L"\" " + std::wstring(mode, mode + std::strlen(mode));
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
@@ -93,13 +96,30 @@ int RunRelaunchingChild(const std::filesystem::path& self) {
     const pid_t child = fork();
     Require(child >= 0);
     if (child == 0) {
-        execl(self.c_str(), self.c_str(), "--relaunch", static_cast<char*>(nullptr));
+        execl(self.c_str(), self.c_str(), mode, static_cast<char*>(nullptr));
         std::_Exit(127);
     }
     int status = 0;
     Require(waitpid(child, &status, 0) == child);
     return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 #endif
+}
+int DriveNestedExit() {
+    const auto self = OwnExecutable();
+    const auto marker = std::filesystem::temp_directory_path() / ("anyps5-nested-exit-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt");
+    SetVariable(RelaunchMarker, marker.string().c_str());
+    const int code = RunChild(self, "--nested-exit");
+    std::string text;
+    {
+        std::ifstream file(marker);
+        text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    }
+    std::error_code ignored;
+    std::filesystem::remove(marker, ignored);
+    Require(code == 7);
+    Require(text == "remaining handler\n");
+    std::puts("Guest nested exit completed");
+    return 0;
 }
 int DriveRelaunch() {
     const auto self = OwnExecutable();
@@ -108,7 +128,7 @@ int DriveRelaunch() {
     const auto marker = std::filesystem::temp_directory_path() / ("anyps5-relaunch-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt");
     SetVariable(RelaunchMarker, marker.string().c_str());
     SetVariable(MainExecutable, self.string().c_str());
-    Require(RunRelaunchingChild(self) == 0);
+    Require(RunChild(self, "--relaunch") == 0);
     std::string text;
     for (int attempt = 0; attempt < 200 && text.find("relaunched") == std::string::npos; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -143,6 +163,15 @@ int main(int argc, char** argv) {
         Require(at_quick_exit_nid_postfix(QuickFirst) == 0);
         Require(at_quick_exit_nid_postfix(QuickSecond) == 0);
         quick_exit_nid_postfix(0);
+        return 2;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--nested-exit-driver") == 0) {
+        return DriveNestedExit();
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--nested-exit") == 0) {
+        Require(__cxa_atexit_nid_postfix(RemainingHandler, nullptr, nullptr) == 0);
+        Require(__cxa_atexit_nid_postfix(ExitingHandler, nullptr, nullptr) == 0);
+        exit_nid_postfix(0);
         return 2;
     }
     if (argc > 1 && std::strcmp(argv[1], "--relaunch-driver") == 0) {

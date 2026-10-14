@@ -27,4 +27,9 @@ int APS5_VABI sceMouseResetAbsolutePosition() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
+
+bool MouseIsOpen_nid_postfix() {
+    return Mouse::IsOpen();
+}
+
 }

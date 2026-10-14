@@ -10,6 +10,7 @@
 #include <cstring>
 #include <iostream>
 #include <new>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,13 @@ alignas(256) constexpr auto Wave32GeometryCode = [] {
     code[28] = 0x04250a02u;
     return code;
 }();
+
+alignas(256) constexpr std::array<std::uint32_t, 25> FastLaunchCode{
+    0xd7650000, 0x000100c1, 0x7e000505, 0x93018300, 0x4a020001, 0xe0382000, 0x80020201, 0xe0382010,
+    0x80020601, 0xb07c1003, 0xbf900009, 0xbf8c3f70, 0x7d880083, 0xbefe036a, 0xf80008cf, 0x05040302,
+    0xf800020f, 0x09080706, 0x7d840080, 0xbefe036a, 0x7e1402ff, 0x00200400, 0xf8000941, 0x0000000a,
+    0xbf810000,
+};
 
 alignas(256) constexpr std::array<std::uint32_t, 7> PixelCode{
     0xc8020002, 0xc8060102, 0xc80a0202, 0xc80e0302, 0xf800180f, 0x03020100, 0xbf810000,
@@ -132,6 +140,8 @@ struct MeshDraw {
     bool restart = false;
     std::uint32_t waveSize = 64u;
     VkCullModeFlags cull = VK_CULL_MODE_NONE;
+    std::span<const std::uint32_t> code = {};
+    std::uint32_t stagesRegister = 0x20u;
 };
 
 bool ReadsNumWorkgroups(const std::vector<std::uint32_t>& words) {
@@ -160,7 +170,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     const auto index = AgcDriver::Graphics::MeshIndexBufferDescriptor(setup.draw);
     std::copy(index.begin(), index.end(), userData.begin() + ShaderRecompiler::MeshIndexBufferUserWord);
     std::copy(setup.vertexBuffer.begin(), setup.vertexBuffer.end(), userData.begin() + 8);
-    const auto& code = setup.waveSize == 32u ? Wave32GeometryCode : GeometryCode;
+    const std::span<const std::uint32_t> code = !setup.code.empty() ? setup.code : setup.waveSize == 32u ? std::span<const std::uint32_t>(Wave32GeometryCode) : std::span<const std::uint32_t>(GeometryCode);
     const std::array<ShaderRecompiler::MemoryRegion, 1> geometryMemory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(std::span(code))}}};
     ShaderRecompiler::RecompileRequest geometry{
         {ShaderStage::Mesh, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
@@ -194,7 +204,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
     }};
 
     AgcDriver::Graphics::State state{};
-    state.stages = {AgcDriver::Graphics::ShaderPath::Geometry, 0x20u, setup.waveSize, 64, setup.mesh, std::nullopt};
+    state.stages = {AgcDriver::Graphics::ShaderPath::Geometry, setup.stagesRegister, setup.waveSize, 64, setup.mesh, std::nullopt};
     state.color = {reinterpret_cast<std::uintptr_t>(Pixels.data()), {Width, Height}, VK_FORMAT_R8G8B8A8_UNORM, Pixels.size(), 0xe4u};
     state.colors = {state.color};
     state.hasColorTarget = true;
@@ -215,6 +225,7 @@ void DrawMesh(AgcDriver::VulkanDevice& device, const MeshDraw& setup) {
 
 constexpr ShaderRecompiler::MeshConfiguration SmallSubgroup{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u};
 constexpr ShaderRecompiler::MeshConfiguration WideSubgroup{4u, 32u, 96u, 96u, 32u, 128u, 2048u, 0u, 4u};
+constexpr ShaderRecompiler::MeshConfiguration FastLaunchSubgroup{1u, 1u, 1u, 3u, 1u, 32u, 128u, 0u, 4u};
 
 std::size_t FanPixel(float angle, float radius) {
     const auto x = static_cast<std::uint32_t>((radius * std::cos(angle) + 1.0f) * 0.5f * Width);
@@ -343,6 +354,24 @@ int main() {
             DrawMesh(device, {subgroup, {0, static_cast<std::uint32_t>(Ordered.size()), 0, 1, 0, false}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size())), ShaderRecompiler::MeshDrawPushOffsetBytes, false, 32u});
             CheckTriangles("non-indexed wave32 triangle list");
         }
+
+        ClearPixels();
+        DrawMesh(device, {FastLaunchSubgroup, {0, Triangles, 0, 1, 0, false}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size())), ShaderRecompiler::MeshDrawPushOffsetBytes, false, 32u, VK_CULL_MODE_NONE, FastLaunchCode, 0x482030u});
+        CheckTriangles("fast-launch subgroups");
+        ClearPixels();
+        DrawMesh(device, {FastLaunchSubgroup, {0, Triangles / 2u, 0, 1, 0, false, Triangles / 4u}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size())), ShaderRecompiler::MeshDrawPushOffsetBytes, false, 32u, VK_CULL_MODE_NONE, FastLaunchCode, 0x482030u});
+        for (std::uint32_t triangle = 0; triangle < Triangles; ++triangle) {
+            const bool drawn = triangle >= Triangles / 4u && triangle < Triangles / 4u + Triangles / 2u;
+            Require(PixelIs(CellPixel(triangle), drawn ? TriangleColor(triangle) : Background), "fast-launch subgroups from a start vertex: triangle " + std::to_string(triangle) + " pixel " + PixelText(CellPixel(triangle)));
+        }
+        bool fastLaunchIndexedRefused = false;
+        try {
+            DrawMesh(device, {FastLaunchSubgroup, {reinterpret_cast<std::uintptr_t>(Indices.data()), Triangles, 2, 1, 0, true}, VertexBufferDescriptor(Ordered.data(), static_cast<std::uint32_t>(Ordered.size())), ShaderRecompiler::MeshDrawPushOffsetBytes, false, 32u, VK_CULL_MODE_NONE, FastLaunchCode, 0x482030u});
+        } catch (const std::runtime_error& error) {
+            fastLaunchIndexedRefused = std::string(error.what()).find("indexed fast-launch draws are unsupported") != std::string::npos;
+            if (!fastLaunchIndexedRefused) throw;
+        }
+        Require(fastLaunchIndexedRefused, "an indexed fast-launch draw was drawn");
 
         constexpr std::size_t recordBlockBytes = 65536;
         auto* record = static_cast<std::uint32_t*>(::operator new(recordBlockBytes, std::align_val_t{65536}));

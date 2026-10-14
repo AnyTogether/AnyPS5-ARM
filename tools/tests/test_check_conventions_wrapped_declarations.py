@@ -10,7 +10,7 @@ DEFINITION = "int APS5_VABI sceFooBar(int a, int b) { return a + b; }\n"
 
 
 class WrappedDeclarationTests(unittest.TestCase):
-    def check(self, first_file, first_text):
+    def check(self, first_file, first_text, second_text=DEFINITION):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
 
@@ -31,7 +31,7 @@ class WrappedDeclarationTests(unittest.TestCase):
             git("commit", "-qm", "feat: add library a")
             second = root / "core/libs/prx/libSceB/Export.cpp"
             second.parent.mkdir(parents=True)
-            second.write_text(DEFINITION, encoding="utf-8")
+            second.write_text(second_text, encoding="utf-8")
             git("add", ".")
             git("commit", "-qm", "feat: add library b")
             env = {key: value for key, value in os.environ.items()
@@ -46,6 +46,12 @@ class WrappedDeclarationTests(unittest.TestCase):
         result = self.check("Export.h", "int APS5_VABI sceFooBar(int a,\n    int b);\n")
         self.assertNotIn("duplicate-export", result.stdout, result.stdout + result.stderr)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_cut_helpers_in_different_libraries_are_not_duplicate_nids(self):
+        helper = "int APS5_VABI Support_nid_no_patch_cut() { return 3; }\n"
+        result = self.check("Export.cpp", helper, helper)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("[duplicate-export]", result.stdout)
 
     def test_wrapped_definition_is_a_duplicate(self):
         result = self.check("Export.cpp", "int APS5_VABI sceFooBar(int a,\n    int b) {\n    return 0;\n}\n")

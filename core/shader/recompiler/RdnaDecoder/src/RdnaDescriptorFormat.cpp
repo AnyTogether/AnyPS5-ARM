@@ -13,7 +13,7 @@ struct FormatInfo {
     bool sint32;
 };
 
-constexpr std::array<FormatInfo, 80> kFormatInfoTable {{
+constexpr std::array<FormatInfo, 82> kFormatInfoTable {{
     {IrBufferFormat::Format8UNorm, true, false, false},
     {IrBufferFormat::Format8SNorm, true, false, false},
     {IrBufferFormat::Format8UInt, true, true, false},
@@ -40,7 +40,9 @@ constexpr std::array<FormatInfo, 80> kFormatInfoTable {{
     {IrBufferFormat::Format11_11_10Float, true, false, false},
     {IrBufferFormat::Format10_11_11Float, true, true, false},
     {IrBufferFormat::Format10_10_10_2UNorm, true, false, false},
+    {IrBufferFormat::Format10_10_10_2SNorm, true, false, false},
     {IrBufferFormat::Format10_10_10_2UInt, true, true, false},
+    {IrBufferFormat::Format10_10_10_2SInt, true, false, true},
     {IrBufferFormat::Format8_8_8_8UNorm, true, false, false},
     {IrBufferFormat::Format8_8_8_8SNorm, true, false, false},
     {IrBufferFormat::Format8_8_8_8UInt, true, true, false},

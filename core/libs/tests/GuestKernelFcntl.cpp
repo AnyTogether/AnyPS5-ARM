@@ -63,6 +63,8 @@ static constexpr std::uint64_t NonblockingRequest = 0x8004667e;
 static constexpr std::uint64_t ReadableRequest = 0x4004667f;
 static constexpr std::uint64_t WindowSizeRequest = 0x40087468;
 static constexpr std::uint64_t AsyncRequest = 0x8004667d;
+static constexpr std::uint64_t CloseOnExecRequest = 0x20006601;
+static constexpr std::uint64_t KeepOnExecRequest = 0x20006602;
 static constexpr int SceEbadf = static_cast<int>(0x80020009u);
 static constexpr int SceEinval = static_cast<int>(0x80020016u);
 static constexpr int SceEnotsup = static_cast<int>(0x8002002du);
@@ -123,6 +125,10 @@ static void FileFlagsRoundTrip() {
     Require(fcntl_nid_postfix(file, GetDescriptorFlags) == 1);
     Require(sceKernelFcntl(file, SetDescriptorFlags, 0) == 0);
     Require(sceKernelFcntl(file, GetDescriptorFlags) == 0);
+    Require(ioctl_nid_postfix(file, CloseOnExecRequest, nullptr) == 0);
+    Require(fcntl_nid_postfix(file, GetDescriptorFlags) == 1);
+    Require(ioctl_nid_postfix(file, KeepOnExecRequest, nullptr) == 0);
+    Require(fcntl_nid_postfix(file, GetDescriptorFlags) == 0);
     Require(fcntl_nid_postfix(file, DarwinReadAhead, 1) == 0);
     Require(fcntl_nid_postfix(file, GetFlags) == (ReadWrite | ReadAheadFlag));
     Require(fcntl_nid_postfix(file, ReadAhead, -1) == 0);
@@ -326,6 +332,10 @@ static void PipeFlagsRoundTrip() {
     Require(fcntl_nid_postfix(pipe[1], SetDescriptorFlags, 1) == 0);
     Require(fcntl_nid_postfix(pipe[1], GetDescriptorFlags) == 1);
     Require(fcntl_nid_postfix(pipe[0], GetDescriptorFlags) == 0);
+    Require(ioctl_nid_postfix(pipe[0], CloseOnExecRequest, nullptr) == 0);
+    Require(fcntl_nid_postfix(pipe[0], GetDescriptorFlags) == 1);
+    Require(ioctl_nid_postfix(pipe[1], KeepOnExecRequest, nullptr) == 0);
+    Require(fcntl_nid_postfix(pipe[1], GetDescriptorFlags) == 0);
 
     Require(fcntl_nid_postfix(pipe[0], SetFlags, fcntl_nid_postfix(pipe[0], GetFlags) | NonBlocking) == 0);
     Require(fcntl_nid_postfix(pipe[0], GetFlags) == (ReadOnly | NonBlocking));

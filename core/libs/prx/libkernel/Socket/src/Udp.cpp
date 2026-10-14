@@ -19,9 +19,11 @@
 #endif
 #endif
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include "prx/libkernel/Socket/include/SocketError.hpp"
+#include "prx/libkernel/Socket/include/SocketOptions.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
@@ -97,6 +99,12 @@ int NativeError() {
     return GuestSockets::GuestErrorFromHost(errno);
 #endif
 }
+int ConnectError() {
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) return 36;
+#endif
+    return NativeError();
+}
 int SendError(int type) {
 #ifdef _WIN32
     if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
@@ -111,6 +119,7 @@ struct Socket {
     int type;
     std::mutex modeMutex;
     bool nonblocking = false;
+    GuestSockets::SocketOptionState options;
     Socket(NativeSocket value, int family, int type) : value(value), family(family), type(type) {}
     ~Socket() {
         if (value == Invalid) return;
@@ -216,15 +225,6 @@ std::shared_ptr<Socket> Lookup(int descriptor) {
     if (found != sockets.end()) return found->second;
     Fail(9);
     return {};
-}
-int Option(int guest) {
-    switch (guest) {
-        case 0x4: return SO_REUSEADDR;
-        case 0x20: return SO_BROADCAST;
-        case 0x1001: return SO_SNDBUF;
-        case 0x1002: return SO_RCVBUF;
-        default: return -1;
-    }
 }
 bool Address(const void* input, std::uint32_t length, sockaddr_storage& native, socklen_t& size) {
     if (!input || length < 2) { Fail(14); return false; }
@@ -833,26 +833,20 @@ int APS5_VABI setsockopt_nid_postfix(int descriptor, int level, int option,
     }
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
-    const int nativeOption = Option(option);
-    if (level != 0xffff || nativeOption == -1) return Fail(42);
-    if (!value || length < sizeof(int)) return Fail(22);
-    return ::setsockopt(socket->value, SOL_SOCKET, nativeOption,
-        static_cast<const char*>(value), sizeof(int)) ? Fail(NativeError()) : 0;
+    if (level != 0xffff) return Fail(42);
+    std::lock_guard lock(socket->modeMutex);
+    const int error = GuestSockets::SetSocketLevelOption(static_cast<std::uintptr_t>(socket->value), socket->options, option, value, length);
+    return error == 0 ? 0 : Fail(error);
 }
 int APS5_VABI getsockopt_nid_postfix(int descriptor, int level, int option,
                                     void* value, std::uint32_t* length) {
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
-    const int nativeOption = Option(option);
-    if (level != 0xffff || nativeOption == -1) return Fail(42);
-    if (!value || !length || *length < sizeof(int)) return Fail(22);
-    int result = 0;
-    socklen_t size = sizeof(result);
-    if (::getsockopt(socket->value, SOL_SOCKET, nativeOption, reinterpret_cast<char*>(&result), &size))
-        return Fail(NativeError());
-    std::memcpy(value, &result, sizeof(result));
-    *length = sizeof(result);
-    return 0;
+    if (level != 0xffff) return Fail(42);
+    if (!length) return Fail(22);
+    std::lock_guard lock(socket->modeMutex);
+    const int error = GuestSockets::GetSocketLevelOption(static_cast<std::uintptr_t>(socket->value), socket->options, socket->type, option, value, length);
+    return error == 0 ? 0 : Fail(error);
 }
 int APS5_VABI socket_nid_postfix(int family, int type, int protocol) {
     const bool nonblocking = (type & GuestNonBlocking) != 0;
@@ -929,7 +923,11 @@ int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint
     socklen_t size;
     if (!Address(address, length, native, size)) return -1;
     if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
-    return ::connect(socket->value, reinterpret_cast<sockaddr*>(&native), size) ? Fail(NativeError()) : 0;
+    {
+        std::lock_guard lock(socket->modeMutex);
+        socket->options.reportedError = 0;
+    }
+    return ::connect(socket->value, reinterpret_cast<sockaddr*>(&native), size) ? Fail(ConnectError()) : 0;
 }
 int APS5_VABI listen_nid_postfix(int descriptor, int backlog) {
     const auto socket = Lookup(descriptor);
@@ -1360,7 +1358,7 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
     if (native.empty() && pipes.empty()) {
         if (ready || timeout == 0) return ready;
         if (timeout < 0) throw std::runtime_error("poll: an infinite wait without sockets or pipes never returns");
-        std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+        PreciseSleepUs(static_cast<unsigned long long>(timeout) * 1000);
         return 0;
     }
     const auto collect = [&](std::size_t i, bool pipe) {

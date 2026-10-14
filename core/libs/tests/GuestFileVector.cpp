@@ -206,6 +206,15 @@ int main() {
     Require(sceKernelWritev(ends[1], message, 1) == 3);
     Require(sceKernelReadv(ends[0], reads, 2) == 3);
     Require(std::memcmp(first, "xyz", 3) == 0);
+    char stuvw[] = "stuvw";
+    GuestIovec longer[1] = {{stuvw, 5}};
+    Require(sceKernelWritev(ends[1], longer, 1) == 5);
+    Require(sceKernelReadv(ends[0], reads, 2) == 5);
+    Require(std::memcmp(first, "stu", 3) == 0 && std::memcmp(second, "vw", 2) == 0);
+    Require(sceKernelWritev(ends[1], longer, 1) == 5 && sceKernelWritev(ends[1], longer, 1) == 5);
+    Require(readv_nid_postfix(ends[0], reads, 2) == 7);
+    Require(std::memcmp(first, "stu", 3) == 0 && std::memcmp(second, "vwst", 4) == 0);
+    Require(sceKernelReadv(ends[0], reads, 2) == 3 && std::memcmp(first, "uvw", 3) == 0);
     Require(sceKernelPreadv(ends[0], reads, 2, 0) == ErrorEspipe);
     Require(sceKernelPwritev(ends[1], message, 1, 0) == ErrorEspipe);
 #ifndef _WIN32

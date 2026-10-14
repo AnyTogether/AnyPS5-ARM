@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <sys/stat.h>
 #ifndef _WIN32
 #include <cerrno>
 #include <fcntl.h>
@@ -81,6 +82,24 @@ constexpr int PcAclExtended = 59;
 constexpr int PcAclPathMax = 60;
 constexpr int PcMacPresent = 63;
 constexpr int PcAclNfs4 = 64;
+constexpr int GuestAtSymlinkNofollow = 0x0200;
+
+int GuestFileError(int error) {
+    switch (error) {
+    case ENOENT: return GuestEnoent;
+    case EACCES: return 13;
+    case ENOTDIR: return 20;
+    case EINVAL: return GuestEinval;
+    case EPERM: return GuestEperm;
+    case EROFS: return 30;
+    case ENAMETOOLONG: return GuestEnametoolong;
+    case EIO: return GuestEio;
+#ifdef ELOOP
+    case ELOOP: return GuestEloop;
+#endif
+    default: return GuestEio;
+    }
+}
 
 std::int64_t Fail(int error) {
     *__error_nid_postfix() = error;
@@ -369,6 +388,23 @@ int APS5_VABI fchdir_nid_postfix(int fd) {
     return 0;
 }
 
+int APS5_VABI chroot_nid_postfix(const char* path) {
+    if (path == nullptr) return static_cast<int>(Fail(GuestEfault));
+    if (*path == '\0') return static_cast<int>(Fail(GuestEnoent));
+    if (std::strlen(path) >= GuestPathMax || HasLongComponent(path)) return static_cast<int>(Fail(GuestEnametoolong));
+    std::filesystem::path native;
+    if (const int error = ResolvePathError_nid_no_patch(path, native)) return static_cast<int>(Fail(error));
+    std::error_code error;
+    const auto status = std::filesystem::status(native, error);
+    if (status.type() == std::filesystem::file_type::not_found) return static_cast<int>(Fail(HasNonDirectoryPrefix(native) ? GuestEnotdir : GuestEnoent));
+    if (error) return static_cast<int>(Fail(GuestError(error)));
+    if (!std::filesystem::is_directory(status)) return static_cast<int>(Fail(GuestEnotdir));
+    const bool root = std::filesystem::equivalent(native, ResolvePath_nid_no_patch("/"), error);
+    if (error) return static_cast<int>(Fail(GuestError(error)));
+    if (root) return 0;
+    throw std::runtime_error(std::string("chroot: changing the root directory to ") + path + " is not supported, the guest path resolver keeps a fixed root");
+}
+
 int APS5_VABI symlink_nid_postfix(const char* target, const char* created) {
     if (target == nullptr || created == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*target == '\0' || *created == '\0') return static_cast<int>(Fail(GuestEnoent));
@@ -465,6 +501,41 @@ int APS5_VABI mkdirat_nid_postfix(int fd, const char* path, std::uint16_t mode) 
             return static_cast<int>(Fail(GuestEnotdir));
         return static_cast<int>(Fail(GuestError(std::error_code(nativeError, std::generic_category()))));
     }
+#endif
+    RecordWrittenPath_nid_no_patch(native);
+    return 0;
+}
+
+int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag) {
+    if (flag != 0 && flag != GuestAtSymlinkNofollow) return static_cast<int>(Fail(GuestEinval));
+    if (path == nullptr) return static_cast<int>(Fail(GuestEfault));
+    if (*path == '\0') return static_cast<int>(Fail(GuestEnoent));
+    std::filesystem::path native;
+    if (fd == GuestAtFdcwd || *path == '/') {
+        if (const int error = ResolvePathError_nid_no_patch(path, native)) return static_cast<int>(Fail(error));
+    } else {
+        int error = 0;
+        const char* base = GetDirectoryDescriptorPath_nid_no_patch(fd, &error);
+        if (base == nullptr) return static_cast<int>(Fail(error));
+        native = std::filesystem::path(reinterpret_cast<const char8_t*>(base)) / std::filesystem::path(reinterpret_cast<const char8_t*>(path));
+    }
+    if (flag == GuestAtSymlinkNofollow) {
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
+        const bool symbolic = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+        std::error_code status;
+        const bool symbolic = std::filesystem::is_symlink(std::filesystem::symlink_status(native, status));
+#endif
+        if (symbolic) {
+            NotImplemented_nid_no_patch("fchmodat: AT_SYMLINK_NOFOLLOW on a symbolic link");
+            return -1;
+        }
+    }
+#ifdef _WIN32
+    if (::_wchmod(native.wstring().c_str(), mode & 07777) != 0) return static_cast<int>(Fail(GuestFileError(errno)));
+#else
+    if (::chmod(native.c_str(), static_cast<mode_t>(mode & 07777)) != 0) return static_cast<int>(Fail(GuestFileError(errno)));
 #endif
     RecordWrittenPath_nid_no_patch(native);
     return 0;

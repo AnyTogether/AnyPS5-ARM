@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
@@ -27,6 +28,8 @@ bool DescriptorIsOpen_nid_no_patch(int descriptor);
 
 namespace File {
 int HostStandardError();
+[[nodiscard]] std::unique_lock<std::mutex> LockPositionedTransfer(int descriptor);
+void SharePositionedTransfer(int from, int to);
 }
 
 #endif

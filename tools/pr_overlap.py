@@ -45,7 +45,24 @@ def open_prs(base):
     query = urlencode({"state": "open", "base": base, "per_page": 100})
     out = gh("api", "--paginate", f"repos/{REPO}/pulls?{query}")
     prs = {}
-    for pr in json.loads(out):
+    decoder = json.JSONDecoder()
+    offset = 0
+    page_count = 0
+    pull_requests = []
+    while offset < len(out):
+        while offset < len(out) and out[offset].isspace():
+            offset += 1
+        if offset == len(out):
+            break
+        page, offset = decoder.raw_decode(out, offset)
+        if not isinstance(page, list):
+            raise ValueError("gh api --paginate returned a non-array page")
+        page_count += 1
+        pull_requests.extend(page)
+    if page_count == 0:
+        raise ValueError("gh api --paginate returned no JSON pages")
+
+    for pr in pull_requests:
         prs[pr["number"]] = {
             "ref": f"refs/pr/{pr['number']}",
             "sha": pr["head"]["sha"],
@@ -80,7 +97,7 @@ def exports(diff):
     lines = diff.splitlines()
     for i, line in enumerate(lines):
         m = EXPORT.match(line)
-        if not m or m.group(1).endswith("_nid_no_patch"):
+        if not m or m.group(1).endswith(("_nid_no_patch", "_nid_no_patch_cut")):
             continue
         text = line[1:]
         for nxt in lines[i + 1:]:
@@ -127,7 +144,7 @@ def clashes(a, b, path):
 def conflicts(a, b):
     if not (a["tree"] and b["tree"] and a["files"] & b["files"]):
         return {}
-    files = merge("--merge-base=refs/pr/base", a["tree"], b["tree"])[1]
+    files = merge(a["tree"], b["tree"])[1]
     return {path: [] if path in a["added"] else clashes(a, b, path) for path in files}
 
 

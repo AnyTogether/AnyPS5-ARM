@@ -77,6 +77,41 @@ def check_native_load_paths(output, libraries):
             f'{library}: a present optional provider does not continue to LoadLibraryExW'
 
 
+def imported_symbols_by_dll(path):
+    pe = path.read_bytes()
+    header = struct.unpack_from('<I', pe, 0x3c)[0]
+    assert struct.unpack_from('<H', pe, header + 24)[0] == 0x20b, path
+    optional = header + 24
+    section_table = optional + struct.unpack_from('<H', pe, header + 20)[0]
+
+    def file_offset(rva):
+        for index in range(struct.unpack_from('<H', pe, header + 6)[0]):
+            offset = section_table + index * 40
+            size, start, raw_size, raw = struct.unpack_from('<IIII', pe, offset + 8)
+            if start <= rva < start + min(size, raw_size):
+                return raw + rva - start
+        raise AssertionError(f'RVA {rva:#x} has no file data in {path}')
+
+    import_rva = struct.unpack_from('<I', pe, optional + 112 + 8)[0]
+    assert import_rva, f'{path} has no import directory'
+    descriptor = file_offset(import_rva)
+    imports = {}
+    while any(pe[descriptor:descriptor + 20]):
+        lookup, _, _, name_rva, iat = struct.unpack_from('<IIIII', pe, descriptor)
+        name_offset = file_offset(name_rva)
+        dll = pe[name_offset:pe.index(b'\0', name_offset)].decode('ascii').lower()
+        symbols = set()
+        index = 0
+        while (symbol_rva := struct.unpack_from('<Q', pe, file_offset((lookup or iat) + index * 8))[0]):
+            if not symbol_rva & (1 << 63):
+                symbol_offset = file_offset(symbol_rva) + 2
+                symbols.add(pe[symbol_offset:pe.index(b'\0', symbol_offset)].decode('ascii'))
+            index += 1
+        imports[dll] = symbols
+        descriptor += 20
+    return imports
+
+
 def dynamic(image, offset, phoff, tags):
     for index, tag in enumerate(tags + [(0, 0)]):
         struct.pack_into('<qQ', image, offset + index * 16, *tag)
@@ -257,6 +292,133 @@ def exit_code_without_standard_handles(executable_path):
         kernel32.CloseHandle(process.hProcess)
 
 
+def run_with_standard_pipes(executable_path, capture_stdout, capture_stderr):
+    startf_usestdhandles = 0x00000100
+    handle_flag_inherit = 0x00000001
+    wait_object_0 = 0
+    wait_timeout = 0x00000102
+    error_broken_pipe = 109
+
+    class StartupInfo(ctypes.Structure):
+        _fields_ = [
+            ('cb', wintypes.DWORD),
+            ('lpReserved', wintypes.LPWSTR),
+            ('lpDesktop', wintypes.LPWSTR),
+            ('lpTitle', wintypes.LPWSTR),
+            ('dwX', wintypes.DWORD),
+            ('dwY', wintypes.DWORD),
+            ('dwXSize', wintypes.DWORD),
+            ('dwYSize', wintypes.DWORD),
+            ('dwXCountChars', wintypes.DWORD),
+            ('dwYCountChars', wintypes.DWORD),
+            ('dwFillAttribute', wintypes.DWORD),
+            ('dwFlags', wintypes.DWORD),
+            ('wShowWindow', wintypes.WORD),
+            ('cbReserved2', wintypes.WORD),
+            ('lpReserved2', wintypes.LPVOID),
+            ('hStdInput', wintypes.HANDLE),
+            ('hStdOutput', wintypes.HANDLE),
+            ('hStdError', wintypes.HANDLE),
+        ]
+
+    class ProcessInformation(ctypes.Structure):
+        _fields_ = [
+            ('hProcess', wintypes.HANDLE),
+            ('hThread', wintypes.HANDLE),
+            ('dwProcessId', wintypes.DWORD),
+            ('dwThreadId', wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreatePipe.argtypes = [ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.HANDLE),
+                                   wintypes.LPVOID, wintypes.DWORD]
+    kernel32.CreatePipe.restype = wintypes.BOOL
+    kernel32.SetHandleInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD]
+    kernel32.SetHandleInformation.restype = wintypes.BOOL
+    kernel32.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.LPVOID, wintypes.LPVOID,
+                                        wintypes.BOOL, wintypes.DWORD, wintypes.LPVOID, wintypes.LPCWSTR,
+                                        ctypes.POINTER(StartupInfo), ctypes.POINTER(ProcessInformation)]
+    kernel32.CreateProcessW.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    kernel32.ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                                  ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    kernel32.ReadFile.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    read_handles = {}
+    write_handles = {}
+    for stream, capture in (('stdout', capture_stdout), ('stderr', capture_stderr)):
+        if not capture:
+            continue
+        read_handle = wintypes.HANDLE()
+        write_handle = wintypes.HANDLE()
+        if not kernel32.CreatePipe(ctypes.byref(read_handle), ctypes.byref(write_handle), None, 0):
+            raise OSError(ctypes.get_last_error(), 'CreatePipe failed')
+        if not kernel32.SetHandleInformation(read_handle, handle_flag_inherit, 0):
+            kernel32.CloseHandle(read_handle)
+            kernel32.CloseHandle(write_handle)
+            raise OSError(ctypes.get_last_error(), 'SetHandleInformation failed')
+        if not kernel32.SetHandleInformation(write_handle, handle_flag_inherit, handle_flag_inherit):
+            kernel32.CloseHandle(read_handle)
+            kernel32.CloseHandle(write_handle)
+            raise OSError(ctypes.get_last_error(), 'SetHandleInformation failed')
+        read_handles[stream] = read_handle
+        write_handles[stream] = write_handle
+
+    info = StartupInfo()
+    info.cb = ctypes.sizeof(info)
+    info.dwFlags = startf_usestdhandles
+    info.hStdOutput = write_handles.get('stdout')
+    info.hStdError = write_handles.get('stderr')
+    process = ProcessInformation()
+    command = ctypes.create_unicode_buffer(f'"{executable_path}"')
+    if not kernel32.CreateProcessW(str(executable_path), command, None, None, bool(write_handles), 0, None, None,
+                                   ctypes.byref(info), ctypes.byref(process)):
+        for handle in [*read_handles.values(), *write_handles.values()]:
+            kernel32.CloseHandle(handle)
+        raise OSError(ctypes.get_last_error(), 'CreateProcessW failed')
+
+    try:
+        for handle in write_handles.values():
+            kernel32.CloseHandle(handle)
+        write_handles.clear()
+        result = kernel32.WaitForSingleObject(process.hProcess, 30_000)
+        if result == wait_timeout:
+            kernel32.TerminateProcess(process.hProcess, 0xffffffff)
+            kernel32.WaitForSingleObject(process.hProcess, 0xffffffff)
+            raise TimeoutError('GUI child did not exit')
+        if result != wait_object_0:
+            raise OSError(f'WaitForSingleObject returned {result}')
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)):
+            raise OSError(ctypes.get_last_error(), 'GetExitCodeProcess failed')
+
+        output = {}
+        for stream, handle in read_handles.items():
+            chunks = []
+            while True:
+                buffer = ctypes.create_string_buffer(4096)
+                count = wintypes.DWORD()
+                if not kernel32.ReadFile(handle, buffer, len(buffer), ctypes.byref(count), None):
+                    if ctypes.get_last_error() != error_broken_pipe:
+                        raise OSError(ctypes.get_last_error(), f'ReadFile failed for {stream}')
+                    break
+                if count.value == 0:
+                    break
+                chunks.append(buffer.raw[:count.value])
+            output[stream] = b''.join(chunks).decode(errors='replace')
+        return exit_code.value, output.get('stdout', ''), output.get('stderr', '')
+    finally:
+        for handle in [*read_handles.values(), process.hThread, process.hProcess]:
+            kernel32.CloseHandle(handle)
+
+
 def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix='anyps5-import-modules-') as directory:
@@ -404,19 +566,97 @@ def main():
         assert not output.exists()
 
         if os.name == 'nt':
-            for name, owner, symbol, expected in [
-                    ('missing-symbol-gui', 'a.prx', 'absent#A#B', 0xc0000139),
-                    ('missing-dependency-gui', 'missing.prx', 'shared#A#B', 0xc0000135)]:
+            for host_library in sys.argv[2:]:
+                library = Path(host_library).resolve()
+                runtime = library.stem.removeprefix('windows_stdio_host_')
+                if runtime == library.stem:
+                    runtime = 'default'
+                if runtime == 'msvcrt':
+                    imports = imported_symbols_by_dll(library)
+                    assert {'__iob_func', 'fputs'} <= imports.get('msvcrt.dll', set()), (library, imports)
+                    assert not any(name.startswith('api-ms-win-crt-') for name in imports), (library, imports)
+
+                def convert_stdio_case(case_name):
+                    case = work / case_name
+                    (case / 'prx').mkdir(parents=True)
+                    libs = case / 'libs'
+                    libs.mkdir()
+                    source = case / 'input.elf'
+                    source.write_bytes(executable('a.prx', 'shared'))
+                    executable_path = case / 'output.exe'
+                    result = subprocess.run([str(relinker), '--windows', '--windows-gui', str(source), str(executable_path)],
+                                            capture_output=True, text=True, timeout=30)
+                    assert result.returncode == 0, result.stderr
+                    (libs / 'a.prx').write_bytes(library.read_bytes())
+                    return executable_path, executable_path.parent / 'anyps5.log'
+
+                executable_path, log = convert_stdio_case(f'gui-dll-{runtime}-both-missing')
+                run_status = exit_code_without_standard_handles(executable_path)
+                assert run_status == 11, (runtime, hex(run_status))
+                assert log.is_file(), (runtime, log)
+                content = log.read_text(errors='replace')
+                assert 'Windows DLL stdout probe' in content, (runtime, content)
+                assert 'Windows DLL stderr probe' in content, (runtime, content)
+
+                executable_path, log = convert_stdio_case(f'gui-dll-{runtime}-stdout-missing')
+                run_status, stdout, stderr = run_with_standard_pipes(executable_path, False, True)
+                assert run_status == 11, (runtime, hex(run_status))
+                assert log.is_file(), (runtime, log)
+                content = log.read_text(errors='replace')
+                assert 'Windows DLL stdout probe' in content, (runtime, content)
+                assert 'Windows DLL stderr probe' in stderr, (runtime, stderr)
+                assert not stdout
+
+                executable_path, log = convert_stdio_case(f'gui-dll-{runtime}-stderr-missing')
+                run_status, stdout, stderr = run_with_standard_pipes(executable_path, True, False)
+                assert run_status == 11, (runtime, hex(run_status))
+                assert log.is_file(), (runtime, log)
+                content = log.read_text(errors='replace')
+                assert 'Windows DLL stdout probe' in stdout, (runtime, stdout)
+                assert 'Windows DLL stderr probe' in content, (runtime, content)
+                assert not stderr
+
+                executable_path, log = convert_stdio_case(f'gui-dll-{runtime}-both-redirected')
+                run_status, stdout, stderr = run_with_standard_pipes(executable_path, True, True)
+                assert run_status == 11, (runtime, hex(run_status))
+                assert 'Windows DLL stdout probe' in stdout, (runtime, stdout)
+                assert 'Windows DLL stderr probe' in stderr, (runtime, stderr)
+                assert not log.exists(), (runtime, log)
+
+            for name, owner, symbol, expected, message in [
+                    ('missing-symbol-gui', 'a.prx', 'absent#A#B', 0xc0000139, 'unresolved ELF import absent'),
+                    ('missing-dependency-gui', 'missing.prx', 'shared#A#B', 0xc0000135, 'Failed to load module')]:
                 result, output = convert(name, owner, symbol, windows_gui=True)
                 assert result.returncode == 0, result.stderr
                 run_status = exit_code_without_standard_handles(output)
                 assert run_status == expected, (name, hex(run_status), hex(expected))
+                log = output.parent / 'anyps5.log'
+                assert log.is_file() and message in log.read_text(errors='replace'), (name, log.exists())
+
+            result, output = convert('gui-success-log', 'a.prx', guest_owner='b.prx', windows_gui=True)
+            assert result.returncode == 0, result.stderr
+            log = output.parent / 'anyps5.log'
+            log.write_text('stale previous run', encoding='utf-8')
+            run_status = exit_code_without_standard_handles(output)
+            assert run_status == 11, hex(run_status)
+            content = log.read_text(errors='replace')
+            assert 'Transferring control to ELF entry point' in content, content
+            assert 'stale previous run' not in content, content
+
+            result, output = convert('gui-log-create-denied', 'a.prx', guest_owner='b.prx', windows_gui=True)
+            assert result.returncode == 0, result.stderr
+            log = output.parent / 'anyps5.log'
+            log.mkdir()
+            run_status = exit_code_without_standard_handles(output)
+            assert run_status == 11, hex(run_status)
+            assert log.is_dir()
 
         result, output = convert('missing-symbol', 'a.prx', 'absent#A#B')
         assert result.returncode == 0, result.stderr
         if os.name == 'nt':
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode != 0 and 'unresolved ELF import absent' in run.stderr, (run.returncode, run.stderr)
+            assert not (output.parent / 'anyps5.log').exists()
         result, output = convert('wrong-provider', 'c.prx')
         assert result.returncode == 0, result.stderr
         if os.name == 'nt':

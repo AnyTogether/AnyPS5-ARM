@@ -81,9 +81,8 @@ struct SpirvEmitterState {
     SpirvModule module;
     const IrProgram& program;
     ShaderStageInputInfo inputInfo;
-    std::array<std::uint32_t, 6> tessVariables {};
+    std::array<std::uint32_t, 7> tessVariables {};
     std::uint32_t tessInnerVariable = 0;
-    std::uint32_t tessPatchBase = 0;
 
     SpirvRequirements requirements;
     std::uint32_t laneCount = 1;
@@ -97,6 +96,7 @@ struct SpirvEmitterState {
     bool fragmentDescriptorSet = false;
     bool contractFloat = false;
     bool meshAsCompute = false;
+    bool float16DenormPreserve = false;
     std::unordered_set<const IrValue*> sharedLaneValues;
     std::uint32_t laneHalf = 0;
     // The target's SPIR-V version and what the device accepts, for capabilities an emitter adds
@@ -111,6 +111,7 @@ struct SpirvEmitterState {
     std::uint32_t storageBufferVariable = 0;
     std::uint32_t storageBufferU64Variable = 0;
     std::uint32_t storageBufferCoherentVariable = 0;
+    std::uint32_t storageBufferU8Variable = 0;
     std::vector<std::uint32_t> memoryByteOffsets;
     std::map<std::array<std::uint32_t, 6>, std::uint32_t> formattedBufferFunctions;
     std::map<std::array<std::uint32_t, 6>, std::uint32_t> formattedGpuBufferFunctions;
@@ -127,6 +128,7 @@ struct SpirvEmitterState {
     std::array<std::uint32_t, 2> bdaByteWriteFunctions {};
     std::uint32_t bdaFaultFunction = 0;
     bool nativeF16ModesEmitted = false;
+    bool f16DenormPreserveEmitted = false;
     std::uint32_t dot2F32F16Function = 0;
     std::array<std::array<std::uint32_t, 2>, 2> bdaDwordReadFunctions {};
     std::array<std::array<std::uint32_t, 2>, 2> bdaSpanReadFunctions {};

@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawCache.hpp"
 #include <algorithm>
+#include <bit>
 #include <cstdlib>
 
 namespace AgcDriver::DriverDetail {
@@ -54,6 +55,36 @@ void Driver::accountDrawVariant(const DispatchVariant& variant, bool added) {
         --drawCacheVariants;
         drawCacheVariantBytes -= variantBytes(variant);
     }
+}
+
+DrawKeySightings::DrawKeySightings(std::size_t keyCount) {
+    Graphics::Require(keyCount >= Ways, "draw key sightings need at least one bucket");
+    const auto buckets = std::bit_ceil(keyCount / Ways);
+    keys.assign(buckets * Ways, 0);
+    filled.assign(buckets, 0);
+    next.assign(buckets, 0);
+    bucketMask = buckets - 1;
+}
+
+bool DrawKeySightings::SeenBefore(std::uint64_t key) {
+    auto mixed = key;
+    mixed = (mixed ^ (mixed >> 30u)) * 0xbf58476d1ce4e5b9ull;
+    mixed = (mixed ^ (mixed >> 27u)) * 0x94d049bb133111ebull;
+    mixed ^= mixed >> 31u;
+    const auto bucket = static_cast<std::size_t>(mixed) & bucketMask;
+    auto* ways = keys.data() + bucket * Ways;
+    if (std::find(ways, ways + filled[bucket], key) != ways + filled[bucket]) return true;
+    ways[next[bucket]] = key;
+    next[bucket] = static_cast<std::uint8_t>((next[bucket] + 1u) % Ways);
+    if (filled[bucket] < Ways) ++filled[bucket];
+    return false;
+}
+
+bool Driver::admitDrawKey(std::uint64_t key) {
+    std::lock_guard cacheLock(drawCacheMutex);
+    if (drawCache.contains(key)) return true;
+    if (!drawKeySightings) drawKeySightings.emplace(drawCacheEntries() * DrawKeySightings::Ways);
+    return drawKeySightings->SeenBefore(key);
 }
 
 void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<DispatchVariant>>& fresh, std::shared_ptr<const DrawDecode> decode) {

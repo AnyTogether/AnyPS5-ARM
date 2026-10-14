@@ -60,6 +60,19 @@ int mutexOwnership(PthreadMutex* mutex, PthreadMutex* owned) {
     return 0;
 }
 
+template <class TNative>
+struct WakingLock {
+    PthreadMutex mutex;
+    TNative& native;
+    void lock() { native.lock(); }
+    void unlock() {
+        native.unlock();
+#ifdef _WIN32
+        TimedWait::Unpark(mutex);
+#endif
+    }
+};
+
 int waitUntil(PthreadCond* cond, PthreadMutex* mutex, std::optional<std::uint64_t> deadlineNanos, const void* caller) {
     auto* c = resolveCond(cond);
     PthreadMutex m = nullptr;
@@ -72,7 +85,8 @@ int waitUntil(PthreadCond* cond, PthreadMutex* mutex, std::optional<std::uint64_
         ~Trace() { KernelTraceWait_nid_postfix("cond", caller, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()), timedOut); }
     } trace{caller, timedOut, waitStart};
     if (m->_type == MutexType::Recursive) {
-        std::unique_lock<std::recursive_timed_mutex> lock(m->_rmtx, std::adopt_lock);
+        WakingLock<std::recursive_timed_mutex> waking{m, m->_rmtx};
+        std::unique_lock lock(waking, std::adopt_lock);
         const auto previousCount = m->_count;
         m->_count = 0;
         m->_owner.store(std::thread::id{}, std::memory_order_release);
@@ -87,7 +101,8 @@ int waitUntil(PthreadCond* cond, PthreadMutex* mutex, std::optional<std::uint64_
         ThreadCancel::Check();
         return timedOut ? sceTimedOut : 0;
     }
-    std::unique_lock<std::timed_mutex> lock(m->_mtx, std::adopt_lock);
+    WakingLock<std::timed_mutex> waking{m, m->_mtx};
+    std::unique_lock lock(waking, std::adopt_lock);
     m->_owner.store(std::thread::id{}, std::memory_order_release);
     timedOut = !ThreadCancel::Wait(c->_cv, lock, deadlineNanos);
     m->_owner.store(std::this_thread::get_id(), std::memory_order_release);

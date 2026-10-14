@@ -210,6 +210,10 @@ int main() {
     PollDescriptor closed[2]{{client, In, 0}, {listener, In, 0}};
     Require(poll_nid_postfix(closed, 2, -1) == 1 && closed[0].revents == Invalid && closed[1].revents == 0);
     Require(poll_nid_postfix(nullptr, 0, 10) == 0);
+    const auto shortWaitStart = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; ++i) Require(poll_nid_postfix(nullptr, 0, 1) == 0);
+    const auto shortWait = std::chrono::steady_clock::now() - shortWaitStart;
+    Require(shortWait >= std::chrono::milliseconds(20) && shortWait < std::chrono::milliseconds(200));
     Require(poll_nid_postfix(nullptr, 1, 0) == -1 && *__error_nid_postfix() == 14);
     Require(poll_nid_postfix(&single, 1, -2) == -1 && *__error_nid_postfix() == 22);
     TestPipes(listener);

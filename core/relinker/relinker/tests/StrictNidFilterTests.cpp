@@ -271,6 +271,45 @@ void exceptionLandingPads() {
     emit(input, 31, {0xC3});
     importThunk(input, 64, 0x2000);
     require(AnalyzeStrictReachability(input).ImportSlots.contains(0x2000), "Exception-only import was removed");
+    const auto checkLanding = [&](std::uint64_t base, std::uint64_t offset, bool signedOffset, bool rejected) {
+        auto data = bytes;
+        write<std::uint8_t>(data, 0x280, 0);
+        write<std::uint64_t>(data, 0x281, base);
+        write<std::uint8_t>(data, 0x289, 0xFF);
+        write<std::uint8_t>(data, 0x28A, signedOffset ? 12 : 4);
+        write<std::uint8_t>(data, 0x28B, 25);
+        write<std::uint64_t>(data, 0x28C, 0);
+        write<std::uint64_t>(data, 0x294, 1);
+        write<std::uint64_t>(data, 0x29C, offset);
+        write<std::uint8_t>(data, 0x2A4, 0);
+        try {
+            const auto functions = Relinker::UnusedNidFilter::ReadExceptionFunctions(data, headers, {}, {});
+            require(!rejected, "Overflowing LSDA landing pad address was accepted");
+            const auto expected = offset == 0 ? std::vector<std::uint64_t>{0x1000} :
+                std::vector<std::uint64_t>{0x1000, base + offset};
+            require(functions.size() == 1 && functions[0].ExtraTargets == expected,
+                    "Valid LSDA landing pad address changed");
+        } catch (const Relinker::RelinkerException& error) {
+            require(rejected && std::string(error.what()).find("LSDA landing pad address overflowed") != std::string::npos,
+                    "LSDA landing pad rejected for an unexpected reason");
+        }
+    };
+    const auto maximum = std::numeric_limits<std::uint64_t>::max();
+    for (const std::uint64_t base : {std::uint64_t{0x1000}, maximum - 16}) {
+        checkLanding(base, 0, false, false);
+        checkLanding(base, maximum - base, false, false);
+        checkLanding(base, maximum - base + 1, false, true);
+        checkLanding(base, maximum, false, true);
+    }
+    checkLanding(0x1000, maximum, true, false);
+    checkLanding(0x1000, std::uint64_t{0} - 0x1000, true, false);
+    checkLanding(0x1000, std::uint64_t{0} - 0x1001, true, true);
+    checkLanding(maximum - 16, 16, true, false);
+    checkLanding(maximum - 16, 17, true, true);
+    checkLanding(0, 0, true, false);
+    checkLanding(0, maximum, false, false);
+    checkLanding(std::uint64_t{1} << 63, std::uint64_t{1} << 63, true, false);
+    checkLanding((std::uint64_t{1} << 63) - 1, std::uint64_t{1} << 63, true, true);
     write<std::uint8_t>(bytes, 0x282, 0xFF);
     requireFailure([&] { Relinker::UnusedNidFilter::ReadExceptionFunctions(bytes, headers, {}, {}); }, "Malformed LSDA was accepted");
 }
@@ -398,7 +437,9 @@ void relativeRelocationTableBounds() {
     bytes[6] = 1;
     write<std::uint16_t>(bytes, 16, 3);
     write<std::uint16_t>(bytes, 18, 62);
+    write<std::uint32_t>(bytes, 20, 1);
     write<std::uint64_t>(bytes, 32, 64);
+    write<std::uint16_t>(bytes, 52, 64);
     write<std::uint16_t>(bytes, 54, 56);
     write<std::uint16_t>(bytes, 56, 2);
 

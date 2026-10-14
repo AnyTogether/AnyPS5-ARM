@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,6 +32,19 @@ class PlaceholderImages;
 
 struct UnrenderableDraw : std::runtime_error {
     using std::runtime_error::runtime_error;
+};
+
+class PipelineCacheSynchronization {
+public:
+    using PipelineUseLock = std::shared_lock<std::shared_mutex>;
+    using SnapshotLock = std::unique_lock<std::shared_mutex>;
+
+    PipelineUseLock LockForPipelineUse() const { return PipelineUseLock(mutex); }
+    SnapshotLock LockForSnapshot() const { return SnapshotLock(mutex); }
+    SnapshotLock TryLockForSnapshot() const { return SnapshotLock(mutex, std::try_to_lock); }
+
+private:
+    mutable std::shared_mutex mutex;
 };
 
 inline void Require(bool condition, const std::string& reason) {
@@ -183,6 +198,11 @@ struct Context {
     bool provokingVertexModePerPipeline = false;
     bool singlePassStorage = false;
     VkSampleCountFlags sampleLocationSampleCounts = 0;
+    PipelineCacheSynchronization* pipelineCacheSynchronization = nullptr;
+
+    PipelineCacheSynchronization::PipelineUseLock LockPipelineCacheForUse() const {
+        return pipelineCacheSynchronization != nullptr ? pipelineCacheSynchronization->LockForPipelineUse() : PipelineCacheSynchronization::PipelineUseLock{};
+    }
 
     template<typename TFunction>
     TFunction Function(const char* name) const {

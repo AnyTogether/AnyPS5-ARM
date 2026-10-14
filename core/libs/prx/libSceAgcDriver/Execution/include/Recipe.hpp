@@ -84,6 +84,7 @@ struct DrawRecipe {
     std::optional<Graphics::State> masked;
     std::set<std::uint32_t> fragmentOutputs;
     VkPipelineStageFlags shaderStages = 0;
+    bool hasDepth = false;
 };
 
 }

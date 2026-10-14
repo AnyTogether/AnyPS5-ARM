@@ -562,6 +562,142 @@ void CheckUnwatchedImport() {
 #endif
 }
 
+class PartlyCommitted {
+public:
+    static constexpr std::size_t Bytes = 4 * Block;
+
+    PartlyCommitted() {
+#ifdef _WIN32
+        memory = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocateAtOrAbove_nid_postfix(GuestArena::GuestArenaHighestFree_nid_no_patch(Bytes, Block), Bytes, Block));
+#else
+        void* raw = mmap(nullptr, Bytes + Block, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        Require(raw != MAP_FAILED, "cannot reserve the partly committed range");
+        const auto begin = reinterpret_cast<std::uintptr_t>(raw);
+        const auto aligned = (begin + Block - 1) & ~static_cast<std::uintptr_t>(Block - 1);
+        if (aligned != begin) munmap(raw, aligned - begin);
+        if (aligned + Bytes != begin + Bytes + Block) munmap(reinterpret_cast<void*>(aligned + Bytes), begin + Block - aligned);
+        memory = reinterpret_cast<std::uint8_t*>(aligned);
+#endif
+        Require(memory != nullptr, "cannot reserve the partly committed range");
+    }
+
+    ~PartlyCommitted() {
+#ifdef _WIN32
+        GuestArena::GuestArenaReset_nid_postfix(memory, Bytes);
+        GuestAllocations::GuestAllocationsInvalidate_nid_postfix(Address(), Bytes);
+        GuestArena::GuestArenaRelease_nid_postfix(memory, Bytes);
+#else
+        GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(memory, Bytes);
+        munmap(memory, Bytes);
+        GuestAllocations::GuestAllocationsInvalidate_nid_postfix(Address(), Bytes);
+#endif
+    }
+
+    PartlyCommitted(const PartlyCommitted&) = delete;
+    PartlyCommitted& operator=(const PartlyCommitted&) = delete;
+
+    void Commit(std::size_t block) {
+#ifdef _WIN32
+        GuestArena::GuestArenaCommit_nid_postfix(memory + block * Block, Block, PAGE_READWRITE, Block);
+#else
+        Require(mmap(memory + block * Block, Block, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != MAP_FAILED, "cannot commit a block of the partly committed range");
+        GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(memory + block * Block, Block);
+#endif
+        GuestAllocations::GuestAllocationsInvalidate_nid_postfix(Address(block), Block);
+    }
+
+    void Decommit(std::size_t block) {
+#ifdef _WIN32
+        GuestArena::GuestArenaReset_nid_postfix(memory + block * Block, Block);
+#else
+        GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(memory + block * Block, Block);
+        Require(mmap(memory + block * Block, Block, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) != MAP_FAILED, "cannot decommit a block of the partly committed range");
+#endif
+        GuestAllocations::GuestAllocationsInvalidate_nid_postfix(Address(block), Block);
+    }
+
+    std::uint8_t* Data() const { return memory; }
+    std::uint64_t Address(std::size_t block = 0) const { return reinterpret_cast<std::uint64_t>(memory) + block * Block; }
+
+private:
+    std::uint8_t* memory = nullptr;
+};
+
+using Runs = std::vector<std::pair<std::uint64_t, std::uint64_t>>;
+
+std::uint64_t CollectCommitted(const PartlyCommitted& range, Runs& runs) {
+    BumpCollectEpoch();
+    return CollectCommittedWrites(range.Address(), PartlyCommitted::Bytes, runs);
+}
+
+void CheckCommittedRanges() {
+    PartlyCommitted range;
+    const auto base = range.Address();
+    range.Commit(0);
+    std::memset(range.Data(), 0x11, Block);
+    Require(CollectWrites(base, PartlyCommitted::Bytes) == 0, "a partly committed range was collected as a whole");
+    Runs runs;
+    const Runs first{{base, base + Block}};
+    const auto synced = CollectCommitted(range, runs);
+    Require(synced != 0 && runs == first, "the committed part of a partly committed range was not collected");
+    Require(UnchangedCommittedSince(runs, synced), "a collected committed part reads as changed");
+
+    range.Data()[8] = 0x22;
+    const auto written = CollectCommitted(range, runs);
+    Require(written > synced && runs == first && !UnchangedCommittedSince(runs, synced) && UnchangedCommittedSince(runs, written), "a CPU write to the committed part was missed");
+    Require(MarkWritten(base + 16, 4) != 0 && !UnchangedCommittedSince(first, written), "a driver store into the committed part was missed");
+    Require(UnchangedCommittedSince(first, CollectCommitted(range, runs)), "a collect after a driver store reads the committed part as changed");
+
+    const auto beforeCommit = CollectCommitted(range, runs);
+    range.Commit(2);
+    const Runs both{{base, base + Block}, {range.Address(2), range.Address(3)}};
+    const auto grown = CollectCommitted(range, runs);
+    Require(grown != 0 && runs == both, "a block committed inside the range is not described");
+    Require(!UnchangedCommittedSince(runs, beforeCommit), "a block committed inside the range reads as unchanged since before the commit");
+    Require(UnchangedCommittedSince(runs, grown), "the committed parts read as changed after their collect");
+
+    range.Decommit(2);
+    range.Commit(2);
+    const auto recommitted = CollectCommitted(range, runs);
+    Require(recommitted != 0 && runs == both && !UnchangedCommittedSince(runs, grown), "a block decommitted and committed again reads as unchanged");
+
+    range.Decommit(2);
+    Require(CollectCommitted(range, runs) != 0 && runs == first, "a decommitted block is still described as committed");
+
+#ifdef _WIN32
+    HANDLE firstSection = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE, 0, Block, nullptr);
+    HANDLE secondSection = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE, 0, Block, nullptr);
+    struct Sections {
+        HANDLE first;
+        HANDLE second;
+        ~Sections() {
+            if (first != nullptr) CloseHandle(first);
+            if (second != nullptr) CloseHandle(second);
+        }
+    } sections{firstSection, secondSection};
+    Require(firstSection != nullptr && secondSection != nullptr, "cannot create the shared backings of the partly committed range");
+    const auto beforeMap = CollectCommitted(range, runs);
+    GuestArena::GuestArenaMap_nid_postfix(range.Data() + 3 * Block, Block, firstSection, 0, PAGE_READWRITE);
+    GuestAllocations::GuestAllocationsInvalidate_nid_postfix(range.Address(3), Block);
+    const Runs viewed{{base, base + Block}, {range.Address(3), range.Address(4)}};
+    const auto mapped = CollectCommitted(range, runs);
+    Require(mapped != 0 && runs == viewed, "a view mapped inside the range is not described");
+    Require(!UnchangedCommittedSince(runs, beforeMap), "a view mapped inside the range reads as unchanged since before the mapping");
+    Require(UnchangedCommittedSince(runs, mapped), "a collected view reads as changed");
+    GuestArena::GuestArenaReset_nid_postfix(range.Data() + 3 * Block, Block);
+    GuestArena::GuestArenaMap_nid_postfix(range.Data() + 3 * Block, Block, secondSection, 0, PAGE_READWRITE);
+    GuestAllocations::GuestAllocationsInvalidate_nid_postfix(range.Address(3), Block);
+    Require(CollectCommitted(range, runs) != 0 && runs == viewed && !UnchangedCommittedSince(runs, mapped), "a view replaced inside the range reads as unchanged");
+    GuestArena::GuestArenaReset_nid_postfix(range.Data() + 3 * Block, Block);
+    GuestAllocations::GuestAllocationsInvalidate_nid_postfix(range.Address(3), Block);
+    Require(CollectCommitted(range, runs) != 0 && runs == first, "an unmapped view is still described as committed");
+#endif
+
+    range.Decommit(0);
+    Require(CollectCommitted(range, runs) != 0 && runs.empty() && UnchangedCommittedSince(runs, TrackerGeneration()), "a range with no committed page did not collect as empty");
+    Require(!UnchangedCommittedSince(first, 0), "an unknown generation was accepted for the committed parts");
+}
+
 int main() {
     try {
         if (!WriteWatched()) {
@@ -587,6 +723,7 @@ int main() {
         CheckCollectBoundaries();
         CheckImportWindow();
         CheckUnwatchedImport();
+        CheckCommittedRanges();
     } catch (const std::exception& error) {
         std::cerr << "write tracking test failed: " << error.what() << "\n";
         return 1;

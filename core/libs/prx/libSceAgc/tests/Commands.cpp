@@ -10,6 +10,8 @@
 #include <cstring>
 #include <string>
 
+extern "C" std::uint32_t* APS5_VABI sceAgcDcbEventWrite(CommandBuffer* buf, std::uint8_t eventType, const volatile void* address);
+extern "C" std::uint64_t APS5_VABI sceAgcDcbEventWriteGetSize(std::uint8_t eventType);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbResetQueue(CommandBuffer* buf, std::uint32_t op, std::uint32_t state);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbClearState(CommandBuffer* buf, std::uint32_t command);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbSetFlip(CommandBuffer* buf, std::uint32_t handle, std::int32_t index, std::uint32_t mode, std::int64_t argument);
@@ -727,6 +729,47 @@ void testDefaults() {
     expectFailure([] { Agc::Command::GetRegisterDefaults(0xffffffffu, true, __func__); });
 }
 
+void testEventWrite() {
+    Storage storage;
+    const auto* samplePacket = sceAgcDcbEventWrite(&storage.buffer, 0x38, reinterpret_cast<const void*>(0x1000));
+    check(samplePacket == storage.words.data(), "incorrect event 0x38 return pointer");
+    check(storage.words[0] == 0xc0024600u, "incorrect event 0x38 packet header");
+    check(storage.words[1] == (0x100u | 0x38u), "incorrect event 0x38 first payload word");
+    check(storage.words[2] == 0x1000u, "incorrect event 0x38 low address word");
+    check(storage.words[3] == 0u, "incorrect event 0x38 high address word");
+    check(sceAgcDcbEventWriteGetSize(0x38) == 16, "incorrect event 0x38 size");
+    check(sceAgcDcbEventWriteGetSize(0x39) == 16, "incorrect event 0x39 size");
+
+    Storage sample39;
+    sceAgcDcbEventWrite(&sample39.buffer, 0x39, reinterpret_cast<const void*>(0x2008));
+    check(sample39.words[0] == 0xc0024600u && sample39.words[1] == (0x100u | 0x39u) && sample39.words[2] == 0x2008u && sample39.words[3] == 0u, "incorrect event 0x39 packet");
+
+    expectFailure([&] { sceAgcDcbEventWrite(&storage.buffer, 0x38, reinterpret_cast<const void*>(0x1001)); });
+    expectFailure([&] { sceAgcDcbEventWrite(&storage.buffer, 0x40, nullptr); });
+
+    Storage partialFlush;
+    sceAgcDcbEventWrite(&partialFlush.buffer, 7, nullptr);
+    check(partialFlush.words[0] == 0xc0004600u && partialFlush.words[1] == 0x407u, "incorrect event 7 partial flush packet");
+    check(sceAgcDcbEventWriteGetSize(7) == 8, "incorrect event 7 size");
+
+    Storage partialFlush15;
+    sceAgcDcbEventWrite(&partialFlush15.buffer, 15, nullptr);
+    check(partialFlush15.words[0] == 0xc0004600u && partialFlush15.words[1] == 0x40fu, "incorrect event 15 partial flush packet");
+
+    Storage partialFlush16;
+    sceAgcDcbEventWrite(&partialFlush16.buffer, 16, nullptr);
+    check(partialFlush16.words[0] == 0xc0004600u && partialFlush16.words[1] == 0x410u, "incorrect event 16 partial flush packet");
+
+    Storage cacheFlushNull;
+    sceAgcDcbEventWrite(&cacheFlushNull.buffer, 0x16, nullptr);
+    check(cacheFlushNull.words[0] == 0xc0004600u && cacheFlushNull.words[1] == 0x16u, "incorrect event 0x16 null address packet");
+    check(sceAgcDcbEventWriteGetSize(0x16) == 8, "incorrect event 0x16 size");
+
+    Storage cacheFlushWithAddress;
+    sceAgcDcbEventWrite(&cacheFlushWithAddress.buffer, 0x16, reinterpret_cast<const void*>(0x2d2a10000ull));
+    check(cacheFlushWithAddress.words[0] == 0xc0004600u && cacheFlushWithAddress.words[1] == 0x16u, "incorrect event 0x16 with address packet");
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -738,6 +781,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         testPackets();
+        testEventWrite();
         testNop();
         testClearState();
         testIndexedIndirectDraws();

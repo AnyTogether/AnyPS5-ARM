@@ -10,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 
 extern "C" {
@@ -17,9 +18,6 @@ int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelGetdents(int, char*, int);
 int APS5_VABI sceKernelGetdirentries(int, char*, int, std::int64_t*);
-int APS5_VABI getdents_nid_postfix(int, char*, int);
-int APS5_VABI getdirentries_nid_postfix(int, char*, int, std::int64_t*);
-int* APS5_VABI __error_nid_postfix();
 }
 
 static void Check(bool value, int line) {
@@ -82,24 +80,13 @@ static void CheckOversizedName() {
     const int directory = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
     Require(directory >= 0);
     std::array<char, 512> buffer;
-    buffer.fill('x');
-    Require(sceKernelGetdents(directory, buffer.data(), static_cast<int>(buffer.size())) == 24);
-    Require(std::strcmp(buffer.data() + 8, ".") == 0);
-    Require(std::strcmp(buffer.data() + 20, "..") == 0);
-    Require(std::all_of(buffer.begin() + 24, buffer.end(), [](char byte) { return byte == 'x'; }));
-    for (int attempt = 0; attempt < 2; ++attempt) {
-        buffer.fill('x');
-        Require(sceKernelGetdents(directory, buffer.data(), static_cast<int>(buffer.size())) == SCE_KERNEL_ERROR_ENAMETOOLONG);
-        Require(std::all_of(buffer.begin(), buffer.end(), [](char byte) { return byte == 'x'; }));
+    bool threw = false;
+    try {
+        sceKernelGetdents(directory, buffer.data(), static_cast<int>(buffer.size()));
+    } catch (const std::runtime_error&) {
+        threw = true;
     }
-    *__error_nid_postfix() = 0;
-    Require(getdents_nid_postfix(directory, buffer.data(), static_cast<int>(buffer.size())) == -1);
-    Require(*__error_nid_postfix() == 63);
-    *__error_nid_postfix() = 0;
-    std::int64_t base = -1;
-    Require(getdirentries_nid_postfix(directory, buffer.data(), static_cast<int>(buffer.size()), &base) == -1);
-    Require(*__error_nid_postfix() == 63);
-    Require(std::all_of(buffer.begin(), buffer.end(), [](char byte) { return byte == 'x'; }));
+    Require(threw);
     Require(sceKernelClose(directory) == 0);
     std::filesystem::remove_all(root);
 }

@@ -66,6 +66,13 @@ alignas(256) constexpr std::array<std::uint32_t, 4> PixelCode{
     0x7e0e02f2, 0xf800180f, 0x07070707, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 6> LayerFieldPixelCode{
+    0x2c020090, 0x7e020d01, 0x100202f0, 0xf800180f, 0x01010101, 0xbf810000,
+};
+
+constexpr std::array<std::uint8_t, Layers> WhiteBands{255, 255, 255};
+constexpr std::array<std::uint8_t, Layers> LayerFieldBands{0, 128, 255};
+
 struct Vertex {
     std::array<float, 4> position;
     std::array<float, 3> color;
@@ -142,7 +149,7 @@ bool DeclaresLayer(const std::vector<std::uint32_t>& words) {
     return false;
 }
 
-void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, bool mesh) {
+void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, bool mesh, std::span<const std::uint32_t> pixelCode, bool layerField) {
     const auto target = device.Target();
     const auto vertexBuffer = BufferDescriptor(Vertices.data(), sizeof(Vertex), static_cast<std::uint32_t>(Vertices.size()));
     const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Vertices.size()), 0, 1, 0, false};
@@ -172,10 +179,15 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
     ShaderRecompiler::ShaderPixelStageInfo pixel{};
     pixel.targetOutputMode[0] = 9;
     pixel.targetExportMapping.fill(0xe4u);
+    if (layerField) {
+        pixel.inputAddr = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary);
+        pixel.ancillary = true;
+        pixel.layerExported = true;
+    }
     const std::vector<std::uint32_t> pixelUserData(8, 0u);
-    const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(PixelCode.data()), std::as_bytes(std::span(PixelCode))}}};
+    const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(pixelCode.data()), std::as_bytes(pixelCode)}}};
     ShaderRecompiler::RecompileRequest fragment{
-        {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(PixelCode.data()), PixelCode, 0, {}},
+        {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
         {64, 0, pixelUserData, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
         PixelPushLayout(geometryPush, target)
@@ -235,7 +247,7 @@ std::uint64_t BlockOffset(const AgcDriver::Graphics::TextureSwizzleEquation& equ
     return offset;
 }
 
-void Check(const std::byte* volume, const AgcDriver::Graphics::ColorTarget& color, const std::string& what) {
+void Check(const std::byte* volume, const AgcDriver::Graphics::ColorTarget& color, const std::string& what, const std::array<std::uint8_t, Layers>& bands) {
     const auto geometry = AgcDriver::Graphics::DescribeSurface(AgcDriver::Graphics::SurfaceForTarget(color));
     Require(!geometry.thick, "a 64 KiB render-target volume is not stored as thin slices");
     const auto block = AgcDriver::Graphics::ThinBlockLayout(AgcDriver::Graphics::TextureTileMode::kR64KBX, 4);
@@ -247,11 +259,11 @@ void Check(const std::byte* volume, const AgcDriver::Graphics::ColorTarget& colo
         for (std::uint32_t y = 0; y < Height; ++y) {
             for (std::uint32_t x = 0; x < Width; ++x) {
                 const bool drawn = slice >= FirstSlice && x / BandWidth == slice - FirstSlice;
-                const auto expected = drawn ? std::uint8_t{255} : Kept;
+                const auto expected = drawn ? bands[slice - FirstSlice] : Kept;
                 const auto* texel = base + BlockOffset(*equation, x, y, slice);
                 for (std::uint32_t channel = 0; channel < 4; ++channel) {
                     const auto actual = std::to_integer<std::uint8_t>(texel[channel]);
-                    Require(actual == expected, what + ": slice " + std::to_string(slice) + " texel (" + std::to_string(x) + ", " + std::to_string(y) + ") channel " + std::to_string(channel) + " is " + std::to_string(actual) + ", expected " + std::to_string(expected) + (drawn ? " (the band of layer " + std::to_string(slice - FirstSlice) + ")" : slice < FirstSlice ? " (outside the color view)" : " (another layer's band)"));
+                    Require(actual == expected || (drawn && expected == 128 && actual == 127), what + ": slice " + std::to_string(slice) + " texel (" + std::to_string(x) + ", " + std::to_string(y) + ") channel " + std::to_string(channel) + " is " + std::to_string(actual) + ", expected " + std::to_string(expected) + (drawn ? " (the band of layer " + std::to_string(slice - FirstSlice) + ")" : slice < FirstSlice ? " (outside the color view)" : " (another layer's band)"));
                 }
             }
         }
@@ -274,14 +286,18 @@ int main(int argc, char** argv) {
         BuildBands();
         const GuestVolume volume((VolumeTarget(nullptr).bytes + 65535u) & ~std::size_t{65535u});
         const auto color = VolumeTarget(volume.Data());
-        Run(*device, color, false);
-        Check(volume.Data(), color, "vertex draw");
+        Run(*device, color, false, PixelCode, false);
+        Check(volume.Data(), color, "vertex draw", WhiteBands);
+        const GuestVolume fieldVolume((VolumeTarget(nullptr).bytes + 65535u) & ~std::size_t{65535u});
+        const auto fieldColor = VolumeTarget(fieldVolume.Data());
+        Run(*device, fieldColor, false, LayerFieldPixelCode, true);
+        Check(fieldVolume.Data(), fieldColor, "a pixel shader reading the render target index of its packed ancillary word", LayerFieldBands);
         if (vertexOnly) std::puts("layered volume vertex draw tests passed");
         else if (target.meshAsCompute) {
             std::memset(volume.Data(), Kept, color.bytes);
-            Run(*device, color, true);
-            Check(volume.Data(), color, "emulated mesh draw");
-        } else if (target.mesh.has_value()) Run(*device, color, true);
+            Run(*device, color, true, PixelCode, false);
+            Check(volume.Data(), color, "emulated mesh draw", WhiteBands);
+        } else if (target.mesh.has_value()) Run(*device, color, true, PixelCode, false);
         else std::puts("mesh case skipped, the device has no VK_EXT_mesh_shader");
         std::puts("layered volume draw tests passed");
         return 0;

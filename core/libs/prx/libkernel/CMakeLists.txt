@@ -33,6 +33,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/src/MainThreadMacOs.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/src/Rwlock.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/src/Sem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/Posix/Atfork.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/Posix/Attr.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/Posix/Barrier.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/Posix/Cond.cpp
@@ -45,6 +46,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/Pthread/Posix/Spinlock.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Socket/src/Socket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Socket/src/Udp.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Socket/src/SocketOptions.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Socket/src/AddressConversion.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/EventFlag/src/EventFlag.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Module/src/Module.cpp
@@ -62,6 +64,7 @@ add_library(libkernel SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SystemConfiguration.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Login.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SoftwareVersion.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/System/src/ThermalSensors.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Signals.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/SignalSets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/System/src/Notification.cpp
@@ -81,7 +84,7 @@ target_include_directories(libkernel PRIVATE ${LIBS_INCLUDE_DIR}/nid/include)
 target_link_libraries(libkernel PRIVATE ${CMAKE_DL_LIBS})
 target_link_libraries(libkernel PRIVATE libc)
 if(WIN32)
-    target_link_libraries(libkernel PRIVATE ws2_32 shell32 advapi32)
+    target_link_libraries(libkernel PRIVATE ws2_32 shell32 advapi32 wbemuuid ole32 oleaut32)
     target_compile_definitions(libkernel PRIVATE _WIN32_WINNT=0x0602)
 endif()
 configure_windows_unwind(libkernel)
@@ -299,6 +302,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_aio PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_positioned_race_tests ${LIBS_INCLUDE_DIR}/tests/GuestPositionedRace.cpp)
+    target_include_directories(guest_positioned_race_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_positioned_race_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_positioned_race_tests)
+    add_test(NAME guest_positioned_race COMMAND guest_positioned_race_tests)
+    if(WIN32)
+        set_tests_properties(guest_positioned_race PROPERTIES TIMEOUT 60 ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_once_tests ${LIBS_INCLUDE_DIR}/tests/GuestOnce.cpp)
     target_include_directories(guest_once_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_once_tests PRIVATE libkernel libc)
@@ -387,6 +399,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_pthread_attr PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_pthread_attr PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_test_executable(guest_pthread_schedparam_tests ${LIBS_INCLUDE_DIR}/tests/GuestPthreadSchedparam.cpp)
+    target_include_directories(guest_pthread_schedparam_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_pthread_schedparam_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_pthread_schedparam_tests)
+    add_test(NAME guest_pthread_schedparam COMMAND guest_pthread_schedparam_tests)
+    set_tests_properties(guest_pthread_schedparam PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_pthread_schedparam PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
     add_test_executable(guest_pthread_mutexattr_tests ${LIBS_INCLUDE_DIR}/tests/GuestPthreadMutexattr.cpp)
@@ -649,6 +671,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_parent_process PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_pthread_atfork_tests ${LIBS_INCLUDE_DIR}/tests/GuestPthreadAtfork.cpp)
+    target_include_directories(guest_pthread_atfork_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_pthread_atfork_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_pthread_atfork_tests)
+    add_test(NAME guest_pthread_atfork COMMAND guest_pthread_atfork_tests)
+    if(WIN32)
+        set_tests_properties(guest_pthread_atfork PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_kill_tests ${LIBS_INCLUDE_DIR}/tests/GuestKill.cpp)
     target_include_directories(guest_kill_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_kill_tests PRIVATE libkernel libc)
@@ -797,6 +828,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_getrusage PROPERTIES TIMEOUT 20)
     if(WIN32)
         set_tests_properties(guest_getrusage PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
+    add_test_executable(guest_thermal_sensors_tests ${LIBS_INCLUDE_DIR}/tests/GuestThermalSensors.cpp)
+    target_include_directories(guest_thermal_sensors_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_thermal_sensors_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_thermal_sensors_tests)
+    add_test(NAME guest_thermal_sensors COMMAND guest_thermal_sensors_tests)
+    set_tests_properties(guest_thermal_sensors PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_thermal_sensors PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
     add_test_executable(guest_getlogin_tests ${LIBS_INCLUDE_DIR}/tests/GuestGetlogin.cpp)
@@ -1005,6 +1046,16 @@ if(BUILD_TESTING)
     target_include_directories(guest_socket_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
     configure_windows_unwind(guest_socket_error_tests)
     add_test(NAME guest_socket_error COMMAND guest_socket_error_tests)
+    add_test_executable(guest_socket_options_tests ${LIBS_INCLUDE_DIR}/tests/GuestSocketOptions.cpp)
+    target_include_directories(guest_socket_options_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_socket_options_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_socket_options_tests)
+    add_test(NAME guest_socket_options COMMAND guest_socket_options_tests)
+    set_tests_properties(guest_socket_options PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(guest_socket_options PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+    endif()
     add_test_executable(guest_udp_tests ${LIBS_INCLUDE_DIR}/tests/GuestUdp.cpp)
     target_include_directories(guest_udp_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_udp_tests PRIVATE libkernel libc)
@@ -1146,6 +1197,35 @@ if(BUILD_TESTING)
         set_tests_properties(guest_memory PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
+    add_test_executable(guest_flexible_memory_budget_tests ${LIBS_INCLUDE_DIR}/tests/GuestFlexibleMemoryBudget.cpp)
+    target_include_directories(guest_flexible_memory_budget_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_flexible_memory_budget_tests PRIVATE libkernel libc)
+    configure_windows_unwind(guest_flexible_memory_budget_tests)
+    add_library(guest_flexible_memory_module SHARED ${LIBS_INCLUDE_DIR}/tests/GuestFlexibleMemoryModule.cpp)
+    set_target_properties(guest_flexible_memory_module PROPERTIES PREFIX "" SUFFIX ".guest.prx")
+    add_dependencies(guest_flexible_memory_budget_tests guest_flexible_memory_module)
+    target_compile_definitions(guest_flexible_memory_budget_tests PRIVATE GUEST_FLEXIBLE_MEMORY_MODULE="$<TARGET_FILE:guest_flexible_memory_module>")
+    foreach(flexibleMemoryCase IN ITEMS declared:838860800 limited:16777216 none:0 missing:0 invalid:true)
+        string(REPLACE ":" ";" flexibleMemoryCase ${flexibleMemoryCase})
+        list(GET flexibleMemoryCase 0 flexibleMemoryName)
+        list(GET flexibleMemoryCase 1 flexibleMemorySize)
+        set(flexibleMemoryRun ${CMAKE_CURRENT_BINARY_DIR}/guest_flexible_memory_${flexibleMemoryName})
+        file(MAKE_DIRECTORY ${flexibleMemoryRun})
+        if(NOT flexibleMemoryName STREQUAL "missing")
+            set(flexibleMemoryField "")
+            if(NOT flexibleMemoryName STREQUAL "none")
+                set(flexibleMemoryField ",\"kernel\":{\"flexibleMemorySize\":${flexibleMemorySize}}")
+            endif()
+            file(WRITE ${flexibleMemoryRun}/app0/sce_sys/param.json
+                "{\"titleId\":\"PPSA00000\",\"localizedParameters\":{\"en-US\":{\"titleName\":\"Example\"}}${flexibleMemoryField}}")
+        endif()
+        add_test(NAME guest_flexible_memory_${flexibleMemoryName} COMMAND guest_flexible_memory_budget_tests ${flexibleMemoryName}
+            WORKING_DIRECTORY ${flexibleMemoryRun})
+        if(WIN32)
+            set_tests_properties(guest_flexible_memory_${flexibleMemoryName} PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+        endif()
+    endforeach()
     add_test_executable(guest_mlock_tests ${LIBS_INCLUDE_DIR}/tests/GuestMlock.cpp)
     target_include_directories(guest_mlock_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_mlock_tests PRIVATE libkernel libc)
@@ -1254,6 +1334,13 @@ if(BUILD_TESTING)
         configure_windows_unwind(guest_mutex_raise_exception_tests)
         add_test(NAME guest_mutex_raise_exception COMMAND guest_mutex_raise_exception_tests)
         set_tests_properties(guest_mutex_raise_exception PROPERTIES TIMEOUT 20 ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
+        add_test_executable(guest_mutex_contention_tests ${LIBS_INCLUDE_DIR}/tests/GuestMutexContention.cpp)
+        target_include_directories(guest_mutex_contention_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_mutex_contention_tests PRIVATE libkernel libc)
+        configure_windows_unwind(guest_mutex_contention_tests)
+        add_test(NAME guest_mutex_contention COMMAND guest_mutex_contention_tests)
+        set_tests_properties(guest_mutex_contention PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
     add_test_executable(guest_pthread_rename_tests ${LIBS_INCLUDE_DIR}/tests/GuestPthreadRename.cpp)

@@ -26,6 +26,7 @@ struct SpirvTargetOptions {
     bool fragmentDescriptorSet = false;
     bool contractFloat = false;
     bool meshAsCompute = false;
+    bool float16DenormPreserve = false;
 };
 
 class SpirvEmitter {

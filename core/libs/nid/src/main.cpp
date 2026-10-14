@@ -1,5 +1,6 @@
 #include <nid/BinaryPatcherFactory.hpp>
 #include <nid/ExportExclusions.hpp>
+#include <nid/NativePath.hpp>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -9,20 +10,20 @@
 namespace {
 
 std::vector<std::uint8_t> _readFile(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(Nid::Internal::NativePath(path), std::ios::binary);
     if (!f) throw std::runtime_error("cannot open: " + path);
     return {std::istreambuf_iterator<char>(f), {}};
 }
 
 void _writeFile(const std::string& path, const std::vector<std::uint8_t>& data) {
-    std::ofstream f(path, std::ios::binary);
+    std::ofstream f(Nid::Internal::NativePath(path), std::ios::binary);
     if (!f) throw std::runtime_error("cannot write: " + path);
     f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
 }
 
 }
 
-int main(int argc, char* argv[]) {
+int Run(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: nid_patcher <library_name> [--preserve-exports <unpatched-library>] <file> [file2 ...]\n";
         return 1;
@@ -65,3 +66,27 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+#ifdef _WIN32
+int wmain(int argc, wchar_t* argv[]) {
+    try {
+        std::vector<std::string> values;
+        values.reserve(static_cast<std::size_t>(argc));
+        for (int index = 0; index < argc; ++index) {
+            const auto utf8 = std::filesystem::path(argv[index]).u8string();
+            values.emplace_back(utf8.begin(), utf8.end());
+        }
+        std::vector<char*> arguments;
+        arguments.reserve(values.size());
+        for (auto& value : values) arguments.push_back(value.data());
+        return Run(argc, arguments.data());
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL: " << error.what() << '\n';
+        return 2;
+    }
+}
+#else
+int main(int argc, char* argv[]) {
+    return Run(argc, argv);
+}
+#endif

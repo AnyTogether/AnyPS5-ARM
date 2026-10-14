@@ -14,6 +14,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "AudioOut2Internal.hpp"
+#include "prx/libSceAudioOut/include/AudioOutSdl.hpp"
 
 // An AudioOut2 context is the hardware output queue: every push appends a grain (num_grains samples)
 // to a queue of queue_depth grains that plays in real time. Titles pace their mixer on that queue, so
@@ -106,7 +107,7 @@ static std::uint32_t QueueLevel(AudioOut2Context& context, Clock::time_point now
 static void DeviceCallback(void* userdata, Uint8* stream, int length);
 
 static void OpenDevice(AudioOut2Context& context) {
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+    if (InitializeSdlAudio_nid_no_patch() < 0) {
         AUDIOOUT2_TRACE("SDL audio init failed: %s\n", SDL_GetError());
         return;
     }
@@ -134,7 +135,7 @@ static void CloseDevice(SDL_AudioDeviceID device) {
 }
 
 static void OpenPadDevice(AudioOut2Context& context) {
-    if (SDL_WasInit(SDL_INIT_AUDIO) == 0 && SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) return;
+    if (SDL_WasInit(SDL_INIT_AUDIO) == 0 && InitializeSdlAudio_nid_no_patch() < 0) return;
     const int count = SDL_GetNumAudioDevices(0);
     for (int index = 0; index < count; index++) {
         const char* listed = SDL_GetAudioDeviceName(index, 0);

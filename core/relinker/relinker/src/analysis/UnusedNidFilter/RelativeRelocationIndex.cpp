@@ -1,4 +1,5 @@
 #include <relinker/analysis/UnusedNidFilter/IRelativeRelocationIndex.hpp>
+#include <relinker/parsing/ElfReader.hpp>
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <unordered_map>
 #include <cstring>
@@ -147,12 +148,10 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
             hasSceDynlibData = true;
             sceTableBase = read64(elfBytes, phPos + 8);
         }
-        if (type != PT_LOAD) continue;
-        LoadSegment seg;
-        seg.fileOffset = read64(elfBytes, phPos + 8);
-        seg.vaddr = read64(elfBytes, phPos + 16);
-        seg.fileSize = read64(elfBytes, phPos + 32);
-        loads.push_back(seg);
+    }
+    for (const auto& header : ElfReader(elfBytes).ReadProgramHeaders()) {
+        if (header.Type != PT_LOAD) continue;
+        loads.push_back({header.MappedAddress, header.Offset, header.FileSize});
     }
 
     std::unordered_map<VirtualAddress, VirtualAddress> targets;

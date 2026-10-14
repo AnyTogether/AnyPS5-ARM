@@ -110,6 +110,27 @@ class DebtSplitTests(unittest.TestCase):
         self.assertFalse((self.root / "docs/dev/debt/libSceC.md").exists())
         self.assertEqual(self.read(INDEX), self.git("show", "main:" + INDEX).stdout)
 
+    def test_resolve_moves_unchanged_entry_to_functional(self):
+        result = self.rebase([A_STUB, B_STUB], [C_STUB, A_FUNCTIONAL, SHADER, SHARED])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "")
+        self.git("rebase", "--continue")
+        self.assertEqual(self.read("docs/dev/debt/libSceC.md"),
+                         "# libSceC technical debt\n\n### Functional\n\n" + C_STUB.replace("../../", "../../../") + "\n")
+        self.assertEqual(result.stdout.split(), ["docs/dev/debt/libSceC.md"])
+        self.assertEqual(self.read(INDEX), self.git("show", "main:" + INDEX).stdout)
+
+    def test_resolve_moves_unchanged_entry_to_silent_stubs(self):
+        result = self.rebase([A_STUB, B_STUB, C_STUB, A_FUNCTIONAL], [SHADER, SHARED])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "")
+        self.git("rebase", "--continue")
+        self.assertEqual(self.read("docs/dev/debt/libSceA.md"),
+                         "# libSceA technical debt\n\n### Silent stubs\n\n" + A_STUB.replace("../../", "../../../") +
+                         "\n" + A_FUNCTIONAL.replace("../../", "../../../") + "\n")
+        self.assertEqual(result.stdout.split(), ["docs/dev/debt/libSceA.md"])
+        self.assertEqual(self.read(INDEX), self.git("show", "main:" + INDEX).stdout)
+
     def test_resolve_refuses_changes_to_lines_that_stay_in_the_index(self):
         result = self.rebase([A_STUB, B_STUB, C_STUB], [A_FUNCTIONAL, SHADER, SHARED + " too"])
         self.assertNotEqual(result.returncode, 0)
@@ -135,6 +156,18 @@ class DebtSplitTests(unittest.TestCase):
         result = self.tool("resolve")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not in a three-way conflict", result.stderr)
+
+    def test_resolve_preserves_entries_inserted_before_the_first_existing_entry(self):
+        first = "- [libSceA](../../core/libs/prx/libSceA/First.cpp) - `sceAFirst` returns 0"
+        second = "- [libSceA](../../core/libs/prx/libSceA/Second.cpp) - `sceASecond` returns 0"
+        result = self.rebase([first, second, A_STUB, B_STUB, C_STUB], [A_FUNCTIONAL, SHADER, SHARED])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.git("rebase", "--continue")
+        self.assertEqual(self.read("docs/dev/debt/libSceA.md"),
+                         "# libSceA technical debt\n\n### Silent stubs\n\n" +
+                         "\n".join(entry.replace("../../", "../../../") for entry in (first, second, A_STUB)) +
+                         "\n\n### Functional\n\n" + A_FUNCTIONAL.replace("../../", "../../../") + "\n")
+        self.assertEqual(self.read(INDEX), self.git("show", "main:" + INDEX).stdout)
 
 
 if __name__ == "__main__":

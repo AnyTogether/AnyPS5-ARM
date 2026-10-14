@@ -20,6 +20,9 @@ int APS5_VABI dup_nid_postfix(int);
 int APS5_VABI dup2_nid_postfix(int, int);
 int APS5_VABI fcntl_nid_postfix(int, int, ...);
 int APS5_VABI flock_nid_postfix(int, int);
+std::int64_t APS5_VABI sceKernelWrite(int, const void*, std::size_t);
+std::int64_t APS5_VABI sceKernelPread(int, void*, std::size_t, std::int64_t);
+std::int64_t APS5_VABI sceKernelPwrite(int, const void*, std::size_t, std::int64_t);
 int* APS5_VABI __error_nid_postfix();
 FileStream* APS5_VABI fopen_nid_postfix(const char*, const char*);
 FileStream* APS5_VABI fdopen_nid_postfix(int, const char*);
@@ -165,6 +168,12 @@ static void Conversions() {
         Require(flock_nid_postfix(copy, 2 | 4) == -1 && *__error_nid_postfix() == 35);
         Require(flock_nid_postfix(fixture.other, 8) == 0);
         Require(Acquires(fixture.other, 2));
+        Require(flock_nid_postfix(fixture.source, 2 | 4) == 0);
+        char byte = 'x';
+        Require(sceKernelPwrite(fixture.other, &byte, 1, 0) == 1 && sceKernelWrite(fixture.other, "yz", 2) == 2);
+        Require(sceKernelPread(fixture.other, &byte, 1, 1) == 1 && byte == 'z');
+        Require(flock_nid_postfix(fixture.other, 1 | 4) == -1 && *__error_nid_postfix() == 35);
+        Require(flock_nid_postfix(fixture.source, 8) == 0);
     }
 }
 

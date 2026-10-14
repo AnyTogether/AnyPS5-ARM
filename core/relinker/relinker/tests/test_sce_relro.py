@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import struct
@@ -41,6 +42,29 @@ def relink(relinker, work, name, image, options):
     return result, output
 
 
+def filtered_fixture(extra, lifecycle):
+    image = fixture(extra)
+    if not lifecycle:
+        image[0x1100:0x1118] = image[0x700:0x718]
+        struct.pack_into("<Q", image, 0x400 + 4 * 16 + 8, 0x1100)
+        struct.pack_into("<qQqQ", image, 0x470, 0x6100003f, 24, 0, 0)
+        struct.pack_into("<QQ", image, 64 + (1 + len(extra)) * 56 + 32, 9 * 16, 9 * 16)
+        return image
+    image[0x200] = 0xc3
+    image[0x210:0x218] = b"\x48\x8b\x05" + struct.pack("<i", 0x1300 - 0x217) + b"\xc3"
+    image[0x600:0x605] = b"\0foo\0"
+    struct.pack_into("<IBBHQQ", image, 0x638, 1, 0x12, 0, 0, 0, 0)
+    struct.pack_into("<QQq", image, 0x700, 0x1200, 8, 0x210)
+    struct.pack_into("<QQq", image, 0x718, 0x1300, (1 << 32) | 6, 0)
+    tags = [(5, 0x600), (10, 5), (6, 0x620), (11, 24), (7, 0x700), (8, 48), (9, 24),
+            (25, 0x1200), (27, 8), (0x6100003f, 48), (0, 0)]
+    dynamic = 64 + (1 + len(extra)) * 56
+    struct.pack_into("<QQ", image, dynamic + 32, len(tags) * 16, len(tags) * 16)
+    for index, tag in enumerate(tags):
+        struct.pack_into("<qQ", image, 0x400 + index * 16, *tag)
+    return image
+
+
 def main():
     relinker = Path(sys.argv[1]).resolve()
     standalone = [(PT_SCE_RELRO, 4, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000)]
@@ -61,6 +85,14 @@ def main():
                 if target == "windows" and os.name == "nt":
                     run = subprocess.run([str(output)], capture_output=True, timeout=20)
                     assert run.returncode == 42, (name, run.returncode, run.stderr)
+            for lifecycle in (False, True):
+                for level in (0, 1, 2):
+                    case = f"{name}-filter-{level}-{'lifecycle' if lifecycle else 'relocations'}"
+                    result, output = relink(relinker, work, case, filtered_fixture(extra, lifecycle),
+                                            ["--registry", f"unused-filter={level}"])
+                    assert result.returncode == 0, (case, result.stdout, result.stderr)
+                    registry = json.loads(output.with_suffix(".registry.json").read_text())
+                    assert [entry["nid"] for entry in registry] == (["foo"] if lifecycle else []), (case, registry)
         for name, load in (("tail", (PT_LOAD, 6, 0x1000, 0x1000, 0x800, 0x800, 0x1000)),
                            ("head", (PT_LOAD, 6, 0x1800, 0x1800, 0x800, 0x800, 0x1000))):
             for options in ([], ["--windows"]):

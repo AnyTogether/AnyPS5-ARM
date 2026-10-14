@@ -17,7 +17,6 @@
 namespace ShaderRecompiler {
 namespace {
 
-constexpr std::int64_t PatchIndexCount = 256;
 constexpr std::int64_t LocalVertexIndexCount = 8192;
 constexpr std::int64_t TriangleFactorBytes = 16;
 constexpr std::int64_t QuadFactorBytes = 24;
@@ -418,7 +417,7 @@ std::uint32_t ComponentCount(IrOpcode opcode) {
 class Lowering {
 public:
     Lowering(IrProgram& program, const ShaderTessellationInputInfo& tessellation)
-        : program(program), tessellation(tessellation), stage(program.Resources().stage), evaluator(stage == IrShaderStage::TessellationControl ? tessellation.outputControlPoints : 0u, stage == IrShaderStage::Local ? LocalVertexIndexCount : PatchIndexCount) {}
+        : program(program), tessellation(tessellation), stage(program.Resources().stage), evaluator(stage == IrShaderStage::TessellationControl ? tessellation.outputControlPoints : 0u, stage == IrShaderStage::Local ? LocalVertexIndexCount : static_cast<std::int64_t>(tessellation.patchesPerGroup)) {}
 
     void Run() {
         for (IrBlock* block : program.BlockOrder()) {
@@ -450,6 +449,7 @@ public:
         deadCodeEliminator.Eliminate(program);
         program.Metadata().tessellationLocalStride = localStride;
         program.Metadata().tessellationControlStride = controlStride;
+        program.Metadata().tessellationPatchStride = patchStride;
     }
 
 private:
@@ -513,19 +513,29 @@ private:
     void derive() {
         const auto inputs = static_cast<std::int64_t>(tessellation.inputControlPoints);
         const auto outputs = static_cast<std::int64_t>(tessellation.outputControlPoints);
-        for (const auto& access : accesses) {
+        for (auto& access : accesses) {
             if (access.kind == TessellationAttribute::LocalOutput) agree(localStride, access.address.relative, access.pc);
             if (access.kind == TessellationAttribute::ControlInput && access.address.vertex != 0) agree(localStride, access.address.vertex, access.pc);
             if (access.kind == TessellationAttribute::ControlInput && access.address.dynamic && access.address.relative > 0 && access.address.relative % inputs == 0) agree(localStride, access.address.relative / inputs, access.pc);
             if (access.kind == TessellationAttribute::ControlOutput && access.address.vertex != 0) agree(controlStride, access.address.vertex, access.pc);
             if (access.kind == TessellationAttribute::EvaluationInput) {
-                if (access.address.relative <= 0 || access.address.relative % outputs != 0) Fail("domain shader reads of patch constants or other patches are unsupported", access.pc);
-                agree(controlStride, access.address.relative / outputs, access.pc);
+                const auto end = access.address.constant + 4 * static_cast<std::int64_t>(access.components);
+                if (access.address.relative > 0 && access.address.relative % outputs == 0 && access.address.constant >= 0 && end <= access.address.relative) {
+                    agree(controlStride, access.address.relative / outputs, access.pc);
+                } else {
+                    access.kind = TessellationAttribute::PatchInput;
+                }
             }
         }
-        std::optional<std::int64_t> patchStride;
+        std::optional<std::int64_t> recordStride;
         std::int64_t patchLowest = AddressLimit;
         std::int64_t patchHighest = 0;
+        const auto record = [&](const Access& access, std::int64_t end) {
+            if (recordStride && *recordStride != access.address.relative) Fail("inconsistent patch-constant stride", access.pc);
+            recordStride = access.address.relative;
+            patchLowest = std::min(patchLowest, access.address.constant);
+            patchHighest = std::max(patchHighest, end);
+        };
         for (auto& access : accesses) {
             const auto& address = access.address;
             const auto end = address.constant + 4 * static_cast<std::int64_t>(access.components);
@@ -540,11 +550,8 @@ private:
                 break;
             case TessellationAttribute::ControlOutput:
                 if (address.vertex == 0) {
-                    if (controlStride == 0u || address.constant < outputs * controlStride) Fail("the hull shader writes off-chip memory outside its control points and patch constants", access.pc);
-                    if (patchStride && *patchStride != address.relative) Fail("inconsistent patch-constant stride", access.pc);
-                    patchStride = address.relative;
-                    patchLowest = std::min(patchLowest, address.constant);
-                    patchHighest = std::max(patchHighest, end);
+                    if (controlStride == 0u || evaluator.Lowest(address) < static_cast<std::int64_t>(tessellation.patchesPerGroup) * outputs * controlStride) Fail("the hull shader writes off-chip memory outside its control points and patch constants", access.pc);
+                    record(access, end);
                     access.kind = TessellationAttribute::PatchOutput;
                     requireFirstInvocation(access);
                 } else if (address.relative != outputs * controlStride || address.constant < 0 || end > controlStride) {
@@ -561,11 +568,19 @@ private:
                 requireFirstInvocation(access);
                 break;
             }
+            case TessellationAttribute::PatchInput:
+                if (controlStride == 0u) Fail("the domain shader reads patch constants but no control point, so their locations are unknown", access.pc);
+                if (address.relative == 0) Fail("the domain shader reads off-chip memory that is not indexed by its relative patch", access.pc);
+                if (evaluator.Lowest(address) < static_cast<std::int64_t>(tessellation.patchesPerGroup) * outputs * controlStride) Fail("the domain shader reads off-chip memory that is neither its patch's control points nor a patch-constant record", access.pc);
+                record(access, end);
+                break;
             case TessellationAttribute::PatchOutput:
                 break;
             }
         }
-        if (patchStride && (*patchStride == 0 || std::abs(*patchStride) < patchHighest - patchLowest)) Fail("patch-constant records of neighbouring patches overlap", 0u);
+        if (!recordStride) return;
+        if (*recordStride == 0 || std::abs(*recordStride) < patchHighest - patchLowest) Fail(stage == IrShaderStage::TessellationEvaluation ? "the domain shader reads more than one patch-constant record" : "patch-constant records of neighbouring patches overlap", 0u);
+        patchStride = static_cast<std::uint32_t>(std::abs(*recordStride));
     }
 
     bool dynamicInputAddress(IrValue* user, IrValue* value) {
@@ -626,7 +641,9 @@ private:
 
     IrValue& componentAddress(const Access& access, std::uint32_t component) {
         if (access.address.dynamic) return insert(access, IrOpcode::IAdd32, IrType::U32, {access.addressValue, &constant(access.memoryOffset + 4u * component)});
-        IrValue& offset = constant(static_cast<std::uint32_t>(access.address.constant) + 4u * component);
+        auto address = access.address.constant + 4 * static_cast<std::int64_t>(component);
+        if (access.kind == TessellationAttribute::PatchOutput || access.kind == TessellationAttribute::PatchInput) address -= FloorDiv(address, patchStride) * patchStride;
+        IrValue& offset = constant(static_cast<std::uint32_t>(address));
         if (access.kind != TessellationAttribute::ControlInput || access.address.vertex == 0) return offset;
         IrValue& invocation = insert(access, IrOpcode::GetBuiltin, IrType::U32, {&constant(static_cast<std::uint32_t>(StageInputKind::InvocationId)), &constant(0u)});
         IrValue& scaled = insert(access, IrOpcode::IMul32, IrType::U32, {&invocation, &constant(static_cast<std::uint32_t>(access.address.vertex))});
@@ -691,6 +708,7 @@ private:
     std::vector<Access> accesses;
     std::uint32_t localStride = 0;
     std::uint32_t controlStride = 0;
+    std::uint32_t patchStride = 0;
 };
 
 }

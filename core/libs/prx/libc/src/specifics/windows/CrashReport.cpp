@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <tlhelp32.h>
+#include "prx/libc/include/CallTrace.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <utility>
 #include <mutex>
 #include "Sse4aEmulation.hpp"
@@ -32,6 +34,7 @@ void Report(const char* format, ...) {
 
 void ReportAllThreads();
 void ReportStackCandidates(std::uint64_t rsp, int limit, std::uint64_t span);
+void ReportCallTrace();
 
 void DescribeAddress(std::uint64_t address, char* buffer, std::size_t size) {
     HMODULE module = nullptr;
@@ -243,6 +246,7 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     static std::atomic<bool> reported{false};
     const auto* fault = info->ExceptionRecord;
     if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 1 && GuestArena::GuestArenaHandleWrite_nid_postfix(fault->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
+    if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 0 && GuestArena::GuestArenaHandleRead_nid_postfix(fault->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleWatch(info)) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleSse4a(info)) return EXCEPTION_CONTINUE_EXECUTION;
     const auto* record = info->ExceptionRecord;
@@ -325,10 +329,32 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
             }
         }
     }
+    ReportCallTrace();
     std::fflush(stderr);
     ReportAllThreads();
     std::fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void ReportCallTrace() {
+    static CallTraceEntry entries[64];
+    const std::size_t count = CopyCallTrace_nid_no_patch(entries, std::size(entries));
+    if (count == 0) return;
+    char line[MAX_PATH + 64];
+    Report("  last traced system library calls (APS5_TRACE_CALLS):\n");
+    for (std::size_t index = 0; index < count; ++index) {
+        DescribeAddress(entries[index].returnAddress, line, sizeof(line));
+        Report("    #%llu thread %llu %s %s from %s\n", static_cast<unsigned long long>(entries[index].sequence),
+            static_cast<unsigned long long>(entries[index].thread), entries[index].library, entries[index].name, line);
+    }
+    static CallTraceCount counts[32];
+    std::uint64_t total = 0;
+    const std::size_t counted = CopyCallCounts_nid_no_patch(counts, std::size(counts), &total);
+    if (counted == 0) return;
+    Report("  most called traced imports (%llu calls in total):\n", static_cast<unsigned long long>(total));
+    for (std::size_t index = 0; index < counted; ++index) {
+        Report("    %12llu %s %s\n", static_cast<unsigned long long>(counts[index].calls), counts[index].library, counts[index].name);
+    }
 }
 
 std::size_t CaptureFrames(const CONTEXT* context, std::uint64_t* frames, std::size_t capacity) {
@@ -451,6 +477,7 @@ void ReportBacktrace(const char* what, bool reportThreads) {
         Report("    #%u %s\n", static_cast<unsigned>(i), line);
     }
     ReportStackCandidates(reinterpret_cast<std::uint64_t>(__builtin_frame_address(0)), 32, 0x4000);
+    ReportCallTrace();
     if (reportThreads) ReportAllThreads();
     std::fflush(stderr);
 }

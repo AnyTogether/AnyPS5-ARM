@@ -150,6 +150,66 @@ int main() {
         return b.eliminate() == 1u && !clamped.HasUses() && product.HasUses();
     });
 
+    passed &= run("a min, max, min3, max3 or med3 of flushed values needs no flush, one with an unknown operand does", [] {
+        Builder b;
+        const auto value = [&](IrValue& bits) -> IrValue& { return b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&bits}); };
+        const auto flushedResult = [&](IrOpcode opcode, std::initializer_list<IrValue*> arguments) -> IrValue& {
+            return b.flush(b.emit(IrOpcode::BitCastU32F32, IrType::U32, {&b.emit(opcode, IrType::F32, arguments)}));
+        };
+        auto& x = value(b.flush(b.unknown()));
+        auto& y = value(b.flush(b.unknown()));
+        auto& z = value(b.flush(b.unknown()));
+        auto& raw = value(b.unknown());
+        IrValue* removed[] = {
+            &flushedResult(IrOpcode::FPMin32, {&x, &y}),
+            &flushedResult(IrOpcode::FPMax32, {&y, &x}),
+            &flushedResult(IrOpcode::FPMinTri32, {&x, &y, &z}),
+            &flushedResult(IrOpcode::FPMaxTri32, {&z, &y, &x}),
+            &flushedResult(IrOpcode::FPMedTri32, {&x, &z, &y}),
+        };
+        auto& mixedPair = flushedResult(IrOpcode::FPMax32, {&x, &raw});
+        auto& mixedMedian = flushedResult(IrOpcode::FPMedTri32, {&x, &y, &raw});
+        for (auto* flushed : removed) b.keep(*flushed);
+        b.keep(mixedPair);
+        b.keep(mixedMedian);
+        const bool counted = b.eliminate() == 5u;
+        bool kept = false;
+        for (auto* flushed : removed) kept |= flushed->HasUses();
+        return counted && !kept && mixedPair.HasUses() && mixedMedian.HasUses();
+    });
+
+    passed &= run("a floor or ceil needs no flush, even of an unknown value", [] {
+        Builder b;
+        auto& raw = b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&b.unknown()});
+        auto& floored = b.flush(b.emit(IrOpcode::BitCastU32F32, IrType::U32, {&b.emit(IrOpcode::FPFloor32, IrType::F32, {&raw})}));
+        auto& ceiled = b.flush(b.emit(IrOpcode::BitCastU32F32, IrType::U32, {&b.emit(IrOpcode::FPCeil32, IrType::F32, {&raw})}));
+        b.keep(floored);
+        b.keep(ceiled);
+        return b.eliminate() == 2u && !floored.HasUses() && !ceiled.HasUses();
+    });
+
+    passed &= run("a max carried around a loop without a flush keeps its flush and the search ends", [] {
+        Builder b;
+        IrBlock& head = *b.block;
+        IrBlock& body = b.newBlock();
+        IrBlock& exit = b.newBlock();
+        head.AddBranch(&body);
+        body.AddBranch(&body);
+        body.AddBranch(&exit);
+        auto& initial = b.flush(b.unknown());
+        b.block = &body;
+        auto& carried = b.program.CreateValue(IrOpcode::Phi, IrType::U32);
+        body.AppendInstruction(&carried);
+        auto& step = b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&b.flush(b.unknown())});
+        auto& maximum = b.emit(IrOpcode::BitCastU32F32, IrType::U32, {&b.emit(IrOpcode::FPMax32, IrType::F32, {&b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&carried}), &step})});
+        carried.AddPhiOperand(&head, &initial);
+        carried.AddPhiOperand(&body, &maximum);
+        auto& flushed = b.flush(maximum);
+        b.block = &exit;
+        b.keep(flushed);
+        return b.eliminate() == 0u && flushed.HasUses();
+    });
+
     passed &= run("a phi of flushed values needs no flush", [] {
         Builder b;
         IrBlock& head = *b.block;

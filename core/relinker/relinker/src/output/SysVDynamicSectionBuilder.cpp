@@ -84,7 +84,9 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
 
     auto symbolInfo = [](const NidReference& ref) -> std::uint8_t {
         if (ref.Nid.empty()) return static_cast<std::uint8_t>((STB_WEAK << 4) | STT_NOTYPE);
-        return static_cast<std::uint8_t>(((ref.Weak ? STB_WEAK : STB_GLOBAL) << 4) | STT_FUNC);
+        const bool tls = ref.RelocationTypeValue == R_X86_64_DTPMOD64 || ref.RelocationTypeValue == R_X86_64_DTPOFF64
+            || ref.RelocationTypeValue == R_X86_64_TPOFF64;
+        return static_cast<std::uint8_t>(((ref.Weak ? STB_WEAK : STB_GLOBAL) << 4) | (tls ? STT_TLS : STT_FUNC));
     };
 
     static constexpr std::size_t kRelaEntSize = 24;
@@ -94,6 +96,7 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
 
     for (const auto& ref : nidReferences) {
         if (!ref.Library.empty()) result.ImportModules.emplace(ref.RelocationAddress, ref.Library);
+        if (ref.Function) result.FunctionImports.insert(ref.RelocationAddress);
         std::uint32_t relType = ref.RelocationTypeValue;
         if (relType == 0) relType = R_X86_64_JUMP_SLOT;
 

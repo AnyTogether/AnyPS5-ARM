@@ -36,4 +36,13 @@ if(BUILD_TESTING)
         set_tests_properties(guest_resolver PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
     endif()
+    add_test_executable(guest_service_database_tests ${LIBS_INCLUDE_DIR}/tests/GuestServiceDatabase.cpp)
+    target_include_directories(guest_service_database_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_service_database_tests PRIVATE libScePosixForWebKit libc)
+    configure_windows_unwind(guest_service_database_tests)
+    add_test(NAME guest_service_database COMMAND guest_service_database_tests)
+    if(WIN32)
+        set_tests_properties(guest_service_database PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libScePosixForWebKit>")
+    endif()
 endif()

@@ -36,6 +36,7 @@ struct PeImport {
     std::uint32_t RelocationType = 1;
     std::string Library;
     bool Weak = false;
+    bool Function = false;
 };
 
 struct PeRelocations {

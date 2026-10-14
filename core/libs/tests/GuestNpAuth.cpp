@@ -27,6 +27,7 @@ int main() {
     constexpr int aborted = static_cast<int>(0x80550304);
     constexpr int requestNotFound = static_cast<int>(0x80550306);
     constexpr int invalidId = static_cast<int>(0x80550307);
+    constexpr int pollRunning = 1;
 
     const int syncReq = sceNpAuthCreateRequest();
     const int syncReq2 = sceNpAuthCreateRequest();
@@ -64,6 +65,10 @@ int main() {
     Require(sceNpAuthGetIdTokenV3(asyncReq, param, token) == 0);
     Require(sceNpAuthGetIdTokenV3(asyncReq, param, token) == invalidArgument);
     int asyncPoll = 0;
+    Require(sceNpAuthPollAsync(asyncReq, &asyncPoll) == pollRunning);
+    Require(asyncPoll == 0);
+    Require(sceNpAuthPollAsync(asyncReq, &asyncPoll) == 0);
+    Require(asyncPoll == signedOut);
     Require(sceNpAuthPollAsync(asyncReq, &asyncPoll) == 0);
     Require(asyncPoll == signedOut);
     int asyncWait = 0;

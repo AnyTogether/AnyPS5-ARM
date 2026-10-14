@@ -75,6 +75,36 @@ void settingsReject() {
     require(rejects("MouseSensitivity = 1\nMouseSensitivity = 2\n"), "a setting given twice is rejected");
 }
 
+void mouseLookDefault() {
+    useConfig("Cross = KEY:F\n");
+    const auto settings = Pad::LoadInputMapping().settings;
+    require(settings.mouseVerticalScale == 1.0 && settings.mouseCurve == 1.0 && settings.mouseMaxSpeed == 1.0, "mouse look scales default to 1");
+    require(settings.mouseDeadzoneOffset == 0.2 && settings.mouseSmoothingMs == 10.0 && settings.mouseDecayMs == 30.0, "mouse look timing and offset defaults");
+}
+
+void mouseLookParse() {
+    useConfig("MouseCurve=0.7 ; softer start\nmousedeadzoneoffset = 0.15\nMouseMaxSpeed = 1.5\nMouseSmoothingMs = 0\nMouseDecayMs = 50\nMouseVerticalScale = 0.5\n");
+    const auto settings = Pad::LoadInputMapping().settings;
+    require(settings.mouseCurve == 0.7, "mouse curve is read");
+    require(settings.mouseDeadzoneOffset == 0.15, "mouse deadzone offset is read case-insensitively");
+    require(settings.mouseMaxSpeed == 1.5, "mouse max speed is read");
+    require(settings.mouseSmoothingMs == 0.0, "a 0 smoothing is accepted");
+    require(settings.mouseDecayMs == 50.0, "mouse decay is read");
+    require(settings.mouseVerticalScale == 0.5, "mouse vertical scale is read");
+}
+
+void mouseLookReject() {
+    require(rejects("MouseCurve = 0.1\n"), "a mouse curve below 0.2 is rejected");
+    require(rejects("MouseCurve = steep\n"), "a non-numeric mouse curve is rejected");
+    require(rejects("MouseDeadzoneOffset = 0.95\n"), "a deadzone offset above 0.9 is rejected");
+    require(rejects("MouseDecayMs =\n"), "an empty decay is rejected");
+    require(rejects("MouseDecayMs = 0\n"), "a zero decay is rejected");
+    require(rejects("MouseSmoothingMs = 501\n"), "a smoothing above 500 is rejected");
+    require(rejects("MouseMaxSpeed = nan\n"), "a non-finite max speed is rejected");
+    require(rejects("MouseVerticalScale = 11\n"), "a vertical scale above 10 is rejected");
+    require(rejects("MouseDecayMs = 20\nmousedecayms = 30\n"), "a mouse setting given twice is rejected");
+}
+
 void deadzoneOffMatchesRawSticks() {
     for (const std::int16_t axis : {std::int16_t{-32768}, std::int16_t{-20000}, std::int16_t{-1}, std::int16_t{0}, std::int16_t{1}, std::int16_t{1234}, std::int16_t{32767}}) {
         const auto stick = Pad::StickWithDeadzone(axis, axis, 0);
@@ -108,6 +138,9 @@ int main() try {
     settingsDefault();
     settingsParse();
     settingsReject();
+    mouseLookDefault();
+    mouseLookParse();
+    mouseLookReject();
     deadzoneOffMatchesRawSticks();
     deadzoneShapesSticks();
     std::filesystem::remove_all(root);

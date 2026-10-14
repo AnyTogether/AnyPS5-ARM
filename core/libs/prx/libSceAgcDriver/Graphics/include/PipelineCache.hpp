@@ -21,6 +21,7 @@ public:
     PipelineCache(const PipelineCache&) = delete;
     PipelineCache& operator=(const PipelineCache&) = delete;
     VkPipelineCache Handle() const { return cache; }
+    PipelineCacheSynchronization& Synchronization() { return synchronization; }
 
 private:
     void load(std::vector<std::byte>& initialData);
@@ -30,6 +31,7 @@ private:
     Context context;
     VkPhysicalDeviceProperties properties{};
     VkPipelineCache cache = VK_NULL_HANDLE;
+    PipelineCacheSynchronization synchronization;
     std::filesystem::path path;
     std::size_t savedBytes = 0;
     std::mutex mutex;

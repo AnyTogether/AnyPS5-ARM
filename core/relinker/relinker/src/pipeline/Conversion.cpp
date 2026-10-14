@@ -34,7 +34,7 @@ namespace Relinker {
 
 Conversion::Conversion(Domain::IProgress& progress) : progress(progress) {}
 
-ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOptions& options) const {
+ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOptions& options) const try {
     Domain::InputProgress inputProgress(progress, Io::Utf8Path(input.InputPath));
     static_assert(std::endian::native == std::endian::little);
     if (options.Target != TargetSystem::Linux && options.Target != TargetSystem::Windows && options.Target != TargetSystem::MacOs) throw Domain::RelinkerException("Unknown target system");
@@ -102,7 +102,7 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
     if (macos) {
         patcher = std::make_shared<Elfpatcher::MacOs::MacOsMachOPatcher>();
     } else if (windows) {
-        patcher = std::make_shared<Elfpatcher::Windows::WindowsPePatcher>(options.WindowsGui, std::move(input.Icon), input.InputPath.parent_path() / "sce_sys" / "icon0.png", [&](auto completed, auto total) { inputProgress.Report({Domain::ProgressStage::Image, {}, completed, total}); });
+        patcher = std::make_shared<Elfpatcher::Windows::WindowsPePatcher>(options.WindowsGui, std::move(input.Icon), input.InputPath.parent_path() / "sce_sys" / "icon0.png", [&](auto completed, auto total) { inputProgress.Report({Domain::ProgressStage::Image, {}, completed, total}); }, options.WindowsFixedBase, options.TraceImports);
     } else {
         patcher = std::make_shared<Elfpatcher::Linux::LinuxElfPatcher>(
             std::make_shared<Elfpatcher::EntryStubBuilder>(),
@@ -120,7 +120,7 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
     try {
         executableBytes = patcher->Patch(sourceBytes, result.OriginalHeaders, result.DynamicSection, result.OriginalPltGotVaddr, options.RunPath, options.LazyBinding, options.WindowsDiagnostics, trampolines);
     } catch (Domain::RelinkerException& error) {
-        error.InputPath = Io::Utf8Path(input.InputPath);
+        if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(input.InputPath);
         throw;
     }
 
@@ -129,6 +129,9 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
     if (windows) diagnostics = std::static_pointer_cast<Elfpatcher::Windows::WindowsPePatcher>(patcher)->GetDiagnostics();
     inputProgress.Report({Domain::ProgressStage::Executable, Io::Utf8Path(input.InputPath), 1, 1});
     return {std::move(executableBytes), std::move(guestArtifacts), std::move(result), std::move(diagnostics)};
+} catch (Domain::RelinkerException& error) {
+    if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(input.InputPath);
+    throw;
 }
 
 }

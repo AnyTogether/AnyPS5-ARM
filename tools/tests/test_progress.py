@@ -9,6 +9,30 @@ import progress
 
 
 class ProgressTests(unittest.TestCase):
+    def test_raw_string_example_does_not_declare_an_export(self):
+        source = 'const char* example = R"help(\nint APS5_VABI Fake() { return 0; }\n)help";\n'
+        source += 'int APS5_VABI Real() { return 7; }\n'
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(source, encoding="utf-8")
+            group = progress.scan_library(library)
+        self.assertEqual(group["done_names"], ["Real"])
+        self.assertEqual(group["todo_names"], [])
+
+    def test_stub_marker_inside_raw_literals_does_not_mark_implementation_as_stub(self):
+        for prefix in ("", "u8", "u", "U", "L"):
+            source = ('int APS5_VABI Ready(int value) {\n'
+                      'auto message = ' + prefix + 'R"help(\n"quoted" NotImplemented_nid_no_patch(); } {\n)help";\n'
+                      'return value + 1;\n}\n')
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as directory:
+                library = Path(directory) / "libSceExample"
+                library.mkdir()
+                (library / "Export.cpp").write_text(source, encoding="utf-8")
+                group = progress.scan_library(library)
+                self.assertEqual(group["done_names"], ["Ready"])
+                self.assertEqual(group["todo_names"], [])
+
     def test_nonvoid_stub_wrappers_keep_callers_unimplemented(self):
         with tempfile.TemporaryDirectory() as directory:
             library = Path(directory) / "libSceExample"
@@ -219,6 +243,19 @@ class ProgressTests(unittest.TestCase):
             self.assertIn("+1 implemented", report)
             self.assertIn("| libSceExample | `A` |", report)
             self.assertIn("<summary>⚪ 1 behaviourally empty (constant return or throw)</summary>", report)
+
+    def test_cut_helpers_are_not_system_exports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libSceExample"
+            library.mkdir()
+            (library / "Export.cpp").write_text(
+                "int APS5_VABI Ready_nid_no_patch_cut() { return 1; }\n"
+                "int APS5_VABI Pending_nid_no_patch_cut() { NotImplemented_nid_no_patch(__func__); }\n"
+                "int APS5_VABI Real() { return 2; }\n", encoding="utf-8")
+            group = progress.scan_library(library)
+            self.assertEqual(group["done_names"], ["Real"])
+            self.assertEqual(group["todo_names"], [])
+            self.assertEqual(group["inert_names"], ["Real"])
 
     def test_empty_libraries(self):
         with tempfile.TemporaryDirectory() as directory:

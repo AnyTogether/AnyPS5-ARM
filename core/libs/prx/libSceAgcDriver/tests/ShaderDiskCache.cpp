@@ -7,6 +7,9 @@
 #include "Optimization/DescriptorBindingBuilder.hpp"
 #include "ShaderCacheDirectory.hpp"
 #include "ControlFlow/RequestSerializer.hpp"
+#include "Optimization/RequestMemoryView.hpp"
+#include "Optimization/SrtWalker.hpp"
+#include "IntermediateRepresentation/IrBlock.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -18,7 +21,10 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <optional>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -247,6 +253,7 @@ CompiledVariant sampleVariant() {
     info.info.usesDma = true;
     info.info.usesFaultBuffer = true;
     info.info.rasterPrimitive = true;
+    info.info.layerExported = true;
     info.bindings.pushDataStartDword = 2;
     info.bindings.memoryOffsetDword = 1;
     info.bindings.memoryOffsetCount = 5;
@@ -415,6 +422,7 @@ void verifyKeySensitivity() {
     changes("the sRGB formats decoded in the shader", [](SampleRequest& sample) { sample.request.target.srgbDecodeFormats = 2u; });
     changes("the narrow subgroup clock", [](SampleRequest& sample) { sample.request.target.narrowSubgroupClock = true; });
     changes("f64 denormal preservation", [](SampleRequest& sample) { sample.request.target.float64DenormPreserve = true; });
+    changes("f16 denormal preservation", [](SampleRequest& sample) { sample.request.target.float16DenormPreserve = true; });
     changes("the workgroup size limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupSize[2] = 128; });
     changes("the invocation limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupInvocations = 512; });
     changes("the shared memory limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupSharedMemoryBytes = 32768; });
@@ -1081,6 +1089,743 @@ void verifySpecializationLiveness() {
     require(SpecializeSpirv(specialized) == specialized, "dead computation removal is not stable");
 }
 
+constexpr std::uint64_t PlanSrtAddress = 0x7f0000010000ull;
+constexpr std::uint64_t PlanTableAddress = 0x7f0000020000ull;
+constexpr std::uint64_t PlanMaterialAddress = 0x7f0000030000ull;
+constexpr std::uint64_t PlanPayloadAddress = 0x7f0000040000ull;
+constexpr std::uint64_t PlanPointerAddress = 0x7f0000048000ull;
+constexpr std::uint64_t PlanOutputAddress = 0x7f0000050000ull;
+constexpr std::uint64_t PlanTextureAddress = 0x7f0000060000ull;
+constexpr std::uint64_t PlanUnmappedAddress = 0x7f00000f0000ull;
+
+struct PlanFixture {
+    std::string name;
+    ShaderStage stage = ShaderStage::Compute;
+    std::uint64_t codeAddress = 0;
+    std::uint32_t waveSize = 64;
+    std::vector<std::uint32_t> code;
+    std::vector<std::uint32_t> userData;
+    std::vector<std::pair<std::uint64_t, std::vector<std::uint32_t>>> regions;
+    std::optional<ShaderPixelStageInfo> pixel;
+    std::vector<MemoryRegion> memory;
+
+    RecompileRequest Request(bool useCache) {
+        static constexpr std::array<std::uint32_t, 7> capabilities{spv::CapabilityShader, spv::CapabilityImageGatherExtended, spv::CapabilitySampledImageArrayDynamicIndexing, spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess, spv::CapabilityClipDistance};
+        static constexpr std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
+        memory.clear();
+        for (const auto& [address, words] : regions) memory.push_back({address, std::as_bytes(std::span(words))});
+        RecompileRequest request{};
+        request.shader = {stage, codeAddress, code, 0, {}};
+        request.context.waveSize = waveSize;
+        request.context.userDataBaseRegister = 0;
+        request.context.userData = userData;
+        if (stage == ShaderStage::Compute) request.context.compute = ShaderComputeStageInfo{{waveSize, 1u, 1u}, 0u, {false, false, false}, false, 1u};
+        request.context.pixel = pixel;
+        request.context.memory = memory;
+        request.target.vulkanVersion = 0x00401000u;
+        request.target.spirvVersion = 0x00010300u;
+        request.target.subgroupSize = 32;
+        request.target.supportedCapabilities = capabilities;
+        request.target.supportedExtensions = extensions;
+        request.target.bdaAbiVersion = 1u;
+        request.layout.pushConstantSizeBytes = 128;
+        request.useCache = useCache;
+        return request;
+    }
+};
+
+std::vector<std::uint32_t> imageWords(std::uint64_t base) {
+    return {static_cast<std::uint32_t>(base >> 8u), static_cast<std::uint32_t>((base >> 40u) & 0xffu) | (56u << 20u) | (3u << 30u), 3u << 14u, 0xfacu | (9u << 28u), 0u, 0u, 0u, 0u};
+}
+
+std::vector<std::uint32_t> bufferWords(std::uint64_t base, std::uint32_t stride, std::uint32_t records, std::uint32_t format = 0xfacu) {
+    return {static_cast<std::uint32_t>(base), static_cast<std::uint32_t>((base >> 32u) & 0xffffu) | (stride << 16u), records, format};
+}
+
+void place(std::vector<std::uint32_t>& words, std::size_t offset, const std::vector<std::uint32_t>& values) {
+    std::copy(values.begin(), values.end(), words.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+std::vector<PlanFixture> planFixtures() {
+    std::vector<PlanFixture> fixtures;
+    const std::vector<std::uint32_t> srtPointer{static_cast<std::uint32_t>(PlanSrtAddress), static_cast<std::uint32_t>(PlanSrtAddress >> 32u)};
+    const auto add = [&](std::string name, std::uint32_t waveSize, std::vector<std::uint32_t> code, std::vector<std::uint32_t> userData, std::vector<std::pair<std::uint64_t, std::vector<std::uint32_t>>> regions) {
+        PlanFixture fixture;
+        fixture.name = std::move(name);
+        fixture.codeAddress = 0x100000u + static_cast<std::uint64_t>(fixtures.size()) * 0x1000u;
+        fixture.waveSize = waveSize;
+        fixture.code = std::move(code);
+        fixture.userData = std::move(userData);
+        fixture.regions = std::move(regions);
+        fixtures.push_back(std::move(fixture));
+    };
+    add("user data buffer", 64, {0xe0700000u, 0x80000000u, 0xbf810000u}, bufferWords(PlanOutputAddress, 0u, 0x40u, 0x00027facu), {});
+
+    std::vector<std::uint32_t> guarded(32, 0u);
+    place(guarded, 0, imageWords(PlanTextureAddress));
+    place(guarded, 16, bufferWords(PlanOutputAddress, 0u, 16u));
+    guarded[20] = 1u;
+    add("guarded image", 32, {0xf4000400u, 0xfa000050u, 0xf4080500u, 0xfa000020u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xbf068010u, 0xbf850006u, 0xf40c0200u, 0xfa000000u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, guarded}});
+    add("guarded image stores", 32, {0xf4000400u, 0xfa000050u, 0xbf8cc07fu, 0xbf068010u, 0xbf850006u, 0xf40c0100u, 0xfa000000u, 0xbf8cc07fu, 0xf0200f08u, 0x00010004u, 0xbf820005u, 0xf40c0100u, 0xfa000000u, 0xbf8cc07fu, 0xf0200f10u, 0x00010004u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, guarded}});
+
+    std::vector<std::uint32_t> heap(32, 0u);
+    place(heap, 0, imageWords(PlanTextureAddress));
+    place(heap, 8, imageWords(PlanTextureAddress + 0x100u));
+    place(heap, 24, imageWords(PlanTextureAddress));
+    const std::vector<std::uint32_t> materials{0u, 1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 3u, 0u, 0u};
+    std::vector<std::uint32_t> tables(16, 0u);
+    place(tables, 0, bufferWords(PlanTableAddress, 32u, 4u));
+    place(tables, 8, bufferWords(PlanMaterialAddress, 16u, 3u));
+    place(tables, 12, bufferWords(PlanOutputAddress, 0u, 16u));
+    add("bindless material table", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x93109010u, 0xf4200406u, 0x20000004u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
+    add("bindless whole table", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
+    add("bindless sample in a loop latch", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xbea80380u, 0xf09c0f08u, 0x00450000u, 0x80288128u, 0xbf0a8428u, 0xbf85fffbu, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
+
+    std::vector<std::uint32_t> phis(32, 0u);
+    place(phis, 0, imageWords(PlanTextureAddress));
+    place(phis, 12, {0x49u, 0u, 0x00500000u, 0u});
+    place(phis, 16, bufferWords(PlanOutputAddress, 0u, 16u));
+    phis[20] = 1u;
+    place(phis, 24, imageWords(PlanTextureAddress + 0x100u));
+    add("descriptor phi sampler", 32, {0xf40c0200u, 0xfa000000u, 0xf4000400u, 0xfa000050u, 0xbf8cc07fu, 0xbf068010u, 0xbf850003u, 0xf4080500u, 0xfa000020u, 0xbf820002u, 0xf4080500u, 0xfa000030u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, phis}});
+    add("descriptor phi image", 32, {0xf4000400u, 0xfa000050u, 0xf4080500u, 0xfa000020u, 0xbf8cc07fu, 0xbf068010u, 0xbf850003u, 0xf40c0200u, 0xfa000000u, 0xbf820002u, 0xf40c0200u, 0xfa000060u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, phis}});
+    add("descriptor phi loop", 32, {0xf4080500u, 0xfa000020u, 0xf4080600u, 0xfa000040u, 0xf40c0200u, 0xfa000000u, 0xbe910380u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf068011u, 0xbf850003u, 0xf40c0200u, 0xfa000000u, 0xbf820002u, 0xf40c0200u, 0xfa000060u, 0xbf8cc07fu, 0x80118111u, 0xbf0a8211u, 0xbf85fff0u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, phis}});
+    add("descriptor phi in sequence", 32, {0xf4000400u, 0xfa000050u, 0xbf8cc07fu, 0xbf068010u, 0xbf850003u, 0xf40c0200u, 0xfa000000u, 0xbf820002u, 0xf40c0200u, 0xfa000060u, 0xbf068010u, 0xbf850003u, 0xf4080500u, 0xfa000020u, 0xbf820002u, 0xf4080500u, 0xfa000030u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, phis}});
+
+    std::vector<std::uint32_t> root(16, 0u);
+    place(root, 0, bufferWords(PlanOutputAddress, 0u, 256u, 0x30027facu));
+    root[4] = 1u;
+    root[6] = static_cast<std::uint32_t>(PlanPayloadAddress);
+    root[7] = static_cast<std::uint32_t>(PlanPayloadAddress >> 32u);
+    const std::vector<std::uint32_t> payload{0x3f800000u};
+    add("guarded nested read", 64, {0xf4080100u, 0xfa000000u, 0xf4000200u, 0xfa000010u, 0xf4040280u, 0xfa000018u, 0xbe8c03ffu, 0x11111111u, 0xbf8cc07fu, 0xbf068008u, 0xbf850003u, 0xf4000305u, 0xfa000000u, 0xbf8cc07fu, 0x7e02020cu, 0x34040082u, 0xe0701000u, 0x80010102u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, root}, {PlanPayloadAddress, payload}});
+    auto chained = root;
+    chained[6] = static_cast<std::uint32_t>(PlanPointerAddress);
+    chained[7] = static_cast<std::uint32_t>(PlanPointerAddress >> 32u);
+    add("guarded pointer chain", 64, {0xf4080100u, 0xfa000000u, 0xf4000200u, 0xfa000010u, 0xf4040280u, 0xfa000018u, 0xbe8c03ffu, 0x11111111u, 0xbf8cc07fu, 0xbf068008u, 0xbf850006u, 0xf4040385u, 0xfa000000u, 0xbf8cc07fu, 0xf4000307u, 0xfa000000u, 0xbf8cc07fu, 0x7e02020cu, 0x34040082u, 0xe0701000u, 0x80010102u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, chained}, {PlanPayloadAddress, payload}, {PlanPointerAddress, {static_cast<std::uint32_t>(PlanPayloadAddress), static_cast<std::uint32_t>(PlanPayloadAddress >> 32u)}}});
+    add("descriptor through a pointer", 64, {0xf4040280u, 0xfa000018u, 0xbf8cc07fu, 0xf4080105u, 0xfa000000u, 0xbf8cc07fu, 0x34040082u, 0xe0701000u, 0x80010002u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, chained}, {PlanPointerAddress, bufferWords(PlanOutputAddress, 0u, 256u, 0x30027facu)}});
+    add("descriptor invariant phi", 32, {0xf4000400u, 0xfa000050u, 0xf4080500u, 0xfa000020u, 0xbf8cc07fu, 0xbf068010u, 0xbf850003u, 0xf40c0200u, 0xfa000000u, 0xbf820002u, 0xf40c0200u, 0xfa000000u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, phis}});
+
+    PlanFixture fragment;
+    fragment.name = "fragment parameters";
+    fragment.stage = ShaderStage::Fragment;
+    fragment.codeAddress = 0x100000u + static_cast<std::uint64_t>(fixtures.size()) * 0x1000u;
+    fragment.code = {0xc8100000u, 0xc8110001u, 0xc8140402u, 0xc8150403u, 0xf800180fu, 0x05040504u, 0xbf810000u};
+    ShaderPixelStageInfo pixel{};
+    pixel.interpolatorCount = 2u;
+    pixel.interpolatorSettings[1] = 1u;
+    pixel.wave32 = true;
+    pixel.inputAddr = PixelInputBit(PixelInput::PerspectiveCenter) | PixelInputBit(PixelInput::LinearCenter);
+    pixel.hasPerspectiveCenterVgpr = true;
+    pixel.noPerspective = true;
+    pixel.targetOutputMode[0] = 9u;
+    pixel.targetExportMapping[0] = 0xe4u;
+    fragment.pixel = pixel;
+    fixtures.push_back(std::move(fragment));
+    return fixtures;
+}
+
+IrResourcePlan handBuiltPlan() {
+    IrResourcePlan plan;
+    std::uint32_t ids = 0;
+    const auto make = [&](IrOpcode opcode, IrType type) -> IrValue& {
+        plan.valueStorage.push_back(std::make_unique<IrValue>(opcode, type, ids++));
+        return *plan.valueStorage.back();
+    };
+    const auto constant = [&](std::uint32_t value) -> IrValue& {
+        auto& immediate = make(IrOpcode::Void, IrType::U32);
+        immediate.SetImmediateU32(value);
+        return immediate;
+    };
+    auto& resource = make(IrOpcode::GetSrtResource, IrType::SrtResource);
+    const auto readConst = [&](std::uint32_t slot) -> IrValue& {
+        auto& read = make(IrOpcode::ReadConst, IrType::U32);
+        read.AddArgument(&resource);
+        read.AddArgument(&constant(slot));
+        return read;
+    };
+    const auto userData = [&](std::uint32_t index) -> IrValue& {
+        auto& reg = make(IrOpcode::Void, IrType::ScalarReg);
+        reg.SetRegister({RegisterBank::Scalar, index});
+        auto& read = make(IrOpcode::GetUserData, IrType::U32);
+        read.AddArgument(&reg);
+        return read;
+    };
+    auto& handle = make(IrOpcode::CompositeConstructU64, IrType::U64);
+    handle.AddArgument(&userData(0));
+    handle.AddArgument(&userData(1));
+    auto& pointer = make(IrOpcode::LoadAddressU32, IrType::U32);
+    pointer.AddArgument(&handle);
+    pointer.AddArgument(&constant(8));
+    plan.blockStorage.push_back(std::make_unique<IrBlock>(3u));
+    plan.blockStorage.push_back(std::make_unique<IrBlock>(7u));
+    auto& phi = make(IrOpcode::Phi, IrType::U32);
+    phi.AddPhiOperand(plan.blockStorage[0].get(), &readConst(0));
+    phi.AddPhiOperand(plan.blockStorage[1].get(), &constant(0));
+    auto& condition = make(IrOpcode::Void, IrType::Bool);
+    condition.SetImmediateU64(1u);
+    condition.SetFlags(std::uint64_t{0x1234u});
+    plan.stage = IrShaderStage::Compute;
+    plan.shaderHash = 0x123456789abcull;
+    plan.userDataBase = 2u;
+    plan.userDataCount = 4u;
+    plan.srgbDecodeFormats = 5u;
+    MemoryInfo memory;
+    memory.kind = ResourceKind::Image;
+    memory.resource = 1u;
+    memory.dmask = 0xfu;
+    memory.imageDimension = RdnaImageDimension::Dim2D;
+    memory.gpuDescriptor = true;
+    memory.flushDenormals = true;
+    MemoryInfo every;
+    every.kind = ResourceKind::Buffer;
+    every.resource = 2u;
+    every.sampler = 3u;
+    every.offset = 0x14u;
+    every.secondaryOffset = 0x28u;
+    every.dmask = 0x5u;
+    every.dataDwords = 3u;
+    every.dataBits = 16u;
+    every.componentIndex = 1u;
+    every.componentCount = 2u;
+    every.dataFormat = 10u;
+    every.numberFormat = 7u;
+    every.imageSampleFlags = 0x21u;
+    every.imageDimension = RdnaImageDimension::Dim3D;
+    every.imageAddressComponents = 3u;
+    every.addressIsFull = true;
+    every.dataSigned = true;
+    every.typed = true;
+    every.formatted = true;
+    every.d16 = true;
+    every.imageHasMip = true;
+    every.imageR128 = true;
+    every.imagePacked = true;
+    every.imageByElements = 2u;
+    every.idxen = true;
+    every.offen = true;
+    every.planningOnly = true;
+    every.coherent = true;
+    every.gpuDescriptor = true;
+    every.flushDenormals = true;
+    plan.memoryInfo = {memory, every, MemoryInfo{}};
+    DescriptorSource buffer;
+    buffer.dwordCount = 4u;
+    buffer.dwords = {&readConst(1), &readConst(2), &phi, &pointer};
+    DescriptorSource table;
+    table.dwordCount = 8u;
+    table.dwords[0] = &readConst(3);
+    table.indirectImage = DescriptorSource::IndirectImage{3u, 2u, 16u, 4u, 2u, 32u, true};
+    DescriptorSource heap;
+    heap.dwordCount = 4u;
+    heap.dwords[1] = &readConst(6);
+    DescriptorSource material;
+    material.dwordCount = 4u;
+    material.dwords[2] = &readConst(7);
+    auto& wide = make(IrOpcode::Void, IrType::U64);
+    wide.SetImmediateU64(0x8000000000000001ull);
+    material.dwords[3] = &wide;
+    plan.descriptorSources = {buffer, table, heap, material};
+    plan.controlFlow = {{&condition, {1u, 2u}, {0u}, {}}, {nullptr, {2u}, {3u}, {0u}}, {nullptr, {}, {}, {}}};
+    plan.materializationSources = {0u, 2u};
+    plan.srtReads = {{&readConst(4), 2u}, {&pointer, 1u}};
+    plan.guardedSrtSlots = {1u};
+    plan.srtGuardOffset = 6u;
+    plan.cleanFlatSlots = {0u, 1u};
+    plan.pureFlatSlots = {1u, 0u};
+    plan.requiresSpecializationMemory = true;
+    plan.srtPlanComplete = true;
+    plan.resourceTrackingComplete = true;
+    plan.info.buffers = {BufferResource{}, BufferResource{2u, 0x40u, 0x100u, 0u, true, true, true, true, true, 0x7u, true, 4u}};
+    ImageResource image{};
+    image.source = 1u;
+    image.resourceClass = ImageResourceClass::Sampled;
+    image.dimension = RdnaImageDimension::Dim2D;
+    plan.info.images = {image};
+    ResourceMaterializer::PrepareImageModes(plan.info);
+    plan.uniformFill.fill = {UniformFillKind::Buffer, 1u, {4u, 8u, 12u}, 2u, 0x3f800000u};
+    auto& fillValue = readConst(5);
+    plan.uniformFill.values = {&fillValue, &fillValue, nullptr, nullptr};
+    return plan;
+}
+
+std::vector<std::byte> encodedPlan(const IrResourcePlan& plan) {
+    std::vector<std::byte> bytes;
+    require(ShaderDiskCache::EncodePlan(plan, bytes), "a self-contained plan does not encode");
+    return bytes;
+}
+
+bool samePlan(const IrResourcePlan& left, const IrResourcePlan& right) {
+    if (left.valueStorage.size() != right.valueStorage.size() || left.blockStorage.size() != right.blockStorage.size()) return false;
+    std::map<const IrValue*, std::size_t> leftValues;
+    std::map<const IrValue*, std::size_t> rightValues;
+    std::map<const IrBlock*, std::size_t> leftBlocks;
+    std::map<const IrBlock*, std::size_t> rightBlocks;
+    for (std::size_t index = 0; index < left.valueStorage.size(); ++index) {
+        leftValues.emplace(left.valueStorage[index].get(), index);
+        rightValues.emplace(right.valueStorage[index].get(), index);
+    }
+    for (std::size_t index = 0; index < left.blockStorage.size(); ++index) {
+        leftBlocks.emplace(left.blockStorage[index].get(), index);
+        rightBlocks.emplace(right.blockStorage[index].get(), index);
+    }
+    const auto sameValue = [&](const IrValue* a, const IrValue* b) {
+        if (a == nullptr || b == nullptr) return a == b;
+        const auto foundA = leftValues.find(a);
+        const auto foundB = rightValues.find(b);
+        return foundA != leftValues.end() && foundB != rightValues.end() && foundA->second == foundB->second;
+    };
+    const auto sameBlock = [&](const IrBlock* a, const IrBlock* b) {
+        const auto foundA = leftBlocks.find(a);
+        const auto foundB = rightBlocks.find(b);
+        return foundA != leftBlocks.end() && foundB != rightBlocks.end() && foundA->second == foundB->second;
+    };
+    for (std::size_t index = 0; index < left.blockStorage.size(); ++index) {
+        if (left.blockStorage[index]->Id() != right.blockStorage[index]->Id()) return false;
+    }
+    for (std::size_t index = 0; index < left.valueStorage.size(); ++index) {
+        const auto& a = *left.valueStorage[index];
+        const auto& b = *right.valueStorage[index];
+        if (a.Opcode() != b.Opcode() || a.Type() != b.Type() || a.Id() != b.Id() || a.Flags<std::uint64_t>() != b.Flags<std::uint64_t>() || !(a.Register() == b.Register()) || a.HasImmediate() != b.HasImmediate() || (a.HasImmediate() && a.ImmediateU64() != b.ImmediateU64())) return false;
+        if (a.ArgumentCount() != b.ArgumentCount() || a.IsPhi() != b.IsPhi() || a.PhiBlockCount() != b.PhiBlockCount()) return false;
+        for (std::size_t operand = 0; operand < a.ArgumentCount(); ++operand) {
+            if (!sameValue(a.Argument(operand), b.Argument(operand))) return false;
+        }
+        for (std::size_t operand = 0; operand < a.PhiBlockCount(); ++operand) {
+            if (!sameBlock(a.PhiBlock(operand), b.PhiBlock(operand))) return false;
+        }
+    }
+    if (left.stage != right.stage || left.shaderHash != right.shaderHash || left.userDataBase != right.userDataBase || left.userDataCount != right.userDataCount || left.srgbDecodeFormats != right.srgbDecodeFormats) return false;
+    if (left.memoryInfo != right.memoryInfo || left.descriptorSources.size() != right.descriptorSources.size() || left.controlFlow.size() != right.controlFlow.size() || left.srtReads.size() != right.srtReads.size()) return false;
+    for (std::size_t index = 0; index < left.descriptorSources.size(); ++index) {
+        const auto& a = left.descriptorSources[index];
+        const auto& b = right.descriptorSources[index];
+        if (a.dwordCount != b.dwordCount || a.indirectImage != b.indirectImage) return false;
+        for (std::size_t dword = 0; dword < a.dwords.size(); ++dword) {
+            if (!sameValue(a.dwords[dword], b.dwords[dword])) return false;
+        }
+    }
+    for (std::size_t index = 0; index < left.controlFlow.size(); ++index) {
+        const auto& a = left.controlFlow[index];
+        const auto& b = right.controlFlow[index];
+        if (!sameValue(a.condition, b.condition) || a.successors != b.successors || a.sources != b.sources || a.images != b.images) return false;
+    }
+    for (std::size_t index = 0; index < left.srtReads.size(); ++index) {
+        if (!sameValue(left.srtReads[index].value, right.srtReads[index].value) || left.srtReads[index].flatOffset != right.srtReads[index].flatOffset) return false;
+    }
+    for (std::size_t index = 0; index < left.uniformFill.values.size(); ++index) {
+        if (!sameValue(left.uniformFill.values[index], right.uniformFill.values[index])) return false;
+    }
+    return left.materializationSources == right.materializationSources && left.guardedSrtSlots == right.guardedSrtSlots && left.srtGuardOffset == right.srtGuardOffset && left.cleanFlatSlots == right.cleanFlatSlots && left.pureFlatSlots == right.pureFlatSlots &&
+           left.requiresSpecializationMemory == right.requiresSpecializationMemory && left.srtPlanComplete == right.srtPlanComplete && left.resourceTrackingComplete == right.resourceTrackingComplete && left.info == right.info && left.uniformFill.fill == right.uniformFill.fill;
+}
+
+struct MaterializedPlan {
+    bool ok = false;
+    std::string error;
+    ResourceSnapshot snapshot;
+    SrtReadTrace trace;
+    std::size_t leaf = 0;
+};
+
+MaterializedPlan materializePlan(const IrResourcePlan& plan, SrtRuntime runtime) {
+    MaterializedPlan outcome;
+    runtime.readTrace = &outcome.trace;
+    try {
+        ResourceMaterializer{}.Materialize(plan, runtime, outcome.snapshot);
+        outcome.ok = true;
+    } catch (const std::exception& error) {
+        outcome.error = error.what();
+    }
+    outcome.leaf = static_cast<std::size_t>(std::find_if(plan.valueStorage.begin(), plan.valueStorage.end(), [&](const auto& value) { return value.get() == outcome.trace.leaf; }) - plan.valueStorage.begin());
+    return outcome;
+}
+
+bool sameMaterialization(const MaterializedPlan& left, const MaterializedPlan& right) {
+    const auto& a = left.snapshot;
+    const auto& b = right.snapshot;
+    return left.ok == right.ok && left.error == right.error && a.buffers == b.buffers && a.images == b.images && a.samplers == b.samplers && a.flattenedSrt == b.flattenedSrt && a.userData == b.userData && a.uniformFill == b.uniformFill && a.srtPoison == b.srtPoison && a.nullRootReads == b.nullRootReads &&
+           left.leaf == right.leaf && left.trace.leafSlot == right.trace.leafSlot && left.trace.leaves == right.trace.leaves && left.trace.otherReads == right.trace.otherReads;
+}
+
+void mutateWords(std::vector<std::uint32_t>& words, std::mt19937& random) {
+    static constexpr std::array<std::uint64_t, 8> addresses{PlanSrtAddress, PlanTableAddress, PlanMaterialAddress, PlanPayloadAddress, PlanPointerAddress, PlanOutputAddress, PlanTextureAddress, PlanUnmappedAddress};
+    for (auto& word : words) {
+        switch (random() % 16u) {
+        case 0: word = static_cast<std::uint32_t>(random()); break;
+        case 1: word = 0u; break;
+        case 2: {
+            const auto address = addresses[random() % addresses.size()] + (random() % 8u) * 4u;
+            word = random() % 2u == 0u ? static_cast<std::uint32_t>(address) : static_cast<std::uint32_t>(address >> 32u);
+            break;
+        }
+        case 3: word ^= 1u << (random() % 32u); break;
+        default: break;
+        }
+    }
+}
+
+std::size_t verifyRoundTripRuntimes(const IrResourcePlan& plan, const IrResourcePlan& decoded, const PlanFixture& fixture, std::uint32_t seed, const std::string& what) {
+    std::mt19937 random(seed);
+    std::size_t succeeded = 0;
+    for (std::uint32_t run = 0; run < 1000u; ++run) {
+        auto userData = fixture.userData;
+        auto regions = fixture.regions;
+        if (userData.size() < plan.userDataCount) userData.resize(plan.userDataCount, 0u);
+        if (run != 0u) {
+            mutateWords(userData, random);
+            for (auto& region : regions) mutateWords(region.second, random);
+        }
+        std::vector<MemoryRegion> memory;
+        for (const auto& [address, words] : regions) memory.push_back({address, std::as_bytes(std::span(words))});
+        RequestMemoryView view(memory);
+        const auto runtime = view.MakeRuntime(userData, fixture.codeAddress);
+        const auto original = materializePlan(plan, runtime);
+        const auto loaded = materializePlan(decoded, runtime);
+        require(sameMaterialization(original, loaded), what + ": runtime " + std::to_string(run) + " materialized differently from the decoded plan (" + original.error + " / " + loaded.error + ")");
+        if (original.ok) ++succeeded;
+    }
+    return succeeded;
+}
+
+void verifyPlanEntryDamage(const std::vector<std::byte>& key, const IrResourcePlan& plan, const std::string& what) {
+    const auto file = ShaderDiskCache::EncodePlanEntry(key, plan);
+    require(!file.empty(), what + ": the plan entry was not encoded");
+    IrResourcePlan decoded;
+    require(ShaderDiskCache::DecodePlanEntry(file, key, decoded) == ShaderDiskCache::LoadStatus::Loaded && encodedPlan(decoded) == encodedPlan(plan), what + ": the plan entry does not decode to the plan");
+    for (std::size_t size = 0; size < file.size(); size += size < 512 ? 1 : 37) {
+        IrResourcePlan partial;
+        require(ShaderDiskCache::DecodePlanEntry(std::span(file).first(size), key, partial) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry truncated to " + std::to_string(size) + " bytes is not rejected");
+    }
+    for (std::size_t offset = 0; offset < file.size(); offset += offset < 512 ? 1 : 29) {
+        for (const auto bit : {std::byte{0x01}, std::byte{0x80}}) {
+            auto damaged = file;
+            damaged[offset] ^= bit;
+            IrResourcePlan partial;
+            require(ShaderDiskCache::DecodePlanEntry(damaged, key, partial) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry with byte " + std::to_string(offset) + " flipped is not rejected");
+        }
+    }
+    auto longer = file;
+    longer.push_back(std::byte{0});
+    require(ShaderDiskCache::DecodePlanEntry(longer, key, decoded) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry with a trailing byte is not rejected");
+    auto otherKey = key;
+    otherKey.back() ^= std::byte{1};
+    require(ShaderDiskCache::DecodePlanEntry(file, otherKey, decoded) == ShaderDiskCache::LoadStatus::KeyMismatch, what + ": a plan entry for another key loads");
+    auto previousFormat = file;
+    previousFormat[4] = static_cast<std::byte>(ShaderDiskCache::FormatVersion - 1u);
+    require(ShaderDiskCache::DecodePlanEntry(previousFormat, key, decoded) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry of the previous format loads");
+    auto otherSource = file;
+    otherSource[8] ^= std::byte{1};
+    require(ShaderDiskCache::DecodePlanEntry(otherSource, key, decoded) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry of another source version loads");
+    CompiledVariant variant;
+    require(ShaderDiskCache::DecodeEntry(file, key, variant) == ShaderDiskCache::LoadStatus::Rejected, what + ": a plan entry decodes as a compiled variant");
+}
+
+void verifyPlanPayloadDamage(const IrResourcePlan& plan, const std::string& what) {
+    const auto bytes = encodedPlan(plan);
+    for (std::size_t size = 0; size < bytes.size(); ++size) {
+        IrResourcePlan partial;
+        require(!ShaderDiskCache::DecodePlan(std::span(bytes).first(size), partial), what + ": a plan truncated to " + std::to_string(size) + " bytes decodes");
+    }
+    std::size_t rejected = 0;
+    for (std::size_t offset = 0; offset < bytes.size(); ++offset) {
+        for (const auto bit : {std::byte{0x01}, std::byte{0x40}}) {
+            auto damaged = bytes;
+            damaged[offset] ^= bit;
+            IrResourcePlan decoded;
+            if (!ShaderDiskCache::DecodePlan(damaged, decoded)) {
+                ++rejected;
+                continue;
+            }
+            std::vector<std::byte> again;
+            require(ShaderDiskCache::EncodePlan(decoded, again), what + ": a plan accepted with byte " + std::to_string(offset) + " flipped is not self-contained");
+        }
+    }
+    require(rejected != 0u, what + ": no damaged plan was rejected");
+}
+
+void verifyMalformedPlans() {
+    const auto rejects = [](const std::string& what, const std::function<void(IrResourcePlan&)>& damage) {
+        auto plan = handBuiltPlan();
+        damage(plan);
+        std::vector<std::byte> bytes;
+        require(ShaderDiskCache::EncodePlan(plan, bytes), "malformed plan: " + what + " did not encode");
+        IrResourcePlan decoded;
+        require(!ShaderDiskCache::DecodePlan(bytes, decoded), "malformed plan: " + what + " decodes");
+    };
+    rejects("a branch with one successor", [](IrResourcePlan& plan) { plan.controlFlow[0].successors.pop_back(); });
+    rejects("a successor past the blocks", [](IrResourcePlan& plan) { plan.controlFlow[1].successors[0] = 3u; });
+    rejects("a block source past the sources", [](IrResourcePlan& plan) { plan.controlFlow[0].sources[0] = 4u; });
+    rejects("a block image past the images", [](IrResourcePlan& plan) { plan.controlFlow[1].images[0] = 1u; });
+    rejects("a materialized source past the sources", [](IrResourcePlan& plan) { plan.materializationSources.push_back(4u); });
+    rejects("a buffer past the sources", [](IrResourcePlan& plan) { plan.info.buffers[0].source = 4u; });
+    rejects("an image past the sources", [](IrResourcePlan& plan) { plan.info.images[0].source = 5u; });
+    rejects("a descriptor of nine dwords", [](IrResourcePlan& plan) { plan.descriptorSources[1].dwordCount = 9u; });
+    rejects("a uniform fill of five words", [](IrResourcePlan& plan) { plan.uniformFill.fill.words = 5u; });
+    rejects("an image table heap past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].indirectImage->heapSource = 4u; });
+    rejects("an image table material past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].indirectImage->materialSource = 4u; });
+    auto foreign = handBuiltPlan();
+    IrValue stray(IrOpcode::Void, IrType::U32, 99u);
+    foreign.srtReads[0].value = &stray;
+    std::vector<std::byte> bytes;
+    require(!ShaderDiskCache::EncodePlan(foreign, bytes), "a plan reading a value it does not own was encoded");
+    auto unblocked = handBuiltPlan();
+    auto& phi = *unblocked.valueStorage.emplace_back(std::make_unique<IrValue>(IrOpcode::Phi, IrType::U32, 100u));
+    phi.AddArgument(unblocked.valueStorage[0].get());
+    unblocked.srtReads[0].value = &phi;
+    bytes.clear();
+    require(!ShaderDiskCache::EncodePlan(unblocked, bytes), "a phi without predecessor blocks was encoded");
+    auto emptied = handBuiltPlan();
+    emptied.valueStorage.push_back(nullptr);
+    bytes.clear();
+    require(!ShaderDiskCache::EncodePlan(emptied, bytes), "a plan with an empty value slot was encoded");
+}
+
+void verifyPlanRoundTrip() {
+    const auto handBuilt = handBuiltPlan();
+    const auto handBytes = encodedPlan(handBuilt);
+    IrResourcePlan handDecoded;
+    require(ShaderDiskCache::DecodePlan(handBytes, handDecoded), "the hand-built plan does not decode");
+    require(encodedPlan(handDecoded) == handBytes && handDecoded.valueStorage.size() == handBuilt.valueStorage.size() && handDecoded.blockStorage.size() == handBuilt.blockStorage.size(), "the hand-built plan changed in a round trip");
+    const auto& phi = *handDecoded.descriptorSources[0].dwords[2];
+    require(phi.IsPhi() && phi.PhiBlockCount() == 2u && phi.PhiBlock(0)->Id() == 3u && phi.PhiBlock(1)->Id() == 7u && phi.Argument(1)->ImmediateU32() == 0u, "the decoded phi lost its blocks or operands");
+    require(handDecoded.uniformFill.values[0] == handDecoded.uniformFill.values[1] && handDecoded.uniformFill.values[0] != nullptr && handDecoded.uniformFill.values[2] == nullptr, "the decoded uniform fill lost its shared or null values");
+    require(samePlan(handBuilt, handDecoded), "the decoded hand-built plan differs from the plan in a field or a value");
+    PlanFixture handFixture;
+    handFixture.userData = {static_cast<std::uint32_t>(PlanSrtAddress), static_cast<std::uint32_t>(PlanSrtAddress >> 32u), 0u, 0u};
+    std::vector<std::uint32_t> handSrt(16, 0u);
+    place(handSrt, 0, bufferWords(PlanOutputAddress, 0u, 16u));
+    handFixture.regions = {{PlanSrtAddress, handSrt}, {PlanPayloadAddress, {0x3f800000u}}};
+    static_cast<void>(verifyRoundTripRuntimes(handBuilt, handDecoded, handFixture, 7u, "hand-built plan"));
+    verifyPlanPayloadDamage(handBuilt, "hand-built plan");
+    verifyMalformedPlans();
+
+    auto fixtures = planFixtures();
+    std::vector<std::shared_ptr<const IrResourcePlan>> plans;
+    std::size_t index = 0;
+    for (auto& fixture : fixtures) {
+        auto request = fixture.Request(false);
+        const auto plan = GetResourcePlan(request);
+        plans.push_back(plan);
+        const auto bytes = encodedPlan(*plan);
+        IrResourcePlan decoded;
+        require(ShaderDiskCache::DecodePlan(bytes, decoded), fixture.name + ": the plan does not decode");
+        require(encodedPlan(decoded) == bytes, fixture.name + ": the plan changed in a round trip");
+        require(samePlan(*plan, decoded), fixture.name + ": the decoded plan differs from the plan in a field or a value");
+        require(decoded.valueStorage.size() == plan->valueStorage.size() && decoded.blockStorage.size() == plan->blockStorage.size(), fixture.name + ": the decoded plan holds another graph");
+        const auto succeeded = verifyRoundTripRuntimes(*plan, decoded, fixture, 0x5eedu + static_cast<std::uint32_t>(index), fixture.name);
+        require(succeeded != 0u, fixture.name + ": no runtime materialized");
+        std::vector<std::byte> key;
+        ShaderDiskCache::BuildPlanKey(request, 32u, key);
+        if (index % 4u == 0u) verifyPlanEntryDamage(key, *plan, fixture.name);
+        std::cout << "plan round trip: " << fixture.name << ", " << plan->valueStorage.size() << " values, " << ShaderDiskCache::EncodePlanEntry(key, *plan).size() << " bytes per entry, " << succeeded << " of 1000 runtimes materialized\n";
+        ++index;
+    }
+    const auto covers = [&](const std::function<bool(const IrResourcePlan&)>& predicate) {
+        return std::any_of(plans.begin(), plans.end(), [&](const std::shared_ptr<const IrResourcePlan>& plan) { return predicate(*plan); });
+    };
+    require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.descriptorSources.begin(), plan.descriptorSources.end(), [](const DescriptorSource& source) { return source.indirectImage.has_value(); }); }), "no fixture plans an indirect image table");
+    require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.controlFlow.begin(), plan.controlFlow.end(), [](const ResourceBlock& block) { return block.condition != nullptr; }); }), "no fixture plans a control-flow condition");
+    require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.valueStorage.begin(), plan.valueStorage.end(), [](const auto& value) { return value->IsPhi(); }); }), "no fixture plans a phi");
+    require(covers([](const IrResourcePlan& plan) { return !plan.guardedSrtSlots.empty(); }), "no fixture plans a guarded SRT read");
+    require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.pureFlatSlots.begin(), plan.pureFlatSlots.end(), [](std::uint8_t pure) { return pure != 0u; }); }), "no fixture plans a pure flat slot");
+}
+
+void verifyPlanKey() {
+    auto fixtures = planFixtures();
+    auto& fixture = fixtures[1];
+    const auto planKey = [&](const std::function<void(RecompileRequest&)>& change, std::uint32_t hostSubgroupSize = 32u) {
+        auto request = fixture.Request(true);
+        change(request);
+        std::vector<std::byte> key;
+        ShaderDiskCache::BuildPlanKey(request, hostSubgroupSize, key);
+        return key;
+    };
+    const auto key = planKey([](RecompileRequest&) {});
+    require(planKey([](RecompileRequest&) {}) == key, "the plan key is not deterministic");
+    std::vector<std::byte> variantKey;
+    ShaderDiskCache::BuildKey(fixture.Request(true), 32u, variantKey);
+    require(variantKey != key && ShaderDiskCache::EntryName(variantKey) != ShaderDiskCache::EntryName(key), "the plan and the compiled variant share an entry");
+    require(planKey([](RecompileRequest& request) { request.layout = {1u, 4u, 16u, 64u}; }) == key, "the binding layout changed the plan key");
+    require(planKey([](RecompileRequest& request) { request.shader.codeAddress += 0x1000u; request.context.memory = {}; }) == key, "the code address or the memory changed the plan key");
+    auto userData = fixture.userData;
+    userData[0] ^= 0x100u;
+    require(planKey([&](RecompileRequest& request) { request.context.userData = userData; }) == key, "user data values changed the plan key");
+    const auto original = fixture.code;
+    for (std::size_t word = 0; word < original.size(); ++word) {
+        for (std::uint32_t bit = 0; bit < 32u; ++bit) {
+            fixture.code = original;
+            fixture.code[word] ^= 1u << bit;
+            require(planKey([](RecompileRequest&) {}) != key, "the plan key ignores code word " + std::to_string(word) + " bit " + std::to_string(bit));
+        }
+    }
+    fixture.code = original;
+    fixture.code.push_back(0xbf810000u);
+    require(planKey([](RecompileRequest&) {}) != key, "the plan key ignores an appended code word");
+    fixture.code = original;
+    require(planKey([](RecompileRequest&) {}, 64u) != key, "the plan key ignores the host subgroup size");
+    require(planKey([](RecompileRequest& request) { request.target.subgroupSize = 64u; }) != key, "the plan key ignores the target");
+    require(planKey([](RecompileRequest& request) { request.target.srgbDecodeFormats = 2u; }) != key, "the plan key ignores the sRGB formats decoded in the shader");
+    require(planKey([](RecompileRequest& request) { request.context.waveSize = 64u; request.context.compute->numThreads[0] = 64u; }) != key, "the plan key ignores the wave size");
+    require(planKey([](RecompileRequest& request) { request.context.floatMode = ShaderFloatMode{0xc0u, true, false, false}; }) != key, "the plan key ignores the float mode");
+}
+
+void appendWords(std::vector<std::byte>& out, std::span<const std::uint32_t> words) {
+    const auto count = static_cast<std::uint64_t>(words.size());
+    const auto countBytes = std::as_bytes(std::span(&count, 1));
+    out.insert(out.end(), countBytes.begin(), countBytes.end());
+    const auto bytes = std::as_bytes(words);
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+void appendSnapshot(std::vector<std::byte>& out, const ResourceCapture& capture) {
+    const auto& snapshot = capture.snapshot;
+    for (const auto* values : {&snapshot.buffers, &snapshot.images, &snapshot.samplers}) {
+        std::vector<std::uint32_t> words;
+        for (const auto& value : *values) {
+            words.push_back(value.dwordCount);
+            words.insert(words.end(), value.dwords.begin(), value.dwords.end());
+        }
+        appendWords(out, words);
+    }
+    appendWords(out, snapshot.flattenedSrt);
+    appendWords(out, snapshot.userData);
+    const auto& fill = snapshot.uniformFill;
+    appendWords(out, std::vector<std::uint32_t>{static_cast<std::uint32_t>(fill.kind), fill.resource, fill.groupStride[0], fill.groupStride[1], fill.groupStride[2], fill.words, fill.value, snapshot.nullRootReads});
+    std::vector<std::uint32_t> poison;
+    for (const auto& entry : snapshot.srtPoison) poison.insert(poison.end(), {entry.slot, entry.pc, static_cast<std::uint32_t>(entry.address), static_cast<std::uint32_t>(entry.address >> 32u)});
+    appendWords(out, poison);
+    std::vector<std::uint32_t> leaves{capture.readTrace.leafSlot};
+    for (const auto& [slot, address] : capture.readTrace.leaves) leaves.insert(leaves.end(), {slot, static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u)});
+    appendWords(out, leaves);
+    std::vector<std::uint32_t> reads;
+    for (const auto address : capture.readTrace.otherReads) reads.insert(reads.end(), {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u)});
+    appendWords(out, reads);
+}
+
+std::vector<std::vector<std::byte>> preparedOutputs(std::vector<PlanFixture>& fixtures, std::vector<std::shared_ptr<const IrResourcePlan>>* plans = nullptr) {
+    std::vector<std::vector<std::byte>> outputs;
+    for (auto& fixture : fixtures) {
+        const auto request = fixture.Request(true);
+        const auto handle = PrepareShader(request);
+        RequestMemoryView view(request.context.memory);
+        const auto capture = CaptureResources(request, view.MakeRuntime(request.context.userData, request.shader.codeAddress), *handle);
+        const auto result = MaterializeShader(request, *capture, *handle);
+        std::vector<std::byte> bytes;
+        appendWords(bytes, GetPreparedArtifact(*handle).spirv.Words());
+        ShaderDiskCache::EncodeResult(*result, bytes);
+        appendSnapshot(bytes, *capture);
+        require(ShaderDiskCache::EncodePlan(*capture->plan, bytes), fixture.name + ": the captured plan does not encode");
+        if (plans != nullptr) plans->push_back(capture->plan);
+        outputs.push_back(std::move(bytes));
+    }
+    return outputs;
+}
+
+std::filesystem::path planOutputPath(std::size_t index) {
+    return ShaderCacheDirectory() / "plan-outputs" / ("fixture-" + std::to_string(index) + ".bin");
+}
+
+std::filesystem::path planEntryPath(PlanFixture& fixture) {
+    std::vector<std::byte> key;
+    ShaderDiskCache::BuildPlanKey(fixture.Request(true), 32u, key);
+    return ShaderDiskCache::EntryDirectory() / ShaderDiskCache::EntryName(key);
+}
+
+int runPlanLoadingProcess(std::string_view mode) {
+    if (mode == "--load-plan-switch") setEnvironment("APS5_TRACE_BINDLESS", "1");
+    if (mode == "--load-plan-off") setEnvironment("APS5_NO_PERF_DISK_PLANS", "1");
+    auto fixtures = planFixtures();
+    const auto count = fixtures.size();
+    std::vector<std::shared_ptr<const IrResourcePlan>> plans;
+    const auto outputs = preparedOutputs(fixtures, &plans);
+    ShaderDiskCache::Flush();
+    const auto totals = ShaderDiskCache::Totals();
+    const auto builds = FrontEndBuilds();
+    const auto counts = " (front end builds " + std::to_string(builds) + ", plan hits " + std::to_string(totals.planHits) + ", plan misses " + std::to_string(totals.planMisses) + ", plan load failures " + std::to_string(totals.planLoadFailures) + ", variant hits " + std::to_string(totals.hits) + ", variant misses " + std::to_string(totals.misses) + ")";
+    if (mode == "--load-plan-switch") {
+        require(builds == count && totals.planHits == 0u && totals.planMisses == count && totals.misses == count, "another switch value reused stored plans or variants" + counts);
+        std::cout << "a process with another switch value rebuilt all " << count << " plans\n";
+        return 0;
+    }
+    if (mode == "--load-plan") {
+        require(builds == 0u && totals.planHits == count && totals.planMisses == 0u && totals.planLoadFailures == 0u && totals.hits == count && totals.misses == 0u, "the second process ran the front end" + counts);
+    } else if (mode == "--load-plan-off") {
+        require(builds == count && totals.planHits == 0u && totals.planMisses == 0u && totals.planWrites == 0u && totals.hits == count && totals.misses == 0u, "APS5_NO_PERF_DISK_PLANS=1 used the stored plans or missed the stored variants" + counts);
+    } else {
+        require(builds == 1u && totals.planHits == count - 1u && totals.planLoadFailures == 1u && totals.planWrites == 1u && totals.hits == count && totals.misses == 0u, "the damaged plan was not rejected and rebuilt alone" + counts);
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        std::vector<std::byte> expected;
+        require(ReadWholeFile(planOutputPath(index), expected), "cannot read the first process's output for " + fixtures[index].name);
+        require(outputs[index] == expected, fixtures[index].name + ": the SPIR-V, bindings, push constants, snapshot or plan differ from the first process");
+    }
+    if (mode == "--load-plan") {
+        auto changed = planFixtures();
+        auto& fixture = changed.front();
+        fixture.code.insert(fixture.code.end() - 1, 0xbf800000u);
+        const auto request = fixture.Request(true);
+        static_cast<void>(PrepareShader(request));
+        const auto after = ShaderDiskCache::Totals();
+        require(FrontEndBuilds() == 1u && after.planHits == count && after.planMisses == 1u, "a changed code word reused a stored plan");
+        std::cout << "second process prepared " << count << " shaders from stored plans without running the front end\n";
+    } else if (mode == "--load-plan-off") {
+        std::cout << "APS5_NO_PERF_DISK_PLANS=1 ran the front end for all " << count << " shaders with the same output\n";
+    } else {
+        std::cout << "a damaged plan entry was rejected, rebuilt and stored again with the same output\n";
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto fresh = GetResourcePlan(fixtures[index].Request(false));
+        require(samePlan(*plans[index], *fresh), fixtures[index].name + ": the plan this process used differs from the plan its front end builds");
+    }
+    ShaderDiskCache::Flush();
+    return 0;
+}
+
+void verifyPlanAcrossProcesses(const char* self) {
+    auto fixtures = planFixtures();
+    const auto builds = FrontEndBuilds();
+    const auto before = ShaderDiskCache::Totals();
+    const auto outputs = preparedOutputs(fixtures);
+    ShaderDiskCache::Flush();
+    const auto after = ShaderDiskCache::Totals();
+    require(FrontEndBuilds() - builds == fixtures.size() && after.planMisses - before.planMisses == fixtures.size() && after.planWrites - before.planWrites == fixtures.size(), "the first process did not build and store every plan");
+    std::filesystem::create_directories(planOutputPath(0).parent_path());
+    for (std::size_t index = 0; index < outputs.size(); ++index) require(WriteFileAtomically(planOutputPath(index), outputs[index]), "cannot write the first process's output");
+    auto refused = fixtures[1];
+    refused.codeAddress = 0x200000u;
+    refused.code = {0xf40c0200u, 0xfa000000u, 0xf4000400u, 0xfa000050u, 0xbf8cc07fu, 0xbf068010u, 0xbf850003u, 0xf4080500u, 0xfa000020u, 0xbf820002u, 0xf4080500u, 0x20000000u, 0xf4080600u, 0xfa000040u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20000u, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xbf810000u};
+    bool threw = false;
+    try {
+        static_cast<void>(PrepareShader(refused.Request(true)));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    ShaderDiskCache::Flush();
+    require(threw && ShaderDiskCache::Totals().planWrites == after.planWrites && !std::filesystem::exists(planEntryPath(refused)), "a plan the front end refused was stored");
+    std::uintmax_t planBytes = 0;
+    for (auto& fixture : fixtures) planBytes += std::filesystem::file_size(planEntryPath(fixture));
+    std::cout << fixtures.size() << " plan entries, " << planBytes / fixtures.size() << " bytes per entry on average\n";
+    const auto run = [&](const char* mode) {
+        const std::string command = "\"" + std::string(self) + "\" " + mode;
+        require(std::system(command.c_str()) == 0, std::string("the process ") + mode + " failed");
+    };
+    run("--load-plan");
+    run("--load-plan-off");
+    std::vector<std::byte> entry;
+    const auto damaged = planEntryPath(fixtures.front());
+    require(ReadWholeFile(damaged, entry), "cannot read a stored plan entry");
+    entry[entry.size() / 2] ^= std::byte{0x20};
+    require(WriteFileAtomically(damaged, entry), "cannot damage a stored plan entry");
+    run("--load-plan-corrupt");
+    std::vector<std::byte> rewritten;
+    std::vector<std::byte> key;
+    ShaderDiskCache::BuildPlanKey(fixtures.front().Request(true), 32u, key);
+    IrResourcePlan plan;
+    require(ReadWholeFile(damaged, rewritten) && ShaderDiskCache::DecodePlanEntry(rewritten, key, plan) == ShaderDiskCache::LoadStatus::Loaded, "the rebuilt plan was not stored again");
+    run("--load-plan-switch");
+}
+
 void verifyDefaultDirectory(const char* self) {
     setEnvironment("ANYPS5_SHADER_CACHE_DIR", "");
     setEnvironment("ANYPS5_NO_SHADER_CACHE", "1");
@@ -1098,6 +1843,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--load") return runLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--no-failure-memo") return runWithoutFailureMemo();
+        if (argc == 2 && std::string_view(argv[1]).starts_with("--load-plan")) return runPlanLoadingProcess(argv[1]);
         const auto directory = std::filesystem::temp_directory_path() / ("aps5-shader-disk-cache-test-" + std::to_string(std::random_device{}()));
         std::filesystem::remove_all(directory);
         verifyDefaultDirectory(argv[0]);
@@ -1109,8 +1855,11 @@ int main(int argc, char** argv) {
         verifyArtifactStorageIsolation();
         verifyKeySensitivity();
         verifyFloatModeSerialization();
+        verifyPlanRoundTrip();
+        verifyPlanKey();
         verifyStore();
         verifyAcrossProcesses(argv[0]);
+        verifyPlanAcrossProcesses(argv[0]);
         verifyEmissionFailureMemo();
         verifyFailureMemoSwitch(argv[0]);
         verifyInvocationIsolation();

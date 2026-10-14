@@ -6,15 +6,12 @@ Entries about one library or component are in [debt](debt/), one file per librar
 
 - The bundled [SPIRV-Tools build](../../core/shader/recompiler/PatchSpirvTools.cmake) replaces the redundancy-elimination source with a build-directory copy that releases processed traversal maps. Remove this patch when the pinned revision includes [SPIRV-Tools #6962](https://github.com/KhronosGroup/SPIRV-Tools/pull/6962). System-dependency builds need the fix in their installed SPIRV-Tools package.
 - macOS bundles get a patched MoltenVK ([moltenvk_patches.py](../../tools/macos/moltenvk_patches.py)): `MVKDevice::encodeGPUAddressableBuffers` returns at once instead of adding every buffer-device-address buffer to each encoder whose pipeline uses buffer device addresses, which cost up to 2.7 ms per encoder under Rosetta with the driver's thousands of host imports. It relies on MoltenVK 1.4 keeping its allocations resident through an `MTLResidencySet`. The bundle launcher also turns on asynchronous MoltenVK submissions (`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0`) only for a patched MoltenVK: unpatched, the loop raced the driver freeing finished batches' buffers and the device was lost with an invalid resource. Remove both when MoltenVK skips that loop itself, or when the driver needs far fewer addressable buffers.
+- On macOS a sampled block-compressed texture is never copied on the GPU from the uncompressed storage image a compute pass wrote it through (`Texture::CanBlockCopyFrom`): MoltenVK's `vkCmdCopyImage` from the block-sized uint image into the BC image returned stale blocks after the storage image was written again (`agc_driver_bc_block_copy`), so such a surface takes the store-and-upload path.
 - Building on Windows requires a specific version of mingw - MinGW-w64 GCC 15.2.0 (`winlibs-gcc15`, `x86_64-ucrt-posix-seh`)
 - Even compiled prx libraries on Windows require nearby (static linking of these dependencies causes conflicts):
   - libgcc_s_seh-1.dll
   - libstdc++-6.dll
   - libwinpthread-1.dll
-
-### Direct memory
-
-- Windows direct-memory backing reserves a paging-file section and commits each mapped guest page before setting its protection. Committed physical contents remain in the section across unmap/remap and are released when the backing and its remaining views are destroyed; commitment is not recovered merely by unmapping a page. Linux retains its existing backing. Peak gameplay memory and Windows versions other than the tested host remain unverified.
 
 ### Silent stubs
 

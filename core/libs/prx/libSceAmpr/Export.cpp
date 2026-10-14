@@ -14,6 +14,7 @@
 #include <limits>
 #include <string>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <typeinfo>
 
@@ -227,7 +228,16 @@ static int RecordWriteAddressFromCounterPair(Apr::CommandBufferObject* buffer, v
 }
 
 static constexpr int ThrdSuccess = 0;
+static constexpr int ThrdNomem = 1;
+static constexpr int ThrdTimedout = 2;
+static constexpr int ThrdBusy = 3;
 static constexpr int ThrdError = 4;
+
+static constexpr int CppDeviceOrResourceBusy = 0;
+static constexpr int CppInvalidArgument = 1;
+static constexpr int CppResourceUnavailableTryAgain = 6;
+
+static constexpr int MtxPlain = 0x1;
 
 static std::atomic_flag sharedPtrSpinLock;
 
@@ -243,10 +253,29 @@ static_assert(sizeof(AmmUsageStatsData) == 0x18);
 static constexpr std::uint16_t AmmPageTablePoolEntries = 512;
 static constexpr std::uint32_t AmmRingIdleFlags = 0x7;
 
+struct GuestPad {
+    unsigned (APS5_VABI* const* vtable)(GuestPad*);
+    void* condition;
+    void* mutex;
+    bool started;
+};
+
+static_assert(offsetof(GuestPad, condition) == 0x8 && offsetof(GuestPad, mutex) == 0x10 && offsetof(GuestPad, started) == 0x18 && sizeof(GuestPad) == 0x20);
+
 extern "C" {
+int APS5_VABI pthread_create_nid_postfix(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg);
 int APS5_VABI pthread_join_nid_postfix(Pthread thread, void** value);
 int APS5_VABI pthread_create_nid_postfix(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg);
 int APS5_VABI scePthreadGetthreadid(void);
+int APS5_VABI _Mtx_init_nid_postfix(void** handle, int type);
+void APS5_VABI _Mtx_destroy_nid_postfix(void** handle);
+int APS5_VABI _Mtx_lock_nid_postfix(void** handle);
+int APS5_VABI _Mtx_unlock_nid_postfix(void** handle);
+int APS5_VABI _Cnd_init_nid_postfix(void** handle);
+void APS5_VABI _Cnd_destroy_nid_postfix(void** handle);
+int APS5_VABI _Cnd_wait_nid_postfix(void** condition, void** mutex);
+int APS5_VABI _Cnd_signal_nid_postfix(void** handle);
+int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t** source, std::size_t limit, void* state);
 int APS5_VABI _Cnd_init_nid_postfix(void** handle);
 void APS5_VABI _Cnd_destroy_nid_postfix(void** handle);
 int APS5_VABI _Cnd_wait_nid_postfix(void** condition, void** mutex);
@@ -315,25 +344,25 @@ AmprTypeInfo::PointerVtable _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix 
 AmprTypeInfo::FunctionVtable _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__function_type_info)};
 }
 
-// Dinkumware's std::thread launch pad: the new thread runs the pad's only virtual function, _Go,
-// and _Launch returns once that function has copied what it needs and called _Release.
-struct ThreadPad {
-    void* const* vtable;
-    void* condition;
-    void* mutex;
-    bool started;
-};
-
-using PadGo = unsigned (APS5_VABI *)(ThreadPad* self);
-
-static void* APS5_VABI RunPad(void* data) {
-    auto* pad = static_cast<ThreadPad*>(data);
-    const unsigned result = reinterpret_cast<PadGo>(pad->vtable[0])(pad);
-    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(result));
+static void RequireThrd(int result, const char* what) {
+    switch (result) {
+    case ThrdSuccess:
+        return;
+    case ThrdNomem:
+    case ThrdTimedout:
+        ThrowCppError_nid_no_patch(CppResourceUnavailableTryAgain);
+    case ThrdBusy:
+        ThrowCppError_nid_no_patch(CppDeviceOrResourceBusy);
+    case ThrdError:
+        ThrowCppError_nid_no_patch(CppInvalidArgument);
+    }
+    throw std::runtime_error(std::string(what) + " failed with " + std::to_string(result));
 }
 
-static void ThreadCall(int result, const char* what) {
-    if (result != ThrdSuccess) throw std::runtime_error(std::string("std::_Pad: ") + what + " failed");
+static void* APS5_VABI PadEntry_nid_no_patch(void* argument) {
+    auto* pad = static_cast<GuestPad*>(argument);
+    const auto go = pad->vtable[0];
+    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(go(pad)));
 }
 
 extern "C" {
@@ -940,7 +969,6 @@ int APS5_VABI sceAmprAmmWaitCommandBufferCompletion(std::uint32_t id) {
 [[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code) {
     ThrowCppError_nid_no_patch(code);
 }
-
 int APS5_VABI _Thrd_join_nid_postfix(Pthread thread, int* code) {
     void* result = nullptr;
     if (pthread_join_nid_postfix(thread, &result) != 0) return ThrdError;
@@ -948,48 +976,50 @@ int APS5_VABI _Thrd_join_nid_postfix(Pthread thread, int* code) {
     return ThrdSuccess;
 }
 
-void APS5_VABI _ZNSt4_Pad8_ReleaseEv_nid_postfix(ThreadPad* self) {
-    if (!self) APS5_INVALID_ARG_EX;
-    ThreadCall(_Mtx_lock_nid_postfix(&self->mutex), "locking the pad");
-    self->started = true;
-    SignalCondition_nid_no_patch(&self->condition);
-    ThreadCall(_Mtx_unlock_nid_postfix(&self->mutex), "unlocking the pad");
+void APS5_VABI _ZNSt4_Pad8_ReleaseEv_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Mtx_lock_nid_postfix(&pad->mutex), "_Pad::_Release: _Mtx_lock");
+    pad->started = true;
+    RequireThrd(_Cnd_signal_nid_postfix(&pad->condition), "_Pad::_Release: _Cnd_signal");
+    RequireThrd(_Mtx_unlock_nid_postfix(&pad->mutex), "_Pad::_Release: _Mtx_unlock");
 }
 
-void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(ThreadPad* self) {
-    if (!self) APS5_INVALID_ARG_EX;
-    ThreadCall(_Cnd_init_nid_postfix(&self->condition), "creating the condition");
-    if (_Mtx_init_nid_postfix(&self->mutex, 1) != ThrdSuccess) {
-        _Cnd_destroy_nid_postfix(&self->condition);
-        throw std::runtime_error("std::_Pad: creating the mutex failed");
+void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Cnd_init_nid_postfix(&pad->condition), "_Pad::_Pad: _Cnd_init");
+    const int created = _Mtx_init_nid_postfix(&pad->mutex, MtxPlain);
+    if (created != ThrdSuccess) {
+        _Cnd_destroy_nid_postfix(&pad->condition);
+        RequireThrd(created, "_Pad::_Pad: _Mtx_init");
     }
-    self->started = false;
+    pad->started = false;
+    const int locked = _Mtx_lock_nid_postfix(&pad->mutex);
+    if (locked != ThrdSuccess) {
+        _Mtx_destroy_nid_postfix(&pad->mutex);
+        _Cnd_destroy_nid_postfix(&pad->condition);
+        RequireThrd(locked, "_Pad::_Pad: _Mtx_lock");
+    }
 }
 
-void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(ThreadPad* self) {
-    if (!self) APS5_INVALID_ARG_EX;
-    _Cnd_destroy_nid_postfix(&self->condition);
-    _Mtx_destroy_nid_postfix(&self->mutex);
+void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Mtx_unlock_nid_postfix(&pad->mutex), "_Pad::~_Pad: _Mtx_unlock");
+    _Mtx_destroy_nid_postfix(&pad->mutex);
+    _Cnd_destroy_nid_postfix(&pad->condition);
 }
 
 int APS5_VABI _Thrd_id_nid_postfix(void) {
     return scePthreadGetthreadid();
 }
 
-void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(ThreadPad* self, Pthread* thread) {
-    if (!self || !thread) APS5_INVALID_ARG_EX;
-    if (pthread_create_nid_postfix(thread, nullptr, RunPad, self) != 0) _ZSt16_Throw_Cpp_errori_nid_postfix(6);
-    ThreadCall(_Mtx_lock_nid_postfix(&self->mutex), "locking the pad");
-    while (!self->started) ThreadCall(_Cnd_wait_nid_postfix(&self->condition, &self->mutex), "waiting for the thread");
-    ThreadCall(_Mtx_unlock_nid_postfix(&self->mutex), "unlocking the pad");
+void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(GuestPad* pad, Pthread* thread) {
+    if (!pad || !thread) APS5_INVALID_ARG_EX;
+    const int created = pthread_create_nid_postfix(thread, nullptr, PadEntry_nid_no_patch, pad);
+    if (created != 0) ThrowCppError_nid_no_patch(CppResourceUnavailableTryAgain);
+    while (!pad->started) RequireThrd(_Cnd_wait_nid_postfix(&pad->condition, &pad->mutex), "_Pad::_Launch: _Cnd_wait");
 }
-
 // locale::id objects: 0 until the facet is first looked up, as libc's ids are.
 std::uint64_t _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix = 0;
-
-int APS5_VABI _Cnd_signal_nid_postfix(void** handle) {
-    return SignalCondition_nid_no_patch(handle);
-}
 
 void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void) {
     sharedPtrSpinLock.clear(std::memory_order_release);

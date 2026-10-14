@@ -1,11 +1,15 @@
 #include <elfpatcher/windows/WindowsRelocationBuilder.hpp>
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <io/BufferUtils.hpp>
+#include <algorithm>
+#include <bit>
 #include <map>
+#include <string>
 
 namespace Elfpatcher::Windows {
 
-PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Domain::SysVDynamicSection& dynamicSection) const {
+PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Domain::SysVDynamicSection& dynamicSection,
+                                              const std::vector<Domain::ProgramHeader>& headers) const {
     if (dynamicSection.DynSymData.empty() || dynamicSection.DynSymData.size() % 24 != 0)
         throw Domain::RelinkerException("Invalid ELF dynamic symbol table size");
     PeRelocations result;
@@ -19,7 +23,7 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
             const auto addend = Io::ReadU64(table, offset + 16);
             const auto type = static_cast<std::uint32_t>(info);
             const auto symbol = info >> 32;
-            if ((plt && type != 7) || (type != 1 && type != 6 && type != 7 && type != 8))
+            if ((plt && type != 7) || (type != 1 && type != 6 && type != 7 && type != 8 && type != 16 && type != 17 && type != 18))
                 throw Domain::RelinkerException("Unsupported Windows relocation type " + std::to_string(type), target);
             const auto rva = image.GetRva(target, 8);
             const auto next = ranges.lower_bound(target);
@@ -31,6 +35,21 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
                     throw Domain::RelinkerException("RELATIVE relocation has a symbol index", target);
                 image.WritePointer(target, image.GetRelocatedAddress(addend));
                 result.BaseRelocations.push_back(rva);
+                continue;
+            }
+            if (type == 16 || type == 17 || type == 18) {
+                if (symbol != 0)
+                    throw Domain::RelinkerException("Imported TLS relocation " + std::to_string(type) + " is not supported for this target", target);
+                if (type == 16)
+                    throw Domain::RelinkerException("Executable DTPMOD64 relocation is not supported for this target", target);
+                const auto tls = std::find_if(headers.begin(), headers.end(), [](const auto& header) { return header.Type == 7; });
+                if (tls == headers.end() || tls->MemorySize == 0)
+                    throw Domain::RelinkerException("TLS relocation without a non-empty PT_TLS segment", target);
+                const auto alignment = std::max<std::uint64_t>(tls->Alignment, 1);
+                if (!std::has_single_bit(alignment) || tls->MemorySize > 0x7fff0000u)
+                    throw Domain::RelinkerException("Invalid or unsupported ELF TLS layout", tls->Offset);
+                image.RequireWritable(target, 8);
+                image.WritePointer(target, type == 17 ? addend : addend - Io::AlignUp64(tls->MemorySize, alignment));
                 continue;
             }
             if (symbol == 0 || symbol >= dynamicSection.DynSymData.size() / 24)
@@ -51,6 +70,7 @@ PeRelocations WindowsRelocationBuilder::Apply(WindowsLoadImage& image, const Dom
             image.WritePointer(target, 0);
             result.Imports.push_back({name, rva, addend});
             result.Imports.back().Weak = (dynamicSection.DynSymData[symbolOffset + 4] >> 4) == STB_WEAK;
+            result.Imports.back().Function = type == 7 || (type == 6 && dynamicSection.FunctionImports.contains(target));
             if (const auto module = dynamicSection.ImportModules.find(target); module != dynamicSection.ImportModules.end())
                 result.Imports.back().Library = module->second;
         }

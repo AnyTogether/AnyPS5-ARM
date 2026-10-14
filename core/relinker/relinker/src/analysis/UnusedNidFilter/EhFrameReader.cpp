@@ -238,7 +238,12 @@ private:
             encoded(position, callEncoding);
             const auto landing = encoded(position, callEncoding);
             leb(position);
-            if (landing != 0) region.ExtraTargets.push_back(landingBase + landing);
+            if (landing != 0) {
+                const bool negative = (callEncoding & 0x08) != 0 && (landing >> 63) != 0;
+                if (negative ? landingBase < std::uint64_t{0} - landing : landing > std::numeric_limits<VirtualAddress>::max() - landingBase)
+                    throw RelinkerException("Strict filter: LSDA landing pad address overflowed", address);
+                region.ExtraTargets.push_back(landingBase + landing);
+            }
         }
         if (position != tableEnd) throw RelinkerException("Strict filter: LSDA call-site table size mismatch", address);
     }

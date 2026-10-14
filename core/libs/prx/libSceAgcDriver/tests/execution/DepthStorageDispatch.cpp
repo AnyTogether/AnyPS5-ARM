@@ -39,7 +39,8 @@ constexpr std::uint32_t Type2D = 9;
 constexpr std::uint32_t Type2DArray = 13;
 constexpr std::uint32_t TileLinear = 0;
 constexpr std::uint32_t TileStandard256B = 1;
-constexpr std::size_t BlockBytes = 1u << 20u;
+constexpr std::uint32_t TileZ64KBX = 0x18;
+constexpr std::size_t BlockBytes = 2u << 20u;
 constexpr std::size_t StencilOffset = 1u << 16u;
 constexpr std::size_t OutputOffset = 2u << 16u;
 constexpr std::size_t MultisampledOffset = 4u << 16u;
@@ -48,6 +49,8 @@ constexpr std::size_t SampledOffset = 8u << 16u;
 constexpr std::size_t LaterDepthOffset = 10u << 16u;
 constexpr std::size_t ArrayDepthOffset = 12u << 16u;
 constexpr std::size_t ArrayStencilOffset = 13u << 16u;
+constexpr std::size_t ArrayOffset = 16u << 16u;
+constexpr std::uint32_t ArrayLayers = 3;
 
 alignas(256) constexpr std::array<std::uint32_t, 14> ScaleDepthCode{
     0x7e3c0300u, 0x7e3e0280u, 0x7e140280u, 0xf0001108u, 0x00010a1eu, 0xbf8c3f70u, 0x34060082u,
@@ -247,13 +250,77 @@ void ArrayViewCase(AgcDriver::VulkanDevice& device, const Shaders& shaders, std:
     RequireRow(Draw(device, shaders, surface, {.depthCompare = VK_COMPARE_OP_LESS}), "depth test against the one-layer 2D array view's depth");
     RunPlane(device, layer(AddStencilLayerCode, stencil, Format8Uint, 0.0f), AddStencilLayerCode, output, 5u, "stencil dispatch through a one-layer 2D array view");
     RequireRow(Draw(device, shaders, surface, {.depthTest = false, .stencilTest = true, .stencil = StencilEqual(9u)}), "stencil test against the one-layer 2D array view's stencil");
+}
 
+ShaderRecompiler::RecompileResult LayerProgram(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::span<std::uint32_t> output, const std::uint8_t* layers, std::uint32_t layer) {
     std::vector<std::uint32_t> userData(16, 0u);
-    const auto texture = TextureDescriptor(depth, Format32Float, Type2DArray, TileLinear, 1u);
+    const auto buffer = BufferDescriptor(output.data(), static_cast<std::uint32_t>(output.size_bytes()));
+    const auto texture = TextureDescriptor(layers, Format32Float, Type2DArray, TileZ64KBX, ArrayLayers - 1u);
+    std::copy(buffer.begin(), buffer.end(), userData.begin());
     std::copy(texture.begin(), texture.end(), userData.begin() + 4);
-    userData[14] = std::bit_cast<std::uint32_t>(1.0f / 64.0f);
-    const auto program = Compile(device, StoreLayerCode, userData);
-    ExpectRefusal([&] { device.Dispatch(program, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(StoreLayerCode.data())); }, "storage image access to depth/stencil surface", "a two-layer 2D array storage view of the depth plane");
+    userData[12] = layer;
+    userData[14] = std::bit_cast<std::uint32_t>(1.0f / 128.0f);
+    return Compile(device, code, userData);
+}
+
+void StoreLayer(AgcDriver::VulkanDevice& device, std::span<std::uint8_t> layers, std::span<std::uint32_t> output, std::uint32_t layer) {
+    const auto store = LayerProgram(device, StoreLayerCode, output, layers.data(), layer);
+    device.Dispatch(store, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(StoreLayerCode.data()));
+    device.WaitIdle();
+}
+
+void RequireGuestLayer(std::span<const std::uint8_t> layer, bool stored, float rest, float initial, const std::string& what) {
+    std::vector<std::uint32_t> seen(Threads, 0u);
+    std::uint32_t kept = 0;
+    for (std::size_t offset = 0; offset < layer.size(); offset += sizeof(float)) {
+        float texel = 0.0f;
+        std::memcpy(&texel, layer.data() + offset, sizeof(texel));
+        const auto lane = static_cast<std::uint32_t>(texel * 128.0f);
+        if (stored && texel < 0.25f && texel != initial && static_cast<float>(lane) / 128.0f == texel) {
+            ++seen[lane];
+            continue;
+        }
+        if (texel == rest) {
+            ++kept;
+            continue;
+        }
+        Require(texel == initial, what + ": guest texel at offset " + std::to_string(offset) + " is " + std::to_string(texel) + ", expected " + std::to_string(rest) + " or the untouched " + std::to_string(initial));
+    }
+    const auto texels = static_cast<std::uint32_t>(layer.size() / sizeof(float));
+    const auto expected = (rest == initial ? texels : Width * Height) - (stored ? Threads : 0u);
+    Require(kept == expected, what + ": " + std::to_string(kept) + " guest texels hold " + std::to_string(rest) + ", expected " + std::to_string(expected));
+    if (!stored) return;
+    for (std::uint32_t lane = 0; lane < Threads; ++lane) Require(seen[lane] == 1u, what + ": the value stored by lane " + std::to_string(lane) + " is in guest memory " + std::to_string(seen[lane]) + " times");
+}
+
+void LayeredArrayViewCase(AgcDriver::VulkanDevice& device, const Shaders& shaders, std::uint8_t* block) {
+    const auto sliceBytes = static_cast<std::size_t>(AgcDriver::Graphics::DepthSliceBytes({Width, Height}, 4u));
+    Require(sliceBytes == 1u << 16u, "a depth slice of the test extent is not one 64 KiB block");
+    const std::span<std::uint8_t> layers(block + ArrayOffset, sliceBytes * ArrayLayers);
+    const std::span<std::uint32_t> output(reinterpret_cast<std::uint32_t*>(block + OutputOffset), Threads);
+    const auto guestLayer = [&](std::uint32_t layer) { return layers.subspan(sliceBytes * layer, sliceBytes); };
+    const float untouched = 0.875f;
+    const float guestDepth = 0.75f;
+    for (std::uint32_t layer = 0; layer < ArrayLayers; ++layer) {
+        const float value = layer == 2 ? guestDepth : untouched;
+        for (std::size_t offset = 0; offset < sliceBytes; offset += sizeof(float)) std::memcpy(guestLayer(layer).data() + offset, &value, sizeof(float));
+    }
+    const Surface first{reinterpret_cast<std::uintptr_t>(guestLayer(0).data()), 0, 0, false, VK_FORMAT_D32_SFLOAT};
+    const Surface second{reinterpret_cast<std::uintptr_t>(guestLayer(1).data()), 0, 0, false, VK_FORMAT_D32_SFLOAT};
+    Require(Draw(device, shaders, first, {.depthWrite = true, .depthCompare = VK_COMPARE_OP_ALWAYS}) == Covered, "the first layer's depth producer did not cover its surface");
+    Require(Draw(device, shaders, second, {.depthWrite = true, .depthCompare = VK_COMPARE_OP_ALWAYS}) == Covered, "the second layer's depth producer did not cover its surface");
+
+    StoreLayer(device, layers, output, 1);
+    RequireRow(Draw(device, shaders, second, {.depthCompare = VK_COMPARE_OP_GREATER}), "depth test against the values a 2D array storage view stored to the second layer's surface");
+    Require(Draw(device, shaders, first, {.depthCompare = VK_COMPARE_OP_GREATER}) == 0, "a store to the second layer changed the first layer's surface");
+    StoreLayer(device, layers, output, 2);
+    RequireRow(Draw(device, shaders, second, {.depthCompare = VK_COMPARE_OP_GREATER}), "depth test against the second layer's surface after a store to the third layer");
+
+    AgcDriver::Graphics::StorageTexture::FlushPending(reinterpret_cast<std::uintptr_t>(layers.data()), layers.size(), nullptr, "test");
+    device.WaitIdle();
+    RequireGuestLayer(guestLayer(0), false, 0.5f, untouched, "the first layer in guest memory after the flush");
+    RequireGuestLayer(guestLayer(1), true, 0.5f, untouched, "the second layer in guest memory after the flush");
+    RequireGuestLayer(guestLayer(2), true, guestDepth, guestDepth, "the third layer in guest memory after the flush");
 }
 
 void MultisampledCase(AgcDriver::VulkanDevice& device, const Shaders& compiled, std::uint8_t* block) {
@@ -334,6 +401,7 @@ int main() {
         const auto shaders = DepthFastClearHarness::Compile(*device);
         StoreBackCase(*device, shaders, block.Data());
         ArrayViewCase(*device, shaders, block.Data());
+        LayeredArrayViewCase(*device, shaders, block.Data());
         MultisampledCase(*device, shaders, block.Data());
         TwoViewsCase(*device, block.Data());
         SampledCopyCase(*device, shaders, block.Data());

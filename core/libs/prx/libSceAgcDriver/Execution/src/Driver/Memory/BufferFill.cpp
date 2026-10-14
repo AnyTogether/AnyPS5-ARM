@@ -14,13 +14,22 @@
 
 namespace AgcDriver::DriverDetail {
 
+namespace {
+
+bool matchesBufferPatternFillKernel(std::span<const std::uint32_t> code) {
+    static constexpr std::array<std::uint32_t, 12> kernel{0xd7460004u, 0x04010c08u, 0xf4280302u, 0xfa000000u, 0xbf8cc07fu, 0x7e00020cu, 0x7e02020du, 0x7e04020eu, 0x7e06020fu, 0xe01c2000u, 0x80000004u, 0xbf810000u};
+    return code.size() >= kernel.size() && std::equal(kernel.begin(), kernel.end(), code.begin());
+}
+
+}
+
 bool Driver::matchesFillKernel(std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
     static const bool enabled = std::getenv("APS5_NO_FILL_HLE") == nullptr;
     static const bool patternEnabled = std::getenv("APS5_NO_PATTERN_FILL_HLE") == nullptr;
     if (!enabled || userData.size() < 8 || compute.numThreads[0] != 64 || compute.numThreads[1] != 1 || compute.numThreads[2] != 1) return false;
     if (patternEnabled && MatchesPatternFillKernel(code, userData, compute)) return true;
     static constexpr std::array<std::uint32_t, 9> fillKernel{0xd7460004u, 0x04010c08u, 0x7e000204u, 0x7e020205u, 0x7e040206u, 0x7e060207u, 0xe01c2000u, 0x80000004u, 0xbf810000u};
-    if (code.size() < fillKernel.size() || !std::equal(fillKernel.begin(), fillKernel.end(), code.begin())) return false;
+    if (!matchesBufferPatternFillKernel(code) && (code.size() < fillKernel.size() || !std::equal(fillKernel.begin(), fillKernel.end(), code.begin()))) return false;
 
     const auto stride = (userData[1] >> 16u) & 0x3fffu;
     const bool swizzled = ((userData[1] >> 31u) & 1u) != 0;
@@ -60,45 +69,48 @@ std::optional<DwordPatternFill> MatchDwordPatternFill(std::span<const std::uint3
     return fill;
 }
 
-std::optional<LoadedDwordFill> MatchLoadedDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
-    static const bool enabled = std::getenv("APS5_NO_FILL_HLE") == nullptr;
-    if (!enabled || userData.size() != 8 || packet.size() < 5 || ((packet[0] >> 8u) & 0xffu) != 0x15u || !compute.groupIdEnable[0] || compute.numThreads[0] != 64 || compute.numThreads[1] != 1 || compute.numThreads[2] != 1) return std::nullopt;
-    // v_lshl_add_u32 v0, s8, 6, v0; s_buffer_load_dword vcc_lo, s[4:7], 0; s_waitcnt lgkmcnt(0);
-    // v_mov_b32 v1, vcc_lo; buffer_store_dword v1, v0, s[0:3], 0 idxen; s_endpgm. Stray clears the
-    // DCC keys of its 4K targets with it every frame.
-    static constexpr std::array<std::uint32_t, 9> kernel{0xd7460000u, 0x04010c08u, 0xf4201a82u, 0xfa000000u, 0xbf8cc07fu, 0x7e02026au, 0xe0102000u, 0x80000100u, 0xbf810000u};
-    if (code.size() < kernel.size() || !std::equal(kernel.begin(), kernel.end(), code.begin())) return std::nullopt;
-    const auto stride = (userData[1] >> 16u) & 0x3fffu;
-    const bool swizzled = ((userData[1] >> 31u) & 1u) != 0;
-    const bool addTid = ((userData[3] >> 23u) & 1u) != 0;
-    const auto type = userData[3] >> 30u;
-    const bool sourceSwizzled = ((userData[5] >> 31u) & 1u) != 0;
-    const auto sourceType = userData[7] >> 30u;
-    // The load is in range when the record count covers the dword: bytes without a stride.
-    const auto sourceStride = (userData[5] >> 16u) & 0x3fffu;
-    const bool sourceInRange = sourceStride == 0 ? userData[6] >= 4 : userData[6] != 0;
-    if (type != 0 || stride != 4 || swizzled || addTid || sourceType != 0 || sourceSwizzled || !sourceInRange || (packet[4] & 0x20u) != 0 || packet[2] != 1 || packet[3] != 1) return std::nullopt;
-    const auto records = std::min<std::uint64_t>(static_cast<std::uint64_t>(packet[1]) * 64u, userData[2]);
-    const auto base = userData[0] | (static_cast<std::uint64_t>(userData[1] & 0xffffu) << 32u);
-    const auto source = userData[4] | (static_cast<std::uint64_t>(userData[5] & 0xffffu) << 32u);
-    if (base % 16u != 0 || (records * 4u) % 16u != 0 || source % 4u != 0) return std::nullopt;
-    return LoadedDwordFill{base, static_cast<std::size_t>(records * 4u), source};
-}
-
 std::optional<DwordPatternFill> MatchZeroDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
     static const bool enabled = std::getenv("APS5_NO_FILL_HLE") == nullptr;
-    if (!enabled || userData.size() != 4 || packet.size() < 5 || ((packet[0] >> 8u) & 0xffu) != 0x15u || !compute.groupIdEnable[0] || compute.numThreads[0] != 64 || compute.numThreads[1] != 1 || compute.numThreads[2] != 1) return std::nullopt;
+    if (!enabled || userData.size() != 4 || packet.size() < 5 || !compute.groupIdEnable[0] || compute.numThreads[0] != 64 || compute.numThreads[1] != 1 || compute.numThreads[2] != 1) return std::nullopt;
     static constexpr std::array<std::uint32_t, 6> kernel{0xd7460000u, 0x04010c04u, 0x7e020280u, 0xe0102000u, 0x80000100u, 0xbf810000u};
     if (code.size() < kernel.size() || !std::equal(kernel.begin(), kernel.end(), code.begin())) return std::nullopt;
     const auto stride = (userData[1] >> 16u) & 0x3fffu;
     const bool swizzled = ((userData[1] >> 31u) & 1u) != 0;
     const bool addTid = ((userData[3] >> 23u) & 1u) != 0;
+    const auto outOfBounds = (userData[3] >> 28u) & 3u;
+    const auto format = (userData[3] >> 12u) & 0x7fu;
     const auto type = userData[3] >> 30u;
-    if (type != 0 || stride != 4 || swizzled || addTid || (packet[4] & 0x20u) != 0 || packet[2] != 1 || packet[3] != 1) return std::nullopt;
-    const auto records = std::min<std::uint64_t>(static_cast<std::uint64_t>(packet[1]) * 64u, userData[2]);
+    if (type != 0 || stride != 4 || swizzled || addTid || outOfBounds != 0 || format < 20u || format > 22u || (packet[4] & 0x20u) != 0 || packet[2] != 1 || packet[3] != 1) return std::nullopt;
+    const auto dwords = std::min<std::uint64_t>(static_cast<std::uint64_t>(packet[1]) * 64u, userData[2]);
     const auto base = userData[0] | (static_cast<std::uint64_t>(userData[1] & 0xffffu) << 32u);
-    if (records == 0 || base % 16u != 0 || (records * 4u) % 16u != 0) return std::nullopt;
-    return DwordPatternFill{base, static_cast<std::size_t>(records * 4u), {}};
+    if (dwords == 0 || dwords % 4u != 0 || base % 16u != 0) return std::nullopt;
+    return DwordPatternFill{base, static_cast<std::size_t>(dwords * 4u), {}};
+}
+
+std::optional<Graphics::MemoryValueFill> MatchMemoryValueBufferFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
+    static const bool enabled = std::getenv("APS5_NO_FILL_HLE") == nullptr;
+    if (!enabled || userData.size() != 8 || packet.size() < 5 || (packet[4] & 0x20u) != 0 || !compute.groupIdEnable[0]) return std::nullopt;
+    const auto fill = Graphics::MatchMemoryValueFill(code, userData, compute.numThreads, {packet[1], packet[2], packet[3]});
+    if (!fill) return std::nullopt;
+    if (fill->address % 16u != 0 || fill->bytes % 16u != 0) return std::nullopt;
+    return fill;
+}
+
+bool IsByteFill(const std::array<std::uint32_t, 4>& pattern) {
+    return std::all_of(pattern.begin(), pattern.end(), [&](std::uint32_t word) { return word == (pattern[0] & 0xffu) * 0x01010101u; });
+}
+
+std::optional<Graphics::DccKeys> KeysFillMemo(const std::array<std::uint32_t, 4>& pattern, bool coversStorageKeys, bool memoryValueFill) {
+    if (!IsByteFill(pattern) || !(coversStorageKeys || memoryValueFill)) return std::nullopt;
+    switch (pattern[0] & 0xffu) {
+        case 0x00: return Graphics::DccKeys::Clear0000;
+        case 0x40: return Graphics::DccKeys::Clear0001;
+        case 0x80: return Graphics::DccKeys::Clear1110;
+        case 0xc0: return Graphics::DccKeys::Clear1111;
+        case 0x20: return Graphics::DccKeys::ClearRegister;
+        case 0xff: return Graphics::DccKeys::Uncompressed;
+        default: return std::nullopt;
+    }
 }
 
 bool Driver::fillClearEnabled() {
@@ -168,8 +180,9 @@ void Driver::fillClearCount(const Graphics::StorageTexture::FillCoverage& covera
 bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute, const std::shared_ptr<VulkanDevice>& localDevice) {
     auto dwordFill = MatchDwordPatternFill(packet, code, userData, compute);
     if (!dwordFill) dwordFill = MatchZeroDwordFill(packet, code, userData, compute);
-    const auto loadedFill = dwordFill ? std::nullopt : MatchLoadedDwordFill(packet, code, userData, compute);
-    if (!dwordFill && !loadedFill && !matchesFillKernel(code, userData, compute)) return false;
+    std::optional<Graphics::MemoryValueFill> memoryFill;
+    if (!dwordFill) memoryFill = MatchMemoryValueBufferFill(packet, code, userData, compute);
+    if (!dwordFill && !memoryFill && !matchesFillKernel(code, userData, compute)) return false;
     std::uint64_t base;
     std::size_t bytes;
     std::array<std::uint32_t, 4> pattern;
@@ -178,18 +191,15 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         base = dwordFill->base;
         bytes = dwordFill->bytes;
         pattern = dwordFill->pattern;
-    } else if (loadedFill) {
-        if (loadedFill->bytes == 0) return true;
-        // The dword is read when the dispatch would have run: after the labels before it, through
-        // the flush hook (GPU work still writing it is waited for).
+    } else if (memoryFill) {
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
         inputLock.lock();
         recordLabelsForPacket(localDevice.get(), queueId);
-        if (!GuestMemory::Accessible(reinterpret_cast<const void*>(loadedFill->source), 4)) return false;
-        GuestMemory::Read(loadedFill->source, std::as_writable_bytes(std::span(pattern).first(1)), 4);
+        if (!GuestMemory::Accessible(reinterpret_cast<const void*>(memoryFill->valueAddress), 4)) return false;
+        GuestMemory::Read(memoryFill->valueAddress, std::as_writable_bytes(std::span(pattern).first(1)), 4);
         std::fill(pattern.begin() + 1, pattern.end(), pattern[0]);
-        base = loadedFill->base;
-        bytes = loadedFill->bytes;
+        base = memoryFill->address;
+        bytes = memoryFill->bytes;
     } else if (MatchesPatternFillKernel(code, userData, compute)) {
         const auto range = DecodePatternFillRange(userData, packet);
         if (!range) return false;
@@ -221,7 +231,16 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         const auto records = std::min<std::uint64_t>(static_cast<std::uint64_t>(groups[0]) * 64u, numRecords);
         base = userData[0] | (static_cast<std::uint64_t>(userData[1] & 0xffffu) << 32u);
         bytes = static_cast<std::size_t>(records * 16u);
-        pattern = {userData[4], userData[5], userData[6], userData[7]};
+        if (matchesBufferPatternFillKernel(code)) {
+            const auto source = userData[4] | (static_cast<std::uint64_t>(userData[5] & 0xffffu) << 32u);
+            GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
+            inputLock.lock();
+            recordLabelsForPacket(localDevice.get(), queueId);
+            if (!GuestMemory::Accessible(reinterpret_cast<const void*>(source), sizeof(pattern))) return false;
+            GuestMemory::Read(source, std::as_writable_bytes(std::span(pattern)), 4);
+        } else {
+            pattern = {userData[4], userData[5], userData[6], userData[7]};
+        }
     }
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     static std::atomic<std::uint64_t> fills{0}, filledBytes{0}, cpuFills{0};
@@ -258,7 +277,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
 
         static const bool traceKeys = std::getenv("APS5_TRACE_DCC_KEYS") != nullptr;
         if (traceKeys && coverage.cover == Graphics::StorageTexture::FillCover::Keys) std::fprintf(stderr, "[dcc-keys] title fills keys 0x%llx+0x%zx with %08x %08x %08x %08x (queue 0x%x)\n", static_cast<unsigned long long>(base), bytes, pattern[0], pattern[1], pattern[2], pattern[3], queueId);
-        const bool uniformKeysFill = coverage.cover == Graphics::StorageTexture::FillCover::Keys && std::all_of(pattern.begin(), pattern.end(), [&](std::uint32_t word) { return word == (pattern[0] & 0xffu) * 0x01010101u; });
+        const bool uniformKeysFill = coverage.cover == Graphics::StorageTexture::FillCover::Keys && IsByteFill(pattern);
         if (uniformKeysFill) {
             Graphics::StorageTexture::NoteKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
             Graphics::StorageTexture::ClearByKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
@@ -291,18 +310,8 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         phase(FillFlush);
         const bool stored = cleared || localDevice->FillBuffer(base, bytes, pattern);
         phase(FillDevice);
-        if (uniformKeysFill && stored && !cleared) {
-            Graphics::DccKeys filled = Graphics::DccKeys::Mixed;
-            switch (pattern[0] & 0xffu) {
-                case 0x00: filled = Graphics::DccKeys::Clear0000; break;
-                case 0x40: filled = Graphics::DccKeys::Clear0001; break;
-                case 0x80: filled = Graphics::DccKeys::Clear1110; break;
-                case 0xc0: filled = Graphics::DccKeys::Clear1111; break;
-                case 0x20: filled = Graphics::DccKeys::ClearRegister; break;
-                case 0xff: filled = Graphics::DccKeys::Uncompressed; break;
-                default: break;
-            }
-            if (filled != Graphics::DccKeys::Mixed) Graphics::NoteKeysFillOnGpu(base, bytes, filled);
+        if (stored && !cleared) {
+            if (const auto filled = KeysFillMemo(pattern, uniformKeysFill, memoryFill.has_value())) Graphics::NoteKeysFillOnGpu(base, bytes, *filled);
         }
         if (profile && stored && !cleared) {
             const bool uniform = pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3];

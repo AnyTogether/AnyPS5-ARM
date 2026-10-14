@@ -10,12 +10,14 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/HostThreadLocal.hpp"
 #include <cstdint>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include "GuestResolver.hpp"
 
@@ -30,6 +32,66 @@ struct HostLookup {
     std::vector<std::string> addressBytes;
     std::vector<char*> addresses;
 };
+
+struct ServiceRecord {
+    const char* name;
+    std::uint16_t port;
+    const char* protocol;
+    std::array<const char*, 2> aliases;
+};
+
+constexpr ServiceRecord Services[]{
+    {"ftp-data", 20, "tcp", {}}, {"ftp-data", 20, "udp", {}}, {"ftp-data", 20, "sctp", {}},
+    {"ftp", 21, "tcp", {}}, {"ftp", 21, "udp", {}}, {"ftp", 21, "sctp", {}},
+    {"ssh", 22, "tcp", {}}, {"ssh", 22, "udp", {}}, {"ssh", 22, "sctp", {}},
+    {"telnet", 23, "tcp", {}}, {"telnet", 23, "udp", {}},
+    {"smtp", 25, "tcp", {"mail"}}, {"smtp", 25, "udp", {"mail"}},
+    {"domain", 53, "tcp", {}}, {"domain", 53, "udp", {}},
+    {"tftp", 69, "tcp", {}}, {"tftp", 69, "udp", {}},
+    {"http", 80, "tcp", {"www", "www-http"}}, {"http", 80, "udp", {"www", "www-http"}},
+    {"http", 80, "sctp", {"www", "www-http"}},
+    {"pop3", 110, "tcp", {}}, {"pop3", 110, "udp", {}},
+    {"ntp", 123, "tcp", {}}, {"ntp", 123, "udp", {}},
+    {"imap", 143, "tcp", {"imap2", "imap4"}}, {"imap", 143, "udp", {"imap2", "imap4"}},
+    {"https", 443, "tcp", {}}, {"https", 443, "udp", {}}, {"https", 443, "sctp", {}},
+    {"rtsp", 554, "tcp", {}}, {"rtsp", 554, "udp", {}},
+    {"submission", 587, "tcp", {}}, {"submission", 587, "udp", {}},
+    {"imaps", 993, "tcp", {}}, {"imaps", 993, "udp", {}},
+    {"pop3s", 995, "tcp", {"spop3"}}, {"pop3s", 995, "udp", {"spop3"}},
+};
+
+constexpr std::size_t ServiceNameSize = 11;
+constexpr std::size_t ServiceAliasSize = 9;
+constexpr std::size_t ServiceProtocolSize = 5;
+constexpr std::size_t ServiceAliasCount = std::tuple_size_v<decltype(ServiceRecord::aliases)>;
+
+template<typename TSelect>
+constexpr std::size_t LongestServiceText(TSelect select) {
+    std::size_t longest = 0;
+    for (const auto& service : Services)
+        for (const char* text : select(service))
+            if (text) longest = std::max(longest, std::char_traits<char>::length(text));
+    return longest;
+}
+
+static_assert(ServiceNameSize == LongestServiceText([](const ServiceRecord& record) { return std::array{record.name}; }) + 1);
+static_assert(ServiceAliasSize == LongestServiceText([](const ServiceRecord& record) { return record.aliases; }) + 1);
+static_assert(ServiceProtocolSize == LongestServiceText([](const ServiceRecord& record) { return std::array{record.protocol}; }) + 1);
+
+struct ServiceLookup {
+    GuestResolver::ServiceEntry entry;
+    std::array<char, ServiceNameSize> name;
+    std::array<char, ServiceProtocolSize> protocol;
+    std::array<std::array<char, ServiceAliasSize>, ServiceAliasCount> aliasNames;
+    std::array<char*, ServiceAliasCount + 1> aliases;
+};
+static_assert(std::is_trivially_destructible_v<ServiceLookup>);
+
+template<std::size_t Size>
+char* CopyServiceText(std::array<char, Size>& target, const char* text) {
+    std::memcpy(target.data(), text, std::strlen(text) + 1);
+    return target.data();
+}
 
 bool NumericAddress(const char* name, std::array<unsigned char, 4>& address) {
     std::array<unsigned char, 3> parts{};
@@ -160,6 +222,27 @@ GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) 
         errno = ENOMEM;
         return nullptr;
     }
+}
+
+GuestResolver::ServiceEntry* APS5_VABI getservbyname_nid_postfix(const char* name, const char* protocol) {
+    for (const auto& service : Services) {
+        bool named = std::strcmp(name, service.name) == 0;
+        for (const char* alias : service.aliases)
+            named = named || (alias && std::strcmp(name, alias) == 0);
+        if (!named || (protocol && std::strcmp(protocol, service.protocol) != 0)) continue;
+        static thread_local ServiceLookup lookup;
+        std::size_t count = 0;
+        for (const char* alias : service.aliases) {
+            if (!alias) continue;
+            lookup.aliases[count] = CopyServiceText(lookup.aliasNames[count], alias);
+            ++count;
+        }
+        lookup.aliases[count] = nullptr;
+        lookup.entry = {CopyServiceText(lookup.name, service.name), lookup.aliases.data(), htons(service.port),
+            CopyServiceText(lookup.protocol, service.protocol)};
+        return &lookup.entry;
+    }
+    return nullptr;
 }
 
 void APS5_VABI freeaddrinfo_nid_postfix(GuestResolver::AddressInfo* first) {

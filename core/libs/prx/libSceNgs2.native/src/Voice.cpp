@@ -116,7 +116,10 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
         return;
     }
     auto* dest = Ngs2FindVoice(patch.dest_handle);
-    if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) APS5_INVALID_ARG_EX;
+    if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->rackId == SCE_NGS2_RACK_ID_SAMPLER ||
+        dest->rack->rackId == SCE_NGS2_RACK_ID_CUSTOM_SAMPLER) {
+        APS5_INVALID_ARG_EX;
+    }
     port.dest = dest;
 }
 
@@ -245,7 +248,7 @@ static void AddWaveformBlocks(Ngs2Voice& voice, const Ngs2SamplerVoiceWaveformBl
     }
 }
 
-static void SetFilter(Ngs2Voice& voice, const Ngs2SamplerVoiceFilterParam& param) {
+void Ngs2SetFilter(Ngs2Voice& voice, const Ngs2SamplerVoiceFilterParam& param) {
     if (param.index >= voice.rack->maxFilters) APS5_INVALID_ARG_EX;
     if (voice.filters.size() <= param.index) voice.filters.resize(param.index + 1);
     auto& filter = voice.filters[param.index];
@@ -281,20 +284,28 @@ static void SetFilter(Ngs2Voice& voice, const Ngs2SamplerVoiceFilterParam& param
 
 static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
     switch (param.id) {
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP: SetupSampler(voice, ParamAs<Ngs2SamplerVoiceSetupParam>(param).format); break;
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS: AddWaveformBlocks(voice, ParamAs<Ngs2SamplerVoiceWaveformBlocksParam>(param)); break;
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_EXIT_LOOP: {
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP:
+        case SCE_NGS2_CUSTOM_SAMPLER_VOICE_PARAM_SETUP:
+            SetupSampler(voice, ParamAs<Ngs2SamplerVoiceSetupParam>(param).format);
+            break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS:
+        case SCE_NGS2_CUSTOM_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS:
+            AddWaveformBlocks(voice, ParamAs<Ngs2SamplerVoiceWaveformBlocksParam>(param));
+            break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_EXIT_LOOP:
+        case SCE_NGS2_CUSTOM_SAMPLER_VOICE_PARAM_EXIT_LOOP: {
             const auto looping = std::find_if(voice.blocks.begin(), voice.blocks.end(), [](const Ngs2Block& block) { return block.info.num_repeats != 0; });
             if (looping != voice.blocks.end()) looping->info.num_repeats = 0;
             break;
         }
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_PITCH: {
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_PITCH:
+        case SCE_NGS2_CUSTOM_SAMPLER_VOICE_PARAM_PITCH: {
             const float ratio = ParamAs<Ngs2SamplerVoicePitchParam>(param).ratio;
             if (!std::isfinite(ratio) || ratio < 0.0f) APS5_INVALID_ARG_EX;
             voice.pitch = ratio;
             break;
         }
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: Ngs2SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
         default: throw std::runtime_error("NGS2: sampler voice param " + Ngs2Hex(param.id) + " is not implemented");
     }
 }
@@ -317,7 +328,8 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
     }
     if (rackId != voice.rack->rackId) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
     switch (rackId) {
-        case SCE_NGS2_RACK_ID_SAMPLER: ApplySamplerParam(voice, param); return;
+        case SCE_NGS2_RACK_ID_SAMPLER:
+        case SCE_NGS2_RACK_ID_CUSTOM_SAMPLER: ApplySamplerParam(voice, param); return;
         case SCE_NGS2_RACK_ID_SUBMIXER:
             if (param.id == SCE_NGS2_SUBMIXER_VOICE_PARAM_USER_FX) {
                 const auto& fx = ParamAs<Ngs2SubmixerVoiceUserFxParam>(param);

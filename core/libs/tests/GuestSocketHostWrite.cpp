@@ -141,6 +141,8 @@ int main(int argc, char** argv) {
     Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &physical) == 0, "allocate direct memory");
     void* mapping = nullptr;
     Require(sceKernelMapDirectMemory(&mapping, page * 2, 3, 0, physical, 0) == 0, "map read/write memory");
+    void* twin = nullptr;
+    Require(sceKernelMapDirectMemory(&twin, page * 2, 3, 0, physical, 0) == 0, "map read/write memory a second time");
     auto* buffer = static_cast<char*>(mapping) + page - 7;
     const auto collect = [&] {
         std::array<void*, 16> pages{};
@@ -199,6 +201,9 @@ int main(int argc, char** argv) {
         void* outputMapping = nullptr;
         Require(sceKernelMapDirectMemory(&outputMapping, page * 2, 3, 0, outputPhysical, 0) == 0,
             "map sender output memory");
+        void* outputTwin = nullptr;
+        Require(sceKernelMapDirectMemory(&outputTwin, page * 2, 3, 0, outputPhysical, 0) == 0,
+            "map sender output memory a second time");
         const auto collectOutputs = [&] {
             std::array<void*, 16> pages{};
             std::size_t count = pages.size();
@@ -238,6 +243,7 @@ int main(int argc, char** argv) {
             if (mask & 1) Require(Protection(address) == PAGE_READONLY, "sender address rearmed");
             if (mask & 2) Require(Protection(length) == PAGE_READONLY, "sender length rearmed");
         }
+        Require(sceKernelMunmap(outputTwin, page * 2) == 0, "unmap the second sender output mapping");
         Require(sceKernelMunmap(outputMapping, page * 2) == 0, "unmap sender outputs");
         Require(sceKernelReleaseDirectMemory(outputPhysical, page * 2) == 0, "release sender output memory");
     }
@@ -300,6 +306,7 @@ int main(int argc, char** argv) {
     Require(Protection(buffer) == PAGE_READONLY, "completed receive can be rearmed");
     Require((net ? sceNetSocketClose(sender) : close_nid_postfix(sender)) == 0, "close sender");
     Require((net ? sceNetSocketClose(receiver) : close_nid_postfix(receiver)) == 0, "close receiver");
+    Require(sceKernelMunmap(twin, page * 2) == 0, "unmap the second direct memory mapping");
     Require(sceKernelMunmap(mapping, page * 2) == 0, "unmap direct memory");
     Require(sceKernelReleaseDirectMemory(physical, page * 2) == 0, "release direct memory");
 }

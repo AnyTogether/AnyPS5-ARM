@@ -56,11 +56,21 @@ def main():
         result = subprocess.run([str(relinker), "--skip-sce-module", str(source), str(output)],
                                 capture_output=True, text=True, timeout=20)
         assert result.returncode == 0, (result.stdout, result.stderr)
+        relocated_source = Path(directory) / "relocated-table.elf"
+        relocated = Path(directory) / "relocated-table.out"
+        image = argv_fixture()
+        struct.pack_into("<H", image, 0x38, 2)
+        relocated_source.write_bytes(image)
+        result = subprocess.run([str(relinker), "--skip-sce-module", str(relocated_source), str(relocated)],
+                                capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert struct.unpack_from("<Q", relocated.read_bytes(), 0x20)[0] >= len(image), "The program header table was not moved"
         if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
-            output.chmod(0o755)
-            for arguments, expected in ((["Z"], -signal.SIGTRAP), (["Z", "extra"], -signal.SIGILL)):
-                executed = subprocess.run([str(output), *arguments], capture_output=True, timeout=20)
-                assert executed.returncode == expected, (arguments, executed.returncode)
+            for executable in (output, relocated):
+                executable.chmod(0o755)
+                for arguments, expected in ((["Z"], -signal.SIGTRAP), (["Z", "extra"], -signal.SIGILL)):
+                    executed = subprocess.run([str(executable), *arguments], capture_output=True, timeout=20)
+                    assert executed.returncode == expected, (executable.name, arguments, executed.returncode)
         for address, error in ((0x7FF00000, None), (0x80000000, "Entry stub call exceeds rel32 range")):
             source.write_bytes(far_load_fixture(address))
             far = Path(directory) / ("far-%x.elf" % address)

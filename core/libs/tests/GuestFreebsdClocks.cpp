@@ -4,11 +4,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 
 extern "C" {
 int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
 int APS5_VABI clock_getres_nid_postfix(int clockId, KernelTimespec* res);
+int APS5_VABI clock_settime_nid_postfix(int clockId, const KernelTimespec* tp);
 int APS5_VABI sceKernelClockGettime(KernelClockid clockId, KernelTimespec* tp);
 int APS5_VABI sceKernelClockGetres(KernelClockid clockId, KernelTimespec* tp);
 int* APS5_VABI __error_nid_postfix();
@@ -25,7 +27,9 @@ static constexpr int GUEST_CLOCK_REALTIME = 0;
 static constexpr int GUEST_CLOCK_VIRTUAL = 1;
 static constexpr int GUEST_CLOCK_PROF = 2;
 static constexpr int GUEST_CLOCK_MONOTONIC = 4;
+static constexpr int GUEST_CLOCK_REALTIME_PRECISE = 9;
 static constexpr int GUEST_CLOCK_SECOND = 13;
+static constexpr int GUEST_CLOCK_THREAD_CPUTIME_ID = 14;
 static constexpr int GUEST_CLOCK_PROCESS_CPUTIME_ID = 15;
 
 static constexpr std::int64_t NANOS_PER_SECOND = 1000000000LL;
@@ -205,9 +209,43 @@ static void CalendarConversionsInitializeTheirState() {
     Require(sceKernelConvertUtcToLocaltime(0, nullptr, nullptr, nullptr) == SCE_OK);
 }
 
+static void RequireSettimeError(int clockId, const KernelTimespec* time, int error) {
+    *__error_nid_postfix() = 0;
+    Require(clock_settime_nid_postfix(clockId, time) == -1 && *__error_nid_postfix() == error);
+}
+
+static bool SettimeThrows(const KernelTimespec& time, const char* requested) {
+    try {
+        clock_settime_nid_postfix(GUEST_CLOCK_REALTIME, &time);
+    } catch (const std::runtime_error& error) {
+        return std::strstr(error.what(), requested) != nullptr;
+    }
+    return false;
+}
+
+static void SettimeValidatesLikeFreebsd() {
+    const KernelTimespec valid{1767225600, 5};
+    RequireSettimeError(GUEST_CLOCK_REALTIME, nullptr, 14);
+    RequireSettimeError(GUEST_CLOCK_MONOTONIC, nullptr, 14);
+    for (const int clockId : {GUEST_CLOCK_VIRTUAL, GUEST_CLOCK_PROF, GUEST_CLOCK_MONOTONIC, GUEST_CLOCK_REALTIME_PRECISE,
+             GUEST_CLOCK_SECOND, GUEST_CLOCK_THREAD_CPUTIME_ID, GUEST_CLOCK_PROCESS_CPUTIME_ID, -1, 16})
+        RequireSettimeError(clockId, &valid, 22);
+    const KernelTimespec negativeNanoseconds{0, -1};
+    const KernelTimespec wholeSecondOfNanoseconds{0, NANOS_PER_SECOND};
+    const KernelTimespec negativeSeconds{-1, 0};
+    RequireSettimeError(GUEST_CLOCK_REALTIME, &negativeNanoseconds, 22);
+    RequireSettimeError(GUEST_CLOCK_REALTIME, &wholeSecondOfNanoseconds, 22);
+    RequireSettimeError(GUEST_CLOCK_REALTIME, &negativeSeconds, 22);
+    RequireSettimeError(GUEST_CLOCK_MONOTONIC, &negativeSeconds, 22);
+    Require(SettimeThrows(valid, "1767225600.000000005"));
+    Require(SettimeThrows(KernelTimespec{0, 0}, "0.000000000"));
+    Require(SettimeThrows(KernelTimespec{1, NANOS_PER_SECOND - 1}, "1.999999999"));
+}
+
 int main() {
     if (!OmittedResolutionSucceeds()) return 1;
     UnsupportedResolutionStillThrows();
+    SettimeValidatesLikeFreebsd();
     CalendarConversionsInitializeTheirState();
     SecondClockReportsWholeSeconds();
     KernelTimezone zone{-1, -1};

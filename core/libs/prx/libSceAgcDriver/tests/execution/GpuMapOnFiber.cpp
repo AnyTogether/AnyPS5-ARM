@@ -119,7 +119,11 @@ int main() {
         AgcDriverShutdown_nid_postfix();
         ReleaseMapping();
         Require(used <= FiberStackLimit, "GPU mapping on a fiber used " + std::to_string(used) + " bytes of the fiber's stack, more than " + std::to_string(FiberStackLimit) + ": the import of the mapped memory ran on it");
+#ifdef _WIN32
+        Require(onFiber == 0, "GPU mapping on a fiber started " + std::to_string(onFiber) + " host threads for its import instead of importing on the fiber's host stack");
+#else
         Require(onFiber == 1, "GPU mapping on a fiber started " + std::to_string(onFiber) + " host threads for its import instead of one");
+#endif
         Require(onThread == 0, "GPU mapping on an ordinary thread started " + std::to_string(onThread) + " host threads for its import instead of importing on its own stack");
         std::cout << "A GPU mapping made on a fiber used " << used << " bytes of its stack\n";
         return 0;

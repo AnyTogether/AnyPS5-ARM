@@ -402,7 +402,7 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
     const auto templateBytes = WindowsTlsTemplateBuilder().Build(*tls, image, sections, templateRva, relocations);
     std::copy(templateBytes.begin(), templateBytes.end(), data.Data.begin() + templateOffset);
     const auto writeAddress = [&](const std::size_t offset, const std::uint32_t rva) {
-        Io::WriteU64(data.Data, offset, ImageBase + rva);
+        Io::WriteU64(data.Data, offset, image.GetImageBase() + rva);
         relocations.push_back(CheckedRva(data.Rva + offset));
     };
 

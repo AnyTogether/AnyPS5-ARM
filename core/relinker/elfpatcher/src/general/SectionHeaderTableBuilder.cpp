@@ -80,7 +80,7 @@ void SectionHeaderTableBuilder::WriteTable(
     buf.resize(buf.size() + kShdrEntrySize * kSectionHeaderCount, 0);
 
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 0, 0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0);
-    _writeSectionHeader(buf, shOff + kShdrEntrySize * 1, kShStrTabNameOffset, SHT_STRTAB, 0, shStrTabOff, shStrTabOff, shStrTabSize, 0, 0, kNoSpecialAlignment, 0);
+    _writeSectionHeader(buf, shOff + kShdrEntrySize * 1, kShStrTabNameOffset, SHT_STRTAB, 0, 0, shStrTabOff, shStrTabSize, 0, 0, kNoSpecialAlignment, 0);
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 2, kDynStrNameOffset, SHT_STRTAB, SHF_ALLOC, dynStrAddress, request.DynStrOffset, request.DynStrSize, 0, 0, kNoSpecialAlignment, 0);
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 3, kDynSymNameOffset, SHT_DYNSYM, SHF_ALLOC, dynSymAddress, request.DynSymOffset, request.DynSymSize, kDynSymLinkToStrTab, kDynSymInfoFirstGlobal, kDynSymAlign, kSymEntrySize);
     _writeSectionHeader(buf, shOff + kShdrEntrySize * 4, kDynamicNameOffset, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE, dynamicAddress, request.DynamicSegmentOffset, request.DynamicSegmentSize, kDynamicLinkToStrTab, 0, kDynSymAlign, kDynEntrySize);

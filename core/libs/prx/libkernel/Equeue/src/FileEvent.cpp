@@ -232,6 +232,10 @@ bool TakeSnapshot(HANDLE handle, Snapshot& snapshot) {
     return true;
 }
 
+bool IsDeleted(const Snapshot& snapshot) {
+    return snapshot.deletePending || snapshot.links == 0;
+}
+
 std::vector<std::uint32_t> SnapshotHints(const Snapshot& before, const Snapshot& after, bool directory) {
     std::vector<std::uint32_t> hints;
     if (!directory) {
@@ -252,7 +256,7 @@ std::vector<std::uint32_t> SnapshotHints(const Snapshot& before, const Snapshot&
     if ((after.deletePending && !before.deletePending) || after.links < before.links) {
         hints.push_back(NOTE_DELETE);
     }
-    if (!after.path.empty() && after.path != before.path) {
+    if (!after.path.empty() && after.path != before.path && !IsDeleted(after)) {
         hints.push_back(NOTE_RENAME);
     }
     return hints;
@@ -346,7 +350,9 @@ void RunHostWatch(std::shared_ptr<VnodeWatch> watch, HostWatch host) {
             }
             if (current.path != host.last.path) {
                 CloseChange(host.parent);
-                host.parent = WatchParent(current.path);
+                if (!IsDeleted(current)) {
+                    host.parent = WatchParent(current.path);
+                }
             }
             host.last = std::move(current);
         }

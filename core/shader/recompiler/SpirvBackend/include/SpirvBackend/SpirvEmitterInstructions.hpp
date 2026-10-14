@@ -211,7 +211,7 @@ std::uint32_t EmitBitCastF16U16(SpirvEmitterState& state, std::uint32_t arg0);
 std::uint32_t EmitConvertU32U16(SpirvEmitterState& state, std::uint32_t arg0);
 std::uint32_t EmitConvertU32U8(SpirvEmitterState& state, std::uint32_t arg0);
 std::uint32_t EmitBitCastU32F32(SpirvEmitterState& state, std::uint32_t arg0);
-std::uint32_t EmitConvertF32F16(SpirvEmitterState& state, std::uint32_t bits);
+std::uint32_t EmitConvertF32F16(SpirvEmitterState& state, const IrValue& inst, std::uint32_t bits);
 std::uint32_t EmitCompositeExtractU32x2(SpirvEmitterState& state, std::uint32_t arg0, const IrValue* arg1);
 std::uint32_t EmitCompositeExtractU32x3(SpirvEmitterState& state, std::uint32_t arg0, const IrValue* arg1);
 std::uint32_t EmitCompositeExtractU32x4(SpirvEmitterState& state, std::uint32_t arg0, const IrValue* arg1);

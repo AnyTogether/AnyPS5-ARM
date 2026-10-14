@@ -1,6 +1,7 @@
 #include <relinker/guest/GuestImage.hpp>
 #include <relinker/parsing/ElfReader.hpp>
 #include <io/BufferUtils.hpp>
+#include <io/NativePath.hpp>
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -87,8 +88,8 @@ std::vector<std::string> GuestImageReader::ReadModuleNames(const std::vector<std
     return names;
 }
 
-GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes, const bool windows) const {
-    const auto fail = [&](const std::string& message) { throw Domain::RelinkerException(path.string() + ": " + message); };
+GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes, const bool windows) const try {
+    const auto fail = [&](const std::string& message) { throw Domain::RelinkerException(Io::Utf8Path(path) + ": " + message); };
     const auto range = [&](std::uint64_t offset, std::uint64_t size) {
         if (offset > bytes.size() || size > bytes.size() - offset) {
             std::ostringstream message;
@@ -361,6 +362,9 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
     if (tags.contains(33) && tags.at(33) != 0 && image.Init == 0) fail("Guest PREINIT_ARRAY has no module initializer");
     image.Bytes = std::move(bytes);
     return image;
+} catch (Domain::RelinkerException& error) {
+    if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(path);
+    throw;
 }
 
 }
