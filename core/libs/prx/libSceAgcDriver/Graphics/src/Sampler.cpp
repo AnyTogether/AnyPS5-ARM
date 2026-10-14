@@ -9,7 +9,6 @@ namespace AgcDriver::Graphics {
     Sampler::Sampler(const Context& context, const GuestSamplerResource& descriptor) : context(context) {
         Require(!descriptor.anisotropyEnable || context.samplerAnisotropy, "guest sampler descriptor requests anisotropic filtering which the device does not support");
         Require(descriptor.maxAnisotropy <= context.limits.maxSamplerAnisotropy, "guest sampler descriptor requests an anisotropy ratio beyond the device limit");
-        Require(descriptor.lodBias >= -context.limits.maxSamplerLodBias && descriptor.lodBias <= context.limits.maxSamplerLodBias, "guest sampler descriptor requests a LOD bias beyond the device limit");
         Require(!(descriptor.unnormalizedCoordinates && descriptor.compareEnable), "guest sampler descriptor with unnormalized coordinates enables depth comparison, which is not implemented");
         forcesDegamma = descriptor.forceDegamma;
 
@@ -27,7 +26,7 @@ namespace AgcDriver::Graphics {
         info.addressModeU = descriptor.addressModeU;
         info.addressModeV = descriptor.addressModeV;
         info.addressModeW = descriptor.addressModeW;
-        info.mipLodBias = descriptor.lodBias;
+        info.mipLodBias = std::clamp(descriptor.lodBias, -context.limits.maxSamplerLodBias, context.limits.maxSamplerLodBias);
         info.anisotropyEnable = descriptor.anisotropyEnable ? VK_TRUE : VK_FALSE;
         info.maxAnisotropy = descriptor.maxAnisotropy;
         info.compareEnable = descriptor.compareEnable ? VK_TRUE : VK_FALSE;

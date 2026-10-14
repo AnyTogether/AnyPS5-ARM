@@ -54,7 +54,9 @@ float toSignedLodBias(std::uint32_t raw) {
 
 }
 
-GuestSamplerResource DecodeSamplerResource(std::span<const std::uint32_t> words, bool unnormalizedProven, bool forceDegammaPaired, bool integerBorder) {
+namespace {
+
+GuestSamplerResource decodeSamplerResource(std::span<const std::uint32_t> words, bool unnormalizedProven, bool forceDegammaPaired, bool integerBorder) {
     Require(words.size() == 4, "guest sampler descriptor must contain 4 dwords");
 
     const auto clampX = (words[0] >> 0u) & 0x7u;
@@ -172,6 +174,16 @@ GuestSamplerResource DecodeSamplerResource(std::span<const std::uint32_t> words,
         result.maxAnisotropy = 1.0f;
     }
     return result;
+}
+
+}
+
+GuestSamplerResource DecodeSamplerResource(std::span<const std::uint32_t> words, bool unnormalizedProven, bool forceDegammaPaired, bool integerBorder) {
+    try {
+        return decodeSamplerResource(words, unnormalizedProven, forceDegammaPaired, integerBorder);
+    } catch (const std::runtime_error& error) {
+        throw UnrenderableDraw(error.what());
+    }
 }
 
 std::optional<std::array<std::uint32_t, 4>> SingleLevelSamplerWords(std::span<const std::uint32_t, 4> words, bool singleLevelImage, bool mipmappedImage) {

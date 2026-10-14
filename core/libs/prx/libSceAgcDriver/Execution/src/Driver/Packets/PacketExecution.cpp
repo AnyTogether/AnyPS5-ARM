@@ -254,6 +254,8 @@ void Driver::execute(const Submission& submission) {
             try {
                 if (opcode == 0x15) timed(&WorkerProfile::dispatchMs, [&] { dispatch(queue, packet, submission); });
                 else timed(&WorkerProfile::dispatchMs, [&] { dispatchIndirect(queue, packet, submission); });
+            } catch (const Graphics::UnrenderableDraw& error) {
+                reportSkippedWork("dispatch", error.what());
             } catch (const ShaderRecompiler::UnsupportedResourceBinding& error) {
                 reportSkippedWork("dispatch", error.what());
             }
