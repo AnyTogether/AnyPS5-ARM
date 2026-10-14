@@ -179,7 +179,17 @@ void Driver::ReportFailure(std::exception_ptr error) {
     require(error != nullptr, "null asynchronous failure");
     {
         std::lock_guard lock(mutex);
-        if (!failure) failure = error;
+        if (!failure) {
+            failure = error;
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception& reason) {
+                std::fprintf(stderr, "[gpu] submission failed: %s\n", reason.what());
+            } catch (...) {
+                std::fprintf(stderr, "[gpu] submission failed with a non-standard exception\n");
+            }
+            std::fflush(stderr);
+        }
         failed.store(true, std::memory_order_release);
         for (const auto& [handle, output] : outputs) output->Fail(failure);
         for (auto& [queue, worker] : workers) {
