@@ -297,6 +297,9 @@ int main(int argc, char** argv) {
             std::memset(volume.Data(), Kept, color.bytes);
             Run(*device, color, true, PixelCode, false);
             Check(volume.Data(), color, "emulated mesh draw", WhiteBands);
+            std::memset(fieldVolume.Data(), Kept, fieldColor.bytes);
+            Run(*device, fieldColor, true, LayerFieldPixelCode, true);
+            Check(fieldVolume.Data(), fieldColor, "emulated mesh draw with a pixel shader reading the render target index of its packed ancillary word", LayerFieldBands);
         } else if (target.mesh.has_value()) Run(*device, color, true, PixelCode, false);
         else std::puts("mesh case skipped, the device has no VK_EXT_mesh_shader");
         std::puts("layered volume draw tests passed");
