@@ -210,6 +210,10 @@ void RunColorTargetLayoutTests() {
     }
 
     Require(DecodeColorTileMode(0x0dc68000u) == ColorTileMode::D64KBX, "the observed SW_64KB_D_X color descriptor was rejected");
+    Require(DecodeColorTileMode(0x4dc60000u) == ColorTileMode::Z64KBX, "the observed SW_64KB_Z_X color descriptor was rejected");
+    Require(ColorTextureTileMode(ColorTileMode::Z64KBX) == TextureTileMode::kZ64KBX, "a Z-order XOR color target did not map to its texture mode");
+    Require(ColorTileModeIsXor(ColorTileMode::Z64KBX) && ColorTileModeBlockBytes(ColorTileMode::Z64KBX) == 65536u, "a Z-order XOR color target lost its block alignment or XOR flag");
+    reject([] { DecodeColorTileMode((0x4dc60000u & ~(0x1fu << 19u)) | (1u << 19u)); });
     Require(ColorTextureTileMode(ColorTileMode::D64KBX) == TextureTileMode::kD64KBX, "a display XOR color target did not map to its texture mode");
     Require(ColorTileModeIsXor(ColorTileMode::D64KBX) && ColorTileModeBlockBytes(ColorTileMode::D64KBX) == 65536u, "a display XOR color target lost its block alignment or XOR flag");
     reject([] { DecodeColorTileMode(0x0cc68000u); });
@@ -230,7 +234,7 @@ void RunColorTargetLayoutTests() {
         const auto block = ThinBlockLayout(TextureTileMode::kD64KBX, bpe);
         const auto width = 2u * block[1] + 1u;
         const auto height = 2u * block[2] + 1u;
-        for (const auto mode : {ColorTileMode::D64KBX, ColorTileMode::RenderTarget}) {
+        for (const auto mode : {ColorTileMode::Z64KBX, ColorTileMode::D64KBX, ColorTileMode::RenderTarget}) {
             const auto* equation = FindTextureSwizzleEquation(static_cast<std::uint32_t>(mode), bpe);
             Require(equation != nullptr, "a 64 KiB color swizzle equation is missing");
             const ColorTargetLayout layout(width, height, mode, bpe, 0x4600);

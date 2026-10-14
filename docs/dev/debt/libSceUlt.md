@@ -9,3 +9,5 @@
 ### Functional
 
 - [libSceUlt queues](../../../core/libs/prx/libSceUlt/Export.cpp) use preallocated host storage instead of the supplied guest work area; its existing size formula and the 512-byte object layouts remain unverified. Waiting-queue pool thread limits and waiter priority ordering are not implemented. Finalization wakes blocked queue callers with `ULT_ERROR_STATE`.
+- [sceUltWaitingQueueResourcePoolDestroy](../../../core/libs/prx/libSceUlt/Export.cpp) refuses with `ULT_ERROR_BUSY` only when a thread is currently waiting on a pool-backed mutex, semaphore or queue, matching the PS5 libSceUlt disassembly (0x473a in or55417wcDk); bound but idle objects do not block pool destruction. Waiting-queue pool guest work area node accounting is not implemented.
+- [sceUltMutexDestroy](../../../core/libs/prx/libSceUlt/Export.cpp) returns `ULT_ERROR_BUSY` when the mutex is held or has waiting threads, tracked via owner and waiter counts in `UltMutexState`. Prosper (`hle_ult.cpp`) logs a destroy of a held mutex and returns `ULT_OK`; AnyPS5 returns `ULT_ERROR_BUSY` to prevent destroying active mutexes.

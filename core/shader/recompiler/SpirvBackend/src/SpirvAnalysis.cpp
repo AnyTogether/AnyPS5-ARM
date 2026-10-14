@@ -224,11 +224,17 @@ std::uint32_t FunctionLdsDwords(const IrProgram& program) {
     std::uint64_t needed = 0;
     for (const IrBlock* block : program.BlockOrder()) {
         for (const IrValue* inst : block->Instructions()) {
-            if (SharedAccessOf(inst->Opcode()) == SharedAccess::None) continue;
+            const auto access = SharedAccessOf(inst->Opcode());
+            if (access == SharedAccess::None) continue;
             const auto index = inst->Flags<MemoryFlags>().index;
             if (index >= program.Resources().memoryInfo.size()) return FunctionLdsDwordLimit;
             const auto& memory = program.Resources().memoryInfo[index];
             if (memory.kind != ResourceKind::Lds) continue;
+            if (access == SharedAccess::Append || access == SharedAccess::Consume) {
+                needed = std::max<std::uint64_t>(needed, (std::uint64_t{memory.offset} >> 2u) + 1u);
+                if (needed >= FunctionLdsDwordLimit) return FunctionLdsDwordLimit;
+                continue;
+            }
             const auto dwords = SharedAccessDwords(inst->Opcode());
             if (dwords == 0u || inst->ArgumentCount() == 0) return FunctionLdsDwordLimit;
             const auto address = bound.Of(inst->Argument(0));

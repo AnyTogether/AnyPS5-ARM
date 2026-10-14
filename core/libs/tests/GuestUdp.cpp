@@ -19,6 +19,7 @@ int APS5_VABI getpeername_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI ioctl_nid_postfix(int, std::uint64_t, void*);
 int APS5_VABI _ioctl_nid_postfix(int, std::uint64_t, void*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
+std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
 std::int64_t APS5_VABI sendto_nid_postfix(int, const void*, std::uint64_t, int, const void*, std::uint32_t);
 std::int64_t APS5_VABI recvfrom_nid_postfix(int, void*, std::uint64_t, int, void*, std::uint32_t*);
 int APS5_VABI close_nid_postfix(int);
@@ -98,9 +99,50 @@ static void CheckAddressLengths(int family) {
     Require(close_nid_postfix(sender) == 0 && close_nid_postfix(receiver) == 0);
 }
 
+static void CheckDontWait() {
+    const int receiver = socket_nid_postfix(2, 2, 0);
+    const int sender = socket_nid_postfix(2, 2, 0);
+    Require(receiver >= 0 && sender >= 0);
+    std::array<unsigned char, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+    Require(bind_nid_postfix(receiver, address.data(), address.size()) == 0);
+    std::uint32_t size = address.size();
+    Require(getsockname_nid_postfix(receiver, address.data(), &size) == 0);
+    char buffer[16]{};
+    Iovec vector{buffer, sizeof(buffer)};
+    Msghdr message{nullptr, 0, &vector, 1, nullptr, 0, 0};
+#ifdef _WIN32
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 45);
+    Require(recvfrom_nid_postfix(receiver, buffer, sizeof(buffer), 0x80, nullptr, nullptr) == -1 && *__error_nid_postfix() == 45);
+    Require(recvmsg_nid_postfix(receiver, &message, 0x80) == -1 && *__error_nid_postfix() == 45);
+    Require(sendto_nid_postfix(sender, "x", 1, 0x80, address.data(), address.size()) == -1 && *__error_nid_postfix() == 45);
+#else
+    const auto start = std::chrono::steady_clock::now();
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 35);
+    Require(recvfrom_nid_postfix(receiver, buffer, sizeof(buffer), 0x80, nullptr, nullptr) == -1 && *__error_nid_postfix() == 35);
+    Require(recvmsg_nid_postfix(receiver, &message, 0x80) == -1 && *__error_nid_postfix() == 35);
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x82) == -1 && *__error_nid_postfix() == 35);
+    Require(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+    const char datagram[] = "nowait";
+    Require(sendto_nid_postfix(sender, datagram, sizeof(datagram), 0x80, address.data(), address.size()) == sizeof(datagram));
+    Require(recvfrom_nid_postfix(receiver, buffer, sizeof(buffer), 2, nullptr, nullptr) == sizeof(datagram));
+    std::memset(buffer, 0, sizeof(buffer));
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x82) == sizeof(datagram) && std::strcmp(buffer, datagram) == 0);
+    std::memset(buffer, 0, sizeof(buffer));
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == sizeof(datagram) && std::strcmp(buffer, datagram) == 0);
+    Require(connect_nid_postfix(sender, address.data(), address.size()) == 0);
+    Require(send_nid_postfix(sender, datagram, sizeof(datagram), 0x80 | 0x20000) == sizeof(datagram));
+    std::memset(buffer, 0, sizeof(buffer));
+    Require(recvmsg_nid_postfix(receiver, &message, 0) == sizeof(datagram) && std::strcmp(buffer, datagram) == 0);
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 35);
+#endif
+    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x1) == -1 && *__error_nid_postfix() == 45);
+    Require(close_nid_postfix(receiver) == 0 && close_nid_postfix(sender) == 0);
+}
+
 int main() {
     CheckAddressLengths(2);
     CheckAddressLengths(28);
+    CheckDontWait();
     const int receiver = socket_nid_postfix(2, 2, 0);
     const int sender = socket_nid_postfix(2, 2, 17);
     Require(receiver >= 0 && sender >= 0 && receiver != sender);

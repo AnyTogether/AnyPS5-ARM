@@ -4,6 +4,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <bit>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -54,8 +56,10 @@ public:
         VkFormatProperties properties{};
         context.formatProperties(context.physical, target.format, &properties);
         Require((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0, "multisampled render-target format cannot be a color attachment");
-        constexpr VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         VkImageFormatProperties supported{};
+        sampleable = (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0 && context.imageFormatProperties(context.physical, target.format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage | VK_IMAGE_USAGE_SAMPLED_BIT, 0, &supported) == VK_SUCCESS && (supported.sampleCounts & samples) != 0;
+        if (sampleable) usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
         Check(context.imageFormatProperties(context.physical, target.format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &supported), "vkGetPhysicalDeviceImageFormatProperties multisampled target");
         Require((supported.sampleCounts & samples) != 0 && target.extent.width <= supported.maxExtent.width && target.extent.height <= supported.maxExtent.height, "multisampled render target exceeds device image limits");
         try {
@@ -120,6 +124,23 @@ public:
         });
     }
 
+    std::shared_ptr<Texture> Sampled(VkComponentMapping components) {
+        Require(sampleable, "the device cannot sample the multisampled color target's format at its sample count");
+        Require(cmask.Refusal().empty(), cmask.Refusal());
+        Require(cmask.Keys() != DccKeys::Clear0000, "sampling a multisampled color target whose CMASK fast clear no draw has applied is not implemented");
+        Require(Recorder::Active() != nullptr, "a multisampled color target is only sampled by recorded draws and dispatches");
+        ApplyFastClear(target);
+        recordCommands(context, [&](VkCommandBuffer commands, Recorder*) {
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+            Recorder::CountBarriers(Recorder::CommandClass::Draw, 1);
+        });
+        const std::array<std::uint32_t, 4> key{static_cast<std::uint32_t>(components.r), static_cast<std::uint32_t>(components.g), static_cast<std::uint32_t>(components.b), static_cast<std::uint32_t>(components.a)};
+        if (const auto found = textures.find(key); found != textures.end()) return found->second;
+        auto texture = std::make_shared<Texture>(context, image, target.format, VK_IMAGE_ASPECT_COLOR_BIT, components);
+        textures.emplace(key, texture);
+        return texture;
+    }
+
     VkRenderPass ResolvePass() {
         if (resolvePass != VK_NULL_HANDLE) return resolvePass;
         std::array<VkAttachmentDescription, 2> attachments{};
@@ -164,7 +185,11 @@ public:
     MultisampledColorFill colorFill;
 
 private:
+    bool sampleable = false;
+    std::map<std::array<std::uint32_t, 4>, std::shared_ptr<Texture>> textures;
+
     void release() noexcept {
+        textures.clear();
         if (resolvePass) context.Function<PFN_vkDestroyRenderPass>("vkDestroyRenderPass")(context.device, resolvePass, nullptr);
         if (view) context.Function<PFN_vkDestroyImageView>("vkDestroyImageView")(context.device, view, nullptr);
         if (image) context.Function<PFN_vkDestroyImage>("vkDestroyImage")(context.device, image, nullptr);
@@ -378,6 +403,28 @@ bool TakeMultisampledClear(MultisampledCmask& cmask, MultisampledColorFill& colo
 VkImageView MultisampleTargetView(const Context& context, const ColorTarget& target) {
     std::lock_guard lock(targetsMutex());
     return acquire(context, target).view;
+}
+
+std::shared_ptr<Texture> MultisampleTargetTexture(const Context& context, const GuestTextureResource& resource, VkComponentMapping components) {
+    std::lock_guard lock(targetsMutex());
+    const auto format = ResolveTextureFormat(resource.format);
+    const MultisampleTarget* other = nullptr;
+    for (const auto& target : targets()) {
+        if (!target->active->load(std::memory_order_acquire)) continue;
+        if (target->context.device != context.device || target->target.surfaceAddress != resource.baseAddress) continue;
+        const auto& rendered = target->target;
+        if (rendered.format == format && rendered.extent.width == resource.width && rendered.extent.height == resource.height && rendered.samples == resource.samples && rendered.mip == 0) return target->Sampled(components);
+        other = target.get();
+    }
+    char text[320];
+    if (other != nullptr) std::snprintf(text, sizeof(text), "AGC graphics: sampling multisampled color target 0x%llx (%ux%u, %u samples, vk format %d) as a %ux%u texture of %u samples and guest format %u (vk %d) is not implemented", static_cast<unsigned long long>(resource.baseAddress), other->target.extent.width, other->target.extent.height, other->target.samples, static_cast<int>(other->target.format), resource.width, resource.height, resource.samples, resource.format, static_cast<int>(format));
+    else std::snprintf(text, sizeof(text), "AGC graphics: sampling the %ux%u multisampled texture 0x%llx of %u samples, which no draw rendered to, is not implemented", resource.width, resource.height, static_cast<unsigned long long>(resource.baseAddress), resource.samples);
+    throw std::runtime_error(text);
+}
+
+void MaterializeMultisampleTargetClear(const Context& context, const ColorTarget& target) {
+    std::lock_guard lock(targetsMutex());
+    acquire(context, target);
 }
 
 void ResolveMultisampleTarget(const Context& context, const ColorTarget& source, StorageTexture& destination, VkImageView destinationView) {

@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: true
+          submodules: recursive
       - id: toolchain
         if: matrix.platform == 'windows'
         uses: actions/cache@v6
@@ -62,7 +62,7 @@ jobs:
           save: false
       - name: Install lavapipe for the GPU execution tests and the audio development files
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev
       - name: Configure Linux
         if: matrix.platform == 'linux'
         run: cmake -S . -B build $CONFIGURE
@@ -130,7 +130,12 @@ jobs:
           done
           python tools/package_release.py --docs docs/user --output dist
           chmod +x "dist/relinker-$RELEASE_TAG"
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          gh api --method POST "repos/$GH_REPO/releases/generate-notes" -f tag_name="$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.json"
+          python tools/prepare_release_notes.py --input "$RUNNER_TEMP/release-notes.json" --body "$RUNNER_TEMP/release-body.md" --full dist/release-notes.md
       - name: Create draft and upload files
-        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --title "$RELEASE_TAG" --generate-notes
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-body.md"
       - name: Publish complete release
         run: gh release edit "$RELEASE_TAG" --draft=false

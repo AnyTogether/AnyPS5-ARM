@@ -26,6 +26,25 @@ alignas(256) constexpr std::array<std::uint32_t, 10> VertexCode{
     0xf80000cf, 0x03020100, 0xf80008df, 0x07060504, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 106> MeshCode{
+    0x8f6a9003, 0x94fe6ac1, 0xbf88000b, 0xd7650006, 0x000100c1, 0xd7660006, 0x00020cc1, 0x93ebff03,
+    0x00040018, 0xd7460006, 0x04190c6b, 0x340c0c82, 0xd8340000, 0x00000506, 0xbf8cc07f, 0xbefe04c1,
+    0xbf8a0000, 0x938dff02, 0x00090016, 0x9382ff03, 0x00040018, 0x938cff03, 0x00080008, 0xd7650009,
+    0x000100c1, 0xd7660009, 0x000212c1, 0xd746000a, 0x04250c02, 0x7da8120c, 0xbf88002e, 0x361600ff,
+    0x0000ffff, 0x2c180090, 0x361a02ff, 0x0000ffff, 0xd8d80000, 0x0b00000b, 0xd8d80000, 0x0c00000c,
+    0xd8d80000, 0x0d00000d, 0xbf8cc07f, 0xe0382000, 0x8002100b, 0xe0382010, 0x8002140b, 0xe0382000,
+    0x8002180c, 0xe0382010, 0x80021c0c, 0xe0382000, 0x8002200d, 0xe0382010, 0x8002240d, 0x161c1483,
+    0x161e14ff, 0x00000060, 0xbf8c3f70, 0xdb7c0400, 0x0000100f, 0xdb7c0410, 0x0000140f, 0xdb7c0420,
+    0x0000180f, 0xdb7c0430, 0x00001c0f, 0xdb7c0440, 0x0000200f, 0xdb7c0450, 0x0000240f, 0x4a501c81,
+    0x4a521c82, 0x3450508a, 0x34525294, 0xd772002a, 0x04a6510e, 0xbf8cc07f, 0xbefe04c1, 0xbf8a0000,
+    0x930e830d, 0xbf078002, 0xbf850003, 0x8f0f8c0d, 0x887c0f0e, 0xbf900009, 0x7da8140d, 0xbf880002,
+    0xf8000941, 0x0000002a, 0xbefe04c1, 0x7da8140e, 0xbf88000c, 0x34561485, 0xdbfc0400, 0x2c00002b,
+    0xdbfc0410, 0x3000002b, 0xbf8cc07f, 0xf80000cf, 0x2f2e2d2c, 0xf80008df, 0x33323130, 0xf800020f,
+    0x33323130, 0xbf810000,
+};
+
+constexpr ShaderRecompiler::MeshConfiguration Subgroup{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u};
+
 alignas(256) constexpr std::array<std::uint32_t, 7> PixelCode{
     0x7e0002f2, 0x7e0202f2, 0x7e0402f2, 0x7e0602f2, 0xf800080f, 0x03020100, 0xbf810000,
 };
@@ -79,25 +98,29 @@ bool Expected(Visible visible, std::uint32_t pixel) {
     return false;
 }
 
-void Draw(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const Row& row) {
+void Draw(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const Row& row, bool mesh) {
     Pixels.fill(std::byte{0});
     std::array<Vertex, 3> vertices{};
     for (std::size_t i = 0; i < vertices.size(); ++i) {
         vertices[i] = {{PositionX[i], PositionY[i], 0.5f, 1.0f}, {row.component0[i], row.component1[i], row.component2[i], 0.0f}};
     }
 
-    std::vector<std::uint32_t> vertexUserData(4, 0u);
+    std::vector<std::uint32_t> vertexUserData(mesh ? 12u : 4u, 0u);
     const auto vertexBuffer = BufferDescriptor(vertices.data(), sizeof(Vertex), static_cast<std::uint32_t>(vertices.size()));
-    std::copy(vertexBuffer.begin(), vertexBuffer.end(), vertexUserData.begin());
-    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(VertexCode.data()), std::as_bytes(std::span(VertexCode))}}};
+    std::copy(vertexBuffer.begin(), vertexBuffer.end(), vertexUserData.begin() + (mesh ? 8 : 0));
+    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(vertices.size()), 0, 1, 0, false};
+    const std::span<const std::uint32_t> code = mesh ? std::span<const std::uint32_t>(MeshCode) : std::span<const std::uint32_t>(VertexCode);
+    const auto stage = mesh ? ShaderStage::Mesh : ShaderStage::Vertex;
+    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
     ShaderRecompiler::ShaderVertexStageInfo vertexInfo{};
     vertexInfo.paClVsOutCntl = row.control;
     ShaderRecompiler::RecompileRequest vertex{
-        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(VertexCode.data()), VertexCode, 0, {}},
+        {stage, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
         {waveSize, 0, vertexUserData, std::nullopt, std::nullopt, vertexInfo, vertexMemory},
         device.Target(),
-        {0, 0, 0, 64}
+        {0, 0, 0, mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : 64u}
     };
+    if (mesh) vertex.graphics = ShaderRecompiler::GraphicsCompileContext{0, {}, Subgroup, std::nullopt, {draw.indexAddress, draw.indexCount, draw.indexSize, draw.instanceCount}};
     vertex.useCache = false;
     const auto vertexResult = ShaderRecompiler::Recompile(vertex);
     const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
@@ -116,12 +139,13 @@ void Draw(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const Row& ro
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
-        {ShaderStage::Vertex, &vertexResult, 0},
+        {stage, &vertexResult, 0},
         {ShaderStage::Fragment, &pixelResult, PixelPushOffset(vertexPush, device.Target())}
     }};
 
     AgcDriver::Graphics::State state{};
-    state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, waveSize, waveSize, std::nullopt, std::nullopt};
+    if (mesh) state.stages = {AgcDriver::Graphics::ShaderPath::Geometry, 0x20u, waveSize, waveSize, Subgroup, std::nullopt};
+    else state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, waveSize, waveSize, std::nullopt, std::nullopt};
     state.paClVsOutCntl = row.control;
     state.color = {reinterpret_cast<std::uintptr_t>(Pixels.data()), {Width, Height}, VK_FORMAT_R8G8B8A8_UNORM, Pixels.size(), 0xe4u};
     state.colors = {state.color};
@@ -136,13 +160,12 @@ void Draw(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, const Row& ro
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
     state.blendConstants = {};
-    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(vertices.size()), 0, 1, 0, false};
     device.Draw(state, draw, shaders);
     device.WaitIdle();
 }
 
-void Check(const Row& row, std::uint32_t waveSize) {
-    const auto what = std::string("vertex clip and cull distances, ") + row.name + ", wave" + std::to_string(waveSize);
+void Check(const Row& row, std::uint32_t waveSize, bool mesh) {
+    const auto what = std::string(mesh ? "mesh" : "vertex") + " clip and cull distances, " + row.name + ", wave" + std::to_string(waveSize);
     for (std::uint32_t pixel = 0; pixel < Width * Height; ++pixel) {
         const auto value = std::to_integer<std::uint8_t>(Pixels[pixel * 4u]);
         Require(value == 0u || value == 255u, what + ": pixel " + std::to_string(pixel) + " stored " + std::to_string(value));
@@ -170,7 +193,7 @@ int main() {
                 if (!cullDistance && (row.control & 0xff00u) != 0u) {
                     bool refused = false;
                     try {
-                        Draw(*device, waveSize, row);
+                        Draw(*device, waveSize, row, false);
                     } catch (const std::runtime_error& error) {
                         refused = std::string(error.what()).find("which the device lacks") != std::string::npos;
                         if (!refused) throw;
@@ -178,11 +201,19 @@ int main() {
                     Require(refused, std::string("a cull plane was drawn on a device without shaderCullDistance: ") + row.name);
                     continue;
                 }
-                Draw(*device, waveSize, row);
-                Check(row, waveSize);
+                Draw(*device, waveSize, row, false);
+                Check(row, waveSize, false);
             }
         }
         if (!cullDistance) std::puts("the device lacks shaderCullDistance: cull planes were checked to be refused");
+        if (device->Target().mesh.has_value()) {
+            for (const auto& row : Rows) {
+                Draw(*device, 64u, row, true);
+                Check(row, 64u, true);
+            }
+        } else {
+            std::puts("mesh case skipped, the device has no VK_EXT_mesh_shader");
+        }
         std::puts("vertex clip and cull distance tests passed");
         return 0;
     } catch (const std::exception& error) {

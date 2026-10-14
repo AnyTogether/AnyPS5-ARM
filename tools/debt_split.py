@@ -43,7 +43,7 @@ def key(kind, text):
 def relink(text, source, destination):
     def replace(match):
         target = match.group(1)
-        if re.match(r"^[a-z][a-z0-9+.-]*:", target):
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:|//", target):
             return match.group(0)
         path, _, anchor = target.partition("#")
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(source), path)) if path else source

@@ -536,6 +536,21 @@ class RepositoryChecksTests(unittest.TestCase):
         self.assertEqual(check.findings,
                          [("duplicate-export", "core/libs/prx/libSceB/Export.cpp", 1, "sceFooBar is also in libSceA")])
 
+    def test_type_change_does_not_shift_later_files(self):
+        (self.root / "a.txt").write_text("text\n", encoding="utf-8")
+        self.commit()
+        target = self.root / "target"
+        target.write_text("README.md", encoding="utf-8")
+        blob = self.git("hash-object", "-w", "target")
+        target.unlink()
+        self.git("update-index", "--cacheinfo", "120000", blob, "a.txt")
+        (self.root / "z.cpp").write_text("int z;\n// debt\n", encoding="utf-8")
+        self.git("add", "z.cpp")
+        self.git("commit", "-qm", "test: replace a file with a link")
+        check = Check("HEAD~1", "HEAD")
+        check.code()
+        self.assertIn(("comment", "z.cpp", 2, ""), check.findings)
+
     def test_submodule_outside_thirdparty_reports_without_crashing(self):
         head = self.git("rev-parse", "HEAD")
         self.git("update-index", "--add", "--cacheinfo", "160000", head, "vendor")

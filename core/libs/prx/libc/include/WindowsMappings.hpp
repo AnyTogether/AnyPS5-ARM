@@ -24,8 +24,8 @@ public:
     enum class Collection { All, Armed, Fresh };
 
     static WindowsMappings& Get() {
-        static WindowsMappings mappings;
-        return mappings;
+        static auto* mappings = new WindowsMappings;
+        return *mappings;
     }
 
     void* Reserve(void* address, std::size_t bytes) {
@@ -35,6 +35,7 @@ public:
     std::vector<std::pair<std::uintptr_t, std::size_t>> Commit(void* address, std::size_t bytes, DWORD protection, std::size_t granule, bool watched) {
         std::vector<std::pair<std::uintptr_t, std::size_t>> created;
         std::lock_guard lock(mutex);
+        collectableRanges.clear();
         const auto end = reinterpret_cast<std::uintptr_t>(address) + bytes;
         for (auto cursor = reinterpret_cast<std::uintptr_t>(address); cursor < end;) {
             const auto memory = query(cursor);
@@ -77,13 +78,18 @@ public:
 
     void Map(void* address, std::size_t bytes, HANDLE section, std::uint64_t offset, DWORD protection, bool watched = false, bool resident = false) {
         std::lock_guard lock(mutex);
+        collectableRanges.clear();
         auto cursor = reinterpret_cast<std::uintptr_t>(address);
         reset(cursor, bytes);
         if (resident) watchResident = watched;
         HANDLE duplicate = nullptr;
         if (!DuplicateHandle(GetCurrentProcess(), section, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) fail("keep shared guest section");
         const auto owned = std::make_shared<Section>(duplicate);
-        const auto slotOf = [&](std::size_t done) -> Physical& { return physical[std::make_pair(reinterpret_cast<std::uintptr_t>(section), offset + done)]; };
+        const auto slotOf = [&](std::size_t done) -> const std::shared_ptr<Physical>& {
+            auto& slot = physical[std::make_pair(reinterpret_cast<std::uintptr_t>(section), offset + done)];
+            if (!slot) slot = std::make_shared<Physical>();
+            return slot;
+        };
         const auto pageOf = [](Physical& slot) {
             auto shared = slot.page.lock();
             if (!shared) {
@@ -93,7 +99,7 @@ public:
             return shared;
         };
         const auto single = [&](std::size_t done) {
-            const auto& slot = slotOf(done);
+            const auto& slot = *slotOf(done);
             const auto shared = slot.page.lock();
             return resident && !slot.stored && (!shared || shared->aliases.empty());
         };
@@ -106,14 +112,14 @@ public:
                 commitResident(base, runBytes);
                 residentRuns.emplace(base, Run{base + runBytes, {}, static_cast<std::uint32_t>(runBytes >> 12)});
                 for (std::size_t at = 0; at < runBytes; at += pageBytes) {
-                    auto& slot = slotOf(done + at);
-                    const auto shared = pageOf(slot);
-                    if (slot.saved) {
-                        std::memcpy(reinterpret_cast<void*>(base + at), slot.saved->bytes + slot.savedOffset, pageBytes);
-                        slot.saved.reset();
+                    const auto slot = slotOf(done + at);
+                    const auto shared = pageOf(*slot);
+                    if (slot->saved) {
+                        std::memcpy(reinterpret_cast<void*>(base + at), slot->saved->bytes + slot->savedOffset, pageBytes);
+                        slot->saved.reset();
                     }
                     shared->aliases.push_back(base + at);
-                    views.emplace(base + at, View{shared, protection, {}, 0, owned, offset + done + at, 0, 0, true, &slot});
+                    views.emplace(base + at, View{shared, protection, {}, 0, owned, offset + done + at, 0, 0, true, slot});
                     invalidate(*shared);
                 }
                 remember(freshRanges, base, base + runBytes);
@@ -122,17 +128,17 @@ public:
                 done += runBytes;
                 continue;
             }
-            auto& slot = slotOf(done);
-            const auto shared = pageOf(slot);
+            const auto slot = slotOf(done);
+            const auto shared = pageOf(*slot);
             const auto aliases = shared->aliases;
             for (const auto alias : aliases) {
                 if (views.at(alias).resident) demote(alias);
             }
             split(base, pageBytes);
             mapShared(base, section, offset + done, protection);
-            slot.stored = true;
+            slot->stored = true;
             shared->aliases.push_back(base);
-            views.emplace(base, View{shared, protection, {}, 0, owned, offset + done, 0, 0, false, &slot});
+            views.emplace(base, View{shared, protection, {}, 0, owned, offset + done, 0, 0, false, slot});
             remember(freshRanges, base, base + pageBytes);
             invalidate(*shared);
             done += pageBytes;
@@ -141,6 +147,7 @@ public:
 
     void SetProtection(std::uintptr_t address, std::size_t bytes, DWORD protection) {
         std::lock_guard lock(mutex);
+        collectableRanges.clear();
         for (auto it = views.lower_bound(address); it != views.end() && it->first < address + bytes; ++it) {
             it->second.protection = protection;
             it->second.armed = 0;
@@ -209,14 +216,7 @@ public:
     void ForgetSection(HANDLE section) {
         std::lock_guard lock(mutex);
         const auto key = reinterpret_cast<std::uintptr_t>(section);
-        for (auto slot = physical.lower_bound(std::make_pair(key, std::uint64_t{0})); slot != physical.end() && slot->first.first == key;) {
-            const auto shared = slot->second.page.lock();
-            if (shared && !shared->aliases.empty()) {
-                ++slot;
-                continue;
-            }
-            slot = physical.erase(slot);
-        }
+        physical.erase(physical.lower_bound(std::make_pair(key, std::uint64_t{0})), physical.lower_bound(std::make_pair(key + 1, std::uint64_t{0})));
     }
 
     bool BeginHostWrite(std::uintptr_t address, std::size_t bytes) {
@@ -333,6 +333,13 @@ public:
                 }
             }
         } else if (clear && !collectable(address, end)) return false;
+        auto position = views.lower_bound(address & ~(pageBytes - 1));
+        std::uintptr_t cleanStart = 0;
+        std::uintptr_t cleanEnd = 0;
+        const auto flushClean = [&] {
+            if (cleanEnd > cleanStart) rememberClean(cleanStart, cleanEnd);
+            cleanStart = cleanEnd = 0;
+        };
         for (auto cursor = address; cursor < end;) {
             const auto nextClean = cleanRanges.upper_bound(cursor);
             if (nextClean != cleanRanges.begin()) {
@@ -343,8 +350,9 @@ public:
                 }
             }
             const auto base = cursor & ~(pageBytes - 1);
-            const auto found = views.find(base);
+            const auto found = viewAt(base, position);
             if (found != views.end() && found->second.resident) {
+                flushClean();
                 if (!watchResident) return false;
                 const auto available = capacity - *count;
                 if (available == 0) return true;
@@ -370,7 +378,10 @@ public:
                         }
                     }
                 }
-                if (view.protection == PAGE_NOACCESS) return false;
+                if (view.protection == PAGE_NOACCESS) {
+                    flushClean();
+                    return false;
+                }
                 const bool pinned = view.page->pins != 0;
                 std::uint8_t settled = 0;
                 auto settledEnd = cursor;
@@ -413,24 +424,25 @@ public:
                         other.armed |= arming;
                     }
                     const auto tracked = static_cast<std::uint8_t>(settled & ~untracked);
-                    auto cleanFrom = cursor;
-                    auto cleanTo = cursor;
                     for (std::size_t sub = 0; sub < subpages; ++sub) {
                         if ((tracked & (1u << sub)) == 0) continue;
                         const auto from = std::max(cursor, base + sub * subpageBytes);
                         const auto to = std::min(settledEnd, base + (sub + 1) * subpageBytes);
                         if (from == base + sub * subpageBytes && to == base + (sub + 1) * subpageBytes) view.seen[sub] = view.page->generation[sub];
-                        if (from != cleanTo) {
-                            if (cleanFrom != cleanTo) rememberClean(cleanFrom, cleanTo);
-                            cleanFrom = from;
+                        if (from != cleanEnd) {
+                            flushClean();
+                            cleanStart = from;
                         }
-                        cleanTo = to;
+                        cleanEnd = to;
                     }
-                    if (cleanFrom != cleanTo) rememberClean(cleanFrom, cleanTo);
                 }
-                if (full) return true;
+                if (full) {
+                    flushClean();
+                    return true;
+                }
                 cursor = stop;
             } else {
+                flushClean();
                 if (collection == Collection::Fresh) {
                     const auto next = views.lower_bound(cursor);
                     cursor = next == views.end() ? end : std::min(end, next->first);
@@ -449,14 +461,18 @@ public:
                 cursor = stop;
             }
         }
+        flushClean();
         return true;
     }
 
 private:
     bool collectable(std::uintptr_t address, std::uintptr_t end) {
+        const auto proven = collectableRanges.upper_bound(address);
+        if (proven != collectableRanges.begin() && std::prev(proven)->second >= end) return true;
+        auto position = views.lower_bound(address & ~(pageBytes - 1));
         for (auto cursor = address; cursor < end;) {
             const auto base = cursor & ~(pageBytes - 1);
-            if (const auto found = views.find(base); found != views.end()) {
+            if (const auto found = viewAt(base, position); found != views.end()) {
                 if (found->second.protection == PAGE_NOACCESS || (found->second.resident && !watchResident)) return false;
                 cursor = std::min(end, base + pageBytes);
                 continue;
@@ -465,6 +481,7 @@ private:
             if (memory.State != MEM_COMMIT || memory.Type != MEM_PRIVATE) return false;
             cursor = std::min(end, reinterpret_cast<std::uintptr_t>(memory.BaseAddress) + memory.RegionSize);
         }
+        remember(collectableRanges, address, end);
         return true;
     }
 
@@ -513,7 +530,7 @@ private:
         std::uint32_t hostWrites;
         std::uint8_t collected = 0;
         bool resident = false;
-        Physical* slot = nullptr;
+        std::shared_ptr<Physical> slot;
     };
     struct Run {
         std::uintptr_t end;
@@ -776,6 +793,7 @@ private:
     }
 
     void reset(std::uintptr_t address, std::size_t bytes) {
+        collectableRanges.clear();
         const auto end = address + bytes;
         forgetClean(address, end);
         breakRun(address);
@@ -855,9 +873,20 @@ private:
     }
 
     Ranges cleanRanges;
+    Ranges collectableRanges;
     Ranges freshRanges;
     std::map<std::uintptr_t, View> views;
-    std::map<std::pair<std::uintptr_t, std::uint64_t>, Physical> physical;
+
+    using Views = std::map<std::uintptr_t, View>;
+
+    Views::iterator viewAt(std::uintptr_t base, Views::iterator& position) {
+        if (position != views.end() && position->first < base) {
+            ++position;
+            if (position != views.end() && position->first < base) position = views.lower_bound(base);
+        }
+        return position != views.end() && position->first == base ? position : views.end();
+    }
+    std::map<std::pair<std::uintptr_t, std::uint64_t>, std::shared_ptr<Physical>> physical;
     std::map<std::uintptr_t, Run> residentRuns;
     std::map<std::uintptr_t, std::size_t> splitAliases;
     std::size_t granularity = 0x10000;

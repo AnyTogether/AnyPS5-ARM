@@ -1,5 +1,6 @@
-add_library(libSceSystemService SHARED EXCLUDE_FROM_ALL Export.cpp)
+add_library(libSceSystemService SHARED EXCLUDE_FROM_ALL Export.cpp LoadExec.cpp)
 target_include_directories(libSceSystemService PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(libSceSystemService PRIVATE libSceAgcDriver)
 configure_windows_unwind(libSceSystemService)
 
 if(BUILD_TESTING)
@@ -14,6 +15,19 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
 
+    add_library(guest_loadexec_host SHARED ${LIBS_INCLUDE_DIR}/tests/GuestLoadExecHost.cpp)
+    target_include_directories(guest_loadexec_host PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_loadexec_host PRIVATE libSceSystemService libc libkernel)
+    set_target_properties(guest_loadexec_host PROPERTIES PREFIX "" SUFFIX ".prx" BUILD_RPATH "$ORIGIN")
+    configure_windows_unwind(guest_loadexec_host)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        add_test(NAME loadexec_arguments COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/relinker/relinker/tests/test_loadexec_arguments.py
+            $<TARGET_FILE:relinker> $<TARGET_FILE:guest_loadexec_host>
+            $<TARGET_FILE:libSceSystemService> $<TARGET_FILE:libSceAgcDriver> $<TARGET_FILE:libc> $<TARGET_FILE:libkernel> ${CMAKE_CXX_COMPILER})
+        set_tests_properties(loadexec_arguments PROPERTIES TIMEOUT 30)
+    endif()
     add_test_executable(guest_system_exit_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemExit.cpp)
     target_include_directories(guest_system_exit_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_system_exit_tests PRIVATE libSceSystemService libc)

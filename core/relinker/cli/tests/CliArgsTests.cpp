@@ -222,6 +222,25 @@ void windowsFixedBase() {
     expectThrows({"--windows", "--windows-fixed-base", "0x400000", "--windows-fixed-base", "0x800000", "input.elf", "output.exe"}, "--windows-fixed-base cannot be repeated");
 }
 
+void linuxFixedBase() {
+    require(!parse({"input.elf", "output.elf"}).linuxFixedBase, "fixed base was enabled by default");
+    for (const auto& value : {"0x400000", "0X400000", "4194304"})
+        require(parse({"--linux-fixed-base", value, "input.elf", "output.elf"}).linuxFixedBase == 0x400000, "fixed base was parsed incorrectly");
+    require(parse({"input.elf", "--linux-fixed-base", "0x10000", "output.elf"}).linuxFixedBase == 0x10000, "lowest fixed base was rejected");
+    require(parse({"--linux-fixed-base", "0x7fffffff0000", "input.elf", "output.elf"}).linuxFixedBase == 0x7fffffff0000, "highest fixed base was rejected");
+    require(parse({"--linux-fixed-base", "0x400000000", "input.elf", "output.elf"}).linuxFixedBase == 0x400000000, "fixed base was truncated to 32 bits");
+    const std::string range = "--linux-fixed-base requires a 64 KiB-aligned address from 0x10000 through 0x7fffffff0000";
+    for (const auto& value : {"0", "0x0", "0xf000", "0x400001", "0x408000", "0x", "0X", "-4194304", "+4194304", " 4194304", "4194304 ", "0x400000junk", "0x-400000", "18446744073709551616", "0x800000000000", "0x7fffffff10000"})
+        expectThrows({"--linux-fixed-base", value, "input.elf", "output.elf"}, range);
+    expectThrows({"--linux-fixed-base"}, "--linux-fixed-base requires an address");
+    expectThrows({"--linux-fixed-base", "", "input.elf", "output.elf"}, "--linux-fixed-base requires an address");
+    expectThrows({"--linux-fixed-base", "--windows", "input.elf", "output.elf"}, "--linux-fixed-base requires an address");
+    expectThrows({"--linux-fixed-base", "0x400000", "--linux-fixed-base", "0x400000", "input.elf", "output.elf"}, "--linux-fixed-base cannot be repeated");
+    expectThrows({"--windows", "--linux-fixed-base", "0x400000", "input.elf", "output.exe"}, "--linux-fixed-base cannot be used with --windows or --macos");
+    expectThrows({"--linux-fixed-base", "0x400000", "--macos", "input.elf", "output"}, "--linux-fixed-base cannot be used with --windows or --macos");
+    expectThrows({"--lazy-binding", "--linux-fixed-base", "0x400000", "input.elf", "output.elf"}, "--linux-fixed-base conflicts with --lazy-binding");
+}
+
 }
 
 void moduleDirectories() {
@@ -288,6 +307,7 @@ int main() {
         windowsGuiRequiresWindows();
         missingPositionals();
         windowsFixedBase();
+        linuxFixedBase();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

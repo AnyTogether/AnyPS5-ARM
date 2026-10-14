@@ -5,6 +5,8 @@
 #include <initializer_list>
 #include <iterator>
 #include <span>
+#include <string>
+#include <utility>
 
 namespace ShaderRecompiler {
 namespace {
@@ -806,12 +808,52 @@ std::uint32_t EmitFPDot2F32F16(SpirvEmitterState& state, std::uint32_t arg0, std
     });
 }
 
+namespace {
+
+std::uint32_t InterpolateFunction(SpirvEmitterState& state, bool halfResult, std::uint32_t mode) {
+    const auto key = std::make_pair(halfResult, mode);
+    if (const auto found = state.interpolateFunctions.find(key); found != state.interpolateFunctions.end()) return found->second;
+    const auto f32 = TypeF32(state);
+    const auto id = state.module.AllocateId();
+    struct Restore {
+        SpirvEmitterState& state;
+        std::uint32_t label;
+        ~Restore() {
+            state.module.EndHelperFunction();
+            state.currentLabel = label;
+        }
+    };
+    state.module.BeginHelperFunction();
+    const Restore restore{state, state.currentLabel};
+    state.module.AddName(id, std::string(halfResult ? "interpolate_f16_mode_" : "interpolate_f32_mode_") + std::to_string(mode));
+    state.module.AddFunction(spv::OpFunction, f32, id, spv::FunctionControlDontInlineMask, state.module.Type(spv::OpTypeFunction, f32, f32, f32, f32));
+    std::array<std::uint32_t, 3> parameters{};
+    for (auto& parameter : parameters) {
+        parameter = state.module.AllocateId();
+        state.module.AddFunction(spv::OpFunctionParameter, f32, parameter);
+    }
+    EmitLabel(state, state.module.AllocateId());
+    state.module.AddFunction(spv::OpReturnValue, Interpolate(state, parameters[0], parameters[1], parameters[2], halfResult, mode));
+    state.module.AddFunction(spv::OpFunctionEnd);
+    state.interpolateFunctions.emplace(key, id);
+    return id;
+}
+
+std::uint32_t CallInterpolate(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t mode) {
+    const auto function = InterpolateFunction(state, halfResult, mode);
+    const auto result = state.module.AllocateId();
+    state.module.AddFunction(spv::OpFunctionCall, TypeF32(state), result, function, delta, coordinate, base);
+    return result;
+}
+
+}
+
 std::uint32_t EmitFPInterpolateF32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, const IrValue* mode) {
-    return Interpolate(state, arg0, arg1, arg2, false, mode->ImmediateU32());
+    return CallInterpolate(state, arg0, arg1, arg2, false, mode->ImmediateU32());
 }
 
 std::uint32_t EmitFPInterpolateF16(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, const IrValue* mode) {
-    return Interpolate(state, arg0, arg1, arg2, true, mode->ImmediateU32());
+    return CallInterpolate(state, arg0, arg1, arg2, true, mode->ImmediateU32());
 }
 
 std::uint32_t EmitConvertF32F64(SpirvEmitterState& state, std::uint32_t arg0) {

@@ -21,6 +21,9 @@ std::int64_t Write(int descriptor, const void* buffer, std::size_t length);
 int Stat(int descriptor, FileStat* status);
 bool Ready(int descriptor, bool write, std::int64_t* data, bool* eof);
 int Poll(KernelSocketPoll::Entry* entries, int count, int timeoutMilliseconds);
+#ifdef _WIN32
+bool PipeReady(int descriptor, short events, short& revents);
+#endif
 struct Interest {
     int descriptor;
     bool write;

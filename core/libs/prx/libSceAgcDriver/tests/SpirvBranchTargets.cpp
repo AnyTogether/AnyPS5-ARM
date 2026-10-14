@@ -41,7 +41,7 @@ std::vector<std::uint32_t> recompile(std::span<const std::uint32_t> code) {
     request.useCache = false;
     auto result = Recompile(request);
     require(!result.spirv.empty(), "the shader did not recompile");
-    return std::move(result.spirv);
+    return result.spirv.Copy();
 }
 
 void requireDistinctTargets(const char* name, std::span<const std::uint32_t> code) {

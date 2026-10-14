@@ -42,8 +42,8 @@ struct PathAliases {
 };
 
 PathAliases& Aliases() {
-    static PathAliases aliases;
-    return aliases;
+    static auto* aliases = new PathAliases;
+    return *aliases;
 }
 
 std::string TrimSlashes(const char* path) {
@@ -120,7 +120,10 @@ struct WorkingDirectory {
     const std::filesystem::path root = std::filesystem::canonical(std::filesystem::current_path());
     std::filesystem::path current = root;
 };
-WorkingDirectory& Directories() { static WorkingDirectory state; return state; }
+WorkingDirectory& Directories() {
+    static auto* state = new WorkingDirectory;
+    return *state;
+}
 std::filesystem::path HostPath(WorkingDirectory& state, const std::filesystem::path& guest) {
     if (auto aliased = ResolveAlias(guest.relative_path().generic_string())) return *aliased;
     return ResolveHostPath(state.root, guest.relative_path()).make_preferred();
@@ -395,7 +398,16 @@ extern "C" std::filesystem::path RelinkedModulePath_nid_no_patch(const std::file
     auto relinked = path;
     relinked += ".guest.prx";
     std::error_code error;
-    return std::filesystem::is_regular_file(relinked, error) ? relinked : path;
+    if (std::filesystem::is_regular_file(relinked, error)) return relinked;
+    const auto name = relinked.filename().string();
+    std::optional<std::filesystem::path> matched;
+    std::filesystem::directory_iterator entry(relinked.parent_path().empty() ? "." : relinked.parent_path(), error), end;
+    for (; !error && entry != end; entry.increment(error)) {
+        if (!SameName(entry->path().filename().string(), name)) continue;
+        if (matched) throw std::runtime_error("Ambiguous case-insensitive guest path: " + relinked.string());
+        matched = entry->path();
+    }
+    return matched && std::filesystem::is_regular_file(*matched, error) ? *matched : path;
 }
 
 extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {

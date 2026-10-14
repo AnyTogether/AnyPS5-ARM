@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import stat
 import tempfile
 from pathlib import Path
 import sys
@@ -119,6 +120,44 @@ class StubGeneratorTests(unittest.TestCase):
                 mask = os.umask(0o022)
                 os.umask(mask)
                 self.assertEqual(code.stat().st_mode & 0o777, 0o666 & ~mask)
+
+
+class ReadOnlyOutputTests(unittest.TestCase):
+    def test_later_staging_failure_preserves_original_error_and_cleans_readonly_temporary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nids, output = root / "nids.txt", root / "Export.cpp"
+            nids.write_text("AAAAAAAAAAA\n", encoding="utf-8")
+            original = "existing source\n"
+            output.write_text(original, encoding="utf-8")
+            output.chmod(0o444)
+            errors = io.StringIO()
+            arguments = ["--module", "libSceExample", "--nids", str(nids), "--out", str(output),
+                         "--td-out", str(root / "absent" / "debt.txt")]
+            with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as error:
+                stubgen.main(arguments)
+            self.assertEqual(error.exception.code, 2)
+            self.assertIn("absent", errors.getvalue())
+            self.assertNotIn("Export.cpp.", errors.getvalue())
+            self.assertEqual(output.read_text(encoding="utf-8"), original)
+            self.assertFalse(output.stat().st_mode & stat.S_IWRITE)
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ["Export.cpp", "nids.txt"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows denies replacing read-only output files")
+    def test_denied_replace_preserves_readonly_output_without_leaking_temporary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nids, output = root / "nids.txt", root / "Export.cpp"
+            nids.write_text("AAAAAAAAAAA\n", encoding="utf-8")
+            original = "existing source\n"
+            output.write_text(original, encoding="utf-8")
+            output.chmod(0o444)
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                stubgen.main(["--module", "libSceExample", "--nids", str(nids), "--out", str(output)])
+            self.assertEqual(error.exception.code, 2)
+            self.assertEqual(output.read_text(encoding="utf-8"), original)
+            self.assertFalse(output.stat().st_mode & stat.S_IWRITE)
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ["Export.cpp", "nids.txt"])
 
 
 if __name__ == "__main__":

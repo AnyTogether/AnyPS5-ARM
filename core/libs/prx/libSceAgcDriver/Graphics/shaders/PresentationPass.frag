@@ -1,16 +1,25 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "PqToSdr.glsl"
 
 layout(set = 0, binding = 0) uniform usampler2D source;
+layout(set = 0, binding = 1, std430) readonly buffer PqLuminance { float pqNits[]; };
 layout(push_constant) uniform Parameters {
     ivec2 origin;
     ivec2 size;
     ivec2 sourceSize;
     int stride;
     uint mode;
+    float whiteNits;
 } parameters;
 layout(location = 0) out vec4 color;
 
 vec4 decode(uint word) {
+    if ((parameters.mode & 16u) != 0u) {
+        vec3 nits = vec3(pqNits[word & 0x3ffu], pqNits[(word >> 10u) & 0x3ffu], pqNits[(word >> 20u) & 0x3ffu]);
+        return vec4(srgbEncode(pqToSdrLinear((parameters.mode & 2u) != 0u ? nits : nits.zyx, parameters.whiteNits)), 1.0);
+    }
     uvec4 channels;
     float levels = 255.0;
     if ((parameters.mode & 1u) != 0u) {

@@ -92,7 +92,7 @@ int main() {
     for (int i = 0; i < 70; ++i) {
         MouseInputEvent motion{};
         motion.x = i;
-        MousePublishInput_nid_postfix(motion);
+        MousePublishInput_nid_no_patch(motion);
     }
     Require(sceMouseRead(MOUSE_HANDLE, data, 64) == 64);
     Require(data[0].x_axis == 6 && data[63].x_axis == 69);

@@ -49,8 +49,8 @@ std::uintptr_t alignUp(std::uintptr_t value, std::size_t alignment) {
 class Arena {
 public:
     static Arena& Get() {
-        static Arena arena;
-        return arena;
+        static auto* arena = new Arena;
+        return *arena;
     }
 
     bool Available() const {
@@ -67,21 +67,18 @@ public:
     }
 
     void* AllocateAtOrAbove(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
-        if (_base == 0) throw std::runtime_error("guest address space arena is unavailable");
-        if (alignment == 0 || (alignment & (alignment - 1)) != 0) throw std::invalid_argument("invalid guest arena alignment");
+        RequireAllocatable(alignment);
         std::lock_guard lock(_lock);
         if (hint >= _end) throw std::runtime_error("mapping address hint is above the guest address space arena");
-        std::uintptr_t candidate = alignUp(std::max(_base, hint), alignment);
-        auto it = _used.upper_bound(candidate);
-        if (it != _used.begin() && std::prev(it)->second > candidate) --it;
-        for (; it != _used.end(); ++it) {
-            const auto& [start, end] = *it;
-            if (candidate <= _end && bytes <= _end - candidate && candidate + bytes <= start) break;
-            candidate = std::max(candidate, alignUp(end, alignment));
-        }
-        if (candidate > _end || bytes > _end - candidate) throw std::runtime_error("guest address space arena exhausted");
-        _used.emplace(candidate, candidate + bytes);
-        return reinterpret_cast<void*>(candidate);
+        return Claim(FindAtOrAbove(hint, bytes, alignment), bytes);
+    }
+
+    void* AllocateFromHint(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
+        RequireAllocatable(alignment);
+        std::lock_guard lock(_lock);
+        auto candidate = hint < _end ? FindAtOrAbove(hint, bytes, alignment) : 0;
+        if (candidate == 0 && hint > _base) candidate = FindAtOrAbove(_base, bytes, alignment);
+        return Claim(candidate, bytes);
     }
 
     std::uintptr_t HighestFree(std::size_t bytes, std::size_t alignment) {
@@ -248,6 +245,30 @@ private:
     std::map<std::uintptr_t, std::uintptr_t> _used;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> _holes;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> _hostRegions;
+    void RequireAllocatable(std::size_t alignment) const {
+        if (_base == 0) throw std::runtime_error("guest address space arena is unavailable");
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0) throw std::invalid_argument("invalid guest arena alignment");
+    }
+
+    std::uintptr_t FindAtOrAbove(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) const {
+        std::uintptr_t candidate = alignUp(std::max(_base, hint), alignment);
+        auto it = _used.upper_bound(candidate);
+        if (it != _used.begin() && std::prev(it)->second > candidate) --it;
+        for (; it != _used.end(); ++it) {
+            const auto& [start, end] = *it;
+            if (candidate <= _end && bytes <= _end - candidate && candidate + bytes <= start) break;
+            candidate = std::max(candidate, alignUp(end, alignment));
+        }
+        if (candidate > _end || bytes > _end - candidate) return 0;
+        return candidate;
+    }
+
+    void* Claim(std::uintptr_t candidate, std::size_t bytes) {
+        if (candidate == 0) throw std::runtime_error("guest address space arena exhausted");
+        _used.emplace(candidate, candidate + bytes);
+        return reinterpret_cast<void*>(candidate);
+    }
+
     std::uintptr_t _base = 0;
     std::uintptr_t _end = 0;
     bool _writeWatched = false;
@@ -282,6 +303,10 @@ void* GuestArenaAllocate_nid_postfix(std::size_t bytes, std::size_t alignment) {
 
 void* GuestArenaAllocateAtOrAbove_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
     return Arena::Get().AllocateAtOrAbove(hint, bytes, alignment);
+}
+
+void* GuestArenaAllocateFromHint_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
+    return Arena::Get().AllocateFromHint(hint, bytes, alignment);
 }
 
 std::uintptr_t GuestArenaHighestFree_nid_no_patch(std::size_t bytes, std::size_t alignment) {

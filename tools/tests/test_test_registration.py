@@ -18,6 +18,28 @@ class RegistrationTests(unittest.TestCase):
             (build / "CTestTestfile.cmake").write_text(content, encoding="utf-8")
             return check_test_registration.registered(build)
 
+    def test_bracket_comments_do_not_register_tests(self):
+        for equals in ("", "=", "==="):
+            with self.subTest(equals=equals):
+                content = (f"#[{equals}[\nadd_test(ghost /build/tests/missing_tests)\n]{equals}]\n"
+                           'add_test("real" "/build/tests/real_tests")\n')
+                self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_bracket_comment_does_not_disable_a_registered_test(self):
+        content = ('add_test("real" "/build/tests/real_tests")\n'
+                   '#[=[\nset_tests_properties("real" PROPERTIES DISABLED TRUE)\n]=]\n')
+        self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_bracket_comment_inside_arguments_does_not_end_the_command(self):
+        content = ('add_test("real" #[=[ )\nadd_test(ghost /build/tests/missing_tests)\n]=]\n'
+                   '"/build/tests/real_tests")\n')
+        self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_comment_markers_inside_literals_remain_arguments(self):
+        content = ('add_test("real" "/build/tests/real_tests" "#[[" [=[# comment]=] "\\\\#")\n')
+        self.assertEqual(list(check_test_registration.commands(content)),
+                         [("add_test", ["real", "/build/tests/real_tests", "#[[", "# comment", "\\#"])])
+
     def test_test_name_does_not_register_executable(self):
         names = self.registered('add_test("missing_tests" "/usr/bin/python3" "unrelated.py")\n')
         self.assertNotIn("missing_tests", names)
@@ -41,7 +63,8 @@ class RegistrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text("CMAKE_MAKE_PROGRAM:FILEPATH=/configured/ninja\nCMAKE_GENERATOR:INTERNAL=Ninja\n", encoding="utf-8")
-            with patch.object(check_test_registration.subprocess, "run", return_value=SimpleNamespace(stdout=output)) as run:
+            with patch.object(check_test_registration.subprocess, "run", side_effect=lambda command, **kwargs: SimpleNamespace(
+                    stdout="Build file encoding: UTF-8\n" if command[-1] == "wincodepage" else output)) as run:
                 self.assertEqual(check_test_registration.built(build), {"buffer-bounds_tests"})
             self.assertEqual(run.call_args[0][0][0], "/configured/ninja")
 
@@ -50,7 +73,8 @@ class RegistrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text("CMAKE_MAKE_PROGRAM:FILEPATH=/configured/ninja\nCMAKE_GENERATOR:INTERNAL=Ninja Multi-Config\n", encoding="utf-8")
-            with patch.object(check_test_registration.subprocess, "run", return_value=SimpleNamespace(stdout=output)) as run:
+            with patch.object(check_test_registration.subprocess, "run", side_effect=lambda command, **kwargs: SimpleNamespace(
+                    stdout="Build file encoding: UTF-8\n" if command[-1] == "wincodepage" else output)) as run:
                 self.assertEqual(check_test_registration.built(build), {"buffer_bounds_tests"})
             self.assertEqual(run.call_args[0][0][0], "/configured/ninja")
 
@@ -150,6 +174,40 @@ class RegistrationTests(unittest.TestCase):
                     with self.assertRaises(FileNotFoundError):
                         check_test_registration.built(build)
                     run.assert_not_called()
+
+    @unittest.skipIf(shutil.which("ninja") is None, "requires a local Ninja to exercise its real output encoding")
+    def test_ninja_output_encoding_with_a_cp1252_default(self):
+        program = shutil.which("ninja")
+        actual_run = check_test_registration.subprocess.run
+        for encoding in (("utf-8", "mbcs") if sys.platform == "win32" else ("utf-8",)):
+            with self.subTest(encoding=encoding), tempfile.TemporaryDirectory() as directory:
+                build = Path(directory)
+                name = "caf\u00e9_tests".encode(encoding, errors="ignore").decode(encoding)
+                (build / "CMakeCache.txt").write_text(
+                    f"CMAKE_MAKE_PROGRAM:FILEPATH={program}\nCMAKE_GENERATOR:INTERNAL=Ninja\n", encoding="utf-8")
+                (build / "build.ninja").write_text(
+                    "rule CXX_EXECUTABLE_LINKER\n  command = true\n"
+                    f"build tests/{name}: CXX_EXECUTABLE_LINKER\n", encoding=encoding)
+
+                def run(command, **kwargs):
+                    if command[-1] == "wincodepage":
+                        return SimpleNamespace(stdout="Build file encoding: " + ("ANSI" if encoding == "mbcs" else "UTF-8"))
+                    kwargs.setdefault("encoding", "cp1252")
+                    return actual_run(command, **kwargs)
+
+                with patch.object(check_test_registration.subprocess, "run", side_effect=run):
+                    self.assertEqual(check_test_registration.built(build), {name})
+
+    def test_unknown_windows_ninja_encoding_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(
+                "CMAKE_MAKE_PROGRAM:FILEPATH=/configured/ninja\nCMAKE_GENERATOR:INTERNAL=Ninja\n", encoding="utf-8")
+            with patch.object(check_test_registration.sys, "platform", "win32"), patch.object(
+                    check_test_registration.subprocess, "run", return_value=SimpleNamespace(stdout="unknown")) as run:
+                with self.assertRaisesRegex(ValueError, "unsupported Ninja build-file encoding"):
+                    check_test_registration.built(build)
+                run.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

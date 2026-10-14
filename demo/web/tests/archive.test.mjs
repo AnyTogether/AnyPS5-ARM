@@ -7,8 +7,9 @@ import { register } from "node:module";
 register("./cdn-loader.mjs", import.meta.url, { data: { url: process.env.ANYPS5_TEST_ZIP_URL, path: process.env.ANYPS5_TEST_ZIP_PATH } });
 
 const site = name => pathToFileURL(path.join(process.argv[2], name)).href;
-const { Archive, memoryEstimate, MEMORY_LIMIT, packageArchive } = await import(site("archive.mjs"));
+const { Archive, memoryEstimate, MEMORY_LIMIT, ICON_LIMIT, packageArchive } = await import(site("archive.mjs"));
 const { BlobReader, BlobWriter, Uint8ArrayReader, Uint8ArrayWriter, ZipReader, ZipWriter } = await import(process.env.ANYPS5_TEST_ZIP_URL);
+await import("./archive-reserved.test.mjs");
 const { default: createRelinker } = await import(site("native/relinker_wasm.mjs"));
 const native = await createRelinker();
 const executable = new Uint8Array(await readFile(path.join(process.argv[3], "main.elf")));
@@ -130,12 +131,86 @@ const invalid = native.Convert({ target: "unsupported" }, () => {});
 assert.equal(invalid.ok, false);
 console.log("Archive validation, missing-folder warnings and large-download budget verified");
 
+const iconBytes = new Uint8Array(1024 * 1024);
+const iconArchive = new Archive([
+  { path: "title/program.elf", file: new Blob([new Uint8Array([0x7f, 69, 76, 70])]) },
+  { path: "title/sce_sys/icon0.png", file: new Blob([iconBytes]) }
+]);
+const iconSummary = await iconArchive.inspect(() => {});
+assert.equal(iconSummary.selectedBytes, 4);
+assert.equal(iconSummary.windowsSelectedBytes, iconBytes.length + 4);
+assert.equal((await iconArchive.conversionInput("linux", false, () => {})).icon, null);
+assert.equal((await iconArchive.conversionInput("windows", false, () => {})).icon.length, iconBytes.length);
+const librariesAtBudgetEdge = MEMORY_LIMIT
+  - memoryEstimate(iconSummary.totalBytes, iconSummary.selectedBytes, 0, iconSummary.files)
+  - iconBytes.length * 2;
+assert(memoryEstimate(iconSummary.totalBytes, iconSummary.selectedBytes, librariesAtBudgetEdge, iconSummary.files) < MEMORY_LIMIT);
+assert(memoryEstimate(iconSummary.totalBytes, iconSummary.windowsSelectedBytes, librariesAtBudgetEdge, iconSummary.files) > MEMORY_LIMIT);
+await iconArchive.close();
+console.log("Linux conversion input and memory estimate exclude the Windows-only icon");
+
+const oversizedIconArchive = new Archive([
+  { path: "title/program.elf", file: new Blob([new Uint8Array([0x7f, 69, 76, 70])]) },
+  { path: "title/sce_sys/icon0.png", file: new Blob([new Uint8Array(ICON_LIMIT + 1)]) }
+]);
+const oversizedIconSummary = await oversizedIconArchive.inspect(() => {});
+assert.equal(oversizedIconSummary.windowsIconTooLarge, true);
+assert.equal(oversizedIconArchive.selectedBytesForTarget("linux"), 4);
+assert.throws(() => oversizedIconArchive.selectedBytesForTarget("windows"), /16 MiB/u);
+assert.equal((await oversizedIconArchive.conversionInput("linux", false, () => {})).icon, null);
+await oversizedIconArchive.close();
+console.log("Oversized Windows-only icons do not block Linux conversion");
+
 const workerMessages = [];
 globalThis.self = { postMessage: message => workerMessages.push(message) };
-await import(site("worker.mjs"));
+const worker = await import(site("worker.mjs"));
+const libraryArchive = await zip([["libs/system.prx", new Uint8Array([1, 2, 3])]]);
+const libraryBytes = new Uint8Array(await libraryArchive.arrayBuffer());
+const libraryPath = "libraries/windows-acde1234.zip";
+const librarySha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", libraryBytes))]
+  .map(byte => byte.toString(16).padStart(2, "0"))
+  .join("");
+const release = {
+  tag: "v1",
+  platforms: {
+    windows: {
+      path: libraryPath,
+      size: libraryBytes.byteLength,
+      expandedBytes: 3,
+      sha256: librarySha256
+    }
+  }
+};
+const originalFetch = globalThis.fetch;
+let latestResponse = new Response(null, { status: 403, headers: { "X-RateLimit-Remaining": "0" } });
+globalThis.fetch = async url => {
+  if (url === "./release.json") return new Response(JSON.stringify(release));
+  if (url === "https://api.github.com/repos/boykopovar/AnyPS5/releases/latest") return latestResponse;
+  if (url === libraryPath) return new Response(libraryBytes);
+  throw new Error(`Unexpected fetch: ${url}`);
+};
+try {
+  const downloaded = await worker.downloadLibraries("windows");
+  assert.equal(downloaded.release.tag, release.tag);
+  assert.deepEqual(new Uint8Array(await downloaded.file.arrayBuffer()), libraryBytes);
+  assert(workerMessages.some(message => message.type === "progress" && /rate limit reached/u.test(message.message ?? "")));
+
+  latestResponse = new Response(null, { status: 429 });
+  const rateLimitedDownload = await worker.downloadLibraries("windows");
+  assert.deepEqual(new Uint8Array(await rateLimitedDownload.file.arrayBuffer()), libraryBytes);
+
+  latestResponse = new Response(null, { status: 403 });
+  await assert.rejects(worker.downloadLibraries("windows"), /Cannot verify the latest release \(403\)/u);
+  latestResponse = new Response(JSON.stringify({ tag_name: "v2" }));
+  await assert.rejects(worker.downloadLibraries("windows"), /A new release is being published/u);
+} finally {
+  globalThis.fetch = originalFetch;
+  workerMessages.length = 0;
+}
 await self.onmessage({ data: { type: "convert", target: "windows", mode: "disk" } });
 assert.equal(workerMessages.length, 1);
 assert.equal(workerMessages[0].type, "error");
 assert.match(workerMessages[0].message, /browsers block DLL creation/u);
 delete globalThis.self;
+console.log("Rate-limited release checks use the verified site manifest; other release-check failures remain errors");
 console.log("Windows folder output rejected before conversion or file writes");

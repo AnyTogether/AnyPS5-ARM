@@ -332,11 +332,24 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     Report("  r12 %016llx r13 %016llx r14 %016llx r15 %016llx\n", context->R12, context->R13, context->R14, context->R15);
     // The words each register points at, to recognise which structure a bad pointer came from.
     {
+        const DWORD indirectLength = GetEnvironmentVariableA("APS5_CRASH_INDIRECT_MEMORY", nullptr, 0);
+        const bool indirectMemory = indirectLength > 1;
         const std::pair<const char*, std::uint64_t> pointers[] = {{"rax", context->Rax}, {"rbx", context->Rbx}, {"rcx", context->Rcx}, {"rdx", context->Rdx}, {"rsi", context->Rsi}, {"rdi", context->Rdi}, {"r12", context->R12}, {"r13", context->R13}, {"r14", context->R14}, {"r15", context->R15}};
         for (const auto& [name, value] : pointers) {
             if (value < 0x10000 || (value & 7) != 0 || !IsReadable(value) || !IsReadable(value + 0x38)) continue;
             const auto* words = reinterpret_cast<const std::uint64_t*>(value);
             Report("  [%s] %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n", name, words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]);
+            if (!indirectMemory) continue;
+            for (std::size_t i = 0; i < 8; ++i) {
+                const auto address = words[i];
+                if (address < 0x10000 || IsExecutable(address)) continue;
+                std::uint64_t content[8]{};
+                SIZE_T copied = 0;
+                if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), content, sizeof(content), &copied) || copied != sizeof(content)) continue;
+                Report("  [[%s+0x%llx]] @%016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
+                    name, static_cast<unsigned long long>(i * sizeof(*words)), static_cast<unsigned long long>(address),
+                    content[0], content[1], content[2], content[3], content[4], content[5], content[6], content[7]);
+            }
         }
     }
     Report("  frame pointer chain:\n");

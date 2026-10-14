@@ -6,10 +6,15 @@
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
 
 namespace AgcDriver {
+
+namespace Graphics {
+class Buffer;
+}
 
 class PresentationPass {
 public:
@@ -18,8 +23,8 @@ public:
     PresentationPass(const PresentationPass&) = delete;
     PresentationPass& operator=(const PresentationPass&) = delete;
 
-    void Bind(std::size_t slot, VkImage image, std::uint32_t width, std::uint32_t height, std::uint64_t pixelFormat, std::uint32_t layer = 0);
-    void RecordPresent(VkCommandBuffer commands, std::size_t slot, VkImage destination, VkFormat format, VkExtent2D extent, VkImageLayout finalLayout);
+    void Bind(std::size_t slot, VkImage image, std::uint32_t width, std::uint32_t height, std::uint64_t pixelFormat, float whiteNits, std::uint32_t layer = 0);
+    void RecordPresent(VkCommandBuffer commands, std::size_t slot, VkImage destination, VkFormat format, VkColorSpaceKHR colorSpace, VkExtent2D extent, VkImageLayout finalLayout);
     void RecordDump(VkCommandBuffer commands, std::size_t slot, std::uint32_t stride, VkBuffer destination);
     void Release(std::size_t slot) noexcept;
     static bool TenBitFormat(VkFormat format);
@@ -36,6 +41,7 @@ private:
         std::uint32_t width = 0;
         std::uint32_t height = 0;
         std::uint32_t mode = 0;
+        float whiteNits = 0.0f;
         std::vector<std::pair<VkImageView, VkFramebuffer>> transient;
         VkImage dumpImage = VK_NULL_HANDLE;
         VkDeviceMemory dumpMemory = VK_NULL_HANDLE;
@@ -49,7 +55,7 @@ private:
     VkFramebuffer createFramebuffer(VkRenderPass renderPass, VkImageView view, VkExtent2D extent) const;
     void ensureDumpTarget(Slot& slot, VkExtent2D extent);
     void releaseDumpTarget(Slot& slot) noexcept;
-    void draw(VkCommandBuffer commands, const Slot& slot, const Target& target, VkFramebuffer framebuffer, VkExtent2D extent, const std::int32_t (&parameters)[8]) const;
+    void draw(VkCommandBuffer commands, const Slot& slot, const Target& target, VkFramebuffer framebuffer, VkExtent2D extent, const std::int32_t (&parameters)[9]) const;
     void release() noexcept;
 
     Graphics::Context context;
@@ -59,6 +65,7 @@ private:
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     VkShaderModule vertex = VK_NULL_HANDLE;
     VkShaderModule fragment = VK_NULL_HANDLE;
+    std::unique_ptr<Graphics::Buffer> pqNits;
     std::map<std::pair<VkFormat, VkImageLayout>, Target> targets;
     std::vector<Slot> slots;
 };

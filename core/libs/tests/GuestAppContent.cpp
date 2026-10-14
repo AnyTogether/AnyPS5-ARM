@@ -11,6 +11,7 @@ int APS5_VABI sceAppContentInitialize(const AppContentInitParam*, AppContentBoot
 int APS5_VABI sceAppContentAddcontMount(uint32_t, const NpUnifiedEntitlementLabel*, AppContentMountPoint*);
 int APS5_VABI sceAppContentAddcontUnmount(const AppContentMountPoint*);
 int APS5_VABI sceAppContentAddcontEnqueueDownload(uint32_t, const NpUnifiedEntitlementLabel*);
+int APS5_VABI sceAppContentAddcontDelete(uint32_t, const NpUnifiedEntitlementLabel*);
 int APS5_VABI sceAppContentTemporaryDataMount2(uint32_t, AppContentMountPoint*);
 int APS5_VABI sceAppContentTemporaryDataUnmount(const AppContentMountPoint*);
 int APS5_VABI sceAppContentTemporaryDataFormat(const AppContentMountPoint*);
@@ -85,6 +86,8 @@ int main() {
     Require(sceAppContentAddcontUnmount(nullptr) == ErrorParameter);
     Require(sceAppContentAddcontEnqueueDownload(0, &label) == ErrorNotFound);
     Require(sceAppContentAddcontEnqueueDownload(7, &label) == ErrorNotFound);
+    Require(sceAppContentAddcontDelete(0, &label) == ErrorNotFound);
+    Require(sceAppContentAddcontDelete(7, nullptr) == ErrorParameter);
     Require(sceAppContentAddcontEnqueueDownload(0, nullptr) == ErrorParameter);
     Require(sceAppContentAddcontMount(0, &label, &mountPoint) == ErrorNotFound);
 

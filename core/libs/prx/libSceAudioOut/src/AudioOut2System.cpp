@@ -41,4 +41,9 @@ int APS5_VABI sceAudioOut2EnableChat(void) {
     return 0;
 }
 
+int APS5_VABI sceAudioOut2DisableChat(void) {
+    if (g_chatEnabled.exchange(false)) AUDIOOUT2_TRACE("t=%.3f DisableChat: chat audio is no longer allowed alongside the title's\n", AudioOut2TraceSeconds());
+    return 0;
+}
+
 }

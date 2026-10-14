@@ -124,14 +124,14 @@ std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t by
     return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu), bytes, 0x31016facu};
 }
 
-std::array<std::uint32_t, 8> TextureDescriptor(const void* data, std::uint32_t format, std::uint32_t type = Type2D, std::uint32_t tile = TileLinear, std::uint32_t lastArray = 0) {
+std::array<std::uint32_t, 8> TextureDescriptor(const void* data, std::uint32_t format, std::uint32_t type = Type2D, std::uint32_t tile = TileLinear, std::uint32_t lastArray = 0, std::uint32_t baseArray = 0) {
     const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(data));
     return {
         static_cast<std::uint32_t>(address >> 8u),
         static_cast<std::uint32_t>((address >> 40u) & 0xffu) | (format << 20u) | (((Width - 1u) & 3u) << 30u),
         ((Width - 1u) >> 2u) | ((Height - 1u) << 14u),
         0xfacu | (tile << 20u) | (type << 28u),
-        lastArray, 0u, 0u, 0u,
+        lastArray | (baseArray << 16u), 0u, 0u, 0u,
     };
 }
 
@@ -252,10 +252,10 @@ void ArrayViewCase(AgcDriver::VulkanDevice& device, const Shaders& shaders, std:
     RequireRow(Draw(device, shaders, surface, {.depthTest = false, .stencilTest = true, .stencil = StencilEqual(9u)}), "stencil test against the one-layer 2D array view's stencil");
 }
 
-ShaderRecompiler::RecompileResult LayerProgram(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::span<std::uint32_t> output, const std::uint8_t* layers, std::uint32_t layer) {
+ShaderRecompiler::RecompileResult LayerProgram(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, std::span<std::uint32_t> output, const std::uint8_t* layers, std::uint32_t layer, std::uint32_t baseArray) {
     std::vector<std::uint32_t> userData(16, 0u);
     const auto buffer = BufferDescriptor(output.data(), static_cast<std::uint32_t>(output.size_bytes()));
-    const auto texture = TextureDescriptor(layers, Format32Float, Type2DArray, TileZ64KBX, ArrayLayers - 1u);
+    const auto texture = TextureDescriptor(layers, Format32Float, Type2DArray, TileZ64KBX, ArrayLayers - 1u, baseArray);
     std::copy(buffer.begin(), buffer.end(), userData.begin());
     std::copy(texture.begin(), texture.end(), userData.begin() + 4);
     userData[12] = layer;
@@ -263,8 +263,8 @@ ShaderRecompiler::RecompileResult LayerProgram(AgcDriver::VulkanDevice& device, 
     return Compile(device, code, userData);
 }
 
-void StoreLayer(AgcDriver::VulkanDevice& device, std::span<std::uint8_t> layers, std::span<std::uint32_t> output, std::uint32_t layer) {
-    const auto store = LayerProgram(device, StoreLayerCode, output, layers.data(), layer);
+void StoreLayer(AgcDriver::VulkanDevice& device, std::span<std::uint8_t> layers, std::span<std::uint32_t> output, std::uint32_t layer, std::uint32_t baseArray = 0) {
+    const auto store = LayerProgram(device, StoreLayerCode, output, layers.data(), layer, baseArray);
     device.Dispatch(store, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(StoreLayerCode.data()));
     device.WaitIdle();
 }
@@ -313,8 +313,8 @@ void LayeredArrayViewCase(AgcDriver::VulkanDevice& device, const Shaders& shader
     StoreLayer(device, layers, output, 1);
     RequireRow(Draw(device, shaders, second, {.depthCompare = VK_COMPARE_OP_GREATER}), "depth test against the values a 2D array storage view stored to the second layer's surface");
     Require(Draw(device, shaders, first, {.depthCompare = VK_COMPARE_OP_GREATER}) == 0, "a store to the second layer changed the first layer's surface");
-    StoreLayer(device, layers, output, 2);
-    RequireRow(Draw(device, shaders, second, {.depthCompare = VK_COMPARE_OP_GREATER}), "depth test against the second layer's surface after a store to the third layer");
+    StoreLayer(device, layers, output, 0, 2);
+    RequireRow(Draw(device, shaders, second, {.depthCompare = VK_COMPARE_OP_GREATER}), "depth test against the second layer's surface after a store to the third layer through a view from base slice 2");
 
     AgcDriver::Graphics::StorageTexture::FlushPending(reinterpret_cast<std::uintptr_t>(layers.data()), layers.size(), nullptr, "test");
     device.WaitIdle();

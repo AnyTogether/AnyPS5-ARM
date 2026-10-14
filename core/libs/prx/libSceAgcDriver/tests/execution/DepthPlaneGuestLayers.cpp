@@ -313,6 +313,76 @@ void RecordedUploads(const Context& context, const WatchedBlock& block) {
     recorder.Sync();
 }
 
+void RunCubeGather(const Context& base, const WatchedBlock& block) {
+    TextureDetiler detiler(base);
+    auto context = base;
+    context.detiler = &detiler;
+    GuestTextureResource resource{};
+    resource.width = Side;
+    resource.height = Side;
+    resource.depthOrLastArray = 5;
+    resource.mipCount = 2;
+    resource.tileMode = TextureTileMode::kZ64KBX;
+    resource.dimension = TextureDimension::kCube;
+    resource.format = Format32Float;
+    resource.dstSelX = 4;
+    resource.dstSelY = 5;
+    resource.dstSelZ = 6;
+    resource.dstSelW = 7;
+    const auto geometry = DescribeSurface(resource);
+    Require(geometry.layerBytes != LayerBytes, "the cube fixture's per-layer footprint must not match one host depth slice");
+    const auto address = block.Address();
+    resource.baseAddress = address;
+    ClearDepthSurfaces(context.device);
+    for (std::uint32_t layer = 0; layer < 6; ++layer) {
+        DepthSurfaceView(context, DepthTarget{address + geometry.GuestLayerOffset(layer), 0, {Side, Side}, VK_FORMAT_D32_SFLOAT, 1.0f, 0, 0});
+    }
+    imageToBufferCopies = 0;
+    bufferToImageCopies = 0;
+    const auto texture = DepthSurfaceTexture(context, words, resource, components);
+    Require(texture != nullptr, "a cube over six depth surfaces at the descriptor's layer offsets was not sampled through their depth planes");
+    if (imageToBufferCopies.load() != 6 || bufferToImageCopies.load() != 1) {
+        throw std::runtime_error("sampling a cube over six depth surfaces recorded " + std::to_string(imageToBufferCopies.load()) + " depth surface copies and " + std::to_string(bufferToImageCopies.load()) + " plane copy fills, expected 6 and 1");
+    }
+    ClearDepthSurfaces(context.device);
+}
+
+void RunCubeTiledSlice(const Context& base, const WatchedBlock& block) {
+    TextureDetiler detiler(base);
+    auto context = base;
+    context.detiler = &detiler;
+    constexpr VkExtent2D extent{64, 64};
+    GuestTextureResource resource{};
+    resource.width = extent.width;
+    resource.height = extent.height;
+    resource.depthOrLastArray = 5;
+    resource.mipCount = 1;
+    resource.tileMode = TextureTileMode::kZ64KBX;
+    resource.dimension = TextureDimension::kCube;
+    resource.format = Format32Float;
+    resource.dstSelX = 4;
+    resource.dstSelY = 5;
+    resource.dstSelZ = 6;
+    resource.dstSelW = 7;
+    const auto geometry = DescribeSurface(resource);
+    const auto slice = DepthSliceBytes(extent, 4u);
+    Require(geometry.layerBytes == slice && geometry.sliceLinearBytes != slice, "the tiled cube fixture must have a layer footprint equal to a depth slice but a different linear footprint");
+    const auto address = block.Address();
+    resource.baseAddress = address;
+    ClearDepthSurfaces(context.device);
+    for (std::uint32_t layer = 0; layer < 6; ++layer) {
+        DepthSurfaceView(context, DepthTarget{address + geometry.GuestLayerOffset(layer), 0, extent, VK_FORMAT_D32_SFLOAT, 1.0f, 0, 0});
+    }
+    imageToBufferCopies = 0;
+    bufferToImageCopies = 0;
+    const auto texture = DepthSurfaceTexture(context, words, resource, components);
+    Require(texture != nullptr, "a tiled cube whose linear layer footprint differs from a depth slice was not sampled through its depth planes");
+    if (imageToBufferCopies.load() != 6 || bufferToImageCopies.load() != 1) {
+        throw std::runtime_error("sampling a tiled cube over six depth surfaces recorded " + std::to_string(imageToBufferCopies.load()) + " depth surface copies and " + std::to_string(bufferToImageCopies.load()) + " plane copy fills, expected 6 and 1");
+    }
+    ClearDepthSurfaces(context.device);
+}
+
 }
 
 int main() {
@@ -337,6 +407,8 @@ int main() {
             Require(AgcDriver::GuestMemory::Watched(block.Address(), BlockBytes), "depth plane guest layers: the guest block is not write-watched");
             Run(context, block);
             RecordedUploads(context, block);
+            RunCubeGather(context, block);
+            RunCubeTiledSlice(context, block);
         }
         device.reset();
         std::puts("depth plane guest layer tests passed");

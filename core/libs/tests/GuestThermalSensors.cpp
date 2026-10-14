@@ -1,16 +1,19 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 extern "C" {
 void ReadThermalSensors_nid_no_patch(const char* root, int celsius[3]);
 int APS5_VABI sceKernelGetCpuTemperature(int* outCelsius);
 int APS5_VABI sceKernelGetSocSensorTemperature(int sensorId, int* outCelsius);
+int APS5_VABI sceKernelGetSocPowerConsumption(void* consumption);
 }
 
 static void Require(bool value) {
@@ -70,6 +73,12 @@ int main() {
     int probe = -12345;
     const int result = sceKernelGetSocSensorTemperature(0, &probe);
     Require(result == 0 ? (probe >= 0 && probe <= 130) : (result == SCE_KERNEL_ERROR_EINVAL && probe == -12345));
+
+    Require(sceKernelGetSocPowerConsumption(nullptr) == SCE_KERNEL_ERROR_EFAULT);
+    std::uint32_t consumption[32];
+    std::fill(std::begin(consumption), std::end(consumption), 0xa5a5a5a5u);
+    Require(sceKernelGetSocPowerConsumption(consumption) == SCE_KERNEL_ERROR_EINVAL);
+    Require(std::all_of(std::begin(consumption), std::end(consumption), [](std::uint32_t word) { return word == 0xa5a5a5a5u; }));
 
     std::filesystem::remove_all(root);
     return 0;

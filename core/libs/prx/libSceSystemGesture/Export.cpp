@@ -3,6 +3,9 @@
 #include <cstring>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <cstring>
+#include <stdexcept>
+#include <string>
 
 // No touch input is emulated: recognizers exist but never report events.
 static constexpr int32_t GESTURE_HANDLE = 1;
@@ -12,21 +15,24 @@ static constexpr int SCE_SYSTEM_GESTURE_ERROR_INDEX_OUT_OF_ARRAY = static_cast<i
 
 namespace {
 
-// The recognizer's opaque storage keeps what the title configured, so it can be reported back.
-struct RecognizerConfig {
-    int32_t type;
+constexpr std::uint64_t RECOGNIZER_STATE_MAGIC = 0x41505335'47455354ULL;
+
+struct RecognizerState {
+    std::uint64_t magic;
+    std::int32_t gestureType;
+    std::uint32_t hasRectangle;
     SystemGestureRectangle rectangle;
 };
-static_assert(sizeof(RecognizerConfig) <= sizeof(SystemGestureTouchRecognizer));
 
-void StoreConfig(SystemGestureTouchRecognizer* recognizer, const RecognizerConfig& config) {
-    std::memcpy(recognizer->reserve, &config, sizeof(config));
+static_assert(sizeof(RecognizerState) <= sizeof(SystemGestureTouchRecognizer));
+
+void storeRecognizerState(SystemGestureTouchRecognizer* recognizer, const RecognizerState& state) {
+    std::memcpy(recognizer->reserve, &state, sizeof(state));
 }
 
-RecognizerConfig LoadConfig(const SystemGestureTouchRecognizer* recognizer) {
-    RecognizerConfig config;
-    std::memcpy(&config, recognizer->reserve, sizeof(config));
-    return config;
+bool loadRecognizerState(const SystemGestureTouchRecognizer* recognizer, RecognizerState& state) {
+    std::memcpy(&state, recognizer->reserve, sizeof(state));
+    return state.magic == RECOGNIZER_STATE_MAGIC;
 }
 
 }
@@ -47,10 +53,12 @@ int APS5_VABI sceSystemGestureCreateTouchRecognizer(int32_t gesture_handle, Syst
     (void)param;
     if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
     if (!recognizer) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
-    std::memset(recognizer, 0, sizeof(*recognizer));
-    RecognizerConfig config{type, {}};
-    if (rectangle) config.rectangle = *rectangle;
-    StoreConfig(recognizer, config);
+    RecognizerState state{};
+    state.magic = RECOGNIZER_STATE_MAGIC;
+    state.gestureType = type;
+    state.hasRectangle = rectangle ? 1 : 0;
+    if (rectangle) state.rectangle = *rectangle;
+    storeRecognizerState(recognizer, state);
     return 0;
 }
 
@@ -119,10 +127,14 @@ int APS5_VABI sceSystemGestureGetTouchEventsCount(int32_t gesture_handle, const 
 int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(int32_t gesture_handle, const SystemGestureTouchRecognizer* recognizer, SystemGestureTouchRecognizerInformation* information) {
     if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
     if (!recognizer || !information) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
-    const RecognizerConfig config = LoadConfig(recognizer);
-    std::memset(information, 0, sizeof(*information));
-    information->gesture_type = config.type;
-    information->rectangle = config.rectangle;
+    RecognizerState state{};
+    if (!loadRecognizerState(recognizer, state))
+        throw std::runtime_error(std::string(__func__) + ": recognizer was not created by sceSystemGestureCreateTouchRecognizer");
+    if (!state.hasRectangle)
+        throw std::runtime_error(std::string(__func__) + ": recognizer was created without a rectangle");
+    information->gesture_type = state.gestureType;
+    information->rectangle = state.rectangle;
+    information->updated_time = 0;
     return 0;
 }
 
@@ -175,9 +187,12 @@ int APS5_VABI sceSystemGestureUpdateTouchRecognizerRectangle(int32_t gesture_han
     if (gesture_handle != GESTURE_HANDLE) return SCE_SYSTEM_GESTURE_ERROR_INVALID_HANDLE;
     if (!recognizer) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
     if (!rectangle) return SCE_SYSTEM_GESTURE_ERROR_INVALID_ARGUMENT;
-    RecognizerConfig config = LoadConfig(recognizer);
-    config.rectangle = *rectangle;
-    StoreConfig(recognizer, config);
+    RecognizerState state{};
+    if (loadRecognizerState(recognizer, state)) {
+        state.hasRectangle = 1;
+        state.rectangle = *rectangle;
+        storeRecognizerState(recognizer, state);
+    }
     return 0;
 }
 

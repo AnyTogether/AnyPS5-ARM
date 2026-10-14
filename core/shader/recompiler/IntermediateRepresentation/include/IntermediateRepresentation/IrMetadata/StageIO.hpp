@@ -14,7 +14,9 @@ enum class TessellationAttribute {
     EvaluationInput,
     PatchOutput,
     Factor,
-    PatchInput
+    PatchInput,
+    InstanceOutput,
+    InstanceInput
 };
 
 enum class TessellationBaseKind {
@@ -46,6 +48,7 @@ enum class StageInputKind {
     HelperInvocation,
     RasterPrimitive,
     LayerExported,
+    BaseInstance,
 };
 
 enum class StageOutputKind {

@@ -45,6 +45,20 @@ std::size_t Driver::dispatchCacheEntries() {
     return entries;
 }
 
+std::uint64_t Driver::DispatchCacheBytes() {
+    static const std::uint64_t bytes = [] {
+        const char* text = std::getenv("APS5_DISPATCH_CACHE_BYTES");
+        const auto parsed = text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
+        return parsed != 0 ? static_cast<std::uint64_t>(parsed) : std::uint64_t{256} << 20u;
+    }();
+    return bytes;
+}
+
+Driver::DispatchCacheFootprint Driver::DispatchCacheSize() {
+    std::lock_guard lock(dispatchCacheMutex);
+    return {dispatchCache.size(), dispatchCacheVariantBytes};
+}
+
 std::uint64_t Driver::variantBytes(const DispatchVariant& variant) {
     return sizeof(DispatchVariant) + variant.words.size() * sizeof(std::uint32_t) + variant.runs.size() * sizeof(std::pair<std::uint64_t, std::uint64_t>) + variant.captured.size() * sizeof(ShaderRecompiler::MemoryRegion) + (variant.vertexInfo != nullptr ? sizeof(ShaderRecompiler::ShaderVertexStageInfo) : 0);
 }

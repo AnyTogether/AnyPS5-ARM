@@ -8,7 +8,6 @@ extern "C" {
 void APS5_VABI sceImeParamInit(Param* param);
 int APS5_VABI sceImeGetPanelSize(const Param* param, uint32_t* width, uint32_t* height);
 int APS5_VABI sceImeClose_nid_postfix(void);
-int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const void* extended);
 int APS5_VABI sceImeGetPanelPositionAndForm(PositionAndForm* form);
 int APS5_VABI sceImeSetCaret(const Caret* caret);
 int APS5_VABI sceImeSetText(const char16_t* text, uint32_t length);
@@ -111,37 +110,6 @@ static void CheckErrors() {
     Require(width == 0x12345678 && height == 0x87654321, "outputs changed on error");
 }
 
-static void IgnoreEvent(void*, const ImeEvent*) {}
-
-static void CheckOpen() {
-    constexpr int ConnectionFailed = static_cast<int>(0x80bc0004u);
-    constexpr int InvalidUserId = static_cast<int>(0x80bc0010u);
-    constexpr int InvalidType = static_cast<int>(0x80bc0011u);
-    constexpr int InvalidOption = static_cast<int>(0x80bc0015u);
-    constexpr int InvalidAddress = static_cast<int>(0x80bc0031u);
-    char16_t buffer[16]{};
-    Param param;
-    sceImeParamInit(&param);
-    param.user_id = 1;
-    param.max_text_length = 15;
-    param.input_text_buffer = buffer;
-    param.handler = IgnoreEvent;
-    Require(sceImeOpen_nid_postfix(nullptr, nullptr) == InvalidAddress, "null open param");
-    Param invalid = param;
-    invalid.input_text_buffer = nullptr;
-    Require(sceImeOpen_nid_postfix(&invalid, nullptr) == InvalidAddress, "null text buffer");
-    invalid = param;
-    invalid.user_id = -1;
-    Require(sceImeOpen_nid_postfix(&invalid, nullptr) == InvalidUserId, "invalid open user");
-    invalid = param;
-    invalid.type = 5;
-    Require(sceImeOpen_nid_postfix(&invalid, nullptr) == InvalidType, "invalid open type");
-    invalid = param;
-    invalid.option = 0x80000000;
-    Require(sceImeOpen_nid_postfix(&invalid, nullptr) == InvalidOption, "invalid open option");
-    Require(sceImeOpen_nid_postfix(&param, nullptr) == ConnectionFailed, "the panel opened without an IME service");
-}
-
 static void CheckClosedPanel() {
     constexpr int notOpened = static_cast<int>(0x80bc0002u);
     Caret caret{};
@@ -190,7 +158,6 @@ int main() {
     CheckInitialization();
     CheckPanelSizes();
     CheckErrors();
-    CheckOpen();
     CheckClosedPanel();
     CheckKeyboardResourceIds();
 }

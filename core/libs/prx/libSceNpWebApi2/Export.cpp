@@ -198,10 +198,9 @@ int APS5_VABI sceNpWebApi2PushEventUnregisterPushContextCallback() {
     return 0;
 }
 
-// Requests never reach a server, so the timeout has nothing to bound once validated.
 int APS5_VABI sceNpWebApi2SetRequestTimeout(int64_t request_id, uint32_t timeout) {
+    (void)request_id;
     (void)timeout;
-    if (request_id <= 0) return SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT;
     return 0;
 }
 

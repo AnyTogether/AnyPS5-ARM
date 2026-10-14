@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-file(STRINGS "${LIST_FILE}" entries)
+file(STRINGS "${LIST_FILE}" entries ENCODING UTF-8)
 set(sources)
 set(guard)
 set(submodules)
@@ -46,7 +46,7 @@ foreach(source IN LISTS sources)
     if(NOT source MATCHES "\\.(cpp|hpp|h)$")
         continue()
     endif()
-    file(STRINGS "${source}" lines REGEX "\"APS5_[A-Z0-9_]+\"")
+    file(STRINGS "${source}" lines ENCODING UTF-8 REGEX "\"APS5_[A-Z0-9_]+\"")
     foreach(line IN LISTS lines)
         string(REGEX MATCHALL "\"APS5_[A-Z0-9_]+\"" names "${line}")
         list(APPEND switches ${names})
@@ -56,7 +56,7 @@ foreach(source IN LISTS sources)
         continue()
     endif()
     get_filename_component(sourceDirectory "${source}" DIRECTORY)
-    file(STRINGS "${source}" lines REGEX "^[ \t]*#[ \t]*include[ \t]*\"[^\"]+\"")
+    file(STRINGS "${source}" lines ENCODING UTF-8 REGEX "^[ \t]*#[ \t]*include[ \t]*\"[^\"]+\"")
     foreach(line IN LISTS lines)
         string(REGEX REPLACE "^[ \t]*#[ \t]*include[ \t]*\"([^\"]+)\".*$" "\\1" included "${line}")
         set(resolved)
@@ -109,7 +109,7 @@ foreach(source IN LISTS guard)
         continue()
     endif()
     file(RELATIVE_PATH relative "${ROOT}" "${source}")
-    file(STRINGS "${source}" lines REGEX "ShaderRecompiler|setenv|putenv")
+    file(STRINGS "${source}" lines ENCODING UTF-8 REGEX "ShaderRecompiler|setenv|putenv")
     foreach(line IN LISTS lines)
         if(line MATCHES "using[ \t]+namespace[ \t]+ShaderRecompiler" OR line MATCHES "namespace[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*(::)?ShaderRecompiler[ \t]*;")
             list(APPEND failures "${relative} brings the ShaderRecompiler namespace in whole, which hides its calls from the shader disk cache key review: qualify them")
@@ -140,23 +140,22 @@ list(REMOVE_DUPLICATES switches)
 list(SORT switches)
 list(JOIN switches ",\n    " switchList)
 
-set(content "#ifndef CORE_SHADER_RECOMPILER_SHADERCACHEVERSION_HPP
-#define CORE_SHADER_RECOMPILER_SHADERCACHEVERSION_HPP
-
-#include <cstdint>
-#include <string_view>
-
+set(content "#include \"ShaderCacheSourceVersion.hpp\"\n")
+string(APPEND content "
 namespace ShaderRecompiler::ShaderDiskCache::Generated {
 
-inline constexpr std::uint64_t SourceVersion = 0x${version}ull;
+namespace {
 
-inline constexpr std::string_view RecompilerSwitches[] = {
+constexpr std::string_view recompilerSwitches[] = {
     ${switchList}
 };
 
 }
 
-#endif
+constinit const std::uint64_t SourceVersion = 0x${version}ull;
+constinit const std::span<const std::string_view> RecompilerSwitches = recompilerSwitches;
+
+}
 ")
 
 if(EXISTS "${OUTPUT}")

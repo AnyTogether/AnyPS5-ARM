@@ -29,6 +29,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
+if(APPLE)
+    set(ANYPS5_PRX_RPATH "@loader_path")
+else()
+    set(ANYPS5_PRX_RPATH "$ORIGIN")
+endif()
+
 add_executable(nid_patcher
         ${CMAKE_CURRENT_SOURCE_DIR}/nid/src/Sha1.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/nid/src/NidCompute.cpp
@@ -72,6 +78,21 @@ if(MINGW)
     foreach(runtimeLinkFlag IN ITEMS -static-libgcc -static-libstdc++ -static)
         string(REPLACE "${runtimeLinkFlag}" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
     endforeach()
+
+    if(NOT EXISTS "${CMAKE_RANLIB}")
+        message(FATAL_ERROR "Stable import libraries require ranlib")
+    endif()
+    list(LENGTH CMAKE_CXX_CREATE_SHARED_LIBRARY linkCommandCount)
+    string(FIND "${CMAKE_CXX_CREATE_SHARED_LIBRARY}" "-Wl,--out-implib,<TARGET_IMPLIB> " implibOption)
+    if(NOT linkCommandCount EQUAL 1 OR implibOption EQUAL -1)
+        message(FATAL_ERROR "Expected one shared library link command that writes -Wl,--out-implib,<TARGET_IMPLIB>: ${CMAKE_CXX_CREATE_SHARED_LIBRARY}")
+    endif()
+    string(REPLACE "-Wl,--out-implib,<TARGET_IMPLIB> " "-Wl,--out-implib,<TARGET_IMPLIB>.new " linkCommand "${CMAKE_CXX_CREATE_SHARED_LIBRARY}")
+    set(CMAKE_CXX_CREATE_SHARED_LIBRARY
+            "\"${CMAKE_COMMAND}\" -E env SOURCE_DATE_EPOCH=0 ${linkCommand}"
+            "\"${CMAKE_RANLIB}\" -D <TARGET_IMPLIB>.new"
+            "\"${CMAKE_COMMAND}\" -E copy_if_different <TARGET_IMPLIB>.new <TARGET_IMPLIB>"
+    )
 endif()
 
 set(LIBC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/prx/libc)
@@ -97,11 +118,19 @@ set_target_properties(libc PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${UNPATCHED_DIR}
         ARCHIVE_OUTPUT_DIRECTORY ${IMPLIB_DIR}
         BUILD_WITH_INSTALL_RPATH ON
-        INSTALL_RPATH "${PRX_RPATH}"
+        INSTALL_RPATH "${ANYPS5_PRX_RPATH}"
 )
 
 set(LIBC_UNPATCHED ${UNPATCHED_DIR}/libc.prx)
 set(LIBC_PATCHED ${PATCHED_DIR}/libc.prx)
+set(LIBC_EXPORT_LIST ${CMAKE_CURRENT_BINARY_DIR}/libc.exports)
+
+add_custom_command(
+        OUTPUT ${LIBC_EXPORT_LIST}
+        COMMAND $<TARGET_FILE:nid_patcher> --write-export-list ${LIBC_UNPATCHED} ${LIBC_EXPORT_LIST}
+        DEPENDS nid_patcher libc ${LIBC_UNPATCHED}
+        COMMENT "Listing libc exports"
+)
 
 add_custom_command(
         OUTPUT ${LIBC_PATCHED}
@@ -153,7 +182,7 @@ foreach(LIB_DIR ${LIBS_DIRS})
                 LIBRARY_OUTPUT_DIRECTORY ${UNPATCHED_DIR}
                 ARCHIVE_OUTPUT_DIRECTORY ${IMPLIB_DIR}
                 BUILD_WITH_INSTALL_RPATH ON
-                INSTALL_RPATH "${PRX_RPATH}"
+                INSTALL_RPATH "${ANYPS5_PRX_RPATH}"
         )
 
         set(UNPATCHED_FILE ${UNPATCHED_DIR}/${LIB_NAME}.prx)
@@ -162,8 +191,8 @@ foreach(LIB_DIR ${LIBS_DIRS})
         add_custom_command(
                 OUTPUT ${PATCHED_FILE}
                 COMMAND ${CMAKE_COMMAND} -E copy ${UNPATCHED_FILE} ${PATCHED_FILE}
-                COMMAND $<TARGET_FILE:nid_patcher> ${LIB_NAME} --preserve-exports "${LIBC_UNPATCHED}" "${PATCHED_FILE}"
-                DEPENDS nid_patcher ${LIB_NAME} ${UNPATCHED_FILE} ${LIBC_UNPATCHED}
+                COMMAND $<TARGET_FILE:nid_patcher> ${LIB_NAME} --preserve-export-list "${LIBC_EXPORT_LIST}" "${PATCHED_FILE}"
+                DEPENDS nid_patcher ${LIB_NAME} ${UNPATCHED_FILE} ${LIBC_EXPORT_LIST}
                 COMMENT "Patching NIDs for ${LIB_NAME}"
         )
 

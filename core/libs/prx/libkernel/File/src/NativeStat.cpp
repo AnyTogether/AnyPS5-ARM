@@ -8,14 +8,17 @@
 
 #ifdef _WIN32
 #include "prx/libkernel/File/include/WindowsFileTime.hpp"
+#include "prx/libkernel/File/include/WindowsSymbolicLink.hpp"
 #include <io.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+constexpr unsigned short SymbolicLinkMode = 0120777;
 struct NativeStat : __stat64 {
     FILE_BASIC_INFO times{};
     BY_HANDLE_FILE_INFORMATION identity{};
     bool hasTimes = false;
     bool hasIdentity = false;
+    bool isSymbolicLink = false;
 };
 static int ReadHandleInfo(HANDLE handle, NativeStat* st) {
     if (GetFileType(handle) != FILE_TYPE_DISK) return 0;
@@ -45,9 +48,20 @@ static int DoFstat(int fd, NativeStat* st) {
 }
 static int DoLstat(const std::filesystem::path& p, NativeStat* st) {
     const auto attributes = GetFileAttributesW(p.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
-        NotImplemented_nid_no_patch("lstat of a Windows symbolic link");
-    return DoStat(p, st);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) return DoStat(p, st);
+    std::string target;
+    if (!File::WindowsSymbolicLink::ReadRelative(p, target, "lstat"))
+        NotImplemented_nid_no_patch("lstat of a Windows reparse point other than a relative symbolic link");
+    const auto handle = CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
+    const int result = ReadHandleInfo(handle, st);
+    CloseHandle(handle);
+    if (result != 0) return result;
+    st->st_mode = SymbolicLinkMode;
+    st->st_size = static_cast<__int64>(target.size());
+    st->isSymbolicLink = true;
+    return 0;
 }
 #else
 #include <sys/stat.h>
@@ -68,7 +82,7 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
     sb->st_mode = static_cast<std::uint16_t>(st.st_mode);
     sb->st_size = static_cast<std::int64_t>(st.st_size);
 #ifdef _WIN32
-    if (st.hasIdentity) sb->st_size = static_cast<std::int64_t>((static_cast<std::uint64_t>(st.identity.nFileSizeHigh) << 32u) | st.identity.nFileSizeLow);
+    if (st.hasIdentity && !st.isSymbolicLink) sb->st_size = static_cast<std::int64_t>((static_cast<std::uint64_t>(st.identity.nFileSizeHigh) << 32u) | st.identity.nFileSizeLow);
     sb->st_dev = static_cast<std::uint32_t>(st.st_dev);
     sb->st_ino = static_cast<std::uint32_t>(st.st_ino);
     sb->st_nlink = static_cast<std::uint16_t>(st.st_nlink);

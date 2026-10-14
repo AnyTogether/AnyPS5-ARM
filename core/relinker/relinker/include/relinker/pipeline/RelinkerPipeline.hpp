@@ -17,7 +17,7 @@ class RelinkerPipeline : public IRelinkerPipeline {
 public:
     RelinkerPipeline(std::shared_ptr<IElfReader> elfReader, std::shared_ptr<ISyscallScanner> syscallScanner, std::shared_ptr<ICallSiteResolver> callSiteResolver, std::shared_ptr<IValidationPolicy> validationPolicy, std::shared_ptr<ISysVDynamicSectionBuilder> dynamicSectionBuilder, std::shared_ptr<IUnusedNidFilter> unusedNidFilter, std::uint32_t unusedFilterLevel, Domain::IProgress& progress);
 
-    RelinkResult Relink(const std::vector<std::uint8_t>& sourceElf) override;
+    RelinkResult Relink() override;
 
 private:
     std::shared_ptr<IElfReader> elfReader;

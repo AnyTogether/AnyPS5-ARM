@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import json
 import os
 import operator
 import shlex
@@ -56,7 +57,7 @@ def oracle():
         if root:
             lib = root / "lib"
             command += [f"-I{root / 'include'}", f"-L{lib}", f"-Wl,-rpath,{lib}"]
-        subprocess.run(command + ["-lhsa-runtime64"], check=True)
+        subprocess.run(command + ["-lhsa-runtime64"], check=True, stdout=sys.stderr)
         output.replace(binary)
     return binary
 
@@ -88,8 +89,8 @@ def assemble(body, work, wave64, *, ieee, denorm32, denorm16, dx10_clamp, round3
                        ("@FP16_OVERFLOW@", str(int(fp16_overflow))), ("@LDS@", str(lds)), ("@BODY@", body)):
         text = text.replace(key, value)
     (work / "k.s").write_text(text)
-    subprocess.run([tool("clang"), "-x", "assembler", "-target", "amdgcn-amd-amdhsa", f"-mcpu={target()}", *(["-mwavefrontsize64"] if wave64 else []), "-c", str(work / "k.s"), "-o", str(work / "k.o")], check=True)
-    subprocess.run([tool("ld.lld"), "-m", "elf64_amdgpu", "-shared", str(work / "k.o"), "-o", str(work / "k.co")], check=True)
+    subprocess.run([tool("clang"), "-x", "assembler", "-target", "amdgcn-amd-amdhsa", f"-mcpu={target()}", *(["-mwavefrontsize64"] if wave64 else []), "-c", str(work / "k.s"), "-o", str(work / "k.o")], check=True, stdout=sys.stderr)
+    subprocess.run([tool("ld.lld"), "-m", "elf64_amdgpu", "-shared", str(work / "k.o"), "-o", str(work / "k.co")], check=True, stdout=sys.stderr)
     return work / "k.co"
 
 
@@ -119,7 +120,7 @@ def run(body, rows, extra=b"", wave64=False, coarse=False, *, ieee, denorm32, de
         for start in range(0, len(padded), rows_per_dispatch):
             chunk = padded[start:start + rows_per_dispatch]
             (work / "in.bin").write_bytes(b"".join(struct.pack("<4I", *r) for r in chunk) + extra)
-            subprocess.run([oracle(), str(code), str(len(chunk)), str(work / "in.bin"), str(work / "out.bin"), "16"], check=True, env=env)
+            subprocess.run([oracle(), str(code), str(len(chunk)), str(work / "in.bin"), str(work / "out.bin"), "16"], check=True, env=env, stdout=sys.stderr)
             data = (work / "out.bin").read_bytes()
             out += [struct.unpack_from("<16I", data, lane * 64) for lane in range(len(chunk))]
     return out[:len(rows)]
@@ -148,16 +149,33 @@ def main():
     parser.add_argument("--lds", type=int, default=DEFAULT_LDS, metavar="BYTES", help=f"group segment size, 0 to {MAX_LDS} (default {DEFAULT_LDS})")
     parser.add_argument("--extra", type=Path, help="bytes appended after the rows")
     parser.add_argument("--outs", type=int, choices=range(1, 17), default=16, metavar="N", help="print v10..v(10+N-1)")
+    parser.add_argument("--json", action="store_true", help="emit inputs, results and run settings as JSON; target is the assembly target, not a GPU model or driver")
     args = parser.parse_args()
     rows = [tuple(parse_word(v) for v in line.split()) for line in args.rows.read_text().splitlines() if line.strip()]
     if any(len(r) != 4 for r in rows):
         sys.exit("every row needs 4 values")
     extra = args.extra.read_bytes() if args.extra else b""
-    for result in run(args.body.read_text(), rows, extra, args.wave64, args.coarse,
-                      ieee=args.ieee, denorm32=args.denorm32, denorm16=args.denorm16,
-                      dx10_clamp=args.dx10_clamp, round32=args.round32, round16=args.round16,
-                      fp16_overflow=args.fp16_overflow, lds=args.lds):
-        print(" ".join(f"{v:08x}" for v in result[:args.outs]))
+    body = args.body.read_text()
+    modes = {name: getattr(args, name) for name in ("ieee", "denorm32", "denorm16", "dx10_clamp", "round32", "round16", "fp16_overflow")}
+    results = run(body, rows, extra, args.wave64, args.coarse, **modes, lds=args.lds)
+    if args.json:
+        report = {
+            "schema_version": 1,
+            "assembly_target": target(),
+            "wave_size": 64 if args.wave64 else 32,
+            "floating_point_modes": modes,
+            "lds_bytes": args.lds,
+            "memory": "coarse" if args.coarse else "fine",
+            "body": body,
+            "extra_bytes": len(extra),
+            "extra_sha256": hashlib.sha256(extra).hexdigest(),
+            "output_registers": [f"v{10 + index}" for index in range(args.outs)],
+            "rows": [{"input": row, "output": result[:args.outs]} for row, result in zip(rows, results)],
+        }
+        print(json.dumps(report, indent=2))
+    else:
+        for result in results:
+            print(" ".join(f"{v:08x}" for v in result[:args.outs]))
 
 
 if __name__ == "__main__":

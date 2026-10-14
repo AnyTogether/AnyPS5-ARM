@@ -19,6 +19,7 @@
 #include "prx/libSceAgcDriver/Execution/include/DisplayBuffer.hpp"
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libSceVideoOut/include/BufferReuseTracker.hpp"
+#include "prx/libSceVideoOut/include/HostHdrProbe.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 
@@ -87,6 +88,10 @@ static constexpr int VIDEO_OUT_BUFFER_INDEX_BLANK = -1;
 static constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_DEFAULT = 0x0000000000000001ULL;
 static constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_119_88HZ = 0x000000000000000FULL;
 
+static constexpr std::uint32_t VIDEO_OUT_DYNAMIC_RANGE_SDR = 1;
+static constexpr std::uint32_t VIDEO_OUT_DYNAMIC_RANGE_HDR = 2;
+static constexpr std::uint64_t VIDEO_OUT_OUTPUT_STATUS_FLAG_HDR = 1;
+
 static constexpr uint64_t VIDEO_OUT_REFRESH_RATE_59_94HZ = 3;
 static constexpr uint64_t VIDEO_OUT_REFRESH_RATE_119_88HZ = 13;
 
@@ -140,6 +145,7 @@ struct VideoOutConfig {
     VideoOutVblankStatus preVblankStatus{};
 
     std::array<VideoOutBuffer, VIDEO_OUT_BUFFER_NUM_MAX> buffers{};
+    alignas(std::atomic_ref<std::uint64_t>::required_alignment) std::array<std::uint64_t, VIDEO_OUT_BUFFER_NUM_MAX> bufferLabels{};
     std::array<uint32_t, VIDEO_OUT_BUFFER_NUM_MAX> bufferPending{};
     std::array<BufferReuseTracker, VIDEO_OUT_BUFFER_NUM_MAX> bufferReuse;
     std::array<BufferAttributeGroup, VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX> groups{};
@@ -220,6 +226,7 @@ public:
 
     // 0, or VIDEO_OUT_ERROR_FLIP_QUEUE_FULL when the title has VIDEO_OUT_FLIP_QUEUE_CAPACITY flips pending.
     int SubmitFlip(int handle, int index, int flipMode, int64_t flipArg);
+    int SubmitEopFlip(int handle, int index, int flipMode, int64_t flipArg, std::uint32_t* token);
 
 private:
     bool close(int handle);
@@ -229,6 +236,7 @@ private:
     void updateDisplayRefreshRate();
     void processFlip(FlipRequest& req);
     void triggerEvents(VideoOutConfig& cfg, int eventKind, void* triggerData);
+    void pollHostHdr();
 
     std::mutex mutex;
     std::mutex shutdownMutex;
@@ -238,6 +246,8 @@ private:
     std::shared_ptr<FlipQueue> flipQueue = std::make_shared<FlipQueue>();
 
     DisplayWindow window;
+    HostHdrProbe hdrProbe;
+    std::uint64_t hdrGeneration = 0;
     std::atomic<int> displayRefreshRate{0};
 
     std::jthread presentThread;

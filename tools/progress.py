@@ -20,6 +20,8 @@ SOURCE = f'https://github.com/{os.environ.get("GITHUB_REPOSITORY", "boykopovar/A
 DEFINITION = re.compile(r"\bAPS5_VABI\s+(\w+)\s*\([^;{]*\)\s*(?:noexcept\s*)?(?:try\s*)?\{")
 STUB = "NotImplemented_nid_no_patch"
 CALL = re.compile(r"\b(\w+)\s*\(")
+KEYWORDS = r"return|else|do|throw|co_return|co_await|co_yield|and|or|not|xor|bitand|bitor|compl"
+QUALIFIED = re.compile(rf"(?:\.|->|(?:\b(?!(?:{KEYWORDS})\b)\w+|>)\s*::)\s*$")
 CMAKE_SHARED = re.compile(r'^\s*include\(\s*"?\$\{CMAKE_CURRENT_SOURCE_DIR\}/\.\./([\w.-]+)/[\w.-]+\.cmake"?\s*\)', re.M)
 SOURCE_SHARED = re.compile(r'^\s*#\s*include\s*"prx/([\w.-]+)/[\w./-]+\.cpp"', re.M)
 STUB_WRAPPER = re.compile(
@@ -101,12 +103,16 @@ def body_end(text, start):
 
 
 def stub_calls(text):
-    calls = {STUB}
+    helpers = {}
     for match in STUB_WRAPPER.finditer(text):
         body = text[match.end() - 1:body_end(text, match.end() - 1)]
-        if any(call.group(1) == STUB for call in CALL.finditer(body)):
-            calls.add(match.group(1))
-    return calls
+        helpers.setdefault(match.group(1), set()).update(call.group(1) for call in CALL.finditer(body))
+    calls = {STUB}
+    while True:
+        found = {name for name, targets in helpers.items() if name not in calls and targets & calls}
+        if not found:
+            return calls
+        calls |= found
 
 
 def statements(body):
@@ -167,7 +173,8 @@ def scan_library(path):
             if name.endswith(("_nid_no_patch", "_nid_no_patch_cut")):
                 continue
             body = text[match.end() - 1:body_end(text, match.end() - 1)]
-            if any(call.group(1) in calls for call in CALL.finditer(body)):
+            if any(call.group(1) in calls and not QUALIFIED.search(body, 0, call.start())
+                   for call in CALL.finditer(body)):
                 todo.add(name)
                 continue
             done.add(name)

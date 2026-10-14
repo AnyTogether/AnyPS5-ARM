@@ -99,6 +99,7 @@ void Driver::stop() {
     {
         std::lock_guard lock(mutex);
         stopping = true;
+        eopFlips.clear();
         for (auto& [queue, worker] : workers) {
             worker.pending.clear();
             worker.unfinishedWrites.clear();

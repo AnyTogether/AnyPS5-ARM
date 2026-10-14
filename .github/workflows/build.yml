@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: Pull request number to build
+        description: Pull request numbers to build together, separated by spaces or commas (up to 8)
         required: true
         type: string
       linux:
@@ -47,29 +47,72 @@ jobs:
       register-context: ${{ steps.gate.outputs.register-context }}
       write-watch: ${{ steps.gate.outputs.write-watch }}
       full: ${{ steps.gate.outputs.full }}
+      relinker-hosts: ${{ steps.gate.outputs.relinker-hosts }}
     steps:
       - uses: actions/github-script@v8
         id: gate
         env:
           PR_NUMBER: ${{ inputs.pr }}
+          LINUX_BUILD: ${{ inputs.linux }}
         with:
           script: |
+            const { owner, repo } = context.repo;
+            const workflow = '.github/workflows/build.yml';
+            const libc = 'core/libs/prx/libc/';
+            const select = (paths, all) => {
+              const touches = (...prefixes) => all ||
+                paths.some((path) => prefixes.some((prefix) => prefix.endsWith('/') ? path.startsWith(prefix) : path === prefix));
+              return {
+                relinker: touches(
+                  'core/relinker/', libc, 'core/libs/prx/libkernel/AppMetadata/', 'core/libs/tests/ParamJsonParser.cpp',
+                  'core/shader/recompiler/tests/CacheFileReadTests.cpp', 'core/shader/recompiler/ShaderCacheDirectory.hpp',
+                  'tools/', 'cmake/', 'CMakeLists.txt', workflow
+                ),
+                registerContext: touches('core/libs/tests/register_context/', 'core/libs/tests/RegisterContext.cpp', libc, workflow),
+                writeWatch: touches('core/libs/tests/write_watch/', 'core/libs/tests/WriteWatch.cpp', libc, workflow),
+              };
+            };
+            const relinkerHosts = (full, linux) => JSON.stringify([
+              ...(full && linux ? [] : [{ os: 'ubuntu-latest', compiler: 'g++' }]),
+              ...(full ? [] : [{ os: 'windows-latest', compiler: 'g++' }]),
+              { os: 'macos-latest', compiler: 'clang++' },
+            ]);
             if (context.eventName === 'push') {
               if (context.ref !== 'refs/heads/main') {
                 throw new Error('Automatic full builds only run on main');
               }
+              let paths = [];
+              let all = true;
+              if (!/^0+$/.test(context.payload.before)) {
+                try {
+                  const { data } = await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${context.payload.before}...${context.sha}`
+                  });
+                  const files = data.files ?? [];
+                  all = files.length >= 300;
+                  paths = files.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean));
+                } catch (error) {
+                  core.warning(`Could not list the files of this push, so every test job runs: ${error.message}`);
+                }
+              }
+              const run = select(paths, all);
               core.setOutput('sha', context.sha);
               core.setOutput('pr', '');
               core.setOutput('head', '');
-              core.setOutput('relinker', true);
-              core.setOutput('register-context', true);
-              core.setOutput('write-watch', true);
+              core.setOutput('relinker', run.relinker);
+              core.setOutput('register-context', run.registerContext);
+              core.setOutput('write-watch', run.writeWatch);
               core.setOutput('full', true);
-              await core.summary.addRaw(`Building main at ${context.sha}: all builds and tests enabled`).write();
+              core.setOutput('relinker-hosts', relinkerHosts(true, true));
+              await core.summary.addRaw(
+                `Building main at ${context.sha}: full builds enabled, ` +
+                `macOS relinker ${run.relinker ? 'enabled' : 'skipped'}, ` +
+                `register context tests ${run.registerContext ? 'enabled' : 'skipped'}, write watch tests ${run.writeWatch ? 'enabled' : 'skipped'}`
+              ).write();
               return;
             }
-            const { owner, repo } = context.repo;
             const manual = context.eventName === 'workflow_dispatch';
+            const linux = process.env.LINUX_BUILD !== 'false';
             if (manual) {
               for (const username of new Set([context.actor, process.env.GITHUB_TRIGGERING_ACTOR])) {
                 const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
@@ -77,60 +120,68 @@ jobs:
                   throw new Error('Only collaborators with write access can start or rerun builds');
                 }
               }
-              if (!/^[1-9][0-9]*$/.test(process.env.PR_NUMBER)) {
-                throw new Error('Enter a positive pull request number');
+              if (!/^[1-9][0-9]*([ ,]+[1-9][0-9]*){0,7}$/.test(process.env.PR_NUMBER.trim())) {
+                throw new Error('Enter up to 8 positive pull request numbers separated by spaces or commas');
               }
             }
-            const pull_number = manual ? Number(process.env.PR_NUMBER) : context.payload.pull_request.number;
-            if (!Number.isSafeInteger(pull_number) || pull_number < 1) {
+            const numbers = manual
+              ? [...new Set(process.env.PR_NUMBER.trim().split(/[ ,]+/).map(Number))]
+              : [context.payload.pull_request.number];
+            if (numbers.some((pull_number) => !Number.isSafeInteger(pull_number) || pull_number < 1)) {
               throw new Error('Invalid pull request number');
             }
-            let { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
-            for (let attempt = 0; pr.mergeable === null && attempt < 10; ++attempt) {
-              await new Promise((resolve) => setTimeout(resolve, 3000));
-              ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number }));
-            }
-            if (pr.state !== 'open' || pr.base.ref !== 'main') {
-              throw new Error('The pull request must be open and target main');
-            }
-            if (!manual && pr.head.sha !== context.payload.pull_request.head.sha) {
-              throw new Error('The pull request has newer commits; use the latest run');
-            }
-            if (pr.mergeable === false) {
-              throw new Error('The pull request does not merge cleanly into main; rebase it first');
-            }
+            const pulls = [];
+            const paths = [];
+            let truncated = false;
             let relinker = manual;
-            if (!manual) {
-              const { data: commits } = await github.rest.repos.listCommits({
-                owner, repo, sha: 'main', author: pr.user.login, per_page: 1
-              });
-              relinker = commits.length > 0;
+            for (const pull_number of numbers) {
+              let { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+              for (let attempt = 0; pr.mergeable === null && attempt < 10; ++attempt) {
+                await new Promise((resolve) => setTimeout(resolve, 3000));
+                ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number }));
+              }
+              if (!manual && pr.state !== 'open') {
+                await core.summary.addRaw(`PR #${pull_number} was ${pr.merged ? 'merged' : 'closed'} before this run started: nothing to build`).write();
+                return;
+              }
+              if (pr.state !== 'open' || pr.base.ref !== 'main') {
+                throw new Error(`Pull request #${pull_number} must be open and target main`);
+              }
+              if (!manual && pr.head.sha !== context.payload.pull_request.head.sha) {
+                throw new Error('The pull request has newer commits; use the latest run');
+              }
+              if (pr.mergeable === false) {
+                throw new Error(`Pull request #${pull_number} does not merge cleanly into main; rebase it first`);
+              }
+              if (!manual) {
+                const { data: commits } = await github.rest.repos.listCommits({
+                  owner, repo, sha: 'main', author: pr.user.login, per_page: 1
+                });
+                relinker = commits.length > 0;
+              }
+              const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 });
+              truncated ||= files.length >= 3000;
+              paths.push(...files.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean)));
+              pulls.push({ number: pull_number, head: pr.head.sha });
             }
-            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 });
-            const paths = files.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean));
-            const touches = (...prefixes) => files.length >= 3000 ||
-              paths.some((path) => prefixes.some((prefix) => prefix.endsWith('/') ? path.startsWith(prefix) : path === prefix));
-            const workflow = '.github/workflows/build.yml';
-            const libc = 'core/libs/prx/libc/';
-            relinker = relinker && touches(
-              'core/relinker/', libc, 'core/libs/prx/libkernel/AppMetadata/', 'core/libs/tests/ParamJsonParser.cpp',
-              'core/shader/recompiler/tests/CacheFileReadTests.cpp', 'core/shader/recompiler/ShaderCacheDirectory.hpp',
-              'tools/', 'cmake/', 'CMakeLists.txt', workflow
-            );
-            const registerContext = touches('core/libs/tests/register_context/', 'core/libs/tests/RegisterContext.cpp', libc, workflow);
-            const writeWatch = touches('core/libs/tests/write_watch/', 'core/libs/tests/WriteWatch.cpp', libc, workflow);
+            const run = select(paths, truncated);
+            relinker = relinker && run.relinker;
+            const registerContext = run.registerContext;
+            const writeWatch = run.writeWatch;
             const { data: main } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
             core.setOutput('sha', main.commit.sha);
-            core.setOutput('pr', String(pull_number));
-            core.setOutput('head', pr.head.sha);
+            core.setOutput('pr', pulls.map((pull) => pull.number).join(' '));
+            core.setOutput('head', pulls.map((pull) => pull.head).join(' '));
             core.setOutput('relinker', relinker);
             core.setOutput('register-context', registerContext);
             core.setOutput('write-watch', writeWatch);
             core.setOutput('full', manual);
-            core.info(`PR #${pull_number} at ${pr.head.sha} merged into main at ${main.commit.sha}`);
+            core.setOutput('relinker-hosts', relinkerHosts(manual, linux));
+            const merged = pulls.map((pull) => `PR #${pull.number} at ${pull.head} merged into main at ${main.commit.sha}`);
+            merged.forEach((line) => core.info(line));
             await core.summary.addRaw(
-              `PR #${pull_number} at ${pr.head.sha} merged into main at ${main.commit.sha}: full builds ${manual ? 'enabled' : 'disabled'}, ` +
-              `relinker ${relinker ? 'enabled' : 'skipped: no relinker file changed or the author has no commit in main'}, ` +
+              `${merged.join(', then ')}: full builds ${manual ? 'enabled' : 'disabled'}, ` +
+              `relinker ${relinker ? (manual ? (linux ? 'enabled on macOS (the full builds run the Linux and Windows relinker tests)' : 'enabled on Linux and macOS (the full Windows build runs the Windows relinker tests)') : 'enabled') : 'skipped: no relinker file changed or the author has no commit in main'}, ` +
               `register context tests ${registerContext ? 'enabled' : 'skipped'}, write watch tests ${writeWatch ? 'enabled' : 'skipped'}`
             ).write();
 
@@ -142,13 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            compiler: g++
-          - os: windows-latest
-            compiler: g++
-          - os: macos-latest
-            compiler: clang++
+        include: ${{ fromJSON(needs.eligibility.outputs.relinker-hosts) }}
     env:
       WINLIBS_RELEASE: 15.2.0posix-14.0.0-ucrt-r7
       WINLIBS_ZIP: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
@@ -167,9 +212,15 @@ jobs:
           PR_NUMBER: ${{ needs.eligibility.outputs.pr }}
           PR_HEAD: ${{ needs.eligibility.outputs.head }}
         run: |
-          git fetch --no-tags --unshallow origin "refs/pull/$PR_NUMBER/head"
-          if [ "$(git rev-parse FETCH_HEAD)" != "$PR_HEAD" ]; then echo "::error::The pull request has newer commits; start a new build"; exit 1; fi
-          if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit FETCH_HEAD; then echo "::error::The pull request does not merge cleanly into main; rebase it first"; exit 1; fi
+          read -ra numbers <<< "$PR_NUMBER"
+          read -ra heads <<< "$PR_HEAD"
+          refspecs=()
+          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          git fetch --no-tags --unshallow origin "${refspecs[@]}"
+          for i in "${!numbers[@]}"; do
+            if [ "$(git rev-parse "refs/remotes/pull/${numbers[i]}")" != "${heads[i]}" ]; then echo "::error::Pull request #${numbers[i]} has newer commits; start a new build"; exit 1; fi
+            if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit "refs/remotes/pull/${numbers[i]}"; then echo "::error::Pull request #${numbers[i]} does not merge cleanly into main and the pull requests before it; rebase it first"; exit 1; fi
+          done
       - if: runner.os == 'Windows'
         id: toolchain
         uses: actions/cache@v6
@@ -220,14 +271,22 @@ jobs:
   linux:
     needs: eligibility
     if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.linux)) && needs.eligibility.outputs.full == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: [self-hosted, linux, x64, anyps5]
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: /var/cache/anyps5/ccache
+      CCACHE_MAXSIZE: 30G
+      CCACHE_COMPILERCHECK: content
+      MESA_SHADER_CACHE_DIR: /var/cache/anyps5/mesa
+      MESA_SHADER_CACHE_MAX_SIZE: 4G
+      CMAKE_BUILD_PARALLEL_LEVEL: 1
+      CTEST_PARALLEL_LEVEL: 1
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.eligibility.outputs.sha }}
           persist-credentials: false
-          submodules: true
+          submodules: recursive
       - name: Merge the pull request into main
         if: ${{ needs.eligibility.outputs.head != '' }}
         shell: bash
@@ -235,43 +294,39 @@ jobs:
           PR_NUMBER: ${{ needs.eligibility.outputs.pr }}
           PR_HEAD: ${{ needs.eligibility.outputs.head }}
         run: |
-          git fetch --no-tags --unshallow origin "refs/pull/$PR_NUMBER/head"
-          if [ "$(git rev-parse FETCH_HEAD)" != "$PR_HEAD" ]; then echo "::error::The pull request has newer commits; start a new build"; exit 1; fi
-          if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit FETCH_HEAD; then echo "::error::The pull request does not merge cleanly into main; rebase it first"; exit 1; fi
+          read -ra numbers <<< "$PR_NUMBER"
+          read -ra heads <<< "$PR_HEAD"
+          refspecs=()
+          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          fetch_options=()
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then fetch_options+=(--unshallow); fi
+          git fetch --no-tags "${fetch_options[@]}" origin "${refspecs[@]}"
+          for i in "${!numbers[@]}"; do
+            if [ "$(git rev-parse "refs/remotes/pull/${numbers[i]}")" != "${heads[i]}" ]; then echo "::error::Pull request #${numbers[i]} has newer commits; start a new build"; exit 1; fi
+            if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit "refs/remotes/pull/${numbers[i]}"; then echo "::error::Pull request #${numbers[i]} does not merge cleanly into main and the pull requests before it; rebase it first"; exit 1; fi
+          done
           git submodule update --init --recursive
-      - uses: hendrikmuhs/ccache-action@v1.2.24
-        with:
-          key: linux
-          save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          evict-old-files: job
-      - name: Install lavapipe and the SDL audio and XRandR development files
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libpipewire-0.3-dev libpulse-dev libasound2-dev libxrandr-dev
-      - id: mesa
+      - name: Prepare persistent caches
         run: |
-          echo "version=$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" >> "$GITHUB_OUTPUT"
+          mkdir -p "$CCACHE_DIR" "$MESA_SHADER_CACHE_DIR"
+          test -w "$CCACHE_DIR" && test -w "$MESA_SHADER_CACHE_DIR"
+          ccache --zero-stats
+          ccache --show-config
+          dpkg-query -W mesa-vulkan-drivers
           grep -m1 '^model name' /proc/cpuinfo
-          echo "cpu=$(grep -E '^(vendor_id|cpu family|model|flags)[[:space:]]*:' /proc/cpuinfo | sort -u | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v6
-        with:
-          path: .mesa-shader-cache
-          key: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-${{ github.sha }}
-          restore-keys: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-
       - run: cmake -S . -B build $CONFIGURE -DANYPS5_ENABLE_SPIRV_TOOLS=ON
       - name: Check that every test executable is registered with ctest
         run: python3 tools/check_test_registration.py build
       - run: cmake --build build
       - run: cmake --build build --target libs
-      - run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --output-log ctest.log --output-junit ctest.xml
+      - run: ctest --test-dir build --output-on-failure --timeout 120 --output-log ctest.log --output-junit ctest.xml
         env:
           ANYPS5_REQUIRE_VULKAN: 1
           GALLIUM_OVERRIDE_CPU_CAPS: avx
-          MESA_SHADER_CACHE_DIR: ${{ github.workspace }}/.mesa-shader-cache
-      - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled() }}
-        uses: actions/cache/save@v6
-        with:
-          path: .mesa-shader-cache
-          key: mesa-${{ steps.mesa.outputs.version }}-${{ steps.mesa.outputs.cpu }}-${{ github.sha }}
       - run: python3 tools/check_skips.py build/ctest.xml
+      - name: Report compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
       - name: Report tests slower than 30 s
         if: ${{ !cancelled() }}
         shell: bash
@@ -297,7 +352,7 @@ jobs:
         with:
           ref: ${{ needs.eligibility.outputs.sha }}
           persist-credentials: false
-          submodules: true
+          submodules: recursive
       - name: Merge the pull request into main
         if: ${{ needs.eligibility.outputs.head != '' }}
         shell: bash
@@ -305,9 +360,15 @@ jobs:
           PR_NUMBER: ${{ needs.eligibility.outputs.pr }}
           PR_HEAD: ${{ needs.eligibility.outputs.head }}
         run: |
-          git fetch --no-tags --unshallow origin "refs/pull/$PR_NUMBER/head"
-          if [ "$(git rev-parse FETCH_HEAD)" != "$PR_HEAD" ]; then echo "::error::The pull request has newer commits; start a new build"; exit 1; fi
-          if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit FETCH_HEAD; then echo "::error::The pull request does not merge cleanly into main; rebase it first"; exit 1; fi
+          read -ra numbers <<< "$PR_NUMBER"
+          read -ra heads <<< "$PR_HEAD"
+          refspecs=()
+          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          git fetch --no-tags --unshallow origin "${refspecs[@]}"
+          for i in "${!numbers[@]}"; do
+            if [ "$(git rev-parse "refs/remotes/pull/${numbers[i]}")" != "${heads[i]}" ]; then echo "::error::Pull request #${numbers[i]} has newer commits; start a new build"; exit 1; fi
+            if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit "refs/remotes/pull/${numbers[i]}"; then echo "::error::Pull request #${numbers[i]} does not merge cleanly into main and the pull requests before it; rebase it first"; exit 1; fi
+          done
           git submodule update --init --recursive
       - id: toolchain
         uses: actions/cache@v6

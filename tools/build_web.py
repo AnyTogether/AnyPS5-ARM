@@ -62,9 +62,14 @@ def publish_libraries(output):
                 files = archive.infolist()
                 if not files or len(files) > 4096:
                     raise ValueError("Invalid library archive")
+                names = set()
                 for file in files:
                     if not file.filename.startswith("libs/") or any(part in ("..", ".", "") for part in file.filename.rstrip("/").split("/")) or "\\" in file.filename:
                         raise ValueError("Invalid library archive layout")
+                    name = file.filename.rstrip("/").lower()
+                    if name in names:
+                        raise ValueError(f"Duplicate library archive path: {file.filename}")
+                    names.add(name)
                 corrupt = archive.testzip()
                 if corrupt:
                     raise ValueError(f"Corrupt release entry: {corrupt}")

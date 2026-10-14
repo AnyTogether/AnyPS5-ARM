@@ -220,6 +220,7 @@ std::uint32_t EmitFPNeg32(SpirvEmitterState& state, std::uint32_t arg0);
 std::uint32_t EmitFPCmpClass32(SpirvEmitterState& state, std::uint32_t value, std::uint32_t mask);
 void EmitReference(SpirvValueEmitContext& context);
 void EmitReferenceU32(SpirvValueEmitContext& context);
+void EmitUnlinkedCall(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t low, std::uint32_t high, std::uint32_t programCounter);
 void EmitControlNop(SpirvValueEmitContext& context);
 void EmitWaitcnt(SpirvValueEmitContext& context);
 void EmitSendmsg(SpirvValueEmitContext& context);

@@ -19,6 +19,7 @@ bool GuestArenaAvailable_nid_postfix();
 bool GuestArenaContains_nid_postfix(const void* pointer, std::size_t bytes);
 void* GuestArenaAllocate_nid_postfix(std::size_t bytes, std::size_t alignment);
 void* GuestArenaAllocateAtOrAbove_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment);
+void* GuestArenaAllocateFromHint_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment);
 std::uintptr_t GuestArenaHighestFree_nid_no_patch(std::size_t bytes, std::size_t alignment);
 void GuestArenaMarkUsed_nid_postfix(const void* pointer, std::size_t bytes);
 void GuestArenaRelease_nid_postfix(const void* pointer, std::size_t bytes);

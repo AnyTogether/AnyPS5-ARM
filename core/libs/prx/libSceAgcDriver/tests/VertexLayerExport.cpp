@@ -16,7 +16,7 @@ struct Module {
     std::uint32_t version = 0;
 };
 
-Module inspect(const std::vector<std::uint32_t>& words) {
+Module inspect(std::span<const std::uint32_t> words) {
     Module module;
     if (words.size() > 1) module.version = words[1];
     std::vector<std::uint32_t> layerIds;
@@ -32,7 +32,7 @@ Module inspect(const std::vector<std::uint32_t>& words) {
     return module;
 }
 
-bool has(const std::vector<std::uint32_t>& values, std::uint32_t value) {
+bool has(std::span<const std::uint32_t> values, std::uint32_t value) {
     for (const auto entry : values) {
         if (entry == value) return true;
     }

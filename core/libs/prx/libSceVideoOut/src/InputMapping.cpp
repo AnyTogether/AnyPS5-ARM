@@ -214,13 +214,32 @@ std::uint8_t stickByte(std::int32_t axis) {
     return static_cast<std::uint8_t>(((axis + 32768) * 255 + 32767) / 65535);
 }
 
+std::filesystem::path pathFromUtf8(std::string_view text) {
+    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
+std::string pathToUtf8(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return std::string(reinterpret_cast<const char*>(text.data()), text.size());
+}
+
+std::filesystem::path configuredPath() {
+#ifdef _WIN32
+    const wchar_t* configured = _wgetenv(L"ANYPS5_INPUT_CONFIG");
+    return configured != nullptr ? std::filesystem::path(configured) : std::filesystem::path{};
+#else
+    const char* configured = std::getenv("ANYPS5_INPUT_CONFIG");
+    return configured != nullptr ? pathFromUtf8(configured) : std::filesystem::path{};
+#endif
+}
+
 [[noreturn]] void invalidLine(const std::filesystem::path& path, std::size_t line, const std::string& reason) {
-    throw std::runtime_error("Pad: invalid input mapping " + path.string() + ":" + std::to_string(line) + ": " + reason);
+    throw std::runtime_error("Pad: invalid input mapping " + pathToUtf8(path) + ":" + std::to_string(line) + ": " + reason);
 }
 
 std::filesystem::path defaultConfigPath() {
     std::unique_ptr<char, decltype(&SDL_free)> basePath(SDL_GetBasePath(), SDL_free);
-    if (basePath) return std::filesystem::path(basePath.get()) / "anyps5-input.ini";
+    if (basePath) return pathFromUtf8(basePath.get()) / "anyps5-input.ini";
     return "anyps5-input.ini";
 }
 
@@ -244,13 +263,13 @@ std::array<std::uint8_t, 2> Pad::StickWithDeadzone(std::int16_t x, std::int16_t 
 Pad::InputConfiguration Pad::LoadInputMapping() {
     InputConfiguration configuration{{InputMapping.begin(), InputMapping.end()}, {}};
     auto& bindings = configuration.bindings;
-    const char* configuredPath = std::getenv("ANYPS5_INPUT_CONFIG");
-    const bool explicitPath = configuredPath != nullptr && configuredPath[0] != '\0';
-    const std::filesystem::path path = explicitPath ? configuredPath : defaultConfigPath();
+    const auto configured = configuredPath();
+    const bool explicitPath = !configured.empty();
+    const std::filesystem::path path = explicitPath ? configured : defaultConfigPath();
     std::ifstream file(path);
     if (!file) {
         if (explicitPath || std::filesystem::exists(path)) {
-            throw std::runtime_error("Pad: cannot read input mapping '" + path.string() + "'");
+            throw std::runtime_error("Pad: cannot read input mapping '" + pathToUtf8(path) + "'");
         }
         return configuration;
     }
@@ -301,7 +320,7 @@ Pad::InputConfiguration Pad::LoadInputMapping() {
             invalidLine(path, lineNumber, error.what());
         }
     }
-    if (file.bad()) throw std::runtime_error("Pad: cannot read input mapping '" + path.string() + "'");
+    if (file.bad()) throw std::runtime_error("Pad: cannot read input mapping '" + pathToUtf8(path) + "'");
 
     return configuration;
 }

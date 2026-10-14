@@ -24,6 +24,8 @@ public:
     bool RequiresFilterMinmax() const;
     bool ReadsOpaqueBlackBorder() const;
     bool RequiresNonSeamlessCube() const;
+    static void Validate(const Context& context, const GuestSamplerResource& descriptor);
+    static bool ReadsOpaqueBlackBorder(const GuestSamplerResource& descriptor);
 
 private:
     void release() noexcept;

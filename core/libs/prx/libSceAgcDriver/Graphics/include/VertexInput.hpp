@@ -3,6 +3,10 @@
 
 #include "prx/libSceAgcDriver/Graphics/include/Shaders.hpp"
 #include <algorithm>
+#include <atomic>
+#include <list>
+#include <mutex>
+#include <unordered_map>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -134,6 +138,94 @@ inline VertexInputLayout BuildVertexInputLayout(const Context& context, std::spa
     }
     return result;
 }
+
+inline void ValidateVertexAddresses(std::span<const ShaderRecompiler::VertexAttribute> attributes) {
+    for (const auto& attribute : attributes) {
+        if (NullVertexDescriptor(attribute)) continue;
+        const auto& fields = attribute.resource.fields;
+        const auto address = fields[0] | (static_cast<std::uint64_t>(fields[1] & 0xffffu) << 32u);
+        if (address == 0 || address % DecodeVertexFormat(attribute).alignment != 0) Require(false, "unaligned vertex buffer");
+    }
+}
+
+class VertexInputCache {
+public:
+    explicit VertexInputCache(const Context& context, std::size_t capacity = 1024) : context(context), capacity(capacity) {
+        Require(capacity != 0, "vertex input cache capacity is zero");
+    }
+
+    std::shared_ptr<const VertexInputLayout> TryGet(std::uint64_t variant, std::span<const ShaderRecompiler::VertexAttribute> attributes) {
+        if (attributes.empty() || variant == 0 || bypassed(variant)) return nullptr;
+        return get(variant, attributes);
+    }
+
+    std::size_t Size() const {
+        std::lock_guard lock(mutex);
+        return entries.size();
+    }
+
+private:
+    std::shared_ptr<const VertexInputLayout> get(std::uint64_t variant, std::span<const ShaderRecompiler::VertexAttribute> attributes) {
+        std::lock_guard lock(mutex);
+        const auto found = entries.find(variant);
+        if (found != entries.end()) {
+            if (!sameShape(attributes, found->second.shape)) {
+                bypass(variant);
+                order.erase(found->second.order);
+                entries.erase(found);
+                return nullptr;
+            }
+            ValidateVertexAddresses(attributes);
+            order.splice(order.begin(), order, found->second.order);
+            return found->second.layout;
+        }
+        if (bypassed(variant)) return nullptr;
+        auto layout = std::make_shared<const VertexInputLayout>(BuildVertexInputLayout(context, attributes));
+        std::vector<ShaderRecompiler::VertexAttribute> shape(attributes.begin(), attributes.end());
+        order.push_front(variant);
+        try {
+            entries.emplace(variant, Entry{layout, std::move(shape), order.begin()});
+        } catch (...) {
+            order.pop_front();
+            throw;
+        }
+        if (entries.size() > capacity) {
+            bypass(order.back());
+            entries.erase(order.back());
+            order.pop_back();
+        }
+        return layout;
+    }
+
+    static bool sameShape(std::span<const ShaderRecompiler::VertexAttribute> a, std::span<const ShaderRecompiler::VertexAttribute> b) {
+        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const auto& x, const auto& y) {
+            return x.location == y.location && x.components == y.components && x.formatComponents == y.formatComponents && x.fetchIndex == y.fetchIndex &&
+                (x.resource.fields[1] & 0xffff0000u) == (y.resource.fields[1] & 0xffff0000u) && x.resource.fields[3] == y.resource.fields[3] && NullVertexDescriptor(x) == NullVertexDescriptor(y);
+        });
+    }
+    static std::size_t bypassIndex(std::uint64_t variant) {
+        return static_cast<std::size_t>((variant ^ (variant >> 32u)) & 65535u);
+    }
+    bool bypassed(std::uint64_t variant) const {
+        const auto index = bypassIndex(variant);
+        return (bypassBits[index / 64u].load(std::memory_order_relaxed) & (std::uint64_t{1} << (index % 64u))) != 0;
+    }
+    void bypass(std::uint64_t variant) {
+        const auto index = bypassIndex(variant);
+        bypassBits[index / 64u].fetch_or(std::uint64_t{1} << (index % 64u), std::memory_order_relaxed);
+    }
+    struct Entry {
+        std::shared_ptr<const VertexInputLayout> layout;
+        std::vector<ShaderRecompiler::VertexAttribute> shape;
+        std::list<std::uint64_t>::iterator order;
+    };
+    Context context;
+    std::size_t capacity;
+    std::array<std::atomic<std::uint64_t>, 1024> bypassBits{};
+    mutable std::mutex mutex;
+    std::list<std::uint64_t> order;
+    std::unordered_map<std::uint64_t, Entry> entries;
+};
 
 // The whole byte range a vertex buffer descriptor covers (records * stride, or records when the
 // stride is 0): what an indirect draw, whose counts only the GPU knows, copies for the fetch.
@@ -414,4 +506,3 @@ inline std::vector<std::size_t> SoloZeroPaddedFetchIndices(const std::vector<Ver
 }
 
 #endif
-

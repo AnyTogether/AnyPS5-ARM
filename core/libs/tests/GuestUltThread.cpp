@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 #include <thread>
 
 extern "C" {
@@ -30,6 +31,11 @@ int APS5_VABI _sceUltQueueDataResourcePoolCreate(void*, const char*, std::uint32
 int APS5_VABI _sceUltQueueCreate(void*, const char*, std::uint64_t, void*, void*, const void*, std::uint32_t);
 int APS5_VABI sceUltQueuePush(void*, const void*);
 int APS5_VABI sceUltQueuePop(void*, void*);
+int APS5_VABI sceUltMutexDestroy(void*);
+int APS5_VABI sceUltWaitingQueueResourcePoolDestroy(void*);
+int APS5_VABI sceUltSemaphoreDestroy(void*);
+int APS5_VABI sceUltQueueDestroy(void*);
+int APS5_VABI sceUltQueueDataResourcePoolDestroy(void*);
 }
 
 static constexpr int Ok = 0;
@@ -177,6 +183,34 @@ static void UnderscoredCreate() {
     std::uint64_t value = 0x1122334455667788ull, output = 0;
     CHECK(sceUltQueuePush(queue, &value) == Ok);
     CHECK(sceUltQueuePop(queue, &output) == Ok && output == value);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(nullptr) == Null);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(unknownPool) == State);
+    CHECK(sceUltMutexDestroy(nullptr) == Null);
+    CHECK(sceUltMutexLock(mutex) == Ok);
+    CHECK(sceUltMutexDestroy(mutex) == Busy);
+    std::atomic<bool> waiterStarted{false};
+    std::atomic<bool> waiterAcquired{false};
+    std::thread waiter([&] {
+        waiterStarted.store(true, std::memory_order_release);
+        CHECK(sceUltMutexLock(mutex) == Ok);
+        waiterAcquired.store(true, std::memory_order_release);
+        CHECK(sceUltMutexUnlock(mutex) == Ok);
+    });
+    while (!waiterStarted.load(std::memory_order_acquire)) std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    CHECK(!waiterAcquired.load(std::memory_order_acquire));
+    CHECK(sceUltMutexDestroy(mutex) == Busy);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(pool) == Busy);
+    CHECK(sceUltMutexUnlock(mutex) == Ok);
+    waiter.join();
+    CHECK(waiterAcquired.load(std::memory_order_acquire));
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(pool) == Ok);
+    CHECK(sceUltWaitingQueueResourcePoolDestroy(pool) == State);
+    CHECK(sceUltMutexDestroy(mutex) == Ok);
+    CHECK(sceUltMutexDestroy(mutex) == State);
+    CHECK(sceUltSemaphoreDestroy(semaphore) == Ok);
+    CHECK(sceUltQueueDestroy(queue) == Ok);
+    CHECK(sceUltQueueDataResourcePoolDestroy(dataPool) == Ok);
 }
 
 int main(int argc, char** argv) {

@@ -22,9 +22,10 @@ def args_module():
     image = bytearray(0x3000)
     image[:16] = b'\x7fELF\x02\x01\x01' + bytes(9)
     struct.pack_into('<HHIQQQIHHHHHH', image, 16,
-                     3, 62, 1, 0, 64, 0, 0, 64, 56, 3, 0, 0, 0)
-    struct.pack_into('<IIQQQQQQ', image, 64, 1, 7, 0, 0, 0, len(image), len(image), 0x1000)
+                     3, 62, 1, 0, 64, 0, 0, 64, 56, 4, 0, 0, 0)
+    struct.pack_into('<IIQQQQQQ', image, 64, 1, 5, 0, 0, 0, 0x2000, 0x2000, 0x1000)
     struct.pack_into('<IIQQQQQQ', image, 176, 0x6474e551, 6, 0, 0, 0, 0, 0, 16)
+    struct.pack_into('<IIQQQQQQ', image, 232, 1, 6, 0x2000, 0x2000, 0x2000, 0x1000, 0x1000, 0x1000)
     strings = b'\0RecordArgs\0libc.prx\0shared\0'
     tags = [(5, 0x2600), (10, len(strings)), (6, 0x2400), (11, 24), (4, 0x2500),
             (7, 0x2700), (8, 24), (9, 24), (1, 12), (12, 0x1010), (0, 0)]

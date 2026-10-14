@@ -4,10 +4,13 @@
 #include <nid/MachONidPatcher.hpp>
 #include <nid/NidPatcherUtils.hpp>
 #include <nid/NativePath.hpp>
+#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <vector>
 
 namespace Nid {
 
@@ -113,6 +116,24 @@ std::unordered_set<std::string> ReadElfExports(const std::vector<std::uint8_t>& 
     return result;
 }
 
+std::string ReadText(const std::string& path, std::ifstream& input) {
+    std::string text{std::istreambuf_iterator<char>(input), {}};
+    if (input.bad()) throw std::runtime_error("cannot read export list: " + path);
+    return text;
+}
+
+std::string FormatExportList(const std::unordered_set<std::string>& exports) {
+    std::vector<std::string> names(exports.begin(), exports.end());
+    std::ranges::sort(names);
+    std::string text;
+    for (const auto& name : names) {
+        if (name.find('\n') != std::string::npos) throw std::runtime_error("export name contains a line break: " + name);
+        text += name;
+        text += '\n';
+    }
+    return text;
+}
+
 }
 
 std::string NormalizeExportName(const std::string& name) {
@@ -152,6 +173,33 @@ std::unordered_set<std::string> ReadExportExclusions(const std::string& path) {
         result.insert(std::move(normalized));
     }
     return result;
+}
+
+std::unordered_set<std::string> ReadExportList(const std::string& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("cannot open export list: " + path);
+    const auto text = ReadText(path, input);
+    if (text.empty() || text.back() != '\n') throw std::runtime_error("malformed export list: " + path);
+    std::unordered_set<std::string> result;
+    for (std::size_t start = 0; start < text.size();) {
+        const auto end = text.find('\n', start);
+        if (end == start) throw std::runtime_error("empty name in export list: " + path);
+        auto name = text.substr(start, end - start);
+        if (!result.insert(name).second) throw std::runtime_error("duplicate name in export list: " + name);
+        start = end + 1;
+    }
+    return result;
+}
+
+bool WriteExportList(const std::string& referencePath, const std::string& path) {
+    const auto text = FormatExportList(ReadExportExclusions(referencePath));
+    if (std::ifstream existing(path, std::ios::binary); existing && ReadText(path, existing) == text) return false;
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) throw std::runtime_error("cannot write export list: " + path);
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    output.close();
+    if (!output) throw std::runtime_error("cannot write export list: " + path);
+    return true;
 }
 
 }

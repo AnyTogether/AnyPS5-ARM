@@ -94,18 +94,42 @@ inline bool WriteFileAtomically(const std::filesystem::path& path, std::span<con
 inline bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::byte>& bytes) {
     bytes.clear();
     try {
+#ifdef _WIN32
+        const auto file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+        struct Close { HANDLE file; ~Close() { CloseHandle(file); } } close{file};
+        LARGE_INTEGER fileSize{};
+        if (!GetFileSizeEx(file, &fileSize)) return false;
+        const auto size = fileSize.QuadPart;
+#else
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file) return false;
         const auto size = static_cast<std::streamoff>(file.tellg());
+#endif
         if (size < 0 || static_cast<std::uintmax_t>(size) > bytes.max_size() ||
             static_cast<std::uintmax_t>(size) > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
             return false;
+#ifdef _WIN32
+        bytes.resize(static_cast<std::size_t>(size));
+        for (std::size_t offset = 0; offset < bytes.size();) {
+            const auto left = bytes.size() - offset;
+            const auto chunk = static_cast<DWORD>(left > MAXDWORD ? MAXDWORD : left);
+            DWORD count = 0;
+            if (!ReadFile(file, bytes.data() + offset, chunk, &count, nullptr) || count == 0) {
+                bytes.clear();
+                return false;
+            }
+            offset += count;
+        }
+#else
         if (!file.seekg(0, std::ios::beg)) return false;
         bytes.resize(static_cast<std::size_t>(size));
         if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
             bytes.clear();
             return false;
         }
+#endif
         return true;
     } catch (const std::bad_alloc&) {
         bytes.clear();

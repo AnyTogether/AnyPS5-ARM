@@ -302,6 +302,18 @@ bool AllLanesBit(const IrValue* bit) {
     return words && AllOnesWord((*words)[0]) && AllOnesWord((*words)[1]);
 }
 
+bool HelperTest(const IrValue* predicate) {
+    return Is(predicate, IrOpcode::IEqual32) && EitherOrder(predicate, [](const IrValue* builtin, const IrValue* zero) { return IsU32(zero, 0u) && Is(builtin, IrOpcode::GetBuiltin) && IsU32(builtin->Argument(0), static_cast<std::uint32_t>(StageInputKind::HelperInvocation)) && IsU32(builtin->Argument(1), 0u); });
+}
+
+bool HelperOrFalseConjunct(const IrValue* bit) {
+    bit = Resolved(bit);
+    if (bit == nullptr) return false;
+    if (bit->HasImmediate()) return bit->Type() == IrType::Bool && !bit->ImmediateBool();
+    if (Is(bit, IrOpcode::LogicalAnd)) return HelperOrFalseConjunct(bit->Argument(0)) || HelperOrFalseConjunct(bit->Argument(1));
+    return HelperTest(bit);
+}
+
 bool EveryInvocationEnters(IrShaderStage stage) {
     return stage == IrShaderStage::Vertex || stage == IrShaderStage::Local || stage == IrShaderStage::TessellationControl || stage == IrShaderStage::TessellationEvaluation;
 }
@@ -314,9 +326,10 @@ public:
         bit = Resolved(bit);
         if (bit == nullptr || !Spend()) return false;
         if (bit->HasImmediate()) return bit->Type() == IrType::Bool && !bit->ImmediateBool();
-        if (Is(bit, IrOpcode::LogicalAnd)) return ZeroBit(bit->Argument(0)) || ZeroBit(bit->Argument(1));
+        if (Is(bit, IrOpcode::LogicalAnd)) return HelperOrFalseConjunct(bit) || ZeroBit(bit->Argument(0)) || ZeroBit(bit->Argument(1));
         if (Is(bit, IrOpcode::SelectU1)) return ZeroBit(bit->Argument(1)) && ZeroBit(bit->Argument(2));
         if (Is(bit, IrOpcode::Phi)) return Incoming(bit, [this](const IrValue* incoming) { return ZeroBit(incoming); });
+        if (Is(bit, IrOpcode::IEqual32)) return HelperTest(bit);
         const auto words = LaneBitWords(bit);
         return words && Word((*words)[0], 0u) && Word((*words)[1], 1u);
     }
@@ -334,7 +347,7 @@ private:
         if (predicate->HasImmediate()) return everyInvocationEnters && predicate->Type() == IrType::Bool && predicate->ImmediateBool();
         switch (predicate->Opcode()) {
             case IrOpcode::LogicalAnd: return NotHelper(predicate->Argument(0)) || NotHelper(predicate->Argument(1));
-            case IrOpcode::IEqual32: return EitherOrder(predicate, [](const IrValue* builtin, const IrValue* zero) { return IsU32(zero, 0u) && Is(builtin, IrOpcode::GetBuiltin) && IsU32(builtin->Argument(0), static_cast<std::uint32_t>(StageInputKind::HelperInvocation)) && IsU32(builtin->Argument(1), 0u); });
+            case IrOpcode::IEqual32: return HelperTest(predicate);
             default: return ZeroBit(predicate);
         }
     }

@@ -1,9 +1,9 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
+#include <array>
 #include <cstdint>
-#include <cstdio>
-#include <functional>
+#include <cstdlib>
 #include <stdexcept>
-#include <string>
 
 extern "C" {
 int APS5_VABI sceOpusCeltDecInitialize(std::uint32_t*);
@@ -14,31 +14,74 @@ int APS5_VABI sceOpusCeltDecDecode(void*, const std::uint8_t*, int, std::int16_t
 int APS5_VABI sceOpusCeltDecDestroy(void*);
 }
 
-static int failures = 0;
+namespace {
 
-static void RequireNotImplemented(const char* name, const std::function<void()>& call) {
-    try {
-        call();
-    } catch (const std::runtime_error& error) {
-        if (std::string(error.what()) == std::string(name) + " not implemented") return;
-        std::fprintf(stderr, "%s threw: %s\n", name, error.what());
-        ++failures;
-        return;
-    }
-    std::fprintf(stderr, "%s returned instead of reporting that it is not implemented\n", name);
-    ++failures;
+void Require(bool value) { if (!value) std::abort(); }
+
+template <typename TFunction>
+void RequireThrows(TFunction function) {
+    try { function(); } catch (const std::runtime_error&) { return; }
+    std::abort();
 }
+
+const std::uint8_t CELT_STEREO[] = {
+    0x75, 0x00, 0xFC, 0xB5, 0x1F, 0xBC, 0xC8, 0xCA, 0x0B, 0xC2, 0x18, 0x1A, 0xFB, 0xDB, 0x3E, 0x2B, 0x6B, 0x0A, 0x67, 0x71, 0x25, 0x2F, 0x51, 0x57,
+    0x4F, 0x78, 0xB3, 0x1F, 0xE9, 0xF3, 0x99, 0x51, 0xE9, 0x70, 0x72, 0x23, 0x99, 0x3E, 0x26, 0xA3, 0xF1, 0x8F, 0x02, 0xB3, 0xAA, 0xBA, 0xAB, 0x7E,
+    0xA5, 0x6A, 0xBA, 0x33, 0xCA, 0xE9, 0x43, 0x4D, 0x41, 0xC9, 0x90, 0x3C, 0xD0, 0x5F, 0x55, 0xC1, 0x54, 0xA8, 0xD0, 0x6F, 0x71, 0x4F, 0xCB, 0x95,
+    0xDF, 0x09, 0xC9, 0xB6, 0xAA, 0xA1, 0x8D, 0xD4, 0x2B, 0xC0, 0xF7, 0x23, 0xDD, 0xF5, 0x54, 0xEF, 0x90, 0xC4, 0xD3, 0x47, 0xC1, 0x91, 0x2D, 0xA8,
+    0x3D, 0x53, 0xF4, 0x7D, 0xFF, 0xBD, 0x47, 0x0E, 0xD2, 0x95, 0x25, 0x42, 0x66, 0x02, 0xD7, 0x80, 0x00, 0x67, 0x59, 0x13, 0x60, 0x2F, 0x6C, 0x60,
+    0x00, 0xFC, 0xB3, 0xF1, 0x8F, 0xA9, 0xA8, 0x43, 0x9D, 0xC0, 0x23, 0xBE, 0x5B, 0x38, 0xE8, 0xF8, 0xB8, 0x85, 0xBE, 0xD2, 0x2F, 0x40, 0x53, 0x40,
+    0xEF, 0x24, 0xE5, 0xA6, 0x91, 0xF4, 0x9B, 0x73, 0xC5, 0x61, 0x61, 0x08, 0x3F, 0x56, 0x7D, 0x7A, 0x2A, 0xBC, 0xAF, 0x3A, 0x70, 0xDD, 0x5E, 0x0B,
+    0x12, 0xBD, 0xC5, 0xEA, 0x69, 0x63, 0x65, 0x36, 0x5E, 0x27, 0x15, 0xBA, 0xB0, 0xE3, 0x62, 0xE7, 0x4F, 0x54, 0xFA, 0xD2, 0x49, 0x7E, 0xBD, 0xE4,
+    0xDA, 0x9E, 0x2F, 0x90, 0x9E, 0x91, 0x84, 0x6F, 0x95, 0xCE, 0x2D, 0x25, 0x63, 0x23, 0x57, 0x1C, 0x00, 0x20, 0x79, 0xE7, 0xEE, 0xBB, 0x91, 0x7F,
+    0xEE, 0x63, 0x00, 0xFC, 0xB2, 0x91, 0x0B, 0x44, 0x10, 0xE2, 0xD2, 0x82, 0x28, 0x1C, 0x96, 0x98, 0x61, 0xB7, 0x87, 0x46, 0x4A, 0x96, 0xA1, 0x41,
+    0xE7, 0x5F, 0x84, 0xA1, 0x73, 0x0E, 0x28, 0x29, 0xD0, 0x65, 0x9C, 0x99, 0x33, 0xA0, 0x7E, 0x63, 0xB9, 0x51, 0xED, 0x67, 0xCB, 0x5D, 0xD2, 0x22,
+    0xC8, 0x0C, 0x59, 0x72, 0xB5, 0x37, 0xA9, 0xB5, 0x24, 0x25, 0xB3, 0xA1, 0x09, 0x8B, 0xBA, 0x9E, 0x6C, 0x5C, 0x23, 0x7C, 0x7B, 0x19, 0xDB, 0x45,
+    0xCF, 0x19, 0xC5, 0x1F, 0x79, 0xCC, 0x16, 0x07, 0xA5, 0x4C, 0xD8, 0xA0, 0x4B, 0x48, 0x8F, 0xAE, 0x17, 0x7C, 0x28, 0xF0, 0x03, 0xFF, 0xF9, 0xE1,
+    0x80, 0x55, 0x44, 0x44, 0x7F, 0xEE,
+};
+
+const std::uint8_t HYBRID_PACKET[] = {0x7C, 0x87, 0xFC, 0xB1};
+
+} // namespace
 
 int main() {
     std::uint32_t context = 0;
-    std::uint8_t state[64] = {};
-    std::int16_t pcm[16] = {};
-    const std::uint8_t packet[] = {0xFC, 0x00};
-    RequireNotImplemented("sceOpusCeltDecInitialize", [&] { sceOpusCeltDecInitialize(&context); });
-    RequireNotImplemented("sceOpusCeltDecTerminate", [&] { sceOpusCeltDecTerminate(&context); });
-    RequireNotImplemented("sceOpusCeltDecGetSize", [] { sceOpusCeltDecGetSize(2); });
-    RequireNotImplemented("sceOpusCeltDecCreateEx", [&] { sceOpusCeltDecCreateEx(&context, state, 48000, 2); });
-    RequireNotImplemented("sceOpusCeltDecDecode", [&] { sceOpusCeltDecDecode(state, packet, sizeof(packet), pcm, sizeof(pcm)); });
-    RequireNotImplemented("sceOpusCeltDecDestroy", [&] { sceOpusCeltDecDestroy(state); });
-    return failures == 0 ? 0 : 1;
+    Require(sceOpusCeltDecInitialize(&context) == 0);
+    RequireThrows([&] { sceOpusCeltDecInitialize(&context); });
+    Require(sceOpusCeltDecGetSize(1) == 640 && sceOpusCeltDecGetSize(2) == 640);
+    RequireThrows([&] { sceOpusCeltDecGetSize(3); });
+    std::array<std::uint8_t, 640> state{}, monoState{};
+    Require(sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2) == 0);
+    Require(sceOpusCeltDecCreateEx(&context, monoState.data(), 48000, 1) == 0);
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2); });
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    std::array<std::int16_t, 1922> pcm{};
+    pcm.fill(12345);
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), HYBRID_PACKET, sizeof(HYBRID_PACKET), pcm.data() + 1, 3840); });
+    Require(std::all_of(pcm.begin(), pcm.end(), [](auto value) { return value == 12345; }));
+    std::size_t offset = 0;
+    bool audible = false;
+    for (int frame = 0; frame < 3; ++frame) {
+        const int bytes = CELT_STEREO[offset] | (CELT_STEREO[offset + 1] << 8);
+        const auto* packet = CELT_STEREO + offset + 2;
+        pcm.fill(12345);
+        RequireThrows([&] { sceOpusCeltDecDecode(state.data(), packet, bytes, pcm.data() + 1, 3839); });
+        Require(sceOpusCeltDecDecode(state.data(), packet, bytes, pcm.data() + 1, 3840) == 3840);
+        Require(pcm.front() == 12345 && pcm.back() == 12345);
+        audible = audible || std::any_of(pcm.begin() + 1, pcm.end() - 1, [](auto value) { return value != 0; });
+        std::array<std::int16_t, 962> mono{};
+        mono.front() = mono.back() = 12345;
+        Require(sceOpusCeltDecDecode(monoState.data(), packet, bytes, mono.data() + 1, 1920) == 1920);
+        Require(mono.front() == 12345 && mono.back() == 12345);
+        offset += bytes + 2;
+    }
+    Require(audible);
+    Require(sceOpusCeltDecDestroy(state.data()) == 0);
+    RequireThrows([&] { sceOpusCeltDecDestroy(state.data()); });
+    RequireThrows([&] { sceOpusCeltDecDecode(state.data(), CELT_STEREO + 2, CELT_STEREO[0], pcm.data(), 3840); });
+    Require(sceOpusCeltDecDestroy(monoState.data()) == 0);
+    Require(sceOpusCeltDecTerminate(&context) == 0);
+    RequireThrows([&] { sceOpusCeltDecTerminate(&context); });
+    RequireThrows([&] { sceOpusCeltDecCreateEx(&context, state.data(), 48000, 2); });
 }

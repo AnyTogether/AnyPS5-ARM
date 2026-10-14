@@ -168,13 +168,18 @@ std::uint32_t EmitMemoryElementInBounds(SpirvEmitterState& state, const MemoryRe
     return inBounds;
 }
 
+bool InFunctionStorage(const SpirvEmitterState& state, ResourceKind kind) {
+    if (kind == ResourceKind::Scratch) return true;
+    return kind == ResourceKind::Lds && !LdsInDeviceMemory(state) && ShaderWorkgroupInput(state) == nullptr;
+}
+
 std::uint32_t EmitMemoryElementPointer(SpirvEmitterState& state, const MemoryResourceAccess& access, std::uint32_t index) {
     if (access.kind == ResourceKind::Lds && LdsInDeviceMemory(state)) {
         return EmitStorageBufferElementPointer(state, access, EmitAddU32(state, state.ldsBufferBase, index), TypeStorageBufferElementPointer(state));
     }
     if (access.kind == ResourceKind::Lds || access.kind == ResourceKind::Scratch) {
         const auto pointer = state.module.AllocateId();
-        const std::uint32_t storageClass = access.kind == ResourceKind::Scratch ? spv::StorageClassFunction : ShaderWorkgroupInput(state) != nullptr ? spv::StorageClassWorkgroup : spv::StorageClassFunction;
+        const std::uint32_t storageClass = InFunctionStorage(state, access.kind) ? spv::StorageClassFunction : spv::StorageClassWorkgroup;
         state.module.AddFunction(spv::OpAccessChain, TypeU32ElementPointer(state, storageClass), pointer, access.objectPointer, index);
         return pointer;
     }

@@ -52,7 +52,8 @@ std::string CallRegistryWriter::WriteCallRegistry(const std::vector<CallRegistry
         }
 
         out << "],\n";
-        out << "    \"callSitesResolved\": " << (e.CallSitesResolved ? "true" : "false") << "\n";
+        out << "    \"callSitesResolved\": " << (e.CallSitesResolved ? "true" : "false") << ",\n";
+        out << "    \"weak\": " << (e.Weak ? "true" : "false") << "\n";
         out << "  }";
         if (i + 1 < entries.size()) out << ",";
         out << "\n";

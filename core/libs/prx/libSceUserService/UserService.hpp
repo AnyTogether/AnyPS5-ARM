@@ -5,6 +5,8 @@
 #include <cstdint>
 
 constexpr int USER_SERVICE_OK = 0;
+constexpr int USER_SERVICE_ERROR_NOT_INITIALIZED = static_cast<int>(0x80960002u);
+constexpr int USER_SERVICE_ERROR_ALREADY_INITIALIZED = static_cast<int>(0x80960003u);
 constexpr int USER_SERVICE_ERROR_INVALID_ARGUMENT = -2137653243;
 constexpr int USER_SERVICE_ERROR_NO_EVENT = -2137653241;
 constexpr int USER_SERVICE_ERROR_NOT_LOGGED_IN = -2137653239;

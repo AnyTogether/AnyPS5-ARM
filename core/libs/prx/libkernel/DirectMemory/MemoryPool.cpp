@@ -52,8 +52,8 @@ bool PageSpan(uint64_t start, size_t len, uint64_t& lo, uint64_t& hi) {
 
 struct PhysicalMemoryPool {
     static PhysicalMemoryPool& Instance() {
-        static PhysicalMemoryPool inst;
-        return inst;
+        static auto* inst = new PhysicalMemoryPool;
+        return *inst;
     }
 
     int Alloc(int64_t searchStart, int64_t searchEnd, size_t len, size_t alignment, int memoryType, int64_t* physOut) {

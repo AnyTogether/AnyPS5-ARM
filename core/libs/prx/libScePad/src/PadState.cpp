@@ -3,6 +3,7 @@
 #include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -14,6 +15,7 @@ namespace {
     std::mutex stateMutex;
     PadInputState state;
     PadOutputState output;
+    std::chrono::steady_clock::time_point audioHapticEnd;
     std::uint64_t timestamp = 0;
 
     struct QueuedInput {
@@ -381,8 +383,23 @@ extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
 
 extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out) {
     std::lock_guard lock(stateMutex);
+    if ((output.audioVibrationLarge || output.audioVibrationSmall) && std::chrono::steady_clock::now() >= audioHapticEnd) {
+        output.audioVibrationLarge = output.audioVibrationSmall = 0;
+        ++output.sequence;
+    }
     if (seenSequence == nullptr || out == nullptr || *seenSequence == output.sequence) return false;
     *seenSequence = output.sequence;
     *out = output;
     return true;
+}
+
+extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8_t small) {
+    std::lock_guard lock(stateMutex);
+    if (large == 0 && small == 0) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= audioHapticEnd) output.audioVibrationLarge = output.audioVibrationSmall = 0;
+    output.audioVibrationLarge = std::max(output.audioVibrationLarge, large);
+    output.audioVibrationSmall = std::max(output.audioVibrationSmall, small);
+    audioHapticEnd = now + std::chrono::milliseconds(80);
+    ++output.sequence;
 }

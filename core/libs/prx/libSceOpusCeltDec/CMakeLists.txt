@@ -1,6 +1,6 @@
 add_library(libSceOpusCeltDec SHARED EXCLUDE_FROM_ALL ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp)
 target_include_directories(libSceOpusCeltDec PRIVATE ${LIBS_INCLUDE_DIR})
-target_link_libraries(libSceOpusCeltDec PRIVATE libc)
+target_link_libraries(libSceOpusCeltDec PRIVATE ffmpeg)
 configure_windows_unwind(libSceOpusCeltDec)
 
 if(BUILD_TESTING)

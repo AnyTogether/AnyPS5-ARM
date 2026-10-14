@@ -78,8 +78,8 @@ void Draw(AgcDriver::VulkanDevice& device, const Case& value) {
     const auto vertexResult = ShaderRecompiler::Recompile(vertexRequest);
     Require(vertexResult.vertexAttributes.size() == 1u, std::string(value.what) + ": the fetch did not become a vertex attribute");
     if (device.Target().registrationModules) {
-        if (registrationModule.empty()) registrationModule = vertexResult.spirv.Words();
-        Require(vertexResult.spirv.Words() == registrationModule, std::string(value.what) + ": registration modules: the V# specialized the vertex module");
+        if (registrationModule.empty()) registrationModule = vertexResult.spirv.Copy();
+        Require(std::ranges::equal(vertexResult.spirv.Words(), registrationModule), std::string(value.what) + ": registration modules: the V# specialized the vertex module");
     }
     const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
 

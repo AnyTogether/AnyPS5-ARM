@@ -9,6 +9,7 @@ namespace H264Fixture {
 
 inline constexpr std::uint32_t Width = 64;
 inline constexpr std::uint32_t Height = 40;
+inline constexpr std::uint32_t CodedHeight = 48;
 
 inline constexpr std::array<std::uint8_t, 1477> Stream{
     0x00, 0x00, 0x00, 0x01, 0x09, 0x10, 0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x0a, 0xac, 0xd9,
@@ -107,20 +108,20 @@ inline constexpr std::array<std::uint8_t, 1477> Stream{
 };
 
 inline constexpr std::array<std::uint64_t, 6> PictureHashes{
-    0x5871fdc85dfa274eull, 0x26ce4afb974cffc4ull, 0xd2e739633733d5baull,
-    0x54feb3d290e028fdull, 0xfa1342a4ba1819c8ull, 0x870125dd7f079a4cull,
+    0x51b6aa8b48a59d5full, 0x2d097708ed7c0f66ull, 0xdee989a52806e938ull,
+    0x4bfd091eacb8679full, 0x290cf60ce8be58bcull, 0x809cb73819503632ull,
 };
 
 inline constexpr std::array<std::uint64_t, 6> DisplayOrderUnits{0, 2, 3, 1, 5, 4};
 
-inline std::uint64_t hashNv12(const std::uint8_t* buffer, std::uint32_t pitch) {
+inline std::uint64_t hashNv12(const std::uint8_t* buffer, std::uint32_t pitch, std::uint32_t height) {
     std::uint64_t hash = 0xcbf29ce484222325ull;
     const auto mix = [&](const std::uint8_t* row) {
         for (std::uint32_t column = 0; column < Width; ++column) hash = (hash ^ row[column]) * 0x100000001b3ull;
     };
-    for (std::uint32_t row = 0; row < Height; ++row) mix(buffer + static_cast<std::size_t>(row) * pitch);
-    const auto* chroma = buffer + static_cast<std::size_t>(pitch) * Height;
-    for (std::uint32_t row = 0; row < Height / 2; ++row) mix(chroma + static_cast<std::size_t>(row) * pitch);
+    for (std::uint32_t row = 0; row < height; ++row) mix(buffer + static_cast<std::size_t>(row) * pitch);
+    const auto* chroma = buffer + static_cast<std::size_t>(pitch) * height;
+    for (std::uint32_t row = 0; row < height / 2; ++row) mix(chroma + static_cast<std::size_t>(row) * pitch);
     return hash;
 }
 

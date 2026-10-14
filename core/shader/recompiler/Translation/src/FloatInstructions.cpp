@@ -39,12 +39,22 @@ bool TranslationContext::packedFloat16(const RdnaInstruction& inst, IrOpcode opc
         if (high ? operand.negateHi : operand.negate) bits = IrU32(ir.BitwiseXor(bits.Value(), ir.Constant(0x8000u)));
         return bits;
     };
-    const auto minMaxLane = [&](bool high) { return minMaxF16Bits(opcode == IrOpcode::FPMax32, laneBits(sourceAt(inst, 0u), high), laneBits(sourceAt(inst, 1u), high)); };
+    std::array<std::array<IrU32, 2>, 3> sourceBits{};
+    std::array<std::array<bool, 2>, 3> sourceBitsReady{};
+    const auto sourceLaneBits = [&](std::uint32_t index, bool high) {
+        const std::size_t lane = high ? 1u : 0u;
+        if (!sourceBitsReady[index][lane]) {
+            const RdnaOperand& operand = accumulator && index == 2u ? accumulatorOperand(inst) : sourceAt(inst, index);
+            sourceBits[index][lane] = laneBits(operand, high);
+            sourceBitsReady[index][lane] = true;
+        }
+        return sourceBits[index][lane];
+    };
+    const auto minMaxLane = [&](bool high) { return minMaxF16Bits(opcode == IrOpcode::FPMax32, sourceLaneBits(0u, high), sourceLaneBits(1u, high)); };
     const bool native = nativeFloat16 && inst.destination.omod == 0u && (opcode == IrOpcode::FPAdd32 || opcode == IrOpcode::FPMul32);
     const auto nativeResult = [&]() {
-        const auto packed = [&](const RdnaOperand& operand) { return packU16Lanes(laneBits(operand, false), laneBits(operand, true)); };
-        const IrU32 lhs = packed(sourceAt(inst, 0u));
-        const IrU32 rhs = packed(sourceAt(inst, 1u));
+        const IrU32 lhs = packU16Lanes(sourceLaneBits(0u, false), sourceLaneBits(0u, true));
+        const IrU32 rhs = packU16Lanes(sourceLaneBits(1u, false), sourceLaneBits(1u, true));
         return IrU32(ir.Emit(opcode == IrOpcode::FPAdd32 ? IrOpcode::FPAdd16x2 : IrOpcode::FPMul16x2, IrType::U32, {&lhs.Value(), &rhs.Value()}));
     };
     IrU32 result = quietSnan ? packU16Lanes(minMaxLane(false), minMaxLane(true)) : native ? nativeResult() : packHalf2x16(translateLane(false), translateLane(true));
@@ -67,7 +77,7 @@ bool TranslationContext::packedFloat16(const RdnaInstruction& inst, IrOpcode opc
             const std::uint32_t count = accumulator ? 3u : inst.sourceCount;
             std::array<IrU32, 3> bits{};
             for (std::uint32_t index = 0u; index < count; ++index) {
-                bits[index] = laneBits(accumulator && index == 2u ? accumulatorOperand(inst) : sourceAt(inst, index), high);
+                bits[index] = sourceLaneBits(index, high);
             }
             IrU32 lane(high ? ir.ShiftRightLogical(result.Value(), ir.Constant(16u)) : ir.BitwiseAnd(result.Value(), ir.Constant(0xffffu)));
             if (native && inst.destination.clamp && dx10Clamp()) return lane;

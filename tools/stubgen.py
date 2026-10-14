@@ -197,7 +197,11 @@ def write_outputs(outputs):
             temporary.replace(path)
     finally:
         for temporary, path in staged:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except PermissionError:
+                temporary.chmod(0o600)
+                temporary.unlink(missing_ok=True)
 
 
 def main(argv=None):

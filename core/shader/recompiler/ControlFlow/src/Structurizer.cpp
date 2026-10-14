@@ -22,6 +22,29 @@ std::vector<std::uint32_t> allBlockIds(std::uint32_t count) {
     return ids;
 }
 
+std::vector<std::uint32_t> reversePostOrder(const ControlFlowGraph& graph);
+
+std::vector<std::uint32_t> analysisOrder(const ControlFlowGraph& graph, bool successorsFirst) {
+    const auto count = static_cast<std::uint32_t>(graph.blocks.size());
+    std::vector<std::uint32_t> order;
+    std::vector<bool> placed(count, false);
+    if (graph.entryBlock < count) {
+        order = reversePostOrder(graph);
+        if (successorsFirst) {
+            std::reverse(order.begin(), order.end());
+        }
+        for (const auto id : order) {
+            placed[id] = true;
+        }
+    }
+    for (std::uint32_t id = 0; id < count; ++id) {
+        if (!placed[id]) {
+            order.push_back(id);
+        }
+    }
+    return order;
+}
+
 bool inPlaceIntersections() {
     static const bool enabled = std::getenv("APS5_NO_PERF_DOM_INTERSECTION") == nullptr;
     return enabled;
@@ -316,43 +339,47 @@ bool reachesWithinIteration(const ControlFlowGraph& graph, const NaturalLoop& lo
 }
 
 std::uint32_t joinWithinIteration(const ControlFlowGraph& graph, const NaturalLoop& loop, std::uint32_t trueTarget, std::uint32_t falseTarget, std::uint32_t globalMerge) {
-    std::vector<std::uint32_t> reached;
+    std::vector<bool> reached(graph.blocks.size(), false);
     std::vector<std::uint32_t> pending = {trueTarget, falseTarget};
     while (!pending.empty()) {
         const auto blockId = pending.back();
         pending.pop_back();
-        if (blockId == globalMerge || contains(reached, blockId) || !isInsideLoopConstruct(graph, loop, blockId)) {
+        if (blockId == globalMerge || reached[blockId] || !isInsideLoopConstruct(graph, loop, blockId)) {
             continue;
         }
-        reached.push_back(blockId);
+        reached[blockId] = true;
         const auto& successors = graph.FindBlock(blockId).successors;
         pending.insert(pending.end(), successors.begin(), successors.end());
     }
+    std::vector<bool> joins(graph.blocks.size(), false);
     std::vector<std::uint32_t> joining = {globalMerge};
+    joins[globalMerge] = true;
     for (std::size_t index = 0; index < joining.size(); ++index) {
         for (const auto predecessor : graph.FindBlock(joining[index]).predecessors) {
-            if (contains(reached, predecessor) && !contains(joining, predecessor)) {
+            if (reached[predecessor] && !joins[predecessor]) {
+                joins[predecessor] = true;
                 joining.push_back(predecessor);
             }
         }
     }
     sortUnique(joining);
-    if (!contains(joining, trueTarget) || !contains(joining, falseTarget)) {
+    if (!joins[trueTarget] || !joins[falseTarget]) {
         return globalMerge;
     }
     std::vector<std::vector<std::uint32_t>> postDominators(graph.blocks.size());
     for (const auto blockId : joining) {
         postDominators[blockId] = blockId == globalMerge ? std::vector<std::uint32_t>{globalMerge} : joining;
     }
+    const auto order = analysisOrder(graph, true);
     for (bool changed = true; changed;) {
         changed = false;
-        for (const auto blockId : joining) {
-            if (blockId == globalMerge) {
+        for (const auto blockId : order) {
+            if (!joins[blockId] || blockId == globalMerge) {
                 continue;
             }
             auto next = joining;
             for (const auto successor : graph.FindBlock(blockId).successors) {
-                if (contains(joining, successor)) {
+                if (joins[successor]) {
                     next = intersectSorted(next, postDominators[successor]);
                 }
             }
@@ -433,9 +460,11 @@ std::uint32_t mergeBesideReturns(const ControlFlowGraph& graph, const BasicBlock
             postDominators[block.id] = {block.id};
         }
     }
+    const auto order = analysisOrder(graph, true);
     for (bool changed = true; changed;) {
         changed = false;
-        for (const auto& block : graph.blocks) {
+        for (const auto blockId : order) {
+            const auto& block = graph.blocks[blockId];
             if (kept[block.id].empty()) {
                 continue;
             }
@@ -443,8 +472,7 @@ std::uint32_t mergeBesideReturns(const ControlFlowGraph& graph, const BasicBlock
             for (std::size_t i = 1; i < kept[block.id].size(); ++i) {
                 intersectAnalysisSet(next, postDominators[kept[block.id][i]]);
             }
-            addUnique(next, block.id);
-            sortUnique(next);
+            addSortedUnique(next, block.id);
             if (next != postDominators[block.id]) {
                 replaceAnalysisSet(postDominators[block.id], std::move(next));
                 changed = true;
@@ -506,9 +534,11 @@ std::uint32_t iterationSelectionMerge(const ControlFlowGraph& graph, const Natur
     }
     std::vector<std::vector<std::uint32_t>> postDominators(count, allBlockIds(count));
     postDominators[join] = {join};
+    const auto order = analysisOrder(graph, true);
     for (bool changed = true; changed;) {
         changed = false;
-        for (const auto& block : graph.blocks) {
+        for (const auto blockId : order) {
+            const auto& block = graph.blocks[blockId];
             if (!joins[block.id] || block.id == join) {
                 continue;
             }
@@ -810,6 +840,8 @@ constexpr std::uint32_t CloneWordLimit = 1024u;
 constexpr std::uint32_t CloneWordFloor = 256u;
 constexpr std::uint32_t CloneShareDivisor = 8u;
 constexpr std::uint32_t CloneBudgetDivisor = 4u;
+constexpr std::uint32_t SplitGrowthFactor = 16u;
+constexpr std::uint32_t SplitGrowthFloor = 64u;
 
 struct SplitBudget {
     std::uint32_t programWords = 0;
@@ -1450,10 +1482,328 @@ void tarjanVisit(TarjanState& state, std::uint32_t blockId) {
     state.components.push_back(std::move(component));
 }
 
+bool forcedFlagStructurization() {
+    static const bool forced = std::getenv("APS5_FORCE_STRUCTURIZER_FALLBACK") != nullptr;
+    return forced;
+}
+
+std::vector<std::uint32_t> terminatorTargets(const Terminator& terminator) {
+    if (terminator.kind == TerminatorKind::Branch) {
+        return {terminator.trueBlock};
+    }
+    if (terminator.kind == TerminatorKind::ConditionalBranch) {
+        return {terminator.trueBlock, terminator.falseBlock};
+    }
+    return {};
+}
+
+bool supportsFlagStructurization(const ControlFlowGraph& graph) {
+    const auto count = graph.blocks.size();
+    if (graph.unsupported || graph.entryBlock >= count) {
+        return false;
+    }
+    for (std::uint32_t id = 0; id < count; ++id) {
+        const auto& block = graph.blocks[id];
+        const auto kind = block.terminator.kind;
+        if (block.id != id || (kind != TerminatorKind::Branch && kind != TerminatorKind::ConditionalBranch && kind != TerminatorKind::Return)) {
+            return false;
+        }
+        const auto targets = terminatorTargets(block.terminator);
+        if (std::any_of(targets.begin(), targets.end(), [&](std::uint32_t target) { return target >= count; })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct FlagEmission {
+    ControlFlowGraph* graph = nullptr;
+    std::uint32_t entryBlock = InvalidControlFlowId;
+    std::uint32_t firstVariable = 0;
+    std::uint32_t nextVariable = 0;
+    std::vector<std::vector<std::uint32_t>> targets;
+    std::vector<std::vector<std::uint32_t>> successors;
+    std::vector<std::vector<std::uint32_t>> predecessors;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> openLoops;
+    std::vector<std::uint32_t> order;
+    std::vector<std::uint32_t> fallthroughs;
+};
+
+std::vector<std::vector<std::uint32_t>> orderedComponents(const FlagEmission& emission, const std::vector<std::uint32_t>& members) {
+    const auto count = emission.successors.size();
+    std::vector<bool> inside(count, false);
+    for (const auto member : members) {
+        inside[member] = true;
+    }
+    std::vector<std::uint32_t> index(count, InvalidControlFlowId);
+    std::vector<std::uint32_t> lowlink(count, InvalidControlFlowId);
+    std::vector<std::uint32_t> componentOf(count, InvalidControlFlowId);
+    std::vector<bool> onStack(count, false);
+    std::vector<std::uint32_t> stack;
+    std::vector<std::pair<std::uint32_t, std::size_t>> work;
+    std::vector<std::vector<std::uint32_t>> components;
+    std::uint32_t nextIndex = 0;
+    const auto visit = [&](std::uint32_t blockId) {
+        index[blockId] = nextIndex;
+        lowlink[blockId] = nextIndex;
+        ++nextIndex;
+        stack.push_back(blockId);
+        onStack[blockId] = true;
+        work.emplace_back(blockId, 0u);
+    };
+    for (const auto root : members) {
+        if (index[root] != InvalidControlFlowId) {
+            continue;
+        }
+        visit(root);
+        while (!work.empty()) {
+            const auto blockId = work.back().first;
+            const auto& successors = emission.successors[blockId];
+            if (work.back().second < successors.size()) {
+                const auto successor = successors[work.back().second++];
+                if (!inside[successor]) {
+                    continue;
+                }
+                if (index[successor] == InvalidControlFlowId) {
+                    visit(successor);
+                } else if (onStack[successor]) {
+                    lowlink[blockId] = std::min(lowlink[blockId], index[successor]);
+                }
+                continue;
+            }
+            work.pop_back();
+            if (!work.empty()) {
+                auto& parent = lowlink[work.back().first];
+                parent = std::min(parent, lowlink[blockId]);
+            }
+            if (lowlink[blockId] != index[blockId]) {
+                continue;
+            }
+            std::vector<std::uint32_t> component;
+            for (;;) {
+                const auto member = stack.back();
+                stack.pop_back();
+                onStack[member] = false;
+                componentOf[member] = static_cast<std::uint32_t>(components.size());
+                component.push_back(member);
+                if (member == blockId) {
+                    break;
+                }
+            }
+            sortUnique(component);
+            components.push_back(std::move(component));
+        }
+    }
+
+    std::vector<std::uint32_t> incoming(components.size(), 0u);
+    std::vector<std::vector<std::uint32_t>> following(components.size());
+    for (const auto member : members) {
+        for (const auto successor : emission.successors[member]) {
+            if (inside[successor] && componentOf[successor] != componentOf[member]) {
+                following[componentOf[member]].push_back(componentOf[successor]);
+            }
+        }
+    }
+    for (auto& next : following) {
+        sortUnique(next);
+        for (const auto component : next) {
+            ++incoming[component];
+        }
+    }
+    std::map<std::uint32_t, std::uint32_t> ready;
+    for (std::uint32_t component = 0; component < components.size(); ++component) {
+        if (incoming[component] == 0u) {
+            ready.emplace(components[component].front(), component);
+        }
+    }
+    std::vector<std::vector<std::uint32_t>> ordered;
+    ordered.reserve(components.size());
+    while (!ready.empty()) {
+        const auto component = ready.begin()->second;
+        ready.erase(ready.begin());
+        for (const auto next : following[component]) {
+            if (--incoming[next] == 0u) {
+                ready.emplace(components[next].front(), next);
+            }
+        }
+        ordered.push_back(std::move(components[component]));
+    }
+    return ordered;
+}
+
+std::uint32_t flagLoopHead(const FlagEmission& emission, const std::vector<std::uint32_t>& component) {
+    for (const auto member : component) {
+        const auto& predecessors = emission.predecessors[member];
+        if (member == emission.entryBlock || std::any_of(predecessors.begin(), predecessors.end(), [&](std::uint32_t predecessor) { return !std::binary_search(component.begin(), component.end(), predecessor); })) {
+            return member;
+        }
+    }
+    return component.front();
+}
+
+std::uint32_t appendFlagBlock(FlagEmission& emission, std::uint32_t positionBlock) {
+    const auto block = appendRouteBlock(*emission.graph, positionBlock);
+    emission.order.push_back(block);
+    return block;
+}
+
+std::uint32_t appendFlagAssignment(FlagEmission& emission, std::uint32_t positionBlock, std::uint32_t variable, std::int32_t value) {
+    const auto assignment = appendAssignmentBlock(*emission.graph, positionBlock, positionBlock, variable, value);
+    emission.order.push_back(assignment);
+    return assignment;
+}
+
+void setDispatch(BasicBlock& block, std::uint32_t variable, std::uint32_t trueTarget, std::uint32_t falseTarget) {
+    block.successors = {trueTarget, falseTarget};
+    block.terminator.kind = TerminatorKind::ConditionalBranch;
+    block.terminator.condition = BranchCondition::GotoVariable;
+    block.terminator.trueBlock = trueTarget;
+    block.terminator.falseBlock = falseTarget;
+    block.terminator.gotoVariable = variable;
+}
+
+std::vector<bool> alwaysNextComponents(const FlagEmission& emission, const std::vector<std::vector<std::uint32_t>>& components, const std::vector<std::uint32_t>& firsts) {
+    const auto count = static_cast<std::uint32_t>(components.size());
+    std::vector<std::uint32_t> componentOf(emission.successors.size(), InvalidControlFlowId);
+    for (std::uint32_t component = 0; component < count; ++component) {
+        for (const auto member : components[component]) {
+            componentOf[member] = component;
+        }
+    }
+    std::vector<bool> next(count, true);
+    std::vector<std::int64_t> skipped(count + 1u, 0);
+    for (std::uint32_t component = 0; component < count; ++component) {
+        for (const auto member : components[component]) {
+            for (const auto successor : emission.successors[member]) {
+                const auto target = componentOf[successor];
+                if (target <= component) {
+                    continue;
+                }
+                ++skipped[component + 1u];
+                --skipped[target];
+                if (successor != firsts[target]) {
+                    next[target] = false;
+                }
+            }
+        }
+    }
+    const auto entryComponent = componentOf[emission.entryBlock];
+    std::int64_t crossing = 0;
+    for (std::uint32_t component = 0; component < count; ++component) {
+        crossing += skipped[component];
+        if (crossing > 0 || component < entryComponent || (component == entryComponent && firsts[component] != emission.entryBlock)) {
+            next[component] = false;
+        }
+    }
+    return next;
+}
+
+void emitFlagBlock(FlagEmission& emission, std::uint32_t original, bool guarded) {
+    auto& graph = *emission.graph;
+    const auto reach = emission.firstVariable + original;
+    const auto guard = guarded ? appendFlagBlock(emission, original) : InvalidControlFlowId;
+    const auto clear = appendFlagAssignment(emission, original, reach, 0);
+    emission.fallthroughs.push_back(clear);
+    emission.order.push_back(original);
+
+    std::vector<std::uint32_t> edges;
+    std::vector<std::uint32_t> ends;
+    for (const auto target : emission.targets[original]) {
+        const auto edge = appendFlagAssignment(emission, original, emission.firstVariable + target, 1);
+        edges.push_back(edge);
+        const auto loop = std::find_if(emission.openLoops.begin(), emission.openLoops.end(), [&](const std::pair<std::uint32_t, std::uint32_t>& open) { return open.first == target; });
+        if (loop == emission.openLoops.end()) {
+            ends.push_back(edge);
+            continue;
+        }
+        emission.fallthroughs.push_back(edge);
+        ends.push_back(appendFlagAssignment(emission, original, loop->second, 1));
+    }
+
+    const bool conditional = graph.blocks[original].terminator.kind == TerminatorKind::ConditionalBranch;
+    const auto join = conditional ? appendFlagBlock(emission, original) : InvalidControlFlowId;
+    const auto merge = guarded ? appendFlagBlock(emission, original) : InvalidControlFlowId;
+    const auto exit = conditional ? join : merge;
+    for (const auto end : ends) {
+        if (exit == InvalidControlFlowId) {
+            emission.fallthroughs.push_back(end);
+        } else {
+            setBranch(graph.blocks[end], exit);
+        }
+    }
+    if (conditional) {
+        emission.fallthroughs.push_back(join);
+    }
+    if (guarded) {
+        emission.fallthroughs.push_back(merge);
+        setDispatch(graph.blocks[guard], reach, clear, merge);
+        graph.blocks[guard].terminator.mergeBlock = merge;
+    }
+
+    auto& block = graph.blocks[original];
+    block.successors = edges;
+    block.terminator.mergeBlock = join;
+    block.terminator.continueBlock = InvalidControlFlowId;
+    block.terminator.loopHeader = false;
+    if (!edges.empty()) {
+        block.terminator.trueBlock = edges.front();
+    }
+    if (conditional) {
+        block.terminator.falseBlock = edges.back();
+    }
+}
+
+void emitFlagRegion(FlagEmission& emission, const std::vector<std::uint32_t>& members);
+
+void emitFlagLoop(FlagEmission& emission, std::vector<std::uint32_t> component, std::uint32_t head, bool guarded) {
+    auto& graph = *emission.graph;
+    const auto again = emission.nextVariable++;
+    const auto header = appendFlagBlock(emission, head);
+    emission.fallthroughs.push_back(header);
+    emission.fallthroughs.push_back(appendFlagAssignment(emission, head, again, 0));
+    emission.openLoops.emplace_back(head, again);
+    emitFlagBlock(emission, head, guarded);
+    component.erase(std::find(component.begin(), component.end(), head));
+    emitFlagRegion(emission, component);
+    emission.openLoops.pop_back();
+    const auto latch = appendFlagBlock(emission, head);
+    const auto merge = appendFlagBlock(emission, head);
+    emission.fallthroughs.push_back(merge);
+    setDispatch(graph.blocks[latch], again, header, merge);
+    auto& terminator = graph.blocks[header].terminator;
+    terminator.loopHeader = true;
+    terminator.mergeBlock = merge;
+    terminator.continueBlock = latch;
+}
+
+void emitFlagRegion(FlagEmission& emission, const std::vector<std::uint32_t>& members) {
+    const auto components = orderedComponents(emission, members);
+    std::vector<bool> loops;
+    std::vector<std::uint32_t> firsts;
+    for (const auto& component : components) {
+        const auto first = component.front();
+        loops.push_back(component.size() != 1u || contains(emission.successors[first], first));
+        firsts.push_back(loops.back() ? flagLoopHead(emission, component) : first);
+    }
+    const auto next = emission.openLoops.empty() ? alwaysNextComponents(emission, components, firsts) : std::vector<bool>(components.size(), false);
+    for (std::size_t index = 0; index < components.size(); ++index) {
+        if (loops[index]) {
+            emitFlagLoop(emission, components[index], firsts[index], !next[index]);
+        } else {
+            emitFlagBlock(emission, firsts[index], !next[index] || emission.graph->blocks[firsts[index]].terminator.kind == TerminatorKind::Return);
+        }
+    }
+}
+
 }
 
 void Structurizer::Structurize(ControlFlowGraph& graph) const {
     const auto original = graph;
+    const bool flagsSupported = supportsFlagStructurization(original);
+    if (flagsSupported && forcedFlagStructurization()) {
+        structurizeWithFlags(graph);
+        return;
+    }
     try {
         structurizeAttempts(graph, false);
     } catch (const std::runtime_error&) {
@@ -1462,8 +1812,84 @@ void Structurizer::Structurize(ControlFlowGraph& graph) const {
         try {
             structurizeAttempts(graph, true);
         } catch (const std::runtime_error&) {
-            std::rethrow_exception(error);
+            if (!flagsSupported) {
+                std::rethrow_exception(error);
+            }
+            graph = original;
+            try {
+                structurizeWithFlags(graph);
+            } catch (const std::runtime_error&) {
+                std::rethrow_exception(error);
+            }
         }
+    }
+}
+
+void Structurizer::structurizeWithFlags(ControlFlowGraph& graph) const {
+    if (!supportsFlagStructurization(graph)) {
+        throw std::runtime_error("CFG flag structurization supports only branch, conditional branch and return blocks");
+    }
+    const auto count = static_cast<std::uint32_t>(graph.blocks.size());
+    const auto entry = graph.entryBlock;
+    FlagEmission emission;
+    emission.graph = &graph;
+    emission.entryBlock = entry;
+    emission.firstVariable = nextGotoVariable(graph);
+    emission.nextVariable = emission.firstVariable + count;
+    emission.targets.resize(count);
+    emission.successors.resize(count);
+    emission.predecessors.resize(count);
+    for (const auto& block : graph.blocks) {
+        emission.targets[block.id] = terminatorTargets(block.terminator);
+        emission.successors[block.id] = emission.targets[block.id];
+        sortUnique(emission.successors[block.id]);
+        for (const auto successor : emission.successors[block.id]) {
+            emission.predecessors[successor].push_back(block.id);
+        }
+    }
+
+    emitFlagRegion(emission, allBlockIds(count));
+    const auto body = std::move(emission.order);
+    emission.order.clear();
+    for (auto variable = emission.firstVariable; variable < emission.nextVariable; ++variable) {
+        emission.fallthroughs.push_back(appendFlagAssignment(emission, entry, variable, variable == emission.firstVariable + entry ? 1 : 0));
+    }
+    emission.order.insert(emission.order.end(), body.begin(), body.end());
+    appendFlagBlock(emission, entry);
+
+    const auto& order = emission.order;
+    std::vector<bool> placed(graph.blocks.size(), false);
+    for (const auto blockId : order) {
+        if (blockId >= placed.size() || placed[blockId]) {
+            throw std::runtime_error("CFG flag structurization placed a block twice");
+        }
+        placed[blockId] = true;
+    }
+    if (order.size() != graph.blocks.size()) {
+        throw std::runtime_error("CFG flag structurization did not place every block");
+    }
+    std::vector<bool> fallthrough(graph.blocks.size(), false);
+    for (const auto blockId : emission.fallthroughs) {
+        fallthrough[blockId] = true;
+    }
+    for (std::size_t position = 0; position + 1u < order.size(); ++position) {
+        if (fallthrough[order[position]]) {
+            setBranch(graph.blocks[order[position]], order[position + 1u]);
+        }
+    }
+
+    graph.entryBlock = order.front();
+    std::vector<BasicBlock> blocks;
+    blocks.reserve(order.size());
+    for (const auto blockId : order) {
+        blocks.push_back(std::move(graph.blocks[blockId]));
+    }
+    applyBlockOrder(graph, std::move(blocks));
+    rebuildPredecessors(graph);
+    recomputeAnalyses(graph);
+    orderByDominance(graph);
+    if (graph.irreducible || !hasStructuredConstructs(graph)) {
+        throw std::runtime_error("CFG flag structurization did not produce structured constructs");
     }
 }
 
@@ -1580,10 +2006,12 @@ void Structurizer::computeDominatorTree(ControlFlowGraph& graph) const {
         block.dominators = block.id == graph.entryBlock ? std::vector<std::uint32_t>{block.id} : all;
     }
 
+    const auto order = analysisOrder(graph, false);
     bool changed = true;
     while (changed) {
         changed = false;
-        for (auto& block : graph.blocks) {
+        for (const auto id : order) {
+            auto& block = graph.blocks[id];
             if (block.id == graph.entryBlock) {
                 continue;
             }
@@ -1650,19 +2078,7 @@ void Structurizer::computePostDominators(ControlFlowGraph& graph) const {
         block.postDominators = block.successors.empty() ? std::vector<std::uint32_t>{block.id} : all;
     }
 
-    std::vector<std::uint32_t> order;
-    order.reserve(count);
-    std::vector<bool> ordered(count, false);
-    if (graph.entryBlock < count) {
-        const auto forward = reversePostOrder(graph);
-        for (auto it = forward.rbegin(); it != forward.rend(); ++it) {
-            order.push_back(*it);
-            ordered[*it] = true;
-        }
-    }
-    for (std::uint32_t id = 0; id < count; ++id) {
-        if (!ordered[id]) order.push_back(id);
-    }
+    const auto order = analysisOrder(graph, true);
 
     bool changed = true;
     while (changed) {
@@ -1813,11 +2229,15 @@ void Structurizer::canonicalizeNaturalLoops(ControlFlowGraph& graph, bool routeL
 void Structurizer::splitSharedMergeBlocks(ControlFlowGraph& graph, bool routeLeavingExits, bool routeSharedExits, bool relaxReturnJoins) const {
     const auto originalBlockCount = static_cast<std::uint32_t>(graph.blocks.size());
     const auto splitBudget = std::max<std::uint32_t>(16u, originalBlockCount * 4u);
+    const auto growthBudget = std::max<std::uint32_t>(SplitGrowthFloor, originalBlockCount * SplitGrowthFactor);
     const auto programWords = estimatedSpirvWords(graph, allBlockIds(originalBlockCount));
     SplitBudget budget{programWords, std::max(CloneWordLimit, programWords / CloneBudgetDivisor), std::max(CloneWordLimit, programWords), nextGotoVariable(graph)};
     for (std::uint32_t splits = 0; splits < splitBudget; ++splits) {
         if (!splitOneLoopMerge(graph) && !splitOneSelectionMerge(graph, budget, [this](ControlFlowGraph& candidate) { recomputeAnalyses(candidate); }, routeLeavingExits, routeSharedExits) && !splitOneReturnJoin(graph, relaxReturnJoins)) {
             return;
+        }
+        if (graph.blocks.size() > growthBudget) {
+            throw std::runtime_error("CFG shared merge splitting exceeded growth budget: originalBlocks=" + std::to_string(originalBlockCount) + " currentBlocks=" + std::to_string(graph.blocks.size()) + " growthBudget=" + std::to_string(growthBudget));
         }
         rebuildPredecessors(graph);
         recomputeAnalyses(graph);

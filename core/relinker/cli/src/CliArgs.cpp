@@ -1,17 +1,31 @@
 #include <Cli.hpp>
 #include <io/NativePath.hpp>
-#include <filesystem>
 #include <charconv>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 namespace Cli {
 
 const char* Usage() {
-    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--trace-imports] [--windows-fixed-base <address>] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--executable <path>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
+    return "Usage: relinker [--help] [--windows | --macos] [--windows-diagnostics] [--windows-gui] [--trace-imports] [--windows-fixed-base <address>] [--linux-fixed-base <address>] [--skip-syscall-check | --trap-sdk-syscall-stubs] [--skip-sce-module | --sce-module-path <path>] [--exclude-sce-module <file>]... [--module-dir <dir>]... [--executable <path>]... [--to-intel] [--to-rosetta] [unused-filter=0|1|2] [--registry] [--rpath <path>] [--lazy-binding] [--autorun] <input.elf> <output.elf>\n"
            "Example: relinker input.elf output.elf";
+}
+
+static std::uint64_t ParseLinuxFixedBase(std::string_view value) {
+    constexpr std::uint64_t lowest = 0x10000;
+    constexpr std::uint64_t highest = 0x7fffffff0000;
+    constexpr std::uint64_t alignment = 0x10000;
+    const bool hexadecimal = value.starts_with("0x") || value.starts_with("0X");
+    if (hexadecimal) value.remove_prefix(2);
+    std::uint64_t address = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), address, hexadecimal ? 16 : 10);
+    if (value.empty() || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || address < lowest || address > highest || address % alignment != 0)
+        throw std::runtime_error("--linux-fixed-base requires a 64 KiB-aligned address from 0x10000 through 0x7fffffff0000");
+    return address;
 }
 
 Args ParseArgs(int argc, char* argv[]) {
@@ -35,6 +49,11 @@ Args ParseArgs(int argc, char* argv[]) {
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || address < 0x20000 || address > 0x7fffffff0000 || (address & 0xffff) != 0)
                 throw std::runtime_error("--windows-fixed-base requires a 64 KiB-aligned address from 0x20000 through 0x7fffffff0000");
             args.windowsFixedBase = address;
+        } else if (arg == "--linux-fixed-base") {
+            if (args.linuxFixedBase) throw std::runtime_error("--linux-fixed-base cannot be repeated");
+            if (i + 1 >= argc || std::string_view(argv[i + 1]).empty() || std::string_view(argv[i + 1]).starts_with("--"))
+                throw std::runtime_error("--linux-fixed-base requires an address");
+            args.linuxFixedBase = ParseLinuxFixedBase(argv[++i]);
         } else if (arg == "--skip-syscall-check") {
             args.skipSyscallCheck = true;
         } else if (arg == "--trap-sdk-syscall-stubs") {
@@ -130,6 +149,10 @@ Args ParseArgs(int argc, char* argv[]) {
         throw std::runtime_error("--trace-imports requires --windows");
     if (args.traceImports && args.lazyBinding)
         throw std::runtime_error("--trace-imports conflicts with --lazy-binding");
+    if (args.linuxFixedBase && (args.toWindows || args.toMacos))
+        throw std::runtime_error("--linux-fixed-base cannot be used with --windows or --macos");
+    if (args.linuxFixedBase && args.lazyBinding)
+        throw std::runtime_error("--linux-fixed-base conflicts with --lazy-binding");
 
     if (!args.showHelp && (args.inputPath.empty() || args.outputPath.empty()))
         throw std::runtime_error(Usage());

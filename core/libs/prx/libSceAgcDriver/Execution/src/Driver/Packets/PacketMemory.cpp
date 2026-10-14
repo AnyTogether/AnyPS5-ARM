@@ -165,19 +165,37 @@ bool Driver::preparePacketMemory(const Submission& submission, QueueState& queue
                 }
             }
         }
+        if (drained && opcode == 0x50 && Pm4::DmaSource(packet) == 2 && Pm4::DmaDestination(packet) != 1) {
+            const auto destination = packet[4] | (static_cast<std::uint64_t>(packet[5]) << 32u);
+            const std::size_t bytes = packet[6] & 0x3ffffffu;
+            if (bytes != 0 && destination % 16 == 0 && bytes % 16 == 0 && GuestMemory::Accessible(reinterpret_cast<const void*>(destination), bytes, true)) {
+                if (const auto localDevice = device.Load()) {
+                    storeBufferFill(submission.queue, destination, bytes, {packet[2], packet[2], packet[2], packet[2]}, localDevice, false, false);
+                    ++dmaFills;
+                    wroteOnGpu = true;
+                    drained = false;
+                }
+            }
+        }
         if (drained) ++storesDrained;
     }
 
     static const bool drawDrain = std::getenv("APS5_DRAW_DRAIN") != nullptr;
     drawPacket = Pm4::DrawOpcode(opcode);
-    sampleDump = opcode == 0x46 && (packet[1] & 0x3fu) == 0x39u;
+    sampleDump = Pm4::SampleDump(packet);
     if (sampleDump && !drainAll) {
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Label);
         std::lock_guard gpuLock(GuestMemory::GpuMutex());
         if (const auto localDevice = device.Load()) {
             recordDeferredLabels(localDevice.get(), submission.queue);
-            wroteOnGpu = localDevice->DumpSamplesOnGpu(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u));
+            wroteOnGpu = localDevice->DumpSamplesOnGpu(Pm4::SampleDumpAddress(packet));
         }
+    }
+
+    if (header == FlipPacketHeader) {
+        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Flush);
+        std::lock_guard gpuLock(GuestMemory::GpuMutex());
+        static_cast<void>(Graphics::StorageTexture::StoreSmallPending("flip"));
     }
 
     static const bool syncFlip = std::getenv("APS5_SYNC_FLIP") != nullptr;
@@ -241,9 +259,9 @@ void Driver::dumpSampleCounters(std::uint64_t address) {
         samples = recorder->SamplesTotal();
     }
     constexpr std::uint64_t ready = 1ull << 63u;
-    for (std::uint64_t db = 0; db < 16; ++db) {
+    for (std::uint64_t db = 0; db < Pm4::SampleDumpBlocks; ++db) {
         const std::uint64_t value = ready | (db == 0 ? samples : 0u);
-        GuestMemory::Write(address + db * 16u, std::as_bytes(std::span(&value, 1)), 8);
+        GuestMemory::Write(address + db * Pm4::SampleDumpStride, std::as_bytes(std::span(&value, 1)).first(Pm4::SampleDumpBlockBytes), 8);
     }
 }
 

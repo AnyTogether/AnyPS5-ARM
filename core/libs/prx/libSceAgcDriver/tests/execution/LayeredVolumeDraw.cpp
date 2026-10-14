@@ -137,7 +137,7 @@ private:
     std::byte* block = nullptr;
 };
 
-bool DeclaresLayer(const std::vector<std::uint32_t>& words) {
+bool DeclaresLayer(std::span<const std::uint32_t> words) {
     for (std::size_t at = 5; at < words.size();) {
         const auto length = words[at] >> 16u;
         const auto opcode = words[at] & 0xffffu;

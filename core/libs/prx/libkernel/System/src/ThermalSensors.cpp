@@ -272,4 +272,9 @@ int APS5_VABI sceKernelGetSocSensorTemperature(int sensorId, int* outCelsius) {
     return 0;
 }
 
+int APS5_VABI sceKernelGetSocPowerConsumption(void* consumption) {
+    if (consumption == nullptr) return SCE_KERNEL_ERROR_EFAULT;
+    return SCE_KERNEL_ERROR_EINVAL;
+}
+
 }

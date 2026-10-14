@@ -6,7 +6,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTextureDetileGeneratedDir}"
     COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 -o "${agcColorTransferSpv}" "${agcColorTransferSource}"
     COMMAND ${CMAKE_COMMAND} -DINPUT=${agcColorTransferSpv} -DOUTPUT=${agcColorTransferHeader} -DSYMBOL=COLOR_TRANSFER_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
-    DEPENDS "${agcColorTransferSource}" glslang-standalone
+    DEPENDS "${agcColorTransferSource}" "${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/PqToSdr.glsl" glslang-standalone
     VERBATIM
 )
 

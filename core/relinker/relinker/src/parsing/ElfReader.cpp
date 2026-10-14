@@ -3,6 +3,7 @@
 #include <relinker/domain/Types.hpp>
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace Relinker {
 
@@ -23,6 +24,10 @@ ElfReader::ElfReader(std::vector<std::uint8_t> fileBuffer)
 
 const std::vector<std::uint8_t>& ElfReader::GetRawBytes() const {
     return _fileBuffer;
+}
+
+std::vector<std::uint8_t> ElfReader::TakeBytes() {
+    return std::move(_fileBuffer);
 }
 
 std::string ElfReader::formatMagic() const {

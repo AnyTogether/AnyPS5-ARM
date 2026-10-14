@@ -29,6 +29,10 @@ int main() {
         check("far indirect call", {0xff, 0x1d, 0xfa, 0, 0, 0}, true);
         check("far indirect jump", {0xff, 0x2d, 0xfa, 0, 0, 0}, true);
         check("RIP-relative function pointer load", {0x48, 0x8b, 0x05, 0xf9, 0, 0, 0}, true);
+        check("REX-prefixed indirect call", {0x48, 0xff, 0x15, 0xf9, 0, 0, 0}, true);
+        check("multiple REX prefixes on pointer load", {0x40, 0x48, 0x8b, 0x05, 0xf8, 0, 0, 0}, true);
+        check("pointer load without REX.W", {0x40, 0x8b, 0x05, 0xf9, 0, 0, 0}, false);
+        check("register pointer load", {0x48, 0x8b, 0x00}, false);
         check("increment memory", {0xff, 0x05, 0xfa, 0, 0, 0}, false);
         check("decrement memory", {0xff, 0x0d, 0xfa, 0, 0, 0}, false);
         check("push memory", {0xff, 0x35, 0xfa, 0, 0, 0}, true);

@@ -17,10 +17,12 @@
 #endif
 #include "prx/libc/include/Shutdown.hpp"
 #include "SceTypes.hpp"
+#include "LoadExec.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
 #include "prx/libc/include/specifics/macos/ExecutablePath.hpp"
+#include "prx/libSceAgcDriver/Execution/include/HostHdr.hpp"
 
 namespace {
 
@@ -192,6 +194,9 @@ int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* argu
     if (!path || !*path) return SYSTEM_SERVICE_ERROR_PARAMETER;
     if (std::strcmp(path, "exit") == 0) LibcExit_nid_no_patch(0);
     auto launch = PrepareLaunch(path, arguments);
+#if defined(_WIN32) || defined(__linux__)
+    LoadConvertedExecutable_nid_no_patch(std::filesystem::path(launch.executable), arguments);
+#endif
     LibcRunShutdown_nid_postfix();
     std::fflush(nullptr);
     StartHostExecutable(launch);
@@ -215,10 +220,11 @@ int APS5_VABI sceSystemServiceGetHdrToneMapLuminance(SystemServiceHdrToneMapLumi
  if (luminance == nullptr) {
   return SYSTEM_SERVICE_ERROR_PARAMETER;
  }
- constexpr float SdrReferenceWhiteNits = 100.0f;
- luminance->max_full_frame_tone_map_luminance = SdrReferenceWhiteNits;
- luminance->max_tone_map_luminance = SdrReferenceWhiteNits;
- luminance->min_tone_map_luminance = 0.0f;
+ const auto hdr = AgcDriver::CurrentHostHdr();
+ luminance->max_tone_map_luminance = AgcDriver::ToneMapPeakNits(hdr);
+ luminance->max_full_frame_tone_map_luminance = hdr.available ? hdr.display.maxFullFrameLuminance : AgcDriver::SdrToneMapLuminanceNits;
+ luminance->min_tone_map_luminance = hdr.available ? hdr.display.minLuminance : 0.0f;
+ AgcDriverNoteReportedToneMapPeak_nid_postfix(luminance->max_tone_map_luminance);
  return SYSTEM_SERVICE_OK;
 }
 

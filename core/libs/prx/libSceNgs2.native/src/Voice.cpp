@@ -456,6 +456,14 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             submixer.voice_state.state_flags = voice.stateFlags;
             return SCE_NGS2_OK;
         }
+        case SCE_NGS2_RACK_ID_CUSTOM_SAMPLER: {
+            if (state_size != sizeof(Ngs2CustomSamplerVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
+            auto& sampler = *reinterpret_cast<Ngs2CustomSamplerVoiceState*>(state);
+            sampler = {};
+            sampler.voice_state.state_flags = voice.stateFlags;
+            sampler.num_decoded_samples = voice.decodedSamples;
+            return SCE_NGS2_OK;
+        }
         default: throw std::runtime_error("NGS2: voice state of rack " + Ngs2Hex(voice.rack->rackId) + " is not implemented");
     }
 }

@@ -10,6 +10,9 @@
 
 extern "C" int APS5_VABI vswprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
 extern "C" int APS5_VABI snwprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
+extern "C" int APS5_VABI vswprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
+extern "C" int APS5_VABI swprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
+extern "C" int APS5_VABI vsnwprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
 extern "C" int APS5_VABI swprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
 extern "C" std::size_t APS5_VABI strftime_nid_postfix(char*, std::size_t, const char*, const GuestTm*);
 extern "C" std::size_t APS5_VABI wcsftime_nid_postfix(char16_t*, std::size_t, const char16_t*, const GuestTm*);
@@ -148,6 +151,38 @@ static void CheckGroupingFlag() {
         "snwprintf_s ' flag");
 }
 
+static void CheckSecureWideBoundary() {
+    constexpr std::size_t wideRsizeMax = (SIZE_MAX >> 1) / sizeof(char16_t);
+    char16_t buffer[4];
+    for (auto& unit : buffer) unit = u'x';
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(swprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n") < 0 && buffer[0] == 0, "swprintf_s accepted-boundary failure clears");
+    Require(buffer[1] == u'y', "swprintf_s does not clear beyond the first unit");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(swprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n") < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "swprintf_s oversized size leaves the buffer untouched");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vswprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n", nullptr) < 0 && buffer[0] == 0, "vswprintf_s accepted-boundary failure clears");
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vswprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n", nullptr) < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "vswprintf_s oversized size leaves the buffer untouched");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vsnwprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n", nullptr) < 0 && buffer[0] == 0, "vsnwprintf_s accepted-boundary failure clears");
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vsnwprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n", nullptr) < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "vsnwprintf_s oversized size leaves the buffer untouched");
+}
+
 static void CheckSwprintf() {
     char16_t buffer[8];
     for (auto& unit : buffer) unit = u'x';
@@ -244,6 +279,7 @@ int main() {
     CheckPointer();
     CheckCount();
     CheckSwprintf();
+    CheckSecureWideBoundary();
     CheckWcsftime();
     Check(u"%.2s", "\xc3\xa9\xc3\xa8", u"\u00e9\u00e8");
     Check(u"%.1s", "\xc3\xa9\xc3\xa8", u"\u00e9");

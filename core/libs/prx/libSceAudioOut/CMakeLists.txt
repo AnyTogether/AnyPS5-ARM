@@ -14,12 +14,10 @@ target_include_directories(libSceAudioOut PRIVATE
         ${LIBS_INCLUDE_DIR}
         ${ANYPS5_SDL2_INCLUDE_DIR}
 )
-# On macOS every library uses one SDL, the driver's, as libSceVideoOut does: a second static copy would
-# register SDL's Objective-C classes twice, and the runtime would pick one of them at random.
 if(APPLE)
-    target_link_libraries(libSceAudioOut PRIVATE libc libkernel libSceAgcDriver)
+    target_link_libraries(libSceAudioOut PRIVATE libc libkernel libScePad libSceAgcDriver)
 else()
-    target_link_libraries(libSceAudioOut PRIVATE libc libkernel SDL2-static)
+    target_link_libraries(libSceAudioOut PRIVATE libc libkernel libScePad SDL2-static)
 endif()
 configure_windows_unwind(libSceAudioOut)
 
@@ -131,6 +129,15 @@ if(BUILD_TESTING)
     add_test(NAME audio_out2_port_buffers COMMAND audio_out2_port_buffers_tests)
     if(WIN32)
         set_tests_properties(audio_out2_port_buffers PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
+    endif()
+    add_test_executable(audio_out2_device_state_tests tests/AudioOut2DeviceState.cpp)
+    target_include_directories(audio_out2_device_state_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(audio_out2_device_state_tests PRIVATE libSceAudioOut libc)
+    configure_windows_unwind(audio_out2_device_state_tests)
+    add_test(NAME audio_out2_device_state COMMAND audio_out2_device_state_tests)
+    if(WIN32)
+        set_tests_properties(audio_out2_device_state PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioOut>")
     endif()
     add_test_executable(audio_out2_timing_tests tests/AudioOut2Timing.cpp)

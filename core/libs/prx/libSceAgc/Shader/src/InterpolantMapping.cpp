@@ -72,7 +72,7 @@ int CreateInterpolantMapping(const char* fn, ShaderRegister* regs, const Shader*
         throw std::runtime_error(std::string(fn) + ": input semantic count exceeds 32");
     }
 
-    AgcDriver::ShaderPreparationScope transaction;
+    AgcDriver::ShaderPreparationScope transaction({ps != nullptr ? gs : nullptr, ps});
     std::array<ShaderRegister, 32> values{};
     auto* output = regs;
     regs = values.data();

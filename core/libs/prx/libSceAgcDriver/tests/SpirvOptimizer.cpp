@@ -166,6 +166,8 @@ void testNarrowConversions(bool optimizationEnabled) {
                         check(opcodeCount(normalized, spv::OpStore) == (vector ? 1u : 2u), label + ": optimizer lost buffer stores");
                         if (!optimizationEnabled) {
                             check(output == input, label + ": none mode changed the shader");
+                            const auto specialized = ShaderRecompiler::ValidateAndOptimizeSpirv(input, Vulkan11, Spirv13, false, true, true);
+                            check(specialized == input, label + ": none mode changed the specialized shader");
                         } else {
                             check(opcodeCount(normalized, spv::OpIAdd) == 0, label + ": optimizer did not remove dead arithmetic");
                             if (arithmetic && !type.floating) {
@@ -378,6 +380,77 @@ OpFunctionEnd
     }
 }
 
+void testLongControlFlow(bool optimizationEnabled, bool large) {
+    const char* mode = std::getenv("APS5_SPIRV_OPT");
+    const bool full = mode != nullptr && std::string(mode) == "full";
+    const std::size_t blocks = large && optimizationEnabled && !full ? 512 : 8;
+    std::string source = R"(OpCapability Shader
+OpCapability StorageBuffer8BitAccess
+OpExtension "SPV_KHR_8bit_storage"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main"
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %array ArrayStride 4
+OpMemberDecorate %buffer 0 Offset 0
+OpDecorate %buffer Block
+OpDecorate %data DescriptorSet 0
+OpDecorate %data Binding 0
+OpDecorate %byteArray ArrayStride 1
+OpMemberDecorate %byteBuffer 0 Offset 0
+OpDecorate %byteBuffer Block
+OpDecorate %bytes DescriptorSet 0
+OpDecorate %bytes Binding 1
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%boolean = OpTypeBool
+%byte = OpTypeInt 8 0
+%byteArray = OpTypeRuntimeArray %byte
+%byteBuffer = OpTypeStruct %byteArray
+%byteBufferPointer = OpTypePointer StorageBuffer %byteBuffer
+%bytePointer = OpTypePointer StorageBuffer %byte
+%array = OpTypeRuntimeArray %uint
+%buffer = OpTypeStruct %array
+%bufferPointer = OpTypePointer StorageBuffer %buffer
+%valuePointer = OpTypePointer StorageBuffer %uint
+%function = OpTypeFunction %void
+%data = OpVariable %bufferPointer StorageBuffer
+%bytes = OpVariable %byteBufferPointer StorageBuffer
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%two = OpConstant %uint 2
+)";
+    for (std::size_t i = 0; i < blocks * 4; ++i) source += "%index" + std::to_string(i) + " = OpConstant %uint " + std::to_string(i + 1) + "\n";
+    source += "%main = OpFunction %void None %function\n%entry = OpLabel\n%input = OpAccessChain %valuePointer %data %zero %zero\n%seed = OpLoad %uint %input Volatile\n%condition = OpINotEqual %boolean %seed %zero\nOpBranch %block0\n";
+    for (std::size_t i = 0; i < blocks; ++i) {
+        const auto number = std::to_string(i);
+        const auto previous = i == 0 ? "%seed" : "%next" + std::to_string(i - 1);
+        source += "%block" + number + " = OpLabel\n%sum" + number + " = OpIAdd %uint " + previous + " %one\n";
+        source += "%duplicate" + number + " = OpIAdd %uint " + previous + " %one\n%shared" + number + " = OpIAdd %uint %seed %one\n";
+        for (std::size_t j = 0; j < 3; ++j) {
+            const auto index = std::to_string(i * 4 + j);
+            source += "%slot" + index + " = OpAccessChain %valuePointer %data %zero %index" + index + "\n";
+            source += "OpStore %slot" + index + " %" + (j == 0 ? "sum" : j == 1 ? "duplicate" : "shared") + number + " Volatile\n";
+        }
+        const auto branchIndex = std::to_string(i * 4 + 3);
+        source += "%branchSlot" + number + " = OpAccessChain %valuePointer %data %zero %index" + branchIndex + "\n";
+        source += "OpSelectionMerge %join" + number + " None\nOpBranchConditional %condition %left" + number + " %right" + number + "\n";
+        source += "%left" + number + " = OpLabel\n%leftValue" + number + " = OpIAdd %uint %sum" + number + " %one\nOpStore %branchSlot" + number + " %leftValue" + number + " Volatile\nOpBranch %join" + number + "\n";
+        source += "%right" + number + " = OpLabel\n%rightCopy" + number + " = OpIAdd %uint %sum" + number + " %one\nOpStore %branchSlot" + number + " %rightCopy" + number + " Volatile\n";
+        source += "%rightValue" + number + " = OpIAdd %uint %sum" + number + " %two\nOpStore %branchSlot" + number + " %rightValue" + number + " Volatile\nOpBranch %join" + number + "\n";
+        source += "%join" + number + " = OpLabel\n%next" + number + " = OpPhi %uint %leftValue" + number + " %left" + number + " %rightValue" + number + " %right" + number + "\n";
+        if (i + 1 == blocks) source += "%byteSlot = OpAccessChain %bytePointer %bytes %zero %zero\n%truncated = OpUConvert %byte %next" + number + "\nOpStore %byteSlot %truncated Volatile\nOpReturn\n";
+        else source += "OpBranch %block" + std::to_string(i + 1) + "\n";
+    }
+    source += "OpFunctionEnd\n";
+    const auto input = assemble(source);
+    const auto output = ShaderRecompiler::ValidateAndOptimizeSpirv(input, Vulkan11, Spirv13, false);
+    const auto stores = opcodeCount(output, spv::OpStore);
+    check(stores >= blocks * 4 + 1 && stores <= blocks * 6 + 1, "long control-flow optimization discarded observable stores");
+    const auto adds = opcodeCount(output, spv::OpIAdd);
+    if (!optimizationEnabled) check(output == input, "disabled optimization changed the long control-flow module");
+    else check(adds >= blocks && adds <= blocks * 4, "control-flow optimization lost arithmetic or retained redundant values");
+}
+
 }
 
 int main() {
@@ -388,6 +461,8 @@ int main() {
     testInvalidInputIsRejected();
     testSpecializedSelectionExit();
     testSpecializedDeadContinue();
+    testLongControlFlow(optimizationEnabled, false);
+    testLongControlFlow(optimizationEnabled, true);
     if (failures != 0) {
         std::fprintf(stderr, "%d optimizer check(s) failed\n", failures);
         return 1;

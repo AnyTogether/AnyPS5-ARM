@@ -131,16 +131,18 @@ def option_name(argument, options):
 def nid_arguments(arguments, options):
     normalized = []
     collecting = False
+    collecting_option = "--nid"
     for index, argument in enumerate(arguments):
         if argument == "--":
             normalized.extend(arguments[index:])
             break
         name = option_name(argument, options)
-        if name == "--nid" and "=" not in argument:
+        if name in ("--nid", "--name", "--symbol") and "=" not in argument:
             collecting = True
+            collecting_option = "--name" if name in ("--name", "--symbol") else "--nid"
             continue
         if collecting and name is None:
-            normalized.append("--nid=" + argument)
+            normalized.append(collecting_option + "=" + argument)
             continue
         collecting = False
         normalized.append(argument)
@@ -154,11 +156,24 @@ def main(argv=None):
                         help="NID database CSV (downloaded to a cache dir by default)")
     parser.add_argument("--nid", action="append", default=None,
                         help="resolve only these NIDs instead of scanning the tree")
+    parser.add_argument("--name", "--symbol", dest="name", action="append", default=None,
+                        help="compute NIDs for these symbol names")
     parser.add_argument("--json", action="store_true",
                         help="emit machine-readable JSON")
     options = [option for action in parser._actions for option in action.option_strings]
     arguments = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(nid_arguments(arguments, options))
+    if args.name:
+        if args.nid:
+            parser.error("--name/--symbol cannot be combined with --nid")
+        rows = [{"name": name, "nid": compute_nid(name)} for name in args.name]
+        if args.json:
+            print(json.dumps({"symbols": rows}, indent=1))
+        else:
+            print("%-40s %s" % ("NAME", "NID"))
+            for row in rows:
+                print("%-40s %s" % (row["name"], row["nid"]))
+        return 0
     requested_nids = any(option_name(argument, options) == "--nid" for argument in arguments)
     for nid in args.nid or []:
         if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:

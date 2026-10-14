@@ -94,7 +94,7 @@ std::vector<std::uint32_t> ValidateAndOptimizeSpirv(std::span<const std::uint32_
     spvtools::Optimizer optimizer(environment);
     optimizer.SetMessageConsumer(consumer);
     static const char* mode = std::getenv("APS5_SPIRV_OPT");
-    if (!specialize && mode != nullptr && std::string(mode) == "none") return std::vector<std::uint32_t>(spirv.begin(), spirv.end());
+    if (mode != nullptr && std::string(mode) == "none") return std::vector<std::uint32_t>(spirv.begin(), spirv.end());
     // The recompiler emits helpers (BDA lookup, fault reporting) as functions called from every memory
     // access. Exhaustive inlining multiplies module size by ~10x and optimization time by ~20x, so the
     // default pipeline keeps the performance passes that work per function and leaves inlining to the driver.

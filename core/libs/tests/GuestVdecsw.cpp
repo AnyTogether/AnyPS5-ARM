@@ -188,13 +188,13 @@ void testDecode() {
             }
             check(pictures < PictureHashes.size(), "more pictures than access units");
             check(output.isLastFrame == (pictures + 1 == PictureHashes.size()), "only the last picture of the finalized sequence is marked last");
-            check(!output.isErrorFrame && !output.isDiscardedFrame && output.pictureCount == 1 && output.frameWidth == Width && output.frameHeight == Height && output.frameBuffer == buffers[pictures % 2].data(), "unexpected picture geometry");
+            check(!output.isErrorFrame && !output.isDiscardedFrame && output.pictureCount == 1 && output.frameWidth == Width && output.frameHeight == CodedHeight && output.frameBuffer == buffers[pictures % 2].data(), "unexpected picture geometry");
             AvcPictureInfo info{sizeof(AvcPictureInfo)};
             check(sceVdecswGetAvcPictureInfo(&output, &info, nullptr) == 0 && info.isValid, "picture info missing");
             const auto unit = DisplayOrderUnits[pictures];
             check(info.ptsData == 1000 + unit && info.dtsData == unit && info.attachedData == 0xa0 + unit && info.idrPictureFlag == (pictures == 0 ? 1 : 0) && info.profileIdc == 100, "pictures out of display order");
-            check(info.picWidthInMbsMinus1 == Width / 16 - 1 && info.picHeightInMapUnitsMinus1 == (Height + 15) / 16 - 1 && info.frameMbsOnlyFlag == 1 && info.frameCroppingFlag == 1 && info.frameCropRightOffset == 0 && info.frameCropBottomOffset == ((Height + 15) / 16 * 16 - Height) / 2, "picture geometry in the picture info is wrong");
-            check(hashNv12(static_cast<const std::uint8_t*>(output.frameBuffer), output.framePitch) == PictureHashes[pictures], "picture " + std::to_string(pictures) + " differs from the reference");
+            check(info.picWidthInMbsMinus1 == Width / 16 - 1 && info.picHeightInMapUnitsMinus1 == CodedHeight / 16 - 1 && info.frameMbsOnlyFlag == 1 && info.frameCroppingFlag == 1 && info.frameCropLeftOffset == 0 && info.frameCropRightOffset == 0 && info.frameCropTopOffset == 0 && info.frameCropBottomOffset == (CodedHeight - Height) / 2, "picture geometry in the picture info is wrong");
+            check(hashNv12(static_cast<const std::uint8_t*>(output.frameBuffer), output.framePitch, output.frameHeight) == PictureHashes[pictures], "picture " + std::to_string(pictures) + " differs from the reference");
             ++pictures;
         }
     };

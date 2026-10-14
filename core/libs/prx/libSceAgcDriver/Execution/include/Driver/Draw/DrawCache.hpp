@@ -24,6 +24,7 @@ struct DrawProgram {
 
     std::shared_ptr<const ShaderSnapshot> snapshot;
     std::size_t codeOffset = 0;
+    std::shared_ptr<const ShaderSnapshot> tailContinuation;
 };
 
 struct DrawDecode {

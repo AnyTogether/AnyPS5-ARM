@@ -116,6 +116,13 @@ struct Videodec2AvcPictureInfo {
     std::uint32_t picHeightInLumaSamples;
 };
 
+struct Videodec2Crop {
+    std::uint32_t left;
+    std::uint32_t right;
+    std::uint32_t top;
+    std::uint32_t bottom;
+};
+
 struct DecoderMemoryInfo {
     std::uint64_t thisSize;
     std::uint64_t cpuMemorySize;
@@ -141,6 +148,7 @@ int APS5_VABI sceVideodec2Decode_nid_postfix(std::uint64_t handle, const InputDa
 int APS5_VABI sceVideodec2Flush_nid_postfix(std::uint64_t handle, Videodec2FrameBuffer* frame, Videodec2OutputInfo* output);
 int APS5_VABI sceVideodec2Reset_nid_postfix(std::uint64_t handle);
 int APS5_VABI sceVideodec2GetAvcPictureInfo_nid_postfix(const Videodec2OutputInfo* output, Videodec2AvcPictureInfo* first, Videodec2AvcPictureInfo* second);
+void Videodec2PictureCrop_nid_no_patch(std::uint64_t handle, const void* frameBuffer, Videodec2Crop* crop);
 }
 
 namespace {
@@ -183,10 +191,12 @@ std::shared_ptr<Decoder> findDecoder(std::uint64_t handle) {
     return found->second;
 }
 
-AvcPictureInfo pictureInfo(const Videodec2OutputInfo& output) {
+AvcPictureInfo pictureInfo(std::uint64_t handle, const Videodec2OutputInfo& output) {
     Videodec2AvcPictureInfo source{sizeof(Videodec2AvcPictureInfo)};
     sceVideodec2GetAvcPictureInfo_nid_postfix(&output, &source, nullptr);
     if (!source.isValid) throw std::runtime_error("Vdecsw: decoded picture has no picture info");
+    Videodec2Crop crop{};
+    Videodec2PictureCrop_nid_no_patch(handle, output.frameBuffer, &crop);
     const auto widthInMbs = (output.frameWidth + 15u) / 16u;
     const auto heightInMbs = (output.frameHeight + 15u) / 16u;
     AvcPictureInfo info{};
@@ -201,9 +211,11 @@ AvcPictureInfo pictureInfo(const Videodec2OutputInfo& output) {
     info.picWidthInMbsMinus1 = widthInMbs - 1u;
     info.picHeightInMapUnitsMinus1 = heightInMbs - 1u;
     info.frameMbsOnlyFlag = 1;
-    info.frameCroppingFlag = widthInMbs * 16u != output.frameWidth || heightInMbs * 16u != output.frameHeight;
-    info.frameCropRightOffset = (widthInMbs * 16u - output.frameWidth) / 2u;
-    info.frameCropBottomOffset = (heightInMbs * 16u - output.frameHeight) / 2u;
+    info.frameCroppingFlag = crop.left != 0 || crop.right != 0 || crop.top != 0 || crop.bottom != 0;
+    info.frameCropLeftOffset = crop.left / 2u;
+    info.frameCropRightOffset = crop.right / 2u;
+    info.frameCropTopOffset = crop.top / 2u;
+    info.frameCropBottomOffset = crop.bottom / 2u;
     return info;
 }
 
@@ -226,7 +238,7 @@ void advance(std::uint64_t handle, Decoder& decoder) {
             return;
         }
         if (output.isValid) {
-            const auto info = pictureInfo(output);
+            const auto info = pictureInfo(handle, output);
             decoder.pictures.push_back({std::move(pixels), output, info});
         }
     }

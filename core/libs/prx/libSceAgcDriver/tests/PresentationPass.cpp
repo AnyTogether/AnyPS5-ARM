@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/DisplayBuffer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayFormat.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PqToSdr.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationScaler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
@@ -29,6 +30,8 @@ constexpr std::uint64_t Bgra8 = 0x8000000000000000ull;
 constexpr std::uint64_t Rgba8 = 0x8000000022000000ull;
 constexpr std::uint64_t TenBit = 0x0100000000000000ull;
 constexpr std::uint64_t Rgba16Float = 0xc001000622000000ull;
+constexpr std::uint64_t Rgb10Pq = 0x8100070422000000ull;
+constexpr std::uint64_t Bgr10Pq = 0x8100070400000000ull;
 
 class Device {
 public:
@@ -272,15 +275,15 @@ std::vector<std::byte> convertPathPresent(const Context& context, const Source& 
     return bytesOf(readback, bytes);
 }
 
-std::vector<std::byte> passPresent(const Context& context, PresentationPass& pass, const Source& source, const Image& resident, VkExtent2D extent, VkFormat format, std::uint32_t layer = 0) {
+std::vector<std::byte> passPresent(const Context& context, PresentationPass& pass, const Source& source, const Image& resident, VkExtent2D extent, VkFormat format, std::uint32_t layer = 0, float whiteNits = AgcDriver::SdrToneMapLuminanceNits, VkColorSpaceKHR colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
     Image destination(context, format, extent, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     const auto bytes = static_cast<std::size_t>(extent.width) * extent.height * 4;
     Buffer readback(context, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    pass.Bind(0, resident.Handle(), source.width, source.height, source.pixelFormat, layer);
+    pass.Bind(0, resident.Handle(), source.width, source.height, source.pixelFormat, whiteNits, layer);
     {
         CommandBatch batch(context);
         const auto commands = batch.Handle();
-        pass.RecordPresent(commands, 0, destination.Handle(), format, extent, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        pass.RecordPresent(commands, 0, destination.Handle(), format, colorSpace, extent, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         readImage(context, commands, destination, readback);
         batch.SubmitAndWait();
     }
@@ -288,11 +291,11 @@ std::vector<std::byte> passPresent(const Context& context, PresentationPass& pas
     return bytesOf(readback, bytes);
 }
 
-std::vector<std::byte> passDump(const Context& context, PresentationPass& pass, const Source& source, const Image& resident, std::uint32_t stride, std::uint32_t layer = 0) {
+std::vector<std::byte> passDump(const Context& context, PresentationPass& pass, const Source& source, const Image& resident, std::uint32_t stride, std::uint32_t layer = 0, float whiteNits = AgcDriver::SdrToneMapLuminanceNits) {
     const auto extent = PresentationPass::DumpExtent(source.width, source.height, stride);
     const auto bytes = static_cast<std::size_t>(extent.width) * extent.height * 4;
     Buffer readback(context, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-    pass.Bind(1, resident.Handle(), source.width, source.height, source.pixelFormat, layer);
+    pass.Bind(1, resident.Handle(), source.width, source.height, source.pixelFormat, whiteNits, layer);
     {
         CommandBatch batch(context);
         pass.RecordDump(batch.Handle(), 1, stride, readback.Handle());
@@ -303,7 +306,7 @@ std::vector<std::byte> passDump(const Context& context, PresentationPass& pass, 
 }
 
 std::string describe(const Source& source, VkExtent2D extent) {
-    return std::string(AgcDriver::DisplayTenBit(source.pixelFormat) ? "10-bit " : "8-bit ") + (AgcDriver::DisplayRedLow(source.pixelFormat) ? "red-low" : "blue-low") + " display in VkFormat " + std::to_string(static_cast<int>(source.storage)) + " at " + std::to_string(extent.width) + "x" + std::to_string(extent.height);
+    return std::string(AgcDriver::DisplayPq(source.pixelFormat) ? "PQ " : AgcDriver::DisplayTenBit(source.pixelFormat) ? "10-bit " : "8-bit ") + (AgcDriver::DisplayRedLow(source.pixelFormat) ? "red-low" : "blue-low") + " display in VkFormat " + std::to_string(static_cast<int>(source.storage)) + " at " + std::to_string(extent.width) + "x" + std::to_string(extent.height);
 }
 
 void passMatchesConvertPath(const Context& context, PresentationPass& pass, const Source& source, const Image& resident) {
@@ -345,6 +348,48 @@ bool renderable(const Context& context, VkFormat format) {
     context.formatProperties(context.physical, format, &properties);
     constexpr VkFormatFeatureFlags needed = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
     return (properties.optimalTilingFeatures & needed) == needed;
+}
+
+void passPassesPqThrough(const Context& context, PresentationPass& pass, const Source& source, const Image& resident) {
+    const bool redLowSource = AgcDriver::DisplayRedLow(source.pixelFormat);
+    for (const auto format : {VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_A2R10G10B10_UNORM_PACK32}) {
+        if (!renderable(context, format)) {
+            std::printf("  10-bit destination VkFormat %d is not renderable here; skipped\n", static_cast<int>(format));
+            continue;
+        }
+        const bool redLowDestination = format == VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+        const VkExtent2D extent{source.width + 40, source.height};
+        const auto rect = AgcDriver::ComputeContainRect_nid_postfix(source.width, source.height, extent.width, extent.height);
+        const auto drawn = passPresent(context, pass, source, resident, extent, format, 0, 1000.0f, VK_COLOR_SPACE_HDR10_ST2084_EXT);
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            for (std::uint32_t x = 0; x < extent.width; ++x) {
+                std::uint32_t word = 0;
+                std::memcpy(&word, drawn.data() + (static_cast<std::size_t>(y) * extent.width + x) * 4, 4);
+                if (static_cast<std::int32_t>(x) < rect.x || static_cast<std::int32_t>(x) >= rect.x + static_cast<std::int32_t>(rect.width)) {
+                    Require(word == 0xc0000000u, "an HDR10 letterbox band is not opaque PQ black: " + describe(source, extent));
+                    continue;
+                }
+                std::uint32_t sourceWord = 0;
+                std::memcpy(&sourceWord, source.words.data() + (static_cast<std::size_t>(y) * source.width + (x - static_cast<std::uint32_t>(rect.x))) * 4, 4);
+                const auto red = [](std::uint32_t value, bool redLow) { return redLow ? value & 0x3ffu : (value >> 20u) & 0x3ffu; };
+                const auto blue = [](std::uint32_t value, bool redLow) { return redLow ? (value >> 20u) & 0x3ffu : value & 0x3ffu; };
+                Require(red(word, redLowDestination) == red(sourceWord, redLowSource) && ((word >> 10u) & 0x3ffu) == ((sourceWord >> 10u) & 0x3ffu) && blue(word, redLowDestination) == blue(sourceWord, redLowSource) && (word >> 30u) == 3u, "the HDR10 presentation changed the PQ code values: " + describe(source, extent) + " into VkFormat " + std::to_string(static_cast<int>(format)));
+            }
+        }
+    }
+}
+
+void passRefusesSdrToHdr10(const Context& context, PresentationPass& pass) {
+    const auto source = makeSource(Bgra8 | TenBit, VK_FORMAT_A2B10G10R10_UNORM_PACK32, 200, 130);
+    const auto resident = residentImage(context, source);
+    bool refused = false;
+    try {
+        static_cast<void>(passPresent(context, pass, source, *resident, {200, 130}, VK_FORMAT_A2B10G10R10_UNORM_PACK32, 0, AgcDriver::SdrToneMapLuminanceNits, VK_COLOR_SPACE_HDR10_ST2084_EXT));
+    } catch (const std::exception&) {
+        refused = true;
+    }
+    pass.Release(0);
+    Require(refused, "the presentation pass presented an SDR display buffer to an HDR10 destination");
 }
 
 void passKeepsTenBits(const Context& context, PresentationPass& pass, const Source& source, const Image& resident) {
@@ -433,11 +478,56 @@ void passPresentsSlice(const Context& context, PresentationPass& pass) {
 void passRefusesHalfFloat(PresentationPass& pass, const Image& resident) {
     bool refused = false;
     try {
-        pass.Bind(1, resident.Handle(), 200, 130, Rgba16Float);
+        pass.Bind(1, resident.Handle(), 200, 130, Rgba16Float, AgcDriver::SdrToneMapLuminanceNits);
     } catch (const std::exception&) {
         refused = true;
     }
     Require(refused, "the presentation pass took a 16-bit float display buffer");
+    refused = false;
+    try {
+        pass.Bind(1, resident.Handle(), 200, 130, Rgb10Pq, 0.0f);
+    } catch (const std::exception&) {
+        refused = true;
+    }
+    Require(refused, "the presentation pass took a white level below 1 nit");
+}
+
+int largestDifference(const std::vector<std::byte>& expected, const std::vector<std::byte>& actual) {
+    Require(expected.size() == actual.size(), "compared frames differ in size");
+    int worst = 0;
+    for (std::size_t i = 0; i < expected.size(); ++i) worst = std::max(worst, std::abs(std::to_integer<int>(expected[i]) - std::to_integer<int>(actual[i])));
+    return worst;
+}
+
+Source convertedAt(const Source& source, float whiteNits) {
+    auto converted = source;
+    for (std::size_t i = 0; i < converted.decoded.size(); i += 4) {
+        std::uint32_t word = 0;
+        std::memcpy(&word, source.words.data() + i, 4);
+        const auto pixel = AgcDriver::PqToSdrPixel(word, AgcDriver::DisplayRedLow(source.pixelFormat), whiteNits);
+        for (std::size_t channel = 0; channel < pixel.size(); ++channel) converted.decoded[i + channel] = static_cast<std::byte>(pixel[channel]);
+    }
+    return converted;
+}
+
+void passConvertsPq(const Context& context, PresentationPass& pass, const Source& guest, const Image& resident, float whiteNits) {
+    const auto source = convertedAt(guest, whiteNits);
+    for (const auto extent : {VkExtent2D{source.width, source.height}, VkExtent2D{source.width + 60, source.height}, VkExtent2D{source.width, source.height + 51}}) {
+        Require(largestDifference(convertPathPresent(context, source, extent), passPresent(context, pass, source, resident, extent, VK_FORMAT_B8G8R8A8_UNORM, 0, whiteNits)) <= 1, "the PQ presentation pass differs from the CPU conversion by more than one level: " + describe(source, extent));
+    }
+    for (const auto extent : {VkExtent2D{117, 76}, VkExtent2D{331, 215}}) {
+        const int worst = largestDifference(convertPathPresent(context, source, extent), passPresent(context, pass, source, resident, extent, VK_FORMAT_B8G8R8A8_UNORM, 0, whiteNits));
+        std::printf("  %s, white %.0f nits: scaled, by at most %d\n", describe(source, extent).c_str(), whiteNits, worst);
+        Require(worst <= 2, "the scaled PQ presentation pass differs from the convert path's filtered blit by more than two levels: " + describe(source, extent));
+    }
+    for (const std::uint32_t stride : {1u, 3u}) {
+        const auto extent = PresentationPass::DumpExtent(source.width, source.height, stride);
+        std::vector<std::byte> expected(static_cast<std::size_t>(extent.width) * extent.height * 4);
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            for (std::uint32_t x = 0; x < extent.width; ++x) std::memcpy(expected.data() + (static_cast<std::size_t>(y) * extent.width + x) * 4, source.decoded.data() + (static_cast<std::size_t>(y) * stride * source.width + x * stride) * 4, 4);
+        }
+        Require(largestDifference(expected, passDump(context, pass, source, resident, stride, 0, whiteNits)) <= 1, "the PQ presentation dump differs from the subsampled CPU conversion: " + describe(source, extent) + " stride " + std::to_string(stride));
+    }
 }
 
 void residentPresentTests(const Context& context) {
@@ -457,6 +547,14 @@ void residentPresentTests(const Context& context) {
         if (AgcDriver::DisplayTenBit(pixelFormat)) passKeepsTenBits(context, pass, source, *resident);
         if (pixelFormat == Bgra8) passRefusesHalfFloat(pass, *resident);
     }
+    for (const auto& [pixelFormat, storage] : {std::pair{Rgb10Pq, VK_FORMAT_A2B10G10R10_UNORM_PACK32}, std::pair{Bgr10Pq, VK_FORMAT_A2R10G10B10_UNORM_PACK32}, std::pair{Bgr10Pq, VK_FORMAT_A2B10G10R10_UNORM_PACK32}}) {
+        const auto source = makeSource(pixelFormat, storage, 200, 130);
+        const auto resident = residentImage(context, source);
+        passConvertsPq(context, pass, source, *resident, AgcDriver::SdrToneMapLuminanceNits);
+        passConvertsPq(context, pass, source, *resident, 1000.0f);
+        passPassesPqThrough(context, pass, source, *resident);
+    }
+    passRefusesSdrToHdr10(context, pass);
     passPresentsSlice(context, pass);
     blitLetterboxMatchesClear(context);
 }

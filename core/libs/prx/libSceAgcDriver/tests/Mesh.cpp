@@ -144,7 +144,7 @@ struct MeshDraw {
     std::uint32_t stagesRegister = 0x20u;
 };
 
-bool ReadsNumWorkgroups(const std::vector<std::uint32_t>& words) {
+bool ReadsNumWorkgroups(std::span<const std::uint32_t> words) {
     constexpr std::uint32_t OpDecorate = 71;
     constexpr std::uint32_t OpAccessChain = 65;
     constexpr std::uint32_t OpLoad = 61;

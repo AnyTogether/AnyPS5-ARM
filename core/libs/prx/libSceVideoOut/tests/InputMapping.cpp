@@ -105,6 +105,48 @@ void mouseLookReject() {
     require(rejects("MouseDecayMs = 20\nmousedecayms = 30\n"), "a mouse setting given twice is rejected");
 }
 
+void setConfigPath(const std::filesystem::path& path) {
+#ifdef _WIN32
+    require(_wputenv_s(L"ANYPS5_INPUT_CONFIG", path.wstring().c_str()) == 0, "set ANYPS5_INPUT_CONFIG");
+#else
+    require(::setenv("ANYPS5_INPUT_CONFIG", path.string().c_str(), 1) == 0, "set ANYPS5_INPUT_CONFIG");
+#endif
+}
+
+void nonAsciiPaths() {
+    const std::u8string name = u8"anyps5-input-\u00fc-\u65e5\u672c-" + std::u8string(root.filename().u8string());
+    const auto directory = root / std::filesystem::path(name);
+    std::filesystem::create_directories(directory);
+    const auto file = directory / "anyps5-input.ini";
+    {
+        std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+        stream << "MouseSensitivity = 3\n";
+        require(stream.good(), "write the input mapping in a non-ASCII directory");
+    }
+    setConfigPath(file);
+    require(Pad::LoadInputMapping().settings.mouseSensitivity == 3.0, "ANYPS5_INPUT_CONFIG may name a path with non-ASCII characters");
+    {
+        std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+        stream << "MouseSensitivity = fast\n";
+    }
+    std::string message;
+    try {
+        Pad::LoadInputMapping();
+    } catch (const std::runtime_error& error) {
+        message = error.what();
+    }
+    const auto utf8Name = std::string(reinterpret_cast<const char*>(name.data()), name.size());
+    require(message.find(utf8Name) != std::string::npos, "an error names the path in UTF-8");
+    setConfigPath(directory / "missing.ini");
+    message.clear();
+    try {
+        Pad::LoadInputMapping();
+    } catch (const std::runtime_error& error) {
+        message = error.what();
+    }
+    require(message.find(utf8Name) != std::string::npos, "a missing file names the path in UTF-8");
+}
+
 void deadzoneOffMatchesRawSticks() {
     for (const std::int16_t axis : {std::int16_t{-32768}, std::int16_t{-20000}, std::int16_t{-1}, std::int16_t{0}, std::int16_t{1}, std::int16_t{1234}, std::int16_t{32767}}) {
         const auto stick = Pad::StickWithDeadzone(axis, axis, 0);
@@ -141,6 +183,7 @@ int main() try {
     mouseLookDefault();
     mouseLookParse();
     mouseLookReject();
+    nonAsciiPaths();
     deadzoneOffMatchesRawSticks();
     deadzoneShapesSticks();
     std::filesystem::remove_all(root);

@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
@@ -11,6 +12,7 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "Recompiler.hpp"
 #include "Optimization/ResourceProgram.hpp"
+#include "DepthFastClearHarness.hpp"
 #include "VulkanTestDevice.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -28,9 +30,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <iostream>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -64,11 +69,11 @@ constexpr std::array<Color, 4> Destinations{{
     {0.5f, 0.25f, 0.75f, 0.5f}, {1.0f, 0.0f, 0.125f, 0.25f}, {0.0625f, 0.875f, 0.5f, 1.0f}, {0.25f, 0.5f, 0.375f, 0.75f}
 }};
 
-alignas(256) std::array<std::array<std::uint32_t, 64>, 8> Programs{};
+alignas(256) std::array<std::array<std::uint32_t, 64>, 16> Programs{};
 std::size_t programCount = 0;
 
 std::uint16_t Half(float value) {
-    Require(value == 0.0f || (value >= 0.0625f && value <= 1.0f), "the test's half values are normal and at most 1");
+    Require(value == 0.0f || (value >= 0.0078125f && value <= 1.0f), "the test's half values are normal and at most 1");
     if (value == 0.0f) return 0;
     const auto bits = std::bit_cast<std::uint32_t>(value);
     Require((bits & 0x1fffu) == 0, "the test's half values are exact");
@@ -92,7 +97,7 @@ std::uint32_t Packed16(float value, std::uint32_t exportFormat) {
     return static_cast<std::uint16_t>(static_cast<std::int16_t>(std::lround(value * 32767.0f)));
 }
 
-std::span<const std::uint32_t> Program(const Color& color, std::uint32_t exportFormat) {
+std::span<const std::uint32_t> Program(const Color& color, std::uint32_t exportFormat, std::optional<std::uint32_t> sampleMask = std::nullopt, std::optional<std::uint16_t> packedAlpha = std::nullopt) {
     Require(programCount < Programs.size(), "too many test programs");
     auto& code = Programs[programCount++];
     std::size_t at = 0;
@@ -100,9 +105,14 @@ std::span<const std::uint32_t> Program(const Color& color, std::uint32_t exportF
         code[at++] = 0x7e0002ffu | (vgpr << 17u);
         code[at++] = value;
     };
+    if (sampleMask) {
+        move(8, *sampleMask);
+        code[at++] = 0xf8001084u;
+        code[at++] = 0x00080000u;
+    }
     if (exportFormat != Float32Export) {
         move(4, Packed16(color[0], exportFormat) | (Packed16(color[1], exportFormat) << 16u));
-        move(5, Packed16(color[2], exportFormat) | (Packed16(color[3], exportFormat) << 16u));
+        move(5, Packed16(color[2], exportFormat) | ((packedAlpha ? *packedAlpha : Packed16(color[3], exportFormat)) << 16u));
         code[at++] = 0xf8001c0fu;
         code[at++] = 0x00000504u;
     } else {
@@ -172,21 +182,23 @@ struct Block {
     std::uint8_t* data = nullptr;
 };
 
-AgcDriver::Graphics::ColorTarget DecodeTarget(const Block& block) {
+AgcDriver::Graphics::ColorTarget DecodeTarget(const Block& block, std::uint32_t samples = 1) {
     AgcDriver::Registers cx;
     cx[0x318] = static_cast<std::uint32_t>(block.Address() >> 8u);
     cx[0x31b] = 0;
     cx[0x31c] = Float16x4Info;
-    cx[0x31d] = 0;
+    const auto log2 = static_cast<std::uint32_t>(std::countr_zero(samples));
+    cx[0x31d] = (log2 << 12u) | (log2 << 15u);
+    cx[0x321] = 0;
     cx[0x3b0] = ((Width - 1u) << 14u) | (Height - 1u);
     cx[0x3b8] = TiledAttrib3;
     cx[0x390] = static_cast<std::uint32_t>(block.Address() >> 40u);
     const auto color = AgcDriver::Graphics::DecodeColorBuffer(cx, 0);
-    Require(color.format == VK_FORMAT_R16G16B16A16_SFLOAT && color.elementBytes == 8 && color.bytes == block.bytes, "the 16_16_16_16 float target did not decode as a 256x128 RGBA16F surface");
+    Require(color.format == VK_FORMAT_R16G16B16A16_SFLOAT && color.elementBytes == 8 && color.samples == samples && color.bytes * samples == block.bytes, "the 16_16_16_16 float target did not decode as a 256x128 RGBA16F surface");
     return color;
 }
 
-void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, bool alphaToCoverage, std::uint32_t exportFormat, std::span<const std::uint32_t> pixelCode) {
+void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, bool alphaToCoverage, std::uint32_t exportFormat, std::span<const std::uint32_t> pixelCode, bool dithered = false, bool sampleMaskExport = false) {
     VkPipelineColorBlendAttachmentState blend{};
     blend.colorWriteMask = 0xf;
     const auto target = device.Target();
@@ -222,12 +234,15 @@ void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarge
     state.blend = blend;
     state.blendConstants = {};
     state.alphaToCoverage = alphaToCoverage;
+    state.ditheredAlphaToCoverage = dithered;
+    state.samples = color.samples;
 
     const auto codeAddress = reinterpret_cast<std::uintptr_t>(pixelCode.data());
-    const AgcDriver::Registers context{{0x1b6, 0x8000}, {0x1b3, 0}, {0x1b4, 0}, {0x203, 0}, {0x1c5, exportFormat}};
+    const AgcDriver::Registers context{{0x1b6, 0x8000}, {0x1b3, 0}, {0x1b4, 0}, {0x203, sampleMaskExport ? 0x100u : 0u}, {0x1c5, exportFormat}};
     const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{codeAddress, std::as_bytes(pixelCode)}}};
     auto prepared = AgcDriver::Graphics::DecodePixelStageInfo(context, {});
     prepared.alphaToCoverage = alphaToCoverage;
+    prepared.ditheredAlphaToCoverage = dithered;
     ShaderRecompiler::RecompileRequest fragment{
         {ShaderStage::Fragment, codeAddress, pixelCode, 0, {}},
         {waveSize, 0, {}, std::nullopt, prepared, std::nullopt, pixelMemory},
@@ -240,6 +255,7 @@ void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarge
     fragment.shader.code = snapshot.code;
     fragment.context.pixel = AgcDriver::Graphics::DecodePixelStageInfo(context, AgcDriver::Graphics::ExportMappings(state));
     fragment.context.pixel->alphaToCoverage = state.alphaToCoverage;
+    fragment.context.pixel->ditheredAlphaToCoverage = state.ditheredAlphaToCoverage;
     const ShaderRecompiler::SrtRuntime runtime{};
     const auto materialize = [&](const ShaderRecompiler::RecompileRequest& request) {
         const auto invocation = AgcDriver::DriverDetail::InvocationFor(snapshot, 0, request);
@@ -253,6 +269,59 @@ void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarge
     }};
     const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Triangle.size()), 0, 1, 0, false};
     device.Draw(state, draw, shaders);
+}
+
+alignas(256) std::array<std::array<std::uint32_t, 9>, 3> DepthOnlyPrograms{};
+
+void DepthOnlyCoverage(AgcDriver::VulkanDevice& device, const DepthFastClearHarness::Shaders& harness, const Block& depth, float alpha, std::size_t slot, bool written, std::uint32_t enable = 0x3u, float fourth = 0.0f) {
+    namespace Harness = DepthFastClearHarness;
+    const Harness::Surface surface{depth.Address(), 0, 0, false, VK_FORMAT_D32_SFLOAT};
+    auto& code = DepthOnlyPrograms[slot];
+    code = {0x7e0802ffu, 0x3e800000u, 0x7e0a02ffu, std::bit_cast<std::uint32_t>(alpha), 0x7e0e02ffu, std::bit_cast<std::uint32_t>(fourth), 0xf8001800u | enable, 0x07060504u, 0xbf810000u};
+    const std::span<const std::uint32_t> pixelCode(code.data(), 9);
+    ShaderRecompiler::ShaderPixelStageInfo pixel{};
+    pixel.wave32 = true;
+    pixel.inputAddr = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionX) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionY);
+    pixel.posX = true;
+    pixel.posY = true;
+    pixel.targetOutputMode[0] = 3;
+    pixel.targetExportMapping.fill(0xe4u);
+    pixel.alphaToCoverage = true;
+    const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(pixelCode.data()), std::as_bytes(pixelCode)}}};
+    ShaderRecompiler::RecompileRequest fragment{
+        {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
+        {32, 0, {}, std::nullopt, pixel, std::nullopt, pixelMemory},
+        device.Target(),
+        PixelPushLayout(harness.vertexPush, device.Target())
+    };
+    fragment.useCache = false;
+    const auto pixelResult = ShaderRecompiler::Recompile(fragment);
+    const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
+        {ShaderStage::Vertex, &harness.vertex, 0},
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(harness.vertexPush, device.Target())}
+    }};
+    AgcDriver::Graphics::State state{};
+    state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, 32u, 32u, std::nullopt, std::nullopt};
+    state.depth = AgcDriver::Graphics::DepthTarget{surface.depth, 0, {Harness::Width, Harness::Height}, VK_FORMAT_D32_SFLOAT, 1.0f, 0, 0, false};
+    state.depthTest = true;
+    state.depthWrite = true;
+    state.depthCompare = VK_COMPARE_OP_ALWAYS;
+    state.alphaToCoverage = true;
+    state.renderExtent = {Harness::Width, Harness::Height};
+    state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    state.viewport = {0, static_cast<float>(Harness::Height), static_cast<float>(Harness::Width), -static_cast<float>(Harness::Height), 0, 1};
+    state.negativeOneToOne = false;
+    state.scissor = {{0, 0}, {Harness::Width, Harness::Height}};
+    state.cullMode = VK_CULL_MODE_NONE;
+    state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    state.blendConstants = {};
+    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Harness::Triangles().size()), 0, 1, 0, false};
+    device.Draw(state, draw, shaders);
+    device.WaitIdle();
+    const auto passed = Harness::Draw(device, harness, surface, {.depthCompare = VK_COMPARE_OP_LESS});
+    char detail[160];
+    std::snprintf(detail, sizeof(detail), "a depth-only draw with alpha-to-coverage and a 32_AR alpha of %.2f (export mask 0x%x, fourth channel %.2f) left %u of %u pixels at the cleared depth", alpha, enable, fourth, passed, Harness::Covered);
+    Require(passed == (written ? 0u : Harness::Covered), detail);
 }
 
 std::vector<std::uint16_t> ReadBack(AgcDriver::VulkanDevice& device, const Block& block) {
@@ -294,12 +363,108 @@ void Check(AgcDriver::VulkanDevice& device, const Block& block, const ColorTarge
     }
 }
 
+void DitheredCoverage(AgcDriver::VulkanDevice& device) {
+    struct Case {
+        std::uint32_t bits;
+        std::uint32_t format;
+        std::array<std::uint32_t, 4> masks;
+    };
+    constexpr std::array<Case, 36> cases{{
+        {0x00000000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x80000000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x3c7fffffu, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x3c800000u, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3c800001u, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3cffffffu, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3d000000u, 9u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x3d000001u, 9u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x3effffffu, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f000000u, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f000001u, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f77ffffu, 9u, {0xffu, 0xf7u, 0xffu, 0xffu}},
+        {0x3f780000u, 9u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x3f780001u, 9u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x3f800000u, 9u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x7f800000u, 9u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0xff800000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x7fc00000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00000000u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00008000u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x000023ffu, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00002400u, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x00002401u, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x000027ffu, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x00002800u, 4u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x00002801u, 4u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x000037ffu, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003800u, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003801u, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003bbfu, 4u, {0xffu, 0xf7u, 0xffu, 0xffu}},
+        {0x00003bc0u, 4u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x00003bc1u, 4u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x00003c00u, 4u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x00007c00u, 4u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x0000fc00u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00007e00u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+    }};
+    const ColorTargetLayout layout(Width, Height, ColorTileMode::RenderTarget, 8);
+    std::vector<std::unique_ptr<Block>> blocks;
+    for (const auto& test : cases) {
+        blocks.push_back(std::make_unique<Block>(layout.Bytes() * 8u));
+        auto& source = *blocks.back();
+        std::memset(source.data, 0, source.bytes);
+        const auto multisampled = DecodeTarget(source, 8);
+        for (std::uint32_t sample = 0; sample < 8; ++sample) {
+            const Color color{std::ldexp(1.0f, static_cast<int>(sample) - 7), 0, 0, 1};
+            Draw(device, multisampled, false, Float32Export, Program(color, Float32Export, 1u << sample), false, true);
+        }
+        const auto alpha = test.format == Float32Export ? std::bit_cast<float>(test.bits) : 0.0f;
+        const Color color{0, 0, 0, alpha};
+        const auto half = test.format == Float16Export ? std::optional<std::uint16_t>(static_cast<std::uint16_t>(test.bits)) : std::nullopt;
+        Draw(device, multisampled, true, test.format, Program(color, test.format, std::nullopt, half), true);
+        blocks.push_back(std::make_unique<Block>(layout.Bytes()));
+        auto& resolved = *blocks.back();
+        std::memset(resolved.data, 0, resolved.bytes);
+        AgcDriver::Graphics::ColorMetadataPass pass{};
+        pass.mode = AgcDriver::Graphics::ColorMetadataPass::Mode::Resolve;
+        pass.source = multisampled;
+        pass.targets = {DecodeTarget(resolved)};
+        device.ColorMetadataPass(pass);
+        const auto stored = ReadBack(device, resolved);
+        for (std::uint32_t y = 0; y < Height; ++y) {
+            for (std::uint32_t x = 0; x < Width; ++x) {
+                const auto mask = test.masks[2u * (x & 1u) + (y & 1u)];
+                const auto expected = x < ScissorWidth ? static_cast<float>(255u - mask) / 1024.0f : 0.0f;
+                const auto actual = FromHalf(stored[layout.Offset(x, y) / 2u]);
+                if (actual == expected) continue;
+                char detail[192];
+                std::snprintf(detail, sizeof(detail), "dithered coverage export %u alpha 0x%08x pixel (%u,%u): resolved %.9g, expected %.9g for mask0x%02x", test.format, test.bits, x, y, actual, expected, mask);
+                throw std::runtime_error(detail);
+            }
+        }
+        programCount = 0;
+    }
+    AgcDriver::Graphics::ClearMultisampleTargets(device.Device());
 }
 
-int main() {
+}
+
+int main(int argc, char** argv) {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        if (argc == 2 && std::string_view(argv[1]) == "--dithered8") {
+            try {
+                DitheredCoverage(*device);
+            } catch (const std::runtime_error& error) {
+                if (std::string_view(error.what()) != "AGC graphics: the device cannot render color with the target's sample count") throw;
+                std::printf("skipped, the device lacks eight-sample color attachments: %s\n", error.what());
+                return VulkanTestSkipped;
+            }
+            std::puts("dithered eight-sample alpha-to-coverage tests passed");
+            return 0;
+        }
+        Require(argc == 1, "unknown alpha-to-coverage test argument");
         const ColorTargetLayout layout(Width, Height, ColorTileMode::RenderTarget, 8);
         Block block(layout.Bytes());
         struct Case {
@@ -343,6 +508,13 @@ int main() {
             Check(*device, block, layout, before, [&](const Color& destination) { return test.written ? source : destination; }, name);
             programCount = 0;
         }
+        const auto harness = DepthFastClearHarness::Compile(*device);
+        const Block coveredDepth(BlockBytes);
+        const Block discardedDepth(BlockBytes);
+        DepthOnlyCoverage(*device, harness, coveredDepth, 0.75f, 0, true);
+        DepthOnlyCoverage(*device, harness, discardedDepth, 0.25f, 1, false);
+        const Block fullMaskDepth(BlockBytes);
+        DepthOnlyCoverage(*device, harness, fullMaskDepth, 0.25f, 2, false, 0xfu, 0.75f);
         std::puts("alpha-to-coverage tests passed");
         return 0;
     } catch (const std::exception& error) {

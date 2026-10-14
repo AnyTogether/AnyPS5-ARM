@@ -32,6 +32,7 @@
 #include "Optimization/include/Optimization/HostInterpolationChecker.hpp"
 #include "Optimization/include/Optimization/MaskedSelectEliminator.hpp"
 #include "Optimization/include/Optimization/ReadLaneEliminator.hpp"
+#include "Optimization/include/Optimization/RedundantValueEliminator.hpp"
 #include "Optimization/include/Optimization/RequestMemoryView.hpp"
 #include "Optimization/include/Optimization/ResourceMaterializer.hpp"
 #include "Optimization/ResourceProgram.hpp"
@@ -107,7 +108,14 @@ RdnaProgram DecodeStageProgram(ShaderStageKind stage, std::span<const std::uint3
 
 ShaderStageInputInfo RequestInputInfo(const RecompileRequest& request) {
     const auto* mesh = request.graphics && request.graphics->mesh ? &*request.graphics->mesh : nullptr;
-    const auto* tessellation = request.graphics && request.graphics->tessellation ? &*request.graphics->tessellation : nullptr;
+    std::optional<TessellationConfiguration> tessellationCopy;
+    if (request.graphics && request.graphics->tessellation) {
+        tessellationCopy = *request.graphics->tessellation;
+        tessellationCopy->instancePatches = TessellationInstancePatches(request);
+        const auto& capabilities = request.target.supportedCapabilities;
+        tessellationCopy->drawParameters = std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDrawParameters)) != capabilities.end();
+    }
+    const auto* tessellation = tessellationCopy ? &*tessellationCopy : nullptr;
     return BuildShaderStageInputInfo(toShaderStageKind(request.shader.stage), request.context, HostSubgroupSize(request), mesh, tessellation);
 }
 
@@ -123,7 +131,7 @@ std::atomic<std::uint64_t> frontEndBuilds{0};
 
 struct PreparedControlFlow {
     PreparedControlFlow(const RecompileRequest& request, const SwappcInfo& swappcInfo)
-        : stage(request.shader.stage), swappc(swappcInfo), code(request.shader.code.begin(), request.shader.code.end()),
+        : stage(request.shader.stage), fallbacks(swappcInfo.linkedCallFallbacks.begin(), swappcInfo.linkedCallFallbacks.end()), swappc(WithFallbacks(swappcInfo, fallbacks)), code(request.shader.code.begin(), request.shader.code.end()),
           decoded(DecodeStageProgram(toShaderStageKind(request.shader.stage), code)), cfg(GraphBuilder{}.Build(decoded, &swappc)) {
         Structurizer{}.Structurize(cfg);
     }
@@ -134,10 +142,16 @@ struct PreparedControlFlow {
     bool Matches(const RecompileRequest& request, const SwappcInfo& swappcInfo) const {
         return stage == request.shader.stage && swappc.fetchCallAllowed == swappcInfo.fetchCallAllowed &&
                swappc.userDataBaseRegister == swappcInfo.userDataBaseRegister && swappc.userDataCount == swappcInfo.userDataCount &&
-               std::ranges::equal(code, request.shader.code);
+               std::ranges::equal(fallbacks, swappcInfo.linkedCallFallbacks) && std::ranges::equal(code, request.shader.code);
+    }
+
+    static SwappcInfo WithFallbacks(SwappcInfo info, const std::vector<std::uint32_t>& fallbacks) {
+        info.linkedCallFallbacks = fallbacks;
+        return info;
     }
 
     ShaderStage stage;
+    std::vector<std::uint32_t> fallbacks;
     SwappcInfo swappc;
     std::vector<std::uint32_t> code;
     RdnaProgram decoded;
@@ -146,7 +160,7 @@ struct PreparedControlFlow {
 
 std::shared_ptr<const PreparedControlFlow> ShaderPreparationContext::AcquireFrontend(const RecompileRequest& request) {
     const auto inputInfo = RequestInputInfo(request);
-    const SwappcInfo swappc{inputInfo.vertex != nullptr, request.context.userDataBaseRegister, static_cast<std::uint32_t>(request.context.userData.size())};
+    const SwappcInfo swappc{inputInfo.vertex != nullptr, request.context.userDataBaseRegister, static_cast<std::uint32_t>(request.context.userData.size()), 0u, request.context.linkedCallFallbacks};
     static const bool reuse = std::getenv("APS5_NO_PERF_FRONTEND_PAIR") == nullptr;
     if (reuse && frontend != nullptr && frontend->Matches(request, swappc)) {
         return frontend;
@@ -162,6 +176,10 @@ std::uint64_t FrontEndBuilds() {
     return frontEndBuilds.load(std::memory_order_relaxed);
 }
 
+std::uint32_t ShaderPreparationContext::ResourcePrograms() const {
+    return resourcePrograms;
+}
+
 IrProgram PrepareResourceProgram(const RecompileRequest& request) {
     return PrepareResourceProgram(request, nullptr);
 }
@@ -169,7 +187,11 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request) {
 IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparationContext* preparation) {
     frontEndBuilds.fetch_add(1, std::memory_order_relaxed);
     ShaderPreparationContext local;
-    const auto frontend = (preparation != nullptr ? *preparation : local).AcquireFrontend(request);
+    auto& context = preparation != nullptr ? *preparation : local;
+    ++context.resourcePrograms;
+    context.interfaceSource.reset();
+    context.interfaceProgram.reset();
+    const auto frontend = context.AcquireFrontend(request);
     const auto stageKind = toShaderStageKind(request.shader.stage);
     const auto inputInfo = RequestInputInfo(request);
     const auto& decoded = frontend->decoded;
@@ -305,12 +327,13 @@ struct EmissionFailure {
     std::exception_ptr failure;
 };
 
-struct SourceEntry {
+struct SourceEntry : std::enable_shared_from_this<SourceEntry> {
     std::mutex mutex;
     // The code the entry was built for: the key carries only a hash of it, so a candidate entry is
     // accepted only when its code matches word for word. Owned here because the request's span
     // points into a registration the driver may replace while the entry lives on.
     std::vector<std::uint32_t> code;
+    std::vector<std::uint32_t> linkedCallFallbacks;
     std::shared_ptr<const IrResourcePlan> plan;
     // A plan build that threw (an unsupported resource chain or control flow) is remembered and
     // rethrown: the front end ran every pass before failing, ~13 ms per dispatch of a shader the
@@ -409,6 +432,7 @@ std::shared_ptr<SourceEntry> getSource(const RecompileRequest& request, ShaderPr
         if (source == nullptr) {
             source = std::make_shared<SourceEntry>();
             source->code.assign(request.shader.code.begin(), request.shader.code.end());
+            source->linkedCallFallbacks.assign(request.context.linkedCallFallbacks.begin(), request.context.linkedCallFallbacks.end());
             auto& bucket = sources[key];
             if (!bucket.empty()) {
                 // A second entry under one key is a code hash collision (or the unhashed key with
@@ -460,7 +484,19 @@ std::uint64_t nextVariantId() {
     return variants.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
-CompiledVariant compileVariant(const RecompileRequest& request, IrProgram program, std::exception_ptr* emissionFailure = nullptr) try {
+template<typename TStep>
+auto recordEmissionFailure(std::exception_ptr* emissionFailure, TStep&& step) -> decltype(step()) {
+    try {
+        return step();
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (...) {
+        if (emissionFailure != nullptr) *emissionFailure = std::current_exception();
+        throw;
+    }
+}
+
+void prepareInterface(const RecompileRequest& request, IrProgram& program) {
     const auto inputInfo = RequestInputInfo(request);
     constexpr DeadCodeEliminator deadCodeEliminator;
     constexpr ResourceMaterializer resourceMaterializer;
@@ -468,13 +504,19 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     resourceMaterializer.ApplyStaticInterface(program, nativeSampleOffsets);
 
     deadCodeEliminator.RemoveIdentities(program);
+    constexpr RedundantValueEliminator redundantValueEliminator;
+    static_cast<void>(redundantValueEliminator.Eliminate(program));
     deadCodeEliminator.Eliminate(program);
 
     constexpr ShaderInfoCollector shaderInfoCollector;
     shaderInfoCollector.Collect(program, inputInfo);
+}
 
+CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program) {
+    const auto inputInfo = RequestInputInfo(request);
     constexpr BindingAllocator bindingAllocator;
     bool registration = request.target.registrationModules && (request.shader.stage == ShaderStage::Vertex || request.shader.stage == ShaderStage::Fragment);
+    program.Metadata().bindingLayoutComplete = false;
     auto bindings = bindingAllocator.Allocate(program, request.layout, registration);
 
     SpirvTargetOptions targetOptions {};
@@ -514,9 +556,6 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     result.shaderDataDwords = bindings.layout.ShaderDataDwords();
     result.imageMetadataDword = bindings.layout.ImageMetadataDword();
     result.runtimeImageCount = bindings.layout.runtimeImageCount;
-    for (std::uint32_t index = 0; index < program.Info().images.size(); ++index) {
-        if (program.Info().images[index].indirectRoot != ImageResource::NoIndirectImage) result.runtimeImageResources.push_back(index);
-    }
     result.hostSubgroupSize = HostSubgroupSize(request);
     result.vertexOffsetSgpr = program.Info().vertexOffsetSgpr;
     result.instanceOffsetSgpr = program.Info().instanceOffsetSgpr;
@@ -563,12 +602,16 @@ CompiledVariant compileVariant(const RecompileRequest& request, IrProgram progra
     }
 #endif
 
-    return {request.layout, std::move(program).TakeCompiledInfo(), std::move(static_cast<CompiledBindingLayout&>(bindings)), std::move(result)};
-} catch (const std::bad_alloc&) {
-    throw;
-} catch (...) {
-    if (emissionFailure != nullptr) *emissionFailure = std::current_exception();
-    throw;
+    return {request.layout, {}, std::move(static_cast<CompiledBindingLayout&>(bindings)), std::move(result)};
+}
+
+CompiledVariant compileVariant(const RecompileRequest& request, IrProgram program, std::exception_ptr* emissionFailure = nullptr) {
+    return recordEmissionFailure(emissionFailure, [&] {
+        prepareInterface(request, program);
+        auto variant = emitVariant(request, program);
+        variant.info = std::move(program).TakeCompiledInfo();
+        return variant;
+    });
 }
 
 struct SpecializedModule {
@@ -917,8 +960,9 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
     } else {
         result.spirv = artifact.spirv;
     }
+    const auto tables = ResourceMaterializer::ResolveImageTables(variant.info.info, snapshot, artifact.variantId);
     BindingAllocationResult bindings;
-    DescriptorBindingBuilder{}.Populate(bindings, variant.bindings, *bindingPlan, variant.info.userDataBase, snapshot, partialThreads(request));
+    DescriptorBindingBuilder{}.Populate(bindings, variant.bindings, *bindingPlan, variant.info.userDataBase, snapshot, partialThreads(request), &tables);
     result.workgroupMemoryDwords = WorkgroupMemoryStrideDwords(variant.info.info);
     result.bindings = std::move(bindings.bindings);
     result.pushConstants = std::move(bindings.pushConstants);
@@ -936,12 +980,44 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
         }
     }
     result.poisonedSrtReads = static_cast<std::uint32_t>(snapshot.srtPoison.size()) + snapshot.nullRootReads;
+    if (!tables.map.empty()) {
+        result.imageTablePoison.reserve(tables.poison.size());
+        for (const auto& poison : tables.poison) result.imageTablePoison.push_back({poison.words, poison.dwordCount, poison.resource, static_cast<std::uint32_t>(poison.reason)});
+        result.imageTableRanges = snapshot.tables.ranges;
+        result.imageTableReadRanges.reserve(snapshot.tables.tables.size());
+        for (const auto& table : snapshot.tables.tables) result.imageTableReadRanges.push_back(table.readRanges);
+        result.imageTableShader = snapshot.tables.shader;
+        result.imageTableFaults = tables.faults;
+    }
     return result;
 }
 
 bool sameLayout(const BindingLayout& left, const BindingLayout& right) {
     return left.descriptorSet == right.descriptorSet && left.firstBinding == right.firstBinding && left.pushConstantOffsetBytes == right.pushConstantOffsetBytes && left.pushConstantSizeBytes == right.pushConstantSizeBytes;
 }
+
+}
+
+struct PreparedInterface {
+    static CompiledVariant Compile(SourceEntry& source, const RecompileRequest& request, ShaderPreparationContext& preparation, std::exception_ptr* emissionFailure) {
+        if (preparation.interfaceSource.get() != &source || preparation.interfaceProgram->Resources().shaderHash != request.shader.codeAddress) {
+            preparation.interfaceSource.reset();
+            preparation.interfaceProgram.reset();
+            auto program = source.program != nullptr ? std::move(source.program) : std::make_unique<IrProgram>(PrepareResourceProgram(request, &preparation));
+            recordEmissionFailure(emissionFailure, [&] { prepareInterface(request, *program); });
+            preparation.interfaceSource = source.shared_from_this();
+            preparation.interfaceProgram = std::move(program);
+        }
+        auto& program = *preparation.interfaceProgram;
+        return recordEmissionFailure(emissionFailure, [&] {
+            auto variant = emitVariant(request, program);
+            variant.info = program.CompiledInfo();
+            return variant;
+        });
+    }
+};
+
+namespace {
 
 std::shared_ptr<const CompiledVariant> findOrCompileVariant(SourceEntry& source, const RecompileRequest& request, bool& cacheHit, ShaderPreparationContext* preparation = nullptr) {
     for (const auto& candidate : source.variants) {
@@ -967,16 +1043,24 @@ std::shared_ptr<const CompiledVariant> findOrCompileVariant(SourceEntry& source,
         }
     }
     if (variant == nullptr) {
-        auto program = source.program != nullptr ? std::move(*source.program) : PrepareResourceProgram(request, preparation);
-        source.program.reset();
+        static const bool layoutPair = std::getenv("APS5_NO_PERF_LAYOUT_PAIR") == nullptr;
         std::exception_ptr emissionFailure;
         try {
-            variant = std::make_shared<const CompiledVariant>(compileVariant(request, std::move(program), &emissionFailure));
+            if (layoutPair && preparation != nullptr) {
+                variant = std::make_shared<const CompiledVariant>(PreparedInterface::Compile(source, request, *preparation, &emissionFailure));
+            } else {
+                auto program = source.program != nullptr ? std::move(*source.program) : PrepareResourceProgram(request, preparation);
+                source.program.reset();
+                variant = std::make_shared<const CompiledVariant>(compileVariant(request, std::move(program), &emissionFailure));
+            }
         } catch (...) {
             if (emissionFailure != nullptr && FailureMemo()) source.emissionFailures.push_back({request.shader.codeAddress, request.layout, emissionFailure});
             throw;
         }
-        if (disk) ShaderDiskCache::Store(std::move(diskKey), variant);
+        if (disk) {
+            if (auto persisted = ShaderDiskCache::Persist(diskKey, *variant)) variant = std::move(persisted);
+            else ShaderDiskCache::Store(std::move(diskKey), variant);
+        }
     }
     source.program.reset();
     source.variants.push_back(variant);
@@ -1079,6 +1163,29 @@ std::uint64_t snapshotHash(const RecompileRequest& request, const ResourceSnapsh
     for (const auto stride : snapshot.uniformFill.groupStride) mix(stride);
     mix(snapshot.uniformFill.words);
     mix(snapshot.uniformFill.value);
+    const auto& tables = snapshot.tables;
+    mix(tables.shader);
+    mix(tables.tables.size());
+    for (const auto& table : tables.tables) {
+        mix(table.base);
+        mix(table.size);
+        mix(table.records);
+        mix(table.keys);
+        mix(table.fault);
+        mix(table.outside ? 1u : 0u);
+        mixWords(table.codes);
+        mix(table.readRanges.size());
+        for (const auto& [base, size] : table.readRanges) {
+            mix(base);
+            mix(size);
+        }
+    }
+    mixDescriptors(tables.words);
+    mix(tables.ranges.size());
+    for (const auto& [base, size] : tables.ranges) {
+        mix(base);
+        mix(size);
+    }
     for (const auto threads : partialThreads(request)) mix(threads);
     mix(request.layout.pushConstantOffsetBytes);
     if (request.context.pixel) {
@@ -1289,7 +1396,9 @@ std::span<const std::uint32_t> GetPreparedCode(const SourceHandle& handle) {
     return handle.source->code;
 }
 
-PreparedShaderInvocation::PreparedShaderInvocation(const RecompileRequest& request, const std::shared_ptr<const SourceHandle>& handle) : request(request), handle(handle) {}
+PreparedShaderInvocation::PreparedShaderInvocation(const RecompileRequest& request, const std::shared_ptr<const SourceHandle>& handle) : request(request), handle(handle) {
+    this->request.context.linkedCallFallbacks = handle->source->linkedCallFallbacks;
+}
 
 std::optional<PreparedShaderInvocation> PreparedShaderInvocation::TryCreate(const RecompileRequest& request, const std::shared_ptr<const SourceHandle>& handle) {
     struct PreparedKeyStorage {};

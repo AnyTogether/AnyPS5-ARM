@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 
+from test_guest_host_libc import importing
 from test_guest_intel_trampolines import main_fixture
 from test_guest_module_directories import module_with_symbol, needed_libraries
 from test_guest_needed_modules import executable_with_needed
@@ -14,13 +15,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="anyps5-executables-") as directory:
         work = Path(directory)
 
-        def convert(case, windows, options, picker=None):
+        def convert(case, windows, options, picker=None, eboot=None):
             (case / "sce_module").mkdir(parents=True, exist_ok=True)
             (case / "sce_module" / "bundled.prx").write_bytes(module_with_symbol(True))
             (case / "picker").mkdir(exist_ok=True)
             (case / "picker" / "picker.bin").write_bytes(main_fixture() if picker is None else picker)
             source = case / "eboot.bin"
-            source.write_bytes(main_fixture())
+            source.write_bytes(main_fixture() if eboot is None else eboot)
             output = case / "out" / ("app.exe" if windows else "app.elf")
             output.parent.mkdir(exist_ok=True)
             result = subprocess.run([str(relinker), *(["--windows"] if windows else []), "--registry", *options, str(source), str(output)],
@@ -70,6 +71,19 @@ def main():
                 secondary = output.parent / "picker.picker.bin.elf"
                 assert "$ORIGIN/app0/Media/Modules/needed.prx.guest.prx" in needed_libraries(secondary.read_bytes())
                 assert "$ORIGIN/app0/Media/Modules/needed.prx.guest.prx" not in needed_libraries(output.read_bytes())
+
+        for label, windows, target in (("linux", False, []), ("macos", False, ["--macos"]), ("windows", True, [])):
+            for name, picker in (("subset", importing("libScePad.prx")), ("order", importing("libSceVideoOut.prx", "libScePad.prx"))):
+                case = work / f"{label}-host-{name}"
+                result, output = convert(case, windows, [*target, "--executable", "picker/picker.bin"], picker, importing("libScePad.prx", "libSceVideoOut.prx"))
+                assert result.returncode == 0, (label, name, result.stdout, result.stderr)
+                modules = sorted(output.parent.rglob("*.guest.prx"))
+                assert [path.name for path in modules] == ["bundled.prx.guest.prx"], (label, name, modules)
+                if label == "linux":
+                    secondary = output.parent / "picker.picker.bin.elf"
+                    assert needed_libraries(modules[0].read_bytes()) == [], needed_libraries(modules[0].read_bytes())
+                    assert "libSceVideoOut.prx" in needed_libraries(output.read_bytes())
+                    assert "libScePad.prx" in needed_libraries(secondary.read_bytes())
 
 
 if __name__ == "__main__":

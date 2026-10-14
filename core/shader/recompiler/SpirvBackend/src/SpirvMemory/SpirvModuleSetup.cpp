@@ -149,8 +149,11 @@ void DefineModule(SpirvEmitterState& state) {
         state.module.EmitCapability(spv::CapabilityGroupNonUniformShuffle);
     }
     if (state.requirements.computeDerivatives && StageOf(state) == IrShaderStage::Compute) {
-        state.module.EmitCapability(spv::CapabilityComputeDerivativeGroupQuadsKHR);
+        state.module.EmitCapability(spv::CapabilityComputeDerivativeGroupLinearKHR);
         state.module.EmitExtension("SPV_KHR_compute_shader_derivatives");
+    }
+    if (std::any_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) { return input.kind == StageInputKind::BaseInstance; })) {
+        state.module.EmitCapability(spv::CapabilityDrawParameters);
     }
     const bool fragmentBarycentric = StageOf(state) == IrShaderStage::Pixel && std::any_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
         return input.perVertex || input.kind == StageInputKind::BaryCoordSmooth || input.kind == StageInputKind::BaryCoordNoPerspective;
@@ -182,10 +185,6 @@ void DefineModule(SpirvEmitterState& state) {
             localX = ((localX * localY * localZ + 63u) / 64u) * 32u;
             localY = 1u;
             localZ = 1u;
-            if (state.requirements.computeDerivatives) {
-                localY = localX / 2u;
-                localX = 2u;
-            }
         }
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeLocalSize, localX, localY, localZ);
     }
@@ -222,7 +221,7 @@ void DefineModule(SpirvEmitterState& state) {
         }
     }
     if (state.requirements.computeDerivatives && StageOf(state) == IrShaderStage::Compute) {
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDerivativeGroupQuadsKHR);
+        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDerivativeGroupLinearKHR);
     }
     state.module.AddName(state.mainFunc, "main");
     if (state.requirements.functionLds) {

@@ -330,7 +330,9 @@ static void RenameAndDeleteWatchedFile() {
     Require(close_nid_postfix(file) == 0);
     Require(close_nid_postfix(kq) == 0);
 }
+#endif
 
+#if !defined(_WIN32) && !defined(__APPLE__)
 static std::uint32_t NotesThrough(int kq, std::uintptr_t ident, std::uint32_t last) {
     std::uint32_t notes = 0;
     KernelEvent events[4]{};
@@ -438,6 +440,8 @@ int main() {
     FileWatch();
 #ifndef _WIN32
     RenameAndDeleteWatchedFile();
+#endif
+#if !defined(_WIN32) && !defined(__APPLE__)
     MoveDirectoryEntries();
 #endif
     DirectoryWatch();

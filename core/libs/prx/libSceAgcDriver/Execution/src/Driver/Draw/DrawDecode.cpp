@@ -41,7 +41,7 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
         DrawProgram result{
             {stage, address, std::span(snapshot.code).subspan(codeOffset), snapshot.headerAddress, snapshot.header},
             userDataBase,
-            8,
+            stage == Stage::Fragment ? 0u : 8u,
             {},
             {{{snapshot.codeAddress, std::as_bytes(std::span(snapshot.code))}, {snapshot.headerAddress, snapshot.header}}},
             program,
@@ -51,6 +51,7 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
             Graphics::NoteRegisterRead(Graphics::RegisterBank::Shader, userDataBase + i);
             result.userData.push_back((staticAbi ? ReadGraphicsRegister(queue.shader, userDataBase + i) : readUserData(queue.shader, userDataBase + i)));
         }
+        if ((stage == Stage::Vertex || stage == Stage::Fragment) && snapshot.header.empty() && snapshot.userDataTailRegister) result.tailContinuation = ReadUserDataTailContinuation(result.binary.code, result.firstUserSgpr, result.userData);
         return result;
     };
     {
@@ -102,7 +103,6 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
                 require(rejection.empty(), rejection.c_str());
             }
             append(0x008, 1, Stage::Fragment, 0x00b, 0x00c, Role::Fragment);
-            programs.back().firstUserSgpr = 0;
         }
     }
 }
@@ -118,6 +118,7 @@ std::shared_ptr<DrawDecode> Driver::decodeDraw(const QueueState& queue, const Su
     if (product->pixel.ancillary) product->pixel.rasterPrimitive = Graphics::RasterPrimitiveOf(product->state);
     if (const auto localDevice = device.Load(); localDevice != nullptr) localDevice->NormalizeUnobservedViewportDepth(product->state, product->pixel);
     if (product->pixel.ancillary) product->pixel.layerExported = product->state.layerExports != 0;
+    product->pixel.ditheredAlphaToCoverage = product->state.ditheredAlphaToCoverage;
     return product;
 }
 

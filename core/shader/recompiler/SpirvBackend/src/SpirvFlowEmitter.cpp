@@ -291,6 +291,7 @@ void EmitDirectInstruction(SpirvValueEmitContext& ctx, const IrValue& inst) {
         case IrOpcode::Void: return Invoke(EmitVoid, ctx, inst);
         case IrOpcode::Reference: return Invoke(EmitReference, ctx, inst);
         case IrOpcode::ReferenceU32: return Invoke(EmitReferenceU32, ctx, inst);
+        case IrOpcode::UnlinkedCall: return Invoke(EmitUnlinkedCall, ctx, inst);
         case IrOpcode::GetUserData: return Invoke(EmitGetUserData, ctx, inst);
         case IrOpcode::GetShaderBase: return Invoke(EmitGetShaderBase, ctx, inst);
         case IrOpcode::ShaderClock: return Invoke(EmitShaderClock, ctx, inst);
@@ -870,6 +871,13 @@ void EmitReference(SpirvValueEmitContext& context) {
 
 void EmitReferenceU32(SpirvValueEmitContext& context) {
     EmitVoid(context);
+}
+
+void EmitUnlinkedCall(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t low, std::uint32_t high, std::uint32_t programCounter) {
+    auto& state = ctx.state;
+    if (state.faultBufferVariable == 0) ctx.Fail(inst, "calls an unlinked target without a fault buffer");
+    RecordBdaFaultWords(state, low, high, ConstantU32(state, 0u), programCounter, BdaAbi::FaultReason::UnlinkedCall);
+    StopBdaInvocationIf(state, ConstantBool(state, true));
 }
 
 void EmitControlNop(SpirvValueEmitContext& context) {

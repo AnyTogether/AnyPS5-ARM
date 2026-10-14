@@ -70,6 +70,10 @@ void checkChunks() {
     const auto note = chunk("tEXt", {'n', 0, 'v'});
     check("unknown-critical", {chunk("ABCD", {}), idat}, false);
     check("ancillary", {note, idat}, true);
+    check("private-ancillary", {chunk("vpAg", {}), idat}, true);
+    check("reserved-ancillary", {chunk("tExT", {}), idat}, true);
+    for (const auto& type : {"t1Xt", "tEX!", "tEX\x80"})
+        check("invalid-chunk-type", {chunk(type, {}), idat}, false);
     const auto first = chunk("IDAT", {data.begin(), data.begin() + 6});
     const auto last = chunk("IDAT", {data.begin() + 6, data.end()});
     check("consecutive", {first, last}, true);

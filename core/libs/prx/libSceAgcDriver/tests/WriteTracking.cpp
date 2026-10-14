@@ -570,6 +570,36 @@ void CheckImportWindow() {
     Require(!UnchangedSince(base, Block, after), "a store after the import window was missed");
 }
 
+void CheckImportWindowZeroPages() {
+    void* memory = AllocateWatched(5 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    auto* bytes = static_cast<volatile std::uint8_t*>(memory);
+    auto* plain = static_cast<std::uint8_t*>(memory);
+    std::memset(plain, 0x11, Block);
+    std::memset(plain + Block, 0, 2 * Block);
+    std::memset(plain + 3 * Block, 0x44, Block);
+    std::memset(plain + 4 * Block, 0x66, Block);
+    const auto synced = CollectWritesUncached(base, 5 * Block);
+    Require(synced != 0, "the zero page import window block is not collected");
+    Require(ImportWatched(base, 5 * Block, [&] {
+        bytes[0x100] = 0x11;
+        bytes[Block + 0x100] = 0;
+        bytes[2 * Block + 0x2000] = 0x22;
+        bytes[3 * Block + 0x3000] = 0x44;
+        bytes[4 * Block + 0x100] = 0x55;
+        return true;
+    }), "the zero page import window import failed");
+    const std::array<std::uint64_t, 5> generations{synced, synced, synced, synced, synced};
+    std::array<std::uint8_t, 5> changed{};
+    std::array<std::uint8_t, 5> cpu{};
+    Require(ChangedBlocks(base, 5 * Block, generations, changed, cpu), "the zero page import window block is not tracked");
+    Require(changed[0] == BlockUnchanged && cpu[0] == 1, "a page before the zero pages of an import window reads as written");
+    Require(changed[1] == BlockUnchanged && UnchangedSince(base + Block, Block, synced), "a zero page an import window resolved without changing its bytes reads as written");
+    Require(changed[2] == BlockWritten && WrittenSince(base + 2 * Block, Block, synced), "a store of new bytes to a zero page within an import window was missed");
+    Require(changed[3] == BlockUnchanged && UnchangedSince(base + 3 * Block, Block, synced), "a page after the zero pages of an import window was compared with other bytes");
+    Require(changed[4] == BlockWritten && WrittenSince(base + 4 * Block, Block, synced), "a store of new bytes after the zero pages of an import window was missed");
+}
+
 void ProtectPage(std::uint64_t address, bool readable) {
 #ifdef _WIN32
     DWORD previous = 0;
@@ -793,6 +823,7 @@ int main() {
         CheckVersionRanges();
         CheckCollectBoundaries();
         CheckImportWindow();
+        CheckImportWindowZeroPages();
         CheckUnwatchedImport();
         CheckCommittedRanges();
     } catch (const std::exception& error) {

@@ -22,11 +22,15 @@ constexpr std::uint64_t MiB = 1ull << 20u;
 
 std::uint64_t reportedBudget = 0;
 std::uint64_t reportedUsage = 0;
+std::uint64_t reportedHostBudget = 0;
+std::uint64_t reportedHostUsage = 0;
 
 VKAPI_ATTR void VKAPI_CALL mockMemoryProperties2(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2* properties) {
     auto* reported = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
     reported->heapBudget[0] = reportedBudget;
     reported->heapUsage[0] = reportedUsage;
+    reported->heapBudget[1] = reportedHostBudget;
+    reported->heapUsage[1] = reportedHostUsage;
 }
 
 Context mockContext(bool budgetExtension) {
@@ -49,6 +53,46 @@ void Choose(const char* what, bool budgetExtension, std::uint64_t budget, std::u
     Expect(type == expected, std::string(what) + ": chose memory type " + std::to_string(type) + ", expected " + std::to_string(expected));
 }
 
+void BufferPlacementTests() {
+    constexpr auto coherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    Context context = mockContext(true);
+    context.memory.memoryTypeCount = 4;
+    context.memory.memoryTypes[0] = {coherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0};
+    context.memory.memoryTypes[1] = {coherent, 1};
+    context.memory.memoryTypes[2] = {coherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0};
+    context.memory.memoryTypes[3] = {VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, 1};
+    reportedBudget = 3000 * MiB;
+    reportedUsage = 2936 * MiB;
+    reportedHostBudget = 8000 * MiB;
+    reportedHostUsage = 2000 * MiB;
+    const auto choose = [&](const char* what, std::uint32_t mask, VkMemoryPropertyFlags flags, std::uint32_t expected) {
+        const auto type = context.BufferMemoryType(mask, flags, 64 * MiB);
+        Expect(type == expected, std::string(what) + ": chose " + std::to_string(type) + ", expected " + std::to_string(expected));
+    };
+    choose("coherent buffer fits exactly in preferred cached heap", 15, coherent, 0);
+    ++reportedUsage;
+    choose("coherent buffer moves before allocating from a full heap", 15, coherent, 1);
+    choose("buffer respects its allowed type mask", 5, coherent, 0);
+    choose("another type on the same full heap is not an alternative", 7, coherent | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0);
+    choose("noncoherent alternative is not eligible", 9, coherent, 0);
+    choose("explicit device-local requirement is preserved", 15, coherent | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+    choose("uncached-only coherent buffer preserves its type", 2, coherent, 1);
+    reportedHostUsage = reportedHostBudget - 64 * MiB + 1;
+    choose("alternative must have enough reported room", 15, coherent, 0);
+    reportedHostBudget = 0;
+    choose("unreported alternative budget is not assumed free", 15, coherent, 0);
+    reportedHostBudget = 8000 * MiB;
+    reportedHostUsage = 2000 * MiB;
+    reportedBudget = 0;
+    choose("unreported preferred budget retains cached preference", 15, coherent, 0);
+    reportedBudget = 3000 * MiB;
+    context.memoryProperties2 = nullptr;
+    choose("no budget query retains cached preference", 15, coherent, 0);
+    context.memoryProperties2 = mockMemoryProperties2;
+    context.physical = VK_NULL_HANDLE;
+    choose("no physical device retains cached preference", 15, coherent, 0);
+}
+
 }
 
 int main() {
@@ -61,6 +105,7 @@ int main() {
         Choose("allocation exceeds the budget", true, 3000 * MiB, 2937 * MiB, both, HostType);
         Choose("usage already over the budget", true, 2952 * MiB, 3633 * MiB, both, HostType);
         Choose("no host type allowed", true, 3000 * MiB, 3000 * MiB, 1u << DeviceType, DeviceType);
+        BufferPlacementTests();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());
         return 1;

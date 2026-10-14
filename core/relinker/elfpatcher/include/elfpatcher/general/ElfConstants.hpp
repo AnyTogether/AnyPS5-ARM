@@ -58,6 +58,7 @@ inline constexpr std::uint64_t kDynamicHeaderAlignment = 8;
 inline constexpr std::uint64_t kInterpHeaderAlignment = 1;
 inline constexpr std::uint16_t kSyntheticProgramHeaderCount = 5;
 
+inline constexpr std::uint32_t PT_NULL = 0;
 inline constexpr std::uint32_t PT_LOAD = 1;
 inline constexpr std::uint32_t PT_DYNAMIC = 2;
 inline constexpr std::uint32_t PT_INTERP = 3;
@@ -70,6 +71,7 @@ inline constexpr std::uint32_t PT_GNU_RELRO = 0x6474e552;
 inline constexpr std::uint32_t PF_X = 0x1;
 inline constexpr std::uint32_t PF_W = 0x2;
 inline constexpr std::uint32_t PF_R = 0x4;
+inline constexpr std::uint32_t ET_EXEC = 2;
 inline constexpr std::uint32_t ET_DYN = 3;
 inline constexpr std::uint32_t PT_SCE_DYNLIBDATA = 0x61000000;
 inline constexpr std::uint32_t PT_OS_PROCPARAM = 0x61000001;
@@ -143,6 +145,7 @@ inline constexpr std::uint32_t R_X86_64_DTPOFF64 = 17;
 inline constexpr std::uint32_t R_X86_64_TPOFF64 = 18;
 inline constexpr std::uint32_t R_X86_64_GOTPCRELX = 41;
 inline constexpr std::uint32_t R_X86_64_REX_GOTPCRELX = 42;
+inline constexpr std::uint32_t R_X86_64_IRELATIVE = 37;
 
 inline constexpr std::uint8_t STB_GLOBAL = 1;
 inline constexpr std::uint8_t STB_WEAK = 2;
@@ -151,6 +154,8 @@ inline constexpr std::uint8_t STT_FUNC = 2;
 inline constexpr std::uint8_t STT_TLS = 6;
 inline constexpr std::uint8_t STV_DEFAULT = 0;
 inline constexpr std::uint16_t SHN_UNDEF = 0;
+inline constexpr std::uint16_t SHN_LORESERVE = 0xff00;
+inline constexpr std::uint16_t SHN_ABS = 0xfff1;
 
 inline constexpr std::uint32_t SHT_NULL = 0;
 inline constexpr std::uint32_t SHT_PROGBITS = 1;

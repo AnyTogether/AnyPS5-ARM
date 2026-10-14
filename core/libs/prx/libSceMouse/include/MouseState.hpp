@@ -24,7 +24,7 @@ int Read(std::int32_t handle, MouseData* data, std::int32_t num);
 void Publish(const MouseInputEvent& event);
 }
 
-extern "C" void MousePublishInput_nid_postfix(const MouseInputEvent& event);
-extern "C" bool MouseIsOpen_nid_postfix();
+extern "C" void MousePublishInput_nid_no_patch(const MouseInputEvent& event);
+extern "C" bool MouseIsOpen_nid_no_patch();
 
 #endif

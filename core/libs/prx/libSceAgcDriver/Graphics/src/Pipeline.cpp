@@ -164,6 +164,7 @@ bool NormalizeUnobservedViewportDepth(const Context& context, State& state, cons
 bool ValidateSampleLocations(const Context& context, const State& state) {
     const bool extensionSupportsSamples = (context.sampleLocationSampleCounts & state.samples) != 0;
     Require(!state.customSampleLocations || extensionSupportsSamples, "custom sample locations require VK_EXT_sample_locations support for the draw's sample count");
+    Require(!state.sampleLocationGrid || (context.sampleLocationGridSampleCounts & state.samples) != 0, "sample locations varying between pixels require a 2x2 sample location grid for the draw's sample count");
     const bool enabled = extensionSupportsSamples && (!state.depth || SampleLocationsCompatibleDepth(context, HostDepthFormat(context, state.depth->format), state.depth->samples));
     Require(!state.customSampleLocations || enabled, "custom sample locations require a compatible depth format and sample count");
     return enabled;
@@ -266,15 +267,22 @@ bool libraryKeys(PipelineLibraryKeys& keys, const Context& context, const State&
     if (state.stages.tessellation) appendKey(keys.preRasterization, state.stages.tessellation->inputControlPoints);
     appendKey(keys.fragmentShader, state.samples);
     appendKey(keys.fragmentOutput, state.samples);
+    appendKey(keys.fragmentShader, state.perSampleShading);
+    appendKey(keys.fragmentOutput, state.perSampleShading);
     const auto sampleLocationsEnabled = ValidateSampleLocations(context, state);
     appendKey(keys.fragmentShader, sampleLocationsEnabled);
     appendKey(keys.fragmentOutput, sampleLocationsEnabled);
     appendKey(keys.fragmentShader, state.customSampleLocations);
     appendKey(keys.fragmentOutput, state.customSampleLocations);
     if (state.customSampleLocations) {
-        for (std::uint32_t sample = 0; sample < state.samples; ++sample) {
-            appendKey(keys.fragmentShader, state.sampleLocations[sample]);
-            appendKey(keys.fragmentOutput, state.sampleLocations[sample]);
+        appendKey(keys.fragmentShader, state.sampleLocationGrid);
+        appendKey(keys.fragmentOutput, state.sampleLocationGrid);
+        const auto grid = SampleLocationGrid(state);
+        for (std::uint32_t pixel = 0; pixel < grid.width * grid.height; ++pixel) {
+            for (std::uint32_t sample = 0; sample < state.samples; ++sample) {
+                appendKey(keys.fragmentShader, state.sampleLocations[pixel * 8u + sample]);
+                appendKey(keys.fragmentOutput, state.sampleLocations[pixel * 8u + sample]);
+            }
         }
     }
     for (const auto& blend : state.blends) appendKey(keys.fragmentOutput, blend);
@@ -334,6 +342,7 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
     Require(!depthBias || state.depthBiasClamp == 0.0f || context.depthBiasClamp, "device does not support depth bias clamping");
     Require(!state.dualSourceBlend || (context.dualSrcBlend && state.blends.size() <= context.limits.maxFragmentDualSrcAttachments), "device does not support dual-source blending into this many attachments");
     Require(!state.negativeOneToOne || context.depthClipControl, "negative-one-to-one depth clipping requires VK_EXT_depth_clip_control with depthClipControl enabled");
+    Require(!state.perSampleShading || context.sampleRateShading, "per-sample pixel shading requires the sampleRateShading device feature");
     Require(state.conservativeRasterization == VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT || context.conservativeRasterization, "conservative rasterization requires VK_EXT_conservative_rasterization with at most 1/256 pixel of overestimation and degenerate triangles rasterized");
     ValidateProvokingVertex(context, state, shaders);
     if (state.rectList) Require(context.tessellationShader && context.limits.maxTessellationPatchSize >= 4, "rect-list requires tessellation with four output control points");
@@ -517,10 +526,13 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         }
         VkPipelineMultisampleStateCreateInfo samples{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
         samples.rasterizationSamples = static_cast<VkSampleCountFlagBits>(state.samples);
+        samples.sampleShadingEnable = state.perSampleShading ? VK_TRUE : VK_FALSE;
+        samples.minSampleShading = state.perSampleShading ? 1.0f : 0.0f;
         const auto locations = SampleLocations(state);
         VkPipelineSampleLocationsStateCreateInfoEXT sampleLocations{VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT};
         sampleLocations.sampleLocationsEnable = VK_TRUE;
-        sampleLocations.sampleLocationsInfo = {VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT, nullptr, samples.rasterizationSamples, {1, 1}, state.samples, locations.data()};
+        const auto grid = SampleLocationGrid(state);
+        sampleLocations.sampleLocationsInfo = {VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT, nullptr, samples.rasterizationSamples, grid, state.samples * grid.width * grid.height, locations.data()};
         if (sampleLocationsEnabled) samples.pNext = &sampleLocations;
         VkPipelineDepthStencilStateCreateInfo depthStencil{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         depthStencil.depthTestEnable = state.depthTest;
@@ -762,7 +774,8 @@ void Pipeline::Begin(VkCommandBuffer commands, const Framebuffer& framebuffer, V
     begin.framebuffer = framebuffer.Handle();
     begin.renderArea = {{0, 0}, extent};
     const auto locations = SampleLocations(state);
-    const VkSampleLocationsInfoEXT info{VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT, nullptr, static_cast<VkSampleCountFlagBits>(state.samples), {1, 1}, state.samples, locations.data()};
+    const auto grid = SampleLocationGrid(state);
+    const VkSampleLocationsInfoEXT info{VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT, nullptr, static_cast<VkSampleCountFlagBits>(state.samples), grid, state.samples * grid.width * grid.height, locations.data()};
     const VkAttachmentSampleLocationsEXT initial{static_cast<std::uint32_t>(state.colors.size()), info};
     const VkSubpassSampleLocationsEXT post{0, info};
     VkRenderPassSampleLocationsBeginInfoEXT sampleLocations{VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT};
@@ -897,8 +910,12 @@ void pipelineKey(std::vector<std::byte>& key, const Context& context, const Stat
     for (const auto& blend : state.blends) append(key, blend);
     for (const auto value : state.blendConstants) append(key, value);
     append(key, state.samples);
+    append(key, state.perSampleShading);
     append(key, state.customSampleLocations);
-    if (state.customSampleLocations) append(key, state.sampleLocations);
+    if (state.customSampleLocations) {
+        append(key, state.sampleLocationGrid);
+        append(key, state.sampleLocations);
+    }
     append(key, state.colors.size());
     for (const auto& color : state.colors) append(key, color.format);
     if (state.blends.size() != state.colors.size()) {
@@ -938,6 +955,8 @@ void pipelineKey(std::vector<std::byte>& key, const Context& context, const Stat
         append(key, tessellation.partitioning);
         append(key, tessellation.outputTopology);
         append(key, tessellation.patchesPerGroup);
+        append(key, tessellation.primitiveGroupSize);
+        append(key, tessellation.breakAtInstance);
     }
 }
 

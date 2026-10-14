@@ -309,22 +309,34 @@ const IrProgramMetadata& IrProgram::Metadata() const {
     return metadata;
 }
 
-CompiledShaderInfo IrProgram::TakeCompiledInfo() && {
+namespace {
+
+CompiledShaderInfo compiledInfo(const IrResourcePlan& resourcePlan, std::uint32_t waveSize, ShaderInfo info, IrBindingLayout bindings) {
     CompiledShaderInfo result;
     result.stage = resourcePlan.stage;
     result.shaderHash = resourcePlan.shaderHash;
     result.waveSize = waveSize;
     result.userDataBase = resourcePlan.userDataBase;
     result.userDataCount = resourcePlan.userDataCount;
-    result.scratchDwords = resourcePlan.info.scratchDwords;
-    result.info = std::move(resourcePlan.info);
-    result.bindings = std::move(metadata.bindings);
+    result.scratchDwords = info.scratchDwords;
+    result.info = std::move(info);
+    result.bindings = std::move(bindings);
     for (const auto& output : result.info.outputs) {
         if (output.kind == StageOutputKind::Parameter && output.index < 32u) {
             result.paramExportMask |= 1u << output.index;
         }
     }
     return result;
+}
+
+}
+
+CompiledShaderInfo IrProgram::CompiledInfo() const& {
+    return compiledInfo(resourcePlan, waveSize, resourcePlan.info, metadata.bindings);
+}
+
+CompiledShaderInfo IrProgram::TakeCompiledInfo() && {
+    return compiledInfo(resourcePlan, waveSize, std::move(resourcePlan.info), std::move(metadata.bindings));
 }
 
 IrValue& IrProgram::CreateValue(IrOpcode opcode, IrType type, std::uint64_t flags) {

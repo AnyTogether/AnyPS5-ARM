@@ -1,0 +1,131 @@
+"""Check that --linux-fixed-base places the executable at the requested address and rebases every address it holds."""
+
+from pathlib import Path
+import platform
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+
+from test_linux_load_alignment import PT_SCE_VERSION
+
+PT_NULL = 0
+PT_LOAD = 1
+PT_DYNAMIC = 2
+PT_GNU_STACK = 0x6474E551
+BASE = 0x400000
+ENTRY = 0x10
+SLOT = 0x800
+ADDRESS_TAGS = {3, 4, 5, 6, 7, 23}
+
+
+def check_code(base):
+    """lea rax,[rip-7]; mov rcx,[rip+slot]; cmp rax,rcx; jne fail; movabs rdx,base+entry; cmp rax,rdx; jne fail; int3; fail: ud2"""
+    slot_displacement = SLOT - (ENTRY + 14)
+    return (b"\x48\x8d\x05" + struct.pack("<i", -7)
+            + b"\x48\x8b\x0d" + struct.pack("<i", slot_displacement)
+            + b"\x48\x39\xc8" + b"\x75\x10"
+            + b"\x48\xba" + struct.pack("<Q", base + ENTRY)
+            + b"\x48\x39\xd0" + b"\x75\x01"
+            + b"\xcc" + b"\x0f\x0b")
+
+
+def fixture(relocation_type=8, addend=ENTRY, alignment=0x4000, memory_size=0x1000):
+    image = bytearray(0x8000)
+    image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, ENTRY, 64, 0, 0, 64, 56, 6, 64, 0, 0)
+    tags = [(5, 0x7A0), (10, 1), (6, 0x780), (11, 24), (7, 0x700), (8, 24), (9, 24), (0, 0)]
+    struct.pack_into("<IIQQQQQQ", image, 64, PT_LOAD, 7, 0x4000, 0, 0, 0x1000, memory_size, alignment)
+    struct.pack_into("<IIQQQQQQ", image, 120, PT_DYNAMIC, 6, 0x4600, 0x600, 0x600, len(tags) * 16, len(tags) * 16, 8)
+    for index in range(2, 6):
+        struct.pack_into("<IIQQQQQQ", image, 64 + index * 56, PT_SCE_VERSION, 0, 0, 0, 0, 0, 0, 1)
+    for index, tag in enumerate(tags):
+        struct.pack_into("<qQ", image, 0x4600 + index * 16, *tag)
+    struct.pack_into("<QQq", image, 0x4700, SLOT, relocation_type, addend)
+    code = check_code(BASE)
+    image[0x4000 + ENTRY:0x4000 + ENTRY + len(code)] = code
+    return image
+
+
+def headers(elf):
+    phoff, = struct.unpack_from("<Q", elf, 0x20)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x36)
+    return [struct.unpack_from("<IIQQQQQQ", elf, phoff + index * phentsize) for index in range(phnum)]
+
+
+def mapped(elf, address):
+    for header in headers(elf):
+        if header[0] == PT_LOAD and header[3] <= address < header[3] + header[5]:
+            return header[2] + address - header[3]
+    raise AssertionError(hex(address))
+
+
+def dynamic_tags(elf):
+    dynamic = next(header for header in headers(elf) if header[0] == PT_DYNAMIC)
+    return [struct.unpack_from("<qQ", elf, dynamic[2] + offset) for offset in range(0, dynamic[5], 16)]
+
+
+def relocations(elf):
+    tags = dict(dynamic_tags(elf))
+    offset = mapped(elf, tags[7])
+    return [struct.unpack_from("<QQq", elf, offset + index) for index in range(0, tags[8], 24)]
+
+
+def relink(relinker, directory, name, image, *options):
+    source = directory / (name + ".elf")
+    output = directory / (name + ".out")
+    source.write_bytes(image)
+    result = subprocess.run([str(relinker), "--skip-sce-module", *options, str(source), str(output)],
+                            capture_output=True, text=True, timeout=20)
+    return result, output
+
+
+def main():
+    relinker = Path(sys.argv[1]).resolve()
+    with tempfile.TemporaryDirectory(prefix="anyps5-fixed-base-") as directory:
+        work = Path(directory)
+        result, plain_path = relink(relinker, work, "plain", fixture())
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        result, fixed_path = relink(relinker, work, "fixed", fixture(), "--linux-fixed-base", hex(BASE))
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        plain = plain_path.read_bytes()
+        fixed = fixed_path.read_bytes()
+
+        assert struct.unpack_from("<H", plain, 16)[0] == 3, "a relink without the option is no longer ET_DYN"
+        assert struct.unpack_from("<H", fixed, 16)[0] == 2, "a fixed-base relink is not ET_EXEC"
+        assert struct.unpack_from("<Q", fixed, 24)[0] == struct.unpack_from("<Q", plain, 24)[0] + BASE, "entry not rebased"
+
+        plain_headers = headers(plain)
+        fixed_headers = headers(fixed)
+        assert len(plain_headers) == len(fixed_headers)
+        for before, after in zip(plain_headers, fixed_headers):
+            shift = 0 if before[0] in (PT_NULL, PT_GNU_STACK) else BASE
+            assert after == (*before[:3], before[3] + shift, before[4] + shift, *before[5:]), (before, after)
+        assert min(header[3] for header in fixed_headers if header[0] == PT_LOAD) == BASE, "image does not start at the base"
+
+        for (tag, value), (fixed_tag, fixed_value) in zip(dynamic_tags(plain), dynamic_tags(fixed), strict=True):
+            assert tag == fixed_tag and fixed_value == value + (BASE if tag in ADDRESS_TAGS else 0), (tag, value, fixed_value)
+
+        plain_relocations = relocations(plain)
+        assert plain_relocations == [(SLOT, 8, ENTRY)], plain_relocations
+        assert relocations(fixed) == [(SLOT + BASE, 8, ENTRY + BASE)], relocations(fixed)
+
+        if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
+            fixed_path.chmod(0o755)
+            executed = subprocess.run([str(fixed_path)], capture_output=True, timeout=20)
+            assert executed.returncode == -signal.SIGTRAP, ("the image did not run at the base with its relocation applied", executed.returncode)
+
+        for name, image, base, error in (
+            ("unaligned", fixture(alignment=0x20000), 0x410000, "is not a multiple of the PT_LOAD alignment 0x20000"),
+            ("beyond-user-space", fixture(memory_size=0x100000), 0x7FFFFFFF0000, "outside the Linux user address space"),
+            ("unsupported-type", fixture(relocation_type=9), BASE, "Relocation type 9 cannot be placed at a fixed Linux base"),
+            ("negative-target", fixture(addend=-16), BASE, "Relocation target -16 lies below the image at a fixed Linux base"),
+        ):
+            result, output = relink(relinker, work, name, image, "--linux-fixed-base", hex(base))
+            assert result.returncode == 2 and error in result.stderr and not output.exists(), (name, result.returncode, result.stdout, result.stderr)
+    print("Linux fixed base test passed")
+
+
+if __name__ == "__main__":
+    main()

@@ -87,6 +87,13 @@ public:
             throw std::system_error(GetLastError(), std::system_category(), "Reading process arguments");
         for (int index = 0; index < count; ++index)
             arguments.push_back(toUtf8(values.get()[index]));
+        wchar_t skip[2]{};
+        if (GetEnvironmentVariableW(L"ANYPS5_LOADEXEC_ARGV_SKIP", skip, 2) == 1 && skip[0] == L'1') {
+            if (arguments.size() < 2) throw std::runtime_error("LoadExec: missing guest process arguments");
+            arguments.erase(arguments.begin());
+            if (_wputenv_s(L"ANYPS5_LOADEXEC_ARGV_SKIP", L"") != 0 || !SetEnvironmentVariableW(L"ANYPS5_LOADEXEC_ARGV_SKIP", nullptr))
+                throw std::runtime_error("LoadExec: cannot clear the argument marker");
+        }
 #elif defined(__APPLE__)
         // macOS has no /proc; the C runtime keeps the arguments.
         const int count = *_NSGetArgc();
@@ -138,9 +145,12 @@ constexpr int guestRlimitFsize = 1;
 constexpr int guestPriorityProcess = 0;
 constexpr int guestPriorityGroup = 1;
 constexpr int guestPriorityUser = 2;
-constexpr int guestNice = 0;
+std::atomic<int> guestNice{0};
+constexpr int guestNiceMin = -20;
+constexpr int guestNiceMax = 20;
 constexpr int guestRlimitData = 2;
 constexpr int guestRlimitCore = 4;
+constexpr int guestRlimitNofile = 8;
 constexpr int guestRlimitSbsize = 9;
 constexpr int guestRlimitVmem = 10;
 constexpr int guestRlimitNpts = 11;
@@ -576,6 +586,20 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
 #endif
         return 0;
     }
+    case guestRlimitNofile: {
+#ifdef _WIN32
+        constexpr std::int64_t crtDescriptors = 8192;
+        limit->rlim_cur = crtDescriptors;
+        limit->rlim_max = crtDescriptors;
+#else
+        rlimit native{};
+        if (::getrlimit(RLIMIT_NOFILE, &native) != 0)
+            throw std::system_error(errno, std::generic_category(), "getrlimit: getrlimit failed");
+        limit->rlim_cur = toGuestLimit(native.rlim_cur);
+        limit->rlim_max = toGuestLimit(native.rlim_max);
+#endif
+        return 0;
+    }
     case guestRlimitCpu:
     case guestRlimitFsize:
     case guestRlimitCore:
@@ -604,7 +628,28 @@ int APS5_VABI getpriority_nid_postfix(int which, int who) {
         *__error_nid_postfix() = guestNoProcess;
         return -1;
     }
-    return guestNice;
+    return guestNice.load(std::memory_order_relaxed);
+}
+
+int APS5_VABI setpriority_nid_postfix(int which, int who, int niceval) {
+    if (which != guestPriorityProcess && which != guestPriorityGroup && which != guestPriorityUser) {
+        *__error_nid_postfix() = guestInvalid;
+        return -1;
+    }
+    const bool found = which == guestPriorityUser ? (who == 0 ? getuid_nid_postfix() : who) == getuid_nid_postfix()
+                                                  : who == 0 || who == getpid_nid_postfix();
+    if (!found) {
+        *__error_nid_postfix() = guestNoProcess;
+        return -1;
+    }
+    const int clamped = niceval < guestNiceMin ? guestNiceMin : (niceval > guestNiceMax ? guestNiceMax : niceval);
+    guestNice.store(clamped, std::memory_order_relaxed);
+    return 0;
+}
+
+int APS5_VABI getdtablesize_nid_postfix(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return -1;
 }
 
 int APS5_VABI sceKernelIsTrinityMode(void) {

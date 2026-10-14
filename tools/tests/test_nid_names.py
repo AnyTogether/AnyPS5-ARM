@@ -240,9 +240,46 @@ int APS5_VABI sceReal() { return 0; }
 ''')
         self.assertEqual(nid_names.collect_real_names(), {"sceReal"})
 
+    def test_name_option_computes_symbol_nid(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["nid_names.py", "--name", "ceilf", "floorf"]), contextlib.redirect_stdout(output):
+            self.assertEqual(nid_names.main(), 0)
+        text = output.getvalue()
+        self.assertIn("ceilf", text)
+        self.assertIn("GAUuLKGhsCw", text)
+        self.assertIn("floorf", text)
+        self.assertIn("mKhVDmYciWA", text)
+
+    def test_name_option_with_json_emits_symbols_list(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["nid_names.py", "--name", "ceilf", "--json"]), contextlib.redirect_stdout(output):
+            self.assertEqual(nid_names.main(), 0)
+        data = json.loads(output.getvalue())
+        self.assertEqual(data, {"symbols": [{"name": "ceilf", "nid": "GAUuLKGhsCw"}]})
+
+    def test_symbol_alias_does_not_load_database(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["nid_names.py", "--symbol", "truncf"]), \
+                patch.object(nid_names, "load_db", side_effect=AssertionError("unexpected db load")), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(nid_names.main(), 0)
+        self.assertIn("Vo8rvWtZw3g", output.getvalue())
+
+    def test_name_option_rejects_nid_and_keeps_long_names(self):
+        with patch.object(sys, "argv", ["nid_names.py", "--name", "ceilf", "--nid", "AAAAAAAAAAA"]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                nid_names.main()
+        long_name = "a" * 50
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["nid_names.py", "--name", long_name]), contextlib.redirect_stdout(output):
+            self.assertEqual(nid_names.main(), 0)
+        self.assertIn(long_name, output.getvalue())
+
     def test_spliced_line_comment_and_macro_tokens(self):
         self.write_source('// continued \\\nAPS5_EXPORT("AAAAAAAAAAA", exampleUnknown00);\nAPS5_EX\\\nPORT("BBBBBBBBBBB", exampleUnknown01);\n')
         self.assertEqual(nid_names.collect_unknowns(), {"BBBBBBBBBBB": "core/libs/prx/libSceExample/Export.cpp:exampleUnknown01"})
+
 
 
 if __name__ == "__main__":

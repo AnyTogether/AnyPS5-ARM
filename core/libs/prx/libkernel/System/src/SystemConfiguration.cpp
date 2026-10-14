@@ -1,10 +1,8 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libkernel/System/include/HostCpu.hpp"
 #include <algorithm>
-#if defined(__x86_64__) || defined(__i386__)
-#include <cpuid.h>
-#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -47,20 +45,6 @@ int CopyOut(const void* value, std::size_t size, void* oldValue, std::size_t* ol
 
 bool IsLeafMib(const int* name) {
     return (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5)) || (name[0] == 1 && name[1] == 37);
-}
-
-std::string HostCpuModel() {
-#if defined(__x86_64__) || defined(__i386__)
-    if (__get_cpuid_max(0x80000000, nullptr) < 0x80000004) return {};
-    unsigned int brand[12] = {};
-    for (unsigned int leaf = 0; leaf < 3; ++leaf)
-        __get_cpuid(0x80000002 + leaf, &brand[leaf * 4], &brand[leaf * 4 + 1], &brand[leaf * 4 + 2], &brand[leaf * 4 + 3]);
-    std::string model(reinterpret_cast<const char*>(brand), strnlen(reinterpret_cast<const char*>(brand), sizeof(brand)));
-    model.erase(0, model.find_first_not_of(' '));
-    return model;
-#else
-    return {};
-#endif
 }
 
 }
@@ -262,5 +246,40 @@ int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion* 
     std::memcpy(version->versionString, "01.000.000", sizeof("01.000.000"));
     version->version = 0x01000000;
     return 0;
+}
+
+int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_t* size) {
+    struct KnownName {
+        const char* name;
+        int mib[3];
+        std::size_t length;
+    };
+    static constexpr KnownName known[] = {
+        {"hw.model", {6, 2}, 2},
+        {"hw.ncpu", {6, 3}, 2},
+        {"hw.physmem", {6, 5}, 2},
+        {"hw.realmem", {6, 12}, 2},
+        {"kern.arandom", {1, 37}, 2},
+        {"kern.proc.pathname", {1, 14, 12}, 3},
+    };
+    constexpr std::size_t MaximumPath = 1024;
+    if (name == nullptr || size == nullptr) throw std::invalid_argument(std::string(__func__) + ": null name or size");
+    const std::size_t nameLength = strnlen(name, MaximumPath);
+    if (nameLength == MaximumPath) {
+        *__error_nid_postfix() = 63;
+        return -1;
+    }
+    if (nameLength == 0 || std::strcmp(name, "machdep.cacheline_size") == 0) {
+        *__error_nid_postfix() = 2;
+        return -1;
+    }
+    for (const auto& entry : known) {
+        if (std::strcmp(name, entry.name) != 0) continue;
+        std::size_t bytes = *size * sizeof(int);
+        const int result = CopyOut(entry.mib, entry.length * sizeof(int), mib, &bytes);
+        *size = bytes / sizeof(int);
+        return result;
+    }
+    throw std::runtime_error(std::string(__func__) + ": unsupported name " + name);
 }
 }

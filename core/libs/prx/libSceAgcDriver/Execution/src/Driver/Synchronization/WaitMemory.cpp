@@ -140,6 +140,7 @@ void Driver::waitMemory(std::span<const std::uint32_t> packet, std::uint32_t que
     if (heldAtSubmit) return;
     if (std::uint32_t writer = queue; !requireMemory && storedSince(packet, awaited, awaitedBytes, received, &writer)) {
         if (writer != queue) notePendingWait(packet, queue, received);
+        else epochPoint.bump = false;
         return;
     }
 
@@ -332,6 +333,7 @@ void Driver::waitMemory(std::span<const std::uint32_t> packet, std::uint32_t que
     while (!Pm4::WaitSatisfiedUnchecked(packet)) {
         if (std::uint32_t writer = queue; !requireMemory && storedSince(packet, awaited, awaitedBytes, received, &writer)) {
             if (writer != queue) notePendingWait(packet, queue, received);
+            else epochPoint.bump = false;
             return;
         }
         ++polls;

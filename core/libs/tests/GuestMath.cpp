@@ -9,7 +9,17 @@
 #include <cstring>
 #include <limits>
 #include <initializer_list>
+#include <xmmintrin.h>
+struct GuestFloatingPointEnvironment {
+    std::uint32_t control;
+    std::uint32_t status;
+    std::uint32_t tag;
+    unsigned char other[16];
+    std::uint32_t mxcsr;
+};
+static_assert(sizeof(GuestFloatingPointEnvironment) == 32);
 extern "C" {
+int APS5_VABI fegetenv_nid_postfix(GuestFloatingPointEnvironment*);
 double APS5_VABI atof_nid_postfix(const char*);
 double APS5_VABI strtod_nid_postfix(const char*, char**);
 double APS5_VABI wcstod_nid_postfix(const char16_t*, char16_t**);
@@ -183,6 +193,52 @@ static void CheckNearbyint() {
     Require(nearbyint_nid_postfix(INFINITY) == INFINITY && nearbyint_nid_postfix(-INFINITY) == -INFINITY);
     Require(std::isnan(nearbyint_nid_postfix(NAN)));
     Require(std::fetestexcept(FE_INEXACT) == 0);
+}
+
+static std::uint16_t X87ControlWord() {
+    std::uint16_t control;
+    asm volatile("fnstcw %0" : "=m"(control));
+    return control;
+}
+
+static std::uint16_t X87StatusWord() {
+    std::uint16_t status;
+    asm volatile("fnstsw %0" : "=m"(status));
+    return status;
+}
+
+static void CheckFegetenv() {
+    const std::uint16_t savedControl = X87ControlWord();
+    const unsigned savedCsr = _mm_getcsr();
+    const std::uint16_t control = 0x0f7e;
+    const unsigned csr = 0x7fa0;
+    asm volatile("fnclex");
+    asm volatile("fldcw %0" : : "m"(control));
+    _mm_setcsr(csr);
+    volatile long double zero = 0.0L;
+    volatile long double quotient = 1.0L / zero;
+    (void)quotient;
+    const std::uint16_t status = X87StatusWord();
+    Require((status & 0x04) != 0 && (status & 0x01) == 0);
+
+    GuestFloatingPointEnvironment environment;
+    std::memset(&environment, 0xcc, sizeof(environment));
+    Require(fegetenv_nid_postfix(&environment) == 0);
+    const std::uint16_t controlAfter = X87ControlWord();
+    const unsigned csrAfter = _mm_getcsr();
+
+    asm volatile("fnclex");
+    asm volatile("fldcw %0" : : "m"(savedControl));
+    _mm_setcsr(savedCsr);
+
+    Require((environment.control & 0xffff) == control);
+    Require((environment.status & 0xffff) == status);
+    Require(environment.mxcsr == csr);
+    Require(controlAfter == control);
+    Require(csrAfter == csr);
+    bool threw = false;
+    try { fegetenv_nid_postfix(nullptr); } catch (...) { threw = true; }
+    Require(threw);
 }
 
 static bool ExtendedBits(long double value, std::uint64_t mantissa, std::uint16_t signExponent) {
@@ -895,6 +951,7 @@ int main() {
     CheckExp2Errno();
     CheckExactOperations();
     CheckNearbyint();
+    CheckFegetenv();
     CheckLongDouble();
     CheckNearbyintl();
     CheckAsinl();

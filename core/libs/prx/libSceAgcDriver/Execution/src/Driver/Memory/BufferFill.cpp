@@ -69,11 +69,19 @@ std::optional<DwordPatternFill> MatchDwordPatternFill(std::span<const std::uint3
     return fill;
 }
 
-std::optional<DwordPatternFill> MatchZeroDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
+std::optional<DwordPatternFill> MatchConstantDwordFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
     static const bool enabled = std::getenv("APS5_NO_FILL_HLE") == nullptr;
     if (!enabled || userData.size() != 4 || packet.size() < 5 || !compute.groupIdEnable[0] || compute.numThreads[0] != 64 || compute.numThreads[1] != 1 || compute.numThreads[2] != 1) return std::nullopt;
-    static constexpr std::array<std::uint32_t, 6> kernel{0xd7460000u, 0x04010c04u, 0x7e020280u, 0xe0102000u, 0x80000100u, 0xbf810000u};
-    if (code.size() < kernel.size() || !std::equal(kernel.begin(), kernel.end(), code.begin())) return std::nullopt;
+    static constexpr std::array<std::uint32_t, 6> kernel{0xd7460000u, 0x04010c04u, 0x7e020200u, 0xe0102000u, 0x80000100u, 0xbf810000u};
+    if (code.size() < kernel.size()) return std::nullopt;
+    for (std::size_t word = 0; word < kernel.size(); ++word) {
+        if ((word == 2 ? code[word] & ~0x1ffu : code[word]) != kernel[word]) return std::nullopt;
+    }
+    const auto source = code[2] & 0x1ffu;
+    std::uint32_t value;
+    if (source >= 0x80u && source <= 0xc0u) value = source - 0x80u;
+    else if (source >= 0xc1u && source <= 0xd0u) value = 0u - (source - 0xc0u);
+    else return std::nullopt;
     const auto stride = (userData[1] >> 16u) & 0x3fffu;
     const bool swizzled = ((userData[1] >> 31u) & 1u) != 0;
     const bool addTid = ((userData[3] >> 23u) & 1u) != 0;
@@ -84,7 +92,9 @@ std::optional<DwordPatternFill> MatchZeroDwordFill(std::span<const std::uint32_t
     const auto dwords = std::min<std::uint64_t>(static_cast<std::uint64_t>(packet[1]) * 64u, userData[2]);
     const auto base = userData[0] | (static_cast<std::uint64_t>(userData[1] & 0xffffu) << 32u);
     if (dwords == 0 || dwords % 4u != 0 || base % 16u != 0) return std::nullopt;
-    return DwordPatternFill{base, static_cast<std::size_t>(dwords * 4u), {}};
+    DwordPatternFill fill{base, static_cast<std::size_t>(dwords * 4u), {}};
+    fill.pattern.fill(value);
+    return fill;
 }
 
 std::optional<Graphics::MemoryValueFill> MatchMemoryValueBufferFill(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute) {
@@ -179,7 +189,7 @@ void Driver::fillClearCount(const Graphics::StorageTexture::FillCoverage& covera
 
 bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute, const std::shared_ptr<VulkanDevice>& localDevice) {
     auto dwordFill = MatchDwordPatternFill(packet, code, userData, compute);
-    if (!dwordFill) dwordFill = MatchZeroDwordFill(packet, code, userData, compute);
+    if (!dwordFill) dwordFill = MatchConstantDwordFill(packet, code, userData, compute);
     std::optional<Graphics::MemoryValueFill> memoryFill;
     if (!dwordFill) memoryFill = MatchMemoryValueBufferFill(packet, code, userData, compute);
     if (!dwordFill && !memoryFill && !matchesFillKernel(code, userData, compute)) return false;
@@ -242,6 +252,12 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
             pattern = {userData[4], userData[5], userData[6], userData[7]};
         }
     }
+    storeBufferFill(queueId, base, bytes, pattern, localDevice, memoryFill.has_value(), true);
+    return true;
+}
+
+
+void Driver::storeBufferFill(std::uint32_t queueId, std::uint64_t base, std::size_t bytes, const std::array<std::uint32_t, 4>& pattern, const std::shared_ptr<VulkanDevice>& localDevice, bool memoryValueFill, bool noteMetadata) {
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     static std::atomic<std::uint64_t> fills{0}, filledBytes{0}, cpuFills{0};
 
@@ -256,116 +272,113 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
     static auto fillReport = std::chrono::steady_clock::now();
     ++fills;
     filledBytes += bytes;
-    if (bytes != 0) {
-        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
-        std::lock_guard gpuLock(GuestMemory::GpuMutex());
-        const auto holdStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-        auto phaseStart = holdStart;
-        const auto phase = [&](FillPhase which) {
-            if (!profile) return;
-            const auto now = std::chrono::steady_clock::now();
-            fillPhaseMs[which] += std::chrono::duration<double, std::milli>(now - phaseStart).count();
-            phaseStart = now;
-        };
+    if (bytes == 0) return;
+    GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
+    std::lock_guard gpuLock(GuestMemory::GpuMutex());
+    const auto holdStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    auto phaseStart = holdStart;
+    const auto phase = [&](FillPhase which) {
+        if (!profile) return;
+        const auto now = std::chrono::steady_clock::now();
+        fillPhaseMs[which] += std::chrono::duration<double, std::milli>(now - phaseStart).count();
+        phaseStart = now;
+    };
 
-        recordLabelsForPacket(localDevice.get(), queueId);
-        phase(FillLabels);
-        GuestMemory::CheckRange(reinterpret_cast<const void*>(base), bytes, 16, true);
-        phase(FillCheck);
-        const auto coverage = Graphics::StorageTexture::ClassifyFill(base, bytes);
-        phase(FillClassify);
+    recordLabelsForPacket(localDevice.get(), queueId);
+    phase(FillLabels);
+    GuestMemory::CheckRange(reinterpret_cast<const void*>(base), bytes, 16, true);
+    phase(FillCheck);
+    const auto coverage = Graphics::StorageTexture::ClassifyFill(base, bytes);
+    phase(FillClassify);
 
-        static const bool traceKeys = std::getenv("APS5_TRACE_DCC_KEYS") != nullptr;
-        if (traceKeys && coverage.cover == Graphics::StorageTexture::FillCover::Keys) std::fprintf(stderr, "[dcc-keys] title fills keys 0x%llx+0x%zx with %08x %08x %08x %08x (queue 0x%x)\n", static_cast<unsigned long long>(base), bytes, pattern[0], pattern[1], pattern[2], pattern[3], queueId);
-        const bool uniformKeysFill = coverage.cover == Graphics::StorageTexture::FillCover::Keys && IsByteFill(pattern);
-        if (uniformKeysFill) {
-            Graphics::StorageTexture::NoteKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
-            Graphics::StorageTexture::ClearByKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
-        }
+    static const bool traceKeys = std::getenv("APS5_TRACE_DCC_KEYS") != nullptr;
+    if (traceKeys && coverage.cover == Graphics::StorageTexture::FillCover::Keys) std::fprintf(stderr, "[dcc-keys] title fills keys 0x%llx+0x%zx with %08x %08x %08x %08x (queue 0x%x)\n", static_cast<unsigned long long>(base), bytes, pattern[0], pattern[1], pattern[2], pattern[3], queueId);
+    const bool uniformKeysFill = coverage.cover == Graphics::StorageTexture::FillCover::Keys && IsByteFill(pattern);
+    if (uniformKeysFill) {
+        Graphics::StorageTexture::NoteKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
+        Graphics::StorageTexture::ClearByKeysFill(base, bytes, static_cast<std::uint8_t>(pattern[0]));
+    }
 
-        const auto discarded = fillClearEnabled() ? Graphics::StorageTexture::DiscardPendingInside(base, bytes) : 0u;
-        phase(FillDiscard);
-        const char* refusal = nullptr;
-        bool cleared = false;
-        if (coverage.image != nullptr) {
-            if (!fillClearEnabled()) {
-                refusal = "disabled";
-            } else if (fillClearExactOnly() && (coverage.cover != Graphics::StorageTexture::FillCover::Exact || coverage.others != 0)) {
-                refusal = "exact only";
-            } else {
+    const auto discarded = fillClearEnabled() ? Graphics::StorageTexture::DiscardPendingInside(base, bytes) : 0u;
+    phase(FillDiscard);
+    const char* refusal = nullptr;
+    bool cleared = false;
+    if (coverage.image != nullptr) {
+        if (!fillClearEnabled()) {
+            refusal = "disabled";
+        } else if (fillClearExactOnly() && (coverage.cover != Graphics::StorageTexture::FillCover::Exact || coverage.others != 0)) {
+            refusal = "exact only";
+        } else {
 
-                Graphics::StorageTexture::FlushPending(base, bytes, coverage.image.get(), "buffer fill", Graphics::PublishScope::PartialUnits);
-                cleared = coverage.image->FillClear(pattern, coverage.layer, refusal);
-            }
-        }
-        phase(FillClearPhase);
-        fillClearCount(coverage, bytes, pattern, discarded, cleared, refusal);
-        noteForeignWriter(base, base + bytes, queueId);
-
-        const bool uniform = pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3];
-        const bool absorbed = !cleared && uniform && coverage.cover == Graphics::StorageTexture::FillCover::None && Graphics::MultisampledColorFillAbsorbs(base, bytes, pattern[0]);
-        if (absorbed) {
-            ++absorbedFills;
-            absorbedBytes += bytes;
-        } else if (!cleared) {
-            ++flushes;
-
-            if (Graphics::StorageTexture::FlushPending(base, bytes, nullptr, "buffer fill", Graphics::PublishScope::PartialUnits)) ++flushed;
-        }
-        phase(FillFlush);
-        const bool stored = cleared || absorbed || localDevice->FillBuffer(base, bytes, pattern);
-        phase(FillDevice);
-        if (stored && !cleared && !absorbed) {
-            if (const auto filled = KeysFillMemo(pattern, uniformKeysFill, memoryFill.has_value())) Graphics::NoteKeysFillOnGpu(base, bytes, *filled);
-        }
-        if (profile && stored && !cleared && !absorbed) {
-            ++(uniform ? uniformFills : patternFills);
-            (uniform ? uniformBytes : patternBytes) += bytes;
-            if (!uniform) chainCopies += static_cast<std::uint64_t>(std::bit_width((bytes / 16) - 1));
-        }
-        if (!stored) {
-            ++cpuFills;
-
-            localDevice->WaitIdle();
-            static thread_local std::vector<std::byte>* blockSlot = nullptr;
-            auto& block = ShaderRecompiler::ThreadOwned(blockSlot);
-            const auto chunk = std::min<std::size_t>(bytes, 1u << 20u);
-            block.resize(chunk);
-            for (std::size_t at = 0; at < chunk; at += 16) std::memcpy(block.data() + at, pattern.data(), 16);
-            for (std::size_t done = 0; done < bytes; done += chunk) GuestMemory::Write(base + done, std::span<const std::byte>(block).first(std::min(chunk, bytes - done)), 16);
-            phase(FillCpu);
-        }
-        if (uniform) {
-            Graphics::NoteDepthMetadataFill(base, bytes, pattern[0]);
-            Graphics::NoteColorMetadataFill(base, bytes, pattern[0]);
-        }
-        if (profile) {
-            const auto now = std::chrono::steady_clock::now();
-            const auto cover = static_cast<std::size_t>(coverage.cover);
-            ++holdByCover[cover];
-            holdByCoverMs[cover] += std::chrono::duration<double, std::milli>(now - holdStart).count();
-            if (now - fillReport > std::chrono::seconds(10)) {
-                fillReport = now;
-                static constexpr std::array<const char*, 8> coverNames{"none", "exact", "inside", "around", "straddle", "several", "keys", "layer"};
-                std::string line;
-                char text[64];
-                for (std::size_t i = 0; i < FillPhaseCount; ++i) {
-                    std::snprintf(text, sizeof(text), " %s %.0f", fillPhaseNames[i], fillPhaseMs[i]);
-                    line += text;
-                }
-                char absorbedText[128];
-                std::snprintf(absorbedText, sizeof(absorbedText), "; multisampled clears not stored %llu (%.0f MiB)", static_cast<unsigned long long>(absorbedFills), static_cast<double>(absorbedBytes) / 1048576.0);
-                line += absorbedText;
-                line += "; hold by cover (count/ms):";
-                for (std::size_t i = 0; i < coverNames.size(); ++i) {
-                    std::snprintf(text, sizeof(text), " %s %llu/%.0f", coverNames[i], static_cast<unsigned long long>(holdByCover[i]), holdByCoverMs[i]);
-                    line += text;
-                }
-                std::fprintf(stderr, "[fill] %llu buffer fills (%.0f MiB), %llu stored by the CPU; hold phases ms (cumulative):%s; pre-store flushes %llu (%llu stored an image); stored on the GPU: uniform %llu (%.0f MiB), pattern %llu (%.0f MiB), chain copies %llu\n", static_cast<unsigned long long>(fills.load()), filledBytes.load() / 1048576.0, static_cast<unsigned long long>(cpuFills.load()), line.c_str(), static_cast<unsigned long long>(flushes), static_cast<unsigned long long>(flushed), static_cast<unsigned long long>(uniformFills), uniformBytes / 1048576.0, static_cast<unsigned long long>(patternFills), patternBytes / 1048576.0, static_cast<unsigned long long>(chainCopies));
-            }
+            Graphics::StorageTexture::FlushPending(base, bytes, coverage.image.get(), "buffer fill", Graphics::PublishScope::PartialUnits);
+            cleared = coverage.image->FillClear(pattern, coverage.layer, refusal);
         }
     }
-    return true;
-}
+    phase(FillClearPhase);
+    fillClearCount(coverage, bytes, pattern, discarded, cleared, refusal);
+    noteForeignWriter(base, base + bytes, queueId);
 
+    const bool uniform = pattern[0] == pattern[1] && pattern[1] == pattern[2] && pattern[2] == pattern[3];
+    const bool absorbed = !cleared && uniform && coverage.cover == Graphics::StorageTexture::FillCover::None && Graphics::MultisampledColorFillAbsorbs(base, bytes, pattern[0]);
+    if (absorbed) {
+        ++absorbedFills;
+        absorbedBytes += bytes;
+    } else if (!cleared) {
+        ++flushes;
+
+        if (Graphics::StorageTexture::FlushPending(base, bytes, nullptr, "buffer fill", Graphics::PublishScope::PartialUnits)) ++flushed;
+    }
+    phase(FillFlush);
+    const bool stored = cleared || absorbed || localDevice->FillBuffer(base, bytes, pattern);
+    phase(FillDevice);
+    if (stored && !cleared && !absorbed) {
+        if (const auto filled = KeysFillMemo(pattern, uniformKeysFill, memoryValueFill)) Graphics::NoteKeysFillOnGpu(base, bytes, *filled);
+    }
+    if (profile && stored && !cleared && !absorbed) {
+        ++(uniform ? uniformFills : patternFills);
+        (uniform ? uniformBytes : patternBytes) += bytes;
+        if (!uniform) chainCopies += static_cast<std::uint64_t>(std::bit_width((bytes / 16) - 1));
+    }
+    if (!stored) {
+        ++cpuFills;
+
+        localDevice->WaitIdle();
+        static thread_local std::vector<std::byte>* blockSlot = nullptr;
+        auto& block = ShaderRecompiler::ThreadOwned(blockSlot);
+        const auto chunk = std::min<std::size_t>(bytes, 1u << 20u);
+        block.resize(chunk);
+        for (std::size_t at = 0; at < chunk; at += 16) std::memcpy(block.data() + at, pattern.data(), 16);
+        for (std::size_t done = 0; done < bytes; done += chunk) GuestMemory::Write(base + done, std::span<const std::byte>(block).first(std::min(chunk, bytes - done)), 16);
+        phase(FillCpu);
+    }
+    if (noteMetadata && uniform) {
+        Graphics::NoteDepthMetadataFill(base, bytes, pattern[0]);
+        Graphics::NoteColorMetadataFill(base, bytes, pattern[0]);
+    }
+    if (profile) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto cover = static_cast<std::size_t>(coverage.cover);
+        ++holdByCover[cover];
+        holdByCoverMs[cover] += std::chrono::duration<double, std::milli>(now - holdStart).count();
+        if (now - fillReport > std::chrono::seconds(10)) {
+            fillReport = now;
+            static constexpr std::array<const char*, 8> coverNames{"none", "exact", "inside", "around", "straddle", "several", "keys", "layer"};
+            std::string line;
+            char text[64];
+            for (std::size_t i = 0; i < FillPhaseCount; ++i) {
+                std::snprintf(text, sizeof(text), " %s %.0f", fillPhaseNames[i], fillPhaseMs[i]);
+                line += text;
+            }
+            char absorbedText[128];
+            std::snprintf(absorbedText, sizeof(absorbedText), "; multisampled clears not stored %llu (%.0f MiB)", static_cast<unsigned long long>(absorbedFills), static_cast<double>(absorbedBytes) / 1048576.0);
+            line += absorbedText;
+            line += "; hold by cover (count/ms):";
+            for (std::size_t i = 0; i < coverNames.size(); ++i) {
+                std::snprintf(text, sizeof(text), " %s %llu/%.0f", coverNames[i], static_cast<unsigned long long>(holdByCover[i]), holdByCoverMs[i]);
+                line += text;
+            }
+            std::fprintf(stderr, "[fill] %llu buffer fills (%.0f MiB), %llu stored by the CPU; hold phases ms (cumulative):%s; pre-store flushes %llu (%llu stored an image); stored on the GPU: uniform %llu (%.0f MiB), pattern %llu (%.0f MiB), chain copies %llu\n", static_cast<unsigned long long>(fills.load()), filledBytes.load() / 1048576.0, static_cast<unsigned long long>(cpuFills.load()), line.c_str(), static_cast<unsigned long long>(flushes), static_cast<unsigned long long>(flushed), static_cast<unsigned long long>(uniformFills), uniformBytes / 1048576.0, static_cast<unsigned long long>(patternFills), patternBytes / 1048576.0, static_cast<unsigned long long>(chainCopies));
+        }
+    }
+}
 }

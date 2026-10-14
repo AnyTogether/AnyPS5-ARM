@@ -151,7 +151,9 @@ void Driver::eraseDrawEntry(std::uint64_t key, const std::shared_ptr<DrawEntry>&
 
 bool DecodeProgramsCurrent(const DrawDecode& decode, const ShaderRegistry&) {
     return std::all_of(decode.programs.begin(), decode.programs.end(), [&](const DrawProgram& program) {
-        return !program.snapshot->header.empty() || ReadRawShader(program.snapshot->codeAddress + program.codeOffset * sizeof(std::uint32_t)) == program.snapshot;
+        if (!program.snapshot->header.empty()) return true;
+        return ReadRawShader(program.snapshot->codeAddress + program.codeOffset * sizeof(std::uint32_t)) == program.snapshot &&
+            (program.tailContinuation == nullptr || ReadRawShader(program.tailContinuation->codeAddress) == program.tailContinuation);
     });
 }
 

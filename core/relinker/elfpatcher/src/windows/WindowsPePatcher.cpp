@@ -35,7 +35,7 @@ WindowsPePatcher::WindowsPePatcher(const bool windowsGui, std::optional<std::vec
 
 const std::string& WindowsPePatcher::GetDiagnostics() const { return diagnostics; }
 
-std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t>& sourceElf, const std::vector<Domain::ProgramHeader>& originalHeaders, const Domain::SysVDynamicSection& dynamicSection, const std::uint64_t originalPltGotVaddr, const std::string& runPath, const bool lazyBinding, const bool dependencyDiagnostics, const std::vector<Codegen::TrampolineSite>& trampolines) {
+std::vector<std::uint8_t> WindowsPePatcher::Patch(std::vector<std::uint8_t> sourceElf, const std::vector<Domain::ProgramHeader>& originalHeaders, const Domain::SysVDynamicSection& dynamicSection, const std::uint64_t originalPltGotVaddr, const std::string& runPath, const bool lazyBinding, const bool dependencyDiagnostics, const std::vector<Codegen::TrampolineSite>& trampolines) {
     const auto report = [&](std::uint64_t completed) { if (progress) progress(completed, 10000); };
     report(0);
     diagnostics.clear();

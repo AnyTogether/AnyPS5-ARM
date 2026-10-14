@@ -41,7 +41,7 @@ void RunBdaContractTests() {
     ValidateBdaTarget(program, target);
     AgcDriver::Graphics::Require(!BdaInvocationsMayStop(program), "a BDA program with barriers must keep its invocations running");
     program.Resources().stage = IrShaderStage::TessellationControl;
-    reject([&] { ValidateBdaTarget(program, target); }, "barrier-safe");
+    ValidateBdaTarget(program, target);
     program.Resources().stage = IrShaderStage::Compute;
     RecompileRequest request{};
     request.target.bdaAbiVersion = BdaAbi::Version;

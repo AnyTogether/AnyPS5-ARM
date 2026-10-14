@@ -619,6 +619,15 @@ struct Ngs2SamplerVoiceState {
 };
 static_assert(sizeof(Ngs2SamplerVoiceState) == 56);
 
+struct Ngs2CustomSamplerVoiceState {
+    Ngs2VoiceState voice_state;
+    std::uint32_t reserved[2];
+    std::uint64_t num_decoded_samples;
+    std::uint64_t reserved2[3];
+};
+static_assert(sizeof(Ngs2CustomSamplerVoiceState) == 48);
+static_assert(offsetof(Ngs2CustomSamplerVoiceState, num_decoded_samples) == 16);
+
 struct Ngs2WaveformInfo {
     Ngs2WaveformFormat format;
     std::uint32_t data_offset;

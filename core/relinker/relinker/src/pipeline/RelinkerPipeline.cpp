@@ -54,7 +54,7 @@ std::string RelinkerPipeline::relocationTypeName(std::uint32_t type) {
     }
 }
 
-RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf) {
+RelinkResult RelinkerPipeline::Relink() {
     if (elfReader->ReadHeader().Type == kEtRel)
         throw RelinkerException("ET_REL relocatable inputs are not supported");
 
@@ -70,8 +70,8 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         if (ph.Type == PT_LOAD && (ph.Flags & PF_X) != 0) {
             auto segment = elfReader->ReadSegment(ph);
             if (!segment.empty()) {
-                if (textSection.empty()) {
-                    textSection = segment;
+                if (executableSegments.empty()) {
+                    if (unusedFilterLevel != 0) textSection = segment;
                     textVAddr = ph.MappedAddress;
                 }
                 executableSegments.emplace_back(std::move(segment), ph.MappedAddress, ph.Offset);
@@ -525,6 +525,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         entry.TargetSection = ".got";
         entry.TargetOffset = ref.RelocationAddress;
         entry.CallSitesResolved = false;
+        entry.Weak = ref.Weak;
         entries.push_back(std::move(entry));
     }
 

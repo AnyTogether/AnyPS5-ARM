@@ -95,17 +95,9 @@ std::string Hex(std::uint32_t value) {
     return text;
 }
 
-std::uint32_t Run(AgcDriver::VulkanDevice& device, ShaderRecompiler::ShaderFloatMode mode, std::uint32_t compare, std::uint32_t capture, std::uint32_t group) {
+ShaderRecompiler::RecompileResult Compile(const AgcDriver::VulkanDevice& device, ShaderRecompiler::ShaderFloatMode mode, std::uint32_t compare, std::uint32_t capture) {
     Code[6] = compare;
     Code[7] = capture;
-    for (std::uint32_t lane = 0; lane < Threads; ++lane) {
-        const std::uint32_t pair = group * Threads + lane;
-        Input[lane * Inputs] = Values[pair / ValueCount];
-        Input[lane * Inputs + 1u] = Values[pair % ValueCount];
-        Input[lane * Inputs + 2u] = 0u;
-        Input[lane * Inputs + 3u] = 0u;
-    }
-    Output.fill(0xdeadbeefu);
     std::vector<std::uint32_t> userData(8, 0u);
     const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size() * 4u));
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size() * 4u));
@@ -122,8 +114,19 @@ std::uint32_t Run(AgcDriver::VulkanDevice& device, ShaderRecompiler::ShaderFloat
     };
     request.useCache = false;
     request.context.floatMode = mode;
-    const auto result = ShaderRecompiler::Recompile(request);
-    device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
+    return ShaderRecompiler::Recompile(request);
+}
+
+std::uint32_t Run(AgcDriver::VulkanDevice& device, const ShaderRecompiler::RecompileResult& program, std::uint32_t group) {
+    for (std::uint32_t lane = 0; lane < Threads; ++lane) {
+        const std::uint32_t pair = group * Threads + lane;
+        Input[lane * Inputs] = Values[pair / ValueCount];
+        Input[lane * Inputs + 1u] = Values[pair % ValueCount];
+        Input[lane * Inputs + 2u] = 0u;
+        Input[lane * Inputs + 3u] = 0u;
+    }
+    Output.fill(0xdeadbeefu);
+    device.Dispatch(program, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
     device.WaitIdle();
     std::uint32_t mask = 0u;
     for (std::uint32_t lane = 0; lane < Threads; ++lane) {
@@ -135,8 +138,9 @@ std::uint32_t Run(AgcDriver::VulkanDevice& device, ShaderRecompiler::ShaderFloat
 
 void Check(AgcDriver::VulkanDevice& device, const char* modeName, ShaderRecompiler::ShaderFloatMode mode, const Row& row, bool exec, const std::uint32_t* expected) {
     const std::string name = std::string(exec ? "v_cmpx_" : "v_cmp_") + row.condition + "_f32";
+    const auto program = Compile(device, mode, exec ? row.cmpx : row.cmp, exec ? CaptureExec : CaptureVcc);
     for (std::uint32_t group = 0; group < Groups; ++group) {
-        const std::uint32_t actual = Run(device, mode, exec ? row.cmpx : row.cmp, exec ? CaptureExec : CaptureVcc, group);
+        const std::uint32_t actual = Run(device, program, group);
         if (actual == expected[group]) continue;
         const std::uint32_t diff = actual ^ expected[group];
         for (std::uint32_t lane = 0; lane < Threads; ++lane) {

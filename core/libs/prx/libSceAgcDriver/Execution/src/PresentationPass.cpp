@@ -1,9 +1,14 @@
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
 #include "prx/libSceAgcDriver/Execution/include/AspectFit.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayFormat.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PqToSdr.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/shaders/PresentationPassFrag_spv.h"
 #include "prx/libSceAgcDriver/Graphics/shaders/PresentationPassVert_spv.h"
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstring>
 
 namespace AgcDriver {
 namespace {
@@ -12,6 +17,7 @@ constexpr std::uint32_t ModeTenBit = 1;
 constexpr std::uint32_t ModeRedLow = 2;
 constexpr std::uint32_t ModeKeepTenBit = 4;
 constexpr std::uint32_t ModeSubsample = 8;
+constexpr std::uint32_t ModePq = 16;
 
 }
 
@@ -26,23 +32,23 @@ PresentationPass::PresentationPass(const Graphics::Context& context, std::size_t
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         Graphics::Check(context.Function<PFN_vkCreateSampler>("vkCreateSampler")(context.device, &samplerInfo, nullptr, &sampler), "vkCreateSampler presentation pass");
-        const VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler};
+        const std::array<VkDescriptorSetLayoutBinding, 2> bindings{{{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler}, {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}}};
         VkDescriptorSetLayoutCreateInfo descriptorInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        descriptorInfo.bindingCount = 1;
-        descriptorInfo.pBindings = &binding;
+        descriptorInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
+        descriptorInfo.pBindings = bindings.data();
         Graphics::Check(context.Function<PFN_vkCreateDescriptorSetLayout>("vkCreateDescriptorSetLayout")(context.device, &descriptorInfo, nullptr, &descriptorLayout), "vkCreateDescriptorSetLayout presentation pass");
-        const VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};
+        const VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 36};
         VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &descriptorLayout;
         layoutInfo.pushConstantRangeCount = 1;
         layoutInfo.pPushConstantRanges = &push;
         Graphics::Check(context.Function<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(context.device, &layoutInfo, nullptr, &pipelineLayout), "vkCreatePipelineLayout presentation pass");
-        const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(slotCount)};
+        const std::array<VkDescriptorPoolSize, 2> sizes{{{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(slotCount)}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<std::uint32_t>(slotCount)}}};
         VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         poolInfo.maxSets = static_cast<std::uint32_t>(slotCount);
-        poolInfo.poolSizeCount = 1;
-        poolInfo.pPoolSizes = &size;
+        poolInfo.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
+        poolInfo.pPoolSizes = sizes.data();
         Graphics::Check(context.Function<PFN_vkCreateDescriptorPool>("vkCreateDescriptorPool")(context.device, &poolInfo, nullptr, &descriptorPool), "vkCreateDescriptorPool presentation pass");
         for (auto& slot : slots) {
             VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -51,6 +57,19 @@ PresentationPass::PresentationPass(const Graphics::Context& context, std::size_t
             allocation.pSetLayouts = &descriptorLayout;
             Graphics::Check(context.Function<PFN_vkAllocateDescriptorSets>("vkAllocateDescriptorSets")(context.device, &allocation, &slot.set), "vkAllocateDescriptorSets presentation pass");
         }
+        const auto& luminance = PqEotfNits();
+        pqNits = std::make_unique<Graphics::Buffer>(context, sizeof(luminance), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        std::memcpy(pqNits->Bytes().data(), luminance.data(), sizeof(luminance));
+        const VkDescriptorBufferInfo tableInfo{pqNits->Handle(), 0, sizeof(luminance)};
+        std::vector<VkWriteDescriptorSet> tableWrites(slots.size(), VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            tableWrites[i].dstSet = slots[i].set;
+            tableWrites[i].dstBinding = 1;
+            tableWrites[i].descriptorCount = 1;
+            tableWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            tableWrites[i].pBufferInfo = &tableInfo;
+        }
+        context.Function<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(context.device, static_cast<std::uint32_t>(tableWrites.size()), tableWrites.data(), 0, nullptr);
         const auto createModule = context.Function<PFN_vkCreateShaderModule>("vkCreateShaderModule");
         VkShaderModuleCreateInfo moduleInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         moduleInfo.codeSize = sizeof(PRESENTATION_PASS_VERT_SPV);
@@ -85,6 +104,7 @@ void PresentationPass::release() noexcept {
     if (pipelineLayout) context.Function<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout")(context.device, pipelineLayout, nullptr);
     if (descriptorLayout) context.Function<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")(context.device, descriptorLayout, nullptr);
     if (sampler) context.Function<PFN_vkDestroySampler>("vkDestroySampler")(context.device, sampler, nullptr);
+    pqNits.reset();
     fragment = vertex = VK_NULL_HANDLE;
     descriptorPool = VK_NULL_HANDLE;
     pipelineLayout = VK_NULL_HANDLE;
@@ -226,16 +246,18 @@ const PresentationPass::Target& PresentationPass::target(VkFormat format, VkImag
     return targets.emplace(key, created).first->second;
 }
 
-void PresentationPass::Bind(std::size_t index, VkImage image, std::uint32_t width, std::uint32_t height, std::uint64_t pixelFormat, std::uint32_t layer) {
+void PresentationPass::Bind(std::size_t index, VkImage image, std::uint32_t width, std::uint32_t height, std::uint64_t pixelFormat, float whiteNits, std::uint32_t layer) {
     Graphics::Require(index < slots.size(), "presentation pass slot is out of range");
     Graphics::Require(image != VK_NULL_HANDLE && width != 0 && height != 0, "presentation pass source is unavailable");
     Graphics::Require(!DisplayHalfFloat(pixelFormat), "presentation pass does not decode 16-bit float display buffers");
+    Graphics::Require(std::isfinite(whiteNits) && whiteNits >= 1.0f, "presentation pass white level must be at least 1 nit");
     Release(index);
     auto& slot = slots[index];
     slot.source = createView(image, VK_FORMAT_R32_UINT, VK_IMAGE_USAGE_SAMPLED_BIT, layer);
     slot.width = width;
     slot.height = height;
-    slot.mode = (DisplayTenBit(pixelFormat) ? ModeTenBit : 0u) | (DisplayRedLow(pixelFormat) ? ModeRedLow : 0u);
+    slot.mode = (DisplayTenBit(pixelFormat) ? ModeTenBit : 0u) | (DisplayRedLow(pixelFormat) ? ModeRedLow : 0u) | (DisplayPq(pixelFormat) ? ModePq : 0u);
+    slot.whiteNits = whiteNits;
     const VkDescriptorImageInfo imageInfo{sampler, slot.source, VK_IMAGE_LAYOUT_GENERAL};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = slot.set;
@@ -246,7 +268,7 @@ void PresentationPass::Bind(std::size_t index, VkImage image, std::uint32_t widt
     context.Function<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(context.device, 1, &write, 0, nullptr);
 }
 
-void PresentationPass::draw(VkCommandBuffer commands, const Slot& slot, const Target& entry, VkFramebuffer framebuffer, VkExtent2D extent, const std::int32_t (&parameters)[8]) const {
+void PresentationPass::draw(VkCommandBuffer commands, const Slot& slot, const Target& entry, VkFramebuffer framebuffer, VkExtent2D extent, const std::int32_t (&parameters)[9]) const {
     VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     begin.renderPass = entry.renderPass;
     begin.framebuffer = framebuffer;
@@ -263,7 +285,7 @@ void PresentationPass::draw(VkCommandBuffer commands, const Slot& slot, const Ta
     context.Function<PFN_vkCmdEndRenderPass>("vkCmdEndRenderPass")(commands);
 }
 
-void PresentationPass::RecordPresent(VkCommandBuffer commands, std::size_t index, VkImage destination, VkFormat format, VkExtent2D extent, VkImageLayout finalLayout) {
+void PresentationPass::RecordPresent(VkCommandBuffer commands, std::size_t index, VkImage destination, VkFormat format, VkColorSpaceKHR colorSpace, VkExtent2D extent, VkImageLayout finalLayout) {
     Graphics::Require(index < slots.size() && slots[index].source != VK_NULL_HANDLE, "presentation pass slot has no source");
     Graphics::Require(destination != VK_NULL_HANDLE && extent.width != 0 && extent.height != 0, "presentation pass destination is unavailable");
     auto& slot = slots[index];
@@ -278,8 +300,10 @@ void PresentationPass::RecordPresent(VkCommandBuffer commands, std::size_t index
     }
     slot.transient.emplace_back(view, framebuffer);
     const auto rect = ComputeContainRect_nid_postfix(slot.width, slot.height, extent.width, extent.height);
-    const std::uint32_t mode = slot.mode | (TenBitFormat(format) ? ModeKeepTenBit : 0u);
-    const std::int32_t parameters[8] = {rect.x, rect.y, static_cast<std::int32_t>(rect.width), static_cast<std::int32_t>(rect.height), static_cast<std::int32_t>(slot.width), static_cast<std::int32_t>(slot.height), 1, static_cast<std::int32_t>(mode)};
+    const bool hdr10 = colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    Graphics::Require(colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR || (hdr10 && (slot.mode & ModePq) != 0 && TenBitFormat(format)), "presentation pass presents only PQ display buffers to a 10-bit HDR10 destination");
+    const std::uint32_t mode = (hdr10 ? slot.mode & ~ModePq : slot.mode) | (TenBitFormat(format) ? ModeKeepTenBit : 0u);
+    const std::int32_t parameters[9] = {rect.x, rect.y, static_cast<std::int32_t>(rect.width), static_cast<std::int32_t>(rect.height), static_cast<std::int32_t>(slot.width), static_cast<std::int32_t>(slot.height), 1, static_cast<std::int32_t>(mode), std::bit_cast<std::int32_t>(slot.whiteNits)};
     draw(commands, slot, entry, framebuffer, extent, parameters);
 }
 
@@ -334,7 +358,7 @@ void PresentationPass::RecordDump(VkCommandBuffer commands, std::size_t index, s
     const auto extent = DumpExtent(slot.width, slot.height, stride);
     ensureDumpTarget(slot, extent);
     const auto& entry = target(VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    const std::int32_t parameters[8] = {0, 0, static_cast<std::int32_t>(extent.width), static_cast<std::int32_t>(extent.height), static_cast<std::int32_t>(slot.width), static_cast<std::int32_t>(slot.height), static_cast<std::int32_t>(stride), static_cast<std::int32_t>(slot.mode | ModeSubsample)};
+    const std::int32_t parameters[9] = {0, 0, static_cast<std::int32_t>(extent.width), static_cast<std::int32_t>(extent.height), static_cast<std::int32_t>(slot.width), static_cast<std::int32_t>(slot.height), static_cast<std::int32_t>(stride), static_cast<std::int32_t>(slot.mode | ModeSubsample), std::bit_cast<std::int32_t>(slot.whiteNits)};
     draw(commands, slot, entry, slot.dumpFramebuffer, extent, parameters);
     VkBufferImageCopy copy{};
     copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};

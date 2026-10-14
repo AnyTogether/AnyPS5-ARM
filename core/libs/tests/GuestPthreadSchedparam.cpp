@@ -14,6 +14,7 @@ int APS5_VABI scePthreadAttrInit(PthreadAttr* attr);
 int APS5_VABI scePthreadAttrDestroy(PthreadAttr* attr);
 int APS5_VABI scePthreadAttrSetinheritsched(PthreadAttr* attr, int inheritSched);
 int APS5_VABI scePthreadAttrSetschedpolicy(PthreadAttr* attr, int policy);
+int APS5_VABI scePthreadAttrSetschedparam(PthreadAttr* attr, const KernelSchedParam* param);
 }
 
 static constexpr int SCE_OK = 0;
@@ -98,6 +99,46 @@ static int CreatedPolicy(int inheritSched, int policy) {
     return reported;
 }
 
+static void* APS5_VABI ReportPriority(void* arg) {
+    int policy = -1;
+    KernelSchedParam param{};
+    Require(scePthreadGetschedparam(scePthreadSelf(), &policy, &param) == SCE_OK);
+    *static_cast<int*>(arg) = param.sched_priority;
+    return nullptr;
+}
+
+static int CreatedPriority(const PthreadAttr* attr) {
+    int reported = -1;
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, attr, ReportPriority, &reported, "priority") == SCE_OK);
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
+    return reported;
+}
+
+static int CreatedPriority(int inheritSched, const KernelSchedParam* param) {
+    PthreadAttr attr = nullptr;
+    Require(scePthreadAttrInit(&attr) == SCE_OK);
+    Require(scePthreadAttrSetinheritsched(&attr, inheritSched) == SCE_OK);
+    Require(scePthreadAttrSetschedpolicy(&attr, SCHED_RR) == SCE_OK);
+    if (param) Require(scePthreadAttrSetschedparam(&attr, param) == SCE_OK);
+    const int reported = CreatedPriority(&attr);
+    Require(scePthreadAttrDestroy(&attr) == SCE_OK);
+    return reported;
+}
+
+static void* APS5_VABI Spawn(void*) {
+    const KernelSchedParam param{300};
+    for (int priority : {450, 600}) {
+        Require(SceSet(SCHED_FIFO, priority) == SCE_OK);
+        Require(CreatedPriority(INHERIT_SCHED, &param) == priority);
+        Require(CreatedPriority(INHERIT_SCHED, nullptr) == priority);
+        Require(CreatedPriority(nullptr) == priority);
+        Require(CreatedPriority(EXPLICIT_SCHED, &param) == 300);
+        Require(CreatedPriority(EXPLICIT_SCHED, nullptr) == 700);
+    }
+    return nullptr;
+}
+
 int main() {
     Pthread thread = nullptr;
     Require(scePthreadCreate(&thread, nullptr, Run, nullptr, "schedparam") == SCE_OK);
@@ -105,4 +146,6 @@ int main() {
     Require(CreatedPolicy(EXPLICIT_SCHED, SCHED_RR) == SCHED_RR);
     Require(CreatedPolicy(EXPLICIT_SCHED, SCHED_FIFO) == SCHED_FIFO);
     Require(CreatedPolicy(INHERIT_SCHED, SCHED_RR) == SCHED_FIFO);
+    Require(scePthreadCreate(&thread, nullptr, Spawn, nullptr, "spawn") == SCE_OK);
+    Require(scePthreadJoin(thread, nullptr) == SCE_OK);
 }

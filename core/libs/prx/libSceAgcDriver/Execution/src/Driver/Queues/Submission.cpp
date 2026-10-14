@@ -5,12 +5,36 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/SynchronizationStatistics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
+#include "prx/libSceAgcDriver/Execution/include/SubmissionCapture.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include <bit>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 
 namespace AgcDriver::DriverDetail {
+
+namespace {
+
+std::uint64_t captureTime() {
+    return static_cast<std::uint64_t>(std::llround(TraceMs() * 1000.0));
+}
+
+void writeCaptured(Driver& driver, SubmissionCapture& capture, const CapturedSubmission& captured) {
+    try {
+        capture.Write(captured);
+    } catch (...) {
+        driver.ReportFailure(std::current_exception());
+        throw;
+    }
+}
+
+bool EopRelease(std::span<const std::uint32_t> words) {
+    return words.size() >= 8 && (words[0] >> 30u) == 3u && Pm4::PacketWords(words[0]) == 8u && ((words[0] >> 8u) & 0xffu) == 0x49u && ((words[2] >> 24u) & 7u) == 2u;
+}
+
+}
 
 void Driver::copyCommands(Submission& submission, const std::uint32_t* guest, std::size_t words) {
     submission.commands.clear();
@@ -146,10 +170,19 @@ void Driver::noteAwaitingTitle(std::uint32_t queue, std::uint64_t awaited) {
 
 void Driver::holdFlipBehindWorker(const Submission& submission) {
     if (submission.queue != 0 || onWorkerThread()) return;
-    bool flips = false;
-    for (std::size_t cursor = 0; cursor < submission.commands.size() && !flips; cursor += Pm4::PacketWords(submission.commands[cursor])) flips = submission.commands[cursor] == FlipPacketHeader;
-    if (!flips) return;
+    bool candidate = false;
+    for (std::size_t cursor = 0; cursor < submission.commands.size() && !candidate; cursor += Pm4::PacketWords(submission.commands[cursor])) {
+        const auto words = std::span(submission.commands).subspan(cursor);
+        candidate = words[0] == FlipPacketHeader || EopRelease(words);
+    }
+    if (!candidate) return;
     std::unique_lock lock(mutex);
+    bool flips = false;
+    for (std::size_t cursor = 0; cursor < submission.commands.size() && !flips; cursor += Pm4::PacketWords(submission.commands[cursor])) {
+        const auto words = std::span(submission.commands).subspan(cursor);
+        flips = words[0] == FlipPacketHeader || (EopRelease(words) && eopFlips.contains(words[7]));
+    }
+    if (!flips) return;
     flipHolders.fetch_add(1, std::memory_order_acq_rel);
     changed.wait(lock, [&] { return failure != nullptr || stopping.load(std::memory_order_acquire) || shutdownToken.stop_requested() || flipsAhead.load(std::memory_order_acquire) == 0 || queue0AwaitsTitle.load(std::memory_order_acquire); });
     flipHolders.fetch_sub(1, std::memory_order_acq_rel);
@@ -162,6 +195,7 @@ void Driver::releaseFlipHold() {
 }
 
 void Driver::reserveOutputs(Submission& submission) {
+    std::set<std::uint32_t> eopTokens;
     for (std::size_t cursor = 0; cursor < submission.commands.size();) {
         const auto* words = submission.commands.data() + cursor;
         if (words[0] == RenderingWaitPacketHeader) {
@@ -170,6 +204,15 @@ void Driver::reserveOutputs(Submission& submission) {
             auto wait = output->second->CaptureRenderingWait(words[2]);
             require(wait != nullptr, "video output returned a null rendering wait");
             submission.renderingWaits.emplace(cursor, std::move(wait));
+        }
+        if (EopRelease(std::span(submission.commands).subspan(cursor))) {
+            const auto token = words[7];
+            const auto flip = eopFlips.find(token);
+            if (flip != eopFlips.end()) {
+                require(submission.queue == 0, "EOP flips on async queues are not implemented");
+                require(eopTokens.insert(token).second, "EOP flip token repeated in a submission");
+                submission.flips.emplace(cursor, flip->second.request);
+            }
         }
         noteHeldAtSubmit(submission, cursor);
         if (words[0] == FlipPacketHeader) {
@@ -182,19 +225,20 @@ void Driver::reserveOutputs(Submission& submission) {
         }
         cursor += Pm4::PacketWords(words[0]);
     }
+    for (const auto token : eopTokens) eopFlips.erase(token);
 }
 
 void Driver::executeRewindTail(const Submission& stalled) {
     PerformanceTimer timing("Driver.Rewind");
     std::atomic_ref<std::uint32_t> control(*const_cast<std::uint32_t*>(stalled.rewindTail - 1));
-    if ((control.load(std::memory_order_acquire) & 0x80000000u) == 0) {
+    if ((control.load(std::memory_order_acquire) & Pm4::RewindValid) == 0) {
         noteWaitBlocked(stalled.queue, reinterpret_cast<std::uint64_t>(stalled.rewindTail - 1), true);
         struct BlockedWait {
             Driver& driver;
             std::uint32_t queue;
             ~BlockedWait() { driver.noteWaitBlocked(queue, 0, false); }
         } blocked{*this, stalled.queue};
-        while ((control.load(std::memory_order_acquire) & 0x80000000u) == 0) {
+        while ((control.load(std::memory_order_acquire) & Pm4::RewindValid) == 0) {
             CheckFailure();
             checkStopping();
             noteAwaitingTitle(stalled.queue, reinterpret_cast<std::uint64_t>(stalled.rewindTail - 1));
@@ -211,6 +255,8 @@ void Driver::executeRewindTail(const Submission& stalled) {
     if (APS5_ENABLE_TIMING_LOG) tail.validatedAt = std::chrono::steady_clock::now();
     waitForFlipRoom(tail);
     if (APS5_ENABLE_TIMING_LOG) tail.roomReadyAt = std::chrono::steady_clock::now();
+    auto* const capture = SubmissionCapture::Active();
+    auto captured = capture != nullptr ? SubmissionCapture::Prepare(tail.queue, SubmissionKind::Rewind, tail.commands, tail.conditionalEnds) : CapturedSubmission{};
     {
         std::lock_guard lock(mutex);
         rethrowFailure();
@@ -219,7 +265,9 @@ void Driver::executeRewindTail(const Submission& stalled) {
         tail.shaders = shaders;
         tail.serial = stalled.serial;
         tail.received = ++eventSerial;
+        if (capture != nullptr) capture->Take(captured, tail.serial, captureTime(), tail.heldAtSubmit);
     }
+    if (capture != nullptr) writeCaptured(*this, *capture, captured);
     if (APS5_ENABLE_TIMING_LOG) tail.enqueuedAt = tail.dequeuedAt = tail.orderedAt = std::chrono::steady_clock::now();
     timing.Finish();
     execute(tail);
@@ -250,10 +298,13 @@ void Driver::Submit(const Packet* packet, std::uint32_t queue) {
     if (APS5_ENABLE_TIMING_LOG) submission.validatedAt = std::chrono::steady_clock::now();
     waitForFlipRoom(submission);
     holdFlipBehindWorker(submission);
+    AwaitRegistrationPreparation();
     if (APS5_ENABLE_TIMING_LOG) submission.roomReadyAt = std::chrono::steady_clock::now();
     static const bool trace = std::getenv("APS5_TRACE_GPU") != nullptr;
     if (trace) std::fprintf(stderr, "[gpu] %.1f submit queue=0x%x dwords=%zu at %p\n", TraceMs(), queue, submission.commands.size(), static_cast<const void*>(descriptor.addr));
     const auto validated = profile ? std::chrono::steady_clock::now() : start;
+    auto* const capture = SubmissionCapture::Active();
+    auto captured = capture != nullptr ? SubmissionCapture::Prepare(queue, SubmissionKind::Submit, submission.commands, submission.conditionalEnds) : CapturedSubmission{};
     {
         std::lock_guard lock(mutex);
         rethrowFailure();
@@ -264,6 +315,7 @@ void Driver::Submit(const Packet* packet, std::uint32_t queue) {
         submission.serial = accepted + 1;
 
         submission.received = ++eventSerial;
+        if (capture != nullptr) capture->Take(captured, submission.serial, captureTime(), submission.heldAtSubmit);
         if (profile) {
             const auto now = std::chrono::steady_clock::now();
             submission.enqueuedAt = now;
@@ -280,11 +332,14 @@ void Driver::Submit(const Packet* packet, std::uint32_t queue) {
         ++accepted;
     }
     changed.notify_all();
+    if (capture != nullptr) writeCaptured(*this, *capture, captured);
 }
 
 void Driver::SuspendPoint() {
     const auto receivedAt = APS5_ENABLE_TIMING_LOG ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     require(!onWorkerThread(), "worker cannot suspend itself");
+    auto* const capture = SubmissionCapture::Active();
+    auto captured = capture != nullptr ? SubmissionCapture::Prepare(0, SubmissionKind::Suspend, {}, {}) : CapturedSubmission{};
     std::unique_lock lock(mutex);
     rethrowFailure();
     checkStopping();
@@ -296,10 +351,14 @@ void Driver::SuspendPoint() {
     boundary.queue = 0;
     boundary.receivedAt = receivedAt;
     boundary.enqueuedAt = std::chrono::steady_clock::now();
+    if (capture != nullptr) capture->Take(captured, boundary.serial, captureTime(), boundary.heldAtSubmit);
     enqueue(std::move(boundary));
     ++accepted;
 
     changed.notify_all();
+    if (capture == nullptr) return;
+    lock.unlock();
+    writeCaptured(*this, *capture, captured);
 }
 
 bool Driver::waitFree(const Submission& submission) {
@@ -380,8 +439,9 @@ void Driver::noteHeldAtSubmit(Submission& submission, std::size_t cursor) {
         return;
     }
     if ((opcode != 0x3c && opcode != 0x93) || packet.size() < 7 || ((packet[1] >> 4u) & 3u) != 1u) return;
-    const auto address = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
-    const std::size_t bytes = Pm4::WaitAwaitedBytes(packet);
+    const auto wait = Pm4::DecodeWait(packet);
+    const auto address = wait.address;
+    const std::size_t bytes = wait.bytes;
     if (address % 4 != 0 || !GuestMemory::Accessible(reinterpret_cast<const void*>(address), bytes)) return;
     const auto worker = workers.find(submission.queue);
     for (std::size_t offset = 0; offset < bytes; offset += 4) {

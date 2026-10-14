@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -35,10 +37,16 @@ THandle newHandle() {
 }
 
 VkFormat lastImageFormat = VK_FORMAT_UNDEFINED;
+std::vector<VkImage> createdImages;
+std::vector<std::tuple<VkImage, VkImage, VkImageAspectFlags>> imageCopies;
+VkImage lastImage = VK_NULL_HANDLE;
+std::vector<VkImage> clearedImages;
 
 VKAPI_ATTR VkResult VKAPI_CALL createImage(VkDevice, const VkImageCreateInfo* info, const VkAllocationCallbacks*, VkImage* image) {
     lastImageFormat = info->format;
     *image = newHandle<VkImage>();
+    createdImages.push_back(*image);
+    lastImage = *image;
     return VK_SUCCESS;
 }
 
@@ -96,7 +104,12 @@ VKAPI_ATTR void VKAPI_CALL destroyImageView(VkDevice, VkImageView, const VkAlloc
 VKAPI_ATTR void VKAPI_CALL destroyImage(VkDevice, VkImage, const VkAllocationCallbacks*) {}
 VKAPI_ATTR void VKAPI_CALL freeMemory(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*) {}
 VKAPI_ATTR void VKAPI_CALL cmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, std::uint32_t, const VkMemoryBarrier*, std::uint32_t, const VkBufferMemoryBarrier*, std::uint32_t, const VkImageMemoryBarrier*) {}
-VKAPI_ATTR void VKAPI_CALL cmdClearDepthStencilImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClearDepthStencilValue*, std::uint32_t, const VkImageSubresourceRange*) {}
+VKAPI_ATTR void VKAPI_CALL cmdClearDepthStencilImage(VkCommandBuffer, VkImage image, VkImageLayout, const VkClearDepthStencilValue*, std::uint32_t, const VkImageSubresourceRange*) {
+    clearedImages.push_back(image);
+}
+VKAPI_ATTR void VKAPI_CALL cmdCopyImage(VkCommandBuffer, VkImage source, VkImageLayout, VkImage destination, VkImageLayout, std::uint32_t count, const VkImageCopy* regions) {
+    for (std::uint32_t i = 0; i < count; ++i) imageCopies.emplace_back(source, destination, regions[i].dstSubresource.aspectMask);
+}
 
 VKAPI_ATTR void VKAPI_CALL formatProperties(VkPhysicalDevice, VkFormat, VkFormatProperties* properties) {
     *properties = {};
@@ -133,7 +146,8 @@ PFN_vkVoidFunction VKAPI_CALL deviceProc(VkDevice, const char* name) {
         {"vkDestroyImage", reinterpret_cast<PFN_vkVoidFunction>(destroyImage)},
         {"vkFreeMemory", reinterpret_cast<PFN_vkVoidFunction>(freeMemory)},
         {"vkCmdPipelineBarrier", reinterpret_cast<PFN_vkVoidFunction>(cmdPipelineBarrier)},
-        {"vkCmdClearDepthStencilImage", reinterpret_cast<PFN_vkVoidFunction>(cmdClearDepthStencilImage)}
+        {"vkCmdClearDepthStencilImage", reinterpret_cast<PFN_vkVoidFunction>(cmdClearDepthStencilImage)},
+        {"vkCmdCopyImage", reinterpret_cast<PFN_vkVoidFunction>(cmdCopyImage)}
     };
     const auto it = table.find(name);
     return it == table.end() ? nullptr : it->second;
@@ -255,12 +269,6 @@ void RunDepthSurfaceReuseTests() {
     Require(lookup(context, {stencil, FormatR8G8B8A8Unorm, 320, 180, TileRenderTarget64KB}) == nullptr, "an RGBA8 view of a stencil plane's own extent must be read as reused memory");
     Require(lookup(context, {stencil, FormatR32Float, 320, 180}) == nullptr, "an R32F view of a stencil plane's own extent must be read as reused memory");
 
-    constexpr std::uint64_t reusedDepth = 0x70000000;
-    DepthSurfaceView(context, {reusedDepth, depthStencil, {320, 180}, VK_FORMAT_D32_SFLOAT_S8_UINT, 1.0f, 0});
-    Require(lookup(context, {depthStencil, FormatR32Float, 320, 180}) != nullptr, "an R32F view must sample the older surface's depth plane when a newer surface's stencil plane reuses its address");
-    Require(lookup(context, {depthStencil, FormatR8Uint, 320, 180}) != nullptr, "an 8-bit view must sample the newer surface's stencil plane at a reused address");
-    Require(lookup(context, {reusedDepth, FormatR32Float, 320, 180}) != nullptr, "the newer surface's own depth plane must still be found");
-
     const auto storageAliasesDepth = [&](const Context& owner, const View& view) {
         const auto words = tsharp(view);
         return DepthSurfaceAt(owner, words, DecodeTextureResource(words));
@@ -281,6 +289,52 @@ void RunDepthSurfaceReuseTests() {
     Require(storageAliasesDepth(context, {depth16, FormatR16Unorm, 128, 128}), "the newest depth extent must still reject actual storage access");
     Require(storageAliasesDepth(context, {stencil16, FormatR8Uint, 128, 128}), "storage access to the actual stencil plane must remain rejected");
     Require(!storageAliasesDepth(context, {stencil16, FormatR11G11B10Float, 128, 128}), "a stencil address reused for color is not a stencil storage alias");
+
+    constexpr std::uint64_t shared = 0x70000000;
+    constexpr std::uint64_t stencilA = 0x71000000;
+    constexpr std::uint64_t stencilB = 0x72000000;
+    constexpr std::uint64_t otherDepth = 0x73000000;
+    const auto pairing = [&](std::uint64_t depth, std::uint64_t stencil) {
+        const auto before = createdImages.size();
+        DepthSurfaceView(context, {depth, stencil, {256, 256}, VK_FORMAT_D32_SFLOAT_S8_UINT, 1.0f, 0});
+        return createdImages.size() != before ? createdImages[before] : VK_NULL_HANDLE;
+    };
+    const auto withA = pairing(shared, stencilA);
+    imageCopies.clear();
+    const auto withB = pairing(shared, stencilB);
+    Require(withA != VK_NULL_HANDLE && withB != VK_NULL_HANDLE && withA != withB, "each depth/stencil pairing must have its own image");
+    Require(imageCopies.size() == 1 && imageCopies[0] == std::make_tuple(withA, withB, static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)), "a depth plane paired with another stencil plane must carry its depth over");
+    imageCopies.clear();
+    pairing(shared, stencilB);
+    Require(imageCopies.empty(), "drawing again with the same pairing must not copy");
+    pairing(shared, stencilA);
+    Require(imageCopies.size() == 1 && imageCopies[0] == std::make_tuple(withB, withA, static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT)), "returning to the first pairing must carry the depth written through the second");
+    imageCopies.clear();
+    const auto otherWithA = pairing(otherDepth, stencilA);
+    Require(imageCopies.size() == 1 && imageCopies[0] == std::make_tuple(withA, otherWithA, static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_STENCIL_BIT)), "a stencil plane paired with another depth plane must carry its stencil over");
+    {
+        constexpr std::uint64_t arrayBase = 0x80000000;
+        constexpr std::uint64_t htile = 0x81000000;
+        constexpr VkExtent2D extent{1024, 512};
+        const auto sliceHtile = HtileMetadataBytes(extent);
+        DepthTarget first{arrayBase, 0, extent, VK_FORMAT_D32_SFLOAT, 1.0f, 0};
+        first.htileAddress = htile;
+        DepthTarget second{arrayBase + DepthSliceBytes(extent, 4u), 0, extent, VK_FORMAT_D32_SFLOAT, 1.0f, 0};
+        second.htileAddress = htile + sliceHtile;
+        DepthSurfaceView(context, first);
+        const auto firstImage = lastImage;
+        DepthSurfaceView(context, second);
+        const auto secondImage = lastImage;
+        const auto clearsAfter = [&](std::size_t bytes) {
+            clearedImages.clear();
+            NoteHtileDepthClear(htile, static_cast<std::size_t>(bytes));
+            DepthSurfaceView(context, first);
+            DepthSurfaceView(context, second);
+            return clearedImages;
+        };
+        Require(clearsAfter(sliceHtile) == std::vector<VkImage>{firstImage}, "an HTILE clear of the first slice must clear that slice alone");
+        Require(clearsAfter(2u * sliceHtile) == std::vector<VkImage>{firstImage, secondImage}, "an HTILE clear over both slices must clear both");
+    }
 
     ClearDepthSurfaces(context.device);
 }

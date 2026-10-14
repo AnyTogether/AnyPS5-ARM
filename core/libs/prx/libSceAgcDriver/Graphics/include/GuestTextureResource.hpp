@@ -58,7 +58,8 @@ enum class TextureDimension {
     k2DArray,
     kCube,
     k3D,
-    k1DArray
+    k1DArray,
+    k2DMsaa
 };
 
 struct GuestTextureResource {
@@ -86,10 +87,12 @@ struct GuestTextureResource {
     bool dccPipeAligned = false;
     std::uint32_t minLod = 0;
     std::uint32_t allocatedMipCount = 0;
+    std::uint32_t samples = 1;
 };
 
 float EffectiveMinLod(const GuestTextureResource& resource);
 
+bool IsNullTextureResource(std::span<const std::uint32_t> words);
 GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words);
 bool DescriptorSingleLevel(std::span<const std::uint32_t> words);
 bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, TextureDimension dimension);

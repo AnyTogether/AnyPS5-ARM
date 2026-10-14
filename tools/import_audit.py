@@ -64,6 +64,8 @@ def elf_sections(path, data):
     ident, section_offset, section_size, section_count = header[0], header[6], header[11], header[12]
     if ident[4] != 2 or ident[5] != 1 or section_size != 64:
         raise AuditError(f"{path}: only little-endian ELF64 with 64-byte section headers is supported (class {ident[4]}, data {ident[5]}, shentsize {section_size})")
+    if ident[6] != 1 or header[3] != 1:
+        raise AuditError(f"{path}: unsupported ELF version (identification {ident[6]}, object {header[3]})")
     if not section_offset:
         raise AuditError(f"{path}: ELF file without a section header table is not supported")
     if not section_count:
@@ -75,6 +77,8 @@ def elf_sections(path, data):
 def elf_program_dynamic_symbols(path, data):
     header = unpack("<16sHHIQQQIHHHHHH", data, 0, path, "ELF header")
     ident, program_offset, program_size, program_count = header[0], header[5], header[9], header[10]
+    if ident[6] != 1 or header[3] != 1:
+        raise AuditError(f"{path}: unsupported ELF version (identification {ident[6]}, object {header[3]})")
     if ident[4] != 2 or ident[5] != 1 or program_size != 56 or not program_offset or not program_count:
         raise AuditError(f"{path}: sectionless ELF needs little-endian ELF64 program headers")
     take(data, program_offset, program_count * program_size, path, "program header table")
@@ -118,11 +122,12 @@ def elf_program_dynamic_symbols(path, data):
     if 4 in dynamic:
         hash_offset = file_offset(dynamic[4], 8, "SysV hash table")
         buckets, chains = unpack("<II", data, hash_offset, path, "SysV hash header")
-        take(data, hash_offset, 8 + 4 * (buckets + chains), path, "SysV hash table")
+        file_offset(dynamic[4], 8 + 4 * (buckets + chains), "SysV hash table")
         symbol_count = chains
     elif 0x6ffffef5 in dynamic:
         hash_offset = file_offset(dynamic[0x6ffffef5], 16, "GNU hash header")
         buckets, first_symbol, bloom_count, _ = unpack("<IIII", data, hash_offset, path, "GNU hash header")
+        file_offset(dynamic[0x6ffffef5], 16 + bloom_count * 8 + buckets * 4, "GNU hash prefix")
         bucket_offset = hash_offset + 16 + bloom_count * 8
         bucket_data = take(data, bucket_offset, buckets * 4, path, "GNU hash buckets")
         chain_offset = bucket_offset + buckets * 4
@@ -222,6 +227,8 @@ def elf_imports(path, data):
             take(data, strings_offset, strings_size, path, "dynamic string table")
             for position in range(0, size, 16):
                 tag, value = unpack("<qQ", data, offset + position, path, "dynamic entry")
+                if tag == 0:
+                    break
                 if tag == 1:
                     needed.add(cstring(data, strings_offset + value, strings_offset + strings_size, path, "needed library name"))
     return symbols, needed
@@ -382,9 +389,17 @@ def built_libraries(directories):
 def read_modules(directories):
     imports = {}
     exports = defaultdict(set)
+    images = {}
     for directory in directories:
         for file in directory_files(directory, "*"):
             data = file.read_bytes()
+            digest = hashlib.sha256(data).digest()
+            if file.name in images:
+                previous, fingerprint = images[file.name]
+                if digest != fingerprint:
+                    raise AuditError(f"ambiguous guest module {file.name}: {previous} and {file} have different contents")
+                continue
+            images[file.name] = (file, digest)
             own = elf_imports(file, data)
             symbols, needed = own
             imports[file.name] = (sorted(symbols), sorted(needed))
@@ -444,7 +459,7 @@ def read_registry(path):
         nid = entry["nid"].split("#", 1)[0]
         if not NID.fullmatch(nid):
             raise AuditError(f"{path}: entry {index} has an invalid NID {entry['nid']!r}")
-        imports.append((nid, entry["library"]))
+        imports.append((nid, entry["library"], bool(entry.get("weak", False))))
     return imports
 
 
@@ -467,12 +482,13 @@ def classify(nid, library, providers, stubs, modules):
 
 def audit(imports, exports, stubs, libraries, modules, module_imports=None, module_exports=None):
     records = {}
-    for nid, library in imports:
-        record = records.setdefault((nid, library), {"nid": nid, "library": library, "references": 0})
+    for nid, library, weak in imports:
+        record = records.setdefault((nid, library), {"nid": nid, "library": library, "references": 0, "weak": weak})
         record["references"] += 1
+        record["weak"] = weak
     for module, (symbols, needed) in (module_imports or {}).items():
         for nid in symbols:
-            record = records.setdefault((nid, None, module), {"nid": nid, "library": None, "module": module, "references": 0})
+            record = records.setdefault((nid, None, module), {"nid": nid, "library": None, "module": module, "references": 0, "weak": False})
             record["references"] += 1
     for record in records.values():
         nid, library = record["nid"], record["library"]
@@ -499,9 +515,11 @@ def audit(imports, exports, stubs, libraries, modules, module_imports=None, modu
 
 
 def current_stop(imports, records):
-    """The first import the loader cannot resolve, in registry order."""
+    """The first import the loader cannot resolve, in registry order; a weak import resolves to null instead."""
     classes = {(record["nid"], record["library"]): record for record in records}
-    for nid, library in imports:
+    for nid, library, weak in imports:
+        if weak:
+            continue
         record = classes.get((nid, library))
         if record is not None and record["class"] == "absent":
             return record
@@ -609,6 +627,7 @@ def main(argv=None):
     parser.add_argument("--source", default=str(PRX), help="core/libs/prx tree used to find throwing stubs (default: this repository's)")
     parser.add_argument("--names", help="aerolib.csv style file (NID, name per line) used to name absent imports")
     parser.add_argument("--json", type=Path, help="write the full result to this file")
+    parser.add_argument("--strict-providers", action="store_true", help="fail when a named import is provided only by another library; retains the existing libc and title-module rules")
     args = parser.parse_args(argv)
     try:
         if args.json:
@@ -643,7 +662,7 @@ def main(argv=None):
         print(f"FAIL: {error.strerror}: {error.filename}" if error.filename else f"FAIL: {error}", file=sys.stderr)
         return 2
     print(render(summary, records, missing, stops))
-    return 1 if summary["unique_by_class"]["absent"] or missing else 0
+    return 1 if summary["unique_by_class"]["absent"] or missing or (args.strict_providers and summary["library_mismatch"]) else 0
 
 
 if __name__ == "__main__":

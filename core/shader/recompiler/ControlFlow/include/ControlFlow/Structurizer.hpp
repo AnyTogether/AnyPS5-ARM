@@ -11,6 +11,7 @@ public:
 
 private:
     void structurizeAttempts(ControlFlowGraph& graph, bool relaxReturnJoins) const;
+    void structurizeWithFlags(ControlFlowGraph& graph) const;
     void structurize(ControlFlowGraph& graph, bool privatizeReturns, bool routeLeavingExits, bool routeSharedExits, bool relaxReturnJoins) const;
     void privatizeSharedReturns(ControlFlowGraph& graph) const;
     void computeDominatorTree(ControlFlowGraph& graph) const;

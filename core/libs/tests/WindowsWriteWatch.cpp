@@ -172,6 +172,36 @@ void CheckPrivate() {
     VirtualFree(memory, 0, MEM_RELEASE);
 }
 
+void CheckForgottenSectionKeepsNoPages() {
+    auto& mappings = Mappings::Get();
+    HANDLE section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE, 0, Bytes, nullptr);
+    auto* first = static_cast<unsigned char*>(mappings.Reserve(nullptr, Bytes));
+    auto* second = static_cast<unsigned char*>(mappings.Reserve(nullptr, Bytes));
+    Require(section && first && second, "cannot allocate forgotten section test memory");
+    const auto resident = [&](unsigned char* address) {
+        MEMORY_BASIC_INFORMATION info{};
+        Require(VirtualQuery(address, &info, sizeof(info)) == sizeof(info), "resident query failed");
+        return info.State == MEM_COMMIT && info.Type == MEM_PRIVATE;
+    };
+    mappings.Map(first, Bytes, section, 0, PAGE_READWRITE, true, true);
+    mappings.Map(second, Bytes, section, 0, PAGE_READWRITE, true, true);
+    Require(!resident(first) && !resident(second), "a second mapping kept the first resident");
+    mappings.ForgetSection(section);
+    mappings.Reset(first, Bytes);
+    mappings.Reset(second, Bytes);
+    mappings.Map(first, Bytes, section, 0, PAGE_READWRITE, true, true);
+    Require(resident(first), "a forgotten section's handle value kept its pages in the section");
+    first[0] = 7;
+    mappings.ForgetSection(section);
+    mappings.Reset(first, Bytes);
+    mappings.Map(first, Bytes, section, 0, PAGE_READWRITE, true, true);
+    Require(resident(first) && first[0] == 0, "a forgotten section's handle value kept its unmapped bytes");
+    mappings.Reset(first, Bytes);
+    VirtualFree(first, 0, MEM_RELEASE);
+    VirtualFree(second, 0, MEM_RELEASE);
+    CloseHandle(section);
+}
+
 void CheckConcurrentWrites() {
     Region region;
     std::atomic<bool> start{false};
@@ -199,6 +229,7 @@ int main() {
         CheckFailureAndHoles();
         CheckPrivate();
         CheckConcurrentWrites();
+        CheckForgottenSectionKeepsNoPages();
         std::cout << "Windows deferred write-watch tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import tarfile
 import tempfile
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import package_release
+import prepare_release_notes
 
 
 @contextmanager
@@ -238,6 +240,41 @@ class ReleaseAssetsTests(unittest.TestCase):
             self.assertEqual(sorted(file.name for file in output.iterdir()), sorted(names))
             for name in names:
                 self.assertEqual((output / name).read_bytes(), b"old " + name.encode())
+
+
+class ReleaseNotesTests(unittest.TestCase):
+    def test_short_notes_are_unchanged_including_unicode_at_limit(self):
+        for notes in ("", "## What's Changed\n* Fix\n", "я" * 125000):
+            self.assertEqual(prepare_release_notes.release_body(notes), notes)
+
+    def test_only_changes_section_is_removed_from_long_notes(self):
+        for newline in ("\n", "\r\n"):
+            for tail in ("## New Contributors\n* @example\n\n**Full Changelog**: URL\n",
+                         "**Full Changelog**: URL\n", ""):
+                with self.subTest(newline=newline, tail=tail):
+                    prefix = "Release introduction" + newline
+                    tail = tail.replace("\n", newline)
+                    notes = prefix + "## What's Changed" + newline + "* change\n" * 20000 + tail
+                    self.assertEqual(prepare_release_notes.release_body(notes), prefix + tail)
+
+    def test_oversized_remainder_is_not_shortened(self):
+        remainder = "## New Contributors\n" + "x" * 125001
+        notes = "## What's Changed\n* Fix\n\n" + remainder
+        self.assertEqual(prepare_release_notes.release_body(notes), remainder)
+        self.assertEqual(prepare_release_notes.release_body(remainder), remainder)
+
+    def test_full_notes_are_preserved_in_asset(self):
+        for notes in ("", "## What's Changed\n* Fix\n", "я" * 125000,
+                      "## What's Changed\n" + "* Fix\n" * 25000 + "## New Contributors\n* @example\n"):
+            with self.subTest(length=len(notes)), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "notes.json"
+                body = root / "body.md"
+                full = root / "dist/release-notes.md"
+                source.write_text(json.dumps({"body": notes}), encoding="utf-8")
+                prepare_release_notes.prepare_notes(source, body, full)
+                self.assertEqual(full.read_bytes(), notes.encode("utf-8"))
+                self.assertEqual(body.read_bytes(), prepare_release_notes.release_body(notes).encode("utf-8"))
 
 
 if __name__ == "__main__":

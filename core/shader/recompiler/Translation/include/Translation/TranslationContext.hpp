@@ -2,6 +2,7 @@
 #define CORE_SHADER_RECOMPILIER_TRANSLATION_INCLUDE_TRANSLATION_TRANSLATIONCONTEXT_HPP
 
 #include "Translation/InstructionTranslator.hpp"
+#include "Translation/RoundingMode.hpp"
 #include <array>
 #include <cstdint>
 #include <initializer_list>
@@ -16,11 +17,18 @@ public:
     void TranslateEmbeddedFetch(const RdnaInstruction& instruction, std::uint32_t attribute, std::uint32_t components);
     void TranslateInstruction(const RdnaInstruction& instruction);
     void SetPixelInput(const ShaderPixelInputInfo* info, bool barycentricEnabled, bool hostOnly = false) { pixelInput = info; fragmentShaderBarycentricEnabled = barycentricEnabled; hostInterpolationOnly = hostOnly; }
-    void SetFloatMode(const std::optional<ShaderFloatMode>& mode) { floatMode = mode; ieeeMode = mode.has_value() && mode->ieeeMode; }
+    void SetFloatMode(const std::optional<ShaderFloatMode>& mode) {
+        declaredFloatMode = mode;
+        floatMode = mode;
+        ieeeMode = mode.has_value() && mode->ieeeMode;
+        rounding = RoundingState{static_cast<std::uint8_t>(mode.has_value() ? mode->floatMode & ModeRoundBits : 0u), 0u};
+    }
+    void SetEntryRounding(const RoundingState& state) { setRounding(state); }
     void SetRelaxedFloat(bool relaxed) { relaxedFloat = relaxed; }
     void SetNativeFloat16(bool enabled) { nativeFloat16 = enabled; }
     void AddBranchCondition(const BasicBlock& source, BlockInfo& info);
     void TranslateCodeTableLoad(const RdnaInstruction& instruction, const ControlFlowGraph::CodeTableLoad& table);
+    void TranslateUnlinkedCall(const RdnaInstruction& instruction);
 
 private:
     struct AddressOperands {
@@ -345,6 +353,9 @@ private:
     void vInterpP2F16(const RdnaInstruction& inst);
     void eXP(const RdnaInstruction& inst);
     bool emitScalar(const RdnaInstruction& inst);
+    void setRounding(const RoundingState& state);
+    void writeRounding(const RdnaInstruction& inst);
+    void checkRoundingUse(const RdnaInstruction& inst) const;
     bool emitVector(const RdnaInstruction& inst);
     std::uint32_t f32DenormalFlushFor(const RdnaInstruction& inst) const;
     bool emitInterpolation(const RdnaInstruction& inst);
@@ -356,6 +367,8 @@ private:
     bool hostInterpolationOnly = false;
     bool relaxedFloat = false;
     std::optional<ShaderFloatMode> floatMode;
+    std::optional<ShaderFloatMode> declaredFloatMode;
+    RoundingState rounding;
     bool ieeeMode = false;
     bool nativeFloat16 = false;
     IrBuilder ir;

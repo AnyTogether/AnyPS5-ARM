@@ -44,10 +44,18 @@ TextureDimension resolveDimension(std::uint32_t raw) {
         case 11: return TextureDimension::kCube;
         case 12: return TextureDimension::k1DArray;
         case 13: return TextureDimension::k2DArray;
+        case 14: return TextureDimension::k2DMsaa;
         default: throw std::runtime_error("AGC graphics: guest texture descriptor uses an unsupported image type " + std::to_string(raw));
     }
 }
 
+}
+
+bool IsNullTextureResource(std::span<const std::uint32_t> words) {
+    Require(words.size() == 8, "guest texture descriptor must contain 8 dwords");
+    const auto base40 = (static_cast<std::uint64_t>(words[0]) | (static_cast<std::uint64_t>(words[1]) << 32u)) & 0xffffffffffull;
+    const auto type = (words[3] >> 28u) & 0xfu;
+    return base40 == 0 || type == 0;
 }
 
 GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words) {
@@ -76,7 +84,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     const auto baseArray = (words[4] >> 16u) & 0x1fffu;
 
     const auto arrayPitch = (words[5] >> 0u) & 0xfu;
-    const auto maxMip = (words[5] >> 4u) & 0xfu;
+    auto maxMip = (words[5] >> 4u) & 0xfu;
     const auto minLodWarn = (words[5] >> 8u) & 0xfffu;
     const auto cornerSample = ((words[5] >> 23u) & 0x1u) != 0;
     const auto mipStatsCntEn = ((words[5] >> 25u) & 0x1u) != 0;
@@ -138,6 +146,13 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     } catch (const std::exception& error) {
         throw std::runtime_error(std::string(error.what()) + describe());
     }
+    std::uint32_t samples = 1;
+    if (dimension == TextureDimension::k2DMsaa) {
+        Require(baseLevel == 0 && lastLevel >= 1u && lastLevel <= 4u && maxMip == lastLevel, "guest multisampled texture descriptor does not hold the same sample count of 2 to 16 in its last level and its last mip, which is not implemented" + describe());
+        samples = 1u << lastLevel;
+        lastLevel = 0;
+        maxMip = 0;
+    }
     // Views may name levels past MAX_MIP (a 512x512 view through 1x1 over a 9-level surface); the
     // hardware never addresses them, so the view ends at the surface's last level.
     if (baseLevel <= maxMip) lastLevel = std::min(lastLevel, maxMip);
@@ -160,6 +175,9 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
                 depth = 0;
             }
             Require(depth == 0 && baseArray == 0, "guest 2D texture descriptor has a nonzero depth or base array");
+            break;
+        case TextureDimension::k2DMsaa:
+            Require(depth == 0 && baseArray == 0, "guest multisampled 2D texture descriptor has a nonzero depth or base array");
             break;
         case TextureDimension::k3D:
             // word4 DEPTH holds the depth minus one; BASE_ARRAY has no meaning for volumes.
@@ -207,6 +225,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     result.dccAlphaOnMsb = dccAlphaPos;
     result.dccPipeAligned = metaPipeAligned;
     result.minLod = minLod;
+    result.samples = samples;
     if (baseLevel > maxMip) {
         Require(LevelsFitAllocation(result, lastLevel + 1u), "guest texture descriptor starts past the surface's last mip level at levels that would move the surface's own" + describe());
         result.mipCount = lastLevel + 1u;
@@ -231,6 +250,7 @@ bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, Texture
         case ShaderRecompiler::DescriptorImageShape::ImageCube: return dimension == TextureDimension::kCube;
         case ShaderRecompiler::DescriptorImageShape::Image3D: return dimension == TextureDimension::k3D;
         case ShaderRecompiler::DescriptorImageShape::Image1DArray: return dimension == TextureDimension::k1DArray;
+        case ShaderRecompiler::DescriptorImageShape::Image2DMultisample: return dimension == TextureDimension::k2DMsaa;
     }
     throw std::runtime_error("AGC graphics: MatchesGuestDimension encountered an unknown descriptor image shape");
 }

@@ -42,7 +42,8 @@ static void RequireLockAllUnsupported(int flags) {
     Require(rejected);
 }
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(ANYPS5_ENABLE_ASAN)
+#define HAS_LOCKED_KILOBYTES
 static std::size_t LockedKilobytes() {
     std::ifstream status("/proc/self/status");
     std::string line;
@@ -68,11 +69,11 @@ int main() {
     *__error_nid_postfix() = untouched;
     Require(mlock_nid_postfix(mapped, 0) == 0);
     Require(*__error_nid_postfix() == untouched);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     const auto lockedBefore = LockedKilobytes();
 #endif
     Require(mlock_nid_postfix(bytes + 1, length - page) == 0);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     Require(LockedKilobytes() - lockedBefore == length / 1024);
 #endif
     Require(mlock_nid_postfix(mapped, length) == 0);
@@ -83,7 +84,7 @@ int main() {
     Require(munlock_nid_postfix(mapped, 0) == 0);
     Require(*__error_nid_postfix() == untouched);
     Require(munlock_nid_postfix(bytes + 1, length - page) == 0);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     Require(LockedKilobytes() == lockedBefore);
 #elif defined(_WIN32)
     Require(!VirtualUnlock(mapped, length) && GetLastError() == ERROR_NOT_LOCKED);
@@ -93,18 +94,18 @@ int main() {
     Require(*__error_nid_postfix() == untouched);
     bytes[0] = 7;
     Require(mlock_nid_postfix(mapped, page) == 0);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     Require(LockedKilobytes() - lockedBefore == page / 1024);
 #endif
     Require(munlock_nid_postfix(mapped, length) == 0);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     Require(LockedKilobytes() == lockedBefore);
 #elif defined(_WIN32)
     Require(!VirtualUnlock(mapped, page) && GetLastError() == ERROR_NOT_LOCKED);
 #endif
     Require(mlock_nid_postfix(mapped, page) == 0);
     Require(munlock_nid_postfix(mapped, page) == 0);
-#if defined(__linux__)
+#ifdef HAS_LOCKED_KILOBYTES
     Require(LockedKilobytes() == lockedBefore);
 #elif defined(_WIN32)
     Require(!VirtualUnlock(mapped, page) && GetLastError() == ERROR_NOT_LOCKED);
@@ -119,18 +120,22 @@ int main() {
 
     void* reserved = nullptr;
     Require(sceKernelReserveVirtualRange(&reserved, page, 0, 0) == 0);
+#ifndef ANYPS5_ENABLE_ASAN
     *__error_nid_postfix() = 0;
     Require(mlock_nid_postfix(reserved, page) == -1 && *__error_nid_postfix() == 12);
+#endif
     *__error_nid_postfix() = untouched;
     Require(munlock_nid_postfix(reserved, page) == 0);
     Require(*__error_nid_postfix() == untouched);
     Require(sceKernelMunmap(reserved, page) == 0);
 
     Require(sceKernelMunmap(mapped, length) == 0);
+#ifndef ANYPS5_ENABLE_ASAN
     *__error_nid_postfix() = 0;
     Require(mlock_nid_postfix(mapped, page) == -1 && *__error_nid_postfix() == 12);
     *__error_nid_postfix() = 0;
     Require(munlock_nid_postfix(mapped, page) == -1 && *__error_nid_postfix() == 12);
+#endif
 
     RequireLockAllInvalid(0);
     RequireLockAllInvalid(4);

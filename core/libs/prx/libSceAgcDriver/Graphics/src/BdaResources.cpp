@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Graphics/include/BdaResources.hpp"
+#include "ImageTableAbi.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <algorithm>
 #include <atomic>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <list>
 #include <mutex>
+#include <iomanip>
 #include <sstream>
 
 namespace AgcDriver::Graphics {
@@ -253,7 +255,30 @@ void BdaResources::CheckFault() const {
         std::memset(fault->Bytes().data(), 0, fault->Bytes().size());
         return;
     }
+    if (report.reason == ShaderRecompiler::BdaAbi::FaultReason::ImageTable) {
+        const auto table = std::find_if(imageTables.begin(), imageTables.end(), [&](const ImageTableFaults& candidate) { return candidate.stage == report.stage; });
+        const auto* tables = table != imageTables.end() ? &*table : imageTables.size() == 1 ? &imageTables.front() : nullptr;
+        std::ostringstream message;
+        message << "image table: shader 0x" << std::hex << (tables != nullptr ? tables->shader : 0u) << std::dec << " stage " << report.stage << " pc 0x" << std::hex << report.instruction << " selected the descriptor at 0x" << report.address << std::dec;
+        if (tables != nullptr && report.bytes < tables->poison.size()) {
+            const auto& poison = tables->poison[report.bytes];
+            if (poison.dwordCount != 0) {
+                message << " (words";
+                for (std::uint32_t index = 0; index < poison.dwordCount && index < poison.words.size(); ++index) message << ' ' << std::hex << std::setw(8) << std::setfill('0') << poison.words[index];
+                message << std::dec << ")";
+            }
+            message << ": " << ShaderRecompiler::ImageTableAbi::PoisonReasonName(static_cast<ShaderRecompiler::ImageTableAbi::PoisonReason>(poison.reason));
+            if (report.bytes < tables->messages.size() && !tables->messages[report.bytes].empty()) message << ": " << tables->messages[report.bytes];
+        } else {
+            message << ": poison entry " << report.bytes;
+        }
+        throw std::runtime_error(message.str());
+    }
     std::ostringstream message;
+    if (report.reason == ShaderRecompiler::BdaAbi::FaultReason::UnlinkedCall) {
+        message << "shader stage " << report.stage << " called address 0x" << std::hex << report.address << " at program counter 0x" << report.instruction << ", which no linked callee of that call matches";
+        throw std::runtime_error(message.str());
+    }
     message << "BDA access failed: address=0x" << std::hex << report.address << " instruction=0x" << report.instruction << std::dec << " bytes=" << report.bytes << " stage=" << report.stage << " reason=" << static_cast<std::uint32_t>(report.reason);
     if (report.reason == ShaderRecompiler::BdaAbi::FaultReason::Permission && table != nullptr) {
         const auto bytes = table->Bytes();
@@ -274,13 +299,28 @@ void BdaResources::CheckFault() const {
 
 namespace AgcDriver::Graphics {
 
+void BdaResources::SetImageTables(std::vector<ImageTableFaults> tables, std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges) {
+    imageTables = std::move(tables);
+    imageTableRanges = std::move(ranges);
+}
+
 void BdaResources::markWrittenPages() const {
     namespace Abi = ShaderRecompiler::BdaAbi;
     auto* words = reinterpret_cast<std::uint32_t*>(fault->Bytes().data());
     Require(words[Abi::WrittenOverflowWord] == 0, "more than " + std::to_string(Abi::WrittenPageSlots) + " chunks of " + std::to_string(Abi::WrittenChunkPages) + " pages stored to through the BDA table in one use are not implemented");
     const auto count = words[Abi::WrittenCountWord];
     if (count == 0) return;
-    Require(Abi::ForEachWrittenRange(words, [](std::uint64_t address, std::size_t bytes) { GuestMemory::MarkWritten(address, bytes); }), "invalid BDA written-page record");
+    Require(Abi::ForEachWrittenRange(words, [&](std::uint64_t begin, std::size_t bytes) {
+        const auto end = begin + bytes;
+        for (const auto& [base, size] : imageTableRanges) {
+            if (size != 0 && begin < base + size && base < end) {
+                std::ostringstream message;
+                message << "image table at 0x" << std::hex << base << " is written by its own dispatch";
+                Require(false, message.str());
+            }
+        }
+        GuestMemory::MarkWritten(begin, bytes);
+    }), "invalid BDA written-page record");
     for (std::uint32_t claim = 0; claim < count; ++claim) {
         const auto slot = words[Abi::WrittenListWord + claim];
         words[Abi::WrittenSlotsWord + 2 * slot] = 0;

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <functional>
 #include <mutex>
 #include <unordered_map>
@@ -604,9 +605,50 @@ int APS5_VABI clock_settime_nid_postfix(int clockId, const KernelTimespec* tp) {
 // Moved as-is (not yet implemented) from the monolithic libkernel/Export.cpp.
 // ---------------------------------------------------------------------------
 
-// The sce* clock calls share the POSIX implementations above. The console clock is kept in UTC:
-// the time zone reported here and by gettimeofday has no offset and no daylight saving.
 static constexpr int SceKernelErrorEfault = static_cast<int>(0x8002000e);
+
+struct HostZone {
+    std::int64_t standardEast;
+    std::int64_t daylight;
+};
+
+static HostZone HostZoneAt(std::int64_t utcTime) {
+    std::tm local{};
+#ifdef _WIN32
+    constexpr std::int64_t cycleSeconds = 146097LL * 86400LL;
+    constexpr std::int64_t lastHostSecond = 32535215999LL;
+    const std::int64_t cycles = utcTime >= 0 && utcTime <= lastHostSecond ? 0 : (utcTime >= 0 ? utcTime / cycleSeconds : -((-(utcTime + 1)) / cycleSeconds + 1));
+    const std::time_t t = static_cast<std::time_t>(utcTime - cycles * cycleSeconds);
+    _tzset();
+    if (localtime_s(&local, &t) != 0) throw std::runtime_error(std::string(__func__) + ": no host local time for " + std::to_string(utcTime));
+    long standardBias = 0;
+    long daylightBias = 0;
+    _get_timezone(&standardBias);
+    _get_dstbias(&daylightBias);
+    return {-static_cast<std::int64_t>(standardBias), local.tm_isdst > 0 ? -static_cast<std::int64_t>(daylightBias) : 0};
+#else
+    const std::time_t t = static_cast<std::time_t>(utcTime);
+    ::tzset();
+    if (localtime_r(&t, &local) == nullptr) throw std::runtime_error(std::string(__func__) + ": no host local time for " + std::to_string(utcTime));
+    const std::int64_t daylight = local.tm_isdst > 0 ? static_cast<std::int64_t>(local.tm_gmtoff) + ::timezone : 0;
+    return {static_cast<std::int64_t>(local.tm_gmtoff) - daylight, daylight};
+#endif
+}
+
+static std::int64_t HostDaylightAmount(std::int64_t utcTime) {
+    constexpr std::int64_t monthSeconds = 2629746;
+    for (int month = 0; month <= 11; ++month) {
+        for (const int direction : {1, -1}) {
+            const HostZone zone = HostZoneAt(utcTime + direction * month * monthSeconds);
+            if (zone.daylight != 0) return zone.daylight;
+        }
+    }
+    return 0;
+}
+
+static KernelTimesec ZoneState(std::int64_t time, const HostZone& zone) {
+    return {time, static_cast<std::uint32_t>(zone.standardEast), static_cast<std::uint32_t>(zone.daylight)};
+}
 
 int APS5_VABI sceKernelClockGetres(KernelClockid clock_id, KernelTimespec* tp) {
     if (tp == nullptr) return SceKernelErrorEfault;
@@ -622,16 +664,19 @@ int APS5_VABI sceKernelClockGettime(KernelClockid clock_id, KernelTimespec* tp) 
 
 int APS5_VABI sceKernelConvertLocaltimeToUtc(int64_t local_time, int64_t reserved, int64_t* utc_time, KernelTimesec* timezone, int32_t* dst_seconds) {
     (void)reserved;
-    if (utc_time != nullptr) *utc_time = local_time;
-    if (timezone != nullptr) *timezone = {local_time, 0u, 0u};
-    if (dst_seconds != nullptr) *dst_seconds = 0;
+    const HostZone guess = HostZoneAt(local_time);
+    const HostZone zone = HostZoneAt(local_time - guess.standardEast - guess.daylight);
+    if (utc_time != nullptr) *utc_time = local_time - zone.standardEast - zone.daylight;
+    if (timezone != nullptr) *timezone = ZoneState(local_time, zone);
+    if (dst_seconds != nullptr) *dst_seconds = static_cast<int32_t>(HostDaylightAmount(local_time - zone.standardEast - zone.daylight));
     return 0;
 }
 
 int APS5_VABI sceKernelConvertUtcToLocaltime(int64_t utc_time, int64_t* local_time, KernelTimesec* st, int32_t* dst_sec) {
-    if (local_time != nullptr) *local_time = utc_time;
-    if (st != nullptr) *st = {utc_time, 0u, 0u};
-    if (dst_sec != nullptr) *dst_sec = 0;
+    const HostZone zone = HostZoneAt(utc_time);
+    if (local_time != nullptr) *local_time = utc_time + zone.standardEast + zone.daylight;
+    if (st != nullptr) *st = ZoneState(utc_time, zone);
+    if (dst_sec != nullptr) *dst_sec = static_cast<int32_t>(zone.daylight);
     return 0;
 }
 

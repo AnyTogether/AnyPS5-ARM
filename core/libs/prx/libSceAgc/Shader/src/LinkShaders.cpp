@@ -22,7 +22,7 @@ extern "C" int APS5_VABI sceAgcLinkShaders(ShaderRegister* context, ShaderRegist
 
     // The simple vertex/pixel pipeline combines two primitive context registers
     // and 32 interpolant registers. Publish only after both helpers succeed.
-    AgcDriver::ShaderPreparationScope transaction;
+    AgcDriver::ShaderPreparationScope transaction({vertex, pixel});
     std::array<ShaderRegister, 34> contextValues{};
     std::array<ShaderRegister, 3> primitiveValues{};
     sceAgcCreatePrimState(contextValues.data(), primitiveValues.data(), nullptr, vertex, primitiveType);

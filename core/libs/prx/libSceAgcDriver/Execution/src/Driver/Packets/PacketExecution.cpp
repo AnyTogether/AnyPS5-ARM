@@ -216,7 +216,15 @@ void Driver::execute(const Submission& submission) {
         recent.Record(cursor);
         if (header == RenderingWaitPacketHeader) {
             timed(&WorkerProfile::waitMs, [&] { submission.renderingWaits.at(cursor)->Wait(); });
-        } else if (header == FlipPacketHeader) {
+        } else if (submission.flips.contains(cursor)) {
+            if (opcode == 0x49) {
+                if (!wroteOnGpu) {
+                    Pm4::Execute(packet, queue);
+                    if (const auto label = Pm4::DecodeLabelWrite(packet)) noteLabelStore(label->address, label->Bytes(), ++eventSerial, submission.queue);
+                }
+                if (endOfPipeInterrupt && !interruptDeferred) AgcDriverDeliverEopInterrupt(submission.queue);
+            }
+            if (deviceUse.owns_lock()) deviceUse.unlock();
             CheckFailure();
             std::uint64_t batchesAtFlip = 0, unsignaledAtFlip = 0;
             bool flipInterruptDeferred = false;
@@ -335,7 +343,7 @@ void Driver::execute(const Submission& submission) {
             recordQueuedLabelsBeforeRead(submission.queue);
             Pm4::Execute(packet, queue);
         } else if (sampleDump && !wroteOnGpu) {
-            dumpSampleCounters(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u));
+            dumpSampleCounters(Pm4::SampleDumpAddress(packet));
         } else if (opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
             if (!wroteOnGpu) {
                 if (Pm4::IndirectRegisterOpcode(opcode)) Pm4::ExecuteIndirectRegisters(packet, submission.registerLists.at(cursor), queue);

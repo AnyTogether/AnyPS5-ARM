@@ -168,6 +168,9 @@ void testRegisterFile() {
 
 void testContextAndBases() {
     AgcDriver::QueueState state;
+    for (const auto offset : {0x10bu, 0x10cu, 0x10du}) execute(state, makePacket(0x69, {offset, 0xffffffffu}));
+    execute(state, makePacket(0x12, {0}));
+    for (const auto offset : {0x10bu, 0x10cu, 0x10du}) check(state.context.at(offset) == 0, "CLEAR_STATE did not restore stencil defaults");
     execute(state, makePacket(0x69, {0x10, 17}));
     execute(state, makePacket(0x76, {0x20c, 2}));
     execute(state, makePacket(0x10, {3, 0}, 0x68));
@@ -548,6 +551,21 @@ void testCopies() {
     } catch (...) { VirtualFree(memory, 0, MEM_RELEASE); throw; }
     check(VirtualFree(memory, 0, MEM_RELEASE) != 0, "VirtualFree failed");
 #endif
+}
+
+void testTraceRegisterWrites() {
+    AgcDriver::QueueState state;
+    const auto repeated = makePacket(0x37, {0x06010000u, 0xc343u, 0u, 0x1234u, 0x5678u});
+    check(!AgcDriver::Pm4::DecodeLabelWrite(repeated), "trace register payload was decoded as a guest memory label");
+    execute(state, repeated);
+    check(state.userConfig.at(0x343u) == 0x5678u, "one-address trace write did not retain the last register value");
+    execute(state, makePacket(0x37, {0x06000000u, 0xc340u, 0u, 1u, 2u, 3u}));
+    check(state.userConfig.at(0x340u) == 1u && state.userConfig.at(0x341u) == 2u && state.userConfig.at(0x342u) == 3u, "sequential trace write did not advance the register address");
+    execute(state, makePacket(0x37, {0x06010000u, 0xc347u, 0u, 4u, 5u}));
+    check(state.userConfig.at(0x347u) == 5u, "one-address trace write crossed the register range");
+    for (const auto& invalid : {makePacket(0x37, {0x06000000u, 0xc347u, 0u, 1u, 2u}), makePacket(0x37, {0x06010000u, 0xc348u, 0u, 1u}), makePacket(0x37, {0x06010000u, 0xc343u, 1u, 1u})}) {
+        expectFailure([&] { execute(state, invalid); }, "register destination outside");
+    }
 }
 
 void testMemoryCopyDecode() {
@@ -1238,6 +1256,7 @@ int main(int argc, char** argv) {
         testIndirectDraw();
         testIndexAttributesIndirect();
         testMemory();
+        testTraceRegisterWrites();
         testCopies();
         testMemoryCopyDecode();
         testMemorySynchronization();

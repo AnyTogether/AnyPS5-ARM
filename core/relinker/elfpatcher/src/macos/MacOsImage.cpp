@@ -63,6 +63,7 @@ constexpr std::uint8_t RebaseOpcodeDoRebaseImmTimes = 0x50;
 
 constexpr std::uint8_t BindTypePointer = 1;
 constexpr std::uint8_t BindSpecialDylibFlatLookup = 0x0e;
+constexpr std::uint8_t BindSymbolFlagsWeakImport = 0x1;
 constexpr std::uint8_t BindOpcodeDone = 0x00;
 constexpr std::uint8_t BindOpcodeSetDylibSpecialImm = 0x30;
 constexpr std::uint8_t BindOpcodeSetSymbolTrailingFlagsImm = 0x40;
@@ -649,7 +650,7 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     bind.push_back(BindOpcodeSetTypeImm | BindTypePointer);
     for (const auto& item : input.Binds) {
         const auto [segment, offset] = Locate(segments, item.Rva, 8);
-        bind.push_back(BindOpcodeSetSymbolTrailingFlagsImm);
+        bind.push_back(item.Weak ? BindOpcodeSetSymbolTrailingFlagsImm | BindSymbolFlagsWeakImport : BindOpcodeSetSymbolTrailingFlagsImm);
         AppendCString(bind, item.Symbol);
         bind.push_back(BindOpcodeSetAddendSleb);
         AppendSleb(bind, item.Addend);

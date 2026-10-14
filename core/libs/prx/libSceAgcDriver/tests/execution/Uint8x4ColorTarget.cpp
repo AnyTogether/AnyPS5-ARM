@@ -51,7 +51,7 @@ constexpr std::array<std::array<float, 4>, 3> Triangle{{
     {-1.0f, -1.0f, 0.5f, 1.0f}, {3.0f, -1.0f, 0.5f, 1.0f}, {-1.0f, 3.0f, 0.5f, 1.0f}
 }};
 
-alignas(256) std::array<std::array<std::uint32_t, 16>, 4> Programs{};
+alignas(256) std::array<std::array<std::uint32_t, 16>, 6> Programs{};
 std::size_t programCount = 0;
 
 std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t stride, std::uint32_t count) {
@@ -246,6 +246,8 @@ int main() {
         Expect(*device, Rgba8UintInfo, VK_FORMAT_R8G8B8A8_UINT, 4, {0x12u, 0xbeu, 0x42u, 0x7fu}, "a UINT16_ABGR export into an 8_8_8_8_UINT target");
         Expect(*device, Rgba8UintInfo, VK_FORMAT_R8G8B8A8_UINT, 4, {0x23u, 0x9au, 0x65u, 0x81u}, "a UINT16_ABGR export into a SW_64KB_D_X target", AgcDriver::Graphics::ColorTileMode::D64KBX);
         Expect(*device, Rgba8UintInfo, VK_FORMAT_R8G8B8A8_UINT, 4, {0x31u, 0x7cu, 0x42u, 0x96u}, "a UINT16_ABGR export into a SW_64KB_D_X target with XOR", AgcDriver::Graphics::ColorTileMode::D64KBX, 0x4600);
+        Expect(*device, Rgba8UintInfo, VK_FORMAT_R8G8B8A8_UINT, 4, {0x47u, 0x2bu, 0xd1u, 0x6eu}, "a UINT16_ABGR export into a SW_64KB_Z_X target", AgcDriver::Graphics::ColorTileMode::Z64KBX);
+        Expect(*device, Rgba8UintInfo, VK_FORMAT_R8G8B8A8_UINT, 4, {0x5cu, 0x83u, 0x19u, 0xa4u}, "a UINT16_ABGR export into a SW_64KB_Z_X target with XOR", AgcDriver::Graphics::ColorTileMode::Z64KBX, 0x4600);
         std::puts("8_8_8_8_UINT color target tests passed");
         return 0;
     } catch (const std::exception& error) {

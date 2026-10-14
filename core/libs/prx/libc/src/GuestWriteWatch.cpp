@@ -52,8 +52,8 @@ constexpr std::uintptr_t PageBytes = 4096;
 class Watch {
 public:
     static Watch& Get() {
-        static Watch watch;
-        return watch;
+        static auto* watch = new Watch;
+        return *watch;
     }
 
     bool Available() const {
@@ -326,8 +326,8 @@ const bool g_opened = (Watch::Get(), true);
 class Watch {
 public:
     static Watch& Get() {
-        static Watch watch;
-        return watch;
+        static auto* watch = new Watch;
+        return *watch;
     }
 
     bool Available() const {

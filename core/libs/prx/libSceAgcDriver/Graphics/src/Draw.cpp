@@ -53,6 +53,7 @@ std::uint64_t DrawRenderPassKey(const Context& context, const State& state, std:
     mix(state.samples);
     mix(state.customSampleLocations);
     if (state.customSampleLocations) {
+        mix(state.sampleLocationGrid);
         for (const auto location : state.sampleLocations) mix(location);
     }
     if (!context.provokingVertexModePerPipeline) mix(state.provokingVertexMode);
@@ -94,12 +95,12 @@ std::array<std::byte, 16> clearTexel(const ColorTarget& color, DccKeys keys) {
     return texel;
 }
 
-bool clearToTexel(StorageTexture& image, const std::array<std::byte, 16>& texel, std::uint32_t elementBytes, const char*& refusal) {
+bool clearToTexel(StorageTexture& image, const std::array<std::byte, 16>& texel, std::uint32_t elementBytes, const char*& refusal, bool allowRegisterClear = false) {
     std::array<std::byte, 16> repeated{};
     for (std::size_t offset = 0; offset + elementBytes <= repeated.size(); offset += elementBytes) std::memcpy(repeated.data() + offset, texel.data(), elementBytes);
     std::array<std::uint32_t, 4> pattern{};
     std::memcpy(pattern.data(), repeated.data(), repeated.size());
-    return image.FillClear(std::span<const std::uint32_t, 4>(pattern), StorageTexture::WholeImage, refusal);
+    return image.FillClear(std::span<const std::uint32_t, 4>(pattern), StorageTexture::WholeImage, refusal, allowRegisterClear);
 }
 
 void writeTexels(const ColorTarget& color, const std::array<std::byte, 16>& texel) {
@@ -666,6 +667,8 @@ bool ValidationKey(const Context& context, std::span<const CompiledShader> shade
             add(tessellation.partitioning);
             add(tessellation.outputTopology);
             add(tessellation.patchesPerGroup);
+            add(tessellation.primitiveGroupSize);
+            add(tessellation.breakAtInstance ? 1u : 0u);
         }
     }
     return keyed;
@@ -697,7 +700,7 @@ std::set<std::uint32_t> CachedFragmentOutputs(const Context& context, std::span<
     }
     std::set<std::uint32_t> outputs;
     try {
-        outputs = ValidateShaders(shaders, state, context.subgroup, context.fragmentShaderBarycentric, context.descriptorIndexing, context.imageInt64Atomics, context.geometryShader, context.sampleRateShading, context.bufferInt64Atomics, context.shaderClipDistance, context.shaderCullDistance, context.viewportIndexLayer);
+        outputs = ValidateShaders(shaders, state, context.subgroup, context.fragmentShaderBarycentric, context.descriptorIndexing, context.imageInt64Atomics, context.geometryShader, context.sampleRateShading, context.bufferInt64Atomics, context.shaderClipDistance, context.shaderCullDistance, context.viewportIndexLayer, context.runtimeDescriptorArray);
     } catch (const std::exception& error) {
         if (keyed) {
             std::lock_guard lock(validationMutex());
@@ -1022,6 +1025,7 @@ struct DrawInputs {
     VkDeviceSize indexOffset = 0;
     std::uint32_t maxIndex = 0;
     VertexInputLayout vertexInput;
+    std::shared_ptr<const VertexInputLayout> retainedVertexInput;
     std::vector<std::shared_ptr<Buffer>> vertexBuffers;
     std::vector<VkBuffer> vertexHandles;
     std::vector<VkDeviceSize> vertexOffsets;
@@ -1031,6 +1035,7 @@ struct DrawInputs {
     std::uint32_t meshGroups = 0;
     std::vector<std::uint32_t> restartTable;
     const ShaderRecompiler::RecompileResult* emulatedMesh = nullptr;
+    const VertexInputLayout& VertexLayout() const { return retainedVertexInput != nullptr ? *retainedVertexInput : vertexInput; }
 };
 
 std::shared_ptr<Buffer> zeroVertexBuffer(const Context& context, const ShaderRecompiler::VertexAttribute& attribute) {
@@ -1206,8 +1211,12 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
     APS5_LOG_CHARS_OUT_DEBUG("Index validation OK");
     const auto& attributes = shaders.front().program->vertexAttributes;
     // Validates the vertex descriptors; the layout also keys and builds the pipeline.
-    if (recipe != nullptr) inputs.vertexInput = recipe->vertexInput;
-    else inputs.vertexInput = BuildVertexInputLayout(context, attributes);
+    if (recipe != nullptr) {
+        inputs.vertexInput = recipe->vertexInput;
+    } else if (!attributes.empty()) {
+        if (context.vertexInputs != nullptr) inputs.retainedVertexInput = context.vertexInputs->TryGet(shaders.front().program->variantId, attributes);
+        if (inputs.retainedVertexInput == nullptr) inputs.vertexInput = BuildVertexInputLayout(context, attributes);
+    }
     inputs.vertexOffsets.assign(attributes.size(), 0);
     // An indexed draw's vertex offset moves every fetch: the copy must reach the last one.
     if (draw.indexed) {
@@ -2244,6 +2253,9 @@ void drawWith(const Context& context, const State& state, const Pm4::DrawParamet
     const bool multisampled = std::any_of(targets.begin(), targets.end(), [](const TargetBinding& binding) { return binding.multisampled; });
     Require(lean || !multisampled, "multisampled draws are only rendered as recorded draws");
     Require(lean || inputs.emulatedMesh == nullptr, "emulated mesh draws are only rendered as recorded draws");
+    for (const auto& binding : targets) {
+        if (binding.multisampled) Require(std::find(resources->MultisampleSources().begin(), resources->MultisampleSources().end(), binding.color.surfaceAddress) == resources->MultisampleSources().end(), "sampling a multisampled color target the draw renders to is not implemented");
+    }
     if (!lean && !resolved.moved.empty()) {
         resolved.resources = std::make_shared<ShaderResources>(context, shaders, state.color, static_cast<std::uint32_t>(state.colors.size()), draw.indexAddress, static_cast<std::size_t>(indexBytes), snapshots);
         resolved.moved.clear();
@@ -2265,7 +2277,7 @@ void drawWith(const Context& context, const State& state, const Pm4::DrawParamet
         const auto built = resources->SetLayouts();
         Require(described.layouts.main == built.main && described.layouts.fragment == built.fragment && described.layouts.split == built.split && std::ranges::equal(described.mainKey, built.mainKey) && std::ranges::equal(described.fragmentKey, built.fragmentKey), "set layouts described from the shaders differ from the draw's");
     }
-    auto pipeline = CachedPipeline(context, pipelineState, inputs.vertexInput, *resources, shaders, lean ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    auto pipeline = CachedPipeline(context, pipelineState, inputs.VertexLayout(), *resources, shaders, lean ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     // Resident targets' views are stable while their storage image lives, so the framebuffer is
     // reused with the pipeline; a per-draw RenderTarget gets a framebuffer of its own.
     std::vector<std::shared_ptr<StorageTexture>> owners;
@@ -2311,7 +2323,7 @@ void drawWith(const Context& context, const State& state, const Pm4::DrawParamet
             for (const auto& owner : owners) recipe->targets.emplace_back(owner);
             recipe->targetViews = targetViews;
             recipe->passKey = DrawRenderPassKey(context, state, targetViews);
-            recipe->vertexInput = inputs.vertexInput;
+            recipe->vertexInput = inputs.VertexLayout();
             recipe->pushStages = PushConstantStages(shaders);
             if (recipe->pushStages != 0) {
                 recipe->pushBytes = AssemblePushConstants(shaders);
@@ -2719,6 +2731,10 @@ void RunColorMetadataPass(const Context& context, const ColorMetadataPass& pass)
         ResolveMultisampleTarget(context, *pass.source, *resident, resident->AttachmentView(destination.format, destination.mip));
         return;
     }
+    if (pass.mode == ColorMetadataPass::Mode::FmaskDecompress) {
+        for (const auto& color : pass.targets) MaterializeMultisampleTargetClear(context, color);
+        return;
+    }
     for (const auto& color : pass.targets) {
         if (color.cmaskAddress != 0) {
             const auto resident = metadataPassResident(context, color);
@@ -2738,7 +2754,7 @@ void RunColorMetadataPass(const Context& context, const ColorMetadataPass& pass)
         const auto resident = metadataPassResident(context, color);
         if (resident != nullptr) {
             const char* refusal = nullptr;
-            const bool current = keys == DccKeys::ClearRegister ? clearToTexel(*resident, texel, color.elementBytes, refusal) : StorageTexture::FindPending(color.address, color.bytes) == resident || resident->UploadedKeys() == keys;
+            const bool current = keys == DccKeys::ClearRegister ? clearToTexel(*resident, texel, color.elementBytes, refusal, true) : StorageTexture::FindPending(color.address, color.bytes) == resident || resident->UploadedKeys() == keys;
             if (current) {
                 resident->MarkDirty();
                 MarkDccUncompressed(context, color.dccAddress, color.bytes, colorKeyCount(color, color.bytes));

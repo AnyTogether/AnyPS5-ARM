@@ -85,8 +85,11 @@ private:
     };
 
     static bool read(void* context, std::uint64_t address, std::uint32_t* value);
+    static bool readWords(void* context, std::uint64_t address, std::uint32_t* values, std::uint64_t count);
     static bool accessible(void* context, std::uint64_t address, std::uint64_t bytes);
+    static bool pending(void* context, std::uint64_t address, std::uint64_t bytes);
     Page& page(std::uint64_t base);
+    [[nodiscard]] bool overlapsInitial(std::uint64_t begin, std::uint64_t end) const;
 
     // Regions given at construction (the registered shader's code and header), referenced as given:
     // the caller keeps them alive for as long as the capture is used.

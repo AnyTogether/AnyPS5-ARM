@@ -59,6 +59,20 @@ class DebtSplitTests(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-qm", "docs: split technical debt")
 
+    def test_split_preserves_external_urls_and_rewrites_local_links(self):
+        links = ["HTTPS://example.test/guide#intro", "//example.test/guide#intro",
+                 "https://example.test/guide", "MAILTO:author@example.test"]
+        references = " ".join(f"[reference]({target})" for target in links)
+        self.write(INDEX, ORIGINAL.replace(A_STUB, A_STUB + " " + references
+                   + " [local](ARCHITECTURE.md#layout)"))
+        self.split()
+        moved = self.read("docs/dev/debt/libSceA.md")
+        for target in links:
+            with self.subTest(target=target):
+                self.assertIn(f"[reference]({target})", moved)
+        self.assertIn("[local](../ARCHITECTURE.md#layout)", moved)
+        self.assertIn("../../../core/libs/prx/libSceA/Export.cpp", moved)
+
     def test_split_moves_entries_by_their_first_core_link(self):
         self.split()
         self.assertEqual(self.read("docs/dev/debt/libSceA.md"),

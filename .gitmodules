@@ -37,3 +37,6 @@
 [submodule "3rdparty/libusb-cmake"]
 	path = 3rdparty/libusb-cmake
 	url = https://github.com/libusb/libusb-cmake.git
+[submodule "3rdparty/mbedtls"]
+	path = 3rdparty/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git

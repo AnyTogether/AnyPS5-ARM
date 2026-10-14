@@ -114,16 +114,14 @@ std::vector<std::byte> copySource(std::uint64_t source, std::size_t bytes, bool 
     return data;
 }
 
-constexpr std::uint32_t DmaSelectGds = 1;
-constexpr std::uint32_t DmaSelectNowhere = 2;
 
 bool gdsRange(std::uint64_t offset, std::size_t bytes) {
     return offset <= GdsBytes && bytes <= GdsBytes - offset;
 }
 
 std::vector<std::byte> dmaSourceBytes(std::span<const std::uint32_t> packet) {
-    const std::size_t bytes = packet[6] & 0x3ffffffu;
-    if (dmaSource(packet) != DmaSelectGds) return copySource(address(packet[2], packet[3]), bytes, dmaSource(packet) == 2);
+    const std::size_t bytes = DmaBytes(packet);
+    if (dmaSource(packet) != DmaSelectGds) return copySource(address(packet[2], packet[3]), bytes, dmaSource(packet) == DmaSourceData);
     return copySource(GdsAddress() + packet[2], bytes, false);
 }
 
@@ -133,13 +131,8 @@ void copyMemory(std::uint64_t source, std::uint64_t destination, std::size_t byt
     GuestMemory::Write(destination, copySource(source, bytes, immediate));
 }
 
-constexpr std::uint32_t CopyDataGpuClockSource = 18;
 constexpr std::uint32_t CopyDataCachePolicy = (3u << 13u) | (3u << 25u);
 constexpr std::uint32_t ContextRegisterBase = 0xa000;
-
-bool copyDataToRegister(std::span<const std::uint32_t> packet) {
-    return ((packet[1] >> 8u) & 0xfu) == 0;
-}
 
 std::uint32_t copyDataCount(std::span<const std::uint32_t> packet) {
     return (packet[1] & 0x10000u) != 0 ? 2u : 1u;
@@ -150,8 +143,8 @@ std::uint64_t gpuClockCount() {
 }
 
 std::vector<std::byte> copyDataSource(std::span<const std::uint32_t> packet, std::size_t bytes) {
-    const auto source = ((packet[1] & 0xfu) << 1u) | ((packet[1] >> 30u) & 1u);
-    if (source != CopyDataGpuClockSource) return copySource(address(packet[2], packet[3]), bytes, source >= 10);
+    const auto source = CopyDataSource(packet);
+    if (source != CopyDataGpuClockSource) return copySource(address(packet[2], packet[3]), bytes, CopyDataImmediate(source));
     const auto value = gpuClockCount();
     std::vector<std::byte> data(bytes);
     for (std::size_t i = 0; i < bytes; ++i) data[i] = static_cast<std::byte>(value >> (i * 8));
@@ -460,6 +453,11 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
             require(packet.size() >= 5, "WRITE_DATA has no data");
             require((packet[1] & ~(0x40110f00u | WriteDataCachePolicy)) == 0, "WRITE_DATA engine or reserved fields are not implemented");
             const auto destination = (packet[1] >> 8u) & 0xfu;
+            if (destination == 0) {
+                const auto count = (packet[1] & 0x10000u) != 0 ? 1u : packet.size() - 4;
+                require(packet[3] == 0 && packet[2] >= 0xc340u && packet[2] <= 0xc347u && count <= 0xc348u - packet[2], "WRITE_DATA register destination outside the thread-trace user-data registers is not implemented");
+                break;
+            }
             require(destination == 1 || destination == 2 || destination == 3 || destination == 5, "WRITE_DATA register destination is not implemented");
             require((packet[2] & 3u) == 0, "misaligned WRITE_DATA destination");
             break;
@@ -467,9 +465,9 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
         case 0x40: {
             size(6);
             require((packet[1] & ~(0x40110f0fu | CopyDataCachePolicy)) == 0, "COPY_DATA engine or reserved fields are not implemented");
-            const auto source = ((packet[1] & 0xfu) << 1u) | ((packet[1] >> 30u) & 1u);
+            const auto source = CopyDataSource(packet);
             const auto destination = ((packet[1] >> 8u) & 0xfu) << 1u;
-            if (copyDataToRegister(packet)) {
+            if (CopyDataToRegister(packet)) {
                 require(source == 2 || source == 4, "COPY_DATA to a register from a register, GDS, immediate or clock source is not implemented");
                 require((packet[2] & 3u) == 0, "misaligned COPY_DATA source");
                 require(packet[5] == 0 && packet[4] >= ContextRegisterBase && packet[4] - ContextRegisterBase <= 0x400u - copyDataCount(packet), "COPY_DATA to a register outside the context registers is not implemented");
@@ -483,12 +481,12 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
         case 0x50:
             size(7);
             require((packet[1] & ~(0xe0300001u | DmaSourceCachePolicy | DmaDestinationCachePolicy)) == 0, "DMA_DATA reserved fields are not implemented");
-            require(memorySelector(dmaDestination(packet)) || dmaDestination(packet) == DmaSelectGds || dmaDestination(packet) == DmaSelectNowhere, "DMA_DATA register destination is not implemented");
-            require(dmaDestination(packet) != DmaSelectNowhere || memorySelector(dmaSource(packet)), "DMA_DATA prefetch of a register, GDS or immediate source is not implemented");
-            require(memorySelector(dmaSource(packet)) || dmaSource(packet) == 2 || dmaSource(packet) == DmaSelectGds, "DMA_DATA register source is not implemented");
-            require(dmaSource(packet) != DmaSelectGds || (packet[3] == 0 && gdsRange(packet[2], packet[6] & 0x3ffffffu)), "DMA_DATA GDS source range exceeds the GDS");
-            require(dmaDestination(packet) != DmaSelectGds || (packet[5] == 0 && gdsRange(packet[4], packet[6] & 0x3ffffffu)), "DMA_DATA GDS destination range exceeds the GDS");
-            require(dmaSource(packet) != 2 || packet[3] == 0, "DMA_DATA immediate exceeds 32 bits");
+            require(memorySelector(dmaDestination(packet)) || dmaDestination(packet) == DmaSelectGds || dmaDestination(packet) == DmaDestinationNowhere, "DMA_DATA register destination is not implemented");
+            require(dmaDestination(packet) != DmaDestinationNowhere || memorySelector(dmaSource(packet)), "DMA_DATA prefetch of a register, GDS or immediate source is not implemented");
+            require(memorySelector(dmaSource(packet)) || dmaSource(packet) == DmaSourceData || dmaSource(packet) == DmaSelectGds, "DMA_DATA register source is not implemented");
+            require(dmaSource(packet) != DmaSelectGds || (packet[3] == 0 && gdsRange(packet[2], DmaBytes(packet))), "DMA_DATA GDS source range exceeds the GDS");
+            require(dmaDestination(packet) != DmaSelectGds || (packet[5] == 0 && gdsRange(packet[4], DmaBytes(packet))), "DMA_DATA GDS destination range exceeds the GDS");
+            require(dmaSource(packet) != DmaSourceData || packet[3] == 0, "DMA_DATA immediate exceeds 32 bits");
             break;
         default: throw std::runtime_error("known packet has no validator");
     }
@@ -585,6 +583,7 @@ std::optional<LabelWrite> DecodeLabelWrite(std::span<const std::uint32_t> packet
         return label;
     }
     if (opcode == 0x37 && packet.size() > 4) {
+        if (((packet[1] >> 8u) & 0xfu) == 0) return std::nullopt;
         const auto destination = address(packet[2], packet[3]);
         if (destination == 0) return std::nullopt;
         // WR_ONE_ADDR stores every value at the same address: the last one remains.
@@ -601,28 +600,29 @@ std::optional<StoreWrite> ResolveStore(std::span<const std::uint32_t> packet, co
     const auto fits = [limit](std::uint64_t destination, std::size_t bytes) { return bytes <= limit && destination % 4 == 0 && bytes % 4 == 0; };
     switch ((packet[0] >> 8u) & 0xffu) {
         case 0x40: {
-            if (packet.size() < 6 || copyDataToRegister(packet)) return std::nullopt;
-            const auto source = ((packet[1] & 0xfu) << 1u) | ((packet[1] >> 30u) & 1u);
-            const std::size_t bytes = (packet[1] & 0x10000u) != 0 ? 8 : 4;
+            if (packet.size() < 6 || CopyDataToRegister(packet)) return std::nullopt;
+            const std::size_t bytes = CopyDataBytes(packet);
             const auto destination = address(packet[4], packet[5]);
             if (!fits(destination, bytes)) return std::nullopt;
             return StoreWrite{destination, {}, copyDataSource(packet, bytes)};
         }
         case 0x50: {
             if (packet.size() < 7 || dmaDestination(packet) == DmaSelectGds) return std::nullopt;
-            if (dmaDestination(packet) == DmaSelectNowhere) return StoreWrite{address(packet[2], packet[3]), {}, {}};
-            const std::size_t bytes = packet[6] & 0x3ffffffu;
+            if (dmaDestination(packet) == DmaDestinationNowhere) return StoreWrite{address(packet[2], packet[3]), {}, {}};
+            const std::size_t bytes = DmaBytes(packet);
             const auto destination = address(packet[4], packet[5]);
             if (!fits(destination, bytes)) return std::nullopt;
             return StoreWrite{destination, {}, dmaSourceBytes(packet)};
         }
         case 0x83: {
-            if (packet.size() < 5 || packet[1] / 4 > QueueState::ConstantRamWords || packet[2] > QueueState::ConstantRamWords - packet[1] / 4) return std::nullopt;
-            const auto words = queue.ConstantRam().subspan(packet[1] / 4, packet[2]);
+            if (packet.size() != 5) return std::nullopt;
+            const auto dump = DecodeConstantRamDump(packet);
+            if (dump.offset / 4 > QueueState::ConstantRamWords || dump.words > QueueState::ConstantRamWords - dump.offset / 4) return std::nullopt;
+            const auto words = queue.ConstantRam().subspan(dump.offset / 4, dump.words);
             if (words.size_bytes() > limit) return std::nullopt;
             // A view of the queue's constant RAM: valid until the next CONST_RAM write on this queue,
             // which is a later packet of the same worker.
-            return StoreWrite{address(packet[3], packet[4]), std::as_bytes(words), {}};
+            return StoreWrite{dump.destination, std::as_bytes(words), {}};
         }
         default: return std::nullopt;
     }
@@ -636,10 +636,87 @@ std::uint32_t DmaDestination(std::span<const std::uint32_t> packet) {
     return dmaDestination(packet);
 }
 
+WaitFields DecodeWait(std::span<const std::uint32_t> packet) {
+    const auto opcode = packet.empty() ? 0u : (packet[0] >> 8u) & 0xffu;
+    require((opcode == 0x3cu && packet.size() == 7) || (opcode == 0x93u && packet.size() == 9), "expected WAIT_REG_MEM or WAIT_REG_MEM_64 packet");
+    const bool wide = opcode == 0x93u;
+    return {packet[1] & 7u, address(packet[2], packet[3]), wide ? address(packet[4], packet[5]) : packet[4], wide ? address(packet[6], packet[7]) : packet[5], wide ? packet[8] : packet[6], WaitAwaitedBytes(packet)};
+}
+
+ConditionalWrite DecodeConditionalWrite(std::span<const std::uint32_t> packet) {
+    require(packet.size() == 9 && ((packet[0] >> 8u) & 0xffu) == 0x45u, "expected COND_WRITE packet");
+    return {address(packet[2], packet[3]), address(packet[6], packet[7]), packet[8]};
+}
+
+ConstantRamDump DecodeConstantRamDump(std::span<const std::uint32_t> packet) {
+    require(packet.size() == 5 && ((packet[0] >> 8u) & 0xffu) == 0x83u, "expected DUMP_CONST_RAM packet");
+    return {packet[1], packet[2], address(packet[3], packet[4])};
+}
+
+std::vector<PacketStore> DecodeStores(std::span<const std::uint32_t> packet) {
+    require(!packet.empty(), "truncated PM4 header");
+    const auto known = [](std::uint64_t destination, std::span<const std::byte> bytes) {
+        return PacketStore{destination, bytes.size(), PacketStore::Value::Bytes, {bytes.begin(), bytes.end()}, false};
+    };
+    const auto pattern = [](std::uint64_t destination, std::uint64_t bytes, std::uint32_t value) {
+        const auto repeated = std::as_bytes(std::span(&value, 1));
+        return PacketStore{destination, bytes, PacketStore::Value::Pattern, {repeated.begin(), repeated.end()}, false};
+    };
+    const auto runTime = [](std::uint64_t destination, std::uint64_t bytes) { return PacketStore{destination, bytes, PacketStore::Value::RunTime, {}, false}; };
+    if (FillerPacket(packet[0])) return {};
+    switch ((packet[0] >> 8u) & 0xffu) {
+        case 0x49: {
+            const auto label = DecodeLabelWrite(packet);
+            if (!label.has_value()) return {};
+            if ((packet[2] >> 29u) == 3) return {runTime(label->address, label->Bytes().size())};
+            return {known(label->address, label->Bytes())};
+        }
+        case 0x37: {
+            const auto label = DecodeLabelWrite(packet);
+            if (!label.has_value()) return {};
+            return {known(label->address, label->Bytes())};
+        }
+        case 0x40: {
+            require(packet.size() == 6, "invalid COPY_DATA size");
+            if (CopyDataToRegister(packet)) return {};
+            const auto destination = address(packet[4], packet[5]);
+            if (CopyDataImmediate(CopyDataSource(packet))) return {pattern(destination, CopyDataBytes(packet), packet[2])};
+            return {runTime(destination, CopyDataBytes(packet))};
+        }
+        case 0x50: {
+            require(packet.size() == 7, "invalid DMA_DATA size");
+            const auto bytes = DmaBytes(packet);
+            if (bytes == 0 || dmaDestination(packet) == DmaDestinationNowhere || dmaDestination(packet) == DmaSelectGds) return {};
+            const auto destination = address(packet[4], packet[5]);
+            if (dmaSource(packet) == DmaSourceData) return {pattern(destination, bytes, packet[2])};
+            return {runTime(destination, bytes)};
+        }
+        case 0x45: {
+            const auto write = DecodeConditionalWrite(packet);
+            auto store = known(write.destination, std::as_bytes(std::span(&write.value, 1)));
+            store.conditional = true;
+            return {store};
+        }
+        case 0x83: {
+            const auto dump = DecodeConstantRamDump(packet);
+            if (dump.words == 0) return {};
+            return {runTime(dump.destination, static_cast<std::uint64_t>(dump.words) * 4)};
+        }
+        case 0x46: {
+            if (!SampleDump(packet)) return {};
+            require(packet.size() == 4, "invalid EVENT_WRITE sample dump size");
+            std::vector<PacketStore> stores;
+            for (std::uint64_t block = 0; block < SampleDumpBlocks; ++block) stores.push_back(runTime(SampleDumpAddress(packet) + block * SampleDumpStride, SampleDumpBlockBytes));
+            return stores;
+        }
+        default: return {};
+    }
+}
+
 std::optional<MemoryCopy> DecodeMemoryCopy(std::span<const std::uint32_t> packet) {
     if (packet.size() != 7 || ((packet[0] >> 8u) & 0xffu) != 0x50) return std::nullopt;
     if (!memorySelector(dmaSource(packet)) || !memorySelector(dmaDestination(packet))) return std::nullopt;
-    const std::size_t bytes = packet[6] & 0x3ffffffu;
+    const std::size_t bytes = DmaBytes(packet);
     const auto source = address(packet[2], packet[3]);
     const auto destination = address(packet[4], packet[5]);
     if (bytes == 0 || (source < destination + bytes && destination < source + bytes)) return std::nullopt;
@@ -957,19 +1034,27 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
         case 0x81:
             std::copy(packet.begin() + 2, packet.end(), queue.WritableConstantRam().begin() + packet[1] / 4);
             return;
-        case 0x83:
-            GuestMemory::Write(address(packet[3], packet[4]), std::as_bytes(queue.ConstantRam().subspan(packet[1] / 4, packet[2])), 4);
+        case 0x83: {
+            const auto dump = DecodeConstantRamDump(packet);
+            GuestMemory::Write(dump.destination, std::as_bytes(queue.ConstantRam().subspan(dump.offset / 4, dump.words)), 4);
             return;
+        }
         case 0x45: {
+            const auto write = DecodeConditionalWrite(packet);
             std::uint32_t value = 0;
             {
                 const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::Wait);
-                GuestMemory::Read(address(packet[2], packet[3]), std::as_writable_bytes(std::span(&value, 1)), 4);
+                GuestMemory::Read(write.compared, std::as_writable_bytes(std::span(&value, 1)), 4);
             }
-            if (waitCompares(packet, false, value)) GuestMemory::Write(address(packet[6], packet[7]), std::as_bytes(packet.subspan(8, 1)), 4);
+            if (waitCompares(packet, false, value)) GuestMemory::Write(write.destination, std::as_bytes(std::span(&write.value, 1)), 4);
             return;
         }
         case 0x37: {
+            if (((packet[1] >> 8u) & 0xfu) == 0) {
+                const bool repeat = (packet[1] & 0x10000u) != 0;
+                for (std::size_t i = 4; i < packet.size(); ++i) writeRegister(queue, 0x79, packet[2] - 0xc000u + (repeat ? 0u : static_cast<std::uint32_t>(i - 4)), packet[i]);
+                return;
+            }
             const auto destination = address(packet[2], packet[3]);
             if ((packet[1] & 0x10000u) != 0) {
                 for (const auto& value : packet.subspan(4)) GuestMemory::Write(destination, std::as_bytes(std::span(&value, 1)), 4);
@@ -977,7 +1062,7 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
             return;
         }
         case 0x40: {
-            if (copyDataToRegister(packet)) {
+            if (CopyDataToRegister(packet)) {
                 std::array<std::uint32_t, 2> values{};
                 const auto count = copyDataCount(packet);
                 const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::Registers);
@@ -986,15 +1071,15 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
                 return;
             }
             const auto destination = address(packet[4], packet[5]);
-            const auto data = copyDataSource(packet, (packet[1] & 0x10000u) != 0 ? 8 : 4);
+            const auto data = copyDataSource(packet, CopyDataBytes(packet));
             GuestMemory::CheckRange(reinterpret_cast<void*>(destination), data.size(), 1, true);
             GuestMemory::Write(destination, data);
             return;
         }
         case 0x28: return;
         case 0x50: {
-            const std::size_t bytes = packet[6] & 0x3ffffffu;
-            if (bytes == 0 || dmaDestination(packet) == DmaSelectNowhere) return;
+            const std::size_t bytes = DmaBytes(packet);
+            if (bytes == 0 || dmaDestination(packet) == DmaDestinationNowhere) return;
             auto data = dmaSourceBytes(packet);
             const auto destination = dmaDestination(packet) == DmaSelectGds ? GdsAddress() + packet[4] : address(packet[4], packet[5]);
             GuestMemory::CheckRange(reinterpret_cast<void*>(destination), bytes, 1, true);

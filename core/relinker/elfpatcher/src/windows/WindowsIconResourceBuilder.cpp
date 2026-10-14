@@ -38,6 +38,9 @@ void validatePng(const std::vector<std::uint8_t>& bytes, const std::filesystem::
         const auto length = readBigEndian(bytes, offset);
         if (length > bytes.size() - offset - 12) fail("truncated chunk data");
         const auto type = readBigEndian(bytes, offset + 4);
+        for (std::size_t index = offset + 4; index < offset + 8; ++index)
+            if (!((bytes[index] >= 'A' && bytes[index] <= 'Z') || (bytes[index] >= 'a' && bytes[index] <= 'z')))
+                fail("invalid chunk type");
         std::uint32_t crc = 0xffffffffu;
         for (std::size_t index = offset + 4; index < offset + 8 + length; ++index) {
             crc ^= bytes[index];

@@ -27,6 +27,7 @@ def main():
         with urllib.request.urlopen(url, timeout=30) as response:
             library.write_bytes(response.read())
         environment = dict(os.environ, ANYPS5_TEST_ZIP_URL=url, ANYPS5_TEST_ZIP_PATH=library.as_uri())
+        subprocess.run(["node", str(ROOT / "demo/web/tests/archive-root.test.mjs"), str(args.build.resolve() / "web")], env=environment, check=True)
         subprocess.run(["node", str(ROOT / "demo/web/tests/archive.test.mjs"), str(args.build.resolve() / "web"), str(fixture)], env=environment, check=True)
 
 

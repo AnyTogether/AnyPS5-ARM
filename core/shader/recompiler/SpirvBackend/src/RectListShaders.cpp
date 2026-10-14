@@ -7,6 +7,7 @@
 #endif
 #include <algorithm>
 #include <array>
+#include <span>
 #include <bit>
 #include <limits>
 #include <set>
@@ -402,7 +403,7 @@ private:
 
 }
 
-static bool DeclaresClipDistance(const std::vector<std::uint32_t>& words) {
+static bool DeclaresClipDistance(std::span<const std::uint32_t> words) {
     for (std::size_t i = 5; i < words.size() && (words[i] >> 16) != 0; i += words[i] >> 16) {
         if ((words[i] & 0xffffu) == spv::OpDecorate && words[i] >> 16 == 4 && words[i + 2] == spv::DecorationBuiltIn && words[i + 3] == spv::BuiltInClipDistance) return true;
     }
@@ -429,7 +430,7 @@ RectListShaders BuildRectListShaders(const RecompileResult& vertex, const Recomp
     const auto components = static_cast<std::uint32_t>((parameters.size() + 1) * 4);
     require(limits.maxPatchSize >= 4 && components <= limits.maxControlPerVertexInputComponents && components <= limits.maxControlPerVertexOutputComponents && components <= limits.maxEvaluationInputComponents && components <= limits.maxEvaluationOutputComponents && limits.maxControlPerPatchOutputComponents >= 6 && components * 4 + 6 <= limits.maxControlTotalOutputComponents, "tessellation interface exceeds device limits");
     const auto faultBinding = RuntimeAbi::BindingNumber(RuntimeAbi::Stage::TessellationControl, RuntimeAbi::Binding::FaultBuffer);
-    const bool clipDistance = DeclaresClipDistance(vertex.spirv);
+    const bool clipDistance = DeclaresClipDistance(vertex.spirv.Words());
     RectListEmitter control(parameters, spv::ExecutionModelTessellationControl, target.spirvVersion, faultBinding, clipDistance);
     RectListEmitter evaluation(parameters, spv::ExecutionModelTessellationEvaluation, target.spirvVersion, faultBinding, clipDistance);
     RectListShaders shaders;

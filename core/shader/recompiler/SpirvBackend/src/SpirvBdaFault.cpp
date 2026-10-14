@@ -75,6 +75,11 @@ void RecordBdaFault(SpirvEmitterState& state, std::uint32_t address, std::uint32
     state.module.AddFunction(spv::OpFunctionCall, TypeVoid(state), state.module.AllocateId(), state.bdaFaultFunction, ConstantU32(state, static_cast<std::uint32_t>(reason)), address, bytes, instruction);
 }
 
+void RecordBdaFaultReason(SpirvEmitterState& state, std::uint32_t address, std::uint32_t bytes, std::uint32_t instruction, std::uint32_t reason) {
+    if (state.bdaFaultFunction == 0 || !state.program.Info().usesDma) throw std::runtime_error("BDA fault function is missing");
+    state.module.AddFunction(spv::OpFunctionCall, TypeVoid(state), state.module.AllocateId(), state.bdaFaultFunction, reason, address, bytes, instruction);
+}
+
 void RecordBdaFaultWords(SpirvEmitterState& state, std::uint32_t addressLow, std::uint32_t addressHigh, std::uint32_t bytes, std::uint32_t instruction, BdaAbi::FaultReason reason) {
     if (state.program.Info().usesDma) {
         const auto u64 = TypeScalarU64(state);

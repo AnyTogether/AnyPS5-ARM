@@ -4,10 +4,26 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Queues/WorkerAffinity.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
+#include <algorithm>
 #include "prx/libSceAgcDriver/Execution/include/TracyZone.hpp"
 #include <cstdlib>
 
 namespace AgcDriver::DriverDetail {
+
+std::uint32_t Driver::ReserveEopFlip(const FlipInfo& info) {
+    std::lock_guard lock(mutex);
+    rethrowFailure();
+    checkStopping();
+    require(nextEopToken <= EopFlipTokenLimit, "EOP flip token space exhausted");
+    const auto output = outputs.find(info.handle);
+    require(output != outputs.end(), "EOP flip references an unregistered video output");
+    auto request = output->second->TryReserve(info);
+    if (!request) return 0;
+    const auto token = nextEopToken;
+    eopFlips.emplace(token, EopFlip{info.handle, std::move(request)});
+    ++nextEopToken;
+    return token;
+}
 
 void Driver::RegisterVideoOutput(std::uint32_t handle, const std::shared_ptr<IVideoOutput>& output) {
     require(output != nullptr, "null video output");
@@ -21,6 +37,7 @@ void Driver::UnregisterVideoOutput(std::uint32_t handle, const std::shared_ptr<I
     std::lock_guard lock(mutex);
     const auto it = outputs.find(handle);
     require(it != outputs.end() && it->second == output, "video output registration mismatch");
+    std::erase_if(eopFlips, [handle](const auto& entry) { return entry.second.handle == handle; });
     outputs.erase(it);
 }
 
@@ -72,6 +89,7 @@ void Driver::Present(const PresentationWindow& window, const DisplayBuffer* buff
             std::uint32_t drawableHeight = 0;
             window.getDrawableSize(window.context, &drawableWidth, &drawableHeight);
             presenting->Resize(drawableWidth, drawableHeight);
+            presenting->SelectDynamicRange(buffer);
             timing.Mark("resize");
             presentable = presenting->Presentable();
             if (buffer != nullptr) require(buffer->width == window.width && buffer->height == window.height, "display buffer extent differs from output");

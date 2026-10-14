@@ -151,6 +151,7 @@ void ValidateValueReferences(const IrProgram& program, ShaderStageInputInfo inpu
                             break;
                         case StageInputKind::VertexIndex:
                         case StageInputKind::InstanceIndex:
+                        case StageInputKind::BaseInstance:
                         case StageInputKind::InvocationId:
                         case StageInputKind::PrimitiveId:
                         case StageInputKind::FrontFacing:
@@ -236,7 +237,7 @@ bool IsPixelParameterFlat(const ShaderPixelInputInfo& pixel, std::uint32_t input
 }
 
 void CollectPixelInputs(const IrProgram& program, const ShaderPixelInputInfo* pixel, ShaderInfo& info) {
-    if (pixel->HasPositionInput()) {
+    if (pixel->HasPositionInput() || pixel->psDitheredAlphaToCoverage) {
         AddInput(info, StageInputKind::FragCoord, 0, 4, "gl_FragCoord");
     }
     if (pixel->psFrontFace) {
@@ -342,6 +343,9 @@ void CollectBuiltinInputs(const IrProgram& program, ShaderInfo& info) {
                     break;
                 case StageInputKind::InstanceIndex:
                     AddInput(info, kind, 0, 1, "gl_InstanceIndex");
+                    break;
+                case StageInputKind::BaseInstance:
+                    AddInput(info, kind, 0, 1, "gl_BaseInstance");
                     break;
                 case StageInputKind::InvocationId:
                     AddInput(info, kind, 0, 1, "gl_InvocationID");

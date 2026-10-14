@@ -27,6 +27,10 @@
 #include <link.h>
 #endif
 
+#ifdef _WIN32
+extern "C" void ForgetUnloadedUnwindImages_nid_no_patch();
+#endif
+
 namespace {
 thread_local std::array<char, 512> loaderError{};
 thread_local bool pendingError = false;
@@ -42,6 +46,7 @@ struct Module {
         if (owned && native) {
 #ifdef _WIN32
             FreeLibrary(static_cast<HMODULE>(native));
+            ForgetUnloadedUnwindImages_nid_no_patch();
 #else
             ::dlclose(native);
 #endif
@@ -64,30 +69,30 @@ std::uintptr_t MainProgramBase() {
     return reinterpret_cast<std::uintptr_t>(_dyld_get_image_header(0));
 }
 #elif !defined(_WIN32)
-std::uintptr_t MainProgramBase() {
-    static const std::uintptr_t base = [] {
-        struct Scan {
-            std::uintptr_t value = 0;
-        };
-        Scan scan;
-        ::dl_iterate_phdr(
-            [](dl_phdr_info* info, size_t, void* data) {
-                auto* found = static_cast<Scan*>(data);
-                if (found->value == 0 && info->dlpi_name != nullptr && info->dlpi_name[0] == '\0') found->value = info->dlpi_addr;
-                return found->value == 0 ? 0 : 1;
-            },
-            &scan);
-        return scan.value;
+const link_map* MainProgramMap() {
+    static const link_map* const map = [] {
+        void* handle = ::dlopen(nullptr, RTLD_LAZY);
+        link_map* found = nullptr;
+        const bool resolved = handle != nullptr && ::dlinfo(handle, RTLD_DI_LINKMAP, &found) == 0 && found != nullptr;
+        if (handle != nullptr) ::dlclose(handle);
+        if (!resolved) throw std::runtime_error("dlsym: cannot find the link map of the main program");
+        return found;
     }();
-    return base;
+    return map;
 }
 #endif
 #ifndef _WIN32
 
 bool FromGuestModule(void* address) {
     Dl_info info{};
+#ifdef __APPLE__
     if (address == nullptr || !::dladdr(address, &info) || info.dli_fname == nullptr) return false;
     if (reinterpret_cast<std::uintptr_t>(info.dli_fbase) == MainProgramBase()) return true;
+#else
+    link_map* image = nullptr;
+    if (address == nullptr || !::dladdr1(address, &info, reinterpret_cast<void**>(&image), RTLD_DL_LINKMAP) || info.dli_fname == nullptr || image == nullptr) return false;
+    if (image == MainProgramMap()) return true;
+#endif
     const std::string path(info.dli_fname);
     return path.ends_with(".prx");
 }

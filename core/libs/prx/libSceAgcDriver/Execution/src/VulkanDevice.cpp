@@ -9,6 +9,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/BdaFeatures.hpp"
+#include "prx/libSceAgcDriver/Execution/include/DeviceFault.hpp"
 #include "prx/libSceAgcDriver/Execution/include/FragmentBarycentric.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PipelineLinkOptimization.hpp"
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
@@ -20,6 +21,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayFormat.hpp"
+#include "prx/libSceAgcDriver/Execution/include/HostHdr.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GpuColorTransfer.hpp"
@@ -68,6 +70,7 @@ namespace AgcDriver {
 namespace {
 
 void check(VkResult result, const char* operation) {
+    if (result == VK_ERROR_DEVICE_LOST) Graphics::ReportDeviceLost();
     if (result != VK_SUCCESS) {
         throw std::runtime_error(std::string(operation) + ": Vulkan result " + std::to_string(result));
     }
@@ -260,6 +263,8 @@ struct VulkanDevice::State {
     VkPhysicalDeviceProperties properties{};
     std::string driverInfo;
     PFN_vkGetCalibratedTimestampsKHR calibratedTimestamps = nullptr;
+    PFN_vkCmdSetCheckpointNV checkpointMarker = nullptr;
+    bool deviceLostHook = false;
     VkTimeDomainKHR hostTimeDomain = VK_TIME_DOMAIN_DEVICE_KHR;
     VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
     std::vector<std::uint32_t> capabilities{1};
@@ -298,6 +303,7 @@ struct VulkanDevice::State {
     std::uint32_t srgbDecodeFormats = 0;
     bool storageImageWithoutFormat = false;
     VkSampleCountFlags sampleLocationSampleCounts = 0;
+    VkSampleCountFlags sampleLocationGridSampleCounts = 0;
     bool depthClamp = false;
     bool depthBounds = false;
     bool depthBiasClamp = false;
@@ -305,6 +311,11 @@ struct VulkanDevice::State {
     bool occlusionQueryPrecise = false;
     VkDeviceSize hostImportAlignment = 0;
     bool dmaBufImport = false;
+    bool sparseBinding = false;
+    std::uint32_t queueFamily = 0;
+    std::uint32_t sparseFamily = VK_QUEUE_FAMILY_IGNORED;
+    VkQueue sparseQueue = VK_NULL_HANDLE;
+    std::mutex sparseQueueMutex;
     bool memoryBudget = false;
     bool depthRangeUnrestricted = false;
     bool samplerAnisotropy = false;
@@ -351,6 +362,7 @@ struct VulkanDevice::State {
     std::unique_ptr<Graphics::TextureCache> textureCache;
     std::unique_ptr<Graphics::PipelineCache> pipelineCache;
     std::unique_ptr<Graphics::DescriptorCache> descriptorCache;
+    std::unique_ptr<Graphics::VertexInputCache> vertexInputs;
     std::unique_ptr<Graphics::SamplerCache> samplerCache;
     Graphics::ResourceCache& resourceCache = Graphics::SharedResourceCache();
     // Recorded dispatches that write a copied buffer (their results reach guest memory by a CPU
@@ -363,6 +375,14 @@ struct VulkanDevice::State {
     std::unique_ptr<PresentationScaler> scaler;
     std::unique_ptr<PresentationPass> presentation;
     VkFormat surfaceFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    bool swapchainColorSpaces = false;
+    bool hdrMetadata = false;
+    std::vector<VkSurfaceFormatKHR> surfaceFormats;
+    std::uint64_t surfaceDisplayGeneration = 0;
+    std::uint64_t metadataGeneration = 0;
+    std::unique_ptr<PresentationScaler> hdrScaler;
+    VkFormat hdrScalerSource = VK_FORMAT_UNDEFINED;
     // The swapchain image AcquireImage took for the next present(), consumed by that present.
     bool imageAcquired = false;
     std::uint32_t acquiredIndex = 0;
@@ -643,6 +663,10 @@ struct VulkanDevice::State {
 
     ~State() {
         contextReady = false;
+        if (deviceLostHook && Graphics::DeviceLostOwner() == this) {
+            Graphics::DeviceLostHook() = nullptr;
+            Graphics::DeviceLostOwner() = nullptr;
+        }
         if (compileOnly && device != VK_NULL_HANDLE) {
             reinterpret_cast<PFN_vkDestroyDevice>(deviceProc(device, "vkDestroyDevice"))(device, nullptr);
             device = VK_NULL_HANDLE;
@@ -694,6 +718,7 @@ struct VulkanDevice::State {
             workgroupMemory.reset();
             if (workgroupMemoryLayout != VK_NULL_HANDLE) reinterpret_cast<PFN_vkDestroyDescriptorSetLayout>(deviceProc(device, "vkDestroyDescriptorSetLayout"))(device, workgroupMemoryLayout, nullptr);
             descriptorCache.reset();
+            vertexInputs.reset();
             emptyBuffer.reset();
             placeholderImages.reset();
             samplerCache.reset();
@@ -702,6 +727,7 @@ struct VulkanDevice::State {
             colorTransfer.reset();
             presentation.reset();
             scaler.reset();
+            hdrScaler.reset();
             pipelineCache.reset();
             context.bufferPool.reset();
             bufferPool.reset();
@@ -938,6 +964,12 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
                 throw std::runtime_error(std::string("Vulkan presentation: required instance extension missing: ") + name);
             }
         }
+        if (std::any_of(available.begin(), available.end(), [](const auto& item) { return std::strcmp(item.extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) == 0; })) {
+            instanceExtensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+            state->swapchainColorSpaces = true;
+        }
+        create.enabledExtensionCount = static_cast<std::uint32_t>(instanceExtensions.size());
+        create.ppEnabledExtensionNames = instanceExtensions.data();
     }
 #ifdef __APPLE__
     // MoltenVK is a portability driver: the loader lists it only for instances that opt in.
@@ -1143,6 +1175,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     if (window != nullptr) deviceExtensions.assign(presentationExtensions.begin(), presentationExtensions.end());
     // A device that advertises VK_KHR_portability_subset (MoltenVK) must have it enabled.
     if (hasExtension("VK_KHR_portability_subset")) deviceExtensions.push_back("VK_KHR_portability_subset");
+    if (window != nullptr && hasExtension(VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
+        deviceExtensions.push_back(VK_EXT_HDR_METADATA_EXTENSION_NAME);
+        state->hdrMetadata = true;
+    }
     if (state->fragmentShaderBarycentric) {
         deviceExtensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
         state->capabilities.push_back(spv::CapabilityFragmentBarycentricKHR);
@@ -1235,6 +1271,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
                 VkMultisamplePropertiesEXT multisample{VK_STRUCTURE_TYPE_MULTISAMPLE_PROPERTIES_EXT};
                 multisampleProperties(selected, samples, &multisample);
                 if (multisample.maxSampleLocationGridSize.width != 0 && multisample.maxSampleLocationGridSize.height != 0) state->sampleLocationSampleCounts |= samples;
+                if (multisample.maxSampleLocationGridSize.width % 2u == 0 && multisample.maxSampleLocationGridSize.height % 2u == 0) state->sampleLocationGridSampleCounts |= samples;
             }
         }
         if (state->sampleLocationSampleCounts != 0) deviceExtensions.push_back(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME);
@@ -1409,6 +1446,14 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     enabled.tessellationShader = available.tessellationShader;
     state->tessellationShader = enabled.tessellationShader == VK_TRUE;
     if (state->tessellationShader) state->capabilities.push_back(3);
+    VkPhysicalDeviceShaderDrawParametersFeatures drawParametersFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES};
+    {
+        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &drawParametersFeatures};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
+    }
+    const bool drawParameters = drawParametersFeatures.shaderDrawParameters == VK_TRUE;
+    drawParametersFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES, nullptr, VK_TRUE};
+    if (drawParameters) state->capabilities.push_back(spv::CapabilityDrawParameters);
     APS5_LOG_OUT("Vulkan features tessellationAvailable=%u mesh=%u depthClip=%u depthRangeUnrestricted=%u pipelineLibrary=%u", static_cast<unsigned>(state->tessellationShader), static_cast<unsigned>(state->meshShader), static_cast<unsigned>(state->depthClipControl), static_cast<unsigned>(state->depthRangeUnrestricted), static_cast<unsigned>(state->graphicsPipelineLibrary));
     require(available.samplerAnisotropy && available.textureCompressionBC, "device lacks sampler anisotropy or BC texture compression support required for texture sampling");
     enabled.samplerAnisotropy = VK_TRUE;
@@ -1416,6 +1461,34 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     // Guest shaders routinely read past descriptor ranges; robust access turns that into zeros
     // instead of a GPU fault that loses the device.
     enabled.robustBufferAccess = available.robustBufferAccess;
+    VkDeviceQueueCreateInfo queueInfos[2]{queueInfo, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
+    if (available.sparseBinding && state->dmaBufImport) {
+        std::uint32_t families = 0;
+        auto getFamilies = state->InstanceFunction<PFN_vkGetPhysicalDeviceQueueFamilyProperties>("vkGetPhysicalDeviceQueueFamilyProperties");
+        getFamilies(selected, &families, nullptr);
+        std::vector<VkQueueFamilyProperties> queues(families);
+        getFamilies(selected, &families, queues.data());
+        const auto binds = [&](std::uint32_t index) { return index != family && queues[index].queueCount != 0 && (queues[index].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0; };
+        std::uint32_t sparseFamily = families;
+        for (std::uint32_t i = 0; i < families && sparseFamily == families; ++i) {
+            if (binds(i) && queues[i].queueFlags == VK_QUEUE_SPARSE_BINDING_BIT) sparseFamily = i;
+        }
+        for (std::uint32_t i = 0; i < families && sparseFamily == families; ++i) {
+            if (binds(i)) sparseFamily = i;
+        }
+        if (sparseFamily != families) {
+            queueInfos[1].queueFamilyIndex = sparseFamily;
+            queueInfos[1].queueCount = 1;
+            queueInfos[1].pQueuePriorities = &priority;
+            deviceInfo.queueCreateInfoCount = 2;
+            state->sparseFamily = sparseFamily;
+            state->sparseBinding = true;
+        } else {
+            state->sparseBinding = family < families && (queues[family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0;
+        }
+        enabled.sparseBinding = state->sparseBinding ? VK_TRUE : VK_FALSE;
+    }
+    deviceInfo.pQueueCreateInfos = queueInfos;
     // Indirect draw records with a non-zero first instance, and several records per call.
     enabled.drawIndirectFirstInstance = available.drawIndirectFirstInstance;
     enabled.multiDrawIndirect = available.multiDrawIndirect;
@@ -1468,9 +1541,9 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
         state->descriptorIndexing = descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing == VK_TRUE && descriptorIndexingFeatures.shaderStorageImageArrayNonUniformIndexing == VK_TRUE;
         state->storageBufferUpdateAfterBind = descriptorIndexingFeatures.descriptorBindingStorageBufferUpdateAfterBind == VK_TRUE;
-        state->descriptorBindingPartiallyBound = compileOnly && descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE;
-        state->descriptorBindingVariableDescriptorCount = compileOnly && descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount == VK_TRUE;
-        state->runtimeDescriptorArray = compileOnly && descriptorIndexingFeatures.runtimeDescriptorArray == VK_TRUE;
+        state->descriptorBindingPartiallyBound = descriptorIndexingFeatures.descriptorBindingPartiallyBound == VK_TRUE;
+        state->descriptorBindingVariableDescriptorCount = descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount == VK_TRUE;
+        state->runtimeDescriptorArray = descriptorIndexingFeatures.runtimeDescriptorArray == VK_TRUE;
         if (state->storageBufferUpdateAfterBind) {
             VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &state->descriptorIndexingProperties};
             state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
@@ -1573,6 +1646,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         descriptorIndexingFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &descriptorIndexingFeatures;
     }
+    if (drawParameters) {
+        drawParametersFeatures.pNext = byteFeatures.pNext;
+        byteFeatures.pNext = &drawParametersFeatures;
+    }
     // Timeline semaphores let a queue worker wait for recorded batches without holding the GPU mutex
     // (see Recorder::WaitSerial). The instance is 1.1, so the KHR extension is used even on 1.2+
     // devices. Debug aid: APS5_NO_TIMELINE=1 leaves it off (drains wait under the mutex as before).
@@ -1630,6 +1707,27 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         pipelineFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &pipelineFeatures;
     }
+    VkPhysicalDeviceFaultFeaturesEXT faultFeatures{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
+    if (hasExtension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &faultFeatures};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &features);
+    }
+    const bool deviceFault = faultFeatures.deviceFault == VK_TRUE;
+    if (deviceFault) {
+        faultFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
+        faultFeatures.deviceFault = VK_TRUE;
+        deviceExtensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+        deviceInfo.enabledExtensionCount = static_cast<std::uint32_t>(deviceExtensions.size());
+        deviceInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        faultFeatures.pNext = byteFeatures.pNext;
+        byteFeatures.pNext = &faultFeatures;
+    }
+    const bool checkpoints = std::getenv("APS5_GPU_CHECKPOINTS") != nullptr && hasExtension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+    if (checkpoints) {
+        deviceExtensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+        deviceInfo.enabledExtensionCount = static_cast<std::uint32_t>(deviceExtensions.size());
+        deviceInfo.ppEnabledExtensionNames = deviceExtensions.data();
+    }
     bdaFeatures.pNext = &byteFeatures;
     VkPhysicalDeviceRobustness2FeaturesEXT robustness2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
     if (hasExtension(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
@@ -1670,6 +1768,18 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         }
     }
     state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, family, 0, &state->queue);
+    state->queueFamily = family;
+    if (state->sparseFamily != VK_QUEUE_FAMILY_IGNORED) state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, state->sparseFamily, 0, &state->sparseQueue);
+    if (checkpoints) state->checkpointMarker = state->DeviceFunction<PFN_vkCmdSetCheckpointNV>("vkCmdSetCheckpointNV");
+    if (deviceFault || checkpoints) {
+        const auto faultInfo = deviceFault ? state->DeviceFunction<PFN_vkGetDeviceFaultInfoEXT>("vkGetDeviceFaultInfoEXT") : nullptr;
+        const auto checkpointData = checkpoints ? state->DeviceFunction<PFN_vkGetQueueCheckpointDataNV>("vkGetQueueCheckpointDataNV") : nullptr;
+        Graphics::DeviceLostHook() = [device = state->device, queue = state->queue, faultInfo, checkpointData] {
+            for (const auto& line : DeviceFaultReport(device, faultInfo, queue, checkpointData)) std::fprintf(stderr, "%s\n", line.c_str());
+        };
+        Graphics::DeviceLostOwner() = state.get();
+        state->deviceLostHook = true;
+    }
     APS5_LOG_OUT("Vulkan device ready device=%p queue=%p family=%u", reinterpret_cast<void*>(state->device), reinterpret_cast<void*>(state->queue), family);
     VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -1688,6 +1798,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     state->textureCache = std::make_unique<Graphics::TextureCache>(graphicsContext());
     state->colorTransfer = std::make_unique<Graphics::GpuColorTransfer>(graphicsContext());
     state->descriptorCache = std::make_unique<Graphics::DescriptorCache>(graphicsContext());
+    state->vertexInputs = std::make_unique<Graphics::VertexInputCache>(graphicsContext());
     state->samplerCache = std::make_unique<Graphics::SamplerCache>();
     state->CreateWorkgroupMemoryLayout();
     if (!state->shaderProfile->NullDescriptors()) {
@@ -1720,12 +1831,9 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         require((surface.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0, "surface does not support transfer destination images");
         require((surface.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) != 0, "opaque composition is unavailable");
         require((surface.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0, "identity surface transform is unavailable");
-        std::uint32_t formatCount = 0;
-        auto getFormats = state->InstanceFunction<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>("vkGetPhysicalDeviceSurfaceFormatsKHR");
-        check(getFormats(selected, state->surface, &formatCount, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR");
-        std::vector<VkSurfaceFormatKHR> formats(formatCount);
-        check(getFormats(selected, state->surface, &formatCount, formats.data()), "vkGetPhysicalDeviceSurfaceFormatsKHR");
-        require(std::any_of(formats.begin(), formats.end(), [](const auto& format) { return format.format == VK_FORMAT_B8G8R8A8_UNORM && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; }), "BGRA8 sRGB-nonlinear surface format is unavailable");
+        refreshSurfaceFormats();
+        SetPresentingHdr10(false);
+        require(std::any_of(state->surfaceFormats.begin(), state->surfaceFormats.end(), [](const auto& format) { return format.format == VK_FORMAT_B8G8R8A8_UNORM && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; }), "BGRA8 sRGB-nonlinear surface format is unavailable");
         std::uint32_t presentModeCount = 0;
         auto getPresentModes = state->InstanceFunction<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>("vkGetPhysicalDeviceSurfacePresentModesKHR");
         check(getPresentModes(selected, state->surface, &presentModeCount, nullptr), "vkGetPhysicalDeviceSurfacePresentModesKHR");
@@ -1738,7 +1846,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         swapchain.surface = state->surface;
         swapchain.minImageCount = surface.minImageCount;
         swapchain.imageFormat = state->surfaceFormat;
-        swapchain.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+        swapchain.imageColorSpace = state->surfaceColorSpace;
         swapchain.imageExtent = state->extent;
         swapchain.imageArrayLayers = 1;
         swapchain.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -1879,6 +1987,8 @@ bool VulkanDevice::StoresPendingOver(std::uint64_t address, std::size_t bytes) c
 }
 
 int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::byte> bytes, std::uint64_t stamp, std::uint32_t queue, bool reapFirst) {
+    static const bool storeAtLabel = Graphics::StorageTexture::StoreAtLabelRequested(std::getenv("APS5_STORE_AT_LABEL"));
+    if (storeAtLabel) Graphics::StorageTexture::FlushAllPending("label");
     if (!state->recorder || bytes.empty() || bytes.size() > 65536 || address % 4 != 0 || bytes.size() % 4 != 0) return 4;
     auto& recorder = *state->recorder;
     // Batches that already finished are retired before the checks: their completions ran, so they
@@ -1949,7 +2059,7 @@ bool VulkanDevice::AfterRecordedWork(std::function<void()> action, bool reapFirs
 bool VulkanDevice::DumpSamplesOnGpu(std::uint64_t address) {
     if (!state->recorder) return false;
     auto& recorder = *state->recorder;
-    constexpr std::size_t bytes = 15 * 16 + 8;
+    constexpr std::size_t bytes = Pm4::SampleDumpBytes;
     if (OpportunisticReap()) recorder.Reap();
     if (state->CopiedWriterOverlaps(address, bytes) || (Graphics::Recorder::PendingCompletionLabels() != 0 && recorder.CompletionLabelIn(address, bytes))) return false;
     const auto context = graphicsContext();
@@ -2395,6 +2505,10 @@ void VulkanDevice::Resize(std::uint32_t width, std::uint32_t height) {
         return;
     }
     if (state->extent.width == width && state->extent.height == height) return;
+    recreateSwapchain(width, height, false);
+}
+
+void VulkanDevice::recreateSwapchain(std::uint32_t width, std::uint32_t height, bool force) {
     VkSurfaceCapabilitiesKHR surface{};
     check(state->InstanceFunction<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>("vkGetPhysicalDeviceSurfaceCapabilitiesKHR")(state->physical, state->surface, &surface), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR resize");
     // The window's drawable size and the surface's extent can disagree for a moment while the window
@@ -2407,16 +2521,21 @@ void VulkanDevice::Resize(std::uint32_t width, std::uint32_t height) {
             state->extent = {0, 0};
             return;
         }
-        if (state->extent.width == width && state->extent.height == height) return;
+        if (!force && state->extent.width == width && state->extent.height == height) return;
     }
     WaitIdle();
+    refreshSurfaceFormats();
+    if (state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
+        const bool offered = std::any_of(state->surfaceFormats.begin(), state->surfaceFormats.end(), [&](const VkSurfaceFormatKHR& format) { return format.format == state->surfaceFormat && format.colorSpace == state->surfaceColorSpace; });
+        if (!offered || !AgcDriver::CurrentHostHdr().available) useSurfaceFormat({VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR});
+    }
     require(width >= surface.minImageExtent.width && width <= surface.maxImageExtent.width && height >= surface.minImageExtent.height && height <= surface.maxImageExtent.height, "unsupported resized output extent");
     require((surface.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0 && (surface.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) != 0 && (surface.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0, "resized surface capabilities are unsupported");
     VkSwapchainCreateInfoKHR create{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     create.surface = state->surface;
     create.minImageCount = surface.minImageCount;
     create.imageFormat = state->surfaceFormat;
-    create.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    create.imageColorSpace = state->surfaceColorSpace;
     create.imageExtent = {width, height};
     create.imageArrayLayers = 1;
     create.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -2438,7 +2557,90 @@ void VulkanDevice::Resize(std::uint32_t width, std::uint32_t height) {
     check(getImages(state->device, replacement, &count, state->images.data()), "vkGetSwapchainImagesKHR resize");
     state->images.resize(count);
     state->rendered.assign(count, VK_NULL_HANDLE);
+    if (state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) setHdrMetadata();
     APS5_LOG_OUT_DEBUG("Resize complete swapchain=%p extent=%ux%u images=%u", reinterpret_cast<void*>(state->swapchain), state->extent.width, state->extent.height, count);
+}
+
+void VulkanDevice::refreshSurfaceFormats() {
+    const auto getFormats = state->InstanceFunction<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>("vkGetPhysicalDeviceSurfaceFormatsKHR");
+    const auto displayGeneration = AgcDriver::CurrentHostHdr().displayGeneration;
+    std::uint32_t count = 0;
+    check(getFormats(state->physical, state->surface, &count, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    std::vector<VkSurfaceFormatKHR> formats(count);
+    check(getFormats(state->physical, state->surface, &count, formats.data()), "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    formats.resize(count);
+    constexpr VkFormatFeatureFlags target = VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    std::erase_if(formats, [&](const VkSurfaceFormatKHR& format) {
+        if (format.colorSpace != VK_COLOR_SPACE_HDR10_ST2084_EXT) return false;
+        VkFormatProperties properties{};
+        graphicsContext().formatProperties(state->physical, format.format, &properties);
+        return (properties.optimalTilingFeatures & target) != target;
+    });
+    state->surfaceFormats = std::move(formats);
+    state->surfaceDisplayGeneration = displayGeneration;
+    constexpr VkFormatFeatureFlags scalerSource = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    const std::array<VkFormat, 2> pqTexels{VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_FORMAT_A2R10G10B10_UNORM_PACK32};
+    const bool sources = std::all_of(pqTexels.begin(), pqTexels.end(), [&](VkFormat format) {
+        VkFormatProperties properties{};
+        graphicsContext().formatProperties(state->physical, format, &properties);
+        return (properties.optimalTilingFeatures & scalerSource) == scalerSource;
+    });
+    AgcDriverSetSurfaceHdr10_nid_postfix(state->swapchainColorSpaces && state->hdrMetadata && sources && Hdr10SurfaceFormat(state->surfaceFormats, VK_FORMAT_UNDEFINED).has_value());
+}
+
+void VulkanDevice::setHdrMetadata() {
+    const auto host = AgcDriver::CurrentHostHdr();
+    state->metadataGeneration = host.generation;
+    require(host.available && state->hdrMetadata && state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT && state->swapchain != VK_NULL_HANDLE, "HDR metadata needs HDR output, an HDR10 swapchain and VK_EXT_hdr_metadata");
+    VkHdrMetadataEXT metadata{VK_STRUCTURE_TYPE_HDR_METADATA_EXT};
+    metadata.displayPrimaryRed = {0.708f, 0.292f};
+    metadata.displayPrimaryGreen = {0.170f, 0.797f};
+    metadata.displayPrimaryBlue = {0.131f, 0.046f};
+    metadata.whitePoint = {0.3127f, 0.3290f};
+    metadata.maxLuminance = host.display.maxLuminance;
+    metadata.minLuminance = host.display.minLuminance;
+    metadata.maxContentLightLevel = PqToSdrWhiteNits(host);
+    metadata.maxFrameAverageLightLevel = std::min(host.display.maxFullFrameLuminance, metadata.maxContentLightLevel);
+    state->DeviceFunction<PFN_vkSetHdrMetadataEXT>("vkSetHdrMetadataEXT")(state->device, 1, &state->swapchain, &metadata);
+    std::fprintf(stderr, "[videoout] HDR metadata: mastering %.1f to %.4f nits, MaxCLL %.1f nits, MaxFALL %.1f nits\n", metadata.maxLuminance, metadata.minLuminance, metadata.maxContentLightLevel, metadata.maxFrameAverageLightLevel);
+}
+
+void VulkanDevice::useSurfaceFormat(VkSurfaceFormatKHR format) {
+    state->surfaceFormat = format.format;
+    state->surfaceColorSpace = format.colorSpace;
+    state->scaler = std::make_unique<PresentationScaler>(graphicsContext(), VK_FORMAT_B8G8R8A8_UNORM, state->surfaceFormat);
+    state->hdrScaler.reset();
+    state->hdrScalerSource = VK_FORMAT_UNDEFINED;
+    const bool hdr = state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    SetPresentingHdr10(hdr);
+    std::fprintf(stderr, "[videoout] presenting %s: swapchain format %d in color space %d\n", hdr ? "HDR10" : "SDR", static_cast<int>(state->surfaceFormat), static_cast<int>(state->surfaceColorSpace));
+}
+
+void VulkanDevice::SelectDynamicRange(const DisplayBuffer* buffer) {
+    GuestMemory::AssertGpuLockHeld("VulkanDevice::SelectDynamicRange");
+    require(state->swapchain != VK_NULL_HANDLE, "cannot select the dynamic range of an unavailable swapchain");
+    if (AgcDriver::CurrentHostHdr().displayGeneration != state->surfaceDisplayGeneration) refreshSurfaceFormats();
+    const auto host = AgcDriver::CurrentHostHdr();
+    const bool metadataStale = state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT && host.available && host.generation != state->metadataGeneration;
+    if (buffer == nullptr || state->extent.width == 0 || state->extent.height == 0) {
+        if (metadataStale) setHdrMetadata();
+        return;
+    }
+    const auto wanted = DynamicRangeSurfaceFormat(state->surfaceFormats, buffer->pixelFormat, host.available);
+    if (wanted.format == state->surfaceFormat && wanted.colorSpace == state->surfaceColorSpace) {
+        if (metadataStale) setHdrMetadata();
+        return;
+    }
+    WaitIdle();
+    useSurfaceFormat(wanted);
+    recreateSwapchain(state->extent.width, state->extent.height, true);
+}
+
+void VulkanDevice::ensureHdrScaler(VkFormat source) {
+    if (state->hdrScaler != nullptr && state->hdrScalerSource == source) return;
+    if (state->SharedSlotInFlight()) RetirePresents(0);
+    state->hdrScaler = std::make_unique<PresentationScaler>(graphicsContext(), source, state->surfaceFormat);
+    state->hdrScalerSource = source;
 }
 
 bool VulkanDevice::Presentable() const {
@@ -2573,6 +2775,14 @@ bool ResidentKeysMoved(const Graphics::StorageTexture& resident) {
     return resident.Descriptor().dccAddress != 0 && ResidentKeys(resident) != resident.UploadedKeys();
 }
 
+VkClearColorValue PqClearValue(const DisplayBuffer& buffer) {
+    const auto texel = DisplayBufferClearTexel(buffer, DisplayBufferKeys(buffer));
+    std::uint32_t word = 0;
+    std::memcpy(&word, texel.data(), sizeof(word));
+    const auto color = PqClearColor(word, DisplayRedLow(buffer.pixelFormat));
+    return VkClearColorValue{{color[0], color[1], color[2], color[3]}};
+}
+
 std::optional<std::array<std::byte, 4>> CompressedClearPixel(const DisplayBuffer& buffer, std::size_t bytes) {
     GuestMemory::FlushGpuWrites(buffer.address, bytes);
     const auto keys = DisplayBufferKeys(buffer);
@@ -2615,18 +2825,23 @@ bool VulkanDevice::PresentDisplayBuffer(const DisplayBuffer& buffer) {
     if (storeAtFlip) Graphics::StorageTexture::FlushAllPending("flip");
     else Graphics::StorageTexture::FlushDumpSelected("flip");
     auto& dumps = Dumps();
+    const bool passthrough = state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    require(!passthrough || DisplayPq(buffer.pixelFormat), "only a PQ display buffer is presented to the HDR10 swapchain");
     if (buffer.tilingMode == 1) {
-        const auto pixels = ReadDisplayBuffer(buffer);
+        if (passthrough) ensureHdrScaler(DisplayTexelFormat(buffer.pixelFormat));
+        const auto pixels = passthrough ? ReadDisplayBufferTexels(buffer) : ReadDisplayBuffer(buffer);
         bool dumpFrame = false;
         if (dumps.dumped < dumps.limit && ++dumps.presents % static_cast<std::uint64_t>(dumps.every) == 0) {
-            if (dumps.cpu) {
+            if (passthrough) {
+                WriteFrameBmp(dumps.dumped++, buffer.width, buffer.height, ReadDisplayBuffer(buffer), DumpScale());
+            } else if (dumps.cpu) {
                 WriteFrameBmp(dumps.dumped++, buffer.width, buffer.height, pixels, DumpScale());
             } else {
                 state->nextDumpIndex = dumps.dumped++;
                 dumpFrame = true;
             }
         }
-        if (!present(buffer.width, buffer.height, true, pixels, nullptr, nullptr, VK_FILTER_LINEAR, dumpFrame)) {
+        if (!present(buffer.width, buffer.height, true, pixels, nullptr, nullptr, VK_FILTER_LINEAR, dumpFrame, false, nullptr, 0, passthrough)) {
             if (dumpFrame) --dumps.dumped;
             return false;
         }
@@ -2672,7 +2887,7 @@ bool VulkanDevice::PresentDisplayBuffer(const DisplayBuffer& buffer) {
     const auto cleared = buffer.dccAddress != 0 && resident == nullptr ? CompressedClearPixel(buffer, bytes) : std::nullopt;
     bool dumpFrame = false;
     if (dumps.dumped < dumps.limit && ++dumps.presents % static_cast<std::uint64_t>(dumps.every) == 0) {
-        if (dumps.cpu) {
+        if (dumps.cpu || (passthrough && resident == nullptr)) {
             auto full = cleared ? std::vector<std::byte>(static_cast<std::size_t>(buffer.width) * buffer.height * cleared->size()) : ReadDisplayBuffer(buffer);
             for (std::size_t offset = 0; cleared && offset < full.size(); offset += cleared->size()) std::memcpy(full.data() + offset, cleared->data(), cleared->size());
             WriteFrameBmp(dumps.dumped++, buffer.width, buffer.height, full, DumpScale());
@@ -2687,12 +2902,15 @@ bool VulkanDevice::PresentDisplayBuffer(const DisplayBuffer& buffer) {
         AgcDriver::ProfilePrint_nid_no_patch("[flip] %llu presents from the resident image (%llu refreshed first), through guest memory: %llu not pending, %llu unsuitable; %llu GPU frame dumps\n", static_cast<unsigned long long>(residentPresents), static_cast<unsigned long long>(refreshedPresents), static_cast<unsigned long long>(notPending), static_cast<unsigned long long>(unsuitable), static_cast<unsigned long long>(gpuDumps));
     }
     CaptureTrace::Log("present dump=%d address=%llx width=%u height=%u resident=%d generation=%llu", dumpFrame ? state->nextDumpIndex : -1, static_cast<unsigned long long>(buffer.address), buffer.width, buffer.height, resident != nullptr, static_cast<unsigned long long>(resident ? resident->Generation() : 0));
+    if (passthrough && resident == nullptr) ensureHdrScaler(DisplayTexelFormat(buffer.pixelFormat));
     VkClearColorValue uniform{};
-    if (cleared) {
+    if (cleared && passthrough) {
+        uniform = PqClearValue(buffer);
+    } else if (cleared) {
         const auto channel = [&](std::size_t index) { return static_cast<float>(std::to_integer<unsigned>((*cleared)[index])) / 255.0f; };
         uniform = {{channel(2), channel(1), channel(0), channel(3)}};
     }
-    if (!present(buffer.width, buffer.height, true, {}, cleared ? nullptr : &buffer, resident, filter, dumpFrame, convert, cleared ? &uniform : nullptr, layer)) {
+    if (!present(buffer.width, buffer.height, true, {}, cleared ? nullptr : &buffer, resident, filter, dumpFrame, convert, cleared ? &uniform : nullptr, layer, passthrough)) {
         // A dropped frame (swapchain out of date) keeps the dump numbering contiguous.
         if (dumpFrame) --dumps.dumped;
         return false;
@@ -2741,7 +2959,7 @@ bool VulkanDevice::AcquireImage() {
     return true;
 }
 
-bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaque, std::span<const std::byte> pixels, const DisplayBuffer* display, const std::shared_ptr<Graphics::StorageTexture>& resident, VkFilter residentFilter, bool dumpFrame, bool residentConvert, const VkClearColorValue* uniform, std::uint32_t residentLayer) {
+bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaque, std::span<const std::byte> pixels, const DisplayBuffer* display, const std::shared_ptr<Graphics::StorageTexture>& resident, VkFilter residentFilter, bool dumpFrame, bool residentConvert, const VkClearColorValue* uniform, std::uint32_t residentLayer, bool passthrough) {
     PerformanceTimer timing("Vulkan.Present");
     APS5_LOG_OUT_DEBUG("present begin width=%u height=%u opaque=%u pixels=%zu", width, height, static_cast<unsigned>(opaque), pixels.size());
     require(state->swapchain != VK_NULL_HANDLE, "device has no swapchain");
@@ -2760,6 +2978,10 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     require(uniform == nullptr || (pixels.empty() && display == nullptr && resident == nullptr), "a uniform presentation has no other source");
     const bool direct = resident != nullptr && !residentConvert;
     const bool drawn = resident != nullptr && residentConvert && !DisplayHalfFloat(display->pixelFormat);
+    require(passthrough == (state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) || clearOnly, "a presentation's dynamic range differs from its swapchain's");
+    require(!passthrough || drawn || clearOnly || (state->hdrScaler != nullptr && !dumpFrame), "an HDR10 presentation through the scaler needs the HDR10 scaler and dumps on the CPU");
+    auto* scaler = passthrough && !drawn ? state->hdrScaler.get() : state->scaler.get();
+    const float whiteNits = PqToSdrWhiteNits(AgcDriver::CurrentHostHdr());
     // The scaler's source image, the color transfer's staging and the upload buffer are single
     // objects an in-flight blit through them may still read: the paths using or re-creating them
     // wait for every slot first. The game path did so before taking the mutex
@@ -2825,8 +3047,8 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         state->DeviceFunction<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, barrier.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &barrier.subresourceRange);
     } else {
         APS5_LOG_OUT_DEBUG("Recording swapchain scaled blit width=%u height=%u bytes=%zu buffer=%p image=%p", width, height, pixels.size(), reinterpret_cast<void*>(state->uploadBuffer), reinterpret_cast<void*>(barrier.image));
-        require(state->scaler != nullptr && state->presentation != nullptr, "presentation scaler is unavailable");
-        if (shared) state->scaler->EnsureSourceImage(width, height);
+        require(scaler != nullptr && state->presentation != nullptr, "presentation scaler is unavailable");
+        if (shared) scaler->EnsureSourceImage(width, height);
         const auto slotIndex = static_cast<std::size_t>(&slot - state->presentSlots.data());
         VkImageMemoryBarrier residentBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         const VkPipelineStageFlags residentStage = drawn ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT;
@@ -2847,22 +3069,25 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
             if (residentConvert && !drawn) {
                 state->colorTransfer->DetileImage(commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, Graphics::ColorTileMode::RenderTarget, DisplayRedLow(display->pixelFormat), DisplayTenBit(display->pixelFormat), DisplayHalfFloat(display->pixelFormat), residentLayer);
-                state->scaler->RecordUpload(commands, state->colorTransfer->LinearBuffer());
+                scaler->RecordUpload(commands, state->colorTransfer->LinearBuffer());
             }
         } else {
-            if (display != nullptr) {
-                state->colorTransfer->Detile(commands, DisplayRedLow(display->pixelFormat), DisplayTenBit(display->pixelFormat), DisplayHalfFloat(display->pixelFormat));
+            if (display != nullptr && passthrough) {
+                state->colorTransfer->Detile(commands);
+            } else if (display != nullptr) {
+                const bool pq = DisplayPq(display->pixelFormat);
+                state->colorTransfer->Detile(commands, DisplayRedLow(display->pixelFormat), DisplayTenBit(display->pixelFormat) && !pq, DisplayHalfFloat(display->pixelFormat), pq ? std::optional<float>(whiteNits) : std::nullopt);
             }
-            if (uniform != nullptr) state->scaler->RecordClear(commands, *uniform);
-            else state->scaler->RecordUpload(commands, display != nullptr ? state->colorTransfer->LinearBuffer() : state->uploadBuffer);
+            if (uniform != nullptr) scaler->RecordClear(commands, *uniform);
+            else scaler->RecordUpload(commands, display != nullptr ? state->colorTransfer->LinearBuffer() : state->uploadBuffer);
         }
         if (drawn) {
-            state->presentation->Bind(slotIndex, resident->Image(), width, height, display->pixelFormat, residentLayer);
-            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->extent, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            state->presentation->Bind(slotIndex, resident->Image(), width, height, display->pixelFormat, whiteNits, residentLayer);
+            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         } else {
-            state->scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
+            scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
             if (direct) PresentationScaler::RecordBlitFrom(graphicsContext(), commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, residentFilter, barrier.image, state->extent.width, state->extent.height, residentLayer);
-            else state->scaler->RecordBlit(commands, barrier.image, state->extent.width, state->extent.height);
+            else scaler->RecordBlit(commands, barrier.image, state->extent.width, state->extent.height);
         }
         if (dumpFrame) {
             const auto scale = DumpScale();
@@ -2872,8 +3097,8 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
                 slot.dumpHeight = extent.height;
                 slot.dumpScale = 1;
             } else {
-                slot.dumpWidth = state->scaler->SourceWidth();
-                slot.dumpHeight = state->scaler->SourceHeight();
+                slot.dumpWidth = scaler->SourceWidth();
+                slot.dumpHeight = scaler->SourceHeight();
                 slot.dumpScale = scale;
             }
             const auto dumpBytes = static_cast<std::size_t>(slot.dumpWidth) * slot.dumpHeight * 4;
@@ -2886,7 +3111,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
                 slot.dumpScaler->RecordBlitInto(commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, VK_FILTER_NEAREST, width, height, residentLayer);
                 slot.dumpScaler->RecordReadback(commands, slot.dumpBuffer->Handle());
             } else {
-                state->scaler->RecordReadback(commands, slot.dumpBuffer->Handle());
+                scaler->RecordReadback(commands, slot.dumpBuffer->Handle());
             }
         }
         if (resident != nullptr) {
@@ -3200,8 +3425,14 @@ Graphics::Context VulkanDevice::buildContext() const {
     };
     context.pipelineCacheSynchronization = state->pipelineCache ? &state->pipelineCache->Synchronization() : nullptr;
     context.dmaBufImport = state->dmaBufImport;
+    context.sparseBinding = state->sparseBinding;
+    context.queueFamily = state->queueFamily;
+    context.sparseFamily = state->sparseFamily;
+    context.sparseQueue = state->sparseQueue;
+    context.sparseQueueMutex = &state->sparseQueueMutex;
     context.recorder = state->recorder.get();
     context.descriptorCache = state->descriptorCache.get();
+    context.vertexInputs = state->vertexInputs.get();
     context.samplerCache = state->samplerCache.get();
     context.drawIndirectFirstInstance = state->drawIndirectFirstInstance;
     context.multiDrawIndirect = state->multiDrawIndirect;
@@ -3225,6 +3456,11 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.descriptorIndexing = state->descriptorIndexing;
     context.descriptorIndexingLimits = state->descriptorIndexingProperties;
     context.imageInt64Atomics = state->imageInt64Atomics;
+    context.runtimeDescriptorArray = state->runtimeDescriptorArray;
+    context.partiallyBound = state->descriptorBindingPartiallyBound;
+    context.variableDescriptorCount = state->descriptorBindingVariableDescriptorCount;
+    context.imageTableCapacity = ImageTableCapacity(context);
+    context.samplerTableCapacity = SamplerTableCapacity(context);
     context.geometryShader = state->geometryShader;
     context.sampleRateShading = state->sampleRateShading;
     context.storageImageMultisample = std::find(state->capabilities.begin(), state->capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStorageImageMultisample)) != state->capabilities.end();
@@ -3239,6 +3475,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.pipelineExecutableInfo = state->pipelineExecutableInfo;
     context.srgbDecodeFormats = state->srgbDecodeFormats;
     context.sampleLocationSampleCounts = state->sampleLocationSampleCounts;
+    context.sampleLocationGridSampleCounts = state->sampleLocationGridSampleCounts;
     context.memoryProperties2 = state->memoryBudget ? state->InstanceFunction<PFN_vkGetPhysicalDeviceMemoryProperties2>("vkGetPhysicalDeviceMemoryProperties2") : nullptr;
     context.singlePassStorage = state->storageImageWithoutFormat;
     return context;
@@ -4079,6 +4316,7 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
         context.Resolved(&Graphics::DeviceFunctions::cmdPushConstants, "vkCmdPushConstants")(commands, record.objects->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, Graphics::ComputePushConstantBytes, record.pushBytes->data());
     }
     const auto gpuTiming = recorder.BeginGpuTiming(record.programAddress != 0 ? record.programAddress : record.shader->program->variantId);
+    if (state->checkpointMarker != nullptr) state->checkpointMarker(commands, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(record.programAddress)));
     if (argumentImport != nullptr) {
         context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, arguments - argumentImport->base);
     } else {
@@ -4329,7 +4567,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         const auto subgroupSize = state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize) ? std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize) : 0u;
         if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
             ComputePipelineCapture capture;
-            capture.spirv = shader.spirv;
+            capture.spirv = shader.spirv.Copy();
             ComputeDescriptorSetLayout resourcesLayout;
             resourcesLayout.flags = resources->LayoutUpdateAfterBind() ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT : 0;
             const auto layoutBindings = resources->LayoutBindings();

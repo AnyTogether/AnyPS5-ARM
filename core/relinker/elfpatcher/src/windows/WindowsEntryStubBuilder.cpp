@@ -97,6 +97,9 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         return rva;
     };
 
+    const auto parentVariable = addWideString(u"ANYPS5_LOADEXEC_PARENT");
+    const auto parentText = reserve(34);
+    const auto skipFirstArgument = reserve(4);
     const auto programPath = reserve(PathCapacity * 2);
     const auto modulePath = reserve(PathCapacity * 2);
     const auto argumentBlock = reserve(8);
@@ -207,6 +210,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     }
 
     const auto lastError = reserve(4);
+    const auto unresolvedCount = reserve(4);
     const auto errorDigits = reserve(11);
     const auto errorMessage = reserve(ErrorMessageCapacity);
     const auto loading = addString("Loading PRX: ");
@@ -215,6 +219,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     const auto failedModule = addString("Failed to load module: ");
     const auto skippedModule = addString(" -> not found; nothing is imported from it, continuing without it\n");
     const auto errorPrefix = addString("GetLastError: ");
+    const auto moduleNotFoundHint = addString("hint: the module or one of its dependent DLLs was not found; a self-built libs/ also needs libgcc_s_seh-1.dll, libstdc++-6.dll and libwinpthread-1.dll from the toolchain's mingw64/bin next to it\n");
     const auto messageSeparator = addString(" - ");
     const auto newline = addString("\n");
     const auto searched = addString("Searched libraries:\n");
@@ -232,6 +237,8 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
             (import.Library.empty() ? std::string{} : " from " + import.Library) + "\n");
     const auto argumentError = errors.size();
     errors.push_back("FAIL: cannot prepare command-line arguments\n");
+    const auto parentError = errors.size();
+    errors.push_back("FAIL: cannot wait for the previous LoadExec process\n");
     const auto directoryError = errors.size();
     errors.push_back("FAIL: cannot make the executable directory the current directory\n");
     const auto traceError = errors.size();
@@ -394,6 +401,49 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     };
 
     code.Emit({0x53, 0x55, 0x56, 0x57, 0x41, 0x54, 0x48, 0x83, 0xec, 0x60});
+    code.Rip({0x48, 0x8d, 0x0d}, parentVariable);
+    code.Rip({0x48, 0x8d, 0x15}, parentText);
+    code.Emit({0x41, 0xb8, 17, 0, 0, 0});
+    call("GetEnvironmentVariableW");
+    code.Emit({0x85, 0xc0});
+    const auto noParent = code.Branch({0x0f, 0x84});
+    code.Emit({0x83, 0xf8, 16});
+    const auto shortValue = code.Branch({0x0f, 0x86});
+    fail(parentError, 1);
+    code.PatchBranch(shortValue, code.GetRva());
+    code.Rip({0xc7, 0x05}, skipFirstArgument - 4);
+    code.U32(1);
+    code.Rip({0x48, 0x8d, 0x35}, parentText);
+    code.Emit({0x31, 0xff});
+    const auto digit = code.GetRva();
+    code.Emit({0x0f, 0xb7, 0x06, 0x85, 0xc0});
+    const auto parsed = code.Branch({0x0f, 0x84});
+    code.Emit({0x83, 0xe8, 0x30, 0x83, 0xf8, 9});
+    const auto decimal = code.Branch({0x0f, 0x86});
+    code.Emit({0x83, 0xe8, 0x31, 0x83, 0xf8, 5});
+    const auto hex = code.Branch({0x0f, 0x86});
+    fail(parentError, 1);
+    code.PatchBranch(hex, code.GetRva());
+    code.Emit({0x83, 0xc0, 10});
+    code.PatchBranch(decimal, code.GetRva());
+    code.Emit({0x48, 0xc1, 0xe7, 4, 0x48, 0x09, 0xc7, 0x48, 0x83, 0xc6, 2});
+    code.Rip({0xe9}, digit);
+    code.PatchBranch(parsed, code.GetRva());
+    code.Emit({0x48, 0x89, 0xf9, 0xba, 0xff, 0xff, 0xff, 0xff});
+    call("WaitForSingleObject");
+    code.Emit({0x85, 0xc0});
+    const auto waited = code.Branch({0x0f, 0x84});
+    fail(parentError, 1);
+    code.PatchBranch(waited, code.GetRva());
+    code.Emit({0x48, 0x89, 0xf9});
+    call("CloseHandle");
+    requireNonzero(parentError, 1);
+    code.Rip({0x48, 0x8d, 0x0d}, parentVariable);
+    code.Emit({0x31, 0xd2});
+    call("SetEnvironmentVariableW");
+    requireNonzero(parentError, 1);
+    code.PatchBranch(noParent, code.GetRva());
+
     code.Emit({0x31, 0xc9});
     code.Rip({0x48, 0x8d, 0x15}, programPath);
     code.Emit({0x41, 0xb8});
@@ -486,6 +536,11 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         writeString(resolvedPaths[index], true);
         writeString(newline, true);
         writeLastError();
+        code.Rip({0x8b, 0x05}, lastError);
+        code.Emit({0x83, 0xf8, 0x7e});
+        const auto notModuleNotFound = code.Branch({0x0f, 0x85});
+        writeString(moduleNotFoundHint, true);
+        code.PatchBranch(notModuleNotFound, code.GetRva());
         if (dependencyDiagnostics) {
             code.Rip({0x48, 0x8d, 0x0d}, resolvedPaths[index]);
             code.Rip({0x48, 0x8d, 0x15}, programText);
@@ -522,6 +577,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     };
 
     std::vector<std::size_t> unresolvedBranches;
+    bool anyUnresolvable = false;
     std::vector<std::size_t> lazyUnresolvedImports;
     std::vector<std::size_t> tlsResolverAddresses;
     for (std::size_t index = 0; index < imports.size(); ++index) {
@@ -573,7 +629,8 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         }
         captureLastError();
         writeString(errorRvas.at(3 + index), true);
-        unresolvedBranches.push_back(code.Branch({0xe9}));
+        code.Rip({0xff, 0x05}, unresolvedCount);
+        const auto nextImport = code.Branch({0xe9});
         code.PatchBranch(resolved, code.GetRva());
         if (imports[index].RelocationType == 16) code.Emit({0x48, 0x8b, 0x00});
         if (imports[index].RelocationType == 17) code.Emit({0x48, 0x8b, 0x40, 8});
@@ -584,8 +641,15 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         }
         trace(imports[index], symbolNames[index]);
         guestStartup.WriteImport(code, imports[index], handles);
+        code.PatchBranch(nextImport, code.GetRva());
+        anyUnresolvable = true;
     }
 
+    if (anyUnresolvable) {
+        code.Rip({0x8b, 0x05}, unresolvedCount);
+        code.Emit({0x85, 0xc0});
+        unresolvedBranches.push_back(code.Branch({0x0f, 0x85}));
+    }
     guestStartup.Initialize(code, guestModules, handles);
     writeString(enteringElf);
     code.Rip({0x48, 0x8d, 0x0d}, shellLibrary);
@@ -605,6 +669,13 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     requireNonzero(argumentError, 0xc000000du);
     code.Rip({0x48, 0x89, 0x05}, wideArguments);
     code.Emit({0x48, 0x89, 0xc3});
+    code.Rip({0x83, 0x3d}, skipFirstArgument - 1);
+    code.Emit({0});
+    const auto retainProgramName = code.Branch({0x0f, 0x84});
+    code.Emit({0x48, 0x83, 0xc3, 8});
+    code.Rip({0x83, 0x2d}, argumentCount - 1);
+    code.Emit({1});
+    code.PatchBranch(retainProgramName, code.GetRva());
     code.Rip({0x8b, 0x2d}, argumentCount);
     code.Emit({0x8d, 0x45, 0xff, 0x3d});
     code.U32(ArgumentCapacity - 1);

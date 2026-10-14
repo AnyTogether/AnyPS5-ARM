@@ -312,6 +312,31 @@ std::exception_ptr InjectedFailure() {
     }
 }
 
+void AwaitedRegistrationPreparation() {
+    std::atomic<bool> ran{false};
+    AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        ran.store(true, std::memory_order_release);
+    });
+    AgcDriver::DriverDetail::AwaitRegistrationPreparation();
+    Require(ran.load(std::memory_order_acquire), "a submission did not wait for the registration preparation queued before it");
+    std::atomic<bool> slow{false};
+    std::atomic<bool> fast{false};
+    AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        slow.store(true, std::memory_order_release);
+    });
+    auto waiter = std::async(std::launch::async, [&] {
+        AgcDriver::DriverDetail::AwaitRegistrationPreparation();
+        return slow.load(std::memory_order_acquire);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    AgcDriver::DriverDetail::SubmitRegistrationPreparation([&] { fast.store(true, std::memory_order_release); });
+    Require(waiter.get(), "a submission stopped waiting for an earlier preparation once a later one finished");
+    AgcDriver::DriverDetail::AwaitRegistrationPreparation();
+    Require(fast.load(std::memory_order_acquire), "the later preparation did not run");
+}
+
 void PendingRegistrationPreparation(AgcDriver::VulkanDevice& device) {
     alignas(256) const std::array<std::uint32_t, 1> code{0xbf810000u};
     std::array<std::uint32_t, 4> users{};
@@ -688,6 +713,7 @@ int main(int argc, char** argv) {
         RegisteredVertexWorkgroup(device->Target());
         FailureCapture(*device);
         PendingRegistrationPreparation(*device);
+        AwaitedRegistrationPreparation();
         Require(argc != 2 || std::string_view(argv[1]) != "--fail-before-registration", "injected failure before registration");
         PrepareMultisampledStorage(*device);
         device.reset();

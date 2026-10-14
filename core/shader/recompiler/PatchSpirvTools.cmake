@@ -3,31 +3,101 @@ set(spirvToolsRedundancySource "${spirvToolsSourceDir}/redundancy_elimination.cp
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${spirvToolsRedundancySource}")
 file(READ "${spirvToolsRedundancySource}" spirvToolsRedundancy)
 
+set(spirvToolsLocalRedundancySource "${spirvToolsSourceDir}/local_redundancy_elimination.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${spirvToolsLocalRedundancySource}")
+file(READ "${spirvToolsLocalRedundancySource}" spirvToolsLocalRedundancy)
+set(spirvToolsExpectedElimination [=[
+  auto func = [this, &vnTable, &modified, value_to_ids](Instruction* inst) {
+    if (inst->result_id() == 0) {
+      return;
+    }
+
+    uint32_t value = vnTable.GetValueNumber(inst);
+
+    if (value == 0) {
+      return;
+    }
+
+    auto candidate = value_to_ids->insert({value, inst->result_id()});
+    if (!candidate.second) {
+      context()->KillNamesAndDecorates(inst);
+      context()->ReplaceAllUsesWith(inst->result_id(), candidate.first->second);
+      context()->KillInst(inst);
+      modified = true;
+    }
+  };
+  block->ForEachInst(func);
+]=])
+string(FIND "${spirvToolsLocalRedundancy}" "${spirvToolsExpectedElimination}" spirvToolsEliminationPosition)
+if(spirvToolsEliminationPosition EQUAL -1)
+    message(FATAL_ERROR "SPIRV-Tools value elimination has changed; review the local traversal fix")
+endif()
+
 set(spirvToolsOldTraversal [=[
+  struct State {
+    DominatorTreeNode* node;
+    std::map<uint32_t, uint32_t> value_to_id_map;
+  };
+  std::vector<State> todo;
+  todo.push_back({bb, std::map<uint32_t, uint32_t>()});
+  bool modified = false;
+  for (size_t next_node = 0; next_node < todo.size(); next_node++) {
+    modified |= EliminateRedundanciesInBB(todo[next_node].node->bb_, vnTable,
+                                          &todo[next_node].value_to_id_map);
     for (DominatorTreeNode* child : todo[next_node].node->children_) {
       todo.push_back({child, todo[next_node].value_to_id_map});
     }
+  }
 ]=])
 set(spirvToolsNewTraversal [=[
-    const auto& children = todo[next_node].node->children_;
-    for (size_t child_index = 0; child_index < children.size(); ++child_index) {
-      if (child_index + 1 == children.size()) {
-        todo.push_back({children[child_index],
-                        std::move(todo[next_node].value_to_id_map)});
-      } else {
-        todo.push_back({children[child_index], todo[next_node].value_to_id_map});
-      }
+  struct State {
+    DominatorTreeNode* node;
+    size_t next_child;
+    size_t added_begin;
+    bool entered;
+  };
+  std::map<uint32_t, uint32_t> value_to_id_map;
+  std::vector<uint32_t> added_values;
+  std::vector<State> todo;
+  todo.push_back({bb, 0, 0, false});
+  bool modified = false;
+  while (!todo.empty()) {
+    auto& state = todo.back();
+    if (!state.entered) {
+      state.entered = true;
+      state.node->bb_->ForEachInst([&](Instruction* inst) {
+        if (inst->result_id() == 0) return;
+        const uint32_t value = vnTable.GetValueNumber(inst);
+        if (value == 0) return;
+        auto candidate = value_to_id_map.insert({value, inst->result_id()});
+        if (candidate.second) {
+          added_values.push_back(value);
+        } else {
+          context()->KillNamesAndDecorates(inst);
+          context()->ReplaceAllUsesWith(inst->result_id(), candidate.first->second);
+          context()->KillInst(inst);
+          modified = true;
+        }
+      });
     }
-    todo[next_node].value_to_id_map.clear();
+    const auto& children = state.node->children_;
+    if (state.next_child != children.size()) {
+      auto* child = children[state.next_child++];
+      todo.push_back({child, 0, added_values.size(), false});
+      continue;
+    }
+    while (added_values.size() != state.added_begin) {
+      value_to_id_map.erase(added_values.back());
+      added_values.pop_back();
+    }
+    todo.pop_back();
+  }
 ]=])
 string(FIND "${spirvToolsRedundancy}" "${spirvToolsOldTraversal}" spirvToolsTraversalPosition)
 if(spirvToolsTraversalPosition EQUAL -1)
     message(FATAL_ERROR "SPIRV-Tools redundancy traversal has changed; review the local memory fix")
 endif()
 string(REPLACE "${spirvToolsOldTraversal}" "${spirvToolsNewTraversal}" spirvToolsRedundancy "${spirvToolsRedundancy}")
-string(REPLACE "#include \"source/opt/redundancy_elimination.h\"\n"
-        "#include \"source/opt/redundancy_elimination.h\"\n\n#include <utility>\n"
-        spirvToolsRedundancy "${spirvToolsRedundancy}")
 
 set(spirvToolsPatchedDir "${CMAKE_BINARY_DIR}/3rdparty/SPIRV-Tools/patched")
 set(spirvToolsPatchedSource "${spirvToolsPatchedDir}/redundancy_elimination.cpp")

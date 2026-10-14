@@ -1,6 +1,8 @@
 #ifndef CORE_LIBS_PRX_LIBSCEAUDIOOUT_SRC_AUDIOOUT2INTERNAL_HPP
 #define CORE_LIBS_PRX_LIBSCEAUDIOOUT_SRC_AUDIOOUT2INTERNAL_HPP
 
+#include <array>
+#include <condition_variable>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +49,8 @@ struct AudioOut2CapturedPort {
     std::size_t index = 0;
     std::uint64_t generation = 0;
     const void* data = nullptr;
+    std::vector<std::byte> pcm;
+    std::array<float, AUDIO_OUT2_PORT_CHANNELS_MAX> volume{};
 };
 
 using AudioOut2Grain = std::vector<AudioOut2CapturedPort>;
@@ -86,6 +90,9 @@ struct AudioOut2Context {
     // Mixed stereo frames the device has not played yet; it plays silence until the cushion is mixed.
     std::deque<float> output;
     bool priming = true;
+    bool advancedMode = false;
+    std::condition_variable grainReady;
+    std::deque<AudioOut2Grain> advancedGrains;
     std::deque<AudioOut2Grain> pendingGrains;
     std::deque<std::chrono::steady_clock::time_point> pendingSince;
     SDL_AudioDeviceID padDevice = 0;
@@ -112,7 +119,7 @@ struct AudioOut2Context {
 // Mixes every port of the context that carries PCM data into out (stereo float, frames frames), summing
 // onto the zeroed buffer. Returns the number of ports mixed.
 std::uint32_t AudioOut2MixPorts(const AudioOut2Context& context, const AudioOut2Grain& grain, float* out, float* padOut, std::uint32_t frames);
-AudioOut2Grain AudioOut2CaptureGrain(const AudioOut2Context& context);
+AudioOut2Grain AudioOut2CaptureGrain(const AudioOut2Context& context, bool snapshot = false);
 bool AudioOut2HasPadPorts(const AudioOut2Context& context);
 // Forgets the ports of a context being destroyed.
 void AudioOut2ReleasePorts(const AudioOut2Context& context);

@@ -335,8 +335,11 @@ int main() {
         ExpectFailure(*device, Offsets, chain, Samplers[0].words, "single-level", "a 4-level view read with texel offsets");
         ExpectFailure(*device, Gradient, chain, Samplers[0].words, "single-level", "a 4-level view read by image_sample_d");
         ExpectFailure(*device, LevelZero, chain, Samplers[2].words, "single-level", "a 4-level view through an S# with a minimum LOD and a LOD bias");
-        ExpectFailure(*device, Plain, single, {0x00008092u, 0x00fff000u, 0x05100000u, 0u}, "different minification", "unequal minification and magnification filters");
-        ExpectFailure(*device, Plain, single, {0x00008090u, 0x00fff000u, 0x05500000u, 0u}, "clamp mode 0", "wrap on X");
+        const auto magFilterReference = Run(*device, Plain, single, {0x00008092u, 0x00fff000u, 0x05500000u, 0u}, coordinates);
+        const auto unequalFilterSamples = Run(*device, Plain, single, {0x00008092u, 0x00fff000u, 0x05100000u, 0u}, coordinates);
+        Require(unequalFilterSamples == magFilterReference, "unnormalized sampler with unequal filters does not sample with its magnification filter");
+        const auto clampModeZeroSamples = Run(*device, Plain, single, {0x00008090u, 0x00fff000u, 0x05500000u, 0u}, coordinates);
+        Require(clampModeZeroSamples == magFilterReference, "unnormalized sampler with clamp mode 0 does not sample with clamp mode 2");
         const auto constantView = [&](std::uint32_t type, std::uint32_t format, std::uint32_t swizzle) {
             auto descriptor = TextureDescriptor(SingleLevel.data(), 0u, 0u);
             descriptor[1] = (descriptor[1] & ~(0x1ffu << 20u)) | (format << 20u);

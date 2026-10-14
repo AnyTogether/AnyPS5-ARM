@@ -18,58 +18,10 @@
 #include <io.h>
 #include "prx/libkernel/File/include/DirectoryDescriptor.hpp"
 #elif defined(__APPLE__)
-#include <cstring>
-#include <dirent.h>
 #include <fcntl.h>
-#include <sys/attr.h>
-#include <sys/fsgetpath.h>
-#include <sys/mount.h>
+#include <sys/event.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <unordered_map>
-#include <sys/event.h>
-
-// <sys/event.h> names the host's kqueue constants with macros that would replace the guest constants
-// of the same names; keep the host values under names of their own.
-namespace {
-constexpr std::int16_t HOST_EVFILT_READ = EVFILT_READ;
-constexpr std::int16_t HOST_EVFILT_USER = EVFILT_USER;
-constexpr std::int16_t HOST_EVFILT_VNODE = EVFILT_VNODE;
-constexpr std::uint16_t HOST_EV_ADD = EV_ADD;
-constexpr std::uint16_t HOST_EV_CLEAR = EV_CLEAR;
-constexpr std::uint16_t HOST_EV_EOF = EV_EOF;
-constexpr std::uint32_t HOST_NOTE_TRIGGER = NOTE_TRIGGER;
-constexpr std::uint32_t HOST_NOTE_DELETE = NOTE_DELETE;
-constexpr std::uint32_t HOST_NOTE_WRITE = NOTE_WRITE;
-constexpr std::uint32_t HOST_NOTE_EXTEND = NOTE_EXTEND;
-constexpr std::uint32_t HOST_NOTE_ATTRIB = NOTE_ATTRIB;
-constexpr std::uint32_t HOST_NOTE_LINK = NOTE_LINK;
-constexpr std::uint32_t HOST_NOTE_RENAME = NOTE_RENAME;
-constexpr std::uint32_t HOST_NOTE_REVOKE = NOTE_REVOKE;
-}
-
-#undef EVFILT_READ
-#undef EVFILT_WRITE
-#undef EVFILT_VNODE
-#undef EVFILT_TIMER
-#undef EVFILT_USER
-#undef EV_ADD
-#undef EV_DELETE
-#undef EV_ENABLE
-#undef EV_DISABLE
-#undef EV_ONESHOT
-#undef EV_CLEAR
-#undef EV_RECEIPT
-#undef EV_DISPATCH
-#undef EV_SYSFLAGS
-#undef EV_ERROR
-#undef EV_EOF
-#undef NOTE_DELETE
-#undef NOTE_WRITE
-#undef NOTE_EXTEND
-#undef NOTE_ATTRIB
-#undef NOTE_LINK
-#undef NOTE_RENAME
 #else
 #include <dirent.h>
 #include <fcntl.h>
@@ -85,12 +37,17 @@ namespace {
 
 constexpr int GUEST_EBADF = 9;
 constexpr int GUEST_EINVAL = 22;
+#ifdef __APPLE__
+static_assert(NOTE_DELETE == 0x0001 && NOTE_WRITE == 0x0002 && NOTE_EXTEND == 0x0004 && NOTE_ATTRIB == 0x0008 &&
+    NOTE_LINK == 0x0010 && NOTE_RENAME == 0x0020);
+#else
 constexpr std::uint32_t NOTE_DELETE = 0x0001;
 constexpr std::uint32_t NOTE_WRITE = 0x0002;
 constexpr std::uint32_t NOTE_EXTEND = 0x0004;
 constexpr std::uint32_t NOTE_ATTRIB = 0x0008;
 constexpr std::uint32_t NOTE_LINK = 0x0010;
 constexpr std::uint32_t NOTE_RENAME = 0x0020;
+#endif
 constexpr std::uint32_t MAPPED_NOTES = NOTE_DELETE | NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_LINK | NOTE_RENAME;
 
 class VnodeWatch {
@@ -102,17 +59,14 @@ public:
             throw std::runtime_error("EVFILT_VNODE: CreateEvent failed, error=" + std::to_string(::GetLastError()));
         }
 #elif defined(__APPLE__)
-        stopEvent = ::kqueue();
-        if (stopEvent < 0) {
-            throw std::runtime_error("EVFILT_VNODE: kqueue failed, errno=" + std::to_string(errno));
+        int ends[2];
+        if (::pipe(ends) != 0) {
+            throw std::runtime_error("EVFILT_VNODE: pipe failed, errno=" + std::to_string(errno));
         }
-        struct kevent change {};
-        EV_SET(&change, 0, HOST_EVFILT_USER, HOST_EV_ADD | HOST_EV_CLEAR, 0, 0, nullptr);
-        if (::kevent(stopEvent, &change, 1, nullptr, 0, nullptr) < 0) {
-            const int error = errno;
-            ::close(stopEvent);
-            throw std::runtime_error("EVFILT_VNODE: kevent failed, errno=" + std::to_string(error));
-        }
+        stopEvent = ends[0];
+        stopSignal = ends[1];
+        ::fcntl(stopEvent, F_SETFD, FD_CLOEXEC);
+        ::fcntl(stopSignal, F_SETFD, FD_CLOEXEC);
 #else
         stopEvent = ::eventfd(0, EFD_CLOEXEC);
         if (stopEvent < 0) {
@@ -124,6 +78,9 @@ public:
     ~VnodeWatch() {
 #ifdef _WIN32
         ::CloseHandle(stopEvent);
+#elif defined(__APPLE__)
+        ::close(stopEvent);
+        ::close(stopSignal);
 #else
         ::close(stopEvent);
 #endif
@@ -137,10 +94,9 @@ public:
 #ifdef _WIN32
         ::SetEvent(stopEvent);
 #elif defined(__APPLE__)
-        struct kevent trigger {};
-        EV_SET(&trigger, 0, HOST_EVFILT_USER, 0, HOST_NOTE_TRIGGER, 0, nullptr);
-        const auto triggered = ::kevent(stopEvent, &trigger, 1, nullptr, 0, nullptr);
-        static_cast<void>(triggered);
+        const char one = 1;
+        const auto written = ::write(stopSignal, &one, sizeof(one));
+        static_cast<void>(written);
 #else
         const std::uint64_t one = 1;
         const auto written = ::write(stopEvent, &one, sizeof(one));
@@ -166,6 +122,9 @@ private:
     std::atomic<bool> stopped{false};
 #ifdef _WIN32
     HANDLE stopEvent = nullptr;
+#elif defined(__APPLE__)
+    int stopEvent = -1;
+    int stopSignal = -1;
 #else
     int stopEvent = -1;
 #endif
@@ -405,26 +364,13 @@ int OpenHostWatch(int descriptor, std::uint32_t notes, HostWatch& host) {
 
 #elif defined(__APPLE__)
 
-struct DirectoryEntry {
-    ino_t inode;
-    nlink_t links;
-    bool directory;
-};
-
-// Closing any descriptor of a file drops the process's fcntl locks on it, so a watched file is read
-// through the guest's own descriptor; closing that descriptor stops the watch before it is closed.
 struct HostWatch {
     int notify = -1;
     int target = -1;
-    int entries = -1;
-    bool directory = false;
-    struct stat last {};
-    fsid_t volume {};
-    std::unordered_map<std::string, DirectoryEntry> names;
 };
 
 void CloseHostWatch(HostWatch& host) {
-    for (int* descriptor : {&host.notify, &host.entries}) {
+    for (int* descriptor : {&host.notify, &host.target}) {
         if (*descriptor >= 0) {
             ::close(*descriptor);
             *descriptor = -1;
@@ -432,233 +378,17 @@ void CloseHostWatch(HostWatch& host) {
     }
 }
 
-std::uint32_t AttributeHint(const struct stat& last, const struct stat& current) {
-    if (current.st_nlink > last.st_nlink) {
-        return NOTE_LINK;
-    }
-    return current.st_nlink < last.st_nlink ? NOTE_DELETE : NOTE_ATTRIB;
-}
-
-std::uint32_t ModifyHint(const struct stat& last, const struct stat& current) {
-    if (current.st_size > last.st_size) {
-        return NOTE_WRITE | NOTE_EXTEND;
-    }
-    return current.st_size < last.st_size ? NOTE_ATTRIB : NOTE_WRITE;
-}
-
-void FileHints(HostWatch& host, std::uint32_t notes, std::vector<std::uint32_t>& hints) {
-    struct stat current = host.last;
-    if (::fstat(host.target, &current) != 0) {
-        current = host.last;
-    }
-    // A truncate reaches the host as NOTE_ATTRIB and the guest as the modification it is on Linux.
-    const bool resized = current.st_size != host.last.st_size;
-    const bool attributes = (notes & HOST_NOTE_ATTRIB) != 0;
-    if ((notes & (HOST_NOTE_WRITE | HOST_NOTE_EXTEND)) != 0 || (attributes && resized)) {
-        hints.push_back(ModifyHint(host.last, current));
-    }
-    if ((notes & (HOST_NOTE_LINK | HOST_NOTE_DELETE)) != 0 || (attributes && (!resized || (notes & HOST_NOTE_WRITE) != 0))) {
-        hints.push_back(AttributeHint(host.last, current));
-    }
-    if ((notes & HOST_NOTE_RENAME) != 0) {
-        hints.push_back(NOTE_RENAME);
-    }
-    host.last = current;
-}
-
-int ReadEntries(int directory, std::unordered_map<std::string, DirectoryEntry>& names) {
-    const int scan = ::openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (scan < 0) {
-        return errno == ENOENT ? 0 : errno;
-    }
-    DIR* listing = ::fdopendir(scan);
-    if (listing == nullptr) {
-        const int error = errno;
-        ::close(scan);
-        return error;
-    }
-    int error = 0;
-    for (;;) {
-        errno = 0;
-        const dirent* entry = ::readdir(listing);
-        if (entry == nullptr) {
-            error = errno;
-            break;
-        }
-        if (std::strcmp(entry->d_name, ".") == 0 || std::strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-        struct stat status {};
-        if (::fstatat(scan, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0) {
-            if (errno == ENOENT) {
-                continue;
-            }
-            error = errno;
-            break;
-        }
-        names[entry->d_name] = {status.st_ino, status.st_nlink, S_ISDIR(status.st_mode)};
-    }
-    ::closedir(listing);
-    return error;
-}
-
-// kqueue reports a changed directory only as NOTE_WRITE, so the entries are compared with the last
-// listing to tell the guest what inotify tells Linux: an entry that left for, or came from, another
-// directory adds NOTE_EXTEND to the NOTE_WRITE of one created, removed or renamed in place.
-bool RemovedHint(const HostWatch& host, const DirectoryEntry& entry, std::uint32_t& hint) {
-    const std::uint32_t link = entry.directory ? NOTE_LINK : 0;
-    fsid_t volume = host.volume;
-    char path[MAXPATHLEN];
-    if (::fsgetpath(path, sizeof(path), &volume, entry.inode) < 0) {
-        if (errno == ENOENT) {
-            hint = NOTE_WRITE | link;
-            return true;
-        }
-        throw std::runtime_error("EVFILT_VNODE: fsgetpath failed, errno=" + std::to_string(errno));
-    }
-    // A listing read while an entry is renamed in place can miss both of its names; the entry is then
-    // still in this directory and the listing has to be read again.
-    char* separator = std::strrchr(path, '/');
-    if (separator != nullptr) {
-        *separator = '\0';
-        struct stat parent {};
-        if (::lstat(separator == path ? "/" : path, &parent) == 0 && parent.st_dev == host.last.st_dev && parent.st_ino == host.last.st_ino) {
-            return false;
-        }
-    }
-    if (!entry.directory && entry.links > 1) {
-        NotImplemented_nid_no_patch("EVFILT_VNODE: telling a removed link from a file with several links moved out of the directory");
-    }
-    hint = NOTE_WRITE | NOTE_EXTEND | link;
-    return true;
-}
-
-bool AddedHint(const HostWatch& host, const std::string& name, const DirectoryEntry& entry, std::uint32_t& hint) {
-    struct Times {
-        std::uint32_t length;
-        attribute_set_t returned;
-        timespec created;
-        std::uint64_t inode;
-        timespec added;
-    } __attribute__((packed));
-    attrlist request {};
-    request.bitmapcount = ATTR_BIT_MAP_COUNT;
-    request.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_CRTIME | ATTR_CMN_FILEID | ATTR_CMN_ADDEDTIME;
-    Times times {};
-    if (::getattrlistat(host.entries, name.c_str(), &request, &times, sizeof(times), FSOPT_NOFOLLOW) != 0) {
-        if (errno == ENOENT) {
-            return false;
-        }
-        throw std::runtime_error("EVFILT_VNODE: getattrlistat failed, errno=" + std::to_string(errno));
-    }
-    if (times.inode != entry.inode) {
-        return false;
-    }
-    constexpr attrgroup_t needed = ATTR_CMN_CRTIME | ATTR_CMN_FILEID | ATTR_CMN_ADDEDTIME;
-    if ((times.returned.commonattr & needed) != needed) {
-        NotImplemented_nid_no_patch("EVFILT_VNODE: a directory entry without an added time");
-    }
-    const std::uint32_t link = entry.directory ? NOTE_LINK : 0;
-    // APFS gives an entry created in place an added time equal to its creation time, and one moved in
-    // from another directory the time of the move, which a new link to a file gets as well.
-    const timespec created = times.created;
-    const timespec added = times.added;
-    if (added.tv_sec == created.tv_sec && added.tv_nsec == created.tv_nsec) {
-        hint = NOTE_WRITE | link;
-        return true;
-    }
-    if (!entry.directory && entry.links > 1) {
-        NotImplemented_nid_no_patch("EVFILT_VNODE: telling a new link from a file with several links moved into the directory");
-    }
-    hint = NOTE_WRITE | NOTE_EXTEND | link;
-    return true;
-}
-
-int EntryHints(HostWatch& host, std::vector<std::uint32_t>& hints) {
-    for (;;) {
-        std::unordered_map<std::string, DirectoryEntry> current;
-        if (const int error = ReadEntries(host.entries, current)) {
-            return error;
-        }
-        std::unordered_map<ino_t, int> before;
-        std::unordered_map<ino_t, int> after;
-        for (const auto& [name, entry] : host.names) {
-            ++before[entry.inode];
-        }
-        for (const auto& [name, entry] : current) {
-            ++after[entry.inode];
-        }
-        std::vector<std::uint32_t> found;
-        bool settled = true;
-        for (const auto& [name, entry] : host.names) {
-            const auto now = current.find(name);
-            if (now != current.end() && now->second.inode == entry.inode) {
-                continue;
-            }
-            std::uint32_t hint = NOTE_WRITE;
-            if (!after.contains(entry.inode) && !RemovedHint(host, entry, hint)) {
-                settled = false;
-                break;
-            }
-            found.push_back(hint);
-        }
-        for (const auto& [name, entry] : current) {
-            if (!settled) {
-                break;
-            }
-            const auto then = host.names.find(name);
-            if (then != host.names.end() && then->second.inode == entry.inode) {
-                continue;
-            }
-            std::uint32_t hint = NOTE_WRITE;
-            if (!before.contains(entry.inode) && !AddedHint(host, name, entry, hint)) {
-                settled = false;
-                break;
-            }
-            found.push_back(hint);
-        }
-        if (!settled) {
-            continue;
-        }
-        if (found.empty()) {
-            found.push_back(NOTE_WRITE);
-        }
-        hints.insert(hints.end(), found.begin(), found.end());
-        host.names = std::move(current);
-        return 0;
-    }
-}
-
-int DirectoryHints(HostWatch& host, std::uint32_t notes, std::vector<std::uint32_t>& hints) {
-    if ((notes & HOST_NOTE_WRITE) != 0) {
-        if (const int error = EntryHints(host, hints)) {
-            return error;
-        }
-    }
-    if ((notes & HOST_NOTE_ATTRIB) != 0) {
-        hints.push_back(NOTE_ATTRIB);
-    }
-    if ((notes & HOST_NOTE_RENAME) != 0) {
-        hints.push_back(NOTE_RENAME);
-    }
-    if ((notes & HOST_NOTE_DELETE) != 0) {
-        hints.push_back(NOTE_DELETE);
-    }
-    return 0;
-}
-
 void RunHostWatch(std::shared_ptr<VnodeWatch> watch, HostWatch host) {
     struct kevent stop {};
-    EV_SET(&stop, watch->StopEvent(), HOST_EVFILT_READ, HOST_EV_ADD, 0, 0, nullptr);
+    EV_SET(&stop, watch->StopEvent(), EVFILT_READ, EV_ADD, 0, 0, nullptr);
     if (::kevent(host.notify, &stop, 1, nullptr, 0, nullptr) < 0) {
         const int error = errno;
         CloseHostWatch(host);
-        throw std::runtime_error("EVFILT_VNODE: kevent failed, errno=" + std::to_string(error));
+        throw std::runtime_error("EVFILT_VNODE: registering the stop event failed, errno=" + std::to_string(error));
     }
     for (;;) {
-        struct kevent events[2];
-        const int count = ::kevent(host.notify, nullptr, 0, events, 2, nullptr);
-        if (count < 0) {
+        struct kevent event {};
+        if (::kevent(host.notify, nullptr, 0, &event, 1, nullptr) < 0) {
             if (errno == EINTR) {
                 continue;
             }
@@ -666,29 +396,14 @@ void RunHostWatch(std::shared_ptr<VnodeWatch> watch, HostWatch host) {
             CloseHostWatch(host);
             throw std::runtime_error("EVFILT_VNODE: kevent failed, errno=" + std::to_string(error));
         }
-        std::uint32_t notes = 0;
-        bool stopping = false;
-        for (int index = 0; index < count; ++index) {
-            if (events[index].filter == HOST_EVFILT_READ) {
-                stopping = true;
-            } else {
-                notes |= events[index].fflags;
-                stopping = stopping || (events[index].flags & HOST_EV_EOF) != 0;
-            }
-        }
-        if (stopping || (notes & HOST_NOTE_REVOKE) != 0) {
+        if (event.filter != EVFILT_VNODE) {
             break;
         }
-        std::vector<std::uint32_t> hints;
-        if (!host.directory) {
-            FileHints(host, notes, hints);
-        } else if (const int error = DirectoryHints(host, notes, hints)) {
-            CloseHostWatch(host);
-            throw std::runtime_error("EVFILT_VNODE: reading the watched directory failed, errno=" + std::to_string(error));
+        auto notes = event.fflags & MAPPED_NOTES;
+        if ((notes & NOTE_DELETE) != 0) {
+            notes &= ~NOTE_LINK;
         }
-        for (const auto hint : hints) {
-            watch->Deliver(hint);
-        }
+        watch->Deliver(notes);
     }
     CloseHostWatch(host);
 }
@@ -704,37 +419,19 @@ int OpenHostWatch(int descriptor, std::uint32_t, HostWatch& host) {
     if (!S_ISREG(status.st_mode) && !S_ISDIR(status.st_mode)) {
         NotImplemented_nid_no_patch("EVFILT_VNODE: a descriptor that is not a file or a directory");
     }
-    host.directory = S_ISDIR(status.st_mode);
-    host.target = descriptor;
-    host.last = status;
-    if (host.directory) {
-        struct statfs volume {};
-        if (::fstatfs(descriptor, &volume) != 0) {
-            throw std::runtime_error("EVFILT_VNODE: fstatfs failed, errno=" + std::to_string(errno));
-        }
-        if (std::strcmp(volume.f_fstypename, "apfs") != 0) {
-            NotImplemented_nid_no_patch(("EVFILT_VNODE: a directory on " + std::string(volume.f_fstypename)).c_str());
-        }
-        host.volume = volume.f_fsid;
-        host.entries = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
-        if (host.entries < 0) {
-            throw std::runtime_error("EVFILT_VNODE: opening the watched directory failed, errno=" + std::to_string(errno));
-        }
+    host.target = ::fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+    if (host.target < 0) {
+        const int error = errno;
+        CloseHostWatch(host);
+        throw std::runtime_error("EVFILT_VNODE: duplicating the watched descriptor failed, errno=" + std::to_string(error));
     }
     host.notify = ::kqueue();
     struct kevent change {};
-    EV_SET(&change, descriptor, HOST_EVFILT_VNODE, HOST_EV_ADD | HOST_EV_CLEAR,
-        HOST_NOTE_DELETE | HOST_NOTE_WRITE | HOST_NOTE_EXTEND | HOST_NOTE_ATTRIB | HOST_NOTE_LINK | HOST_NOTE_RENAME | HOST_NOTE_REVOKE, 0, nullptr);
+    EV_SET(&change, host.target, EVFILT_VNODE, EV_ADD | EV_CLEAR, MAPPED_NOTES, 0, nullptr);
     if (host.notify < 0 || ::kevent(host.notify, &change, 1, nullptr, 0, nullptr) < 0) {
         const int error = errno;
         CloseHostWatch(host);
         throw std::runtime_error("EVFILT_VNODE: kqueue failed, errno=" + std::to_string(error));
-    }
-    if (host.directory) {
-        if (const int error = ReadEntries(host.entries, host.names)) {
-            CloseHostWatch(host);
-            throw std::runtime_error("EVFILT_VNODE: reading the watched directory failed, errno=" + std::to_string(error));
-        }
     }
     return 0;
 }

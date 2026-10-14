@@ -19,7 +19,7 @@ int APS5_VABI sceMouseRead(std::int32_t handle, MouseData* data, std::int32_t nu
     return Mouse::Read(handle, data, num);
 }
 
-void MousePublishInput_nid_postfix(const MouseInputEvent& event) {
+void MousePublishInput_nid_no_patch(const MouseInputEvent& event) {
     Mouse::Publish(event);
 }
 
@@ -28,7 +28,7 @@ int APS5_VABI sceMouseResetAbsolutePosition() {
     return 0;
 }
 
-bool MouseIsOpen_nid_postfix() {
+bool MouseIsOpen_nid_no_patch() {
     return Mouse::IsOpen();
 }
 

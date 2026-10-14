@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <stdexcept>
 
 extern "C" {
@@ -39,6 +40,16 @@ static constexpr std::int64_t IDLE_LIMIT_NANOS = 100 * NANOS_PER_MILLISECOND;
 static constexpr std::int64_t GIVE_UP_NANOS = 10 * NANOS_PER_SECOND;
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+static void SetTimeZone(const char* zone) {
+#ifdef _WIN32
+    Require(_putenv_s("TZ", zone) == 0);
+    _tzset();
+#else
+    Require(setenv("TZ", zone, 1) == 0);
+    tzset();
+#endif
+}
 
 static bool OmittedResolutionSucceeds() {
     constexpr int clocks[] = {0, 1, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 3, 6, 9999, -1, INT_MIN, INT_MAX};
@@ -177,6 +188,7 @@ static void XtimeTicksAreGettimeofdayMicroseconds() {
 }
 
 static void CalendarConversionsInitializeTheirState() {
+    SetTimeZone("UTC0");
     constexpr std::uint64_t sentinel = 0xa5a5a5a5a5a5a5a5ull;
     struct GuardedState {
         std::uint64_t before;
@@ -242,11 +254,52 @@ static void SettimeValidatesLikeFreebsd() {
     Require(SettimeThrows(KernelTimespec{1, NANOS_PER_SECOND - 1}, "1.999999999"));
 }
 
+static std::int32_t RuntimeDaylight(std::int32_t daylight) {
+#ifdef _WIN32
+    long bias = 0;
+    Require(_get_dstbias(&bias) == 0);
+    return daylight == 0 ? 0 : static_cast<std::int32_t>(-bias);
+#else
+    return daylight;
+#endif
+}
+
+static void RequireZone(const char* zone, std::int64_t utc, std::int64_t standardEast, std::int32_t zoneDaylight, std::int32_t daylightInEffect) {
+    SetTimeZone(zone);
+    zoneDaylight = RuntimeDaylight(zoneDaylight);
+    const std::int32_t daylight = daylightInEffect == 0 ? 0 : zoneDaylight;
+    const std::int64_t east = standardEast + daylight;
+    std::int64_t local = -1;
+    KernelTimesec universal{-1, 0xa5a5a5a5u, 0xa5a5a5a5u};
+    std::int32_t universalDst = -1;
+    Require(sceKernelConvertUtcToLocaltime(utc, &local, &universal, &universalDst) == SCE_OK);
+    Require(local == utc + east && universalDst == daylight);
+    Require(universal.t == utc && universal.west_sec == static_cast<std::uint32_t>(east - daylight) && universal.dst_sec == static_cast<std::uint32_t>(daylight));
+    std::int64_t converted = -1;
+    KernelTimesec state{-1, 0xa5a5a5a5u, 0xa5a5a5a5u};
+    std::int32_t dst = -1;
+    Require(sceKernelConvertLocaltimeToUtc(local, 0, &converted, &state, &dst) == SCE_OK);
+    Require(converted == utc && dst == zoneDaylight);
+    Require(state.t == local && state.west_sec == universal.west_sec && state.dst_sec == universal.dst_sec);
+}
+
+static void CalendarConversionsFollowTheHostZone() {
+    constexpr std::int64_t winter = 1768478400;
+    constexpr std::int64_t summer = 1782907200;
+    RequireZone("UTC0", summer, 0, 0, 0);
+    RequireZone("IST-5:30", winter, 19800, 0, 0);
+    RequireZone("BRT+3", summer, -10800, 0, 0);
+    RequireZone("EST5EDT", winter, -18000, 3600, 0);
+    RequireZone("EST5EDT", summer, -18000, 3600, 3600);
+    SetTimeZone("UTC0");
+}
+
 int main() {
     if (!OmittedResolutionSucceeds()) return 1;
     UnsupportedResolutionStillThrows();
     SettimeValidatesLikeFreebsd();
     CalendarConversionsInitializeTheirState();
+    CalendarConversionsFollowTheHostZone();
     SecondClockReportsWholeSeconds();
     KernelTimezone zone{-1, -1};
     Require(gettimeofday_nid_postfix(nullptr, nullptr) == SCE_OK);

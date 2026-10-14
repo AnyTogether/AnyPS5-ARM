@@ -230,9 +230,26 @@ static void TestRelinkedModuleNames() {
     std::filesystem::remove_all(root);
 }
 
+static void TestRelinkedModuleNameCase() {
+    const auto root = std::filesystem::path("anyps5-relinked-case-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directories(root));
+    { std::ofstream file(root / "librenoircore.ps5.prx.guest.prx"); file << "relinked"; }
+    const auto requested = (root / "libRenoirCore.PS5.prx").generic_string();
+    FileStat status{};
+    Require(sceKernelStat(requested.c_str(), &status) == 0 && status.st_size == 8);
+    Require(stat_nid_postfix(requested.c_str(), &status) == 0 && status.st_size == 8);
+    Require(sceKernelCheckReachability(requested.c_str()) == 0);
+    const int opened = sceKernelOpen(requested.c_str(), 0, 0);
+    Require(opened >= 0 && sceKernelClose(opened) == 0);
+    Require(sceKernelStat((root / "libRenoirCore.PS5.prx2").generic_string().c_str(), &status) == static_cast<int>(0x80020002u));
+    std::filesystem::remove_all(root);
+}
+
 int main() {
     TestParentTraversal();
     TestRelinkedModuleNames();
+    TestRelinkedModuleNameCase();
     Require(chmod_nid_postfix(nullptr, 0600) == -1 && *__error_nid_postfix() == 14);
     Require(sceKernelChmod_nid_postfix(nullptr, 0600) == static_cast<int>(0x8002000eu));
     Require(chmod_nid_postfix("", 0600) == -1 && *__error_nid_postfix() == 2);
@@ -634,9 +651,25 @@ int main() {
         Require(std::filesystem::create_directory(targetDirectory));
         const auto directoryLink = root / "directory-link";
         const auto danglingLink = root / "dangling-link";
+        const auto absoluteLink = root / "absolute-link";
         Require(CreateSymbolicLinkW(directoryLink.c_str(), L"target-directory",
             SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
-        Require(CreateSymbolicLinkW(danglingLink.c_str(), missing.c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+        Require(CreateSymbolicLinkW(danglingLink.c_str(), L"missing.txt", SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+        Require(CreateSymbolicLinkW(absoluteLink.c_str(), std::filesystem::absolute(present).c_str(),
+            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+        const auto checkRelativeLink = [](const std::filesystem::path& link, std::int64_t targetLength) {
+            FileStat own{};
+            return lstat_nid_postfix(link.string().c_str(), &own) == 0 && (own.st_mode & 0170000) == 0120000 &&
+                own.st_size == targetLength && own.st_nlink == 1;
+        };
+        Require(checkRelativeLink(fileLink, 11));
+        Require(checkRelativeLink(directoryLink, 16));
+        Require(checkRelativeLink(danglingLink, 11));
+        FileStat followed{};
+        Require(lstat_nid_postfix(fileLink.string().c_str(), &linkStatus) == 0);
+        Require(stat_nid_postfix(fileLink.string().c_str(), &followed) == 0 && (followed.st_mode & 0170000) == 0100000);
+        Require(followed.st_ino == status.st_ino && linkStatus.st_ino != status.st_ino && linkStatus.st_dev == status.st_dev);
+        Require(stat_nid_postfix(directoryLink.string().c_str(), &followed) == 0 && (followed.st_mode & 0170000) == 0040000);
         const auto checkUnsupportedLink = [](const std::filesystem::path& link) {
             FileStat untouched;
             std::memset(&untouched, 0x5a, sizeof(untouched));
@@ -646,7 +679,7 @@ int main() {
             try {
                 lstat_nid_postfix(link.string().c_str(), &untouched);
             } catch (const std::runtime_error& error) {
-                rejected = std::strcmp(error.what(), "lstat of a Windows symbolic link not implemented") == 0;
+                rejected = std::strcmp(error.what(), "lstat of a Windows reparse point other than a relative symbolic link not implemented") == 0;
             }
             const bool errorUnchanged = *__error_nid_postfix() == sentinelError;
             const auto* bytes = reinterpret_cast<const unsigned char*>(&untouched);
@@ -654,11 +687,9 @@ int main() {
             return rejected && errorUnchanged && statusUnchanged;
         };
         Require(stat_nid_postfix(fileLink.string().c_str(), &status) == 0 && status.st_size == 5);
-        Require(checkUnsupportedLink(fileLink));
-        Require(checkUnsupportedLink(directoryLink));
-        Require(checkUnsupportedLink(danglingLink));
-        Require(std::filesystem::remove(fileLink) && std::filesystem::remove(directoryLink) &&
-            std::filesystem::remove(danglingLink) && std::filesystem::remove(targetDirectory));
+        Require(checkUnsupportedLink(absoluteLink));
+        Require(std::filesystem::remove(fileLink) && std::filesystem::remove(directoryLink) && DeleteFileW(danglingLink.c_str()) != 0 &&
+            std::filesystem::remove(absoluteLink) && std::filesystem::remove(targetDirectory));
     }
 #endif
     FileStat identity{};

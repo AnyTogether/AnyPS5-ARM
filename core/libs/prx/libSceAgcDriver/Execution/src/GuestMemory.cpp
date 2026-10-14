@@ -778,12 +778,18 @@ constexpr std::size_t WritePagesPerBlock = WriteBlockBytes / WritePageBytes;
 
 enum class StampKind : std::uint8_t { Cpu, Driver, ImportWindow, Fresh };
 
+constexpr std::array<std::byte, WritePageBytes> ZeroPage{};
+
 struct WindowCopy {
+    static constexpr std::uint32_t Zero = std::numeric_limits<std::uint32_t>::max();
     std::uint64_t first;
     std::span<const std::byte> bytes;
+    std::span<const std::uint32_t> slots;
 
     bool Holds(std::uintptr_t page) const {
-        return std::memcmp(reinterpret_cast<const void*>(page), bytes.data() + (page - first), WritePageBytes) == 0;
+        const auto slot = slots[(page - first) / WritePageBytes];
+        const auto* expected = slot == Zero ? ZeroPage.data() : bytes.data() + static_cast<std::size_t>(slot) * WritePageBytes;
+        return std::memcmp(reinterpret_cast<const void*>(page), expected, WritePageBytes) == 0;
     }
 };
 
@@ -1250,6 +1256,14 @@ void BumpCollectEpoch() {
     collectEpochBumps.fetch_add(1, std::memory_order_relaxed);
 }
 
+std::uint64_t ThreadCollectEpoch() {
+    return collectMemoEnabled() ? threadCollectEpoch : 0;
+}
+
+std::uint64_t UnwatchSerial() {
+    return unwatchSerial.load(std::memory_order_acquire);
+}
+
 std::uint64_t CollectEpochBumps() {
     return collectEpochBumps.load(std::memory_order_relaxed);
 }
@@ -1310,10 +1324,21 @@ bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function
     const auto stop = (address + bytes + page - 1) & ~(page - 1);
     const bool covered = tracker.covers(first, static_cast<std::size_t>(stop - first));
     std::vector<std::byte> saved;
+    std::vector<std::uint32_t> slots;
     if (covered && staysWatched) {
-        CheckRange(reinterpret_cast<const void*>(first), static_cast<std::size_t>(stop - first), 1, false);
+        const auto length = static_cast<std::size_t>(stop - first);
+        CheckRange(reinterpret_cast<const void*>(first), length, 1, false);
         const auto* source = reinterpret_cast<const std::byte*>(first);
-        saved.assign(source, source + (stop - first));
+        slots.resize(length / page);
+        std::size_t kept = 0;
+        for (std::size_t index = 0; index < slots.size(); ++index) {
+            const bool zero = std::memcmp(source + index * page, ZeroPage.data(), page) == 0;
+            slots[index] = zero ? WindowCopy::Zero : static_cast<std::uint32_t>(kept++);
+        }
+        saved.reserve(kept * page);
+        for (std::size_t index = 0; index < slots.size(); ++index) {
+            if (slots[index] != WindowCopy::Zero) saved.insert(saved.end(), source + index * page, source + (index + 1) * page);
+        }
     }
     const bool before = covered && walkWrites(tracker, first, stop, StampKind::Cpu, true);
     bool imported = false;
@@ -1329,7 +1354,7 @@ bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function
         unwatchLocked(tracker, address, bytes);
         return true;
     }
-    const WindowCopy window{first, saved};
+    const WindowCopy window{first, saved, slots};
     if (!before || !walkWrites(tracker, first, stop, StampKind::Cpu, true, &window)) unwatchLocked(tracker, first, static_cast<std::size_t>(stop - first));
     return true;
 }
@@ -2183,4 +2208,11 @@ void Write(std::uint64_t address, std::span<const std::byte> source, std::size_t
 
 extern "C" void AgcDriverCheckGuestMemory_nid_postfix(const void* pointer, std::size_t bytes, std::size_t alignment, bool writable) {
     AgcDriver::GuestMemory::CheckRange(pointer, bytes, alignment, writable);
+}
+
+extern "C" void AgcDriverStoreGuestLabel_nid_postfix(std::uint64_t* pointer, std::uint64_t value) {
+    AgcDriver::GuestMemory::CheckRange(pointer, sizeof(*pointer), std::atomic_ref<std::uint64_t>::required_alignment, true);
+    AgcDriver::GuestMemory::StoreOwnBytes(reinterpret_cast<std::uintptr_t>(pointer), sizeof(*pointer), [&] {
+        std::atomic_ref(*pointer).store(value, std::memory_order_release);
+    });
 }

@@ -396,19 +396,35 @@ void RunGuestSamplerResourceTests() {
 
     Fields unequalFilters = unnormalizedBase;
     unequalFilters.xyMinFilter = 0;
-    rejectUnnormalized(unequalFilters, "unnormalized coordinates with different minification and magnification filters");
+    const auto unequal = DecodeSamplerResource(pack(unequalFilters), true);
+    requireUnnormalized(unequal, "unnormalized S# with different min and mag filters");
+    Require(unequal.magFilter == VK_FILTER_LINEAR && unequal.minFilter == VK_FILTER_LINEAR, "unnormalized coordinates must use mag filter for both filters");
     Fields unnormalizedAniso = unnormalizedBase;
     unnormalizedAniso.xyMagFilter = 2;
     unnormalizedAniso.xyMinFilter = 2;
     rejectUnnormalized(unnormalizedAniso, "unnormalized coordinates with anisotropic filtering");
-    for (const std::uint32_t clamp : {0u, 1u, 3u, 4u, 5u, 7u}) {
+    for (const std::uint32_t clamp : {1u, 3u, 4u, 5u, 7u}) {
         Fields clampX = unnormalizedBase;
         clampX.clampX = clamp;
         rejectUnnormalized(clampX, "unnormalized coordinates with clamp mode " + std::to_string(clamp) + " on X");
     }
-    Fields clampY = unnormalizedBase;
-    clampY.clampY = 0;
-    rejectUnnormalized(clampY, "unnormalized coordinates with clamp mode 0 on Y");
+    for (const std::uint32_t clamp : {1u, 3u, 4u, 5u, 7u}) {
+        Fields clampY = unnormalizedBase;
+        clampY.clampY = clamp;
+        rejectUnnormalized(clampY, "unnormalized coordinates with clamp mode " + std::to_string(clamp) + " on Y");
+    }
+    Fields clampZero = unnormalizedBase;
+    clampZero.clampX = 0;
+    clampZero.clampY = 0;
+    const auto zeroDecoded = DecodeSamplerResource(pack(clampZero), true);
+    requireUnnormalized(zeroDecoded, "unnormalized S# with clamp mode 0");
+    Require(zeroDecoded.addressModeU == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE && zeroDecoded.addressModeV == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, "unnormalized clamp mode 0 must decode to clamp-to-edge");
+    Fields unnormalizedBiased = unnormalizedBase;
+    unnormalizedBiased.lodBiasRaw = 256;
+    unnormalizedBiased.lodBiasSec = 8;
+    const auto unnormalizedBiasedResult = DecodeSamplerResource(pack(unnormalizedBiased), true);
+    requireUnnormalized(unnormalizedBiasedResult, "unnormalized S# with primary and secondary LOD bias");
+    Require(unnormalizedBiasedResult.lodBias == 0.0f, "unnormalized coordinates must zero host lodBias");
     Fields unnormalizedTruncated = unnormalizedBase;
     unnormalizedTruncated.truncCoord = true;
     rejectUnnormalized(unnormalizedTruncated, "unnormalized coordinates with TRUNC_COORD");
@@ -441,9 +457,17 @@ void RunGuestSamplerResourceTests() {
     badDegamma.disableDegamma = true;
     rejectFields(badDegamma, "disables degamma");
 
-    Fields badLodBiasSec = base;
-    badLodBiasSec.lodBiasSec = 1;
-    rejectFields(badLodBiasSec, "secondary LOD bias");
+    Fields secLodBias = base;
+    secLodBias.lodBiasSec = 1;
+    const auto secResult = DecodeSamplerResource(pack(secLodBias));
+    Require(nearlyEqual(secResult.lodBias, 0.0f), "secondary LOD bias must not alter host lodBias");
+    secLodBias.lodBiasSec = 0x3f;
+    const auto negSecResult = DecodeSamplerResource(pack(secLodBias));
+    Require(nearlyEqual(negSecResult.lodBias, 0.0f), "negative secondary LOD bias must not alter host lodBias");
+    secLodBias.lodBiasRaw = 256;
+    secLodBias.lodBiasSec = 8;
+    const auto combinedResult = DecodeSamplerResource(pack(secLodBias));
+    Require(nearlyEqual(combinedResult.lodBias, 1.0f), "nonzero secondary LOD bias must leave primary lodBias unaffected");
 
     Fields badPreclamp = base;
     badPreclamp.pointPreclamp = true;

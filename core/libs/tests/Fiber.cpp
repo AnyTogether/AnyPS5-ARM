@@ -172,6 +172,25 @@ void APS5_VABI HostCallEntry(std::uint64_t, std::uint64_t) {
     for (;;) sceFiberReturnToThread(0, &received);
 }
 
+alignas(16) std::array<unsigned char, 64 * 1024> g_chainContext;
+FiberStorage g_chainStorage;
+bool g_chainEnded = false;
+
+void APS5_VABI FrameChainEntry(std::uint64_t, std::uint64_t) {
+    auto* frame = static_cast<std::uintptr_t*>(__builtin_frame_address(0));
+    const auto low = reinterpret_cast<std::uintptr_t>(frame);
+    const auto high = low + (1u << 20);
+    for (int depth = 0; depth < 100 && frame != nullptr; ++depth) {
+        const auto address = reinterpret_cast<std::uintptr_t>(frame);
+        Require(address >= low && address + 2 * sizeof(std::uintptr_t) <= high, "frame chain stays on the fiber's stack");
+        frame = reinterpret_cast<std::uintptr_t*>(frame[0]);
+        Require(frame == nullptr || reinterpret_cast<std::uintptr_t>(frame) > address, "frame chain climbs the stack");
+    }
+    g_chainEnded = frame == nullptr;
+    std::uint64_t received = 0;
+    for (;;) sceFiberReturnToThread(0, &received);
+}
+
 void RunHostCallOnSmallContext() {
     auto* fiber = reinterpret_cast<FiberObject*>(&g_hostCallStorage);
     auto* context = g_hostCallArea.data() + g_hostCallArea.size() - HostCallContextSize;
@@ -182,6 +201,14 @@ void RunHostCallOnSmallContext() {
     for (auto* byte = g_hostCallArea.data(); byte != context; ++byte) {
         Require(*byte == HostCallGuardFill, "a host call from a 16 KiB fiber writes nothing below its context");
     }
+}
+
+void RunFrameChain() {
+    auto* fiber = reinterpret_cast<FiberObject*>(&g_chainStorage);
+    Require(_sceFiberInitializeImpl_nid_postfix(fiber, "chain", FrameChainEntry, 0, g_chainContext.data(), g_chainContext.size(), nullptr, 0) == 0, "initialize chain");
+    Require(sceFiberRun_nid_postfix(fiber, 0, nullptr) == 0, "run chain");
+    Require(g_chainEnded, "frame chain of a fiber ends with a null frame");
+    Require(sceFiberFinalize(fiber) == 0, "finalize chain");
 }
 
 [[gnu::noinline]] std::int32_t RunFirst(std::uint64_t* returned) {
@@ -231,4 +258,5 @@ int main() {
     Require(sceFiberStopContextSizeCheck() == 0, "stop size check");
 
     RunHostCallOnSmallContext();
+    RunFrameChain();
 }

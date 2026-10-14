@@ -40,6 +40,37 @@ class WrapperTests(unittest.TestCase):
     def test_static_helper_still_works(self):
         self.assertTodo("static int Helper() " + STUB_BODY + CALLER)
 
+    def test_nested_helpers_are_pending_in_either_source_order(self):
+        for helpers in (
+            "int Last() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+            "int Middle() { return Last(); }\nint Helper() { return Middle(); }\n",
+            "int Helper() { return Middle(); }\nint Middle() { return Last(); }\n"
+            "int Last() { NotImplemented_nid_no_patch(__func__); return 0; }\n",
+        ):
+            with self.subTest(helpers=helpers):
+                self.assertTodo(helpers + CALLER)
+
+    def test_recursive_helper_chain_reaching_stub_is_pending(self):
+        self.assertTodo("int Helper() { return Middle(); }\n"
+                        "int Middle() { if (false) return Helper(); "
+                        "NotImplemented_nid_no_patch(__func__); return 0; }\n" + CALLER)
+
+    def test_recursive_helpers_without_stub_stay_done(self):
+        group = scan("int Helper() { return Middle(); }\n"
+                     "int Middle() { return Helper(); }\n" + CALLER)
+        self.assertEqual(group["done_names"], ["sceExampleCall"])
+        self.assertEqual(group["todo_names"], [])
+
+    def test_helper_chain_uses_whole_call_identifiers(self):
+        group = scan("int Last() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                     "int Helper() { return NotLast(); }\n" + CALLER)
+        self.assertEqual(group["done_names"], ["sceExampleCall"])
+        self.assertEqual(group["todo_names"], [])
+
+    def test_overloaded_helper_keeps_each_stub_path(self):
+        self.assertTodo("int Helper() { NotImplemented_nid_no_patch(__func__); return 0; }\n"
+                        "int Helper(int value) { return value; }\n" + CALLER)
+
     def test_unrelated_helper_stays_done(self):
         group = scan("namespace {\nint Other() { return 1; }\nint Helper() " + STUB_BODY + "}\n"
                      "int APS5_VABI sceExampleCall() { return Other(); }\n")

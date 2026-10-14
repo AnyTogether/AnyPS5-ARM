@@ -7,7 +7,7 @@
 namespace AgcDriver::DriverDetail {
 
 void Driver::noteLabelStore(std::uint64_t address, std::span<const std::byte> bytes, std::uint64_t stamp, std::uint32_t queue) {
-    if (bytes.empty() || bytes.size() > 64 || bytes.size() % 4 != 0 || address % 4 != 0) return;
+    if (!KeepsLabelStore(address, bytes.size())) return;
     std::lock_guard lock(labelStoresMutex);
     for (std::size_t offset = 0; offset < bytes.size(); offset += 4) {
         auto& history = labelStores[address + offset];

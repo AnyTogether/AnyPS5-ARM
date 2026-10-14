@@ -236,6 +236,23 @@ void FillSiginfo(GuestSiginfo* info, int guest) {
     info->pid = getpid_nid_postfix();
 }
 
+void WaitForDeliverableSignal() {
+    auto& pending = Pending();
+    for (;;) {
+        int guest = 0;
+        {
+            std::unique_lock lock(pending.lock);
+            if (!TakePendingUnblocked(&guest)) {
+                pending.changed.wait(lock);
+                continue;
+            }
+        }
+        if (DeliverPendingSignal(guest)) return;
+    }
+}
+
+extern "C" int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, GuestSignalSet* previousSet);
+
 }
 
 namespace {
@@ -570,21 +587,22 @@ int APS5_VABI sigwait_nid_postfix(const GuestSignalSet* set, int* received) {
 }
 
 int APS5_VABI pause_nid_postfix(void) {
-    auto& pending = Pending();
-    for (;;) {
-        int guest = 0;
-        {
-            std::unique_lock lock(pending.lock);
-            if (!TakePendingUnblocked(&guest)) {
-                pending.changed.wait(lock);
-                continue;
-            }
-        }
-        if (DeliverPendingSignal(guest)) {
-            *__error_nid_postfix() = GuestEintr;
-            return -1;
-        }
+    WaitForDeliverableSignal();
+    *__error_nid_postfix() = GuestEintr;
+    return -1;
+}
+
+int APS5_VABI sigsuspend_nid_postfix(const GuestSignalSet* set) {
+    if (set == nullptr) throw std::invalid_argument("sigsuspend: null mask");
+    GuestSignalSet previous{{0, 0, 0, 0}};
+    {
+        std::lock_guard lock(registration);
+        previous.bits[0] = blockedMask.exchange(set->bits[0]);
     }
+    WaitForDeliverableSignal();
+    _sigprocmask_nid_postfix(GuestSigsetmask, &previous, nullptr);
+    *__error_nid_postfix() = GuestEintr;
+    return -1;
 }
 
 int APS5_VABI sigpending_nid_postfix(GuestSignalSet* set) {

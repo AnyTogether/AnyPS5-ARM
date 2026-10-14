@@ -427,6 +427,13 @@ size_t APS5_VABI wcslen_nid_postfix(const char16_t* s) {
     return Length(s);
 }
 
+size_t APS5_VABI wcsnlen_s_nid_postfix(const char16_t* s, size_t maxlen) {
+    if (!s) return 0;
+    size_t length = 0;
+    while (length < maxlen && s[length] != 0) ++length;
+    return length;
+}
+
 int APS5_VABI wcscmp_nid_postfix(const char16_t* s1, const char16_t* s2) {
     for (; *s1 == *s2; ++s1, ++s2) {
         if (*s1 == 0) return 0;

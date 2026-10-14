@@ -70,7 +70,10 @@ class JitObject {
 public:
 #ifdef _WIN32
     JitObject(std::size_t bytes, HANDLE section) : bytes(bytes), section(section) {}
-    ~JitObject() { CloseHandle(section); }
+    ~JitObject() {
+        GuestArena::GuestArenaForgetSection_nid_postfix(section);
+        CloseHandle(section);
+    }
 #elif defined(__APPLE__)
     JitObject(std::size_t bytes, void* memory) : bytes(bytes), memory(memory) {}
     ~JitObject() { ::munmap(memory, bytes); }

@@ -114,6 +114,7 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("Void", Void),
     makeMeta("Reference", Void, U1),
     makeMeta("ReferenceU32", Void, U32),
+    makeMeta("UnlinkedCall", Void, U32, U32, U32),
     makeMeta("GetUserData", U32, ScalarReg),
     makeMeta("GetShaderBase", U64),
     makeMeta("ShaderClock", U64),
@@ -473,12 +474,12 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("DataAppend", U32, U32, U1, U32, U32),
     makeMeta("DataConsume", U32, U32, U1, U32, U32),
     makeMeta("SwizzleU32", U32, U32, U32, U1),
-    makeMeta("ImageQueryDimensions", U32x4, ImageResource, ImageAddress),
-    makeMeta("ImageQueryLod", U32x4, ImageResource, SamplerResource, ImageAddress),
+    makeMeta("ImageQueryDimensions", U32x4, ImageResource, ImageAddress, U1),
+    makeMeta("ImageQueryLod", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
     makeMeta("ImageRead", U32x4, ImageResource, ImageAddress, U1),
     makeMeta("ImageWrite", Void, ImageResource, ImageAddress, U32x4, U1),
-    makeMeta("ImageSampleRaw", U32x4, ImageResource, SamplerResource, ImageAddress),
-    makeMeta("ImageGatherRaw", U32x4, ImageResource, SamplerResource, ImageAddress),
+    makeMeta("ImageSampleRaw", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
+    makeMeta("ImageGatherRaw", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
     makeMeta("ImageAtomicSwap32", U32, ImageResource, ImageAddress, U32, U1),
     makeMeta("ImageAtomicIAdd32", U32, ImageResource, ImageAddress, U32, U1),
     makeMeta("ImageAtomicUMin32", U32, ImageResource, ImageAddress, U32, U1),
@@ -888,6 +889,7 @@ bool IrOpcodeHasSideEffects(IrOpcode opcode) {
         case IrOpcode::Discard:
         case IrOpcode::Reference:
         case IrOpcode::ReferenceU32:
+        case IrOpcode::UnlinkedCall:
         case IrOpcode::SetTessellationAttribute:
         case IrOpcode::InterpolateHostP2:
         case IrOpcode::SetThreadBitScalarRegister:

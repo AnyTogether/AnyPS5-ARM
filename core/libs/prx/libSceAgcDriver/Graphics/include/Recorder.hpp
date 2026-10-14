@@ -123,6 +123,7 @@ public:
         int value;
     };
     std::vector<PendingWrite> PendingWritesOver(std::uint64_t address, std::size_t bytes) const;
+    void PendingWriteRanges(std::vector<std::pair<std::uint64_t, std::uint64_t>>& ranges) const;
     // Batch read tracking: the guest ranges the recorded work reads IN PLACE through a host import
     // and the GPU has not executed yet (a V# element bound in place, a region the GPU copies out of
     // an import, an address-based build's leased heaps, indirect arguments, a GPU-direct storage
@@ -135,6 +136,9 @@ public:
     static bool ReadTracking();
     void NotePendingRead(std::uint64_t address, std::size_t bytes, ReadKind kind);
     void NotePendingReads(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges, ReadKind kind);
+    using ReadList = std::vector<std::pair<std::uint64_t, std::uint64_t>>;
+    void NotePendingReadList(std::shared_ptr<const ReadList> ranges, ReadKind kind);
+    static bool ValidReadList(const ReadList& ranges);
     // Whether an unexecuted batch (open, or in flight with its fence unsignaled) reads the range in
     // place. A hit in an in-flight batch whose fence signaled meanwhile is a miss (one status
     // query per hit). `ignoreSignaled` false: every in-flight batch counts, whatever its fence.
@@ -533,8 +537,15 @@ private:
             ReadKind kind;
         };
         std::vector<Read> reads;
+        struct ReadListNote {
+            std::shared_ptr<const ReadList> ranges;
+            std::size_t position;
+            ReadKind kind;
+        };
+        std::vector<ReadListNote> readLists;
         // Submission number (1-based): identifies a batch after its allocation may have been reused.
         std::uint64_t serial = 0;
+        std::uint64_t traceId = 0;
         bool submitted = false;
         // The GpuMutex queue tag of the thread that opened the batch, and when it was submitted
         // (the [syncwait] line reports what a wait's target and the batches ahead of it were).
@@ -737,11 +748,11 @@ private:
     void finish(std::unique_ptr<Batch> batch, bool wait, int source, bool releaseNow = false);
     void release(Batch& batch) noexcept;
     static bool overlaps(const Batch& batch, std::uint64_t address, std::uint64_t end);
-    // The first noted read of `batch` overlapping [address, end), or null.
-    static const Batch::Read* readOverlap(const Batch& batch, std::uint64_t address, std::uint64_t end);
+    static std::optional<ReadKind> readOverlap(const Batch& batch, std::uint64_t address, std::uint64_t end);
+    static std::vector<std::pair<std::uint64_t, std::uint64_t>> notedReads(const Batch& batch);
     bool signaled(const Batch& batch) const;
     // Rebuilds the lock-free snapshot of pending writes from open, inFlight and finishing.
-    void publishPendingWrites() const;
+    void publishPendingWrites(std::span<const std::pair<std::uint64_t, std::uint64_t>> additions = {}) const;
     // Appends one range to the open batch; returns whether the snapshot must be rebuilt for it.
     // `ownLabel`: the range is a label's own store (NoteLabel, AfterCompletions), which does not
     // overwrite the table entries it covers; any other range flags them (table mutex, briefly).
@@ -825,6 +836,8 @@ private:
     std::map<DrawSnapshotKey, IndexRange> indexRanges;
     std::list<DrawSnapshotKey> indexRangeRecency;
     bool refreshDrawSnapshot(DrawSnapshot& entry, std::uint64_t address, std::size_t bytes);
+    mutable std::weak_ptr<const WriteRanges> publishedWriteRanges;
+    mutable bool publishedWriteRangesValid = false;
 };
 
 }

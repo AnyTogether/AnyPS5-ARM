@@ -44,7 +44,7 @@ void CheckStorageOnlyModule(const RecompileResult& result, std::string_view name
     validator.SetMessageConsumer([&](spv_message_level_t, const char*, const spv_position_t&, const char* message) {
         if (message != nullptr) diagnostics += std::string(message) + '\n';
     });
-    const bool valid = validator.Validate(words);
+    const bool valid = validator.Validate(words.data(), words.size());
     Check(valid, std::string(name) + ": emitted invalid SPIR-V:\n" + diagnostics);
 #endif
 }

@@ -15,6 +15,7 @@ int APS5_VABI wmemcmp_nid_postfix(const char16_t* s1, const char16_t* s2, std::s
 char16_t* APS5_VABI wmemcpy_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 char16_t* APS5_VABI wmemmove_nid_postfix(char16_t* dest, const char16_t* src, std::size_t n);
 std::size_t APS5_VABI wcslen_nid_postfix(const char16_t* s);
+std::size_t APS5_VABI wcsnlen_s_nid_postfix(const char16_t* s, std::size_t maxlen);
 int APS5_VABI wcscmp_nid_postfix(const char16_t* s1, const char16_t* s2);
 int APS5_VABI wcsncmp_nid_postfix(const char16_t* s1, const char16_t* s2, std::size_t n);
 char16_t* APS5_VABI wcscpy_nid_postfix(char16_t* dest, const char16_t* src);
@@ -58,6 +59,13 @@ int main() {
     require(wcslen_nid_postfix(u"") == 0);
     require(wcslen_nid_postfix(u"héllo") == 5);
     require(wcslen_nid_postfix(split) == 2);
+
+    require(wcsnlen_s_nid_postfix(nullptr, 10) == 0);
+    require(wcsnlen_s_nid_postfix(u"", 5) == 0);
+    require(wcsnlen_s_nid_postfix(u"héllo", 0) == 0);
+    require(wcsnlen_s_nid_postfix(u"héllo", 3) == 3);
+    require(wcsnlen_s_nid_postfix(u"héllo", 10) == 5);
+    require(wcsnlen_s_nid_postfix(split, 4) == 2);
 
     require(wcscmp_nid_postfix(u"abc", u"abc") == 0);
     require(wcscmp_nid_postfix(u"abc", u"abd") < 0);

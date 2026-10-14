@@ -29,15 +29,20 @@ function update() {
   folderOption.disabled = !canStream || target === "windows";
   folderOption.textContent = target === "windows" ? "Save to folder · unavailable for Windows (DLL restrictions)" : "Save to folder · uncompressed";
   const libraryBytes = release?.platforms[target]?.expandedBytes;
-  const estimate = summary && libraryBytes !== undefined ? Math.ceil(summary.totalBytes * 1.02) + summary.selectedBytes * 4 + libraryBytes + summary.files * 1024 + 8 * 1024 * 1024 : null;
+  const selectedBytes = summary ? target === "windows" ? summary.windowsSelectedBytes : summary.selectedBytes : null;
+  const conversionTooLarge = selectedBytes !== null && selectedBytes > 256 * 1024 * 1024;
+  const iconTooLarge = target === "windows" && Boolean(summary?.windowsIconTooLarge);
+  const conversionBlocked = conversionTooLarge || iconTooLarge;
+  const estimate = summary && libraryBytes !== undefined ? Math.ceil(summary.totalBytes * 1.02) + selectedBytes * 4 + libraryBytes + summary.files * 1024 + 8 * 1024 * 1024 : null;
   const tooLarge = estimate !== null && estimate > 256 * 1024 * 1024;
   $("save").querySelector('[value="memory"]').disabled = Boolean(tooLarge);
   const memoryBlocked = $("save").value === "memory" && tooLarge;
+  if (summary) $("archive-info").textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules · ${bytes(selectedBytes)} ${target} conversion input` + (summary.root ? ` · Root: ${summary.root}` : "");
   $("save-note").textContent = $("save").value === "disk" ? "Creates a subfolder with the executable, libs and app0. No ZIP compression. Browsers may block DLL and other restricted files; use ZIP for those apps." : $("save").value === "zip" ? "Writes a compressed ZIP directly to disk without holding the whole archive in memory." : "Up to 256 MiB including expanded files and output overhead.";
-  $("browser-note").hidden = supported && canStream && canSaveZip && !memoryBlocked && !folderBlocked;
-  $("browser-note").textContent = !supported ? "This browser or connection does not support the converter. Use a current browser over HTTPS, or use the native relinker." : folderBlocked ? "Browsers block direct DLL creation. Windows output requires ZIP. Choose Save ZIP to disk or Download in memory." : memoryBlocked ? "This archive exceeds the memory-download limit. Choose Save ZIP to disk. If that option is unavailable, open this page in desktop Chrome or Edge." : "Some direct disk saving options are unavailable in this browser or context. Small apps can still be downloaded in memory. For larger apps, use desktop Chrome or Edge over HTTPS.";
-  $("convert").disabled = !supported || working || !summary || !release || memoryBlocked || folderBlocked || (summary.warnings.length > 0 && !$("acknowledge").checked);
-  $("ready-note").textContent = summary ? (folderBlocked ? "Choose a ZIP save mode for Windows." : memoryBlocked ? "A direct disk save is required for this archive." : release ? `Libraries: ${release.tag} · ${$("save").value === "disk" ? "Uncompressed folder" : "ZIP compression level 9"}` : "Loading release information…") : "Choose a ZIP or folder to get started.";
+  $("browser-note").hidden = supported && canStream && canSaveZip && !memoryBlocked && !folderBlocked && !conversionBlocked;
+  $("browser-note").textContent = !supported ? "This browser or connection does not support the converter. Use a current browser over HTTPS, or use the native relinker." : folderBlocked ? "Browsers block direct DLL creation. Windows output requires ZIP. Choose Save ZIP to disk or Download in memory." : iconTooLarge ? "The Windows icon exceeds 16 MiB. Choose Linux or use the native relinker." : conversionTooLarge ? `This ${target} conversion input exceeds 256 MiB. Use the native relinker for this app.` : memoryBlocked ? "This archive exceeds the memory-download limit. Choose Save ZIP to disk. If that option is unavailable, open this page in desktop Chrome or Edge." : "Some direct disk saving options are unavailable in this browser or context. Small apps can still be downloaded in memory. For larger apps, use desktop Chrome or Edge over HTTPS.";
+  $("convert").disabled = !supported || working || !summary || !release || conversionBlocked || memoryBlocked || folderBlocked || (summary.warnings.length > 0 && !$("acknowledge").checked);
+  $("ready-note").textContent = summary ? (folderBlocked ? "Choose a ZIP save mode for Windows." : iconTooLarge ? "The Windows icon exceeds 16 MiB. Choose Linux or use the native relinker." : conversionTooLarge ? `The ${target} conversion input exceeds 256 MiB. Use the native relinker.` : memoryBlocked ? "A direct disk save is required for this archive." : release ? `Libraries: ${release.tag} · ${$("save").value === "disk" ? "Uncompressed folder" : "ZIP compression level 9"}` : "Loading release information…") : "Choose a ZIP or folder to get started.";
 }
 
 function lock(value) {
@@ -90,7 +95,6 @@ async function onMessage({ data }) {
       $("selection").hidden = false;
       $("drop").hidden = true;
       $("archive-name").textContent = file.name;
-      $("archive-info").textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules · ${bytes(summary.selectedBytes)} conversion input` + (summary.root ? ` · Root: ${summary.root}` : "");
       $("warning-list").replaceChildren(...summary.warnings.map(message => { const item = document.createElement("li"); item.textContent = message; return item; }));
       $("warnings").hidden = !summary.warnings.length;
       $("status").hidden = true;

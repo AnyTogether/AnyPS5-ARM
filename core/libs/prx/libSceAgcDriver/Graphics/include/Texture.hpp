@@ -22,6 +22,7 @@
 
 namespace AgcDriver::Graphics {
 
+class Buffer;
 class ResidentColor;
 class CommandBatch;
 class StorageTexture;
@@ -61,7 +62,7 @@ public:
     // compute pass writing it and the next pass sampling it share one image and copy nothing.
     // CanCopyFrom says whether the two descriptors address the same surface compatibly.
     Texture(const Context& context, const std::shared_ptr<StorageTexture>& source, const GuestTextureResource& descriptor, VkComponentMapping components);
-    Texture(const Context& context, VkImage depthImage, VkFormat depthFormat, VkImageAspectFlags aspect, VkComponentMapping components, VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D);
+    Texture(const Context& context, VkImage depthImage, VkFormat depthFormat, VkImageAspectFlags aspect, VkComponentMapping components, VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D, std::uint32_t baseLayer = 0);
     struct DepthCopyTag {};
     Texture(const Context& context, const std::shared_ptr<StorageTexture>& source, const GuestTextureResource& descriptor, VkComponentMapping components, DepthCopyTag);
     static VkFormat DepthCopyFormat(VkFormat colorFormat);
@@ -194,9 +195,12 @@ public:
     static bool FlushPending(std::uint64_t address, std::size_t bytes, const StorageTexture* except = nullptr, const char* reason = "memory access", PublishScope scope = PublishScope::Whole, bool* published = nullptr);
     static void FlushAllPending(const char* reason);
     static void SaveBeforeUnwatch(std::uint64_t address, std::size_t bytes);
+    static constexpr std::uint64_t SmallStoreBytes = 64 * 1024;
+    static std::size_t StoreSmallPending(const char* reason);
     static bool AnyPending();
     static void FlushDumpSelected(const char* reason);
     static bool StoreAtFlipRequested(const char* value);
+    static bool StoreAtLabelRequested(const char* value);
     // See PendingSerial: a change of a surface's source outside the registry (a unit shadow
     // retile) moves it too.
     static void BumpPendingSerial();
@@ -304,7 +308,7 @@ public:
     // captures, snapshots) takes the bytes through the flush hook, and this image alone is current.
     // False, naming why in `refusal`, when the fill must be stored as before.
     static constexpr std::uint32_t WholeImage = ~0u;
-    bool FillClear(std::span<const std::uint32_t, 4> pattern, std::uint32_t layer, const char*& refusal);
+    bool FillClear(std::span<const std::uint32_t, 4> pattern, std::uint32_t layer, const char*& refusal, bool allowRegisterClear = false);
     // The cached, live image whose surface is exactly [address, address + bytes), if any (the newest
     // of several: see ClassifyFill).
     static std::shared_ptr<StorageTexture> FindLive(std::uint64_t address, std::uint64_t bytes);
@@ -369,6 +373,20 @@ private:
     void saveBeforeUnwatch();
     void forgetKeptAtUnwatch(std::uint32_t unit);
     bool keptAtUnwatchHolds(std::uint64_t from, std::uint32_t unit) const;
+    // Drops the saved guest bytes of the units over [address, address + bytes) (another image's fill
+    // or copy supersedes them there); the other units' bytes stay valid.
+    void forgetSavedOver(std::uint64_t address, std::size_t bytes);
+    // A write-back stored on the GPU over memory outside the write watch: the stored units' bytes are
+    // copied from its retile scratch into `savedBytes` behind the store and become `original` once
+    // the batch completed (`savedTicket` names that write-back per unit; anything that replaces or
+    // drops a unit's saved bytes first clears it).
+    std::vector<std::uint32_t> prepareStoredSave(const std::vector<bool>& layers, const std::vector<bool>& skippedLayer);
+    void commitStoredSave(const std::vector<std::uint32_t>& units);
+    void applyStoredSave(std::uint64_t ticket, const std::vector<std::uint32_t>& units);
+    void cancelStoredSave(std::uint32_t unit);
+    void cancelStoredSaves();
+    // Lets the batches holding the saves of the units `layers` selects (every unit for none) complete.
+    void awaitStoredSave(const std::vector<bool>* layers);
     bool guestBytesSettled() const;
     // Tracked units as 64 KiB write-stamp blocks (`blockUnits`: a thin tiled surface at a 64 KiB
     // aligned base; APS5_NO_BLOCK_TRACKING=1 tracks array layers as above instead): a fill of one
@@ -420,7 +438,7 @@ private:
     // The write-back retiles into the import's unit shadow where a slab takes the piece
     // (`shadowed` receives those guest ranges, `imported` the pieces written to the import).
     std::uint64_t uploadWindows(const HostImport& import, std::span<const std::pair<std::uint64_t, std::uint64_t>> runs, bool discard = false);
-    std::uint64_t writeBackWindows(const HostImport& import, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep, std::uint64_t firstStored, std::uint64_t lastStored, std::vector<ShadowedRange>& shadowed, std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported);
+    std::uint64_t writeBackWindows(const HostImport& import, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep, std::uint64_t firstStored, std::uint64_t lastStored, std::vector<ShadowedRange>& shadowed, std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported, Buffer* save = nullptr);
     // Per-layer validity (thin array surfaces whose layers are 64 KiB-aligned guest slices; every
     // other surface is one tracked layer): a layer's generation is the write generation its guest
     // bytes were last known to match the image at, and a pending layer holds results (a clear, a
@@ -571,6 +589,9 @@ private:
     // `original` holds the guest bytes; false after a GPU-side clear, which never read them.
     std::vector<bool> layerOriginal;
     std::map<std::uint64_t, std::uint64_t> keptAtUnwatch;
+    std::shared_ptr<Buffer> savedBytes;
+    std::vector<std::uint64_t> savedTicket;
+    std::uint64_t lastSaveTicket = 0;
     // The storage cache let the image go (Flush): a lookup makes a new image of the surface, so
     // no fill may put results into this one (guarded by the live-image registry lock).
     bool released = false;

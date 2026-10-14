@@ -44,6 +44,7 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
     if (input.InputPath.lexically_normal() == input.OutputPath.lexically_normal()) throw Domain::RelinkerException("Executable output would overwrite the input executable");
     if (!input.Modules.empty() && input.ModuleRoot.empty()) throw Domain::RelinkerException("Module root is required");
     if (options.WindowsDiagnostics && options.Target != TargetSystem::Windows) throw Domain::RelinkerException("Windows diagnostics require the Windows target");
+    if (options.LinuxFixedBase && options.Target != TargetSystem::Linux) throw Domain::RelinkerException("A fixed Linux base requires the Linux target");
     const bool windows = options.Target == TargetSystem::Windows;
     const bool macos = options.Target == TargetSystem::MacOs;
     inputProgress.Report({Domain::ProgressStage::Executable, Io::Utf8Path(input.InputPath), 0, 1});
@@ -69,7 +70,7 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
         { std::ostringstream message; message << "Intel conversion: " << converted.ReplacedCount << " in place, " << trampolines.size() << " stubs, " << converted.KeptCount << " kept\n"; inputProgress.Message(message.str()); }
     }
 
-    auto elfReader = std::make_shared<Relinker::ElfReader>(sourceBytes);
+    auto elfReader = std::make_shared<Relinker::ElfReader>(std::move(sourceBytes));
     const std::shared_ptr<Relinker::ISyscallScanner> syscallScanner = options.SkipSyscallCheck ? Relinker::MakeNullSyscallScanner() : Relinker::MakeSyscallScanner(inputProgress, options.TrapSdkSyscallStubs);
 
     const auto pipeline = std::make_shared<Relinker::RelinkerPipeline>(
@@ -84,7 +85,8 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
 
     { std::ostringstream message; message << "System: " << (windows ? "Windows" : macos ? "macOS" : "Linux") << "; unused-filter=" << options.UnusedFilterLevel << "\n"; inputProgress.Message(message.str()); }
     for (const auto& name : options.ExcludedModules) { std::ostringstream message; message << "Guest module excluded: " << name << '\n'; inputProgress.Message(message.str()); }
-    auto result = pipeline->Relink(sourceBytes);
+    auto result = pipeline->Relink();
+    sourceBytes = elfReader->TakeBytes();
     for (const auto& patch : result.Patches) {
         if (patch.Offset > sourceBytes.size() || patch.Bytes.size() > sourceBytes.size() - patch.Offset)
             throw Domain::RelinkerException("Relinker patch exceeds source image", patch.Offset);
@@ -111,14 +113,15 @@ ConversionOutput Conversion::Convert(ConversionInput input, const ConversionOpti
                 byteWriter
             ),
             std::make_shared<Elfpatcher::SectionHeaderTableBuilder>(byteWriter),
-            byteWriter
+            byteWriter,
+            options.LinuxFixedBase
         );
     }
 
     if (!windows) inputProgress.Report({Domain::ProgressStage::Image, Io::Utf8Path(input.InputPath), 0, 1});
     std::vector<std::uint8_t> executableBytes;
     try {
-        executableBytes = patcher->Patch(sourceBytes, result.OriginalHeaders, result.DynamicSection, result.OriginalPltGotVaddr, options.RunPath, options.LazyBinding, options.WindowsDiagnostics, trampolines);
+        executableBytes = patcher->Patch(std::move(sourceBytes), result.OriginalHeaders, result.DynamicSection, result.OriginalPltGotVaddr, options.RunPath, options.LazyBinding, options.WindowsDiagnostics, trampolines);
     } catch (Domain::RelinkerException& error) {
         if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(input.InputPath);
         throw;

@@ -4,7 +4,6 @@ Entries about one library or component are in [debt](debt/), one file per librar
 
 ### Build
 
-- The bundled [SPIRV-Tools build](../../core/shader/recompiler/PatchSpirvTools.cmake) replaces the redundancy-elimination source with a build-directory copy that releases processed traversal maps. Remove this patch when the pinned revision includes [SPIRV-Tools #6962](https://github.com/KhronosGroup/SPIRV-Tools/pull/6962). System-dependency builds need the fix in their installed SPIRV-Tools package.
 - macOS bundles get a patched MoltenVK ([moltenvk_patches.py](../../tools/macos/moltenvk_patches.py)): `MVKDevice::encodeGPUAddressableBuffers` returns at once instead of adding every buffer-device-address buffer to each encoder whose pipeline uses buffer device addresses, which cost up to 2.7 ms per encoder under Rosetta with the driver's thousands of host imports. It relies on MoltenVK 1.4 keeping its allocations resident through an `MTLResidencySet`. The bundle launcher also turns on asynchronous MoltenVK submissions (`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0`) only for a patched MoltenVK: unpatched, the loop raced the driver freeing finished batches' buffers and the device was lost with an invalid resource. Remove both when MoltenVK skips that loop itself, or when the driver needs far fewer addressable buffers.
 - On macOS a sampled block-compressed texture is never copied on the GPU from the uncompressed storage image a compute pass wrote it through (`Texture::CanBlockCopyFrom`): MoltenVK's `vkCmdCopyImage` from the block-sized uint image into the BC image returned stale blocks after the storage image was written again (`agc_driver_bc_block_copy`), so such a surface takes the store-and-upload path.
 - Building on Windows requires a specific version of mingw - MinGW-w64 GCC 15.2.0 (`winlibs-gcc15`, `x86_64-ucrt-posix-seh`)
@@ -23,9 +22,10 @@ Throughout the project, every function at every stage either **does exactly what
 - `sceNetCtlGetIfStat` signature and 56-byte layout come from PPSA09030's call site and SharpProspero's `SceNetCtlIfStat`; the device kind is always 0, the byte counters are the host's totals over its up non-loopback hardware interfaces (not "since cleared"), and the not-connected result is assumed to match `sceNetCtlGetState`
 - Font, Http2, Net, Ssl, SystemService and libkernel exports imported by PPSA12544 and added without an implementation have unknown signatures
 - The Share, NpTrophy2, NpEntitlementAccess and WebBrowserDialog exports imported by PPSA12544's Unity plugins and added without an implementation have unknown signatures
-- Acm, GameLiveStreaming, Net, NpEntitlementAccess, NpManager, NpWebApi2, VoiceQoS, WebBrowserDialog and libkernel exports imported by PPSA14632 and added without an implementation are declared without parameters
+- Acm, GameLiveStreaming, Net, NpEntitlementAccess, NpManager, VoiceQoS, WebBrowserDialog and libkernel exports imported by PPSA14632 and added without an implementation are declared without parameters
 
 ### Functional
 
+- Controller haptic PCM drives Xbox-style motor rumble from its per-channel RMS (large/small motor, scale 2x, below 0.01 ignored, 80 ms hold); the mapping approximates waveform energy and is not measured against console hardware
 - [Cancellation coverage](ARCHITECTURE.md#thread-cancellation) checks deferred request handling and recovery, not full asynchronous support or console ABI compatibility. Cancellation during file/socket I/O, sleep interruption, cancellation versus exit/detach, condition signal conservation under cancellation, and safe rejection of non-null invalid or reclaimed thread handles remain unverified. No console title or homebrew establishes the cleanup NIDs or buffer layout. Accepted asynchronous mode currently has no diagnostic for its deferred behavior.
 - `--to-intel` guest module trampolines are covered only by a synthetic relinker test; no game title has been verified with them on Linux or Windows.

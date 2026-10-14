@@ -112,6 +112,7 @@ struct CallRegistryEntry {
     FileByteOffset TargetOffset;
     std::vector<FileByteOffset> CallSites;
     bool CallSitesResolved;
+    bool Weak = false;
 };
 
 }

@@ -293,6 +293,48 @@ void NoteKeysFillOnGpu(std::uint64_t begin, std::size_t count, DccKeys keys) {
 
 namespace {
 
+struct LandedKeys {
+    int value = -1;
+    bool mixed = false;
+    bool unknown = false;
+};
+
+LandedKeys KeysAfterPendingWrites(const Recorder& recorder, std::uint64_t begin, std::size_t count) {
+    auto writes = recorder.PendingWritesOver(begin, count);
+    std::sort(writes.begin(), writes.end(), [](const Recorder::PendingWrite& a, const Recorder::PendingWrite& b) { return a.note > b.note; });
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> unwritten{{begin, begin + count}};
+    LandedKeys landed;
+    const auto see = [&](int key) {
+        if (landed.value < 0) landed.value = key;
+        else if (landed.value != key) landed.mixed = true;
+    };
+    for (const auto& write : writes) {
+        if (landed.mixed || unwritten.empty()) break;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> rest;
+        bool covered = false;
+        for (const auto& [from, to] : unwritten) {
+            if (write.end <= from || to <= write.begin) {
+                rest.emplace_back(from, to);
+                continue;
+            }
+            covered = true;
+            if (from < write.begin) rest.emplace_back(from, write.begin);
+            if (write.end < to) rest.emplace_back(write.end, to);
+        }
+        unwritten = std::move(rest);
+        if (!covered) continue;
+        if (write.value >= 0) see(write.value);
+        else landed.unknown = true;
+    }
+    for (const auto& [from, to] : unwritten) {
+        if (landed.mixed) break;
+        const auto* keys = reinterpret_cast<const std::uint8_t*>(from);
+        if (AllKeysEqual(keys + 1, static_cast<std::size_t>(to - from) - 1, keys[0])) see(keys[0]);
+        else landed.mixed = true;
+    }
+    return landed;
+}
+
 std::optional<DccKeys> PendingStoreKeys(Recorder& recorder, std::uint64_t begin, std::size_t count) {
     const auto end = begin + count;
     std::uint64_t note = 0;
@@ -308,8 +350,16 @@ std::optional<DccKeys> PendingStoreKeys(Recorder& recorder, std::uint64_t begin,
             break;
         }
     }
-    if (note == 0 || AnyShadowedOverlaps(begin, count) || recorder.NewestWriteNote(begin, count) != note) return std::nullopt;
-    return keys;
+    if (AnyShadowedOverlaps(begin, count)) {
+        PublishShadow(begin, count, PublishScope::Whole, PublishReason::Keys);
+        if (AnyShadowedOverlaps(begin, count)) return std::nullopt;
+    }
+    if (note != 0 && recorder.NewestWriteNote(begin, count) == note) return keys;
+    if (!GuestMemory::Accessible(reinterpret_cast<const void*>(begin), count)) return std::nullopt;
+    const auto landed = KeysAfterPendingWrites(recorder, begin, count);
+    if (landed.mixed) return DccKeys::Mixed;
+    if (landed.unknown || landed.value < 0) return std::nullopt;
+    return ByteKeys(static_cast<std::uint8_t>(landed.value));
 }
 
 // Whether the keys already read as uncompressed: scans the same bytes as ReadDccKeys, so it counts
@@ -465,12 +515,14 @@ DccKeys readDccKeys(std::uint64_t metaAddress, std::size_t count, bool& memoized
     return uniform ? ByteKeys(first) : DccKeys::Mixed;
 }
 
+DccKeys currentDccKeys(std::uint64_t metaAddress, std::size_t count, bool& memoized);
+
 DccKeys textureClearKeys(const GuestTextureResource& resource, std::uint64_t guestBytes, bool& memoized) {
     memoized = false;
     if (resource.dccAddress == 0) return DccKeys::Uncompressed;
     DccKeys keys;
     if (const auto known = WaitForKeyWriters(resource, guestBytes)) keys = *known;
-    else keys = readDccKeys(resource.dccAddress, DccKeyBytes(guestBytes), memoized);
+    else keys = currentDccKeys(resource.dccAddress, DccKeyBytes(guestBytes), memoized);
     if (keys == DccKeys::Uncompressed || (keys == DccKeys::ClearSingle && SingleKeysReadable(resource))) return keys;
     if (IsConvertedTextureFormat(resource.format) && (keys == DccKeys::Clear0001 || keys == DccKeys::Clear1110)) throw std::runtime_error(std::string("AGC graphics: DCC clear code ") + DccKeysName(keys) + " of converted texture format " + std::to_string(resource.format) + " is not implemented");
     std::byte probe[16]{};
@@ -695,38 +747,8 @@ DccKeys EncodedKeys(const GuestTextureResource& resource, DccKeys keys) {
 bool PendingFillsLeaveUncompressed(const Recorder& recorder, const GuestTextureResource& resource, std::size_t count) {
     const auto begin = resource.dccAddress;
     if (!GuestMemory::Accessible(reinterpret_cast<const void*>(begin), count) || AnyShadowedOverlaps(begin, count)) return false;
-    auto writes = recorder.PendingWritesOver(begin, count);
-    std::sort(writes.begin(), writes.end(), [](const Recorder::PendingWrite& a, const Recorder::PendingWrite& b) { return a.note > b.note; });
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> unwritten{{begin, begin + count}};
-    int value = -1;
-    bool mixed = false;
-    const auto see = [&](int key) {
-        if (value < 0) value = key;
-        else if (value != key) mixed = true;
-    };
-    for (const auto& write : writes) {
-        if (mixed || unwritten.empty()) break;
-        std::vector<std::pair<std::uint64_t, std::uint64_t>> rest;
-        bool covered = false;
-        for (const auto& [from, to] : unwritten) {
-            if (write.end <= from || to <= write.begin) {
-                rest.emplace_back(from, to);
-                continue;
-            }
-            covered = true;
-            if (from < write.begin) rest.emplace_back(from, write.begin);
-            if (write.end < to) rest.emplace_back(write.end, to);
-        }
-        unwritten = std::move(rest);
-        if (covered && write.value >= 0) see(write.value);
-    }
-    for (const auto& [from, to] : unwritten) {
-        if (mixed) break;
-        const auto* keys = reinterpret_cast<const std::uint8_t*>(from);
-        if (AllKeysEqual(keys + 1, static_cast<std::size_t>(to - from) - 1, keys[0])) see(keys[0]);
-        else mixed = true;
-    }
-    return mixed || (value >= 0 && EncodedKeys(resource, ByteKeys(static_cast<std::uint8_t>(value))) == DccKeys::Uncompressed);
+    const auto landed = KeysAfterPendingWrites(recorder, begin, count);
+    return landed.mixed || (landed.value >= 0 && EncodedKeys(resource, ByteKeys(static_cast<std::uint8_t>(landed.value))) == DccKeys::Uncompressed);
 }
 
 }

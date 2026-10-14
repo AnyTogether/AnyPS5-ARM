@@ -22,6 +22,15 @@ struct Waiter;
 #ifdef _WIN32
 constexpr unsigned PARK_SPINS = 1000;
 
+class DeliveryDeferral {
+public:
+    DeliveryDeferral();
+    ~DeliveryDeferral();
+    DeliveryDeferral(const DeliveryDeferral&) = delete;
+    DeliveryDeferral& operator=(const DeliveryDeferral&) = delete;
+};
+
+void DeliverDeferred();
 void SpinPause();
 Waiter* BeginPark(const void* key);
 bool FinishPark(const void* key, Waiter* waiter, const std::uint64_t* deadlineNanos);

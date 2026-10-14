@@ -392,7 +392,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='anyps5-import-modules-') as directory:
         work = Path(directory)
 
-        def convert(name, owner, symbol='shared#A#B', guest_owner=None, module_name=None, provider_name='b.prx', extra_dependencies=(), windows_gui=False):
+        def convert(name, owner, symbol='shared#A#B', guest_owner=None, module_name=None, provider_name='b.prx', extra_dependencies=(), windows_gui=False, extra_symbols=()):
             case = work / name
             modules = case / 'prx'
             modules.mkdir(parents=True)
@@ -406,7 +406,7 @@ def main():
             for dependency in extra_dependencies:
                 (modules / dependency).write_bytes(provider(44))
             source = case / 'input.elf'
-            source.write_bytes(executable(owner, symbol, module_name, extra_dependencies))
+            source.write_bytes(executable(owner, symbol, module_name, extra_dependencies, extra_symbols))
             output = case / 'output.exe'
             arguments = [str(relinker), '--windows']
             if windows_gui:
@@ -625,6 +625,14 @@ def main():
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode != 0 and 'unresolved ELF import absent' in run.stderr, (run.returncode, run.stderr)
             assert not (output.parent / 'anyps5.log').exists()
+        result, output = convert('missing-symbols', 'a.prx', 'absent#A#B', extra_symbols=('shared#A#B', 'missing#A#B'))
+        assert result.returncode == 0, result.stderr
+        if os.name == 'nt':
+            run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
+            assert run.returncode & 0xffffffff == 0xc0000139, (hex(run.returncode & 0xffffffff), run.stderr)
+            lines = [line for line in run.stderr.splitlines() if line.startswith('FAIL: unresolved ELF import ')]
+            assert lines == ['FAIL: unresolved ELF import absent from a.prx', 'FAIL: unresolved ELF import missing from a.prx'], run.stderr
+            assert 'Transferring control to ELF entry point' not in run.stderr, run.stderr
         result, output = convert('wrong-provider', 'c.prx')
         assert result.returncode == 0, result.stderr
         if os.name == 'nt':
@@ -636,6 +644,7 @@ def main():
             run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
             assert run.returncode != 0 and 'Failed to load module:' in run.stderr and 'missing.prx' in run.stderr, (run.returncode, run.stderr)
             assert run.stderr.startswith('Failed to load module:'), run.stderr
+            assert 'GetLastError: 126' in run.stderr and 'hint: the module or one of its dependent DLLs was not found' in run.stderr, run.stderr
 
         for index, (symbol, module_name) in enumerate([('shared#A#B', None), ('shared', None), ('shared#A#B', 'libSceJson')]):
             case = work / ('missing-unused-dependency-' + str(index))
