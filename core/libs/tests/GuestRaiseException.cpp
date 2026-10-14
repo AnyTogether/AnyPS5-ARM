@@ -1,4 +1,4 @@
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include "SceTypes.hpp"
 #include <atomic>
 #include <chrono>

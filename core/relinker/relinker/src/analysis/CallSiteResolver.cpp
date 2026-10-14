@@ -79,6 +79,8 @@ private:
 std::vector<FileByteOffset> CallSiteResolver::ResolveCallSites(const std::vector<std::uint8_t>& textSection, const FileByteOffset textSectionVAddr, const VirtualAddress targetGotOrPltAddress, const ByteCount targetGotOrPltSize) {
     if (targetGotOrPltSize > std::numeric_limits<VirtualAddress>::max() - targetGotOrPltAddress)
         throw RelinkerException("Relocation target range exceeds the address space");
+    if (textSection.size() > std::numeric_limits<FileByteOffset>::max() - textSectionVAddr)
+        throw RelinkerException("Text section range exceeds the address space");
     if (textSection.empty()) return {};
     if (_cachedTextPtr != &textSection || _cachedTextVAddr != textSectionVAddr) {
         auto scanner = Codegen::MakeInstructionScanner();
@@ -99,7 +101,7 @@ std::vector<FileByteOffset> CallSiteResolver::ResolveCallSites(const std::vector
             if (dispOff + 4 > textSection.size()) continue;
             std::int32_t disp = readDisp32(textSection, dispOff);
             VirtualAddress instrEnd = textSectionVAddr + m.Offset + static_cast<VirtualAddress>(m.Length);
-            VirtualAddress target = static_cast<VirtualAddress>(static_cast<std::int64_t>(instrEnd) + disp);
+            VirtualAddress target = instrEnd + static_cast<VirtualAddress>(static_cast<std::int64_t>(disp));
             _cachedTargetToInstr.emplace_back(target, m.Offset);
         }
         std::sort(_cachedTargetToInstr.begin(), _cachedTargetToInstr.end());

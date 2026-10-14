@@ -4339,6 +4339,9 @@ void rectListTests() {
         const auto complete = drawFailure(3, indexed);
         for (const auto count : {4u, 5u}) Require(drawFailure(count, indexed) == complete, "a rect-list draw with a partial last rectangle was not drawn like its complete rectangles");
     }
+    Require(drawFailure(0, true).empty(), "an indexed draw without indices was not skipped");
+    const AgcDriver::Pm4::DrawParameters noInstances{reinterpret_cast<std::uint64_t>(indices.data()), 3, 2, 0, 0, true};
+    Draw(context, state, noInstances, {});
 }
 
 ShaderRecompiler::RecompileResult recompilePixel(std::initializer_list<std::uint32_t> controls, std::span<const std::uint32_t> code) {

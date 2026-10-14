@@ -35,7 +35,7 @@ alignas(256) constexpr std::array<std::uint32_t, 10> VertexCode{
 alignas(256) constexpr std::array<std::uint32_t, 47> PixelCode{
     0x7e080f02u, 0x7e0a0f03u, 0xd5430006u, 0x0411ff05u, 0x000000c0u, 0x7e300300u, 0x7e320301u, 0xd742001au,
     0x00020000u, 0x7e3602ffu, 0xabcd0000u, 0xd75a001bu, 0x046a0200u, 0xd7420008u, 0x00020100u, 0x7e3802ffu,
-    0x12340000u, 0xd75a001cu, 0x04220300u, 0x7e1e02ffu, 0x4500bc00u, 0xd743001du, 0x043e0140u, 0x7e3c0280u,
+    0x00001234u, 0xd75a401cu, 0x04220300u, 0x7e1e02ffu, 0x4500bc00u, 0xd743001du, 0x043e0140u, 0x7e3c0280u,
     0xd75a001eu, 0x04760340u, 0x7e3e0280u, 0xd75a801fu, 0x046a0200u, 0xd7420020u, 0x00020181u, 0xd7420021u,
     0x000201c1u, 0xd7420022u, 0x40020000u, 0xd7430023u, 0x043e0000u, 0xe0782000u, 0x80011806u, 0xe0782010u,
     0x80011c06u, 0xe0782020u, 0x80012006u, 0x7e0e02f2u, 0xf800180fu, 0x07070707u, 0xbf810000u,
@@ -235,7 +235,7 @@ void Check(std::uint32_t waveSize) {
             result[1],
             std::bit_cast<std::uint32_t>(lowX),
             0xabcd0000u | HalfOf(SecondStep(Delta(LowX, 2), j, lowX)),
-            0x12340000u | HalfOf(SecondStep(Delta(HighX, 2), j, highX)),
+            0x1234u | (HalfOf(SecondStep(Delta(HighX, 2), j, highX)) << 16u),
             std::bit_cast<std::uint32_t>(highY),
             HalfOf(SecondStep(Delta(HighY, 2), j, highY)),
             HalfOf(Saturate(SecondStep(Delta(LowX, 2), j, lowX))),

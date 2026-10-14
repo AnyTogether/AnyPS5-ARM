@@ -2288,7 +2288,11 @@ bool ImportMappedRanges(const Context& context, const GuestAllocations::Mapped& 
         const auto range = mapped.lock();
         if (range == nullptr || leasedRangeOwner(current, range->address) != range) continue;
         try {
-            if (!GuestMemory::GpuMutex().HeldByThisThread() && wouldRetireImport(state, importRun(current, range->address))) return false;
+            if (!GuestMemory::GpuMutex().HeldByThisThread()) {
+                const auto run = importRun(current, range->address);
+                const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> span{{{run.base, run.base + run.bytes}}};
+                if (wouldRetireImport(state, run) || StorageTexture::AnyPendingOverlaps(span)) return false;
+            }
             if (importAllocation(context, state, range->address, current, 0, false) == nullptr && GuestAllocations::GuestAllocationsGeneration_nid_postfix() != generation) state.failed.erase(importRun(current, range->address).base);
         } catch (const std::exception& error) {
             std::fprintf(stderr, "[gpu] import of GPU memory mapped at 0x%llx+0x%zx failed: %s\n", static_cast<unsigned long long>(range->address), range->bytes, error.what());
@@ -2656,7 +2660,21 @@ const GuestBufferMemory::Region* GuestBufferMemory::owner(std::uint64_t address)
     return own;
 }
 
-void GuestBufferMemory::addDescriptorRegion(std::uint64_t address, std::size_t bytes, bool atomic, bool swept) {
+namespace {
+
+template<typename Regions>
+bool mirrorOverlaps(const Regions& base, std::uint64_t begin, std::uint64_t end) {
+    auto found = std::upper_bound(base.begin(), base.end(), begin, [](std::uint64_t value, const auto& region) { return value < region.begin; });
+    if (found != base.begin()) --found;
+    for (; found != base.end() && found->begin < end; ++found) {
+        if (found->end > begin && found->mirror != nullptr) return true;
+    }
+    return false;
+}
+
+}
+
+void GuestBufferMemory::addDescriptorRegion(std::uint64_t address, std::size_t bytes, bool atomic, bool swept, bool readOnly) {
     validate(address, bytes);
     const auto begin = address & ~std::uint64_t{3};
     const auto end = begin == address ? address + bytes : (address + bytes + 3) & ~std::uint64_t{3};
@@ -2669,6 +2687,10 @@ void GuestBufferMemory::addDescriptorRegion(std::uint64_t address, std::size_t b
             }
             return;
         case BaseOverlap::Partial:
+            if (readOnly && !mirrorOverlaps(space->base, begin, end) && !WritesOverlap(begin, static_cast<std::size_t>(end - begin))) {
+                readsOverBase.emplace_back(begin, end);
+                break;
+            }
             Spaces().dissolvedOverlap.fetch_add(1, std::memory_order_relaxed);
             dissolveSpace(false);
             break;
@@ -2734,7 +2756,11 @@ bool GuestBufferMemory::bindSparseMirror(Region& region, const GuestAllocations:
 }
 
 void GuestBufferMemory::AddWritable(std::uint64_t address, std::size_t bytes, bool atomic, bool swept) {
-    addDescriptorRegion(address, bytes, atomic, swept);
+    if (space != nullptr && std::any_of(readsOverBase.begin(), readsOverBase.end(), [&](const auto& range) { return address < range.second && range.first < address + bytes; })) {
+        Spaces().dissolvedOverlap.fetch_add(1, std::memory_order_relaxed);
+        dissolveSpace(false);
+    }
+    addDescriptorRegion(address, bytes, atomic, swept, false);
     writes.emplace_back(address, address + bytes);
 }
 
@@ -2742,7 +2768,7 @@ void GuestBufferMemory::AddReadable(std::uint64_t address, std::size_t bytes) {
     // Not in `writes`: no reference copy (copyRegion), no write-back, no pending-write note, no
     // direct-write mark, and UploadPrepare copies it without the device lock. A written descriptor
     // overlapping the range still covers it through its own Writes() entry.
-    addDescriptorRegion(address, bytes, false, false);
+    addDescriptorRegion(address, bytes, false, false, true);
 }
 
 void GuestBufferMemory::AddSnapshot(const GuestMemorySnapshot& snapshot) {

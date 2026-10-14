@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#include "prx/libc/include/WindowsDescriptor.hpp"
 #endif
 
 #include "prx/libc/include/FileStream.hpp"
@@ -210,6 +211,25 @@ static void SortElements(unsigned char* base, size_t count, size_t size, GuestCo
     }
 }
 
+namespace {
+
+template<typename TAllocate>
+void* allocationOrNull(TAllocate allocate) {
+    try {
+        return allocate();
+    } catch (const std::bad_alloc&) {
+    } catch (const std::length_error&) {
+    }
+    errno = 12;
+    return nullptr;
+}
+
+bool validAlignment(std::size_t alignment) {
+    return alignment != 0 && (alignment & (alignment - 1)) == 0;
+}
+
+}
+
 extern "C" {
 
 [[noreturn]] void APS5_VABI _ZSt11_Xbad_allocv_nid_postfix();
@@ -225,6 +245,11 @@ FileStream* APS5_VABI fdopen_nid_postfix(int descriptor, const char* mode) {
         const auto release = [](void* pointer) { ::operator delete(pointer); };
         std::unique_ptr<void, decltype(release)> storage(::operator new(sizeof(FileStream)), release);
 #ifdef _WIN32
+        const auto handle = WindowsDescriptorHandle_nid_no_patch(descriptor);
+        if (handle == INVALID_HANDLE_VALUE) { errno = 9; return nullptr; }
+        const int access = WindowsDescriptorAccess_nid_no_patch(handle, descriptor, "fdopen");
+        const int requested = nativeMode.find('+') != std::string::npos ? 2 : nativeMode[0] == 'r' ? 0 : 1;
+        if (access != 2 && access != requested) { errno = 22; return nullptr; }
         if (parsed->append && !AppendThroughDescriptor(descriptor)) return nullptr;
         auto* native = ::_fdopen(descriptor, nativeMode.c_str());
 #else
@@ -423,8 +448,9 @@ int APS5_VABI fflush_nid_postfix(FileStream* stream) {
     // FreeBSD leaves a stream that is not writing alone; macOS fflush would discard its read buffer and pushed-back bytes.
     if (native && (native->_flags & __SWR) == 0) return 0;
 #endif
-    if (std::fflush(native) != 0) throw std::runtime_error("fflush: flush failed");
-    return 0;
+    const int result = std::fflush(native);
+    if (stream) stream->SyncStatus();
+    return result;
 }
 
 int APS5_VABI malloc_stats_fast_nid_postfix(void* stats) {
@@ -436,7 +462,7 @@ size_t APS5_VABI malloc_usable_size_nid_postfix(void* pointer) {
 }
 
 void* APS5_VABI malloc_nid_postfix(size_t size) {
-    return ApplicationHeapAllocate_nid_no_patch(size);
+    return allocationOrNull([size] { return ApplicationHeapAllocate_nid_no_patch(size); });
 }
 
 void APS5_VABI free_nid_postfix(void* ptr) {
@@ -444,7 +470,7 @@ void APS5_VABI free_nid_postfix(void* ptr) {
 }
 
 void* APS5_VABI realloc_nid_postfix(void* ptr, size_t newSize) {
-    return ApplicationHeapReallocate_nid_no_patch(ptr, newSize);
+    return allocationOrNull([ptr, newSize] { return ApplicationHeapReallocate_nid_no_patch(ptr, newSize); });
 }
 
 void* APS5_VABI reallocf_nid_postfix(void* ptr, size_t newSize) {
@@ -459,19 +485,27 @@ void* APS5_VABI reallocf_nid_postfix(void* ptr, size_t newSize) {
 }
 
 void* APS5_VABI memalign_nid_postfix(size_t alignment, size_t size) {
-    return ApplicationHeapAlign_nid_no_patch(alignment, size);
+    if (!validAlignment(alignment)) {
+        errno = 22;
+        return nullptr;
+    }
+    return allocationOrNull([alignment, size] { return ApplicationHeapAlign_nid_no_patch(alignment, size); });
 }
 
 void* APS5_VABI aligned_alloc_nid_postfix(size_t alignment, size_t size) {
-    return ApplicationHeapAlign_nid_no_patch(alignment, size);
+    return memalign_nid_postfix(alignment, size);
 }
 
 void* APS5_VABI reallocalign_nid_postfix(void* ptr, size_t size, size_t alignment) {
-    return ApplicationHeapRealign_nid_no_patch(ptr, size, alignment);
+    if (size != 0 && !validAlignment(alignment)) {
+        errno = 22;
+        return nullptr;
+    }
+    return allocationOrNull([ptr, size, alignment] { return ApplicationHeapRealign_nid_no_patch(ptr, size, alignment); });
 }
 
 void* APS5_VABI calloc_nid_postfix(size_t count, size_t size) {
-    return ApplicationHeapCalloc_nid_no_patch(count, size);
+    return allocationOrNull([count, size] { return ApplicationHeapCalloc_nid_no_patch(count, size); });
 }
 
 int APS5_VABI posix_memalign_nid_postfix(void** pointer, size_t alignment, size_t size) {

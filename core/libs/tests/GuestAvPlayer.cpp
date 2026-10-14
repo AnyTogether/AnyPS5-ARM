@@ -1070,6 +1070,29 @@ void TestAutoStartKeepsStartedPlayback() {
     Check(startedByTitle, "auto-start won every race against the title's own start");
 }
 
+void TestRestartAfterPausedJumpKeepsClockRunning() {
+    AvPlayerInitData init = InitData(nullptr);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "add source failed");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "enable video failed");
+    Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "enable audio failed");
+    Check(sceAvPlayerStart(player) == 0, "start failed");
+    AvPlayerFrameInfoEx frame{};
+    Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "no video after start");
+    Check(sceAvPlayerPause(player) == 0, "pause failed");
+    Check(sceAvPlayerSetLooping(player, 1) == 0, "looping rejected");
+    Check(sceAvPlayerJumpToTime(player, 0) == 0, "jump while paused failed");
+    Check(sceAvPlayerStart(player) == 0, "restart after the paused jump failed");
+    std::uint64_t last = 0;
+    Check(WaitFor([&] {
+        if (sceAvPlayerGetVideoDataEx(player, &frame)) last = frame.timestamp;
+        return last >= 200;
+    }), "playback froze after a restart that followed a paused jump");
+    Check(sceAvPlayerCurrentTime(player) > 0, "clock stayed frozen after the restart");
+    Check(sceAvPlayerClose(player) == 0, "close failed");
+}
+
 void TestUnsyncedVideoKeepsUpWithAudio() {
     Events events;
     AvPlayerInitData init = InitData(&events);
@@ -1168,6 +1191,7 @@ int main() {
         TestHandedOutFramesStayIntact();
         TestPs5ExtendedInitLayout();
         TestAutoStartKeepsStartedPlayback();
+        TestRestartAfterPausedJumpKeepsClockRunning();
         TestUnsyncedVideoKeepsUpWithAudio();
         TestEofStopLatency();
         std::puts("AvPlayer tests passed");

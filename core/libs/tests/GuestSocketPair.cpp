@@ -1,3 +1,4 @@
+#include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
 #include <cstdint>
@@ -38,6 +39,8 @@ int APS5_VABI shutdown_nid_postfix(int, int);
 int APS5_VABI fcntl_nid_postfix(int, int, ...);
 int APS5_VABI poll_nid_postfix(PollDescriptor*, std::uint32_t, int);
 int APS5_VABI close_nid_postfix(int);
+std::int64_t APS5_VABI fstat_nid_disambig1_nid_postfix(int, FileStat*);
+int APS5_VABI sceKernelFstat(int, FileStat*);
 int* APS5_VABI __error_nid_postfix();
 }
 
@@ -130,6 +133,28 @@ int main() {
     Require(recv_nid_postfix(pair[0], received, sizeof(received), 0) == -1 && *__error_nid_postfix() == 35);
     Require(Exchange(pair[1], pair[0], "wake up"));
     Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
+
+    Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
+    FileStat status{};
+    Require(fstat_nid_disambig1_nid_postfix(pair[0], &status) == 0);
+    Require(status.st_mode == 0140666 && status.st_size == 0 && status.st_blksize != 0 && status.st_nlink == 0);
+    Require(send_nid_postfix(pair[0], "hello", 5, 0) == 5 && Readable(pair[1]));
+    Require(sceKernelFstat(pair[1], &status) == 0 && status.st_mode == 0140666 && status.st_size == 5);
+    Require(shutdown_nid_postfix(pair[0], 1) == 0);
+    Require(fstat_nid_disambig1_nid_postfix(pair[0], &status) == 0 && status.st_mode == 0140444);
+#ifndef _WIN32
+    Require(shutdown_nid_postfix(pair[1], 0) == 0);
+    Require(fstat_nid_disambig1_nid_postfix(pair[1], &status) == 0 && status.st_mode == 0140666 && status.st_size == 5);
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 5);
+#else
+    Require(recv_nid_postfix(pair[1], received, sizeof(received), 0) == 5);
+    Require(shutdown_nid_postfix(pair[1], 0) == 0);
+#endif
+    Require(fstat_nid_disambig1_nid_postfix(pair[1], &status) == 0 && status.st_mode == 0140222 && status.st_size == 0);
+    Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
+    *__error_nid_postfix() = 0;
+    Require(fstat_nid_disambig1_nid_postfix(pair[0], &status) == -1 && *__error_nid_postfix() == 9);
+    Require(sceKernelFstat(pair[1], &status) == static_cast<int>(0x80020009u));
 
     Require(socketpair_nid_postfix(Unix, Datagram, 0, pair) == 0);
     Require(fcntl_nid_postfix(pair[0], 3) == 2);

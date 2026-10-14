@@ -182,6 +182,7 @@ public:
     void WriteBack();
     // Deferred write-back (APS5_EAGER_WRITEBACK=1 stores at once instead).
     void MarkDirty();
+    void MarkSliceDirty(std::uint32_t slice);
     void Flush();
     // Stores every pending image overlapping the range, except `except`; returns whether any was.
     // Stores into host-imported memory are recorded (not waited for): a CPU reader syncs afterwards.
@@ -192,6 +193,7 @@ public:
     // overlapping pending image, as before).
     static bool FlushPending(std::uint64_t address, std::size_t bytes, const StorageTexture* except = nullptr, const char* reason = "memory access", PublishScope scope = PublishScope::Whole, bool* published = nullptr);
     static void FlushAllPending(const char* reason);
+    static void SaveBeforeUnwatch(std::uint64_t address, std::size_t bytes);
     static bool AnyPending();
     static void FlushDumpSelected(const char* reason);
     static bool StoreAtFlipRequested(const char* value);
@@ -267,6 +269,7 @@ public:
     // contains a descriptor of its first mips), if any; the caller decides whether the geometry fits
     // (Texture::CanCopyFrom, ResidentPresentable).
     static std::shared_ptr<StorageTexture> FindPending(std::uint64_t address, std::uint64_t bytes);
+    static std::shared_ptr<StorageTexture> FindPendingSlice(std::uint64_t address, std::uint64_t bytes);
     // How a buffer fill of [address, address + bytes) (Driver.cpp's fill HLE) meets the storage
     // images alive: none of them; a whole surface (Exact) or one array layer of a surface (Layer),
     // `image` and `layer` naming it, whatever other images lie over the range (`others`, of which
@@ -340,6 +343,7 @@ public:
     bool Refresh();
     static std::uint64_t SinglePassMoves();
     static std::uint64_t RefreshesProved();
+    static std::uint64_t UntrackedCompares();
     std::uint64_t GuestBytes() const;
     std::size_t OriginalSnapshotBytes() const { return original.capacity(); }
     VkDeviceSize AllocationBytes() const { return memoryBytes; }
@@ -362,6 +366,9 @@ private:
     void writeBack(std::uint64_t address, std::size_t bytes);
     void writeBackLayers(const std::vector<bool>& layers);
     bool unchangedSinceBaseline(std::uint64_t from, std::uint64_t to) const;
+    void saveBeforeUnwatch();
+    void forgetKeptAtUnwatch(std::uint32_t unit);
+    bool keptAtUnwatchHolds(std::uint64_t from, std::uint32_t unit) const;
     bool guestBytesSettled() const;
     // Tracked units as 64 KiB write-stamp blocks (`blockUnits`: a thin tiled surface at a 64 KiB
     // aligned base; APS5_NO_BLOCK_TRACKING=1 tracks array layers as above instead): a fill of one
@@ -499,7 +506,7 @@ private:
     std::uint64_t sliceLinearBytes = 0;
     SurfaceGeometry geometry;
     std::vector<std::byte> original;
-    mutable std::array<std::uint64_t, 4> comparedGuestBytes{};
+    mutable std::array<std::uint64_t, 5> comparedGuestBytes{};
     std::vector<std::byte> generationBaseline;
     // DCC keys the image content was uploaded under: a fast-cleared surface starts as its clear value.
     DccKeys uploadedKeys = DccKeys::Uncompressed;
@@ -563,6 +570,7 @@ private:
     std::uint64_t version = 0;
     // `original` holds the guest bytes; false after a GPU-side clear, which never read them.
     std::vector<bool> layerOriginal;
+    std::map<std::uint64_t, std::uint64_t> keptAtUnwatch;
     // The storage cache let the image go (Flush): a lookup makes a new image of the surface, so
     // no fill may put results into this one (guarded by the live-image registry lock).
     bool released = false;

@@ -206,7 +206,7 @@ void Settle(THold& hold, const Surface& surface, std::uint32_t result) {
     hold.unlock();
 }
 
-enum class Kind { ReadAfter, ReadBefore, Filled, Copied, LeftWatch };
+enum class Kind { ReadAfter, ReadBefore, Filled, Copied, LeftWatch, WrittenThenLeftWatch, ImportLeftWatch };
 
 struct Case {
     const char* name;
@@ -219,11 +219,11 @@ enum class Outcome { Kept, Lost, Missed };
 Outcome Run(const Case& test) {
     std::optional<Surface> source;
     if (test.kind == Kind::Copied) source.emplace();
-    Surface surface(test.kind == Kind::LeftWatch);
+    const bool leaves = test.kind == Kind::LeftWatch || test.kind == Kind::WrittenThenLeftWatch || test.kind == Kind::ImportLeftWatch;
+    Surface surface(leaves);
     auto* bytes = surface.Bytes();
     const auto address = surface.Address();
     std::unique_lock hold(AgcDriver::GuestMemory::GpuMutex(), std::defer_lock);
-    bool unsaved = false;
     if (test.kind == Kind::Copied) {
         Store(source->Texels());
         Settle(hold, *source, Stored);
@@ -231,8 +231,12 @@ Outcome Run(const Case& test) {
         Settle(hold, *source, Filled);
     }
     Store(surface.Texels());
-    if (test.kind == Kind::Filled) {
+    if (test.kind == Kind::Filled || leaves) {
         Settle(hold, surface, Stored);
+        if (leaves) {
+            std::vector<std::byte> settled(SurfaceBytes);
+            AgcDriver::GuestMemory::Read(address, settled);
+        }
         Fill(surface.Texels());
         if (!HoldPending(hold, surface, Filled)) return Outcome::Missed;
     } else if (test.kind == Kind::Copied) {
@@ -250,7 +254,11 @@ Outcome Run(const Case& test) {
     } else if (!HoldPending(hold, surface, Stored)) {
         return Outcome::Missed;
     }
-    if (test.kind == Kind::LeftWatch) {
+    const auto writePattern = [&] {
+        for (std::size_t offset = 0; offset < Page; ++offset) static_cast<volatile std::uint8_t*>(bytes)[offset] = Pattern(offset);
+    };
+    if (test.kind == Kind::WrittenThenLeftWatch) writePattern();
+    if (leaves) {
         if (!AgcDriver::GuestMemory::Watched(address, SurfaceBytes)) {
             StorageTexture::FlushAllPending("store over untracked fixture");
             std::fprintf(stderr, "[store over untracked] %s: not run, the surface is not write-watched\n", test.name);
@@ -258,32 +266,21 @@ Outcome Run(const Case& test) {
         }
         const auto image = StorageTexture::FindLive(address, SurfaceBytes);
         Require(image != nullptr, "store over untracked: the surface has no storage image");
-        unsaved = !image->GuestSnapshotValid();
-        AgcDriver::GuestMemory::Unwatch(address, SurfaceBytes);
+        Require(!image->GuestSnapshotValid(), "store over untracked: the pending result had saved guest bytes while its memory was write-watched");
+        if (test.kind == Kind::ImportLeftWatch) Require(AgcDriver::GuestMemory::ImportWatched(address, SurfaceBytes, [] { return true; }, false), "store over untracked: the import that leaves the write watch failed");
+        else AgcDriver::GuestMemory::Unwatch(address, SurfaceBytes);
+        Require(!AgcDriver::GuestMemory::Watched(address, SurfaceBytes), "store over untracked: the surface is still write-watched");
     }
     std::array<std::byte, Page> read{};
     if (test.kind == Kind::ReadBefore) AgcDriver::GuestMemory::Read(address + Block + Page, read);
-    for (std::size_t offset = 0; offset < Page; ++offset) static_cast<volatile std::uint8_t*>(bytes)[offset] = Pattern(offset);
-    if (unsaved) {
-        bool refused = false;
-        try {
-            AgcDriver::GuestMemory::Read(address + test.access, read);
-        } catch (const std::runtime_error& error) {
-            if (std::string_view(error.what()).find("outside the write watch") == std::string_view::npos) throw;
-            refused = true;
-        }
-        static_cast<void>(StorageTexture::DiscardPendingInside(address, SurfaceBytes));
-        if (refused && LostBytes(bytes) == 0) return Outcome::Kept;
-        std::fprintf(stderr, "[store over untracked] %s: the result was stored with neither write stamps nor saved bytes to tell what the CPU wrote\n", test.name);
-        return Outcome::Lost;
-    }
+    if (test.kind != Kind::WrittenThenLeftWatch) writePattern();
     AgcDriver::GuestMemory::Read(address + test.access, read);
     const auto lostAtAccess = LostBytes(bytes);
     StorageTexture::FlushAllPending("store over untracked fixture");
     std::vector<std::byte> whole(SurfaceBytes);
     AgcDriver::GuestMemory::Read(address, whole);
     const auto lostAtEnd = LostBytes(bytes);
-    if (test.kind == Kind::Filled || test.kind == Kind::Copied) Require(static_cast<const volatile std::uint32_t*>(surface.Texels())[2 * Block / 4u] == Filled, "store over untracked: the result did not reach a block the CPU left alone");
+    if (test.kind == Kind::Filled || test.kind == Kind::Copied || leaves) Require(static_cast<const volatile std::uint32_t*>(surface.Texels())[2 * Block / 4u] == Filled, "store over untracked: the result did not reach a block the CPU left alone");
     if (lostAtAccess == 0 && lostAtEnd == 0) return Outcome::Kept;
     std::fprintf(stderr, "[store over untracked] %s: of 0x%zx bytes the CPU wrote while the result was pending, %zu were lost after the access at +0x%zx and %zu after every result was stored\n", test.name, Page, lostAtAccess, test.access, lostAtEnd);
     return Outcome::Lost;
@@ -307,12 +304,14 @@ int main() {
             Surface probe;
             Require(AgcDriver::Graphics::DescribeSurface(AgcDriver::Graphics::DecodeTextureResource(TextureDescriptor(probe.Texels()))).guestBytes == SurfaceBytes, "store over untracked: unexpected surface size");
         }
-        constexpr std::array<Case, 5> cases{{
+        constexpr std::array<Case, 7> cases{{
             {"another block read after the CPU write", Kind::ReadAfter, Block + Page},
             {"another block read before the CPU write", Kind::ReadBefore, 0xe000},
             {"a fill of the surface", Kind::Filled, 0xe000},
             {"an image copy into the surface", Kind::Copied, 0xe000},
             {"a surface that left the write watch", Kind::LeftWatch, 0xe000},
+            {"a surface written before it left the write watch", Kind::WrittenThenLeftWatch, 0xe000},
+            {"a surface whose import left the write watch", Kind::ImportLeftWatch, 0xe000},
         }};
         bool kept = true;
         for (const auto& test : cases) {

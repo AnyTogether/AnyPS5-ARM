@@ -2093,7 +2093,8 @@ bool isVop3F16InterpolationOpcode(RdnaOpcode opcode) {
 void decodeVop3F16Interpolation(RdnaInstruction& instruction, std::uint32_t vdst, std::uint32_t src0, std::uint32_t src1, std::uint32_t src2, std::uint32_t abs, std::uint32_t opSel, std::uint32_t clamp, std::uint32_t omod, std::uint32_t neg) {
     const bool hasSource2 = instruction.op != RdnaOpcode::VInterpP1llF16;
     const bool f16Result = instruction.op == RdnaOpcode::VInterpP2F16;
-    if ((abs & 0x1u) != 0u || (neg & 0x1u) != 0u || opSel != 0u || (f16Result && omod != 0u) || (!hasSource2 && ((abs | neg) & 0x4u) != 0u)) {
+    const std::uint32_t resultHalf = f16Result ? 0x8u : 0x0u;
+    if ((abs & 0x1u) != 0u || (neg & 0x1u) != 0u || (opSel & ~resultHalf) != 0u || (f16Result && omod != 0u) || (!hasSource2 && ((abs | neg) & 0x4u) != 0u)) {
         throw std::invalid_argument("VOP3 interpolation modifiers are not implemented");
     }
     if (src1 < 256u || (hasSource2 && src2 < 256u)) {
@@ -2103,6 +2104,7 @@ void decodeVop3F16Interpolation(RdnaInstruction& instruction, std::uint32_t vdst
     instruction.destination = DecodeRdnaVectorGpr(vdst);
     instruction.destination.clamp = clamp != 0u;
     instruction.destination.omod = omod;
+    if ((opSel & resultHalf) != 0u) instruction.destination.sdwaSel = 5u;
     instruction.source0 = DecodeRdnaVectorGpr(src1 - 256u);
     instruction.source0.absolute = (abs & 0x2u) != 0u;
     instruction.source0.negate = (neg & 0x2u) != 0u;

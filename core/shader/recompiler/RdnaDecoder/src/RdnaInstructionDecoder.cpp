@@ -300,6 +300,16 @@ void SetRdnaUnsupported(RdnaInstruction& instruction, RdnaInstructionFamily fami
     throw std::invalid_argument("unsupported RDNA instruction, family=" + std::to_string(static_cast<std::uint32_t>(family)) + " opcode=" + toHexString(opcodeId) + " reason=" + reason + " pc=" + toHexString(instruction.programCounter));
 }
 
+std::uint64_t RdnaApertureSourceValue(const RdnaOperand& operand) {
+    switch (operand.kind) {
+        case RdnaOperandKind::SrcSharedBase: return std::uint64_t{SharedApertureHigh} << 32u;
+        case RdnaOperandKind::SrcSharedLimit: return (std::uint64_t{SharedApertureHigh} << 32u) | 0xffffffffu;
+        case RdnaOperandKind::SrcPrivateBase: return std::uint64_t{PrivateApertureHigh} << 32u;
+        case RdnaOperandKind::SrcPrivateLimit: return (std::uint64_t{PrivateApertureHigh} << 32u) | 0xffffffffu;
+        default: throw std::invalid_argument("RdnaApertureSourceValue: " + RdnaOperandToString(operand) + " is not a scalar aperture source");
+    }
+}
+
 std::string RdnaOperandToString(const RdnaOperand& operand) {
     switch (operand.kind) {
         case RdnaOperandKind::None: return "none";

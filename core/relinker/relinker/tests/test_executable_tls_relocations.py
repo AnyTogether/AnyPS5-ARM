@@ -26,7 +26,7 @@ TLS_NAME, DATA_NAME, IMPORT_NAME = 1, 5, 10
 NULL, TLS_SYMBOL, DATA_SYMBOL, IMPORTED = 0, 1, 2, 3
 
 
-def image(relocations, tls=True):
+def image(relocations, tls=True, symbol_bytes=None):
     """The load-alignment fixture with a writable segment (vaddr 0x1000) holding a GOT and an 8-byte
     TLS template, a symbol table and the given (offset, type, symbol, addend) relocations."""
     data = fixture()
@@ -43,6 +43,8 @@ def image(relocations, tls=True):
     for index, (offset, kind, symbol, addend) in enumerate(relocations):
         struct.pack_into("<QQq", data, 0x4700 + index * 24, offset, symbol << 32 | kind, addend)
     tags = [(5, 0x600), (10, len(STRINGS)), (6, 0x900), (11, 24), (7, 0x700), (8, len(relocations) * 24), (9, 24), (0, 0)]
+    if symbol_bytes is not None:
+        tags.insert(-1, (0x6100003F, symbol_bytes))
     struct.pack_into("<IIQQQQQQ", data, 120, 2, 6, 0x4800, 0x800, 0x800, len(tags) * 16, len(tags) * 16, 8)
     for index, tag in enumerate(tags):
         struct.pack_into("<qQ", data, 0x4800 + index * 16, *tag)
@@ -121,6 +123,15 @@ def main():
         macho = output.read_bytes()
         values = [struct.unpack("<q", macho_bytes_at(macho, 0x140010000 + address, 8))[0] for address in (0x1000, 0x1008, 0x1010)]
         assert values == [4 - TLS_BLOCK, 8, 0x12 - TLS_BLOCK], values
+
+        for kind in (DTPMOD64, DTPOFF64, TPOFF64):
+            for symbol, declared_bytes in ((TLS_SYMBOL, 24), (IMPORTED, 72)):
+                name = f"symbol-bounds-{kind}-{symbol}"
+                result, output = relink(relinker, directory, name,
+                                       image([(0x1000, kind, symbol, 0)], symbol_bytes=declared_bytes))
+                assert result.returncode == 2 and "Symbol table entry out of bounds" in result.stderr, (
+                    name, result.returncode, result.stdout, result.stderr)
+                assert not output.exists(), name
 
         failures = [
             ("tpoff32", [(0x1000, TPOFF32, NULL, 0)], True, (), "Unsupported relocation type 0x17"),

@@ -8,6 +8,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -19,6 +20,7 @@ struct Decoder {
     std::uint32_t context;
     int channels;
     AVCodecContext* codec = nullptr;
+    std::vector<float> pending;
     ~Decoder() { avcodec_free_context(&codec); }
 };
 
@@ -115,17 +117,22 @@ int APS5_VABI sceOpusDecDecode(void* state, const std::uint8_t* data, int bytes,
     if (avcodec_send_packet(decoder.codec, packet.get()) < 0 || avcodec_receive_frame(decoder.codec, frame.get()) < 0)
         throw std::runtime_error("OpusDec: FFmpeg rejected the packet");
     const auto format = static_cast<AVSampleFormat>(frame->format);
-    if (frame->nb_samples != samples || frame->ch_layout.nb_channels != decoder.channels || frame->sample_rate != 48000 ||
+    if (frame->ch_layout.nb_channels != decoder.channels || frame->sample_rate != 48000 ||
         (format != AV_SAMPLE_FMT_FLTP && format != AV_SAMPLE_FMT_FLT))
         throw std::runtime_error("OpusDec: unexpected FFmpeg PCM format");
-    for (int sample = 0; sample < samples; ++sample) {
+    for (int sample = 0; sample < frame->nb_samples; ++sample) {
         for (int channel = 0; channel < decoder.channels; ++channel) {
             const auto* source = reinterpret_cast<const float*>(frame->extended_data[format == AV_SAMPLE_FMT_FLTP ? channel : 0]);
-            const float value = source[format == AV_SAMPLE_FMT_FLTP ? sample : sample * decoder.channels + channel];
-            const auto converted = static_cast<std::int16_t>(std::lrint(std::clamp(value * 32768.0f, -32768.0f, 32767.0f)));
-            std::memcpy(reinterpret_cast<std::uint8_t*>(pcm) + (sample * decoder.channels + channel) * 2, &converted, 2);
+            decoder.pending.push_back(source[format == AV_SAMPLE_FMT_FLTP ? sample : sample * decoder.channels + channel]);
         }
     }
+    const auto count = static_cast<std::size_t>(samples) * decoder.channels;
+    if (decoder.pending.size() < count) decoder.pending.insert(decoder.pending.begin(), count - decoder.pending.size(), 0.0f);
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto converted = static_cast<std::int16_t>(std::lrint(std::clamp(decoder.pending[index] * 32768.0f, -32768.0f, 32767.0f)));
+        std::memcpy(reinterpret_cast<std::uint8_t*>(pcm) + index * 2, &converted, 2);
+    }
+    decoder.pending.erase(decoder.pending.begin(), decoder.pending.begin() + static_cast<std::ptrdiff_t>(count));
     return outputBytes;
 }
 

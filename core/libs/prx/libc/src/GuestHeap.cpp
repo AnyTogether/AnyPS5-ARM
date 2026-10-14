@@ -52,7 +52,7 @@ public:
         if (total > MaximumSmallBytes) {
             blockBytes = alignUp(total, LargeGranuleBytes);
             if (void* cached = _large.Take(blockBytes)) return cached;
-            void* raw = GuestArena::GuestArenaAllocate_nid_postfix(blockBytes, PageBytes);
+            void* raw = arenaAllocate(blockBytes, PageBytes);
             commit(raw, blockBytes);
             return raw;
         }
@@ -65,7 +65,7 @@ public:
             return block;
         }
         if (sizeClass.bump == nullptr || sizeClass.bytes > static_cast<std::size_t>(sizeClass.bumpEnd - sizeClass.bump)) {
-            auto* span = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(SpanBytes, PageBytes));
+            auto* span = static_cast<std::uint8_t*>(arenaAllocate(SpanBytes, PageBytes));
             commit(span, SpanBytes);
             sizeClass.bump = span;
             sizeClass.bumpEnd = span + SpanBytes;
@@ -111,8 +111,42 @@ private:
         return static_cast<std::size_t>(found - _classes.begin());
     }
 
+    static void* arenaAllocate(std::size_t bytes, std::size_t alignment) {
+        try {
+            return GuestArena::GuestArenaAllocate_nid_postfix(bytes, alignment);
+        } catch (const std::runtime_error&) {
+            throw std::bad_alloc();
+        }
+    }
+
     static void commit(void* pointer, std::size_t bytes) {
-        GuestArena::GuestArenaCommit_nid_postfix(pointer, bytes, ReadWriteProtection, bytes);
+        try {
+            GuestArena::GuestArenaCommit_nid_postfix(pointer, bytes, ReadWriteProtection, bytes);
+        } catch (const std::system_error& error) {
+            abandon(pointer, bytes);
+            if (outOfMemory(error)) throw std::bad_alloc();
+            throw;
+        } catch (...) {
+            abandon(pointer, bytes);
+            throw;
+        }
+    }
+
+    static void abandon(void* pointer, std::size_t bytes) {
+        GuestArena::GuestArenaReset_nid_postfix(pointer, bytes);
+        GuestArena::GuestArenaRelease_nid_postfix(pointer, bytes);
+    }
+
+    static bool outOfMemory(const std::system_error& error) {
+#ifdef _WIN32
+        constexpr int NotEnoughMemory = 8;
+        constexpr int OutOfMemory = 14;
+        constexpr int CommitmentLimit = 1455;
+        return error.code().category() == std::system_category() &&
+            (error.code().value() == NotEnoughMemory || error.code().value() == OutOfMemory || error.code().value() == CommitmentLimit);
+#else
+        return error.code() == std::errc::not_enough_memory;
+#endif
     }
 
     // Freed large blocks stay committed and are handed out again for the same block size: the game

@@ -8,7 +8,7 @@ namespace Elfpatcher::Windows {
 
 class WindowsPeWriter {
 public:
-    std::vector<std::uint8_t> Write(const std::vector<PeSection>& sections, std::uint32_t entryRva, const std::array<PeDirectory, 16>& directories, bool windowsGui = false, std::optional<std::uint64_t> fixedImageBase = std::nullopt) const;
+    std::vector<std::uint8_t> Write(const std::vector<PeSection>& sections, std::uint32_t entryRva, const std::array<PeDirectory, 16>& directories, bool windowsGui = false, std::optional<std::uint64_t> fixedImageBase = std::nullopt, bool dynamicBase = true) const;
 };
 
 }

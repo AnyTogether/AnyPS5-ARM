@@ -400,7 +400,7 @@ private:
                 regions.push_back(region(layer, aspect(), layer));
             }
             if (recorder != nullptr) {
-                for (const auto& upload : uploads) recorder->Keep(upload);
+                for (const auto& upload : uploads) recorder->Keep(upload, upload->Bytes().size());
             }
         }
         VkImageMemoryBarrier toTransfer{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};

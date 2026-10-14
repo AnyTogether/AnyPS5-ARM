@@ -249,7 +249,8 @@ jobs:
       - id: mesa
         run: |
           echo "version=$(dpkg-query -W -f='${Version}' mesa-vulkan-drivers)" >> "$GITHUB_OUTPUT"
-          echo "cpu=$(grep -m1 '^flags' /proc/cpuinfo | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          grep -m1 '^model name' /proc/cpuinfo
+          echo "cpu=$(grep -E '^(vendor_id|cpu family|model|flags)[[:space:]]*:' /proc/cpuinfo | sort -u | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v6
         with:
           path: .mesa-shader-cache

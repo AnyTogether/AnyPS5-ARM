@@ -86,7 +86,7 @@ The `--skip-sce-module`, `--exclude-sce-module <file>`, `--skip-syscall-check`, 
 
 ## Runtime layout
 
-For an executable that assumes its image starts at `0x400000`, use `relinker --windows --windows-fixed-base 0x400000 source/input.elf app.exe`. This maps its lowest ELF load page there; the PE headers occupy the preceding 64 KiB. Use this option only when the executable requires a fixed address. Without it, Windows placement and relocation behavior are unchanged. This option does not change Linux or macOS output.
+For an executable that assumes its image starts at `0x400000`, use `relinker --windows --windows-fixed-base 0x400000 source/input.elf app.exe`. This maps its lowest ELF load page there; the PE headers occupy the preceding 64 KiB. Use this option only when the executable requires an exact address. Without it, the Windows executable has no `DYNAMIC_BASE` and loads at its preferred base `0x140000000`; relocations are kept, so Windows relocates it if that range is taken. Modules keep `DYNAMIC_BASE`. This option does not change Linux or macOS output.
 
 Paths are relative to the output executable:
 

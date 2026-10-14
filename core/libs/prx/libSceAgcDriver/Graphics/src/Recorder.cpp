@@ -2044,7 +2044,7 @@ std::vector<std::size_t> Recorder::QueuedWriteGroups(std::span<const QueuedWrite
     std::vector<std::pair<std::uint64_t, std::uint64_t>> computed;
     for (std::size_t i = 0; i < writes.size(); ++i) {
         const auto& write = writes[i];
-        if (!write.computed && std::any_of(computed.begin(), computed.end(), [&](const auto& range) { return write.begin < range.second && range.first < write.end; })) {
+        if (!write.computed && !computed.empty()) {
             ends.push_back(i);
             computed.clear();
         }

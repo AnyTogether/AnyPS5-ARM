@@ -107,6 +107,9 @@ std::optional<std::filesystem::path> ResolveAlias(const std::string& guestPath) 
         if (!HasPrefix(relative, prefix)) continue;
         if (relative.size() == prefix.size()) return std::filesystem::path(host).make_preferred();
         std::filesystem::path result = ResolveHostPath(host, relative.substr(prefix.size() + 1));
+#ifndef _WIN32
+        if (guestPath.back() == '/') result /= "";
+#endif
         return result.make_preferred();
     }
     return std::nullopt;

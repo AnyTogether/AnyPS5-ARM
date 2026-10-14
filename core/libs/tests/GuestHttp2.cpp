@@ -153,17 +153,38 @@ int main() {
     Http2AsyncResult result{};
     Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == 0);
     Require(result.req_id == request && result.result == static_cast<int>(0x80436063));
-    constexpr int notFound = static_cast<int>(0x80436025);
-    constexpr int invalidValue = static_cast<int>(0x804361FE);
-    Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == notFound);
-    Require(sceHttp2WaitAsync(request, nullptr, nullptr, nullptr) == invalidValue);
-    Require(sceHttp2WaitAsync(request, &result, nullptr, &tag) == invalidValue);
-    Require(sceHttp2SendRequestAsync(request, nullptr, 0, nullptr, nullptr) == invalidValue);
-    Require(sceHttp2SendRequestAsync(request, nullptr, 0, &option, &tag) == invalidValue);
-    Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == notFound);
+    Require(Throws([&] { sceHttp2WaitAsync(request, &result, nullptr, nullptr); }));
+    Require(sceHttp2SendRequestAsync(request, nullptr, 0, nullptr, nullptr) == 0);
+    std::uint32_t wait_timeout = 2000000;
+    Require(sceHttp2WaitAsync(request, &result, &wait_timeout, nullptr) == 0);
+    Require(result.req_id == request && result.result == static_cast<int>(0x80436063));
+    Require(Throws([&] { sceHttp2WaitAsync(request, &result, nullptr, nullptr); }));
+    const int invalidRequests[] = {0, -1, 0x7fffffff, context, tmpl, box, doomedRequest, doomedTemplateRequest, doomedContextRequest};
+    for (const int invalid : invalidRequests) {
+        Require(sceHttp2SendRequestAsync(invalid, nullptr, 0, nullptr, nullptr) == InvalidId);
+        Require(Throws([&] { sceHttp2WaitAsync(invalid, &result, nullptr, nullptr); }));
+    }
+    const int independent = sceHttp2CreateRequestWithURL(tmpl, "GET", "https://example.com/", 0);
+    Require(independent > 0 && independent != request);
+    Require(sceHttp2SendRequestAsync(request, nullptr, 0, nullptr, nullptr) == 0);
+    Require(sceHttp2SendRequestAsync(independent, nullptr, 0, nullptr, nullptr) == 0);
+    Require(sceHttp2SendRequestAsync(request, nullptr, 0, nullptr, nullptr) == 0);
+    Require(Throws([&] { sceHttp2SendRequestAsync(request, nullptr, 0, nullptr, &tag); }));
+    Require(sceHttp2WaitAsync(independent, &result, nullptr, nullptr) == 0);
+    Require(result.req_id == independent && result.result == static_cast<int>(0x80436063));
+    Require(Throws([&] { sceHttp2WaitAsync(independent, &result, nullptr, nullptr); }));
+    for (int i = 0; i < 2; ++i) {
+        Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == 0);
+        Require(result.req_id == request && result.result == static_cast<int>(0x80436063));
+    }
+    Require(Throws([&] { sceHttp2WaitAsync(request, &result, nullptr, nullptr); }));
+    Require(sceHttp2SendRequestAsync(independent, nullptr, 0, nullptr, nullptr) == 0);
+    Require(sceHttp2DeleteRequest(independent) == 0);
+    Require(sceHttp2SendRequestAsync(independent, nullptr, 0, nullptr, nullptr) == InvalidId);
+    Require(Throws([&] { sceHttp2WaitAsync(independent, &result, nullptr, nullptr); }));
     Require(sceKernelDeleteUserEvent(eq, request) == 0);
-    Require(sceHttp2SendRequestAsync(request, nullptr, 0, &option, nullptr) < 0);
-    Require(sceHttp2WaitAsync(request, &result, nullptr, nullptr) == notFound);
+    Require(Throws([&] { sceHttp2SendRequestAsync(request, nullptr, 0, &option, nullptr); }));
+    Require(Throws([&] { sceHttp2WaitAsync(request, &result, nullptr, nullptr); }));
     Require(sceHttp2DeleteRequest(request) == 0);
     Require(sceKernelDeleteEqueue(eq) == 0);
     Require(sceHttp2DeleteCookieBox(box) == 0 && sceHttp2DeleteCookieBox(other) == 0);

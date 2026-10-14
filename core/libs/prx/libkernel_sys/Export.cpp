@@ -363,13 +363,13 @@ int APS5_VABI link_nid_postfix(const char* existing, const char* created) {
     if (const int error = ResolvePathError_nid_no_patch(existing, source)) return static_cast<int>(Fail(error));
     if (const int error = ResolvePathError_nid_no_patch(created, destination)) return static_cast<int>(Fail(error));
     std::error_code error;
-    const auto status = std::filesystem::symlink_status(source, error);
+    const auto status = std::filesystem::status(source, error);
     if (!std::filesystem::exists(status)) return static_cast<int>(Fail(GuestEnoent));
-    if (std::filesystem::is_symlink(status)) throw std::runtime_error("link: a symbolic link as the existing path is not supported");
     if (std::filesystem::is_directory(status)) return static_cast<int>(Fail(GuestEperm));
     if (std::filesystem::exists(std::filesystem::symlink_status(destination, error))) return static_cast<int>(Fail(GuestEexist));
     if (!std::filesystem::is_directory(destination.parent_path(), error)) return static_cast<int>(Fail(GuestEnoent));
-    std::filesystem::create_hard_link(source, destination, error);
+    const auto target = std::filesystem::is_symlink(source, error) ? std::filesystem::canonical(source, error) : source;
+    if (!error) std::filesystem::create_hard_link(target, destination, error);
     if (error == std::errc::cross_device_link) return static_cast<int>(Fail(GuestExdev));
     if (error) throw std::system_error(error, "link");
     RecordWrittenPath_nid_no_patch(destination);

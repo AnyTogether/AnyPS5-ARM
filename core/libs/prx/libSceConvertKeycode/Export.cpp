@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "HitLog.hpp"
 #include "prx/libc/include/General.hpp"
@@ -6,6 +8,18 @@
 namespace {
 constexpr int kErrInvalidAddress = static_cast<int>(0x80BC0031u);
 constexpr int kErrInvalidUserId = static_cast<int>(0x80BC0010u);
+
+char16_t UsCharacter(std::uint16_t keycode) {
+    static constexpr char16_t kPunctuation[] = u"-=[]\\\0;'`,./";
+    static constexpr char16_t kKeypad[] = u"/*-+\0" u"1234567890.";
+    if (keycode >= 0x04 && keycode <= 0x1D) return static_cast<char16_t>(u'a' + (keycode - 0x04));
+    if (keycode >= 0x1E && keycode <= 0x26) return static_cast<char16_t>(u'1' + (keycode - 0x1E));
+    if (keycode == 0x27) return u'0';
+    if (keycode == 0x2C) return u' ';
+    if (keycode >= 0x2D && keycode <= 0x38) return kPunctuation[keycode - 0x2D];
+    if (keycode >= 0x54 && keycode <= 0x63) return kKeypad[keycode - 0x54];
+    return 0;
+}
 }  // namespace
 
 extern "C" {
@@ -27,8 +41,11 @@ int APS5_VABI sceConvertKeycodeGetCharacterFromKeyboardData(void) {
     return 0;
 }
 
-int APS5_VABI sceConvertKeycodeGetCharacter(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceConvertKeycodeGetCharacter(std::uint16_t keycode, std::uint32_t state, std::uint32_t type, char16_t* character) {
+    if (character == nullptr) return kErrInvalidAddress;
+    if (state != 0) throw std::runtime_error("sceConvertKeycodeGetCharacter: unsupported state " + std::to_string(state));
+    if (type != 0) throw std::runtime_error("sceConvertKeycodeGetCharacter: unsupported keyboard type " + std::to_string(type));
+    *character = UsCharacter(keycode);
     return 0;
 }
 

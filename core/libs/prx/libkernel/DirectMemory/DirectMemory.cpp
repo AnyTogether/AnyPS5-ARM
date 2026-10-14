@@ -1090,19 +1090,17 @@ std::uintptr_t GuestPageSkew(std::uintptr_t address) {
 
 #ifdef _WIN32
 static bool IsGuestModuleImage(const void* base) {
-    std::wstring path(MAX_PATH, L'\0');
-    for (;;) {
-        const auto length = GetModuleFileNameW(static_cast<HMODULE>(const_cast<void*>(base)), path.data(), static_cast<DWORD>(path.size()));
-        if (length == 0) return false;
-        if (length < path.size()) {
-            path.resize(length);
-            break;
-        }
-        path.resize(path.size() * 2);
+    const auto address = reinterpret_cast<std::uintptr_t>(base);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(address);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(address + static_cast<std::uintptr_t>(dos->e_lfanew));
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    const auto sectionCount = nt->FileHeader.NumberOfSections;
+    for (unsigned i = 0; i < sectionCount; ++i) {
+        if (std::strncmp(reinterpret_cast<const char*>(sections[i].Name), ".elf0", IMAGE_SIZEOF_SHORT_NAME) == 0) return true;
     }
-    constexpr std::wstring_view suffix = L".guest.prx";
-    if (path.size() < suffix.size()) return false;
-    return std::equal(suffix.begin(), suffix.end(), path.end() - static_cast<std::ptrdiff_t>(suffix.size()), [](wchar_t expected, wchar_t actual) { return std::towlower(actual) == expected; });
+    return false;
 }
 #endif
 

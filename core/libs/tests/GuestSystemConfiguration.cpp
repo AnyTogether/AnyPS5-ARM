@@ -191,26 +191,25 @@ static void CheckLeafWithTrailingComponent() {
 static void CheckSystemSwVersion() {
     *__error_nid_postfix() = 13;
     Require(sceKernelGetSystemSwVersion_nid_postfix(nullptr) == SCE_KERNEL_ERROR_EFAULT && *__error_nid_postfix() == 13);
-    SceKernelSystemSwVersion version{};
-    version.size = 0;
-    *__error_nid_postfix() = 13;
-    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == SCE_KERNEL_ERROR_EINVAL && *__error_nid_postfix() == 13);
-    version.size = sizeof(SceKernelSystemSwVersion) - 1;
-    *__error_nid_postfix() = 13;
-    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == SCE_KERNEL_ERROR_EINVAL && *__error_nid_postfix() == 13);
-    version.size = sizeof(SceKernelSystemSwVersion) + 1;
-    *__error_nid_postfix() = 13;
-    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == SCE_KERNEL_ERROR_EINVAL && *__error_nid_postfix() == 13);
-    std::memset(&version, 0xaa, sizeof(version));
-    version.size = sizeof(SceKernelSystemSwVersion);
-    *__error_nid_postfix() = 13;
-    Require(sceKernelGetSystemSwVersion_nid_postfix(&version) == 0 && *__error_nid_postfix() == 13);
-    Require(version.size == sizeof(SceKernelSystemSwVersion));
-    Require(std::strcmp(version.versionString, "01.000.000") == 0);
-    for (std::size_t i = sizeof("01.000.000"); i < sizeof(version.versionString); ++i) {
-        Require(version.versionString[i] == 0);
+    const std::uint64_t sizes[] = {0, 24, 39, 40, 41, 48, 64};
+    for (const std::uint64_t size : sizes) {
+        struct {
+            std::uint64_t prefix;
+            SceKernelSystemSwVersion version;
+            unsigned char suffix[88];
+        } storage;
+        std::memset(&storage, 0xaa, sizeof(storage));
+        storage.version.size = size;
+        *__error_nid_postfix() = 13;
+        Require(sceKernelGetSystemSwVersion_nid_postfix(&storage.version) == 0 && *__error_nid_postfix() == 13);
+        Require(storage.prefix == 0xaaaaaaaaaaaaaaaaull && storage.version.size == size);
+        Require(std::strcmp(storage.version.versionString, "01.000.000") == 0);
+        for (std::size_t i = sizeof("01.000.000"); i < sizeof(storage.version.versionString); ++i) {
+            Require(storage.version.versionString[i] == 0);
+        }
+        Require(storage.version.version == 0x01000000);
+        for (unsigned char byte : storage.suffix) Require(byte == 0xaa);
     }
-    Require(version.version == 0x01000000);
 }
 static void CheckPseudoRandomSysctl() {
     *__error_nid_postfix() = 13;

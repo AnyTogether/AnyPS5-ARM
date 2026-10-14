@@ -8,6 +8,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 extern "C" {
 FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode);
@@ -37,6 +43,18 @@ static void ExpectException(TAction action) {
         return;
     }
     throw std::runtime_error("Expected a stream exception");
+}
+
+static void ReplaceWithReadOnlyDescriptor(FileStream* stream, const char* path) {
+#ifdef _WIN32
+    const int descriptor = _open(path, _O_RDONLY | _O_BINARY);
+    Require(descriptor >= 0 && _dup2(descriptor, _fileno(GetNativeStream(stream))) == 0);
+    Require(_close(descriptor) == 0);
+#else
+    const int descriptor = open(path, O_RDONLY);
+    Require(descriptor >= 0 && dup2(descriptor, fileno(GetNativeStream(stream))) >= 0);
+    Require(close(descriptor) == 0);
+#endif
 }
 
 int main(int argc, char** argv) {
@@ -144,6 +162,12 @@ int main(int argc, char** argv) {
     Require(fputs_nid_postfix(marker, stream) == EOF);
     Require(ferror_nid_postfix(stream) != 0);
     Require(fclose_nid_postfix(stream) == 0);
+    stream = fopen_nid_postfix(argv[1], "wb");
+    Require(stream != nullptr && fputs_nid_postfix(marker, stream) >= 0);
+    ReplaceWithReadOnlyDescriptor(stream, argv[1]);
+    Require(fflush_nid_postfix(stream) == EOF);
+    Require(ferror_nid_postfix(stream) != 0);
+    static_cast<void>(fclose_nid_postfix(stream));
     Require(std::remove(argv[1]) == 0);
     std::cout << "PASS: stream objects, file operations, EOF and error handling\n";
 }

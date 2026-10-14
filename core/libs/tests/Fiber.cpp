@@ -51,10 +51,27 @@ FiberStorage g_secondStorage;
 auto* const g_first = reinterpret_cast<FiberObject*>(&g_firstStorage);
 auto* const g_second = reinterpret_cast<FiberObject*>(&g_secondStorage);
 
+void CheckActiveContext(FiberObject* fiber, std::uint64_t expectedSize) {
+    FiberInfo info{};
+    info.size = sizeof(info);
+    Require(sceFiberGetInfo(fiber, &info) == 0, "active fiber context info");
+    Require(info.size_context == expectedSize, "reported context keeps the requested size");
+    volatile std::uint64_t marker = 0;
+    const auto address = reinterpret_cast<std::uintptr_t>(&marker);
+    const auto low = reinterpret_cast<std::uintptr_t>(info.addr_context);
+    const auto high = low + info.size_context;
+    Require(address >= low && address < high, "reported fiber context contains the executing stack");
+    for (auto cursor = address; cursor < high; cursor += sizeof(std::uint64_t)) {
+        const volatile auto word = *reinterpret_cast<const volatile std::uint64_t*>(cursor);
+        (void)word;
+    }
+}
+
 void APS5_VABI FirstEntry(std::uint64_t argOnInitialize, std::uint64_t argOnRun) {
     Require(argOnInitialize == 11 && argOnRun == 100, "first fiber arguments");
     FiberObject* self = nullptr;
     Require(sceFiberGetSelf(&self) == 0 && self == g_first, "first fiber self");
+    CheckActiveContext(g_first, g_firstContext.size());
     std::uint64_t framePointer = 0;
     Require(sceFiberGetThreadFramePointerAddress(nullptr) == FiberErrorNull, "frame pointer null");
     Require(sceFiberGetThreadFramePointerAddress(&framePointer) == 0 && framePointer == g_threadFramePointer, "thread frame pointer");
@@ -65,6 +82,7 @@ void APS5_VABI FirstEntry(std::uint64_t argOnInitialize, std::uint64_t argOnRun)
     std::uint64_t received = 0;
     Require(sceFiberSwitch(g_second, 200, &received) == 0, "switch to second fiber");
     Require(received == 300 && carried == 1.5, "switch back to first fiber");
+    CheckActiveContext(g_first, g_firstContext.size());
     for (;;) {
         Require(sceFiberReturnToThread(received + 1, &received) == 0, "first fiber return");
     }
@@ -72,10 +90,12 @@ void APS5_VABI FirstEntry(std::uint64_t argOnInitialize, std::uint64_t argOnRun)
 
 void APS5_VABI SecondEntry(std::uint64_t argOnInitialize, std::uint64_t argOnRun) {
     Require(argOnInitialize == 22 && argOnRun == 200, "second fiber arguments");
+    CheckActiveContext(g_second, g_secondContext.size());
     Require(sceFiberSwitch(g_second, 0, nullptr) == FiberErrorState, "switch to self");
     _mm_setcsr(_mm_getcsr() | 0x8000u);
     std::uint64_t received = 0;
     Require(sceFiberReturnToThread(250, &received) == 0 && received == 260, "second fiber resumed on another thread");
+    CheckActiveContext(g_second, g_secondContext.size());
     Require((_mm_getcsr() & 0x8000u) != 0, "second fiber keeps its MXCSR");
     Require(sceFiberSwitch(g_first, 300, nullptr) == 0, "switch to first fiber");
     Require(false, "second fiber resumed after its last switch");
@@ -143,6 +163,7 @@ void CheckWindowsHostStack() {
 #endif
 
 void APS5_VABI HostCallEntry(std::uint64_t, std::uint64_t) {
+    CheckActiveContext(reinterpret_cast<FiberObject*>(&g_hostCallStorage), HostCallContextSize);
 #ifdef _WIN32
     CheckWindowsHostStack();
 #endif

@@ -359,7 +359,7 @@ private:
     // The region of a descriptor-bound range (AddWritable/AddReadable), committed pages only. A
     // range inside a base region of the space adds nothing: the region serves it, as today's merge
     // of the two did.
-    void addDescriptorRegion(std::uint64_t address, std::size_t bytes, bool atomic, bool swept);
+    void addDescriptorRegion(std::uint64_t address, std::size_t bytes, bool atomic, bool swept, bool readOnly);
     static bool servesView(const Region& region, std::uint64_t view);
     static bool sparseHeapCandidate(const Region& region);
     bool bindSparseMirror(Region& region, const GuestAllocations::Lease& lease);
@@ -399,6 +399,7 @@ private:
     // regions follow the registry's order), so AddSnapshot can search instead of scanning.
     bool regionsSorted = false;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> writes;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> readsOverBase;
     std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> heapReferences;
     // UploadPrepare ran (regions are frozen); `uploaded` once UploadFinish ran.
     bool prepared = false;

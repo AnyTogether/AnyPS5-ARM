@@ -262,6 +262,14 @@ if(BUILD_TESTING)
         set_tests_properties(windows_write_watch PROPERTIES TIMEOUT 20)
     endif()
 
+    if(WIN32)
+        add_test_executable(undeliverable_host_exception_tests tests/UndeliverableHostException.cpp)
+        add_dependencies(undeliverable_host_exception_tests libc)
+        add_test(NAME undeliverable_host_exception COMMAND undeliverable_host_exception_tests $<TARGET_FILE:libc>)
+        set_tests_properties(undeliverable_host_exception PROPERTIES
+            PASS_REGULAR_EXPRESSION "C\\+\\+ exception St9bad_alloc raised on thread [0-9]+ cannot be delivered: 0x[0-9a-f]+ undeliverable_host_exception_tests\\.exe\\+0x[0-9a-f]+ has no unwind data")
+    endif()
+
     add_test_executable(guest_offline_imports_tests tests/GuestOfflineImports.cpp)
     target_include_directories(guest_offline_imports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_offline_imports_tests PRIVATE libSceHttp libSceNpEntitlementAccess libSceRudp libc)

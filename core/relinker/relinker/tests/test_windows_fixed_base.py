@@ -70,7 +70,7 @@ def main():
             assert bool(struct.unpack_from("<H", data, pe + 22)[0] & 1) == (base is not None)
             characteristics = struct.unpack_from("<H", data, optional + 70)[0]
             assert characteristics & 0x100
-            assert bool(characteristics & 0x40) == (base is None)
+            assert characteristics & 0x40 == 0, "converted main executable must not advertise DYNAMIC_BASE"
             relocations = struct.unpack_from("<II", data, optional + 112 + 5 * 8)
             assert bool(relocations[1]) == (base is None)
             return output

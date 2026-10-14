@@ -551,7 +551,7 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
     if (kind == TessellationAttribute::ControlInput && scaled != nullptr && sum->Argument(1)->HasImmediate() && scaled->Opcode() == IrOpcode::IMul32 && scaled->Argument(1)->HasImmediate() && scaled->Argument(1)->ImmediateU32() == stride) {
         const auto constant = sum->Argument(1)->ImmediateU32();
         const auto vertex = inPatch(EmitBinaryU32(state, spv::OpIAdd, ctx.Arg(*scaled, 0), ConstantU32(state, constant / stride)));
-        state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, ConstantU32(state, constant % stride / 16u), ConstantU32(state, constant % 16u / 4u));
+        state.module.AddFunction(spv::OpAccessChain, type, pointer, variable, vertex, ConstantU32(state, constant % stride / 16u), ConstantU32(state, constant % stride % 16u / 4u));
         return pointer;
     }
     const auto offset = patch ? address : EmitBinaryU32(state, spv::OpUMod, address, ConstantU32(state, stride));

@@ -4,6 +4,7 @@
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <cstdint>
+#include <optional>
 
 namespace AgcDriver {
 
@@ -15,6 +16,7 @@ std::uint32_t DisplayTexelBytes(std::uint64_t pixelFormat);
 
 enum class ResidentPresent : std::uint8_t { None, Blit, Convert };
 ResidentPresent ResidentPresentPath(VkFormat storage, std::uint64_t pixelFormat, bool blitSource);
+std::optional<std::uint32_t> ResidentPresentSlice(std::uint64_t imageAddress, std::uint64_t imageBytes, std::uint32_t slices, std::uint64_t displayAddress, std::uint64_t displayBytes);
 
 }
 

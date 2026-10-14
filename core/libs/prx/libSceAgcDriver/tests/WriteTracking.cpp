@@ -275,6 +275,76 @@ void CheckPrivateMappingReuse() {
     GuestArena::GuestArenaRelease_nid_postfix(replacement, 3 * Block);
 }
 
+void CheckUntrackedHint() {
+    constexpr std::size_t bytes = 4 * Block;
+    auto* memory = static_cast<volatile std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(bytes, Block));
+    GuestArena::GuestArenaCommit_nid_postfix(const_cast<std::uint8_t*>(memory), bytes, PAGE_READWRITE, 16384);
+    struct Cleanup {
+        void* memory;
+        ~Cleanup() {
+            GuestArena::GuestArenaReset_nid_postfix(memory, bytes);
+            GuestArena::GuestArenaRelease_nid_postfix(memory, bytes);
+        }
+    } cleanup{const_cast<std::uint8_t*>(memory)};
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    const auto hinted = base + Block;
+    constexpr std::size_t hintedBytes = 2 * Block;
+    for (std::size_t offset = 0; offset < bytes; offset += 4096) memory[offset] = 0x11;
+    BumpCollectEpoch();
+    Require(CollectWrites(base, bytes) != 0 && UntrackedHint(base, bytes) == 0, "watched memory has an untracked hint");
+    Unwatch(hinted, hintedBytes);
+    const auto stamp = NewestStamp(hinted, hintedBytes);
+    const auto first = UntrackedHint(hinted, hintedBytes);
+    Require(first != 0, "memory that left the watch has no untracked hint");
+    Require(UntrackedHint(base, bytes) == 0 && UntrackedHint(hinted - 4096, 8192) == 0, "a range with watched blocks has an untracked hint");
+    std::array<std::uint8_t, 64> host{};
+    Require(UntrackedHint(reinterpret_cast<std::uint64_t>(host.data()), host.size()) == 0, "memory outside the arena has an untracked hint");
+    Require(!Watched(hinted, hintedBytes) && CollectWrites(hinted, hintedBytes) == 0 && !UnchangedSince(hinted, hintedBytes, TrackerGeneration()), "a hinted range reads as tracked");
+    std::array<std::uint64_t, 2> generations{first, first};
+    std::array<std::uint8_t, 2> changed{};
+    Require(!ChangedBlocks(hinted, hintedBytes, generations, changed), "a hinted range uses block stamps");
+    for (unsigned epoch = 0; epoch < 8; ++epoch) {
+        BumpCollectEpoch();
+        Require(UntrackedHint(hinted, hintedBytes) == first, "an untracked hint moved without a store");
+    }
+    memory[Block + 3 * 16384 + 8] ^= 1;
+    Require(UntrackedHint(hinted, hintedBytes) == first, "an untracked hint was walked twice in one epoch");
+    BumpCollectEpoch();
+    const auto stored = UntrackedHint(hinted, hintedBytes);
+    Require(stored > first, "a CPU store into a hinted range did not move its hint");
+    Require(UntrackedHint(hinted + Block, Block) == first, "a CPU store moved the hint of another block");
+    BumpCollectEpoch();
+    Require(UntrackedHint(hinted, hintedBytes) == stored, "an untracked hint moved again without a store");
+    memory[Block + 8] = memory[Block + 8];
+    BumpCollectEpoch();
+    const auto rewritten = UntrackedHint(hinted, hintedBytes);
+    Require(rewritten > stored, "a store of the bytes already there did not move the hint");
+    std::thread([&] { memory[2 * Block + 5 * 4096] ^= 1; }).join();
+    BumpCollectEpoch();
+    const auto threaded = UntrackedHint(hinted, hintedBytes);
+    Require(threaded > rewritten, "a store from another thread did not move the hint");
+    Require(UntrackedHint(hinted + Block, Block) == threaded && UntrackedHint(hinted, Block) == rewritten, "a walk stamped a store into the wrong block");
+    Require(NewestStamp(hinted, hintedBytes) == stamp, "untracked hint walks advanced the block stamps");
+    Unwatch(hinted, hintedBytes);
+    BumpCollectEpoch();
+    Require(UntrackedHint(hinted, hintedBytes) == threaded, "unwatching a hinted range again moved its hint");
+    Unwatch(base, Block);
+    const auto own = UntrackedHint(base, Block);
+    Require(own > threaded && UntrackedHint(hinted, hintedBytes) == threaded, "a range leaving the watch did not start a hint of its own");
+    GuestArena::GuestArenaReset_nid_postfix(const_cast<std::uint8_t*>(memory) + Block, hintedBytes);
+    GuestArena::GuestArenaCommit_nid_postfix(const_cast<std::uint8_t*>(memory) + Block, hintedBytes, PAGE_READWRITE, 16384);
+    BumpCollectEpoch();
+    const auto fresh = CollectWrites(hinted, hintedBytes);
+    Require(Watched(hinted, hintedBytes) && fresh != 0 && UnchangedSince(hinted, hintedBytes, fresh), "fresh backing of a hinted range is not watched");
+    memory[Block + 8] = 0x5a;
+    BumpCollectEpoch();
+    Require(UntrackedHint(hinted, hintedBytes) == 0, "watched fresh backing has an untracked hint");
+    CollectWritesUncached(hinted, hintedBytes);
+    Require(!UnchangedSince(hinted, Block, fresh), "an untracked hint walk took a CPU store from watched memory");
+    Unwatch(hinted, hintedBytes);
+    Require(UntrackedHint(hinted, hintedBytes) > own, "fresh backing leaving the watch did not start a new hint");
+}
+
 std::uint64_t ChildHostHole() {
     std::uintptr_t arena = 0;
     std::size_t arenaBytes = 0;
@@ -717,6 +787,7 @@ int main() {
 #ifdef _WIN32
         CheckDeferredSharedImports();
         CheckPrivateMappingReuse();
+        CheckUntrackedHint();
         CheckHostHoleInChild();
 #endif
         CheckVersionRanges();

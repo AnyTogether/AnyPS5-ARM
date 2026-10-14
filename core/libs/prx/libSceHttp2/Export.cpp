@@ -14,8 +14,6 @@
 // No network is emulated: contexts, templates and requests can be created, but any request
 // that would touch the network fails with the library's network error.
 static constexpr int ERROR_NETWORK = static_cast<int>(0x80436063);
-static constexpr int ERROR_NOT_FOUND = static_cast<int>(0x80436025);
-static constexpr int ERROR_INVALID_VALUE = static_cast<int>(0x804361FE);
 static constexpr int ERROR_INVALID_ID = static_cast<int>(0x817B1100);
 static constexpr int ERROR_NULL_POINTER = static_cast<int>(0x817B1225);
 
@@ -76,10 +74,8 @@ static void EraseCompletions(const std::vector<int>& ids) {
     for (const int id : ids) g_completions.erase(id);
 }
 
-// Every asynchronous operation fails with the network error as soon as it is issued; its
-// completion is queued for sceHttp2WaitAsync and announced on the caller's event queue.
-static int CompleteAsync(int req_id, const Http2AsyncOption* kqueue_option, const void* option) {
-    if (kqueue_option == nullptr || option != nullptr) return ERROR_INVALID_VALUE;
+static int CompleteAsync(const char* function, int req_id, const Http2AsyncOption* kqueue_option, const void* option) {
+    if (option != nullptr) NotImplemented_nid_no_patch(function);
     bool queued = false;
     {
         std::lock_guard handlesLock(g_handlesMutex);
@@ -93,12 +89,14 @@ static int CompleteAsync(int req_id, const Http2AsyncOption* kqueue_option, cons
         }
     }
     if (!queued) return ERROR_INVALID_ID;
-    const int triggered = EqueueTriggerEvent_nid_postfix(kqueue_option->equeue, static_cast<uintptr_t>(kqueue_option->user_event_id), EVFILT_USER, kqueue_option->user_data);
-    if (triggered != 0) {
-        std::lock_guard lock(g_completionsMutex);
-        const auto pending = g_completions.find(req_id);
-        if (pending != g_completions.end() && !pending->second.empty()) pending->second.pop_back();
-        return triggered;
+    if (kqueue_option == nullptr) return 0;
+    if (EqueueTriggerEvent_nid_postfix(kqueue_option->equeue, static_cast<uintptr_t>(kqueue_option->user_event_id), EVFILT_USER, kqueue_option->user_data) != 0) {
+        {
+            std::lock_guard lock(g_completionsMutex);
+            const auto pending = g_completions.find(req_id);
+            if (pending != g_completions.end() && !pending->second.empty()) pending->second.pop_back();
+        }
+        NotImplemented_nid_no_patch(function);
     }
     return 0;
 }
@@ -213,7 +211,7 @@ int APS5_VABI sceHttp2SendRequest(int req_id, const void* post_data, size_t size
 int APS5_VABI sceHttp2SendRequestAsync(int req_id, const void* post_data, size_t size, Http2AsyncOption* kqueue_option, void* option) {
     (void)post_data;
     (void)size;
-    return CompleteAsync(req_id, kqueue_option, option);
+    return CompleteAsync(__func__, req_id, kqueue_option, option);
 }
 
 int APS5_VABI sceHttp2SetAuthEnabled(int id, int is_enable) {
@@ -318,16 +316,11 @@ int APS5_VABI sceHttp2Term(int lib_http2_ctx_id) {
 }
 
 int APS5_VABI sceHttp2WaitAsync(int req_id, Http2AsyncResult* result, uint32_t* timeout, void* option) {
-    // Operations complete when they are issued, so there is never anything to wait for.
     (void)timeout;
-    if (result == nullptr || option != nullptr) return ERROR_INVALID_VALUE;
-    {
-        std::lock_guard handlesLock(g_handlesMutex);
-        if (FindHandle(req_id, Http2Kind::Request) == nullptr) NotImplemented_nid_no_patch("sceHttp2WaitAsync: waiting on a request that was deleted or never created");
-    }
+    if (result == nullptr || option != nullptr) NotImplemented_nid_no_patch(__func__);
     std::lock_guard lock(g_completionsMutex);
     const auto pending = g_completions.find(req_id);
-    if (pending == g_completions.end() || pending->second.empty()) return ERROR_NOT_FOUND;
+    if (pending == g_completions.end() || pending->second.empty()) NotImplemented_nid_no_patch("sceHttp2WaitAsync: waiting for an operation that has not completed");
     *result = pending->second.front();
     pending->second.pop_front();
     return 0;

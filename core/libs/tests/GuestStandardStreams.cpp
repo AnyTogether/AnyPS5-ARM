@@ -1,6 +1,7 @@
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdlib>
+#include <fcntl.h>
 #include <cstring>
 #include <cstdarg>
 #include <cstdint>
@@ -429,7 +430,71 @@ static void CheckDescriptorAppend(std::FILE* original) {
     }
 }
 
+static void CheckDescriptorAccessModes() {
+    const auto filename = "anyps5-fdopen-modes-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    for (const int access : {0, 1, 2}) {
+        for (const char* mode : {"r", "w", "a", "r+", "w+", "a+"}) {
+            { std::ofstream output(filename); output << "retained"; }
+#ifdef _WIN32
+            const int descriptor = _open(filename.c_str(), access | _O_BINARY);
+#else
+            const int descriptor = ::open(filename.c_str(), access);
+#endif
+            Require(descriptor >= 0);
+            const int requested = std::strchr(mode, '+') ? 2 : *mode == 'r' ? 0 : 1;
+            const bool incompatible = access != 2 && access != requested;
+#ifdef _WIN32
+            const auto originalHandle = _get_osfhandle(descriptor);
+            if (incompatible) Require(_lseek(descriptor, 2, SEEK_SET) == 2);
+#else
+            const int originalFlags = ::fcntl(descriptor, F_GETFL);
+            Require(originalFlags >= 0);
+            if (incompatible) Require(::lseek(descriptor, 2, SEEK_SET) == 2);
+#endif
+            *__error_nid_postfix() = 0;
+            auto* stream = fdopen_nid_postfix(descriptor, mode);
+            if (incompatible) {
+                if (stream != nullptr || *__error_nid_postfix() != 22)
+                    std::fprintf(stderr, "fdopen access=%d mode=%s returned %p with errno=%d\n", access, mode,
+                        static_cast<void*>(stream), *__error_nid_postfix());
+                Require(stream == nullptr && *__error_nid_postfix() == 22);
+#ifdef _WIN32
+                Require(_get_osfhandle(descriptor) == originalHandle && _lseek(descriptor, 0, SEEK_CUR) == 2);
+#else
+                Require(::fcntl(descriptor, F_GETFL) == originalFlags && ::lseek(descriptor, 0, SEEK_CUR) == 2);
+#endif
+                Require(CheckFileBytes(filename, "retained", mode, false));
+                const bool probeAppend = access == 1 && *mode == 'a';
+#ifdef _WIN32
+                if (probeAppend) Require(_write(descriptor, "X", 1) == 1 && _lseek(descriptor, 0, SEEK_CUR) == 3);
+                Require(_close(descriptor) == 0);
+#else
+                if (probeAppend) Require(::write(descriptor, "X", 1) == 1 && ::lseek(descriptor, 0, SEEK_CUR) == 3);
+                Require(::close(descriptor) == 0);
+#endif
+                Require(CheckFileBytes(filename, probeAppend ? "reXained" : "retained", mode, false));
+            } else {
+                Require(stream != nullptr);
+                if (requested == 0) Require(fgetc_nid_postfix(stream) == 'r');
+                else Require(fputc_nid_postfix('X', stream) == 'X');
+                Require(fclose_nid_postfix(stream) == 0);
+            }
+        }
+    }
+#ifdef _WIN32
+    const int closed = _open(filename.c_str(), _O_RDONLY | _O_BINARY);
+    Require(closed >= 0 && _close(closed) == 0);
+#else
+    const int closed = ::open(filename.c_str(), O_RDONLY);
+    Require(closed >= 0 && ::close(closed) == 0);
+#endif
+    *__error_nid_postfix() = 0;
+    Require(fdopen_nid_postfix(closed, "r") == nullptr && *__error_nid_postfix() == 9);
+    Require(std::filesystem::remove(filename));
+}
+
 int main() {
+    CheckDescriptorAccessModes();
     Require(_Getmbcurmax_nid_postfix() == 1 && _Getmbcurmax_nid_postfix() == ___mb_cur_max_nid_postfix());
     CheckFlushWhileReading();
     Require(fdopen_nid_postfix(-1, "rb") == nullptr && *__error_nid_postfix() == 9);

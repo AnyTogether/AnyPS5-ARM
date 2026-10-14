@@ -4,6 +4,7 @@
 #include "SpirvBackend/SpirvMemory/SpirvSubgroup.hpp"
 #include "SpirvBackend/SpirvBufferFormat.hpp"
 #include "FlatApertures.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <array>

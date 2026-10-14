@@ -1,3 +1,4 @@
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <climits>
 #include <cstdint>
@@ -23,14 +24,10 @@ int APS5_VABI _sigprocmask_nid_postfix(int, const GuestSignalSet*, GuestSignalSe
 int APS5_VABI JumpKeepingCalleeSaved(std::uint64_t* buffer);
 }
 
-#ifdef _WIN32
-#define TEST_ASM_FUNCTION(name) ".globl " name "\n.def " name "; .scl 2; .type 32; .endef\n" name ":\n"
-#define TEST_ASM_CALL(name) "    call " name "\n"
-#elif defined(__APPLE__)
-#define TEST_ASM_FUNCTION(name) ".globl _" name "\n_" name ":\n"
-#define TEST_ASM_CALL(name) "    call _" name "\n"
+#define TEST_ASM_FUNCTION(name) APS5_ASM_FUNCTION(name)
+#if defined(_WIN32) || defined(__APPLE__)
+#define TEST_ASM_CALL(name) "    call " APS5_ASM_SYMBOL(name) "\n"
 #else
-#define TEST_ASM_FUNCTION(name) ".globl " name "\n.type " name ", @function\n" name ":\n"
 #define TEST_ASM_CALL(name) "    call " name "@PLT\n"
 #endif
 

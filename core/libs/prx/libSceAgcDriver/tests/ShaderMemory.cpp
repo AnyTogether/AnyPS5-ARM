@@ -1391,6 +1391,25 @@ void verifyHalfWaveReduction() {
     };
     require(reductions(vertex(scan(0xffffffffu, 0x26000000u, 0x83800000u), 32u), spv::OpGroupNonUniformUMin) == 1u, "half-wave reduction: the wave64 vertex UMin scan, whose entry EXEC is every invocation, did not read lane 31 as a subgroup UMin on 32 lanes");
     require(halves(vertex(scan(0x80000000u, 0x24000000u, 0x84000000u), 64u), spv::OpGroupNonUniformSMax, 0x80000000u), "half-wave reduction: the wave64 vertex SMax scan did not read lanes 31 and 63 as reductions of host invocations 0-31 and 32-63 on 64 lanes");
+    const auto domain = [](std::vector<std::uint32_t> code, std::uint32_t subgroupSize) {
+        *std::find(code.begin(), code.end(), 0xf800180fu) = 0xf80008cfu;
+        *std::find(code.begin(), code.end(), 0x7e160f00u) = 0x7e160f01u;
+        RecompileRequest request{};
+        request.shader = {ShaderStage::TessellationEvaluation, 0x10000u, code, 0, {}};
+        request.context.waveSize = 64;
+        request.context.vertex = ShaderVertexStageInfo{};
+        request.target.vulkanVersion = 0x00401000u;
+        request.target.spirvVersion = 0x00010300u;
+        request.target.subgroupSize = subgroupSize;
+        request.target.supportedCapabilities = capabilities;
+        request.target.fragmentShaderBarycentricEnabled = false;
+        request.layout.pushConstantSizeBytes = 128;
+        request.graphics = GraphicsCompileContext{0u, {}, std::nullopt, TessellationConfiguration{3u, 3u, 1u, 2u, 2u}, {}};
+        request.useCache = false;
+        return Recompile(request).spirv;
+    };
+    require(reductions(domain(scan(0xffffffffu, 0x26000000u, 0x83800000u), 32u), spv::OpGroupNonUniformUMin) == 1u, "half-wave reduction: the wave64 domain UMin scan under s_orn2_saveexec_b64 vcc, exec did not read lane 31 as a subgroup UMin on 32 lanes");
+    require(halves(domain(scan(0u, 0x38000000u, 0x88000000u), 64u), spv::OpGroupNonUniformBitwiseOr, 0u), "half-wave reduction: the wave64 domain OR scan did not read lanes 31 and 63 as reductions of host invocations 0-31 and 32-63 on 64 lanes");
     const auto floatScan = [&scan](std::uint32_t identity, std::uint32_t vector, std::uint32_t join) {
         auto code = scan(identity, vector, 0u);
         code[23] = join;
@@ -1432,6 +1451,7 @@ void verifyHalfWaveReduction() {
     auto overwritten = umin;
     overwritten.insert(overwritten.begin() + 17, {0x7ef80500u, 0x7e008514u});
     expectFailure([&] { static_cast<void>(pixel(overwritten, 32u, true)); }, lane63, "half-wave reduction: a scan of window registers read lane 63 after a v_movreld_b32 at a runtime M0 that may overwrite them");
+    require(reductions(domain(divergent, 32u), spv::OpGroupNonUniformUMin) == 1u, "half-wave reduction: domain keys masked inside a divergent branch did not read lane 31 as a subgroup UMin on 32 lanes");
     const char* arithmetic = "v_readlane_b32 of lane 31 of a wave64 half-wave reduction scan needs subgroup arithmetic";
     expectFailure([&] { static_cast<void>(pixel(umin, 32u, false)); }, arithmetic, "half-wave reduction: a device without subgroup arithmetic read lane 31 on 32 lanes");
     expectFailure([&] { static_cast<void>(pixel(umin, 64u, false)); }, arithmetic, "half-wave reduction: a device without subgroup arithmetic read lane 31 on 64 lanes");

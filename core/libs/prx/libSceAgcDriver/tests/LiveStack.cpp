@@ -39,6 +39,14 @@ void checkLiveStack(std::uintptr_t stackBottom, std::uintptr_t stackTop, std::ui
 
 void RunLiveStackAccessTests() {
     checkLiveStack(0, 0, 0);
+#if defined(_WIN32)
+    for (const auto address : {std::uintptr_t{0xf00000000000ull}, std::uintptr_t{0x7fffffffffffull}}) {
+        Require(!GuestMemory::Accessible(reinterpret_cast<const void*>(address), 4),
+                "an address above the user address space is reported accessible");
+        const auto committed = GuestMemory::CommittedRanges(address, 4, false);
+        Require(committed.empty(), "an address above the user address space reports committed bytes");
+    }
+#endif
 #if defined(__linux__)
     const auto page = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
     const std::size_t stackBytes = 256 * 1024;

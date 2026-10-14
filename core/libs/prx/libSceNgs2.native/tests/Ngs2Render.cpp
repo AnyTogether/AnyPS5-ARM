@@ -147,6 +147,27 @@ static void TestPcmBlockEnd() {
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 
+static void TestPatchToRackHandle() {
+    const auto system = CreateSystem();
+    const auto masteringRack = CreateRack(system, SCE_NGS2_RACK_ID_MASTERING);
+    const auto master = Voice(masteringRack);
+    Control(master, SCE_NGS2_MASTERING_VOICE_PARAM_SETUP, Ngs2MasteringVoiceSetupParam{{}, 1, 0});
+    Control(master, SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT, Ngs2MasteringVoiceOutputParam{{}, 0, 0});
+    Event(master, SCE_NGS2_VOICE_EVENT_PLAY);
+
+    const std::vector<std::int16_t> pcm(Grain, 16384);
+    const auto sampler = Sampler(system, pcm, 0);
+    Control(sampler, SCE_NGS2_VOICE_PARAM_PATCH, Ngs2VoicePatchParam{{}, 0, 0, masteringRack});
+
+    Ngs2VoicePortInfo port{};
+    Require(sceNgs2VoiceGetPortInfo(sampler, 0, &port, sizeof(port)) == SCE_NGS2_OK);
+    Require(port.dest_handle == master && port.dest_input_id == 0);
+    Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+    const auto out = RenderI16(system);
+    Require(out == pcm);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 static bool Near(float a, float b) {
     return std::fabs(a - b) < 1e-4f;
 }
@@ -887,6 +908,7 @@ int main() {
     Require(std::atexit(RenderAfterStaticTeardown) == 0);
     TestErrorsAndInfo();
     TestPcmBlockEnd();
+    TestPatchToRackHandle();
     TestPan();
     TestPitchAndRepeat();
     TestSubmixerMatrix();

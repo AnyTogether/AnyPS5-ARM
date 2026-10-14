@@ -40,6 +40,12 @@ const std::uint8_t OPUS_STEREO[] = {
     0xA7, 0xFA, 0x99, 0xF9, 0x47, 0x32, 0x07, 0xAF, 0x24, 0xBF, 0x14, 0xC5,
 };
 
+const std::uint8_t OPUS_NARROWBAND[] = {
+    11, 0, 0x08, 0x83, 0x9C, 0xE1, 0x7B, 0x2F, 0x52, 0xCA, 0x9E, 0x75, 0xD8,
+    13, 0, 0x08, 0x96, 0x51, 0x3A, 0x33, 0x4A, 0xF8, 0x29, 0xF5, 0xBE, 0x40, 0x15, 0x98,
+    10, 0, 0x08, 0x85, 0x89, 0x9D, 0x73, 0x0F, 0xC2, 0xB1, 0xE2, 0x48,
+};
+
 } // namespace
 
 int main() {
@@ -111,4 +117,25 @@ int main() {
     Require(sceOpusDecDecode(otherState.data(), OPUS_STEREO + offset + 2, OPUS_STEREO[offset], reference.data(), 3840) == 3840);
     Require(sceOpusDecDestroy(otherState.data()) == 0);
     Require(sceOpusDecTerminate(&otherContext) == 0);
+
+    std::uint32_t narrowContext = 0;
+    std::array<std::uint8_t, 640> narrowState{};
+    Require(sceOpusDecInitialize(&narrowContext) == 0);
+    Require(sceOpusDecCreateEx(&narrowContext, narrowState.data(), 48000, 1) == 0);
+    std::array<std::int16_t, 962> narrow{};
+    bool audible = false;
+    for (std::size_t at = 0; at < sizeof(OPUS_NARROWBAND);) {
+        const int bytes = OPUS_NARROWBAND[at] | (OPUS_NARROWBAND[at + 1] << 8);
+        narrow.fill(12345);
+        Require(sceOpusDecDecode(narrowState.data(), OPUS_NARROWBAND + at + 2, bytes, narrow.data() + 1, 1920) == 1920);
+        Require(narrow.front() == 12345 && narrow.back() == 12345);
+        audible = audible || std::any_of(narrow.begin() + 1, narrow.end() - 1, [](auto value) { return value != 0 && value != 12345; });
+        at += bytes + 2;
+    }
+    Require(audible);
+    narrow.fill(12345);
+    Require(sceOpusDecDecode(narrowState.data(), OPUS_STEREO + 2, 70, narrow.data() + 1, 1920) == 1920);
+    Require(narrow.front() == 12345 && narrow.back() == 12345);
+    Require(sceOpusDecDestroy(narrowState.data()) == 0);
+    Require(sceOpusDecTerminate(&narrowContext) == 0);
 }

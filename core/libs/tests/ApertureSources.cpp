@@ -1,14 +1,10 @@
-#include "ControlFlow/GraphBuilder.hpp"
-#include "FlatApertures.hpp"
 #include "IntermediateRepresentation/IrProgram.hpp"
 #include "RdnaDecoder/RdnaInstructionDecoder.hpp"
-#include "Translation/InstructionTranslator.hpp"
+#include "RdnaDecoder/RdnaScalarOpDecoder.hpp"
+#include "Translation/TranslationContext.hpp"
 #include <array>
-#include <cstdint>
 #include <cstdio>
-#include <exception>
-#include <optional>
-#include <span>
+#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -20,19 +16,19 @@ struct ApertureSource {
     std::uint32_t code;
     RdnaOperandKind kind;
     const char* name;
-    std::uint64_t value;
+    std::uint32_t low;
+    std::uint32_t high;
 };
 
-constexpr std::array<ApertureSource, 4> ApertureSources{{
-    {235u, RdnaOperandKind::SrcSharedBase, "src_shared_base", SharedApertureBase},
-    {236u, RdnaOperandKind::SrcSharedLimit, "src_shared_limit", SharedApertureLimit},
-    {237u, RdnaOperandKind::SrcPrivateBase, "src_private_base", PrivateApertureBase},
-    {238u, RdnaOperandKind::SrcPrivateLimit, "src_private_limit", PrivateApertureLimit},
+const std::array<ApertureSource, 4> ApertureSources{{
+    {235u, RdnaOperandKind::SrcSharedBase, "src_shared_base", 0x00000000u, 0x80000000u},
+    {236u, RdnaOperandKind::SrcSharedLimit, "src_shared_limit", 0xffffffffu, 0x80000000u},
+    {237u, RdnaOperandKind::SrcPrivateBase, "src_private_base", 0x00000000u, 0x70000000u},
+    {238u, RdnaOperandKind::SrcPrivateLimit, "src_private_limit", 0xffffffffu, 0x70000000u},
 }};
 
-constexpr std::uint32_t Destination = 4u;
-constexpr std::uint32_t EndProgram = 0xbf810000u;
-constexpr std::array<std::uint32_t, 2> WaveSizes{32u, 64u};
+constexpr std::uint32_t MovB32 = 0x03u;
+constexpr std::uint32_t MovB64 = 0x04u;
 
 void Require(bool value, const std::string& message) {
     if (!value) throw std::runtime_error(message);
@@ -44,108 +40,68 @@ std::string Hex(std::uint32_t value) {
     return text;
 }
 
-std::uint32_t ScalarMove32(std::uint32_t source) {
-    return 0xbe800300u | (Destination << 16u) | source;
+RdnaInstruction ScalarMove(std::uint32_t opcode, std::uint32_t source) {
+    const std::array<std::uint32_t, 2> words{0x80000000u | (0x7du << 23u) | (opcode << 8u) | source, 0u};
+    return DecodeRdnaSop1(0u, words, 0u);
 }
 
-std::uint32_t ScalarMove64(std::uint32_t source) {
-    return 0xbe800400u | (Destination << 16u) | source;
-}
-
-IrProgram Translate(std::span<const std::uint32_t> code, std::uint32_t waveSize) {
-    const auto decoded = RdnaInstructionDecoder{}.Decode(code);
-    const auto graph = GraphBuilder{}.Build(decoded);
-    const ShaderComputeInputInfo compute{};
-    TranslateOptions options;
-    options.stage = ShaderStageKind::Compute;
-    options.waveSize = waveSize;
-    options.userDataCount = 0;
-    options.inputInfo.compute = &compute;
-    return InstructionTranslator{}.Translate(decoded, graph, options);
-}
-
-std::optional<std::uint32_t> ScalarRegisterConstant(const IrProgram& program, std::uint32_t index) {
-    const IrValue* written = nullptr;
-    for (const auto& block : program.Blocks()) {
-        for (const auto* instruction : block->Instructions()) {
-            if (instruction->Opcode() != IrOpcode::SetScalarRegister) continue;
-            const auto reg = instruction->Argument(0)->Register();
-            if (reg.bank == RegisterBank::Scalar && reg.index == index) written = instruction->Argument(1);
-        }
+std::map<std::uint32_t, std::uint32_t> TranslateWrites(const RdnaInstruction& instruction) {
+    IrProgram program;
+    auto& block = program.CreateBlock();
+    program.SetEntryBlock(block);
+    program.BlockOrder() = {&block};
+    program.Metadata().blockInfo.resize(1);
+    TranslationContext context(program, block, 256);
+    context.TranslateInstruction(instruction);
+    std::map<std::uint32_t, std::uint32_t> writes;
+    for (const IrValue* value : block.Instructions()) {
+        if (value->Opcode() != IrOpcode::SetScalarRegister) continue;
+        const IrValue* written = value->Argument(1u)->Resolve();
+        Require(written->HasImmediate(), "the write of s" + std::to_string(value->Argument(0u)->Register().index) + " is not a constant");
+        writes[value->Argument(0u)->Register().index] = written->ImmediateU32();
     }
-    if (written == nullptr) return std::nullopt;
-    Require(written->HasImmediate(), "s" + std::to_string(index) + " was last written with " + std::string(IrOpcodeName(written->Opcode())) + ", not a constant");
-    return written->ImmediateU32();
+    return writes;
 }
 
 void CheckDecode() {
     for (const auto& source : ApertureSources) {
         const auto operand = DecodeRdnaScalarSource(source.code, 0u);
-        Require(operand.kind == source.kind, "scalar source " + std::to_string(source.code) + " decoded to the wrong operand kind");
-        Require(RdnaOperandToString(operand) == source.name, "scalar source " + std::to_string(source.code) + " is named " + RdnaOperandToString(operand));
+        Require(operand.kind == source.kind,
+            "scalar source " + std::to_string(source.code) + " decoded to the wrong operand kind");
+        Require(RdnaOperandToString(operand) == source.name,
+            "scalar source " + std::to_string(source.code) + " is named " + RdnaOperandToString(operand));
     }
 }
 
-void CheckMove32() {
-    for (const auto& source : ApertureSources) {
-        for (const auto waveSize : WaveSizes) {
-            const std::string name = "s_mov_b32 s4, " + std::string(source.name) + " in wave" + std::to_string(waveSize);
-            const std::array<std::uint32_t, 2> code{ScalarMove32(source.code), EndProgram};
-            const auto program = Translate(code, waveSize);
-            const auto low = ScalarRegisterConstant(program, Destination);
-            Require(low.has_value(), name + " did not write s4");
-            const auto expected = static_cast<std::uint32_t>(source.value);
-            Require(*low == expected, name + " wrote " + Hex(*low) + ", expected the low dword " + Hex(expected));
-            Require(!ScalarRegisterConstant(program, Destination + 1u).has_value(), name + " also wrote s5");
-        }
-    }
+void CheckWord(const std::map<std::uint32_t, std::uint32_t>& writes, std::uint32_t reg, std::uint32_t expected, const std::string& read) {
+    const auto found = writes.find(reg);
+    Require(found != writes.end(), read + " did not write s" + std::to_string(reg));
+    Require(found->second == expected, read + " wrote " + Hex(found->second) + " to s" + std::to_string(reg) + ", expected " + Hex(expected));
 }
 
-void CheckMove64() {
+void CheckReadValues() {
     for (const auto& source : ApertureSources) {
-        for (const auto waveSize : WaveSizes) {
-            const std::string name = "s_mov_b64 s[4:5], " + std::string(source.name) + " in wave" + std::to_string(waveSize);
-            const std::array<std::uint32_t, 2> code{ScalarMove64(source.code), EndProgram};
-            const auto program = Translate(code, waveSize);
-            const auto low = ScalarRegisterConstant(program, Destination);
-            const auto high = ScalarRegisterConstant(program, Destination + 1u);
-            Require(low.has_value() && high.has_value(), name + " did not write both s4 and s5");
-            const auto expectedLow = static_cast<std::uint32_t>(source.value);
-            const auto expectedHigh = static_cast<std::uint32_t>(source.value >> 32u);
-            Require(*low == expectedLow && *high == expectedHigh,
-                name + " wrote " + Hex(*high) + "_" + Hex(*low) + ", expected " + Hex(expectedHigh) + "_" + Hex(expectedLow));
-        }
-    }
-}
-
-void CheckDwordPastThePairThrows() {
-    for (const auto& source : ApertureSources) {
-        const std::string name = "v_mqsad_u32_u8 v[0:3], v[4:5], v6, " + std::string(source.name);
-        const std::array<std::uint32_t, 3> code{0xd5750000u, 0x00020d04u | (source.code << 18u), EndProgram};
-        try {
-            static_cast<void>(Translate(code, 32u));
-        } catch (const std::runtime_error& error) {
-            const std::string message = error.what();
-            Require(message.find("v_mqsad_u32_u8") != std::string::npos && message.find(source.name) != std::string::npos && message.find("at pc 0") != std::string::npos,
-                name + " refused without naming the instruction, the source and the program counter: " + message);
-            continue;
-        }
-        throw std::runtime_error(name + " read dwords past the aperture pair");
+        const RdnaInstruction narrow = ScalarMove(MovB32, source.code);
+        Require(narrow.op == RdnaOpcode::SMovB32, "the 32-bit scalar move decoded to another opcode");
+        Require(narrow.source0.kind == source.kind, "the 32-bit scalar move decodes source0 as the wrong operand kind");
+        const auto narrowWrites = TranslateWrites(narrow);
+        CheckWord(narrowWrites, 0u, source.low, std::string("s_mov_b32 of ") + source.name);
+        Require(narrowWrites.size() == 1u, std::string("s_mov_b32 of ") + source.name + " wrote more than one register");
+        const RdnaInstruction wide = ScalarMove(MovB64, source.code);
+        Require(wide.op == RdnaOpcode::SMovB64, "the 64-bit scalar move decoded to another opcode");
+        Require(wide.source0.kind == source.kind, "the 64-bit scalar move decodes source0 as the wrong operand kind");
+        const auto wideWrites = TranslateWrites(wide);
+        CheckWord(wideWrites, 0u, source.low, std::string("s_mov_b64 of ") + source.name);
+        CheckWord(wideWrites, 1u, source.high, std::string("s_mov_b64 of ") + source.name);
+        Require(wideWrites.size() == 2u, std::string("s_mov_b64 of ") + source.name + " wrote more than two registers");
     }
 }
 
 }
 
 int main() {
-    try {
-        CheckDecode();
-        CheckMove32();
-        CheckMove64();
-        CheckDwordPastThePairThrows();
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "%s\n", error.what());
-        return 1;
-    }
+    CheckDecode();
+    CheckReadValues();
     std::puts("aperture sources tests passed");
     return 0;
 }

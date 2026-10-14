@@ -18,6 +18,7 @@
 #include <sys/select.h>
 #endif
 #endif
+#include "SceTypes.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
@@ -120,6 +121,8 @@ struct Socket {
     std::mutex modeMutex;
     bool nonblocking = false;
     GuestSockets::SocketOptionState options;
+    bool receiveShut = false;
+    bool sendShut = false;
     Socket(NativeSocket value, int family, int type) : value(value), family(family), type(type) {}
     ~Socket() {
         if (value == Invalid) return;
@@ -691,6 +694,41 @@ int UnnamedAddress(void* address, std::uint32_t* length) {
 }
 }
 
+int GuestSockets::Stat(int descriptor, FileStat* status) {
+    std::shared_ptr<Socket> socket;
+    {
+        std::lock_guard lock(socketsMutex);
+        const auto found = sockets.find(descriptor);
+        if (found == sockets.end()) return 9;
+        socket = found->second;
+    }
+    bool receiveShut = false;
+    bool sendShut = false;
+    {
+        std::lock_guard lock(socket->modeMutex);
+        receiveShut = socket->receiveShut;
+        sendShut = socket->sendShut;
+    }
+    std::int64_t available = 0;
+#ifdef _WIN32
+    unsigned long count = 0;
+    if (ioctlsocket(socket->value, FIONREAD, &count) == 0) available = static_cast<std::int64_t>(count);
+#else
+    int count = 0;
+    if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
+#endif
+    int sendBuffer = 0;
+    socklen_t length = sizeof(sendBuffer);
+    if (getsockopt(socket->value, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&sendBuffer), &length) != 0) sendBuffer = 0;
+    *status = FileStat{};
+    status->st_mode = 0140000;
+    if (!receiveShut || available > 0) status->st_mode |= 0444;
+    if (!sendShut) status->st_mode |= 0222;
+    status->st_size = available;
+    status->st_blksize = sendBuffer > 0 ? static_cast<std::uint32_t>(sendBuffer) : 0;
+    return 0;
+}
+
 bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* eof) {
     std::shared_ptr<Socket> socket;
     {
@@ -998,7 +1036,11 @@ int APS5_VABI shutdown_nid_postfix(int descriptor, int how) {
     const auto socket = Lookup(descriptor);
     if (!socket) return Fail(9);
     if (how < 0 || how > 2) return Fail(22);
-    return ::shutdown(socket->value, how) ? Fail(NativeError()) : 0;
+    if (::shutdown(socket->value, how)) return Fail(NativeError());
+    std::lock_guard lock(socket->modeMutex);
+    if (how != 1) socket->receiveShut = true;
+    if (how != 0) socket->sendShut = true;
+    return 0;
 }
 int APS5_VABI getsockname_nid_postfix(int descriptor, void* address, std::uint32_t* length) {
     const auto socket = Lookup(descriptor);

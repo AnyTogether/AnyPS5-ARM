@@ -465,6 +465,20 @@ int main() {
     Require(fchmodat_nid_postfix(base, longName.c_str(), 0600, 0) == -1 && Error() == 63);
 #endif
     Require(sceKernelClose(base) == 0);
+#ifndef _WIN32
+    if (created == 0) {
+        const auto throughLink = (root / "through-link.bin").string();
+        Require(link_nid_postfix(symbolic.c_str(), throughLink.c_str()) == 0);
+        Require(!std::filesystem::is_symlink(std::filesystem::symlink_status(throughLink)));
+        Require(std::filesystem::equivalent(throughLink, original) && std::filesystem::hard_link_count(original) == 2);
+        Require(std::filesystem::remove(throughLink) && std::filesystem::hard_link_count(original) == 1);
+        Require(link_nid_postfix((root / "dangling").string().c_str(), throughLink.c_str()) == -1 && Error() == 2);
+        const auto directoryLink = (root / "directory-link").string();
+        Require(symlink_nid_postfix(".", directoryLink.c_str()) == 0);
+        Require(link_nid_postfix(directoryLink.c_str(), throughLink.c_str()) == -1 && Error() == 1);
+        Require(!std::filesystem::exists(std::filesystem::symlink_status(throughLink)));
+    }
+#endif
     std::filesystem::remove_all(root);
     return 0;
 }

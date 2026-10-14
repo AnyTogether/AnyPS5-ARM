@@ -1192,6 +1192,14 @@ if(BUILD_TESTING)
     set_target_properties(guest_memory_module PROPERTIES PREFIX "" SUFFIX ".guest.prx")
     add_dependencies(guest_memory_tests guest_memory_module)
     target_compile_definitions(guest_memory_tests PRIVATE GUEST_MEMORY_MODULE="$<TARGET_FILE:guest_memory_module>")
+    if(WIN32)
+        add_library(guest_memory_elf0_module SHARED
+            ${LIBS_INCLUDE_DIR}/tests/GuestMemoryModule.cpp
+            ${LIBS_INCLUDE_DIR}/tests/GuestMemoryModule.S)
+        set_target_properties(guest_memory_elf0_module PROPERTIES PREFIX "" SUFFIX ".guest.prx")
+        add_dependencies(guest_memory_tests guest_memory_elf0_module)
+        target_compile_definitions(guest_memory_tests PRIVATE GUEST_MEMORY_ELF0_MODULE="$<TARGET_FILE:guest_memory_elf0_module>")
+    endif()
     add_test(NAME guest_memory COMMAND guest_memory_tests)
     if(WIN32)
         set_tests_properties(guest_memory PROPERTIES ENVIRONMENT_MODIFICATION

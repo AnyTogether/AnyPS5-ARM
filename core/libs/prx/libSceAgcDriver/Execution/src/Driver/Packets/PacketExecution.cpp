@@ -330,6 +330,10 @@ void Driver::execute(const Submission& submission) {
             const auto condition = Pm4::ReadCondition(packet);
             if (condition == 0) nextCursor = submission.conditionalEnds.at(cursor);
             if (traceGpu) std::fprintf(stderr, "[gpu] %.1f queue 0x%x COND_EXEC at DWORD %zu reads 0x%x at 0x%llx: %s %zu dwords\n", TraceMs(), submission.queue, cursor, condition, static_cast<unsigned long long>(packet[1] | (static_cast<std::uint64_t>(packet[2]) << 32u)), condition == 0 ? "skips" : "executes", submission.conditionalEnds.at(cursor) - cursor - count);
+        } else if (opcode == 0x91) {
+            landPendingWaits(submission.queue);
+            recordQueuedLabelsBeforeRead(submission.queue);
+            Pm4::Execute(packet, queue);
         } else if (sampleDump && !wroteOnGpu) {
             dumpSampleCounters(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u));
         } else if (opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {

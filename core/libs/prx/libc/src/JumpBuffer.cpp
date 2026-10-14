@@ -1,5 +1,5 @@
 #include "prx/libc/include/General.hpp"
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 
 // setjmp/longjmp must capture the guest's own frame, so they are written directly in assembly with
 // the guest (System V) calling convention. The saved state fits the guest's 96-byte jmp_buf:

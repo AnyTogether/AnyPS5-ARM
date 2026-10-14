@@ -3260,7 +3260,7 @@ bool ShaderResources::precollectImages() {
 }
 
 std::shared_ptr<Texture> ShaderResources::fastTexture(const ImageRecord& record) {
-    if (record.texture == nullptr || record.texture->RefreshedPerUse()) return nullptr;
+    if (record.texture == nullptr || record.texture->RefreshedPerUse() || record.texture->IsDepthCopy()) return nullptr;
     struct Outcome {
         bool profile;
         std::chrono::steady_clock::time_point start;

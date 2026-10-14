@@ -225,6 +225,8 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
     auto policy = std::dynamic_pointer_cast<ValidationPolicy>(validationPolicy);
 
     const std::vector<std::uint8_t>& raw = elfReader->GetRawBytes();
+    const std::optional<ByteCount> dynSymTabSize = hasTag(DT_OS_SYMTABSZ)
+        ? std::optional<ByteCount>(getTagValue(DT_OS_SYMTABSZ)) : std::nullopt;
 
     if (dynStrTabOffset > raw.size() || dynStrTabSize > raw.size() - dynStrTabOffset)
         throw RelinkerException("Dynamic string table is out of bounds", dynStrTabOffset);
@@ -266,10 +268,17 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
         return relaOff + off;
     };
 
-    auto isZeroSectionSymbol = [&](const std::uint32_t symIdx) {
-        const FileByteOffset symOff = dynSymTabOffset + static_cast<FileByteOffset>(symIdx) * symEntSize;
-        if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < symEntSize)
+    auto symbolEntryPos = [&](const std::uint32_t symIdx) -> FileByteOffset {
+        const ByteCount off = static_cast<ByteCount>(symIdx) * symEntSize;
+        const FileByteOffset symOff = dynSymTabOffset + off;
+        if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < symEntSize
+            || (dynSymTabSize && (off > *dynSymTabSize || symEntSize > *dynSymTabSize - off)))
             throw RelinkerException("Symbol table entry out of bounds", symOff);
+        return symOff;
+    };
+
+    auto isZeroSectionSymbol = [&](const std::uint32_t symIdx) {
+        const FileByteOffset symOff = symbolEntryPos(symIdx);
         std::uint64_t value = 0;
         std::memcpy(&value, raw.data() + symOff + 8, sizeof(value));
         return (raw[symOff + 4] & 0xf) == 3 && value == 0;
@@ -283,9 +292,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
                                            [](const ProgramHeader& ph) { return ph.Type == PT_TLS; });
 
     const auto definedTlsSymbolValue = [&](const std::uint32_t symIdx, const FileByteOffset pos) -> std::optional<std::uint64_t> {
-        const FileByteOffset symOff = dynSymTabOffset + static_cast<FileByteOffset>(symIdx) * symEntSize;
-        if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < symEntSize)
-            throw RelinkerException("Symbol table entry out of bounds", symOff);
+        const FileByteOffset symOff = symbolEntryPos(symIdx);
         std::uint16_t section = 0;
         std::memcpy(&section, raw.data() + symOff + 6, sizeof(section));
         if (section == SHN_UNDEF)
@@ -325,9 +332,7 @@ RelinkResult RelinkerPipeline::Relink(const std::vector<std::uint8_t>& sourceElf
             if (isTlsRelocation(relType) && (symIdx == 0 || definedTlsSymbol(symIdx, pos)))
                 continue;
 
-            const FileByteOffset symOff = dynSymTabOffset + static_cast<FileByteOffset>(symIdx) * symEntSize;
-            if (symOff < dynSymTabOffset || symOff > raw.size() || raw.size() - symOff < 5)
-                throw RelinkerException("Symbol table entry out of bounds", symOff);
+            const FileByteOffset symOff = symbolEntryPos(symIdx);
 
             std::uint32_t nameOff = 0;
             std::memcpy(&nameOff, raw.data() + symOff, 4);

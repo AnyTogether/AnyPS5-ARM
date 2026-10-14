@@ -19,6 +19,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
 #include "prx/libSceAgcDriver/Execution/include/BdaFeatures.hpp"
+#include "prx/libSceAgcDriver/Execution/include/DisplayFormat.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderMemory.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
@@ -4311,11 +4312,13 @@ void queuedWriteGroupTests() {
     };
     Require(Recorder::QueuedWriteGroups({}).empty(), "no queued writes made a group");
     const std::vector<Write> query{{0x100, 0x200, false}, {0x100, 0x1f8, true}, {0x108, 0x200, true}, {0x200, 0x300, false}, {0x200, 0x2f8, true}, {0x208, 0x300, true}};
-    Require(Recorder::QueuedWriteGroups(query) == Groups{6}, "a clear, a begin dump and an end dump per query slot are not one group");
+    Require(Recorder::QueuedWriteGroups(query) == Groups{3, 6}, "the clear of the next query slot did not wait for the dumps before it");
     const std::vector<Write> reused{{0x100, 0x1f8, true}, {0x100, 0x200, false}, {0x100, 0x1f8, true}};
     Require(Recorder::QueuedWriteGroups(reused) == Groups{1, 3}, "a store over a computed write of its group did not start a new group");
     const std::vector<Write> apart{{0x100, 0x1f8, true}, {0x1f8, 0x200, false}, {0x300, 0x310, false}};
-    Require(Recorder::QueuedWriteGroups(apart) == Groups{3}, "stores beside the computed writes left their group");
+    Require(Recorder::QueuedWriteGroups(apart) == Groups{1, 3}, "stores after the computed writes joined their group");
+    const std::vector<Write> label{{0x100, 0x1f8, true}, {0x108, 0x200, true}, {0x400, 0x408, false}};
+    Require(Recorder::QueuedWriteGroups(label) == Groups{2, 3}, "a label after the dumps landed before them");
     const std::vector<Write> stores{{0x100, 0x110, false}, {0x100, 0x110, false}};
     Require(Recorder::QueuedWriteGroups(stores) == Groups{2}, "stores alone were split into groups");
     std::uint64_t seed = 0x9e3779b97f4a7c15ull;
@@ -5585,6 +5588,127 @@ void firstLayerViewTests(const Device& device, Recorder& recorder) {
     expectRed(program.Red(flatTexture.View(), flatTexture.Layout(), 0.0f), 0x20 / 255.0f, "a 2D texture over the surface does not read its first layer");
 }
 
+void sliceDirtyTests(const Device& device, Recorder& recorder) {
+    const auto& base = device.GetContext();
+    constexpr std::uint32_t side = 128;
+    constexpr std::size_t sliceBytes = 65536;
+    constexpr std::size_t bytes = 4 * sliceBytes;
+    constexpr std::uint8_t untouched = 0x11;
+    for (const auto tileMode : {TextureTileMode::kLinear, TextureTileMode::kR64KBX}) {
+        const std::string what = tileMode == TextureTileMode::kLinear ? "a linear two-slice image" : "a tiled two-slice image";
+        void* block = AllocateWatched(bytes, 65536);
+        if (block == nullptr) {
+            std::cout << "no write watching: slice dirty marking not tested\n";
+            return;
+        }
+        auto* memory = static_cast<std::uint8_t*>(block);
+        std::memset(memory, untouched, bytes);
+        const auto address = reinterpret_cast<std::uint64_t>(block);
+        {
+            GuestAllocations::Mutation mutation;
+            mutation.Add(block, bytes, true, true, true);
+        }
+        struct Unregister {
+            const Context& context;
+            void* block;
+            std::uint64_t address;
+            std::size_t bytes;
+            ~Unregister() {
+                {
+                    GuestAllocations::Mutation mutation;
+                    mutation.Remove(block);
+                }
+                HostImportFor(context, address, bytes);
+                ReleaseWatched(block, bytes);
+            }
+        } unregister{base, block, address, bytes};
+        AgcDriver::GuestMemory::CollectWritesUncached(address, bytes);
+        TextureDetiler detiler(base);
+        auto context = base;
+        context.hostImportAlignment = 0;
+        context.detiler = &detiler;
+        GuestTextureResource resource{};
+        resource.baseAddress = address;
+        resource.width = side;
+        resource.height = side;
+        resource.depthOrLastArray = 1;
+        resource.mipCount = 1;
+        resource.tileMode = tileMode;
+        resource.dimension = TextureDimension::k2DArray;
+        resource.format = 56;
+        resource.dstSelX = 4;
+        resource.dstSelY = 5;
+        resource.dstSelZ = 6;
+        resource.dstSelW = 7;
+        const auto geometry = DescribeSurface(resource);
+        Require(geometry.imageLayers == 2 && geometry.layerBytes == sliceBytes && geometry.guestBytes == 2 * sliceBytes, what + " does not hold two 64 KiB slices");
+        const auto stored = [&](std::uint32_t slice, std::array<std::uint8_t, 4> color) {
+            std::vector<std::byte> read(sliceBytes);
+            AgcDriver::GuestMemory::Read(address + geometry.GuestLayerOffset(slice), read);
+            for (std::size_t at = 0; at < read.size(); ++at) {
+                if (std::to_integer<std::uint8_t>(read[at]) != color[at % 4]) return false;
+            }
+            return true;
+        };
+        {
+            auto image = StorageTexture::Create(context, detiler, resource, 0);
+            const auto commands = recorder.Commands();
+            recorder.Keep(image);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+            const VkClearColorValue red{{1.0f, 0.0f, 0.0f, 1.0f}};
+            const VkClearColorValue green{{0.0f, 1.0f, 0.0f, 1.0f}};
+            const VkImageSubresourceRange first{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            const VkImageSubresourceRange second{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, 1};
+            context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &red, 1, &first);
+            context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &green, 1, &second);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+            image->MarkSliceDirty(0);
+            for (std::uint32_t slice = 0; slice < 2; ++slice) {
+                const auto display = address + geometry.GuestLayerOffset(slice);
+                const auto found = StorageTexture::FindPendingSlice(display, sliceBytes);
+                Require(found == image, what + ": a display buffer that is slice " + std::to_string(slice) + " does not find the pending image");
+                Require(AgcDriver::ResidentPresentSlice(found->Descriptor().baseAddress, found->GuestBytes(), found->ImageLayers(), display, sliceBytes) == slice, what + ": a display buffer that is slice " + std::to_string(slice) + " is not presented from that layer");
+            }
+            Require(StorageTexture::FindPending(address + geometry.GuestLayerOffset(1), sliceBytes) == nullptr, what + ": the lookup by base address finds a display buffer in slice 1");
+            Require(StorageTexture::FindPendingSlice(address + 2 * sliceBytes, sliceBytes) == nullptr && StorageTexture::FindPendingSlice(address + geometry.GuestLayerOffset(1), sliceBytes + 1) == nullptr, what + ": a range past the image's last slice finds the pending image");
+            image->WriteBack();
+            recorder.Submit();
+            device.WaitQueue();
+            recorder.Sync();
+            Require(stored(0, {255, 0, 0, 255}), what + ": the slice a draw wrote was not stored");
+            Require(stored(1, {untouched, untouched, untouched, untouched}), what + ": a slice no draw wrote was stored over guest memory");
+            static_cast<void>(recorder.Commands());
+            recorder.Keep(image);
+            image->MarkSliceDirty(1);
+            image->WriteBack();
+            recorder.Submit();
+            device.WaitQueue();
+            recorder.Sync();
+            Require(stored(0, {255, 0, 0, 255}) && stored(1, {0, 255, 0, 255}), what + ": the second slice was not stored once a draw wrote it");
+            auto other = StorageTexture::Create(context, detiler, resource, 0);
+            static_cast<void>(recorder.Commands());
+            recorder.Keep(image);
+            recorder.Keep(other);
+            image->MarkSliceDirty(1);
+            other->MarkSliceDirty(1);
+            std::string ambiguous;
+            try {
+                static_cast<void>(StorageTexture::FindPendingSlice(address + geometry.GuestLayerOffset(1), sliceBytes));
+            } catch (const std::runtime_error& error) {
+                ambiguous = error.what();
+            }
+            Require(ambiguous.find("is a slice of the pending array images") != std::string::npos, what + ": a slice of two pending array images did not throw: " + ambiguous);
+            image->WriteBack();
+            other->WriteBack();
+            recorder.Submit();
+            device.WaitQueue();
+            recorder.Sync();
+        }
+        recorder.Sync();
+    }
+    std::cout << "slice dirty marking: ok\n";
+}
+
 void atomicViewTests(const Device& device, Recorder& recorder) {
     const auto& context = device.GetContext();
     TextureDetiler detiler(context);
@@ -6358,6 +6482,11 @@ void Run(Context context) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--queued-write-groups-only") {
+            queuedWriteGroupTests();
+            std::cout << "queued write group tests passed\n";
+            return 0;
+        }
         std::unique_ptr<Device> created;
         try {
             created = std::make_unique<Device>();
@@ -6450,6 +6579,14 @@ int main(int argc, char** argv) {
             hostImportUnmapTests(device, recorder);
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--slice-dirty-only") {
+            sliceDirtyTests(device, recorder);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--resident-present-only") {
+            RunResidentPresentTests(device.GetContext());
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--parked-import-unmap-only") {
             gpu.unlock();
             parkedImportUnmapTests(device);
@@ -6525,6 +6662,7 @@ int main(int argc, char** argv) {
         drawInputReuseTests(device, recorder);
         drawInputInPlaceTests(device, recorder);
         RunResidentPresentTests(device.GetContext());
+        sliceDirtyTests(device, recorder);
         storeRunTests(device, recorder);
         queuedWriteGroupTests();
         remappedImportTests(device);

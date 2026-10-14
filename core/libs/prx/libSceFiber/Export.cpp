@@ -2,7 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -510,7 +510,7 @@ int32_t APS5_VABI sceFiberGetInfo(FiberObject* object, FiberInfo* fiber_info) {
     if (fiber_info->size != sizeof(FiberInfo)) return SCE_FIBER_ERROR_INVALID;
     fiber_info->entry = reinterpret_cast<FiberEntry>(fiber->entry);
     fiber_info->arg_on_initialize = fiber->argOnInitialize;
-    fiber_info->addr_context = fiber->context;
+    fiber_info->addr_context = SizedWindow(fiber);
     fiber_info->size_context = fiber->contextSize;
     std::memcpy(fiber_info->name, fiber->name, sizeof(fiber_info->name));
     fiber_info->size_context_margin = static_cast<uint64_t>(-1);

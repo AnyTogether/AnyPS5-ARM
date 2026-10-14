@@ -56,7 +56,7 @@ IrU1 TranslationContext::readMask(const RdnaOperand& operand) {
         case RdnaOperandKind::SrcSharedBase:
         case RdnaOperandKind::SrcSharedLimit:
         case RdnaOperandKind::SrcPrivateBase:
-        case RdnaOperandKind::SrcPrivateLimit: return threadBit(apertureSourcePair(operand));
+        case RdnaOperandKind::SrcPrivateLimit: return threadBit(readU32Pair(operand));
         default: return IrU1(ir.INotEqual(readRawU32(operand).Value(), ir.Constant(0u)));
     }
 }

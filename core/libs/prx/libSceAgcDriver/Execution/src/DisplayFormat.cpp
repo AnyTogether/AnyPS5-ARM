@@ -51,4 +51,11 @@ ResidentPresent ResidentPresentPath(VkFormat storage, std::uint64_t pixelFormat,
     }
 }
 
+std::optional<std::uint32_t> ResidentPresentSlice(std::uint64_t imageAddress, std::uint64_t imageBytes, std::uint32_t slices, std::uint64_t displayAddress, std::uint64_t displayBytes) {
+    if (slices == 0 || displayBytes == 0 || imageBytes % slices != 0 || imageBytes / slices != displayBytes || displayAddress < imageAddress) return std::nullopt;
+    const auto offset = displayAddress - imageAddress;
+    if (offset % displayBytes != 0 || offset / displayBytes >= slices) return std::nullopt;
+    return static_cast<std::uint32_t>(offset / displayBytes);
+}
+
 }

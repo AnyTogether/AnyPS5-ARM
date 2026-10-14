@@ -474,6 +474,89 @@ void importAtMapOverBudgetTests(const Context& context) {
     for (auto* block : {kept, used, mapped}) ::operator delete(block, std::align_val_t{bytes});
 }
 
+void spaceReadAcrossImportsTests(const Context& context, const BdaTestAccess& access) {
+    constexpr std::size_t piece = 65536;
+    constexpr std::size_t window = 2 * piece;
+    void* block = ::operator new(3 * piece, std::align_val_t{window});
+    auto* guest = static_cast<std::uint8_t*>(block);
+    const auto first = reinterpret_cast<std::uintptr_t>(block);
+    const auto boundary = first + window;
+    std::memset(guest, 0x5a, window);
+    std::memset(guest + window, 0x6b, piece);
+    auto importing = context;
+    importing.hostImportAlignment = piece;
+    SetHostImportWindow(window);
+    const auto change = [&](std::uint8_t* range, bool add) {
+        auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+        if (add) GuestAllocations::GuestAllocationsAdd_nid_postfix(mutation, range, piece, true, false, true);
+        else GuestAllocations::GuestAllocationsRemove_nid_postfix(mutation, range);
+        GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    };
+    for (std::size_t index = 0; index < 3; ++index) change(guest + index * piece, true);
+    for (int build = 0; build < 2; ++build) {
+        const auto before = AddressSpaceCounters();
+        GuestBufferMemory leased(importing);
+        leased.AcquireRegistered();
+        leased.AddReadable(boundary - 256, 512);
+        leased.Upload(true);
+        std::uint32_t adjustment = 0;
+        const auto view = leased.Descriptor(boundary - 256, 512, adjustment);
+        Require(view.buffer != VK_NULL_HANDLE && view.range == 512 + adjustment, "a read-only V# across two imports has no descriptor");
+        const auto bytes = access.bytes(view.buffer);
+        Require(view.offset + adjustment + 512 <= bytes.size() && bytes[view.offset + adjustment] == std::byte{0x5a} && bytes[view.offset + adjustment + 256] == std::byte{0x6b}, "a read-only V# across two imports misses the bytes of either range");
+        const auto ranges = leased.AddressRanges();
+        Require(std::any_of(ranges.begin(), ranges.end(), [&](const auto& range) { return range.begin <= first && boundary <= range.end; }) && std::any_of(ranges.begin(), ranges.end(), [&](const auto& range) { return range.begin <= boundary && boundary + piece <= range.end; }), "an import is missing from the BDA table of a build with a read-only V# across it");
+        leased.WriteBack();
+        const auto after = AddressSpaceCounters();
+        if (after.enabled && build == 1) Require(after.hits == before.hits + 1 && after.dissolvedOverlap == before.dissolvedOverlap, "a read-only V# across two imports dissolved the cached address space");
+    }
+    for (std::size_t index = 0; index < 3; ++index) change(guest + index * piece, false);
+    SetHostImportWindow(0);
+    ::operator delete(block, std::align_val_t{window});
+}
+
+void spaceReadAcrossImportsWrittenTests(const Context& context) {
+    constexpr std::size_t piece = 65536;
+    constexpr std::size_t window = 2 * piece;
+    void* block = ::operator new(3 * piece, std::align_val_t{window});
+    auto* guest = static_cast<std::uint8_t*>(block);
+    const auto boundary = reinterpret_cast<std::uintptr_t>(block) + window;
+    std::memset(guest, 0x5a, window);
+    std::memset(guest + window, 0x6b, piece);
+    auto importing = context;
+    importing.hostImportAlignment = piece;
+    SetHostImportWindow(window);
+    const auto change = [&](std::uint8_t* range, bool add) {
+        auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+        if (add) GuestAllocations::GuestAllocationsAdd_nid_postfix(mutation, range, piece, true, false, true);
+        else GuestAllocations::GuestAllocationsRemove_nid_postfix(mutation, range);
+        GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    };
+    for (const bool writtenFirst : {false, true}) {
+        for (std::size_t index = 0; index < 3; ++index) change(guest + index * piece, true);
+        for (int build = 0; build < 2; ++build) {
+            const auto before = AddressSpaceCounters();
+            GuestBufferMemory leased(importing);
+            leased.AcquireRegistered();
+            if (writtenFirst) leased.AddWritable(boundary - 384, 256);
+            leased.AddReadable(boundary - 256, 512);
+            if (!writtenFirst) leased.AddWritable(boundary - 384, 256);
+            leased.Upload(true);
+            std::uint32_t readAdjustment = 0;
+            std::uint32_t writeAdjustment = 0;
+            const auto read = leased.Descriptor(boundary - 256, 512, readAdjustment);
+            const auto written = leased.Descriptor(boundary - 384, 256, writeAdjustment);
+            Require(read.buffer != VK_NULL_HANDLE && read.buffer == written.buffer && written.offset + writeAdjustment + 128 == read.offset + readAdjustment, "a written V# inside a read-only V# across two imports maps other bytes than it");
+            leased.WriteBack();
+            const auto after = AddressSpaceCounters();
+            if (after.enabled && build == 0) Require(after.dissolvedOverlap == before.dissolvedOverlap + 1, "a written V# inside a read-only V# across two imports kept the cached address space");
+        }
+        for (std::size_t index = 0; index < 3; ++index) change(guest + index * piece, false);
+    }
+    SetHostImportWindow(0);
+    ::operator delete(block, std::align_val_t{window});
+}
+
 ShaderRecompiler::DescriptorBinding binding(Role role, std::uint32_t slot) {
     return {ShaderRecompiler::DescriptorKind::StorageBuffer, role, 0, slot, 1, {}, false};
 }
@@ -1471,6 +1554,8 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     failedImportRemapTests(context, access);
     spaceImportRunTests(context);
     importWindowTests(context);
+    spaceReadAcrossImportsTests(context, access);
+    spaceReadAcrossImportsWrittenTests(context);
     importJoinTests(context);
     importWholeRangeOverWindowTests(context);
     importRefusedWholeRangeTests(context);

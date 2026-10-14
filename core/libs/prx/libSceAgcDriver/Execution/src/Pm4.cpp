@@ -198,7 +198,7 @@ std::string_view UnsupportedReason(std::uint32_t header) {
         case 0x11: case 0x12: case 0x13: case 0x15: case 0x16: case 0x20: case 0x22: case 0x26: case 0x27:
         case 0x2a: case 0x2d: case 0x2f: case 0x35: case 0x37: case 0x40: case 0x42: case 0x45: case 0x46: case 0x50:
         case 0x58: case 0x63: case 0x64: case 0x69: case 0x76: case 0x79: case 0x7a:
-        case 0x81: case 0x83: case 0x9f: case 0x28: return {};
+        case 0x81: case 0x83: case 0x91: case 0x9f: case 0x28: return {};
         case 0x24: case 0x25: case 0x2c: case 0x38:
             if (IndirectDrawsDisabled()) return "graphics draw, shader stages and guest render-target materialization are not implemented";
             return {};
@@ -301,6 +301,13 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
             require((packet[5] & ~0x20u) == 0, "unsupported indexed draw flags");
             break;
         case 0x2a: graphics(); size(2); require(packet[1] <= 3, "unsupported index-type modifiers"); break;
+        case 0x91:
+            graphics();
+            size(4);
+            require((packet[1] & 1u) == 0, "INDEX_ATTRIBUTES_INDIRECT indirect mode (addr_offset) is not implemented");
+            require((packet[1] & 0xeu) == 0, "INDEX_ATTRIBUTES_INDIRECT attribute base is not 16-byte aligned");
+            require((packet[3] >> 16u) == 0, "INDEX_ATTRIBUTES_INDIRECT reserved attribute index bits are set");
+            break;
         case 0x2d:
             graphics();
             size(3);
@@ -647,7 +654,7 @@ bool UsesGpuCacheBarrier(std::span<const std::uint32_t> packet) {
 
 bool AccessesMemory(std::uint32_t header) {
     switch ((header >> 8u) & 0xffu) {
-        case 0x22: case 0x27: case 0x3c: case 0x93: case 0x49: case 0x16: case 0x2d: case 0x35: case 0x24: case 0x25: case 0x2c: case 0x38: case 0x37: case 0x40: case 0x45: case 0x50: case 0x63: case 0x64: case 0x83: case 0x9f: return true;
+        case 0x22: case 0x27: case 0x3c: case 0x93: case 0x49: case 0x16: case 0x2d: case 0x35: case 0x24: case 0x25: case 0x2c: case 0x38: case 0x37: case 0x40: case 0x45: case 0x50: case 0x63: case 0x64: case 0x83: case 0x91: case 0x9f: return true;
         default: return false;
     }
 }
@@ -828,6 +835,40 @@ void ExecuteIndirectRegisters(std::span<const std::uint32_t> packet, std::span<c
     }
 }
 
+namespace {
+
+constexpr std::uint64_t IndexAttributesBytes = 16;
+
+struct IndexAttributes {
+    std::uint64_t address;
+    std::array<std::uint32_t, 4> words;
+};
+
+IndexAttributes readIndexAttributes(std::span<const std::uint32_t> packet) {
+    require(packet.size() == 4 && ((packet[0] >> 8u) & 0xffu) == 0x91, "expected INDEX_ATTRIBUTES_INDIRECT packet");
+    require((packet[1] & 0xfu) == 0, "INDEX_ATTRIBUTES_INDIRECT indirect mode or reserved base bits are not implemented");
+    const auto base = address(packet[1], packet[2]);
+    const auto offset = static_cast<std::uint64_t>(packet[3] & 0xffffu) * IndexAttributesBytes;
+    require(offset <= std::numeric_limits<std::uint64_t>::max() - base, "INDEX_ATTRIBUTES_INDIRECT record address overflow");
+    IndexAttributes attributes{base + offset, {}};
+    const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::IndirectArguments);
+    GuestMemory::Read(attributes.address, std::as_writable_bytes(std::span(attributes.words)), IndexAttributesBytes);
+    return attributes;
+}
+
+void executeIndexAttributes(const IndexAttributes& attributes, QueueState& queue) {
+    if (attributes.words[3] > 3) {
+        char what[160];
+        std::snprintf(what, sizeof(what), "INDEX_ATTRIBUTES_INDIRECT record at 0x%llx has index type 0x%x (index-type modifiers are not implemented)", static_cast<unsigned long long>(attributes.address), attributes.words[3]);
+        throw std::runtime_error(what);
+    }
+    queue.indexBase = address(attributes.words[0], attributes.words[1]);
+    queue.indexBufferSize = attributes.words[2];
+    queue.indexType = attributes.words[3];
+}
+
+}
+
 void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
     const auto opcode = (packet[0] >> 8u) & 0xffu;
     switch (opcode) {
@@ -874,6 +915,7 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
         case 0x3f: throw std::runtime_error(std::string(UnsupportedReason(packet[0])));
         case 0x26: queue.indexBase = address(packet[1], packet[2]); return;
         case 0x2a: queue.indexType = packet[1]; return;
+        case 0x91: executeIndexAttributes(readIndexAttributes(packet), queue); return;
         case 0x2f: queue.instanceCount = packet[1]; return;
         case 0x63: case 0x64: case 0x9f:
             ExecuteIndirectRegisters(packet, ReadIndirectRegisters(packet), queue);

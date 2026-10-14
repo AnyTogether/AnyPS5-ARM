@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -69,38 +70,168 @@ bool IsLaneId(const IrValue* value) {
     return value != nullptr && value->Resolve()->Opcode() == IrOpcode::LaneId;
 }
 
-IrValue* BallotSource(IrValue* raw, std::uint32_t word) {
-    IrValue* value = raw->Resolve();
-    if (value->Opcode() != IrOpcode::CompositeExtractU32x4 || !IsImmediate(value->Argument(1), word)) return nullptr;
-    IrValue* ballot = value->Argument(0)->Resolve();
-    return ballot->Opcode() == IrOpcode::Ballot ? ballot->Argument(0)->Resolve() : nullptr;
-}
-
 bool IsTrue(const IrValue* value) {
     return value != nullptr && value->HasImmediate() && value->Type() == IrType::Bool && value->ImmediateBool();
 }
 
-IrValue* HostLaneWord(IrValue* raw, std::uint32_t word) {
-    IrValue* value = raw->Resolve();
-    while (value->Opcode() == IrOpcode::BitwiseAnd32 && IsTrue(BallotSource(value->Argument(1), word))) value = value->Argument(0)->Resolve();
-    return value;
+using LaneWords = std::pair<IrValue*, IrValue*>;
+
+IrValue* BallotPredicate(IrValue* word, std::uint32_t half) {
+    IrValue* ballot = word->Argument(0)->Resolve();
+    return ballot->Opcode() == IrOpcode::Ballot && IsImmediate(word->Argument(1), half) ? ballot->Argument(0)->Resolve() : nullptr;
 }
 
-IrValue* SavedLaneBit(IrValue* value) {
-    if (value->Opcode() != IrOpcode::INotEqual32) return nullptr;
-    IrValue* masked = VariableOperand(value, 0u);
-    if (masked == nullptr || masked->Opcode() != IrOpcode::BitwiseAnd32) return nullptr;
-    IrValue* shifted = VariableOperand(masked, 1u);
-    if (shifted == nullptr || shifted->Opcode() != IrOpcode::ShiftRightLogical32) return nullptr;
-    IrValue* bit = shifted->Argument(1)->Resolve();
-    if (bit->Opcode() != IrOpcode::BitwiseAnd32 || !IsLaneId(VariableOperand(bit, 31u))) return nullptr;
-    IrValue* word = shifted->Argument(0)->Resolve();
-    if (word->Opcode() != IrOpcode::SelectU32) return BallotSource(HostLaneWord(word, 0u), 0u);
-    IrValue* low = word->Argument(0)->Resolve();
-    if (low->Opcode() != IrOpcode::ULessThan32 || !IsLaneId(low->Argument(0)) || !IsImmediate(low->Argument(1), 32u)) return nullptr;
-    IrValue* source = BallotSource(HostLaneWord(word->Argument(1), 0u), 0u);
-    return source != nullptr && BallotSource(HostLaneWord(word->Argument(2), 1u), 1u) == source ? source : nullptr;
+bool SamePredicate(const IrValue* lhs, const IrValue* rhs) {
+    if (lhs == nullptr || rhs == nullptr) return false;
+    if (lhs == rhs) return true;
+    return lhs->HasImmediate() && rhs->HasImmediate() && lhs->Type() == IrType::Bool && rhs->Type() == IrType::Bool && lhs->ImmediateBool() == rhs->ImmediateBool();
 }
+
+std::optional<LaneWords> LaneBitWords(IrValue* value, std::uint32_t waveSize) {
+    if (value->Opcode() != IrOpcode::INotEqual32) return std::nullopt;
+    IrValue* masked = VariableOperand(value, 0u);
+    if (masked == nullptr || masked->Opcode() != IrOpcode::BitwiseAnd32) return std::nullopt;
+    IrValue* shifted = VariableOperand(masked, 1u);
+    if (shifted == nullptr || shifted->Opcode() != IrOpcode::ShiftRightLogical32) return std::nullopt;
+    IrValue* bit = shifted->Argument(1)->Resolve();
+    if (bit->Opcode() != IrOpcode::BitwiseAnd32 || !IsLaneId(VariableOperand(bit, 31u))) return std::nullopt;
+    IrValue* word = shifted->Argument(0)->Resolve();
+    if (waveSize != 64u) return LaneWords{word, nullptr};
+    if (word->Opcode() != IrOpcode::SelectU32) return LaneWords{word, word};
+    IrValue* low = word->Argument(0)->Resolve();
+    if (low->Opcode() != IrOpcode::ULessThan32 || !IsLaneId(low->Argument(0)) || !IsImmediate(low->Argument(1), 32u)) return LaneWords{word, word};
+    return LaneWords{word->Argument(1)->Resolve(), word->Argument(2)->Resolve()};
+}
+
+class LaneBits {
+public:
+    explicit LaneBits(IrProgram& program) : program(program) {}
+
+    IrValue* Of(const LaneWords& words) {
+        std::vector<LaneWords> visited;
+        if (matches(words, visited)) return &build(words);
+        for (const auto& pair : visited) {
+            if (known.at(pair)) known.erase(pair);
+        }
+        return nullptr;
+    }
+
+private:
+    static LaneWords argument(const LaneWords& words, std::size_t index) {
+        return {words.first->Argument(index)->Resolve(), words.second == nullptr ? nullptr : words.second->Argument(index)->Resolve()};
+    }
+
+    bool matches(const LaneWords& words, std::vector<LaneWords>& visited) {
+        if (const auto found = known.find(words); found != known.end()) return found->second;
+        known.emplace(words, true);
+        visited.push_back(words);
+        const bool result = check(words, visited);
+        if (!result) known[words] = false;
+        return result;
+    }
+
+    bool check(const LaneWords& words, std::vector<LaneWords>& visited) {
+        const auto [low, high] = words;
+        if (low->HasImmediate()) {
+            if (low->Type() != IrType::U32 || (low->ImmediateU32() != 0u && low->ImmediateU32() != 0xffffffffu)) return false;
+            return high == nullptr || (high->HasImmediate() && high->Type() == IrType::U32 && high->ImmediateU32() == low->ImmediateU32());
+        }
+        if (high != nullptr && (high->HasImmediate() || high->Opcode() != low->Opcode())) return false;
+        switch (low->Opcode()) {
+        case IrOpcode::CompositeExtractU32x4: {
+            if (BallotPredicate(low, 0u) == nullptr) return false;
+            return high == nullptr || SamePredicate(BallotPredicate(low, 0u), BallotPredicate(high, 1u));
+        }
+        case IrOpcode::BitwiseAnd32:
+        case IrOpcode::BitwiseOr32:
+        case IrOpcode::BitwiseXor32:
+            return matches(argument(words, 0), visited) && matches(argument(words, 1), visited);
+        case IrOpcode::BitwiseNot32:
+            return matches(argument(words, 0), visited);
+        case IrOpcode::SelectU32:
+            if (high != nullptr && high->Argument(0)->Resolve() != low->Argument(0)->Resolve()) return false;
+            return matches(argument(words, 1), visited) && matches(argument(words, 2), visited);
+        case IrOpcode::Phi:
+            if (low->ArgumentCount() == 0 || low->ArgumentCount() != low->PhiBlockCount()) return false;
+            if (high != nullptr && (high->Parent() != low->Parent() || high->ArgumentCount() != low->ArgumentCount() || high->PhiBlockCount() != low->PhiBlockCount())) return false;
+            for (std::size_t index = 0; index < low->ArgumentCount(); ++index) {
+                if (high != nullptr && high->PhiBlock(index) != low->PhiBlock(index)) return false;
+                if (!matches(argument(words, index), visited)) return false;
+            }
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    IrValue& boolean(bool value) {
+        IrValue& result = program.CreateValue(IrOpcode::Void, IrType::Bool);
+        result.SetImmediateBool(value);
+        return result;
+    }
+
+    IrValue& emit(IrValue* position, IrOpcode opcode, std::initializer_list<IrValue*> arguments) {
+        IrValue& value = program.CreateValue(opcode, IrType::Bool);
+        for (IrValue* argument : arguments) value.AddArgument(argument);
+        position->Parent()->InsertInstructionBefore(position, &value);
+        return value;
+    }
+
+    IrValue& combine(IrValue* position, IrOpcode opcode, IrValue& lhs, IrValue& rhs) {
+        for (const auto& [fixed, other] : {std::pair{&lhs, &rhs}, std::pair{&rhs, &lhs}}) {
+            if (!fixed->HasImmediate()) continue;
+            if (opcode == IrOpcode::LogicalAnd) return fixed->ImmediateBool() ? *other : *fixed;
+            if (opcode == IrOpcode::LogicalOr) return fixed->ImmediateBool() ? *fixed : *other;
+            if (!fixed->ImmediateBool()) return *other;
+        }
+        return emit(position, opcode, {&lhs, &rhs});
+    }
+
+    IrValue& build(const LaneWords& words) {
+        IrValue* low = words.first;
+        if (low->HasImmediate()) return boolean(low->ImmediateU32() != 0u);
+        if (const auto found = built.find(words); found != built.end()) return *found->second;
+        IrValue* result = nullptr;
+        switch (low->Opcode()) {
+        case IrOpcode::CompositeExtractU32x4:
+            result = BallotPredicate(low, 0u);
+            break;
+        case IrOpcode::BitwiseAnd32:
+        case IrOpcode::BitwiseOr32:
+        case IrOpcode::BitwiseXor32: {
+            const auto opcode = low->Opcode() == IrOpcode::BitwiseAnd32 ? IrOpcode::LogicalAnd : low->Opcode() == IrOpcode::BitwiseOr32 ? IrOpcode::LogicalOr : IrOpcode::LogicalXor;
+            IrValue& lhs = build(argument(words, 0));
+            IrValue& rhs = build(argument(words, 1));
+            result = &combine(low, opcode, lhs, rhs);
+            break;
+        }
+        case IrOpcode::BitwiseNot32: {
+            IrValue& operand = build(argument(words, 0));
+            result = operand.HasImmediate() ? &boolean(!operand.ImmediateBool()) : &emit(low, IrOpcode::LogicalNot, {&operand});
+            break;
+        }
+        case IrOpcode::SelectU32: {
+            IrValue& chosen = build(argument(words, 1));
+            IrValue& other = build(argument(words, 2));
+            result = &emit(low, IrOpcode::SelectU1, {low->Argument(0)->Resolve(), &chosen, &other});
+            break;
+        }
+        default: {
+            IrValue& phi = program.CreateValue(IrOpcode::Phi, IrType::Bool);
+            low->Parent()->InsertInstructionBefore(low, &phi);
+            built.emplace(words, &phi);
+            for (std::size_t index = 0; index < low->ArgumentCount(); ++index) phi.AddPhiOperand(low->PhiBlock(index), &build(argument(words, index)));
+            return phi;
+        }
+        }
+        built.emplace(words, result);
+        return *result;
+    }
+
+    IrProgram& program;
+    std::map<LaneWords, bool> known;
+    std::map<LaneWords, IrValue*> built;
+};
 
 bool Implies(IrValue* rawPredicate, IrValue* rawCondition) {
     IrValue* predicate = rawPredicate->Resolve();
@@ -420,17 +551,14 @@ public:
         : program(program), tessellation(tessellation), stage(program.Resources().stage), evaluator(stage == IrShaderStage::TessellationControl ? tessellation.outputControlPoints : 0u, stage == IrShaderStage::Local ? LocalVertexIndexCount : static_cast<std::int64_t>(tessellation.patchesPerGroup)) {}
 
     void Run() {
-        for (IrBlock* block : program.BlockOrder()) {
-            for (IrValue* inst : block->Instructions()) {
-                if (IrValue* source = SavedLaneBit(inst)) inst->ReplaceAllUsesWith(source);
-            }
-        }
+        if (stage == IrShaderStage::TessellationControl) lowerOwnLaneBits();
         collect();
         derive();
         for (const auto& access : accesses) rewrite(access);
         if (stage == IrShaderStage::TessellationEvaluation) removePrimitiveExports();
         constexpr DeadCodeEliminator deadCodeEliminator;
         deadCodeEliminator.Eliminate(program);
+        if (stage == IrShaderStage::TessellationControl) removeUnobservedCycles();
         std::vector<IrValue*> relative;
         for (IrBlock* block : program.BlockOrder()) {
             for (IrValue* inst : block->Instructions()) {
@@ -453,6 +581,20 @@ public:
     }
 
 private:
+    void lowerOwnLaneBits() {
+        LaneBits laneBits(program);
+        for (IrBlock* block : program.BlockOrder()) {
+            for (IrValue* inst : block->Instructions()) {
+                const auto words = LaneBitWords(inst, program.WaveSize());
+                if (!words) continue;
+                if (IrValue* bit = laneBits.Of(*words)) inst->ReplaceUsesWith(bit, true);
+            }
+        }
+        ResolveControlFlowIdentities(program);
+        constexpr DeadCodeEliminator identities;
+        identities.RemoveIdentities(program);
+    }
+
     void collect() {
         const auto& memoryInfo = program.Resources().memoryInfo;
         for (IrBlock* block : program.BlockOrder()) {
@@ -618,6 +760,36 @@ private:
                 const auto address = evaluator.Evaluate(value, nullptr);
                 if (!address || address->relative != 0) Fail("the relative patch or vertex index is used outside a tessellation ring or LDS address", 0u);
             }
+        }
+    }
+
+    void removeUnobservedCycles() {
+        std::unordered_set<IrValue*> observed;
+        std::vector<IrValue*> pending;
+        for (IrBlock* block : program.BlockOrder()) {
+            for (IrValue* inst : block->Instructions()) {
+                if (inst->MayHaveSideEffects() && observed.insert(inst).second) pending.push_back(inst);
+            }
+        }
+        while (!pending.empty()) {
+            IrValue* value = pending.back();
+            pending.pop_back();
+            for (IrValue* argument : value->Arguments()) {
+                if (argument != nullptr && observed.insert(argument).second) pending.push_back(argument);
+            }
+        }
+        std::vector<IrValue*> unobserved;
+        for (IrBlock* block : program.BlockOrder()) {
+            for (IrValue* inst : block->Instructions()) {
+                if (!observed.contains(inst)) unobserved.push_back(inst);
+            }
+        }
+        for (IrValue* inst : unobserved) {
+            for (std::size_t index = 0; index < inst->ArgumentCount(); ++index) inst->ReplaceArgument(index, nullptr);
+        }
+        for (IrValue* inst : unobserved) {
+            inst->Parent()->RemoveInstruction(inst);
+            inst->Invalidate();
         }
     }
 
