@@ -189,6 +189,11 @@ int main(int argc, char** argv) {
     write(replacement, 0x48, &realign);
     write(replacement, 0x50, &posixAlign);
     if (argc > 1 && std::strcmp(argv[1], "lazy") == 0) {
+#ifdef __APPLE__
+        // The process parameters of a macOS image come from the relinker's __APS5DATA,__meta section,
+        // which this native test executable does not have.
+        return 77;
+#endif
         installProcessParameters();
         require(initializes == 0);
         require(_Znwm_nid_postfix(40) == storage.data() && lastSize == 40 && initializes == 1);
