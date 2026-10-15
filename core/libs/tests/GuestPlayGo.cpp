@@ -26,20 +26,6 @@ int APS5_VABI scePlayGoGetChunkId(int, std::uint16_t*, std::uint32_t, std::uint3
 
 static void Require(bool value) { if (!value) std::abort(); }
 
-template <typename Operation>
-static void RequireMissingChunkMetadata(Operation&& operation) {
-    bool threw = false;
-    try {
-        operation();
-    } catch (const std::runtime_error& error) {
-        const std::string_view message(error.what());
-        threw = message.find("playgo-chunk.dat") != std::string_view::npos &&
-            message.find("playgo-scenario.json") != std::string_view::npos &&
-            message.find("chunk ID") != std::string_view::npos;
-    }
-    Require(threw);
-}
-
 static int CheckPackageChunkTable(const char* root) {
     constexpr int badChunkId = static_cast<int>(0x80B2000C);
     std::filesystem::current_path(root);
@@ -109,9 +95,9 @@ static int CheckNoPlayGoFile(const char* root) {
     todo[1].locus = 1;
     Require(scePlayGoSetToDoList(handle, todo, 2) == badLocus);
     todo[1] = {1, 3, 0};
-    RequireMissingChunkMetadata([&] { scePlayGoSetToDoList(handle, todo, 2); });
+    Require(scePlayGoSetToDoList(handle, todo, 2) == 0);
     todo[1] = {0xFFFF, 3, 0};
-    RequireMissingChunkMetadata([&] { scePlayGoSetToDoList(handle, todo, 2); });
+    Require(scePlayGoSetToDoList(handle, todo, 2) == 0);
 
     std::uint32_t entries = 1;
     Require(scePlayGoGetToDoList(handle, todo, 2, &entries) == 0 && entries == 0);
@@ -121,7 +107,7 @@ static int CheckNoPlayGoFile(const char* root) {
     Require(scePlayGoGetLocus(handle, &chunk, 1, &locus) == 0 && locus == 3);
     const std::uint16_t undeclared[2] = {1, 10};
     std::int8_t loci[2] = {0, 0};
-    RequireMissingChunkMetadata([&] { scePlayGoGetLocus(handle, undeclared, 2, loci); });
+    Require(scePlayGoGetLocus(handle, undeclared, 2, loci) == 0 && loci[0] == 3 && loci[1] == 3);
     const std::uint16_t onlyDeclared[2] = {0, 0};
     Require(scePlayGoGetLocus(handle, onlyDeclared, 2, loci) == 0 && loci[0] == 3 && loci[1] == 3);
     std::uint32_t chunkCount = 0;

@@ -89,8 +89,10 @@ static const ChunkTable& Chunks() {
 static bool IsKnownChunk(uint16_t id) {
     const auto& chunks = Chunks();
     if (chunks.defined) return chunks.ids.contains(id);
-    if (chunks.scenario || id == 0) return true;
-    throw std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID " + std::to_string(id) + " cannot be checked");
+    // A dump without any playgo-* file in sce_sys is taken as fully installed, as with only
+    // playgo-scenario.json: Stray (PPSA02100) asks for chunk 1 at startup and ships neither file.
+    static_cast<void>(id);
+    return true;
 }
 
 static int ValidateChunks(const uint16_t* chunk_ids, uint32_t number_of_entries) {
