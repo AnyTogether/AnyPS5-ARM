@@ -18,7 +18,7 @@ Includes a [relinker](core/relinker) that converts executable to the target syst
 | ![Silksong](docs/games/img/silksong-enemy.jpg) | ![PvZ Replanted](docs/games/img/pvz-ingame.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
 | in game (first area), work in progress | opening screens at 60 fps, work in progress | 60 fps, playable | 60 fps, test title |
 
-**[Game status notebook →](docs/games/README.md)** ([Türkçe](docs/games/tr/README.md)) one page per game with screenshots, the steps behind it and technical details: DOOM (homebrew) plays too, and Stray plays its first chapter, at a very low frame rate for now.
+**[Game status notebook →](docs/games/README.md)** ([Türkçe](docs/games/tr/README.md)) one page per game with screenshots, the steps behind it and technical details: DOOM (homebrew) plays too, Stray plays its first chapter, at a very low frame rate for now, and Minecraft gets into a world.
 
 <sub>MacBook Pro M3 Pro, macOS 26.6.2. The Unity titles still need the manual module steps described on their pages; AnyPS5.app does not do them yet.</sub>
 

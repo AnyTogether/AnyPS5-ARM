@@ -36,6 +36,7 @@ The driver code runs translated by Rosetta, like the game. The libraries also bu
 | 🟢 | **Stray** (`PPSA02100`) | First chapter plays with correct graphics. Next: the chapters after it, and the frame rate (step 1). |
 | 🟢 | **Hollow Knight: Silksong**, **Plants vs. Zombies: Replanted** | Playable; the Unity module steps are still manual (step 4). |
 | 🟡 | **Quake II / Quake III** | Quake II in game; Quake III needs its data files. |
+| 🟡 | **Minecraft** (`PPSA17221`) | Menus at 60 FPS, reaches a world. Next: the open file limit that crashes it ~20 s in, then the frame rate in the world (~7-8). |
 | 🔴 | **GTA III – Definitive Edition** (`PPSA03527`) | Retry on current main. |
 | ⏭️ | **More titles** | Each new title gets a page in the [notebook](games/README.md). |
 

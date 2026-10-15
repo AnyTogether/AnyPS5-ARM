@@ -36,6 +36,7 @@ Sürücü kodu da oyun gibi Rosetta ile çevrilerek çalışıyor. Kütüphanele
 | 🟢 | **Stray** (`PPSA02100`) | İlk bölüm doğru grafiklerle oynanıyor. Sırada: sonraki bölümler ve FPS (1. adım). |
 | 🟢 | **Hollow Knight: Silksong**, **Plants vs. Zombies: Replanted** | Oynanabilir; Unity modül adımları hâlâ elle (4. adım). |
 | 🟡 | **Quake II / Quake III** | Quake II oyun içinde; Quake III veri dosyalarını istiyor. |
+| 🟡 | **Minecraft** (`PPSA17221`) | Menüler 60 FPS, dünyaya giriyor. Sırada: ~20 sn sonra çökerten açık dosya sınırı, sonra dünyadaki FPS (~7-8). |
 | 🔴 | **GTA III – Definitive Edition** (`PPSA03527`) | Güncel main ile yeniden denemek. |
 | ⏭️ | **Yeni oyunlar** | Her yeni oyun [defterde](../games/tr/README.md) kendi sayfasını alıyor. |
 
