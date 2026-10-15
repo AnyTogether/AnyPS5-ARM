@@ -52,6 +52,7 @@ struct PadOutputState {
 
 namespace Pad {
 void Initialize();
+bool IsInitialized();
 PadData ReadState();
 int Read(PadData* data, int num);
 void SetVibration(std::uint8_t large, std::uint8_t small);

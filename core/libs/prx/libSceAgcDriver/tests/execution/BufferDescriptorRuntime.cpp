@@ -125,6 +125,9 @@ void ScalarReads(AgcDriver::VulkanDevice& device) {
             static_cast<void>(ShaderRecompiler::Recompile(request));
         } catch (const std::runtime_error& error) {
             Require(std::string(error.what()).find("buffer descriptor uses an unsupported type") != std::string::npos, "vector buffer descriptor failed for another reason");
+            char words[64];
+            std::snprintf(words, sizeof(words), "(buffer 0 V# %08x %08x %08x %08x)", userData[0], userData[1], userData[2], userData[3]);
+            Require(std::string(error.what()).find(words) != std::string::npos, std::string("unsupported buffer descriptor error does not name ") + words + ": " + error.what());
             continue;
         }
         throw std::runtime_error("a vector or mixed buffer access accepted a non-buffer descriptor type");

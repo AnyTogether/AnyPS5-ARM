@@ -165,6 +165,39 @@ class TraceDigestTests(unittest.TestCase):
             trace_digest.main([str(self.trace), "--json"])
         self.assertEqual(json.loads(output.getvalue())["frames"], 3)
 
+    def test_fractional_adjacent_slices_remain_separate_in_command_output(self):
+        for first, second in (("Driver.Packet", "Driver.Completion"),
+                              ("Driver.WorkerWait", "Driver.CompletionWait")):
+            with self.subTest(first=first):
+                events = [EVENTS[1], EVENTS[-3],
+                          complete(1, first, 10000.1, 20000.2),
+                          complete(1, second, 30000.3, 20000.0)]
+                with gzip.open(self.trace, "wt", encoding="utf-8") as handle:
+                    json.dump({"traceEvents": events}, handle)
+                summary = dict(SUMMARY, window=dict(SUMMARY["window"], ms=50.0003))
+                self.trace.with_name("aps5-summary.jsonl").write_text(json.dumps(summary), encoding="utf-8")
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(trace_digest.main([str(self.trace), "--json"]), 0)
+                result = json.loads(output.getvalue())
+                thread = next(thread for thread in result["threads"] if thread["thread"] == "queue worker 0x0")
+                field = "wait" if trace_digest.is_wait(first) else "busy"
+                self.assertAlmostEqual(thread[field + "_ms_per_frame"], 40.0002)
+                self.assertAlmostEqual(thread[field + "_pct"], 100 * 40.0002 / 50.0003)
+                self.assertAlmostEqual(thread["untraced_ms_per_frame"], 10.0001)
+                if field == "busy":
+                    self.assertEqual({entry["name"] for entry in thread["top"]}, {first, second})
+                else:
+                    self.assertEqual({entry["name"] for entry in result["longest_waits"]}, {first, second})
+
+    def test_one_nanosecond_nested_wait_remains_nested(self):
+        trace = trace_digest.Trace({"traceEvents": [
+            complete(1, "Driver.WorkerWait", 10000.1, 20000.2),
+            complete(1, "Driver.InnerWait", 30000.299, 0.001),
+            complete(1, "Driver.Completion", 30000.3, 20000.0)]})
+        self.assertEqual([(entry[3], entry[4]) for entry in trace.slices[1]],
+                         [(0, False), (1, True), (0, False)])
+
 
 def interval_line(start, end, p99, gpu_ms, **changes):
     line = dict(SUMMARY, window={"spec": "summary_every 30", "first_present": 0, "ms": (end - start) * 1000.0}, interval_start_s=start, interval_end_s=end,

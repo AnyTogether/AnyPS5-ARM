@@ -38,6 +38,9 @@ def main():
                              "callSites": ["0x200"], "callSitesResolved": True, "weak": False}]
                 if entries != expected:
                     raise AssertionError((name, options, entries))
+                needed = json.loads(output.with_suffix(".needed.json").read_text(encoding="utf-8"))
+                if needed != ["lib.so"]:
+                    raise AssertionError((name, options, needed))
         strings = b"\0lib.so\0" + names[0].encode("utf-8") + b"\0"
         image = fixture(str_size=len(strings), table_bytes=strings)
         struct.pack_into("<H", image, 56, 6)

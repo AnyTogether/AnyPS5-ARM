@@ -114,6 +114,8 @@ for (const target of ["windows", "linux"]) {
 for (const [entries, error] of [
   [[["one", executable], ["two", executable]], /exactly one/u],
   [[["readme", new Uint8Array([1])]], /exactly one/u],
+  [[["eboot.bin", new Uint8Array([79, 21, 61, 29])]], /SELF container/u],
+  [[["eboot.bin", new Uint8Array([84, 20, 245, 238])]], /SELF container/u],
   [[["app", executable], ["..\/escape", resource]], /Unsafe ZIP/u],
   [[["app", executable], ["APP", resource]], /Duplicate ZIP/u],
   [[["app", executable], ["folder", resource], ["folder/file", resource]], /also used as a folder/u],
@@ -126,6 +128,11 @@ for (const [entries, error] of [
 const missing = new Archive(await zip([["any-name", executable]]));
 assert.equal((await missing.inspect(() => {})).warnings.length, 2);
 await missing.close();
+const selfModule = new Archive(await zip([["program.dat", executable],["sce_module/library.prx", new Uint8Array([84, 20, 245, 238])]]));
+const selfModuleSummary = await selfModule.inspect(() => {});
+assert.equal(selfModuleSummary.warnings.length, 2);
+assert.match(selfModuleSummary.warnings.join(" "), /SELF container/u);
+await selfModule.close();
 assert(memoryEstimate(200 * 1024 ** 3, 1024, 1024, 100) > MEMORY_LIMIT);
 const invalid = native.Convert({ target: "unsupported" }, () => {});
 assert.equal(invalid.ok, false);

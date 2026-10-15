@@ -133,6 +133,7 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         pixelStorage.psPosZ = pixel.posZ;
         pixelStorage.psPosW = pixel.posW;
         pixelStorage.psFrontFace = pixel.frontFace;
+        pixelStorage.psFrontFaceAllBits = pixel.frontFaceAllBits;
         pixelStorage.psAncillary = pixel.ancillary;
         pixelStorage.psNoPerspective = pixel.noPerspective;
         pixelStorage.psPixelKillEnable = pixel.pixelKillEnable;
@@ -147,6 +148,8 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         if (pixel.ditheredAlphaToCoverage && !pixel.alphaToCoverage) throw std::runtime_error("dithered alpha-to-coverage requires enabled coverage");
         pixelStorage.psAlphaToCoverage = pixel.alphaToCoverage;
         pixelStorage.psDitheredAlphaToCoverage = pixel.ditheredAlphaToCoverage;
+        pixelStorage.quadPixelMask = pixel.quadPixelMask;
+        pixelStorage.quadSampleMask = pixel.quadSampleMask;
         ShaderStageInputInfo result;
         result.pixel = &pixelStorage;
         return result;
@@ -184,7 +187,7 @@ ShaderStageInputInfo BuildShaderStageInputInfo(ShaderStageKind stage, const Gues
         if (stage == ShaderStageKind::Local || stage == ShaderStageKind::TessellationControl || stage == ShaderStageKind::TessellationEvaluation) {
             if (tessellation == nullptr) throw std::runtime_error("ShaderInputInfoBuilder: tessellation configuration is missing");
             if (tessellation->inputControlPoints == 0u || tessellation->inputControlPoints > 32u || tessellation->outputControlPoints == 0u || tessellation->outputControlPoints > 32u) throw std::runtime_error("ShaderInputInfoBuilder: invalid tessellation control-point counts");
-            if ((tessellation->domain != 1u && tessellation->domain != 2u) || (tessellation->partitioning != 0u && tessellation->partitioning != 2u) || (tessellation->outputTopology != 2u && tessellation->outputTopology != 3u)) throw std::runtime_error("ShaderInputInfoBuilder: unsupported tessellation configuration");
+            if ((tessellation->domain != 1u && tessellation->domain != 2u) || (tessellation->partitioning != 0u && tessellation->partitioning != 2u && tessellation->partitioning != 3u) || (tessellation->outputTopology != 2u && tessellation->outputTopology != 3u)) throw std::runtime_error("ShaderInputInfoBuilder: unsupported tessellation configuration");
             if (tessellation->patchesPerGroup == 0u || tessellation->patchesPerGroup > 256u) throw std::runtime_error("ShaderInputInfoBuilder: invalid tessellation patches per group");
             auto& target = vertexStorage.tess;
             target.inputControlPoints = tessellation->inputControlPoints;

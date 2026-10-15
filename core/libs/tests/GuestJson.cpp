@@ -61,6 +61,14 @@ Pair* APS5_VABI _ZNK3sce4Json6Object8iteratordeEv(const Iterator*);
 Pair* APS5_VABI _ZNK3sce4Json6Object8iteratorptEv(const Iterator*);
 Iterator* APS5_VABI _ZNK3sce4Json6Object4findERKNS0_6StringE(Iterator*, const Object*, const String*);
 int APS5_VABI _ZNK3sce4Json6String7compareEPKc(const String*, const char*);
+extern std::size_t _ZN3sce4Json6String4nposE;
+void APS5_VABI _ZN3sce4Json6String5clearEv(String*);
+void APS5_VABI _ZN3sce4Json6String7reserveEm(String*, std::size_t);
+String* APS5_VABI _ZN3sce4Json6String6appendERKS1_(String*, const String*);
+String* APS5_VABI _ZN3sce4Json6String6appendEPKc(String*, const char*);
+String* APS5_VABI _ZNK3sce4Json6String6substrEmm(String*, const String*, std::size_t, std::size_t);
+std::size_t APS5_VABI _ZNK3sce4Json6String4findEcm(const String*, char, std::size_t);
+std::size_t APS5_VABI _ZNK3sce4Json6String5rfindEcm(const String*, char, std::size_t);
 bool APS5_VABI _ZNK3sce4Json6Object8iteratorneERKS2_(const Iterator*, const Iterator*);
 void APS5_VABI _ZN3sce4Json5ValueC1Ev(Value*);
 void APS5_VABI _ZN3sce4Json5ValueC1Eb(Value*, bool);
@@ -432,6 +440,44 @@ static void ObjectFind() {
     _ZN3sce4Json6ObjectD1Ev(&object);
 }
 
+static void StringMethods() {
+    Require(_ZN3sce4Json6String4nposE == static_cast<std::size_t>(-1));
+    const auto text = [](const String& string) { return std::string(_ZNK3sce4Json6String5c_strEv(&string), _ZNK3sce4Json6String6lengthEv(&string)); };
+    String base{};
+    String suffix{};
+    _ZN3sce4Json6StringC1EPKc(&base, "a/b/c");
+    _ZN3sce4Json6StringC1EPKc(&suffix, "-tail");
+    Require(_ZNK3sce4Json6String4findEcm(&base, '/', 0) == 1);
+    Require(_ZNK3sce4Json6String4findEcm(&base, '/', 2) == 3);
+    Require(_ZNK3sce4Json6String4findEcm(&base, 'z', 0) == _ZN3sce4Json6String4nposE);
+    Require(_ZNK3sce4Json6String5rfindEcm(&base, '/', _ZN3sce4Json6String4nposE) == 3);
+    Require(_ZNK3sce4Json6String5rfindEcm(&base, '/', 2) == 1);
+    String part{};
+    Require(_ZNK3sce4Json6String6substrEmm(&part, &base, 2, 3) == &part);
+    Require(text(part) == "b/c");
+    _ZN3sce4Json6StringD1Ev(&part);
+    Require(_ZNK3sce4Json6String6substrEmm(&part, &base, 5, _ZN3sce4Json6String4nposE) == &part);
+    Require(text(part).empty());
+    _ZN3sce4Json6StringD1Ev(&part);
+    bool refused = false;
+    try {
+        _ZNK3sce4Json6String6substrEmm(&part, &base, 6, 1);
+    } catch (const std::out_of_range&) {
+        refused = true;
+    }
+    Require(refused);
+    _ZN3sce4Json6String7reserveEm(&base, 64);
+    Require(_ZN3sce4Json6String6appendERKS1_(&base, &suffix) == &base);
+    Require(_ZN3sce4Json6String6appendEPKc(&base, "!") == &base);
+    Require(text(base) == "a/b/c-tail!");
+    _ZN3sce4Json6String6appendERKS1_(&base, &base);
+    Require(text(base) == "a/b/c-tail!a/b/c-tail!");
+    _ZN3sce4Json6String5clearEv(&base);
+    Require(text(base).empty());
+    _ZN3sce4Json6StringD1Ev(&suffix);
+    _ZN3sce4Json6StringD1Ev(&base);
+}
+
 static void NullAccess(SetNullAccessCallback setCallback) {
     callbackCalls = 0;
     lastRequested = -1;
@@ -741,6 +787,7 @@ int main() {
     ObjectPair();
     ArrayIteratorCopies();
     AllocatorNotifyError();
+    StringMethods();
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     NullAccess(_ZN3sce4Json11Initializer27setGlobalNullAccessCallbackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_);
     StaticNullAccess();

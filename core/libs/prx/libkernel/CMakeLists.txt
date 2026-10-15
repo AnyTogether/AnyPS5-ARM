@@ -1186,6 +1186,7 @@ if(BUILD_TESTING)
     add_test(NAME guest_kqueue COMMAND guest_kqueue_tests)
     set_tests_properties(guest_kqueue PROPERTIES TIMEOUT 20)
     if(WIN32)
+        target_link_libraries(guest_kqueue_tests PRIVATE advapi32)
         set_tests_properties(guest_kqueue PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()

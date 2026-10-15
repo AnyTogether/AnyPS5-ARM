@@ -498,6 +498,80 @@ class RepositoryChecksTests(unittest.TestCase):
         check.code()
         self.assertIn(("comment", "core/example.cpp", 3, ""), check.findings)
 
+    def test_unchanged_move_preserves_existing_comments_and_extensions(self):
+        source = self.root / "core/tests/Existing.cpp"
+        source.parent.mkdir(parents=True)
+        source.write_text("// existing explanation\n__attribute__((noinline)) int Existing() { return 1; }\n", encoding="utf-8")
+        self.commit()
+        destination = self.root / "core/tests/group/Café example.cpp"
+        destination.parent.mkdir()
+        source.rename(destination)
+        (self.root / "a.bin").write_bytes(b"binary\x00data")
+        (self.root / "README.md").unlink()
+        self.commit()
+        check = Check("HEAD~1", "HEAD")
+        check.code()
+        check.repository()
+        name = destination.relative_to(self.root).as_posix()
+        self.assertEqual(check.status[name], "R")
+        self.assertEqual(check.numstat[name], ("0", "0"))
+        self.assertNotIn(name, check.added)
+        self.assertEqual(check.findings, [("binary", "a.bin", 0, "")])
+
+    def test_edited_move_checks_new_lines_at_the_destination(self):
+        source = self.root / "core/tests/Existing.cpp"
+        source.parent.mkdir(parents=True)
+        original = "// existing explanation\n__attribute__((noinline)) int Existing() { return 1; }\n"
+        original += "".join(f"int Existing{index}() {{ return {index}; }}\n" for index in range(12))
+        source.write_text(original, encoding="utf-8")
+        self.commit()
+        destination = self.root / "core/tests/group/Edited.cpp"
+        destination.parent.mkdir()
+        source.rename(destination)
+        destination.write_text(original + "// new explanation\n__declspec(noinline) int Added() { return 2; }\n", encoding="utf-8")
+        self.commit()
+        check = Check("HEAD~1", "HEAD")
+        check.code()
+        name = destination.relative_to(self.root).as_posix()
+        self.assertEqual(check.status[name], "R")
+        self.assertEqual(check.numstat[name], ("2", "0"))
+        self.assertEqual(check.findings, [("comment", name, 15, ""), ("extension", name, 16, "__declspec")])
+
+    def test_copied_code_is_still_checked_as_an_addition(self):
+        source = self.root / "core/tests/Existing.cpp"
+        source.parent.mkdir(parents=True)
+        source.write_text("// existing explanation\n__attribute__((noinline)) int Existing() { return 1; }\n", encoding="utf-8")
+        self.commit()
+        destination = self.root / "core/tests/Copy.cpp"
+        destination.write_bytes(source.read_bytes())
+        self.commit()
+        check = Check("HEAD~1", "HEAD")
+        check.code()
+        name = destination.relative_to(self.root).as_posix()
+        self.assertEqual(check.status[name], "A")
+        self.assertEqual(check.findings, [("comment", name, 1, ""), ("extension", name, 2, "__attribute__")])
+
+    def test_moving_a_document_to_a_forbidden_path_is_rejected(self):
+        (self.root / "README.md").rename(self.root / "investigation.md")
+        self.commit()
+        check = Check("HEAD~1", "HEAD")
+        check.repository()
+        self.assertEqual(check.findings, [("notes-file", "investigation.md", 0, "")])
+
+    def test_moving_a_document_rechecks_relative_links(self):
+        source = self.root / "docs/dev/guide.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("[reference](reference.md)\n", encoding="utf-8")
+        (source.parent / "reference.md").write_text("Reference\n", encoding="utf-8")
+        self.commit()
+        destination = self.root / "docs/dev/group/guide.md"
+        destination.parent.mkdir()
+        source.rename(destination)
+        self.commit()
+        check = Check("HEAD~1", "HEAD")
+        check.docs()
+        self.assertEqual(check.findings, [("doc-link", "docs/dev/group/guide.md", 1, "reference.md")])
+
     def test_unicode_raw_literals_keep_git_patch_and_grep_records_intact(self):
         literals = 'R"text(foo\u2028+tail\u2029+tail)text"'
         fixtures = (

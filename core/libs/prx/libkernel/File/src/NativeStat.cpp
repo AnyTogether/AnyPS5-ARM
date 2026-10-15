@@ -148,12 +148,6 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
 
 namespace File {
 
-std::filesystem::path PathOrRelinkedModule(const std::filesystem::path& nativePath) {
-    std::error_code error;
-    if (std::filesystem::exists(std::filesystem::symlink_status(nativePath, error))) return nativePath;
-    return RelinkedModulePath_nid_no_patch(nativePath);
-}
-
 void FillFileStat(const std::filesystem::path& nativePath, FileStat* sb) {
     NativeStat st{};
     if (DoStat(nativePath, &st) != 0) {

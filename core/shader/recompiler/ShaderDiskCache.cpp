@@ -84,14 +84,14 @@ std::filesystem::path ShaderCacheDirectory() {
 namespace ShaderRecompiler::ShaderDiskCache {
 
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__)
-static_assert(sizeof(CompiledShaderArtifact) == 232, "CompiledShaderArtifact changed: update the artifact encoder");
+static_assert(sizeof(CompiledShaderArtifact) == 264, "CompiledShaderArtifact changed: update the artifact encoder");
 static_assert(sizeof(ShaderInvocation) == 200, "ShaderInvocation changed: update the invocation encoder");
-static_assert(sizeof(RecompileResult) == 440, "RecompileResult changed: update EncodeResult and DecodeResult");
+static_assert(sizeof(RecompileResult) == 472, "RecompileResult changed: update EncodeResult and DecodeResult");
 static_assert(sizeof(DescriptorBinding) == 592, "DescriptorBinding changed: update the binding encoder");
 static_assert(sizeof(VertexAttribute) == 32, "VertexAttribute changed: update the attribute encoder");
 static_assert(sizeof(VertexInput) == 16, "VertexInput changed: update the vertex input encoder");
 static_assert(sizeof(FragmentParameter) == 12, "FragmentParameter changed: update the parameter encoder");
-static_assert(sizeof(CompiledShaderInfo) == 344, "CompiledShaderInfo changed: update the info encoder");
+static_assert(sizeof(CompiledShaderInfo) == 352, "CompiledShaderInfo changed: update the info encoder");
 static_assert(sizeof(ShaderInfo) == 232, "ShaderInfo changed: update the info encoder");
 static_assert(sizeof(BufferResource) == 32, "BufferResource changed: update the info encoder");
 static_assert(sizeof(ImageResource) == 88, "ImageResource changed: update the info encoder");
@@ -99,12 +99,12 @@ static_assert(sizeof(SamplerResource) == 24, "SamplerResource changed: update th
 static_assert(sizeof(SampledResourcePair) == 12, "SampledResourcePair changed: update the info encoder");
 static_assert(sizeof(StageInput) == 56, "StageInput changed: update the info encoder");
 static_assert(sizeof(StageOutput) == 48, "StageOutput changed: update the info encoder");
-static_assert(sizeof(IrBindingLayout) == 72, "IrBindingLayout changed: update the layout encoder");
+static_assert(sizeof(IrBindingLayout) == 80, "IrBindingLayout changed: update the layout encoder");
 static_assert(sizeof(IrDescriptorBinding) == 32, "IrDescriptorBinding changed: update the layout encoder");
-static_assert(sizeof(BindingAllocationResult) == 152, "BindingAllocationResult changed: update the allocation encoder");
-static_assert(sizeof(CompiledBindingLayout) == 80, "CompiledBindingLayout changed: update the allocation encoder");
+static_assert(sizeof(BindingAllocationResult) == 160, "BindingAllocationResult changed: update the allocation encoder");
+static_assert(sizeof(CompiledBindingLayout) == 88, "CompiledBindingLayout changed: update the allocation encoder");
 static_assert(sizeof(BindingLayout) == 16, "BindingLayout changed: update BuildKey");
-static_assert(sizeof(IrResourcePlan) == 584, "IrResourcePlan changed: update EncodePlan and DecodePlan");
+static_assert(sizeof(IrResourcePlan) == 712, "IrResourcePlan changed: update EncodePlan and DecodePlan");
 static_assert(sizeof(IrValue) == 152, "IrValue changed: update the plan value encoder");
 static_assert(sizeof(GuestRegister) == 8, "GuestRegister changed: update the plan value encoder");
 static_assert(sizeof(MemoryInfo) == 80, "MemoryInfo changed: update the plan encoder");
@@ -140,14 +140,14 @@ constexpr std::size_t fieldCount() {
 
 static_assert(fieldCount<ShaderInfo>() == 23, "ShaderInfo changed: update the info encoder");
 static_assert(fieldCount<BufferResource>() == 12, "BufferResource changed: update the info encoder");
-static_assert(fieldCount<ImageResource>() == 36, "ImageResource changed: update the info encoder");
+static_assert(fieldCount<ImageResource>() == 37, "ImageResource changed: update the info encoder");
 static_assert(fieldCount<SamplerResource>() == 8, "SamplerResource changed: update the info encoder");
 static_assert(fieldCount<SampledResourcePair>() == 3, "SampledResourcePair changed: update the info encoder");
 static_assert(fieldCount<StageInput>() == 5, "StageInput changed: update the info encoder");
 static_assert(fieldCount<StageOutput>() == 4, "StageOutput changed: update the info encoder");
-static_assert(fieldCount<IrResourcePlan>() == 21, "IrResourcePlan changed: update EncodePlan and DecodePlan");
+static_assert(fieldCount<IrResourcePlan>() == 23, "IrResourcePlan changed: update EncodePlan and DecodePlan");
 static_assert(fieldCount<GuestRegister>() == 2, "GuestRegister changed: update the plan value encoder");
-static_assert(fieldCount<MemoryInfo>() == 30, "MemoryInfo changed: update the plan encoder");
+static_assert(fieldCount<MemoryInfo>() == 31, "MemoryInfo changed: update the plan encoder");
 static_assert(fieldCount<DescriptorSource>() == 3, "DescriptorSource changed: update the plan encoder");
 static_assert(fieldCount<TableColumn>() == 15, "TableColumn changed: update the plan encoder");
 static_assert(fieldCount<KeyDomain>() == 4, "KeyDomain changed: update the plan encoder");
@@ -499,6 +499,9 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Value(result.barycentricEmulation.smooth);
     writer.Value(result.barycentricEmulation.linear);
     writer.Value(static_cast<std::uint32_t>(result.meshEmulation));
+    writer.Values(std::span<const std::uint32_t>(result.stencilReferences));
+    writer.Value(result.stencilReplaySafe);
+    writer.Value(result.stencilReferenceDword);
 }
 
 void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
@@ -545,6 +548,9 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Value(meshEmulation);
     if (meshEmulation > static_cast<std::uint32_t>(MeshEmulationRole::Passthrough)) throw std::runtime_error("invalid mesh emulation role in the shader cache");
     result.meshEmulation = static_cast<MeshEmulationRole>(meshEmulation);
+    reader.Values(result.stencilReferences);
+    reader.Value(result.stencilReplaySafe);
+    reader.Value(result.stencilReferenceDword);
     result.variantId = 0;
 }
 
@@ -625,6 +631,7 @@ void decodeInvocation(Reader& reader, ShaderInvocation& invocation) {
 
 void encodeLayout(Writer& writer, const IrBindingLayout& layout) {
     writer.Value(layout.pushDataStartDword);
+    writer.Value(layout.stencilReferenceDword);
     writer.Value(layout.memoryOffsetDword);
     writer.Value(layout.memoryOffsetCount);
     writer.Value(layout.dispatchThreadLimit);
@@ -639,6 +646,7 @@ void encodeLayout(Writer& writer, const IrBindingLayout& layout) {
 
 void decodeLayout(Reader& reader, IrBindingLayout& layout) {
     reader.Value(layout.pushDataStartDword);
+    reader.Value(layout.stencilReferenceDword);
     reader.Value(layout.memoryOffsetDword);
     reader.Value(layout.memoryOffsetCount);
     reader.Value(layout.dispatchThreadLimit);
@@ -696,6 +704,7 @@ void encodeShaderInfo(Writer& writer, const ShaderInfo& info) {
         out.Value(image.constantSwizzle);
         out.Value(image.constantSwizzleCompatible);
         out.Value(image.flatVolumeCompatible);
+        out.Value(image.singleMipPlaneBiasCompatible);
         out.Value(image.flatLineCompatible);
         out.Value(image.flatVolumeLineCompatible);
         out.Value(image.foldTexelOffsetsOnly);
@@ -796,6 +805,7 @@ void decodeShaderInfo(Reader& reader, ShaderInfo& info) {
         in.Value(image.constantSwizzle);
         in.Value(image.constantSwizzleCompatible);
         in.Value(image.flatVolumeCompatible);
+        in.Value(image.singleMipPlaneBiasCompatible);
         in.Value(image.flatLineCompatible);
         in.Value(image.flatVolumeLineCompatible);
         in.Value(image.foldTexelOffsetsOnly);
@@ -923,6 +933,7 @@ void encodeMemoryInfo(Writer& out, const MemoryInfo& memory) {
     out.Value(memory.coherent);
     out.Value(memory.gpuDescriptor);
     out.Value(memory.flushDenormals);
+    out.Value(memory.flushDenormalResults);
 }
 
 void decodeMemoryInfo(Reader& in, MemoryInfo& memory) {
@@ -956,17 +967,18 @@ void decodeMemoryInfo(Reader& in, MemoryInfo& memory) {
     in.Value(memory.coherent);
     in.Value(memory.gpuDescriptor);
     in.Value(memory.flushDenormals);
+    in.Value(memory.flushDenormalResults);
 }
 
 bool encodePlan(Writer& writer, const IrResourcePlan& plan) {
-    if (std::ranges::any_of(plan.valueStorage, [](const auto& value) { return value == nullptr; }) || std::ranges::any_of(plan.blockStorage, [](const auto& block) { return block == nullptr; })) return false;
+    if (std::ranges::any_of(plan.blockStorage, [](const auto& block) { return block == nullptr; })) return false;
     std::unordered_map<const IrValue*, std::uint32_t> values;
     std::unordered_map<const IrBlock*, std::uint32_t> blocks;
-    values.reserve(plan.valueStorage.size());
+    values.reserve(plan.valueStorage.Size());
     blocks.reserve(plan.blockStorage.size());
-    for (std::size_t index = 0; index < plan.valueStorage.size(); ++index) values.emplace(plan.valueStorage[index].get(), static_cast<std::uint32_t>(index));
+    for (std::size_t index = 0; index < plan.valueStorage.Size(); ++index) values.emplace(&plan.valueStorage[index], static_cast<std::uint32_t>(index));
     for (std::size_t index = 0; index < plan.blockStorage.size(); ++index) blocks.emplace(plan.blockStorage[index].get(), static_cast<std::uint32_t>(index));
-    bool owned = values.size() == plan.valueStorage.size() && blocks.size() == plan.blockStorage.size();
+    bool owned = values.size() == plan.valueStorage.Size() && blocks.size() == plan.blockStorage.size();
     std::uint32_t current = 0;
     const auto valueIndex = [&](const IrValue* value) {
         if (value == nullptr) return NoPlanIndex;
@@ -983,29 +995,31 @@ bool encodePlan(Writer& writer, const IrResourcePlan& plan) {
     writer.Value(plan.userDataCount);
     writer.Value(plan.srgbDecodeFormats);
     writer.List(plan.blockStorage, [](Writer& out, const std::unique_ptr<IrBlock>& block) { out.Value(block->Id()); });
-    writer.List(plan.valueStorage, [&](Writer& out, const std::unique_ptr<IrValue>& value) {
+    writer.Value<std::uint64_t>(plan.valueStorage.Size());
+    for (const auto& stored : plan.valueStorage) {
+        const auto* value = &stored;
         const auto bank = static_cast<std::uint32_t>(value->Register().bank);
         if (bank > 0xfu) owned = false;
-        out.Compact(static_cast<std::uint32_t>(value->Opcode()));
-        out.Compact(static_cast<std::uint32_t>(value->Type()));
-        out.Compact(value->Id());
-        out.Compact(value->Flags<std::uint64_t>());
-        out.Compact((static_cast<std::uint64_t>(value->Register().index) << 4u) | (bank & 0xfu));
-        out.Compact((static_cast<std::uint64_t>(value->ArgumentCount()) << 1u) | (value->HasImmediate() ? 1u : 0u));
-        if (value->HasImmediate()) out.Compact(value->ImmediateU64());
+        writer.Compact(static_cast<std::uint32_t>(value->Opcode()));
+        writer.Compact(static_cast<std::uint32_t>(value->Type()));
+        writer.Compact(value->Id());
+        writer.Compact(value->Flags<std::uint64_t>());
+        writer.Compact((static_cast<std::uint64_t>(value->Register().index) << 4u) | (bank & 0xfu));
+        writer.Compact((static_cast<std::uint64_t>(value->ArgumentCount()) << 1u) | (value->HasImmediate() ? 1u : 0u));
+        if (value->HasImmediate()) writer.Compact(value->ImmediateU64());
         for (const auto* argument : value->Arguments()) {
             const auto index = valueIndex(argument);
             const auto delta = static_cast<std::int64_t>(index) - static_cast<std::int64_t>(current);
-            out.Compact(argument == nullptr ? 0u : ((static_cast<std::uint64_t>(delta) << 1u) ^ static_cast<std::uint64_t>(delta >> 63)) + 1u);
+            writer.Compact(argument == nullptr ? 0u : ((static_cast<std::uint64_t>(delta) << 1u) ^ static_cast<std::uint64_t>(delta >> 63)) + 1u);
         }
         if (value->IsPhi() && value->PhiBlockCount() != value->ArgumentCount()) owned = false;
         for (std::size_t operand = 0; value->IsPhi() && operand < value->ArgumentCount(); ++operand) {
             const auto found = operand < value->PhiBlockCount() ? blocks.find(value->PhiBlock(operand)) : blocks.end();
             if (found == blocks.end()) owned = false;
-            out.Compact(found != blocks.end() ? found->second : 0u);
+            writer.Compact(found != blocks.end() ? found->second : 0u);
         }
         ++current;
-    });
+    }
     writer.List(plan.memoryInfo, encodeMemoryInfo);
     writer.List(plan.descriptorSources, [&](Writer& out, const DescriptorSource& source) {
         for (const auto* dword : source.dwords) out.Value(valueIndex(dword));
@@ -1048,6 +1062,7 @@ bool encodePlan(Writer& writer, const IrResourcePlan& plan) {
     writer.Value(plan.srtGuardOffset);
     writer.Values(std::span<const std::uint8_t>(plan.cleanFlatSlots));
     writer.Values(std::span<const std::uint8_t>(plan.pureFlatSlots));
+    writer.Value(plan.denseValueIds);
     writer.Value(plan.requiresSpecializationMemory);
     writer.Value(plan.srtPlanComplete);
     writer.Value(plan.resourceTrackingComplete);
@@ -1132,36 +1147,35 @@ bool decodePlan(Reader& reader, IrResourcePlan& plan) {
     if (!reader.Ok()) return false;
     plan.blockStorage.reserve(blockIds.size());
     for (const auto id : blockIds) plan.blockStorage.push_back(std::make_unique<IrBlock>(id));
-    plan.valueStorage.reserve(records.size());
+    plan.valueStorage.Reserve(records.size());
     for (const auto& record : records) {
-        auto value = std::make_unique<IrValue>(record.opcode, record.type, record.id);
+        auto* value = plan.valueStorage.Create(record.opcode, record.type, record.id);
         value->SetFlags(record.flags);
         if (record.hasImmediate) value->SetImmediateU64(record.immediate);
         value->SetRegister(record.registerValue);
-        plan.valueStorage.push_back(std::move(value));
     }
     bool valid = true;
     const auto valueAt = [&](std::uint32_t index) -> IrValue* {
         if (index == NoPlanIndex) return nullptr;
-        if (index >= plan.valueStorage.size()) {
+        if (index >= plan.valueStorage.Size()) {
             valid = false;
             return nullptr;
         }
-        return plan.valueStorage[index].get();
+        return &plan.valueStorage[index];
     };
     for (std::size_t index = 0; index < records.size(); ++index) {
         const auto& record = records[index];
-        auto& value = *plan.valueStorage[index];
+        auto& value = plan.valueStorage[index];
+        std::vector<IrValue*> arguments;
+        std::vector<IrBlock*> phiBlocks;
+        arguments.reserve(record.arguments.size());
         for (std::size_t operand = 0; operand < record.arguments.size(); ++operand) {
-            auto* argument = valueAt(record.arguments[operand]);
-            if (value.IsPhi()) {
-                value.AddPhiOperand(plan.blockStorage[record.phiBlocks[operand]].get(), argument);
-            } else {
-                value.AddArgument(argument);
-            }
+            arguments.push_back(valueAt(record.arguments[operand]));
+            if (value.IsPhi()) phiBlocks.push_back(plan.blockStorage[record.phiBlocks[operand]].get());
         }
+        value.SetDetachedOperands(std::move(arguments), std::move(phiBlocks));
     }
-    reader.List(plan.memoryInfo, 78, decodeMemoryInfo);
+    reader.List(plan.memoryInfo, 79, decodeMemoryInfo);
     reader.List(plan.descriptorSources, 72, [&](Reader& in, DescriptorSource& source) {
         for (auto& dword : source.dwords) dword = valueAt(in.Get<std::uint32_t>());
         in.Value(source.dwordCount);
@@ -1204,6 +1218,7 @@ bool decodePlan(Reader& reader, IrResourcePlan& plan) {
     reader.Value(plan.srtGuardOffset);
     reader.Values(plan.cleanFlatSlots);
     reader.Values(plan.pureFlatSlots);
+    reader.Value(plan.denseValueIds);
     reader.Value(plan.requiresSpecializationMemory);
     reader.Value(plan.srtPlanComplete);
     reader.Value(plan.resourceTrackingComplete);
@@ -1222,12 +1237,15 @@ bool decodePlan(Reader& reader, IrResourcePlan& plan) {
     if (!std::ranges::all_of(plan.info.buffers, [&](const BufferResource& buffer) { return knownSource(buffer.source); })) return false;
     if (!std::ranges::all_of(plan.info.images, [&](const ImageResource& image) { return knownSource(image.source); })) return false;
     if (!std::ranges::all_of(plan.info.samplers, [&](const SamplerResource& sampler) { return knownSource(sampler.source); })) return false;
-    return std::ranges::all_of(plan.controlFlow, [&](const ResourceBlock& block) {
+    const bool blocksValid = std::ranges::all_of(plan.controlFlow, [&](const ResourceBlock& block) {
         return (block.condition == nullptr || block.successors.size() == 2u) &&
                std::ranges::all_of(block.successors, [&](std::uint32_t successor) { return successor < plan.controlFlow.size(); }) &&
                std::ranges::all_of(block.sources, knownSource) &&
                std::ranges::all_of(block.images, [&](std::uint32_t image) { return image < plan.info.images.size(); });
     });
+    if (!blocksValid) return false;
+    ResourceMaterializer::CompactPlan(plan);
+    return true;
 }
 
 constexpr std::string_view NeutralSwitches[] = {

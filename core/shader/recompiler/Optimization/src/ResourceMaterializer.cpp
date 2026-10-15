@@ -1,5 +1,6 @@
 #include "Optimization/ResourceMaterializer.hpp"
 #include "Optimization/SrtWalker/SrtFlatSlotClasses.hpp"
+#include "Optimization/SrtWalker/SrtEvaluator.hpp"
 #include "Optimization/ShaderStageInputInfo.hpp"
 #include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include "RdnaDecoder/RdnaImageOpDecoder.hpp"
@@ -34,6 +35,8 @@ namespace {
 using ImageTableAbi::PoisonReason;
 
 std::atomic<std::uint64_t> specializationNanoseconds{0};
+std::atomic<std::uint64_t> evaluateNanoseconds{0};
+std::atomic<std::uint64_t> materializeNanoseconds{0};
 
 bool MaterializeProfiled() {
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
@@ -786,7 +789,9 @@ void materializeSnapshot(const IrResourcePlan& plan, const SrtRuntime& runtime, 
     snapshot.userData.assign(runtime.userData.begin(), runtime.userData.begin() + plan.userDataCount);
 
     std::vector<DescriptorValue> values;
+    const auto evaluateStarted = MaterializeProfiled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     walker.EvaluateRuntimeSources(plan, plan.materializationSources, runtime, values, snapshot.flattenedSrt, plan.cleanFlatSlots, activeSources, &snapshot.srtPoison, &snapshot.nullRootReads);
+    if (MaterializeProfiled()) evaluateNanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - evaluateStarted).count()), std::memory_order_relaxed);
 
     std::size_t cursor = 0;
     if (values.size() < plan.info.buffers.size()) {
@@ -835,6 +840,29 @@ void materializeSnapshot(const IrResourcePlan& plan, const SrtRuntime& runtime, 
         }
         snapshot.samplers[i] = values[cursor];
         cursor++;
+    }
+}
+
+void materializeForcedDegamma(const IrResourcePlan& plan, ResourceSnapshot& snapshot) {
+    for (std::uint32_t index = 0; index < plan.info.images.size(); ++index) {
+        auto& descriptor = snapshot.images.at(index);
+        if (((descriptor.dwords[1] >> 20u) & 0x1ffu) != static_cast<std::uint32_t>(IrBufferFormat::Format8_8_8_8UInt)) continue;
+        bool forced = false;
+        bool plain = false;
+        for (const auto& pair : plan.info.sampledPairs) {
+            if (pair.image != index) continue;
+            const auto& sampler = snapshot.samplers.at(pair.sampler);
+            if (sampler.dwordCount != 4u) throw std::runtime_error("FORCE_DEGAMMA requires four sampler descriptor words");
+            const bool enabled = (sampler.dwords[0] & (1u << 20u)) != 0u;
+            forced = forced || enabled;
+            plain = plain || !enabled;
+        }
+        if (!forced) continue;
+        const auto& image = plan.info.images.at(index);
+        if (!image.singleMipPlaneBiasCompatible || image.dimension != RdnaImageDimension::Dim2D || image.table != NoTable || image.resourceClass != ImageResourceClass::Sampled || image.depthCompare || image.packed) throw std::runtime_error("FORCE_DEGAMMA on RGBA8_UINT requires a direct plain biased pixel sample");
+        if (plain) throw std::runtime_error("FORCE_DEGAMMA on RGBA8_UINT with mixed sampler states is not implemented");
+        if ((descriptor.dwords[3] >> 28u) != 10u || (descriptor.dwords[4] & 0x1fffu) != 0u || (descriptor.dwords[3] & 0xff000u) != 0u || (descriptor.dwords[5] & 0xf0u) != 0u) throw std::runtime_error("FORCE_DEGAMMA on RGBA8_UINT requires a one-slice volume at mip zero");
+        descriptor.dwords[1] = (descriptor.dwords[1] & ~(0x1ffu << 20u)) | (static_cast<std::uint32_t>(IrBufferFormat::Format8_8_8_8Srgb) << 20u);
     }
 }
 
@@ -929,7 +957,12 @@ void materializeTables(const IrResourcePlan& plan, ResourceSnapshot& snapshot) {
             snapshot.buffers.at(i).dwords[3] = 0u;
         }
         const auto decoded = decodeBufferDescriptor(snapshot.buffers.at(i));
-        if (decoded.Type() != 0u) throw UnsupportedResourceBinding("buffer descriptor uses an unsupported type");
+        if (decoded.Type() != 0u) {
+            const auto& words = snapshot.buffers.at(i).dwords;
+            char detail[64];
+            std::snprintf(detail, sizeof(detail), " (buffer %u V# %08x %08x %08x %08x)", i, words[0], words[1], words[2], words[3]);
+            throw UnsupportedResourceBinding(std::string("buffer descriptor uses an unsupported type") + detail);
+        }
         if (plan.stage != IrShaderStage::Compute && decoded.AddTid()) {
             static std::atomic<bool> reportedAddTid{false};
             if (!reportedAddTid.exchange(true)) std::fprintf(stderr, "[recompiler] a graphics-stage ADD_TID buffer descriptor (%08x %08x %08x %08x) is bound as a null buffer\n", decoded.fields[0], decoded.fields[1], decoded.fields[2], decoded.fields[3]);
@@ -1186,7 +1219,8 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
         modes.push_back(mode);
         const bool volumeLoad = (image.dimension == RdnaImageDimension::Dim2D || image.dimension == RdnaImageDimension::Dim2DArray) && image.fmaskCompatible;
         const bool volumeStore = image.dimension == RdnaImageDimension::Dim2DArray && storage && image.written && !image.read && !image.atomic && image.mipMode != ImageMipMode::DynamicStorage;
-        if ((volumeLoad || volumeStore) && !depth && packed == IrBufferFormat::Invalid && image.byElements == 0u) {
+        const bool volumePlaneBias = image.dimension == RdnaImageDimension::Dim2D && image.singleMipPlaneBiasCompatible && !storage && image.table == NoTable && conversion == IrBufferFormat::Invalid;
+        if ((volumeLoad || volumeStore || volumePlaneBias) && !depth && packed == IrBufferFormat::Invalid && image.byElements == 0u) {
             auto volume = mode;
             volume.dimension = RdnaImageDimension::Dim3D;
             modes.push_back(volume);
@@ -1370,6 +1404,9 @@ RuntimeImageModeMatch ResourceMaterializer::TryRuntimeImageMode(const ImageResou
             }
         }
     }
+    if (image.singleMipPlaneBiasCompatible && image.dimension == RdnaImageDimension::Dim2D && decoded.dimension == RdnaImageDimension::Dim3D) {
+        if ((descriptor.dwords[4] & 0x1fffu) != 0u || (descriptor.dwords[3] & 0xff000u) != 0u || (descriptor.dwords[5] & 0xf0u) != 0u) throw std::runtime_error("2D biased sampling of a volume requires one slice and mip level zero only");
+    }
     for (std::uint32_t index = 0u; index < modes.size(); ++index) {
         const auto& mode = modes[index];
         if (mode.constantSwizzle) continue;
@@ -1494,13 +1531,13 @@ void ownPlanValues(IrResourcePlan& plan) {
             if (argument != nullptr) pending.push_back(argument);
         }
     }
+    plan.valueStorage.Reserve(order.size());
     for (const auto* value : order) {
-        auto clone = std::make_unique<IrValue>(value->Opcode(), value->Type(), value->Id());
+        auto* clone = plan.valueStorage.Create(value->Opcode(), value->Type(), static_cast<std::uint32_t>(plan.valueStorage.Size()));
         clone->SetFlags(value->Flags<std::uint64_t>());
         if (value->HasImmediate()) clone->SetImmediateU64(value->ImmediateU64());
         clone->SetRegister(value->Register());
-        clones[value] = clone.get();
-        plan.valueStorage.push_back(std::move(clone));
+        clones[value] = clone;
     }
     std::unordered_map<const IrBlock*, IrBlock*> blocks;
     const auto blockFor = [&](const IrBlock* block) {
@@ -1512,20 +1549,73 @@ void ownPlanValues(IrResourcePlan& plan) {
         return clone;
     };
     for (const auto* value : order) {
-        auto* clone = clones.at(value);
+        std::vector<IrValue*> arguments;
+        std::vector<IrBlock*> phiBlocks;
+        arguments.reserve(value->ArgumentCount());
+        if (value->IsPhi()) phiBlocks.reserve(value->ArgumentCount());
         for (std::size_t index = 0; index < value->ArgumentCount(); index++) {
             const auto* argument = value->Argument(index);
-            auto* mapped = argument == nullptr ? nullptr : clones.at(argument);
-            if (value->IsPhi()) {
-                clone->AddPhiOperand(blockFor(value->PhiBlock(index)), mapped);
-            } else {
-                clone->AddArgument(mapped);
-            }
+            arguments.push_back(argument == nullptr ? nullptr : clones.at(argument));
+            if (value->IsPhi()) phiBlocks.push_back(blockFor(value->PhiBlock(index)));
         }
+        clones.at(value)->SetDetachedOperands(std::move(arguments), std::move(phiBlocks));
     }
     for (auto* root : roots) {
         if (*root != nullptr) *root = clones.at(*root);
     }
+    plan.denseValueIds = true;
+}
+
+void buildCompactPlan(IrResourcePlan& plan) {
+    if (!plan.denseValueIds || plan.valueStorage.Size() >= CompactResourcePlan::NoValue) return;
+    CompactResourcePlan compact;
+    const auto idOf = [&](const IrValue* value, std::uint32_t& id) {
+        if (value == nullptr) return false;
+        const auto* resolved = value->Resolve();
+        id = resolved->Id();
+        return id < plan.valueStorage.Size() && &plan.valueStorage[id] == resolved;
+    };
+    try {
+        compact.values.reserve(plan.valueStorage.Size());
+        for (const auto& stored : plan.valueStorage) {
+            const auto* value = &stored;
+            if (value->ArgumentCount() > 0xffu) return;
+            CompactPlanValue entry;
+            entry.immediate = value->ImmediateU64();
+            entry.flags = value->Flags<std::uint64_t>();
+            entry.firstArgument = static_cast<std::uint32_t>(compact.arguments.size());
+            entry.registerIndex = value->Register().index;
+            entry.type = value->Type();
+            entry.opcode = value->Opcode();
+            entry.argumentCount = static_cast<std::uint8_t>(value->ArgumentCount());
+            entry.hasImmediate = value->HasImmediate();
+            for (std::size_t index = 0; index < value->ArgumentCount(); index++) {
+                std::uint32_t id = 0;
+                if (!idOf(value->Argument(index), id)) return;
+                compact.arguments.push_back(id);
+            }
+            compact.values.push_back(entry);
+        }
+        compact.sourceDwords.assign(plan.descriptorSources.size() * 8u, CompactResourcePlan::NoValue);
+        for (std::size_t source = 0; source < plan.descriptorSources.size(); source++) {
+            const auto& descriptor = plan.descriptorSources[source];
+            if (descriptor.dwordCount > 8u) return;
+            for (std::uint32_t dword = 0; dword < descriptor.dwordCount; dword++) {
+                if (!idOf(descriptor.dwords[dword], compact.sourceDwords[source * 8u + dword])) return;
+            }
+        }
+        compact.srtReads.resize(plan.srtReads.size());
+        for (std::size_t slot = 0; slot < plan.srtReads.size(); slot++) {
+            if (!idOf(plan.srtReads[slot].value, compact.srtReads[slot])) return;
+        }
+        compact.conditions.assign(plan.controlFlow.size(), CompactResourcePlan::NoValue);
+        for (std::size_t block = 0; block < plan.controlFlow.size(); block++) {
+            if (plan.controlFlow[block].condition != nullptr && !idOf(plan.controlFlow[block].condition, compact.conditions[block])) return;
+        }
+    } catch (const std::exception&) {
+        return;
+    }
+    plan.compact = std::move(compact);
 }
 
 }
@@ -1552,6 +1642,9 @@ IrResourcePlan ResourceMaterializer::ExtractPlan(const IrProgram& program) const
     plan.info = source.info;
     PrepareImageModes(plan.info);
     plan.uniformFill = source.uniformFill;
+    for (auto& block : plan.controlFlow) {
+        if (block.condition != nullptr && !Detail::Evaluator::MayEvaluate(source, block.condition)) block.condition = nullptr;
+    }
     ownPlanValues(plan);
     const auto addSource = [&plan](std::uint32_t index) {
         if (index >= plan.descriptorSources.size()) {
@@ -1579,7 +1672,13 @@ IrResourcePlan ResourceMaterializer::ExtractPlan(const IrProgram& program) const
     }
     plan.pureFlatSlots = Detail::ComputePureFlatSlots(plan);
     plan.guardedSrtSlots = Detail::ComputeGuardedFlatSlots(plan);
+    buildCompactPlan(plan);
     return plan;
+}
+
+void ResourceMaterializer::CompactPlan(IrResourcePlan& plan) {
+    plan.compact = {};
+    buildCompactPlan(plan);
 }
 
 void ResourceMaterializer::Materialize(const IrResourcePlan& program, const SrtRuntime& runtime, ResourceSnapshot& snapshot) const {
@@ -1590,6 +1689,7 @@ void ResourceMaterializer::Materialize(const IrResourcePlan& program, const SrtR
     if (plan.requiresSpecializationMemory && runtime.readMemory == nullptr) {
         throw std::runtime_error("ResourceMaterializer::Materialize requires runtime memory access for image tables");
     }
+    const auto materializeStarted = MaterializeProfiled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     SrtWalker walker;
     ResourceSnapshot nextSnapshot;
     std::vector<std::uint8_t> activeSources;
@@ -1601,15 +1701,25 @@ void ResourceMaterializer::Materialize(const IrResourcePlan& program, const SrtR
         throw;
     }
     const auto started = MaterializeProfiled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    materializeForcedDegamma(plan, nextSnapshot);
     materializeTables(plan, nextSnapshot);
     materializeSrtGuards(plan, nextSnapshot);
     if (MaterializeProfiled()) specializationNanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count()), std::memory_order_relaxed);
     snapshot = std::move(nextSnapshot);
     reportTables();
+    if (MaterializeProfiled()) materializeNanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - materializeStarted).count()), std::memory_order_relaxed);
 }
 
 std::uint64_t ResourceMaterializer::SpecializationNanoseconds() {
     return specializationNanoseconds.load(std::memory_order_relaxed);
+}
+
+std::uint64_t ResourceMaterializer::EvaluateNanoseconds() {
+    return evaluateNanoseconds.load(std::memory_order_relaxed);
+}
+
+std::uint64_t ResourceMaterializer::MaterializeNanoseconds() {
+    return materializeNanoseconds.load(std::memory_order_relaxed);
 }
 
 }

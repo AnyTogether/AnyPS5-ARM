@@ -7,6 +7,8 @@
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "prx/libSceAgcDriver/Execution/include/SubmissionCapture.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
+#include "ThreadOwned.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #include <bit>
 #include <cmath>
 #include <cstdio>
@@ -34,6 +36,33 @@ bool EopRelease(std::span<const std::uint32_t> words) {
     return words.size() >= 8 && (words[0] >> 30u) == 3u && Pm4::PacketWords(words[0]) == 8u && ((words[0] >> 8u) & 0xffu) == 0x49u && ((words[2] >> 24u) & 7u) == 2u;
 }
 
+}
+
+std::deque<const std::uint32_t*>& Driver::releasedTails() {
+    struct ReleasedTailsStorage {};
+    return HostThreadLocal<std::deque<const std::uint32_t*>, ReleasedTailsStorage>();
+}
+
+void Driver::noteReleasedTails(const Submission& submission) {
+    auto& released = releasedTails();
+    released.clear();
+    thread_local Submission* scratchSlot = nullptr;
+    auto& scratch = ShaderRecompiler::ThreadOwned(scratchSlot);
+    const std::uint32_t* tail = submission.rewindTail;
+    std::size_t words = submission.rewindWords;
+    for (std::size_t chunk = 0; chunk < 256 && tail != nullptr; ++chunk) {
+        if ((std::atomic_ref<std::uint32_t>(*const_cast<std::uint32_t*>(tail - 1)).load(std::memory_order_acquire) & 0x80000000u) == 0) break;
+        released.push_back(tail - 1);
+        scratch.rewindTail = nullptr;
+        scratch.rewindWords = 0;
+        try {
+            copyCommands(scratch, tail, words);
+        } catch (const std::exception&) {
+            break;
+        }
+        tail = scratch.rewindTail;
+        words = scratch.rewindWords;
+    }
 }
 
 void Driver::copyCommands(Submission& submission, const std::uint32_t* guest, std::size_t words) {
@@ -248,6 +277,14 @@ void Driver::executeRewindTail(const Submission& stalled) {
     Submission tail{};
     tail.queue = stalled.queue;
     if (APS5_ENABLE_TIMING_LOG) tail.receivedAt = std::chrono::steady_clock::now();
+    auto& released = releasedTails();
+    if (!released.empty() && released.front() == stalled.rewindTail - 1) {
+        released.pop_front();
+        tail.enqueuedAt = lastEpochBump();
+    } else {
+        released.clear();
+        tail.enqueuedAt = std::chrono::steady_clock::now();
+    }
     copyCommands(tail, stalled.rewindTail, stalled.rewindWords);
     if (APS5_ENABLE_TIMING_LOG) tail.copiedAt = std::chrono::steady_clock::now();
     validate(tail, stalled.rewindTail);
@@ -315,10 +352,10 @@ void Driver::Submit(const Packet* packet, std::uint32_t queue) {
         submission.serial = accepted + 1;
 
         submission.received = ++eventSerial;
+        const auto now = std::chrono::steady_clock::now();
+        submission.enqueuedAt = now;
         if (capture != nullptr) capture->Take(captured, submission.serial, captureTime(), submission.heldAtSubmit);
         if (profile) {
-            const auto now = std::chrono::steady_clock::now();
-            submission.enqueuedAt = now;
             ++costs.submissions;
             costs.validateNs += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(validated - copied).count());
             costs.copyNs += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>((copied - start) + (now - validated)).count());
@@ -373,6 +410,7 @@ bool Driver::waitFree(const Submission& submission) {
 
 bool Driver::queue0Before(std::uint64_t received) const {
     if (queue0Executing != 0 && queue0Executing < received) return true;
+    if (!queue0Uncommitted.empty() && queue0Uncommitted.front() < received) return true;
     const auto worker = workers.find(0);
     if (worker == workers.end()) return false;
     for (const auto& pending : worker->second.pending) {
@@ -455,7 +493,11 @@ void Driver::noteHeldAtSubmit(Submission& submission, std::size_t cursor) {
 }
 
 void Driver::forgetUnfinishedWrites(QueueWorker& worker, const Submission& submission) {
-    for (const auto dword : submission.labelWrites) {
+    forgetUnfinishedWrites(worker, submission.labelWrites);
+}
+
+void Driver::forgetUnfinishedWrites(QueueWorker& worker, std::span<const std::uint64_t> labelWrites) {
+    for (const auto dword : labelWrites) {
         const auto found = worker.unfinishedWrites.find(dword);
         if (found == worker.unfinishedWrites.end()) continue;
         if (--found->second == 0) worker.unfinishedWrites.erase(found);

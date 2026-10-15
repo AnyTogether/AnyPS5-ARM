@@ -1,5 +1,6 @@
 #include <cstdio>
 #include "prx/libSceAgcDriver/Graphics/include/State.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureSwizzleEquations.hpp"
@@ -127,7 +128,7 @@ constexpr std::uint32_t DepthControlMask = ~0x007007f0u;
 // EXEC_ON_HIER_FAIL / EXEC_ON_NOOP / EXEC_IF_OVERLAPPED (bits 9, 10, 17) only force the pixel shader
 // to run, which it always does here.
 constexpr std::uint32_t ShaderControlMask = ~(0x0000f870u | 0x00020600u | 0x00010000u);
-constexpr std::uint32_t PixelStageRunsMask = 0x00020747u;
+constexpr std::uint32_t PixelStageRunsMask = 0x000207c7u;
 constexpr std::uint32_t AlphaToCoverageMask = ~0x0001ff00u;
 constexpr std::uint32_t AlphaToCoverageUndithered = 0x0000aa01u;
 constexpr std::uint32_t AlphaToCoverageDithered = 0x00018701u;
@@ -278,10 +279,23 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     Require(!depthClear || (zFormat != 0 && !depthReadOnly), "depth clear requires a writable depth plane");
     DepthTarget depth{};
     depth.samples = 1u << ((read(cx, 0x010) >> 2u) & 3u);
+    depth.depthSwizzle = (read(cx, 0x010) >> 4u) & 31u;
+    depth.iterate256 = (read(cx, 0x010) & (1u << 20u)) != 0;
+    depth.firstSlice = view & 0x1fffu;
+    depth.lastSlice = (view >> 13u) & 0x7ffu;
     depth.address = zFormat != 0 ? base(0x012, 0x01a) : 0;
     depth.stencilAddress = stencil ? base(0x013, 0x01b) : 0;
     Require(zFormat == 0 || depthReadOnly || base(0x014, 0x01c) == depth.address, "depth read and written at different addresses is unsupported");
     Require(!stencil || stencilReadOnly || base(0x015, 0x01d) == depth.stencilAddress, "stencil read and written at different addresses is unsupported");
+    if (depth.samples != 1u) {
+        depth.pipeBankXor = static_cast<std::uint32_t>(depth.address & 65535u);
+        depth.address &= ~std::uint64_t{65535u};
+        depth.stencilAddress &= ~std::uint64_t{65535u};
+        if (const auto surface = find(cx, 0x2af); surface != cx.end()) {
+            depth.htilePipeAligned = (surface->second & (1u << 18u)) != 0;
+            depth.htileVrsEncoding = (surface->second >> 19u) & 3u;
+        }
+    }
     const auto size = read(cx, 0x007);
     depth.extent = {(size & 0x3fffu) + 1u, ((size >> 16u) & 0x3fffu) + 1u};
     if (const auto slice = view & 0x1fffu; slice != 0) {
@@ -291,9 +305,10 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     depth.format = zFormat == 1 ? (stencil ? VK_FORMAT_D16_UNORM_S8_UINT : VK_FORMAT_D16_UNORM) : (stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D32_SFLOAT);
     depth.clearDepth = readFloat(cx, 0x00b);
     depth.clearStencil = static_cast<std::uint8_t>(read(cx, 0x00a) & 0xffu);
+    depth.htileDepthOnly = (read(cx, 0x011) & (1u << 29u)) != 0u;
     if (const auto htile = find(cx, 0x005); zFormat != 0 && htile != cx.end() && htile->second != 0 && (read(cx, 0x010) & (1u << 29u)) != 0) {
         depth.htileAddress = base(0x005, 0x01e) + static_cast<std::uint64_t>(view & 0x1fffu) * HtileMetadataBytes(depth.extent);
-        depth.htileStencil = stencil && (read(cx, 0x011) & (1u << 29u)) == 0;
+        depth.htileStencil = stencil && !depth.htileDepthOnly;
     }
     result.depth = depth;
     result.depthTest = (depthControl & 2u) != 0;
@@ -408,6 +423,40 @@ bool coveredCentroidSupported(const QueueState& queue) {
     const auto ena = find(queue.context, 0x1b3);
     const auto addr = find(queue.context, 0x1b4);
     return ena != queue.context.end() && addr != queue.context.end() && (ena->second & addr->second & CentroidInputs) == 0;
+}
+
+std::array<std::uint32_t, 4> sampleMaskFields(std::uint32_t top, std::uint32_t bottom) {
+    return {top & 0xffffu, top >> 16u, bottom & 0xffffu, bottom >> 16u};
+}
+
+std::string sampleMaskRejection(const QueueState& queue, std::uint32_t config, std::uint32_t top, std::uint32_t bottom) {
+    const auto log2 = config & 7u;
+    if (log2 > 3u) return {};
+    const auto full = (1u << (1u << log2)) - 1u;
+    auto masks = sampleMaskFields(top, bottom);
+    for (auto& mask : masks) mask &= full;
+    if (std::ranges::all_of(masks, [&](std::uint32_t mask) { return mask == full; })) return {};
+    const bool uniform = std::ranges::all_of(masks, [&](std::uint32_t mask) { return mask == masks[0]; });
+    const bool wholePixels = std::ranges::all_of(masks, [&](std::uint32_t mask) { return mask == 0u || mask == full; });
+    char detail[96];
+    std::snprintf(detail, sizeof(detail), " (PA_SC_AA_MASK_X0Y0_X1Y0=0x%08x, PA_SC_AA_MASK_X0Y1_X1Y1=0x%08x)", top, bottom);
+    const auto conservative = find(queue.context, 0x313);
+    if (conservative != queue.context.end() && (conservative->second & ~0x001f6000u) != 0) return std::string("AGC graphics: sample masks with conservative rasterization are unsupported") + detail;
+    if (!wholePixels && uniform && !PixelProgramSkipped(queue)) {
+        const auto ena = find(queue.context, 0x1b3);
+        const auto addr = find(queue.context, 0x1b4);
+        if (ena != queue.context.end() && addr != queue.context.end() && (ena->second & addr->second & CentroidInputs) != 0) return std::string("AGC graphics: sample masks that remove some samples of a pixel with centroid interpolation are unsupported") + detail;
+    }
+    return {};
+}
+
+std::array<std::uint16_t, 4> decodeQuadSampleMask(const Registers& cx, std::uint32_t samples) {
+    const bool singleSample = (read(cx, 0x2f8) & 7u) == 0u;
+    const auto full = (1u << samples) - 1u;
+    const auto fields = sampleMaskFields(read(cx, 0x30e), read(cx, 0x30f));
+    std::array<std::uint16_t, 4> masks{};
+    for (std::size_t pixel = 0; pixel < masks.size(); ++pixel) masks[pixel] = static_cast<std::uint16_t>(singleSample ? ((fields[pixel] & 1u) != 0u ? full : 0u) : fields[pixel] & full);
+    return masks;
 }
 
 std::uint32_t decodeSamples(const Registers& cx) {
@@ -666,7 +715,7 @@ ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
     APS5_LOG_OUT_DEBUG("DecodeShaderStages value=0x%x primitive=%u path=%u vertexWave=%u", value, primitive, static_cast<unsigned>(result.path), result.vertexWaveSize);
     if (path == ShaderPath::Vertex) {
         validate((value & 0x2000u) != 0, "legacy vertex routing without PRIMGEN_EN is unsupported");
-        validate((value & ~0x0247a010u) == 0, "unsupported vertex routing, scheduling or wave-ID state");
+        validate((value & ~0x0247a010u) == 0 || value == 0x02002008u, "unsupported vertex routing, scheduling or wave-ID state");
     } else if (path == ShaderPath::Tessellation) {
         validate((value & 0x00600020u) == 0, "wave32 tessellation or geometry amplification is unsupported");
         validate((value & ~0x0207ed0du) == 0 && (value & 0x02002000u) == 0x02002000u && (value & 3u) == 1u && ((value >> 3u) & 3u) == 1u, "unsupported tessellation routing");
@@ -677,7 +726,7 @@ ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
         validate(tess.inputControlPoints != 0 && tess.inputControlPoints <= 32 && tess.outputControlPoints != 0 && tess.outputControlPoints <= 32, "invalid tessellation control-point counts");
         validate(tess.patchesPerGroup != 0, "VGT_LS_HS_CONFIG.NUM_PATCHES is zero");
         if ((parameters & ~0x000600ffu) != 0) Require(false, zeroMessage(0x2db, parameters, "VGT_TF_PARAM donut, factor detection, memory type or reserved state"));
-        validate((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2) && (tess.outputTopology == 2 || tess.outputTopology == 3), "only triangle and quad domains with integer or fractional-odd partitioning and triangle output are supported by the reference path");
+        validate((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2 || tess.partitioning == 3) && (tess.outputTopology == 2 || tess.outputTopology == 3), "only triangle and quad domains with integer, fractional-even or fractional-odd partitioning and triangle output are supported by the reference path");
         result.minTessellationLevel = readFloat(queue.context, 0x287);
         result.maxTessellationLevel = readFloat(queue.context, 0x286);
         Require(result.minTessellationLevel >= 0.0f && result.minTessellationLevel <= 63.0f && result.minTessellationLevel <= result.maxTessellationLevel && result.maxTessellationLevel >= 1.0f, "tessellation level clamps need 0 <= VGT_HOS_MIN_TESS_LEVEL <= 63, VGT_HOS_MAX_TESS_LEVEL >= 1 and the minimum at most the maximum");
@@ -816,7 +865,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     Require(read(cx, 0x83) == 0xffffu, "clip rectangles are unsupported");
     Require((read(cx, 0x8c) & 0xfu) == 0xau, "nonstandard triangle edge rules are unsupported");
     Require(read(cx, 0x2f9) == 0x2du, "nonstandard pixel center or vertex quantization is unsupported");
-    Require(read(cx, 0x30e) == 0xffffffffu && read(cx, 0x30f) == 0xffffffffu, "sample masks are unsupported");
+    if (auto reason = sampleMaskRejection(queue, read(cx, 0x2f8), read(cx, 0x30e), read(cx, 0x30f)); !reason.empty()) throw std::runtime_error(reason);
     const auto viewportControl = read(cx, 0x206);
     if (viewportControl != 0x43fu) throw std::runtime_error(vteMessage(viewportControl));
     zero(cx, 0x204, ClipControlMask, "unsupported PA_CL_CLIP_CNTL flags");
@@ -903,6 +952,8 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         APS5_LOG_OUT_DEBUG("Render extent from screen=%ux%u", result.renderExtent.width, result.renderExtent.height);
         Require(result.renderExtent.width != 0 && result.renderExtent.height != 0, "empty framebuffer extent for a draw without color writes");
     }
+    result.quadSampleMask = decodeQuadSampleMask(cx, result.samples);
+    result.pixelEarlyZ = !PixelProgramSkipped(queue) && PixelEarlyZ(read(cx, 0x203));
     if ((read(cx, 0x207) & LayerExports & ~result.layerExports & ~(1u << 21u)) != 0) {
         static bool reported = false;
         if (!reported) {
@@ -1035,6 +1086,43 @@ std::array<ShaderRecompiler::ColorExportPacking, 8> ExportPackings(const State& 
         if (color.exportIndex < packings.size()) packings[color.exportIndex] = color.packing;
     }
     return packings;
+}
+
+bool PartialSampleMask(const State& state) {
+    const auto full = (1u << state.samples) - 1u;
+    return std::ranges::any_of(state.quadSampleMask, [&](std::uint16_t mask) { return (mask & full) != full; });
+}
+
+bool UniformSampleMask(const State& state) {
+    const auto full = (1u << state.samples) - 1u;
+    return std::ranges::all_of(state.quadSampleMask, [&](std::uint16_t mask) { return (mask & full) == (state.quadSampleMask[0] & full); });
+}
+
+VkSampleMask HostSampleMask(const State& state) {
+    const auto full = (1u << state.samples) - 1u;
+    return UniformSampleMask(state) ? state.quadSampleMask[0] & full : full;
+}
+
+std::uint8_t QuadPixelMask(const State& state) {
+    if (!PartialSampleMask(state) || UniformSampleMask(state)) return 0xfu;
+    const auto full = (1u << state.samples) - 1u;
+    std::uint8_t pixels = 0;
+    for (std::uint32_t pixel = 0; pixel < state.quadSampleMask.size(); ++pixel) {
+        if ((state.quadSampleMask[pixel] & full) != 0u) pixels = static_cast<std::uint8_t>(pixels | (1u << pixel));
+    }
+    return pixels;
+}
+
+std::array<std::uint16_t, 4> QuadSampleMasks(const State& state) {
+    std::array<std::uint16_t, 4> masks{0xffffu, 0xffffu, 0xffffu, 0xffffu};
+    if (!PartialSampleMask(state) || UniformSampleMask(state)) return masks;
+    const auto full = (1u << state.samples) - 1u;
+    if (std::ranges::all_of(state.quadSampleMask, [&](std::uint16_t mask) { return (mask & full) == 0u || (mask & full) == full; })) return masks;
+    for (std::size_t pixel = 0; pixel < masks.size(); ++pixel) {
+        const auto mask = state.quadSampleMask[pixel] & full;
+        masks[pixel] = static_cast<std::uint16_t>(mask == full ? 0xffffu : mask);
+    }
+    return masks;
 }
 
 ShaderRecompiler::RasterPrimitive RasterPrimitiveOf(const State& state) {
@@ -1390,8 +1478,10 @@ std::string DrawRejection(const QueueState& queue, bool indexed) {
     if (value(cx, 0x8c, word) && (word & 0xfu) != 0xau) return require(false, "nonstandard triangle edge rules are unsupported");
     if (value(cx, 0x2f9, word) && word != 0x2du) return require(false, "nonstandard pixel center or vertex quantization is unsupported");
     if (value(cx, 0x313, word) && (word & ~0x001f6000u) != 0 && word != 0x6001u) return conservativeMessage(word);
-    std::uint32_t other = 0;
-    if (value(cx, 0x30e, word) && value(cx, 0x30f, other) && (word != 0xffffffffu || other != 0xffffffffu)) return require(false, "sample masks are unsupported");
+    std::uint32_t config = 0, other = 0;
+    if (value(cx, 0x2f8, config) && value(cx, 0x30e, word) && value(cx, 0x30f, other)) {
+        if (auto reason = sampleMaskRejection(queue, config, word, other); !reason.empty()) return reason;
+    }
     if (value(cx, 0x206, word) && word != 0x43fu) return vteMessage(word);
     if (auto reason = nonzero(cx, 0x204, ClipControlMask, "unsupported PA_CL_CLIP_CNTL flags"); !reason.empty()) return reason;
     std::uint32_t targetMask = 0, shaderMask = 0;
@@ -1414,10 +1504,11 @@ bool PixelProgramSkipped(const QueueState& queue) {
     const auto& cx = queue.context;
     const auto targetMask = find(cx, 0x8e);
     const auto shaderMask = find(cx, 0x8f);
-    const auto zFormat = find(cx, 0x1c4);
     const auto shaderControl = find(cx, 0x203);
-    if (targetMask == cx.end() || shaderMask == cx.end() || zFormat == cx.end() || shaderControl == cx.end()) return false;
-    return (targetMask->second & shaderMask->second) == 0 && zFormat->second == 0 && (shaderControl->second & PixelStageRunsMask) == 0;
+    if (targetMask == cx.end() || shaderMask == cx.end() || shaderControl == cx.end()) return false;
+    const auto alphaToMask = find(cx, 0x2dc);
+    if (alphaToMask != cx.end() && (alphaToMask->second & 1u) != 0) return false;
+    return (targetMask->second & shaderMask->second) == 0 && (shaderControl->second & PixelStageRunsMask) == 0;
 }
 
 std::string NullPixelProgramRejection(const QueueState& queue) {
@@ -1431,6 +1522,11 @@ std::string NullPixelProgramRejection(const QueueState& queue) {
 std::vector<RegisterRead>*& RegisterReadLog() {
     static thread_local std::vector<RegisterRead>* log = nullptr;
     return log;
+}
+
+std::atomic<std::uint32_t>& RegisterReadLogsOpen() {
+    static std::atomic<std::uint32_t> open{0};
+    return open;
 }
 
 bool SplitsAlternateAlpha(const State& state) {

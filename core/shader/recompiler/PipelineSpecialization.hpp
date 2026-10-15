@@ -28,6 +28,7 @@ inline constexpr std::uint32_t ExportPackingBase = 8224u;
 inline constexpr std::uint32_t DualSourceBlend = 8232u;
 inline constexpr std::uint32_t RasterPrimitive = 8233u;
 inline constexpr std::uint32_t LayerExported = 8234u;
+inline constexpr std::uint32_t StencilReferenceOffset = 8235u;
 inline constexpr std::uint32_t HeapCountBase = 8256u;
 inline constexpr std::uint32_t MipCountBase = 8320u;
 inline constexpr std::uint32_t DescriptorIndexBase = 16384u;

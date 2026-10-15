@@ -15,8 +15,10 @@
 #include "SDL.h"
 #include "SceTypes.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
+#include "prx/libc/include/Shutdown.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libSceAudioOut/include/AudioOutSdl.hpp"
+#include "AudioOutShutdown.hpp"
 
 static constexpr int PORT_TYPE_MAIN = 0;
 static constexpr int PORT_TYPE_BGM = 1;
@@ -383,7 +385,8 @@ int APS5_VABI sceAudioOutClose(int handle) {
     return 0;
 }
 
-int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) {
+int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) try {
+    const AudioOutCall call;
     std::lock_guard<std::mutex> outputLock(g_outputMutex);
     std::unique_lock<std::mutex> lock(g_mutex);
     Port* port = getPort(handle);
@@ -398,13 +401,16 @@ int APS5_VABI sceAudioOutOutput(int handle, const void* ptr) {
     }
     if (ptr != nullptr) port->lastDataOutputTime = sceKernelGetProcessTime();
     return static_cast<int>(port->samplesNum);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
-int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) {
+int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) try {
     if (param == nullptr || num == 0) {
         return -2144993276;
     }
 
+    const AudioOutCall call;
     std::lock_guard<std::mutex> outputLock(g_outputMutex);
     std::unique_lock<std::mutex> lock(g_mutex);
 
@@ -430,6 +436,8 @@ int APS5_VABI sceAudioOutOutputs(AudioOutOutputParam* param, std::uint32_t num) 
     }
 
     return static_cast<int>(first.samplesNum);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
 int APS5_VABI sceAudioOutSetVolume(int handle, std::uint32_t flag, int* vol) {

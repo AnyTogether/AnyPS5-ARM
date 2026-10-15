@@ -1,5 +1,7 @@
 #include <shared_mutex>
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Pipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
@@ -256,10 +258,7 @@ void guard(const Context& context, const ColorTarget& target, const std::shared_
     std::unique_lock lock(guardedMutex());
     guarded().push_back({context.device, target.address, bytes, target.samples, active});
     anyGuarded().store(true, std::memory_order_release);
-    static std::once_flag installed;
-    std::call_once(installed, [] {
-        GuestMemory::SetReadGuard(&guardReads);
-    });
+    InstallResidentImageReadGuard_nid_no_patch();
     GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(&retireUnmapped);
 }
 
@@ -289,6 +288,60 @@ MultisampleTarget& acquire(const Context& context, const ColorTarget& use) {
     return created;
 }
 
+MultisampleTarget& createFilled(const Context& context, const GuestTextureResource& resource, VkFormat format) {
+    const auto refuse = [&](const std::string& reason) {
+        char text[160];
+        std::snprintf(text, sizeof(text), "AGC graphics: sampling the %ux%u multisampled texture 0x%llx of %u samples, which no draw rendered to and ", resource.width, resource.height, static_cast<unsigned long long>(resource.baseAddress), resource.samples);
+        throw std::runtime_error(text + reason + ", is not implemented");
+    };
+    ColorTarget use{};
+    switch (resource.tileMode) {
+        case TextureTileMode::kStandard4KB: use.tileMode = ColorTileMode::Standard4KB; break;
+        case TextureTileMode::kStandard64KB: use.tileMode = ColorTileMode::Standard64KB; break;
+        case TextureTileMode::kR64KBX: use.tileMode = ColorTileMode::RenderTarget; break;
+        default: refuse("whose tile mode " + std::to_string(static_cast<int>(resource.tileMode)) + " has no modeled multisampled color footprint");
+    }
+    use.address = resource.baseAddress;
+    use.surfaceAddress = resource.baseAddress;
+    use.extent = {resource.width, resource.height};
+    use.surfaceExtent = use.extent;
+    use.format = format;
+    use.elementBytes = BytesPerElement(resource.format);
+    use.pipeBankXor = resource.pipeBankXor;
+    use.samples = resource.samples;
+    const auto bytes = MultisampledColorBytes(use);
+    if (bytes == 0) refuse("whose " + std::to_string(use.elementBytes) + "-byte elements have no modeled multisampled color footprint");
+    use.bytes = ColorTargetLayout(use.extent.width, use.extent.height, use.tileMode, use.elementBytes).Bytes();
+    char range[64];
+    std::snprintf(range, sizeof(range), "0x%llx+0x%llx", static_cast<unsigned long long>(use.address), static_cast<unsigned long long>(bytes));
+    RequireNoMultisampleTarget(use.address, static_cast<std::size_t>(bytes), "sampling a multisampled texture no draw rendered to");
+    GuestMemory::FlushGpuWrites(use.address, static_cast<std::size_t>(bytes));
+    if (!GuestMemory::Accessible(reinterpret_cast<const void*>(use.address), static_cast<std::size_t>(bytes))) refuse(std::string("whose color memory ") + range + " is not mapped");
+    const auto* memory = reinterpret_cast<const std::byte*>(use.address);
+    std::uint32_t value = 0;
+    std::memcpy(&value, memory, sizeof(value));
+    char held[16];
+    std::snprintf(held, sizeof(held), "0x%08x", value);
+    const auto repeated = std::mismatch(memory + sizeof(value), memory + bytes, memory).first;
+    if (repeated != memory + bytes) {
+        char offset[32];
+        std::snprintf(offset, sizeof(offset), "+0x%llx", static_cast<unsigned long long>(repeated - memory));
+        refuse(std::string("whose color memory ") + range + " does not hold one repeated 32-bit value (" + held + " until " + offset + ")");
+    }
+    VkClearColorValue clear{};
+    if (!MultisampledFillClearColor(use, value, clear)) refuse(std::string("whose color memory ") + range + " holds " + held + ", which has no exact clear value in its format");
+    targets().push_back(std::make_unique<MultisampleTarget>(context, use));
+    auto& created = *targets().back();
+    guard(context, use, created.active);
+    created.colorFill.NoteFill(use.address, static_cast<std::size_t>(bytes), value);
+    return created;
+}
+
+}
+
+void InstallResidentImageReadGuard_nid_no_patch() {
+    static std::once_flag installed;
+    std::call_once(installed, [] { GuestMemory::SetReadGuard(&guardReads); });
 }
 
 void MultisampledCmask::NoteFill(std::uint64_t fillAddress, std::size_t fillBytes, std::uint32_t pattern) {
@@ -416,9 +469,12 @@ std::shared_ptr<Texture> MultisampleTargetTexture(const Context& context, const 
         if (rendered.format == format && rendered.extent.width == resource.width && rendered.extent.height == resource.height && rendered.samples == resource.samples && rendered.mip == 0) return target->Sampled(components);
         other = target.get();
     }
+    if (other == nullptr) {
+        Require(Recorder::Active() != nullptr, "a multisampled texture is only sampled by recorded draws and dispatches");
+        return createFilled(context, resource, format).Sampled(components);
+    }
     char text[320];
-    if (other != nullptr) std::snprintf(text, sizeof(text), "AGC graphics: sampling multisampled color target 0x%llx (%ux%u, %u samples, vk format %d) as a %ux%u texture of %u samples and guest format %u (vk %d) is not implemented", static_cast<unsigned long long>(resource.baseAddress), other->target.extent.width, other->target.extent.height, other->target.samples, static_cast<int>(other->target.format), resource.width, resource.height, resource.samples, resource.format, static_cast<int>(format));
-    else std::snprintf(text, sizeof(text), "AGC graphics: sampling the %ux%u multisampled texture 0x%llx of %u samples, which no draw rendered to, is not implemented", resource.width, resource.height, static_cast<unsigned long long>(resource.baseAddress), resource.samples);
+    std::snprintf(text, sizeof(text), "AGC graphics: sampling multisampled color target 0x%llx (%ux%u, %u samples, vk format %d) as a %ux%u texture of %u samples and guest format %u (vk %d) is not implemented", static_cast<unsigned long long>(resource.baseAddress), other->target.extent.width, other->target.extent.height, other->target.samples, static_cast<int>(other->target.format), resource.width, resource.height, resource.samples, resource.format, static_cast<int>(format));
     throw std::runtime_error(text);
 }
 
@@ -481,6 +537,7 @@ void ClearMultisampleTargets(VkDevice device) {
 }
 
 void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const char* access) {
+    RequireNoResidentDepthRead_nid_no_patch(address, bytes);
     if (bytes == 0 || !anyGuarded().load(std::memory_order_acquire)) return;
     std::shared_lock lock(guardedMutex());
     for (const auto& range : guarded()) {

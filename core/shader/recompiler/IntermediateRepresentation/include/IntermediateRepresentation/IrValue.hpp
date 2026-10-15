@@ -86,6 +86,7 @@ public:
     void SetImmediateU16(std::uint16_t value);
     void SetRegister(const GuestRegister& reg);
     void AddPhiOperand(IrBlock* predecessor, IrValue* value);
+    void SetDetachedOperands(std::vector<IrValue*> arguments, std::vector<IrBlock*> phiBlocks);
     void ReplaceOpcode(IrOpcode opcode);
     void Invalidate();
     void ReplaceUsesWith(IrValue* replacement, bool preserve);

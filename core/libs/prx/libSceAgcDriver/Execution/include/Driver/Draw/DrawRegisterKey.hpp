@@ -5,7 +5,7 @@
 
 namespace AgcDriver::DriverDetail {
 
-std::uint64_t RegisterStateKey(const QueueState& queue, bool allUserWords = false, bool incremental = true);
+std::uint64_t RegisterStateKey(const QueueState& queue, bool allUserWords = false, bool incremental = true, std::uint64_t* shapeKey = nullptr);
 
 }
 

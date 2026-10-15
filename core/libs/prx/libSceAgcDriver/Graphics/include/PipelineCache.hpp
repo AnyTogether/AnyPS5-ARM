@@ -4,8 +4,11 @@
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -24,6 +27,24 @@ public:
     PipelineCacheSynchronization& Synchronization() { return synchronization; }
 
 private:
+    struct FileHeader {
+        std::uint32_t magic;
+        std::uint32_t format;
+        std::uint64_t dataBytes;
+        std::uint64_t dataHash;
+        bool operator==(const FileHeader&) const = default;
+    };
+    enum class FileState { Missing, Unreadable, Invalid, Valid };
+    struct File {
+        FileState state = FileState::Missing;
+        const char* invalidReason = nullptr;
+        FileHeader header{};
+        std::vector<std::byte> contents;
+        std::span<const std::byte> Payload() const;
+    };
+
+    File readFile() const;
+    std::optional<FileHeader> readHeader() const;
     void load(std::vector<std::byte>& initialData);
     void save(bool final);
     void run();
@@ -33,7 +54,9 @@ private:
     VkPipelineCache cache = VK_NULL_HANDLE;
     PipelineCacheSynchronization synchronization;
     std::filesystem::path path;
-    std::size_t savedBytes = 0;
+    std::size_t loadedBytes = 0;
+    std::size_t settledBytes = 0;
+    std::optional<FileHeader> settledFile;
     std::mutex mutex;
     std::condition_variable wake;
     bool stopping = false;

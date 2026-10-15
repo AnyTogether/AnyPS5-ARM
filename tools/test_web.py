@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", type=Path, required=True)
     args = parser.parse_args()
+    subprocess.run(["node", "--test", str(ROOT / "demo/web/tests/output-directory.test.mjs")], check=True)
     with tempfile.TemporaryDirectory(prefix="anyps5-web-") as directory:
         fixture = Path(directory)
         (fixture / "main.elf").write_bytes(main_fixture())

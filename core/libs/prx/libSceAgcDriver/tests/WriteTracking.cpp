@@ -570,6 +570,29 @@ void CheckImportWindow() {
     Require(!UnchangedSince(base, Block, after), "a store after the import window was missed");
 }
 
+void CheckImportWindowOtherThread() {
+    void* memory = AllocateWatched(2 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    auto* bytes = static_cast<volatile std::uint8_t*>(memory);
+    std::memset(memory, 0x11, 2 * Block);
+    const auto synced = CollectWritesUncached(base, 2 * Block);
+    Require(synced != 0, "the other-thread import window block is not collected");
+    Require(ImportWatched(base, 2 * Block, [&] {
+        std::thread store([&] {
+            bytes[0x100] = 0x11;
+            bytes[Block + 0x100] = 0x77;
+        });
+        store.join();
+        return true;
+    }), "the other-thread import window import failed");
+    const std::array<std::uint64_t, 2> generations{synced, synced};
+    std::array<std::uint8_t, 2> changed{};
+    std::array<std::uint8_t, 2> cpu{};
+    Require(ChangedBlocks(base, 2 * Block, generations, changed, cpu), "the other-thread import window block is not tracked");
+    Require(changed[0] == BlockUnchanged && cpu[0] == 1, "a same-value store from another thread within an import window lost its possible CPU touch");
+    Require(changed[1] == BlockWritten && WrittenSince(base + Block, Block, synced) && cpu[1] == 1, "a store of new bytes from another thread within an import window was missed");
+}
+
 void CheckImportWindowZeroPages() {
     void* memory = AllocateWatched(5 * Block);
     const auto base = reinterpret_cast<std::uint64_t>(memory);
@@ -824,6 +847,7 @@ int main() {
         CheckCollectBoundaries();
         CheckImportWindow();
         CheckImportWindowZeroPages();
+        CheckImportWindowOtherThread();
         CheckUnwatchedImport();
         CheckCommittedRanges();
     } catch (const std::exception& error) {

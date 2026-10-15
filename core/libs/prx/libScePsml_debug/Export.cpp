@@ -139,15 +139,13 @@ int APS5_VABI scePsmlMfsr2Init() {
     return 0;
 }
 
-APS5_EXPORT("xNZM9Y5lf-M", scePsmlUnknown01);
-int APS5_VABI scePsmlUnknown01(void) {
-    NotImplemented_nid_no_patch("xNZM9Y5lf-M");
+int APS5_VABI scePsmlMfsrEnableSpecularAA() {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-APS5_EXPORT("lcZD9tJraAw", scePsmlUnknown02);
-int APS5_VABI scePsmlUnknown02(void) {
-    NotImplemented_nid_no_patch("lcZD9tJraAw");
+int APS5_VABI scePsmlMfsrEnableQuality8K() {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

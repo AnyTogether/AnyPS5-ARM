@@ -24,6 +24,9 @@ void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option) {
         } else if (info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_FILTER) {
             if (info.option != nullptr || info.state_size != 0 || info.state_offset != 0) APS5_INVALID_ARG_EX;
             if (info.source_buffer_id != 0 || info.extra_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
+        } else if (info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX) {
+            if (info.source_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
+            if (info.option != nullptr && info.option->size < sizeof(Ngs2CustomModuleOption)) APS5_INVALID_ARG_EX;
         } else {
             throw std::runtime_error("NGS2: custom module id " + Ngs2Hex(info.module_id) + " is not implemented");
         }
@@ -43,23 +46,32 @@ void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option) {
     rack.customModuleIds.resize(option.num_modules);
     rack.userFx.resize(option.num_modules);
     rack.userFxCommon.resize(option.num_modules);
-    for (auto& voice : rack.voices) voice.userFx.resize(option.num_modules);
+    for (auto& voice : rack.voices) {
+        voice.userFx.resize(option.num_modules);
+        voice.customUserFx.resize(option.num_modules);
+    }
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
         rack.customModuleIds[m] = option.module[m].module_id;
         if (option.module[m].module_id == SCE_NGS2_CUSTOM_MODULE_ID_FILTER) continue;
-        const auto& module = *reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(option.module[m].option);
-        rack.userFx[m] = module;
-        rack.userFxCommon[m].resize(module.common_size);
-        for (std::uint32_t i = 0; i < rack.voices.size(); i++) {
-            auto& fx = rack.voices[i].userFx[m];
-            fx.param.resize(module.param_size);
-            fx.work.resize(module.work_size);
-            fx.state.resize(option.module[m].state_size);
-            fx.flags = USER_FX2_FLAG_FIRST_PROCESS;
-            if (module.setup_handler == nullptr) continue;
-            auto context = UserFxContext(rack, m, i);
-            const int result = module.setup_handler(&context);
-            if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx2 setup handler failed with " + std::to_string(result));
+        if (option.module[m].module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) {
+            const auto& module = *reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(option.module[m].option);
+            rack.userFx[m] = module;
+            rack.userFxCommon[m].resize(module.common_size);
+            for (std::uint32_t i = 0; i < rack.voices.size(); i++) {
+                auto& fx = rack.voices[i].userFx[m];
+                fx.param.resize(module.param_size);
+                fx.work.resize(module.work_size);
+                fx.state.resize(option.module[m].state_size);
+                fx.flags = USER_FX2_FLAG_FIRST_PROCESS;
+                if (module.setup_handler == nullptr) continue;
+                auto context = UserFxContext(rack, m, i);
+                const int result = module.setup_handler(&context);
+                if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx2 setup handler failed with " + std::to_string(result));
+            }
+        } else if (option.module[m].module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX) {
+            for (std::uint32_t i = 0; i < rack.voices.size(); i++) {
+                rack.voices[i].customUserFx[m].flags = 1;
+            }
         }
     }
 }
@@ -91,6 +103,17 @@ static void SetUserFxParam(Ngs2Voice& voice, std::uint32_t index, const Ngs2Cust
     if (param.data_size != fx.param.size() || (param.data == nullptr && param.data_size != 0)) APS5_INVALID_ARG_EX;
     if (param.data_size != 0) std::memcpy(fx.param.data(), param.data, param.data_size);
     fx.flags |= USER_FX2_FLAG_PARAM_CHANGED;
+}
+
+static void SetCustomUserFxParam(Ngs2Voice& voice, std::uint32_t index, const Ngs2CustomVoiceUserFxParam& param) {
+    if (index >= voice.customUserFx.size()) APS5_INVALID_ARG_EX;
+    if (index >= voice.rack->customModuleIds.size() || voice.rack->customModuleIds[index] != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX) {
+        APS5_INVALID_ARG_EX;
+    }
+    auto& fx = voice.customUserFx[index];
+    fx.handler = param.handler;
+    fx.data = {param.user_data0, param.user_data1, param.user_data2};
+    fx.flags = 1;
 }
 
 void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
@@ -130,24 +153,41 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         SetUserFxParam(voice, param.id & 0x1f, ParamAs<Ngs2CustomVoiceUserFx2Param>(param));
         return;
     }
+    if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX) {
+        if (rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
+        SetCustomUserFxParam(voice, param.id & 0x1f, ParamAs<Ngs2CustomVoiceUserFxParam>(param));
+        return;
+    }
     if (rackId != SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) throw std::invalid_argument("NGS2: voice param " + Ngs2Hex(param.id) + " belongs to another rack");
     throw std::runtime_error("NGS2: voice param " + Ngs2Hex(param.id) + " is not implemented");
 }
 
 void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate) {
-    if (voice.userFx.empty() || std::none_of(voice.rack->customModuleIds.begin(), voice.rack->customModuleIds.end(),
-                                             [](std::uint32_t id) { return id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2; })) return;
+    if (voice.userFx.empty() && voice.customUserFx.empty()) return;
     std::vector<float*> channels(voice.channels);
     for (std::uint32_t c = 0; c < voice.channels; c++) channels[c] = voice.samples.data() + static_cast<std::size_t>(c) * grain;
-    for (std::size_t m = 0; m < voice.userFx.size(); m++) {
-        if (voice.rack->customModuleIds[m] != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) continue;
-        auto& fx = voice.userFx[m];
-        const auto& module = voice.rack->userFx[m];
-        Ngs2UserFx2ProcessContext context{channels.data(), voice.rack->userFxCommon[m].data(), fx.param.data(), fx.work.data(), fx.state.data(),
-                                          module.user_data, fx.flags, voice.channels, voice.channels, grain, sampleRate, 0, {}};
-        const int result = module.process_handler(&context);
-        if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx2 process handler failed with " + std::to_string(result));
-        fx.flags = 0;
+    for (std::size_t m = 0; m < voice.rack->customModuleIds.size(); m++) {
+        if (voice.rack->customModuleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) {
+            if (!voice.hasSamples) continue;
+            auto& fx = voice.userFx[m];
+            const auto& module = voice.rack->userFx[m];
+            if (module.process_handler == nullptr) continue;
+            Ngs2UserFx2ProcessContext context{channels.data(), voice.rack->userFxCommon[m].data(), fx.param.data(), fx.work.data(), fx.state.data(),
+                                              module.user_data, fx.flags, voice.channels, voice.channels, grain, sampleRate, 0, {}};
+            const int result = module.process_handler(&context);
+            if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx2 process handler failed with " + std::to_string(result));
+            fx.flags = 0;
+        } else if (voice.rack->customModuleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX) {
+            if (m < voice.customUserFx.size() && voice.customUserFx[m].handler != nullptr) {
+                auto& fx = voice.customUserFx[m];
+                Ngs2UserFxProcessContext context{channels.data(), fx.data[0], fx.data[1], fx.data[2],
+                                                 fx.flags, voice.channels, grain, sampleRate};
+                const int result = fx.handler(&context);
+                if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx process handler failed with " + std::to_string(result));
+                fx.flags = 0;
+                voice.hasSamples = std::any_of(voice.samples.begin(), voice.samples.end(), [](float sample) { return sample != 0.0f; });
+            }
+        }
     }
 }
 

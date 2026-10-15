@@ -249,6 +249,8 @@ struct Sock {
     int rcv_timeout_us = 0;
     int snd_timeout_us = 0;
     int reported_error = 0;
+    int snd_buffer = 0;
+    int rcv_buffer = 0;
 };
 
 #ifdef _WIN32
@@ -1093,6 +1095,8 @@ int APS5_VABI sceNetSetsockopt(int s, int level, int optname, const void* optval
         if (optname == NET_SO_NBIO) it->second.nonblock = value != 0;
         if (optname == NET_SO_RCVTIMEO) it->second.rcv_timeout_us = value;
         if (optname == NET_SO_SNDTIMEO) it->second.snd_timeout_us = value;
+        if (optname == NET_SO_SNDBUF) it->second.snd_buffer = value;
+        if (optname == NET_SO_RCVBUF) it->second.rcv_buffer = value;
     }
     return 0;
 }
@@ -1127,6 +1131,16 @@ int APS5_VABI sceNetGetsockopt(int s, int level, int optname, void* optval, uint
             else if (pending != 0) it->second.reported_error = pending;
 #endif
             value = pending == 0 ? 0 : net_error(pending);
+            break;
+        }
+        case NET_SO_SNDBUF:
+        case NET_SO_RCVBUF: {
+            const bool send = optname == NET_SO_SNDBUF;
+            value = send ? socket.snd_buffer : socket.rcv_buffer;
+            if (value != 0) break;
+            NativeLength size = sizeof(value);
+            if (::getsockopt(socket.native->value, SOL_SOCKET, send ? SO_SNDBUF : SO_RCVBUF, reinterpret_cast<char*>(&value), &size) != 0)
+                return fail(native_error());
             break;
         }
         default: return fail(NET_EOPNOTSUPP);

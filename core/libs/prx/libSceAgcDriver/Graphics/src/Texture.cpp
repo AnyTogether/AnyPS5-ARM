@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/CaptureTrace.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/SlimMutex.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
@@ -787,7 +788,8 @@ Texture::Texture(const Context& context, const std::shared_ptr<StorageTexture>& 
     }
 }
 
-Texture::Texture(const Context& context, VkImage depthImage, VkFormat depthFormat, VkImageAspectFlags aspect, VkComponentMapping components, VkImageViewType viewType, std::uint32_t baseLayer) : context(context) {
+Texture::Texture(const Context& context, VkImage depthImage, VkFormat depthFormat, VkImageAspectFlags aspect, VkComponentMapping components, VkImageViewType viewType, std::uint32_t baseLayer, std::shared_ptr<OwnedImage> owner) : context(context), owned(std::move(owner)) {
+    Require(owned == nullptr || (owned->image == depthImage && owned->context.device == context.device), "a depth sampled view must retain its own device and image");
     layout = VK_IMAGE_LAYOUT_GENERAL;
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = depthImage;
@@ -1196,7 +1198,7 @@ private:
 
 // Storage images whose results have not reached guest memory yet.
 struct PendingWrites {
-    std::mutex mutex;
+    SlimMutex mutex;
     PendingList textures;
     // Images taken out of `textures` by a FlushPending still storing them (see adjacentPendingUnchanged).
     std::vector<StorageTexture*> flushing;
@@ -2597,6 +2599,53 @@ StorageTexture::PaddingSeeds StorageTexture::paddingSeeds(const HostImport& impo
     return seeds;
 }
 
+StorageTexture::PaddingSeeds StorageTexture::paddingSeeds(std::span<const ImportSegment> segments, const std::vector<CopiedBytes>& copied) const {
+    if (segments.size() == 1) return paddingSeeds(*segments.front().import, copied);
+    PaddingSeeds merged;
+    for (const auto& segment : segments) {
+        const auto segmentBegin = segment.begin - descriptor.baseAddress;
+        const auto segmentEnd = segment.end - descriptor.baseAddress;
+        std::vector<CopiedBytes> inside;
+        for (const auto& range : copied) {
+            const auto begin = std::max(range.begin, segmentBegin);
+            const auto end = std::min(range.end, segmentEnd);
+            if (begin < end) inside.push_back({begin, end, range.scratch + (begin - range.begin)});
+        }
+        if (inside.empty()) continue;
+        auto seeds = paddingSeeds(*segment.import, std::move(inside));
+        for (auto& entry : seeds.copies) merged.copies.push_back(std::move(entry));
+        for (auto& slab : seeds.slabs) merged.slabs.push_back(std::move(slab));
+        merged.importReads.insert(merged.importReads.end(), seeds.importReads.begin(), seeds.importReads.end());
+    }
+    return merged;
+}
+
+std::vector<StorageTexture::ImportSegment> StorageTexture::importSegments() const {
+    const auto begin = descriptor.baseAddress;
+    const auto end = begin + guestBytes;
+    const bool unitAligned = blockUnits && UnitShadowEnabled();
+    const auto samePiece = [](const RegisteredPiece& a, const RegisteredPiece& b) { return a.address == b.address && a.bytes == b.bytes && a.writable == b.writable && a.gpu == b.gpu; };
+    for (std::uint32_t attempt = 0; attempt < 2; ++attempt) {
+        std::vector<RegisteredPiece> pieces;
+        if (!RegisteredReadableCovers(begin, static_cast<std::size_t>(guestBytes), &pieces) || pieces.size() < 2) return {};
+        if (std::any_of(pieces.begin(), pieces.end(), [&](const RegisteredPiece& piece) { return piece.writable != pieces.front().writable || piece.gpu != pieces.front().gpu; })) return {};
+        std::vector<ImportSegment> segments;
+        const auto proof = HostImportsIdentity(context);
+        for (const auto& piece : pieces) {
+            const auto from = std::max(piece.address, begin);
+            const auto to = std::min(piece.address + piece.bytes, end);
+            const auto* import = HostImportFor(context, from, static_cast<std::size_t>(to - from));
+            if (import == nullptr) return {};
+            if (!segments.empty() && segments.back().import == import) segments.back().end = to;
+            else if (!segments.empty() && unitAligned && from % 65536 != 0) return {};
+            else segments.push_back({import, from, to});
+        }
+        std::vector<RegisteredPiece> still;
+        if (HostImportsUnchanged(context, proof) && RegisteredReadableCovers(begin, static_cast<std::size_t>(guestBytes), &still) && std::equal(pieces.begin(), pieces.end(), still.begin(), still.end(), samePiece)) return segments;
+    }
+    return {};
+}
+
 void StorageTexture::recordDirectUploadBarrier(VkCommandBuffer commands, bool discard) {
     const VkMemoryBarrier sourceReady{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
     VkImageMemoryBarrier toWrite{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -2764,7 +2813,7 @@ std::uint64_t StorageTexture::uploadWindows(const HostImport& import, std::span<
     return uploadedBytes;
 }
 
-std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep, std::uint64_t firstStored, std::uint64_t lastStored, std::vector<ShadowedRange>& shadowed, std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported, Buffer* save) {
+std::uint64_t StorageTexture::writeBackWindows(std::span<const ImportSegment> segments, std::span<const std::pair<std::uint64_t, std::uint64_t>> keep, std::uint64_t firstStored, std::uint64_t lastStored, std::vector<ShadowedRange>& shadowed, std::vector<std::pair<std::uint64_t, std::uint64_t>>& imported, Buffer* save) {
     const auto elementBytes = BytesPerElement(descriptor.format);
     std::vector<std::pair<std::uint64_t, std::uint64_t>> runs;
     std::uint64_t storedBytes = 0;
@@ -2802,23 +2851,34 @@ std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::sp
         std::shared_ptr<ShadowSlabPin> pin;
         std::vector<VkBufferCopy> copies;
     };
+    struct SeedUnit {
+        std::uint64_t begin;
+        std::uint64_t end;
+        std::shared_ptr<ShadowSlab> slab;
+        const HostImport* import;
+    };
     std::vector<SlabPieces> slabPieces;
-    std::vector<VkBufferCopy> importCopies;
-    std::vector<ShadowedRange> seeds;
+    std::vector<std::vector<VkBufferCopy>> importCopies(segments.size());
+    std::vector<SeedUnit> seeds;
     const auto addPiece = [&](std::uint64_t scratchOffset, std::uint64_t guestBegin, std::uint64_t guestEnd) {
         while (guestBegin < guestEnd) {
-            const auto pieceEnd = UnitShadowEnabled() ? std::min(guestEnd, SlabBoundary(import, guestBegin)) : guestEnd;
+            std::size_t segment = 0;
+            while (segment + 1 < segments.size() && segments[segment + 1].begin <= guestBegin) ++segment;
+            Require(segments[segment].begin <= guestBegin && guestBegin < segments[segment].end, "storage image write-back piece lies outside its import segments");
+            const auto& import = *segments[segment].import;
+            auto pieceEnd = std::min(guestEnd, segments[segment].end);
+            if (UnitShadowEnabled()) pieceEnd = std::min(pieceEnd, SlabBoundary(import, guestBegin));
             const auto destination = ShadowDestinationFor(context, import, guestBegin, pieceEnd);
             if (destination.has_value()) {
                 if (slabPieces.empty() || slabPieces.back().slab != destination->slab) slabPieces.push_back({destination->slab, destination->pin, {}});
                 slabPieces.back().copies.push_back({scratchOffset, destination->offset, pieceEnd - guestBegin});
                 for (const auto& [seedBegin, seedEnd] : destination->seedUnits) {
-                    if (std::none_of(seeds.begin(), seeds.end(), [&](const ShadowedRange& seed) { return seed.begin == seedBegin; })) seeds.push_back({seedBegin, seedEnd, destination->slab});
+                    if (std::none_of(seeds.begin(), seeds.end(), [&](const SeedUnit& seed) { return seed.begin == seedBegin; })) seeds.push_back({seedBegin, seedEnd, destination->slab, &import});
                 }
                 if (!shadowed.empty() && shadowed.back().end == guestBegin && shadowed.back().slab == destination->slab) shadowed.back().end = pieceEnd;
                 else shadowed.push_back({guestBegin, pieceEnd, destination->slab});
             } else {
-                importCopies.push_back({scratchOffset, guestBegin - import.base, pieceEnd - guestBegin});
+                importCopies[segment].push_back({scratchOffset, guestBegin - import.base, pieceEnd - guestBegin});
                 if (!imported.empty() && imported.back().second == guestBegin) imported.back().second = pieceEnd;
                 else imported.emplace_back(guestBegin, pieceEnd);
             }
@@ -2837,7 +2897,7 @@ std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::sp
             addPiece(scratchPositions[i] + (begin - window.tiledBegin), descriptor.baseAddress + begin, descriptor.baseAddress + end);
         }
     }
-    std::sort(seeds.begin(), seeds.end(), [](const ShadowedRange& a, const ShadowedRange& b) { return a.begin < b.begin; });
+    std::sort(seeds.begin(), seeds.end(), [](const SeedUnit& a, const SeedUnit& b) { return a.begin < b.begin; });
     std::vector<CopiedBytes> copied;
     for (std::size_t i = 0; i < windows.size(); ++i) {
         const auto& window = windows[i];
@@ -2852,7 +2912,7 @@ std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::sp
     if (save != nullptr) {
         for (const auto& piece : copied) saves.push_back({piece.scratch, piece.begin, piece.end - piece.begin});
     }
-    const auto padding = paddingSeeds(import, std::move(copied));
+    const auto padding = paddingSeeds(segments, copied);
     // A queued label or key store inside a seeded unit lands before the seed copies the import.
     auto flushBegin = firstStored;
     auto flushEnd = lastStored;
@@ -2911,10 +2971,10 @@ std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::sp
             RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, transferAccess);
             Recorder::CountBarriers(Recorder::CommandClass::StorageWriteBack);
         }
-        for (const auto& [begin, end, slab] : seeds) {
+        for (const auto& [begin, end, slab, import] : seeds) {
             // The piece's own slab (a seeded unit is one the piece covers partly).
-            const VkBufferCopy seed{begin - import.base, SlabOffset(import, *slab, begin), end - begin};
-            context.Resolved(&DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer")(commands, import.buffer, slab->buffer, 1, &seed);
+            const VkBufferCopy seed{begin - import->base, SlabOffset(*import, *slab, begin), end - begin};
+            context.Resolved(&DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer")(commands, import->buffer, slab->buffer, 1, &seed);
             NoteShadowSeed(begin, end);
         }
         // The padding's current bytes, under the retile that follows (the import-ready barrier
@@ -2960,7 +3020,9 @@ std::uint64_t StorageTexture::writeBackWindows(const HostImport& import, std::sp
         context.Function<PFN_vkCmdPipelineBarrier>("vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &scratchDone, 0, nullptr, 0, nullptr);
         const auto copyBuffer = context.Resolved(&DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer");
         for (const auto& pieces : slabPieces) copyBuffer(commands, tiledScratch->Handle(), pieces.slab->buffer, static_cast<std::uint32_t>(pieces.copies.size()), pieces.copies.data());
-        if (!importCopies.empty()) copyBuffer(commands, tiledScratch->Handle(), import.buffer, static_cast<std::uint32_t>(importCopies.size()), importCopies.data());
+        for (std::size_t segment = 0; segment < segments.size(); ++segment) {
+            if (!importCopies[segment].empty()) copyBuffer(commands, tiledScratch->Handle(), segments[segment].import->buffer, static_cast<std::uint32_t>(importCopies[segment].size()), importCopies[segment].data());
+        }
         if (!saves.empty()) copyBuffer(commands, tiledScratch->Handle(), save->Handle(), static_cast<std::uint32_t>(saves.size()), saves.data());
     }
     VkImageMemoryBarrier backToGeneral = toSource;
@@ -3739,9 +3801,11 @@ bool StorageTexture::ScanPending(std::span<PendingQuery> queries) {
         query.found = nullptr;
         if (query.end <= query.begin) continue;
         const auto bytes = static_cast<std::size_t>(query.end - query.begin);
-        for (const auto* texture : pending.textures) {
-            if (query.found == nullptr && texture->descriptor.baseAddress == query.begin && texture->guestBytes >= bytes) query.found = texture;
-            if (texture != query.except && texture->overlaps(query.begin, bytes)) query.overlaps = true;
+        if (pending.textures.MayOverlap(query.begin, bytes)) {
+            for (const auto* texture : pending.textures) {
+                if (query.found == nullptr && texture->descriptor.baseAddress == query.begin && texture->guestBytes >= bytes) query.found = texture;
+                if (texture != query.except && texture->overlaps(query.begin, bytes)) query.overlaps = true;
+            }
         }
         for (const auto* texture : pending.flushing) {
             if (texture != query.except && texture->overlaps(query.begin, bytes)) query.overlaps = true;
@@ -4616,7 +4680,18 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
     // own stamps, so every later import writer stamps newer.
     std::vector<ShadowedRange> shadowed;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> imported;
-    const HostImport* shadowImport = nullptr;
+    std::vector<ImportSegment> segments;
+    const auto markShadowed = [&](std::uint64_t generation) {
+        for (const auto& segment : segments) {
+            std::vector<ShadowedRange> ranges;
+            for (const auto& range : shadowed) {
+                if (range.begin < segment.begin || range.begin >= segment.end) continue;
+                Require(range.end <= segment.end, "a shadowed storage write-back range crosses the end of its import segment");
+                ranges.push_back(range);
+            }
+            if (!ranges.empty()) MarkShadowed(*segment.import, ranges, generation);
+        }
+    };
     const auto settle = [&](bool memoizedCollect) {
         for (std::uint32_t layer = 0; layer < trackedLayers; ++layer) {
             if (layers[layer]) layerPending[layer] = false;
@@ -4630,7 +4705,7 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
         }
         refreshGeneration();
         advanceAdjacent(adjacent, now, firstBlock, lastBlock);
-        if (!shadowed.empty()) MarkShadowed(*shadowImport, shadowed, now);
+        if (!shadowed.empty()) markShadowed(now);
     };
     if (keep.empty()) {
         // Every selected block was written by the CPU since the layer's generation: nothing to
@@ -4641,15 +4716,16 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
         settle(true);
         return;
     }
-    if (const auto* import = HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes))) {
+    if (const auto* import = HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes))) segments.push_back({import, descriptor.baseAddress, descriptor.baseAddress + guestBytes});
+    else segments = importSegments();
+    if (!segments.empty()) {
         Require(!unsavedOutsideWatch, "storing storage image results pending over memory outside the write watch without the guest bytes saved before them is not implemented");
         // Outside the write watch the stored bytes are what the next store compares with.
         const auto saveUnits = GuestMemory::Watched(firstStored, static_cast<std::size_t>(lastStored - firstStored)) ? std::vector<std::uint32_t>{} : prepareStoredSave(layers, skippedLayer);
         if (blockUnits) {
             // The kept blocks alone pass through the retiler (windows of their slices).
-            shadowImport = import;
-            const auto written = writeBackWindows(*import, keep, firstStored, lastStored, shadowed, imported, saveUnits.empty() ? nullptr : savedBytes.get());
-            countStorageWriteBack(written, true);
+            const auto storedBytes = writeBackWindows(segments, keep, firstStored, lastStored, shadowed, imported, saveUnits.empty() ? nullptr : savedBytes.get());
+            countStorageWriteBack(storedBytes, true);
             if (profile) Profile().storageGpu += timer.lap();
             forgetStored();
             traceKeyStore("block write-back", descriptor, guestBytes);
@@ -4672,7 +4748,7 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
         auto tiledScratch = std::make_shared<DeviceBuffer>(context, static_cast<std::size_t>(guestBytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         std::vector<CopiedBytes> copied;
         for (const auto& [from, to] : keep) copied.push_back({from - descriptor.baseAddress, to - descriptor.baseAddress, from - descriptor.baseAddress});
-        const auto padding = paddingSeeds(*import, std::move(copied));
+        const auto padding = paddingSeeds(segments, copied);
         detiler.BeginBatch();
         auto* recorder = Recorder::Active();
         std::unique_ptr<CommandBatch> batch;
@@ -4699,7 +4775,6 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
             batch = std::make_unique<CommandBatch>(context);
             commands = batch->Handle();
         }
-        const auto importOffset = descriptor.baseAddress - import->base;
         // The tracked layers are the array layers when there are several; one tracked layer means
         // the whole surface.
         const auto* storedLayers = trackedLayers == arrayLayers && trackedLayers > 1 ? &layers : nullptr;
@@ -4736,9 +4811,15 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
         {
             const auto scratchDone = WholeBufferBarrier(tiledScratch->Handle(), VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
             context.Function<PFN_vkCmdPipelineBarrier>("vkCmdPipelineBarrier")(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &scratchDone, 0, nullptr);
-            std::vector<VkBufferCopy> copies;
-            for (const auto& [from, to] : keep) copies.push_back({from - descriptor.baseAddress, importOffset + (from - descriptor.baseAddress), to - from});
-            if (!copies.empty()) context.Function<PFN_vkCmdCopyBuffer>("vkCmdCopyBuffer")(commands, tiledScratch->Handle(), import->buffer, static_cast<std::uint32_t>(copies.size()), copies.data());
+            for (const auto& segment : segments) {
+                std::vector<VkBufferCopy> copies;
+                for (const auto& [from, to] : keep) {
+                    const auto begin = std::max(from, segment.begin);
+                    const auto end = std::min(to, segment.end);
+                    if (begin < end) copies.push_back({begin - descriptor.baseAddress, begin - segment.import->base, end - begin});
+                }
+                if (!copies.empty()) context.Function<PFN_vkCmdCopyBuffer>("vkCmdCopyBuffer")(commands, tiledScratch->Handle(), segment.import->buffer, static_cast<std::uint32_t>(copies.size()), copies.data());
+            }
             if (!saveUnits.empty()) {
                 std::vector<VkBufferCopy> saves;
                 for (const auto& [from, to] : keep) saves.push_back({from - descriptor.baseAddress, from - descriptor.baseAddress, to - from});

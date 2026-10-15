@@ -74,21 +74,22 @@ def check_diagnostic_inputs(relinker, work):
             assert diagnostics.read_bytes() == (b"" if enabled else original)
 
 
-def check_registry_inputs(relinker, work, windows):
+def check_registry_inputs(relinker, work, windows, needed=False):
     options = ["--windows"] if windows else []
     for module_registry in (False, True):
         for bundled in (False, True):
             for alias in ("direct", "hardlink", "symlink"):
                 if bundled and alias == "direct":
                     continue
-                case = work / f"registry-{windows}-{module_registry}-{bundled}-{alias}"
+                case = work / f"registry-{windows}-{module_registry}-{bundled}-{alias}-{needed}"
                 modules = case / "sce_module"
                 modules.mkdir(parents=True)
                 module = modules / "sample.prx"
                 module_original = bytes(guest_fixture(PLAIN_SITE))
                 module.write_bytes(module_original)
                 output = case / ("output.exe" if windows else "output.elf")
-                registries = [case / "output.registry.json", case / "output.sample.prx.guest.prx.registry.json"]
+                suffix = ".needed.json" if needed else ".registry.json"
+                registries = [case / ("output" + suffix), case / ("output.sample.prx.guest.prx" + suffix)]
                 registry = registries[int(module_registry)]
                 source = registry if alias == "direct" else case / "input.elf"
                 original = bytes(main_fixture())
@@ -111,7 +112,8 @@ def check_registry_inputs(relinker, work, windows):
                 output.write_bytes(previous_output)
                 result = subprocess.run([str(relinker), *options, "--registry", str(source), str(output)],
                                         capture_output=True, text=True, timeout=20)
-                expected = "Registry output would overwrite an input module" if bundled else "Registry output would overwrite the input executable"
+                kind = "Needed libraries" if needed else "Registry"
+                expected = f"{kind} output would overwrite an input module" if bundled else f"{kind} output would overwrite the input executable"
                 assert result.returncode == 2 and expected in result.stderr, (result.returncode, result.stdout, result.stderr)
                 assert source.read_bytes() == original and module.read_bytes() == module_original
                 assert output.read_bytes() == previous_output and untouched.read_bytes() == previous_registry
@@ -130,7 +132,8 @@ def check_registry_after_failed_patch(relinker, work):
     output = case / "output.exe"
     previous_output = b"previous executable"
     output.write_bytes(previous_output)
-    registries = [case / "output.registry.json", case / "output.sample.prx.guest.prx.registry.json"]
+    registries = [case / "output.registry.json", case / "output.sample.prx.guest.prx.registry.json",
+                  case / "output.needed.json", case / "output.sample.prx.guest.prx.needed.json"]
     previous_registry = b"previous registry"
     for registry in registries:
         registry.write_bytes(previous_registry)
@@ -228,6 +231,7 @@ def main():
         for windows in (False, True):
             options = ["--windows"] if windows else []
             check_registry_inputs(relinker, work, windows)
+            check_registry_inputs(relinker, work, windows, needed=True)
             for bundled in (False, True):
                 for alias in ("direct", "normalized", "hardlink", "symlink"):
                     case = work / f"{windows}-{bundled}-{alias}"

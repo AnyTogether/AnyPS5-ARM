@@ -2,6 +2,7 @@
 #include "Optimization/SrtWalker/SrtAddressArithmetic.hpp"
 #include "Optimization/SrtWalker/SrtInstructionPredicates.hpp"
 #include "IntermediateRepresentation/IrBuilder.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -10,10 +11,52 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <optional>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace ShaderRecompiler::Detail {
 
-bool Evaluator::Evaluate(IrValue* value, std::uint32_t& result) {
+namespace {
+
+struct DenseValuePool {
+    std::vector<std::unique_ptr<std::vector<DenseValues::Slot>>> arrays;
+    std::vector<std::vector<DenseValues::Slot>*> free;
+    std::uint64_t stamp = 0;
+};
+
+DenseValuePool& denseValuePool() {
+    struct DenseValuePoolStorage {};
+    return HostThreadLocal<DenseValuePool, DenseValuePoolStorage>();
+}
+
+}
+
+DenseValues::DenseValues(std::size_t values) : _size(values) {
+    if (values == 0u) return;
+    auto& pool = denseValuePool();
+    if (pool.free.empty()) {
+        pool.arrays.push_back(std::make_unique<std::vector<Slot>>());
+        _array = pool.arrays.back().get();
+    } else {
+        _array = pool.free.back();
+        pool.free.pop_back();
+    }
+    if (_array->size() < values) _array->resize(values);
+    _slots = _array->data();
+    pool.stamp += 2u;
+    _stamp = pool.stamp;
+}
+
+DenseValues::~DenseValues() {
+    if (_array == nullptr) return;
+    denseValuePool().free.push_back(_array);
+}
+
+template<typename TNode>
+bool BasicEvaluator<TNode>::Evaluate(TNode value, std::uint32_t& result) {
     std::uint64_t wide = 0;
     if (!EvaluateWide(value, wide)) {
         return false;
@@ -22,63 +65,90 @@ bool Evaluator::Evaluate(IrValue* value, std::uint32_t& result) {
     return true;
 }
 
-bool Evaluator::EvaluateWide(IrValue* raw, std::uint64_t& result) {
-    IrValue* value = raw->Resolve();
-    if (value->HasImmediate()) {
-        switch (value->Type()) {
-            case IrType::Bool: result = value->ImmediateBool() ? 1u : 0u; return true;
-            case IrType::U8: result = value->ImmediateU8(); return true;
-            case IrType::U16: result = value->ImmediateU16(); return true;
-            case IrType::U32: result = value->ImmediateU32(); return true;
-            case IrType::U64: result = value->ImmediateU64(); return true;
-            case IrType::F32: result = Float32Bits(value->ImmediateF32()); return true;
+template<typename TNode>
+bool BasicEvaluator<TNode>::EvaluateWide(TNode value, std::uint64_t& result) {
+    if (value.HasImmediate()) {
+        const auto bits = value.ImmediateBits();
+        switch (value.Type()) {
+            case IrType::Bool: result = bits != 0u ? 1u : 0u; return true;
+            case IrType::U8: result = static_cast<std::uint8_t>(bits); return true;
+            case IrType::U16: result = static_cast<std::uint16_t>(bits); return true;
+            case IrType::U32: result = static_cast<std::uint32_t>(bits); return true;
+            case IrType::U64: result = bits; return true;
+            case IrType::F32: result = Float32Bits(std::bit_cast<float>(static_cast<std::uint32_t>(bits))); return true;
             default: return false;
         }
     }
-    if (value->Opcode() == IrOpcode::Void) {
+    if (value.Opcode() == IrOpcode::Void) {
         return false;
     }
-    IrValue* inst = value;
-    if (_activeMask != nullptr && IsRuntimeSelect(inst->Opcode()) && inst->ArgumentCount() == 3 && inst->Argument(0)->Resolve() == _activeMask) {
-        return EvaluateWide(inst->Argument(1), result);
+    const TNode& inst = value;
+    if (_masked && IsRuntimeSelect(inst.Opcode()) && inst.ArgumentCount() == 3 && inst.Argument(0) == _activeMask) {
+        return EvaluateWide(inst.Argument(1), result);
     }
-    if (_cache.Find(inst, result)) {
+    if (inst.Id() < _dense.Size()) {
+        auto& slot = _dense.At(inst.Id());
+        if (slot.stamp == _dense.Done()) {
+            result = slot.value;
+            return true;
+        }
+        if (slot.stamp == _dense.Visiting()) {
+            return false;
+        }
+        slot.stamp = _dense.Visiting();
+        std::uint64_t out = 0;
+        if (!EvaluateInst(inst, out)) {
+            slot.stamp = 0;
+            static const bool debug = std::getenv("APS5_SRT_DEBUG") != nullptr;
+            if (debug) std::fprintf(stderr, "[srt] cannot evaluate %s (%zu arguments)\n", std::string(IrOpcodeName(inst.Opcode())).c_str(), inst.ArgumentCount());
+            return false;
+        }
+        slot = {_dense.Done(), out};
+        result = out;
         return true;
     }
-    if (std::find(_visiting.begin(), _visiting.end(), inst) != _visiting.end()) {
+    if (_cache.Find(inst.Value(), result)) {
+        return true;
+    }
+    if (std::find(_visiting.begin(), _visiting.end(), inst.Value()) != _visiting.end()) {
         return false;
     }
-    _visiting.push_back(inst);
+    _visiting.push_back(inst.Value());
     std::uint64_t out = 0;
-    const bool evaluated = EvaluateInst(*inst, out);
+    const bool evaluated = EvaluateInst(inst, out);
     _visiting.pop_back();
     if (!evaluated) {
         static const bool debug = std::getenv("APS5_SRT_DEBUG") != nullptr;
-        if (debug) std::fprintf(stderr, "[srt] cannot evaluate %s (%zu arguments)\n", std::string(IrOpcodeName(inst->Opcode())).c_str(), inst->ArgumentCount());
+        if (debug) std::fprintf(stderr, "[srt] cannot evaluate %s (%zu arguments)\n", std::string(IrOpcodeName(inst.Opcode())).c_str(), inst.ArgumentCount());
         return false;
     }
-    _cache.Insert(inst, out);
+    _cache.Insert(inst.Value(), out);
     result = out;
     return true;
 }
 
-float Evaluator::Float32(std::uint64_t bits) { return std::bit_cast<float>(static_cast<std::uint32_t>(bits)); }
+template<typename TNode>
+float BasicEvaluator<TNode>::Float32(std::uint64_t bits) { return std::bit_cast<float>(static_cast<std::uint32_t>(bits)); }
 
-std::uint64_t Evaluator::Float32Bits(float value) { return std::bit_cast<std::uint32_t>(value); }
+template<typename TNode>
+std::uint64_t BasicEvaluator<TNode>::Float32Bits(float value) { return std::bit_cast<std::uint32_t>(value); }
 
-bool Evaluator::Arg(IrValue& inst, std::size_t index, std::uint64_t& result) { return EvaluateWide(inst.Argument(index), result); }
+template<typename TNode>
+bool BasicEvaluator<TNode>::Arg(const TNode& inst, std::size_t index, std::uint64_t& result) { return EvaluateWide(inst.Argument(index), result); }
 
-bool Evaluator::EvaluatePhi(IrValue& inst, std::uint64_t& result) {
-    IrValue* value = ResolveInvariantPhi(_program, &inst);
-    return value != nullptr && EvaluateWide(value, result);
+template<typename TNode>
+bool BasicEvaluator<TNode>::EvaluatePhi(const TNode& inst, std::uint64_t& result) {
+    IrValue* value = ResolveInvariantPhi(_program, inst.Value());
+    return value != nullptr && EvaluateWide(TNode::From(_program, value), result);
 }
 
-bool Evaluator::EvaluateExtract(IrValue& inst, std::uint64_t& result) {
-    IrValue* index = inst.Argument(1)->Resolve();
-    if (!index->HasImmediate() || index->Type() != IrType::U32) {
+template<typename TNode>
+bool BasicEvaluator<TNode>::EvaluateExtract(const TNode& inst, std::uint64_t& result) {
+    const TNode index = inst.Argument(1);
+    if (!index.HasImmediate() || index.Type() != IrType::U32) {
         return false;
     }
-    const auto component = index->ImmediateU32();
+    const auto component = static_cast<std::uint32_t>(index.ImmediateBits());
     if (component >= 2u) {
         return false;
     }
@@ -90,17 +160,17 @@ bool Evaluator::EvaluateExtract(IrValue& inst, std::uint64_t& result) {
         result = static_cast<std::uint32_t>(packed >> (component * 32u));
         return true;
     }
-    IrValue* source = inst.Argument(0)->Resolve();
-    if (source->Opcode() == IrOpcode::Void) {
+    const TNode source = inst.Argument(0);
+    if (source.Opcode() == IrOpcode::Void) {
         return false;
     }
-    if (source->Opcode() == IrOpcode::CompositeConstructU32x2) {
-        return EvaluateWide(source->Argument(component), result);
+    if (source.Opcode() == IrOpcode::CompositeConstructU32x2) {
+        return EvaluateWide(source.Argument(component), result);
     }
-    if (source->Opcode() == IrOpcode::IAddCarry32) {
+    if (source.Opcode() == IrOpcode::IAddCarry32) {
         std::uint64_t lhs = 0;
         std::uint64_t rhs = 0;
-        if (!Arg(*source, 0, lhs) || !Arg(*source, 1, rhs)) {
+        if (!Arg(source, 0, lhs) || !Arg(source, 1, rhs)) {
             return false;
         }
         const auto sum = static_cast<std::uint64_t>(static_cast<std::uint32_t>(lhs)) + static_cast<std::uint32_t>(rhs);
@@ -110,20 +180,21 @@ bool Evaluator::EvaluateExtract(IrValue& inst, std::uint64_t& result) {
     return false;
 }
 
-bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
-    const auto flags = inst.Flags<MemoryFlags>();
+template<typename TNode>
+bool BasicEvaluator<TNode>::EvaluateRawRead(const TNode& inst, std::uint64_t& result) {
+    const auto flags = inst.template Flags<MemoryFlags>();
     if (flags.index >= _program.memoryInfo.size()) {
         return false;
     }
     const auto& mem = _program.memoryInfo[flags.index];
-    IrValue* handle = inst.Argument(0)->Resolve();
-    if (handle->Opcode() == IrOpcode::Void) {
+    const TNode handle = inst.Argument(0);
+    if (handle.Opcode() == IrOpcode::Void) {
         return false;
     }
     std::uint64_t low = 0;
     std::uint64_t high = 0;
     std::uint64_t offset = 0;
-    if (!Arg(*handle, 0, low) || !Arg(*handle, 1, high) || !Arg(inst, 1, offset)) {
+    if (!Arg(handle, 0, low) || !Arg(handle, 1, high) || !Arg(inst, 1, offset)) {
         return false;
     }
     const auto base = ((high << 32u) | static_cast<std::uint32_t>(low)) & AddressMask;
@@ -132,7 +203,7 @@ bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
     if (inst.Opcode() == IrOpcode::ReadConstBuffer) {
         std::uint64_t records = 0;
         std::uint64_t word3 = 0;
-        if (handle->ArgumentCount() != 4u || !Arg(*handle, 2, records) || !Arg(*handle, 3, word3)) {
+        if (handle.ArgumentCount() != 4u || !Arg(handle, 2, records) || !Arg(handle, 3, word3)) {
             return false;
         }
         if (immediate < 0) {
@@ -153,17 +224,17 @@ bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
             return false;
         }
     }
-    if (_nullRoots != nullptr && base == 0 && !LoadedFromMemory(*handle)) {
+    if (_nullRoots != nullptr && base == 0 && !LoadedFromMemory(*handle.Value())) {
         ++*_nullRoots;
         result = 0;
         return true;
     }
-    if (_inaccessible != nullptr && _runtime.accessible != nullptr && !_runtime.accessible(_runtime.userContext, address, sizeof(std::uint32_t)) && LoadedFromMemory(*handle)) {
-        *_inaccessible = {&inst, address};
+    if (_inaccessible != nullptr && _runtime.accessible != nullptr && !_runtime.accessible(_runtime.userContext, address, sizeof(std::uint32_t)) && LoadedFromMemory(*handle.Value())) {
+        *_inaccessible = {inst.Value(), address};
         return false;
     }
     if (auto* trace = _runtime.readTrace; trace != nullptr) {
-        if (&inst == trace->leaf) trace->leaves.emplace_back(trace->leafSlot, address);
+        if (inst.Value() == trace->leaf) trace->leaves.emplace_back(trace->leafSlot, address);
         else trace->otherReads.push_back(address);
     }
     std::uint32_t word = 0;
@@ -178,7 +249,153 @@ bool Evaluator::EvaluateRawRead(IrValue& inst, std::uint64_t& result) {
     return true;
 }
 
-bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
+namespace {
+
+std::optional<std::size_t> evaluatedArguments(IrOpcode opcode) {
+    switch (opcode) {
+        case IrOpcode::BitCastU32F32:
+        case IrOpcode::BitCastF32U32:
+        case IrOpcode::ConvertF32U32:
+        case IrOpcode::ConvertU32F32:
+        case IrOpcode::FPTrunc32:
+        case IrOpcode::FPIsNan32:
+        case IrOpcode::BitwiseNot32:
+        case IrOpcode::LogicalNot: return 1u;
+        case IrOpcode::CompositeConstructU64:
+        case IrOpcode::IAdd32:
+        case IrOpcode::IAdd64:
+        case IrOpcode::ISub32:
+        case IrOpcode::ISub64:
+        case IrOpcode::IMul32:
+        case IrOpcode::IMul64:
+        case IrOpcode::SMin32:
+        case IrOpcode::UMin32:
+        case IrOpcode::FPMul32:
+        case IrOpcode::FPOrdLessThanEqual32:
+        case IrOpcode::FPOrdGreaterThanEqual32:
+        case IrOpcode::BitwiseAnd32:
+        case IrOpcode::BitwiseAnd64:
+        case IrOpcode::BitwiseOr32:
+        case IrOpcode::BitwiseXor32:
+        case IrOpcode::ShiftLeftLogical32:
+        case IrOpcode::ShiftLeftLogical64:
+        case IrOpcode::ShiftRightLogical32:
+        case IrOpcode::ShiftRightLogical64:
+        case IrOpcode::ShiftRightArithmetic32:
+        case IrOpcode::ShiftRightArithmetic64:
+        case IrOpcode::IEqual32:
+        case IrOpcode::INotEqual32:
+        case IrOpcode::SLessThan32:
+        case IrOpcode::ULessThan32:
+        case IrOpcode::UGreaterThan32:
+        case IrOpcode::LogicalAnd:
+        case IrOpcode::LogicalOr:
+        case IrOpcode::LogicalXor: return 2u;
+        case IrOpcode::BitFieldUExtract:
+        case IrOpcode::BitFieldSExtract:
+        case IrOpcode::SelectU32:
+        case IrOpcode::SelectU1:
+        case IrOpcode::SelectF32: return 3u;
+        case IrOpcode::BitFieldInsert: return 4u;
+        default: return std::nullopt;
+    }
+}
+
+std::optional<bool> evaluableAlone(const IrResourcePlan& program, const IrValue& value) {
+    if (value.HasImmediate()) {
+        switch (value.Type()) {
+            case IrType::Bool:
+            case IrType::U8:
+            case IrType::U16:
+            case IrType::U32:
+            case IrType::U64:
+            case IrType::F32: return true;
+            default: return false;
+        }
+    }
+    switch (value.Opcode()) {
+        case IrOpcode::GetUserData:
+        case IrOpcode::GetShaderBase:
+        case IrOpcode::ReadFirstLane:
+        case IrOpcode::ReadConst: return true;
+        case IrOpcode::LoadAddressU32:
+        case IrOpcode::ReadConstBuffer: return IsRawRead(program, value);
+        case IrOpcode::Phi: return std::nullopt;
+        case IrOpcode::CompositeExtractU64:
+        case IrOpcode::CompositeExtractU32x2: {
+            if (value.ArgumentCount() < 2) return true;
+            const auto* index = value.Argument(1) != nullptr ? value.Argument(1)->Resolve() : nullptr;
+            if (index == nullptr || !index->HasImmediate() || index->Type() != IrType::U32 || index->ImmediateU32() >= 2u) return false;
+            if (value.Opcode() == IrOpcode::CompositeExtractU64) return std::nullopt;
+            const auto* source = value.Argument(0) != nullptr ? value.Argument(0)->Resolve() : nullptr;
+            if (source == nullptr || (source->Opcode() != IrOpcode::CompositeConstructU32x2 && source->Opcode() != IrOpcode::IAddCarry32)) return false;
+            return std::nullopt;
+        }
+        default: break;
+    }
+    const auto arguments = evaluatedArguments(value.Opcode());
+    if (!arguments) return false;
+    if (value.ArgumentCount() < *arguments) return true;
+    return std::nullopt;
+}
+
+}
+
+template<typename TNode>
+bool BasicEvaluator<TNode>::MayEvaluate(const IrResourcePlan& program, IrValue* value) {
+    std::unordered_map<const IrValue*, bool> known;
+    const auto requirements = [&program](IrValue* current) {
+        std::vector<IrValue*> required;
+        if (current->IsPhi()) {
+            required.push_back(ResolveInvariantPhi(program, current));
+            return required;
+        }
+        const auto resolved = [](IrValue* value) { return value != nullptr ? value->Resolve() : nullptr; };
+        if (current->Opcode() == IrOpcode::CompositeExtractU64) {
+            required.push_back(resolved(current->Argument(0)));
+            return required;
+        }
+        if (current->Opcode() == IrOpcode::CompositeExtractU32x2) {
+            auto* source = current->Argument(0)->Resolve();
+            if (source->Opcode() == IrOpcode::CompositeConstructU32x2) {
+                required.push_back(resolved(source->Argument(current->Argument(1)->Resolve()->ImmediateU32())));
+            } else {
+                required.push_back(resolved(source->Argument(0)));
+                required.push_back(resolved(source->Argument(1)));
+            }
+            return required;
+        }
+        const auto arguments = *evaluatedArguments(current->Opcode());
+        for (std::size_t index = 0; index < arguments; ++index) {
+            auto* argument = current->Argument(index);
+            required.push_back(argument != nullptr ? argument->Resolve() : nullptr);
+        }
+        return required;
+    };
+    std::vector<std::pair<IrValue*, bool>> pending{{value->Resolve(), false}};
+    while (!pending.empty()) {
+        const auto [current, expanded] = pending.back();
+        pending.pop_back();
+        if (known.contains(current)) continue;
+        if (const auto alone = evaluableAlone(program, *current)) {
+            known.emplace(current, *alone);
+            continue;
+        }
+        const auto required = requirements(current);
+        if (!expanded) {
+            pending.emplace_back(current, true);
+            for (auto* argument : required) {
+                if (argument != nullptr) pending.emplace_back(argument, false);
+            }
+            continue;
+        }
+        known.emplace(current, std::ranges::all_of(required, [&known](const IrValue* argument) { return argument != nullptr && known.at(argument); }));
+    }
+    return known.at(value->Resolve());
+}
+
+template<typename TNode>
+bool BasicEvaluator<TNode>::EvaluateInst(const TNode& inst, std::uint64_t& result) {
     std::uint64_t a = 0;
     std::uint64_t b = 0;
     std::uint64_t c = 0;
@@ -186,7 +403,7 @@ bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
     const auto ternary = [&]() { return Arg(inst, 0, a) && Arg(inst, 1, b) && Arg(inst, 2, c); };
     switch (inst.Opcode()) {
         case IrOpcode::GetUserData: {
-            const auto reg = RegIndex(static_cast<ScalarReg>(inst.Argument(0)->Register().index));
+            const auto reg = RegIndex(static_cast<ScalarReg>(inst.Argument(0).RegisterIndex()));
             if (reg < _program.userDataBase || reg - _program.userDataBase >= _runtime.userData.size()) {
                 return false;
             }
@@ -196,7 +413,8 @@ bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
         case IrOpcode::GetShaderBase: result = _runtime.shaderBase; return true;
         case IrOpcode::Phi: return EvaluatePhi(inst, result);
         case IrOpcode::ReadFirstLane: {
-            Evaluator active(_program, _runtime, _cleanFlatSlots, _cleanEvaluator, inst.Argument(1));
+            const TNode mask = inst.Argument(1);
+            BasicEvaluator active(_program, _runtime, _cleanFlatSlots, _cleanEvaluator, &mask);
             active.ReportInaccessibleReads(_inaccessible);
             active.ReportNullRootReads(_nullRoots);
             return active.EvaluateWide(inst.Argument(0), result);
@@ -212,18 +430,19 @@ bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
             result = static_cast<std::uint32_t>(a) | (static_cast<std::uint64_t>(static_cast<std::uint32_t>(b)) << 32u);
             return true;
         case IrOpcode::ReadConst: {
-            IrValue* slot = inst.Argument(1)->Resolve();
-            if (!slot->HasImmediate() || slot->Type() != IrType::U32 || slot->ImmediateU32() >= _program.srtReads.size()) {
+            const TNode slotValue = inst.Argument(1);
+            const auto slot = static_cast<std::uint32_t>(slotValue.ImmediateBits());
+            if (!slotValue.HasImmediate() || slotValue.Type() != IrType::U32 || slot >= _program.srtReads.size()) {
                 return false;
             }
-            if (slot->ImmediateU32() < _cleanFlatSlots.size() && _cleanFlatSlots[slot->ImmediateU32()] != 0u && _cleanEvaluator != nullptr) {
-                return _cleanEvaluator->EvaluateWide(_program.srtReads[slot->ImmediateU32()].value, result);
+            if (slot < _cleanFlatSlots.size() && _cleanFlatSlots[slot] != 0u && _cleanEvaluator != nullptr) {
+                return _cleanEvaluator->EvaluateWide(TNode::SrtRead(_program, slot), result);
             }
-            return EvaluateWide(_program.srtReads[slot->ImmediateU32()].value, result);
+            return EvaluateWide(TNode::SrtRead(_program, slot), result);
         }
         case IrOpcode::LoadAddressU32:
         case IrOpcode::ReadConstBuffer:
-            if (IsRawRead(_program, inst)) {
+            if (IsRawRead(_program, inst.Opcode(), inst.template Flags<MemoryFlags>().index)) {
                 return EvaluateRawRead(inst, result);
             }
             break;
@@ -508,5 +727,8 @@ bool Evaluator::EvaluateInst(IrValue& inst, std::uint64_t& result) {
     }
     return false;
 }
+
+template class BasicEvaluator<IrNode>;
+template class BasicEvaluator<CompactNode>;
 
 }

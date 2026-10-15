@@ -17,6 +17,11 @@ on:
         required: false
         default: true
         type: boolean
+      full:
+        description: Run the full Linux and Windows builds (off runs only the relinker builds and tests on Linux, Windows and macOS)
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -54,6 +59,7 @@ jobs:
         env:
           PR_NUMBER: ${{ inputs.pr }}
           LINUX_BUILD: ${{ inputs.linux }}
+          FULL_BUILD: ${{ inputs.full }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -113,6 +119,7 @@ jobs:
             }
             const manual = context.eventName === 'workflow_dispatch';
             const linux = process.env.LINUX_BUILD !== 'false';
+            const full = manual && process.env.FULL_BUILD !== 'false';
             if (manual) {
               for (const username of new Set([context.actor, process.env.GITHUB_TRIGGERING_ACTOR])) {
                 const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
@@ -175,13 +182,13 @@ jobs:
             core.setOutput('relinker', relinker);
             core.setOutput('register-context', registerContext);
             core.setOutput('write-watch', writeWatch);
-            core.setOutput('full', manual);
-            core.setOutput('relinker-hosts', relinkerHosts(manual, linux));
+            core.setOutput('full', full);
+            core.setOutput('relinker-hosts', relinkerHosts(full, linux));
             const merged = pulls.map((pull) => `PR #${pull.number} at ${pull.head} merged into main at ${main.commit.sha}`);
             merged.forEach((line) => core.info(line));
             await core.summary.addRaw(
-              `${merged.join(', then ')}: full builds ${manual ? 'enabled' : 'disabled'}, ` +
-              `relinker ${relinker ? (manual ? (linux ? 'enabled on macOS (the full builds run the Linux and Windows relinker tests)' : 'enabled on Linux and macOS (the full Windows build runs the Windows relinker tests)') : 'enabled') : 'skipped: no relinker file changed or the author has no commit in main'}, ` +
+              `${merged.join(', then ')}: full builds ${full ? 'enabled' : 'disabled'}, ` +
+              `relinker ${relinker ? (full ? (linux ? 'enabled on macOS (the full builds run the Linux and Windows relinker tests)' : 'enabled on Linux and macOS (the full Windows build runs the Windows relinker tests)') : 'enabled') : 'skipped: no relinker file changed or the author has no commit in main'}, ` +
               `register context tests ${registerContext ? 'enabled' : 'skipped'}, write watch tests ${writeWatch ? 'enabled' : 'skipped'}`
             ).write();
 
@@ -215,7 +222,7 @@ jobs:
           read -ra numbers <<< "$PR_NUMBER"
           read -ra heads <<< "$PR_HEAD"
           refspecs=()
-          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          for number in "${numbers[@]}"; do refspecs+=("+refs/pull/$number/head:refs/remotes/pull/$number"); done
           git fetch --no-tags --unshallow origin "${refspecs[@]}"
           for i in "${!numbers[@]}"; do
             if [ "$(git rev-parse "refs/remotes/pull/${numbers[i]}")" != "${heads[i]}" ]; then echo "::error::Pull request #${numbers[i]} has newer commits; start a new build"; exit 1; fi
@@ -297,7 +304,7 @@ jobs:
           read -ra numbers <<< "$PR_NUMBER"
           read -ra heads <<< "$PR_HEAD"
           refspecs=()
-          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          for number in "${numbers[@]}"; do refspecs+=("+refs/pull/$number/head:refs/remotes/pull/$number"); done
           fetch_options=()
           if [ "$(git rev-parse --is-shallow-repository)" = true ]; then fetch_options+=(--unshallow); fi
           git fetch --no-tags "${fetch_options[@]}" origin "${refspecs[@]}"
@@ -363,7 +370,7 @@ jobs:
           read -ra numbers <<< "$PR_NUMBER"
           read -ra heads <<< "$PR_HEAD"
           refspecs=()
-          for number in "${numbers[@]}"; do refspecs+=("refs/pull/$number/head:refs/remotes/pull/$number"); done
+          for number in "${numbers[@]}"; do refspecs+=("+refs/pull/$number/head:refs/remotes/pull/$number"); done
           git fetch --no-tags --unshallow origin "${refspecs[@]}"
           for i in "${!numbers[@]}"; do
             if [ "$(git rev-parse "refs/remotes/pull/${numbers[i]}")" != "${heads[i]}" ]; then echo "::error::Pull request #${numbers[i]} has newer commits; start a new build"; exit 1; fi

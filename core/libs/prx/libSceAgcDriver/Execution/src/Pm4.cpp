@@ -131,8 +131,11 @@ void copyMemory(std::uint64_t source, std::uint64_t destination, std::size_t byt
     GuestMemory::Write(destination, copySource(source, bytes, immediate));
 }
 
+constexpr std::uint32_t CopyDataRegisterSource = 0;
 constexpr std::uint32_t CopyDataCachePolicy = (3u << 13u) | (3u << 25u);
+constexpr std::uint32_t ShaderRegisterBase = 0x2c00;
 constexpr std::uint32_t ContextRegisterBase = 0xa000;
+constexpr std::uint32_t UserConfigRegisterBase = 0xc000;
 
 std::uint32_t copyDataCount(std::span<const std::uint32_t> packet) {
     return (packet[1] & 0x10000u) != 0 ? 2u : 1u;
@@ -142,8 +145,27 @@ std::uint64_t gpuClockCount() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() / 10);
 }
 
-std::vector<std::byte> copyDataSource(std::span<const std::uint32_t> packet, std::size_t bytes) {
+std::uint32_t registerBankBase(std::uint32_t offset) {
+    if (offset - ShaderRegisterBase < 0x400u) return ShaderRegisterBase;
+    if (offset - ContextRegisterBase < 0x400u) return ContextRegisterBase;
+    if (offset - UserConfigRegisterBase < 0x4000u) return UserConfigRegisterBase;
+    return 0;
+}
+
+std::vector<std::byte> copyDataSource(std::span<const std::uint32_t> packet, const QueueState& queue, std::size_t bytes) {
     const auto source = CopyDataSource(packet);
+    if (source == CopyDataRegisterSource) {
+        std::vector<std::byte> data(bytes);
+        for (std::size_t word = 0; word < bytes / 4; ++word) {
+            const auto offset = packet[2] + static_cast<std::uint32_t>(word);
+            const auto base = registerBankBase(offset);
+            const auto& bank = base == ShaderRegisterBase ? queue.shader : base == ContextRegisterBase ? queue.context : queue.userConfig;
+            if (base == 0 || !bank.contains(offset - base)) throw std::runtime_error("COPY_DATA source register 0x" + ToHex(offset) + " has no known value");
+            const auto value = bank.at(offset - base);
+            for (std::size_t i = 0; i < 4; ++i) data[word * 4 + i] = static_cast<std::byte>(value >> (i * 8));
+        }
+        return data;
+    }
     if (source != CopyDataGpuClockSource) return copySource(address(packet[2], packet[3]), bytes, CopyDataImmediate(source));
     const auto value = gpuClockCount();
     std::vector<std::byte> data(bytes);
@@ -332,10 +354,10 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
             require((packet[8] & 3u) == 0 && packet[8] >= (opcode == 0x2c ? 16u : 20u), "invalid indirect draw stride");
             require((packet[9] & ~0x20u) == (opcode == 0x2c ? 2u : 0u), "unsupported indirect draw initiator");
             break;
-        case 0x15: size(5); if ((packet[4] & ~0xa066u) != 0x1u || (packet[4] & 0x22u) == 0x22u) throw std::runtime_error("dispatch modifiers 0x" + ToHex(packet[4]) + " are not implemented"); break;
+        case 0x15: size(5); if ((packet[4] & ~0xa06eu) != 0x1u || (packet[4] & 0x22u) == 0x22u) throw std::runtime_error("dispatch modifiers 0x" + ToHex(packet[4]) + " are not implemented"); break;
         case 0x16:
             require(packet.size() == 3 || packet.size() == 4, "invalid indirect dispatch size");
-            require((packet.back() & ~0xa064u) == 0x1u, "indirect dispatch modifiers are not implemented");
+            require((packet.back() & ~0xa06cu) == 0x1u, "indirect dispatch modifiers are not implemented");
             break;
         case 0x22:
             size(5);
@@ -474,7 +496,8 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
                 break;
             }
             require(destination == 2 || destination == 4 || destination == 10, "COPY_DATA GDS or performance-counter destination is not implemented");
-            require(source == 2 || source == 4 || source == 5 || source == 10 || source == 11 || source == CopyDataGpuClockSource, "COPY_DATA register, GDS or reference-clock source is not implemented");
+            require(source == 2 || source == 4 || source == 5 || source == 10 || source == 11 || source == CopyDataGpuClockSource || source == CopyDataRegisterSource, "COPY_DATA GDS or reference-clock source is not implemented");
+            require(source != CopyDataRegisterSource || (packet[3] == 0 && registerBankBase(packet[2]) != 0 && registerBankBase(packet[2]) == registerBankBase(packet[2] + copyDataCount(packet) - 1)), "COPY_DATA from a register outside the shader, context and user config registers is not implemented");
             require(source < 10 || source == CopyDataGpuClockSource || ((packet[1] & 0x10000u) == 0 && packet[3] == 0), "64-bit immediate COPY_DATA is not implemented");
             break;
         }
@@ -601,10 +624,11 @@ std::optional<StoreWrite> ResolveStore(std::span<const std::uint32_t> packet, co
     switch ((packet[0] >> 8u) & 0xffu) {
         case 0x40: {
             if (packet.size() < 6 || CopyDataToRegister(packet)) return std::nullopt;
+            if (CopyDataSource(packet) == CopyDataRegisterSource) return std::nullopt;
             const std::size_t bytes = CopyDataBytes(packet);
             const auto destination = address(packet[4], packet[5]);
             if (!fits(destination, bytes)) return std::nullopt;
-            return StoreWrite{destination, {}, copyDataSource(packet, bytes)};
+            return StoreWrite{destination, {}, copyDataSource(packet, queue, bytes)};
         }
         case 0x50: {
             if (packet.size() < 7 || dmaDestination(packet) == DmaSelectGds) return std::nullopt;
@@ -899,6 +923,15 @@ std::vector<std::uint32_t> ReadIndirectRegisters(std::span<const std::uint32_t> 
     return pairs;
 }
 
+void NoteDispatchRegisters(std::span<const std::uint32_t> packet, QueueState& queue) {
+    const bool direct = ((packet[0] >> 8u) & 0xffu) == 0x15u;
+    queue.shader.insert_or_assign(0x200, packet.back());
+    for (std::uint32_t i = 0; i < 3; ++i) {
+        if (direct) queue.shader.insert_or_assign(0x201 + i, packet[1 + i]);
+        else queue.shader.erase(0x201 + i);
+    }
+}
+
 void ExecuteIndirectRegisters(std::span<const std::uint32_t> packet, std::span<const std::uint32_t> pairs, QueueState& queue) {
     const auto opcode = (packet[0] >> 8u) & 0xffu;
     require(packet.size() == 5 && IndirectRegisterOpcode(opcode), "expected indirect register packet");
@@ -1071,7 +1104,7 @@ void Execute(std::span<const std::uint32_t> packet, QueueState& queue) {
                 return;
             }
             const auto destination = address(packet[4], packet[5]);
-            const auto data = copyDataSource(packet, CopyDataBytes(packet));
+            const auto data = copyDataSource(packet, queue, CopyDataBytes(packet));
             GuestMemory::CheckRange(reinterpret_cast<void*>(destination), data.size(), 1, true);
             GuestMemory::Write(destination, data);
             return;

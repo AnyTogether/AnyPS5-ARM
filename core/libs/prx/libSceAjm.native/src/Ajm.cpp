@@ -152,6 +152,9 @@ struct Instance {
     AVCodecContext* opus = nullptr;
     std::uint32_t opusChannels = 0;
     std::uint32_t opusMappingFamily = 0;
+    std::uint32_t opusStreams = 0;
+    std::uint32_t opusCoupled = 0;
+    bool opusLayoutPending = false;
     std::uint32_t opusSampleRate = 0;
     std::vector<std::uint8_t> opusPending;
     AVCodecContext* aac = nullptr;
@@ -401,12 +404,13 @@ std::int32_t InitializeInstance(Instance& instance, const std::uint8_t* paramete
         std::uint32_t mappingFamily = 0;
         if (size >= 12) std::memcpy(&mappingFamily, parameters + 8, sizeof(mappingFamily));
         if (sampleRate != 48000) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus sample rate other than 48000)");
-        if (mappingFamily > 1 && (mappingFamily != 255 || channels != 1)) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus mapping family other than 0, 1 or a mono stream's 255)");
+        if (mappingFamily > 1 && mappingFamily != 255) NotImplemented_nid_no_patch("sceAjmBatchJobInitialize (Opus mapping family other than 0, 1 or 255)");
         if (mappingFamily == 0 && channels > 2) return AJM_RESULT_INVALID_PARAMETER;
         instance.opusChannels = channels;
         instance.opusMappingFamily = mappingFamily;
         instance.opusSampleRate = sampleRate;
-        OpenOpus(instance);
+        instance.opusLayoutPending = mappingFamily == 255 && channels > 1;
+        if (!instance.opusLayoutPending) OpenOpus(instance);
         instance.opusPending.clear();
         instance.initialized = true;
         instance.totalDecodedSamples = 0;
@@ -988,6 +992,21 @@ void OpenOpus(Instance& instance) {
     if (!instance.opus) throw std::runtime_error("AJM: cannot allocate the FFmpeg Opus decoder");
     av_channel_layout_default(&instance.opus->ch_layout, static_cast<int>(instance.opusChannels));
     instance.opus->sample_rate = 48000;
+    if (instance.opusMappingFamily == 255 && instance.opusChannels > 1) {
+        instance.opus->extradata_size = static_cast<int>(21 + instance.opusChannels);
+        instance.opus->extradata = static_cast<std::uint8_t*>(av_mallocz(instance.opus->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (!instance.opus->extradata) throw std::bad_alloc();
+        auto* header = instance.opus->extradata;
+        std::memcpy(header, "OpusHead", 8);
+        header[8] = 1;
+        header[9] = static_cast<std::uint8_t>(instance.opusChannels);
+        header[12] = 0x80;
+        header[13] = 0xbb;
+        header[18] = 255;
+        header[19] = static_cast<std::uint8_t>(instance.opusStreams);
+        header[20] = static_cast<std::uint8_t>(instance.opusCoupled);
+        for (std::uint32_t channel = 0; channel < instance.opusChannels; ++channel) header[21 + channel] = static_cast<std::uint8_t>(channel);
+    }
     if (instance.opusMappingFamily == 1) {
         static constexpr std::uint8_t streams[8] = {1, 1, 2, 2, 3, 4, 4, 5};
         static constexpr std::uint8_t coupled[8] = {0, 1, 1, 2, 2, 2, 3, 3};
@@ -1032,6 +1051,80 @@ std::size_t OpusPacketSamples(const std::uint8_t* packet, std::size_t size) {
         break;
     }
     return frames * frameSamples;
+}
+
+
+std::size_t OpusLength(const std::uint8_t* data, std::size_t size, std::size_t& at) {
+    if (at >= size) return SIZE_MAX;
+    const std::size_t first = data[at++];
+    if (first < 252) return first;
+    if (at >= size) return SIZE_MAX;
+    return first + 4u * data[at++];
+}
+
+std::size_t OpusSelfDelimitedBytes(const std::uint8_t* data, std::size_t size) {
+    if (size < 1) return SIZE_MAX;
+    const std::uint32_t code = data[0] & 3u;
+    std::size_t at = 1;
+    if (code == 0) {
+        const std::size_t frame = OpusLength(data, size, at);
+        return frame == SIZE_MAX ? SIZE_MAX : at + frame;
+    }
+    if (code == 1) {
+        const std::size_t frame = OpusLength(data, size, at);
+        return frame == SIZE_MAX ? SIZE_MAX : at + 2 * frame;
+    }
+    if (code == 2) {
+        const std::size_t first = OpusLength(data, size, at);
+        const std::size_t second = OpusLength(data, size, at);
+        return first == SIZE_MAX || second == SIZE_MAX ? SIZE_MAX : at + first + second;
+    }
+    if (at >= size) return SIZE_MAX;
+    const std::uint8_t count = data[at++];
+    const std::size_t frames = count & 0x3fu;
+    if (frames == 0) return SIZE_MAX;
+    std::size_t padding = 0;
+    if ((count & 0x40u) != 0) {
+        for (;;) {
+            if (at >= size) return SIZE_MAX;
+            const std::uint8_t value = data[at++];
+            padding += value == 255 ? 254 : value;
+            if (value != 255) break;
+        }
+    }
+    std::size_t total = 0;
+    if ((count & 0x80u) != 0) {
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            const std::size_t bytes = OpusLength(data, size, at);
+            if (bytes == SIZE_MAX) return SIZE_MAX;
+            total += bytes;
+        }
+    } else {
+        const std::size_t bytes = OpusLength(data, size, at);
+        if (bytes == SIZE_MAX) return SIZE_MAX;
+        total = bytes * frames;
+    }
+    return at + total + padding;
+}
+
+void OpenOpusFromPacket(Instance& instance, const std::uint8_t* data, std::size_t size) {
+    std::uint32_t streams = 0;
+    std::uint32_t coupled = 0;
+    std::size_t offset = 0;
+    while (offset < size) {
+        if ((data[offset] & 0x04u) != 0) ++coupled;
+        ++streams;
+        const std::uint32_t channels = coupled * 2 + (streams - coupled);
+        if (channels >= instance.opusChannels) break;
+        const std::size_t bytes = OpusSelfDelimitedBytes(data + offset, size - offset);
+        if (bytes == SIZE_MAX || bytes >= size - offset) break;
+        offset += bytes;
+    }
+    if (coupled * 2 + (streams - coupled) != instance.opusChannels) throw std::runtime_error("AJM Opus: a mapping family 255 packet's " + std::to_string(streams) + " streams (" + std::to_string(coupled) + " stereo) do not make its " + std::to_string(instance.opusChannels) + " channels");
+    instance.opusStreams = streams;
+    instance.opusCoupled = coupled;
+    instance.opusLayoutPending = false;
+    OpenOpus(instance);
 }
 
 void RunOpus(Instance& instance, const JobHeader& job, const AjmBuffer* inputs, const AjmBuffer* outputs) {
@@ -1083,6 +1176,7 @@ void RunOpus(Instance& instance, const JobHeader& job, const AjmBuffer* inputs, 
             if (frames == 0 && pcmOutputs.produced == 0) result |= AJM_RESULT_NOT_ENOUGH_ROOM;
             break;
         }
+        if (instance.opusLayoutPending) OpenOpusFromPacket(instance, data, bytes);
         packet->data = const_cast<std::uint8_t*>(data);
         packet->size = static_cast<int>(bytes);
         if (avcodec_send_packet(instance.opus, packet.get()) < 0) {

@@ -53,6 +53,7 @@ constexpr std::uint32_t LoadResult = 12;
 constexpr std::array<float, 4> Drawn{0.25f, 0.5f, 0.125f, 1.0f};
 constexpr double EdgeMargin = 1.0 / 32.0;
 constexpr std::uint32_t FillOnes = 0x3c003c00u;
+constexpr std::array<float, 4> Ones{1.0f, 1.0f, 1.0f, 1.0f};
 
 alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
     0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
@@ -250,7 +251,7 @@ double EdgeDistance(double x, double y, std::size_t from) {
     return side(c[0], c[1]) < 0 ? -side(x, y) : side(x, y);
 }
 
-void CheckSamples(const AgcDriver::Graphics::State& state, const std::vector<std::array<float, 4>>& loaded) {
+void CheckSamples(const AgcDriver::Graphics::State& state, const std::vector<std::array<float, 4>>& loaded, const std::array<float, 4>& background) {
     const auto locations = AgcDriver::Graphics::SampleLocations(state);
     std::array<std::uint32_t, Samples + 1u> pixelsByCoverage{};
     std::array<std::uint32_t, Samples> coveredBySample{};
@@ -261,7 +262,7 @@ void CheckSamples(const AgcDriver::Graphics::State& state, const std::vector<std
             for (std::uint32_t sample = 0; sample < Samples; ++sample) {
                 const auto& texel = loaded[(y * Side + x) * Samples + sample];
                 const bool drawn = texel == Drawn;
-                const bool empty = texel == std::array<float, 4>{};
+                const bool empty = texel == background;
                 char where[160];
                 std::snprintf(where, sizeof(where), "sample %u of pixel (%u, %u) loaded (%g, %g, %g, %g)", sample, x, y, texel[0], texel[1], texel[2], texel[3]);
                 Require(drawn || empty, std::string(where) + ", neither the drawn color nor the cleared target");
@@ -283,13 +284,17 @@ void CheckSamples(const AgcDriver::Graphics::State& state, const std::vector<std
     Require(std::adjacent_find(coveredBySample.begin(), coveredBySample.end(), std::not_equal_to<>()) != coveredBySample.end(), "every sample index has the same coverage, so the sample index was not told apart");
 }
 
-void CheckFilled(const std::vector<std::array<float, 4>>& loaded) {
+void CheckUniform(const std::vector<std::array<float, 4>>& loaded, const std::array<float, 4>& expected, const std::string& what) {
     for (std::size_t index = 0; index < loaded.size(); ++index) {
         const auto& texel = loaded[index];
         char where[160];
         std::snprintf(where, sizeof(where), "sample %zu of pixel (%zu, %zu) loaded (%g, %g, %g, %g)", index % Samples, index / Samples % Side, index / Samples / Side, texel[0], texel[1], texel[2], texel[3]);
-        Require(texel == std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f}, std::string(where) + " after a fill of the target's color memory with half-float ones");
+        Require(texel == expected, std::string(where) + " " + what);
     }
+}
+
+void StoreWords(const Block& block, std::uint64_t bytes, std::uint32_t word) {
+    for (std::uint64_t offset = 0; offset < bytes; offset += sizeof(word)) std::memcpy(block.data + offset, &word, sizeof(word));
 }
 
 void RequireRefused(AgcDriver::VulkanDevice& device, const std::array<std::uint32_t, 8>& texture, const std::string& expected, const std::string& what) {
@@ -317,14 +322,26 @@ int main() {
         const auto color = DecodeTarget(block);
         const auto state = TargetState(color);
         Draw(*device, state);
-        CheckSamples(state, LoadSamples(*device, block));
+        CheckSamples(state, LoadSamples(*device, block), {});
         const auto colorBytes = AgcDriver::Graphics::MultisampledColorBytes(color);
         Require(colorBytes != 0 && colorBytes <= block.bytes, "the 4x target's color memory does not fit its block");
         AgcDriver::Graphics::NoteColorMetadataFill(block.Address(), static_cast<std::size_t>(colorBytes), FillOnes);
-        CheckFilled(LoadSamples(*device, block));
+        CheckUniform(LoadSamples(*device, block), Ones, "after a fill of the target's color memory with half-float ones");
         RequireRefused(*device, TargetDescriptor(block, 3u), "texture of 8 samples", "loading a 4x target as an 8x texture");
-        RequireRefused(*device, TargetDescriptor(other, SampleShift), "which no draw rendered to", "loading a multisampled texture no draw rendered to");
-        std::puts("every sample of a 4x color target loaded through its multisampled texture descriptor matches the triangle drawn into it, then the fill of its color memory");
+        Require(colorBytes <= other.bytes, "the 4x target's color memory does not fit one block");
+        CheckUniform(LoadSamples(*device, other), {}, "from zeroed color memory no draw rendered to");
+        Block stored(BlockBytes);
+        StoreWords(stored, colorBytes, FillOnes);
+        CheckUniform(LoadSamples(*device, stored), Ones, "from color memory of half-float ones no draw rendered to");
+        const auto storedState = TargetState(DecodeTarget(stored));
+        Draw(*device, storedState);
+        CheckSamples(storedState, LoadSamples(*device, stored), Ones);
+        Block mixed(BlockBytes);
+        StoreWords(mixed, colorBytes, FillOnes);
+        const std::uint32_t odd = 0x3c000000u;
+        std::memcpy(mixed.data + colorBytes - sizeof(odd), &odd, sizeof(odd));
+        RequireRefused(*device, TargetDescriptor(mixed, SampleShift), "does not hold one repeated 32-bit value", "loading a multisampled texture no draw rendered to whose color memory is not uniform");
+        std::puts("every sample of a 4x color target loaded through its multisampled texture descriptor matches the triangle drawn into it, then the fill of its color memory; a surface no draw rendered to loads the value its color memory repeats and keeps it under a later draw");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

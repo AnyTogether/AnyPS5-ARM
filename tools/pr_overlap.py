@@ -126,7 +126,11 @@ def scan(pr):
 
 def hunks(pr, path):
     diff = git("diff", "-U0", "--no-color", "refs/pr/base", pr["tree"], "--", path)
-    return [(int(start), int(start) + max(int(count or 1), 1) - 1) for start, count in HUNK.findall(diff)]
+    found = []
+    for start, count in HUNK.findall(diff):
+        start = max(int(start), 1)
+        found.append((start, start + max(int(count or 1), 1) - 1))
+    return found
 
 
 def clashes(a, b, path):

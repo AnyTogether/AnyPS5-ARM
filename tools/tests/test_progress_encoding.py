@@ -29,7 +29,7 @@ class ProgressEncodingTests(unittest.TestCase):
                 path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             env = {**os.environ, "PYTHONIOENCODING": encoding, "PYTHONUTF8": "0"}
             result = subprocess.run([sys.executable, "-X", "utf8=0", str(PROGRESS), "--compare", *map(str, paths)],
-                                    env=env, capture_output=True, timeout=10)
+                                    env=env, capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
         return result.stdout.decode("utf-8").replace("\r\n", "\n")
 

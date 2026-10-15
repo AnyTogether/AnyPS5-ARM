@@ -221,6 +221,24 @@ std::vector<std::uint32_t> SnapshotHints(const Snapshot& before, const Snapshot&
     return hints;
 }
 
+std::string hostPathText(const std::wstring& path) {
+    const int size = ::WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return "<unprintable host path>";
+    }
+    std::string text(static_cast<std::size_t>(size), '\0');
+    if (::WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, text.data(), size, nullptr, nullptr) != size) {
+        return "<unprintable host path>";
+    }
+    text.pop_back();
+    return text;
+}
+
+std::string changeNotificationFailure(const char* watcher, const std::wstring& path, DWORD error) {
+    return "EVFILT_VNODE: the " + std::string(watcher) + " watch of \"" + hostPathText(path) +
+        "\" failed, FindFirstChangeNotification error=" + std::to_string(error);
+}
+
 HANDLE WatchParent(const std::wstring& path) {
     const auto separator = path.find_last_of(L"\\/");
     if (separator == std::wstring::npos) {
@@ -230,16 +248,16 @@ HANDLE WatchParent(const std::wstring& path) {
     const HANDLE handle = ::FindFirstChangeNotificationW(parent.c_str(), FALSE, PARENT_CHANGES);
     const DWORD error = handle == INVALID_HANDLE_VALUE ? ::GetLastError() : ERROR_SUCCESS;
     if (handle == INVALID_HANDLE_VALUE && error != ERROR_INVALID_FUNCTION) {
-        throw std::runtime_error("EVFILT_VNODE: FindFirstChangeNotification failed, error=" + std::to_string(error));
+        throw std::runtime_error(changeNotificationFailure("parent", parent, error));
     }
     return handle;
 }
 
-HANDLE WatchContents(const std::wstring& path, DWORD changes) {
+HANDLE WatchContents(const std::wstring& path, DWORD changes, const char* watcher) {
     const HANDLE handle = ::FindFirstChangeNotificationW(path.c_str(), FALSE, changes);
     if (handle == INVALID_HANDLE_VALUE) {
         const DWORD error = ::GetLastError();
-        throw std::runtime_error("EVFILT_VNODE: FindFirstChangeNotification failed, error=" + std::to_string(error));
+        throw std::runtime_error(changeNotificationFailure(watcher, path, error));
     }
     return handle;
 }
@@ -352,8 +370,8 @@ int OpenHostWatch(int descriptor, std::uint32_t notes, HostWatch& host) {
     try {
         host.parent = WatchParent(host.last.path);
         if (host.directory) {
-            host.entries = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_FILE_NAME);
-            host.subdirectories = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_DIR_NAME);
+            host.entries = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_FILE_NAME, "entries");
+            host.subdirectories = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_DIR_NAME, "subdirectories");
         }
     } catch (...) {
         CloseHostWatch(host);

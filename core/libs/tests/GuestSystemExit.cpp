@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -29,14 +30,31 @@ using GuestQuickExitCallback = void (APS5_VABI*)();
 extern "C" int APS5_VABI at_quick_exit_nid_postfix(GuestQuickExitCallback);
 extern "C" void APS5_VABI quick_exit_nid_postfix(int);
 namespace {
-bool cleaned = false;
-bool finalized = false;
-void Cleanup() { cleaned = true; }
-void APS5_VABI Finalize(void*) { finalized = true; }
-void VerifyExit() {
-    if (!cleaned || !finalized) std::_Exit(1);
-    std::puts("Guest shutdown and atexit completed");
+std::atomic<bool> awaiting{false};
+void AwaitExit() {
+    awaiting = true;
+    awaiting.notify_one();
+    try {
+        LibcAwaitExit_nid_postfix();
+    } catch (const ProcessShutdown&) {
+        std::puts("Guest thread resumed during exit");
+        std::fflush(stdout);
+        std::_Exit(6);
+    }
 }
+void Cleanup() {
+    std::thread(AwaitExit).detach();
+    awaiting.wait(false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::puts("Guest shutdown completed");
+    std::fflush(stdout);
+}
+void ExitHandlerRan() {
+    std::puts("Guest exit handler ran");
+    std::fflush(stdout);
+    std::_Exit(5);
+}
+void APS5_VABI UnexpectedFinalizer(void*) { ExitHandlerRan(); }
 int quickOrder = 0;
 void APS5_VABI QuickSecond() { quickOrder = 1; }
 void APS5_VABI QuickFirst() {
@@ -202,8 +220,8 @@ int main(int argc, char** argv) {
     }
     if (argc > firstArgument) {
         LibcRegisterShutdown_nid_postfix(Cleanup);
-        Require(__cxa_atexit_nid_postfix(Finalize, nullptr, nullptr) == 0);
-        Require(std::atexit(VerifyExit) == 0);
+        Require(__cxa_atexit_nid_postfix(UnexpectedFinalizer, nullptr, nullptr) == 0);
+        Require(std::atexit(ExitHandlerRan) == 0);
         sceSystemServiceLoadExec("exit", nullptr);
         return 2;
     }

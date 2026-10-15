@@ -16,6 +16,8 @@ int APS5_VABI scePlayGoInitialize(const PlayGoInitParams*);
 int APS5_VABI scePlayGoOpen(int*, const void*);
 int APS5_VABI scePlayGoClose(int);
 int APS5_VABI scePlayGoGetLanguageMask(int, std::uint64_t*);
+int APS5_VABI scePlayGoGetSupportedOptionalChunk(int, std::int32_t, PlayGoOptionalChunk*);
+int APS5_VABI scePlayGoGetOptionalChunk(int, std::int32_t, PlayGoOptionalChunk*);
 int APS5_VABI scePlayGoSetToDoList(int, const PlayGoToDo*, std::uint32_t);
 int APS5_VABI scePlayGoGetToDoList(int, PlayGoToDo*, std::uint32_t, std::uint32_t*);
 int APS5_VABI scePlayGoGetLocus(int, const std::uint16_t*, std::uint32_t, std::int8_t*);
@@ -23,6 +25,20 @@ int APS5_VABI scePlayGoGetChunkId(int, std::uint16_t*, std::uint32_t, std::uint3
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+template <typename Operation>
+static void RequireMissingChunkMetadata(Operation&& operation) {
+    bool threw = false;
+    try {
+        operation();
+    } catch (const std::runtime_error& error) {
+        const std::string_view message(error.what());
+        threw = message.find("playgo-chunk.dat") != std::string_view::npos &&
+            message.find("playgo-scenario.json") != std::string_view::npos &&
+            message.find("chunk ID") != std::string_view::npos;
+    }
+    Require(threw);
+}
 
 static int CheckPackageChunkTable(const char* root) {
     constexpr int badChunkId = static_cast<int>(0x80B2000C);
@@ -65,7 +81,6 @@ static int CheckNoPlayGoFile(const char* root) {
     constexpr int badPointer = static_cast<int>(0x80B2000A);
     constexpr int badSize = static_cast<int>(0x80B2000B);
     constexpr int badLocus = static_cast<int>(0x80B20010);
-    constexpr int badChunkId = static_cast<int>(0x80B2000C);
 
     PlayGoInitParams init{};
     int handle = 0;
@@ -79,6 +94,13 @@ static int CheckNoPlayGoFile(const char* root) {
     Require(scePlayGoGetLanguageMask(handle, nullptr) == badPointer);
     Require(scePlayGoGetLanguageMask(handle, &mask) == 0 && mask == ~0ull);
 
+    for (const auto getOptionalChunk : {scePlayGoGetSupportedOptionalChunk, scePlayGoGetOptionalChunk}) {
+        PlayGoOptionalChunk option{};
+        Require(getOptionalChunk(handle + 1, 0, &option) == badHandle);
+        Require(getOptionalChunk(handle, 0, nullptr) == badPointer);
+        Require(getOptionalChunk(handle, 0, &option) == 0 && option.bitmask == ~0ull);
+    }
+
     PlayGoToDo todo[2] = {{0, 3, 0}, {0, 0, 0}};
     Require(scePlayGoSetToDoList(handle + 1, todo, 2) == badHandle);
     Require(scePlayGoSetToDoList(handle, nullptr, 2) == badPointer);
@@ -87,9 +109,9 @@ static int CheckNoPlayGoFile(const char* root) {
     todo[1].locus = 1;
     Require(scePlayGoSetToDoList(handle, todo, 2) == badLocus);
     todo[1] = {1, 3, 0};
-    Require(scePlayGoSetToDoList(handle, todo, 2) == badChunkId);
+    RequireMissingChunkMetadata([&] { scePlayGoSetToDoList(handle, todo, 2); });
     todo[1] = {0xFFFF, 3, 0};
-    Require(scePlayGoSetToDoList(handle, todo, 2) == badChunkId);
+    RequireMissingChunkMetadata([&] { scePlayGoSetToDoList(handle, todo, 2); });
 
     std::uint32_t entries = 1;
     Require(scePlayGoGetToDoList(handle, todo, 2, &entries) == 0 && entries == 0);
@@ -99,7 +121,7 @@ static int CheckNoPlayGoFile(const char* root) {
     Require(scePlayGoGetLocus(handle, &chunk, 1, &locus) == 0 && locus == 3);
     const std::uint16_t undeclared[2] = {1, 10};
     std::int8_t loci[2] = {0, 0};
-    Require(scePlayGoGetLocus(handle, undeclared, 2, loci) == badChunkId);
+    RequireMissingChunkMetadata([&] { scePlayGoGetLocus(handle, undeclared, 2, loci); });
     const std::uint16_t onlyDeclared[2] = {0, 0};
     Require(scePlayGoGetLocus(handle, onlyDeclared, 2, loci) == 0 && loci[0] == 3 && loci[1] == 3);
     std::uint32_t chunkCount = 0;

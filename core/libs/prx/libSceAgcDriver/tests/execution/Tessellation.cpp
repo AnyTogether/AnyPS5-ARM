@@ -118,6 +118,13 @@ alignas(256) constexpr std::array<std::uint32_t, 30> DomainCode{
     0x7e2802f2, 0xf80008cf, 0x14131110, 0xf800020f, 0x14131214, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 31> DomainLoweredInterior{
+    0xf8000941, 0x00000000, 0x34020e84, 0x16020283, 0xe0341000, 0x04030a01, 0xe0341010, 0x04030c01,
+    0xe0341020, 0x04030e01, 0xbf8c3f70, 0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02,
+    0x10221705, 0x3e221b06, 0x3e221f02, 0xd5510012, 0x040a0d05, 0x102424ff, 0x40400000, 0x08222511,
+    0x7e260280, 0x7e2802f2, 0xf80008cf, 0x14131110, 0xf800020f, 0x14131214, 0xbf810000,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 34> DomainRelativeData{
     0xf8000941, 0x00000000, 0x34020e84, 0x16020283, 0x4a2a0e81, 0x7e2a0d15, 0x102a2aff, 0x3e000000,
     0xe0341000, 0x04030a01, 0xe0341010, 0x04030c01, 0xe0341020, 0x04030e01, 0xbf8c3f70, 0x08040af2,
@@ -719,6 +726,32 @@ void RequireHullBdaReads(AgcDriver::VulkanDevice& device, const ShaderRecompiler
     address(0u);
 }
 
+Stages CompileLoweredInterior(const ShaderRecompiler::SpirvTarget& target, const PatchDraw& patches) {
+    std::uint32_t cursor = 0;
+    return {
+        Compile(target, ShaderStage::Local, LocalCode, cursor, patches),
+        Compile(target, ShaderStage::TessellationControl, HullCode, cursor, patches),
+        Compile(target, ShaderStage::TessellationEvaluation, DomainLoweredInterior, cursor, patches),
+        Compile(target, ShaderStage::Fragment, PixelCode, cursor, patches),
+    };
+}
+
+void RequireFractionalEvenPartitioning(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target) {
+    const auto below = Row(-0.75f);
+    const PatchDraw integer{{3u, 3u, 1u, 0u, 2u}, Indices};
+    Draw(device, CompileLoweredInterior(target, integer), VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, integer);
+    Require(CoveredPixels(0, false) > 100 && PixelAt(Column(0, 0.25f), below) == Background, "integer partitioning: the level-1 patch has a domain point inside it, " + PixelText(PixelAt(Column(0, 0.25f), below)));
+    Require(PixelAt(Column(2, 0.25f), below) != Background, "integer partitioning: the level-5 patch has no domain point inside it");
+    const PatchDraw patches{{3u, 3u, 1u, 3u, 2u}, Indices};
+    const auto stages = CompileLoweredInterior(target, patches);
+    Require(HasSpacing(stages.domain, spv::ExecutionModeSpacingFractionalEven) && !HasSpacing(stages.domain, spv::ExecutionModeSpacingFractionalOdd) && !HasSpacing(stages.domain, spv::ExecutionModeSpacingEqual), "fractional-even partitioning did not compile to fractional-even spacing");
+    Require(HasLevelBound(stages.hull, 64.0f) && !HasLevelBound(stages.hull, 63.0f), "fractional-even partitioning did not bound its tessellation factors at 64");
+    Draw(device, stages, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, patches);
+    Require(CoveredPixels(0, false) > 100 && PixelAt(Column(0, 0.25f), below) != Background, "fractional-even partitioning: the level-1 patch was not raised to level 2 with a domain point inside it");
+    Require(CoveredPixels(1, false) == 0 && PixelAt(Column(1, 0.25f), below) == Background, "fractional-even partitioning: the patch with level 0 was not culled");
+    Require(CoveredPixels(2, false) > 100 && PixelAt(Column(2, 0.25f), below) != Background, "fractional-even partitioning: the level-5 patch has no domain point inside it");
+}
+
 void RequireQuads(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target) {
     const auto center = Row(0.0f);
     std::array<bool, 2> frontFacing{};
@@ -847,6 +880,7 @@ int main() {
         RequireCounterClockwise(*device, target);
         RequireLevelClamps(*device, target);
         RequireIntegerPartitioning(*device, target);
+        RequireFractionalEvenPartitioning(*device, target);
         RequireQuads(*device, target);
         RequirePatchConstants(*device, target);
         RequireRelativePatches(*device, target);

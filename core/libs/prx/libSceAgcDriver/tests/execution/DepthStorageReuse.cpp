@@ -68,6 +68,7 @@ int main() {
             Require(DepthFastClearHarness::Draw(*device, shaders, surface, {.depthWrite = true}) == DepthFastClearHarness::Covered, "depth producer did not cover the surface");
             Read(*device, format == VK_FORMAT_D16_UNORM ? 7u : 22u, Width, true, 0.5f);
             Read(*device, 22u, format == VK_FORMAT_D16_UNORM ? Width : Width / 2u, false, 0.25f);
+            if (format == VK_FORMAT_D32_SFLOAT) Read(*device, 22u, Width, true, 0.25f);
         }
         std::puts("depth storage reuse GPU tests passed");
         return 0;

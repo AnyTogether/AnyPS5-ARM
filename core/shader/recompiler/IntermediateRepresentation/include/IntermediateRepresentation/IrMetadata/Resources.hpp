@@ -89,6 +89,7 @@ struct ImageResource {
     bool constantSwizzle = false;
     bool constantSwizzleCompatible = true;
     bool flatVolumeCompatible = true;
+    bool singleMipPlaneBiasCompatible = false;
     bool flatLineCompatible = true;
     bool flatVolumeLineCompatible = true;
     bool foldTexelOffsetsOnly = false;

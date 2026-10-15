@@ -394,6 +394,87 @@ void PrebuildPolicyReadback(AgcDriver::VulkanDevice& device, bool disabled) {
     Require(std::ranges::all_of(pixels, [](const auto value) { return value == 0xffffffffu; }), "prebuild policy changed native prepared-shader readback");
 }
 
+void RetainedPixelMatchesNullProgram(AgcDriver::VulkanDevice& device) {
+    using namespace AgcDriver::DriverDetail;
+    Fixture front;
+    Fixture retained;
+    front.Initialize(2u);
+    retained.Initialize(1u);
+    const auto null = std::make_shared<ShaderSnapshot>(PrepareNullPixelProgram(device));
+    ShaderRegistry registry;
+    for (const auto& snapshot : {front.snapshot, retained.snapshot, null}) registry.emplace(snapshot->codeAddress, std::vector<std::shared_ptr<const ShaderSnapshot>>{snapshot});
+    AgcDriver::QueueState queue{};
+    queue.context[0x8e] = queue.context[0x8f] = queue.context[0x203] = 0;
+    queue.context[0x2dc] = 0xaa00;
+    queue.context[0x1c4] = 1;
+    front.Bind(queue, 0xc8u, 0x8bu);
+    queue.shader[0x8bu] = 0;
+    retained.Bind(queue, 0x008u, 0x00bu);
+    queue.shader[0x00bu] = (31u << 1u) | (1u << 27u);
+    for (std::uint32_t i = 0; i < 30; ++i) queue.shader[0x00cu + i] = 0xdead0000u + i;
+    queue.context[0x1b6] = queue.context[0x1b3] = queue.context[0x1b4] = queue.context[0x1c5] = 0xffffffffu;
+    auto captured = queue;
+    captured.shader[0x00bu] = 20u << 1u;
+    DrawDecode capturedDraw{};
+    capturedDraw.state.stages.path = AgcDriver::Graphics::ShaderPath::Vertex;
+    DecodeGraphicsPrograms(capturedDraw, captured, registry, false, true);
+    Require(capturedDraw.programs.back().snapshot == null && capturedDraw.programs.back().userData.empty(), "a retained pixel program with a valid 20-word resource count consumed unrelated userdata");
+    for (const auto wave : {64u, 32u}) {
+        DrawDecode draw{};
+        draw.state.stages.path = AgcDriver::Graphics::ShaderPath::Vertex;
+        draw.state.stages.vertexWaveSize = 32u;
+        draw.state.stages.fragmentWaveSize = wave;
+        std::vector<AgcDriver::Graphics::RegisterRead> reads;
+        AgcDriver::Graphics::RegisterReadLog() = &reads;
+        try {
+            DecodeGraphicsPrograms(draw, queue, registry, false, true);
+            draw.pixel = AgcDriver::Graphics::DecodePixelStageInfo(queue.context, {}, AgcDriver::Graphics::PixelProgramSkipped(queue));
+        } catch (...) {
+            AgcDriver::Graphics::RegisterReadLog() = nullptr;
+            throw;
+        }
+        AgcDriver::Graphics::RegisterReadLog() = nullptr;
+        Require(draw.roles.size() == 2 && draw.roles.back() == ShaderRecompiler::ProgramRole::Fragment, "null substitution changed stage linking");
+        Require(draw.programs.back().snapshot == null && draw.programs.back().userData.empty(), "an unused retained pixel program consumed unrelated userdata");
+        Require(draw.pixel.interpolatorCount == 0 && !draw.pixel.depthExportEnable && !draw.pixel.stencilRefExportEnable && !draw.pixel.sampleMaskExportEnable && !draw.pixel.pixelKillEnable, "the substituted pixel program inherited stale inputs or exports");
+        for (const auto mode : draw.pixel.targetOutputMode) Require(mode == 0, "the substituted pixel program inherited stale color formats");
+        for (const auto read : reads) {
+            Require(AgcDriver::Graphics::DrawKeyCovers(read), "a pixel substitution dependency is absent from the draw key");
+            Require(read.bank != AgcDriver::Graphics::RegisterBank::Shader || read.offset < 0x00bu || read.offset > 0x02bu, "the substituted program read fragment resources or userdata");
+        }
+        const auto stages = PrepareGraphicsStages(draw, device.Target());
+        Require(stages.size() == 2 && stages.back().entry.handle != nullptr, "a retained-format null program was not prepared");
+        std::vector<ShaderRecompiler::LinkedProgram> linked;
+        std::vector<ShaderRecompiler::MemoryRegion> memory;
+        for (std::size_t i = 0; i < draw.programs.size(); ++i) {
+            const auto& program = draw.programs[i];
+            linked.push_back({draw.roles[i], program.binary, program.userDataBase, program.firstUserSgpr, program.userData});
+            memory.insert(memory.end(), program.memory.begin(), program.memory.end());
+        }
+        const auto& fragment = draw.programs.back();
+        const auto offset = stages.back().pushOffset;
+        const auto room = AgcDriver::Graphics::PipelinePushSlotBytes - offset % AgcDriver::Graphics::PipelinePushSlotBytes;
+        ShaderRecompiler::RecompileRequest request{fragment.binary, {wave, 0, {}, {}, draw.pixel, {}, memory, RegisteredFloatMode(*null)}, device.Target(), {0, 0, offset, room}, ShaderRecompiler::GraphicsCompileContext{0, linked, {}, {}, {}}};
+        static_cast<void>(InvocationFor(*null, fragment.codeOffset, request));
+        const auto handle = SourceHandleFor(*null, fragment.codeOffset, request);
+        const auto entries = null->prepared->entries.size();
+        static_cast<void>(InvocationFor(*null, fragment.codeOffset, request));
+        Require(null->prepared->entries.size() == entries && SourceHandleFor(*null, fragment.codeOffset, request) == handle, "a repeated null program did not reuse its prepared variant");
+    }
+    queue.shader[0x00bu] = 2;
+    queue.shader[0x00cu] = 0x12345678u;
+    for (const auto trigger : {0u, 1u, 2u}) {
+        auto active = queue;
+        if (trigger == 0) active.context[0x8e] = active.context[0x8f] = 0xf;
+        if (trigger == 1) active.context[0x203] = 0x400;
+        if (trigger == 2) active.context[0x2dc] = 0xaa01;
+        DrawDecode draw{};
+        draw.state.stages.path = AgcDriver::Graphics::ShaderPath::Vertex;
+        DecodeGraphicsPrograms(draw, active, registry, false, true);
+        Require(draw.programs.back().snapshot == retained.snapshot && draw.programs.back().userData == std::vector<std::uint32_t>{0x12345678u}, "an enabled consumer did not restore the retained pixel program");
+    }
+}
+
 void NullPixelMatchesRegistration(AgcDriver::VulkanDevice& device) {
     using namespace AgcDriver::DriverDetail;
     Fixture front;
@@ -449,6 +530,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         const auto dump = argc == 2 ? std::filesystem::path(argv[1]) : std::filesystem::path{};
+        RetainedPixelMatchesNullProgram(*device);
         NullPixelMatchesRegistration(*device);
         Check(*device, AgcDriver::Graphics::ShaderPath::Vertex, dump);
         Check(*device, AgcDriver::Graphics::ShaderPath::Geometry, dump);

@@ -91,7 +91,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     const auto prtDefColor = ((words[5] >> 26u) & 0x1u) != 0;
 
     const auto mipStatsCntId = words[6] & 0xffu;
-    const auto msaaDepth = ((words[6] >> 10u) & 0x1u) != 0;
+    const auto iterate256 = ((words[6] >> 10u) & 0x1u) != 0;
     const auto maxUncompBlkSize = (words[6] >> 15u) & 0x3u;
     const auto maxCompBlkSize = (words[6] >> 17u) & 0x3u;
     const auto metaPipeAligned = ((words[6] >> 19u) & 0x1u) != 0;
@@ -119,7 +119,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     Require(!cornerSample, "guest texture descriptor uses corner sampling which is not implemented");
     Require(!prtDefColor, "guest texture descriptor uses a partially resident default color which is not implemented");
     Require(arrayPitch == 0, "guest texture descriptor uses a nonzero array pitch which is not implemented");
-    Require(!msaaDepth, "guest texture descriptor uses MSAA which is not implemented");
+    Require(!iterate256 || (typeRaw == 14u && tileModeRaw == 24u && (format == 7u || format == 22u)), "guest texture descriptor ITERATE_256 is implemented only for multisampled Z depth");
     static_cast<void>(maxUncompBlkSize);
     static_cast<void>(maxCompBlkSize);
     // Surfaces are always written uncompressed here (render targets and storage images bypass DCC), so
@@ -224,6 +224,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     result.dccAddress = metaCompress ? metaAddr << 8u : 0u;
     result.dccAlphaOnMsb = dccAlphaPos;
     result.dccPipeAligned = metaPipeAligned;
+    result.iterate256 = iterate256;
     result.minLod = minLod;
     result.samples = samples;
     if (baseLevel > maxMip) {

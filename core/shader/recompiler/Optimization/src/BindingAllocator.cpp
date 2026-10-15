@@ -68,7 +68,7 @@ bool usesGds(const IrProgram& program) {
 
 }
 
-BindingAllocationResult BindingAllocator::Allocate(IrProgram& program, const BindingLayout& layout, bool registrationModules) const {
+BindingAllocationResult BindingAllocator::Allocate(IrProgram& program, const BindingLayout& layout, bool registrationModules, bool stencilReplay) const {
     IrProgramMetadata& metadata = program.Metadata();
     if (!metadata.shaderInfoComplete || metadata.bindingLayoutComplete) {
         fail(metadata.shaderInfoComplete ? "shader binding layout failed: binding layout already allocated"
@@ -115,6 +115,11 @@ BindingAllocationResult BindingAllocator::Allocate(IrProgram& program, const Bin
     }
     const auto pushSize = layout.pushConstantSizeBytes / 4u;
     next.pushDataStartDword = next.runtimeImageCount == 0u && next.ShaderDataDwords() != 0u && next.ShaderDataDwords() <= pushSize ? layout.pushConstantOffsetBytes / 4u : PushData::NoStart;
+    if (stencilReplay) {
+        const auto offset = next.UsesPushData() ? next.ShaderDataDwords() : 0u;
+        if (offset >= pushSize) fail("stencil replay requires an unused push constant dword");
+        next.stencilReferenceDword = offset;
+    }
 
     if (!info.buffers.empty()) {
         std::vector<std::uint32_t> resources(info.buffers.size());
@@ -195,6 +200,10 @@ BindingAllocationResult BindingAllocator::Allocate(IrProgram& program, const Bin
     if (result.layout.UsesPushData()) {
         result.pushConstantOffsetBytes = result.layout.pushDataStartDword * static_cast<std::uint32_t>(sizeof(std::uint32_t));
         result.pushConstantSizeBytes = result.layout.ShaderDataDwords() * static_cast<std::uint32_t>(sizeof(std::uint32_t));
+    }
+    if (stencilReplay) {
+        result.pushConstantOffsetBytes = layout.pushConstantOffsetBytes;
+        result.pushConstantSizeBytes += sizeof(std::uint32_t);
     }
     return result;
 }

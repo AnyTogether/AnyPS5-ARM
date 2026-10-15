@@ -2,6 +2,9 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawCache.hpp"
 #include <algorithm>
 #include <bit>
+#include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Memory/WriteEvidence.hpp"
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <cstdlib>
 
 namespace AgcDriver::DriverDetail {
@@ -21,6 +24,21 @@ bool DrawRecipeRecord::Expired() const {
 bool Driver::drawEntries() {
     static const bool entries = std::getenv("APS5_NO_DRAW_SRT_ENTRIES") == nullptr && !stampValidate();
     return entries;
+}
+
+bool Driver::drawDataHits() {
+    static const bool hits = std::getenv("APS5_NO_DRAW_DATA_HITS") == nullptr;
+    return hits;
+}
+
+bool Driver::drawStageDataHits() {
+    static const bool hits = std::getenv("APS5_NO_DRAW_STAGE_DATA_HITS") == nullptr && !stampValidate();
+    return hits;
+}
+
+bool Driver::verifyDrawDataHits() {
+    static const bool verify = std::getenv("APS5_VERIFY_DRAW_DATA_HITS") != nullptr;
+    return verify;
 }
 
 bool Driver::verifyDrawEntries() {
@@ -80,14 +98,17 @@ bool DrawKeySightings::SeenBefore(std::uint64_t key) {
     return false;
 }
 
-bool Driver::admitDrawKey(std::uint64_t key) {
+bool Driver::admitDrawKey(std::uint64_t key, std::uint64_t shape) {
     std::lock_guard cacheLock(drawCacheMutex);
     if (drawCache.contains(key)) return true;
     if (!drawKeySightings) drawKeySightings.emplace(drawCacheEntries() * DrawKeySightings::Ways);
-    return drawKeySightings->SeenBefore(key);
+    const bool seen = drawKeySightings->SeenBefore(key);
+    if (seen || shape == 0 || drawShapes.contains(shape)) return seen;
+    if (!drawShapeSightings) drawShapeSightings.emplace(drawCacheEntries() * DrawKeySightings::Ways);
+    return drawShapeSightings->SeenBefore(shape);
 }
 
-void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<DispatchVariant>>& fresh, std::shared_ptr<const DrawDecode> decode) {
+void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<DispatchVariant>>& fresh, std::shared_ptr<const DrawDecode> decode, std::uint64_t shape) {
     std::lock_guard cacheLock(drawCacheMutex);
     auto& counters = drawEntryCounters;
     ++counters.inserts;
@@ -95,6 +116,7 @@ void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<Disp
     auto replacement = std::make_shared<DrawEntry>();
     replacement->stages.resize(fresh.size());
     replacement->decode = std::move(decode);
+    replacement->shape = shape;
     if (found != drawCache.end()) {
         if (found->second->stages.size() == fresh.size()) replacement->stages = found->second->stages;
         if (found->second->decode != nullptr) replacement->decode = found->second->decode;
@@ -119,6 +141,7 @@ void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<Disp
         }
     }
     replacement->touched = drawCacheHits;
+    if (replacement->decode != nullptr && shape != 0) drawShapes[shape] = key;
     if (found == drawCache.end()) {
         drawOrder.push_front(key);
         replacement->order = drawOrder.begin();
@@ -133,9 +156,12 @@ void Driver::insertDrawEntry(std::uint64_t key, std::vector<std::shared_ptr<Disp
         for (const auto& variants : last->second->stages) {
             for (const auto& variant : variants) accountDrawVariant(*variant, false);
         }
+        if (traceDrawCache()) traceInsert(traceKeysEvicted, last->first);
+        if (const auto shapeOf = drawShapes.find(last->second->shape); shapeOf != drawShapes.end() && shapeOf->second == last->first) drawShapes.erase(shapeOf);
         drawOrder.erase(last->second->order);
         drawCache.erase(last);
         ++drawCacheEvictions;
+        ++counters.evictions;
     }
 }
 
@@ -145,6 +171,7 @@ void Driver::eraseDrawEntry(std::uint64_t key, const std::shared_ptr<DrawEntry>&
     for (const auto& variants : found->second->stages) {
         for (const auto& variant : variants) accountDrawVariant(*variant, false);
     }
+    if (const auto shapeOf = drawShapes.find(found->second->shape); shapeOf != drawShapes.end() && shapeOf->second == key) drawShapes.erase(shapeOf);
     drawOrder.erase(found->second->order);
     drawCache.erase(found);
 }

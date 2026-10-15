@@ -8,8 +8,19 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
+void APS5_VABI _init_env_nid_postfix();
 int APS5_VABI posix_memalign_nid_postfix(void**, std::size_t, std::size_t);
 void* APS5_VABI reallocf_nid_postfix(void*, std::size_t);
 void* APS5_VABI _Znwm_nid_postfix(std::size_t);
@@ -30,6 +41,12 @@ int APS5_VABI atexit_nid_postfix(void (APS5_VABI*)());
 namespace {
 
 alignas(64) std::array<std::byte, 256> storage{};
+alignas(16) std::array<std::byte, 0x40> process{};
+alignas(16) std::array<std::byte, 0x38> libc{};
+alignas(16) std::array<std::byte, 0x78> replacement{};
+#ifdef _WIN32
+[[gnu::section(".proctst"), gnu::used]] alignas(4) std::uint32_t processParameterMetadata[2]{};
+#endif
 std::size_t lastSize = 0;
 std::size_t lastAlignment = 0;
 unsigned posixCalls = 0;
@@ -41,6 +58,55 @@ bool nullPosixResult = false;
 
 void require(bool condition) {
     if (!condition) throw std::runtime_error("application heap test failed");
+}
+
+void installProcessParameters() {
+#ifdef _WIN32
+    auto* image = reinterpret_cast<std::byte*>(GetModuleHandleW(nullptr));
+    require(image != nullptr);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
+    auto* sections = IMAGE_FIRST_SECTION(nt);
+    IMAGE_SECTION_HEADER* target = nullptr;
+    for (unsigned index = 0; index < nt->FileHeader.NumberOfSections; ++index) {
+        if (std::memcmp(sections[index].Name, ".proctst", 8) == 0) {
+            target = &sections[index];
+            break;
+        }
+    }
+    require(target != nullptr);
+    processParameterMetadata[0] = static_cast<std::uint32_t>(process.data() - image);
+    processParameterMetadata[1] = static_cast<std::uint32_t>(process.size());
+    DWORD oldProtect = 0;
+    require(VirtualProtect(target, sizeof(*target), PAGE_READWRITE, &oldProtect) != 0);
+    std::memcpy(target->Name, ".procpar", 8);
+    target->Misc.VirtualSize = sizeof(processParameterMetadata);
+    DWORD restored = 0;
+    VirtualProtect(target, sizeof(*target), oldProtect, &restored);
+#elif defined(__linux__)
+    bool installed = false;
+    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+        if (image->dlpi_name != nullptr && image->dlpi_name[0] != '\0') return 0;
+        for (std::uint16_t index = 0; index < image->dlpi_phnum; ++index) {
+            const auto& header = image->dlpi_phdr[index];
+            if (header.p_type == PT_LOAD || header.p_type == PT_GNU_EH_FRAME || header.p_type < 0x60000000u) continue;
+            auto* mutableHeader = const_cast<Elf64_Phdr*>(&header);
+            const auto pageSize = static_cast<std::uintptr_t>(sysconf(_SC_PAGESIZE));
+            const auto pageStart = reinterpret_cast<std::uintptr_t>(mutableHeader) & ~(pageSize - 1);
+            const auto pageEnd = (reinterpret_cast<std::uintptr_t>(mutableHeader + 1) + pageSize - 1) & ~(pageSize - 1);
+            if (mprotect(reinterpret_cast<void*>(pageStart), pageEnd - pageStart, PROT_READ | PROT_WRITE) != 0) return 1;
+            mutableHeader->p_type = 0x61000001;
+            mutableHeader->p_vaddr = reinterpret_cast<std::uintptr_t>(process.data()) - image->dlpi_addr;
+            mutableHeader->p_paddr = mutableHeader->p_vaddr;
+            mutableHeader->p_filesz = process.size();
+            mutableHeader->p_memsz = process.size();
+            *static_cast<bool*>(data) = true;
+            return 1;
+        }
+        return 1;
+    }, &installed);
+    require(installed);
+#endif
 }
 
 template<typename TAction>
@@ -106,9 +172,6 @@ void write(std::array<std::byte, TSize>& data, std::size_t offset, TValue value)
 int main(int argc, char** argv) {
     reject([] { ApplicationHeapAllocate_nid_no_patch(64); });
     reject([] { ApplicationHeapRegister_nid_no_patch(nullptr); });
-    std::array<std::byte, 0x40> process{};
-    std::array<std::byte, 0x38> libc{};
-    std::array<std::byte, 0x78> replacement{};
     write(process, 0, std::uint64_t{0x40});
     write(process, 8, std::uint32_t{0x4942524f});
     write(process, 0x38, libc.data());
@@ -125,6 +188,16 @@ int main(int argc, char** argv) {
     write(replacement, 0x40, &align);
     write(replacement, 0x48, &realign);
     write(replacement, 0x50, &posixAlign);
+    if (argc > 1 && std::strcmp(argv[1], "lazy") == 0) {
+        installProcessParameters();
+        require(initializes == 0);
+        require(_Znwm_nid_postfix(40) == storage.data() && lastSize == 40 && initializes == 1);
+        _ZdlPv_nid_postfix(storage.data());
+        require(frees == 1);
+        _init_env_nid_postfix();
+        require(initializes == 1);
+        return 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "exit-order") == 0) {
         require(atexit_nid_postfix(exitCallbackAllocates) == 0);
         ApplicationHeapInitialize_nid_no_patch(process.data());

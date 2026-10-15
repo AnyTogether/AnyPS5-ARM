@@ -194,6 +194,7 @@ std::vector<PacketStore> DecodeStores(std::span<const std::uint32_t> packet);
 // packet made by reading them there (through the checked guest memory path, which waits for
 // recorded GPU work that writes them), and both steps in one for the packet.
 std::uint64_t DispatchArgumentAddress(std::span<const std::uint32_t> packet, const QueueState& queue);
+void NoteDispatchRegisters(std::span<const std::uint32_t> packet, QueueState& queue);
 std::array<std::uint32_t, 5> ReadDispatchArguments(std::uint64_t arguments, std::uint32_t initiator);
 std::array<std::uint32_t, 3> PartialGroupThreads(const std::array<std::uint32_t, 3>& groups, const std::array<std::uint32_t, 3>& numThreads);
 std::array<std::uint32_t, 5> ResolveDispatch(std::span<const std::uint32_t> packet, const QueueState& queue);

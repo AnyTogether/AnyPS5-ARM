@@ -781,6 +781,208 @@ MaskFamily familyOf(const std::vector<Region>& regions, const IrValue* mask, std
     return MaskFamily{mask->HasImmediate() || regionOf(regions, mask->Parent()) == Region::Once, wholeQuadSource(mask, waveSize) != nullptr};
 }
 
+class GuardProof {
+public:
+    GuardProof(const IrProgram& program, const std::vector<Region>& regions, const BlockSet& uniform, const IrValue* observation, std::span<const IrBlock* const> path = {}) : program(program), regions(regions), uniform(uniform), observation(observation), path(path), waveSize(program.WaveSize()) {}
+
+    bool ImpliesMask(const IrValue* condition, const IrValue* low, const IrValue* high) {
+        return within(condition, Words{low, high}, 0u);
+    }
+
+    bool Implies(const IrValue* left, const IrValue* right, unsigned depth = 0) {
+        left = resolve(left);
+        right = resolve(right);
+        if (!follow(left, depth) || !follow(right, depth)) return false;
+        if (left == right || truth(left, false) || truth(right, true)) return true;
+        if (right->Opcode() == IrOpcode::LogicalAnd) return Implies(left, right->Argument(0), depth + 1u) && Implies(left, right->Argument(1), depth + 1u);
+        if (right->Opcode() == IrOpcode::LogicalOr) return Implies(left, right->Argument(0), depth + 1u) || Implies(left, right->Argument(1), depth + 1u);
+        if (left->Opcode() == IrOpcode::LogicalAnd) return Implies(left->Argument(0), right, depth + 1u) || Implies(left->Argument(1), right, depth + 1u);
+        if (left->Opcode() == IrOpcode::LogicalOr) return Implies(left->Argument(0), right, depth + 1u) && Implies(left->Argument(1), right, depth + 1u);
+        if (left->IsPhi() && merges(*left)) {
+            return std::all_of(left->Arguments().begin(), left->Arguments().end(), [&](const IrValue* incoming) { return Implies(incoming, right, depth + 1u); });
+        }
+        if (left->Opcode() == IrOpcode::SelectU1) return Implies(left->Argument(1), right, depth + 1u) && Implies(left->Argument(2), right, depth + 1u);
+        if (const auto bit = threadBit(right, waveSize)) return within(left, Words{bit->low, bit->high}, depth + 1u);
+        if (const auto bit = threadBit(left, waveSize)) return fromWords(Words{bit->low, bit->high}, right, depth + 1u);
+        return false;
+    }
+
+private:
+    struct Words {
+        const IrValue* low;
+        const IrValue* high;
+    };
+
+    bool follow(const IrValue* value, unsigned depth) {
+        if (depth > 64u || remaining == 0u) return false;
+        --remaining;
+        return value->HasImmediate() || regionOf(regions, value->Parent()) == Region::Once;
+    }
+
+    static bool truth(const IrValue* value, bool expected) {
+        return value->Type() == IrType::Bool && value->HasImmediate() && value->ImmediateBool() == expected;
+    }
+
+    bool constant(Words words, std::uint32_t value) const {
+        return isImmediate(words.low, value) && (waveSize == 32u || isImmediate(words.high, value));
+    }
+
+    bool same(Words left, Words right) const {
+        return left.low == right.low && (waveSize == 32u || left.high == right.high);
+    }
+
+    bool merges(const IrValue& phi) const {
+        if (regionOf(regions, phi.Parent()) != Region::Once || phi.ArgumentCount() == 0u || phi.ArgumentCount() != phi.PhiBlockCount()) return false;
+        return std::all_of(phi.Arguments().begin(), phi.Arguments().end(), [&](const IrValue* incoming) { return incoming->Resolve()->HasImmediate() || regionOf(regions, incoming->Resolve()->Parent()) == Region::Once; });
+    }
+
+    static const IrValue* incomingFrom(const IrValue& phi, const IrBlock* predecessor) {
+        for (std::size_t index = 0; index < phi.PhiBlockCount(); ++index) if (phi.PhiBlock(index) == predecessor) return phi.Argument(index)->Resolve();
+        return nullptr;
+    }
+
+    const IrValue* resolve(const IrValue* value) const {
+        for (unsigned depth = 0; depth < 64u; ++depth) {
+            value = value->Resolve();
+            if (!value->IsPhi()) return value;
+            const auto block = std::find(path.begin(), path.end(), value->Parent());
+            if (block == path.end() || block == path.begin()) return value;
+            const IrValue* incoming = incomingFrom(*value, *(block - 1));
+            if (incoming == nullptr) return value;
+            value = incoming;
+        }
+        return value;
+    }
+
+    bool capturedHere(const IrValue* value) const {
+        if (uniform.contains(value->Parent())) return true;
+        const IrBlock* observedBlock = path.empty() ? observation->Parent() : path.back();
+        if (!truth(value->Argument(0)->Resolve(), true) || observedBlock == nullptr || value->Parent() == nullptr) return false;
+        if (value->Parent() == observedBlock) {
+            if (!path.empty() && observation->Parent() != observedBlock) return true;
+            const auto& instructions = value->Parent()->Instructions();
+            const auto captured = std::find(instructions.begin(), instructions.end(), value);
+            const auto observed = std::find(instructions.begin(), instructions.end(), observation);
+            return captured != instructions.end() && observed != instructions.end() && std::distance(instructions.begin(), captured) < std::distance(instructions.begin(), observed);
+        }
+        BlockSet visited;
+        std::vector<const IrBlock*> pending{program.BlockOrder().front()};
+        while (!pending.empty()) {
+            const IrBlock* block = pending.back();
+            pending.pop_back();
+            if (block == value->Parent() || !visited.insert(block).second) continue;
+            if (block == observedBlock) return false;
+            pending.insert(pending.end(), block->Successors().begin(), block->Successors().end());
+        }
+        return true;
+    }
+
+    const IrValue* ballot(const IrValue* word, std::uint32_t half) const {
+        if (word->Opcode() != IrOpcode::CompositeExtractU32x4 || !isImmediate(word->Argument(1)->Resolve(), half)) return nullptr;
+        const IrValue* value = word->Argument(0)->Resolve();
+        return value->Opcode() == IrOpcode::Ballot ? value : nullptr;
+    }
+
+    std::optional<Words> quadSource(Words words) const {
+        if (words.low->Opcode() != IrOpcode::CompositeExtractU64 || !isImmediate(words.low->Argument(1)->Resolve(), 0u)) return std::nullopt;
+        const IrValue* wqm = words.low->Argument(0)->Resolve();
+        if (waveSize != 32u && (words.high->Opcode() != IrOpcode::CompositeExtractU64 || words.high->Argument(0)->Resolve() != wqm || !isImmediate(words.high->Argument(1)->Resolve(), 1u))) return std::nullopt;
+        if (wqm->Opcode() != IrOpcode::WqmU64) return std::nullopt;
+        const IrValue* source = wqm->Argument(0)->Resolve();
+        if (source->Opcode() != IrOpcode::CompositeConstructU64 || source->ArgumentCount() != 2u) return std::nullopt;
+        return Words{source->Argument(0)->Resolve(), source->Argument(1)->Resolve()};
+    }
+
+    std::vector<Words> parts(Words words) const {
+        const bool lowAnd = words.low->Opcode() == IrOpcode::BitwiseAnd32;
+        const bool highAnd = waveSize != 32u && words.high->Opcode() == IrOpcode::BitwiseAnd32;
+        std::vector<Words> result;
+        if (!lowAnd && !highAnd) return result;
+        for (unsigned low = 0; low < (lowAnd ? 2u : 1u); ++low) {
+            for (unsigned high = 0; high < (highAnd ? 2u : 1u); ++high) {
+                result.push_back(Words{lowAnd ? words.low->Argument(low)->Resolve() : words.low, highAnd ? words.high->Argument(high)->Resolve() : words.high});
+            }
+        }
+        return result;
+    }
+
+    template<typename TProof>
+    std::optional<bool> intersection(Words words, TProof proof) {
+        const bool lowAnd = words.low->Opcode() == IrOpcode::BitwiseAnd32;
+        const bool highAnd = waveSize != 32u && words.high->Opcode() == IrOpcode::BitwiseAnd32;
+        if (!lowAnd && !highAnd) return std::nullopt;
+        const auto part = [&](unsigned low, unsigned high) {
+            return Words{lowAnd ? words.low->Argument(low)->Resolve() : words.low, highAnd ? words.high->Argument(high)->Resolve() : words.high};
+        };
+        if (!lowAnd || !highAnd) return proof(part(0u, 0u)) && proof(part(lowAnd ? 1u : 0u, highAnd ? 1u : 0u));
+        return (proof(part(0u, 0u)) && proof(part(1u, 1u))) || (proof(part(0u, 1u)) && proof(part(1u, 0u)));
+    }
+
+    bool within(const IrValue* condition, Words words, unsigned depth) {
+        condition = resolve(condition);
+        words = Words{resolve(words.low), resolve(words.high)};
+        if (!follow(condition, depth) || !follow(words.low, depth) || (waveSize != 32u && !follow(words.high, depth))) return false;
+        if (truth(condition, false) || constant(words, 0xffffffffu)) return true;
+        if (const auto bit = threadBit(condition, waveSize)) return subset(Words{bit->low, bit->high}, words, depth + 1u);
+        if (const auto result = intersection(words, [&](Words part) { return within(condition, part, depth + 1u); })) return *result;
+        if (const auto source = quadSource(words)) return within(condition, *source, depth + 1u);
+        const IrValue* lowBallot = ballot(words.low, 0u);
+        const IrValue* highBallot = waveSize == 32u ? lowBallot : ballot(words.high, 1u);
+        if (lowBallot && highBallot && capturedHere(lowBallot) && capturedHere(highBallot)) return Implies(condition, lowBallot->Argument(0), depth + 1u) && Implies(condition, highBallot->Argument(0), depth + 1u);
+        if (condition->Opcode() == IrOpcode::LogicalAnd) return within(condition->Argument(0), words, depth + 1u) || within(condition->Argument(1), words, depth + 1u);
+        if (condition->Opcode() == IrOpcode::LogicalOr) return within(condition->Argument(0), words, depth + 1u) && within(condition->Argument(1), words, depth + 1u);
+        if (condition->IsPhi() && merges(*condition)) return std::all_of(condition->Arguments().begin(), condition->Arguments().end(), [&](const IrValue* incoming) { return within(incoming, words, depth + 1u); });
+        return false;
+    }
+
+    bool fromWords(Words words, const IrValue* condition, unsigned depth) {
+        condition = resolve(condition);
+        words = Words{resolve(words.low), resolve(words.high)};
+        if (!follow(condition, depth) || !follow(words.low, depth) || (waveSize != 32u && !follow(words.high, depth))) return false;
+        if (truth(condition, true) || constant(words, 0u)) return true;
+        if (const auto bit = threadBit(condition, waveSize)) return subset(words, Words{bit->low, bit->high}, depth + 1u);
+        if (condition->Opcode() == IrOpcode::LogicalAnd) return fromWords(words, condition->Argument(0), depth + 1u) && fromWords(words, condition->Argument(1), depth + 1u);
+        if (condition->Opcode() == IrOpcode::LogicalOr) return fromWords(words, condition->Argument(0), depth + 1u) || fromWords(words, condition->Argument(1), depth + 1u);
+        const auto intersections = parts(words);
+        if (!intersections.empty()) return std::any_of(intersections.begin(), intersections.end(), [&](Words part) { return fromWords(part, condition, depth + 1u); });
+        const IrValue* lowBallot = ballot(words.low, 0u);
+        const IrValue* highBallot = waveSize == 32u ? lowBallot : ballot(words.high, 1u);
+        return lowBallot && highBallot && Implies(lowBallot->Argument(0), condition, depth + 1u) && Implies(highBallot->Argument(0), condition, depth + 1u);
+    }
+
+    bool subset(Words left, Words right, unsigned depth) {
+        left = Words{resolve(left.low), resolve(left.high)};
+        right = Words{resolve(right.low), resolve(right.high)};
+        if (!follow(left.low, depth) || !follow(right.low, depth) || (waveSize != 32u && (!follow(left.high, depth) || !follow(right.high, depth)))) return false;
+        if (same(left, right) || constant(left, 0u) || constant(right, 0xffffffffu)) return true;
+        if (const auto result = intersection(right, [&](Words part) { return subset(left, part, depth + 1u); })) return *result;
+        const auto leftParts = parts(left);
+        if (!leftParts.empty() && std::any_of(leftParts.begin(), leftParts.end(), [&](Words part) { return subset(part, right, depth + 1u); })) return true;
+        if (const auto source = quadSource(right); source && subset(left, *source, depth + 1u)) return true;
+        if (left.low->IsPhi() && merges(*left.low) && (waveSize == 32u || (left.high->IsPhi() && left.high->Parent() == left.low->Parent() && merges(*left.high)))) {
+            for (std::size_t index = 0; index < left.low->PhiBlockCount(); ++index) {
+                const IrValue* highIncoming = waveSize == 32u ? left.high : incomingFrom(*left.high, left.low->PhiBlock(index));
+                if (highIncoming == nullptr || !subset(Words{left.low->Argument(index)->Resolve(), highIncoming}, right, depth + 1u)) return false;
+            }
+            return true;
+        }
+        const IrValue* lowBallot = ballot(left.low, 0u);
+        const IrValue* highBallot = waveSize == 32u ? lowBallot : ballot(left.high, 1u);
+        if (lowBallot && highBallot && within(lowBallot->Argument(0), right, depth + 1u) && within(highBallot->Argument(0), right, depth + 1u)) return true;
+        lowBallot = ballot(right.low, 0u);
+        highBallot = waveSize == 32u ? lowBallot : ballot(right.high, 1u);
+        return lowBallot && highBallot && capturedHere(lowBallot) && capturedHere(highBallot) && fromWords(left, lowBallot->Argument(0), depth + 1u) && fromWords(left, highBallot->Argument(0), depth + 1u);
+    }
+
+    const IrProgram& program;
+    const std::vector<Region>& regions;
+    const BlockSet& uniform;
+    const IrValue* observation;
+    std::span<const IrBlock* const> path;
+    std::uint32_t waveSize;
+    std::uint32_t remaining = 8192u;
+};
+
 class UnreadLanes;
 
 using FirstLaneReads = std::array<std::unique_ptr<UnreadLanes>, 4>;
@@ -1017,6 +1219,38 @@ MaskedSelectEliminationStats MaskedSelectEliminator::Eliminate(IrProgram& progra
         if (removed != 0u) DeadCodeEliminator{}.Eliminate(program);
     }
     return stats;
+}
+
+bool GuardImplies(const IrProgram& program, const IrValue* condition, const IrValue* consequence) {
+    if (condition == nullptr || consequence == nullptr) return false;
+    condition = condition->Resolve();
+    consequence = consequence->Resolve();
+    if (condition->Type() != IrType::Bool || consequence->Type() != IrType::Bool) return false;
+    if (condition == consequence || (condition->HasImmediate() && !condition->ImmediateBool()) || (consequence->HasImmediate() && consequence->ImmediateBool())) return true;
+    const auto regions = blockRegions(program);
+    if (std::ranges::find(regions, Region::Loop) != regions.end()) return false;
+    if ((!condition->HasImmediate() && regionOf(regions, condition->Parent()) != Region::Once) || (!consequence->HasImmediate() && regionOf(regions, consequence->Parent()) != Region::Once)) return false;
+    const BlockSet uniform = uniformEntryBlocks(program);
+    std::uint64_t steps = 0;
+    MaskSets sets(steps);
+    ImpliedMasks implied(regions, uniform, program.WaveSize(), familyOf(regions, consequence, program.WaveSize()), sets, steps);
+    implied.AddMask(consequence);
+    return sets.Contains(implied.Of(condition), consequence->Id()) || GuardProof(program, regions, uniform, condition).Implies(condition, consequence);
+}
+
+bool GuardImpliesMaskOnPath(const IrProgram& program, const IrValue* condition, const IrValue* low, const IrValue* high, std::span<const IrBlock* const> path) {
+    if (condition == nullptr || low == nullptr || high == nullptr || path.empty() || program.BlockOrder().empty() || path.front() != program.BlockOrder().front()) return false;
+    if (condition->Resolve()->Type() != IrType::Bool || low->Resolve()->Type() != IrType::U32 || high->Resolve()->Type() != IrType::U32) return false;
+    BlockSet visited;
+    for (std::size_t index = 0; index < path.size(); ++index) {
+        if (path[index] == nullptr || !visited.insert(path[index]).second) return false;
+        if (index != 0u && std::ranges::find(path[index - 1u]->Successors(), path[index]) == path[index - 1u]->Successors().end()) return false;
+    }
+    if (!condition->Resolve()->HasImmediate() && std::ranges::find(path, condition->Resolve()->Parent()) == path.end()) return false;
+    const auto regions = blockRegions(program);
+    if (std::ranges::find(regions, Region::Loop) != regions.end()) return false;
+    const auto uniform = uniformEntryBlocks(program);
+    return GuardProof(program, regions, uniform, condition->Resolve(), path).ImpliesMask(condition, low, high);
 }
 
 }

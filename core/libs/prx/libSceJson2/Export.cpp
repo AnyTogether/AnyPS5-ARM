@@ -513,6 +513,8 @@ void APS5_VABI _ZN3sce4Json12MemAllocatorD2Ev(void* self) {
     *static_cast<void* const**>(self) = &JsonMemAllocatorVtable[2];
 }
 
+std::size_t _ZN3sce4Json6String4nposE = static_cast<std::size_t>(-1);
+
 void APS5_VABI _ZN3sce4Json6StringC1Ev(String* self) { Construct(*self, std::string()); }
 void APS5_VABI _ZN3sce4Json6StringC1EPKc(String* self, const char* text) {
     if (text == nullptr) throw std::invalid_argument("sce::Json::String: null text");
@@ -528,6 +530,25 @@ const char* APS5_VABI _ZNK3sce4Json6String5c_strEv(const String* self) { return 
 bool APS5_VABI _ZNK3sce4Json6String5emptyEv(const String* self) { return self->text->empty(); }
 std::size_t APS5_VABI _ZNK3sce4Json6String6lengthEv(const String* self) { return self->text->size(); }
 bool APS5_VABI _ZNK3sce4Json6StringeqEPKc(const String* self, const char* text) { return text != nullptr && *self->text == text; }
+void APS5_VABI _ZN3sce4Json6String5clearEv(String* self) { self->text->clear(); }
+void APS5_VABI _ZN3sce4Json6String7reserveEm(String* self, std::size_t capacity) { self->text->reserve(capacity); }
+String* APS5_VABI _ZN3sce4Json6String6appendERKS1_(String* self, const String* other) {
+    const std::string copy = *other->text;
+    self->text->append(copy);
+    return self;
+}
+String* APS5_VABI _ZN3sce4Json6String6appendEPKc(String* self, const char* text) {
+    if (text == nullptr) throw std::invalid_argument("sce::Json::String::append: null text");
+    self->text->append(text);
+    return self;
+}
+String* APS5_VABI _ZNK3sce4Json6String6substrEmm(String* result, const String* self, std::size_t position, std::size_t length) {
+    if (position > self->text->size()) throw std::out_of_range("sce::Json::String::substr: position past the end");
+    Construct(*result, self->text->substr(position, length));
+    return result;
+}
+std::size_t APS5_VABI _ZNK3sce4Json6String4findEcm(const String* self, char character, std::size_t position) { return self->text->find(character, position); }
+std::size_t APS5_VABI _ZNK3sce4Json6String5rfindEcm(const String* self, char character, std::size_t position) { return self->text->rfind(character, position); }
 int APS5_VABI _ZNK3sce4Json6String7compareEPKc(const String* self, const char* text) {
     if (text == nullptr) throw std::invalid_argument("sce::Json::String::compare: null text");
     return self->text->compare(text);

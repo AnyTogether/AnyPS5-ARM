@@ -68,6 +68,7 @@ SysVDynamicSection SysVDynamicSectionBuilder::BuildDynamicSection(
     std::uint32_t originalJmprelCount)
 {
     SysVDynamicSection result;
+    result.NeededLibraries = neededLibraries;
     result.DynStrData.push_back(0);
 
     std::vector<std::uint32_t> neededOffsets;

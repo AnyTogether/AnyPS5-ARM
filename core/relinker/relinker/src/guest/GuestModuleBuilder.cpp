@@ -348,6 +348,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     for (const auto& name : neededNames) addHost(name);
     for (const auto& image : images) for (const auto& dependency : image.Dependencies) addHost(dependency);
     if (uniqueHosts.contains("libSceLibcInternal.prx") && uniqueHosts.insert("libc.prx").second) hostLibraries.push_back("libc.prx");
+    dynamic.NeededLibraries = hostLibraries;
     dynamic.DynamicSegmentData.clear();
     const auto addNeeded = [&](const std::string& name) {
         Io::AppendU64(dynamic.DynamicSegmentData, 1);
@@ -427,7 +428,10 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             }
         }
         dynamic.GuestModules.push_back(std::move(runtime));
-        artifacts.push_back({target, std::move(output), std::move(imports), image.SourcePath});
+        std::vector<std::string> neededLibraries;
+        for (const auto& name : image.Dependencies)
+            if (findGuest(name) == guestNames.end()) neededLibraries.push_back(name);
+        artifacts.push_back({target, std::move(output), std::move(imports), image.SourcePath, std::move(neededLibraries)});
         progress.Report({Domain::ProgressStage::Modules, Io::Utf8Path(image.SourcePath), artifacts.size(), order.size()});
     }
     return artifacts;

@@ -26,6 +26,8 @@ constexpr std::array<std::uint32_t, Counters> Starts{1000, 2000, 3000, 4000};
 constexpr std::uint32_t UntouchedAppend = 0x5eed0001u;
 constexpr std::uint32_t UntouchedConsume = 0x5eed0002u;
 constexpr std::size_t ActiveLanesLiteral = 12;
+constexpr std::size_t OrderedM0Literal = 3;
+constexpr std::array<std::uint32_t, 2> OrderedM0{0u, 7u};
 alignas(256) std::array<std::uint32_t, MaxThreads * Results> Output{};
 alignas(16) std::array<std::uint32_t, Counters> CounterReadback{};
 
@@ -41,6 +43,16 @@ alignas(256) auto Code = std::to_array<std::uint32_t>({
     0xbefe04c1,
     0xbf8cc07f,
     0xe0702000, 0x80000403, 0xe0702004, 0x80000503, 0xe0702008, 0x80000603, 0xe070200c, 0x80000703,
+    0xbf810000,
+});
+
+alignas(256) auto OrderedCode = std::to_array<std::uint32_t>({
+    0x34060082,
+    0x4a020083,
+    0xbefc03ff, 0x0000ffff,
+    0xd8fe0310, 0x05000001,
+    0xbf8cc07f,
+    0xe0702000, 0x80000503,
     0xbf810000,
 });
 
@@ -83,13 +95,11 @@ std::array<std::uint32_t, Counters> ReadCounters(AgcDriver::QueueState& queue) {
     return CounterReadback;
 }
 
-void Run(AgcDriver::VulkanDevice& device, const Workgroup& workgroup) {
+void Run(AgcDriver::VulkanDevice& device, const Workgroup& workgroup, std::span<const std::uint32_t> code) {
     Output.fill(0xdeadbeefu);
-    Code[ActiveLanesLiteral] = workgroup.activeLanes;
     std::vector<std::uint32_t> userData(4, 0u);
     const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size()));
     std::copy(output.begin(), output.end(), userData.begin());
-    const std::span<const std::uint32_t> code(Code);
     const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
     const ShaderRecompiler::ShaderComputeStageInfo compute{{workgroup.threads, 1, 1}, 0, {false, false, false}, false, 1};
     ShaderRecompiler::RecompileRequest request{
@@ -134,6 +144,28 @@ void CheckWaves(const Workgroup& workgroup, std::uint32_t result, std::uint32_t 
     }
 }
 
+void CheckOrdered(const Workgroup& workgroup, std::uint32_t m0, const std::array<std::uint32_t, Counters>& counters) {
+    const auto waves = workgroup.threads / workgroup.waveSize;
+    const auto what = workgroup.Name() + " ds_ordered_count with M0 " + std::to_string(m0);
+    std::vector<std::uint32_t> order(waves);
+    for (std::uint32_t wave = 0; wave < waves; ++wave) {
+        order[wave] = wave;
+        const auto first = wave * workgroup.waveSize;
+        for (std::uint32_t lane = first; lane < first + workgroup.waveSize; ++lane) {
+            const auto actual = Output[lane * Results];
+            Require(actual == Output[first * Results], what + ": lane " + std::to_string(lane) + " returned " + std::to_string(actual) + ", its wave's first lane " + std::to_string(Output[first * Results]));
+        }
+    }
+    std::sort(order.begin(), order.end(), [&](std::uint32_t left, std::uint32_t right) { return Output[left * workgroup.waveSize * Results] < Output[right * workgroup.waveSize * Results]; });
+    auto expected = Starts[0];
+    for (const auto wave : order) {
+        const auto first = wave * workgroup.waveSize;
+        Require(Output[first * Results] == expected, what + ": wave " + std::to_string(wave) + " returned " + std::to_string(Output[first * Results]) + ", expected " + std::to_string(expected));
+        expected += first + 3u;
+    }
+    Require(counters[0] == expected, what + ": GDS counter 0 is " + std::to_string(counters[0]) + ", expected " + std::to_string(expected));
+}
+
 void Check(const Workgroup& workgroup, std::uint32_t pass, const std::array<std::uint32_t, Counters>& counters) {
     const auto active = std::min(workgroup.activeLanes, workgroup.threads);
     const std::array<std::uint32_t, Counters> steps{workgroup.threads, workgroup.threads, active, active};
@@ -164,9 +196,16 @@ int main() {
         for (const auto& workgroup : Workgroups) {
             SetCounters(queue);
             Require(ReadCounters(queue) == Starts, workgroup.Name() + ": the GDS counters did not read back as set");
+            Code[ActiveLanesLiteral] = workgroup.activeLanes;
             for (std::uint32_t pass = 0; pass < 2; ++pass) {
-                Run(*device, workgroup);
+                Run(*device, workgroup, Code);
                 Check(workgroup, pass, ReadCounters(queue));
+            }
+            for (const auto m0 : OrderedM0) {
+                SetCounters(queue);
+                OrderedCode[OrderedM0Literal] = m0;
+                Run(*device, workgroup, OrderedCode);
+                CheckOrdered(workgroup, m0, ReadCounters(queue));
             }
         }
         std::puts("gds append consume tests passed");

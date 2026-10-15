@@ -101,6 +101,7 @@ struct SysVDynamicSection {
     std::map<VirtualAddress, std::string> ImportModules;
     std::set<VirtualAddress> FunctionImports;
     std::set<std::string> UnmatchedImportModules;
+    std::vector<std::string> NeededLibraries;
 };
 
 struct CallRegistryEntry {

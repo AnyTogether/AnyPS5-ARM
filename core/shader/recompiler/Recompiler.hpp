@@ -134,6 +134,7 @@ struct ShaderPixelStageInfo {
     bool posZ;
     bool posW;
     bool frontFace;
+    bool frontFaceAllBits;
     bool ancillary;
     bool sampleShading;
     bool noPerspective;
@@ -154,6 +155,8 @@ struct ShaderPixelStageInfo {
     RasterPrimitive rasterPrimitive = RasterPrimitive::Triangle;
     bool layerExported = false;
     bool ditheredAlphaToCoverage = false;
+    std::uint8_t quadPixelMask = 0xf;
+    std::array<std::uint16_t, 4> quadSampleMask{0xffffu, 0xffffu, 0xffffu, 0xffffu};
 };
 
 struct ShaderVertexBufferResource {
@@ -555,6 +558,9 @@ struct CompiledShaderArtifact {
     std::vector<FragmentParameter> fragmentParameters;
     BarycentricEmulation barycentricEmulation;
     MeshEmulationRole meshEmulation = MeshEmulationRole::None;
+    std::vector<std::uint32_t> stencilReferences;
+    bool stencilReplaySafe = false;
+    std::uint32_t stencilReferenceDword = 0xffffffffu;
     std::uint64_t variantId = 0;
 };
 

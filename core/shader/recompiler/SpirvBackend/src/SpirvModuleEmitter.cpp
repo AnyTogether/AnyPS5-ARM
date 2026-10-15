@@ -81,9 +81,14 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
         return bits;
     }
     if (kind == StageInputKind::HelperInvocation) {
-        const auto value = state.module.AllocateId();
+        auto value = state.module.AllocateId();
         const auto bits = state.module.AllocateId();
         state.module.AddFunction(spv::OpLoad, TypeBool(state), value, variable);
+        if (state.quadPixelUncovered != 0u) {
+            const auto helper = state.module.AllocateId();
+            state.module.AddFunction(spv::OpLogicalOr, TypeBool(state), helper, value, state.quadPixelUncovered);
+            value = helper;
+        }
         state.module.AddFunction(spv::OpSelect, TypeU32(state), bits, value, ConstantU32(state, 1u), ConstantU32(state, 0u));
         return bits;
     }
@@ -283,6 +288,7 @@ bool AlphaToCoverage(const SpirvEmitterState& state) {
 }
 
 void StoreCoverage(SpirvEmitterState& state, std::uint32_t mask) {
+    if (state.quadSampleCoverage != 0u) mask = Binary(state, spv::OpBitwiseAnd, TypeI32(state), mask, state.quadSampleCoverage);
     const auto pointer = state.module.AllocateId();
     state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassOutput, TypeI32(state)), pointer, state.sampleMaskVariable, ConstantU32(state, 0u));
     state.module.AddFunction(spv::OpStore, pointer, mask);
@@ -696,7 +702,7 @@ void DefineTessellationInterfaces(SpirvEmitterState& state) {
 
 void DefineTessellationExecutionModes(SpirvEmitterState& state) {
     const auto& tess = state.inputInfo.vertex->tess;
-    if ((tess.domain != 1u && tess.domain != 2u) || (tess.partitioning != 0u && tess.partitioning != 2u) || (tess.outputTopology != 2u && tess.outputTopology != 3u)) {
+    if ((tess.domain != 1u && tess.domain != 2u) || (tess.partitioning != 0u && tess.partitioning != 2u && tess.partitioning != 3u) || (tess.outputTopology != 2u && tess.outputTopology != 3u)) {
         throw std::runtime_error("unsupported tessellation domain, partitioning, or output topology");
     }
     state.module.EmitCapability(spv::CapabilityTessellation);
@@ -704,7 +710,7 @@ void DefineTessellationExecutionModes(SpirvEmitterState& state) {
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputVertices, tess.outputControlPoints);
     } else {
         state.module.AddExecutionMode(state.mainFunc, tess.domain == 2u ? spv::ExecutionModeQuads : spv::ExecutionModeTriangles);
-        state.module.AddExecutionMode(state.mainFunc, tess.partitioning == 0u ? spv::ExecutionModeSpacingEqual : spv::ExecutionModeSpacingFractionalOdd);
+        state.module.AddExecutionMode(state.mainFunc, tess.partitioning == 0u ? spv::ExecutionModeSpacingEqual : tess.partitioning == 3u ? spv::ExecutionModeSpacingFractionalEven : spv::ExecutionModeSpacingFractionalOdd);
         state.module.AddExecutionMode(state.mainFunc, tess.outputTopology == 3u ? spv::ExecutionModeVertexOrderCcw : spv::ExecutionModeVertexOrderCw);
     }
 }
@@ -1292,6 +1298,55 @@ void EmitProgram(SpirvEmitterState& state) {
         state.module.AddFunction(spv::OpBeginInvocationInterlockEXT);
     }
     EmitMemoryOffsets(state);
+    if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadMasked()) {
+        const auto& pixel = *state.inputInfo.pixel;
+        const auto coordinate = [&](std::uint32_t component) {
+            const auto value = Unary(state, spv::OpBitcast, TypeF32(state), EmitBuiltinU32(state, StageInputKind::FragCoord, component));
+            return EmitBinaryU32(state, spv::OpBitwiseAnd, Unary(state, spv::OpConvertFToU, TypeU32(state), value), ConstantU32(state, 1u));
+        };
+        const auto quad = EmitBinaryU32(state, spv::OpBitwiseOr, coordinate(0u), EmitBinaryU32(state, spv::OpShiftLeftLogical, coordinate(1u), ConstantU32(state, 1u)));
+        auto bit = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, ConstantU32(state, pixel.quadPixelMask), quad), ConstantU32(state, 1u));
+        if (pixel.QuadSampleMaskPartial()) {
+            const auto top = ConstantU32(state, static_cast<std::uint32_t>(pixel.quadSampleMask[0]) | (static_cast<std::uint32_t>(pixel.quadSampleMask[1]) << 16u));
+            const auto bottom = ConstantU32(state, static_cast<std::uint32_t>(pixel.quadSampleMask[2]) | (static_cast<std::uint32_t>(pixel.quadSampleMask[3]) << 16u));
+            const auto lower = EmitCompareU32Constant(state, spv::OpIEqual, EmitBinaryU32(state, spv::OpBitwiseAnd, quad, ConstantU32(state, 2u)), 2u);
+            const auto row = Select(state, TypeU32(state), lower, bottom, top);
+            const auto shift = EmitBinaryU32(state, spv::OpShiftLeftLogical, EmitBinaryU32(state, spv::OpBitwiseAnd, quad, ConstantU32(state, 1u)), ConstantU32(state, 4u));
+            const auto covered = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, row, shift), ConstantU32(state, 0xffffu));
+            const auto pointer = state.module.AllocateId();
+            state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, state.sampleMaskInputVariable, ConstantU32(state, 0u));
+            const auto rasterized = state.module.AllocateId();
+            state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, pointer);
+            bit = EmitBinaryU32(state, spv::OpBitwiseAnd, Unary(state, spv::OpBitcast, TypeU32(state), rasterized), covered);
+            state.quadSampleCoverage = Unary(state, spv::OpBitcast, TypeI32(state), covered);
+        }
+        const auto mask = static_cast<std::uint32_t>(pixel.quadPixelMask);
+        const bool demoteCapability = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDemoteToHelperInvocation)) != state.supportedCapabilities.end();
+        const bool demoteCore = state.spirvVersion >= 0x00010600u;
+        const bool demoteExtension = std::find(state.supportedExtensions.begin(), state.supportedExtensions.end(), "SPV_EXT_demote_to_helper_invocation") != state.supportedExtensions.end();
+        const bool demote = demoteCapability && (demoteCore || demoteExtension);
+        if (!demote && state.requirements.neighbourLaneReads) {
+            throw std::runtime_error("the PA_SC_AA_MASK quad pixel mask " + std::to_string(mask) + " leaves helper pixels whose lanes the pixel program reads (implicit-LOD sampling, whole-quad mode or cross-lane reads), which needs the device's shaderDemoteToHelperInvocation");
+        }
+        const auto uncovered = state.module.AllocateId();
+        state.module.AddFunction(spv::OpIEqual, TypeBool(state), uncovered, bit, ConstantU32(state, 0u));
+        state.quadPixelUncovered = uncovered;
+        const auto killLabel = state.module.AllocateId();
+        const auto mergeLabel = state.module.AllocateId();
+        state.module.AddFunction(spv::OpSelectionMerge, mergeLabel, spv::SelectionControlMaskNone);
+        state.module.AddFunction(spv::OpBranchConditional, uncovered, killLabel, mergeLabel);
+        EmitLabel(state, killLabel);
+        if (demote) {
+            state.module.EmitCapability(spv::CapabilityDemoteToHelperInvocation);
+            if (!demoteCore) state.module.EmitExtension("SPV_EXT_demote_to_helper_invocation");
+            state.module.AddFunction(spv::OpDemoteToHelperInvocation);
+            state.module.AddFunction(spv::OpBranch, mergeLabel);
+        } else {
+            state.module.AddFunction(spv::OpKill);
+        }
+        EmitLabel(state, mergeLabel);
+        if (state.quadSampleCoverage != 0u) StoreCoverage(state, ConstantI32(state, -1));
+    }
     if (program.BlockOrder().empty()) {
         if (OrderedPixelShader(state)) {
             state.module.AddFunction(spv::OpEndInvocationInterlockEXT);
@@ -1472,7 +1527,7 @@ void EmitSetTessellationAttribute(SpirvValueEmitContext& ctx, const IrValue& ins
             const auto raised = state.module.AllocateId();
             state.module.AddFunction(spv::OpExtInst, TypeF32(state), raised, GlslStd450(state), GLSLstd450FMax, floating, lowest);
             const auto clamped = state.module.AllocateId();
-            state.module.AddFunction(spv::OpExtInst, TypeF32(state), clamped, GlslStd450(state), GLSLstd450FMin, raised, TessellationLevelBound(state, TessellationLevel(state, 1u), GLSLstd450FMin, state.inputInfo.vertex->tess.partitioning == 0u ? 64.0f : 63.0f));
+            state.module.AddFunction(spv::OpExtInst, TypeF32(state), clamped, GlslStd450(state), GLSLstd450FMin, raised, TessellationLevelBound(state, TessellationLevel(state, 1u), GLSLstd450FMin, state.inputInfo.vertex->tess.partitioning == 2u ? 63.0f : 64.0f));
             value = state.module.AllocateId();
             state.module.AddFunction(spv::OpSelect, TypeF32(state), value, inside, clamped, outer ? floating : lowest);
         }
@@ -1556,10 +1611,8 @@ void EmitSetAttribute(SpirvValueEmitContext& ctx, const IrValue& inst) {
             if ((exp.en & 4u) != 0u && state.sampleMaskVariable != 0u) {
                 const auto raw = ExportRawComponent(ctx, data, 2);
                 const auto value = state.module.AllocateId();
-                const auto pointer = state.module.AllocateId();
                 state.module.AddFunction(spv::OpBitcast, TypeI32(state), value, raw);
-                state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassOutput, TypeI32(state)), pointer, state.sampleMaskVariable, ConstantU32(state, 0u));
-                state.module.AddFunction(spv::OpStore, pointer, value);
+                StoreCoverage(state, value);
             }
             return;
         }

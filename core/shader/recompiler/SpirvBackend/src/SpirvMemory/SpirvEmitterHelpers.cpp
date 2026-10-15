@@ -1,6 +1,7 @@
 #include "Optimization/ResourceMaterializer.hpp"
 #include "BdaAbi.hpp"
 #include "PipelineSpecialization.hpp"
+#include "StencilReplay.hpp"
 #include "SpirvBackend/SpirvEmitterHelpers.hpp"
 #include "SpirvBackend/SpirvMemory/SpirvTypes.hpp"
 #include "SpirvBackend/SpirvMemory/SpirvConstants.hpp"
@@ -300,6 +301,11 @@ void DefineInputs(SpirvEmitterState& state) {
             state.module.AddAnnotation(spv::OpDecorate, variable, spv::DecorationFlat);
         }
     }
+    if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadSampleMaskPartial()) {
+        state.sampleMaskInputVariable = DefineInterfaceVariable(state, SampleMaskArrayType(state), spv::StorageClassInput, "gl_SampleMaskIn");
+        state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationBuiltIn, spv::BuiltInSampleMask);
+        state.module.AddAnnotation(spv::OpDecorate, state.sampleMaskInputVariable, spv::DecorationFlat);
+    }
 }
 
 constexpr std::uint32_t MaxClipDistances = 8u;
@@ -371,7 +377,18 @@ void DefineOutputs(SpirvEmitterState& state) {
             binding.variableId = BuiltIn(state.sampleMaskVariable, SampleMaskArrayType(state), "gl_SampleMask", spv::BuiltInSampleMask);
             break;
         case StageOutputKind::StencilRef:
-            binding.variableId = BuiltIn(state.stencilRefVariable, TypeI32(state), "gl_FragStencilRefARB", spv::BuiltInFragStencilRefEXT);
+            if (std::ranges::find(state.supportedCapabilities, static_cast<std::uint32_t>(spv::CapabilityStencilExportEXT)) == state.supportedCapabilities.end()) {
+                const auto values = StencilReferenceValues(state.program);
+                if (values.empty()) throw std::runtime_error("stencil reference export emulation requires a proven set of at most 16 values");
+                if (!StencilReferenceDefinedForKeptInvocations(state.program)) throw std::runtime_error("stencil reference export emulation requires a stencil export on every kept path");
+                if (PixelInfo(state).psEarlyZ || PixelInfo(state).psOrderedPixelShader || !StencilReplaySafe(state.program)) throw std::runtime_error("stencil reference export emulation requires a replay-safe pixel shader with late tests");
+                state.stencilReplay = true;
+                state.stencilRefVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, TypeI32(state)), spv::StorageClassPrivate);
+                if (state.spirvVersion >= 0x00010400u) state.interfaceVariables.push_back(state.stencilRefVariable);
+                binding.variableId = state.stencilRefVariable;
+            } else {
+                binding.variableId = BuiltIn(state.stencilRefVariable, TypeI32(state), "gl_FragStencilRefARB", spv::BuiltInFragStencilRefEXT);
+            }
             break;
         case StageOutputKind::Parameter:
         case StageOutputKind::Mrt: {
@@ -390,12 +407,15 @@ void DefineOutputs(SpirvEmitterState& state) {
         if (state.inputInfo.pixel->psSampleMaskExportEnable) throw std::runtime_error("alpha-to-coverage with a sample-mask export is unsupported");
         BuiltIn(state.sampleMaskVariable, SampleMaskArrayType(state), "gl_SampleMask", spv::BuiltInSampleMask);
     }
+    if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->QuadSampleMaskPartial()) {
+        BuiltIn(state.sampleMaskVariable, SampleMaskArrayType(state), "gl_SampleMask", spv::BuiltInSampleMask);
+    }
 }
 
 void DefineDescriptors(SpirvEmitterState& state) {
     const IrBindingLayout& layout = state.program.Metadata().bindings;
     const IrShaderStage stage = state.program.Resources().stage;
-    if (layout.UsesPushData() || stage == IrShaderStage::Mesh || stage == IrShaderStage::TessellationControl) {
+    if (layout.UsesPushData() || state.stencilReplay || stage == IrShaderStage::Mesh || stage == IrShaderStage::TessellationControl) {
         const auto type = PushConstantBlockType(state);
         state.pushConstantVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPushConstant, type), spv::StorageClassPushConstant);
         state.module.AddName(type, "BufferResource");

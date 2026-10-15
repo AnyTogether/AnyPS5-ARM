@@ -1,0 +1,31 @@
+name: Web tests
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/web-tests.yml
+      - demo/web/**
+      - tools/test_web.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  output-directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check browser module syntax
+        run: |
+          node --check demo/web/app.mjs
+          node --check demo/web/output-directory.mjs
+          node --check demo/web/worker.mjs
+      - name: Test folder output recovery
+        run: node --test demo/web/tests/output-directory.test.mjs

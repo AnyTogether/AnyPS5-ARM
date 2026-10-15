@@ -188,6 +188,17 @@ void IrValue::AddPhiOperand(IrBlock* predecessor, IrValue* value) {
     AddArgument(value);
 }
 
+void IrValue::SetDetachedOperands(std::vector<IrValue*> arguments, std::vector<IrBlock*> phiBlocks) {
+    if (!this->arguments.empty() || !this->phiBlocks.empty()) {
+        throw std::runtime_error("IrValue::SetDetachedOperands called on a value with operands");
+    }
+    if (IsPhi() ? phiBlocks.size() != arguments.size() : !phiBlocks.empty()) {
+        throw std::runtime_error("IrValue::SetDetachedOperands phi blocks do not match the arguments");
+    }
+    this->arguments = std::move(arguments);
+    this->phiBlocks = std::move(phiBlocks);
+}
+
 void IrValue::ReplaceOpcode(IrOpcode opcode) {
     this->opcode = opcode;
 }

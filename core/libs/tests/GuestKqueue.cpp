@@ -1,11 +1,18 @@
 #include "SceTypes.hpp"
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#include <aclapi.h>
+#include <windows.h>
+#endif
 
 extern "C" {
 int APS5_VABI kqueue_nid_postfix();
@@ -109,6 +116,15 @@ template <typename TCall> static bool Throws(TCall call) {
         return true;
     }
     return false;
+}
+
+template <typename TCall> static std::string ThrownMessage(TCall call) {
+    try {
+        call();
+    } catch (const std::runtime_error& error) {
+        return error.what();
+    }
+    return {};
 }
 
 static void CreateAndClose() {
@@ -420,6 +436,86 @@ static void DeleteWatchedFile() {
     Require(!std::filesystem::exists(path));
 }
 
+#ifdef _WIN32
+static std::string Utf8(const std::wstring& text) {
+    const int size = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    Require(size > 0);
+    std::string narrow(static_cast<std::size_t>(size), '\0');
+    Require(::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, narrow.data(), size, nullptr, nullptr) == size);
+    narrow.pop_back();
+    return narrow;
+}
+
+static PACL DenyListing(const std::wstring& directory, PSECURITY_DESCRIPTOR& owner) {
+    wchar_t account[256]{};
+    DWORD count = static_cast<DWORD>(sizeof(account) / sizeof(account[0]));
+    Require(::GetUserNameW(account, &count) != FALSE);
+    PACL original = nullptr;
+    Require(::GetNamedSecurityInfoW(directory.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+        nullptr, nullptr, &original, nullptr, &owner) == ERROR_SUCCESS);
+    _EXPLICIT_ACCESS_W denied{};
+    denied.grfAccessPermissions = FILE_LIST_DIRECTORY;
+    denied.grfAccessMode = DENY_ACCESS;
+    denied.grfInheritance = NO_INHERITANCE;
+    denied.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
+    denied.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    denied.Trustee.ptstrName = account;
+    PACL blocked = nullptr;
+    Require(::SetEntriesInAclW(1, &denied, original, &blocked) == ERROR_SUCCESS);
+    const DWORD applied = ::SetNamedSecurityInfoW(const_cast<LPWSTR>(directory.c_str()), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, nullptr, nullptr, blocked, nullptr);
+    ::LocalFree(blocked);
+    Require(applied == ERROR_SUCCESS);
+    return original;
+}
+
+static void RequireContext(const std::string& message, const std::string& context) {
+    if (message.find(context) == std::string::npos) {
+        std::fprintf(stderr, "the vnode watch error lacks \"%s\": %s\n", context.c_str(), message.c_str());
+        std::abort();
+    }
+}
+
+static void RequireContextInsensitive(std::string message, std::string context) {
+    const auto lower = [](char character) { return static_cast<char>(std::tolower(static_cast<unsigned char>(character))); };
+    std::transform(message.begin(), message.end(), message.begin(), lower);
+    std::transform(context.begin(), context.end(), context.begin(), lower);
+    if (message.find(context) == std::string::npos) {
+        std::fprintf(stderr, "the vnode watch error lacks \"%s\"\n", context.c_str());
+        std::abort();
+    }
+}
+
+static void DeniedParentWatch() {
+    const auto path = TemporaryName("denied");
+    Require(mkdir_nid_postfix(path.c_str(), 0755) == 0);
+    const int file = open_nid_postfix((path + "/watched.bin").c_str(), ReadWrite | Create, 0644);
+    Require(file >= 0);
+    PSECURITY_DESCRIPTOR owner = nullptr;
+    const auto directory = std::filesystem::absolute(path).wstring();
+    const PACL original = DenyListing(directory, owner);
+    const int kq = kqueue_nid_postfix();
+    KernelEvent events[4]{};
+    const auto ident = static_cast<std::uintptr_t>(file);
+    const std::string message = ThrownMessage([kq, ident] {
+        Apply(kq, Change(ident, EvfiltVnode, EvAdd, NoteWrite));
+    });
+    const DWORD restored = ::SetNamedSecurityInfoW(const_cast<LPWSTR>(directory.c_str()), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, nullptr, nullptr, original, nullptr);
+    Require(restored == ERROR_SUCCESS);
+    ::LocalFree(owner);
+    RequireContext(message, "parent");
+    RequireContext(message, "error=5");
+    RequireContextInsensitive(message, Utf8(directory));
+    Require(Apply(kq, Change(ident, EvfiltVnode, EvAdd | EvClear, NoteWrite)) == 0);
+    Require(write_nid_postfix(file, "abc", 3) == 3);
+    Require(Wait(kq, events, 4) == 1 && events[0].ident == ident);
+    Require((events[0].fflags & NoteWrite) != 0);
+    Require(close_nid_postfix(file) == 0);
+    Require(close_nid_postfix(kq) == 0);
+    Require(std::filesystem::remove_all(path) == 2);
+}
+#endif
 static void Timeout() {
     const int kq = kqueue_nid_postfix();
     KernelEvent event{};
@@ -446,6 +542,9 @@ int main() {
 #endif
     DirectoryWatch();
     DeleteWatchedFile();
+#ifdef _WIN32
+    DeniedParentWatch();
+#endif
     Timeout();
     return 0;
 }

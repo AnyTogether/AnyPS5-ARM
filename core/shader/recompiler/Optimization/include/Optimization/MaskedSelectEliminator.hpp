@@ -3,6 +3,7 @@
 
 #include "IntermediateRepresentation/IrProgram.hpp"
 #include <cstdint>
+#include <span>
 
 namespace ShaderRecompiler {
 
@@ -15,6 +16,9 @@ class MaskedSelectEliminator {
 public:
     [[nodiscard]] MaskedSelectEliminationStats Eliminate(IrProgram& program) const;
 };
+
+[[nodiscard]] bool GuardImplies(const IrProgram& program, const IrValue* condition, const IrValue* consequence);
+[[nodiscard]] bool GuardImpliesMaskOnPath(const IrProgram& program, const IrValue* condition, const IrValue* low, const IrValue* high, std::span<const IrBlock* const> path);
 
 }
 

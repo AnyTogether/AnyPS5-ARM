@@ -49,7 +49,8 @@ class Trace:
             slices.sort(key=lambda entry: (entry[0], -entry[1]))
             stack = []
             for entry in slices:
-                while stack and entry[0] >= stack[-1][0] + stack[-1][1]:
+                start = round(entry[0] * 1000)
+                while stack and start >= round(stack[-1][0] * 1000) + round(stack[-1][1] * 1000):
                     stack.pop()
                 entry[3] = len(stack)
                 entry[4] = any(is_wait(parent[2]) for parent in stack)

@@ -109,6 +109,7 @@ int main() {
         Check(gpuThree.functions == gpuOne.functions && gpuThree.calls > gpuOne.calls, "formatted buffer once: two more formatted loads from a GPU-selected descriptor emitted " + std::to_string(gpuThree.functions - gpuOne.functions) + " more functions, expected calls to the shared one");
         Check(gpuThree.switches == gpuOne.switches, "formatted buffer once: two more formatted loads from a GPU-selected descriptor emitted " + std::to_string(gpuThree.switches - gpuOne.switches) + " more format switches");
         Check(gpuThree.words - gpuOne.words < gpuOne.words / 10u, "formatted buffer once: 2 more formatted loads from a GPU-selected descriptor added " + std::to_string(gpuThree.words - gpuOne.words) + " SPIR-V words to a " + std::to_string(gpuOne.words) + "-word module");
+        Check(gpuOne.words < 40000u, "formatted buffer once: a formatted load from a GPU-selected descriptor takes " + std::to_string(gpuOne.words) + " SPIR-V words, expected under 40000 since every driver that inlines the shared function copies all of it");
         std::printf("formatted buffer once tests passed (%zu words for 1 load, %zu for 3; GPU-selected %zu and %zu; vertex %zu specialized, %zu registration)\n", one.words, three.words, gpuOne.words, gpuThree.words, vertexSpecialized.words, vertexRegistration.words);
         return 0;
     } catch (const std::exception& error) {

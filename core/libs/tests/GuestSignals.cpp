@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <csignal>
+#include <initializer_list>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

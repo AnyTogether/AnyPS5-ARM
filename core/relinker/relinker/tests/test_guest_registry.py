@@ -59,6 +59,8 @@ def main():
             assert libc == [entry("CCCCCCCCCCC", "0x2388"), entry("CCCCCCCCCCC", "0x2390")], (name, libc)
             other = read(output.parent / "output.other.prx.guest.prx.registry.json")
             assert other == [], (name, other)
+            assert read(output.with_suffix(".needed.json")) == []
+            assert read(output.parent / "output.libc.prx.guest.prx.needed.json") == []
             main_nids = [item["nid"] for item in read(output.parent / "output.registry.json")]
             expected = [] if options else ["AAAAAAAAAAA#A#A", "DDDDDDDDDDD#D#D"]
             assert main_nids == expected, (name, main_nids)
@@ -70,6 +72,7 @@ def main():
             plain = convert(relinker, work / (name + "-plain"), options, registry=False)
             written = sorted(path.name for path in plain.parent.glob("*.registry.json"))
             assert written == [], (name, written)
+            assert list(plain.parent.glob("*.needed.json")) == [], name
     print("Guest module registry tests passed")
 
 

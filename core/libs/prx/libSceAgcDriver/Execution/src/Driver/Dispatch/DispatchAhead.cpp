@@ -155,6 +155,7 @@ void Driver::resolveGroupAhead(const Submission& submission, const QueueState& l
             try {
                 if (opcode == 0x15) dispatch(scratch, packet, submission);
                 else dispatchIndirect(scratch, packet, submission);
+                Pm4::NoteDispatchRegisters(packet, scratch);
             } catch (const std::exception&) {
                 ++stats.failures;
                 break;

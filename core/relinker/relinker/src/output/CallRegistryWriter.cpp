@@ -82,4 +82,16 @@ std::string CallRegistryWriter::WriteModuleImports(const std::vector<CallRegistr
     return out.str();
 }
 
+std::string CallRegistryWriter::WriteNeededLibraries(const std::vector<std::string>& libraries) {
+    std::ostringstream out;
+    out << "[\n";
+    for (std::size_t index = 0; index < libraries.size(); ++index) {
+        out << "  " << _jsonString(libraries[index]);
+        if (index + 1 < libraries.size()) out << ",";
+        out << "\n";
+    }
+    out << "]\n";
+    return out.str();
+}
+
 }

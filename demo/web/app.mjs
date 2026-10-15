@@ -1,11 +1,15 @@
+import { abortAndDiscardOutput, OutputDirectoryTransaction } from "./output-directory.mjs";
+
 const $ = id => document.getElementById(id);
 const stages = ["Converting executable", "Converting PRX modules", "Scanning syscalls", "Scanning instructions", "Converting instructions", "Analysing imports", "Building output image", "Writing output"];
 let worker;
 let file;
 let summary;
 let working = false;
+let failing = false;
 let sink;
 let outputDirectory;
+let outputTransaction;
 let downloadUrl;
 let logs = [];
 let release;
@@ -38,7 +42,7 @@ function update() {
   $("save").querySelector('[value="memory"]').disabled = Boolean(tooLarge);
   const memoryBlocked = $("save").value === "memory" && tooLarge;
   if (summary) $("archive-info").textContent = `${summary.files} files · ${bytes(summary.totalBytes)} expanded · ${summary.modules} modules · ${bytes(selectedBytes)} ${target} conversion input` + (summary.root ? ` · Root: ${summary.root}` : "");
-  $("save-note").textContent = $("save").value === "disk" ? "Creates a subfolder with the executable, libs and app0. No ZIP compression. Browsers may block DLL and other restricted files; use ZIP for those apps." : $("save").value === "zip" ? "Writes a compressed ZIP directly to disk without holding the whole archive in memory." : "Up to 256 MiB including expanded files and output overhead.";
+  $("save-note").textContent = $("save").value === "disk" ? "Creates a subfolder with the executable, libs and app0. No ZIP compression. Incomplete output folders are removed after cancellation or failure. Browsers may block DLL and other restricted files; use ZIP for those apps." : $("save").value === "zip" ? "Writes a compressed ZIP directly to disk without holding the whole archive in memory." : "Up to 256 MiB including expanded files and output overhead.";
   $("browser-note").hidden = supported && canStream && canSaveZip && !memoryBlocked && !folderBlocked && !conversionBlocked;
   $("browser-note").textContent = !supported ? "This browser or connection does not support the converter. Use a current browser over HTTPS, or use the native relinker." : folderBlocked ? "Browsers block direct DLL creation. Windows output requires ZIP. Choose Save ZIP to disk or Download in memory." : iconTooLarge ? "The Windows icon exceeds 16 MiB. Choose Linux or use the native relinker." : conversionTooLarge ? `This ${target} conversion input exceeds 256 MiB. Use the native relinker for this app.` : memoryBlocked ? "This archive exceeds the memory-download limit. Choose Save ZIP to disk. If that option is unavailable, open this page in desktop Chrome or Edge." : "Some direct disk saving options are unavailable in this browser or context. Small apps can still be downloaded in memory. For larger apps, use desktop Chrome or Edge over HTTPS.";
   $("convert").disabled = !supported || working || !summary || !release || conversionBlocked || memoryBlocked || folderBlocked || (summary.warnings.length > 0 && !$("acknowledge").checked);
@@ -50,22 +54,30 @@ function lock(value) {
 }
 
 async function fail(message) {
+  if (failing) return;
+  failing = true;
   worker?.terminate();
   worker = null;
-  working = false;
+  working = true;
   summary = null;
-  if (sink) {
-    const active = sink;
-    sink = null;
-    try { await active.abort(); } catch (error) { message += `\nCould not discard the output file: ${error.message}`; }
+  const transaction = outputTransaction;
+  outputTransaction = null;
+  outputDirectory = null;
+  if (transaction) {
+    $("status").hidden = false;
+    $("phase").textContent = "Removing incomplete output folder";
   }
-  if (outputDirectory) { message += `\nIncomplete files remain in ${outputDirectory.name}/.`; outputDirectory = null; }
+  const activeSink = sink;
+  sink = null;
+  for (const failure of await abortAndDiscardOutput(transaction, activeSink)) message += `\n${failure}`;
   $("error").textContent = message;
   $("error").hidden = false;
   $("status").hidden = true;
   $("cancel").hidden = true;
   $("drop").hidden = false;
   $("file").value = "";
+  working = false;
+  failing = false;
   lock(false);
   update();
 }
@@ -141,11 +153,13 @@ async function onMessage({ data }) {
       } else if (data.mode === "zip") {
         $("result-info").textContent += " · ZIP saved to disk";
       } else {
-        $("result-info").textContent += ` · Saved in ${outputDirectory.name}/`;
+        $("result-info").textContent += ` · Saved in ${outputTransaction.name}/`;
         if (document.querySelector('input[name="target"]:checked').value === "linux") $("result-info").textContent += ` · On Linux, run chmod +x "${data.outputName}" before launching.`;
       }
       $("result-note").hidden = data.mode === "disk";
       outputDirectory = null;
+      outputTransaction?.commit();
+      outputTransaction = null;
       summary = null;
       worker.terminate();
       worker = null;
@@ -206,11 +220,8 @@ $("convert").onclick = async () => {
     } else if ($("save").value === "disk") {
       const parent = await window.showDirectoryPicker({ mode: "readwrite" });
       const name = file.name.replace(/\.zip$/iu, "") + "-" + document.querySelector('input[name="target"]:checked').value;
-      let exists = false;
-      try { await parent.getDirectoryHandle(name); exists = true; }
-      catch (error) { if (error.name !== "NotFoundError") throw error; }
-      if (exists) throw new Error(`The folder ${name} already exists. Choose another destination or rename the existing folder.`);
-      outputDirectory = await parent.getDirectoryHandle(name, { create: true });
+      outputTransaction = await OutputDirectoryTransaction.create(parent, name);
+      outputDirectory = outputTransaction.directory;
     }
     $("status").hidden = false;
     $("cancel").hidden = false;

@@ -1,5 +1,7 @@
 #include "IntermediateRepresentation/IrProgram.hpp"
+#include "IntermediateRepresentation/IrBuilder.hpp"
 #include "Optimization/MaskedSelectEliminator.hpp"
+#include "StencilReplay.hpp"
 #include "RdnaDecoder/RdnaInstruction.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -26,6 +28,7 @@ struct Builder {
     IrBlock& newBlock() {
         auto& created = program.CreateBlock();
         program.BlockOrder().push_back(&created);
+        program.Metadata().blockInfo.push_back(BlockInfo{created.Id()});
         return created;
     }
 
@@ -116,6 +119,25 @@ bool removed(const IrValue& value) {
 bool expect(const char* name, bool condition) {
     if (!condition) std::fprintf(stderr, "%s\n", name);
     return condition;
+}
+
+bool messageSafety(IrShaderStage stage, bool malformed = false, bool allocate = false) {
+    IrProgram program;
+    program.Resources().stage = stage;
+    auto& block = program.CreateBlock();
+    program.SetEntryBlock(block);
+    program.BlockOrder().push_back(&block);
+    IrBuilder builder(program);
+    builder.SetInsertionPoint(block);
+    if (allocate) static_cast<void>(builder.Emit(IrOpcode::MeshAllocate, IrType::Void, {&builder.Constant(0u)}));
+    else if (malformed) {
+        auto& message = program.CreateValue(IrOpcode::Sendmsg, IrType::Void);
+        message.AddArgument(&builder.Constant(0u));
+        block.AppendInstruction(&message);
+    }
+    else static_cast<void>(builder.Emit(IrOpcode::Sendmsg, IrType::Void, {}));
+    static_cast<void>(builder.Emit(IrOpcode::Return, IrType::Void, {}));
+    return StencilReplaySafe(program);
 }
 
 bool run(const char* name, const std::function<bool()>& test) {
@@ -766,6 +788,434 @@ int main() {
         b.eliminate();
         return removed(written);
     };
+
+    passed &= run("a vertex message emitted as void is replay-safe", [&] { return messageSafety(IrShaderStage::Vertex); });
+    passed &= run("pixel message classification remains unchanged", [&] { return !messageSafety(IrShaderStage::Pixel); });
+    passed &= run("compute message classification remains unchanged", [&] { return !messageSafety(IrShaderStage::Compute); });
+    passed &= run("a message with operands is refused", [&] { return !messageSafety(IrShaderStage::Vertex, true); });
+    passed &= run("mesh allocation remains refused", [&] { return !messageSafety(IrShaderStage::Vertex, false, true); });
+
+    passed &= run("guard implication preserves a mask within its whole-quad expansion", [&] {
+        Builder b;
+        auto& live = b.mask(16u);
+        auto& quads = wholeQuads(b, live);
+        return GuardImplies(b.program, &live, &quads) && !GuardImplies(b.program, &quads, &live);
+    });
+
+    passed &= run("guard implication intersects both paths through a phi", [&] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& live = b.mask(16u);
+        auto& quads = wholeQuads(b, live);
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        b.block = &merge;
+        auto& subset = b.phi(IrType::Bool, left, live);
+        subset.AddPhiOperand(&right, &b.logicalAnd(live, b.mask(8u)));
+        auto& wider = b.phi(IrType::Bool, left, live);
+        wider.AddPhiOperand(&right, &b.truth());
+        return GuardImplies(b.program, &subset, &quads) && !GuardImplies(b.program, &wider, &quads);
+    });
+
+    passed &= run("guard implication handles whole-quad masks intersected with own active ballots", [&] {
+        Builder b;
+        auto& live = b.mask(16u);
+        const auto [low, high] = b.ballotWords(live);
+        auto& wqm = b.emit(IrOpcode::WqmU64, IrType::U64, {&b.emit(IrOpcode::CompositeConstructU64, IrType::U64, {low, high})});
+        auto& wideLow = b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(0u)});
+        auto& wideHigh = b.emit(IrOpcode::CompositeExtractU64, IrType::U32, {&wqm, &b.constant(1u)});
+        const auto [allLow, allHigh] = b.ballotWords(b.truth());
+        auto& guard = b.threadBit(b.wordAnd(wideLow, *allLow), b.wordAnd(*allHigh, wideHigh));
+        auto& narrower = b.logicalAnd(live, b.mask(8u));
+        return GuardImplies(b.program, &live, &guard) && GuardImplies(b.program, &narrower, &guard) && !GuardImplies(b.program, &guard, &live);
+    });
+
+    passed &= run("a paired mask phi with a wider incoming arm does not imply a narrower write mask", [] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& live = b.mask(16u);
+        const auto [low, high] = b.ballotWords(live);
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        b.block = &merge;
+        auto& lowPhi = b.phi(IrType::U32, left, *low);
+        lowPhi.AddPhiOperand(&right, &b.constant(0xffffffffu));
+        auto& highPhi = b.phi(IrType::U32, left, *high);
+        highPhi.AddPhiOperand(&right, &b.constant(0xffffffffu));
+        auto& merged = b.threadBit(lowPhi, highPhi);
+        return !GuardImplies(b.program, &merged, &live);
+    });
+
+    passed &= run("a reconverged active ballot dominates a later mask observation", [] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        auto& exit = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        merge.AddBranch(&exit);
+        b.block = &merge;
+        auto& active = b.ballotBit(b.truth());
+        b.block = &exit;
+        auto& observed = b.mask(16u);
+        return GuardImplies(b.program, &observed, &active);
+    });
+
+    passed &= run("an active ballot from one branch does not dominate a merged observation", [] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        b.block = &left;
+        auto& active = b.ballotBit(b.truth());
+        b.block = &merge;
+        auto& observed = b.mask(16u);
+        return !GuardImplies(b.program, &observed, &active);
+    });
+
+    passed &= run("a later ballot in a reconverged block cannot justify an earlier observation", [] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        b.block = &merge;
+        auto& observed = b.mask(16u);
+        auto& active = b.ballotBit(b.truth());
+        return !GuardImplies(b.program, &observed, &active);
+    });
+
+    passed &= run("guard implication refuses a loop-carried condition", [] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& header = b.newBlock();
+        entry.AddBranch(&header);
+        header.AddBranch(&header);
+        b.block = &header;
+        auto& condition = b.mask(8u);
+        auto& consequence = b.mask(16u);
+        return !GuardImplies(b.program, &condition, &consequence);
+    });
+
+    passed &= run("stencil replay refuses neighbor-lane operations even without LDS storage", [] {
+        for (const auto opcode : {IrOpcode::PermuteU32, IrOpcode::BpermuteU32, IrOpcode::SwizzleU32, IrOpcode::ReadLane, IrOpcode::ReadFirstLane, IrOpcode::DppMoveU32, IrOpcode::DppUpdateU32, IrOpcode::Permlane16U32, IrOpcode::WqmU64}) {
+            Builder b;
+            b.emit(opcode, IrType::U32, {});
+            if (StencilReplaySafe(b.program)) return false;
+        }
+        return true;
+    });
+
+    const auto exportUnder = [](Builder& b, IrValue& guard, bool stencil, bool live) {
+        ExportInfo info{};
+        info.kind = stencil ? ExportTargetKind::MrtZ : ExportTargetKind::Mrt;
+        info.en = stencil ? 2u : 15u;
+        info.vm = live;
+        ExportFlags flags{static_cast<std::uint32_t>(b.program.Metadata().exportInfo.size())};
+        b.program.Metadata().exportInfo.push_back(info);
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& zero = b.constant(0u);
+        auto& value = b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&zero, &zero, &zero, &zero});
+        b.emit(IrOpcode::SetAttribute, IrType::Void, {&value, &guard}, bits);
+    };
+
+    const auto pixelPredicate = [](Builder& b) -> IrValue& {
+        auto& value = b.emit(IrOpcode::GetBuiltin, IrType::U32, {&b.constant(static_cast<std::uint32_t>(StageInputKind::FragCoord)), &b.constant(0u)});
+        return b.emit(IrOpcode::INotEqual32, IrType::Bool, {&value, &b.constant(0u)});
+    };
+
+    const auto helperPredicate = [](Builder& b, bool helper) -> IrValue& {
+        auto& value = b.emit(IrOpcode::GetBuiltin, IrType::U32, {&b.constant(static_cast<std::uint32_t>(StageInputKind::HelperInvocation)), &b.constant(0u)});
+        return b.emit(helper ? IrOpcode::INotEqual32 : IrOpcode::IEqual32, IrType::Bool, {&value, &b.constant(0u)});
+    };
+
+    const auto stencilByMask = [](Builder& b, IrValue& mask) {
+        auto& zero = b.constant(0u);
+        auto& reference = b.select(mask, zero, b.constant(255u));
+        ExportInfo info{};
+        info.kind = ExportTargetKind::MrtZ;
+        info.en = 2u;
+        info.vm = true;
+        ExportFlags flags{static_cast<std::uint32_t>(b.program.Metadata().exportInfo.size())};
+        b.program.Metadata().exportInfo.push_back(info);
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& value = b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&zero, &reference, &zero, &zero});
+        b.emit(IrOpcode::SetAttribute, IrType::Void, {&value, &b.truth()}, bits);
+    };
+
+    passed &= run("finite stencil references selected by an undefined value cannot be replayed", [] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& undefined = b.emit(IrOpcode::UndefU1, IrType::Bool, {});
+        auto& zero = b.constant(0u);
+        auto& reference = b.select(undefined, zero, b.constant(255u));
+        ExportInfo info{};
+        info.kind = ExportTargetKind::MrtZ;
+        info.en = 2u;
+        info.vm = true;
+        b.program.Metadata().exportInfo.push_back(info);
+        ExportFlags flags{0u};
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &flags, sizeof(flags));
+        auto& value = b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&zero, &reference, &zero, &zero});
+        b.emit(IrOpcode::SetAttribute, IrType::Void, {&value, &b.truth()}, bits);
+        return StencilReferenceValues(b.program) == std::vector<std::uint32_t>{0u, 255u} && !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("stencil replay admits own-lane masks and their whole-quad expansion as export guards", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& quads = wholeQuads(b, b.logicalAnd(pixelPredicate(b), helperPredicate(b, false)));
+        exportUnder(b, quads, true, true);
+        return StencilReplaySafe(b.program);
+    });
+
+    passed &= run("helper participation cannot choose a kept lane's stencil through whole-quad expansion", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        stencilByMask(b, wholeQuads(b, helperPredicate(b, true)));
+        return StencilReferenceValues(b.program) == std::vector<std::uint32_t>{0u, 255u} && !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("nested active ballots do not erase helper uncertainty before whole-quad expansion", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& active = b.ballotBit(b.truth());
+        stencilByMask(b, wholeQuads(b, b.logicalAnd(active, helperPredicate(b, true))));
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("an uncovered helper coordinate predicate cannot choose a real stencil through a ballot", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& bits = b.emit(IrOpcode::GetBuiltin, IrType::U32, {&b.constant(static_cast<std::uint32_t>(StageInputKind::FragCoord)), &b.constant(0u)});
+        auto& coordinate = b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&bits});
+        auto& boundary = b.program.CreateValue(IrOpcode::Void, IrType::F32);
+        boundary.SetImmediateF32(1.0f);
+        auto& predicate = b.emit(IrOpcode::FPOrdGreaterThan32, IrType::Bool, {&coordinate, &boundary});
+        stencilByMask(b, wholeQuads(b, predicate));
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("explicit helper exclusion is preserved through nested ballot mask plumbing", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& real = b.ballotBit(helperPredicate(b, false));
+        stencilByMask(b, wholeQuads(b, b.logicalAnd(real, pixelPredicate(b))));
+        return StencilReplaySafe(b.program);
+    });
+
+    passed &= run("only guarded read-only SRT diagnostics can be replayed", [] {
+        Builder b;
+        b.program.Info().usesFaultBuffer = true;
+        if (StencilReplaySafe(b.program)) return false;
+        b.program.Resources().guardedSrtSlots.push_back(0u);
+        if (!StencilReplaySafe(b.program)) return false;
+        b.program.Metadata().blockInfo.front().terminator.loopHeader = true;
+        if (StencilReplaySafe(b.program)) return false;
+        b.program.Metadata().blockInfo.front().terminator.loopHeader = false;
+        b.emit(IrOpcode::Loop, IrType::Void, {});
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("guarded SRT replay refuses an unannotated control-flow cycle", [] {
+        Builder b;
+        b.program.Info().usesFaultBuffer = true;
+        b.program.Resources().guardedSrtSlots.push_back(0u);
+        auto& entry = *b.block;
+        auto& cycle = b.newBlock();
+        entry.AddBranch(&cycle);
+        cycle.AddBranch(&cycle);
+        auto& metadata = b.program.Metadata().blockInfo;
+        metadata[0u].terminator.kind = TerminatorKind::Branch;
+        metadata[0u].terminator.trueBlock = cycle.Id();
+        metadata[1u].terminator.kind = TerminatorKind::Branch;
+        metadata[1u].terminator.trueBlock = cycle.Id();
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("guarded SRT replay refuses missing control-flow targets", [] {
+        Builder b;
+        b.program.Info().usesFaultBuffer = true;
+        b.program.Resources().guardedSrtSlots.push_back(0u);
+        auto& term = b.program.Metadata().blockInfo.front().terminator;
+        term.kind = TerminatorKind::Branch;
+        term.trueBlock = 1024u;
+        return !StencilReplaySafe(b.program);
+    });
+
+    passed &= run("a captured active ballot cannot provide helper texture coordinates", [&] {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& active = b.ballotBit(b.truth());
+        auto& helperValue = b.emit(IrOpcode::GetBuiltin, IrType::U32, {&b.constant(static_cast<std::uint32_t>(StageInputKind::HelperInvocation)), &b.constant(0u)});
+        auto& helper = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&helperValue, &b.constant(0u)});
+        auto& coordinate = b.select(b.logicalAnd(active, helper), b.constant(1u), b.constant(0u));
+        auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&coordinate});
+        auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+        auto& sampler = b.emit(IrOpcode::GetSamplerResource, IrType::SamplerResource, {});
+        b.emit(IrOpcode::ImageSampleRaw, IrType::U32x4, {&image, &sampler, &address});
+        exportUnder(b, b.truth(), true, true);
+        return !StencilReplaySafe(b.program);
+    });
+
+    const auto optionalPixelBody = [&](bool derivativeConsumer, IrOpcode observer = IrOpcode::ImageSampleRaw) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& entry = *b.block;
+        auto& predicate = pixelPredicate(b);
+        auto& zero = b.constant(0u);
+        auto& condition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&predicate});
+        auto& body = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&body);
+        entry.AddBranch(&merge);
+        body.AddBranch(&merge);
+        auto& entryInfo = b.program.Metadata().blockInfo[0u];
+        entryInfo.terminator.kind = TerminatorKind::ConditionalBranch;
+        entryInfo.terminator.condition = BranchCondition::ExecZero;
+        entryInfo.terminator.trueBlock = merge.Id();
+        entryInfo.terminator.falseBlock = body.Id();
+        entryInfo.condition = &condition;
+        auto& bodyInfo = b.program.Metadata().blockInfo[1u];
+        bodyInfo.terminator.kind = TerminatorKind::Branch;
+        bodyInfo.terminator.trueBlock = merge.Id();
+        b.block = &body;
+        auto& written = b.select(predicate, b.constant(42u), zero);
+        b.block = &merge;
+        auto& merged = b.phi(IrType::U32, entry, zero);
+        merged.AddPhiOperand(&body, &written);
+        if (derivativeConsumer) {
+            auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&merged});
+            auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+            auto& sampler = b.emit(IrOpcode::GetSamplerResource, IrType::SamplerResource, {});
+            b.emit(observer, IrType::U32x4, {&image, &sampler, &address});
+        } else b.keep(merged);
+        exportUnder(b, b.truth(), true, true);
+        return StencilReplaySafe(b.program);
+    };
+
+    passed &= run("an optional wave body preserves inactive values consumed only within a lane", [&] { return optionalPixelBody(false); });
+    passed &= run("an optional wave body cannot change helper coordinates for later implicit samples", [&] { return !optionalPixelBody(true); });
+    passed &= run("an optional wave body cannot change helper coordinates for LOD queries", [&] { return !optionalPixelBody(true, IrOpcode::ImageQueryLod); });
+
+    passed &= run("varying attribute sources cannot be treated as uniform any-active predicates", [&] {
+        for (const auto opcode : {IrOpcode::GetAttribute, IrOpcode::GetInterpolationParameter, IrOpcode::GetInterpolationParameterF16, IrOpcode::GetTessellationAttribute}) {
+            Builder b;
+            b.program.Resources().stage = IrShaderStage::Pixel;
+            auto& entry = *b.block;
+            auto& varying = b.emit(opcode, IrType::U32, {&b.constant(0u), &b.constant(0u), &b.constant(0u)});
+            auto& predicate = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&varying, &b.constant(0u)});
+            auto& condition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&predicate});
+            auto& left = b.newBlock();
+            auto& right = b.newBlock();
+            entry.AddBranch(&left);
+            entry.AddBranch(&right);
+            auto& info = b.program.Metadata().blockInfo[0u];
+            info.terminator.kind = TerminatorKind::ConditionalBranch;
+            info.terminator.condition = BranchCondition::ExecZero;
+            info.terminator.trueBlock = left.Id();
+            info.terminator.falseBlock = right.Id();
+            info.condition = &condition;
+            b.block = &left;
+            exportUnder(b, b.truth(), true, true);
+            b.block = &right;
+            auto& address = b.emit(IrOpcode::MakeImageAddress, IrType::ImageAddress, {&varying});
+            auto& image = b.emit(IrOpcode::GetImageResource, IrType::ImageResource, {});
+            auto& sampler = b.emit(IrOpcode::GetSamplerResource, IrType::SamplerResource, {});
+            b.emit(IrOpcode::ImageSampleRaw, IrType::U32x4, {&image, &sampler, &address});
+            exportUnder(b, b.truth(), true, true);
+            if (StencilReplaySafe(b.program)) return false;
+        }
+        return true;
+    });
+
+    const auto anyActiveGate = [&](bool unrelatedLiveMask) {
+        Builder b;
+        b.program.Resources().stage = IrShaderStage::Pixel;
+        auto& entry = *b.block;
+        const auto [low, high] = b.ballotWords(pixelPredicate(b));
+        auto& own = b.threadBit(*low, *high);
+        auto& words = b.emit(IrOpcode::BitwiseOr32, IrType::U32, {low, high});
+        auto& any = b.emit(IrOpcode::INotEqual32, IrType::Bool, {&words, &b.constant(0u)});
+        auto& condition = b.emit(IrOpcode::LogicalNot, IrType::Bool, {&any});
+        auto& killed = b.newBlock();
+        auto& kept = b.newBlock();
+        entry.AddBranch(&killed);
+        entry.AddBranch(&kept);
+        auto& info = b.program.Metadata().blockInfo[0u];
+        info.terminator.kind = TerminatorKind::ConditionalBranch;
+        info.terminator.condition = BranchCondition::SccZero;
+        info.terminator.trueBlock = killed.Id();
+        info.terminator.falseBlock = kept.Id();
+        info.condition = &condition;
+        b.block = &killed;
+        auto& falseValue = b.program.CreateValue(IrOpcode::Void, IrType::Bool);
+        falseValue.SetImmediateBool(false);
+        exportUnder(b, falseValue, true, true);
+        b.block = &kept;
+        exportUnder(b, unrelatedLiveMask ? b.truth() : own, true, true);
+        return StencilReplaySafe(b.program);
+    };
+
+    passed &= run("any-active early return is stable for the source mask's kept quads", [&] { return anyActiveGate(false); });
+    passed &= run("an any-active early return cannot control unrelated kept invocations", [&] { return !anyActiveGate(true); });
+
+    passed &= run("kept invocations must be covered by the stencil export guard", [&] {
+        Builder b;
+        auto& written = b.mask(16u);
+        exportUnder(b, written, true, false);
+        exportUnder(b, b.logicalAnd(written, b.mask(8u)), false, true);
+        if (!StencilReferenceDefinedForKeptInvocations(b.program)) return false;
+        exportUnder(b, b.truth(), false, true);
+        return !StencilReferenceDefinedForKeptInvocations(b.program);
+    });
+
+    passed &= run("an export on one branch does not cover a kept return on another", [&] {
+        Builder b;
+        auto& entry = *b.block;
+        auto& left = b.newBlock();
+        auto& right = b.newBlock();
+        auto& merge = b.newBlock();
+        entry.AddBranch(&left);
+        entry.AddBranch(&right);
+        left.AddBranch(&merge);
+        right.AddBranch(&merge);
+        auto& metadata = b.program.Metadata().blockInfo;
+        metadata[0].terminator = {TerminatorKind::ConditionalBranch, BranchCondition::Unknown, left.Id(), right.Id()};
+        metadata[1].terminator = {TerminatorKind::Branch, BranchCondition::Always, merge.Id()};
+        metadata[2].terminator = {TerminatorKind::Branch, BranchCondition::Always, merge.Id()};
+        b.block = &left;
+        exportUnder(b, b.truth(), true, false);
+        b.block = &merge;
+        exportUnder(b, b.truth(), false, true);
+        return !StencilReferenceDefinedForKeptInvocations(b.program);
+    });
 
     passed &= run("an implicit-LOD pixel sample reads its quad's coordinates and keeps the select", [&] {
         return !sample(IrShaderStage::Pixel, 0u);

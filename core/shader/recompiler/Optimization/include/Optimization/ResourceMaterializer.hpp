@@ -58,8 +58,11 @@ public:
     static const char* UnnormalizedSampleMismatch(const ImageResource& image);
     static ResolvedImageTables ResolveImageTables(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint64_t memoKey = 0);
     [[nodiscard]] IrResourcePlan ExtractPlan(const IrProgram& program) const;
+    static void CompactPlan(IrResourcePlan& plan);
     void Materialize(const IrResourcePlan& program, const SrtRuntime& runtime, ResourceSnapshot& snapshot) const;
     static std::uint64_t SpecializationNanoseconds();
+    static std::uint64_t EvaluateNanoseconds();
+    static std::uint64_t MaterializeNanoseconds();
 };
 
 }

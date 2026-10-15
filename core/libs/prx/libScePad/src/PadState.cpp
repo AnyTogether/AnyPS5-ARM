@@ -130,6 +130,11 @@ void Pad::Initialize() {
     initialized = true;
 }
 
+bool Pad::IsInitialized() {
+    std::lock_guard lock(stateMutex);
+    return initialized;
+}
+
 namespace {
 PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected) {
     PadData data{};

@@ -192,7 +192,7 @@ extern "C" {
 
 int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* arguments) {
     if (!path || !*path) return SYSTEM_SERVICE_ERROR_PARAMETER;
-    if (std::strcmp(path, "exit") == 0) LibcExit_nid_no_patch(0);
+    if (std::strcmp(path, "exit") == 0) LibcExitWithoutHandlers_nid_no_patch(0);
     auto launch = PrepareLaunch(path, arguments);
 #if defined(_WIN32) || defined(__linux__)
     LoadConvertedExecutable_nid_no_patch(std::filesystem::path(launch.executable), arguments);

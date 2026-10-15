@@ -1,0 +1,875 @@
+#include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
+#include "SpirvBackend/SpirvModule.hpp"
+#include "VulkanTestDevice.hpp"
+#include <SDL_loadso.h>
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
+
+namespace {
+
+using namespace AgcDriver::Graphics;
+
+class Device {
+public:
+    Device() {
+#ifdef _WIN32
+        library = SDL_LoadObject("vulkan-1.dll");
+#else
+        library = SDL_LoadObject("libvulkan.so.1");
+#endif
+        Require(library != nullptr, "cannot load Vulkan");
+        proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_LoadFunction(library, "vkGetInstanceProcAddr"));
+        Require(proc != nullptr, "Vulkan instance procedure is missing");
+        try {
+            VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+            app.apiVersion = VK_API_VERSION_1_1;
+            VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+            info.pApplicationInfo = &app;
+            Check(function<PFN_vkCreateInstance>("vkCreateInstance")(&info, nullptr, &instance), "vkCreateInstance");
+            std::uint32_t count = 0u;
+            const auto enumerate = function<PFN_vkEnumeratePhysicalDevices>("vkEnumeratePhysicalDevices");
+            Check(enumerate(instance, &count, nullptr), "vkEnumeratePhysicalDevices");
+            std::vector<VkPhysicalDevice> devices(count);
+            Check(enumerate(instance, &count, devices.data()), "vkEnumeratePhysicalDevices");
+            int selected = -1;
+            for (const auto physical : devices) {
+                VkPhysicalDeviceProperties properties{};
+                function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties")(physical, &properties);
+                if (const auto* wanted = std::getenv("ANYPS5_GPU"); wanted != nullptr && std::string(properties.deviceName).find(wanted) == std::string::npos) continue;
+                const int rank = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 : properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
+                if (properties.apiVersion < VK_API_VERSION_1_1 || rank <= selected) continue;
+                context.physical = physical;
+                context.limits = properties.limits;
+                selected = rank;
+            }
+            Require(context.physical != VK_NULL_HANDLE, "no Vulkan 1.1 device");
+            VkPhysicalDeviceProperties selectedProperties{};
+            function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties")(context.physical, &selectedProperties);
+            std::printf("Selected GPU name=%s vendor=0x%x device=0x%x driver=%u\n", selectedProperties.deviceName, selectedProperties.vendorID, selectedProperties.deviceID, selectedProperties.driverVersion);
+            const auto queues = function<PFN_vkGetPhysicalDeviceQueueFamilyProperties>("vkGetPhysicalDeviceQueueFamilyProperties");
+            queues(context.physical, &count, nullptr);
+            std::vector<VkQueueFamilyProperties> families(count);
+            queues(context.physical, &count, families.data());
+            std::uint32_t family = 0u;
+            constexpr auto queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT;
+            while (family < count && (families[family].queueFlags & queueFlags) != queueFlags) ++family;
+            Require(family < count, "no graphics and compute queue");
+            VkPhysicalDeviceFeatures available{};
+            function<PFN_vkGetPhysicalDeviceFeatures>("vkGetPhysicalDeviceFeatures")(context.physical, &available);
+            VkPhysicalDeviceFeatures enabled{};
+            enabled.shaderStorageImageReadWithoutFormat = available.shaderStorageImageReadWithoutFormat;
+            const float priority = 1.0f;
+            VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+            queue.queueFamilyIndex = family;
+            queue.queueCount = 1u;
+            queue.pQueuePriorities = &priority;
+            VkDeviceCreateInfo device{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+            device.queueCreateInfoCount = 1u;
+            device.pQueueCreateInfos = &queue;
+            device.pEnabledFeatures = &enabled;
+            Check(function<PFN_vkCreateDevice>("vkCreateDevice")(context.physical, &device, nullptr, &context.device), "vkCreateDevice");
+            context.deviceProc = function<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
+            context.formatProperties = function<PFN_vkGetPhysicalDeviceFormatProperties>("vkGetPhysicalDeviceFormatProperties");
+            context.imageFormatProperties = function<PFN_vkGetPhysicalDeviceImageFormatProperties>("vkGetPhysicalDeviceImageFormatProperties");
+            function<PFN_vkGetPhysicalDeviceMemoryProperties>("vkGetPhysicalDeviceMemoryProperties")(context.physical, &context.memory);
+            context.Function<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(context.device, family, 0u, &context.queue);
+            VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            pool.queueFamilyIndex = family;
+            Check(context.Function<PFN_vkCreateCommandPool>("vkCreateCommandPool")(context.device, &pool, nullptr, &context.pool), "vkCreateCommandPool");
+        } catch (...) { release(); throw; }
+    }
+    ~Device() { release(); }
+    Context GetContext() const { return context; }
+private:
+    template<typename TFunction> TFunction function(const char* name) const {
+        const auto result = reinterpret_cast<TFunction>(proc(instance, name));
+        Require(result != nullptr, std::string("missing Vulkan function ") + name);
+        return result;
+    }
+    void release() noexcept {
+        if (context.device != VK_NULL_HANDLE) {
+            context.Function<PFN_vkDeviceWaitIdle>("vkDeviceWaitIdle")(context.device);
+            ClearCachedTextures(context.device);
+            ClearDepthSurfaces(context.device);
+            context.bufferPool.reset();
+            if (context.pool) context.Function<PFN_vkDestroyCommandPool>("vkDestroyCommandPool")(context.device, context.pool, nullptr);
+            function<PFN_vkDestroyDevice>("vkDestroyDevice")(context.device, nullptr);
+        }
+        if (instance) function<PFN_vkDestroyInstance>("vkDestroyInstance")(instance, nullptr);
+        if (library) SDL_UnloadObject(library);
+    }
+    void* library = nullptr;
+    PFN_vkGetInstanceProcAddr proc = nullptr;
+    VkInstance instance = VK_NULL_HANDLE;
+    Context context{};
+};
+
+class TargetMemory {
+public:
+    explicit TargetMemory(std::size_t bytes) : bytes(bytes) {
+#ifdef _WIN32
+        pointer = GuestArena::GuestArenaAllocate_nid_postfix(bytes, 65536u);
+        GuestArena::GuestArenaCommit_nid_postfix(pointer, bytes, PAGE_READWRITE, bytes);
+#else
+        void* raw = mmap(nullptr, bytes + 65536u, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        Require(raw != MAP_FAILED, "cannot allocate multisample target fixture");
+        const auto begin = reinterpret_cast<std::uintptr_t>(raw);
+        const auto aligned = (begin + 65535u) & ~std::uintptr_t{65535u};
+        if (aligned != begin) munmap(raw, aligned - begin);
+        if (aligned + bytes != begin + bytes + 65536u) munmap(reinterpret_cast<void*>(aligned + bytes), begin + 65536u - aligned);
+        pointer = reinterpret_cast<void*>(aligned);
+        GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(pointer, bytes);
+#endif
+        Require(pointer != nullptr, "multisample target fixture allocation failed");
+        std::memset(pointer, 0xa5, bytes);
+    }
+    ~TargetMemory() {
+#ifdef _WIN32
+        GuestArena::GuestArenaReset_nid_postfix(pointer, bytes);
+        GuestArena::GuestArenaRelease_nid_postfix(pointer, bytes);
+#else
+        GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(pointer, bytes);
+        munmap(pointer, bytes);
+#endif
+    }
+    std::byte* Data() const { return static_cast<std::byte*>(pointer); }
+    std::uint64_t Address() const { return reinterpret_cast<std::uint64_t>(pointer); }
+private:
+    void* pointer = nullptr;
+    std::size_t bytes;
+};
+
+template<typename Action>
+void TargetRefuses(Action action, std::string_view expected) {
+    std::string message;
+    try { action(); }
+    catch (const std::exception& error) { message = error.what(); }
+    Require(message.find(expected) != std::string::npos, "multisample target refusal did not match " + std::string(expected) + ": " + message);
+}
+
+void QueueTargetByteWrite(const Context& context, Recorder& recorder, std::uint64_t address, std::byte value) {
+    auto buffer = std::make_shared<Buffer>(context, 4u, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    const auto commands = recorder.Commands();
+    const auto byte = std::to_integer<std::uint32_t>(value);
+    context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(commands, buffer->Handle(), 0u, 4u, byte * 0x01010101u);
+    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+    recorder.OnComplete([buffer, address] {
+        buffer->Invalidate();
+        AgcDriver::GuestMemory::StoreOwnBytes(address, buffer->Bytes().first(1u));
+    });
+    recorder.Keep(buffer);
+    recorder.NotePendingWrite(address, 1u);
+}
+
+std::vector<std::uint32_t> FetchShader(std::uint32_t width, std::uint32_t height, std::uint32_t fragments, bool arrayed, bool floating) {
+    ShaderRecompiler::SpirvModule module;
+    module.EmitCapability(spv::CapabilityShader);
+    if (arrayed) module.EmitCapability(spv::CapabilityImageMSArray);
+    module.AddMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+    const auto u32 = module.Type(spv::OpTypeInt, 32u, 0u);
+    const auto i32 = module.Type(spv::OpTypeInt, 32u, 1u);
+    const auto scalar = floating ? module.Type(spv::OpTypeFloat, 32u) : u32;
+    const auto v4 = module.Type(spv::OpTypeVector, scalar, 4u);
+    const auto v3 = module.Type(spv::OpTypeVector, u32, 3u);
+    const auto coordinateType = module.Type(spv::OpTypeVector, i32, arrayed ? 3u : 2u);
+    const auto voidType = module.Type(spv::OpTypeVoid);
+    const auto constant = [&](std::uint32_t value) { return module.Constant(spv::OpConstant, u32, value); };
+    const auto array = module.Type(spv::OpTypeRuntimeArray, v4);
+    module.AddAnnotation(spv::OpDecorate, array, spv::DecorationArrayStride, 16u);
+    const auto block = module.Type(spv::OpTypeStruct, array);
+    module.AddAnnotation(spv::OpDecorate, block, spv::DecorationBlock);
+    module.AddAnnotation(spv::OpMemberDecorate, block, 0u, spv::DecorationOffset, 0u);
+    const auto buffer = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassStorageBuffer, block), spv::StorageClassStorageBuffer);
+    module.AddAnnotation(spv::OpDecorate, buffer, spv::DecorationDescriptorSet, 0u);
+    module.AddAnnotation(spv::OpDecorate, buffer, spv::DecorationBinding, 1u);
+    const auto imageType = module.Type(spv::OpTypeImage, scalar, spv::Dim2D, 0u, arrayed ? 1u : 0u, 1u, 1u, spv::ImageFormatUnknown);
+    const auto image = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, imageType), spv::StorageClassUniformConstant);
+    module.AddAnnotation(spv::OpDecorate, image, spv::DecorationDescriptorSet, 0u);
+    module.AddAnnotation(spv::OpDecorate, image, spv::DecorationBinding, 0u);
+    const auto group = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassInput, v3), spv::StorageClassInput);
+    module.AddAnnotation(spv::OpDecorate, group, spv::DecorationBuiltIn, spv::BuiltInWorkgroupId);
+    const auto main = module.AllocateId();
+    module.AddFunction(spv::OpFunction, voidType, main, spv::FunctionControlMaskNone, module.Type(spv::OpTypeFunction, voidType));
+    module.AddFunction(spv::OpLabel, module.AllocateId());
+    const auto loaded = module.AllocateId();
+    module.AddFunction(spv::OpLoad, v3, loaded, group);
+    const auto index = module.AllocateId();
+    module.AddFunction(spv::OpCompositeExtract, u32, index, loaded, 0u);
+    const auto binary = [&](spv::Op op, std::uint32_t a, std::uint32_t b) {
+        const auto result = module.AllocateId();
+        module.AddFunction(op, u32, result, a, b);
+        return result;
+    };
+    const auto pixel = binary(spv::OpUDiv, index, constant(fragments));
+    const auto x = binary(spv::OpUMod, pixel, constant(width));
+    const auto y = binary(spv::OpUMod, binary(spv::OpUDiv, pixel, constant(width)), constant(height));
+    const auto z = binary(spv::OpUDiv, pixel, constant(width * height));
+    const auto signedValue = [&](std::uint32_t value) {
+        const auto result = module.AllocateId();
+        module.AddFunction(spv::OpBitcast, i32, result, value);
+        return result;
+    };
+    const auto coordinate = module.AllocateId();
+    if (arrayed) module.AddFunction(spv::OpCompositeConstruct, coordinateType, coordinate, signedValue(x), signedValue(y), signedValue(z));
+    else module.AddFunction(spv::OpCompositeConstruct, coordinateType, coordinate, signedValue(x), signedValue(y));
+    const auto object = module.AllocateId();
+    module.AddFunction(spv::OpLoad, imageType, object, image);
+    const auto value = module.AllocateId();
+    module.AddFunction(spv::OpImageFetch, v4, value, object, coordinate, spv::ImageOperandsSampleMask, binary(spv::OpUMod, index, constant(fragments)));
+    const auto pointer = module.AllocateId();
+    module.AddFunction(spv::OpAccessChain, module.Type(spv::OpTypePointer, spv::StorageClassStorageBuffer, v4), pointer, buffer, constant(0u), binary(spv::OpIAdd, index, constant(1u)));
+    module.AddFunction(spv::OpStore, pointer, value);
+    module.AddFunction(spv::OpReturn);
+    module.AddFunction(spv::OpFunctionEnd);
+    module.EmitEntryPoint(spv::ExecutionModelGLCompute, main, "main", {group});
+    module.AddExecutionMode(main, spv::ExecutionModeLocalSize, 1u, 1u, 1u);
+    return module.Finalize();
+}
+
+class Fetch {
+public:
+    Fetch(const Context& context, const Texture& texture, Buffer& output, std::span<const std::uint32_t> code, bool firstLayer = false) : context(context) {
+        try {
+            const std::array<VkDescriptorSetLayoutBinding, 2> bindings{{{0u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}, {1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}}};
+            VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+            info.bindingCount = 2u;
+            info.pBindings = bindings.data();
+            Check(context.Function<PFN_vkCreateDescriptorSetLayout>("vkCreateDescriptorSetLayout")(context.device, &info, nullptr, &setLayout), "fetch descriptor layout");
+            const std::array<VkDescriptorPoolSize, 2> sizes{{{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1u}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1u}}};
+            VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            poolInfo.maxSets = 1u;
+            poolInfo.poolSizeCount = 2u;
+            poolInfo.pPoolSizes = sizes.data();
+            Check(context.Function<PFN_vkCreateDescriptorPool>("vkCreateDescriptorPool")(context.device, &poolInfo, nullptr, &pool), "fetch descriptor pool");
+            const VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, nullptr, pool, 1u, &setLayout};
+            Check(context.Function<PFN_vkAllocateDescriptorSets>("vkAllocateDescriptorSets")(context.device, &allocate, &set), "fetch descriptor set");
+            const VkDescriptorImageInfo image{VK_NULL_HANDLE, firstLayer ? texture.FirstLayerView() : texture.View(), texture.Layout()};
+            const VkDescriptorBufferInfo buffer{output.Handle(), 0u, output.Bytes().size()};
+            const std::array<VkWriteDescriptorSet, 2> writes{{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 0u, 0u, 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &image, nullptr, nullptr}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, 1u, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &buffer, nullptr}}};
+            context.Function<PFN_vkUpdateDescriptorSets>("vkUpdateDescriptorSets")(context.device, 2u, writes.data(), 0u, nullptr);
+            VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            layoutInfo.setLayoutCount = 1u;
+            layoutInfo.pSetLayouts = &setLayout;
+            Check(context.Function<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(context.device, &layoutInfo, nullptr, &layout), "fetch pipeline layout");
+            VkShaderModuleCreateInfo shaderInfo{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            shaderInfo.codeSize = code.size_bytes();
+            shaderInfo.pCode = code.data();
+            Check(context.Function<PFN_vkCreateShaderModule>("vkCreateShaderModule")(context.device, &shaderInfo, nullptr, &module), "fetch shader module");
+            VkComputePipelineCreateInfo pipelineInfo{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+            pipelineInfo.layout = layout;
+            pipelineInfo.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0u, VK_SHADER_STAGE_COMPUTE_BIT, module, "main", nullptr};
+            Check(context.Function<PFN_vkCreateComputePipelines>("vkCreateComputePipelines")(context.device, VK_NULL_HANDLE, 1u, &pipelineInfo, nullptr, &pipeline), "fetch pipeline");
+        } catch (...) { release(); throw; }
+    }
+    ~Fetch() { release(); }
+    void Run(VkCommandBuffer commands, std::uint32_t groups) const {
+        context.Function<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        context.Function<PFN_vkCmdBindDescriptorSets>("vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0u, 1u, &set, 0u, nullptr);
+        context.Function<PFN_vkCmdDispatch>("vkCmdDispatch")(commands, groups, 1u, 1u);
+    }
+private:
+    void release() noexcept {
+        if (pipeline) context.Function<PFN_vkDestroyPipeline>("vkDestroyPipeline")(context.device, pipeline, nullptr);
+        if (module) context.Function<PFN_vkDestroyShaderModule>("vkDestroyShaderModule")(context.device, module, nullptr);
+        if (layout) context.Function<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout")(context.device, layout, nullptr);
+        if (pool) context.Function<PFN_vkDestroyDescriptorPool>("vkDestroyDescriptorPool")(context.device, pool, nullptr);
+        if (setLayout) context.Function<PFN_vkDestroyDescriptorSetLayout>("vkDestroyDescriptorSetLayout")(context.device, setLayout, nullptr);
+    }
+    Context context;
+    VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+};
+
+std::vector<std::uint32_t> DepthVertexShader() {
+    ShaderRecompiler::SpirvModule module;
+    module.EmitCapability(spv::CapabilityShader);
+    module.AddMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+    const auto f32 = module.Type(spv::OpTypeFloat, 32u);
+    const auto i32 = module.Type(spv::OpTypeInt, 32u, 1u);
+    const auto boolean = module.Type(spv::OpTypeBool);
+    const auto v4 = module.Type(spv::OpTypeVector, f32, 4u);
+    const auto voidType = module.Type(spv::OpTypeVoid);
+    const auto index = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassInput, i32), spv::StorageClassInput);
+    const auto position = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassOutput, v4), spv::StorageClassOutput);
+    module.AddAnnotation(spv::OpDecorate, index, spv::DecorationBuiltIn, spv::BuiltInVertexIndex);
+    module.AddAnnotation(spv::OpDecorate, position, spv::DecorationBuiltIn, spv::BuiltInPosition);
+    const auto main = module.AllocateId();
+    module.AddFunction(spv::OpFunction, voidType, main, spv::FunctionControlMaskNone, module.Type(spv::OpTypeFunction, voidType));
+    module.AddFunction(spv::OpLabel, module.AllocateId());
+    const auto loaded = module.AllocateId();
+    module.AddFunction(spv::OpLoad, i32, loaded, index);
+    const auto coordinate = [&](std::uint32_t vertex) {
+        const auto equal = module.AllocateId(), value = module.AllocateId();
+        module.AddFunction(spv::OpIEqual, boolean, equal, loaded, module.Constant(spv::OpConstant, i32, vertex));
+        module.AddFunction(spv::OpSelect, f32, value, equal, module.Constant(spv::OpConstant, f32, std::bit_cast<std::uint32_t>(3.0f)), module.Constant(spv::OpConstant, f32, std::bit_cast<std::uint32_t>(-1.0f)));
+        return value;
+    };
+    const auto value = module.AllocateId();
+    module.AddFunction(spv::OpCompositeConstruct, v4, value, coordinate(1u), coordinate(2u), module.Constant(spv::OpConstant, f32, 0u), module.Constant(spv::OpConstant, f32, std::bit_cast<std::uint32_t>(1.0f)));
+    module.AddFunction(spv::OpStore, position, value);
+    module.AddFunction(spv::OpReturn);
+    module.AddFunction(spv::OpFunctionEnd);
+    module.EmitEntryPoint(spv::ExecutionModelVertex, main, "main", {index, position});
+    return module.Finalize();
+}
+
+std::vector<std::uint32_t> DepthFragmentShader() {
+    ShaderRecompiler::SpirvModule module;
+    module.EmitCapability(spv::CapabilityShader);
+    module.AddMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+    const auto f32 = module.Type(spv::OpTypeFloat, 32u);
+    const auto u32 = module.Type(spv::OpTypeInt, 32u, 0u);
+    const auto voidType = module.Type(spv::OpTypeVoid);
+    const auto block = module.Type(spv::OpTypeStruct, f32);
+    module.AddAnnotation(spv::OpDecorate, block, spv::DecorationBlock);
+    module.AddAnnotation(spv::OpMemberDecorate, block, 0u, spv::DecorationOffset, 0u);
+    const auto push = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassPushConstant, block), spv::StorageClassPushConstant);
+    const auto depth = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassOutput, f32), spv::StorageClassOutput);
+    module.AddAnnotation(spv::OpDecorate, depth, spv::DecorationBuiltIn, spv::BuiltInFragDepth);
+    const auto main = module.AllocateId();
+    module.AddFunction(spv::OpFunction, voidType, main, spv::FunctionControlMaskNone, module.Type(spv::OpTypeFunction, voidType));
+    module.AddFunction(spv::OpLabel, module.AllocateId());
+    const auto pointer = module.AllocateId(), value = module.AllocateId();
+    module.AddFunction(spv::OpAccessChain, module.Type(spv::OpTypePointer, spv::StorageClassPushConstant, f32), pointer, push, module.Constant(spv::OpConstant, u32, 0u));
+    module.AddFunction(spv::OpLoad, f32, value, pointer);
+    module.AddFunction(spv::OpStore, depth, value);
+    module.AddFunction(spv::OpReturn);
+    module.AddFunction(spv::OpFunctionEnd);
+    module.EmitEntryPoint(spv::ExecutionModelFragment, main, "main", {depth});
+    module.AddExecutionMode(main, spv::ExecutionModeOriginUpperLeft);
+    module.AddExecutionMode(main, spv::ExecutionModeDepthReplacing);
+    return module.Finalize();
+}
+
+std::vector<std::uint32_t> DepthFeedbackFragmentShader(std::uint32_t binding, bool sampling) {
+    ShaderRecompiler::SpirvModule module;
+    module.EmitCapability(spv::CapabilityShader);
+    module.AddMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+    const auto f32 = module.Type(spv::OpTypeFloat, 32u);
+    const auto i32 = module.Type(spv::OpTypeInt, 32u, 1u);
+    const auto v4 = module.Type(spv::OpTypeVector, f32, 4u);
+    const auto v2 = module.Type(spv::OpTypeVector, i32, 2u);
+    const auto voidType = module.Type(spv::OpTypeVoid);
+    const auto imageType = module.Type(spv::OpTypeImage, f32, spv::Dim2D, 0u, 0u, 1u, 1u, spv::ImageFormatUnknown);
+    const auto imageArray = module.Type(spv::OpTypeArray, imageType, module.Constant(spv::OpConstant, i32, 1u));
+    const auto image = sampling ? module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, imageArray), spv::StorageClassUniformConstant) : 0u;
+    if (sampling) {
+        module.AddAnnotation(spv::OpDecorate, image, spv::DecorationDescriptorSet, ShaderRecompiler::RuntimeAbi::DescriptorSet);
+        module.AddAnnotation(spv::OpDecorate, image, spv::DecorationBinding, binding);
+    }
+    const auto depth = module.DefineGlobalVariable(module.Type(spv::OpTypePointer, spv::StorageClassOutput, f32), spv::StorageClassOutput);
+    module.AddAnnotation(spv::OpDecorate, depth, spv::DecorationBuiltIn, spv::BuiltInFragDepth);
+    const auto zero = module.Constant(spv::OpConstant, i32, 0u);
+    const auto coordinate = module.Constant(spv::OpConstantComposite, v2, zero, zero);
+    const auto main = module.AllocateId();
+    module.AddFunction(spv::OpFunction, voidType, main, spv::FunctionControlMaskNone, module.Type(spv::OpTypeFunction, voidType));
+    module.AddFunction(spv::OpLabel, module.AllocateId());
+    auto value = module.Constant(spv::OpConstant, f32, 0u);
+    if (sampling) {
+        const auto element = module.AllocateId(), object = module.AllocateId(), fetched = module.AllocateId();
+        value = module.AllocateId();
+        module.AddFunction(spv::OpAccessChain, module.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, imageType), element, image, zero);
+        module.AddFunction(spv::OpLoad, imageType, object, element);
+        module.AddFunction(spv::OpImageFetch, v4, fetched, object, coordinate, spv::ImageOperandsSampleMask, zero);
+        module.AddFunction(spv::OpCompositeExtract, f32, value, fetched, 0u);
+    }
+    module.AddFunction(spv::OpStore, depth, value);
+    module.AddFunction(spv::OpReturn);
+    module.AddFunction(spv::OpFunctionEnd);
+    module.EmitEntryPoint(spv::ExecutionModelFragment, main, "main", {depth});
+    module.AddExecutionMode(main, spv::ExecutionModeOriginUpperLeft);
+    module.AddExecutionMode(main, spv::ExecutionModeDepthReplacing);
+    return module.Finalize();
+}
+
+class DepthRaster {
+public:
+    DepthRaster(const Context& context, const DepthTarget& target, VkImageView view) : context(context), extent(target.extent), samples(target.samples) {
+        try {
+            const VkAttachmentDescription attachment{0u, target.format, static_cast<VkSampleCountFlagBits>(samples), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL};
+            const VkAttachmentReference reference{0u, VK_IMAGE_LAYOUT_GENERAL};
+            VkSubpassDescription subpass{};
+            subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            subpass.pDepthStencilAttachment = &reference;
+            VkRenderPassCreateInfo passInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+            passInfo.attachmentCount = 1u;
+            passInfo.pAttachments = &attachment;
+            passInfo.subpassCount = 1u;
+            passInfo.pSubpasses = &subpass;
+            Check(context.Function<PFN_vkCreateRenderPass>("vkCreateRenderPass")(context.device, &passInfo, nullptr, &pass), "depth sample render pass");
+            VkFramebufferCreateInfo framebufferInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+            framebufferInfo.renderPass = pass;
+            framebufferInfo.attachmentCount = 1u;
+            framebufferInfo.pAttachments = &view;
+            framebufferInfo.width = extent.width;
+            framebufferInfo.height = extent.height;
+            framebufferInfo.layers = 1u;
+            Check(context.Function<PFN_vkCreateFramebuffer>("vkCreateFramebuffer")(context.device, &framebufferInfo, nullptr, &framebuffer), "depth sample framebuffer");
+            const VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0u, 4u};
+            VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            layoutInfo.pushConstantRangeCount = 1u;
+            layoutInfo.pPushConstantRanges = &push;
+            Check(context.Function<PFN_vkCreatePipelineLayout>("vkCreatePipelineLayout")(context.device, &layoutInfo, nullptr, &layout), "depth sample pipeline layout");
+            std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
+            const std::array codes{DepthVertexShader(), DepthFragmentShader()};
+            for (std::uint32_t i = 0u; i < 2u; ++i) {
+                VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+                info.codeSize = codes[i].size() * 4u;
+                info.pCode = codes[i].data();
+                Check(context.Function<PFN_vkCreateShaderModule>("vkCreateShaderModule")(context.device, &info, nullptr, &modules[i]), "depth sample shader");
+                stages[i] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0u, i == 0u ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT, modules[i], "main", nullptr};
+            }
+            VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+            VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+            assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            const VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
+            const VkRect2D scissor{{0, 0}, extent};
+            VkPipelineViewportStateCreateInfo viewportInfo{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+            viewportInfo.viewportCount = viewportInfo.scissorCount = 1u;
+            viewportInfo.pViewports = &viewport;
+            viewportInfo.pScissors = &scissor;
+            VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+            raster.polygonMode = VK_POLYGON_MODE_FILL;
+            raster.cullMode = VK_CULL_MODE_NONE;
+            raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            raster.lineWidth = 1.0f;
+            VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+            multisample.rasterizationSamples = static_cast<VkSampleCountFlagBits>(samples);
+            VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+            depth.depthTestEnable = depth.depthWriteEnable = VK_TRUE;
+            depth.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+            VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+            VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            info.stageCount = 2u;
+            info.pStages = stages.data();
+            info.pVertexInputState = &input;
+            info.pInputAssemblyState = &assembly;
+            info.pViewportState = &viewportInfo;
+            info.pRasterizationState = &raster;
+            info.pMultisampleState = &multisample;
+            info.pDepthStencilState = &depth;
+            info.pColorBlendState = &blend;
+            info.layout = layout;
+            info.renderPass = pass;
+            pipelines.resize(samples, VK_NULL_HANDLE);
+            for (std::uint32_t sample = 0u; sample < samples; ++sample) {
+                const auto mask = 1u << sample;
+                multisample.pSampleMask = &mask;
+                Check(context.Function<PFN_vkCreateGraphicsPipelines>("vkCreateGraphicsPipelines")(context.device, VK_NULL_HANDLE, 1u, &info, nullptr, &pipelines[sample]), "depth sample pipeline");
+            }
+        } catch (...) { release(); throw; }
+    }
+    ~DepthRaster() { release(); }
+    void Run(VkCommandBuffer commands, float offset) const {
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        begin.renderPass = pass;
+        begin.framebuffer = framebuffer;
+        begin.renderArea = {{0, 0}, extent};
+        context.Function<PFN_vkCmdBeginRenderPass>("vkCmdBeginRenderPass")(commands, &begin, VK_SUBPASS_CONTENTS_INLINE);
+        for (std::uint32_t sample = 0u; sample < samples; ++sample) {
+            const auto value = offset + static_cast<float>(sample + 1u) / 16.0f;
+            context.Function<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[sample]);
+            context.Function<PFN_vkCmdPushConstants>("vkCmdPushConstants")(commands, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0u, 4u, &value);
+            context.Function<PFN_vkCmdDraw>("vkCmdDraw")(commands, 3u, 1u, 0u, 0u);
+        }
+        context.Function<PFN_vkCmdEndRenderPass>("vkCmdEndRenderPass")(commands);
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
+private:
+    void release() noexcept {
+        for (const auto pipeline : pipelines) if (pipeline) context.Function<PFN_vkDestroyPipeline>("vkDestroyPipeline")(context.device, pipeline, nullptr);
+        for (const auto module : modules) if (module) context.Function<PFN_vkDestroyShaderModule>("vkDestroyShaderModule")(context.device, module, nullptr);
+        if (layout) context.Function<PFN_vkDestroyPipelineLayout>("vkDestroyPipelineLayout")(context.device, layout, nullptr);
+        if (framebuffer) context.Function<PFN_vkDestroyFramebuffer>("vkDestroyFramebuffer")(context.device, framebuffer, nullptr);
+        if (pass) context.Function<PFN_vkDestroyRenderPass>("vkDestroyRenderPass")(context.device, pass, nullptr);
+    }
+    Context context;
+    VkExtent2D extent;
+    std::uint32_t samples;
+    VkRenderPass pass = VK_NULL_HANDLE;
+    VkFramebuffer framebuffer = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    std::array<VkShaderModule, 2> modules{};
+    std::vector<VkPipeline> pipelines;
+};
+
+std::array<std::uint32_t, 8> DepthSampleWords(const DepthTarget& target) {
+    const auto base = (target.address | target.pipeBankXor) >> 8u;
+    const auto metadata = target.htileAddress >> 8u;
+    const auto format = target.format == VK_FORMAT_D16_UNORM ? 7u : 22u;
+    const auto count = static_cast<std::uint32_t>(std::countr_zero(target.samples));
+    const auto width = target.extent.width - 1u, height = target.extent.height - 1u;
+    return {static_cast<std::uint32_t>(base), static_cast<std::uint32_t>((base >> 32u) & 255u) | (format << 20u) | ((width & 3u) << 30u), (width >> 2u) | (height << 14u), (14u << 28u) | (24u << 20u) | (count << 16u) | 0x204u, 0u, count << 4u, (1u << 10u) | (1u << 19u) | (1u << 21u) | (static_cast<std::uint32_t>(metadata & 255u) << 24u), static_cast<std::uint32_t>(metadata >> 8u)};
+}
+
+bool DepthSupported(const Context& context, VkFormat format, std::uint32_t fragments) {
+    VkImageFormatProperties properties{};
+    const auto result = context.imageFormatProperties(context.physical, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0u, &properties);
+    return result == VK_SUCCESS && (properties.sampleCounts & fragments) != 0u && (context.limits.framebufferDepthSampleCounts & fragments) != 0u;
+}
+
+void CheckDrawFeedback() {
+    const auto device = OpenVulkanTestDevice();
+    Require(device != nullptr, "native depth draw feedback requires Vulkan");
+    constexpr VkExtent2D extent{5u, 3u};
+    constexpr std::uint32_t samples = 4u;
+    TargetMemory memory(static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 4u, samples))), metadata(65536u);
+    std::memset(metadata.Data(), 0, 65536u);
+    DepthTarget depth{memory.Address(), 0u, extent, VK_FORMAT_D32_SFLOAT, 0.0f, 0u, metadata.Address(), false, samples};
+    depth.depthSwizzle = 24u;
+    depth.iterate256 = depth.htilePipeAligned = true;
+    struct Cleanup {
+        AgcDriver::VulkanDevice& device;
+        ~Cleanup() { device.WaitIdle(); ClearCachedTextures(device.Device()); ClearDepthSurfaces(device.Device()); }
+    } cleanup{*device};
+    State state{};
+    state.stages = {ShaderPath::Vertex, 0u, 32u, 32u, std::nullopt, std::nullopt};
+    state.depth = depth;
+    state.depthTest = state.depthWrite = true;
+    state.depthCompare = VK_COMPARE_OP_ALWAYS;
+    state.renderExtent = extent;
+    state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    state.viewport = {0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
+    state.negativeOneToOne = false;
+    state.scissor = {{0, 0}, extent};
+    state.cullMode = VK_CULL_MODE_NONE;
+    state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    state.samples = samples;
+    ShaderRecompiler::RecompileResult vertex, producer, reader;
+    vertex.spirv = DepthVertexShader();
+    vertex.variantId = 1u;
+    constexpr auto binding = ShaderRecompiler::RuntimeAbi::FirstImageBinding;
+    producer.spirv = DepthFeedbackFragmentShader(binding, false);
+    producer.variantId = 2u;
+    const auto pixelOffset = PixelPushOffset(0u, device->Target());
+    const AgcDriver::Pm4::DrawParameters draw{0u, 3u, 0u, 1u, 0u, false};
+    const std::array<CompiledShader, 2> initial{{{ShaderRecompiler::ShaderStage::Vertex, &vertex, 0u}, {ShaderRecompiler::ShaderStage::Fragment, &producer, pixelOffset}}};
+    device->Draw(state, draw, initial);
+    device->WaitIdle();
+    reader.spirv = DepthFeedbackFragmentShader(binding, true);
+    reader.variantId = 3u;
+    const auto words = DepthSampleWords(depth);
+    ShaderRecompiler::DescriptorBinding image{};
+    image.kind = ShaderRecompiler::DescriptorKind::SampledImage;
+    image.role = ShaderRecompiler::DescriptorRole::GuestImages;
+    image.descriptorSet = ShaderRecompiler::RuntimeAbi::DescriptorSet;
+    image.binding = binding;
+    image.count = 1u;
+    image.guestDescriptor.assign(words.begin(), words.end());
+    image.imageShape = ShaderRecompiler::DescriptorImageShape::Image2DMultisample;
+    image.imageSamplers = {0u};
+    reader.bindings.push_back(std::move(image));
+    const std::array<CompiledShader, 2> shaders{{{ShaderRecompiler::ShaderStage::Vertex, &vertex, 0u}, {ShaderRecompiler::ShaderStage::Fragment, &reader, pixelOffset}}};
+    TargetRefuses([&] { device->Draw(state, draw, shaders); }, "sampling a native multisampled depth target the draw attaches");
+    device->WaitIdle();
+    std::puts("Native depth feedback refused through the draw resource path");
+}
+
+void CheckDepthTarget(Context context, VkFormat format, std::uint32_t fragments, bool one) {
+    const VkExtent2D extent{5u, 3u};
+    const auto bytes = static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, format == VK_FORMAT_D16_UNORM ? 2u : 4u, fragments));
+    TargetMemory memory(bytes), metadata(65536u);
+    const auto metadataBytes = HtileMetadataBytes(extent);
+    const std::uint32_t pattern = one ? 0xfffffff0u : 0u;
+    for (std::size_t i = 0u; i < metadataBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &pattern, 4u);
+    DepthTarget target{memory.Address(), 0u, extent, format, one ? 1.0f : 0.0f, 0u, metadata.Address(), false, fragments};
+    target.depthSwizzle = 24u;
+    target.pipeBankXor = one ? 0x8c00u : 0u;
+    target.htileDepthOnly = one;
+    target.iterate256 = target.htilePipeAligned = true;
+    Recorder recorder(context);
+    recorder.Activate();
+    struct Cleanup {
+        Recorder& recorder;
+        Context context;
+        ~Cleanup() { recorder.Sync(); ClearCachedTextures(context.device); ClearDepthSurfaces(context.device); }
+    } cleanup{recorder, context};
+    if (!one) {
+        metadata.Data()[metadataBytes - 1u] = std::byte{0x7f};
+        QueueTargetByteWrite(context, recorder, target.htileAddress + metadataBytes - 1u, std::byte{0});
+        Require(recorder.PendingWriteOverlaps(target.htileAddress, metadataBytes), "initial depth producer was not registered");
+    }
+    const auto view = DepthSurfaceView(context, target);
+    Require(DepthSurfaceView(context, target) == view, "native depth attachment did not reuse its image");
+    std::array<std::byte, 1> beforeSampling{};
+    TargetRefuses([&] { AgcDriver::GuestMemory::Read(target.address + bytes - 1u, beforeSampling); }, "sample-preserving guest publication");
+    TargetRefuses([&] { RequireNoMultisampleTarget(target.htileAddress + metadataBytes - 1u, 1u, "a DMA copy"); }, "sample-preserving guest publication");
+    const auto words = DepthSampleWords(target);
+    auto texture = CachedSampledTexture(context, words);
+    Require(texture != nullptr && CachedSampledTexture(context, words) == texture, "native depth sampled view was not reused");
+    Require(DepthSurfaceHolds(context, DecodeTextureResource(words), texture.get()), "native depth sampled view is not held by its attachment");
+    const std::array<std::shared_ptr<Texture>, 1> sampled{texture};
+    TargetRefuses([&] { RequireNoNativeDepthFeedback_nid_no_patch(context, target, sampled); }, "sampling a native multisampled depth target the draw attaches");
+    const std::array<std::shared_ptr<Texture>, 1> unused{};
+    RequireNoNativeDepthFeedback_nid_no_patch(context, target, unused);
+    auto unattached = target;
+    unattached.address += bytes;
+    RequireNoNativeDepthFeedback_nid_no_patch(context, unattached, sampled);
+    auto singleSampled = target;
+    singleSampled.samples = 1u;
+    RequireNoNativeDepthFeedback_nid_no_patch(context, singleSampled, sampled);
+    auto otherDevice = context;
+    otherDevice.device = VK_NULL_HANDLE;
+    RequireNoNativeDepthFeedback_nid_no_patch(otherDevice, target, sampled);
+    recorder.Sync();
+    const auto count = extent.width * extent.height * fragments;
+    Buffer output(context, (count + 2u) * 16u, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    const Fetch fetch(context, *texture, output, FetchShader(extent.width, extent.height, fragments, false, true));
+    const auto check = [&](bool rendered, float offset) {
+        output.Invalidate();
+        for (std::uint32_t index = 0u; index < count; ++index) {
+            std::array<float, 4> result{};
+            std::memcpy(result.data(), output.Bytes().data() + (index + 1u) * 16u, 16u);
+            const auto expected = rendered ? offset + static_cast<float>(index % fragments + 1u) / 16.0f : target.clearDepth;
+            const auto tolerance = format == VK_FORMAT_D16_UNORM && rendered ? 1.0f / 65535.0f : 0.0f;
+            Require(std::isfinite(result[0]) && std::abs(result[0] - expected) <= tolerance && result[1] == 0.0f && result[2] == 0.0f && result[3] == 1.0f, "native depth sampled fetch lost a raster sample or its component mapping");
+        }
+        Require(std::all_of(output.Bytes().begin(), output.Bytes().begin() + 16u, [](auto byte) { return byte == std::byte{0xa5}; }) && std::all_of(output.Bytes().end() - 16u, output.Bytes().end(), [](auto byte) { return byte == std::byte{0xa5}; }), "native depth sampled fetch changed output guards");
+    };
+    std::memset(output.Bytes().data(), 0xa5, output.Bytes().size());
+    {
+        CommandBatch batch(context);
+        fetch.Run(batch.Handle(), count);
+        RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        batch.SubmitAndWait();
+        check(false, 0.0f);
+    }
+    {
+        const DepthRaster raster(context, target, view);
+        for (const auto offset : {0.0f, 0.25f}) {
+            Require(CachedSampledTexture(context, words) == texture, "native sampled view changed between raster writes");
+            std::memset(output.Bytes().data(), 0xa5, output.Bytes().size());
+            CommandBatch batch(context);
+            raster.Run(batch.Handle(), offset);
+            fetch.Run(batch.Handle(), count);
+            RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+            batch.SubmitAndWait();
+            check(true, offset);
+        }
+    }
+    Require(std::all_of(memory.Data(), memory.Data() + bytes, [](auto value) { return value == std::byte{0xa5}; }), "native depth sampling silently published guest memory");
+    std::array<std::byte, 1> probe{};
+    for (const auto address : {target.address, target.address + bytes - 1u, target.htileAddress, target.htileAddress + metadataBytes - 1u}) {
+        TargetRefuses([&] { RequireNoResidentDepthRead_nid_no_patch(address, 1u); }, "sample-preserving guest publication");
+        TargetRefuses([&] { AgcDriver::GuestMemory::Read(address, probe); }, "sample-preserving guest publication");
+        TargetRefuses([&] { RequireNoMultisampleTarget(address, 1u, "a DMA copy"); }, "sample-preserving guest publication");
+    }
+    TargetMemory unrelated(65536u);
+    AgcDriver::GuestMemory::Read(unrelated.Address(), probe);
+    Require(probe[0] == std::byte{0xa5}, "resident depth guard blocked an unrelated read");
+    auto alias = target;
+    alias.htileAddress += 65536u;
+    TargetRefuses([&] { DepthSurfaceView(context, alias); }, "layout or metadata changed");
+    alias = target;
+    alias.htileDepthOnly = !target.htileDepthOnly;
+    TargetRefuses([&] { DepthSurfaceView(context, alias); }, "layout or metadata changed");
+    auto resource = DecodeTextureResource(words);
+    for (std::uint32_t field = 0u; field < 18u; ++field) {
+        auto changed = resource;
+        switch (field) {
+            case 0u: changed.samples = fragments == 2u ? 4u : 2u; break;
+            case 1u: ++changed.width; break;
+            case 2u: ++changed.height; break;
+            case 3u: changed.format = 20u; break;
+            case 4u: changed.dimension = TextureDimension::k2DArray; break;
+            case 5u: changed.depthOrLastArray = 1u; break;
+            case 6u: changed.baseArray = 1u; break;
+            case 7u: changed.minLod = 1u; break;
+            case 8u: changed.pipeBankXor ^= 0x100u; break;
+            case 9u: changed.dccAddress += 256u; break;
+            case 10u: changed.dccPipeAligned = false; break;
+            case 11u: changed.iterate256 = false; break;
+            case 12u: changed.allocatedMipCount = 2u; break;
+            case 13u: changed.mipCount = 2u; break;
+            case 14u: changed.baseLevel = 1u; break;
+            case 15u: changed.lastLevel = 1u; break;
+            case 16u: changed.dccAlphaOnMsb = true; break;
+            case 17u: changed.tileMode = TextureTileMode::kR64KBX; break;
+        }
+        TargetRefuses([&] { DepthSurfaceTexture(context, words, changed, VkComponentMapping{}); }, "native multisample depth sampled");
+    }
+    memory.Data()[bytes - 1u] = std::byte{0x5a};
+    TargetRefuses([&] { CachedSampledTexture(context, words); }, "guest writes");
+    TargetRefuses([&] { DepthSurfaceHolds(context, resource, texture.get()); }, "guest writes");
+    texture.reset();
+    std::printf("Native depth format=%u samples=%u clear=%u: imported, rasterized twice, sampled and refused conflicts\n", static_cast<std::uint32_t>(format), fragments, one);
+}
+
+void CheckEligibility(Context context) {
+    constexpr VkExtent2D extent{129u, 67u};
+    constexpr std::uint32_t samples = 4u;
+    const auto bytes = static_cast<std::size_t>(MultisampledDepthBytes_nid_no_patch(extent, 4u, samples));
+    TargetMemory memory(bytes), metadata(65536u), stencil(bytes);
+    std::memset(metadata.Data(), 0, 65536u);
+    DepthTarget target{memory.Address(), 0u, extent, VK_FORMAT_D32_SFLOAT, 0.0f, 0u, metadata.Address(), false, samples};
+    target.depthSwizzle = 24u;
+    target.iterate256 = target.htilePipeAligned = true;
+    Recorder recorder(context);
+    recorder.Activate();
+    const auto lookup = [&](const DepthTarget& use) {
+        const auto words = DepthSampleWords(use);
+        return DepthSurfaceTexture(context, words, DecodeTextureResource(words), VkComponentMapping{});
+    };
+    const auto clear = [&] {
+        recorder.Sync();
+        ClearCachedTextures(context.device);
+        ClearDepthSurfaces(context.device);
+    };
+    struct Cleanup {
+        decltype(clear)& action;
+        ~Cleanup() { action(); }
+    } cleanup{clear};
+    for (std::uint32_t field = 0u; field < 19u; ++field) {
+        auto invalid = target;
+        std::string_view reason;
+        switch (field) {
+            case 0u: invalid.depthSwizzle = 0u; reason = "non-Z_X"; break;
+            case 1u: invalid.firstSlice = 1u; reason = "arrays"; break;
+            case 2u: invalid.lastSlice = 1u; reason = "arrays"; break;
+            case 3u: invalid.pipeBankXor = 0x10u; reason = "XOR"; break;
+            case 4u: invalid.htileAddress = 0u; reason = "HTILE"; break;
+            case 5u: invalid.iterate256 = false; reason = "HTILE"; break;
+            case 6u: invalid.htilePipeAligned = false; reason = "HTILE"; break;
+            case 7u: invalid.htileVrsEncoding = 1u; reason = "VRS"; break;
+            case 8u: invalid.clearDepth = 0.5f; reason = "clear value"; break;
+            case 9u: invalid.htileAddress = invalid.address; reason = "overlap"; break;
+            case 10u: metadata.Data()[HtileMetadataBytes(extent) - 1u] = std::byte{0x40}; reason = "clear value"; break;
+            case 11u: invalid.format = VK_FORMAT_D32_SFLOAT_S8_UINT; invalid.stencilAddress = stencil.Address(); reason = "stencil"; break;
+            case 12u: invalid.htileDepthOnly = true; metadata.Data()[0] = std::byte{0x30}; reason = "clear value"; break;
+            case 13u: invalid.clearDepth = 1.0f; { const std::uint32_t word = 0xfffffff0u; for (std::size_t offset = 0u; offset < HtileMetadataBytes(extent); offset += 4u) std::memcpy(metadata.Data() + offset, &word, 4u); } reason = "clear value"; break;
+            case 14u: metadata.Data()[0] = std::byte{0xf}; reason = "clear value"; break;
+            case 15u: invalid.clearDepth = 1.0f; reason = "clear value"; break;
+            case 16u: invalid.clearDepth = 1.0f; invalid.htileDepthOnly = true; reason = "clear value"; break;
+            case 17u: { const std::uint32_t word = 0xfffc0000u; for (std::size_t offset = 0u; offset < HtileMetadataBytes(extent); offset += 4u) std::memcpy(metadata.Data() + offset, &word, 4u); } reason = "clear value"; break;
+            case 18u: invalid.htileDepthOnly = true; { const std::uint32_t word = 0xfffffff0u; for (std::size_t offset = 0u; offset < HtileMetadataBytes(extent); offset += 4u) std::memcpy(metadata.Data() + offset, &word, 4u); } reason = "clear value"; break;
+        }
+        Require(DepthSurfaceView(context, invalid) != VK_NULL_HANDLE, "sampling ineligibility must preserve attachment rendering");
+        TargetRefuses([&] { lookup(invalid); }, reason);
+        if (field == 11u) {
+            GuestTextureResource alias{};
+            alias.baseAddress = invalid.stencilAddress;
+            alias.width = extent.width;
+            alias.height = extent.height;
+            alias.dimension = TextureDimension::k2D;
+            alias.samples = 1u;
+            alias.format = 36u;
+            Require(DepthSurfaceTexture(context, {}, alias, VkComponentMapping{}) == nullptr, "single-sample color at a native stencil address must not be claimed as a depth reader");
+            alias.format = 5u;
+            TargetRefuses([&] { DepthSurfaceTexture(context, {}, alias, VkComponentMapping{}); }, "stencil");
+        }
+        if (field == 10u) {
+            std::memset(metadata.Data(), 0, 65536u);
+            TargetRefuses([&] { lookup(invalid); }, reason);
+        }
+        clear();
+        std::memset(metadata.Data(), 0, 65536u);
+    }
+    {
+        TargetMemory unwatched(bytes);
+        AgcDriver::GuestMemory::Unwatch(unwatched.Address(), bytes);
+        auto invalid = target;
+        invalid.address = unwatched.Address();
+        Require(DepthSurfaceView(context, invalid) != VK_NULL_HANDLE, "unwatched sampling memory must preserve attachment rendering");
+        TargetRefuses([&] { lookup(invalid); }, "watched accessible guest memory");
+        clear();
+    }
+    DepthSurfaceView(context, target);
+    metadata.Data()[HtileMetadataBytes(extent) - 1u] = std::byte{0x40};
+    TargetRefuses([&] { lookup(target); }, "guest writes");
+    clear();
+    std::memset(metadata.Data(), 0, 65536u);
+    DepthSurfaceView(context, target);
+    QueueTargetByteWrite(context, recorder, target.address + bytes - 1u, std::byte{0x5a});
+    TargetRefuses([&] { lookup(target); }, "external GPU writes");
+    clear();
+    DepthSurfaceView(context, target);
+    NoteDepthMetadataFill(target.htileAddress, HtileMetadataBytes(extent), 0u);
+    TargetRefuses([&] { lookup(target); }, "metadata fill transition");
+    clear();
+    const auto initialView = DepthSurfaceView(context, target);
+    auto changedClearRegister = target;
+    changedClearRegister.clearDepth = 1.0f;
+    Require(DepthSurfaceView(context, changedClearRegister) == initialView, "changing only DB_DEPTH_CLEAR must reuse the native attachment without recertifying its initial contents");
+    auto texture = lookup(target);
+    recorder.Sync();
+    ClearDepthSurfaces(context.device);
+    Require(texture != nullptr && texture->View() != VK_NULL_HANDLE, "a held depth view lost its native image owner");
+    Buffer output(context, (extent.width * extent.height * samples + 2u) * 16u, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    std::memset(output.Bytes().data(), 0xa5, output.Bytes().size());
+    {
+        const Fetch fetch(context, *texture, output, FetchShader(extent.width, extent.height, samples, false, true));
+        CommandBatch batch(context);
+        fetch.Run(batch.Handle(), extent.width * extent.height * samples);
+        RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        batch.SubmitAndWait();
+        output.Invalidate();
+        for (std::uint32_t i = 0u; i < extent.width * extent.height * samples; ++i) {
+            std::array<float, 4> value{};
+            std::memcpy(value.data(), output.Bytes().data() + (i + 1u) * 16u, 16u);
+            Require(value == std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}, "a held native depth view lost its image contents when the surface cache was cleared");
+        }
+    }
+    texture.reset();
+    std::puts("Native depth eligibility, guest writes, queued writes, metadata transitions and held views checked");
+}
+
+}
+
+int main() {
+    try {
+        std::unique_ptr<Device> device;
+        try { device = std::make_unique<Device>(); }
+        catch (const std::exception& error) {
+            if (std::getenv("ANYPS5_REQUIRE_VULKAN") != nullptr) throw;
+            std::printf("skipped, no usable Vulkan device: %s\n", error.what());
+            return VulkanTestSkipped;
+        }
+        CheckDrawFeedback();
+        const auto context = device->GetContext();
+        const std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+        Require(DepthSupported(context, VK_FORMAT_D32_SFLOAT, 4u), "the native depth regression requires sampled D32 with four samples");
+        std::uint32_t checked = 0u, unavailable = 0u;
+        for (const auto format : {VK_FORMAT_D16_UNORM, VK_FORMAT_D32_SFLOAT}) {
+            for (const auto samples : {2u, 4u, 8u}) {
+                if (!DepthSupported(context, format, samples)) { unavailable += 2u; continue; }
+                for (const bool one : {false, true}) { CheckDepthTarget(context, format, samples, one); ++checked; }
+            }
+        }
+        CheckEligibility(context);
+        std::printf("Native multisampled depth cases checked=%u unavailable=%u\n", checked, unavailable);
+        return 0;
+    } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
+}

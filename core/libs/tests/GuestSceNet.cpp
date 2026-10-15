@@ -701,6 +701,23 @@ static void CheckStreamAddressLengths() {
     for (const int descriptor : {accepted, client, listener}) Require(sceNetSocketClose(descriptor) == 0);
 }
 
+static void CheckBufferSizes() {
+    const int socket = sceNetSocket("buffer-sizes", 2, 2, 17);
+    Require(socket >= 0);
+    for (const int option : {0x1001, 0x1002}) {
+        int value = -1;
+        std::uint32_t size = sizeof(value);
+        Require(sceNetGetsockopt(socket, 0xffff, option, &value, &size) == 0 && size == sizeof(value) && value > 0);
+    }
+    for (const auto [option, requested] : {std::array{0x1001, 32768}, std::array{0x1002, 65536}}) {
+        Require(sceNetSetsockopt(socket, 0xffff, option, &requested, sizeof(requested)) == 0);
+        int value = -1;
+        std::uint32_t size = sizeof(value);
+        Require(sceNetGetsockopt(socket, 0xffff, option, &value, &size) == 0 && size == sizeof(value) && value == requested);
+    }
+    Require(sceNetSocketClose(socket) == 0);
+}
+
 static void CheckUnspecifiedIpv6() {
     std::array<std::uint8_t, 16> unspecified{};
     Require(sceNetInetPton(28, "::", unspecified.data()) == 1);
@@ -907,6 +924,7 @@ int main() {
     CheckDatagramAddressLengths(2);
     CheckDatagramAddressLengths(28);
     CheckStreamAddressLengths();
+    CheckBufferSizes();
 
     const int epoll = sceNetEpollCreate("guest-sce-net", 0);
     Require(epoll >= 0);

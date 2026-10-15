@@ -2,12 +2,12 @@ enable_language(C)
 
 set(LIBATRAC9_DIR ${CMAKE_SOURCE_DIR}/3rdparty/LibAtrac9/C/src)
 set(LIBATRAC9_PATCHED_DIR ${CMAKE_CURRENT_BINARY_DIR}/atrac9)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LIBATRAC9_DIR}/unpack.c)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LIBATRAC9_DIR}/unpack.c ${LIBATRAC9_DIR}/bit_reader.c)
 include(${CMAKE_CURRENT_SOURCE_DIR}/PatchLibAtrac9.cmake)
 add_library(atrac9 STATIC EXCLUDE_FROM_ALL
         ${LIBATRAC9_DIR}/band_extension.c
         ${LIBATRAC9_DIR}/bit_allocation.c
-        ${LIBATRAC9_DIR}/bit_reader.c
+        ${LIBATRAC9_PATCHED_DIR}/bit_reader.c
         ${LIBATRAC9_DIR}/decinit.c
         ${LIBATRAC9_DIR}/decoder.c
         ${LIBATRAC9_DIR}/huffCodes.c

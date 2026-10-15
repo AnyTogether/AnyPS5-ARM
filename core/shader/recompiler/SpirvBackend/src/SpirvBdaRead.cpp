@@ -427,6 +427,17 @@ std::uint32_t EmitBdaRead(SpirvValueEmitContext& ctx, const IrValue& inst, std::
     return EmitBdaBytes(state, address, bits / 8u, instruction, BdaAccessMask(state, inst));
 }
 
+std::uint32_t EmitBdaReadBytes(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t address, std::uint32_t bytes) {
+    auto& state = ctx.state;
+    if (state.bdaPointerFunction == 0) ctx.Fail(inst, "BDA lookup function is missing");
+    const auto instruction = BdaInstructionPc(state, inst);
+    const auto u64 = TypeScalarU64(state);
+    const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), address, Binary(state, spv::OpISub, u64, BdaConstant(state, std::numeric_limits<std::uint64_t>::max()), Unary(state, spv::OpUConvert, u64, bytes)));
+    EmitIfCondition(state, overflow, [&] { RecordBdaFault(state, address, bytes, instruction, BdaAbi::FaultReason::Overflow); });
+    StopBdaInvocationIf(state, overflow);
+    return EmitBdaByteLoop(state, address, bytes, instruction, BdaAccessMask(state, inst));
+}
+
 void EmitBdaWrite(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t address, std::uint32_t value, std::uint32_t bits) {
     auto& state = ctx.state;
     if (state.bdaWritePointerFunction == 0 || state.bdaNoteWriteFunction == 0) ctx.Fail(inst, "BDA write functions are missing");

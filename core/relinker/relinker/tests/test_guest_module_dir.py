@@ -120,6 +120,16 @@ def main():
             else:
                 assert "$ORIGIN/app0/needed.prx.guest.prx" in needed_libraries(output.read_bytes()), needed_libraries(output.read_bytes())
 
+            case = work / f"{windows}-root-executable"
+            (case / "picker").mkdir(parents=True)
+            (case / "picker" / "picker.bin").write_bytes(main_fixture())
+            (case / "root.prx").write_bytes(module_with_symbol(True))
+            result, output = convert(case, windows, ["--module-dir", ".", "--executable", "picker/picker.bin"])
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            picker = case / ("picker.picker.bin" + output.suffix)
+            assert picker.read_bytes().startswith(b"MZ" if windows else b"\x7fELF"), picker
+            assert list((case / "app0").rglob("*.guest.prx")) == [case / "app0" / "root.prx.guest.prx"], list(case.rglob("*.guest.prx"))
+
             case = work / f"{windows}-plugins"
             for rejected, message in ((str(plugins), "inside the guest module parent directory"),
                                       ("../outside", "inside the guest module parent directory"),

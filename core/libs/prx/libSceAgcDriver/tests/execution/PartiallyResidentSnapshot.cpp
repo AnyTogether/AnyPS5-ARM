@@ -262,6 +262,51 @@ void Run(const Context& context, ReservedSurface& surface) {
     AgcDriver::GuestMemory::SetFlushHook(nullptr);
 }
 
+#ifdef _WIN32
+void UntrackedHint(const Context& context, ReservedSurface& surface) {
+    const auto address = surface.Address();
+    const auto words = Descriptor(address);
+    surface.Commit(0, SurfaceBytes);
+    std::memset(surface.Data(), 0x5a, SurfaceBytes);
+    AgcDriver::GuestMemory::BumpCollectEpoch();
+    AgcDriver::GuestMemory::Unwatch(address, SurfaceBytes);
+    Require(!AgcDriver::GuestMemory::Watched(address, SurfaceBytes) && AgcDriver::GuestMemory::UntrackedHint(address, SurfaceBytes) != 0, "the surface did not leave the write watch with an untracked hint");
+    surfaceBegin = address;
+    surfaceEnd = address + SurfaceBytes;
+    std::shared_ptr<Texture> previous;
+    const auto sample = [&](const std::string& when, bool compared, bool same) {
+        AgcDriver::GuestMemory::BumpCollectEpoch();
+        surfaceReads = 0;
+        auto texture = CachedSampledTexture(context, words);
+        Require(texture != nullptr && !texture->ViewsStorageImage(), "the untracked surface was not sampled through a snapshot " + when);
+        const auto reads = surfaceReads.load();
+        if (compared && reads == 0) throw std::runtime_error("the cached snapshot of the untracked surface was not compared with guest memory " + when);
+        if (!compared && reads != 0) throw std::runtime_error("the cached snapshot of the untracked surface was compared with guest memory " + when + " although its untracked hint did not move (" + std::to_string(reads) + " reads)");
+        if (previous != nullptr && same != (texture == previous)) throw std::runtime_error(std::string("sampling the untracked surface ") + when + (same ? " replaced the snapshot" : " kept the stale snapshot"));
+        previous = texture;
+    };
+    AgcDriver::GuestMemory::SetFlushHook(&CountReads);
+    try {
+        sample("at its first use", true, false);
+        for (int epoch = 0; epoch < 50; ++epoch) sample("in a collect epoch without a store", false, true);
+        surface.Data()[0x100] = 0x11;
+        sample("after a CPU write", true, false);
+        sample("after the re-read of the written block", false, true);
+        auto* stored = static_cast<volatile std::uint8_t*>(surface.Data()) + 2 * BlockBytes + 0x40;
+        *stored = *stored;
+        sample("after a CPU store of the bytes already there", true, true);
+        sample("after the compare that followed that store", false, true);
+        AgcDriver::GuestMemory::MarkWritten(address + 0x200, 4);
+        sample("after a driver store", true, true);
+        sample("after the compare that followed the driver store", false, true);
+    } catch (...) {
+        AgcDriver::GuestMemory::SetFlushHook(nullptr);
+        throw;
+    }
+    AgcDriver::GuestMemory::SetFlushHook(nullptr);
+}
+#endif
+
 void PendingStores(const Context& context, ReservedSurface& surface) {
     const auto address = surface.Address();
     const auto words = Descriptor(address);
@@ -326,7 +371,14 @@ int main(int argc, char** argv) {
             ReservedSurface surface;
             std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
             if (argc == 2 && std::string_view(argv[1]) == "--pending-stores") PendingStores(context, surface);
-            else Run(context, surface);
+            else if (argc == 2 && std::string_view(argv[1]) == "--untracked-hint") {
+#ifdef _WIN32
+                UntrackedHint(context, surface);
+#else
+                std::puts("skipped, only Windows host imports leave the write watch with a hint");
+                return Skipped;
+#endif
+            } else Run(context, surface);
             ClearCachedTextures(context.device);
         }
         device.reset();

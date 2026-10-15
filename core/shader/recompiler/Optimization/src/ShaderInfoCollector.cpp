@@ -102,7 +102,7 @@ void ValidateValueReferences(const IrProgram& program, ShaderStageInputInfo inpu
                         return Fail("interpolation parameter reference is invalid");
                     }
                     if (input->ImmediateU32() >= inputInfo.pixel->inputNum || component->ImmediateU32() >= 4u || mode->ImmediateU32() >= 3u) {
-                        return Fail("interpolation parameter reference is out of range");
+                        return Fail("interpolation parameter reference is out of range (attribute " + std::to_string(input->ImmediateU32()) + " component " + std::to_string(component->ImmediateU32()) + " mode " + std::to_string(mode->ImmediateU32()) + ", " + std::to_string(inputInfo.pixel->inputNum) + " inputs)");
                     }
                     break;
                 }
@@ -237,7 +237,7 @@ bool IsPixelParameterFlat(const ShaderPixelInputInfo& pixel, std::uint32_t input
 }
 
 void CollectPixelInputs(const IrProgram& program, const ShaderPixelInputInfo* pixel, ShaderInfo& info) {
-    if (pixel->HasPositionInput() || pixel->psDitheredAlphaToCoverage) {
+    if (pixel->HasPositionInput() || pixel->psDitheredAlphaToCoverage || pixel->QuadMasked()) {
         AddInput(info, StageInputKind::FragCoord, 0, 4, "gl_FragCoord");
     }
     if (pixel->psFrontFace) {

@@ -20,6 +20,9 @@
 #else
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <sys/inotify.h>
+#endif
 extern "C" {
 int APS5_VABI remove_nid_postfix(const char*);
 int APS5_VABI rename_nid_postfix(const char*, const char*);
@@ -246,10 +249,50 @@ static void TestRelinkedModuleNameCase() {
     std::filesystem::remove_all(root);
 }
 
+#ifdef __linux__
+static int DirectoryOpens(int watch) {
+    alignas(inotify_event) char buffer[4096];
+    int opens = 0;
+    for (ssize_t size; (size = read(watch, buffer, sizeof buffer)) > 0;) {
+        for (char* event = buffer; event < buffer + size; event += sizeof(inotify_event) + reinterpret_cast<inotify_event*>(event)->len)
+            if (reinterpret_cast<inotify_event*>(event)->mask & IN_OPEN) ++opens;
+    }
+    return opens;
+}
+
+static void TestMissingPathListsDirectoryOnce() {
+    const auto root = std::filesystem::path("anyps5-missing-listing-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directories(root));
+    { std::ofstream file(root / "present.txt"); file << "present"; }
+    const int watch = inotify_init1(IN_NONBLOCK);
+    Require(watch >= 0 && inotify_add_watch(watch, root.c_str(), IN_OPEN | IN_CLOSE_NOWRITE) >= 0);
+    const auto missing = (root / "Missing.txt").generic_string();
+    FileStat status{};
+    Require(sceKernelStat(missing.c_str(), &status) == static_cast<int>(0x80020002u) && DirectoryOpens(watch) == 1);
+    Require(sceKernelCheckReachability(missing.c_str()) == static_cast<int>(0x80020002u) && DirectoryOpens(watch) == 1);
+    Require(sceKernelOpen(missing.c_str(), 0, 0) == static_cast<int>(0x80020002u) && DirectoryOpens(watch) == 1);
+    close(watch);
+    { std::ofstream file(root / "plugin.prx.guest.prx"); file << "lower"; }
+    { std::ofstream file(root / "Plugin.prx.guest.prx"); file << "upper"; }
+    bool ambiguous = false;
+    try {
+        sceKernelStat((root / "PLUGIN.prx").generic_string().c_str(), &status);
+    } catch (const std::runtime_error&) {
+        ambiguous = true;
+    }
+    Require(ambiguous);
+    std::filesystem::remove_all(root);
+}
+#endif
+
 int main() {
     TestParentTraversal();
     TestRelinkedModuleNames();
     TestRelinkedModuleNameCase();
+#ifdef __linux__
+    TestMissingPathListsDirectoryOnce();
+#endif
     Require(chmod_nid_postfix(nullptr, 0600) == -1 && *__error_nid_postfix() == 14);
     Require(sceKernelChmod_nid_postfix(nullptr, 0600) == static_cast<int>(0x8002000eu));
     Require(chmod_nid_postfix("", 0600) == -1 && *__error_nid_postfix() == 2);

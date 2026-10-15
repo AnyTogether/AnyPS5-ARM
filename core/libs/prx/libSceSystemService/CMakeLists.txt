@@ -40,7 +40,8 @@ if(BUILD_TESTING)
     add_test(NAME guest_system_relaunch COMMAND guest_system_exit_tests --relaunch-driver)
     add_test(NAME guest_nested_exit COMMAND guest_system_exit_tests --nested-exit-driver)
     set_tests_properties(guest_system_exit PROPERTIES
-        PASS_REGULAR_EXPRESSION "Guest shutdown and atexit completed")
+        PASS_REGULAR_EXPRESSION "Guest shutdown completed"
+        FAIL_REGULAR_EXPRESSION "Guest exit handler ran|Guest thread resumed during exit")
     set_tests_properties(guest_quick_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest quick_exit handlers completed")
     set_tests_properties(guest_system_relaunch PROPERTIES

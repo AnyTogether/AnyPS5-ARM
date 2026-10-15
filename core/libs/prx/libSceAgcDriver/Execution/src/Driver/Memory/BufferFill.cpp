@@ -3,12 +3,14 @@
 #include "ThreadOwned.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Memory/DwordPatternFill.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include <algorithm>
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include <bit>
 #include <cstdlib>
+#include <initializer_list>
 #include <optional>
 #include <cstring>
 
@@ -187,6 +189,20 @@ void Driver::fillClearCount(const Graphics::StorageTexture::FillCoverage& covera
     std::fprintf(stderr, "%s\n", line.c_str());
 }
 
+namespace {
+
+void drainPendingInputWrites(std::uint32_t queueId, std::initializer_list<std::pair<std::uint64_t, std::size_t>> inputs) {
+    if (queueId != 0 || !DrawPipeline::Active()) return;
+    auto& pipeline = DrawPipeline::Queue0();
+    for (const auto& [address, bytes] : inputs) {
+        if (!pipeline.Overlaps(address, bytes)) continue;
+        pipeline.Drain(DrawPipeline::DrainReason::Capture, 0x15);
+        return;
+    }
+}
+
+}
+
 bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<const std::uint32_t> packet, std::span<const std::uint32_t> code, const std::vector<std::uint32_t>& userData, const ShaderRecompiler::ShaderComputeStageInfo& compute, const std::shared_ptr<VulkanDevice>& localDevice) {
     auto dwordFill = MatchDwordPatternFill(packet, code, userData, compute);
     if (!dwordFill) dwordFill = MatchConstantDwordFill(packet, code, userData, compute);
@@ -202,6 +218,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         bytes = dwordFill->bytes;
         pattern = dwordFill->pattern;
     } else if (memoryFill) {
+        drainPendingInputWrites(queueId, {{memoryFill->valueAddress, 4}});
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
         inputLock.lock();
         recordLabelsForPacket(localDevice.get(), queueId);
@@ -214,6 +231,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         const auto range = DecodePatternFillRange(userData, packet);
         if (!range) return false;
         if (range->invocations == 0) return true;
+        drainPendingInputWrites(queueId, {{range->control, 8}, {range->source, 4}});
         GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
         inputLock.lock();
         recordLabelsForPacket(localDevice.get(), queueId);
@@ -243,6 +261,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
         bytes = static_cast<std::size_t>(records * 16u);
         if (matchesBufferPatternFillKernel(code)) {
             const auto source = userData[4] | (static_cast<std::uint64_t>(userData[5] & 0xffffu) << 32u);
+            drainPendingInputWrites(queueId, {{source, sizeof(pattern)}});
             GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
             inputLock.lock();
             recordLabelsForPacket(localDevice.get(), queueId);
@@ -252,6 +271,7 @@ bool Driver::fillBuffer(QueueState& queue, std::uint32_t queueId, std::span<cons
             pattern = {userData[4], userData[5], userData[6], userData[7]};
         }
     }
+    if (queueId == 0 && DrawPipeline::Active() && inputLock.owns_lock()) inputLock.unlock();
     storeBufferFill(queueId, base, bytes, pattern, localDevice, memoryFill.has_value(), true);
     return true;
 }
@@ -273,16 +293,17 @@ void Driver::storeBufferFill(std::uint32_t queueId, std::uint64_t base, std::siz
     ++fills;
     filledBytes += bytes;
     if (bytes == 0) return;
-    GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
-    std::lock_guard gpuLock(GuestMemory::GpuMutex());
-    const auto holdStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    auto phaseStart = holdStart;
-    const auto phase = [&](FillPhase which) {
-        if (!profile) return;
-        const auto now = std::chrono::steady_clock::now();
-        fillPhaseMs[which] += std::chrono::duration<double, std::milli>(now - phaseStart).count();
-        phaseStart = now;
-    };
+    const auto store = [this, queueId, base, bytes, pattern, localDevice, memoryValueFill, noteMetadata] {
+        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Fill);
+        std::lock_guard gpuLock(GuestMemory::GpuMutex());
+        const auto holdStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        auto phaseStart = holdStart;
+        const auto phase = [&](FillPhase which) {
+            if (!profile) return;
+            const auto now = std::chrono::steady_clock::now();
+            fillPhaseMs[which] += std::chrono::duration<double, std::milli>(now - phaseStart).count();
+            phaseStart = now;
+        };
 
     recordLabelsForPacket(localDevice.get(), queueId);
     phase(FillLabels);
@@ -380,5 +401,15 @@ void Driver::storeBufferFill(std::uint32_t queueId, std::uint64_t base, std::siz
             std::fprintf(stderr, "[fill] %llu buffer fills (%.0f MiB), %llu stored by the CPU; hold phases ms (cumulative):%s; pre-store flushes %llu (%llu stored an image); stored on the GPU: uniform %llu (%.0f MiB), pattern %llu (%.0f MiB), chain copies %llu\n", static_cast<unsigned long long>(fills.load()), filledBytes.load() / 1048576.0, static_cast<unsigned long long>(cpuFills.load()), line.c_str(), static_cast<unsigned long long>(flushes), static_cast<unsigned long long>(flushed), static_cast<unsigned long long>(uniformFills), uniformBytes / 1048576.0, static_cast<unsigned long long>(patternFills), patternBytes / 1048576.0, static_cast<unsigned long long>(chainCopies));
         }
     }
+    };
+    static const bool orderedFills = std::getenv("APS5_PIPELINE_DRAIN_FILLS") == nullptr;
+    if (orderedFills && queueId == 0 && DrawPipeline::Active()) {
+        DrawPipeline::Queue0().Enqueue([store, queueId] {
+            GuestMemory::SetCurrentPacket(0x15, queueId);
+            store();
+        }, {{base, base + bytes}});
+        return;
+    }
+    store();
 }
 }

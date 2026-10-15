@@ -222,7 +222,7 @@ std::size_t IrProgram::ReclaimUnusedValues() {
     };
     keepBlocks(blocks);
     keepBlocks(resourcePlan.blockStorage);
-    for (const auto& value : resourcePlan.valueStorage) keep(value.get());
+    for (auto& value : resourcePlan.valueStorage) keep(&value);
     for (const auto& source : resourcePlan.descriptorSources) for (IrValue* word : source.dwords) keep(word);
     for (const auto& read : resourcePlan.srtReads) keep(read.value);
     for (const auto& block : resourcePlan.controlFlow) keep(block.condition);

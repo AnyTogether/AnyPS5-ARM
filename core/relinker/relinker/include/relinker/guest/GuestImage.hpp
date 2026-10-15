@@ -66,6 +66,7 @@ struct GuestArtifact {
     std::vector<std::uint8_t> Bytes;
     std::vector<Domain::CallRegistryEntry> Imports;
     std::filesystem::path SourcePath;
+    std::vector<std::string> NeededLibraries;
 };
 
 struct GuestModuleInput {
