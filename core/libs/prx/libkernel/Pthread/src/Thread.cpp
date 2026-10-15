@@ -76,9 +76,18 @@ static GuestThreadState& CurrentGuestState() {
     return state;
 #endif
 }
-static std::mutex stackLock;
-static std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>> liveStacks;
-static std::map<std::uintptr_t, std::size_t> protectedStackPages;
+// The stack registry outlives static destruction: exit handlers still protect guest memory, and on
+// macOS a destroyed std::mutex refuses to lock (guest_memory_lifetime).
+struct StackRegistry {
+    std::mutex lock;
+    std::map<PthreadPrivate*, std::pair<std::uintptr_t, std::uintptr_t>> live;
+    std::map<std::uintptr_t, std::size_t> protectedPages;
+};
+
+static StackRegistry& Stacks() {
+    static auto* registry = new StackRegistry;
+    return *registry;
+}
 #if defined(__linux__)
 struct GuestStackMapping {
     std::uintptr_t mappingEnd;
@@ -227,8 +236,9 @@ static void RegisterStack(PthreadPrivate* self) {
     std::uintptr_t high = 0;
     if (!CurrentStack(&low, &high))
         throw std::runtime_error("Cannot query guest thread stack");
-    std::lock_guard lock(stackLock);
-    liveStacks[self] = {low, high};
+    auto& stacks = Stacks();
+    std::lock_guard lock(stacks.lock);
+    stacks.live[self] = {low, high};
 }
 
 static void RestoreStackPages(std::uintptr_t start, std::size_t bytes) noexcept {
@@ -242,27 +252,29 @@ static void RestoreStackPages(std::uintptr_t start, std::size_t bytes) noexcept 
 }
 
 void NoteGuestStackProtection(std::uintptr_t start, std::size_t bytes, bool readWrite) {
-    std::lock_guard lock(stackLock);
-    auto it = protectedStackPages.upper_bound(start);
-    if (it != protectedStackPages.begin() && std::prev(it)->first + std::prev(it)->second > start) --it;
-    while (it != protectedStackPages.end() && it->first < start + bytes) it = protectedStackPages.erase(it);
-    if (!readWrite) protectedStackPages[start] = bytes;
+    auto& stacks = Stacks();
+    std::lock_guard lock(stacks.lock);
+    auto it = stacks.protectedPages.upper_bound(start);
+    if (it != stacks.protectedPages.begin() && std::prev(it)->first + std::prev(it)->second > start) --it;
+    while (it != stacks.protectedPages.end() && it->first < start + bytes) it = stacks.protectedPages.erase(it);
+    if (!readWrite) stacks.protectedPages[start] = bytes;
 }
 
 static void UnregisterStack(PthreadPrivate* self) {
-    std::lock_guard lock(stackLock);
-    if (const auto found = liveStacks.find(self); found != liveStacks.end()) {
+    auto& stacks = Stacks();
+    std::lock_guard lock(stacks.lock);
+    if (const auto found = stacks.live.find(self); found != stacks.live.end()) {
         const auto [low, high] = found->second;
-        for (auto it = protectedStackPages.begin(); it != protectedStackPages.end();) {
+        for (auto it = stacks.protectedPages.begin(); it != stacks.protectedPages.end();) {
             if (it->first < high && it->first + it->second > low) {
                 RestoreStackPages(it->first, it->second);
-                it = protectedStackPages.erase(it);
+                it = stacks.protectedPages.erase(it);
             } else {
                 ++it;
             }
         }
     }
-    liveStacks.erase(self);
+    stacks.live.erase(self);
 }
 
 bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end) {
@@ -273,8 +285,9 @@ bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintpt
         *end = high;
         return true;
     }
-    std::lock_guard lock(stackLock);
-    for (const auto& [thread, range] : liveStacks) {
+    auto& stacks = Stacks();
+    std::lock_guard lock(stacks.lock);
+    for (const auto& [thread, range] : stacks.live) {
         if (address >= range.first && address < range.second) {
             *start = range.first;
             *end = range.second;
