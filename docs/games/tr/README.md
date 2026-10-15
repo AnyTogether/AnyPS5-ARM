@@ -4,7 +4,7 @@
 
 PS5 oyunlarını Apple Silicon Mac'te, Rosetta 2 ve MoltenVK üzerinden çalıştırma denemelerimiz. Her oyunun sayfasında ekran görüntüleri, adım adım geldiğimiz yer ve teknik ayrıntılar var.
 
-Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son güncelleme: 12 Ekim 2026.
+Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son güncelleme: 15 Ekim 2026.
 
 🟢 Oynanabilir · 🟡 Üzerinde çalışılıyor · 🔴 Açılmıyor · ⚪ Kapsam dışı
 
@@ -15,6 +15,6 @@ Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son gü
 | <img src="../img/doom-e1m1.jpg" width="180"> | [**DOOM (homebrew)**](doom.md) | `PPSA99666` | lowbit/ps5-doom | 🟢 Oynanabilir, E1M1 ve sonrası | 35 (oyunun kendi hedefi) |
 | <img src="../img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Oynanabilir | 60 |
 | <img src="../img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | Projenin test oyunu | 🟢 Oynanabilir | 60 |
-| <img src="../img/stray-saveselect.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🟡 Ana menü (1080p yaması) | ~18-20 |
+| <img src="../img/stray-family.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🟢 Oynanabilir, ilk bölüm (FPS çok düşük) | Oyun içi ~1-11 (1080p) |
 | <img src="../img/quake2-base1.jpg" width="180"> | [**Quake II ve Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II oyun içi · Quake III veri bekliyor | Menü ~48 · oyun içi ~40 |
 |  | **GTA III – Definitive Edition** | `PPSA03527` | Unreal Engine 4 | 🔴 Henüz yeniden denenmedi | — |
