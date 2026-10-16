@@ -327,6 +327,10 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
             output.Value(spec + "ll" + conversion, value);
         } else if (std::strchr("ouxX", conversion)) {
             if (!integerLength) throw std::invalid_argument("Invalid integer length");
+            for (size_t flag = 1; flag < spec.size() && std::strchr("-+ #0", spec[flag]);) {
+                if (spec[flag] == ' ' || spec[flag] == '+') spec.erase(flag, 1);
+                else ++flag;
+            }
             unsigned long long value;
             if (length.empty() || length == "h" || length == "hh") {
                 value = args.Next<unsigned int>();

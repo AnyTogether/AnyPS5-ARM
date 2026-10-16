@@ -883,6 +883,60 @@ static void TestUnsetMatrix() {
     Require(sceNgs2SystemDestroy(stereoSystem, nullptr) == SCE_NGS2_OK);
 }
 
+template <typename TSample>
+static void TestRenderCapacity(std::uint32_t waveformType, std::uint32_t channels) {
+    const auto system = CreateSystem();
+    const auto samples = Grain * channels;
+    const TSample sentinel = 123;
+    std::vector<TSample> out(samples * 3, sentinel);
+    const Ngs2RenderBufferInfo info{out.data(), out.size() * sizeof(TSample), waveformType, channels};
+    Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+    Require(std::all_of(out.begin(), out.begin() + samples, [](TSample value) { return value == 0; }));
+    Require(std::all_of(out.begin() + samples, out.end(), [sentinel](TSample value) { return value == sentinel; }));
+
+    const auto master = Mastering(system, channels);
+    const std::vector<std::int16_t> pcm(Grain, 16384);
+    const auto sampler = Sampler(system, pcm, 0);
+    Patch(sampler, master);
+    Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+    std::fill(out.begin(), out.end(), sentinel);
+    Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+    Require(std::all_of(out.begin(), out.begin() + samples, [sentinel](TSample value) { return value > 0 && value != sentinel; }));
+    Require(std::all_of(out.begin() + samples, out.end(), [sentinel](TSample value) { return value == sentinel; }));
+
+    Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+    Require(std::all_of(out.begin(), out.begin() + samples, [](TSample value) { return value == 0; }));
+    Require(std::all_of(out.begin() + samples, out.end(), [sentinel](TSample value) { return value == sentinel; }));
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
+static void TestSilentRenderValidation() {
+    const auto system = CreateSystem();
+    std::vector<float> out(Grain, 123.0f);
+    Ngs2RenderBufferInfo info{out.data(), out.size() * sizeof(float) - 1, SCE_NGS2_WAVEFORM_TYPE_PCM_F32L, 1};
+    const auto invalid = [&] {
+        bool rejected = false;
+        try { sceNgs2SystemRender(system, &info, 1); } catch (const std::invalid_argument&) { rejected = true; }
+        Require(rejected);
+        Require(std::all_of(out.begin(), out.end(), [](float value) { return value == 123.0f; }));
+    };
+    invalid();
+    info.buffer_size++;
+    info.num_channels = 0;
+    invalid();
+    info.num_channels = 9;
+    invalid();
+    info.num_channels = 1;
+    info.waveform_type = UINT32_MAX;
+    bool unsupported = false;
+    try { sceNgs2SystemRender(system, &info, 1); } catch (const std::runtime_error&) { unsupported = true; }
+    Require(unsupported);
+    Require(std::all_of(out.begin(), out.end(), [](float value) { return value == 123.0f; }));
+    info = {};
+    Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 static void TestAllocator() {
     const Ngs2BufferAllocator allocator{Allocate, Release, 9};
     uintptr_t system = 0;
@@ -922,6 +976,11 @@ int main() {
     TestLock();
     TestDefaultChannelMap();
     TestUnsetMatrix();
+    TestRenderCapacity<float>(SCE_NGS2_WAVEFORM_TYPE_PCM_F32L, 1);
+    TestRenderCapacity<float>(SCE_NGS2_WAVEFORM_TYPE_PCM_F32L, 2);
+    TestRenderCapacity<std::int16_t>(SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1);
+    TestRenderCapacity<std::int16_t>(SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 2);
+    TestSilentRenderValidation();
     TestAllocator();
     exitSystem = CreateSystem();
     return 0;

@@ -59,6 +59,7 @@ bool MultisampledColorFillAbsorbs(std::uint64_t address, std::size_t bytes, std:
 void NoteColorMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32_t pattern);
 void ClearMultisampleTargets(VkDevice device);
 void InstallResidentImageReadGuard_nid_no_patch();
+void UpdateResidentImageUnmapObserver_nid_no_patch();
 void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const char* access);
 
 }

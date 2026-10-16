@@ -42,6 +42,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Point the WinLibs CMake at the CA bundle of Git for Windows
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          for prefix in ucrt64 mingw64; do
+            bundle="C:/Program Files/Git/$prefix/etc/ssl/certs/ca-bundle.crt"
+            if [ -f "$bundle" ]; then echo "SSL_CERT_FILE=$bundle" >> "$GITHUB_ENV"; exit 0; fi
+          done
+          echo "::error::No CA bundle found in Git for Windows"; exit 1
       - id: toolchain
         if: matrix.platform == 'windows'
         uses: actions/cache@v6
@@ -49,8 +58,6 @@ jobs:
           path: C:\winlibs
           key: ${{ env.WINLIBS_ZIP }}
       - if: matrix.platform == 'windows' && steps.toolchain.outputs.cache-hit != 'true'
-        env:
-          SSL_CERT_FILE: 'C:\Program Files\Git\mingw64\etc\ssl\certs\ca-bundle.crt'
         run: |
           curl -sSfL -o "$RUNNER_TEMP/winlibs.zip" "https://github.com/brechtsanders/winlibs_mingw/releases/download/$WINLIBS_RELEASE/$WINLIBS_ZIP"
           7z x "$RUNNER_TEMP/winlibs.zip" -oC:/winlibs
@@ -69,8 +76,6 @@ jobs:
       - name: Configure Windows
         if: matrix.platform == 'windows'
         shell: cmd
-        env:
-          SSL_CERT_FILE: 'C:\Program Files\Git\mingw64\etc\ssl\certs\ca-bundle.crt'
         run: cmake -S . -B build %CONFIGURE%
       - name: Build project and tests (Linux)
         if: matrix.platform == 'linux'

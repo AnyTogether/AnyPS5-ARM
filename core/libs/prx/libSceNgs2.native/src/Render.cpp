@@ -291,6 +291,16 @@ static void WriteOutput(const Ngs2RenderBufferInfo& output, const std::vector<fl
 
 void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
     const auto grain = system.option.num_grain_samples;
+    std::vector<std::size_t> outputBytes(numBufferInfo);
+    for (std::uint32_t i = 0; i < numBufferInfo; i++) {
+        const auto& output = bufferInfo[i];
+        if (output.buffer == nullptr) continue;
+        if (output.num_channels == 0 || output.num_channels > NGS2_MAX_CHANNELS) {
+            throw std::invalid_argument("NGS2: render channel count is invalid");
+        }
+        outputBytes[i] = static_cast<std::size_t>(grain) * output.num_channels * SampleBytes(output.waveform_type);
+        if (output.buffer_size < outputBytes[i]) throw std::invalid_argument("NGS2: render buffer " + std::to_string(i) + " is too small");
+    }
     std::vector<Ngs2Voice*> voices;
     for (auto* rack : system.racks) {
         for (auto& voice : rack->voices) {
@@ -311,8 +321,8 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
         }
     }
     for (std::uint32_t i = 0; i < numBufferInfo; i++) {
-        if (bufferInfo[i].buffer != nullptr) std::memset(bufferInfo[i].buffer, 0, bufferInfo[i].buffer_size);
         if (!mixes[i].empty()) WriteOutput(bufferInfo[i], mixes[i]);
+        else if (outputBytes[i] != 0) std::memset(bufferInfo[i].buffer, 0, outputBytes[i]);
     }
     for (auto* voice : voices) {
         if (voice->state == Ngs2PlayState::Stopped) voice->state = Ngs2PlayState::Empty;

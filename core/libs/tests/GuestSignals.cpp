@@ -198,6 +198,23 @@ int main() {
     Require(received == 30);
     Require(sigprocmask_nid_postfix(1, nullptr, &previous) == 0 && previous.bits[0] == user.bits[0]);
     Require(sigprocmask_nid_postfix(2, &user, nullptr) == 0);
+    const GuestSignalSet highBlock{{1u << 29, 1u << 7, 0, 0}};
+    const GuestSignalSet suspendMask{{0, 0, 1u << 8, 0}};
+    Require(sigprocmask_nid_postfix(3, &highBlock, nullptr) == 0);
+    Require(signal_nid_postfix(73, Callback) != invalid);
+    received = 0;
+    SuspendWait highWait{&suspendMask, 0, 0};
+    void* highSuspender = nullptr;
+    Require(scePthreadCreate(&highSuspender, nullptr, SuspendEntry, &highWait, nullptr) == 0);
+    SuspendSender highSender{highSuspender, -1};
+    void* highSenderThread = nullptr;
+    Require(scePthreadCreate(&highSenderThread, nullptr, SuspendSend, &highSender, nullptr) == 0);
+    Require(scePthreadJoin(highSenderThread, nullptr) == 0 && highSender.result == 0);
+    Require(scePthreadJoin(highSuspender, nullptr) == 0);
+    Require(highWait.result == -1 && highWait.error == 4 && received == 30);
+    Require(sigprocmask_nid_postfix(1, nullptr, &previous) == 0 && std::memcmp(&previous, &highBlock, sizeof(highBlock)) == 0);
+    Require(sigprocmask_nid_postfix(3, &empty, nullptr) == 0);
+    Require(signal_nid_postfix(73, nullptr) == Callback);
     signal_nid_postfix(30, nullptr);
 
     Require(GuestAlarm_nid_no_patch(0) == 0);
@@ -275,4 +292,22 @@ int main() {
     Require(sigpending_nid_postfix(&pendingSignals) == 0);
     Require(pendingSignals.bits[0] == 0 && pendingSignals.bits[1] == 0 && pendingSignals.bits[2] == 0 && pendingSignals.bits[3] == 0);
     Require(signal_nid_postfix(15, nullptr) == Callback);
+
+    const GuestSignalSet highSignals{{0, 1u << 7, 1u << 8, 1u << 31}};
+    for (int guest : {40, 73, 128}) Require(signal_nid_postfix(guest, Callback) != invalid);
+    received = 0;
+    GuestSignalSet previousHighSignals{};
+    Require(sigprocmask_nid_postfix(1, &highSignals, &previousHighSignals) == 0);
+    Require(previousHighSignals.bits[0] == 0 && previousHighSignals.bits[1] == 0 &&
+        previousHighSignals.bits[2] == 0 && previousHighSignals.bits[3] == 0);
+    for (int guest : {40, 73, 128}) Require(raise_nid_postfix(guest) == 0 && received == 0);
+    Require(sigpending_nid_postfix(&pendingSignals) == 0 &&
+        std::memcmp(&pendingSignals, &highSignals, sizeof(highSignals)) == 0);
+    Require(sigprocmask_nid_postfix(2, &highSignals, &previousHighSignals) == 0);
+    Require(std::memcmp(&previousHighSignals, &highSignals, sizeof(highSignals)) == 0);
+    Require(received == 128);
+    Require(sigpending_nid_postfix(&pendingSignals) == 0 &&
+        pendingSignals.bits[0] == 0 && pendingSignals.bits[1] == 0 &&
+        pendingSignals.bits[2] == 0 && pendingSignals.bits[3] == 0);
+    for (int guest : {40, 73, 128}) Require(signal_nid_postfix(guest, nullptr) == Callback);
 }

@@ -231,6 +231,8 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
             if (auto* result = DefaultScopeSymbol(name)) return result;
             const auto nid = Nid::ComputeNid(name, "");
             if (auto* result = DefaultScopeSymbol(nid.c_str())) return result;
+            if (auto* result = DefaultScopeSymbol((std::string(name) + "#guest").c_str())) return result;
+            if (auto* result = DefaultScopeSymbol((nid + "#guest").c_str())) return result;
         }
 #endif
         Error("dlsym: symbol not found in supported module scope");

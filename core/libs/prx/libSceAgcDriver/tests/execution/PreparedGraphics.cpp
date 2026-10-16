@@ -304,7 +304,13 @@ void Check(AgcDriver::VulkanDevice& device, AgcDriver::Graphics::ShaderPath path
         registry.erase(late.snapshot->codeAddress);
     }
     ShaderRegistry invalidRegistry;
-    invalidRegistry[1] = {std::make_shared<const ShaderSnapshot>(ShaderSnapshot{1, 0, 2, {}, {}})};
+    for (const auto& [address, snapshots] : registry) {
+        for (const auto& snapshot : snapshots) {
+            auto compute = *snapshot;
+            compute.type = 0;
+            invalidRegistry[address].push_back(std::make_shared<const ShaderSnapshot>(std::move(compute)));
+        }
+    }
     DrawDecode invalid{};
     invalid.state = prepared.state;
     Reject([&] { DecodeGraphicsPrograms(invalid, queue, invalidRegistry, true, true); }, "registered");

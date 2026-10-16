@@ -7,6 +7,7 @@ import tempfile
 
 from test_guest_intel_trampolines import main_fixture
 from test_guest_symbol_names import guest_module, importing_executable
+from test_windows_import_modules import consumer
 
 RELA = 0x900
 RELASZ = 0x668
@@ -49,10 +50,37 @@ def entry(nid, offset):
     return {"nid": nid, "library": "", "targetOffset": offset}
 
 
+def declared_imports(relinker, case, options, guest_owner):
+    modules = case / "sce_module"
+    modules.mkdir(parents=True)
+    (modules / ("libHost.prx" if guest_owner else "other.prx")).write_bytes(guest_module([("CCCCCCCCCCC", True)]))
+    image = consumer("libHost.prx", symbol="CCCCCCCCCCC#A#B", module_name="libHost")
+    struct.pack_into("<QQq", image, RELA + 24, 0x2398, 1 << 32, 0)
+    struct.pack_into("<Q", image, RELASZ, 48)
+    struct.pack_into("<QQq", image, PLT, 0x2390, (1 << 32) | JUMP_SLOT, 0)
+    for index, tag in enumerate([(23, 0x2340), (2, 24), (20, 7), (0, 0)], 11):
+        struct.pack_into("<qQ", image, 0x600 + index * 16, *tag)
+    struct.pack_into("<QQ", image, 208, 15 * 16, 15 * 16)
+    (modules / "consumer.prx").write_bytes(image)
+    source = case / "input.elf"
+    source.write_bytes(main_fixture())
+    output = case / "output.elf"
+    result = subprocess.run([str(relinker), "--registry", *options, str(source), str(output)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (options, result.stdout, result.stderr)
+    actual = read(case / "output.consumer.prx.guest.prx.registry.json")
+    expected = [] if guest_owner else [{"nid": "CCCCCCCCCCC", "library": "libHost.prx", "targetOffset": offset}
+                                      for offset in ("0x2320", "0x2390")]
+    assert actual == expected, (options, guest_owner, actual, expected)
+
+
 def main():
     relinker = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="anyps5-guest-registry-") as directory:
         work = Path(directory)
+        for name, options in (("linux", []), ("windows", ["--windows"]), ("macos", ["--macos"])):
+            for guest_owner in (False, True):
+                declared_imports(relinker, work / f"declared-{name}-{guest_owner}", options, guest_owner)
         for name, options in (("linux", []), ("windows", ["--windows"])):
             output = convert(relinker, work / name, options)
             libc = read(output.parent / "output.libc.prx.guest.prx.registry.json")

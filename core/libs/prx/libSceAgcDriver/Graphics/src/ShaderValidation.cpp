@@ -510,7 +510,7 @@ Module Inspect(const CompiledShader& compiled, const State& state, const VkPhysi
             typeId = outer[2];
         }
         const auto& type = module.Type(typeId);
-        Require(!decoration.index || (fragment && output && state.dualSourceBlend && decoration.location == 0u && *decoration.index == 1u), "only the second dual-source blend color may use the Index decoration, at location 0 index 1");
+        Require(!decoration.index || (fragment && output && (state.dualSourceBlend || state.reversedBlend != 0) && decoration.location == 0u && *decoration.index == 1u), "only the second dual-source blend color may use the Index decoration, at location 0 index 1");
         if (variable.storage == spv::StorageClassInput || variable.storage == spv::StorageClassOutput) {
             Require(module.interface.contains(id), "SPIR-V input or output is absent from the entry point interface");
             if (decoration.index) {
@@ -687,7 +687,7 @@ std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders,
         Require(signature == (uintExport || packed ? "vertex:u32x4" : "vertex:f32x4"), packed ? "fragment shader must export uint4 words to its packed 10_11_11 unorm attachments" : uintExport ? "fragment shader must export uint4 colors to its unsigned integer attachments" : "fragment shader must export float4 colors to its attachments");
         locations.insert(location);
     }
-    Require(!state.dualSourceBlend || previous.secondSource == "f32x4", "dual-source blending needs a float4 second color at location 0 index 1");
+    Require((!state.dualSourceBlend && state.reversedBlend == 0) || previous.secondSource == "f32x4", "dual-source blending needs a float4 second color at location 0 index 1");
     return locations;
 }
 

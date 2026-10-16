@@ -1,4 +1,5 @@
 #include "DecoderLengthCases.hpp"
+#include "DecoderMetadataCases.hpp"
 #include <codegen/CodegenException.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <cstdint>
@@ -76,6 +77,27 @@ int main() {
                 throw std::runtime_error("Instruction metadata accepted a length above 15 bytes");
             } catch (const Codegen::CodegenException&) {
             }
+        }
+        for (const auto& testCase : kDecoderRipRelativeCases) {
+            const std::string name = testCase.Bytes;
+            auto bytes = parse(testCase.Bytes);
+            require(bytes.size() == testCase.Length, "RIP-relative case " + name + " does not hold its own length");
+            bytes.insert(bytes.end(), 15, 0x90);
+            require(decodedLength(decoder, bytes, name) == testCase.Length, "Wrong length for " + name);
+            const auto info = decoder.DecodeInstruction(bytes.data(), bytes.size());
+            require(info.HasRipRelativeDisp, "RIP-relative operand of " + name + " was not reported");
+            require(info.RipRelativeDispOffset == testCase.DisplacementOffset, "Wrong RIP-relative displacement offset for " + name);
+        }
+        for (const auto& testCase : kDecoderBranchCases) {
+            const std::string name = testCase.Bytes;
+            auto bytes = parse(testCase.Bytes);
+            require(bytes.size() == testCase.Length, "Branch case " + name + " does not hold its own length");
+            bytes.insert(bytes.end(), 15, 0x90);
+            const auto info = decoder.DecodeInstruction(bytes.data(), bytes.size());
+            require(info.Length == testCase.Length, "Wrong length for " + name);
+            require(info.FlowKind == testCase.FlowKind, "Wrong control flow kind for " + name);
+            require(info.HasBranchTarget == testCase.HasBranchTarget, "Wrong branch target presence for " + name);
+            require(!testCase.HasBranchTarget || info.BranchDisp == testCase.BranchDisp, "Wrong branch displacement for " + name);
         }
         const auto threeDNow = parse("0f0f0d11223344a6");
         const auto threeDNowInfo = decoder.DecodeInstruction(threeDNow.data(), threeDNow.size());

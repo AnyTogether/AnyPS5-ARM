@@ -38,7 +38,12 @@ class Repo:
 
 
 def run_tool(path, *args):
-    return subprocess.run([sys.executable, str(TOOL), "--repo", str(path), "--base", "main", *args], capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, str(TOOL), "--repo", str(path), "--base", "main", *args],
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
 
 
 class CheckMainSyncTests(unittest.TestCase):
@@ -131,6 +136,41 @@ class CheckMainSyncTests(unittest.TestCase):
         result = run_tool(self.repo.path, "--head", "island")
         self.assertEqual(result.returncode, 2)
         self.assertIn("no common ancestor", result.stderr)
+
+    def check_unicode_output(self, conflict):
+        name = "sp ace \u00e9 \u6e2c \U0001f680.txt"
+        self.repo.write(name, "one\ntwo\nthree\n")
+        self.repo.commit("add unicode path")
+        self.branch("feature")
+        self.repo.write(name, "one\nmine\nthree\n" if conflict else "zero\none\ntwo\nthree\n")
+        self.repo.commit("feature edit")
+        self.repo.git("checkout", "-q", "main")
+        self.repo.git("checkout", "-q", "-b", "theirs")
+        self.repo.write(name, "one\ntheirs\nthree\n" if conflict else "one\ntwo\nthree\nfour\n")
+        self.repo.commit("their edit")
+        self.repo.git("checkout", "-q", "main")
+        self.repo.merge_pull(9, "theirs")
+        expected = {"ascii": r"sp ace \xe9 \u6e2c \U0001f680.txt",
+                    "cp1252": "sp ace \u00e9 " + r"\u6e2c \U0001f680.txt",
+                    "utf-8": name}
+        for encoding, shown in expected.items():
+            for strict in ((False,) if conflict else (False, True)):
+                with self.subTest(encoding=encoding, strict=strict):
+                    result = subprocess.run([sys.executable, str(TOOL), "--repo", str(self.repo.path),
+                                             "--base", "main", "--head", "feature", *(["--strict"] if strict else [])],
+                                            capture_output=True, text=True, encoding=encoding,
+                                            env={**os.environ, "PYTHONIOENCODING": encoding + ":strict"})
+                    self.assertEqual(result.returncode, 1 if conflict or strict else 0, result.stderr)
+                    self.assertIn("merge: CONFLICT" if conflict else "merge: clean", result.stdout)
+                    self.assertIn(f"  {shown}\n", result.stdout.replace("\r", ""))
+                    self.assertIn("merged pull requests that touched them: #9", result.stdout)
+                    self.assertNotIn("Traceback", result.stderr)
+
+    def test_clean_unicode_report_preserves_exit_status_and_output_encoding(self):
+        self.check_unicode_output(False)
+
+    def test_conflicting_unicode_report_preserves_exit_status_and_output_encoding(self):
+        self.check_unicode_output(True)
 
     def test_missing_base_is_an_error_not_a_pass(self):
         result = subprocess.run([sys.executable, str(TOOL), "--repo", self.directory.name, "--base", "upstream/main"], capture_output=True, text=True)

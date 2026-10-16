@@ -139,6 +139,38 @@ void _releaseFlexible(uintptr_t start, size_t len) {
     }
 }
 
+std::mutex g_lockedRangesLock;
+std::map<uintptr_t, size_t> g_lockedRanges;
+
+void RecordLockedRange(uintptr_t start, uintptr_t end) {
+    std::lock_guard lock(g_lockedRangesLock);
+    auto it = g_lockedRanges.begin();
+    while (it != g_lockedRanges.end()) {
+        if (it->first <= end && it->first + it->second >= start) {
+            start = std::min(start, it->first);
+            end = std::max(end, it->first + it->second);
+            it = g_lockedRanges.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    g_lockedRanges[start] = end - start;
+}
+
+void ForgetLockedRange(uintptr_t start, uintptr_t end) {
+    std::lock_guard lock(g_lockedRangesLock);
+    auto it = g_lockedRanges.upper_bound(start);
+    if (it != g_lockedRanges.begin()) --it;
+    while (it != g_lockedRanges.end() && it->first < end) {
+        const uintptr_t rangeStart = it->first;
+        const uintptr_t rangeEnd = rangeStart + it->second;
+        if (rangeEnd <= start) { ++it; continue; }
+        it = g_lockedRanges.erase(it);
+        if (rangeStart < start) g_lockedRanges[rangeStart] = start - rangeStart;
+        if (rangeEnd > end) g_lockedRanges[end] = rangeEnd - end;
+    }
+}
+
 }
 
 extern "C" {
@@ -230,12 +262,16 @@ int32_t APS5_VABI sceKernelMapNamedFlexibleMemoryInternal(void** addr_in_out, si
 }
 
 int APS5_VABI sceKernelMprotect(const void* addr, size_t len, int prot) {
- return DoMprotect(addr, len, prot);
+ constexpr int DefinedProtection = 0x3F7;
+ return DoMprotect(addr, len, prot & DefinedProtection);
 }
 
 int APS5_VABI sceKernelMunmap(uint64_t vaddr, size_t len) {
  const int result = DoMunmap(reinterpret_cast<void*>(vaddr), len);
- if (result == 0) _releaseFlexible(static_cast<uintptr_t>(vaddr), len);
+ if (result == 0) {
+  _releaseFlexible(static_cast<uintptr_t>(vaddr), len);
+  ForgetLockedRange(static_cast<uintptr_t>(vaddr), static_cast<uintptr_t>(vaddr) + len);
+ }
  return result;
 }
 
@@ -543,7 +579,10 @@ int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
     auto* const address = reinterpret_cast<void*>(start);
     const SIZE_T bytes = end - start;
     std::lock_guard lock(g_workingSetLock);
-    if (VirtualLock(address, bytes)) return 0;
+    if (VirtualLock(address, bytes)) {
+        RecordLockedRange(start, end);
+        return 0;
+    }
     if (GetLastError() != ERROR_WORKING_SET_QUOTA) throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualLock failed");
     SIZE_T minimum = 0;
     SIZE_T maximum = 0;
@@ -551,7 +590,10 @@ int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
     if (!GetProcessWorkingSetSizeEx(GetCurrentProcess(), &minimum, &maximum, &flags)) throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "GetProcessWorkingSetSizeEx failed");
     if (bytes > std::numeric_limits<SIZE_T>::max() - maximum) return SCE_KERNEL_ERROR_EAGAIN;
     if (!SetProcessWorkingSetSizeEx(GetCurrentProcess(), minimum + bytes, maximum + bytes, flags)) return SCE_KERNEL_ERROR_EAGAIN;
-    if (VirtualLock(address, bytes)) return 0;
+    if (VirtualLock(address, bytes)) {
+        RecordLockedRange(start, end);
+        return 0;
+    }
     if (GetLastError() != ERROR_WORKING_SET_QUOTA) throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualLock failed");
     return SCE_KERNEL_ERROR_EAGAIN;
 }
@@ -600,6 +642,7 @@ int UnlockHostPages(std::uintptr_t start, std::uintptr_t end) {
         }
         cursor = next;
     }
+    ForgetLockedRange(start, end);
     return 0;
 }
 #else
@@ -627,13 +670,19 @@ int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
 #ifdef __APPLE__
     if (HasInaccessiblePages(start, end)) return SCE_KERNEL_ERROR_ENOMEM;
 #endif
-    if (::mlock(address, bytes) == 0) return 0;
+    if (::mlock(address, bytes) == 0) {
+        RecordLockedRange(start, end);
+        return 0;
+    }
     int error = errno;
     rlimit limit{};
     if ((error == ENOMEM || error == EPERM || error == EAGAIN) && getrlimit(RLIMIT_MEMLOCK, &limit) == 0 && limit.rlim_cur < limit.rlim_max) {
         limit.rlim_cur = limit.rlim_max;
         if (setrlimit(RLIMIT_MEMLOCK, &limit) == 0) {
-            if (::mlock(address, bytes) == 0) return 0;
+            if (::mlock(address, bytes) == 0) {
+                RecordLockedRange(start, end);
+                return 0;
+            }
             error = errno;
         }
     }
@@ -647,7 +696,10 @@ int LockHostPages(std::uintptr_t start, std::uintptr_t end) {
 
 int UnlockHostPages(std::uintptr_t start, std::uintptr_t end) {
     if (!GuestRangeMapped(start, end)) return SCE_KERNEL_ERROR_ENOMEM;
-    if (::munlock(reinterpret_cast<void*>(start), end - start) == 0) return 0;
+    if (::munlock(reinterpret_cast<void*>(start), end - start) == 0) {
+        ForgetLockedRange(start, end);
+        return 0;
+    }
     const int error = errno;
     if (error == ENOMEM) return SCE_KERNEL_ERROR_ENOMEM;
     throw std::system_error(error, std::generic_category(), "munlock failed");
@@ -672,6 +724,37 @@ int APS5_VABI sceKernelMunlock_nid_postfix(void* address, std::uint64_t length) 
     if (!PageRange(address, length, start, end)) return SCE_KERNEL_ERROR_EINVAL;
     if (start == end) return 0;
     return UnlockHostPages(start, end);
+}
+
+int APS5_VABI sceKernelMunlockall_nid_postfix() {
+#ifndef _WIN32
+    ::munlockall();
+#endif
+    std::map<uintptr_t, size_t> ranges;
+    {
+        std::lock_guard lock(g_lockedRangesLock);
+        ranges.swap(g_lockedRanges);
+    }
+#ifdef _WIN32
+    for (const auto& [start, len] : ranges) {
+        const auto end = start + len;
+        for (auto cursor = start; cursor < end;) {
+            MEMORY_BASIC_INFORMATION region{};
+            if (VirtualQuery(reinterpret_cast<const void*>(cursor), &region, sizeof(region)) != sizeof(region)) break;
+            const auto next = std::min(end, reinterpret_cast<std::uintptr_t>(region.BaseAddress) + region.RegionSize);
+            if (region.State == MEM_COMMIT && (region.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0 && !VirtualUnlock(reinterpret_cast<void*>(cursor), next - cursor)) {
+                if (GetLastError() != ERROR_NOT_LOCKED) throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualUnlock failed");
+                for (auto page = cursor; page < next; page += HostPageSize()) {
+                    if (!VirtualUnlock(reinterpret_cast<void*>(page), std::min(HostPageSize(), next - page)) && GetLastError() != ERROR_NOT_LOCKED) {
+                        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "VirtualUnlock failed");
+                    }
+                }
+            }
+            cursor = next;
+        }
+    }
+#endif
+    return 0;
 }
 
 }

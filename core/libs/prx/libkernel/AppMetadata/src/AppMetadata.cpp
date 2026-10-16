@@ -6,12 +6,14 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
+std::mutex g_metadataMutex;
 bool g_titleLoaded = false;
 bool g_iconAttempted = false;
 bool g_iconLoaded = false;
@@ -32,6 +34,7 @@ void copyToFixedBuffer(char* destination, std::size_t destinationSize, const std
 }
 
 void ensureTitleLoaded() {
+    std::lock_guard lock(g_metadataMutex);
     if (g_titleLoaded) return;
     const auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataParamJsonGuestPath);
     if (!std::filesystem::exists(resolvedPath)) throw std::runtime_error("param.json not found");
@@ -68,6 +71,7 @@ const bool g_dataMounted = [] {
 }();
 
 void ensureIconLoaded() {
+    std::lock_guard lock(g_metadataMutex);
     if (g_iconAttempted) return;
     g_iconAttempted = true;
     const auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataIconGuestPath);
@@ -76,10 +80,11 @@ void ensureIconLoaded() {
     if (!file.is_open()) throw std::runtime_error("failed to open icon0.png");
     file.seekg(0, std::ios::end);
     const auto fileSize = file.tellg();
+    if (file.fail() || fileSize <= 0) throw std::runtime_error("icon0.png is empty or unreadable");
     file.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
-    if (!bytes.empty()) file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (bytes.empty()) throw std::runtime_error("icon0.png is empty");
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file || file.gcount() != static_cast<std::streamsize>(bytes.size())) throw std::runtime_error("failed to read icon0.png");
     constexpr std::uint8_t PngSignature[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     if (bytes.size() < 8 || std::memcmp(bytes.data(), PngSignature, sizeof(PngSignature)) != 0) throw std::runtime_error("icon0.png is not a valid PNG file");
     g_iconBytes = std::move(bytes);

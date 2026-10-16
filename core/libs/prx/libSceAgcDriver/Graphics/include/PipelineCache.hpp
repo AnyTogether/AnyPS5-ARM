@@ -18,13 +18,14 @@ class PipelineCache {
 public:
     static constexpr int SaveIntervalSeconds = 10;
 
-    PipelineCache(const Context& context, const VkPhysicalDeviceProperties& properties);
+    PipelineCache(const Context& context, const VkPhysicalDeviceProperties& properties, bool loadFromFile = true);
     ~PipelineCache();
 
     PipelineCache(const PipelineCache&) = delete;
     PipelineCache& operator=(const PipelineCache&) = delete;
     VkPipelineCache Handle() const { return cache; }
     PipelineCacheSynchronization& Synchronization() { return synchronization; }
+    void SaveNow();
 
 private:
     struct FileHeader {
@@ -54,6 +55,7 @@ private:
     VkPipelineCache cache = VK_NULL_HANDLE;
     PipelineCacheSynchronization synchronization;
     std::filesystem::path path;
+    bool holdsFile = false;
     std::size_t loadedBytes = 0;
     std::size_t settledBytes = 0;
     std::optional<FileHeader> settledFile;

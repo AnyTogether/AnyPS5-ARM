@@ -502,8 +502,8 @@ extern "C" char* APS5_VABI getcwd_nid_postfix(char* buffer, std::size_t size) {
         const auto relative = state.current.lexically_relative(state.root);
         const auto path = relative == "." ? std::string("/") : "/" + relative.generic_string();
         const auto required = path.size() + 1;
-        if ((buffer || size) && size < required) { errno = 34; return nullptr; }
-        if (!buffer) buffer = static_cast<char*>(ApplicationHeapAllocate_nid_no_patch(size ? size : required));
+        if (buffer && size < required) { errno = 34; return nullptr; }
+        if (!buffer) buffer = static_cast<char*>(ApplicationHeapAllocate_nid_no_patch(required));
         if (!buffer) { errno = 12; return nullptr; }
         std::memcpy(buffer, path.c_str(), required);
         return buffer;

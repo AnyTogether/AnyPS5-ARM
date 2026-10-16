@@ -76,6 +76,11 @@ ImageType rawImageType(const DescriptorValue& descriptor) {
     return static_cast<ImageType>((descriptor.dwords[3] >> 28u) & 0xfu);
 }
 
+bool nullImageDescriptor(const ImageResource& image, const DescriptorValue& descriptor) {
+    if (nullImageDescriptor(descriptor)) return true;
+    return rawImageType(descriptor) == static_cast<ImageType>(0u) && image.table == NoTable && image.read && !image.written && !image.atomic;
+}
+
 IrBufferFormat rawImageFormat(const DescriptorValue& descriptor) {
     return static_cast<IrBufferFormat>((descriptor.dwords[1] >> 20u) & 0x1ffu);
 }
@@ -131,7 +136,7 @@ bool validImageDescriptor(const DescriptorValue& descriptor, bool r128) {
 }
 
 std::uint32_t storageMipCount(const ImageResource& base, const DescriptorValue& descriptor) {
-    if (base.mipMode != ImageMipMode::DynamicStorage || nullImageDescriptor(descriptor)) {
+    if (base.mipMode != ImageMipMode::DynamicStorage || nullImageDescriptor(base, descriptor)) {
         return 1u;
     }
     const auto mipBase = (descriptor.dwords[3] >> 12u) & 0xfu;
@@ -173,7 +178,7 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
     if (decoded.mipCount == 0u) {
         return rejectImage(PoisonReason::InvalidFormat, "storage image descriptor has an invalid mip range");
     }
-    if (nullImageDescriptor(descriptor)) {
+    if (nullImageDescriptor(base, descriptor)) {
         decoded.numericClass = base.atomic ? IrTextureNumericClass::Uint : IrTextureNumericClass::Float;
         decoded.dimension = RdnaImageDimension::Dim2D;
         decoded.cube = false;
@@ -529,7 +534,7 @@ private:
     }
 
     std::uint32_t WordsIndex(const DescriptorValue& value) {
-        const auto [found, inserted] = wordsIndex.try_emplace({value.dwords, value.dwordCount}, static_cast<std::uint32_t>(tables.words.size()));
+        const auto [found, inserted] = wordsIndex.try_emplace({value.dwords, value.dwordCount, value.availableDwordMask}, static_cast<std::uint32_t>(tables.words.size()));
         if (inserted) tables.words.push_back(value);
         return found->second;
     }
@@ -593,6 +598,7 @@ private:
                         break;
                     }
                     value.dwords[dword] = Read(*address);
+                    value.availableDwordMask |= static_cast<std::uint8_t>(1u << dword);
                     first = std::min(first, *address);
                     past = std::max(past, *address + sizeof(std::uint32_t));
                 }
@@ -687,9 +693,13 @@ private:
             value.dwordCount = column.sampler ? 4u : 8u;
             if (whole[record] != Unread) {
                 std::copy_n(read.begin() + whole[record], column.dwordCount, value.dwords.begin());
+                value.availableDwordMask = static_cast<std::uint8_t>((1u << column.dwordCount) - 1u);
             } else {
                 for (std::uint32_t dword = 0; dword < column.dwordCount; dword++) {
-                    if (next->second[dword] != Unread) value.dwords[dword] = read[next->second[dword]];
+                    if (next->second[dword] != Unread) {
+                        value.dwords[dword] = read[next->second[dword]];
+                        value.availableDwordMask |= static_cast<std::uint8_t>(1u << dword);
+                    }
                 }
                 ++next;
             }
@@ -755,13 +765,14 @@ private:
     ImageTableSnapshot& tables;
     std::map<std::uint32_t, ColumnRecords> columns;
     struct WordsHash {
-        std::size_t operator()(const std::pair<std::array<std::uint32_t, 8>, std::uint32_t>& key) const noexcept {
-            std::uint64_t hash = 0xcbf29ce484222325ull ^ key.second;
-            for (const auto word : key.first) hash = (hash ^ word) * 0x100000001b3ull;
+        using Key = std::tuple<std::array<std::uint32_t, 8>, std::uint32_t, std::uint8_t>;
+        std::size_t operator()(const Key& key) const noexcept {
+            std::uint64_t hash = 0xcbf29ce484222325ull ^ std::get<1>(key) ^ std::get<2>(key);
+            for (const auto word : std::get<0>(key)) hash = (hash ^ word) * 0x100000001b3ull;
             return static_cast<std::size_t>(hash ^ (hash >> 32u));
         }
     };
-    std::unordered_map<std::pair<std::array<std::uint32_t, 8>, std::uint32_t>, std::uint32_t, WordsHash> wordsIndex;
+    std::unordered_map<WordsHash::Key, std::uint32_t, WordsHash> wordsIndex;
     std::unordered_map<std::uint64_t, bool> pages;
     std::unordered_map<std::uint64_t, bool> wholePages;
 };
@@ -823,7 +834,7 @@ void materializeSnapshot(const IrResourcePlan& plan, const SrtRuntime& runtime, 
             descriptor = DescriptorValue{};
             descriptor.dwordCount = 8u;
         }
-        if (!validImageDescriptor(descriptor, image.r128) && !nullImageDescriptor(descriptor)) {
+        if (!validImageDescriptor(descriptor, image.r128) && !nullImageDescriptor(image, descriptor)) {
             throw UnsupportedResourceBinding("runtime image descriptor is invalid");
         }
         snapshot.images[i] = descriptor;
@@ -890,7 +901,7 @@ std::uint32_t colorCompareReference(IrBufferFormat format) {
 std::uint32_t emulatedCompareState(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint32_t index) {
     const auto& image = info.images[index];
     const auto& descriptor = snapshot.images[index];
-    if (!image.depthCompare || descriptor.dwordCount != 8u || nullImageDescriptor(descriptor)) return 0u;
+    if (!image.depthCompare || descriptor.dwordCount != 8u || nullImageDescriptor(image, descriptor)) return 0u;
     const auto format = rawImageFormat(descriptor);
     if (format == IrBufferFormat::Format32Float || format == IrBufferFormat::Format16UNorm || IsDepthBitsTexture(descriptor.dwords[1], descriptor.dwords[3])) return 0u;
     if (image.table != NoTable || (image.emulatedCompare & EmulatedCompare::Unsupported) != 0u) throw std::runtime_error("unsupported color comparison image instructions");
@@ -1086,6 +1097,12 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
         const auto& image = info.images[resource];
         const auto& modes = info.runtimeImageModes[resource];
         std::array<std::uint32_t, Abi::ImageRecordWords> record{0u, words.dwords[3], 0u};
+        if ((words.availableDwordMask & (1u << 3u)) == 0u) {
+            record[Abi::ImageRecordFlags] = poison(resource, PoisonReason::OutsideSnapshot, &words);
+            const auto offset = static_cast<std::uint32_t>(out.map.size());
+            out.map.insert(out.map.end(), record.begin(), record.end());
+            return offset;
+        }
         const auto decoded = decodeTableEntry(image, modes, words, memoKey, resource);
         if ((decoded & DecodeFailed) != 0u) {
             record[Abi::ImageRecordFlags] = poison(resource, static_cast<PoisonReason>(decoded & ~DecodeFailed), &words);
@@ -1168,7 +1185,7 @@ ResolvedImageTables ResourceMaterializer::ResolveImageTables(const ShaderInfo& i
                 mapped = reason == PoisonReason::OutsideDomain ? Abi::PoisonCode(Abi::OutsideDomainPoison) : poison(resource, reason, nullptr);
             } else if (out.map[header + Abi::TableFault] == 0u) {
                 const auto& words = tables.words.at(code);
-                if (sampler || !nullImageDescriptor(words)) {
+                if (sampler || (words.availableDwordMask & (1u << 3u)) == 0u || !nullImageDescriptor(info.images[resource], words)) {
                     const auto [found, inserted] = records.try_emplace(code, 0u);
                     if (inserted) found->second = sampler ? samplerRecord(resource, words) : imageRecord(resource, words);
                     mapped = found->second;
@@ -1242,7 +1259,13 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
             line.dimension = RdnaImageDimension::Dim1D;
             modes.push_back(line);
         }
-        if (image.dimension == RdnaImageDimension::Dim2D && image.flatLineCompatible && !storage && !depth && conversion == IrBufferFormat::Invalid && packed == IrBufferFormat::Invalid) {
+        if (image.dimension == RdnaImageDimension::Dim2D && image.cubeFaceCompatible && !storage && !depth && conversion == IrBufferFormat::Invalid && packed == IrBufferFormat::Invalid) {
+            auto face = mode;
+            face.dimension = RdnaImageDimension::Dim2DArray;
+            face.cube = true;
+            modes.push_back(face);
+        }
+        if ((image.dimension == RdnaImageDimension::Dim2D || image.dimension == RdnaImageDimension::Dim2DArray) && image.flatLineCompatible && !storage && !depth && conversion == IrBufferFormat::Invalid && packed == IrBufferFormat::Invalid) {
             auto line = mode;
             line.dimension = RdnaImageDimension::Dim1D;
             modes.push_back(line);
@@ -1374,7 +1397,7 @@ RuntimeImageModeMatch ResourceMaterializer::TryRuntimeImageMode(const ImageResou
     };
     if (descriptor.dwordCount != 8u) throw std::runtime_error("runtime image descriptor must contain eight dwords");
     if (modes.empty()) throw std::runtime_error("prepared runtime image modes are missing");
-    if (nullImageDescriptor(descriptor)) {
+    if (nullImageDescriptor(image, descriptor)) {
         result.mode = 0u;
         return result;
     }

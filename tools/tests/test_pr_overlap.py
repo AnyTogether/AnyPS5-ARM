@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -136,6 +137,93 @@ class ConflictTests(unittest.TestCase):
         with patch.object(pr_overlap, "merge", return_value=("merged-tree", set())) as merge:
             self.assertEqual(pr_overlap.conflicts(first, second), {})
         merge.assert_called_once_with("first-tree", "second-tree")
+
+    def real_pull_requests(self, main_changes, older_changes, current_changes):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name).resolve()
+        self.assertTrue(root.is_relative_to(Path(tempfile.gettempdir()).resolve()))
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(root)
+
+        def git(*args):
+            return subprocess.run(
+                ["git", "-c", "user.name=Overlap Test", "-c", "user.email=test@example.com", *args],
+                capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
+
+        git("init", "-q")
+        git("config", "commit.gpgsign", "false")
+        for name in ("shared.cpp", "other.cpp", "unrelated.cpp"):
+            (root / name).write_text("int value = 0;\n", encoding="utf-8")
+        git("add", ".")
+        git("commit", "-qm", "test: create base")
+        base = git("rev-parse", "HEAD")
+
+        def branch(name, parent, changes):
+            git("checkout", "-qb", name, parent)
+            for path, value in changes.items():
+                (root / path).write_text(f"int value = {value};\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "test: change values", "--allow-empty")
+            return git("rev-parse", "HEAD")
+
+        older = branch("older", base, older_changes)
+        main = branch("updated-base", base, main_changes)
+        current = branch("current", main, current_changes)
+        git("update-ref", "refs/pr/base", main)
+        prs = {1: {"ref": current, "author": "current-author", "depends": set()},
+               2: {"ref": older, "author": "older-author", "depends": set()}}
+        for pr in prs.values():
+            pr_overlap.scan(pr)
+        return prs
+
+    def test_reports_shared_files_when_older_pr_conflicts_with_main(self):
+        prs = self.real_pull_requests({"shared.cpp": 2}, {"shared.cpp": 1}, {"shared.cpp": 3})
+        self.assertIsNone(prs[2]["tree"])
+        self.assertIsNotNone(prs[1]["tree"])
+        found = pr_overlap.overlaps(prs, 1, 2)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["uncompared"], {"shared.cpp"})
+        report = pr_overlap.report({2: found}, "https://example.invalid/blob/base")
+        self.assertIn("could not be completed", report)
+        self.assertIn("`shared.cpp`", report)
+        self.assertNotIn("Merging one will break the other", report)
+
+    def test_conflict_in_another_file_does_not_hide_shared_changes(self):
+        prs = self.real_pull_requests({"other.cpp": 2}, {"other.cpp": 1, "shared.cpp": 1}, {"shared.cpp": 3})
+        self.assertIsNone(prs[2]["tree"])
+        found = pr_overlap.overlaps(prs, 1, 2)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["uncompared"], {"shared.cpp"})
+
+    def test_unmergeable_pr_with_no_shared_files_is_not_reported(self):
+        prs = self.real_pull_requests({"other.cpp": 2}, {"other.cpp": 1}, {"unrelated.cpp": 3})
+        self.assertIsNone(prs[2]["tree"])
+        self.assertIsNone(pr_overlap.overlaps(prs, 1, 2))
+
+    def test_mergeable_branches_still_report_confirmed_line_conflicts(self):
+        prs = self.real_pull_requests({}, {"shared.cpp": 1}, {"shared.cpp": 2})
+        self.assertTrue(all(pr["tree"] for pr in prs.values()))
+        found = pr_overlap.overlaps(prs, 1, 2)
+        self.assertEqual(found["conflicts"], {"shared.cpp": [(1, 1)]})
+        self.assertNotIn("uncompared", found)
+
+    def test_mixed_report_keeps_confirmed_and_uncompared_sections(self):
+        rows = {2: {"added": set(), "conflicts": {"other.cpp": [(1, 1)]}},
+                3: {"added": set(), "uncompared": {"shared.cpp"}}}
+        report = pr_overlap.report(rows, "https://example.invalid/blob/base")
+        self.assertIn("[L1]", report)
+        self.assertIn("could not be completed", report)
+        self.assertIn("`shared.cpp`", report)
+        self.assertTrue(report.startswith(pr_overlap.MARKER))
+
+    def test_report_links_pull_requests_without_cross_references(self):
+        rows = {2: {"added": set(), "conflicts": {"other.cpp": [(1, 1)]}},
+                3: {"added": set(), "uncompared": {"shared.cpp"}}}
+        report = pr_overlap.report(rows, "https://github.com/owner/project/blob/base")
+        self.assertIsNone(re.search(r"#\d|https://github\.com/owner/project/(pull|issues)/", report))
+        self.assertIn("[PR 2](https://www.github.com/owner/project/pull/2)", report)
+        self.assertIn("[PR 3](https://www.github.com/owner/project/pull/3)", report)
 
 
 class UnicodePathTests(unittest.TestCase):

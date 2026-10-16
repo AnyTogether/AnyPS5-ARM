@@ -36,6 +36,8 @@ char* APS5_VABI strndup_nid_postfix(const char*, std::size_t);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
 int* APS5_VABI __error_nid_postfix();
 int APS5_VABI atexit_nid_postfix(void (APS5_VABI*)());
+void* APS5_VABI scriptingGetMem_nid_postfix(std::size_t, std::size_t);
+void APS5_VABI scriptingFreeMem_nid_postfix(void*);
 }
 
 namespace {
@@ -378,7 +380,7 @@ int main(int argc, char** argv) {
     require(directory == reinterpret_cast<char*>(storage.data()) && directory[0] == '/' && lastSize == std::strlen(directory) + 1);
     ApplicationHeapFree_nid_no_patch(directory);
     directory = getcwd_nid_postfix(nullptr, 200);
-    require(directory == reinterpret_cast<char*>(storage.data()) && lastSize == 200);
+    require(directory == reinterpret_cast<char*>(storage.data()) && lastSize == std::strlen(directory) + 1);
     ApplicationHeapFree_nid_no_patch(directory);
     fail = true;
     *__error_nid_postfix() = 0;
@@ -389,5 +391,16 @@ int main(int argc, char** argv) {
     require(strndup_nid_postfix(text, 5) == nullptr && *__error_nid_postfix() == 12);
     *__error_nid_postfix() = 0;
     require(getcwd_nid_postfix(nullptr, 0) == nullptr && *__error_nid_postfix() == 12);
+    fail = false;
+    const auto beforeScripting = frees;
+    scriptingFreeMem_nid_postfix(nullptr);
+    require(frees == beforeScripting);
+    require(scriptingGetMem_nid_postfix(0, 31) == storage.data() && lastAlignment == 16 && lastSize == 31);
+    require(scriptingGetMem_nid_postfix(64, 37) == storage.data() && lastAlignment == 64 && lastSize == 37);
+    scriptingFreeMem_nid_postfix(storage.data());
+    require(frees == beforeScripting + 1);
+    require(scriptingGetMem_nid_postfix(24, 80) == nullptr && lastSize == 37);
+    fail = true;
+    require(scriptingGetMem_nid_postfix(16, 64) == nullptr);
     fail = false;
 }

@@ -1,6 +1,7 @@
 import argparse
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 PULL_REQUEST = re.compile(r"Merge pull request #(\d+)")
@@ -105,6 +106,7 @@ if __name__ == "__main__":
         data = report(args.repo, base, args.head)
     except RuntimeError as error:
         parser.error(str(error))
+    sys.stdout.reconfigure(errors="backslashreplace")
     print(render(data))
     if data["conflicts"]:
         raise SystemExit(1)

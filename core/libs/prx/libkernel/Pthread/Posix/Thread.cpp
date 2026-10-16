@@ -8,6 +8,7 @@
 #include "../include/Pthread.hpp"
 #include "Common.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -30,6 +31,10 @@ int APS5_VABI scePthreadGetprio(Pthread thread, int* prio);
 
 static constexpr int GUEST_SCHED_FIFO = 1;
 static constexpr int GUEST_SCHED_RR = 3;
+
+namespace {
+std::atomic<int> guestConcurrency{0};
+}
 
 static bool AcceptsSchedParam(int policy, int priority) {
     if (policy != GUEST_SCHED_FIFO && policy != GUEST_SCHED_RR) return false;
@@ -118,6 +123,48 @@ int APS5_VABI cpuset_setaffinity_nid_postfix(int level, int which, std::int64_t 
     if (which == WhichThread) scePthreadSetaffinity(self, affinity);
     else SetLiveGuestThreadsAffinity(affinity);
     return 0;
+}
+
+struct GuestRtPrio {
+    std::uint16_t type;
+    std::uint16_t prio;
+};
+
+int APS5_VABI rtprio_thread_nid_postfix(int function, int lwpid, GuestRtPrio* priority) {
+    constexpr int Lookup = 0, Set = 1;
+    constexpr int GuestEsrch = 3, GuestEfault = 14, GuestEinval = 22;
+    constexpr std::uint16_t Normal = 3;
+    const auto fail = [](int error) {
+        *__error_nid_postfix() = error;
+        return -1;
+    };
+    if (function != Lookup && function != Set) return fail(GuestEinval);
+    if (priority == nullptr) return fail(GuestEfault);
+    auto* self = scePthreadSelf();
+    if (lwpid != 0 && static_cast<std::int64_t>(lwpid) != static_cast<std::int64_t>(self->tid)) {
+        if (!LiveGuestThreadExists(lwpid)) return fail(GuestEsrch);
+        NotImplemented_nid_no_patch("rtprio_thread: a thread other than the calling one");
+    }
+    const int policy = self->schedPolicy.load(std::memory_order_relaxed);
+    if (policy == 1 || policy == 3) NotImplemented_nid_no_patch("rtprio_thread: a guest thread's real-time class");
+    if (function == Lookup) {
+        priority->type = Normal;
+        priority->prio = 0;
+        return 0;
+    }
+    if (priority->type == Normal && priority->prio == 0) return 0;
+    NotImplemented_nid_no_patch("rtprio_thread: a real-time priority change");
+}
+
+int APS5_VABI pthread_setconcurrency_nid_postfix(int newLevel) {
+    constexpr int GuestEinval = 22;
+    if (newLevel < 0) return GuestEinval;
+    guestConcurrency.store(newLevel, std::memory_order_relaxed);
+    return 0;
+}
+
+int APS5_VABI pthread_getconcurrency_nid_postfix() {
+    return guestConcurrency.load(std::memory_order_relaxed);
 }
 
 int APS5_VABI pthread_create_nid_postfix(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg) {

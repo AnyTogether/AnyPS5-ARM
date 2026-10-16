@@ -30,6 +30,15 @@ class StubgenTests(unittest.TestCase):
         self.assertIn("APS5_VABI", code)
         self.assertIn("NotImplemented_nid_no_patch", code)
 
+    def test_prx_suffix_is_stripped_from_module_name(self):
+        nids = ["AAAAAAAAAAA", "BBBBBBBBBBB"]
+        expected = stubgen.generate("libSceAmpr", nids, {})
+        self.assertIn("sceAmprUnknown00", expected[0])
+        self.assertIn("core/libs/prx/libSceAmpr/", expected[1])
+        for spelling in ("libSceAmpr.prx", "libSceAmpr.PRX"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(stubgen.generate(spelling, nids, {}), expected)
+
 
 class StubGeneratorTests(unittest.TestCase):
     def test_default_stdout_contains_only_cpp(self):
@@ -105,6 +114,12 @@ class StubGeneratorTests(unittest.TestCase):
             path = Path(directory) / "nids.txt"
             path.write_text("# imports\nAAAAAAAAAAA#A#B\nAAAAAAAAAAA\nBBBBBBBBBBB\n", encoding="utf-8-sig")
             self.assertEqual(stubgen.parse_nids(path), ["AAAAAAAAAAA", "BBBBBBBBBBB"])
+
+    def test_named_stub_reports_its_function_name(self):
+        code = stubgen.generate("libSceAmpr", ["tNn5WBkta60", "AAAAAAAAAAA"], {"tNn5WBkta60": "sceAmprCommandBufferNop"})[0]
+        named = code.split("sceAmprCommandBufferNop(void) {\n", 1)[1].split("\n", 1)[0]
+        self.assertEqual(named, "    NotImplemented_nid_no_patch(__func__);")
+        self.assertIn('NotImplemented_nid_no_patch("AAAAAAAAAAA");', code)
 
     def test_valid_generation_keeps_the_code_and_debt(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
     ExpectException([] { fopen_nid_postfix(nullptr, "r"); });
     FileStream closed(std::tmpfile());
     closed.Close();
-    ExpectException([&] { fflush_nid_postfix(&closed); });
+    Require(fflush_nid_postfix(&closed) == -1 && errno == 9);
     Require(std::remove(argv[1]) == 0);
     errno = 0;
     Require(fopen_nid_postfix(argv[1], "rb") == nullptr);

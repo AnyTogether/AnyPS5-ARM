@@ -32,6 +32,7 @@ struct PthreadMutexattrPrivate {
     MutexType type;
     int protocol = 0;
     int ceiling = 0;
+    int pshared = 0;
 };
 
 struct PthreadMutexPrivate {

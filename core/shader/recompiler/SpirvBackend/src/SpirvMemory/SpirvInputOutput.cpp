@@ -61,12 +61,14 @@ namespace ShaderRecompiler
             const auto location = PixelInputLocation(pixel, input.location);
             const bool flat = PixelInputIsFlat(pixel, input.location);
             const bool flatP10 = flat && !input.perVertex && input.location < readsP10.size() && readsP10[input.location];
+            const bool vertexOrder = input.perVertex && (input.location >= 32u || (program.Metadata().pixelVertexOrderInputs >> input.location & 1u) != 0u);
             const auto existing = std::find_if(result.begin(), result.end(), [&](const auto& parameter) { return parameter.location == location; });
             if (existing != result.end()) {
                 existing->flatP10 = existing->flatP10 || flatP10;
+                existing->vertexOrder = existing->vertexOrder || vertexOrder;
                 continue;
             }
-            result.push_back({location, location, flat, input.perVertex, PixelInputIsCustom(pixel, input.location), flatP10});
+            result.push_back({location, location, flat, input.perVertex, PixelInputIsCustom(pixel, input.location), flatP10, vertexOrder});
         }
         return result;
     }

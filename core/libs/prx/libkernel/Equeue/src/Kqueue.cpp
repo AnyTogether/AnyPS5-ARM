@@ -223,6 +223,16 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
     }
     return GuestErrno(queue->EditEvent(change.ident, change.filter, [&change](KernelEqueueEvent& event) {
         event.event.udata = change.udata;
+        if ((change.flags & EV_ENABLE) != 0) {
+            event.enabled = true;
+        }
+        if ((change.flags & EV_DISABLE) != 0) {
+            event.enabled = false;
+        }
+        if ((change.flags & EV_FORCEONESHOT) != 0) {
+            event.event.flags = static_cast<std::uint16_t>(event.event.flags | EV_ONESHOT);
+            event.triggered = true;
+        }
         if (change.filter == EVFILT_USER) {
             TouchUserKnote(event, change);
         } else if (change.filter == EVFILT_VNODE) {
@@ -241,15 +251,6 @@ int Register(const KernelEqueueRef& queue, int kqueueDescriptor, KernelEvent& ch
     if (change.filter != EVFILT_READ && change.filter != EVFILT_WRITE && change.filter != EVFILT_VNODE && change.filter != EVFILT_TIMER && change.filter != EVFILT_USER) {
         NotImplemented_nid_no_patch(("kevent: filter " + std::to_string(change.filter)).c_str());
     }
-    if ((change.flags & EV_DISABLE) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_DISABLE");
-    }
-    if ((change.flags & EV_DISPATCH) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_DISPATCH");
-    }
-    if ((change.flags & EV_FORCEONESHOT) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_FORCEONESHOT");
-    }
     if (change.filter == EVFILT_READ || change.filter == EVFILT_WRITE || change.filter == EVFILT_VNODE) {
         if (const int error = DescriptorFilterError(kqueueDescriptor, change.ident)) {
             return error;
@@ -260,19 +261,23 @@ int Register(const KernelEqueueRef& queue, int kqueueDescriptor, KernelEvent& ch
             return GUEST_ENOENT;
         }
         const auto flags = static_cast<std::uint16_t>(change.flags & ~KNOTE_CLEARED_FLAGS);
+        int error;
         if (change.filter == EVFILT_TIMER) {
-            return AddTimerKnote(queue, change, flags);
-        }
-        if (change.filter == EVFILT_USER) {
-            return AddUserKnote(queue, change, flags);
-        }
-        if (change.filter == EVFILT_VNODE) {
+            error = AddTimerKnote(queue, change, flags);
+        } else if (change.filter == EVFILT_USER) {
+            error = AddUserKnote(queue, change, flags);
+        } else if (change.filter == EVFILT_VNODE) {
             const std::uint32_t notes = change.fflags;
             change.fflags = 0;
             change.data = 0;
-            return AddVnodeEvent(queue, static_cast<int>(change.ident), notes, flags, change.udata);
+            error = AddVnodeEvent(queue, static_cast<int>(change.ident), notes, flags, change.udata);
+        } else {
+            error = AddDescriptorKnote(queue, change, flags);
         }
-        return AddDescriptorKnote(queue, change, flags);
+        if (error == 0 && (change.flags & EV_DISABLE) != 0) {
+            queue->EditEvent(change.ident, change.filter, [](KernelEqueueEvent& event) { event.enabled = false; });
+        }
+        return error;
     }
     if ((change.flags & EV_DELETE) != 0) {
         return GuestErrno(queue->DeleteEvent(change.ident, change.filter));
@@ -338,7 +343,7 @@ int APS5_VABI kevent_nid_postfix(int descriptor, const KernelEvent* changelist, 
         return PosixFailure(GUEST_EBADF);
     }
     if (nevents < 0) {
-        NotImplemented_nid_no_patch("kevent: negative nevents");
+        return PosixFailure(GUEST_EINVAL);
     }
     if (nchanges > 0 && changelist == nullptr) {
         return PosixFailure(GUEST_EFAULT);

@@ -43,6 +43,7 @@ inline constexpr Entry kRdpid = {"RDPID", nullptr, 0};
 inline constexpr Entry kClwb = {"CLWB", nullptr, 0};
 inline constexpr Entry kWideStore = {"256-bit store", nullptr, 0};
 inline constexpr Entry kMaskedStore = {"masked store", nullptr, 0};
+inline constexpr Entry kScalarCompare = {"scalar compare", nullptr, 0};
 inline constexpr Entry kExtrq = {"EXTRQ", nullptr, 0};
 inline constexpr Entry kInsertq = {"INSERTQ", nullptr, 0};
 inline constexpr Entry kExtrqRegisterForm = {"EXTRQ register form", nullptr, 0};

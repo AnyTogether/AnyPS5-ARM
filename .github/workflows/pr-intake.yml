@@ -42,7 +42,10 @@ jobs:
             const openPRs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', base: 'main', per_page: 100
             });
-            const open = new Set(openPRs.filter((p) => p.user.login === pr.user.login).map((p) => p.number));
+            const reopened = context.payload.action === 'reopened';
+            const open = new Set(openPRs
+              .filter((p) => p.user.login === pr.user.login && (reopened || p.number < pull_number))
+              .map((p) => p.number));
             open.add(pull_number);
             if (open.size <= allowedOpen) {
               return;

@@ -15,6 +15,8 @@ namespace {
 
 void Require(bool value) { if (!value) std::abort(); }
 
+constexpr int kStatusNone = 0;
+constexpr int kStatusInitialized = 1;
 constexpr int kStatusFinished = 3;
 constexpr int kErrNotInitialized = static_cast<int>(0x80B80003);
 constexpr int kErrAlreadyInitialized = static_cast<int>(0x80B80004);
@@ -30,10 +32,13 @@ int main() {
 
     Require(sceVrSetupDialogTerminate() == kErrNotInitialized);
     Require(sceVrSetupDialogOpen(&param) == kErrNotInitialized);
+    Require(sceVrSetupDialogClose() == kErrNotInitialized);
     Require(sceVrSetupDialogGetResult(result) == kErrNotInitialized);
+    Require(sceVrSetupDialogUpdateStatus() == kStatusNone);
 
     Require(sceVrSetupDialogInitialize() == 0);
     Require(sceVrSetupDialogInitialize() == kErrAlreadyInitialized);
+    Require(sceVrSetupDialogUpdateStatus() == kStatusInitialized);
 
     Require(sceVrSetupDialogOpen(nullptr) == kErrArgNull);
     Require(sceVrSetupDialogGetResult(result) == kErrNotFinished);
@@ -49,4 +54,5 @@ int main() {
     Require(sceVrSetupDialogClose() == 0);
     Require(sceVrSetupDialogTerminate() == 0);
     Require(sceVrSetupDialogTerminate() == kErrNotInitialized);
+    Require(sceVrSetupDialogUpdateStatus() == kStatusNone);
 }

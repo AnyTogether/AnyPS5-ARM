@@ -5,6 +5,11 @@
 #include "SpirvBackend/SpirvEmitterHelpers.hpp"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
+#include <cstdlib>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
@@ -41,6 +46,170 @@ std::uint32_t DefineInterfaceVariable(SpirvEmitterState& state, std::uint32_t ty
     return variable;
 }
 
+namespace {
+
+class WindowIndexBounds {
+public:
+    std::optional<std::uint64_t> Of(const IrValue& input) {
+        const IrValue* value = input.Resolve();
+        if (value->HasImmediate()) return value->ImmediateU32();
+        if (const auto found = memo.find(value); found != memo.end()) return found->second;
+        if (!active.insert(value).second || active.size() > 256u) return std::nullopt;
+        const auto bound = compute(*value);
+        active.erase(value);
+        memo.emplace(value, bound);
+        return bound;
+    }
+
+private:
+    using Bound = std::optional<std::uint64_t>;
+
+    Bound maxOf(std::initializer_list<Bound> bounds) {
+        std::uint64_t result = 0;
+        for (const auto& bound : bounds) {
+            if (!bound) return std::nullopt;
+            result = std::max(result, *bound);
+        }
+        return result;
+    }
+
+    static std::vector<const IrValue*> reachingStores(const IrValue& load, std::uint32_t slot) {
+        std::vector<const IrValue*> values;
+        std::unordered_set<const IrBlock*> visited;
+        std::vector<std::pair<IrBlock*, const IrValue*>> pending {{load.Parent(), &load}};
+        while (!pending.empty()) {
+            const auto [block, before] = pending.back();
+            pending.pop_back();
+            const auto& instructions = block->Instructions();
+            auto it = instructions.rbegin();
+            if (before != nullptr) it = std::next(std::find(instructions.rbegin(), instructions.rend(), before));
+            bool stored = false;
+            for (; it != instructions.rend() && !stored; ++it) {
+                if ((*it)->Opcode() != IrOpcode::StoreVectorWindow) continue;
+                const IrValue* index = (*it)->Argument(0)->Resolve();
+                if (!index->HasImmediate() || index->ImmediateU32() != slot) continue;
+                values.push_back((*it)->Argument(1));
+                stored = true;
+            }
+            if (stored) continue;
+            for (IrBlock* predecessor : block->Predecessors()) {
+                if (visited.insert(predecessor).second) pending.emplace_back(predecessor, nullptr);
+            }
+        }
+        return values;
+    }
+
+    Bound compute(const IrValue& value) {
+        const auto arg = [&](std::size_t index) { return Of(*value.Argument(index)); };
+        const auto immediate = [&](std::size_t index) -> std::optional<std::uint32_t> {
+            const IrValue* operand = value.Argument(index)->Resolve();
+            if (!operand->HasImmediate()) return std::nullopt;
+            return operand->ImmediateU32();
+        };
+        const auto fits = [](std::uint64_t bound) -> Bound { return bound <= 0xffffffffull ? Bound(bound) : std::nullopt; };
+        switch (value.Opcode()) {
+        case IrOpcode::BitFieldUExtract: {
+            const auto count = immediate(2);
+            if (count && *count < 32u) return (std::uint64_t {1} << *count) - 1u;
+            return arg(0);
+        }
+        case IrOpcode::BitwiseAnd32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (lhs && rhs) return std::min(*lhs, *rhs);
+            return lhs ? lhs : rhs;
+        }
+        case IrOpcode::UMin32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (!lhs || !rhs) return std::nullopt;
+            return std::min(*lhs, *rhs);
+        }
+        case IrOpcode::UMax32:
+            return maxOf({arg(0), arg(1)});
+        case IrOpcode::BitwiseOr32: {
+            const auto both = maxOf({arg(0), arg(1)});
+            if (!both) return std::nullopt;
+            std::uint64_t mask = 0;
+            while (mask < *both) mask = mask << 1u | 1u;
+            return mask;
+        }
+        case IrOpcode::IAdd32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (!lhs || !rhs) return std::nullopt;
+            return fits(*lhs + *rhs);
+        }
+        case IrOpcode::ShiftRightLogical32: {
+            const auto shift = immediate(1);
+            const auto bound = arg(0);
+            if (!bound) return std::nullopt;
+            return shift ? *bound >> (*shift & 31u) : *bound;
+        }
+        case IrOpcode::ShiftLeftLogical32: {
+            const auto shift = immediate(1);
+            const auto bound = arg(0);
+            if (!bound || !shift) return std::nullopt;
+            return fits(*bound << (*shift & 31u));
+        }
+        case IrOpcode::ConvertU32U16:
+            return 0xffffu;
+        case IrOpcode::Select:
+        case IrOpcode::SelectU32:
+        {
+            if (value.Argument(0)->Resolve()->Opcode() == IrOpcode::GetExec || value.Argument(2)->Resolve()->Opcode() == IrOpcode::LoadVectorWindow) return arg(1);
+            const auto lhs = arg(1);
+            const auto rhs = arg(2);
+            if (lhs && rhs) return std::max(*lhs, *rhs);
+            return lhs ? lhs : rhs;
+        }
+        case IrOpcode::ReadFirstLane:
+            return arg(0);
+        case IrOpcode::Identity:
+        case IrOpcode::Phi: {
+            Bound bound;
+            for (std::size_t index = 0; index < value.ArgumentCount(); ++index) {
+                if (const auto incoming = arg(index)) bound = std::max(bound.value_or(0u), *incoming);
+            }
+            return bound;
+        }
+        case IrOpcode::LoadVectorWindow: {
+            const IrValue* index = value.Argument(0)->Resolve();
+            if (!index->HasImmediate()) return std::nullopt;
+            Bound bound = 0u;
+            for (const IrValue* stored : reachingStores(value, index->ImmediateU32())) {
+                bound = maxOf({bound, Of(*stored)});
+                if (!bound) return std::nullopt;
+            }
+            return bound;
+        }
+        default:
+            return std::nullopt;
+        }
+    }
+
+    std::unordered_map<const IrValue*, Bound> memo;
+    std::unordered_set<const IrValue*> active;
+};
+
+std::uint32_t IndexedWindowSlots(const IrProgram& program) {
+    const auto window = program.Metadata().vectorWindowSize;
+    WindowIndexBounds bounds;
+    std::uint64_t reached = 0;
+    for (const auto& block : program.Blocks()) {
+        for (const IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() != IrOpcode::LoadVectorWindow && inst->Opcode() != IrOpcode::StoreVectorWindow) continue;
+            const IrValue* index = inst->Argument(0)->Resolve();
+            if (index->HasImmediate()) continue;
+            const auto bound = bounds.Of(*index);
+            if (bound && *bound < window / 2u) reached = std::max(reached, *bound + 1u);
+        }
+    }
+    return static_cast<std::uint32_t>(reached);
+}
+
+}
+
 void DefineModule(SpirvEmitterState& state) {
     state.interfaceVariables.reserve(state.program.Info().inputs.size() + state.program.Info().outputs.size());
     DefineInputs(state);
@@ -55,9 +224,14 @@ void DefineModule(SpirvEmitterState& state) {
             state.scratchVariable.at(half) = state.module.AllocateId();
         }
     }
-    if (state.program.Metadata().vectorWindowSize != 0u) {
+    if (const auto window = state.program.Metadata().vectorWindowSize; window != 0u) {
+        static const bool narrowWindow = std::getenv("APS5_NO_WINDOW_NARROWING") == nullptr;
+        state.vectorWindowIndexed = narrowWindow ? IndexedWindowSlots(state.program) : 0u;
         for (std::uint32_t half = 0; half < state.laneCount; half++) {
             state.vectorWindowVariable.at(half) = state.module.AllocateId();
+            if (state.vectorWindowIndexed == 0u) continue;
+            auto& slots = state.vectorWindowSlots.at(half);
+            for (std::uint32_t slot = state.vectorWindowIndexed; slot < window; slot++) slots.push_back(state.module.AllocateId());
         }
     }
     state.mainFunc = state.module.AllocateId();

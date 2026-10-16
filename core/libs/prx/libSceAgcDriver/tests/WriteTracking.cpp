@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -98,6 +99,102 @@ void CheckSharedBlock() {
     std::array<std::uint8_t, 64> unwatched{};
     const auto outside = reinterpret_cast<std::uint64_t>(unwatched.data());
     if (!Watched(outside, unwatched.size())) Require(StoredOver(outside, unwatched.size(), TrackerGeneration()), "an unwatched range reads as not stored over");
+}
+
+void CheckStoredAllSince() {
+    constexpr std::size_t bytes = 4 * Block;
+    auto* memory = static_cast<std::uint8_t*>(AllocateWatched(bytes));
+    struct Cleanup {
+        void* memory;
+        ~Cleanup() {
+#ifdef _WIN32
+            GuestArena::GuestArenaReset_nid_postfix(memory, bytes);
+            GuestArena::GuestArenaRelease_nid_postfix(memory, bytes);
+#else
+            GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(memory, bytes);
+            munmap(memory, bytes);
+#endif
+        }
+    } cleanup{memory};
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    std::memset(memory, 0x11, bytes);
+    auto before = CollectWritesUncached(base, bytes);
+    Require(before != 0, "the complete-store block is not collected");
+    Require(!StoredAllSince_nid_no_patch(base, 64, before), "a range with no driver store has complete coverage");
+
+    MarkWritten(base + Block, Block);
+    Require(StoredAllSince_nid_no_patch(base + Block, Block, before), "the first whole-block driver store has no complete coverage");
+    Require(StoredAllSince_nid_no_patch(base + Block + 1, Block - 2, before), "a whole-block store lost its interior coverage");
+    const auto whole = TrackerGeneration();
+    Require(!StoredAllSince_nid_no_patch(base + Block, Block, whole), "a whole-block store at the baseline is taken as newer");
+
+    before = TrackerGeneration();
+    static_cast<volatile std::uint8_t*>(memory)[2 * Block + 7] = 0x22;
+    CollectWritesUncached(base + 2 * Block, Block);
+    Require(!StoredAllSince_nid_no_patch(base + 2 * Block, Block, before), "CPU-only stores prove complete driver coverage");
+
+    before = TrackerGeneration();
+    const std::array<std::byte, 4> dword{};
+    Write(base + 16, dword);
+    Require(StoredAllSince_nid_no_patch(base + 16, dword.size(), before), "a tracked dword store is absent from its exact range");
+    Require(!StoredAllSince_nid_no_patch(base, 64, before), "one dword store proves complete surface coverage");
+    Require(!StoredAllSince_nid_no_patch(base + 15, 5, before) && !StoredAllSince_nid_no_patch(base + 16, 5, before), "a dword store covers an unstored boundary byte");
+    const auto dwordStored = TrackerGeneration();
+    Require(!StoredAllSince_nid_no_patch(base + 16, dword.size(), dwordStored), "a dword store at the baseline is taken as newer");
+    MarkWritten(base, 64);
+    Require(StoredAllSince_nid_no_patch(base, 64, before), "a complete non-block-aligned range store is absent");
+
+    before = TrackerGeneration();
+    MarkWritten(base + 512, 16);
+    MarkWritten(base + 544, 16);
+    Require(!StoredAllSince_nid_no_patch(base + 512, 48, before), "split driver stores prove coverage across a hole");
+    MarkWritten(base + 528, 16);
+    Require(StoredAllSince_nid_no_patch(base + 512, 48, before), "out-of-order split driver stores did not form complete coverage");
+    Require(!StoredAllSince_nid_no_patch(base + 512, 49, before), "split coverage includes an unstored final byte");
+
+    before = TrackerGeneration();
+    MarkWritten(base + 1024 + 8, 24);
+    MarkWritten(base + 1024, 16);
+    Require(StoredAllSince_nid_no_patch(base + 1024, 32, before), "overlapping driver intervals did not form complete coverage");
+
+    before = TrackerGeneration();
+    MarkWritten(base + Block - 4, 8);
+    Require(StoredAllSince_nid_no_patch(base + Block - 4, 8, before), "a tracked store across a block boundary lost coverage");
+    Require(!StoredAllSince_nid_no_patch(base + Block - 5, 9, before) && !StoredAllSince_nid_no_patch(base + Block - 4, 9, before), "a boundary store covers an unstored adjacent byte");
+
+    before = TrackerGeneration();
+    for (unsigned piece = 0; piece < 6; ++piece) MarkWritten(base + static_cast<std::uint64_t>(piece) * 64, 4);
+    Require(!StoredAllSince_nid_no_patch(base, 4, before), "dropped driver evidence proves complete coverage");
+    MarkWritten(base, Block);
+    Require(StoredAllSince_nid_no_patch(base, Block, before), "a new whole-block store did not replace dropped evidence");
+
+    before = TrackerGeneration();
+    MarkWritten(base, 3 * Block);
+    Require(StoredAllSince_nid_no_patch(base, 3 * Block, before), "complete multi-block stores lost coverage");
+    Require(StoredAllSince_nid_no_patch(base + 1, 3 * Block - 2, before) && StoredAllSince_nid_no_patch(base + 3 * Block - 1, 1, before), "complete multi-block stores lost edge bytes");
+    const auto complete = TrackerGeneration();
+    Require(!StoredAllSince_nid_no_patch(base, 3 * Block, complete), "stores older than the baseline prove complete coverage");
+
+    before = TrackerGeneration();
+    MarkWritten(base + 2 * Block, Block);
+    const auto driverStored = TrackerGeneration();
+    static_cast<volatile std::uint8_t*>(memory)[2 * Block + 7] = 0x33;
+    CollectWritesUncached(base + 2 * Block, Block);
+    Require(StoredAllSince_nid_no_patch(base + 2 * Block, Block, before), "a later CPU store erased the proof that the driver stored every byte");
+    Require(!UnchangedSinceCollected(base + 2 * Block, Block, driverStored), "the separate CPU-write check missed a store after complete driver coverage");
+
+    Require(!StoredAllSince_nid_no_patch(base, 0, before) && !StoredAllSince_nid_no_patch(base, 1, 0), "empty or unknown-baseline complete coverage is accepted");
+    Require(!StoredAllSince_nid_no_patch(std::numeric_limits<std::uint64_t>::max(), 2, before), "overflowing complete coverage is accepted");
+    Unwatch(base + 3 * Block, Block);
+    Require(MarkWritten(base + 3 * Block, Block) == 0, "an unwatched whole store acquired trusted driver coverage");
+    Require(!StoredAllSince_nid_no_patch(base + 3 * Block, Block, before), "unwatched stores prove complete coverage");
+    Require(!StoredAllSince_nid_no_patch(base + 3 * Block - 1, 2, before), "a range entering unwatched memory has complete coverage");
+    std::array<std::uint8_t, 16> outside{};
+    const auto outsideAddress = reinterpret_cast<std::uint64_t>(outside.data());
+    if (!Watched(outsideAddress, outside.size())) {
+        MarkWritten(outsideAddress, outside.size());
+        Require(!StoredAllSince_nid_no_patch(outsideAddress, outside.size(), before), "an outside untracked range has complete coverage");
+    }
 }
 
 void CheckOwnStore() {
@@ -834,6 +931,7 @@ int main() {
         }
 #endif
         CheckSharedBlock();
+        CheckStoredAllSince();
         CheckOwnStore();
         CheckUnwatch();
         CheckNewestStamp();

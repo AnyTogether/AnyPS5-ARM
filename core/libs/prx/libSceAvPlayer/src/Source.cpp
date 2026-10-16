@@ -343,6 +343,7 @@ public:
             demuxEpoch = 1;
             minEpoch = 1;
             clockEpoch = 0;
+            loopEpochs.clear();
             audioDriving = false;
             presented = false;
             lastPresented = 0;
@@ -716,6 +717,12 @@ private:
         decoder.current = std::move(decoder.frames.front());
         decoder.frames.pop_front();
         info = decoder.current->info;
+        bool looped = false;
+        while (!loopEpochs.empty() && loopEpochs.front() <= decoder.current->epoch) {
+            looped = looped || loopEpochs.front() == decoder.current->epoch;
+            loopEpochs.pop_front();
+        }
+        if (looped) events.OnWarning(SCE_AVPLAYER_ERROR_WAR_LOOPING_BACK);
     }
 
     void dropLateAudio() {
@@ -756,6 +763,7 @@ private:
                     presentationClock.Rebase(static_cast<double>(requested->target));
                     ++demuxEpoch;
                     minEpoch = demuxEpoch;
+                    loopEpochs.clear();
                     for (auto* decoder : {&video, &audio}) {
                         if (decoder->stream < 0) continue;
                         for (auto& item : decoder->packets) av_packet_free(&item.packet);
@@ -788,10 +796,10 @@ private:
                     {
                         std::lock_guard lock(mutex);
                         ++demuxEpoch;
+                        loopEpochs.push_back(demuxEpoch);
                         pushAll(PacketKind::Drain, demuxEpoch, 0);
                     }
                     condition.notify_all();
-                    events.OnWarning(SCE_AVPLAYER_ERROR_WAR_LOOPING_BACK);
                     continue;
                 }
                 {
@@ -1071,6 +1079,7 @@ private:
     std::uint64_t demuxEpoch = 0;
     std::uint64_t minEpoch = 0;
     std::uint64_t clockEpoch = 0;
+    std::deque<std::uint64_t> loopEpochs;
     bool audioDriving = false;
     bool presented = false;
     std::uint64_t lastPresented = 0;

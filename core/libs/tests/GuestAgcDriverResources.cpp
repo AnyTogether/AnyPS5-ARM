@@ -7,6 +7,7 @@
 #include <string_view>
 
 extern "C" {
+int APS5_VABI sceAgcDriverRegisterDefaultOwner(std::uint32_t);
 int APS5_VABI sceAgcDriverRegisterOwner(std::uint32_t*, const char*);
 int APS5_VABI sceAgcDriverRegisterResource(std::uint32_t*, std::uint32_t, const void*, std::size_t, const char*, std::uint32_t, std::uint64_t);
 int APS5_VABI sceAgcDriverRegisterMultipleResources(std::uint32_t*, std::uint32_t, const void*, std::uint32_t);
@@ -56,6 +57,8 @@ int main() {
     std::uint32_t owner = 7u;
     std::uint32_t resource = 9u;
     const std::uint32_t memory[4]{};
+    Require(sceAgcDriverRegisterDefaultOwner(0u) == 0);
+    Require(sceAgcDriverRegisterDefaultOwner(owner) == 0);
     Require(sceAgcDriverRegisterOwner(&owner, "owner") == Unavailable);
     Require(sceAgcDriverRegisterResource(&resource, owner, memory, sizeof(memory), "resource", 1u, 2u) == Unavailable);
     Require(sceAgcDriverRegisterGdsResource(&resource, owner, 0u, 64u, "gds", 1u, 2u) == Unavailable);

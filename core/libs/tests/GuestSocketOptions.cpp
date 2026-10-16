@@ -152,7 +152,9 @@ void BooleanOptionsReportTheirBit() {
     Require(GetInt(stream, SoKeepAlive) == 0, "SO_KEEPALIVE must turn off");
     SetInt(datagram, SoBroadcast, 1);
     Require(GetInt(datagram, SoBroadcast) == SoBroadcast, "SO_BROADCAST reads back as its bit");
-    for (const int option : {SoNoSigpipe, SoReusePort, SoDebug, SoUseLoopback, SoTimestamp}) {
+    SetInt(stream, SoNoSigpipe, 1);
+    Require(GetInt(stream, SoNoSigpipe) == SoNoSigpipe, "SO_NOSIGPIPE reads back as its bit");
+    for (const int option : {SoReusePort, SoDebug, SoUseLoopback, SoTimestamp}) {
         const int one = 1;
         Require(SetFails(stream, SolSocket, option, &one, sizeof(one), ErrorNoProtocolOption), "an option no title needs must fail with ENOPROTOOPT (42)");
         int value = 0;

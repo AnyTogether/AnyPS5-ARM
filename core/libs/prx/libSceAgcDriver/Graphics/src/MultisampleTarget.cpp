@@ -235,6 +235,7 @@ void guardReads(std::uint64_t address, std::size_t bytes) {
 }
 
 void retireUnmapped(std::uintptr_t address, std::size_t bytes) {
+    RetireUnmappedDepth_nid_no_patch(address, bytes);
     std::unique_lock lock(guardedMutex());
     std::erase_if(guarded(), [&](const auto& range) {
         if (range.address < address || range.address - address > bytes || range.bytes > bytes - (range.address - address)) return false;
@@ -259,7 +260,6 @@ void guard(const Context& context, const ColorTarget& target, const std::shared_
     guarded().push_back({context.device, target.address, bytes, target.samples, active});
     anyGuarded().store(true, std::memory_order_release);
     InstallResidentImageReadGuard_nid_no_patch();
-    GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(&retireUnmapped);
 }
 
 std::mutex& targetsMutex() {
@@ -342,6 +342,13 @@ MultisampleTarget& createFilled(const Context& context, const GuestTextureResour
 void InstallResidentImageReadGuard_nid_no_patch() {
     static std::once_flag installed;
     std::call_once(installed, [] { GuestMemory::SetReadGuard(&guardReads); });
+    UpdateResidentImageUnmapObserver_nid_no_patch();
+}
+
+void UpdateResidentImageUnmapObserver_nid_no_patch() {
+    static std::mutex mutex;
+    std::lock_guard lock(mutex);
+    GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(anyGuarded().load(std::memory_order_acquire) || HasResidentDepthGuards_nid_no_patch() ? &retireUnmapped : nullptr);
 }
 
 void MultisampledCmask::NoteFill(std::uint64_t fillAddress, std::size_t fillBytes, std::uint32_t pattern) {
@@ -533,7 +540,7 @@ void ClearMultisampleTargets(VkDevice device) {
     std::unique_lock guardLock(guardedMutex());
     std::erase_if(guarded(), [&](const auto& range) { return range.device == device; });
     anyGuarded().store(!guarded().empty(), std::memory_order_release);
-    if (guarded().empty()) GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(nullptr);
+    UpdateResidentImageUnmapObserver_nid_no_patch();
 }
 
 void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const char* access) {

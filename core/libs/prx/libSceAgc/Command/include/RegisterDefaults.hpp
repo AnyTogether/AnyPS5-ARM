@@ -6,6 +6,7 @@
 namespace Agc::Command {
 
 void* GetRegisterDefaults(std::uint32_t version, bool internal, const char* function);
+int GetDefaultCxStateFlat(void* destination, std::uint32_t size);
 
 }
 

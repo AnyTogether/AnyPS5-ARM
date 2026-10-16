@@ -38,6 +38,8 @@ def run(output, expected=42):
 def check_occupied_base(output):
     if os.name != "nt":
         return
+    import ctypes
+    ctypes.windll.kernel32.SetErrorMode(0x8003)
     try:
         result = subprocess.run([str(output)], capture_output=True, timeout=5)
     except OSError as error:

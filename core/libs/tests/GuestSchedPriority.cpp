@@ -1,4 +1,5 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
 #include <stdexcept>
@@ -8,6 +9,13 @@ int APS5_VABI sched_get_priority_max_nid_postfix(int policy);
 int APS5_VABI sched_get_priority_min_nid_postfix(int policy);
 int APS5_VABI getpriority_nid_postfix(int which, int who);
 int APS5_VABI setpriority_nid_postfix(int which, int who, int niceval);
+struct GuestRtPrio {
+    std::uint16_t type;
+    std::uint16_t prio;
+};
+int APS5_VABI rtprio_thread_nid_postfix(int function, int lwpid, GuestRtPrio* priority);
+int APS5_VABI pthread_setconcurrency_nid_postfix(int newLevel);
+int APS5_VABI pthread_getconcurrency_nid_postfix(void);
 int APS5_VABI getpid_nid_postfix(void);
 int* APS5_VABI __error_nid_postfix();
 }
@@ -71,4 +79,23 @@ int main() {
     Require(setpriority_nid_postfix(PrioProcess, 0, 99) == 0 && getpriority_nid_postfix(PrioProcess, 0) == 20);
     Require(setpriority_nid_postfix(PrioProcess, 0, -99) == 0 && getpriority_nid_postfix(PrioProcess, 0) == -20);
     Require(setpriority_nid_postfix(PrioProcess, 0, 0) == 0 && getpriority_nid_postfix(PrioProcess, 0) == 0);
+    GuestRtPrio rtprio{7, 7};
+    bool rtprioThrew = false;
+    try { rtprio_thread_nid_postfix(0, 0, &rtprio); } catch (const std::exception&) { rtprioThrew = true; }
+    Require(rtprioThrew);
+    rtprioThrew = false;
+    try { rtprio_thread_nid_postfix(1, 0, &rtprio); } catch (const std::exception&) { rtprioThrew = true; }
+    Require(rtprioThrew);
+    *__error_nid_postfix() = 0;
+    Require(rtprio_thread_nid_postfix(2, 0, &rtprio) == -1 && *__error_nid_postfix() == 22);
+    *__error_nid_postfix() = 0;
+    Require(rtprio_thread_nid_postfix(0, 0, nullptr) == -1 && *__error_nid_postfix() == 14);
+    *__error_nid_postfix() = 0;
+    Require(rtprio_thread_nid_postfix(0, self + 1, &rtprio) == -1 && *__error_nid_postfix() == 3);
+    Require(pthread_getconcurrency_nid_postfix() == 0);
+    *__error_nid_postfix() = 13;
+    Require(pthread_setconcurrency_nid_postfix(4) == 0 && pthread_getconcurrency_nid_postfix() == 4 && *__error_nid_postfix() == 13);
+    *__error_nid_postfix() = 13;
+    Require(pthread_setconcurrency_nid_postfix(-1) == 22 && *__error_nid_postfix() == 13);
+    Require(pthread_setconcurrency_nid_postfix(0) == 0 && pthread_getconcurrency_nid_postfix() == 0);
 }

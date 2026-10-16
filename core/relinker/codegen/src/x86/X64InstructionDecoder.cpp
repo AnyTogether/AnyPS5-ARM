@@ -488,12 +488,12 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
                 }
                 return info;
             }
-            if (reg == 3) {
-                info.FlowKind = ControlFlowKind::IndirectCall;
-                return info;
-            }
-            if (reg == 5) {
-                info.FlowKind = ControlFlowKind::IndirectJump;
+            if (reg == 3 || reg == 5) {
+                if (mod == ModRmModIndirect && rm == ModRmRmRipRelative) {
+                    info.HasRipRelativeDisp = true;
+                    info.RipRelativeDispOffset = pos + 1;
+                }
+                info.FlowKind = reg == 3 ? ControlFlowKind::IndirectCall : ControlFlowKind::IndirectJump;
                 return info;
             }
         }

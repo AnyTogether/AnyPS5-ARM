@@ -337,9 +337,9 @@ ParsedParamJson parseParamJson(const std::filesystem::path& paramJsonPath) {
             const auto parsed = std::from_chars(number.data(), number.data() + number.size(), bytes);
             if (parsed.ec != std::errc{} || parsed.ptr != number.data() + number.size())
                 throw std::runtime_error("param.json kernel.flexibleMemorySize exceeds uint64 range");
-            if (bytes == 0 || (bytes & (PS5_PAGE_SIZE - 1)) != 0)
-                throw std::runtime_error("param.json kernel.flexibleMemorySize must be a positive multiple of 16 KiB");
-            result.flexibleMemorySizeBytes = bytes;
+            if ((bytes & (PS5_PAGE_SIZE - 1)) != 0)
+                throw std::runtime_error("param.json kernel.flexibleMemorySize must be a multiple of 16 KiB");
+            if (bytes != 0) result.flexibleMemorySizeBytes = bytes;
         }
     }
     if (const JsonValue* downloadData = findObjectMember(root, "downloadDataSize")) {

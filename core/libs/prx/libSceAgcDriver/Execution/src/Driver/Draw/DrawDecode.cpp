@@ -2,6 +2,8 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include <algorithm>
+#include <spirv/unified1/spirv.hpp>
 
 namespace AgcDriver::DriverDetail {
 
@@ -65,7 +67,7 @@ void DecodeGraphicsPrograms(DrawDecode& decoded, const QueueState& queue, const 
         const auto& snapshot = *program;
         require((address - snapshot.codeAddress) % sizeof(std::uint32_t) == 0, "graphics entry point is not dword aligned");
         require(snapshot.header.empty() || snapshot.type == type, "graphics program refers to an incompatible shader binary type");
-        if (!nullPixel && snapshot.header.empty()) NoteRawGraphicsDraw();
+        if (!nullPixel && snapshot.header.empty()) NoteRawGraphicsDraw(snapshot);
         const auto codeOffset = static_cast<std::size_t>((address - snapshot.codeAddress) / sizeof(std::uint32_t));
         DrawProgram result{
             {stage, address, std::span(snapshot.code).subspan(codeOffset), snapshot.headerAddress, snapshot.header},
@@ -125,9 +127,15 @@ std::shared_ptr<DrawDecode> Driver::decodeDraw(const QueueState& queue, const Su
     product->pixel = Graphics::DecodePixelStageInfo(queue.context, Graphics::ExportMappings(product->state), Graphics::PixelProgramSkipped(queue));
     product->pixel.targetExportPacking = Graphics::ExportPackings(product->state);
     product->pixel.dualSourceBlend = product->state.dualSourceBlend;
+    product->pixel.reversedBlend = product->state.reversedBlend;
     product->pixel.alphaToCoverage = product->state.alphaToCoverage;
     product->pixel.quadPixelMask = Graphics::QuadPixelMask(product->state);
     product->pixel.quadSampleMask = Graphics::QuadSampleMasks(product->state);
+    if (product->pixel.stencilRefExportEnable && Graphics::StencilReferenceUnused(product->state)) {
+        const auto localDevice = device.Load();
+        const auto capabilities = localDevice == nullptr ? std::vector<std::uint32_t>{} : localDevice->Target().supportedCapabilities;
+        if (std::ranges::find(capabilities, static_cast<std::uint32_t>(spv::CapabilityStencilExportEXT)) == capabilities.end()) product->pixel.stencilRefExportEnable = false;
+    }
     if (product->pixel.ancillary) product->pixel.rasterPrimitive = Graphics::RasterPrimitiveOf(product->state);
     if (const auto localDevice = device.Load(); localDevice != nullptr) localDevice->NormalizeUnobservedViewportDepth(product->state, product->pixel);
     if (product->pixel.ancillary) product->pixel.layerExported = product->state.layerExports != 0;

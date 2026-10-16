@@ -139,7 +139,7 @@ std::int32_t createAac(const AudiodecParamM4aac* param, AudiodecM4aacInfo* info,
     if (param->ui_max_channels > 8) return ERROR_M4AAC_INVALID_MAX_CHANNELS;
     if (param->ui_enable_heaac > 1) return ERROR_M4AAC_INVALID_ENABLE_HEAAC;
     const std::uint32_t channels = param->ui_max_channels == 0 ? 2 : param->ui_max_channels;
-    instance.decoder = Audiodec::CreateAac(param->i_bw_pcm, param->ui_config_number == M4AAC_CONFIG_ADTS, param->ui_sampling_freq_index, channels);
+    instance.decoder = Audiodec::CreateAac(param->i_bw_pcm, param->ui_config_number == M4AAC_CONFIG_ADTS, param->ui_sampling_freq_index, channels, param->ui_enable_heaac == 1);
     instance.channels = channels;
     instance.sampleRate = sampleRate;
     info->ui_sampling_freq = sampleRate;

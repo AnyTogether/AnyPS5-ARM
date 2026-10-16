@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -44,6 +45,33 @@ struct Storage {
 std::mutex defaultsMutex;
 std::array<std::array<Storage, 14>, 2> storage;
 
+struct AgcContextState {
+    std::uint32_t data[512];
+};
+
+static_assert(sizeof(AgcContextState) == 2048);
+
+std::mutex defaultStateMutex;
+AgcContextState defaultState{};
+bool defaultStateInitialized = false;
+
+void InitDefaultCxState() {
+    std::memset(&defaultState, 0, sizeof(defaultState));
+    const auto* source = agcPublicRegDefaultsByVersion[8];
+    for (std::size_t bank = 0; bank < 4; ++bank) {
+        const auto& b = source->banks[bank];
+        if (b.registers == nullptr) continue;
+        for (std::uint32_t r = 0; r < b.registerCount; ++r) {
+            const auto offset = b.registers[r].offset;
+            const auto value = b.registers[r].value;
+            if (offset < 512) {
+                defaultState.data[offset] = value;
+            }
+        }
+    }
+    defaultStateInitialized = true;
+}
+
 }
 
 void* GetRegisterDefaults(std::uint32_t version, bool internal, const char* function) {
@@ -74,6 +102,17 @@ void* GetRegisterDefaults(std::uint32_t version, bool internal, const char* func
         destination.initialized = true;
     }
     return &destination.defaults;
+}
+
+int GetDefaultCxStateFlat(void* destination, std::uint32_t size) {
+    if (destination == nullptr) return static_cast<int>(0x80890001);
+    std::lock_guard lock(defaultStateMutex);
+    if (!defaultStateInitialized) {
+        InitDefaultCxState();
+    }
+    const auto copyBytes = std::min(size, static_cast<std::uint32_t>(sizeof(AgcContextState)));
+    std::memcpy(destination, defaultState.data, copyBytes);
+    return 0;
 }
 
 }

@@ -21,7 +21,7 @@ RAMP = "._:-=+*#%@"
 
 
 def is_wait(name):
-    return "wait" in name.rsplit(".", 1)[-1].lower()
+    return name.startswith("GpuMutex.wait.") or "wait" in name.rsplit(".", 1)[-1].lower()
 
 
 class Trace:
@@ -78,9 +78,12 @@ def load_summary(path, trace_path):
     if not candidate.exists():
         return None
     lines = [json.loads(line) for line in candidate.read_text(encoding="utf-8").splitlines() if line.strip()]
-    for line in reversed(lines):
-        if line.get("trace") == Path(trace_path).name:
-            return line
+    name = Path(trace_path).name
+    alternate = name[:-3] if name.endswith(".gz") else name + ".gz"
+    for filename in (name, alternate):
+        for line in reversed(lines):
+            if line.get("trace") == filename:
+                return line
     return None
 
 
@@ -116,7 +119,8 @@ def digest(trace, summary=None, stacks=None, worst=5, top=10):
     threads = []
     totals = collections.Counter()
     waits = []
-    for tid, slices in sorted(trace.slices.items()):
+    for tid in sorted(trace.slices.keys() | trace.folded.keys()):
+        slices = trace.slices.get(tid, [])
         traced = sum(dur for _, dur, _, depth, _ in slices if depth == 0)
         waited = sum(dur for _, dur, name, _, nested in slices if is_wait(name) and not nested)
         leaders = collections.Counter()
@@ -312,4 +316,6 @@ def main(arguments=None):
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())

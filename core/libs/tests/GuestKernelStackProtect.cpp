@@ -169,7 +169,38 @@ static void* APS5_VABI WriteLeftGuard(void*) {
     return nullptr;
 }
 
+#ifdef _WIN32
+static void ProtectWholeStack() {
+    int local = 0;
+    void* start = nullptr;
+    void* end = nullptr;
+    Require(sceKernelIsStack(&local, &start, &end) == SCE_OK);
+    const auto stackBytes = reinterpret_cast<std::uintptr_t>(end) - reinterpret_cast<std::uintptr_t>(start);
+    Require(mprotect_nid_postfix(start, stackBytes, 0xc2) == 0);
+    Require(QueryPage(reinterpret_cast<std::uintptr_t>(start)).writable);
+    static_cast<volatile unsigned char*>(start)[0] = 6;
+}
+
+static DWORD WINAPI ProtectReservedStack(void*) {
+    ProtectWholeStack();
+    return 0;
+}
+
+static void ProtectHostStacks() {
+    ProtectWholeStack();
+    HANDLE thread = CreateThread(nullptr, HostBytes * 4, ProtectReservedStack, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    Require(thread != nullptr);
+    Require(WaitForSingleObject(thread, INFINITE) == WAIT_OBJECT_0);
+    DWORD exitCode = 1;
+    Require(GetExitCodeThread(thread, &exitCode) != 0 && exitCode == 0);
+    Require(CloseHandle(thread) != 0);
+}
+#endif
+
 int main() {
+#ifdef _WIN32
+    ProtectHostStacks();
+#endif
     std::atomic<bool> passed{false};
     Pthread thread = nullptr;
     Require(scePthreadCreate(&thread, nullptr, Worker, &passed, nullptr) == SCE_OK);

@@ -636,6 +636,72 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual(records[("AAAAAAAAAAA", "stripped.prx")]["class"], "implemented")
         self.assertEqual(records[("BBBBBBBBBBB", "main.prx")]["class"], "implemented")
 
+    def test_elf_with_out_of_file_section_table_uses_program_headers(self):
+        path = Path("module.prx")
+        image = build_sectionless_elf([
+            ("AAAAAAAAAAA", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION)], ["libSceA.prx"])
+        expected_imports = import_audit.elf_imports(path, image)
+        expected_exports = import_audit.elf_exports(path, image)
+        self.assertEqual(expected_imports, ({"AAAAAAAAAAA"}, {"libSceA.prx"}))
+        self.assertEqual(expected_exports, {"BBBBBBBBBBB"})
+        for section_offset in (len(image), len(image) + 64):
+            for section_count in (1, 0):
+                modified = bytearray(image)
+                struct.pack_into("<Q", modified, 40, section_offset)
+                struct.pack_into("<HH", modified, 58, 64, section_count)
+                for reader, expected in ((import_audit.elf_imports, expected_imports), (import_audit.elf_exports, expected_exports)):
+                    with self.subTest(section_offset=section_offset, section_count=section_count, reader=reader.__name__):
+                        self.assertEqual(reader(path, bytes(modified)), expected)
+
+    def test_module_with_out_of_file_section_table_is_audited(self):
+        work = self.work
+        (work.libs / "libSceA.prx").write_bytes(exporting("AAAAAAAAAAA"))
+        module = work.modules / "stripped.prx"
+        image = build_sectionless_elf([
+            ("AAAAAAAAAAA", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION)], ["libSceA.prx"])
+        module.write_bytes(image)
+        (work.modules / "main.prx").write_bytes(build_elf([("BBBBBBBBBBB", 0, GLOBAL_FUNCTION)]))
+        registry = work.root / "game.json"
+        write_registry(registry, [])
+        result = work.root / "audit.json"
+        code, expected_out, err = work.run(registry, "--json", str(result))
+        self.assertEqual((code, err), (0, ""))
+        expected = json.loads(result.read_text())
+        for section_offset in (len(image), len(image) + 64):
+            for section_count in (1, 0):
+                with self.subTest(section_offset=section_offset, section_count=section_count):
+                    modified = bytearray(image)
+                    struct.pack_into("<Q", modified, 40, section_offset)
+                    struct.pack_into("<HH", modified, 58, 64, section_count)
+                    module.write_bytes(modified)
+                    code, out, err = work.run(registry, "--json", str(result))
+                    self.assertEqual((code, err), (0, ""))
+                    self.assertEqual(out, expected_out)
+                    self.assertEqual(json.loads(result.read_text()), expected)
+
+    def test_elf_with_truncated_section_table_is_rejected(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(exporting())
+        path = work.modules / "truncated.prx"
+        image = build_sectionless_elf([
+            ("AAAAAAAAAAA", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION)])
+        registry = work.root / "game.json"
+        write_registry(registry, [])
+        for section_count in (1, 0):
+            modified = bytearray(image)
+            struct.pack_into("<Q", modified, 40, len(image) - 32)
+            struct.pack_into("<HH", modified, 58, 64, section_count)
+            for reader in (import_audit.elf_imports, import_audit.elf_exports):
+                with self.subTest(section_count=section_count, reader=reader.__name__):
+                    with self.assertRaisesRegex(import_audit.AuditError, "lies outside the file"):
+                        reader(path, bytes(modified))
+            with self.subTest(section_count=section_count, reader="main"):
+                path.write_bytes(modified)
+                code, out, err = work.run(registry)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(str(path), err)
+                self.assertIn("lies outside the file", err)
+
     def test_sectionless_elf_gnu_hash(self):
         image = build_sectionless_elf([
             ("AAAAAAAAAAA", 0, GLOBAL_FUNCTION), ("BBBBBBBBBBB", 1, GLOBAL_FUNCTION)],
@@ -1239,6 +1305,39 @@ class ImportAuditTests(unittest.TestCase):
         with patch.object(import_audit.subprocess, "run", return_value=completed) as run:
             self.assertEqual(import_audit.git_stamp(self.work.source), ("abcdef", True))
         self.assertEqual([call.args[0][2] for call in run.call_args_list], [str(self.work.source), str(self.work.source)])
+
+    def test_json_keeps_source_commit_when_a_broken_submodule_prevents_status(self):
+        work = self.work
+        command = ["git", "-C", str(work.source)]
+        identity = ["-c", "user.name=Audit test", "-c", "user.email=audit@example.invalid"]
+        subprocess.run(command + ["init", "-q"], check=True, capture_output=True)
+        subprocess.run(command + identity + ["commit", "--allow-empty", "-qm", "Source fixture"], check=True, capture_output=True)
+        commit = subprocess.check_output(command + ["rev-parse", "HEAD"], text=True).strip()
+        (work.source / ".gitmodules").write_text(
+            '[submodule "damaged"]\n\tpath = damaged\n\turl = https://example.invalid/damaged.git\n', encoding="utf-8")
+        subprocess.run(command + ["add", ".gitmodules"], check=True, capture_output=True)
+        subprocess.run(command + ["update-index", "--add", "--cacheinfo", "160000", commit, "damaged"], check=True, capture_output=True)
+        subprocess.run(command + identity + ["commit", "-qm", "Submodule fixture"], check=True, capture_output=True)
+        damaged = work.source / "damaged"
+        damaged.mkdir()
+        (damaged / ".git").write_text("gitdir: ../missing-submodule-git\n", encoding="utf-8")
+        commit = subprocess.check_output(command + ["rev-parse", "HEAD"], text=True).strip()
+        status = subprocess.run(command + ["status", "--porcelain"], capture_output=True)
+        self.assertNotEqual(status.returncode, 0)
+        (work.libs / "libSceA.prx").write_bytes(exporting("AAAAAAAAAAA"))
+        registry, report = work.root / "game.json", work.root / "audit.json"
+        write_registry(registry, [("AAAAAAAAAAA", "libSceA.prx")])
+        code, _, err = work.run(registry, "--json", str(report))
+        self.assertEqual((code, err), (0, ""))
+        data = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(data["source_commit"], commit)
+        self.assertIsNone(data["source_dirty"])
+        self.assertEqual(data["unique_by_class"], {"implemented": 1, "stub": 0, "absent": 0, "module": 0})
+
+    def test_git_stamp_keeps_commit_when_status_cannot_start(self):
+        completed = subprocess.CompletedProcess([], 0, stdout="abcdef\n")
+        with patch.object(import_audit.subprocess, "run", side_effect=[completed, OSError("status unavailable")]):
+            self.assertEqual(import_audit.git_stamp(self.work.source), ("abcdef", None))
 
     def test_library_directories(self):
         work = self.work

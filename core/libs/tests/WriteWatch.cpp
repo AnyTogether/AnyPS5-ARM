@@ -171,6 +171,43 @@ void CheckHostWrite() {
     ::close(descriptors[1]);
 }
 
+void CheckEmptyRanges() {
+    Region region(1);
+    for (const auto offset : {std::size_t{0}, std::size_t{1}, region.page - 1}) {
+        auto* pointer = region.base + offset;
+        GuestWriteWatchRegister_nid_postfix(pointer, 0);
+        Require(!GuestWriteWatchCovers_nid_postfix(region.Address(0), region.bytes), "an empty registration watches a page");
+        GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+        Require(region.Collect() == All(1), "a new range is not reported in full");
+
+        Require(!GuestWriteWatchUnregister_nid_postfix(pointer, 0), "an empty unregister removes a page");
+        Require(GuestWriteWatchCovers_nid_postfix(region.Address(0), region.bytes), "an empty unregister changes coverage");
+        GuestWriteWatchRegister_nid_postfix(pointer, 0);
+        Require(region.Collect().empty(), "an empty registration marks a watched page fresh");
+
+        GuestWriteWatchBeginHostWrite_nid_postfix(pointer, 0);
+        Require(KernelProtection(region.base) == PROT_READ, "an empty host write unprotects a page");
+        Require(region.Collect().empty(), "an empty host write reports a dirty page");
+        GuestWriteWatchEndHostWrite_nid_postfix(pointer, 0);
+
+        GuestWriteWatchBeginHostWrite_nid_postfix(pointer, 1);
+        GuestWriteWatchEndHostWrite_nid_postfix(pointer, 0);
+        Require(region.Collect() == All(1), "an active host write is not reported");
+        Require(KernelProtection(region.base) == (PROT_READ | PROT_WRITE), "an empty end host write releases an active host write");
+        GuestWriteWatchEndHostWrite_nid_postfix(pointer, 1);
+        Require(region.Collect() == All(1), "a finished host write is not reported");
+        Require(region.Collect().empty(), "a finished host write is reported again");
+
+        GuestWriteWatchProtectionChanged_nid_postfix(pointer, 0, PROT_NONE);
+        std::uintptr_t runEnd = 0;
+        Require(GuestWriteWatchProtection_nid_postfix(region.Address(0), region.Address(1), &runEnd) == (PROT_READ | PROT_WRITE), "an empty protection change changes the recorded protection");
+        Require(region.Collect().empty(), "an empty protection change reports a dirty page");
+        region.base[offset] = 1;
+        Require(region.Collect() == All(1), "an empty range operation prevents a later write from being tracked");
+        Require(GuestWriteWatchUnregister_nid_postfix(region.base, region.bytes), "cannot unregister the test region");
+    }
+}
+
 void CheckProtection() {
     Region region(6);
     std::uintptr_t runEnd = 0;
@@ -298,7 +335,7 @@ void CheckChain() {
 
 int main(int argc, char** argv) {
     try {
-        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, protection, threads, hot or chain");
+        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, empty, protection, threads, hot or chain");
         const std::string_view mode(argv[1]);
         if (mode == "collect") CheckCollect();
         else if (mode == "fresh") CheckFresh();
@@ -306,6 +343,7 @@ int main(int argc, char** argv) {
         else if (mode == "register") CheckRegisterAgain();
         else if (mode == "mapped") CheckRegisterMapped();
         else if (mode == "host") CheckHostWrite();
+        else if (mode == "empty") CheckEmptyRanges();
         else if (mode == "protection") CheckProtection();
         else if (mode == "threads") CheckThreads();
         else if (mode == "hot") CheckHot();

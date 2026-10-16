@@ -164,6 +164,10 @@ int DriveRelaunch() {
 }
 int main(int argc, char** argv) {
     const int firstArgument = argc > 0 && std::strncmp(argv[0], "--", 2) == 0 ? 0 : 1;
+    if (argc > firstArgument && std::strcmp(argv[firstArgument], "--requested-exit-driver") == 0) {
+        Require(RunChild(OwnExecutable(), "--requested-exit") == 0);
+        return 0;
+    }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--immediate") == 0) {
         LibcRegisterShutdown_nid_postfix(UnexpectedCleanup);
         Require(std::atexit(UnexpectedCleanup) == 0);
@@ -222,6 +226,11 @@ int main(int argc, char** argv) {
         LibcRegisterShutdown_nid_postfix(Cleanup);
         Require(__cxa_atexit_nid_postfix(UnexpectedFinalizer, nullptr, nullptr) == 0);
         Require(std::atexit(ExitHandlerRan) == 0);
+        if (std::strcmp(argv[firstArgument], "--requested-exit") == 0) {
+            LibcRequestExit_nid_postfix(0);
+            LibcRequestExit_nid_postfix(7);
+            LibcAwaitExit_nid_postfix();
+        }
         sceSystemServiceLoadExec("exit", nullptr);
         return 2;
     }

@@ -136,7 +136,7 @@ static bool openDevice(Port& port) {
     desired.samples = static_cast<Uint16>(port.samplesNum);
     desired.callback = nullptr;
     SDL_AudioSpec obtained{};
-    port.device = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, SDL_AUDIO_ALLOW_ANY_CHANGE);
+    port.device = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
     if (port.device == 0) {
         return false;
     }
@@ -230,31 +230,8 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
     const std::uint32_t preparedSize = port.samplesNum *
         static_cast<std::uint32_t>(port.channels) * bytesPerSample(port.format);
 
-    SDL_AudioCVT cvt{};
-    const int cvtResult = SDL_BuildAudioCVT(
-        &cvt,
-        sdlFormat(port.format), static_cast<Uint8>(port.channels), static_cast<int>(port.freq),
-        port.spec.format, port.spec.channels, port.spec.freq);
-
-    if (cvtResult < 0) {
-        throw std::runtime_error(std::string("SDL_BuildAudioCVT: ") + SDL_GetError());
-    }
-
     const void* queueData = prepared;
-    std::uint32_t queueSize = preparedSize;
-    std::vector<std::uint8_t> convertBuf;
-
-    if (cvtResult > 0) {
-        convertBuf.resize(static_cast<std::size_t>(preparedSize) * cvt.len_mult);
-        std::memcpy(convertBuf.data(), prepared, preparedSize);
-        cvt.buf = convertBuf.data();
-        cvt.len = static_cast<int>(preparedSize);
-        if (SDL_ConvertAudio(&cvt) < 0) {
-            throw std::runtime_error(std::string("SDL_ConvertAudio: ") + SDL_GetError());
-        }
-        queueData = cvt.buf;
-        queueSize = static_cast<std::uint32_t>(cvt.len_cvt);
-    }
+    const std::uint32_t queueSize = preparedSize;
 
     const std::uint64_t bufferUs = port.freq != 0
         ? (1000000ULL * port.samplesNum) / port.freq

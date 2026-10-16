@@ -34,14 +34,16 @@ if(BUILD_TESTING)
     configure_windows_unwind(guest_system_exit_tests)
     add_test(NAME guest_system_exit_parameters COMMAND guest_system_exit_tests)
     add_test(NAME guest_system_exit COMMAND guest_system_exit_tests --exit)
+    add_test(NAME guest_requested_exit COMMAND guest_system_exit_tests --requested-exit-driver)
     add_test(NAME guest_quick_exit COMMAND guest_system_exit_tests --quick-exit)
     add_test(NAME guest_immediate_exit COMMAND guest_system_exit_tests --immediate)
     add_test(NAME guest_return_from_main COMMAND guest_system_exit_tests --return-from-main)
     add_test(NAME guest_system_relaunch COMMAND guest_system_exit_tests --relaunch-driver)
     add_test(NAME guest_nested_exit COMMAND guest_system_exit_tests --nested-exit-driver)
-    set_tests_properties(guest_system_exit PROPERTIES
+    set_tests_properties(guest_system_exit guest_requested_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest shutdown completed"
         FAIL_REGULAR_EXPRESSION "Guest exit handler ran|Guest thread resumed during exit")
+    set_tests_properties(guest_requested_exit PROPERTIES TIMEOUT 10)
     set_tests_properties(guest_quick_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest quick_exit handlers completed")
     set_tests_properties(guest_system_relaunch PROPERTIES
@@ -49,7 +51,7 @@ if(BUILD_TESTING)
     set_tests_properties(guest_nested_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest nested exit completed" TIMEOUT 30)
     if(WIN32)
-        set_tests_properties(guest_system_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch guest_nested_exit PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_system_exit guest_requested_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch guest_nested_exit PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_system_service_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemService.cpp)

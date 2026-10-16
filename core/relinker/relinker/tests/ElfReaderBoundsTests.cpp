@@ -76,10 +76,49 @@ void RejectAddress(Bytes bytes, const std::uint64_t address) {
     throw std::runtime_error("Invalid file mapping was accepted");
 }
 
+void RejectProgramHeaders(Bytes bytes) {
+    try {
+        Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
+    } catch (const Relinker::RelinkerException&) {
+        return;
+    }
+    throw std::runtime_error("Invalid program header was accepted");
+}
+
 }
 
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> cases = {
+        {"load file range past end of file", [] {
+            auto bytes = Fixture();
+            Write<std::uint64_t>(bytes, 96, 0xd0);
+            Write<std::uint64_t>(bytes, 104, 0xd0);
+            RejectProgramHeaders(std::move(bytes));
+        }},
+        {"load and uncovered SCE RELRO ending at end of file", [] {
+            for (const std::uint32_t type : {1u, 0x61000010u}) {
+                auto bytes = Fixture();
+                Write<std::uint32_t>(bytes, 64, type);
+                Write<std::uint64_t>(bytes, 96, 0xc0);
+                Write<std::uint64_t>(bytes, 104, 0xc0);
+                const auto headers = Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
+                Require(headers.size() == 1 && headers[0].Offset + headers[0].FileSize == 0x300);
+            }
+        }},
+        {"uncovered SCE RELRO file size exceeds memory size", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 64, 0x61000010);
+            Write<std::uint64_t>(bytes, 96, 64);
+            Write<std::uint64_t>(bytes, 104, 32);
+            RejectProgramHeaders(std::move(bytes));
+        }},
+        {"uncovered SCE RELRO file range past end of file", [] {
+            auto bytes = Fixture();
+            Write<std::uint32_t>(bytes, 64, 0x61000010);
+            Write<std::uint64_t>(bytes, 96, 0xd0);
+            Write<std::uint64_t>(bytes, 104, 0xd0);
+            RejectProgramHeaders(std::move(bytes));
+        }},
         {"section entry size field", [] {
             const auto sections = Relinker::ElfReader(Fixture()).ReadSectionHeaders();
             Require(sections.size() == 3 && sections[1].Name == ".text" && sections[1].EntrySize == 24);

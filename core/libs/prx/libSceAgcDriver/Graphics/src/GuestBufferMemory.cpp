@@ -1084,15 +1084,17 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
         if (sameRun(failed->second, run)) return nullptr;
         failures.erase(failed);
     }
-    // The imports this one replaces overlap it; none may be held by a build, and the import must fit the budget (with
-    // what may be evicted) before any of them is retired.
     auto first = state.imports.lower_bound(base);
     if (first != state.imports.begin() && std::prev(first)->second.base + std::prev(first)->second.bytes > base) --first;
     std::uint64_t replaced = 0;
     // A join may replace imports this build already looked up: it runs before any region confirms an import
     // (UploadFinish's pre-pass re-resolves every pointer after it), and a retired import stays alive through the
     // hold (KeepThroughHold). Refusing it there would keep the run copied for good.
-    const auto held = [&](const HostImport& entry) { return !joined && pointerHeld(state, entry); };
+    const auto held = [&](const HostImport& entry) {
+        if (joined || !pointerHeld(state, entry)) return false;
+        const bool expandedWindow = run.ranges.size() == 1 && entry.ranges.size() == 1 && entry.range == run.ranges.front() && base <= entry.base && base + bytes >= entry.base + entry.bytes && bytes > entry.bytes;
+        return !expandedWindow || Recorder::Active() == nullptr;
+    };
     for (auto it = first; it != state.imports.end() && it->first < base + bytes; ++it) {
         if (held(it->second)) return nullptr;
         replaced += it->second.bytes;
@@ -3003,9 +3005,12 @@ void GuestBufferMemory::dissolveSpace(bool resolve) {
     std::vector<Region> merged;
     merged.reserve(space->base.size() + regions.size());
     if (prepared) {
-        // Both sorted and disjoint (UploadPrepare merged this build's regions; the space's are
-        // registered ranges), so the merge keeps the order Descriptor searches.
         std::merge(space->base.begin(), space->base.end(), std::make_move_iterator(regions.begin()), std::make_move_iterator(regions.end()), std::back_inserter(merged), [](const Region& left, const Region& right) { return left.begin < right.begin; });
+        std::uint64_t reached = 0;
+        for (const auto& region : merged) {
+            regionsOverlap = regionsOverlap || region.begin < reached;
+            reached = std::max(reached, region.end);
+        }
     } else {
         merged.assign(space->base.begin(), space->base.end());
         merged.insert(merged.end(), std::make_move_iterator(regions.begin()), std::make_move_iterator(regions.end()));
@@ -3022,15 +3027,22 @@ void GuestBufferMemory::dissolveSpace(bool resolve) {
     space.reset();
 }
 
-const GuestBufferMemory::Region* GuestBufferMemory::owner(std::uint64_t address) const {
-    // The region with the greatest begin at or below the address, as the one merged list gave;
-    // the caller checks the end, as before.
-    const auto candidate = [address](const std::vector<Region>& list) -> const Region* {
+const GuestBufferMemory::Region* GuestBufferMemory::owner(std::uint64_t address, std::uint64_t end) const {
+    const auto candidate = [address, end](const std::vector<Region>& list, bool overlapping) -> const Region* {
         const auto found = std::upper_bound(list.begin(), list.end(), address, [](std::uint64_t value, const Region& region) { return value < region.begin; });
-        return found == list.begin() ? nullptr : &*std::prev(found);
+        if (found == list.begin()) return nullptr;
+        if (overlapping) {
+            for (auto it = found; it != list.begin();) {
+                --it;
+                if (end <= it->end) return &*it;
+            }
+        }
+        return &*std::prev(found);
     };
-    const auto* own = candidate(regions);
-    const auto* shared = space != nullptr ? candidate(space->base) : nullptr;
+    const auto* own = candidate(regions, regionsOverlap);
+    const auto* shared = space != nullptr ? candidate(space->base, false) : nullptr;
+    const auto holds = [end](const Region* region) { return region != nullptr && end <= region->end; };
+    if (holds(own) != holds(shared)) return holds(own) ? own : shared;
     if (own == nullptr || (shared != nullptr && shared->begin > own->begin)) return shared;
     return own;
 }
@@ -4120,7 +4132,7 @@ void GuestBufferMemory::RecordCopyBacks(Recorder& recorder) {
 VkDescriptorBufferInfo GuestBufferMemory::Descriptor(std::uint64_t address, std::size_t bytes, std::uint32_t& adjustment) const {
     Require(uploaded && !committed, "guest GPU memory is not available");
     Require(bytes != 0 && bytes <= std::numeric_limits<std::uint64_t>::max() - address, "invalid guest buffer view");
-    const auto* found = owner(address);
+    const auto* found = owner(address, address + bytes);
     Require(found != nullptr, "guest buffer has no GPU owner");
     const auto& region = *found;
     const auto describe = [&](const char* what) {
@@ -4164,16 +4176,73 @@ std::uint64_t GuestBufferMemory::servedEnd(const Region& region) {
     return region.bufferEnd != 0 ? region.bufferEnd : region.end;
 }
 
+namespace {
+
+using AddressRange = ShaderRecompiler::BdaAbi::Range;
+
+void AppendFrom(const AddressRange& range, std::uint64_t begin, std::uint64_t end, std::vector<AddressRange>& result) {
+    if (begin >= end) return;
+    auto part = range;
+    part.begin = begin;
+    part.end = end;
+    part.deviceAddress += begin - range.begin;
+    result.push_back(part);
+}
+
+void AppendDisjoint(const std::vector<AddressRange>& ranges, std::vector<AddressRange>& result) {
+    std::uint64_t reached = 0;
+    for (const auto& range : ranges) {
+        AppendFrom(range, std::max(range.begin, reached), range.end, result);
+        reached = std::max(reached, range.end);
+    }
+}
+
+void AppendUncovered(const std::vector<AddressRange>& ranges, const std::vector<AddressRange>& covering, std::vector<AddressRange>& result) {
+    for (const auto& range : ranges) {
+        auto cursor = range.begin;
+        auto cover = std::partition_point(covering.begin(), covering.end(), [&](const AddressRange& candidate) { return candidate.end <= range.begin; });
+        for (; cover != covering.end() && cover->begin < range.end && cursor < range.end; ++cover) {
+            AppendFrom(range, cursor, std::min(cover->begin, range.end), result);
+            cursor = std::max(cursor, cover->end);
+        }
+        AppendFrom(range, cursor, range.end, result);
+    }
+}
+
+std::vector<AddressRange> MergeByBegin(const std::vector<AddressRange>& left, const std::vector<AddressRange>& right) {
+    std::vector<AddressRange> merged;
+    merged.reserve(left.size() + right.size());
+    std::merge(left.begin(), left.end(), right.begin(), right.end(), std::back_inserter(merged), [](const AddressRange& first, const AddressRange& second) { return first.begin < second.begin; });
+    return merged;
+}
+
+}
+
 std::vector<ShaderRecompiler::BdaAbi::Range> GuestBufferMemory::AddressRanges() const {
     Require(uploaded && !committed, "guest GPU address ranges are not available");
     std::vector<ShaderRecompiler::BdaAbi::Range> result;
-    result.reserve(regions.size() + (space != nullptr ? space->ranges.size() : 0));
-    for (const auto& region : regions) result.push_back(addressRange(region));
     if (space != nullptr) {
-        std::vector<ShaderRecompiler::BdaAbi::Range> combined;
-        combined.reserve(result.size() + space->ranges.size());
-        std::merge(space->ranges.begin(), space->ranges.end(), result.begin(), result.end(), std::back_inserter(combined), [](const auto& left, const auto& right) { return left.begin < right.begin; });
-        result = std::move(combined);
+        std::vector<ShaderRecompiler::BdaAbi::Range> own;
+        own.reserve(regions.size());
+        for (const auto& region : regions) own.push_back(addressRange(region));
+        std::vector<ShaderRecompiler::BdaAbi::Range> uncovered;
+        uncovered.reserve(own.size());
+        AppendUncovered(own, space->ranges, uncovered);
+        result = MergeByBegin(space->ranges, uncovered);
+    } else if (regionsOverlap) {
+        std::vector<ShaderRecompiler::BdaAbi::Range> live;
+        std::vector<ShaderRecompiler::BdaAbi::Range> copies;
+        for (const auto& region : regions) (region.direct != nullptr || region.mirror != nullptr ? live : copies).push_back(addressRange(region));
+        std::vector<ShaderRecompiler::BdaAbi::Range> liveParts;
+        AppendDisjoint(live, liveParts);
+        std::vector<ShaderRecompiler::BdaAbi::Range> copyParts;
+        AppendDisjoint(copies, copyParts);
+        std::vector<ShaderRecompiler::BdaAbi::Range> uncovered;
+        AppendUncovered(copyParts, liveParts, uncovered);
+        result = MergeByBegin(liveParts, uncovered);
+    } else {
+        result.reserve(regions.size());
+        for (const auto& region : regions) result.push_back(addressRange(region));
     }
     if (writes.empty()) return result;
     auto sortedWrites = writes;
@@ -4200,7 +4269,7 @@ std::vector<ShaderRecompiler::BdaAbi::Range> GuestBufferMemory::AddressRanges() 
             part.end = end;
             part.deviceAddress += cursor - range.begin;
             if (written) {
-                const auto* region = owner(cursor);
+                const auto* region = owner(cursor, end);
                 Require(region != nullptr && region->writable && (region->mirror == nullptr || region->mirror->writable), "runtime buffer write has no writable GPU owner");
                 part.permissions |= ShaderRecompiler::BdaAbi::Write;
             }
@@ -4260,7 +4329,7 @@ std::optional<GuestBufferMemory::CachedTable> GuestBufferMemory::CachedAddressTa
 
 bool GuestBufferMemory::HasCopiedWrites() const {
     for (const auto& [begin, end] : writes) {
-        const auto* found = owner(begin);
+        const auto* found = owner(begin, end);
         if (found == nullptr) continue;
         const auto& region = *found;
         if (region.direct != nullptr) continue;
@@ -4280,7 +4349,7 @@ bool GuestBufferMemory::CopiedWritesOverlap(std::uint64_t address, std::size_t b
     if (bytes == 0) return false;
     for (const auto& [begin, end] : writes) {
         if (!(address < end && begin < address + bytes)) continue;
-        const auto* found = owner(begin);
+        const auto* found = owner(begin, end);
         if (found == nullptr) continue;
         const auto& region = *found;
         if (region.direct != nullptr) continue;
@@ -4293,7 +4362,7 @@ bool GuestBufferMemory::CopiedWritesOverlap(std::uint64_t address, std::size_t b
 
 void GuestBufferMemory::MarkDirectWrites() const {
     for (const auto& [begin, end] : writes) {
-        const auto* found = owner(begin);
+        const auto* found = owner(begin, end);
         if (found == nullptr) continue;
         const auto& region = *found;
         if (region.direct != nullptr || (region.gpuCopy && region.copiedBack)) GuestMemory::MarkWritten(begin, static_cast<std::size_t>(end - begin));
@@ -4360,7 +4429,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> mergeWrites(std::vector<std
 void GuestBufferMemory::takeHeapReferences() {
     heapReferences.clear();
     for (const auto& [begin, end] : mergeWrites(writes)) {
-        const auto* found = owner(begin);
+        const auto* found = owner(begin, end);
         if (found == nullptr || found->mirror == nullptr || !found->mirror->heap || !found->mirror->writable) continue;
         Require(end <= found->end, "written range exceeds its heap mirror");
         const auto& mirror = *found->mirror;
@@ -4377,7 +4446,7 @@ void GuestBufferMemory::WriteBack() {
     // The CPU keeps running while the GPU works, so storing whole ranges would roll back its writes to
     // bytes the shader never touched. Only runs that differ from the uploaded copy are stored.
     for (const auto& [begin, end] : merged) {
-        const auto* found = owner(begin);
+        const auto* found = owner(begin, end);
         Require(found != nullptr, "write-back range has no GPU owner");
         const auto& region = *found;
         // Every branch below but the direct, copied-back and staged ones stores from the CPU.

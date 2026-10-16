@@ -17,6 +17,8 @@ int APS5_VABI sceRtcGetTickResolution(void);
 int APS5_VABI sceRtcGetTick(const RtcDateTime*, RtcTick*);
 int APS5_VABI sceRtcSetTick(RtcDateTime*, const RtcTick*);
 int APS5_VABI sceRtcGetCurrentTick(RtcTick*);
+int APS5_VABI sceRtcGetCurrentClock(RtcDateTime*, int);
+int APS5_VABI sceRtcGetCurrentClockLocalTime(RtcDateTime*);
 int APS5_VABI sceRtcConvertUtcToLocalTime(const RtcTick*, RtcTick*);
 int APS5_VABI sceRtcConvertLocalTimeToUtc(const RtcTick*, RtcTick*);
 int APS5_VABI sceRtcGetTime_t(const RtcDateTime*, std::int64_t*);
@@ -71,8 +73,12 @@ int main() {
     Require(sceRtcGetTickResolution() == 1000000);
     Require(sceRtcIsLeapYear(2000) == 1 && sceRtcIsLeapYear(1900) == 0 && sceRtcIsLeapYear(2024) == 1);
     Require(sceRtcIsLeapYear(0) == invalidYear);
+    Require(sceRtcIsLeapYear(10000) == 1);
+    Require(sceRtcIsLeapYear(9999) == 0 && sceRtcIsLeapYear(9996) == 1);
     Require(sceRtcGetDaysInMonth(2023, 2) == 28 && sceRtcGetDaysInMonth(2024, 2) == 29 && sceRtcGetDaysInMonth(2024, 4) == 30);
     Require(sceRtcGetDaysInMonth(2024, 13) == invalidMonth);
+    Require(sceRtcGetDaysInMonth(10000, 1) == 31);
+    Require(sceRtcGetDaysInMonth(9999, 1) == 31);
     Require(sceRtcGetDayOfWeek(1, 1, 1) == 1 && sceRtcGetDayOfWeek(2026, 9, 26) == 6);
     Require(sceRtcGetDayOfWeek(2023, 2, 29) == invalidDay);
 
@@ -97,6 +103,13 @@ int main() {
     Require(sceRtcSetTick(&converted, &tick) == 0 && Equal(converted, RtcDateTime{9999, 12, 31, 23, 59, 59, 999999}));
     tick.tick = maxTick + 1;
     Require(sceRtcSetTick(&converted, &tick) == invalidValue);
+
+    Require(sceRtcGetCurrentClock(nullptr, 0) == invalidPointer);
+    Require(sceRtcGetCurrentClock(&converted, 0) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClock(&converted, 60) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClock(&converted, -300) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClockLocalTime(nullptr) == invalidPointer);
+    Require(sceRtcGetCurrentClockLocalTime(&converted) == 0 && sceRtcCheckValid(&converted) == 0);
 
     RtcDateTime epoch{1970, 1, 1, 0, 0, 0, 0};
     std::int64_t seconds = -1;

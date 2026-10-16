@@ -26,7 +26,6 @@ namespace {
 constexpr int InvalidArgument = static_cast<int>(0x80550003u);
 constexpr int SignedOut = static_cast<int>(0x80550006u);
 constexpr int RequestNotFound = static_cast<int>(0x80550014u);
-constexpr int UserNotFound = static_cast<int>(0x80550007u);
 
 void Require(bool condition, const char* message) {
     if (!condition) {
@@ -72,9 +71,11 @@ int main() {
     Require(sceNpGetNpId(0x10000, &npId) == SignedOut, "sceNpGetNpId must report the user as signed out");
     Require(std::memcmp(&npId, &untouched, sizeof(npId)) == 0, "sceNpGetNpId must leave the NpId untouched");
     Require(sceNpGetNpId(0x10000, nullptr) == InvalidArgument, "sceNpGetNpId must reject a null NpId");
-    int userId = 0x5a;
-    Require(sceNpGetUserIdByAccountId(0x1234, &userId) == UserNotFound && userId == 0x5a, "no account maps to a signed-in user");
-    Require(sceNpGetUserIdByAccountId(0x1234, nullptr) == InvalidArgument, "null user id");
+    int userId = 0x5a5a;
+    Require(sceNpGetUserIdByAccountId(0, &userId) == InvalidArgument, "sceNpGetUserIdByAccountId must reject account id 0");
+    Require(sceNpGetUserIdByAccountId(0x1234, nullptr) == InvalidArgument, "sceNpGetUserIdByAccountId must reject a null output");
+    Require(sceNpGetUserIdByAccountId(0x1234, &userId) == SignedOut, "sceNpGetUserIdByAccountId must report NP as signed out");
+    Require(userId == 0x5a5a, "sceNpGetUserIdByAccountId must leave the user id untouched");
     NpContentRestriction restriction{};
     Require(sceNpSetContentRestriction(&restriction) == 0, "content restriction accepted");
     Require(sceNpSetContentRestriction(nullptr) == InvalidArgument, "null content restriction");

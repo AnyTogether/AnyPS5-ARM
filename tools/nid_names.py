@@ -163,9 +163,11 @@ def main(argv=None):
     options = [option for action in parser._actions for option in action.option_strings]
     arguments = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(nid_arguments(arguments, options))
+    requested_options = {option_name(argument, options) for argument in arguments}
+    requested_nids = "--nid" in requested_options
+    if requested_nids and requested_options & {"--name", "--symbol"}:
+        parser.error("--name/--symbol cannot be combined with --nid")
     if args.name:
-        if args.nid:
-            parser.error("--name/--symbol cannot be combined with --nid")
         rows = [{"name": name, "nid": compute_nid(name)} for name in args.name]
         if args.json:
             print(json.dumps({"symbols": rows}, indent=1))
@@ -174,7 +176,6 @@ def main(argv=None):
             for row in rows:
                 print("%-40s %s" % (row["name"], row["nid"]))
         return 0
-    requested_nids = any(option_name(argument, options) == "--nid" for argument in arguments)
     for nid in args.nid or []:
         if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:
             parser.error(f"invalid NID {nid!r}: expected 11 characters from A-Z, a-z, 0-9, + or -")

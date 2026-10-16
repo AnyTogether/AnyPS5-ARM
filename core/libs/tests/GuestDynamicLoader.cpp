@@ -1,4 +1,5 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -122,6 +123,16 @@ int main(int argc, char** argv) {
     void* hostAdd = ::dlsym(host, "3qcG+yBRS+s");
     Require(hostAdd != nullptr);
     Require(dlsym_nid_postfix(nullptr, "GuestModuleAdd") == hostAdd);
+    void* hostMul = ::dlsym(host, "GuestModuleMul#guest");
+    void* hostSub = ::dlsym(host, "BOyBJaKwOa8#guest");
+    Require(hostMul != nullptr && hostSub != nullptr);
+    for (void* scope : std::array<void*, 2>{nullptr, reinterpret_cast<void*>(-2)}) {
+        auto defaultMul = reinterpret_cast<Add>(dlsym_nid_postfix(scope, "GuestModuleMul"));
+        auto defaultSub = reinterpret_cast<Add>(dlsym_nid_postfix(scope, "GuestModuleSub"));
+        Require(reinterpret_cast<void*>(defaultMul) == hostMul);
+        Require(reinterpret_cast<void*>(defaultSub) == hostSub);
+        Require(defaultMul(6, 7) == 42 && defaultSub(50, 8) == 42);
+    }
     Require(dlsym_nid_postfix(nullptr, "malloc") == nullptr);
     Require(::dlclose(host) == 0);
 #endif

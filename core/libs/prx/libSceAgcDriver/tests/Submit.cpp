@@ -671,9 +671,10 @@ void testProgramSnapshots() {
     shaders[registeredAddress] = {entry};
     check(AgcDriver::DriverDetail::ProgramSnapshot(shaders, registeredAddress, {2}) == entry, "a registered program was not resolved to its registration");
     check(AgcDriver::DriverDetail::ProgramSnapshot(shaders, registeredAddress + 4 * 8, {2}) == entry, "an entry inside registered code was not resolved to its registration");
-    check(!expectFailure([&] { static_cast<void>(AgcDriver::DriverDetail::ProgramSnapshot(shaders, rawAddress, {2})); }).empty(), "an unregistered program was read raw while shaders are registered");
-    const auto unregistered = AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2});
-    check(unregistered != entry && unregistered->codeAddress == rawAddress && unregistered->header.empty() && unregistered->code.size() == 2, "an empty registry did not read the program as raw code");
+    const auto unregistered = AgcDriver::DriverDetail::ProgramSnapshot(shaders, rawAddress, {2});
+    check(unregistered != entry && unregistered->codeAddress == rawAddress && unregistered->header.empty() && unregistered->code.size() == 2, "an unregistered program beside registered shaders was not read as raw code");
+    check(AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2}) == unregistered, "an empty registry did not read the program as raw code");
+    check(!expectFailure([&] { static_cast<void>(AgcDriver::DriverDetail::ProgramSnapshot(shaders, registeredAddress, {1})); }).empty(), "a registered program was accepted as another shader type");
     check(AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2}) == unregistered, "unchanged raw code lost its snapshot identity");
     check(!expectFailure([] { static_cast<void>(AgcDriver::DriverDetail::ProgramSnapshot({}, 0, {2})); }).empty(), "an unmapped unregistered program was accepted");
     AgcDriver::DriverDetail::DrawDecode decode{};
@@ -688,6 +689,27 @@ void testProgramSnapshots() {
     check(!AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "a rewritten unregistered program left its decode current");
     decode.programs[0].snapshot = AgcDriver::DriverDetail::ProgramSnapshot({}, rawAddress, {2});
     check(AgcDriver::DriverDetail::DecodeProgramsCurrent(decode, shaders), "a decode with the rewritten program was not current");
+}
+
+void testRawGraphicsRanges() {
+    using AgcDriver::DriverDetail::RawGraphicsDrawnIn;
+    constexpr std::uint64_t base = 0x7e0000000000ull;
+    const auto note = [](std::uint64_t address, std::size_t dwords) {
+        AgcDriver::DriverDetail::ShaderSnapshot snapshot{address, 0, 0, std::vector<std::uint32_t>(dwords, 0xbf810000u), {}};
+        AgcDriver::DriverDetail::NoteRawGraphicsDraw(snapshot);
+        check(snapshot.rawGraphicsNoted->load(), "a raw graphics program was not marked as noted");
+        AgcDriver::DriverDetail::NoteRawGraphicsDraw(snapshot);
+    };
+    note(base + 0x100, 0x10);
+    note(base, 0x100);
+    note(base + 0x3f0, 0x8);
+    note(base + 0x800, 0x1);
+    check(RawGraphicsDrawnIn(base + 0x200, base + 0x210), "code inside a raw program that contains a smaller one was not reported");
+    check(RawGraphicsDrawnIn(base + 0x40c, base + 0x500), "the end of a raw program that overlaps another was not reported");
+    check(!RawGraphicsDrawnIn(base + 0x410, base + 0x800), "code between raw programs was reported");
+    check(!RawGraphicsDrawnIn(base - 4, base), "code before a raw program was reported");
+    check(RawGraphicsDrawnIn(base + 0x700, base + 0x900), "a range covering a raw program was not reported");
+    check(!RawGraphicsDrawnIn(base + 0x804, base + 0x808) && !RawGraphicsDrawnIn(base + 0x200, base + 0x200), "code after a raw program or an empty range was reported");
 }
 
 void testProgramWorkgroupUse() {
@@ -860,6 +882,7 @@ int main(int argc, char** argv) {
         check(!unterminated.empty() && bounded->code.size() == 64, "raw compute crossed inaccessible memory or missed its last instruction");
 #endif
         testProgramSnapshots();
+        testRawGraphicsRanges();
         testProgramWorkgroupUse();
         testVertexTailSnapshots();
         testRegisteredVertexWorkgroupRouting();

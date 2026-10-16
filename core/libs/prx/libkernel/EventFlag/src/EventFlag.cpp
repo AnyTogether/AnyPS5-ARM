@@ -66,6 +66,7 @@ int APS5_VABI sceKernelCreateEventFlag(KernelEventFlag* ef, const char* name, ui
     (void)param;
     if (!ef || !name) return SCE_KERNEL_ERROR_EINVAL;
     if ((attr & EVF_ATTR_SINGLE) && (attr & EVF_ATTR_MULTI)) return SCE_KERNEL_ERROR_EINVAL;
+    if ((attr & ~0x33u) != 0) return SCE_KERNEL_ERROR_EINVAL;
     auto* flag = new (std::nothrow) KernelEventFlagPrivate();
     if (!flag) return SCE_KERNEL_ERROR_ENOMEM;
     flag->_name = name;

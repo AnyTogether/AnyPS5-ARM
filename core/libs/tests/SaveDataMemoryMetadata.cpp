@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -115,6 +117,24 @@ int main() {
     set.data_num = 0;
     Require(sceSaveDataSetSaveDataMemory2(&set) == 0);
     std::copy(first.begin(), first.end(), memoryExpected.begin() + 4);
+    Require(Read(memoryPath) == memoryExpected);
+    std::array<char, 4> third{'p', 'q', 'r', 's'};
+    std::array<char, 4> fourth{'t', 'u', 'v', 'w'};
+    constexpr std::size_t GuestMemoryDataSize = 64;
+    alignas(SaveDataMemoryData) std::array<unsigned char, 2 * GuestMemoryDataSize> guestData{};
+    const auto putGuestData = [&guestData](std::size_t index, const char* buffer, std::uint64_t size, std::uint64_t offset) {
+        unsigned char* entry = guestData.data() + index * GuestMemoryDataSize;
+        std::memcpy(entry, &buffer, sizeof(buffer));
+        std::memcpy(entry + 8, &size, sizeof(size));
+        std::memcpy(entry + 16, &offset, sizeof(offset));
+    };
+    putGuestData(0, third.data(), third.size(), 0);
+    putGuestData(1, fourth.data(), fourth.size(), 16);
+    set.data = reinterpret_cast<const SaveDataMemoryData*>(guestData.data());
+    set.data_num = 2;
+    Require(sceSaveDataSetSaveDataMemory2(&set) == 0);
+    std::copy(third.begin(), third.end(), memoryExpected.begin());
+    std::copy(fourth.begin(), fourth.end(), memoryExpected.begin() + 16);
     Require(Read(memoryPath) == memoryExpected);
     const auto setupParamPath = std::filesystem::path("_sd_mem/u42/slot0.param");
     const auto setupBinPath = std::filesystem::path("_sd_mem/u42/slot0.bin");

@@ -214,6 +214,10 @@ struct SharedRange {
         mutation.Add(backing.base, static_cast<std::size_t>(bytes), true, true, true);
     }
 
+    ~SharedRange() {
+        std::erase(backings, &backing);
+    }
+
     std::uint64_t Address() const {
         return reinterpret_cast<std::uint64_t>(backing.base);
     }

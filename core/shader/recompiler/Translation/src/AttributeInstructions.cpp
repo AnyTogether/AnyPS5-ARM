@@ -100,6 +100,7 @@ void TranslationContext::vInterpMovF32(const RdnaInstruction& inst) {
         writeOperand(inst.destination, inst.source0.value == 2u ? &ir.Emit(IrOpcode::GetAttribute, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value)}) : &ir.Constant(0u));
         return;
     }
+    if (inst.source1.value < 32u) program.Metadata().pixelVertexOrderInputs |= 1u << inst.source1.value;
     IrValue& value = ir.Emit(IrOpcode::GetInterpolationParameter, IrType::U32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(inst.source0.value)});
     writeOperand(inst.destination, &value);
 }
@@ -111,6 +112,7 @@ IrF32 TranslationContext::interpolationParameterF16(const RdnaInstruction& inst,
     if (pixelInput == nullptr || !pixelInput->InputIsFp16(inst.source1.value)) {
         throw std::runtime_error("pixel input " + std::to_string(inst.source1.value) + " is read with 16-bit interpolation without FP16_INTERP_MODE");
     }
+    if (inst.source1.value < 32u) program.Metadata().pixelVertexOrderInputs |= 1u << inst.source1.value;
     return IrF32(ir.Emit(IrOpcode::GetInterpolationParameterF16, IrType::F32, {&ir.Constant(inst.source1.value), &ir.Constant(inst.source2.value), &ir.Constant(mode), &ir.Constant(inst.source1.opSel ? 1u : 0u)}));
 }
 

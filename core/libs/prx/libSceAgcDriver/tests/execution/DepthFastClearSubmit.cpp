@@ -11,6 +11,7 @@
 #endif
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +21,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace {
@@ -113,6 +115,8 @@ void DispatchFill(const GuestBlock& code, const GuestBlock& htile, std::uint32_t
     });
 }
 
+constexpr std::array<std::uint32_t, 10> UnknownFillKernel{0xbf800000u, 0xd7460004u, 0x04010c08u, 0x7e000204u, 0x7e020205u, 0x7e040206u, 0x7e060207u, 0xe01c2000u, 0x80000004u, 0xbf810000u};
+
 bool StoresFills(AgcDriver::VulkanDevice& device, const GuestBlock& probe) {
     std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
     std::array<std::uint32_t, 4> pattern{};
@@ -162,6 +166,68 @@ void DispatchBufferPatternFillClearsDepth(AgcDriver::VulkanDevice& device, const
     Require(Draw(device, shaders, surface, {.depthWrite = true}) == Covered, "a compute fill with the buffer pattern 0 over the HTILE did not clear the depth to DB_DEPTH_CLEAR (1.0)");
 }
 
+void DrawAfterFastClearExpandsHtile(AgcDriver::VulkanDevice& device, const Shaders& shaders) {
+    for (const bool stencil : {false, true}) {
+        auto& htile = NewBlock();
+        const Surface surface{NewBlock().Address(), stencil ? NewBlock().Address() : 0, htile.Address(), stencil, stencil ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D32_SFLOAT};
+        Require(Draw(device, shaders, surface, {.depthWrite = true}) == Covered, "a new depth surface was not cleared to DB_DEPTH_CLEAR (1.0)");
+        DmaFill(htile, HtileFillBytes, stencil ? 0xf0u : 0u);
+        Require(Draw(device, shaders, surface, {.depthWrite = true}) == Covered, "a fast clear through the HTILE did not clear the depth to DB_DEPTH_CLEAR (1.0)");
+        std::vector<std::uint32_t> words(HtileFillBytes / 4u);
+        AgcDriver::GuestMemory::Read(htile.Address(), std::as_writable_bytes(std::span(words)), 4);
+        const auto expanded = stencil ? 0xfffff3ffu : 0xfffc000fu;
+        for (const auto word : words) Require(word == expanded, stencil ? "a draw after a depth and stencil fast clear left HTILE words other than expanded (0xfffff3ff)" : "a draw after a depth fast clear left HTILE words other than expanded (0xfffc000f): a kernel decoding the depth through ZMask 0 reads the clear value, not the drawn depth");
+        Require(Draw(device, shaders, surface, {}) == 0u, "the depth drawn after the fast clear was cleared again");
+    }
+}
+
+void UnknownKernelClearsTwice(AgcDriver::VulkanDevice& device, const Shaders& shaders) {
+    const auto& htile = NewBlock();
+    auto& code = NewBlock();
+    std::memcpy(code.Data(), UnknownFillKernel.data(), sizeof(UnknownFillKernel));
+    const Surface surface{NewBlock().Address(), 0, htile.Address(), false, VK_FORMAT_D32_SFLOAT};
+    Require(Draw(device, shaders, surface, {.depthWrite = true}) == Covered, "a new depth surface was not cleared to DB_DEPTH_CLEAR (1.0)");
+    for (const char* frame : {"first", "second"}) {
+        DispatchFill(code, htile, HtileFillBytes);
+        Require(Draw(device, shaders, surface, {.depthWrite = true}) == Covered, std::string("the ") + frame + " clear an unrecognized kernel wrote into the HTILE was not taken");
+        Require(Draw(device, shaders, surface, {}) == 0u, std::string("the depth written after the ") + frame + " kernel clear was lost");
+    }
+}
+
+std::uint32_t* WordsAt(GuestBlock& block, std::size_t offset) { return reinterpret_cast<std::uint32_t*>(block.Data() + offset); }
+
+bool AllWords(const std::uint32_t* words, std::uint32_t value) { return std::all_of(words, words + HtileFillBytes / 4u, [&](std::uint32_t word) { return word == value; }); }
+
+void NonUniformSliceIsRefused(AgcDriver::VulkanDevice& device, const Shaders& shaders) {
+    auto& htile = NewBlock();
+    const Surface first{NewBlock().Address(), 0, htile.Address(), false, VK_FORMAT_D32_SFLOAT, 0};
+    const Surface second{NewBlock().Address(), 0, htile.Address() + HtileFillBytes, false, VK_FORMAT_D32_SFLOAT, 1};
+    Require(Draw(device, shaders, first, {.depthWrite = true}) == Covered, "slice 0 was not cleared to DB_DEPTH_CLEAR (1.0)");
+    Require(Draw(device, shaders, second, {.depthWrite = true}) == Covered, "slice 1 was not cleared to DB_DEPTH_CLEAR (1.0)");
+    auto* sliceOne = WordsAt(htile, HtileFillBytes);
+    std::fill(sliceOne, sliceOne + HtileFillBytes / 4u, 0u);
+    sliceOne[0] = 0xffffffffu;
+    AgcDriver::GuestMemory::MarkWritten(htile.Address() + HtileFillBytes, HtileFillBytes);
+    Require(Draw(device, shaders, second, {}) == 0u, "slice 1 took a clear from HTILE words that are not all equal");
+    Require(sliceOne[0] == 0xffffffffu && std::all_of(sliceOne + 1, sliceOne + HtileFillBytes / 4u, [](std::uint32_t word) { return word == 0u; }), "a bind of slice 1 stored back HTILE words that are not all equal");
+    Require(AllWords(WordsAt(htile, 0), 0xfffc000fu), "a bind of slice 1 changed slice 0's HTILE");
+}
+
+void UniformSliceDecodes(AgcDriver::VulkanDevice& device, const Shaders& shaders) {
+    auto& htile = NewBlock();
+    const Surface first{NewBlock().Address(), 0, htile.Address(), false, VK_FORMAT_D32_SFLOAT, 0};
+    const Surface second{NewBlock().Address(), 0, htile.Address() + HtileFillBytes, false, VK_FORMAT_D32_SFLOAT, 1};
+    Require(Draw(device, shaders, first, {.depthWrite = true}) == Covered, "slice 0 was not cleared to DB_DEPTH_CLEAR (1.0)");
+    Require(Draw(device, shaders, second, {.depthWrite = true}) == Covered, "slice 1 was not cleared to DB_DEPTH_CLEAR (1.0)");
+    Require(Draw(device, shaders, second, {}) == 0u, "the depth drawn into slice 1 was lost");
+    auto* sliceOne = WordsAt(htile, HtileFillBytes);
+    std::fill(sliceOne, sliceOne + HtileFillBytes / 4u, 0u);
+    AgcDriver::GuestMemory::MarkWritten(htile.Address() + HtileFillBytes, HtileFillBytes);
+    Require(Draw(device, shaders, second, {.depthWrite = true}) == Covered, "slice 1 did not take the clear from HTILE words that are all equal");
+    Require(AllWords(sliceOne, 0xfffc000fu), "slice 1's bind did not store its cleared HTILE back as expanded");
+    Require(Draw(device, shaders, second, {}) == 0u, "the depth drawn into slice 1 after the clear was lost");
+}
+
 void DepthOnlyFillKeepsStencil(AgcDriver::VulkanDevice& device, const Shaders& shaders) {
     const auto& htile = NewBlock();
     const Surface surface{NewBlock().Address(), NewBlock().Address(), htile.Address(), true, VK_FORMAT_D32_SFLOAT_S8_UINT};
@@ -185,10 +251,14 @@ int main() {
         const auto shaders = Compile(*device);
         DmaFillClearsDepth(*device, shaders);
         DepthOnlyFillKeepsStencil(*device, shaders);
+        DrawAfterFastClearExpandsHtile(*device, shaders);
         const bool computeRan = StoresFills(*device, NewBlock());
+        NonUniformSliceIsRefused(*device, shaders);
+        UniformSliceDecodes(*device, shaders);
         if (computeRan) {
             DispatchFillClearsDepth(*device, shaders);
             DispatchBufferPatternFillClearsDepth(*device, shaders);
+            UnknownKernelClearsTwice(*device, shaders);
         }
         else std::printf("compute fill not run: the device does not store fills into imported guest memory\n");
         LibcRunShutdown_nid_postfix();

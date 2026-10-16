@@ -115,6 +115,7 @@ def td_target(module, td_path, td_lib):
 
 
 def generate(module, nids, db, td_path=None, td_lib=None):
+    module = re.sub(r"\.prx$", "", module, flags=re.IGNORECASE)
     prefix = module_prefix(module)
     path, lib = td_target(module, td_path, td_lib)
     used = set()
@@ -146,7 +147,7 @@ def generate(module, nids, db, td_path=None, td_lib=None):
         if display is not None:
             chunks.append("")
             chunks.append("int APS5_VABI %s(void) {" % func)
-            chunks.append('    NotImplemented_nid_no_patch("%s");' % nid)
+            chunks.append("    NotImplemented_nid_no_patch(__func__);")
             chunks.append("    return 0;")
             chunks.append("}")
             td.append("- [%s](%s) (%s) - unknown signature" % (display, path, lib))

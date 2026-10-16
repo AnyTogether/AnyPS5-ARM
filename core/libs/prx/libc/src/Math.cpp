@@ -355,7 +355,11 @@ float APS5_VABI log1pf_nid_postfix(float x) { return std::log1p(x); }
 double APS5_VABI expm1_nid_postfix(double x) { return std::expm1(x); }
 float APS5_VABI expm1f_nid_postfix(float x) { return std::expm1(x); }
 float APS5_VABI erff_nid_postfix(float x) { return std::erf(x); }
-double APS5_VABI lgamma_nid_postfix(double x) { return std::lgamma(x); }
+double APS5_VABI lgamma_nid_postfix(double x) {
+    const std::uint64_t magnitude = std::bit_cast<std::uint64_t>(x) & 0x7fffffffffffffffull;
+    if (magnitude != 0 && magnitude < 0x3c70000000000000ull) return -std::log(std::fabs(x));
+    return std::lgamma(x);
+}
 
 float APS5_VABI sinf_nid_postfix(float x) { return std::sin(x); }
 float APS5_VABI cosf_nid_postfix(float x) { return std::cos(x); }
@@ -551,6 +555,13 @@ int APS5_VABI __signbitf_nid_postfix(float x) { return std::signbit(x) ? 1 : 0; 
 int APS5_VABI __signbitl_nid_postfix(long double x) {
     static_assert(sizeof(long double) == 16, "guest long double requires x87 extended precision storage");
     return std::signbit(x) ? 1 : 0;
+}
+
+int APS5_VABI __isfinitel_nid_postfix(long double x) {
+    static_assert(sizeof(long double) == 16 && std::numeric_limits<long double>::digits == 64 && std::numeric_limits<long double>::max_exponent == 16384 && std::endian::native == std::endian::little, "guest long double requires little-endian x87 extended precision storage");
+    std::uint16_t exponent;
+    std::memcpy(&exponent, reinterpret_cast<const std::uint8_t*>(&x) + 8, sizeof(exponent));
+    return (exponent & 0x7fffu) != 0x7fffu;
 }
 
 static std::mutex g_randLock;

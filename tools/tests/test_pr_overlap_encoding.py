@@ -26,7 +26,7 @@ def simulated_cp1252():
         wrapper = io.TextIOWrapper
 
         def fake_wrapper(buffer, encoding=None, *args, **kwargs):
-            if encoding == "locale":
+            if encoding in (None, "locale"):
                 encoding = "cp1252"
             return wrapper(buffer, encoding=encoding, *args, **kwargs)
 

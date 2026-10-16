@@ -99,6 +99,10 @@ extern "C" std::uint32_t AgcDriverReserveEopFlip_nid_postfix(const AgcDriver::Fl
     return AgcDriver::DriverDetail::Driver::Get().ReserveEopFlip(info);
 }
 
+extern "C" std::uint64_t AgcDriverDispatchesAdoptedAhead_nid_postfix() {
+    return AgcDriver::DriverDetail::Driver::Get().DispatchesAdoptedAhead();
+}
+
 extern "C" void AgcDriverRegisterVideoOutput_nid_postfix(std::uint32_t handle, const std::shared_ptr<AgcDriver::IVideoOutput>& output) {
     AgcDriver::RegisterVideoOutput(handle, output);
 }

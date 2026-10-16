@@ -346,7 +346,7 @@ int APS5_VABI sceImeGetPanelSize(const Param* param, uint32_t* width, uint32_t* 
 
 int APS5_VABI sceImeKeyboardClose(int32_t user_id) {
  std::lock_guard lock(g_keyboardMutex);
- if (g_openKeyboards.erase(user_id) == 0) throw std::logic_error("sceImeKeyboardClose: keyboard not open for user " + std::to_string(user_id));
+ if (g_openKeyboards.erase(user_id) == 0) return ErrorNotOpened;
  return 0;
 }
 
@@ -369,7 +369,7 @@ int APS5_VABI sceImeKeyboardGetResourceId(int32_t user_id, KeyboardResourceIdArr
 int APS5_VABI sceImeKeyboardOpen(int32_t user_id, const KeyboardParam* param) {
  if (!param) APS5_INVALID_ARG_EX;
  std::lock_guard lock(g_keyboardMutex);
- if (!g_openKeyboards.insert(user_id).second) throw std::logic_error("sceImeKeyboardOpen: keyboard already open for user " + std::to_string(user_id));
+ if (!g_openKeyboards.insert(user_id).second) return ErrorBusy;
  return 0;
 }
 

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: Pull request numbers to build together, separated by spaces or commas (up to 8)
+        description: Pull request numbers to build together, separated by spaces or commas (up to 40)
         required: true
         type: string
       linux:
@@ -127,8 +127,8 @@ jobs:
                   throw new Error('Only collaborators with write access can start or rerun builds');
                 }
               }
-              if (!/^[1-9][0-9]*([ ,]+[1-9][0-9]*){0,7}$/.test(process.env.PR_NUMBER.trim())) {
-                throw new Error('Enter up to 8 positive pull request numbers separated by spaces or commas');
+              if (!/^[1-9][0-9]*([ ,]+[1-9][0-9]*){0,39}$/.test(process.env.PR_NUMBER.trim())) {
+                throw new Error('Enter up to 40 positive pull request numbers separated by spaces or commas');
               }
             }
             const numbers = manual
@@ -140,7 +140,6 @@ jobs:
             const pulls = [];
             const paths = [];
             let truncated = false;
-            let relinker = manual;
             for (const pull_number of numbers) {
               let { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
               for (let attempt = 0; pr.mergeable === null && attempt < 10; ++attempt) {
@@ -160,19 +159,34 @@ jobs:
               if (pr.mergeable === false) {
                 throw new Error(`Pull request #${pull_number} does not merge cleanly into main; rebase it first`);
               }
-              if (!manual) {
-                const { data: commits } = await github.rest.repos.listCommits({
-                  owner, repo, sha: 'main', author: pr.user.login, per_page: 1
-                });
-                relinker = commits.length > 0;
-              }
               const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 });
               truncated ||= files.length >= 3000;
               paths.push(...files.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean)));
               pulls.push({ number: pull_number, head: pr.head.sha });
             }
             const run = select(paths, truncated);
-            relinker = relinker && run.relinker;
+            let relinker = run.relinker;
+            if (relinker && !manual) {
+              const author = context.payload.pull_request.user.login;
+              const { data: commits } = await github.rest.repos.listCommits({
+                owner, repo, sha: 'main', author, per_page: 1
+              });
+              relinker = commits.length > 0;
+              if (!relinker) {
+                try {
+                  const { data: mergedPRs } = await github.rest.search.issuesAndPullRequests({
+                    q: `repo:${owner}/${repo} is:pr is:merged base:main author:${author}`,
+                    per_page: 1
+                  });
+                  if (mergedPRs.incomplete_results) {
+                    throw new Error('the search results are incomplete');
+                  }
+                  relinker = mergedPRs.total_count > 0;
+                } catch (error) {
+                  core.warning(`Skipping the relinker: could not search the merged pull requests of ${author}: ${error.message}`);
+                }
+              }
+            }
             const registerContext = run.registerContext;
             const writeWatch = run.writeWatch;
             const { data: main } = await github.rest.repos.getBranch({ owner, repo, branch: 'main' });
@@ -188,7 +202,7 @@ jobs:
             merged.forEach((line) => core.info(line));
             await core.summary.addRaw(
               `${merged.join(', then ')}: full builds ${full ? 'enabled' : 'disabled'}, ` +
-              `relinker ${relinker ? (full ? (linux ? 'enabled on macOS (the full builds run the Linux and Windows relinker tests)' : 'enabled on Linux and macOS (the full Windows build runs the Windows relinker tests)') : 'enabled') : 'skipped: no relinker file changed or the author has no commit in main'}, ` +
+              `relinker ${relinker ? (full ? (linux ? 'enabled on macOS (the full builds run the Linux and Windows relinker tests)' : 'enabled on Linux and macOS (the full Windows build runs the Windows relinker tests)') : 'enabled') : 'skipped: no relinker file changed, or no commit or merged pull request in main was found for the author'}, ` +
               `register context tests ${registerContext ? 'enabled' : 'skipped'}, write watch tests ${writeWatch ? 'enabled' : 'skipped'}`
             ).write();
 
@@ -350,7 +364,6 @@ jobs:
     env:
       WINLIBS_RELEASE: 15.2.0posix-14.0.0-ucrt-r7
       WINLIBS_ZIP: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
-      SSL_CERT_FILE: C:\Program Files\Git\mingw64\etc\ssl\certs\ca-bundle.crt
     defaults:
       run:
         shell: bash
@@ -377,6 +390,13 @@ jobs:
             if ! git -c user.name=ci -c user.email=ci@localhost merge --no-ff --no-edit "refs/remotes/pull/${numbers[i]}"; then echo "::error::Pull request #${numbers[i]} does not merge cleanly into main and the pull requests before it; rebase it first"; exit 1; fi
           done
           git submodule update --init --recursive
+      - name: Point the WinLibs CMake at the CA bundle of Git for Windows
+        run: |
+          for prefix in ucrt64 mingw64; do
+            bundle="C:/Program Files/Git/$prefix/etc/ssl/certs/ca-bundle.crt"
+            if [ -f "$bundle" ]; then echo "SSL_CERT_FILE=$bundle" >> "$GITHUB_ENV"; exit 0; fi
+          done
+          echo "::error::No CA bundle found in Git for Windows"; exit 1
       - id: toolchain
         uses: actions/cache@v6
         with:

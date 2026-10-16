@@ -24,6 +24,7 @@ int main() {
 
     Require(scePlayGoDialogGetStatus() == 0);
     Require(scePlayGoDialogTerminate() == notInitialized);
+    Require(scePlayGoDialogClose() == notInitialized);
     Require(scePlayGoDialogOpen(nullptr) == paramInvalid);
     Require(scePlayGoDialogGetResult(nullptr) == notInitialized);
 

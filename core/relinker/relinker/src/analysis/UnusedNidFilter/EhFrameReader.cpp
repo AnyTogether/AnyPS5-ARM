@@ -126,12 +126,21 @@ private:
             default: throw RelinkerException("Strict filter: unsupported unwind pointer format", field);
         }
         if (value == 0) return 0;
+        VirtualAddress base = 0;
         switch (encoding & 0x70) {
             case 0: break;
-            case 0x10: value += field; break;
-            case 0x30: value += dataBase; break;
-            case 0x40: value += functionBase; break;
+            case 0x10: base = field; break;
+            case 0x30: base = dataBase; break;
+            case 0x40: base = functionBase; break;
             default: throw RelinkerException("Strict filter: unsupported unwind pointer base", field);
+        }
+        if ((encoding & 0x70) != 0) {
+            if ((encoding & 0x08) != 0) {
+                const bool negative = (value >> 63) != 0;
+                if (negative ? base < std::uint64_t{0} - value : value > std::numeric_limits<VirtualAddress>::max() - base)
+                    throw RelinkerException("Strict filter: unwind pointer address overflowed", field);
+            }
+            value = base + value;
         }
         if ((encoding & 0x80) != 0 && !importSlots.contains(value)) {
             const auto pointer = pointers.find(value);
@@ -198,7 +207,7 @@ private:
         const auto end = checkedRangeEnd(position, length);
         const auto cieField = position;
         const auto cieOffset = read<std::uint32_t>(position);
-        if (cieOffset > cieField) throw RelinkerException("Strict filter: invalid FDE CIE offset", address);
+        if (cieOffset == 0 || cieOffset > cieField) throw RelinkerException("Strict filter: invalid FDE CIE offset", address);
         const auto cie = readCie(cieField - cieOffset);
         const auto begin = encoded(position, cie.PointerEncoding);
         const auto size = encoded(position, cie.PointerEncoding & 0x0F);

@@ -12,6 +12,8 @@
 namespace {
 
 constexpr int POSIX_EINVAL = 22;
+constexpr int POSIX_PROCESS_PRIVATE = 0;
+constexpr int POSIX_PROCESS_SHARED = 1;
 constexpr int GUEST_REALTIME_CLOCK = 0;
 constexpr int POSIX_PRIO_PROTECT = 2;
 constexpr int POSIX_SCHED_RR = 3;
@@ -86,6 +88,20 @@ int APS5_VABI pthread_mutexattr_init_nid_postfix(PthreadMutexattr* attr) {
     const int result = scePthreadMutexattrInit(attr);
     if (result == 0) (*attr)->type = MutexType::ErrorCheck;
     return PosixThread::ToErrno(result);
+}
+
+int APS5_VABI pthread_mutexattr_getpshared_nid_postfix(const PthreadMutexattr* attr, int* pshared) {
+    if (!attr || !*attr) return POSIX_EINVAL;
+    if (!pshared) throw std::runtime_error("pthread_mutexattr_getpshared: null pshared");
+    *pshared = (*attr)->pshared;
+    return 0;
+}
+
+int APS5_VABI pthread_mutexattr_setpshared_nid_postfix(PthreadMutexattr* attr, int pshared) {
+    if (!attr || !*attr) return POSIX_EINVAL;
+    if (pshared != POSIX_PROCESS_PRIVATE && pshared != POSIX_PROCESS_SHARED) return POSIX_EINVAL;
+    (*attr)->pshared = pshared;
+    return 0;
 }
 
 int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, int protocol) {

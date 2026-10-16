@@ -84,6 +84,8 @@ class DebtSplitTests(unittest.TestCase):
             self.assertNotIn(entry.split(" - ")[0], text)
         for kept in ("- A toolchain limitation", "Everything throws, except:", SHARED, "### Silent stubs", "[debt](debt/)"):
             self.assertIn(kept, text)
+        for path in (INDEX, "docs/dev/debt/libSceA.md"):
+            self.assertNotIn(b"\r", (self.root / path).read_bytes())
 
     def test_split_again_appends_to_existing_files(self):
         self.split()
@@ -116,6 +118,8 @@ class DebtSplitTests(unittest.TestCase):
         self.assertEqual(sorted(result.stdout.split()),
                          ["docs/dev/debt/libSceA.md", "docs/dev/debt/libSceB.md", "docs/dev/debt/libSceC.md"])
         self.assertEqual(self.git("diff", "--name-only", "--diff-filter=U").stdout, "")
+        for path in (INDEX, "docs/dev/debt/libSceA.md"):
+            self.assertNotIn(b"\r", (self.root / path).read_bytes())
         self.git("rebase", "--continue")
         a = self.read("docs/dev/debt/libSceA.md")
         self.assertLess(a.index("`sceAOne`"), a.index("`sceAFour`"))
@@ -182,6 +186,20 @@ class DebtSplitTests(unittest.TestCase):
                          "\n".join(entry.replace("../../", "../../../") for entry in (first, second, A_STUB)) +
                          "\n\n### Functional\n\n" + A_FUNCTIONAL.replace("../../", "../../../") + "\n")
         self.assertEqual(self.read(INDEX), self.git("show", "main:" + INDEX).stdout)
+
+    def test_indented_continuation_after_a_blank_line_moves_with_its_entry(self):
+        note = "  - sub note about sceAOne"
+        self.write(INDEX, "# Project technical debt\n\n### Silent stubs\n\n" + A_STUB + "\n\n" + note + "\n")
+        self.split()
+        self.assertIn(note, self.read("docs/dev/debt/libSceA.md"))
+        self.assertNotIn(note, self.read(INDEX))
+
+    def test_unindented_paragraph_after_a_blank_line_stays_in_the_index(self):
+        paragraph = "A plain paragraph after the stubs"
+        self.write(INDEX, "# Project technical debt\n\n### Silent stubs\n\n" + A_STUB + "\n\n" + paragraph + "\n")
+        self.split()
+        self.assertIn(paragraph, self.read(INDEX))
+        self.assertNotIn(paragraph, self.read("docs/dev/debt/libSceA.md"))
 
 
 if __name__ == "__main__":

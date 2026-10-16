@@ -21,6 +21,7 @@ namespace ShaderRecompiler {
 struct DescriptorValue {
     std::array<std::uint32_t, 8> dwords = {};
     std::uint32_t dwordCount = 0;
+    std::uint8_t availableDwordMask = 0;
 
     bool operator==(const DescriptorValue& other) const = default;
 };

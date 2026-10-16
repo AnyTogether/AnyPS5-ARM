@@ -3,6 +3,8 @@ import io
 import os
 from pathlib import Path
 import sys
+import stat
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -24,6 +26,32 @@ class PadInputTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             pad_input.main()
         return [int(token) for token in self.path.read_text(encoding="utf-8").split()]
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permissions")
+    def test_replacement_keeps_shared_command_mode(self):
+        self.path.write_text("1 0 1\n", encoding="utf-8")
+        self.path.chmod(0o640)
+        self.assertEqual(self.queue(1000, "cross"), [1000, 16384, 300])
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+
+    @unittest.skipUnless(os.name == "posix" and os.geteuid() == 0, "requires a privileged POSIX writer")
+    def test_privileged_replacement_remains_readable_by_original_owner(self):
+        import pwd
+        try:
+            reader = pwd.getpwnam("nobody")
+        except KeyError:
+            self.skipTest("unprivileged test reader unavailable")
+        self.root.chmod(0o755)
+        self.path.write_text("1 0 1\n", encoding="utf-8")
+        self.path.chmod(0o600)
+        os.chown(self.path, reader.pw_uid, reader.pw_gid)
+        self.queue(1000, "cross")
+        result = subprocess.run([sys.executable, "-c",
+            "import sys; from pathlib import Path; print(Path(sys.argv[1]).read_text(), end='')",
+            str(self.path)], user=reader.pw_uid, group=reader.pw_gid, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "1000 16384 300\n")
+        self.assertEqual((self.path.stat().st_uid, self.path.stat().st_gid), (reader.pw_uid, reader.pw_gid))
 
     def test_persistent_command_is_advanced_after_clock_reset(self):
         self.path.write_text("2000 16384 300\n", encoding="utf-8")

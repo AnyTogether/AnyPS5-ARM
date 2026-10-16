@@ -30,28 +30,15 @@ void ProgramHeaderLayoutBuilder::_writeProgramHeader(std::vector<std::uint8_t>& 
     _byteWriter->WriteU64(buf, offset + kPhdrAlignOffset, ph.Alignment);
 }
 
-Domain::ProgramHeader ProgramHeaderLayoutBuilder::_makeLoadHeader(std::uint64_t offset, std::uint64_t vaddr, std::uint64_t size) const {
+Domain::ProgramHeader ProgramHeaderLayoutBuilder::_makeLoadHeader(std::uint64_t offset, std::uint64_t vaddr, std::uint64_t size, std::uint64_t align, std::uint64_t memorySize, std::uint32_t flags) const {
     Domain::ProgramHeader ph{};
     ph.Type = PT_LOAD;
-    ph.Flags = PF_R | PF_W | PF_X;
+    ph.Flags = flags;
     ph.Offset = offset;
     ph.MappedAddress = vaddr;
     ph.PhysicalAddress = vaddr;
     ph.FileSize = size;
-    ph.MemorySize = size;
-    ph.Alignment = kDefaultLoadAlignment;
-    return ph;
-}
-
-Domain::ProgramHeader ProgramHeaderLayoutBuilder::_makeHeaderBlockLoad(std::uint64_t vaddr, std::uint64_t size, std::uint64_t align) const {
-    Domain::ProgramHeader ph{};
-    ph.Type = PT_LOAD;
-    ph.Flags = PF_R;
-    ph.Offset = 0;
-    ph.MappedAddress = vaddr;
-    ph.PhysicalAddress = vaddr;
-    ph.FileSize = size;
-    ph.MemorySize = size;
+    ph.MemorySize = memorySize < size ? size : memorySize;
     ph.Alignment = align;
     return ph;
 }
@@ -104,6 +91,30 @@ std::uint64_t ProgramHeaderLayoutBuilder::ComputeExtraBlockVaddr(
     const std::vector<Domain::ProgramHeader>& originalHeaders,
     std::uint64_t extraBlockOffset
 ) const {
+    const std::uint64_t pageFloor = GuestLoadPageEnd(originalHeaders);
+
+    const std::uint64_t offsetRemainder = extraBlockOffset & (kDefaultLoadAlignment - 1);
+    if (pageFloor > std::numeric_limits<std::uint64_t>::max() - offsetRemainder)
+        throw Domain::RelinkerException("Extra block vaddr computation overflowed");
+    return pageFloor + offsetRemainder;
+}
+
+std::vector<Domain::ProgramHeader> ProgramHeaderLayoutBuilder::_keptHeaders(const std::vector<Domain::ProgramHeader>& originalHeaders) const {
+    std::vector<Domain::ProgramHeader> kept;
+    for (const auto& ph : originalHeaders) {
+        if (!_segmentFilter->ShouldSkip(ph))
+            kept.push_back(ph);
+    }
+    return kept;
+}
+
+std::size_t ProgramHeaderLayoutBuilder::RequiredProgramHeaderCount(const std::vector<Domain::ProgramHeader>& originalHeaders) const {
+    return _keptHeaders(originalHeaders).size() + kSyntheticProgramHeaderCount;
+}
+
+std::uint64_t ProgramHeaderLayoutBuilder::GuestLoadPageEnd(
+    const std::vector<Domain::ProgramHeader>& originalHeaders
+) const {
     bool foundLoad = false;
     std::uint64_t highestVaddrEnd = 0;
     for (const auto& ph : originalHeaders) {
@@ -120,29 +131,9 @@ std::uint64_t ProgramHeaderLayoutBuilder::ComputeExtraBlockVaddr(
     }
     if (!foundLoad)
         throw Domain::RelinkerException("No kept PT_LOAD segment to anchor the extra block against");
-
-    const std::uint64_t align = kDefaultLoadAlignment;
-    const std::uint64_t offsetRemainder = extraBlockOffset & (align - 1);
-    const std::uint64_t alignedFloor = highestVaddrEnd & ~(align - 1);
-    std::uint64_t vaddr = alignedFloor | offsetRemainder;
-    if (vaddr < highestVaddrEnd)
-        vaddr += align;
-    if (vaddr < highestVaddrEnd)
+    if (highestVaddrEnd > std::numeric_limits<std::uint64_t>::max() - (kDefaultLoadAlignment - 1))
         throw Domain::RelinkerException("Extra block vaddr computation overflowed");
-    return vaddr;
-}
-
-std::vector<Domain::ProgramHeader> ProgramHeaderLayoutBuilder::_keptHeaders(const std::vector<Domain::ProgramHeader>& originalHeaders) const {
-    std::vector<Domain::ProgramHeader> kept;
-    for (const auto& ph : originalHeaders) {
-        if (!_segmentFilter->ShouldSkip(ph))
-            kept.push_back(ph);
-    }
-    return kept;
-}
-
-std::size_t ProgramHeaderLayoutBuilder::RequiredProgramHeaderCount(const std::vector<Domain::ProgramHeader>& originalHeaders) const {
-    return _keptHeaders(originalHeaders).size() + kSyntheticProgramHeaderCount;
+    return (highestVaddrEnd + kDefaultLoadAlignment - 1) & ~(kDefaultLoadAlignment - 1);
 }
 
 std::uint16_t ProgramHeaderLayoutBuilder::WriteLayout(
@@ -185,8 +176,12 @@ std::uint16_t ProgramHeaderLayoutBuilder::WriteLayout(
         if (ph.Type == PT_LOAD && !_segmentFilter->ShouldSkip(ph) && ph.Alignment > headerBlockAlign && (ph.Alignment & (ph.Alignment - 1)) == 0)
             headerBlockAlign = ph.Alignment;
     }
+
+    const std::uint64_t extraBlockVaddr = ComputeExtraBlockVaddr(request.OriginalHeaders, request.ExtraBlockOffset);
+    if (request.ExtraBlockVaddr != extraBlockVaddr)
+        throw Domain::RelinkerException("Extra block vaddr does not match its file offset");
     const std::uint64_t headerBlockVaddr =
-        checkedEnd(checkedEnd(request.ExtraBlockVaddr, request.ExtraBlockSize), headerBlockAlign - 1) & ~(headerBlockAlign - 1);
+        checkedEnd(checkedEnd(extraBlockVaddr, request.ExtraBlockSize), headerBlockAlign - 1) & ~(headerBlockAlign - 1);
     checkedEnd(headerBlockVaddr, headerBlockSize);
 
     if (request.DynamicSegmentOffset < request.ExtraBlockOffset)
@@ -200,11 +195,11 @@ std::uint16_t ProgramHeaderLayoutBuilder::WriteLayout(
         request.InterpSize > request.ExtraBlockSize - (request.InterpOffset - request.ExtraBlockOffset))
         throw Domain::RelinkerException("Interp data does not fit within the extra block");
 
-    const std::uint64_t dynamicSegmentVaddr = request.ExtraBlockVaddr + (request.DynamicSegmentOffset - request.ExtraBlockOffset);
-    const std::uint64_t interpVaddr = request.ExtraBlockVaddr + (request.InterpOffset - request.ExtraBlockOffset);
+    const std::uint64_t dynamicSegmentVaddr = extraBlockVaddr + (request.DynamicSegmentOffset - request.ExtraBlockOffset);
+    const std::uint64_t interpVaddr = extraBlockVaddr + (request.InterpOffset - request.ExtraBlockOffset);
 
     std::vector<Domain::ProgramHeader> layout;
-    const std::uint64_t phdrVaddr = tableInExtraBlock ? request.ExtraBlockVaddr + (request.PhOff - request.ExtraBlockOffset) : headerBlockVaddr + request.PhOff;
+    const std::uint64_t phdrVaddr = tableInExtraBlock ? extraBlockVaddr + (request.PhOff - request.ExtraBlockOffset) : headerBlockVaddr + request.PhOff;
     layout.push_back(_makePhdrHeader(request.PhOff, phdrVaddr, static_cast<std::uint64_t>(neededPh) * request.PhEntSize));
     layout.push_back(_makeInterpHeader(request.InterpOffset, interpVaddr, request.InterpSize));
     for (auto ph : kept) {
@@ -212,8 +207,9 @@ std::uint16_t ProgramHeaderLayoutBuilder::WriteLayout(
             ph.Flags = _fixLoadFlags(ph.Flags);
         layout.push_back(ph);
     }
-    layout.push_back(_makeLoadHeader(request.ExtraBlockOffset, request.ExtraBlockVaddr, request.ExtraBlockSize));
-    layout.push_back(_makeHeaderBlockLoad(headerBlockVaddr, headerBlockSize, headerBlockAlign));
+    const std::uint64_t extraBlockPageEnd = checkedEnd(checkedEnd(extraBlockVaddr, request.ExtraBlockSize), kDefaultLoadAlignment - 1) & ~(kDefaultLoadAlignment - 1);
+    layout.push_back(_makeLoadHeader(request.ExtraBlockOffset, extraBlockVaddr, request.ExtraBlockSize, kDefaultLoadAlignment, extraBlockPageEnd - extraBlockVaddr, PF_R | PF_W | PF_X));
+    layout.push_back(_makeLoadHeader(0, headerBlockVaddr, headerBlockSize, headerBlockAlign, headerBlockSize, PF_R));
     layout.push_back(_makeDynamicHeader(request.DynamicSegmentOffset, dynamicSegmentVaddr, request.DynamicSegmentSize));
 
     for (std::size_t index = 0; index < layout.size(); ++index)

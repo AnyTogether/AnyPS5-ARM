@@ -11,5 +11,6 @@
 
 ### Functional
 
+- [sceImeKeyboardOpen, sceImeKeyboardClose](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) - opening a keyboard that is already open for the same user returns `0x80bc0001` (busy) and closing one that is not open returns `0x80bc0002`, as [KytyPS5](https://github.com/KytyPS5/KytyPS5/blob/main/src/libs/ime.cpp) does; it tracks one keyboard for all users, while the open state is kept per user id here, and the PS5 result is unverified
 - [sceImeKeyboardGetInfo](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) returns `0x80bc0023` (no resource id) for every id while a keyboard is open, since the IME keyboard never reports a connected device. [sceImeKeyboardSetMode](../../../core/libs/prx/libSceIme/Export.cpp) validates the mode bits but the mode has no effect, as no IME keyboard events are delivered.
 - [sceImeKeyboardGetResourceId](../../../core/libs/prx/libSceIme/Export.cpp) (libSceIme) reports that no USB keyboard is connected (`0x80bc0004`, as [shadPS4](https://github.com/shadps4-emu/shadPS4) does) because IME keyboard events are not delivered to the handler, although [libSceKeyboard](../../../core/libs/prx/libSceKeyboard/src/keyboard_impl.cpp) exposes the host keyboard

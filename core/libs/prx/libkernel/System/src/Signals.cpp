@@ -43,6 +43,7 @@ constexpr int SaSiginfo = 0x40;
 std::atomic<GuestHandler> handlers[MaxSignal + 1]{};
 static_assert(std::atomic<GuestHandler>::is_always_lock_free);
 std::atomic<std::uint32_t> blockedMask{0};
+std::atomic<std::uint32_t> blockedMaskExtra[3]{};
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 std::mutex registration;
 GuestSigaction dispositions[MaxSignal + 1]{};
@@ -78,7 +79,12 @@ std::uint32_t SignalBit(int guest) { return 1u << ((guest - 1) % 32); }
 std::uint32_t SignalWord(int guest) { return static_cast<std::uint32_t>((guest - 1) / 32); }
 bool SignalInSet(const GuestSignalSet& set, int guest) { return (set.bits[SignalWord(guest)] & SignalBit(guest)) != 0; }
 bool SetHasSignal(const GuestSignalSet& set) { return (set.bits[0] | set.bits[1] | set.bits[2] | set.bits[3]) != 0; }
-bool SignalBlocked(int guest) { return guest <= 32 && (blockedMask.load() & SignalBit(guest)) != 0; }
+bool SignalBlocked(int guest) {
+    if (guest < 1 || guest > MaxSignal) return false;
+    const auto word = SignalWord(guest);
+    const auto mask = word == 0 ? blockedMask.load() : blockedMaskExtra[word - 1].load();
+    return (mask & SignalBit(guest)) != 0;
+}
 
 struct PendingSignals {
     std::mutex lock;
@@ -284,7 +290,7 @@ void ExpireAlarm(std::chrono::microseconds interval) {
         handler = dispositions[GuestSigalrm].handler;
     }
     if (handler == 1) return;
-    if ((blockedMask.load() & (1u << (GuestSigalrm - 1))) != 0)
+    if (SignalBlocked(GuestSigalrm))
         throw std::runtime_error("ITIMER_REAL (it_interval " + DescribeInterval(interval) + ") expired while SIGALRM is blocked: pending signals are not implemented");
     if (handler == 0) {
         std::fprintf(stderr, "SIGALRM: the alarm expired with the default disposition; the process terminates\n");
@@ -526,15 +532,22 @@ int APS5_VABI _sigprocmask_nid_postfix(int how, const GuestSignalSet* set, Guest
         std::lock_guard lock(registration);
         if (previousSet != nullptr) {
             previousSet->bits[0] = blockedMask.load();
-            previousSet->bits[1] = 0;
-            previousSet->bits[2] = 0;
-            previousSet->bits[3] = 0;
+            for (int word = 1; word < 4; ++word) previousSet->bits[word] = blockedMaskExtra[word - 1].load();
         }
         if (set != nullptr) {
             switch (how) {
-                case 1: blockedMask.fetch_or(set->bits[0]); break;
-                case 2: blockedMask.fetch_and(~set->bits[0]); break;
-                case 3: blockedMask.store(set->bits[0]); break;
+                case 1:
+                    blockedMask.fetch_or(set->bits[0]);
+                    for (int word = 1; word < 4; ++word) blockedMaskExtra[word - 1].fetch_or(set->bits[word]);
+                    break;
+                case 2:
+                    blockedMask.fetch_and(~set->bits[0]);
+                    for (int word = 1; word < 4; ++word) blockedMaskExtra[word - 1].fetch_and(~set->bits[word]);
+                    break;
+                case 3:
+                    blockedMask.store(set->bits[0]);
+                    for (int word = 1; word < 4; ++word) blockedMaskExtra[word - 1].store(set->bits[word]);
+                    break;
                 default: throw std::invalid_argument("_sigprocmask: invalid how");
             }
         }
@@ -598,6 +611,7 @@ int APS5_VABI sigsuspend_nid_postfix(const GuestSignalSet* set) {
     {
         std::lock_guard lock(registration);
         previous.bits[0] = blockedMask.exchange(set->bits[0]);
+        for (int word = 1; word < 4; ++word) previous.bits[word] = blockedMaskExtra[word - 1].exchange(set->bits[word]);
     }
     WaitForDeliverableSignal();
     _sigprocmask_nid_postfix(GuestSigsetmask, &previous, nullptr);
@@ -610,9 +624,8 @@ int APS5_VABI sigpending_nid_postfix(GuestSignalSet* set) {
     auto& pending = Pending();
     std::lock_guard lock(pending.lock);
     set->bits[0] = pending.words[0].load(std::memory_order_relaxed) & blockedMask.load();
-    set->bits[1] = 0;
-    set->bits[2] = 0;
-    set->bits[3] = 0;
+    for (int word = 1; word < 4; ++word)
+        set->bits[word] = pending.words[word].load(std::memory_order_relaxed) & blockedMaskExtra[word - 1].load();
     return 0;
 }
 }

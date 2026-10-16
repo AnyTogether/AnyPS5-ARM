@@ -543,6 +543,11 @@ struct Events {
         return std::any_of(received.begin(), received.end(), [&](const auto& event) { return event.first == id && event.second == warning; });
     }
 
+    int Count(std::int32_t id, std::int32_t warning = 0) {
+        std::lock_guard lock(mutex);
+        return static_cast<int>(std::count_if(received.begin(), received.end(), [&](const auto& event) { return event.first == id && event.second == warning; }));
+    }
+
     void Clear() {
         std::lock_guard lock(mutex);
         received.clear();
@@ -829,7 +834,7 @@ void TestPlayback() {
         }
         return wrapped && frames > FrameCount + 5;
     }), "looping never wrapped");
-    Check(events.Seen(EventWarning, LoopingBack), "looping warning missing");
+    Check(WaitFor([&] { return events.Seen(EventWarning, LoopingBack); }), "looping warning missing");
     Check(sceAvPlayerIsActive(player), "looping player went inactive");
     Check(sceAvPlayerStop(player) == 0, "stop failed");
     Check(sceAvPlayerStop(player) == OperationFailed, "second stop accepted");
@@ -1123,6 +1128,114 @@ void TestUnsyncedVideoKeepsUpWithAudio() {
     Check(sceAvPlayerClose(player) == 0, "close failed");
 }
 
+void TestLoopWarningAtPlayback() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "loop timing init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "loop timing source failed");
+    Check(WaitFor([&] { return events.Seen(EventReady); }), "loop timing ready missing");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "loop timing video failed");
+    Check(sceAvPlayerSetAvSyncMode(player, 1) == 0, "loop timing sync mode failed");
+    Check(sceAvPlayerSetLooping(player, 1) == 0, "loop timing looping failed");
+    Check(sceAvPlayerStart(player) == 0, "loop timing start failed");
+    Check(WaitFor([&] { return events.Seen(EventPlay); }), "loop timing play missing");
+    AvPlayerFrameInfoEx frame{};
+    for (int index = 0; index <= FrameCount * 3; ++index) {
+        Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "loop timing frame missing");
+        Check(FrameIndex(frame.timestamp) == index % FrameCount, "loop timing frame out of order");
+        const int loops = index / FrameCount;
+        if (loops > 0) Check(WaitFor([&] { return events.Count(EventWarning, LoopingBack) >= loops; }), "loop timing warning missing");
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        Check(events.Count(EventWarning, LoopingBack) == loops, "loop warning did not match the playback boundary");
+    }
+    events.Clear();
+    Check(sceAvPlayerSetLooping(player, 0) == 0, "loop timing disable looping failed");
+    Check(sceAvPlayerJumpToTime(player, 0) == 0, "loop timing jump failed");
+    Check(WaitFor([&] { return events.Seen(EventWarning, JumpComplete); }), "loop timing jump warning missing");
+    for (int index = 0; index < FrameCount; ++index) {
+        Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "loop timing seek frame missing");
+        Check(FrameIndex(frame.timestamp) == index, "loop timing seek frame out of order");
+    }
+    Check(sceAvPlayerStop(player) == 0, "loop timing stop failed");
+    Check(WaitFor([&] { return events.Seen(EventStop); }), "loop timing stop event missing");
+    Check(events.Count(EventWarning, LoopingBack) == 0, "seek delivered a pending loop warning");
+    events.Clear();
+    Check(sceAvPlayerStart(player) == 0, "loop timing restart failed");
+    Check(WaitFor([&] { return events.Seen(EventPlay); }), "loop timing restart event missing");
+    for (int index = 0; index < FrameCount; ++index) {
+        Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "loop timing restart frame missing");
+        Check(FrameIndex(frame.timestamp) == index, "loop timing restart frame out of order");
+    }
+    Check(sceAvPlayerStop(player) == 0, "loop timing restart stop failed");
+    Check(WaitFor([&] { return events.Seen(EventStop); }), "loop timing restart stop event missing");
+    Check(events.Count(EventWarning, LoopingBack) == 0, "restart delivered a pending loop warning");
+    Check(sceAvPlayerClose(player) == 0, "loop timing close failed");
+}
+
+void TestAudioLoopWarningAtPlayback() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "audio loop timing init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "audio loop timing source failed");
+    Check(WaitFor([&] { return events.Seen(EventReady); }), "audio loop timing ready missing");
+    Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "audio loop timing stream failed");
+    Check(sceAvPlayerSetLooping(player, 1) == 0, "audio loop timing looping failed");
+    Check(sceAvPlayerStart(player) == 0, "audio loop timing start failed");
+    Check(WaitFor([&] { return events.Seen(EventPlay); }), "audio loop timing play missing");
+    AvPlayerFrameInfo frame{};
+    Check(WaitFor([&] { return sceAvPlayerGetAudioData(player, &frame) != 0; }), "audio loop timing first frame missing");
+    int loops = 0;
+    for (int index = 0; index < 256 && loops < 3; ++index) {
+        const auto previous = frame.timestamp;
+        Check(WaitFor([&] { return sceAvPlayerGetAudioData(player, &frame) != 0; }), "audio loop timing frame missing");
+        if (frame.timestamp < previous) ++loops;
+        if (loops > 0) Check(WaitFor([&] { return events.Count(EventWarning, LoopingBack) >= loops; }), "audio loop timing warning missing");
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        Check(events.Count(EventWarning, LoopingBack) == loops, "audio loop warning did not match the playback boundary");
+    }
+    Check(loops == 3, "audio loop timing did not wrap three times");
+    Check(sceAvPlayerClose(player) == 0, "audio loop timing close failed");
+}
+
+void TestLoopWarningSharedByStreams() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "shared loop timing init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "shared loop timing source failed");
+    Check(WaitFor([&] { return events.Seen(EventReady); }), "shared loop timing ready missing");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "shared loop timing video failed");
+    Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "shared loop timing audio failed");
+    Check(sceAvPlayerSetLooping(player, 1) == 0, "shared loop timing looping failed");
+    Check(sceAvPlayerStart(player) == 0, "shared loop timing start failed");
+    Check(WaitFor([&] { return events.Seen(EventPlay); }), "shared loop timing play missing");
+    AvPlayerFrameInfoEx frame{};
+    AvPlayerFrameInfo sound{};
+    std::uint64_t lastVideo = 0;
+    std::uint64_t lastAudio = 0;
+    bool videoWrapped = false;
+    bool audioWrapped = false;
+    Check(WaitFor([&] {
+        if (!audioWrapped && sceAvPlayerGetAudioData(player, &sound)) {
+            CheckEnglishAudio(sound);
+            audioWrapped = sound.timestamp < lastAudio;
+            lastAudio = sound.timestamp;
+        }
+        if (!videoWrapped && sceAvPlayerGetVideoDataEx(player, &frame)) {
+            CheckVideoFrame(frame);
+            videoWrapped = frame.timestamp < lastVideo;
+            lastVideo = frame.timestamp;
+        }
+        return audioWrapped && videoWrapped;
+    }), "shared loop timing streams did not both wrap");
+    Check(sceAvPlayerPause(player) == 0, "shared loop timing pause failed");
+    Check(WaitFor([&] { return events.Seen(EventPause); }), "shared loop timing pause event missing");
+    Check(events.Count(EventWarning, LoopingBack) == 1, "audio and video reported the same loop more than once");
+    Check(sceAvPlayerClose(player) == 0, "shared loop timing close failed");
+}
+
 void TestEofStopLatency() {
     constexpr int Rounds = 9;
     std::array<std::chrono::steady_clock::duration, Rounds> elapsed{};
@@ -1183,6 +1296,9 @@ void TestEofStopLatency() {
 int main() {
     try {
         WriteMovie();
+        TestLoopWarningAtPlayback();
+        TestAudioLoopWarningAtPlayback();
+        TestLoopWarningSharedByStreams();
         TestPlayback();
         TestChangeStream();
         TestExtendedExports();

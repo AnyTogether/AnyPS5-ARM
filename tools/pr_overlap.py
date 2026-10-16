@@ -172,6 +172,10 @@ def overlaps(prs, a, b):
     if pa["author"] != pb["author"]:
         found["conflicts"] = conflicts(pa, pb)
         found["exports"] = (pa["exports"] & pb["exports"]).difference(*(pr["exports"] for pr in shared))
+        if not (pa["tree"] and pb["tree"]):
+            uncompared = pa.get("files", set()) & pb.get("files", set())
+            if uncompared:
+                found["uncompared"] = uncompared
     return found if any(found.values()) else None
 
 
@@ -184,17 +188,39 @@ def spans(conflicts, blob):
                                                for s, e in ranges) for path, ranges in sorted((conflicts or {}).items()))
 
 
+def pull(blob, number):
+    return f'[PR {number}]({blob.split("/blob/", 1)[0].replace("https://github.com/", "https://www.github.com/", 1)}/pull/{number})'
+
+
 def report(rows, blob):
     if not rows:
         return ""
-    lines = [MARKER,
-             "Other open pull requests touch the same code. Merging one will break the other, "
-             "or both implement the same thing. If this one builds on them, list them in **Depends on**.",
-             "",
-             "| Pull request | Conflicting files (lines on `main`) | Same exports | Same new files |",
-             "|---|---|---|---|"]
-    for number, found in sorted(rows.items()):
-        lines.append(f'| #{number} | {spans(found.get("conflicts"), blob)} | {cell(found.get("exports"))} | {cell(found["added"])} |')
+    confirmed = {number: found for number, found in rows.items()
+                 if found.get("conflicts") or found.get("exports") or found["added"]}
+    uncompared = {number: found["uncompared"] for number, found in rows.items() if found.get("uncompared")}
+    lines = [MARKER]
+    if confirmed:
+        lines.extend([
+            "Other open pull requests touch the same code. Merging one will break the other, "
+            "or both implement the same thing. If this one builds on them, list them in **Depends on**.",
+            "",
+            "| Pull request | Conflicting files (lines on `main`) | Same exports | Same new files |",
+            "|---|---|---|---|",
+        ])
+        for number, found in sorted(confirmed.items()):
+            lines.append(f'| {pull(blob, number)} | {spans(found.get("conflicts"), blob)} | {cell(found.get("exports"))} | {cell(found["added"])} |')
+    if uncompared:
+        if confirmed:
+            lines.append("")
+        lines.extend([
+            "Some comparisons could not be completed because a pull request conflicts with the base branch. "
+            "Review these shared files manually before concluding that there is no overlap.",
+            "",
+            "| Pull request | Shared files not compared |",
+            "|---|---|",
+        ])
+        for number, files in sorted(uncompared.items()):
+            lines.append(f"| {pull(blob, number)} | {cell(files)} |")
     return "\n".join(lines) + "\n"
 
 

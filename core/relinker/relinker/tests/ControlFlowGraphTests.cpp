@@ -6,11 +6,13 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <limits>
 
 namespace {
 
 using namespace Relinker::UnusedNidFilter;
 using Relinker::VirtualAddress;
+using Relinker::RelinkerException;
 using Bytes = std::vector<std::uint8_t>;
 constexpr VirtualAddress TextAddress = 0xec00001000;
 
@@ -151,6 +153,29 @@ void CheckBorrowedReachability() {
     RequireOffsets(*first, {0, 1, 3, 4});
 }
 
+void CheckAddressOverflow() {
+    const Pointers pointers;
+    const Bytes text{0x90, 0xc3};
+    bool threw = false;
+    try {
+        BuildControlFlowGraph(text, std::numeric_limits<VirtualAddress>::max(), std::numeric_limits<VirtualAddress>::max(), {}, pointers);
+    } catch (const RelinkerException&) {
+        threw = true;
+    }
+    Require(threw, "Text section address space overflow was not rejected");
+}
+
+void CheckHighVirtualAddress() {
+    constexpr VirtualAddress highVaddr = 0xf00000001000;
+    const Pointers pointers;
+    Bytes text{0xeb, 0x02, 0x90, 0x90, 0xc3};
+    const auto graph = BuildControlFlowGraph(text, highVaddr, highVaddr, {}, pointers);
+    std::unordered_set<VirtualAddress> expected{highVaddr, highVaddr + 4};
+    Require(graph->ReachableVaddrs() == expected, "Unexpected reachable instruction set at high virtual address");
+    Require(graph->IsReachable(highVaddr), "Missing high entry address");
+    Require(graph->IsReachable(highVaddr + 4), "Missing high branch target address");
+}
+
 }
 
 int main() {
@@ -162,6 +187,8 @@ int main() {
         CheckCodeAddresses();
         CheckSpeculativeRoots();
         CheckBorrowedReachability();
+        CheckAddressOverflow();
+        CheckHighVirtualAddress();
         std::cout << "Control-flow graph tests passed\n";
         return 0;
     } catch (const std::exception& error) {

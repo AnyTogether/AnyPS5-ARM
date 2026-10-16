@@ -7,6 +7,8 @@
 extern "C" {
 int APS5_VABI pthread_mutexattr_init_nid_postfix(PthreadMutexattr* attr);
 int APS5_VABI pthread_mutexattr_destroy_nid_postfix(PthreadMutexattr* attr);
+int APS5_VABI pthread_mutexattr_getpshared_nid_postfix(const PthreadMutexattr* attr, int* pshared);
+int APS5_VABI pthread_mutexattr_setpshared_nid_postfix(PthreadMutexattr* attr, int pshared);
 int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, int protocol);
 int APS5_VABI pthread_mutexattr_setprioceiling_nid_postfix(PthreadMutexattr* attr, int prioceiling);
 int APS5_VABI pthread_mutexattr_getprioceiling_nid_postfix(const PthreadMutexattr* attr, int* prioceiling);
@@ -77,8 +79,43 @@ static void CheckType() {
     Require(pthread_mutexattr_gettype_nid_postfix(nullptr, &type) == GUEST_EINVAL && type == -1);
 }
 
+static void CheckProcessSharing() {
+    PthreadMutexattr attr = nullptr;
+    int sharing = -1;
+    Require(pthread_mutexattr_getpshared_nid_postfix(nullptr, &sharing) == GUEST_EINVAL && sharing == -1);
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == GUEST_EINVAL && sharing == -1);
+    Require(pthread_mutexattr_setpshared_nid_postfix(nullptr, 0) == GUEST_EINVAL);
+    Require(pthread_mutexattr_setpshared_nid_postfix(&attr, 0) == GUEST_EINVAL);
+    Require(pthread_mutexattr_init_nid_postfix(&attr) == 0);
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == 0 && sharing == 0);
+    Require(pthread_mutexattr_settype_nid_postfix(&attr, 2) == 0);
+    Require(pthread_mutexattr_setpshared_nid_postfix(&attr, 0) == 0);
+    Require(pthread_mutexattr_setpshared_nid_postfix(&attr, 1) == 0);
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == 0 && sharing == 1);
+    for (const int invalid : {-1, 2, 2147483647})
+        Require(pthread_mutexattr_setpshared_nid_postfix(&attr, invalid) == GUEST_EINVAL);
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == 0 && sharing == 1);
+    int type = -1;
+    Require(pthread_mutexattr_gettype_nid_postfix(&attr, &type) == 0 && type == 2);
+    Require(Throws([&] { pthread_mutexattr_getpshared_nid_postfix(&attr, nullptr); }));
+    PthreadMutex mutex = nullptr;
+    Require(pthread_mutex_init_nid_postfix(&mutex, &attr) == 0);
+    Require(pthread_mutex_lock_nid_postfix(&mutex) == 0);
+    Require(pthread_mutex_lock_nid_postfix(&mutex) == 0);
+    Require(pthread_mutex_unlock_nid_postfix(&mutex) == 0);
+    Require(pthread_mutex_unlock_nid_postfix(&mutex) == 0);
+    Require(pthread_mutex_destroy_nid_postfix(&mutex) == 0);
+    Require(pthread_mutexattr_setpshared_nid_postfix(&attr, 0) == 0);
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == 0 && sharing == 0);
+    Require(pthread_mutexattr_destroy_nid_postfix(&attr) == 0);
+    sharing = -1;
+    Require(pthread_mutexattr_getpshared_nid_postfix(&attr, &sharing) == GUEST_EINVAL && sharing == -1);
+    Require(pthread_mutexattr_setpshared_nid_postfix(&attr, 0) == GUEST_EINVAL);
+}
+
 int main() {
     CheckType();
+    CheckProcessSharing();
     CheckTimedlockInvalidDeadline();
     PthreadMutexattr attr = nullptr;
     Require(pthread_mutexattr_init_nid_postfix(&attr) == 0);

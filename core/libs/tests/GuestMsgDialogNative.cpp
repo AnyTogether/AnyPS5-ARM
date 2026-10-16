@@ -22,6 +22,8 @@ void Require(bool value) { if (!value) std::abort(); }
 
 constexpr int kStatusInitialized = 1;
 constexpr int kStatusFinished = 3;
+constexpr int kErrAlreadyInitialized = static_cast<int>(0x80B80004u);
+constexpr int kErrNotInitialized = static_cast<int>(0x80B80003u);
 constexpr int kErrNotRunning = static_cast<int>(0x80B8000Bu);
 constexpr int kButtonIdOk = 1;
 
@@ -30,11 +32,13 @@ constexpr int kButtonIdOk = 1;
 int main() {
     std::uint8_t param[0x60]{};
 
+    Require(sceMsgDialogTerminate() == kErrNotInitialized);
     Require(sceMsgDialogClose() == kErrNotRunning);
     Require(sceMsgDialogUpdateStatus() == 0);
     Require(sceMsgDialogGetStatus() == 0);
 
     Require(sceMsgDialogInitialize() == 0);
+    Require(sceMsgDialogInitialize() == kErrAlreadyInitialized);
     Require(sceMsgDialogClose() == kErrNotRunning);
     Require(sceMsgDialogUpdateStatus() == kStatusInitialized);
     Require(sceMsgDialogGetStatus() == kStatusInitialized);
@@ -57,6 +61,7 @@ int main() {
     Require(result.button_id == kButtonIdOk);
 
     Require(sceMsgDialogTerminate() == 0);
+    Require(sceMsgDialogTerminate() == kErrNotInitialized);
     Require(sceMsgDialogClose() == kErrNotRunning);
     Require(sceMsgDialogGetStatus() == 0);
 }

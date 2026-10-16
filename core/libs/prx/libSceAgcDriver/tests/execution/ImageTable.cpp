@@ -541,7 +541,7 @@ void SetClassRecords() {
     SetRecord(4, LinearWrap, uintImage);
     SetRecord(5, LinearWrap, sintImage);
     SetRecord(6, {0u, 0u, 0u, 0u}, {0u, 0u, 0u, 0u});
-    SetRecord(7, PointClamp, {0x1234u, 0x5678u, 0x9abcu, 0x0000ffacu});
+    SetRecord(7, PointClamp, {0x1234u, 0x5678u, 0x9abcu, 0x1000ffacu});
     for (std::uint32_t record = 8; record < Records; ++record) SetRecord(record, PointClamp, floatImage);
 }
 
@@ -1003,7 +1003,7 @@ void RunPointerTests(AgcDriver::VulkanDevice& device) {
     const auto floatImage = Image(FloatTexels.data(), Format32Float);
     const auto uintImage = Image(UintTexels.data(), Format32UInt);
     const auto sintImage = Image(SintTexels.data(), Format32SInt);
-    const std::array<std::uint32_t, 4> invalid{0x1234u, 0x5678u, 0x9abcu, 0x0000ffacu};
+    const std::array<std::uint32_t, 4> invalid{0x1234u, 0x5678u, 0x9abcu, 0x1000ffacu};
     std::fill(Root.begin(), Root.end(), 0u);
     SetEntry(0, floatImage);
     SetEntry(1, uintImage);

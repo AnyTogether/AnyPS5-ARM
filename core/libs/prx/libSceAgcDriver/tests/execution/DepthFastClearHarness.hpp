@@ -39,6 +39,7 @@ struct Surface {
     std::uint64_t htile;
     bool htileStencil;
     VkFormat format;
+    std::uint32_t slice = 0;
 };
 
 struct DrawOptions {
@@ -116,6 +117,7 @@ inline std::uint32_t Draw(AgcDriver::VulkanDevice& device, const Shaders& compil
     state.colors = {state.color};
     state.hasColorTarget = true;
     state.depth = AgcDriver::Graphics::DepthTarget{surface.depth, surface.stencil, {Width, Height}, surface.format, 1.0f, 0, surface.htile, surface.htileStencil};
+    state.depth->firstSlice = surface.slice;
     state.depthTest = options.depthTest;
     state.depthWrite = options.depthWrite;
     state.depthCompare = options.depthCompare;

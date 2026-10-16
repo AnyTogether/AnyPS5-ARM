@@ -94,6 +94,31 @@ class DatabaseCacheTests(unittest.TestCase):
 class NidArgumentTests(unittest.TestCase):
     options = ["-h", "--help", "--db", "--nid", "--json"]
 
+    def test_name_and_nid_modes_conflict_even_with_empty_filters(self):
+        for name_option in ("--name", "--symbol", "--na", "--sym"):
+            for nid_option in ("--nid", "--ni"):
+                for names, nids in (
+                        ([name_option], [nid_option]),
+                        ([name_option, "ceilf"], [nid_option]),
+                        ([name_option + "=ceilf"], [nid_option]),
+                        ([name_option], [nid_option, "AAAAAAAAAAA"]),
+                        ([name_option], [nid_option + "=AAAAAAAAAAA"])):
+                    for arguments in (names + nids, nids + names):
+                        with self.subTest(arguments=arguments), \
+                                contextlib.redirect_stdout(io.StringIO()) as output, \
+                                contextlib.redirect_stderr(io.StringIO()) as error, \
+                                patch.object(nid_names, "load_db", return_value={}) as database, \
+                                patch.object(nid_names, "collect_unknowns", return_value={}) as sources, \
+                                patch.object(nid_names, "collect_real_names", return_value=set()) as definitions:
+                            with self.assertRaises(SystemExit) as exited:
+                                nid_names.main([*arguments, "--json"])
+                            self.assertEqual(exited.exception.code, 2)
+                            self.assertIn("--name/--symbol cannot be combined with --nid", error.getvalue())
+                            self.assertEqual(output.getvalue(), "")
+                            database.assert_not_called()
+                            sources.assert_not_called()
+                            definitions.assert_not_called()
+
     def test_invalid_nids_fail_before_database_or_source_access(self):
         for nid in ("short", "ABCDEFGHIJKL", "ABCDEFGHIJ/", "ABCDEFGHIJ_", "ABCDEFGHIJ\u00e9", "", "--jsooon"):
             with self.subTest(nid=nid):

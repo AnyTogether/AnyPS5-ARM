@@ -203,6 +203,16 @@ static void CheckAudioCoprocessorProtection() {
     Require(rejected && undefined == nullptr);
 }
 
+static void CheckMprotectIgnoresUndefinedBits() {
+    constexpr std::size_t length = 0x4000;
+    void* mapping = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapping, length, 3, 0) == 0);
+    Require(sceKernelMprotect(mapping, length, static_cast<int>(0xfffffff2u)) == 0);
+    static_cast<volatile unsigned char*>(mapping)[length - 1] = 5;
+    Require(static_cast<volatile unsigned char*>(mapping)[length - 1] == 5);
+    Require(sceKernelMunmap(mapping, length) == 0);
+}
+
 static void CheckInternalNamedFlexibleMapping() {
     constexpr std::size_t length = 0x10000;
     std::size_t before = 0;
@@ -2362,6 +2372,36 @@ static void CheckVirtualQuerySplitFlexibleRanges() {
     Require(sceKernelMunmap(bytes + page * 2, page) == 0);
 }
 
+static void CheckVirtualQueryWireLayout() {
+    constexpr std::size_t page = 0x4000;
+    constexpr char name[] = "query wire layout";
+    void* mapped = nullptr;
+    Require(sceKernelMapNamedFlexibleMemory(&mapped, page, 3, 0, name) == 0);
+    struct {
+        std::array<unsigned char, 16> before;
+        VirtualQueryInfo info;
+        std::array<unsigned char, 16> after;
+    } result{};
+    result.before.fill(0xa5);
+    result.after.fill(0x5a);
+    Require(sceKernelVirtualQuery(mapped, 0, &result.info, 72) == 0);
+    const auto* bytes = reinterpret_cast<const unsigned char*>(&result.info);
+    std::uintptr_t start = 0, end = 0;
+    std::int32_t protection = 0;
+    std::memcpy(&start, bytes, sizeof(start));
+    std::memcpy(&end, bytes + 8, sizeof(end));
+    std::memcpy(&protection, bytes + 24, sizeof(protection));
+    Require(start == reinterpret_cast<std::uintptr_t>(mapped) && end == start + page);
+    Require(protection == 3 && bytes[32] == 0x11); // flexible and committed
+    Require(std::memcmp(bytes + 33, name, sizeof(name)) == 0);
+    Require(bytes[65] == 0 && bytes[66] == 0);
+    Require(std::all_of(bytes + 67, bytes + 72, [](auto byte) { return byte == 0; }));
+    Require(std::all_of(result.before.begin(), result.before.end(), [](auto byte) { return byte == 0xa5; }));
+    Require(std::all_of(result.after.begin(), result.after.end(), [](auto byte) { return byte == 0x5a; }));
+    Require(sceKernelClearVirtualRangeName(mapped, page) == 0);
+    Require(sceKernelMunmap(mapped, page) == 0);
+}
+
 static void CheckVirtualQueryForNonReadableGuestRange() {
     constexpr std::size_t page = 0x4000;
     auto* mapped = static_cast<unsigned char*>(mmap_nid_postfix(nullptr, page, 3, 0x1002, -1, 0));
@@ -2557,6 +2597,7 @@ int main(int argc, char** argv) {
     CheckVirtualQueryPartialMunmap();
     CheckMunmapOverUnmappedPages();
     CheckPageTableStats();
+    CheckVirtualQueryWireLayout();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
 #ifndef __APPLE__
@@ -2567,6 +2608,7 @@ int main(int argc, char** argv) {
     CheckBatchMapStopsAtInvalidEntry();
     CheckCheckedReleaseDirectMemory();
     CheckAudioCoprocessorProtection();
+    CheckMprotectIgnoresUndefinedBits();
     CheckDirectMemoryFollowsPhysicalPages();
     CheckSparseDirectMemoryBacking();
     CheckReleaseDirectMemoryClearsMappings();

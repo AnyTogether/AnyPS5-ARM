@@ -952,6 +952,103 @@ void converterRosetta() {
     require(intel.Reports.empty() && intel.Bytes == file, "The Intel target converted RDSEED, RDPID or CLWB");
 }
 
+void rosettaScalarCompares() {
+    const auto rosetta = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    const auto match = [&](const Bytes& bytes) { return rosetta->Match(bytes.data(), bytes.size()); };
+    const Bytes compare = {0xC5, 0xEA, 0xC2, 0xCA, 0x03};
+    const auto lowered = match(compare);
+    require(lowered && lowered->Lowering == Codegen::Amd64OnlyLowering::Trampoline && lowered->Optional && !lowered->RelocatableWindow && lowered->InstructionName == "scalar compare", "A Rosetta-hazard scalar compare was not lowered through an optional stub");
+    require(lowered->ReturnBranchOffset == 5 && lowered->StubBody.size() == 10 && Bytes(lowered->StubBody.begin(), lowered->StubBody.begin() + 5) == compare && lowered->StubBody[5] == 0xE9 && lowered->Relocations.empty(), "The scalar compare stub does not run the compare unchanged before its return jump");
+    const auto unaligned = match(Bytes{0xC5, 0xEA, 0xC2, 0x47, 0x68, 0x03});
+    require(unaligned && Bytes(unaligned->StubBody.begin(), unaligned->StubBody.begin() + 6) == Bytes{0xC5, 0xEA, 0xC2, 0x47, 0x68, 0x03} && unaligned->Relocations.empty(), "A memory-form scalar compare does not move unchanged");
+    const Bytes rip = {0xC5, 0xEA, 0xC2, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x03};
+    const auto ripLowered = match(rip);
+    require(ripLowered && ripLowered->Relocations.size() == 1 && ripLowered->Relocations[0].DisplacementOffset == 4 && ripLowered->Relocations[0].InstructionEnd == 9 && ripLowered->Relocations[0].SiteTarget == 9 + 0x100, "A RIP-relative scalar compare was not relocated from its place in the site");
+    require(Bytes(ripLowered->StubBody.begin() + 4, ripLowered->StubBody.begin() + 8) == Bytes(4, 0), "The RIP-relative scalar compare keeps its displacement in the stub");
+    const auto vex3 = match(Bytes{0xC4, 0xE1, 0xEB, 0xC2, 0xCB, 0x03});
+    require(vex3 && Bytes(vex3->StubBody.begin(), vex3->StubBody.begin() + 6) == Bytes{0xC4, 0xE1, 0xEB, 0xC2, 0xCB, 0x03}, "A VEX3 VCMPSD with a hazard predicate does not move unchanged");
+    for (const Bytes& kept : {Bytes{0xC5, 0xEA, 0xC2, 0xCA, 0x00}, Bytes{0xC5, 0xEA, 0xC2, 0xCA, 0x01}, Bytes{0xC5, 0xEA, 0xC2, 0xCA, 0x02}, Bytes{0xC4, 0xE1, 0xEB, 0xC2, 0xCB, 0x01}})
+        require(!match(kept).has_value(), "An EQ_OQ, LT_OS or LE_OS scalar compare must stay inline");
+    for (const Bytes& other : {Bytes{0xC5, 0xE9, 0xC2, 0xCA, 0x03}, Bytes{0xC5, 0xE8, 0xC2, 0xCA, 0x03}, Bytes{0xC5, 0xEA, 0x2E, 0xC8}, Bytes{0xC5, 0xEA, 0xC2, 0xCA}, Bytes{0xC4, 0xE2, 0xEB, 0xC2, 0xCB, 0x03}, Bytes{0x62, 0xD1, 0x76, 0x08, 0xC2, 0xCB, 0x03}})
+        require(!match(other).has_value(), "An instruction other than a Rosetta-hazard scalar compare was moved");
+    require(!Codegen::MakeAmd64OnlyInstructionMatcher()->Match(compare.data(), compare.size()).has_value(), "A scalar compare was moved for an Intel host");
+    const std::vector<std::span<const std::uint8_t>> pair = {std::span<const std::uint8_t>(compare), std::span<const std::uint8_t>(rip)};
+    const auto sequence = rosetta->MatchSequence(pair, {});
+    require(sequence && sequence->InstructionName == "scalar compare" && sequence->ReturnBranchOffset == 14 && sequence->Relocations.size() == 1 && sequence->Relocations[0].SiteTarget == 5 + 9 + 0x100, "A scalar compare after another is not emitted out of line in one stub");
+}
+
+void rosettaLegacyScalarCompares() {
+    const auto rosetta = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    const auto match = [&](const Bytes& bytes) { return rosetta->Match(bytes.data(), bytes.size()); };
+    for (const Bytes& moved : {Bytes{0xF3, 0x0F, 0xC2, 0xCA, 0x03}, Bytes{0xF2, 0x0F, 0xC2, 0xCA, 0x04}, Bytes{0xF2, 0x41, 0x0F, 0xC2, 0xC9, 0x05},
+                               Bytes{0x64, 0xF3, 0x0F, 0xC2, 0x4F, 0x68, 0x06}, Bytes{0xF3, 0x2E, 0x0F, 0xC2, 0x44, 0x24, 0x08, 0x07}, Bytes{0xF3, 0x0F, 0xC2, 0xCA, 0x08}}) {
+        const auto lowered = match(moved);
+        require(lowered && lowered->Lowering == Codegen::Amd64OnlyLowering::Trampoline && lowered->Optional && lowered->InstructionName == "scalar compare", "A legacy Rosetta-hazard scalar compare was not lowered through an optional stub");
+        require(lowered->ReturnBranchOffset == moved.size() && lowered->StubBody.size() == moved.size() + 5 && Bytes(lowered->StubBody.begin(), lowered->StubBody.begin() + static_cast<std::ptrdiff_t>(moved.size())) == moved && lowered->StubBody[moved.size()] == 0xE9 && lowered->Relocations.empty(), "A legacy scalar compare does not run unchanged before its return jump");
+    }
+    const auto rip = match(Bytes{0xF3, 0x0F, 0xC2, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x06});
+    require(rip && rip->Relocations.size() == 1 && rip->Relocations[0].DisplacementOffset == 4 && rip->Relocations[0].InstructionEnd == 9 && rip->Relocations[0].SiteTarget == 9 + 0x100, "A RIP-relative legacy CMPSS was not relocated from its place in the site");
+    const auto ripRex = match(Bytes{0xF2, 0x48, 0x0F, 0xC2, 0x05, 0x00, 0x01, 0x00, 0x00, 0x07});
+    require(ripRex && ripRex->Relocations.size() == 1 && ripRex->Relocations[0].DisplacementOffset == 5 && ripRex->Relocations[0].InstructionEnd == 10 && ripRex->Relocations[0].SiteTarget == 10 + 0x100, "A RIP-relative legacy CMPSD with REX was not relocated");
+    for (const Bytes& kept : {Bytes{0xF3, 0x0F, 0xC2, 0xCA, 0x00}, Bytes{0xF3, 0x0F, 0xC2, 0xCA, 0x01}, Bytes{0xF2, 0x0F, 0xC2, 0xCA, 0x02}})
+        require(!match(kept).has_value(), "A legacy EQ_OQ, LT_OS or LE_OS scalar compare must stay inline");
+    for (const Bytes& other : {Bytes{0x0F, 0xC2, 0xCA, 0x03}, Bytes{0x66, 0x0F, 0xC2, 0xCA, 0x03}, Bytes{0x66, 0xF3, 0x0F, 0xC2, 0xCA, 0x03}, Bytes{0xF2, 0xF3, 0x0F, 0xC2, 0xCA, 0x03},
+                               Bytes{0x67, 0xF3, 0x0F, 0xC2, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x03}, Bytes{0xF0, 0xF3, 0x0F, 0xC2, 0xCA, 0x03}, Bytes{0x48, 0xF3, 0x0F, 0xC2, 0xCA, 0x03},
+                               Bytes{0xF3, 0x0F, 0xC2, 0xCA}, Bytes{0xF3, 0x0F, 0xC3, 0xCA, 0x03}, Bytes{0xF3, 0x0F, 0x10, 0xCA}})
+        require(!match(other).has_value(), "An instruction other than a legacy Rosetta-hazard scalar compare was moved");
+    const Bytes compare = {0xF3, 0x0F, 0xC2, 0xCA, 0x03};
+    require(!Codegen::MakeAmd64OnlyInstructionMatcher()->Match(compare.data(), compare.size()).has_value(), "A legacy scalar compare was moved for an Intel host");
+}
+
+void converterRosettaLegacyScalarCompare() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    Bytes file(0x300, 0xCC);
+    const Bytes text = {
+        0xF3, 0x0F, 0x10, 0x15, 0x10, 0x00, 0x00, 0x00,
+        0x0F, 0x28, 0xC2,
+        0xF3, 0x0F, 0xC2, 0xCA, 0x03,
+        0xC5, 0xF8, 0x28, 0x0D, 0x20, 0x00, 0x00, 0x00,
+        0xC5, 0xF8, 0x2E, 0xC8,
+        0xC3};
+    std::copy(text.begin(), text.end(), file.begin() + 0x200);
+    const auto result = converter->Convert(file, {segmentHeader(text.size())});
+    require(result.Trampolines.size() == 1 && result.Reports.size() == 1 && result.Reports[0].InstructionName == "scalar compare" && result.Reports[0].Offset == 0x20B && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, "The legacy compare in the fmax shape was not the only moved instruction");
+    const auto& site = result.Trampolines[0];
+    require(site.Offset == 0x20B && site.Length == 5 && Bytes(site.Body.begin(), site.Body.begin() + 5) == Bytes(text.begin() + 11, text.begin() + 16) && site.Relocations.empty(), "The legacy compare stub does not run the compare unchanged");
+    const auto intel = Codegen::MakeAmd64OnlyConverter()->Convert(file, {segmentHeader(text.size())});
+    require(intel.Reports.empty() && intel.Bytes == file, "The Intel target moved a legacy scalar compare");
+}
+
+void converterRosettaScalarCompare() {
+    const auto converter = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Rosetta);
+    Bytes file(0x300, 0xCC);
+    const Bytes text = {
+        0xC5, 0xFA, 0x10, 0x15, 0x10, 0x00, 0x00, 0x00,
+        0xC5, 0xF8, 0x28, 0xC2,
+        0xC5, 0xEA, 0xC2, 0xCA, 0x03,
+        0xC5, 0xF8, 0x28, 0x0D, 0x20, 0x00, 0x00, 0x00,
+        0xC5, 0xF8, 0x2E, 0xC8,
+        0xC3};
+    std::copy(text.begin(), text.end(), file.begin() + 0x200);
+    const auto result = converter->Convert(file, {segmentHeader(text.size())});
+    require(result.ReplacedCount == 0 && result.KeptCount == 0 && result.Trampolines.size() == 1 && result.Reports.size() == 1 && result.Reports[0].InstructionName == "scalar compare" && result.Reports[0].Offset == 0x20C && result.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Trampoline, "The Rosetta-hazard compare in the fmax shape was not the only moved instruction");
+    const auto& site = result.Trampolines[0];
+    require(site.Offset == 0x20C && site.Length == 5 && site.ReturnBranchOffset == 5 && Bytes(site.Body.begin(), site.Body.begin() + 5) == Bytes(text.begin() + 12, text.begin() + 17) && Bytes(site.Body.begin() + 5, site.Body.begin() + 10) == Bytes{0xE9, 0, 0, 0, 0} && site.Relocations.empty(), "The compare stub does not run the compare unchanged and return");
+    require(result.Bytes == file, "Moving the compare changed the file image");
+    auto branchInside = file;
+    const Bytes jumped = {0xEB, 0x02, 0xC5, 0xEA, 0xC2, 0xCA, 0x03, 0xC3};
+    std::copy(jumped.begin(), jumped.end(), branchInside.begin() + 0x200);
+    const auto kept = converter->Convert(branchInside, {segmentHeader(jumped.size())});
+    require(kept.Trampolines.empty() && kept.KeptCount == 1 && kept.Reports.size() == 1 && kept.Reports[0].Lowering == Codegen::Amd64OnlyLowering::Kept && kept.Bytes == branchInside, "A branch into the compare did not keep it native");
+    auto ripSource = file;
+    const Bytes ripText = {0xC5, 0xEA, 0xC2, 0x0D, 0x00, 0x01, 0x00, 0x00, 0x03, 0xC3};
+    std::copy(ripText.begin(), ripText.end(), ripSource.begin() + 0x200);
+    const auto ripMoved = converter->Convert(ripSource, {segmentHeader(ripText.size())});
+    require(ripMoved.Trampolines.size() == 1 && ripMoved.Trampolines[0].Relocations.size() == 1 && ripMoved.Trampolines[0].Relocations[0].SiteTarget == 9 + 0x100, "A RIP-relative compare source was not relocated");
+    const auto intel = Codegen::MakeAmd64OnlyConverter()->Convert(file, {segmentHeader(text.size())});
+    require(intel.Reports.empty() && intel.Bytes == file, "The Intel target moved a scalar compare");
+}
+
 void reciprocalOperands() {
     const auto vex2 = Codegen::DecodeReciprocal(Bytes{0xC5, 0xF8, 0x52, 0xD5}.data(), 4);
     require(vex2 && vex2->Operation == Codegen::ReciprocalOperation::ReciprocalSquareRoot && vex2->Destination == 2 && vex2->Source == 5, "VEX2 VRSQRTPS was not decoded");
@@ -1672,6 +1769,10 @@ int main() {
         converterClzero();
         rosettaSubstitutions();
         converterRosetta();
+        rosettaScalarCompares();
+        converterRosettaScalarCompare();
+        rosettaLegacyScalarCompares();
+        converterRosettaLegacyScalarCompare();
         wideStoreSplit();
         converterWideStoreWindows();
         converterJumpTableTargets();

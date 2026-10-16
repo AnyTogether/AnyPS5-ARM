@@ -317,7 +317,10 @@ void testControls() {
     for (int rate = 0; rate <= 2; ++rate) {
         check(sceVideoOutSetFlipRate(handle, rate) == 0 && cfg->flipRate == rate, "flip rate was not applied");
     }
-    expectFailure([&] { sceVideoOutSetFlipRate(handle, 3); });
+    for (const int rate : {3, 60, -1}) {
+        check(sceVideoOutSetFlipRate(handle, rate) == VIDEO_OUT_ERROR_INVALID_VALUE, "flip rate outside 0..2 was accepted");
+        check(cfg->flipRate == 2, "a rejected flip rate changed the stored rate");
+    }
     VideoOutColorSettings settings{};
     expectFailure([&] { sceVideoOutColorSettingsSetGamma(&settings, std::numeric_limits<float>::quiet_NaN()); });
     KernelEqueue queue = 0;

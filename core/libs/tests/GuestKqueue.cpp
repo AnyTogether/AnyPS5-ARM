@@ -57,6 +57,8 @@ static constexpr std::uint16_t EvDisable = 0x0008;
 static constexpr std::uint16_t EvOneshot = 0x0010;
 static constexpr std::uint16_t EvClear = 0x0020;
 static constexpr std::uint16_t EvReceipt = 0x0040;
+static constexpr std::uint16_t EvDispatch = 0x0080;
+static constexpr std::uint16_t EvForceoneshot = 0x0100;
 static constexpr std::uint16_t EvError = 0x4000;
 static constexpr std::uint32_t NoteTrigger = 0x01000000;
 static constexpr std::uint32_t NoteFfcopy = 0xc0000000;
@@ -231,6 +233,56 @@ static void SocketPair() {
     Require(close_nid_postfix(kq) == 0);
 }
 
+static void DisableAndDispatch() {
+    const int kq = kqueue_nid_postfix();
+    int pair[2];
+    Require(socketpair_nid_postfix(Unix, Stream, 0, pair) == 0);
+    int marker = 0;
+    KernelEvent events[4]{};
+    const auto ident = static_cast<std::uintptr_t>(pair[0]);
+
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvDisable)) == 0);
+    Require(send_nid_postfix(pair[1], "a", 1, 0) == 1);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvEnable)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].ident == ident && events[0].data == 1);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvDisable)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvDelete)) == 0);
+    char buffer[4]{};
+    Require(recv_nid_postfix(pair[0], buffer, 1, 0) == 1);
+
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvDispatch, 0, 0, &marker)) == 0);
+    Require(send_nid_postfix(pair[1], "bc", 2, 0) == 2);
+    Require(Wait(kq, events, 4) == 1 && events[0].udata == &marker && events[0].data == 2);
+    Require(Poll(kq, events, 4) == 0);
+    Require(send_nid_postfix(pair[1], "d", 1, 0) == 1);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvEnable)) == 0);
+    Require(Wait(kq, events, 4) == 1 && events[0].data == 3);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvDelete)) == 0);
+
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvForceoneshot)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 3);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 3);
+    Require(Apply(kq, Change(ident, EvfiltRead, EvAdd | EvForceoneshot)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 3);
+    Require(Poll(kq, events, 4) == 0);
+    RequireFailure(Apply(kq, Change(ident, EvfiltRead, EvDelete)), GuestEnoent);
+    Require(recv_nid_postfix(pair[0], buffer, sizeof(buffer), 0) == 3);
+
+    Require(Apply(kq, Change(9, EvfiltUser, EvAdd | EvDisable)) == 0);
+    Require(Apply(kq, Change(9, EvfiltUser, 0, NoteTrigger)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(Apply(kq, Change(9, EvfiltUser, EvAdd | EvEnable)) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].filter == EvfiltUser);
+    Require(Apply(kq, Change(9, EvfiltUser, EvDelete)) == 0);
+
+    Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+
 static void Errors() {
     const int kq = kqueue_nid_postfix();
     KernelEvent events[4]{};
@@ -249,7 +301,9 @@ static void Errors() {
     RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(kq), EvfiltRead, EvAdd)), GuestEinval);
     RequireFailure(Apply(kq, Change(1, 1, EvAdd)), GuestEinval);
     Require(Throws([kq] { Apply(kq, Change(1, EvfiltProc, EvAdd)); }));
-    Require(Throws([kq] { Apply(kq, Change(1, EvfiltUser, EvAdd | EvDisable)); }));
+    Require(Apply(kq, Change(1, EvfiltUser, EvAdd | EvDisable)) == 0);
+    Require(Apply(kq, Change(1, EvfiltUser, EvDelete)) == 0);
+    RequireFailure(kevent_nid_postfix(kq, nullptr, 0, events, -1, nullptr), GuestEinval);
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0);
     Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd)); }));
@@ -532,6 +586,7 @@ int main() {
     Timers();
     UserEvents();
     SocketPair();
+    DisableAndDispatch();
     Errors();
     FileWatch();
 #ifndef _WIN32

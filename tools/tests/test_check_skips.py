@@ -143,6 +143,15 @@ class CheckSkipsTests(unittest.TestCase):
         self.assertIn("error: odd skipped", result.stdout)
         self.assertNotIn("error: geometry skipped", result.stdout)
 
+    def test_reason_on_its_own_line_inside_skipped_is_expected(self):
+        for reason, job in (("the device lacks geometryShader", "linux"), ("no display", "windows")):
+            with self.subTest(job=job), tempfile.TemporaryDirectory() as directory:
+                junit = Path(directory) / "junit.xml"
+                junit.write_text(f'<testsuite><testcase name="gpu"><skipped>\n{reason}\n</skipped></testcase></testsuite>', encoding="utf-8")
+                result = subprocess.run([sys.executable, "-I", str(TOOL), str(junit), "--job", job], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("all expected", result.stdout)
+
 
 
 

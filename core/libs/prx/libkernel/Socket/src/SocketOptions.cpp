@@ -4,6 +4,9 @@
 #include <ws2tcpip.h>
 #else
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #endif
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketOptions.hpp"
@@ -20,20 +23,41 @@ constexpr int GuestDontRoute = 0x10;
 constexpr int GuestBroadcast = 0x20;
 constexpr int GuestLinger = 0x80;
 constexpr int GuestOobInline = 0x100;
+constexpr int GuestNoSigpipe = 0x800;
 constexpr int GuestSendBuffer = 0x1001;
 constexpr int GuestReceiveBuffer = 0x1002;
+constexpr int GuestSendTimeout = 0x1005;
+constexpr int GuestReceiveTimeout = 0x1006;
 constexpr int GuestError = 0x1007;
 constexpr int GuestType = 0x1008;
+constexpr int GuestNonBlocking = 0x1200;
+constexpr int GuestTcpNoDelay = 1;
+constexpr int GuestTcpNoDelayFlag = 4;
 
 constexpr int ErrorInvalid = 22;
 constexpr int ErrorDomain = 33;
 constexpr int ErrorNoProtocolOption = 42;
 constexpr int MaximumLinger = 65535;
+constexpr std::int64_t LongestTimeout = 0x7fffffffffffffffLL;
 
 struct GuestLingerValue {
     std::int32_t enabled;
     std::int32_t seconds;
 };
+
+struct GuestTimeval {
+    std::int64_t seconds;
+    std::int64_t microseconds;
+};
+
+std::int64_t TimeoutOf(const GuestTimeval& time) {
+    if (time.seconds > INT32_MAX) return LongestTimeout;
+    return (time.seconds << 32) + static_cast<std::int64_t>((static_cast<std::uint64_t>(time.microseconds) * ((std::uint64_t{1} << 63) / 500000)) >> 32);
+}
+
+GuestTimeval TimevalOf(std::int64_t timeout) {
+    return {timeout >> 32, (1000000 * static_cast<std::int64_t>(static_cast<std::uint32_t>(timeout))) >> 32};
+}
 
 #ifdef _WIN32
 using NativeHandle = SOCKET;
@@ -88,6 +112,34 @@ int SetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int op
         if (::setsockopt(handle, SOL_SOCKET, SO_LINGER, reinterpret_cast<NativeOptionValue>(&request), sizeof(request))) return HostError();
         return 0;
     }
+    if (option == GuestSendTimeout || option == GuestReceiveTimeout) {
+        if (length < sizeof(GuestTimeval)) return ErrorInvalid;
+        if (!value) return ErrorInvalid;
+        GuestTimeval time;
+        std::memcpy(&time, value, sizeof(time));
+        if (time.seconds < 0 || time.microseconds < 0 || time.microseconds >= 1000000) return ErrorDomain;
+        (option == GuestSendTimeout ? state.sendTimeout : state.receiveTimeout) = TimeoutOf(time);
+        return 0;
+    }
+    if (option == GuestNoSigpipe || option == GuestNonBlocking) {
+        if (length < sizeof(int)) return ErrorInvalid;
+        if (!value) return ErrorInvalid;
+        int number;
+        std::memcpy(&number, value, sizeof(number));
+        if (option == GuestNoSigpipe) {
+            state.noSignal = number != 0;
+            return 0;
+        }
+#ifdef _WIN32
+        unsigned long enabled = number != 0;
+        if (ioctlsocket(handle, FIONBIO, &enabled)) return HostError();
+#else
+        int enabled = number != 0;
+        if (::ioctl(handle, FIONBIO, &enabled)) return HostError();
+#endif
+        state.nonblocking = enabled != 0;
+        return 0;
+    }
     const bool native_boolean = NativeBoolean(option) != -1;
     if (native_boolean || option == GuestSendBuffer || option == GuestReceiveBuffer) {
         if (length < sizeof(int)) return ErrorInvalid;
@@ -116,6 +168,10 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
         const GuestLingerValue guest{current.l_onoff != 0 ? GuestLinger : 0, static_cast<std::int32_t>(current.l_linger)};
         return Copy(value, length, &guest, sizeof(guest));
     }
+    if (option == GuestSendTimeout || option == GuestReceiveTimeout) {
+        const GuestTimeval time = TimevalOf(option == GuestSendTimeout ? state.sendTimeout : state.receiveTimeout);
+        return Copy(value, length, &time, sizeof(time));
+    }
     int number = 0;
     if (const int nativeOption = NativeBoolean(option); nativeOption != -1) {
         int enabled = 0;
@@ -129,6 +185,10 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
         number = listening != 0 ? GuestAcceptConnection : 0;
     } else if (option == GuestType) {
         number = type;
+    } else if (option == GuestNoSigpipe) {
+        number = state.noSignal ? GuestNoSigpipe : 0;
+    } else if (option == GuestNonBlocking) {
+        number = state.nonblocking ? 1 : 0;
     } else if (option == GuestError) {
         int pending = 0;
         socklen_t size = sizeof(pending);
@@ -144,6 +204,28 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
     } else {
         return ErrorNoProtocolOption;
     }
+    return Copy(value, length, &number, sizeof(number));
+}
+
+int SetTcpLevelOption(std::uintptr_t native, bool tcp, int option, const void* value, std::uint32_t length) {
+    if (!tcp) return ErrorInvalid;
+    if (option != GuestTcpNoDelay) return ErrorNoProtocolOption;
+    if (length < sizeof(int)) return ErrorInvalid;
+    if (!value) return ErrorInvalid;
+    int number;
+    std::memcpy(&number, value, sizeof(number));
+    const int enabled = number != 0 ? 1 : 0;
+    if (::setsockopt(static_cast<NativeHandle>(native), IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<NativeOptionValue>(&enabled), sizeof(enabled))) return HostError();
+    return 0;
+}
+
+int GetTcpLevelOption(std::uintptr_t native, bool tcp, int option, void* value, std::uint32_t* length) {
+    if (!tcp) return ErrorInvalid;
+    if (option != GuestTcpNoDelay) return ErrorNoProtocolOption;
+    int enabled = 0;
+    socklen_t size = sizeof(enabled);
+    if (::getsockopt(static_cast<NativeHandle>(native), IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<NativeOptionOutput>(&enabled), &size)) return HostError();
+    const int number = enabled != 0 ? GuestTcpNoDelayFlag : 0;
     return Copy(value, length, &number, sizeof(number));
 }
 

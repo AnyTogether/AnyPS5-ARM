@@ -88,6 +88,7 @@ struct ImageResource {
     bool depthBitsCompatible = true;
     bool constantSwizzle = false;
     bool constantSwizzleCompatible = true;
+    bool cubeFaceCompatible = true;
     bool flatVolumeCompatible = true;
     bool singleMipPlaneBiasCompatible = false;
     bool flatLineCompatible = true;

@@ -90,6 +90,19 @@ class RegistrationTests(unittest.TestCase):
         names = self.registered('add_test("bounds"\n    "/build/tests/buffer_bounds_tests"\n)\n')
         self.assertIn("buffer_bounds_tests", names)
 
+    def test_multi_config_branches_register_the_executable(self):
+        names = self.registered(
+            'if(CTEST_CONFIGURATION_TYPE MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")\n'
+            '  add_test([=[bounds]=] "/build/tests/Debug/buffer_bounds_tests")\n'
+            '  set_tests_properties([=[bounds]=] PROPERTIES  TIMEOUT "20")\n'
+            'elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")\n'
+            '  add_test([=[bounds]=] "/build/tests/Release/buffer_bounds_tests")\n'
+            '  set_tests_properties([=[bounds]=] PROPERTIES  TIMEOUT "20")\n'
+            'else()\n'
+            '  add_test([=[bounds]=] NOT_AVAILABLE)\n'
+            'endif()\n')
+        self.assertIn("buffer_bounds_tests", names)
+
     def test_disabled_test_is_not_counted_as_run(self):
         names = self.registered('add_test("bounds" "/build/tests/buffer_bounds_tests")\nset_tests_properties("bounds" PROPERTIES DISABLED TRUE)\n')
         self.assertNotIn("buffer_bounds_tests", names)

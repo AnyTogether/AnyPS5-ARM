@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
-#include <stdexcept>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 

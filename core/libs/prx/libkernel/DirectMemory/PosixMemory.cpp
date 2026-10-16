@@ -19,6 +19,7 @@
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI sceKernelMlock_nid_postfix(void* address, std::uint64_t length);
 extern "C" int APS5_VABI sceKernelMunlock_nid_postfix(void* address, std::uint64_t length);
+extern "C" int APS5_VABI sceKernelMunlockall_nid_postfix();
 extern "C" int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInfo* info, uint64_t info_size);
 
 namespace {
@@ -238,6 +239,13 @@ int APS5_VABI mlockall_nid_postfix(int flags) {
     }
     if ((flags & GuestLockFuture) != 0) throw std::runtime_error("mlockall: MCL_FUTURE is not implemented: later mappings are not locked");
     throw std::runtime_error("mlockall: MCL_CURRENT is not implemented: the process also holds host stacks, heaps, modules and driver mappings");
+}
+
+int APS5_VABI munlockall_nid_postfix() {
+    const int result = sceKernelMunlockall_nid_postfix();
+    if (result == 0) return 0;
+    SetError(result & 0xffff);
+    return -1;
 }
 
 int APS5_VABI msync_nid_postfix(void* address, std::size_t length, int flags) {

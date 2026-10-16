@@ -18,6 +18,13 @@ int main() {
         require(coverage.Covers(base, 4 * block + 1), "the initialized arena is not watched");
         require(!coverage.Covers(base - 1, 1) && !coverage.Covers(base + 4 * block + 1, 1), "outside memory is watched");
         require(!coverage.Covers(base, 0) && !coverage.Covers(base, std::numeric_limits<std::size_t>::max()), "an empty or overflowing range is watched");
+        std::uint64_t spanBegin = 0;
+        std::uint64_t spanEnd = 0;
+        require(coverage.ExcludedSpan(base + block + 4096, 4096, &spanBegin, &spanEnd) && spanBegin == base + block && spanEnd == base + 2 * block, "the span of an imported page is not its whole block");
+        require(coverage.ExcludedSpan(base + 3 * block - 1, 2, &spanBegin, &spanEnd) && spanBegin == base + 2 * block && spanEnd == base + 4 * block, "the span of a boundary import is not both blocks");
+        require(coverage.ExcludedSpan(base + 4 * block, std::numeric_limits<std::size_t>::max(), &spanBegin, &spanEnd) && spanBegin == base + 4 * block && spanEnd == base + 4 * block + 1, "the span of the last partial block is not clipped to the arena");
+        require(coverage.ExcludedSpan(base - 1, 2, &spanBegin, &spanEnd) && spanBegin == base && spanEnd == base + block, "the span of an import crossing the arena start is not clipped");
+        require(!coverage.ExcludedSpan(base - block, block, &spanBegin, &spanEnd) && !coverage.ExcludedSpan(base + 5 * block, block, &spanBegin, &spanEnd) && !coverage.ExcludedSpan(base, 0, &spanBegin, &spanEnd), "an outside or empty import has a span");
         require(coverage.Exclude(base + block + 4096, 1), "an imported page was not excluded");
         require(!coverage.Covers(base + block, block), "the imported block is still watched");
         require(!coverage.Covers(base + block - 1, 2), "a range crossing into the import is watched");

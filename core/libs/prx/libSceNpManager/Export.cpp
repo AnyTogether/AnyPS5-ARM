@@ -237,11 +237,9 @@ int APS5_VABI sceNpUnregisterPremiumEventCallback(void) {
     return 0;
 }
 
-// No local user is signed in, so no account maps to a user.
 int APS5_VABI sceNpGetUserIdByAccountId(uint64_t account_id, int* user_id) {
-    (void)account_id;
-    if (!user_id) return SCE_NP_ERROR_INVALID_ARGUMENT;
-    return SCE_NP_ERROR_USER_NOT_FOUND;
+    if (account_id == 0 || !user_id) return SCE_NP_ERROR_INVALID_ARGUMENT;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {

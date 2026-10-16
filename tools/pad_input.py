@@ -2,6 +2,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 import time
 
@@ -65,10 +66,20 @@ def main():
         sequence = next_sequence(args.path)
     except ValueError as error:
         parser.error(str(error))
+    metadata = None
+    if os.name == "posix":
+        try:
+            metadata = args.path.stat()
+        except FileNotFoundError:
+            pass
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", dir=args.path.parent, delete=False) as output:
             temporary = Path(output.name)
+            if metadata is not None:
+                if os.geteuid() == 0:
+                    os.fchown(output.fileno(), metadata.st_uid, metadata.st_gid)
+                os.fchmod(output.fileno(), stat.S_IMODE(metadata.st_mode))
             output.write(f"{sequence} {BUTTONS[args.button]} {args.hold_ms}{sticks}\n")
         os.replace(temporary, args.path)
     finally:
