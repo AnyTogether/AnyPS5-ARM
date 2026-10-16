@@ -128,9 +128,14 @@ inline void PreciseSpinPause() {
 }
 
 inline std::uint64_t PreciseMonotonicNanos() {
+#ifdef __APPLE__
+    // macOS's CLOCK_MONOTONIC counts whole microseconds; std::chrono::steady_clock reads this clock in nanoseconds.
+    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<std::uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<std::uint64_t>(ts.tv_nsec);
+#endif
 }
 
 #ifdef __linux__
@@ -161,7 +166,12 @@ inline void PreciseSleepFromNanosWithSlack(std::uint64_t startNanos, unsigned lo
     }
 #else
     (void)allowLowSlack;
+#ifdef __APPLE__
+    // A sleep on macOS wakes ~350 us after its deadline, so more of the wait is spun.
+    constexpr unsigned long long kSpinTailNanos = 400000ULL;
+#else
     constexpr unsigned long long kSpinTailNanos = 100000ULL;
+#endif
     if (nanos > kSpinTailNanos) [[unlikely]] {
         const unsigned long long sleepNanos = nanos - kSpinTailNanos;
         struct timespec req;
