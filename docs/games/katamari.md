@@ -1,4 +1,4 @@
-[← All games](README.md) · **English**
+[← All games](README.md) · **English** · [Türkçe](tr/katamari.md)
 
 # Once Upon a KATAMARI
 
@@ -12,6 +12,18 @@ The user also reports that relaunching starts the game from the beginning. Save-
 
 The test used a fresh macOS relink of the decrypted game and its Unity modules, packaged with the current `main` build (`0deeb2a99`) and MoltenVK. The upstream rect-list culling fix (`140bdd3d4`) removed the invalid rect-list errors from the tested run. An earlier run stopped at a black screen after the startup logo; the follow-up gameplay report supersedes that result.
 
+## Step by step
+
+| | Stage | Details |
+|---|---|---|
+| ✅ | **Startup executable and modules** | Relinked the game executable, its two Unity modules and five Unity plugins from decrypted files. The packaged title starts and loads Unity content. |
+| ✅ | **Degenerate rect-list draws** | The log no longer reports the invalid nondegenerate-rectangle validation failure after using the upstream culling fix. |
+| ✅ | **First rendered scene** | Gameplay is reached in the user's follow-up run. |
+| 🔧 | **Shader warm-up and performance** | The shader counter continues past 30,000; the user reports about 3 FPS during this cold-cache run. Repeat after the counter settles and compare the same scene before assessing steady-state performance. |
+| 🔧 | **Save and resume** | The user reports the next launch starts from the beginning despite save files being present. Verify the in-game save action and whether a saved run resumes. |
+
+✅ done · 🔧 in progress · ⏭️ next
+
 ## Technical details
 
 | | |
@@ -24,14 +36,4 @@ The test used a fresh macOS relink of the decrypted game and its Unity modules, 
 | Tested source | `main at 0deeb2a99` |
 | Output | `Gameplay reached; user reports ~3 FPS during shader warm-up and restart from beginning; save/resume and warm-cache FPS unverified` |
 
-## Step by step
-
-| | Stage | Details |
-|---|---|---|
-| ✅ | **Startup executable and modules** | Relinked the game executable, its two Unity modules and five Unity plugins from decrypted files. The packaged title starts and loads Unity content. |
-| ✅ | **Degenerate rect-list draws** | The log no longer reports the invalid nondegenerate-rectangle validation failure after using the upstream culling fix. |
-| ✅ | **First rendered scene** | Gameplay is reached in the user's follow-up run. |
-| 🔧 | **Shader warm-up and performance** | The shader counter continues past 30,000; the user reports about 3 FPS during this cold-cache run. Repeat after the counter settles and compare the same scene before assessing steady-state performance. |
-| 🔧 | **Save and resume** | The user reports the next launch starts from the beginning despite save files being present. Verify the in-game save action and whether a saved run resumes. |
-
-✅ done · 🔧 in progress · ⏭️ next
+First reported by Eyad Al-Daoud in [PR #8](https://github.com/utkuhalis/AnyPS5-ARM/pull/8).
