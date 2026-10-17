@@ -8,6 +8,7 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include <mutex>
 #include <array>
+#include <map>
 #include <chrono>
 #include <atomic>
 #include <algorithm>
@@ -30,6 +31,8 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <dlfcn.h>
+#include <execinfo.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <pthread.h>
@@ -1834,8 +1837,57 @@ struct GpuLockStats {
     std::uint64_t triesFailed = 0;
     std::uint64_t lockedGpuWaits = 0;
     double lockedGpuWaitMs = 0;
+    // APS5_PROFILE_LOCK_CALLERS=1: the call stacks of contended acquisitions nobody tagged, with
+    // how often and how long they waited, so the [lock] line names the code behind "other".
+    std::map<std::array<void*, 6>, std::pair<std::uint64_t, double>> otherWaitStacks;
     std::chrono::steady_clock::time_point lastReport = std::chrono::steady_clock::now();
 };
+
+bool GpuLockCallersProfiled() {
+    static const bool profiled = std::getenv("APS5_PROFILE_LOCK_CALLERS") != nullptr;
+    return profiled;
+}
+
+void NoteOtherWaitStack(GpuLockStats& stats, double waitedMs) {
+#ifdef __APPLE__
+    void* raw[8] = {};
+    const int captured = ::backtrace(raw, 8);
+    std::array<void*, 6> key{};
+    for (int i = 2; i < captured && i - 2 < static_cast<int>(key.size()); ++i) key[static_cast<std::size_t>(i - 2)] = raw[i];
+    auto& entry = stats.otherWaitStacks[key];
+    ++entry.first;
+    entry.second += waitedMs;
+#else
+    static_cast<void>(stats);
+    static_cast<void>(waitedMs);
+#endif
+}
+
+std::string OtherWaitStacksReport(GpuLockStats& stats) {
+    std::string report;
+#ifdef __APPLE__
+    std::vector<std::pair<std::array<void*, 6>, std::pair<std::uint64_t, double>>> entries(stats.otherWaitStacks.begin(), stats.otherWaitStacks.end());
+    std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
+    for (std::size_t i = 0; i < entries.size() && i < 4; ++i) {
+        char text[96];
+        std::snprintf(text, sizeof(text), "; other stack %llu/%.0f ms:", static_cast<unsigned long long>(entries[i].second.first), entries[i].second.second);
+        report += text;
+        for (void* frame : entries[i].first) {
+            if (frame == nullptr) break;
+            Dl_info info{};
+            if (::dladdr(frame, &info) && info.dli_fname != nullptr) {
+                const char* name = std::strrchr(info.dli_fname, '/');
+                std::snprintf(text, sizeof(text), " %s+0x%llx", name ? name + 1 : info.dli_fname, static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(frame) - reinterpret_cast<std::uintptr_t>(info.dli_fbase)));
+            } else {
+                std::snprintf(text, sizeof(text), " %p", frame);
+            }
+            report += text;
+        }
+    }
+#endif
+    stats.otherWaitStacks.clear();
+    return report;
+}
 
 GpuLockStats& LockStats() {
     thread_local GpuLockStats stats;
@@ -2026,6 +2078,7 @@ void GpuMutexType::lock() {
         ++stats.waits;
         stats.siteWaitedMs[site] += waitedMs;
         ++stats.siteWaits[site];
+        if (site == static_cast<std::size_t>(GpuLockSite::Other) && GpuLockCallersProfiled()) NoteOtherWaitStack(stats, waitedMs);
         if (now - stats.lastReport < std::chrono::seconds(10)) return;
         // The line is printed from inside a contended acquisition, so a thread that rarely waits
         // reports a longer span than 10 s: the real interval is printed.
@@ -2059,6 +2112,7 @@ void GpuMutexType::lock() {
         char counts[160];
         std::snprintf(counts, sizeof(counts), "; lock() %llu / try %llu / try failed %llu; locked GPU waits %llu / %.0f ms", static_cast<unsigned long long>(stats.acquisitions), static_cast<unsigned long long>(stats.tries), static_cast<unsigned long long>(stats.triesFailed), static_cast<unsigned long long>(stats.lockedGpuWaits), stats.lockedGpuWaitMs);
         holds += counts;
+        if (GpuLockCallersProfiled()) holds += OtherWaitStacksReport(stats);
         if (stats.tag == 0xffffffffu) AgcDriver::ProfilePrint_nid_no_patch("[lock] %s waited %.0f ms for the GPU mutex in %llu of %llu acquisitions (%.0f s); by site (acquisitions/waits, waited):%s%s\n", stats.holderColumn == PresenterColumn ? "presenter" : "untagged thread", stats.waitedMs, static_cast<unsigned long long>(stats.waits), static_cast<unsigned long long>(stats.acquisitions), interval, sites.c_str(), holds.c_str());
         else AgcDriver::ProfilePrint_nid_no_patch("[lock] queue 0x%x waited %.0f ms for the GPU mutex in %llu of %llu acquisitions (%.0f s); by site (acquisitions/waits, waited):%s%s\n", stats.tag, stats.waitedMs, static_cast<unsigned long long>(stats.waits), static_cast<unsigned long long>(stats.acquisitions), interval, sites.c_str(), holds.c_str());
         stats.waitedMs = 0;

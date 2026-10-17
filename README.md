@@ -22,6 +22,8 @@ Includes a [relinker](core/relinker) that converts executable to the target syst
 
 <sub>MacBook Pro M3 Pro, macOS 26.6.2. The Unity titles still need the manual module steps described on their pages; AnyPS5.app does not do them yet.</sub>
 
+## Status
+
 [![libraries](https://boykopovar.github.io/AnyPS5/badge-libraries.svg)](https://boykopovar.github.io/AnyPS5/progress.html) [![shaders](https://boykopovar.github.io/AnyPS5/badge-shaders.svg)](https://boykopovar.github.io/AnyPS5/progress.html)
 
 [![progress map](https://boykopovar.github.io/AnyPS5/progress.svg)](https://boykopovar.github.io/AnyPS5/progress.html)
@@ -39,14 +41,6 @@ The [shader recompiler](core/shader/recompiler/Recompiler.cpp) successfully prod
 [Tested games and their frame rates](docs/user/COMPATIBILITY.md)
 
 Per-game progress (stage reached, open blockers, libraries and GPU coverage) is tracked on the [blocker map](https://alxcbtw.github.io/anyps5-roadmap/), a community project built from public GitHub data ([source](https://github.com/AlxcBTW/anyps5-roadmap)). Test reports go in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
-
-## Status
-
-[![libraries](docs/progress/badge-libraries.svg)](docs/progress/badge-libraries.svg) [![shaders](docs/progress/badge-shaders.svg)](docs/progress/badge-shaders.svg)
-
-[![progress map](docs/progress/progress.svg)](docs/progress/progress.svg)
-
-<sub>* System libraries: the share of the functions the project knows so far (declared in [core/libs/prx](core/libs/prx)) that are implemented, not of every PS5 system function.</sub>
 
 ## The AnyPS5 app
 
