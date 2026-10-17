@@ -4,13 +4,23 @@
 
 `PPSA21904` · Unity (IL2CPP)
 
-**Durum:** 🟡 Üzerinde çalışılıyor · oynanışa geliyor; shader ısınması sürüyor · **FPS:** kullanıcı raporuna göre ısınma sırasında oyun içinde ~3; oturmuş FPS ölçülmedi
+**Durum:** 🟡 Üzerinde çalışılıyor · başlık ekranı ve eğitim sahnesi çiziliyor; siyah açılış ara sahnesini atlamak için Esc'yi basılı tutun · **FPS:** menü 30,45; eğitim 1,19 (anlık görüntü, ısınmış FPS değil)
 
-7 çekirdekli GPU'lu bir Apple M1 Mac'te, macOS 27.0.1 ile, 1920×1080 Vulkan çizim boyutunda test edildi. Kullanıcı ikinci denemede oynanışa ~3 FPS ile ulaştığını, oyunun ekranda gösterdiği shader sayacının da 30.000'i geçip artmaya devam ettiğini bildiriyor. Bu soğuk cache ile yapılmış bir gözlem: shader/pipeline ısınması tamamlanmadı, ısınmış bir tekrar denemedeki performans da ölçülmedi. 3 FPS'i oturmuş oyun performansı değil, geçici bir rakam olarak okuyun.
+7 çekirdekli GPU'lu bir Apple M1 Mac'te, macOS 27.0.1 ile, 1920×1080 Vulkan çizim boyutunda test edildi. Kullanıcı, açılışta ve yeni oyun başlatırken görünen siyah ekranın çizilmeyen bir ara sahne olduğunu bildiriyor; klavyede Esc'yi basılı tutunca atlanıp oyuna devam ediliyor.
 
 Kullanıcı ayrıca oyunu yeniden açınca baştan başladığını bildiriyor. Uygulamanın `_sd` klasöründe kayıt dosyaları var, ama bu dosyaların varlığı ilerlemenin gerçekten kaydedildiğini ya da yüklendiğini göstermiyor. Oyun içi kaydetme ve devam etme henüz doğrulanmalı; bunu şimdilik kesinleşmiş bir kayıt verisi hatası saymayın.
 
-Test, oyunun ve Unity modüllerinin şifresi çözülmüş dosyalarından yeni yapılmış bir macOS relink'i ile, güncel `main` build'i (`0deeb2a99`) ve MoltenVK ile paketlenerek yapıldı. Upstream'in rect-list ayıklama düzeltmesi (`140bdd3d4`) test edilen çalıştırmadaki geçersiz rect-list hatalarını giderdi. Daha önceki bir deneme açılış logosundan sonra siyah ekranda kalmıştı; ikinci denemedeki oynanış raporu o sonucun yerini alıyor.
+Test, oyunun ve Unity modüllerinin şifresi çözülmüş dosyalarından yeni yapılmış bir macOS relink'i ile, `0deeb2a99` commit'indeki `main` build'i ve MoltenVK ile paketlenerek yapıldı. Upstream'in rect-list ayıklama düzeltmesi (`140bdd3d4`) test edilen çalıştırmadaki geçersiz rect-list hatalarını giderdi.
+
+## Ekran görüntüleri
+
+![Geleneksel Çince Once Upon a KATAMARI başlık ekranı](../img/katamari-title.jpg)
+*Başlık ekranı: görüntü alındığında 30,45 FPS (19.433 sunulan kare).*
+
+![İlk oynanış eğitim sahnesi](../img/katamari-ingame.jpg)
+*İlk eğitim sahnesi: görüntü alındığında 1,19 FPS (164.403 sunulan kare).*
+
+Bunlar anlık ölçümlerdir. Pencere başlığındaki parantezli sayı shader sayısı değil, toplam sunulan kare sayısıdır. Kullanıcı shader derlemesinin hâlâ sürdüğünü ve Mac pilde olduğu için oturumu bitirdiğini bildiriyor; ısınmış cache ile FPS ölçülmedi.
 
 ## Adım adım
 
@@ -18,8 +28,8 @@ Test, oyunun ve Unity modüllerinin şifresi çözülmüş dosyalarından yeni y
 |---|---|---|
 | ✅ | **Açılış dosyası ve modüller** | Oyunun çalıştırılabilir dosyası, iki Unity modülü ve beş Unity eklentisi şifresi çözülmüş dosyalardan relink edildi. Paketlenen oyun açılıyor ve Unity içeriğini yüklüyor. |
 | ✅ | **Dejenere rect-list çizimleri** | Upstream'in ayıklama düzeltmesinden sonra logda artık geçersiz dikdörtgen doğrulama hatası yok. |
-| ✅ | **İlk çizilen sahne** | Kullanıcının ikinci denemesinde oynanışa ulaşılıyor. |
-| 🔧 | **Shader ısınması ve performans** | Shader sayacı 30.000'i geçip artıyor; kullanıcı bu soğuk cache denemesinde ~3 FPS bildiriyor. Sayaç durduktan sonra aynı sahnede tekrar ölçüp karşılaştırmak gerekiyor. |
+| ✅ | **Açılış ara sahnesi ve ilk sahne** | Açılış ara sahnesi siyah; Esc basılı tutularak atlanıyor. Başlık ekranı ve ilk eğitim sahnesi çiziliyor. |
+| 🔧 | **Shader ısınması ve performans** | Kullanıcı pilde olduğu için shader derlemesi sürerken oturumu bitirdi. Ekran görüntülerinde menüde 30,45, eğitim sahnesinde 1,19 FPS görülüyor; oturmuş performans için ısınma sonrası tekrar ölçüm gerekiyor. |
 | 🔧 | **Kaydetme ve devam etme** | Kullanıcı, kayıt dosyaları olduğu hâlde bir sonraki açılışın baştan başladığını bildiriyor. Oyun içi kaydetme adımı ve kayıtlı bir oyunun devam edip etmediği doğrulanmalı. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
@@ -34,6 +44,6 @@ Test, oyunun ve Unity modüllerinin şifresi çözülmüş dosyalarından yeni y
 | CPU yolu | `x86-64 → Rosetta 2` |
 | Test donanımı | `Apple M1, 7 çekirdekli GPU; macOS 27.0.1` |
 | Test edilen kaynak | `main, 0deeb2a99` |
-| Sonuç | `Oynanışa ulaşıldı; kullanıcı ısınma sırasında ~3 FPS ve baştan başlama bildiriyor; kaydetme/devam ve ısınmış FPS doğrulanmadı` |
+| Sonuç | `Siyah ara sahne atlandıktan sonra başlık ve eğitim sahnesi çiziliyor; ekran görüntülerinde 30,45 ve 1,19 FPS; kaydetme/devam ve ısınmış FPS doğrulanmadı` |
 
 İlk rapor [PR #8](https://github.com/utkuhalis/AnyPS5-ARM/pull/8) ile Eyad Al-Daoud'dan geldi.

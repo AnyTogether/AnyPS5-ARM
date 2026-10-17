@@ -18,5 +18,5 @@ Test donanımı: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Son gü
 | <img src="../img/stray-family.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🟢 Oynanabilir, ilk bölüm (FPS çok düşük) | Oyun içi ~1-11 (1080p) |
 | <img src="../img/minecraft-ingame.jpg" width="180"> | [**Minecraft**](minecraft.md) | `PPSA17221` | Bedrock Edition | 🟡 Dünyaya giriyor, ~20 sn sonra çöküyor | Menüler 60 · oyun içi ~7-8 |
 | <img src="../img/quake2-base1.jpg" width="180"> | [**Quake II ve Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II oyun içi · Quake III veri bekliyor | Menü ~48 · oyun içi ~40 |
-|  | [**Once Upon a KATAMARI**](katamari.md) | `PPSA21904` | Unity (IL2CPP) | 🟡 Oynanışa geliyor; shader ısınması sürüyor (M1, topluluk raporu) | Isınma sırasında oyun içi ~3; oturmuş FPS bilinmiyor |
+| <img src="../img/katamari-title.jpg" width="180"> | [**Once Upon a KATAMARI**](katamari.md) | `PPSA21904` | Unity (IL2CPP) | 🟡 Başlık ve eğitim sahnesi çiziliyor; siyah açılış ara sahnesini Esc basılı tutarak geçin (M1, topluluk raporu) | Menü 30,45 · eğitim 1,19 (anlık ölçüm; ısınmış FPS bilinmiyor) |
 |  | **GTA III – Definitive Edition** | `PPSA03527` | Unreal Engine 4 | 🔴 Henüz yeniden denenmedi | — |
