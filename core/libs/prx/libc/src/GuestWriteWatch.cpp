@@ -564,8 +564,13 @@ private:
     };
 
     struct Lock {
+        // The holds are short (a page table lookup), so a waiter spins before it yields: under Rosetta
+        // every sched_yield is a system call, and the queued waiters of a hot watch paid one per turn.
         explicit Lock(Turns& turns) : _turns(turns), _turn(turns.next.fetch_add(1, std::memory_order_relaxed)) {
-            while (_turns.serving.load(std::memory_order_acquire) != _turn) ::sched_yield();
+            for (unsigned spins = 0; _turns.serving.load(std::memory_order_acquire) != _turn; ++spins) {
+                if (spins < 2048) __builtin_ia32_pause();
+                else ::sched_yield();
+            }
         }
         ~Lock() {
             _turns.serving.store(_turn + 1, std::memory_order_release);
