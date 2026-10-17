@@ -64,6 +64,19 @@ inline const void*& DeviceLostOwner() {
     return owner;
 }
 
+// Records a uniform GPU fill of guest memory in order with the recorded work (the current device's
+// FillBuffer; false when it could not): for metadata the graphics layer rewrites while a GPU fill of
+// it is still pending, where a CPU store would land before the fill and be overwritten by it.
+inline std::function<bool(std::uint64_t address, std::size_t bytes, std::uint32_t value)>& MetadataFillHook() {
+    static std::function<bool(std::uint64_t, std::size_t, std::uint32_t)> hook;
+    return hook;
+}
+
+inline const void*& MetadataFillOwner() {
+    static const void* owner = nullptr;
+    return owner;
+}
+
 inline void ReportDeviceLost() {
     static std::atomic<bool> reported{false};
     if (DeviceLostHook() && !reported.exchange(true)) DeviceLostHook()();

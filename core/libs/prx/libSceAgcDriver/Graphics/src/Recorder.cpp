@@ -2693,11 +2693,24 @@ void Recorder::OnComplete(std::function<void()> action) {
     writeBackCompletions.fetch_add(1, std::memory_order_acq_rel);
 }
 
+bool Recorder::WrittenSince(std::uint64_t address, std::size_t bytes, std::uint64_t serial) const {
+    if (recentWriteSerial == serial) return false;
+    if (recentWriteSerial - serial >= RecentWrites) return true;
+    const auto end = address + bytes;
+    for (auto at = serial + 1; at <= recentWriteSerial; ++at) {
+        const auto& write = recentWrites[at % RecentWrites];
+        if (write.begin < end && address < write.end) return true;
+    }
+    return false;
+}
+
 bool Recorder::noteWrite(std::uint64_t address, std::size_t bytes, bool ownLabel, int value) {
     CaptureTrace::Log("buffer-write batch=%llu address=%llx bytes=%zu label=%d", static_cast<unsigned long long>(submissions + 1), static_cast<unsigned long long>(address), bytes, ownLabel);
     if (bytes == 0) return false;
     ensureOpen();
     const auto end = address + bytes;
+    ++recentWriteSerial;
+    recentWrites[recentWriteSerial % RecentWrites] = {address, end, recentWriteSerial};
     open->writes.emplace_back(address, end);
     open->writeNotes.push_back(++writeNoteCount);
     open->writeValues.push_back(static_cast<std::int16_t>(value));

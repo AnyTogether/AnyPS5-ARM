@@ -1028,10 +1028,34 @@ std::map<std::uint64_t, std::uint64_t>& htileReads() {
     return *reads;
 }
 
+// The words a uniform GPU fill left in a surface's HTILE while that fill (or the expanded store that
+// follows it) is still pending, with the range's newest write stamp and the recorder's write note
+// serial then: while neither moved (no CPU store collected, no other GPU writer noted over it),
+// storeBackClearedHtile knows the words without reading them, which would wait for the GPU
+// (APS5_NO_KNOWN_HTILE=1 reads them as before).
+struct KnownHtile {
+    std::uint32_t word = 0;
+    std::uint64_t stamp = 0;
+    const void* recorder = nullptr;
+    std::uint64_t writeSerial = 0;
+};
+
+std::map<std::uint64_t, KnownHtile>& knownHtiles() {
+    static auto* known = new std::map<std::uint64_t, KnownHtile>();
+    return *known;
+}
+
+bool KnownHtileEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_KNOWN_HTILE") == nullptr;
+    return enabled;
+}
+
 void forgetHtileReads(std::uint64_t address, std::size_t bytes) {
     std::lock_guard lock(htileReadsMutex());
     auto& reads = htileReads();
     reads.erase(reads.lower_bound(address), reads.lower_bound(address + bytes));
+    auto& known = knownHtiles();
+    known.erase(known.lower_bound(address), known.lower_bound(address + bytes));
 }
 
 bool RoutesToNativeDepthOwner(const DepthTarget& target) {
@@ -1052,6 +1076,29 @@ VkImageAspectFlags storeBackClearedHtile(const Context& context, const DepthTarg
         std::lock_guard lock(htileReadsMutex());
         const auto found = htileReads().find(target.htileAddress);
         if (found != htileReads().end() && found->second != 0 && GuestMemory::UnchangedSince(target.htileAddress, bytes, found->second)) return 0;
+    } else if (KnownHtileEnabled() && MetadataFillHook()) {
+        // The recorder's write notes are made under the GPU mutex.
+        std::lock_guard gpu(GuestMemory::GpuMutex());
+        std::optional<std::uint32_t> word;
+        {
+            std::lock_guard lock(htileReadsMutex());
+            const auto found = knownHtiles().find(target.htileAddress);
+            if (found != knownHtiles().end() && found->second.recorder == recorder && found->second.stamp == GuestMemory::NewestStamp(target.htileAddress, bytes) && !recorder->WrittenSince(target.htileAddress, bytes, found->second.writeSerial)) word = found->second.word;
+        }
+        if (word.has_value()) {
+            // The fill is uniform: the words read as `word` once it lands. A clear they show is
+            // consumed by storing the expanded words behind the fill on the GPU (a CPU store would
+            // land first and be overwritten by the fill).
+            const VkImageAspectFlags cleared = HtileFillClears(*word, target.htileStencil) & (VK_IMAGE_ASPECT_DEPTH_BIT | (target.htileStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u));
+            if (cleared == 0) return 0;
+            const auto expanded = expandedHtileWord(*word, target.htileStencil, cleared);
+            if (MetadataFillHook()(target.htileAddress, bytes, expanded)) {
+                std::lock_guard lock(htileReadsMutex());
+                htileReads().erase(target.htileAddress);
+                knownHtiles()[target.htileAddress] = {expanded, GuestMemory::NewestStamp(target.htileAddress, bytes), recorder, recorder->WriteNoteSerial()};
+                return cleared;
+            }
+        }
     }
     std::vector<std::uint32_t> words(bytes / 4u);
     GuestMemory::Read(target.htileAddress, std::as_writable_bytes(std::span(words)), 4);
@@ -1426,6 +1473,10 @@ void NoteDepthMetadataFill(std::uint64_t address, std::size_t bytes, std::uint32
         const auto& target = surface->target;
         if (target.samples != 1u && target.htileAddress != 0u && address < target.htileAddress + HtileMetadataBytes(target.extent) && target.htileAddress < address + bytes) surface->sampling.refusal = "native multisample depth metadata fill transition is not implemented";
         if (!HtileFillCovers(target.htileAddress, target.extent, address, bytes)) continue;
+        if (auto* recorder = Recorder::Active(); target.samples == 1u && KnownHtileEnabled() && recorder != nullptr) {
+            std::lock_guard reads(htileReadsMutex());
+            knownHtiles()[target.htileAddress] = {pattern, GuestMemory::NewestStamp(target.htileAddress, HtileMetadataBytes(target.extent)), recorder, recorder->WriteNoteSerial()};
+        }
         const VkImageAspectFlags written = VK_IMAGE_ASPECT_DEPTH_BIT | (target.htileStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0u);
         surface->pendingClear = (surface->pendingClear & ~written) | HtileFillClears(pattern, target.htileStencil);
     }

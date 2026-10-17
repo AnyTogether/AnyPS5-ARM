@@ -1919,6 +1919,13 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->deviceLostHook = true;
     }
     APS5_LOG_OUT("Vulkan device ready device=%p queue=%p family=%u", reinterpret_cast<void*>(state->device), reinterpret_cast<void*>(state->queue), family);
+    if (!compileOnly) {
+        Graphics::MetadataFillHook() = [this](std::uint64_t address, std::size_t bytes, std::uint32_t value) {
+            const std::array<std::uint32_t, 4> pattern{value, value, value, value};
+            return FillBuffer(address, bytes, pattern);
+        };
+        Graphics::MetadataFillOwner() = this;
+    }
     VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolInfo.queueFamilyIndex = family;
@@ -2034,7 +2041,12 @@ void VulkanDevice::startJournalReplay() {
     state->journalReplay = Graphics::StartPipelineJournalReplay(graphicsContext(), Graphics::PipelineJournalDeviceFingerprint(state->properties), {[this](const ShaderRecompiler::RecompileResult& shader, bool pushConstants) { return ReplayComputePipeline(shader, pushConstants); }});
 }
 
-VulkanDevice::~VulkanDevice() = default;
+VulkanDevice::~VulkanDevice() {
+    if (Graphics::MetadataFillOwner() == this) {
+        Graphics::MetadataFillHook() = nullptr;
+        Graphics::MetadataFillOwner() = nullptr;
+    }
+}
 
 VkPipelineCreateFlags VulkanDevice::computePipelineFlags() const {
     return (graphicsContext().pipelineExecutableInfo ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0) | VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;

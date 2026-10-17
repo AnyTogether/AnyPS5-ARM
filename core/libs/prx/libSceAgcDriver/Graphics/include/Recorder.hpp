@@ -116,6 +116,10 @@ public:
     // Notes several [begin, end) ranges and publishes the snapshot once (a dispatch writes many buffers).
     void NotePendingWrites(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges);
     bool PendingWriteOverlaps(std::uint64_t address, std::size_t bytes) const;
+    // Pending write notes by serial: WrittenSince tells whether a note made after `serial` overlaps the
+    // range (also when the last notes kept no longer reach back that far).
+    std::uint64_t WriteNoteSerial() const { return recentWriteSerial; }
+    bool WrittenSince(std::uint64_t address, std::size_t bytes, std::uint64_t serial) const;
     // Whether no unfinished batch writes the range any more: no open-batch overlap, and every
     // overlapping in-flight batch's fence has signaled (its in-place GPU stores are final in host
     // memory; its completion stores are the caller's business, see VulkanDevice::CopyBuffer).
@@ -765,6 +769,14 @@ private:
     // `ownLabel`: the range is a label's own store (NoteLabel, AfterCompletions), which does not
     // overwrite the table entries it covers; any other range flags them (table mutex, briefly).
     bool noteWrite(std::uint64_t address, std::size_t bytes, bool ownLabel = false, int value = -1);
+    struct RecentWrite {
+        std::uint64_t begin = 0;
+        std::uint64_t end = 0;
+        std::uint64_t serial = 0;
+    };
+    static constexpr std::size_t RecentWrites = 64;
+    std::array<RecentWrite, RecentWrites> recentWrites{};
+    std::uint64_t recentWriteSerial = 0;
     // Appends one range to `batch` (open or in flight) and publishes the snapshot if needed.
     void noteWriteOn(Batch& batch, std::uint64_t address, std::size_t bytes, bool ownLabel = false);
     void noteLabelOn(Batch& batch, std::uint64_t address, std::span<const std::byte> bytes, std::uint64_t stamp, std::uint32_t queue, bool behindCompletion = false);
