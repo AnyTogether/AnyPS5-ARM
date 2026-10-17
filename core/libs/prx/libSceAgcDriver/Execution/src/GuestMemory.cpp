@@ -519,8 +519,10 @@ struct PageRun {
 
 // Calls `emit` with consecutive runs of uniform accessibility covering [address, address + bytes) in
 // order, stopping early when it returns false. Returns false when the address space cannot be queried.
+// `registryAnswers`: on macOS, memory the allocation registry holds as readable may be answered
+// from its ranges (see below); DescribeCommitted needs the kernel's own regions and passes false.
 template <class Emit>
-bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
+bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit, bool registryAnswers = true) {
     auto& pages = Pages();
     pages.initialize();
     const auto end = address + bytes;
@@ -587,7 +589,7 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
             }
             return true;
         };
-        if (!noRegistryAnswers && !GuestAllocations::GuestAllocationsHeldByThisThread_nid_postfix()) {
+        if (registryAnswers && !noRegistryAnswers && !GuestAllocations::GuestAllocationsHeldByThisThread_nid_postfix()) {
             // The ranges are copied out: a lease the thread kept would pin them, and an unmapping
             // waits for every lease to go.
             struct ReadableRange {
@@ -610,11 +612,13 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
                 }
             }
             const auto found = std::upper_bound(readable.begin(), readable.end(), static_cast<std::uint64_t>(cursor), [](std::uint64_t at, const ReadableRange& range) { return at < range.address; });
+            // A range the registry holds read-only may still be writable on the host (memory added
+            // read-only over a writable mapping): the kernel answers for those.
             if (generation == readableGeneration && found != readable.begin()) {
                 const auto& range = *std::prev(found);
-                if (cursor < range.end) {
+                if (cursor < range.end && range.writable) {
                     const auto next = std::min<std::uintptr_t>(end, static_cast<std::uintptr_t>(range.end));
-                    if (!emit(PageRun{cursor, next, true, range.writable})) return true;
+                    if (!emit(PageRun{cursor, next, true, true})) return true;
                     cursor = next;
                     continue;
                 }
@@ -804,7 +808,7 @@ Commitment DescribeCommitted(std::uint64_t address, std::size_t bytes, bool writ
             else result.ranges.emplace_back(run.begin, run.end);
         }
         return true;
-    });
+    }, false);
     require(queried, "cannot query guest memory");
     result.whole = bytes == 0 || (result.ranges.size() == 1 && result.ranges.front().first == address && result.ranges.front().second == address + bytes);
     return result;
