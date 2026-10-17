@@ -373,6 +373,32 @@ bool Driver::enqueueLabelPacket(std::span<const std::uint32_t> packet, std::uint
     return true;
 }
 
+bool Driver::enqueueSampleDump(std::span<const std::uint32_t> packet, std::uint32_t queue) {
+    static const bool ordered = std::getenv("APS5_PIPELINE_DRAIN_SAMPLE_DUMPS") == nullptr;
+    if (!ordered || queue != 0 || !Pm4::SampleDump(packet) || !deferredLabels().labels.empty()) return false;
+    const auto address = Pm4::SampleDumpAddress(packet);
+    DrawPipeline::Queue0().Enqueue([this, queue, address] {
+        GuestMemory::SetCurrentPacket(0x46, queue);
+        commitSampleDump(queue, address);
+    }, {{address, address + Pm4::SampleDumpBytes}});
+    return true;
+}
+
+void Driver::commitSampleDump(std::uint32_t queue, std::uint64_t address) {
+    {
+        GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Label);
+        std::lock_guard gpuLock(GuestMemory::GpuMutex());
+        const auto localDevice = device.Load();
+        if (localDevice == nullptr) return;
+        recordDeferredLabels(localDevice.get(), queue);
+        if (localDevice->DumpSamplesOnGpu(address)) return;
+        // The CPU counts the samples of the work recorded so far once it completed, as the packet's
+        // own drain does.
+        localDevice->WaitIdle();
+    }
+    dumpSampleCounters(address);
+}
+
 void Driver::commitLabel(std::uint32_t queue, std::uint64_t address, std::span<const std::byte> bytes, bool endOfPipeInterrupt) {
     GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Label);
     std::lock_guard gpuLock(GuestMemory::GpuMutex());
