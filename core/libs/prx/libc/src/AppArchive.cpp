@@ -21,8 +21,10 @@ struct Archive {
     std::filesystem::path app0;
 };
 
+// Leaked like the descriptors below: paths resolve from exit handlers that run after static
+// destructors, and macOS refuses to lock a destroyed mutex.
 Archive& State() {
-    static Archive archive;
+    static auto& archive = *new Archive;
     return archive;
 }
 
@@ -75,13 +77,20 @@ struct OpenFile {
     std::mutex mutex;
 };
 
-std::mutex g_descriptorMutex;
-std::map<int, std::shared_ptr<OpenFile>> g_descriptors;
+struct Descriptors {
+    std::mutex mutex;
+    std::map<int, std::shared_ptr<OpenFile>> files;
+};
+
+Descriptors& OpenDescriptors() {
+    static auto& descriptors = *new Descriptors;
+    return descriptors;
+}
 
 std::shared_ptr<OpenFile> Attached(int descriptor) {
-    std::lock_guard lock(g_descriptorMutex);
-    const auto found = g_descriptors.find(descriptor);
-    return found == g_descriptors.end() ? nullptr : found->second;
+    std::lock_guard lock(OpenDescriptors().mutex);
+    const auto found = OpenDescriptors().files.find(descriptor);
+    return found == OpenDescriptors().files.end() ? nullptr : found->second;
 }
 
 ZArchiveReader& Reader(std::uint32_t handle) {
@@ -173,20 +182,20 @@ void AppArchiveAttach_nid_no_patch(int descriptor, const AppArchiveNode& node) {
     if (node.Directory) throw std::invalid_argument("AppArchiveAttach: descriptor " + std::to_string(descriptor) + " cannot hold an app0.zar directory");
     auto file = std::make_shared<OpenFile>();
     file->node = node;
-    std::lock_guard lock(g_descriptorMutex);
-    g_descriptors[descriptor] = std::move(file);
+    std::lock_guard lock(OpenDescriptors().mutex);
+    OpenDescriptors().files[descriptor] = std::move(file);
 }
 
 void AppArchiveShare_nid_no_patch(int from, int to) {
-    std::lock_guard lock(g_descriptorMutex);
-    const auto found = g_descriptors.find(from);
-    if (found == g_descriptors.end()) g_descriptors.erase(to);
-    else g_descriptors[to] = found->second;
+    std::lock_guard lock(OpenDescriptors().mutex);
+    const auto found = OpenDescriptors().files.find(from);
+    if (found == OpenDescriptors().files.end()) OpenDescriptors().files.erase(to);
+    else OpenDescriptors().files[to] = found->second;
 }
 
 void AppArchiveDetach_nid_no_patch(int descriptor) {
-    std::lock_guard lock(g_descriptorMutex);
-    g_descriptors.erase(descriptor);
+    std::lock_guard lock(OpenDescriptors().mutex);
+    OpenDescriptors().files.erase(descriptor);
 }
 
 bool AppArchiveDescriptor_nid_no_patch(int descriptor, AppArchiveNode* node, std::uint64_t* position) {
