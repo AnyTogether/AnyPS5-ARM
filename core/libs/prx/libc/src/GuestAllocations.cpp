@@ -671,6 +671,22 @@ Lease GuestAllocationsAcquire_nid_postfix() {
     return Lease(std::move(ranges));
 }
 
+bool GuestAllocationsTryAcquire_nid_postfix(Lease& lease) {
+    std::unique_lock lock(registry().mutex, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    if (auto shared = registry().readableLease.lock()) {
+        lease = Lease(std::move(shared));
+        return true;
+    }
+    auto ranges = std::make_shared<Lease::Ranges>();
+    for (const auto& [address, range] : registry().ranges) {
+        if (range->readable && range->bytes != 0) ranges->push_back(range);
+    }
+    registry().readableLease = ranges;
+    lease = Lease(std::move(ranges));
+    return true;
+}
+
 std::shared_ptr<const Range> GuestAllocationsLookup_nid_postfix(std::uintptr_t address, bool next) {
     std::lock_guard lock(registry().mutex);
     const auto& ranges = registry().ranges;

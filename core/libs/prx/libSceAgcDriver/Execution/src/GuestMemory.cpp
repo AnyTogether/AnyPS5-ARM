@@ -575,8 +575,8 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         // allocation registry holds as readable is answered from its ranges instead of a
         // mach_vm_region call (a system call per range under Rosetta, millions per 10 s): each thread
         // keeps the registry's readable ranges until its generation moves (every guest mapping,
-        // unmapping and protection change). A thread inside a mutation holds the registry lock and
-        // queries the kernel as before; so does memory the registry does not hold.
+        // unmapping and protection change). A thread inside a mutation, one that finds the registry
+        // busy, and memory the registry does not hold query the kernel as before.
         static const bool noRegistryAnswers = std::getenv("APS5_NO_REGION_CACHE") != nullptr;
         const auto watchWritableOver = [](std::uintptr_t from, std::uintptr_t to) {
             for (std::uintptr_t at = from; at < to;) {
@@ -588,19 +588,33 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
             return true;
         };
         if (!noRegistryAnswers && !GuestAllocations::GuestAllocationsHeldByThisThread_nid_postfix()) {
-            thread_local GuestAllocations::Lease readable;
+            // The ranges are copied out: a lease the thread kept would pin them, and an unmapping
+            // waits for every lease to go.
+            struct ReadableRange {
+                std::uint64_t address;
+                std::uint64_t end;
+                bool writable;
+            };
+            thread_local std::vector<ReadableRange> readable;
             thread_local std::uint64_t readableGeneration = ~std::uint64_t{0};
             const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
             if (generation != readableGeneration) {
-                readable = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
-                readableGeneration = generation;
+                // Without waiting for the registry lock: its holder may be waiting for the GPU mutex
+                // this thread holds. A busy registry leaves the ranges unused for this query.
+                readable.clear();
+                GuestAllocations::Lease lease;
+                if (GuestAllocations::GuestAllocationsTryAcquire_nid_postfix(lease)) {
+                    readable.reserve(lease.size());
+                    for (const auto& range : lease) readable.push_back({range->address, range->address + range->bytes, range->writable});
+                    readableGeneration = generation;
+                }
             }
-            const auto found = std::upper_bound(readable.begin(), readable.end(), static_cast<std::uint64_t>(cursor), [](std::uint64_t at, const std::shared_ptr<const GuestAllocations::Range>& range) { return at < range->address; });
-            if (found != readable.begin()) {
+            const auto found = std::upper_bound(readable.begin(), readable.end(), static_cast<std::uint64_t>(cursor), [](std::uint64_t at, const ReadableRange& range) { return at < range.address; });
+            if (generation == readableGeneration && found != readable.begin()) {
                 const auto& range = *std::prev(found);
-                if (cursor < range->address + range->bytes) {
-                    const auto next = std::min<std::uintptr_t>(end, static_cast<std::uintptr_t>(range->address + range->bytes));
-                    if (!emit(PageRun{cursor, next, true, range->writable})) return true;
+                if (cursor < range.end) {
+                    const auto next = std::min<std::uintptr_t>(end, static_cast<std::uintptr_t>(range.end));
+                    if (!emit(PageRun{cursor, next, true, range.writable})) return true;
                     cursor = next;
                     continue;
                 }
