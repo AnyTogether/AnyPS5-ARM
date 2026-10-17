@@ -119,8 +119,17 @@ bool backWritableImageAnonymously() {
 
 }
 
+namespace {
+thread_local int mutationDepth = 0;
+}
+
+bool GuestAllocationsHeldByThisThread_nid_postfix() {
+    return mutationDepth != 0;
+}
+
 void* GuestAllocationsBegin_nid_postfix() {
     auto* state = new MutationState{std::unique_lock<std::mutex>(registry().mutex), {}};
+    ++mutationDepth;
     registry().readableLease.reset();
     registry().allLease.reset();
     return state;
@@ -128,6 +137,9 @@ void* GuestAllocationsBegin_nid_postfix() {
 
 void GuestAllocationsEnd_nid_postfix(void* mutation) noexcept {
     auto* state = static_cast<MutationState*>(mutation);
+    struct DepthRelease {
+        ~DepthRelease() { --mutationDepth; }
+    } depthRelease;
     const auto ended = generation.fetch_add(1, std::memory_order_release) + 1;
     if (const auto callback = invalidator.load(std::memory_order_acquire)) {
         for (const auto& [address, bytes] : state->changed) callback(address, bytes);

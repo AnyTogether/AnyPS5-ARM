@@ -571,6 +571,41 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
 #elif defined(__APPLE__)
+        // macOS keeps no guest arena, so the page states above never cover guest memory. Memory the
+        // allocation registry holds as readable is answered from its ranges instead of a
+        // mach_vm_region call (a system call per range under Rosetta, millions per 10 s): each thread
+        // keeps the registry's readable ranges until its generation moves (every guest mapping,
+        // unmapping and protection change). A thread inside a mutation holds the registry lock and
+        // queries the kernel as before; so does memory the registry does not hold.
+        static const bool noRegistryAnswers = std::getenv("APS5_NO_REGION_CACHE") != nullptr;
+        const auto watchWritableOver = [](std::uintptr_t from, std::uintptr_t to) {
+            for (std::uintptr_t at = from; at < to;) {
+                std::uintptr_t runEnd = to;
+                const int protection = GuestWriteWatch::GuestWriteWatchProtection_nid_postfix(at, to, &runEnd);
+                if (protection < 0 || (protection & PROT_WRITE) == 0 || runEnd <= at) return false;
+                at = runEnd;
+            }
+            return true;
+        };
+        if (!noRegistryAnswers && !GuestAllocations::GuestAllocationsHeldByThisThread_nid_postfix()) {
+            thread_local GuestAllocations::Lease readable;
+            thread_local std::uint64_t readableGeneration = ~std::uint64_t{0};
+            const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+            if (generation != readableGeneration) {
+                readable = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+                readableGeneration = generation;
+            }
+            const auto found = std::upper_bound(readable.begin(), readable.end(), static_cast<std::uint64_t>(cursor), [](std::uint64_t at, const std::shared_ptr<const GuestAllocations::Range>& range) { return at < range->address; });
+            if (found != readable.begin()) {
+                const auto& range = *std::prev(found);
+                if (cursor < range->address + range->bytes) {
+                    const auto next = std::min<std::uintptr_t>(end, static_cast<std::uintptr_t>(range->address + range->bytes));
+                    if (!emit(PageRun{cursor, next, true, range->writable})) return true;
+                    cursor = next;
+                    continue;
+                }
+            }
+        }
         // The region at or above the cursor, with its current protection.
         auto regionBase = static_cast<mach_vm_address_t>(cursor);
         mach_vm_size_t regionSize = 0;
@@ -591,17 +626,9 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit) {
         }
         const auto next = std::min<std::uintptr_t>(end, regionBase + regionSize);
         const bool readable = (info.protection & VM_PROT_READ) != 0;
+        const bool hostWritable = (info.protection & VM_PROT_WRITE) != 0;
         // A range the write watch protects is writable when the guest's own protection allows writes.
-        const auto watchWritable = [&] {
-            for (std::uintptr_t at = cursor; at < next;) {
-                std::uintptr_t runEnd = next;
-                const int protection = GuestWriteWatch::GuestWriteWatchProtection_nid_postfix(at, next, &runEnd);
-                if (protection < 0 || (protection & PROT_WRITE) == 0 || runEnd <= at) return false;
-                at = runEnd;
-            }
-            return true;
-        };
-        const bool writable = readable && ((info.protection & VM_PROT_WRITE) != 0 || watchWritable());
+        const bool writable = readable && (hostWritable || watchWritableOver(cursor, next));
         if (!emit(PageRun{cursor, next, readable, writable})) return true;
         cursor = next;
 #else
