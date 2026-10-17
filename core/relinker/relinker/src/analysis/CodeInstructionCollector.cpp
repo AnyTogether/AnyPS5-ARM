@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace Relinker {
 
@@ -35,7 +36,7 @@ public:
 
 }
 
-std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::vector<std::uint8_t>& bytes, const std::vector<Domain::ProgramHeader>& headers, const std::function<void(std::uint64_t, std::uint64_t)>& progress) const {
+std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::vector<std::uint8_t>& bytes, const std::vector<Domain::ProgramHeader>& headers, const std::function<void(std::uint64_t, std::uint64_t)>& progress, std::set<Domain::VirtualAddress>* entryRoots) const {
     std::uint64_t lastProgress = 0;
     const auto report = [&](std::uint64_t completed) {
         if (completed <= lastProgress) return;
@@ -438,6 +439,7 @@ std::set<Domain::VirtualAddress> CodeInstructionCollector::Collect(const std::ve
         }
     }
     report(10000);
+    if (entryRoots) *entryRoots = std::move(roots);
     return instructions;
 }
 

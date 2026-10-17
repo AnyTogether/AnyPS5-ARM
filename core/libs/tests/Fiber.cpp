@@ -211,6 +211,26 @@ void RunFrameChain() {
     Require(sceFiberFinalize(fiber) == 0, "finalize chain");
 }
 
+constexpr std::size_t LargeContextSize = 512 * 1024;
+alignas(16) std::array<unsigned char, LargeContextSize> g_largeContext;
+FiberStorage g_largeStorage;
+bool g_largeOnContext = false;
+
+void APS5_VABI LargeContextEntry(std::uint64_t, std::uint64_t) {
+    volatile unsigned char local = 0;
+    const auto* address = const_cast<const unsigned char*>(&local);
+    g_largeOnContext = address >= g_largeContext.data() && address < g_largeContext.data() + g_largeContext.size();
+    sceFiberReturnToThread(0, nullptr);
+}
+
+void RunOnLargeContext() {
+    auto* fiber = reinterpret_cast<FiberObject*>(&g_largeStorage);
+    Require(_sceFiberInitializeImpl_nid_postfix(fiber, "large", LargeContextEntry, 0, g_largeContext.data(), g_largeContext.size(), nullptr, 0) == 0, "initialize large fiber");
+    Require(sceFiberRun_nid_postfix(fiber, 0, nullptr) == 0, "run large fiber");
+    Require(g_largeOnContext, "a fiber with a 512 KiB context runs on its context");
+    Require(sceFiberFinalize(fiber) == 0, "finalize large fiber");
+}
+
 [[gnu::noinline]] std::int32_t RunFirst(std::uint64_t* returned) {
     g_threadFramePointer = reinterpret_cast<std::uint64_t>(__builtin_frame_address(0));
     const std::int32_t result = sceFiberRun_nid_postfix(g_first, 100, returned);
@@ -259,4 +279,5 @@ int main() {
 
     RunHostCallOnSmallContext();
     RunFrameChain();
+    RunOnLargeContext();
 }

@@ -60,6 +60,19 @@ int main() {
     }
 
     {
+        const GuestTimeval limit{0, 1000};
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 20; ++i) {
+            GuestDescriptorSet read{};
+            read.Add(reader);
+            Require(select_nid_postfix(reader + 1, read.words.data(), nullptr, nullptr, &limit) == 0);
+            Require(!read.Has(reader));
+        }
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        Require(elapsed >= std::chrono::milliseconds(20) && elapsed < std::chrono::milliseconds(200));
+    }
+
+    {
         const char byte = 's';
         Require(write_nid_postfix(writer, &byte, 1) == 1);
         GuestDescriptorSet read{};

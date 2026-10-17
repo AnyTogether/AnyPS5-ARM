@@ -8,6 +8,7 @@ int APS5_VABI sceRazorCpuJobManagerDispatch(const void* args);
 int APS5_VABI sceRazorCpuJobManagerJob(const void* args);
 int APS5_VABI sceRazorCpuJobManagerSequence(const void* args);
 int APS5_VABI sceRazorCpuPushMarker(const char* label, std::uint32_t color, std::uint32_t flags);
+int APS5_VABI sceRazorCpuNamedSync(const char* label);
 int APS5_VABI sceRazorCpuPushMarkerStatic(const char* name, std::uint32_t color, std::uint32_t flags);
 int APS5_VABI sceRazorCpuPopMarker(void);
 int APS5_VABI sceRazorCpuFlushOccurred(std::uint64_t* timeSpentInFlush);
@@ -27,6 +28,7 @@ int main() {
     Require(sceRazorCpuJobManagerDispatch(nullptr) == 0);
     Require(sceRazorCpuJobManagerJob(nullptr) == 0);
     Require(sceRazorCpuJobManagerSequence(nullptr) == 0);
+    Require(sceRazorCpuNamedSync("frame") == 0);
     Require(sceRazorCpuPushMarkerStatic("outer", 0x80ffffffu, 2) == 0);
     Require(sceRazorCpuPushMarkerStatic("inner", 0x80ffffffu, 2) == 0);
     Require(sceRazorCpuPopMarker() == 0);

@@ -80,6 +80,22 @@ class CheckCompileTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(seen.read_text(encoding="utf-8")), ["-fsyntax-only", str(source)])
 
+    @unittest.skipUnless(os.name == "nt", "Windows command-line quoting")
+    def test_windows_paths_and_quoted_defines_survive_the_syntax_check(self):
+        source = self.source("unit.cpp")
+        script = self.compiler(
+            "import json\nimport sys\nfrom pathlib import Path\n"
+            "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\n")
+        seen = self.root / "arguments.json"
+        flags = ['-DNAME=quoted "value"', '-IC:\\sdk files\\include\\']
+        arguments = [sys.executable, str(script), str(seen), *flags,
+                     "-c", "-o", "unit.o", "-MD", "-MF", "unit.o.d", str(source)]
+        self.manifest([self.entry("unit.cpp", subprocess.list2cmdline(arguments))])
+        result = self.tool("unit.cpp")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(seen.read_text(encoding="utf-8")),
+                         [*flags, "-fsyntax-only", str(source)])
+
     def test_nothing_checked_is_a_failure(self):
         self.manifest([])
         result = self.tool("orphan.cpp")
@@ -122,6 +138,24 @@ class CheckCompileTests(unittest.TestCase):
         self.manifest([self.entry("unit.cpp", f'"{sys.executable}" "{script}" "{source}"')])
         result = self.tool("--build", str(self.build), "unit.cpp")
         self.assertEqual(result.returncode, 0)
+        self.assertIn("1 translation units compile", result.stdout)
+
+    def test_a_build_directory_beside_the_checkout_is_matched(self):
+        repo = self.root / "AnyPS5"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        sibling = self.root / "sibling-build"
+        sibling.mkdir()
+        source = repo / "src" / "unit.cpp"
+        source.parent.mkdir()
+        source.write_text("int x;\n", encoding="utf-8")
+        script = self.compiler("import sys\nsys.exit(0)\n")
+        entry = {"directory": str(sibling), "command": f'"{sys.executable}" "{script}" "{source}"',
+                 "file": str(source)}
+        (sibling / "compile_commands.json").write_text(json.dumps([entry]), encoding="utf-8")
+        result = subprocess.run([sys.executable, "-I", str(TOOL), "--build", str(sibling), "src/unit.cpp"],
+                                cwd=repo, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("1 translation units compile", result.stdout)
 
     def test_a_changed_file_with_a_non_ascii_name_is_checked(self):
@@ -196,6 +230,38 @@ class CheckCompileTests(unittest.TestCase):
         result = self.tool("unit.cpp", env={"PATH": f"{bin}{os.pathsep}{os.environ['PATH']}"})
         self.assertEqual(result.returncode, 0)
         self.assertIn("1 translation units compile", result.stdout)
+
+
+    def test_argument_arrays_preserve_tokens_and_take_precedence_over_command(self):
+        source = self.source("unit with spaces.cpp")
+        script = self.compiler(
+            "import json\nimport sys\nfrom pathlib import Path\n"
+            "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\n")
+        seen = self.root / "arguments.json"
+        flags = ['-DNAME=quoted "value"', '-IC:\\sdk files\\include\\']
+        arguments = [sys.executable, str(script), str(seen), *flags,
+                     "-c", "-o", "unit.o", "-MD", "-MT", "unit.o", "-MF", "unit.o.d",
+                     os.path.relpath(source, self.build)]
+        entry = {"directory": str(self.build), "file": str(source), "arguments": arguments}
+        for command in (None, "nonexistent-compiler -c unit.cpp"):
+            with self.subTest(command=command):
+                if command is not None:
+                    entry["command"] = command
+                self.manifest([entry])
+                result = self.tool(source.name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(seen.read_text(encoding="utf-8")),
+                                 [*flags, "-fsyntax-only", str(source)])
+
+    def test_invalid_argument_arrays_are_rejected_without_a_traceback(self):
+        source = self.source("unit.cpp")
+        for arguments in (None, [], "compiler -c unit.cpp", ["compiler", 3], [""]):
+            with self.subTest(arguments=arguments):
+                self.manifest([{"directory": str(self.build), "file": str(source), "arguments": arguments}])
+                result = self.tool(source.name)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("arguments must be a nonempty list of strings with an executable", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

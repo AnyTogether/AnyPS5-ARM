@@ -2,9 +2,14 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 #ifdef __linux__
 #include <cstdio>
 #include <fstream>
@@ -103,6 +108,67 @@ void CheckUnwindInfo() {
 }
 #endif
 
+#ifdef _WIN32
+void RequireUnwindMatchesRegion(const void* pointer) {
+    const auto address = reinterpret_cast<std::uint64_t>(pointer);
+    MEMORY_BASIC_INFORMATION expected{};
+    Require(VirtualQuery(pointer, &expected, sizeof(expected)) != 0);
+    char mapped[4096] = {};
+    const DWORD length = GetMappedFileNameA(GetCurrentProcess(), expected.BaseAddress, mapped, sizeof(mapped) - 1);
+    mapped[length] = '\0';
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        ModuleInfoForUnwind info{};
+        Require(sceSysmoduleGetModuleInfoForUnwind(address, 0, &info) == 0);
+        Require(info.st_size == sizeof(ModuleInfoForUnwind));
+        Require(info.seg0_addr == reinterpret_cast<std::uint64_t>(expected.BaseAddress) && info.seg0_size == expected.RegionSize);
+        Require(std::strncmp(info.name, mapped, sizeof(info.name) - 1) == 0);
+        Require(info.eh_frame_hdr_addr == 0 && info.eh_frame_addr == 0 && info.eh_frame_size == 0);
+    }
+}
+
+void CheckUnwindInfo() {
+    RequireUnwindMatchesRegion(reinterpret_cast<const void*>(&RequireUnwindMatchesRegion));
+    RequireUnwindMatchesRegion(reinterpret_cast<const void*>(&sceSysmoduleGetModuleInfoForUnwind));
+    RequireUnwindMatchesRegion(reinterpret_cast<const void*>(&GetModuleHandleW));
+    const auto* host = reinterpret_cast<const char*>(&GetModuleHandleW);
+    MEMORY_BASIC_INFORMATION hostRegion{};
+    Require(VirtualQuery(host, &hostRegion, sizeof(hostRegion)) != 0);
+    for (const std::size_t step : {std::size_t{0x1000}, std::size_t{0x3000}, std::size_t{0x10000}}) {
+        if (hostRegion.RegionSize > step) RequireUnwindMatchesRegion(host + step);
+    }
+    RequireUnwindMatchesRegion(host + 0x2000);
+    RequireUnwindMatchesRegion(host);
+    const auto* anchor = reinterpret_cast<const char*>(&RtlPcToFileHeader);
+    MEMORY_BASIC_INFORMATION anchorRegion{};
+    Require(VirtualQuery(anchor, &anchorRegion, sizeof(anchorRegion)) != 0);
+    if (anchorRegion.RegionSize > 0x4000) {
+        RequireUnwindMatchesRegion(anchor + 0x3000);
+        RequireUnwindMatchesRegion(anchor);
+        RequireUnwindMatchesRegion(anchor + 0x1000);
+        RequireUnwindMatchesRegion(anchor + 0x2000);
+    }
+    static int data = 1;
+    static const char text[] = "unwind region";
+    RequireUnwindMatchesRegion(&data);
+    RequireUnwindMatchesRegion(text);
+    RequireUnwindMatchesRegion(reinterpret_cast<const void*>(&RequireUnwindMatchesRegion));
+    int local = 0;
+    RequireUnwindMatchesRegion(&local);
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    const std::size_t page = system.dwPageSize;
+    auto* memory = static_cast<char*>(VirtualAlloc(nullptr, 3 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    Require(memory != nullptr);
+    RequireUnwindMatchesRegion(memory);
+    DWORD previous = 0;
+    Require(VirtualProtect(memory + 2 * page, page, PAGE_READONLY, &previous) != 0);
+    RequireUnwindMatchesRegion(memory);
+    RequireUnwindMatchesRegion(memory + 2 * page);
+    Require(VirtualFree(memory, 0, MEM_RELEASE) != 0);
+    RequireUnwindMatchesRegion(memory);
+}
+#endif
+
 }
 
 int main() {
@@ -178,7 +244,7 @@ int main() {
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kAgcModuleId) == kModuleUnloaded);
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
     CheckUnwindInfo();
 #endif
 

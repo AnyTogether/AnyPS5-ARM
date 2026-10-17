@@ -120,9 +120,12 @@ int APS5_VABI sceVdecswCreateDecoder(const DecoderConfigInfo*, const DecoderMemo
 int APS5_VABI sceVdecswDeleteDecoder(std::uint64_t);
 int APS5_VABI sceVdecswSetDecodeInput(std::uint64_t, const InputData*);
 int APS5_VABI sceVdecswTrySyncDecodeInput(std::uint64_t, InputResult*);
+int APS5_VABI sceVdecswSyncDecodeInput(std::uint64_t, InputResult*);
 int APS5_VABI sceVdecswSetDecodeOutput(std::uint64_t, const FrameBuffer*);
 int APS5_VABI sceVdecswTrySyncDecodeOutput(std::uint64_t, OutputInfo*);
+int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t, OutputInfo*);
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo*, AvcPictureInfo*, AvcPictureInfo*);
+int APS5_VABI sceVdecswGetHevcPictureInfo(const OutputInfo*, void*);
 int APS5_VABI sceVdecswFinalizeDecodeSequence(std::uint64_t);
 int APS5_VABI sceVdecswResetDecoder(std::uint64_t);
 }
@@ -233,12 +236,37 @@ void testWithoutOutput() {
     check(sceVdecswTrySyncDecodeInput(session.decoder, &result) == InputQueueEmpty, "a reset decoder kept its inputs");
 }
 
+void testSyncWrappers() {
+    Session session;
+    InputResult idle{sizeof(InputResult)};
+    check(sceVdecswSyncDecodeInput(session.decoder, &idle) == InputQueueEmpty, "sync input on an idle decoder did not report an empty queue");
+    const auto units = accessUnits(false);
+    const InputData input{sizeof(InputData), units[0].data(), units[0].size(), 1000, 0, 0xa0};
+    check(sceVdecswSetDecodeInput(session.decoder, &input) == 0, "decode input was rejected");
+    InputResult result{sizeof(InputResult)};
+    check(sceVdecswSyncDecodeInput(session.decoder, &result) == 0 && result.decodedAu == units[0].data(), "sync input did not consume the access unit");
+    std::vector<std::uint8_t> buffer(session.memory.maxFrameBufferSize);
+    const FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size()};
+    check(sceVdecswSetDecodeOutput(session.decoder, &frame) == 0, "output buffer was rejected");
+    check(sceVdecswFinalizeDecodeSequence(session.decoder) == 0, "finalize failed");
+    OutputInfo output{sizeof(OutputInfo)};
+    check(sceVdecswSyncDecodeOutput(session.decoder, &output) == 0 && output.isValid && output.isLastFrame, "sync output did not return the finalized picture");
+    bool hevcThrows = false;
+    try {
+        sceVdecswGetHevcPictureInfo(&output, &result);
+    } catch (const std::exception&) {
+        hevcThrows = true;
+    }
+    check(hevcThrows, "GetHevcPictureInfo must still throw");
+}
+
 }
 
 int main() {
     try {
         testDecode();
         testWithoutOutput();
+        testSyncWrappers();
         std::puts("Vdecsw tests passed");
         return 0;
     } catch (const std::exception& error) {

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 #include <string>
 
 namespace Pad {
@@ -19,7 +20,7 @@ public:
         bool operator==(const Input&) const = default;
     };
 
-    explicit InputCommandFile(const char* path) : path(path != nullptr ? path : "") {
+    explicit InputCommandFile(const std::filesystem::path& path) : path(path) {
         if (!this->path.empty()) lastSequence = read().sequence;
     }
 
@@ -77,7 +78,7 @@ private:
         return command;
     }
 
-    std::string path;
+    std::filesystem::path path;
     std::uint64_t lastSequence = 0;
     std::uint64_t nextPoll = 0;
     std::uint64_t until = 0;

@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
@@ -59,6 +60,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <mutex>
 #include <stdexcept>
@@ -107,6 +109,63 @@ void ReleaseWatched(void* block, std::size_t bytes) {
 #endif
 }
 
+std::optional<std::size_t> selectDevice(std::span<const VkPhysicalDeviceProperties> devices, std::string_view request) {
+    const auto rankDeviceType = [](VkPhysicalDeviceType type) {
+        switch (type) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return 3;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 2;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return 1;
+            default: return 0;
+        }
+    };
+    std::optional<std::size_t> selected;
+    int selectedRank = -1;
+    for (std::size_t index = 0; index < devices.size(); ++index) {
+        const auto& candidate = devices[index];
+        if (candidate.apiVersion < VK_API_VERSION_1_1) continue;
+        const std::string_view name(candidate.deviceName);
+        if (!request.empty() && std::search(name.begin(), name.end(), request.begin(), request.end(), [](char left, char right) {
+            return std::tolower(static_cast<unsigned char>(left)) == std::tolower(static_cast<unsigned char>(right));
+        }) == name.end()) continue;
+        const int rank = request.empty() ? rankDeviceType(candidate.deviceType) : 4;
+        if (rank <= selectedRank) continue;
+        selected = index;
+        selectedRank = rank;
+    }
+    return selected;
+}
+
+void deviceSelectionTests() {
+    const auto properties = [](const char* name, VkPhysicalDeviceType type) {
+        VkPhysicalDeviceProperties result{};
+        result.apiVersion = VK_API_VERSION_1_1;
+        result.deviceType = type;
+        std::memcpy(result.deviceName, name, std::strlen(name) + 1u);
+        return result;
+    };
+    std::array devices{
+        properties("AMD Radeon Graphics", VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU),
+        properties("NVIDIA GeForce RTX 5080", VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU),
+        properties("Virtual GPU", VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU),
+        properties("CPU", VK_PHYSICAL_DEVICE_TYPE_CPU),
+    };
+    Require(!selectDevice({}, {}).has_value(), "an empty device list selected a device");
+    Require(selectDevice(devices, {}) == 1u, "default selection did not prefer the discrete GPU");
+    Require(selectDevice(devices, "aMd rAdEoN") == 0u, "a requested integrated GPU lost to an unrelated discrete GPU");
+    Require(selectDevice(devices, "rtx 5080") == 1u, "a partial GPU name did not match without regard to case");
+    Require(selectDevice(devices, "Virtual") == 2u, "a requested virtual GPU was not selected");
+    Require(selectDevice(devices, "cpu") == 3u, "a requested CPU device was not selected");
+    Require(!selectDevice(devices, "missing").has_value(), "an unmatched request selected another GPU");
+    Require(!selectDevice(devices, "NVIDIA GeForce RTX 5080 with a longer name").has_value(), "a request longer than the device name matched");
+    devices[0].apiVersion = VK_API_VERSION_1_0;
+    Require(!selectDevice(devices, "AMD").has_value(), "a requested device without Vulkan 1.1 was selected");
+    Require(selectDevice(devices, {}) == 1u, "an unsupported device changed default selection");
+    devices[0] = devices[1];
+    Require(selectDevice(devices, {}) == 0u && selectDevice(devices, "NVIDIA") == 0u, "equally ranked matches did not retain enumeration order");
+    for (auto& device : devices) device.apiVersion = VK_API_VERSION_1_0;
+    Require(!selectDevice(devices, {}).has_value(), "a list without Vulkan 1.1 selected a device");
+}
+
 // A compute-capable device with host imports (VK_EXT_external_memory_host) when the host offers
 // them, as the driver creates its own; the recorder's batches need a real queue and real fences.
 class Device {
@@ -140,28 +199,14 @@ public:
             Require(count != 0, "no Vulkan device");
             std::vector<VkPhysicalDevice> devices(count);
             Check(enumerate(instance, &count, devices.data()), "vkEnumeratePhysicalDevices");
-            const auto rankDeviceType = [](VkPhysicalDeviceType type) {
-                switch (type) {
-                    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return 3;
-                    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 2;
-                    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return 1;
-                    default: return 0;
-                }
-            };
             const auto physicalProperties = function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties");
-            int selectedRank = -1;
-            for (const auto physical : devices) {
-                VkPhysicalDeviceProperties candidate{};
-                physicalProperties(physical, &candidate);
-                if (candidate.apiVersion < VK_API_VERSION_1_1) continue;
-                const int rank = rankDeviceType(candidate.deviceType);
-                if (rank <= selectedRank) continue;
-                context.physical = physical;
-                selectedRank = rank;
-            }
-            Require(context.physical != VK_NULL_HANDLE, "no Vulkan 1.1 device");
-            VkPhysicalDeviceProperties selected{};
-            physicalProperties(context.physical, &selected);
+            std::vector<VkPhysicalDeviceProperties> deviceProperties(devices.size());
+            for (std::size_t index = 0; index < devices.size(); ++index) physicalProperties(devices[index], &deviceProperties[index]);
+            const char* requestedName = std::getenv("ANYPS5_GPU");
+            const auto selectedIndex = selectDevice(deviceProperties, requestedName != nullptr ? requestedName : "");
+            Require(selectedIndex.has_value(), requestedName != nullptr && *requestedName != '\0' ? std::string("no Vulkan 1.1 device matching ANYPS5_GPU=\"") + requestedName + "\"" : "no Vulkan 1.1 device");
+            context.physical = devices[*selectedIndex];
+            const auto& selected = deviceProperties[*selectedIndex];
             std::cout << "Vulkan device: " << selected.deviceName << '\n';
             const auto extensions = function<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
             Check(extensions(context.physical, nullptr, &count, nullptr), "vkEnumerateDeviceExtensionProperties");
@@ -218,6 +263,8 @@ public:
             context.occlusionQueryPrecise = supported.occlusionQueryPrecise == VK_TRUE;
             enabled.shaderStorageImageReadWithoutFormat = supported.shaderStorageImageReadWithoutFormat;
             enabled.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
+            enabled.shaderStorageImageMultisample = supported.shaderStorageImageMultisample;
+            context.storageImageMultisample = supported.shaderStorageImageMultisample == VK_TRUE;
             context.singlePassStorage = supported.shaderStorageImageReadWithoutFormat == VK_TRUE && supported.shaderStorageImageWriteWithoutFormat == VK_TRUE;
             address.pNext = &bytes;
             std::vector<const char*> extensionsEnabled{VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME};
@@ -3139,10 +3186,16 @@ void drawInputInPlaceTests(const Device& device, Recorder& recorder) {
     Require(InPlaceDrawInput(context, vertices + 2, 256, 2) != nullptr, "an aligned 16-bit draw input was not bound in place");
     recorder.NotePendingWrite(address + 8192, 16);
     Require(InPlaceDrawInput(context, address + 8192, 256, 4) != nullptr && !recorder.PendingWriteOverlaps(address + 8192, 256), "a draw input under a pending GPU write was bound before the write completed");
+    bool behind = false;
+    Require(InPlaceDrawInput(context, address + 20480, 256, 4, &behind) != nullptr && !behind, "a vertex input free of pending GPU writes was marked as ordered behind one");
+    recorder.NotePendingWrite(address + 20480, 16);
+    Require(InPlaceDrawInput(context, address + 20480, 256, 4, &behind) != nullptr && behind && recorder.PendingWriteOverlaps(address + 20480, 256), "a vertex input under a pending GPU write was not bound in place behind it");
     const std::array<std::byte, 4> label{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
     recorder.RecordStore(import->buffer, address + 12288 - import->base, label, address + 12288);
     Require(recorder.QueuedStoreOverlaps(address + 12288, 4), "the label store was not queued");
     Require(InPlaceDrawInput(context, address + 12288, 256, 4) == nullptr, "a draw input under a queued label store was bound in place");
+    behind = false;
+    Require(InPlaceDrawInput(context, address + 12288, 256, 4, &behind) == nullptr, "a vertex input under a queued label store was bound in place");
     Require(InPlaceDrawInput(context, address + 16384, 256, 4) != nullptr, "a queued label store refused a disjoint draw input");
     alignas(64) static std::array<std::byte, 256> unregistered{};
     Require(InPlaceDrawInput(context, reinterpret_cast<std::uint64_t>(unregistered.data()), unregistered.size(), 4) == nullptr, "memory without a host import was bound in place");
@@ -6236,6 +6289,7 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
     {
         std::lock_guard gpu(GpuMutex());
         Require(MultisampleTargetView(context, target) != VK_NULL_HANDLE, "the multisampled target has no view");
+        Require(!MultisampleTargetStorable(context, target), "a multisampled target nothing stored to was created with storage usage");
         recorder.Submit();
         device.WaitQueue();
         recorder.Sync();
@@ -6321,7 +6375,20 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
     refusedSample(ShaderRecompiler::DescriptorKind::SampledImage, multisampledWords(side, 3u, address), "as a 64x64 texture of 8 samples", "sampling a 4x target as an 8x texture");
     refusedSample(ShaderRecompiler::DescriptorKind::SampledImage, multisampledWords(side / 2u, 2u, address), "as a 32x64 texture of 4 samples", "sampling a 4x target as a narrower texture");
     refusedSample(ShaderRecompiler::DescriptorKind::SampledImage, multisampledWords(side, 2u, address + 4u * 65536u), "which no draw rendered to and whose tile mode 0 has no modeled multisampled color footprint", "sampling a linear multisampled texture no draw rendered to");
-    refusedSample(ShaderRecompiler::DescriptorKind::StorageImage, multisampledWords(side, 2u, address), "storage image access to a multisampled texture", "storage access to a multisampled texture");
+    if (context.storageImageMultisample) {
+        const auto stored = sampledProgram(ShaderRecompiler::DescriptorKind::StorageImage, multisampledWords(side, 2u, address));
+        const CompiledShader storedCompute{ShaderRecompiler::ShaderStage::Compute, &stored, 0};
+        std::lock_guard gpu(GpuMutex());
+        const auto rendered = MultisampleTargetView(context, target);
+        Require(!MultisampleTargetStorable(context, target), "sampling the multisampled target gave it storage usage");
+        ShaderResources resources(context, storedCompute);
+        Require(MultisampleTargetStorable(context, target) && MultisampleTargetView(context, target) != rendered, "a storage binding did not move the multisampled target to an image with storage usage");
+        recorder.Submit();
+        device.WaitQueue();
+        recorder.Sync();
+    } else {
+        refusedSample(ShaderRecompiler::DescriptorKind::StorageImage, multisampledWords(side, 2u, address), "as a storage image at its sample count", "storage access to a multisampled target without shaderStorageImageMultisample");
+    }
     refused([&] { AgcDriver::GuestMemory::Read(address + 3u * 65536u + 256u, texels); }, "a CPU read", "a CPU read in the padding of a later sample plane");
     AgcDriver::GuestMemory::Read(address + 4u * 65536u, texels);
     clearTargets();
@@ -7213,7 +7280,7 @@ bool vertexTargetRangeTests(const Device& device, Recorder& recorder, bool impor
         Draw(context, consumer, draw, shaders, {}, &recipe);
         WaitForOptimizedPipelines(context.device);
         const auto read = recorder.DescribePendingRead(address + unit, 16);
-        Require(read.has_value() == imported && (!read || read->kind == Recorder::ReadKind::DrawInput), "the vertex regression used the wrong copied/imported path");
+        Require(read.has_value() == imported && (!read || read->kind == Recorder::ReadKind::DrawInput || read->kind == Recorder::ReadKind::StorageUpload), "the vertex regression used the wrong copied/imported path");
         check(16);
         Require(recipe != nullptr, "the range regression did not create a draw recipe");
         std::vector<std::byte> cleared(unit);
@@ -7316,10 +7383,13 @@ void pipelineCacheTests(const Device& device, bool benchmark) {
     input = {};
     Require(lookup(input) == first, "pipeline cache retained bytes from a larger key");
     vertex.variantId = 0;
-    const auto unidentified = lookup(input);
-    Require(lookup(input) != unidentified, "pipeline cache retained an unidentified shader");
+    Require(lookup(input) == first, "pipeline cache keyed on the variant id instead of the module");
+    vertex.spirv[2] ^= 1u;
+    const auto other = lookup(input);
+    Require(other != first && lookup(input) == other, "pipeline cache ignored another module");
+    vertex.spirv[2] ^= 1u;
     vertex.variantId = 1;
-    Require(lookup(input) == first, "an unidentified shader disturbed the retained pipeline");
+    Require(lookup(input) == first, "another module disturbed the retained pipeline");
     ClearCachedPipelines(context.device);
     Require(lookup(input) != first, "clearing the pipeline cache retained its old entry");
     std::cout << "Pipeline cache key and retained lifetime tests passed\n";
@@ -7791,13 +7861,13 @@ void pipelineLibraryTests(const Device& device) {
     Require(StagePushOffset(88, ShaderRecompiler::ShaderStage::Fragment, true) == PipelinePushSlotBytes && StagePushOffset(88, ShaderRecompiler::ShaderStage::Fragment, false) == 88 && StagePushOffset(40, ShaderRecompiler::ShaderStage::TessellationEvaluation, true) == 40, "a stage got the wrong push offset");
     const auto beforeSlots = counters().built;
     ShaderRecompiler::RecompileResult otherVertex = vertex;
-    otherVertex.variantId = 14;
+    otherVertex.spirv[2] ^= 1u;
     std::array slotted{CompiledShader{ShaderRecompiler::ShaderStage::Vertex, &vertex, 0}, CompiledShader{ShaderRecompiler::ShaderStage::Fragment, &fragment, PipelinePushSlotBytes}};
     static_cast<void>(CachedPipeline(context, state, input, resources, slotted, VK_IMAGE_LAYOUT_GENERAL));
     slotted.front().program = &otherVertex;
     static_cast<void>(CachedPipeline(context, state, input, resources, slotted, VK_IMAGE_LAYOUT_GENERAL));
     Require(counters().built[2] == beforeSlots[2] + 1u && counters().built[1] == beforeSlots[1] + 1u, "a pixel shader in its fixed slot built its library again for another vertex shader");
-    fragment.variantId = 13;
+    fragment.spirv[2] ^= 1u;
     static_cast<void>(lookup());
     Require(counters().built == std::array<std::uint64_t, 4>{2, 2, 3, 2}, "a new pixel shader rebuilt more than the fragment shader library");
     state.colors.front().format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -8010,6 +8080,11 @@ void Run(Context context) {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--device-selection-only") {
+            deviceSelectionTests();
+            std::cout << "recorder device selection tests passed\n";
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--queued-write-groups-only") {
             queuedWriteGroupTests();
             std::cout << "queued write group tests passed\n";

@@ -18,7 +18,6 @@ using namespace Font;
 constexpr std::uint16_t TEXT_SOURCE_MAGIC = 0x0F04;
 constexpr std::uint16_t FONT_STRING_MAGIC = 0x0F05;
 constexpr std::uint16_t FONT_WRITING_MAGIC = 0x0F06;
-constexpr std::uint16_t FONT_TEXT_CODES_MAGIC = 0x0F08;
 constexpr std::uint16_t FONT_WORDS_MAGIC = 0x0F0B;
 constexpr std::uint16_t CREATE_STRING_DETAIL_ID = 0x0FD4;
 constexpr std::uint32_t WRITING_FORM_HORIZONTAL = 0x10;
@@ -81,18 +80,6 @@ struct FontWordsData {
     FontTextSource* source = nullptr;
 };
 
-struct FontTextCodesData {
-    void* order = nullptr;
-    std::uint32_t code = 0;
-    std::uint32_t reserved0 = 0;
-    FontTextCharacter* current = nullptr;
-    FontTextCharacter* term = nullptr;
-    std::uint16_t magic = FONT_TEXT_CODES_MAGIC;
-};
-
-static_assert(sizeof(FontTextCodesData) <= sizeof(FontTextCodes));
-static_assert(offsetof(FontTextCodesData, code) == offsetof(FontTextCodes, Text) + sizeof(void*));
-
 FontWordsData* GetWordsData(void* fontWords) {
     auto* data = static_cast<FontWordsData*>(fontWords);
     return data && data->magic == FONT_WORDS_MAGIC ? data : nullptr;
@@ -107,12 +94,6 @@ FontWritingData* GetWritingData(FontWriting* fontWriting) {
     if (!fontWriting) return nullptr;
     auto* data = reinterpret_cast<FontWritingData*>(fontWriting->systemUse);
     return data->magic == FONT_WRITING_MAGIC ? data : nullptr;
-}
-
-FontTextCodesData* GetTextCodesData(FontTextCodes* textCodes) {
-    if (!textCodes) return nullptr;
-    auto* data = reinterpret_cast<FontTextCodesData*>(textCodes->systemReserved);
-    return data->magic == FONT_TEXT_CODES_MAGIC ? data : nullptr;
 }
 
 void ReleaseStorage(CharacterStorage*& storage) {
@@ -170,12 +151,6 @@ FontTextCharacter* PrevTextCharacter(const FontTextCharacter* character) {
         if (current->synthetic == 0 && current->clusterIndex == 0) return current;
     }
     return nullptr;
-}
-
-void ReferTextCodes(FontTextCodesData& data, FontTextCharacter* character) {
-    data.order = character->textOrder;
-    data.code = character->characterCode;
-    data.current = character;
 }
 
 FontTextCharacter MakeCharacter(FontHandle font, std::uint32_t code, void* textOrder) {
@@ -263,6 +238,20 @@ void AccumulateWritingMetrics(FontWritingData& writing) {
     writing.metrics.Extent.right = std::max(previous.Extent.right, right);
     writing.metrics.Extent.top = std::min(previous.Extent.top, top);
     writing.metrics.Extent.bottom = std::max(previous.Extent.bottom, bottom);
+}
+
+constexpr std::size_t TEXT_CODES_CURRENT = 5;
+constexpr std::size_t TEXT_CODES_START = 6;
+constexpr std::size_t TEXT_CODES_TERM = 7;
+
+void StepTextCodes(FontTextCodes* textCodes, const FontTextCharacter* character) {
+    textCodes->text.order = character->textOrder;
+    textCodes->text.code = character->characterCode;
+    textCodes->systemUse[TEXT_CODES_CURRENT] = const_cast<FontTextCharacter*>(character);
+}
+
+const FontTextCharacter* TextCodesCharacter(const FontTextCodes* textCodes, std::size_t slot) {
+    return static_cast<const FontTextCharacter*>(textCodes->systemUse[slot]);
 }
 
 }
@@ -600,33 +589,6 @@ FontTextCharacter* APS5_VABI sceFontCharacterRefersTextNext(const FontTextCharac
     return textCharacter ? NextTextCharacter(textCharacter) : nullptr;
 }
 
-FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(FontTextCharacter* textCharacter, FontTextCharacter* termCharacter, FontTextCodes* textCodes) {
-    if (!textCharacter || !textCodes || textCharacter == termCharacter) return nullptr;
-    std::memset(textCodes, 0, sizeof(*textCodes));
-    auto* data = new (textCodes->systemReserved) FontTextCodesData{};
-    data->term = termCharacter;
-    ReferTextCodes(*data, textCharacter);
-    return textCodes;
-}
-
-FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes* textCodesStep) {
-    auto* data = GetTextCodesData(textCodesStep);
-    if (!data) return nullptr;
-    FontTextCharacter* next = NextTextCharacter(data->current);
-    if (!next || next == data->term) return nullptr;
-    ReferTextCodes(*data, next);
-    return textCodesStep;
-}
-
-FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes* textCodesStep) {
-    auto* data = GetTextCodesData(textCodesStep);
-    if (!data) return nullptr;
-    FontTextCharacter* previous = PrevTextCharacter(data->current);
-    if (!previous) return nullptr;
-    ReferTextCodes(*data, previous);
-    return textCodesStep;
-}
-
 int APS5_VABI sceFontCreateWords(const FontMemory* fontMemory, FontTextSource* textSource, const void* detail, void** pFontWords) {
     (void)detail;
     if (!fontMemory || !textSource || !pFontWords) {
@@ -682,6 +644,39 @@ int APS5_VABI sceFontWordsFindWordCharacters(void* fontWords, FontTextCharacter*
     *pLastCharacter = last;
     *pNextCharacter = atEnd(next) ? nullptr : next;
     return SCE_FONT_OK;
+}
+
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter* textCharacter, const FontTextCharacter* termCharacter, FontTextCodes* textCodes) {
+    if (!textCodes) return nullptr;
+    if (!textCharacter) throw std::runtime_error("libSceFont: sceFontCharactersRefersTextCodes without a text character");
+    if (textCharacter->clusterIndex != 0 || textCharacter->synthetic != 0) return nullptr;
+    std::memset(textCodes, 0, sizeof(FontTextCodes));
+    StepTextCodes(textCodes, textCharacter);
+    textCodes->systemUse[TEXT_CODES_START] = const_cast<FontTextCharacter*>(textCharacter);
+    textCodes->systemUse[TEXT_CODES_TERM] = const_cast<FontTextCharacter*>(termCharacter);
+    return textCodes;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = TextCodesCharacter(textCodesStep, TEXT_CODES_CURRENT);
+    if (!current || current == TextCodesCharacter(textCodesStep, TEXT_CODES_TERM)) return nullptr;
+    const FontTextCharacter* next = current->next;
+    while (next && next->synthetic != 0) next = next->next;
+    if (!next) return nullptr;
+    StepTextCodes(textCodesStep, next);
+    return textCodesStep;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = TextCodesCharacter(textCodesStep, TEXT_CODES_CURRENT);
+    if (!current || current == TextCodesCharacter(textCodesStep, TEXT_CODES_START)) return nullptr;
+    const FontTextCharacter* previous = current->prev;
+    while (previous && previous->synthetic != 0) previous = previous->prev;
+    if (!previous) return nullptr;
+    StepTextCodes(textCodesStep, previous);
+    return textCodesStep;
 }
 
 int APS5_VABI sceFontWritingInit(FontWriting* fontWriting, FontString fontString, const FontTextCharacter* fontCharacter) {

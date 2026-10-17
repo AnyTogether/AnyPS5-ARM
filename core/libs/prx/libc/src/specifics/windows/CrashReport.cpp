@@ -2,7 +2,10 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include "prx/libc/include/CallTrace.hpp"
+#include "prx/libc/include/FailureReport.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/Shutdown.hpp"
+#include "prx/libc/include/CrashText.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -304,6 +307,7 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
         // Another thread is already reporting; let it finish before this fault ends the process.
         Sleep(INFINITE);
     }
+    LibcRunEndFlush_nid_no_patch();
     const auto* context = info->ContextRecord;
     char line[MAX_PATH + 64];
     char threadName[128] = "";
@@ -352,6 +356,15 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
             }
         }
     }
+    {
+        const std::pair<const char*, std::uint64_t> registers[] = {{"rax", context->Rax}, {"rbx", context->Rbx}, {"rcx", context->Rcx}, {"rdx", context->Rdx}, {"rsi", context->Rsi}, {"rdi", context->Rdi}, {"rbp", context->Rbp}, {"r8", context->R8}, {"r9", context->R9}, {"r10", context->R10}, {"r11", context->R11}, {"r12", context->R12}, {"r13", context->R13}, {"r14", context->R14}, {"r15", context->R15}};
+        static std::uint8_t bytes[crash_text::MaximumBytes];
+        static char text[960];
+        for (const auto& [name, value] : registers) {
+            if (value < 0x10000) continue;
+            if (crash_text::Format(bytes, ReadCode(value, bytes, sizeof(bytes)), text, sizeof(text))) Report("  [%s] %s\n", name, text);
+        }
+    }
     Report("  frame pointer chain:\n");
     std::uint64_t frame = context->Rbp;
     for (int depth = 0; depth < 32 && frame != 0 && (frame & 7) == 0 && IsReadable(frame) && IsReadable(frame + 8); ++depth) {
@@ -394,6 +407,7 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     ReportCallTrace();
     std::fflush(stderr);
     ReportAllThreads();
+    LibcRunFailureReports_nid_no_patch();
     std::fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -546,10 +560,12 @@ void ReportBacktrace(const char* what, bool reportThreads) {
 
 void AbortSignalHandler(int) {
     ReportBacktrace("abort() (SIGABRT)", true);
+    LibcRunFailureReports_nid_no_patch();
 }
 
 void InvalidParameterHandler(const wchar_t*, const wchar_t*, const wchar_t*, unsigned, std::uintptr_t) {
     ReportBacktrace("UCRT invalid parameter", true);
+    LibcRunFailureReports_nid_no_patch();
 }
 
 // Static destruction runs on the thread that ends the process (ExitProcess -> DLL_PROCESS_DETACH),

@@ -1149,6 +1149,10 @@ void SubmitLibraryPrebuild(std::function<void()> task) {
     RegistrationPreparePool::Prebuild().Submit(std::move(task));
 }
 
+void AwaitLibraryPrebuilds() {
+    if (auto* pool = RegistrationPreparePool::ExistingPrebuild()) pool->AwaitSubmitted();
+}
+
 void CloseRegistrationPreparation() {
     RegistrationPreparePool::Instance().Close();
     if (auto* prebuild = RegistrationPreparePool::ExistingPrebuild()) prebuild->Close();
@@ -1492,6 +1496,11 @@ ShaderSnapshot PrepareNullPixelProgram(const VulkanDevice& device) {
     return null;
 }
 
+std::shared_ptr<const ShaderRegistry> Driver::RegisteredShaders() {
+    std::lock_guard lock(mutex);
+    return shaders;
+}
+
 void Driver::RegisterShader(const Shader* shader) {
     PerformanceContext timingContext(FrameTiming::Preparation());
     PerformanceTimer timing("Shader.Register");
@@ -1544,8 +1553,12 @@ void Driver::RegisterShader(const Shader* shader) {
     registered.context = snapshot.registeredState->context;
     registered.userConfig = snapshot.registeredState->userConfig;
     std::shared_ptr<RegisteredPreparation> preparation;
+    static const bool lazy = std::getenv("APS5_LAZY_SHADER_PREPARE") != nullptr;
     if (!RegistrationPrepareEnabled()) {
         // Prepared at its first use.
+    } else if (lazy) {
+        static_cast<void>(PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred));
+        snapshot.prepared->deferred = true;
     } else if (AsyncRegistrationPrepare()) {
         preparation = PlanRegistered(snapshot, *localDevice, registered, true, &snapshot.prepared->deferred);
         if (preparation != nullptr) preparation->prebuildDevice = localDevice;

@@ -65,12 +65,18 @@ def oracle():
 
 
 @cache
-def detected_target(binary):
-    return subprocess.run([binary, "--target"], capture_output=True, text=True, check=True).stdout.strip()
+def detected_target(binary, visible_devices):
+    environment = dict(os.environ)
+    if visible_devices is None:
+        environment.pop("ROCR_VISIBLE_DEVICES", None)
+    else:
+        environment["ROCR_VISIBLE_DEVICES"] = visible_devices
+    return subprocess.run([binary, "--target"], capture_output=True, text=True, check=True,
+                          env=environment).stdout.strip()
 
 
 def target():
-    return os.environ.get("HW_ORACLE_TARGET") or detected_target(oracle())
+    return os.environ.get("HW_ORACLE_TARGET") or detected_target(oracle(), os.environ.get("ROCR_VISIBLE_DEVICES"))
 
 
 def assemble(body, work, wave64, *, ieee, denorm32, denorm16, dx10_clamp, round32, round16, fp16_overflow, lds=DEFAULT_LDS):
@@ -152,6 +158,8 @@ def main():
     parser.add_argument("--json", action="store_true", help="emit inputs, results and run settings as JSON; target is the assembly target, not a GPU model or driver")
     args = parser.parse_args()
     rows = [tuple(parse_word(v) for v in line.split()) for line in args.rows.read_text().splitlines() if line.strip()]
+    if not rows:
+        parser.error("rows file must contain at least one input row")
     if any(len(r) != 4 for r in rows):
         sys.exit("every row needs 4 values")
     extra = args.extra.read_bytes() if args.extra else b""

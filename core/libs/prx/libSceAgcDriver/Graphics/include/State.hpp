@@ -67,6 +67,7 @@ struct ColorTarget {
     bool uintExport = false;
     std::uint32_t pipeBankXor = 0;
     std::uint32_t samples = 1;
+    std::uint32_t dccControl = 0;
 };
 
 struct DepthTarget {

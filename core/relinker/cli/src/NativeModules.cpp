@@ -7,6 +7,11 @@
 
 namespace Cli {
 
+bool SameDirectory(const std::filesystem::path& first, const std::filesystem::path& second) {
+    if (std::filesystem::exists(first) && std::filesystem::exists(second)) return std::filesystem::equivalent(first, second);
+    return std::filesystem::weakly_canonical(first) == std::filesystem::weakly_canonical(second);
+}
+
 NativeModules ReadModules(const std::filesystem::path& inputPath, const std::filesystem::path& sceModulePath, const std::set<std::string>& excludedModules, const std::vector<std::string>& moduleDirectories) {
     using namespace Relinker;
     const auto root = std::filesystem::absolute(sceModulePath).lexically_normal();
@@ -32,7 +37,7 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
         auto directory = (root / relative).lexically_normal();
         if (!directory.has_filename()) directory = directory.parent_path();
         if (!std::filesystem::is_directory(directory)) throw Domain::RelinkerException("Guest module path is not a directory: " + Io::Utf8Path(directory));
-        if (std::find(directories.begin(), directories.end(), directory) != directories.end()) throw Domain::RelinkerException("Duplicate guest module directory: " + Io::Utf8Path(directory));
+        if (std::any_of(directories.begin(), directories.end(), [&](const auto& existing) { return SameDirectory(existing, directory); })) throw Domain::RelinkerException("Duplicate guest module directory: " + Io::Utf8Path(directory));
         directories.push_back(directory);
         runtimeDirectories.push_back(directory);
     }

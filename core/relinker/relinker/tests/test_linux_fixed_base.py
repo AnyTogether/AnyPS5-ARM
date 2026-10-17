@@ -31,14 +31,14 @@ def check_code(base):
             + b"\xcc" + b"\x0f\x0b")
 
 
-def fixture(relocation_type=8, addend=ENTRY, alignment=0x4000, memory_size=0x1000):
+def fixture(relocation_type=8, addend=ENTRY, alignment=0x4000, memory_size=0x1000, slots=6):
     image = bytearray(0x8000)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
-    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, ENTRY, 64, 0, 0, 64, 56, 6, 64, 0, 0)
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, ENTRY, 64, 0, 0, 64, 56, slots, 64, 0, 0)
     tags = [(5, 0x7A0), (10, 1), (6, 0x780), (11, 24), (7, 0x700), (8, 24), (9, 24), (0, 0)]
     struct.pack_into("<IIQQQQQQ", image, 64, PT_LOAD, 7, 0x4000, 0, 0, 0x1000, memory_size, alignment)
     struct.pack_into("<IIQQQQQQ", image, 120, PT_DYNAMIC, 6, 0x4600, 0x600, 0x600, len(tags) * 16, len(tags) * 16, 8)
-    for index in range(2, 6):
+    for index in range(2, slots):
         struct.pack_into("<IIQQQQQQ", image, 64 + index * 56, PT_SCE_VERSION, 0, 0, 0, 0, 0, 0, 1)
     for index, tag in enumerate(tags):
         struct.pack_into("<qQ", image, 0x4600 + index * 16, *tag)
@@ -111,10 +111,41 @@ def main():
         assert plain_relocations == [(SLOT, 8, ENTRY)], plain_relocations
         assert relocations(fixed) == [(SLOT + BASE, 8, ENTRY + BASE)], relocations(fixed)
 
+        relocated = fixture(slots=5)
+        result, relocated_plain_path = relink(relinker, work, "relocated-plain", relocated)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        result, relocated_fixed_path = relink(relinker, work, "relocated-fixed", relocated, "--linux-fixed-base", hex(BASE))
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        relocated_plain = relocated_plain_path.read_bytes()
+        relocated_fixed = relocated_fixed_path.read_bytes()
+        assert struct.unpack_from("<H", relocated_fixed, 0x38)[0] > struct.unpack_from("<H", relocated, 0x38)[0], "the output program header table did not grow past the input's slots"
+        assert struct.unpack_from("<Q", relocated_fixed, 0x20)[0] != 0x40, "the input table had slots for the output layout"
+        relocated_plain_headers = headers(relocated_plain)
+        relocated_fixed_headers = headers(relocated_fixed)
+        assert len(relocated_plain_headers) == len(relocated_fixed_headers)
+        for before, after in zip(relocated_plain_headers, relocated_fixed_headers):
+            shift = 0 if before[0] in (PT_NULL, PT_GNU_STACK) else BASE
+            assert after == (*before[:3], before[3] + shift, before[4] + shift, *before[5:]), (before, after)
+        assert min(header[3] for header in relocated_fixed_headers if header[0] == PT_LOAD) == BASE, "the relocated image does not start at the base"
+        relocated_entry = struct.unpack_from("<Q", relocated_fixed, 24)[0]
+        assert relocated_entry == struct.unpack_from("<Q", relocated_plain, 24)[0] + BASE, "entry not rebased"
+        entry_offset = mapped(relocated_fixed, relocated_entry)
+        assert entry_offset < len(relocated_fixed), ("the entry's mapping lies outside the output file", entry_offset)
+        covering = next(header for header in relocated_fixed_headers if header[0] == PT_LOAD and header[3] <= relocated_entry < header[3] + header[5])
+        assert covering[1] & 1, "the segment covering the entry is not executable"
+
+        filled = bytearray(relocated)
+        filled[0x158:0x198] = b"\x41" * 0x40
+        result, _ = relink(relinker, work, "relocated-filled", bytes(filled), "--linux-fixed-base", hex(BASE))
+        assert result.returncode == 0, (result.stdout, result.stderr)
+
         if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
             fixed_path.chmod(0o755)
             executed = subprocess.run([str(fixed_path)], capture_output=True, timeout=20)
             assert executed.returncode == -signal.SIGTRAP, ("the image did not run at the base with its relocation applied", executed.returncode)
+            relocated_fixed_path.chmod(0o755)
+            executed = subprocess.run([str(relocated_fixed_path)], capture_output=True, timeout=20)
+            assert executed.returncode == -signal.SIGTRAP, ("the relocated-table image did not run at the base with its relocation applied", executed.returncode)
 
         for name, image, base, error in (
             ("unaligned", fixture(alignment=0x20000), 0x410000, "is not a multiple of the PT_LOAD alignment 0x20000"),

@@ -41,8 +41,6 @@ std::vector<std::string> ReadNeededLibraries(const Domain::SysVDynamicSection& d
         if (name.empty()) throw Domain::RelinkerException("Invalid DT_NEEDED library: " + name);
         if (unique.insert(name).second) result.push_back(std::move(name));
     }
-    // AnyPS5 implements the C runtime in libc.prx; keep it loaded beside the module that asks for it.
-    if (unique.contains("libSceLibcInternal.prx") && !unique.contains("libc.prx")) result.push_back("libc.prx");
     return result;
 }
 
@@ -73,9 +71,9 @@ std::vector<std::uint8_t> MacOsMachOPatcher::Patch(std::vector<std::uint8_t> sou
         input.Binds.push_back({"_" + import.Name, import.TargetRva, static_cast<std::int64_t>(import.Addend), import.Weak});
     for (const auto& library : ReadNeededLibraries(dynamicSection))
         input.Dylibs.push_back(MachODependency(library, "@executable_path"));
-    // Images with TLS bind the allocator and the registration from libkernel.
-    if (std::find(input.Dylibs.begin(), input.Dylibs.end(), "@rpath/libkernel.prx") == input.Dylibs.end())
-        input.Dylibs.push_back("@rpath/libkernel.prx");
+    for (const auto* library : {"@rpath/libkernel.prx", "@rpath/libc.prx"})
+        if (std::find(input.Dylibs.begin(), input.Dylibs.end(), library) == input.Dylibs.end())
+            input.Dylibs.push_back(library);
     input.RunPaths = MachORunPaths(runPath, "@executable_path");
     input.EntryRva = image.GetEntryRva();
     input.Trampolines = &trampolines;

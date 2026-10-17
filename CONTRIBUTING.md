@@ -57,7 +57,9 @@ The [pull request template](.github/pull_request_template.md) is the checklist f
 - Keep the branch up to date with `main` and resolve conflicts yourself; rebasing and force-pushing is fine.
 - A pull request that conflicts with `main` and has no activity for 7 days is labeled `stale` with a reminder. It is not closed.
 - If a pull request needs another one first, say so on the checklist line (`Depends on: #N`; `none` otherwise).
+- If a pull request fixes a reported issue, write `Fixes #N` on its checklist line (`none` otherwise). GitHub closes the issue on merge, and the `fix error` label is added within the hour.
 - If a pull request fixes a stop or a wrong result seen on a title, name it on the checklist line with the title ID and its [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussion (`Unblocks: PPSA01325 #3232`; `none` otherwise). Reviewers review these first.
+- For GPU changes, list each tested GPU's vendor, model, driver and OS on the checklist line. CI runs GPU tests only on lavapipe, so reviewers may ask for a run on another vendor before merging.
 - Fixes a title needs go to `main` as pull requests. A Game bring-up discussion lists the open pull requests and local changes the title still needs; update the list when one is merged, closed or replaced.
 - The PR overlap comment lists open pull requests that change the same lines or exports; agree with their authors which one goes first and declare it with `Depends on`.
 - Run the tests before opening the pull request and describe what was tested (OS, title or homebrew).

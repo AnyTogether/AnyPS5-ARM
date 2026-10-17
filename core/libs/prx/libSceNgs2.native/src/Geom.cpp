@@ -5,6 +5,7 @@
 #include <iterator>
 #include <numbers>
 #include <stdexcept>
+#include <cstring>
 #include <limits>
 
 #include "prx/libc/include/General.hpp"
@@ -194,14 +195,10 @@ int Ngs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param) {
     return SCE_NGS2_OK;
 }
 
-#pragma GCC visibility push(default)
-
-extern "C" {
-
 // Fills only what the flags ask for. The volume matrix is the one of a point (mono) source, levels
 // [0, matrix_format), panned by sceNgs2PanGetVolumeMatrix over num_speakers; without the source angle
 // the source is panned straight ahead, and inside the radius it spreads towards every speaker.
-int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, uint32_t flags) {
+int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
     constexpr std::uint32_t known = APPLY_SOURCE_ANGLE | APPLY_SOURCE_DOPPLER | APPLY_VOLUME_MATRIX | APPLY_A3D_ATTRIBUTE | APPLY_A3D_AMBISONICS;
     if (listener == nullptr || source == nullptr || (flags & ~known) != 0 || !(listener->sound_speed > 0.0f)) APS5_INVALID_ARG_EX;
     if (out_attrib == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
@@ -235,6 +232,3 @@ int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2G
     return SCE_NGS2_OK;
 }
 
-}
-
-#pragma GCC visibility pop

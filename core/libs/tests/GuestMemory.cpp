@@ -922,6 +922,7 @@ static DWORD ImageProtection(const void* pointer) {
     Require(VirtualQuery(pointer, &memory, sizeof(memory)) == sizeof(memory));
     return memory.Protect & 0xffu;
 }
+#endif
 
 static unsigned char* GuestModulePage(void* module, std::size_t page) {
     auto* data = static_cast<unsigned char*>(dlsym_nid_postfix(module, "guestMemoryModuleData"));
@@ -936,6 +937,7 @@ static bool RegisteredGuestRange(const void* pointer, std::size_t bytes) {
     return mutation.Overlaps(pointer, bytes);
 }
 
+#ifdef _WIN32
 static void CheckGuestModuleImageProtection() {
     constexpr std::size_t page = 0x4000;
     const auto path = std::filesystem::relative(GUEST_MEMORY_ELF0_MODULE).generic_string();
@@ -1041,6 +1043,54 @@ static void CheckGuestModuleImageProtection() {
     Require(rejected);
     Require(!RegisteredGuestRange(plainTarget, page));
     Require(dlclose_nid_postfix(plainModule) == 0);
+}
+#elif defined(__linux__)
+static std::string MappingPermissions(const void* pointer) {
+    const auto address = reinterpret_cast<std::uintptr_t>(pointer);
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps, line)) {
+        unsigned long begin = 0;
+        unsigned long end = 0;
+        char permissions[5]{};
+        if (std::sscanf(line.c_str(), "%lx-%lx %4s", &begin, &end, permissions) == 3 && address >= begin && address < end) return permissions;
+    }
+    return {};
+}
+
+static void CheckGuestModuleImageProtection() {
+    constexpr std::size_t page = 0x4000;
+    const auto path = std::filesystem::relative(GUEST_MEMORY_MODULE).generic_string();
+    void* module = dlopen_nid_postfix(path.c_str(), 2);
+    Require(module != nullptr);
+    auto* target = GuestModulePage(module, page);
+    Require(!RegisteredGuestRange(target, page));
+    Require(sceKernelMprotect(target, page, 1) == 0);
+    Require(RegisteredGuestRange(target, page));
+    Require(MappingPermissions(target).starts_with("r--"));
+    Require(sceKernelMprotect(target, page, 3) == 0);
+    Require(MappingPermissions(target).starts_with("rw-"));
+    target[1] = 7;
+    Require(target[1] == 7);
+    Require(dlclose_nid_postfix(module) == 0);
+    Require(!RegisteredGuestRange(target, page));
+
+    module = dlopen_nid_postfix(path.c_str(), 2);
+    Require(module != nullptr);
+    target = GuestModulePage(module, page);
+    Require(!RegisteredGuestRange(target, page));
+    Require(sceKernelMprotect(target, page, 1) == 0);
+    Require(RegisteredGuestRange(target, page));
+    Require(dlclose_nid_postfix(module) == 0);
+    Require(!RegisteredGuestRange(target, page));
+
+    bool rejected = false;
+    try {
+        sceKernelMprotect(reinterpret_cast<const void*>(&::getpid), page, 1);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    Require(rejected);
 }
 #endif
 
@@ -2637,8 +2687,10 @@ int main(int argc, char** argv) {
     CheckNoOverwriteRejectsHostOccupiedMapping();
     CheckFixedMappingsReachTheApplicationAreaEnd();
 #endif
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
     CheckGuestModuleImageProtection();
+#endif
+#ifdef _WIN32
     CheckAliasAcrossDirectAllocations();
     CheckAliasOfReorderedSharedPages();
     CheckAliasRefusesPagesThatAreNotSharedViews();

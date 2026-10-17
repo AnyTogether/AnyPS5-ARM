@@ -241,6 +241,9 @@ int APS5_VABI pthread_rename_np_nid_postfix(Pthread thread, const char* name) {
 int APS5_VABI pthread_getname_np_nid_postfix(Pthread thread, char* name) {
     if (!thread) return PosixThread::GUEST_ESRCH;
     if (!name) return PosixThread::GUEST_EFAULT;
+    // A joined thread answers ESRCH on the console (PS5 firmware 13.60); the object is retained
+    // after scePthreadJoin, so _joined tells it apart from a live thread.
+    if (thread->_joined.load(std::memory_order_acquire)) return PosixThread::GUEST_ESRCH;
     return PosixThread::ToErrno(scePthreadGetname(thread, name));
 }
 

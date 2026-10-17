@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -86,13 +87,28 @@ static const ChunkTable& Chunks() {
     return chunks;
 }
 
+enum class UnlistedChunkAnswer { Stop, Installed, Absent };
+
+static UnlistedChunkAnswer UnlistedChunks() {
+    static const UnlistedChunkAnswer answer = [] {
+        const char* text = std::getenv("APS5_PLAYGO_UNLISTED_CHUNKS");
+        if (text == nullptr || text[0] == '\0') return UnlistedChunkAnswer::Stop;
+        const std::string value(text);
+        if (value == "installed") return UnlistedChunkAnswer::Installed;
+        if (value == "absent") return UnlistedChunkAnswer::Absent;
+        throw std::runtime_error("scePlayGo: APS5_PLAYGO_UNLISTED_CHUNKS must be installed or absent, not \"" + value + "\"");
+    }();
+    return answer;
+}
+
 static bool IsKnownChunk(uint16_t id) {
     const auto& chunks = Chunks();
     if (chunks.defined) return chunks.ids.contains(id);
-    // A dump without any playgo-* file in sce_sys is taken as fully installed, as with only
-    // playgo-scenario.json: Stray (PPSA02100) asks for chunk 1 at startup and ships neither file.
-    static_cast<void>(id);
-    return true;
+    if (chunks.scenario || id == 0) return true;
+    // Unlike upstream, an unset APS5_PLAYGO_UNLISTED_CHUNKS takes a dump without any playgo-* file as
+    // fully installed, as with only playgo-scenario.json: Stray (PPSA02100) asks for chunk 1 at startup
+    // and ships neither file.
+    return UnlistedChunks() != UnlistedChunkAnswer::Absent;
 }
 
 static int ValidateChunks(const uint16_t* chunk_ids, uint32_t number_of_entries) {

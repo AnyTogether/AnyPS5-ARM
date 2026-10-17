@@ -491,6 +491,25 @@ def make_image(transfer, metadata, extent=None, body=None):
     return image
 
 
+def make_eof_segment_prefix_image():
+    image = bytearray(0x1000)
+    image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0x1200, 64, 0, 0, 64, 56, 4, 64, 0, 0)
+    image[0x200:0x206] = bytes.fromhex("ff 25 fa 00 00 00")
+    image[0x210:0x216] = bytes.fromhex("b8 2a 00 00 00 c3")
+    struct.pack_into("<QQq", image, 0x700, 0x300, 8, 0x210)
+    tags = [(5, 0x600), (10, 1), (6, 0x620), (11, 24), (7, 0x700), (8, 24), (9, 24), (0, 0)]
+    struct.pack_into("<IIQQQQQQ", image, 64, 1, 7, 0, 0, 0, len(image), len(image), 0x1000)
+    struct.pack_into("<IIQQQQQQ", image, 120, 2, 6, 0x400, 0x400, 0x400, len(tags) * 16, len(tags) * 16, 8)
+    image.extend(b"\x90" * 0x1000)
+    struct.pack_into("<IIQQQQQQ", image, 176, 7, 4, 0x800, 0x800, 0x800, 8, 16, 16)
+    struct.pack_into("<IIQQQQQQ", image, 232, 1, 5, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000)
+    for index, tag in enumerate(tags):
+        struct.pack_into("<qQ", image, 0x400 + index * 16, *tag)
+    image[0x1ffe:0x2000] = bytes.fromhex("64 90")
+    return image
+
+
 def pe_bytes_at(pe, rva, size):
     header = struct.unpack_from("<I", pe, 0x3c)[0]
     count = struct.unpack_from("<H", pe, header + 6)[0]
@@ -746,6 +765,8 @@ def main():
             for name, instruction in rejected.items():
                 convert(name, make_image("register", "unwind", body=instruction + b"\xc3"),
                         "Unsupported Windows guest TLS instruction")
+            convert("segment-prefix-at-eof", make_eof_segment_prefix_image(),
+                    "Unsupported Windows guest TLS instruction")
             conflicting = make_image("register", "symbol")
             unwind = make_image("register", "unwind", 0x51)
             conflicting[0x900:0x9a0] = unwind[0x900:0x9a0]

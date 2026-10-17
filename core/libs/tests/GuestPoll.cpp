@@ -64,6 +64,10 @@ static void TestPipes(int socket) {
     const auto start = std::chrono::steady_clock::now();
     Require(poll_nid_postfix(&reader, 1, 50) == 0 && reader.revents == 0);
     Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
+    const auto shortWaitStart = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; ++i) Require(poll_nid_postfix(&reader, 1, 2) == 0 && reader.revents == 0);
+    const auto shortWait = std::chrono::steady_clock::now() - shortWaitStart;
+    Require(shortWait >= std::chrono::milliseconds(40) && shortWait < std::chrono::milliseconds(200));
     Require(write_nid_postfix(ends[1], "wake", 4) == 4);
     Require(poll_nid_postfix(&reader, 1, 1000) == 1 && reader.revents == (In | ReadNormal));
     PollDescriptor writer{ends[1], In, -1};

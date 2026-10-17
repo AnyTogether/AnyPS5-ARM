@@ -1,6 +1,7 @@
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <array>
+#include <barrier>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -8,8 +9,11 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <fcntl.h>
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <io.h>
 #else
 #include <unistd.h>
@@ -17,6 +21,7 @@
 
 extern "C" {
 FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode);
+FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const char*, int, int);
 FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode, FileStream* stream);
 int APS5_VABI fclose_nid_postfix(FileStream* stream);
 std::size_t APS5_VABI fread_nid_postfix(void* buffer, std::size_t size, std::size_t count, FileStream* stream);
@@ -31,8 +36,8 @@ int APS5_VABI ferror_nid_postfix(FileStream* stream);
 void APS5_VABI clearerr_nid_postfix(FileStream* stream);
 }
 
-static void Require(bool condition) {
-    if (!condition) throw std::runtime_error("File stream check failed");
+static void Require(bool condition, const char* message = "File stream check failed") {
+    if (!condition) throw std::runtime_error(message);
 }
 
 template<typename TAction>
@@ -57,8 +62,62 @@ static void ReplaceWithReadOnlyDescriptor(FileStream* stream, const char* path) 
 #endif
 }
 
+static void CheckExclusiveCppOpen(const std::string& base) {
+    constexpr int Out = 0x02, Binary = 0x80, Noreplace = 0x40;
+    const std::string path = base + ".exclusive";
+    std::remove(path.c_str());
+    auto* stream = _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(path.c_str(), Out | Binary | Noreplace, 0);
+    Require(stream != nullptr);
+    constexpr char original[] = "keep existing contents";
+    Require(fwrite_nid_postfix(original, 1, sizeof(original), stream) == sizeof(original));
+    Require(fclose_nid_postfix(stream) == 0);
+#ifdef _WIN32
+    const auto nativePath = std::filesystem::path(path).wstring();
+    const auto writer = CreateFileW(nativePath.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Require(writer != INVALID_HANDLE_VALUE);
+    auto* refused = _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(path.c_str(), Out | Binary | Noreplace, 0);
+    if (refused) fclose_nid_postfix(refused);
+    Require(CloseHandle(writer) != 0);
+    Require(refused == nullptr, "C++ noreplace truncated an existing write-shared file");
+#endif
+    stream = fopen_nid_postfix(path.c_str(), "rb");
+    Require(stream != nullptr);
+    std::array<char, sizeof(original)> saved{};
+    Require(fread_nid_postfix(saved.data(), 1, saved.size(), stream) == saved.size());
+    Require(std::memcmp(saved.data(), original, saved.size()) == 0);
+    Require(fclose_nid_postfix(stream) == 0 && std::remove(path.c_str()) == 0);
+    for (const int mode : {0x42, 0x52, 0x53, 0xc2, 0xd2, 0xd3}) {
+        stream = _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(path.c_str(), mode | 0x04, 0);
+        Require(stream != nullptr && ftell_nid_postfix(stream) == 0);
+        Require(fwrite_nid_postfix(original, 1, sizeof(original), stream) == sizeof(original));
+        Require(fclose_nid_postfix(stream) == 0);
+        errno = 0;
+        Require(_ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(path.c_str(), mode, 0) == nullptr && errno == EEXIST);
+        stream = fopen_nid_postfix(path.c_str(), "rb");
+        Require(stream != nullptr && fread_nid_postfix(saved.data(), 1, saved.size(), stream) == saved.size());
+        Require(std::memcmp(saved.data(), original, saved.size()) == 0);
+        Require(fclose_nid_postfix(stream) == 0 && std::remove(path.c_str()) == 0);
+    }
+    for (int round = 0; round < 12; ++round) {
+        std::array<FileStream*, 2> created{};
+        std::barrier start(2);
+        const auto create = [&](int index) {
+            start.arrive_and_wait();
+            created[index] = _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(path.c_str(), Out | Binary | Noreplace, 0);
+        };
+        std::thread first(create, 0), second(create, 1);
+        first.join();
+        second.join();
+        const auto winners = static_cast<int>(created[0] != nullptr) + static_cast<int>(created[1] != nullptr);
+        for (auto* opened : created) if (opened) Require(fclose_nid_postfix(opened) == 0);
+        Require(winners == 1 && std::remove(path.c_str()) == 0);
+    }
+}
+
 int main(int argc, char** argv) {
     Require(argc == 2);
+    CheckExclusiveCppOpen(argv[1]);
     Require(_Stdout_nid_postfix.GetHandle() == stdout);
     Require(_Stderr_nid_postfix.GetHandle() == stderr);
     Require(fputs_nid_postfix("stdout object works\n", &_Stdout_nid_postfix) >= 0);

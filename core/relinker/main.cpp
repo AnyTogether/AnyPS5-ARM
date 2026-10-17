@@ -210,7 +210,7 @@ int Run(const int argc, char* argv[]) {
                 throw Domain::RelinkerException("--executable must be a file inside the guest module parent directory: " + executable);
             const auto input = moduleRoot / relative;
             if (!std::filesystem::is_regular_file(input)) throw Domain::RelinkerException("--executable is not a file: " + Io::Utf8Path(input));
-            if (std::find(moduleDirectories.begin(), moduleDirectories.end(), input.parent_path()) != moduleDirectories.end())
+            if (std::any_of(moduleDirectories.begin(), moduleDirectories.end(), [&](const auto& directory) { return Cli::SameDirectory(directory, input.parent_path()); }))
                 throw Domain::RelinkerException("--executable is in a guest module directory: " + executable);
             std::string name;
             for (const auto& part : relative) name += (name.empty() ? "" : ".") + Io::Utf8Path(part);

@@ -1,5 +1,7 @@
 if(NOT WIN32)
-    string(REPLACE "-static " "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ")
+    foreach(runtimeLinkFlag IN ITEMS -static-libgcc -static-libstdc++ -static)
+        string(REPLACE "${runtimeLinkFlag}" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
+    endforeach()
     string(STRIP "${CMAKE_EXE_LINKER_FLAGS}" CMAKE_EXE_LINKER_FLAGS)
 endif()
 
@@ -243,6 +245,8 @@ if(BUILD_TESTING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME nid_gnu_hash COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_gnu_hash.py $<TARGET_FILE:nid_patcher>)
+        add_test(NAME nid_elf_duplicates COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_elf_duplicates.py $<TARGET_FILE:nid_patcher>)
         add_test(NAME nid_patcher_macho COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/nid/tests/test_macho_nids.py $<TARGET_FILE:nid_patcher>)
         add_test(NAME nid_patcher_native_paths COMMAND ${Python3_EXECUTABLE}
@@ -297,6 +301,35 @@ if(BUILD_TESTING)
         add_test(NAME undeliverable_host_exception COMMAND undeliverable_host_exception_tests $<TARGET_FILE:libc>)
         set_tests_properties(undeliverable_host_exception PROPERTIES
             PASS_REGULAR_EXPRESSION "C\\+\\+ exception St9bad_alloc raised on thread [0-9]+ cannot be delivered: 0x[0-9a-f]+ undeliverable_host_exception_tests\\.exe\\+0x[0-9a-f]+ has no unwind data")
+    endif()
+
+    add_test_executable(crash_text_tests tests/CrashText.cpp)
+    target_include_directories(crash_text_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    if(MINGW)
+        target_compile_options(crash_text_tests PRIVATE -fasynchronous-unwind-tables)
+    endif()
+    add_test(NAME crash_text COMMAND crash_text_tests)
+
+    if(WIN32)
+        add_test_executable(windows_crash_text_tests tests/WindowsCrashText.cpp)
+        add_dependencies(windows_crash_text_tests libc)
+        if(MINGW)
+            target_compile_options(windows_crash_text_tests PRIVATE -fasynchronous-unwind-tables)
+        endif()
+        add_test(NAME windows_crash_text COMMAND windows_crash_text_tests $<TARGET_FILE:libc>)
+        set_tests_properties(windows_crash_text PROPERTIES TIMEOUT 20
+            PASS_REGULAR_EXPRESSION "faulting[^~]*FATAL: unhandled exception 0xc0000005[^~]*  \\[r12\\] \"allocation failed in the heap\"[\r\n]+  \\[r13\\] u\"LowLevelFatalError \\[File:Unknown\\] \\[Line: 42\\] Out of memory\"[\r\n]+  \\[r14\\] \"PAGE END\"[.][.][.]"
+            FAIL_REGULAR_EXPRESSION "\\[rbx\\] u?\"|did not fault")
+    endif()
+
+    add_test_executable(guest_voice_port_attr_tests tests/GuestVoicePortAttr.cpp)
+    target_include_directories(guest_voice_port_attr_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_voice_port_attr_tests PRIVATE libSceVoice libc)
+    configure_windows_unwind(guest_voice_port_attr_tests)
+    add_test(NAME guest_voice_port_attr COMMAND guest_voice_port_attr_tests)
+    if(WIN32)
+        set_tests_properties(guest_voice_port_attr PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVoice>")
     endif()
 
     add_test_executable(guest_offline_imports_tests tests/GuestOfflineImports.cpp)
@@ -507,16 +540,6 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData>")
         set_tests_properties(savedata_native_write_replacement PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
-    endif()
-
-    add_test_executable(guest_ppsa01530_exports_tests tests/GuestPPSA01530Exports.cpp)
-    target_include_directories(guest_ppsa01530_exports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(guest_ppsa01530_exports_tests PRIVATE libkernel libSceJson2 libSceNet libScePad libc)
-    configure_windows_unwind(guest_ppsa01530_exports_tests)
-    add_test(NAME guest_ppsa01530_exports COMMAND guest_ppsa01530_exports_tests)
-    if(WIN32)
-        set_tests_properties(guest_ppsa01530_exports PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel>")
     endif()
 
     add_test_executable(guest_posix_random_tests tests/GuestPosixRandom.cpp)

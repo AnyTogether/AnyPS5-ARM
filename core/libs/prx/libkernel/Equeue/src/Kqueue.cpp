@@ -135,14 +135,18 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
         }
         NotImplemented_nid_no_patch("kevent: EVFILT_READ on a kqueue descriptor");
     }
-    if (!GuestSockets::IsOpen(descriptor)) {
-        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a non-socket descriptor" : "kevent: EVFILT_WRITE on a non-socket descriptor");
+    const bool socket = GuestSockets::IsOpen(descriptor);
+    std::int64_t data = 0;
+    bool eof = false;
+    const bool pipe = !socket && change.filter == EVFILT_READ && GuestSockets::PipeReadState(descriptor, &data, &eof);
+    if (!socket && !pipe) {
+        NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket nor the read end of a pipe" : "kevent: EVFILT_WRITE on a non-socket descriptor");
     }
     if ((change.fflags & NOTE_LOWAT) != 0) {
         NotImplemented_nid_no_patch("kevent: NOTE_LOWAT");
     }
     if ((flags & EV_CLEAR) != 0) {
-        NotImplemented_nid_no_patch("kevent: EV_CLEAR on a socket");
+        NotImplemented_nid_no_patch(pipe ? "kevent: EV_CLEAR on a pipe" : "kevent: EV_CLEAR on a socket");
     }
     auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata);
     change.fflags = 0;

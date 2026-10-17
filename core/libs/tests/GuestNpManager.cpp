@@ -5,12 +5,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 extern "C" {
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id);
 int APS5_VABI sceNpGetUserIdByAccountId(std::uint64_t account_id, int* user_id);
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
 void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
+int APS5_VABI sceNpUnknown_8weiQyIdI3A(int userId, void* buffer);
+int APS5_VABI sceNpUnknown_WxLcN76q19o(void);
 }
 
 extern "C" {
@@ -84,5 +87,20 @@ int main() {
     try { sceNpRegisterGamePresenceCallback(nullptr, nullptr); }
     catch (const std::invalid_argument&) { threw = true; }
     Require(threw, "null presence callback accepted");
+    unsigned char buffer[0x11]{};
+    try {
+        sceNpUnknown_8weiQyIdI3A(0x10000, buffer);
+        Require(false, "sceNpUnknown_8weiQyIdI3A must report that it is not implemented");
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()) == "sceNpUnknown_8weiQyIdI3A not implemented",
+            "sceNpUnknown_8weiQyIdI3A threw");
+    }
+    try {
+        sceNpUnknown_WxLcN76q19o();
+        Require(false, "sceNpUnknown_WxLcN76q19o must report that it is not implemented");
+    } catch (const std::runtime_error& error) {
+        Require(std::string(error.what()) == "sceNpUnknown_WxLcN76q19o not implemented",
+            "sceNpUnknown_WxLcN76q19o threw");
+    }
     return 0;
 }

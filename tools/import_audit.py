@@ -196,7 +196,7 @@ def elf_exports(path, data):
             binding, visibility = info >> 4, other & 3
             if name == 0 or index == 0 or binding not in (1, 2, 10) or visibility not in (0, 3):
                 continue
-            names.add(cstring(data, strings_offset + name, strings_offset + strings_size, path, "export name"))
+            names.add(cstring(data, strings_offset + name, strings_offset + strings_size, path, "export name").split(MODULE_SUFFIX, 1)[0])
     return names
 
 

@@ -9,7 +9,7 @@
 
 namespace ShaderRecompiler::RuntimeAbi {
 
-inline constexpr std::uint32_t Version = 12u;
+inline constexpr std::uint32_t Version = 13u;
 inline constexpr std::uint32_t DescriptorSet = 0u;
 inline constexpr std::uint32_t FragmentDescriptorSet = 1u;
 inline constexpr std::uint32_t StageCount = 4u;
@@ -42,7 +42,7 @@ inline constexpr std::uint32_t SampledHeapCapacity = 64u;
 inline constexpr std::uint32_t BindlessTableSlots = 16u;
 inline constexpr std::uint32_t StorageMipSlots = 4u;
 inline constexpr std::uint32_t StorageHeapCapacity = 16u;
-inline constexpr std::uint32_t SamplerHeapCapacity = 32u;
+inline constexpr std::uint32_t SamplerHeapCapacity = 64u;
 inline constexpr std::uint32_t StateExportMappings = 0u;
 inline constexpr std::uint32_t StateDwords = 2u;
 inline constexpr std::uint32_t StateVertexSelectors = 0u;
@@ -87,9 +87,9 @@ inline std::uint32_t HeapCapacity(Binding binding) {
 }
 
 static_assert(std::is_standard_layout_v<ResourceMetadata> && std::is_trivially_copyable_v<ResourceMetadata> && sizeof(ResourceMetadata) == 48u);
-static_assert(std::is_standard_layout_v<ShaderData> && std::is_trivially_copyable_v<ShaderData> && sizeof(ShaderData) == 14528u);
+static_assert(std::is_standard_layout_v<ShaderData> && std::is_trivially_copyable_v<ShaderData> && sizeof(ShaderData) == 16064u);
 static_assert(UserDataDword == 4u && BufferOffsetsDword == 132u && DispatchThreadLimitDword == 164u);
-static_assert(ExportMappingsDword == 3624u);
+static_assert(ExportMappingsDword == 4008u);
 static_assert(offsetof(ResourceMetadata, descriptor) == 16u && offsetof(ShaderData, images) == 672u && offsetof(ShaderData, samplers) == 12960u);
 
 inline void RequireVersion(std::uint32_t version) {

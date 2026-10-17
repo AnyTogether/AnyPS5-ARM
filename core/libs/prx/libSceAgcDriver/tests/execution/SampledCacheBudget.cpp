@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
@@ -236,6 +237,44 @@ std::shared_ptr<ShaderResources> ImageResources(const Context& context, const Bl
     return std::make_shared<ShaderResources>(context, shader);
 }
 
+void recorderEvictionTests(const Context& context, const Block& block) {
+    auto& cache = SharedResourceCache();
+    cache.Clear();
+    ClearCachedTextures(context.device);
+    auto sampled = ImageResources(context, block, 0, 1, true);
+    const auto images = sampled->StorageImages();
+    Require(images.size() == 1, "the eviction fixture has no sampled storage image");
+    const std::weak_ptr<ShaderResources> resources = sampled;
+    const std::weak_ptr<Texture> view = sampled->SampledTextures().front();
+    const std::weak_ptr<StorageTexture> image = sampled->SampledTextures().front()->SharedStorageSource();
+    cache.Insert({1}, sampled);
+    Require(cache.Find({1}) == sampled, "the recorder fixture's descriptor set was not cached");
+    sampled.reset();
+    Buffer readback(context, sizeof(std::uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    {
+        Recorder recorder(context);
+        recorder.Activate();
+        recorder.Commands();
+        for (std::size_t surface = 1; surface < Surfaces; ++surface) CachedStorageSurface(context, Resource(block.Surface(surface)));
+        Require(cache.Find({1}) == nullptr, "storage eviction left the recorded descriptor set cached");
+        Require(!resources.expired() && !view.expired() && !image.expired(), "eviction destroyed the recorder's descriptor set, view or image");
+        Require(!image.lock()->Cached(), "the recorder fixture did not evict the source image");
+        const auto commands = recorder.Commands();
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        VkBufferImageCopy copy{};
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.imageExtent = {1, 1, 1};
+        context.Function<PFN_vkCmdCopyImageToBuffer>("vkCmdCopyImageToBuffer")(commands, images.front().first, VK_IMAGE_LAYOUT_GENERAL, readback.Handle(), 1, &copy);
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        recorder.Sync();
+        std::uint32_t pixel = 0;
+        std::memcpy(&pixel, readback.Bytes().data(), sizeof(pixel));
+        Require(pixel == 0x5a5a5a5a, "eviction changed the recorder's storage image pixel");
+    }
+    Require(resources.expired() && view.expired() && image.expired(), "an evicted image outlived its completed recorder");
+    std::puts("storage eviction recorder lifetime and pixel readback passed");
+}
+
 bool resourceCacheTests(Context context, const std::string& mode) {
     PlaceholderImages placeholders(context);
     context.placeholderImages = &placeholders;
@@ -281,7 +320,6 @@ bool resourceCacheTests(Context context, const std::string& mode) {
                 Require(cache.Size() == 0 && displaced.empty(), sampledImages ? "an oversized sampled descriptor set entered the resource cache" : "an oversized storage descriptor set entered the resource cache");
                 image.reset();
                 oversized.reset();
-                TextureCacheUsage();
                 Require(rejected.expired() && early.expired(), "the rejected oversized descriptor set retained an evicted storage image");
                 std::puts(sampledImages ? "resource cache oversized sampled lifetime passed" : "resource cache oversized storage lifetime passed");
                 ClearCachedTextures(context.device);
@@ -313,10 +351,10 @@ bool resourceCacheTests(Context context, const std::string& mode) {
             Require(storageSet.expired() && !sampledSet.expired() && !staleImage.expired(), "stale storage release did not preserve the sampled caller's image");
             std::puts("resource cache stale storage caller release passed");
             sampled.reset();
-            TextureCacheUsage();
             Require(sampledSet.expired() && staleImage.expired(), "the rejected descriptor sets retained an evicted storage image");
             std::puts("resource cache stale sampled caller release passed");
         }
+        if (mode == "resource-admission") recorderEvictionTests(context, block);
     } catch (...) {
         cache.Clear();
         throw;
@@ -339,7 +377,7 @@ void viewTests(const Context& context) {
     auto view = Sampled(context, block.Surface(0));
     Require(view->ViewsStorageImage(), "a sampled texture in host-imported memory is not a view of its storage image");
     const std::weak_ptr<Texture> viewed = view;
-    const auto* image = view->StorageSource();
+    const std::weak_ptr<StorageTexture> storage = view->SharedStorageSource();
     const auto after = TextureCacheUsage();
     Require(after.sampledEntries == before.sampledEntries + 1u, "the view did not enter the sampled texture cache");
     Require(after.sampledBytes == before.sampledBytes, "a view of a cached storage image counted " + std::to_string(after.sampledBytes - before.sampledBytes) + " bytes against the sampled texture cache");
@@ -347,12 +385,18 @@ void viewTests(const Context& context) {
     Require(Sampled(context, block.Surface(0)) == view, "the second lookup of the surface did not hit its view");
     view.reset();
     for (std::size_t surface = 1; surface < Surfaces; ++surface) CachedStorageSurface(context, Resource(block.Surface(surface)));
-    Require(!StorageImageCached(context, image), "the storage image cache never evicted the viewed image under a 1 MiB budget");
+    Require(viewed.expired() && storage.expired(), "the sampled texture cache kept the view of an evicted storage image");
     const auto evicted = TextureCacheUsage();
-    Require(viewed.expired(), "the sampled texture cache kept the view of an evicted storage image");
     Require(evicted.sampledEntries == after.sampledEntries - 1u && evicted.sampledBytes == before.sampledBytes, "dropping the view of the evicted storage image changed other sampled entries");
     auto again = Sampled(context, block.Surface(0));
     Require(again->ViewsStorageImage() && again->StorageSource() != nullptr && StorageImageCached(context, again->StorageSource()), "the surface's next lookup does not view its new cached storage image");
+    const std::weak_ptr<Texture> heldView = again;
+    const std::weak_ptr<StorageTexture> heldStorage = again->SharedStorageSource();
+    for (std::size_t surface = 1; surface < Surfaces; ++surface) CachedStorageSurface(context, Resource(block.Surface(surface)));
+    Require(!StorageImageCached(context, again->StorageSource()), "the held view's source was not evicted");
+    Require(!heldView.expired() && !heldStorage.expired(), "eviction destroyed an active caller's view or image");
+    again.reset();
+    Require(heldView.expired() && heldStorage.expired(), "the evicted image outlived its last caller without a sampled lookup");
 }
 
 void reportedBudgetTests(const Context& context) {

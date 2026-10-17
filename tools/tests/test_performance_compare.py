@@ -193,6 +193,14 @@ class PerformanceCompareTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("avant-\u00e9.jsonl:1:", result.stderr)
 
+    def test_bom_summary_loads(self):
+        self.before.write_text(json.dumps(self.baseline) + "\n", encoding="utf-8-sig")
+        self.write(self.after, self.candidate)
+        self.assertEqual(performance_compare.load_summary(self.before), self.baseline)
+        result = self.run_cli("--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["baseline"], self.baseline)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1205,9 +1205,10 @@ void RunOpus(Instance& instance, const JobHeader& job, const AjmBuffer* inputs, 
                 count -= skip;
             }
             if (instance.gapless.totalSamples != 0) {
-                const std::uint64_t remaining = instance.gapless.totalSamples > instance.totalDecodedSamples ? instance.gapless.totalSamples - instance.totalDecodedSamples : 0;
+                const std::uint64_t remaining = instance.gapless.totalSamples > instance.segmentSamples ? instance.gapless.totalSamples - instance.segmentSamples : 0;
                 count = static_cast<std::size_t>(std::min<std::uint64_t>(count, remaining));
             }
+            instance.segmentSamples += count;
             instance.totalDecodedSamples += count;
             if (Resampling(instance)) {
                 std::vector<double> values(count * channels);
@@ -1620,12 +1621,16 @@ int APS5_VABI sceAjmInstanceCreate(uint32_t context, uint32_t codec, uint64_t fl
         created->initialized = true;
     }
     if (codec == CODEC_M4AAC) CheckAacFlags(flags);
-    const std::uint32_t id = (codec << 14) | (g_nextInstance.fetch_add(1, std::memory_order_relaxed) & 0x3FFF);
     std::lock_guard lock(g_lock);
-    g_instances[id] = std::move(created);
-    *instance = id;
-    AJM_TRACE("[ajm] instance create: context %u, codec %u, flags 0x%llx -> instance %u\n", context, codec, static_cast<unsigned long long>(flags), id);
-    return 0;
+    for (std::uint32_t attempt = 0; attempt < 0x4000; ++attempt) {
+        const std::uint32_t id = (codec << 14) | (g_nextInstance.fetch_add(1, std::memory_order_relaxed) & 0x3FFF);
+        if (g_instances.contains(id)) continue;
+        g_instances.emplace(id, std::move(created));
+        *instance = id;
+        AJM_TRACE("[ajm] instance create: context %u, codec %u, flags 0x%llx -> instance %u\n", context, codec, static_cast<unsigned long long>(flags), id);
+        return 0;
+    }
+    return SCE_AJM_ERROR_OUT_OF_RESOURCES;
 }
 
 int APS5_VABI sceAjmInstanceDestroy(uint32_t context, uint32_t instance) {

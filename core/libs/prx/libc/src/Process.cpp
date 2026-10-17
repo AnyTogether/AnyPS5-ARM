@@ -1,3 +1,4 @@
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -99,13 +100,44 @@ extern "C" void LibcRunShutdown_nid_postfix() {
 
 namespace {
 
+std::atomic<void (*)()> endFlush{nullptr};
+void (*previousAbortHandler)(int) = SIG_DFL;
+
+void FlushOnAbort(int number) {
+    LibcRunEndFlush_nid_no_patch();
+    if (previousAbortHandler == SIG_IGN) return;
+    if (previousAbortHandler != SIG_DFL && previousAbortHandler != SIG_ERR) {
+        previousAbortHandler(number);
+        return;
+    }
+#ifndef _WIN32
+    std::signal(number, SIG_DFL);
+    std::raise(number);
+#endif
+}
+
+}
+
+extern "C" void LibcSetEndFlush_nid_no_patch(void (*flush)()) {
+    if (flush == nullptr) throw std::runtime_error("libc: invalid end flush registration");
+    void (*registered)() = nullptr;
+    if (!endFlush.compare_exchange_strong(registered, flush) && registered != flush) throw std::runtime_error("libc: end flush already registered");
+    static std::once_flag installed;
+    std::call_once(installed, [] { previousAbortHandler = std::signal(SIGABRT, FlushOnAbort); });
+}
+
+extern "C" void LibcRunEndFlush_nid_no_patch() {
+    if (const auto flush = endFlush.load(std::memory_order_acquire)) flush();
+}
+
+namespace {
+
 void StartExit() {
     exitRequested.store(true);
     if (exitStarted.exchange(true)) {
         if (!runningExit) LibcAwaitExit_nid_postfix();
     } else {
         runningExit = true;
-        LibcRunShutdown_nid_postfix();
     }
 }
 
@@ -123,6 +155,7 @@ extern "C" {
 }
 
 [[noreturn]] void LibcTerminate_nid_no_patch(int code) {
+    LibcRunEndFlush_nid_no_patch();
 #ifdef _WIN32
     TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
 #endif
@@ -141,11 +174,13 @@ extern "C" {
     }).detach();
 #endif
     CxaFinalize_nid_no_patch(nullptr);
+    LibcRunShutdown_nid_postfix();
     std::exit(code);
 }
 
 [[noreturn]] void LibcExitWithoutHandlers_nid_no_patch(int code) {
     StartExit();
+    LibcRunShutdown_nid_postfix();
     std::fflush(nullptr);
     LibcTerminate_nid_no_patch(code);
 }
@@ -169,6 +204,7 @@ void APS5_VABI exit_nid_postfix(int code) {
 ) {
     (void)arg0; (void)arg1; (void)arg2;
     (void)arg3; (void)arg4; (void)arg5;
+    LibcRunEndFlush_nid_no_patch();
     std::fprintf(stderr, "[libc] abort() called from %p\n", __builtin_return_address(0));
     std::fflush(nullptr);
     std::abort();

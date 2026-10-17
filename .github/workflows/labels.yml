@@ -35,4 +35,5 @@ jobs:
           label prx       c5def5 'Other PRX libraries'
           label build     bfd4f2 'CMake, submodules, 3rdparty'
           label docs      0075ca 'Documentation'
+          label 'fix error' d73a4a 'Closes an issue (Fixes #N)'
           label stale     ededed 'Conflicting with main and no activity for 7 days'

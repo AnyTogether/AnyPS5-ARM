@@ -94,12 +94,16 @@ def parse_elf(data):
     inner = data.find(b"\x7fELF")
     if inner < 0:
         raise Refused("no inner ELF header")
+    if inner + 0x40 > len(data):
+        raise Refused("inner ELF header is truncated")
     header = bytearray(data[inner:inner + 0x40])
     program_offset = struct.unpack_from("<Q", header, 0x20)[0]
     entry_size = struct.unpack_from("<H", header, 0x36)[0]
     count = struct.unpack_from("<H", header, 0x38)[0]
     if entry_size != 56 or count == 0:
         raise Refused("program header table is %d entries of %d bytes" % (count, entry_size))
+    if inner + program_offset + count * entry_size > len(data):
+        raise Refused("ELF program header table does not fit the file")
     headers = []
     for index in range(count):
         offset = inner + program_offset + index * 56
@@ -127,10 +131,11 @@ def place_segments(data, headers, records):
                 header["source"] = segment
                 break
 
-    def load_for(vaddr):
+    def load_for(vaddr, size):
         found = None
         for header in loads:
-            if header["memory"] and header["vaddr"] <= vaddr < header["vaddr"] + header["memory"]:
+            end = header["vaddr"] + header["memory"]
+            if header["memory"] and header["vaddr"] <= vaddr and (vaddr < end or (size == 0 and vaddr == end)):
                 found = header
         return found
 
@@ -139,7 +144,7 @@ def place_segments(data, headers, records):
         if header["type"] == PT_LOAD:
             continue
         if header["vaddr"] != 0:
-            host = load_for(header["vaddr"])
+            host = load_for(header["vaddr"], header["size"])
             if host is None:
                 raise Refused("segment %d vaddr %#x is in no PT_LOAD" % (header["index"], header["vaddr"]))
             header["host"] = host
@@ -205,7 +210,8 @@ def unwrap(path, output, verbose=False):
             regions.append({"old": header["source"], "size": header["size"], "vaddr": 0, "align": 1})
 
     regions.sort(key=lambda region: region["old"])
-    cursor = FIRST_REGION
+    program_offset = struct.unpack_from("<Q", elf_header, 0x20)[0]
+    cursor = max(FIRST_REGION, program_offset + len(headers) * 56)
     for region in regions:
         alignment = region["align"] if region["align"] and (region["align"] & (region["align"] - 1)) == 0 else 1
         placed = align_up(cursor, alignment)
@@ -231,7 +237,6 @@ def unwrap(path, output, verbose=False):
     struct.pack_into("<Q", result, 0x28, 0)
     struct.pack_into("<H", result, 0x3C, 0)
     struct.pack_into("<H", result, 0x3E, 0)
-    program_offset = struct.unpack_from("<Q", elf_header, 0x20)[0]
     for item in headers:
         struct.pack_into("<IIQQQQQQ", result, program_offset + item["index"] * 56,
                          item["type"], item["flags"], item["new"], item["vaddr"], item["vaddr"],

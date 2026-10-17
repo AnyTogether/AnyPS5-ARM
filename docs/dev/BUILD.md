@@ -14,7 +14,7 @@ Python must be found during CMake configuration for Python tests to be registere
 
 This mode builds the conversion tool and its tests on Linux, Windows and macOS, including Apple Silicon. macOS uses AppleClang from the Xcode command-line tools; Windows uses the MinGW-w64 toolchain below. The executable is `build-relinker/core/relinker/relinker` (`relinker.exe` on Windows with Ninja).
 
-The output remains x86-64 Linux ELF or Windows PE. Converted games need system libraries built for the target OS and a compatible x86-64 host. This mode does not build those libraries or provide macOS game execution. Tests inspect both output formats; execution checks run only on their compatible hosts.
+The output is x86-64: Linux ELF by default, Windows PE with `--windows` or Mach-O with `--macos` ([usage](../user/USAGE.md#input-and-conversion)). Converted games need system libraries built for the target OS and a compatible x86-64 host. This mode does not build those libraries, and releases ship them for Linux and Windows only. Tests inspect all three output formats; execution checks run only on their compatible hosts.
 
 Use a separate build directory for the full build.
 
@@ -32,6 +32,7 @@ git submodule update --init --recursive
 - Fedora: if CMake reports `Could NOT find Threads`, install `glibc-static` and `libstdc++-static` with `sudo dnf install glibc-static libstdc++-static`, then rerun configuration. The project enables static executable linking, and FFmpeg's thread check needs these libraries.
 - Windows: only MinGW-w64 GCC 15.2.0 (WinLibs `x86_64-ucrt-posix-seh`, release [`15.2.0posix-14.0.0-ucrt-r7`](https://github.com/brechtsanders/winlibs_mingw/releases/tag/15.2.0posix-14.0.0-ucrt-r7), archive `winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip`) is currently supported. Add its `mingw64/bin` directory to `PATH` before configuring.
 - Windows antivirus software can quarantine the executables that the relinker tests create in the temp directory, which fails `optional_plt`, `empty_tls`, `windows_address_space` and `windows_icon`. Set `TEMP` and `TMP` to a directory the scanner excludes before running `ctest`.
+- Bitdefender Advanced Threat Defense hooks Windows calls that `sceKernelRaiseException` makes while its target thread is suspended. When the target is suspended inside ntdll's exception dispatch while it holds an ntdll lock, the hook waits for that lock and `guest_raise_exception` hangs until its timeout. A scanning exception for the build directory does not prevent it; add `guest_raise_exception_tests.exe` to the Advanced Threat Defense exceptions.
 - FFmpeg binaries are downloaded during configuration unless `FFMPEG_PREBUILT_DIR` is set. With the WinLibs CMake, the download fails with status 60 (`SSL peer certificate or SSH remote key was not OK`) unless `SSL_CERT_FILE` names a CA bundle, for example `C:\Program Files\Git\ucrt64\etc\ssl\certs\ca-bundle.crt` from Git for Windows 2.56 and later (`mingw64` instead of `ucrt64` before 2.56), as in CI.
 
 ## Commands
@@ -59,6 +60,7 @@ Project switches accept `ON` or `OFF`:
 |----------------------------------|---------|--------------------------------------------------|
 | `-DBUILD_TESTING=ON`             | `OFF`   | Build and register tests.                        |
 | `-DANYPS5_RELINKER_ONLY=ON`      | `OFF`   | Build only the relinker and its tests, without third-party dependencies. |
+| `-DANYPS5_BUILD_WASM=ON`         | `OFF`   | Build only the browser relinker (`relinker_web` target). Requires `emcmake` from Emscripten and `BUILD_TESTING=OFF`. |
 | `-DANYPS5_ENABLE_SPIRV_TOOLS=ON` | `OFF`   | Enable SPIR-V validation and optimization.       |
 | `-DANYPS5_ENABLE_ASAN=ON`       | `OFF`   | Build with AddressSanitizer on Linux and move the guest arena out of ASan's shadow gap. |
 | `-DANYPS5_USE_SYSTEM_DEPS=ON`    | `OFF`   | Resolve SDL2, freetype, Vulkan-Headers, SPIRV-Headers, glslang and SPIRV-Tools from the system instead of the submodules. |
@@ -172,6 +174,34 @@ The switch combines with `APS5_TRACE_FRAMES` or `APS5_TRACE_SECONDS`. The interv
 `python tools/trace_digest.py aps5-summary.jsonl` prints the interval lines of such a file as one row per interval (frame p50, p90, p99, max, GPU busy per present, the busiest queue worker and the largest phase) and a text sparkline of the frame p99 and of the GPU busy time; lines of window captures in the file are skipped, and a change of commit, environment, GPU, driver or OS between intervals is reported. `--json` prints the rows as JSON.
 
 With `APS5_TRACE_SUMMARY_EVERY` set, the recorder writes a timestamp pair per batch for the whole run and every `PerformanceTimer` scope adds its time to the thread's totals, two clock reads per scope. A thread's totals are read while it runs, so a scope that straddles an interval boundary is counted in one interval or the other.
+
+## GPU time per command class
+
+Set `APS5_PROFILE_GPU=1` (any value) to time the recorder's GPU work with timestamp queries and print one `[gputime]` line on stderr. `APS5_PROFILE_DRAW` alone does not print it: a batch then gets only its whole-batch timestamp pair. A timed range is a pair of bottom-of-pipe stamps that both wait for all earlier work, so a range is the time its own work adds after everything recorded before it. A batch holds at most 512 ranges, its whole-batch range included. The line is written when a batch's timestamps are read after its fence, at least 10 s after the previous line, and covers every batch read since then.
+
+The header fields: `<n> ms of GPU time` is the sum of the program-keyed ranges only (dispatches and buffer copies, see `by program`); draws and the driver's own commands are not in it. `in <n> batches` counts the batches read. `batch <n> ms first to last command` sums the whole-batch ranges, from the stamp written when the batch opens (it waits for the batches before it) to the stamp written at `Submit`. `classes <n> ms` is the plain sum of every class range, including `present-blit`, which runs outside the batches. `all ranges <n> ms` is, per batch, the union of its class and program ranges, with overlapping time counted once; `present-blit` is not in it. `untimed <n> ms` is `batch` minus `all ranges`: batch time that no range covers, including the work of dropped ranges. `<n> presents` counts the `VulkanDevice::present` calls since the previous line. `<n> ranges dropped at the 512 cap` counts ranges refused because their batch was full.
+
+A class range covers a command together with its own barriers. In `VulkanDevice::CopyBuffer` the `copy` class range spans the leading barrier, the transfer and the trailing barrier, and the program-keyed range sits inside it around the transfer alone, so the transfer counts in both `GPU time` and `classes` but once in `all ranges`. A dispatch's leading and trailing barriers are ranges of their own classes, placed before and after its program range, not around it. `GPU time` plus `classes` can therefore exceed `batch`; compare `all ranges` with `batch` instead.
+
+`by program` lists up to 12 keys, highest time first, as `0x<key> x<ranges> <ms>ms`. A dispatch's key is its guest program address, or the program's `variantId` when the address is 0. A buffer copy's key is the program address of the copy kernel it replaces, or 0 for a PM4 DMA copy (opcode 0x50). `by class` lists every class with at least one range since the previous line as `<name> x<ranges> <ms>ms <MiB>MiB (per present x<ranges> <ms>ms <MiB>MiB)`; the per-present figures are 0 when there was no present. MiB is the byte count each range passes to `EndGpuTiming`. The classes, with the function that opens each range:
+
+- `dispatch-lead`: a dispatch's leading barrier, when it is recorded rather than merged into the previous trailing barrier (`VulkanDevice::recordDispatch`). 0 MiB.
+- `dispatch-trail`: a dispatch's trailing barrier (`recordDispatch`). 0 MiB.
+- `indirect-args`: the barrier that makes an indirect dispatch's host-imported group counts visible to the indirect read (`recordDispatch`). 12 bytes per range.
+- `label-run`: a run of GPU label stores (`vkCmdUpdateBuffer`, plus the queued occlusion dump folds of a per-batch run) with its barriers (`Recorder::RecordStore` for inline runs, `Recorder::closeStoreRun` for per-batch runs). Stored bytes.
+- `fill`: a guest fill of host-imported memory, as `vkCmdFillBuffer` or pattern copies, with its barriers (`VulkanDevice::FillBuffer`). Filled bytes.
+- `fill-clear`: a fill done as a `vkCmdClearColorImage` of a storage image, between two layout barriers (`StorageTexture::FillClear`). Filled bytes.
+- `copy`: the buffer copy of `VulkanDevice::CopyBuffer`, a whole-surface image copy (`StorageTexture::CopyFrom`) and the depth plane copies to and from storage images through a staging buffer (`copyPlane` and the layered copy in `DepthSurface.cpp`). Copied bytes.
+- `staging-in`: a build's copies of guest buffer regions into staging or host-copy buffers, between two barriers (`GuestBufferMemory::recordGpuCopies`). Copied bytes.
+- `staging-out`: the copies of shader-written sub-ranges back into the import (`GuestBufferMemory::RecordCopyBacks`). Copied bytes.
+- `draw`: for a lean draw, from its first barrier to the end of its render pass, so draws that continue the pass fall inside one range (`recordDraw`, ended by `Recorder::endOpenRenderPass`); for a recorded draw with layout transitions, from its first barrier to its download barrier (`Draw`). 0 MiB.
+- `storage-upload`: detiles of guest bytes into a storage image, whole (`StorageTexture::upload`) or by changed runs (`StorageTexture::uploadWindows`), and pending units copied from an alias image (`StorageTexture::borrowUnits`). Uploaded bytes.
+- `storage-writeback`: retiles of a storage image back to guest memory, by windows (`StorageTexture::writeBackWindows`) or by layers (`StorageTexture::writeBackLayers`). Stored bytes.
+- `dcc-clear`: a `vkCmdClearColorImage` of a storage image whose DCC keys read as a clear, at upload (`StorageTexture::upload`) or for a fill of its key bytes (`StorageTexture::clearByKeysFill`, with `APS5_KEYS_FILL_CLEAR=1`). Surface bytes.
+- `dcc-keys`: queued DCC key stores, as `0xff` fills and seed copies between two barriers (`Recorder::recordKeyStores`). Key bytes.
+- `present-blit`: the presentation command buffer from its first to its last command, timed in its own two-query pool (`VulkanDevice::present`) and added when its slot retires (`Recorder::AddGpuTiming`). Width x height x 4 bytes of the swapchain extent.
+- `shadow-publish`: copies of unit shadow slabs into the import, with their barriers (`recordCopies` in `UnitShadow.cpp`, reached from `PublishShadow`). Copied bytes.
+- `template-refresh`: the `vkCmdUpdateBuffer` updates of a cached dispatch's changed data words, as one range from the first update to the last (`ShaderResources::refreshData`, called from `recordDispatch`). Refreshed bytes.
 
 ## Driver thread priority
 

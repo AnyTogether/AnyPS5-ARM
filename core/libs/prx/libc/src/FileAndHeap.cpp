@@ -26,6 +26,7 @@
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
+#include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 
 #ifdef __linux__
@@ -237,6 +238,7 @@ extern "C" {
 FileStream* APS5_VABI fdopen_nid_postfix(int descriptor, const char* mode) {
     if (descriptor < 0) { errno = 9; return nullptr; }
     if (!mode) { errno = 22; return nullptr; }
+    AppArchiveRefuseDescriptor_nid_no_patch(descriptor, "fdopen");
     const auto parsed = ParseFileMode(mode);
     if (!parsed) { errno = 22; return nullptr; }
     try {
@@ -344,17 +346,15 @@ FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const 
         {In, "r"}, {Out, "w"}, {Out | Trunc, "w"}, {Out | App, "a"},
         {In | Binary, "rb"}, {Out | Binary, "wb"}, {Out | Trunc | Binary, "wb"}, {Out | App | Binary, "ab"},
         {In | Out, "r+"}, {In | Out | Trunc, "w+"}, {In | Out | App, "a+"},
-        {In | Out | Binary, "r+b"}, {In | Out | Trunc | Binary, "w+b"}, {In | Out | App | Binary, "a+b"}};
-    const int open = (mode & (In | Out | App | Trunc | Binary)) | ((mode & Nocreate) ? In : 0) | ((mode & App) ? Out : 0);
+        {In | Out | Binary, "r+b"}, {In | Out | Trunc | Binary, "w+b"}, {In | Out | App | Binary, "a+b"},
+        {Out | Noreplace, "wx"}, {Out | Trunc | Noreplace, "wx"}, {In | Out | Trunc | Noreplace, "w+x"},
+        {Out | Binary | Noreplace, "wbx"}, {Out | Trunc | Binary | Noreplace, "wbx"},
+        {In | Out | Trunc | Binary | Noreplace, "w+bx"}};
+    const int open = (mode & (In | Out | App | Trunc | Binary)) | ((mode & Nocreate) ? In : 0) | ((mode & App) ? Out : 0) |
+        (((mode & Noreplace) && (mode & (Out | App))) ? Noreplace : 0);
     const char* openMode = nullptr;
     for (const auto& [flags, text] : modes) if (flags == open) openMode = text;
     if (!openMode) return nullptr;
-    if ((mode & Noreplace) && (open & Out)) {
-        if (auto* existing = fopen_nid_postfix(filename, "r")) {
-            fclose_nid_postfix(existing);
-            return nullptr;
-        }
-    }
     auto* stream = fopen_nid_postfix(filename, openMode);
     if (!stream || !(mode & Ate) || fseek_nid_postfix(stream, 0, SEEK_END) == 0) return stream;
     fclose_nid_postfix(stream);

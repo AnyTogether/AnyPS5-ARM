@@ -14,6 +14,8 @@ extern "C" {
 extern GuestLocale::Implementation* _ZSt21_sceLibcClassicLocale_nid_postfix;
 GuestLocale::Implementation* APS5_VABI _ZNSt6locale16_GetgloballocaleEv_nid_postfix();
 GuestLocale::Implementation* APS5_VABI _ZNSt6locale5_InitEv_nid_postfix();
+struct GuestLocaleFacade { GuestLocale::Implementation* implementation; };
+GuestLocaleFacade* APS5_VABI _ZNSt6locale7classicEv_nid_postfix();
 void APS5_VABI _ZNSt6locale5facet9_RegisterEv_nid_postfix(GuestLocale::Facet* self);
 void APS5_VABI _ZNSt8_LocinfoC1EPKc_nid_postfix(GuestLocale::LocinfoStorage* self, const char* localeName);
 void APS5_VABI _ZNSt8_LocinfoD1Ev_nid_postfix(GuestLocale::LocinfoStorage* self);
@@ -51,6 +53,9 @@ static void CheckGuestCalls() {
     Require(locale != nullptr && locale == _ZNSt6locale16_GetgloballocaleEv_nid_postfix());
     Require(_ZNSt6locale5_InitEv_nid_postfix() == locale);
     Require(_ZNSt6locale5_InitEv_nid_postfix() == locale);
+    auto* classic = _ZNSt6locale7classicEv_nid_postfix();
+    Require(classic != nullptr && classic->implementation == locale);
+    Require(_ZNSt6locale7classicEv_nid_postfix() == classic);
     const std::byte* table = nullptr;
     std::memcpy(&table, locale, sizeof(table));
     void (APS5_VABI *retain)(GuestLocale::Facet*) = nullptr;

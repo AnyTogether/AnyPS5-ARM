@@ -57,7 +57,7 @@ def validate(summary):
 
 def load_summary(path, trace=None):
     records = []
-    with Path(path).open(encoding="utf-8") as source:
+    with Path(path).open(encoding="utf-8-sig") as source:
         for line_number, line in enumerate(source, 1):
             if not line.strip():
                 continue

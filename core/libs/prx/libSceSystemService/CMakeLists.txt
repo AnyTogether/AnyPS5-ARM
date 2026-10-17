@@ -40,6 +40,7 @@ if(BUILD_TESTING)
     add_test(NAME guest_return_from_main COMMAND guest_system_exit_tests --return-from-main)
     add_test(NAME guest_system_relaunch COMMAND guest_system_exit_tests --relaunch-driver)
     add_test(NAME guest_nested_exit COMMAND guest_system_exit_tests --nested-exit-driver)
+    add_test(NAME guest_exit_finalizers_before_shutdown COMMAND guest_system_exit_tests --exit-order-driver)
     set_tests_properties(guest_system_exit guest_requested_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest shutdown completed"
         FAIL_REGULAR_EXPRESSION "Guest exit handler ran|Guest thread resumed during exit")
@@ -50,8 +51,17 @@ if(BUILD_TESTING)
         PASS_REGULAR_EXPRESSION "Guest relaunch completed" TIMEOUT 30)
     set_tests_properties(guest_nested_exit PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest nested exit completed" TIMEOUT 30)
+    set_tests_properties(guest_exit_finalizers_before_shutdown PROPERTIES
+        PASS_REGULAR_EXPRESSION "Guest finalizers ran before shutdown" TIMEOUT 30)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test_executable(guest_system_load_exec_standard_error_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemServiceLoadExecStandardError.cpp)
+        target_include_directories(guest_system_load_exec_standard_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_system_load_exec_standard_error_tests PRIVATE libSceSystemService libkernel libc)
+        add_test(NAME guest_system_load_exec_standard_error COMMAND guest_system_load_exec_standard_error_tests)
+        set_tests_properties(guest_system_load_exec_standard_error PROPERTIES TIMEOUT 20)
+    endif()
     if(WIN32)
-        set_tests_properties(guest_system_exit guest_requested_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch guest_nested_exit PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_system_exit guest_requested_exit guest_system_exit_parameters guest_immediate_exit guest_return_from_main guest_quick_exit guest_system_relaunch guest_nested_exit guest_exit_finalizers_before_shutdown PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_system_service_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemService.cpp)
@@ -70,6 +80,15 @@ if(BUILD_TESTING)
     add_test(NAME guest_system_service_language COMMAND guest_system_service_language_tests)
     if(WIN32)
         set_tests_properties(guest_system_service_language PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_system_service_time_zone_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemServiceTimeZone.cpp)
+    target_include_directories(guest_system_service_time_zone_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_system_service_time_zone_tests PRIVATE libSceSystemService libc)
+    configure_windows_unwind(guest_system_service_time_zone_tests)
+    add_test(NAME guest_system_service_time_zone COMMAND guest_system_service_time_zone_tests)
+    if(WIN32)
+        set_tests_properties(guest_system_service_time_zone PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_system_kill_app_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemKillApp.cpp)

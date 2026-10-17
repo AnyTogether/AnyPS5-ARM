@@ -20,6 +20,7 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #else
@@ -67,6 +68,25 @@ void* Symbol(Module& module, const char* name) {
 #ifdef __APPLE__
 std::uintptr_t MainProgramBase() {
     return reinterpret_cast<std::uintptr_t>(_dyld_get_image_header(0));
+}
+
+// The base a guest module's image is registered at: its ELF load bias, which dl_iterate_phdr reports.
+std::uintptr_t GuestImageBase(void* native) {
+    struct Search {
+        void* native;
+        std::uintptr_t base;
+    } search{native, 0};
+    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+        auto& found = *static_cast<Search*>(data);
+        if (image->dlpi_name == nullptr || image->dlpi_name[0] == '\0') return 0;
+        void* handle = ::dlopen(image->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
+        if (handle == nullptr) return 0;
+        ::dlclose(handle);
+        if (handle != found.native) return 0;
+        found.base = image->dlpi_addr;
+        return 1;
+    }, &search);
+    return search.base;
 }
 #elif !defined(_WIN32)
 const link_map* MainProgramMap() {
@@ -242,26 +262,26 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
 int APS5_VABI dlclose_nid_postfix(void* handle) {
     const auto key = reinterpret_cast<std::uintptr_t>(handle);
     std::shared_ptr<Module> module;
-#ifdef _WIN32
     bool lastReference = true;
-#endif
     {
         std::lock_guard lock(modulesMutex);
         auto found = modules.find(key);
         if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
         module = found->second;
-#ifdef _WIN32
         for (const auto& [other, entry] : modules) {
             if (other != key && entry->native == module->native) lastReference = false;
         }
-#endif
     }
-#ifdef _WIN32
     if (module->owned && module->native && lastReference) {
         GuestAllocations::Mutation mutation;
+#ifdef _WIN32
         mutation.UnregisterImage(module->native);
-    }
+#elif defined(__APPLE__)
+        if (const auto base = GuestImageBase(module->native); base != 0) mutation.UnregisterImage(reinterpret_cast<const void*>(base));
+#else
+        mutation.UnregisterImage(reinterpret_cast<const void*>(static_cast<link_map*>(module->native)->l_addr));
 #endif
+    }
     {
         std::lock_guard lock(modulesMutex);
         auto found = modules.find(key);

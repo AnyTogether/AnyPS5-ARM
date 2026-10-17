@@ -134,7 +134,7 @@ int HostPoll(KernelSocketPoll::Entry* descriptors, int count, int timeoutMillise
             if (entry.revents != 0) ++ready;
         }
         if (ready > 0 || std::chrono::steady_clock::now() >= deadline) return ready;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        PreciseSleepUntil(std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(1)));
     }
 }
 

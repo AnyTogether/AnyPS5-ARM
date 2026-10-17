@@ -14,6 +14,9 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <unwind.h>
 
 extern "C" unsigned __cxa_uncaught_exceptions_nid_postfix();
@@ -172,6 +175,9 @@ void CheckDefaultTerminateMessage() {
     if (child == 0) {
         close(channel[0]);
         dup2(channel[1], 2);
+#ifdef __linux__
+        assert(prctl(PR_SET_DUMPABLE, 0) == 0);
+#endif
         throw std::runtime_error(message);
     }
     close(channel[1]);

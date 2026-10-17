@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <cstring>
 #include <stdexcept>
 #include <chrono>
@@ -14,8 +15,11 @@ namespace {
 
 constexpr int PAD_ERROR_DEVICE_NOT_CONNECTED = static_cast<int>(0x80920007);
 constexpr int PAD_ERROR_DEVICE_NO_HANDLE = static_cast<int>(0x80920008);
+constexpr int PAD_UNKNOWN_N3KSX62FGNO_BEFORE_INIT = static_cast<int>(0x80920005);
+constexpr int PAD_UNKNOWN_N3KSX62FGNO_AFTER_INIT = static_cast<int>(0x809200ff);
 
 bool g_opened = false;
+std::atomic_bool g_initialized{false};
 
 bool ValidPort(int userId, int type, int index) {
     const bool personalPort = type == PAD_PORT_TYPE_STANDARD || type == PAD_PORT_TYPE_SPECIAL;
@@ -143,6 +147,7 @@ int APS5_VABI scePadSetParticularMode(bool mode) {
 
 int APS5_VABI scePadInit_nid_postfix(void) {
  Pad::Initialize();
+ g_initialized.store(true, std::memory_order_release);
  return PAD_OK;
 }
 
@@ -332,8 +337,8 @@ int APS5_VABI scePadSetAngularVelocityBiasCorrectionState(int handle, bool enabl
 
 APS5_EXPORT("n3kSX62fgNo", scePadUnknown_n3kSX62fgNo);
 int APS5_VABI scePadUnknown_n3kSX62fgNo() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    if (g_opened) NotImplemented_nid_no_patch(__func__);
+    return g_initialized.load(std::memory_order_acquire) ? PAD_UNKNOWN_N3KSX62FGNO_AFTER_INIT : PAD_UNKNOWN_N3KSX62FGNO_BEFORE_INIT;
 }
 
 int APS5_VABI scePadVrControllerGetTriggerEffectStates(void) {

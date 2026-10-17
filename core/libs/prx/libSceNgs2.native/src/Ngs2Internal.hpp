@@ -214,6 +214,7 @@ int Ngs2PanInit(Ngs2PanWork* work, const float* speaker_angles, float unit_angle
 int Ngs2PanGetVolumeMatrix(Ngs2PanWork* work, const Ngs2PanParam* params, uint32_t num_params, uint32_t matrix_format, float* out_volume_matrix);
 int Ngs2GeomResetListenerParam(Ngs2GeomListenerParam* out_listener_param);
 int Ngs2GeomCalcListener(const Ngs2GeomListenerParam* param, Ngs2GeomListenerWork* outWork, std::uint32_t flags);
+int Ngs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* outAttrib, std::uint32_t flags);
 int Ngs2GeomResetSourceParam(Ngs2GeomSourceParam* out_source_param);
 
 #endif

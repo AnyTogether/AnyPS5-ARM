@@ -5,7 +5,7 @@ import re
 import subprocess
 from itertools import combinations
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 PARENT = 'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end'
 EXPORT = re.compile(r"^\+.*\bAPS5_VABI\s+(\w+)\s*\(")
@@ -184,7 +184,7 @@ def cell(items):
 
 
 def spans(conflicts, blob):
-    return "<br>".join(f"`{path}` " + ", ".join(f"[L{s}-{e}]({blob}/{path}#L{s}-L{e})" if s != e else f"[L{s}]({blob}/{path}#L{s})"
+    return "<br>".join(f"`{path}` " + ", ".join(f"[L{s}-{e}]({blob}/{quote(path)}#L{s}-L{e})" if s != e else f"[L{s}]({blob}/{quote(path)}#L{s})"
                                                for s, e in ranges) for path, ranges in sorted((conflicts or {}).items()))
 
 

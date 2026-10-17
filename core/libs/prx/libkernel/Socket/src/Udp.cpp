@@ -31,6 +31,7 @@
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
+#include "prx/libkernel/Socket/include/SocketConnect.hpp"
 #include <algorithm>
 #include <chrono>
 #include <climits>
@@ -45,7 +46,6 @@
 #include <cstddef>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 #ifdef __APPLE__
 #include <sys/event.h>
@@ -152,6 +152,10 @@ struct Socket {
 struct Waker {
     NativeSocket value = Invalid;
     Waker() {
+#ifdef _WIN32
+        static const int startup = [] { WSADATA data{}; return WSAStartup(MAKEWORD(2, 2), &data); }();
+        if (startup) throw std::runtime_error("equeue waker: WSAStartup failed, error " + std::to_string(startup));
+#endif
         value = ::socket(AF_INET, SOCK_DGRAM, 0);
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -273,6 +277,11 @@ bool Address(const void* input, std::uint32_t length, sockaddr_storage& native, 
 std::uint16_t& PortOf(sockaddr_storage& address) {
     return address.ss_family == AF_INET ? reinterpret_cast<sockaddr_in&>(address).sin_port : reinterpret_cast<sockaddr_in6&>(address).sin6_port;
 }
+bool Listening(const Socket& socket) {
+    int listening = 0;
+    socklen_t size = sizeof(listening);
+    return ::getsockopt(socket.value, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<char*>(&listening), &size) == 0 && listening != 0;
+}
 int Disconnect(const Socket& socket) {
     sockaddr_storage peer{};
     socklen_t peerSize = sizeof(peer);
@@ -365,6 +374,7 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
     std::vector<WSAPOLLFD> entries;
     constexpr SHORT ReadMask = POLLRDNORM;
     constexpr SHORT WriteMask = POLLWRNORM;
+    bool pipes = false;
 #else
     std::vector<pollfd> entries;
     constexpr short ReadMask = POLLIN;
@@ -374,7 +384,14 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
         std::lock_guard lock(socketsMutex);
         for (const auto& interest : interests) {
             const auto found = sockets.find(interest.descriptor);
-            if (found == sockets.end()) continue;
+            if (found == sockets.end()) {
+#ifdef _WIN32
+                pipes = true;
+#else
+                entries.push_back({interest.descriptor, ReadMask, 0});
+#endif
+                continue;
+            }
             held.push_back(found->second);
             entries.push_back({found->second->value, interest.write ? WriteMask : ReadMask, 0});
         }
@@ -392,6 +409,7 @@ bool GuestSockets::WaitAny(const std::vector<Interest>& interests, std::uint64_t
         if (remaining < 1000000) return false;
         timeout = static_cast<INT>(std::min<std::uint64_t>(remaining / 1000000, INT_MAX));
     }
+    if (pipes && (timeout < 0 || timeout > 1)) timeout = 1;
     if (WSAPoll(entries.data(), static_cast<ULONG>(entries.size()), timeout) == SOCKET_ERROR)
         throw std::runtime_error("equeue wait: WSAPoll failed, guest errno " + std::to_string(NativeError()));
 #elif defined(__APPLE__)
@@ -494,18 +512,22 @@ constexpr int FileAccessInformationClass = 8;
 constexpr int FilePipeLocalInformationClass = 24;
 constexpr ULONG PipeClosingState = 4;
 constexpr ULONG PipeAtomicBytes = 512;
-bool PipeReadiness(int descriptor, short events, short& revents) {
+bool QueryPipe(int descriptor, const char* function, ACCESS_MASK& access, PipeLocalInformation& pipe) {
     const auto handle = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
     if (handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_PIPE) return false;
     static const auto query = reinterpret_cast<QueryInformationFile>(
         reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationFile")));
-    if (!query) throw std::runtime_error("poll: NtQueryInformationFile is unavailable");
+    if (!query) throw std::runtime_error(std::string(function) + ": NtQueryInformationFile is unavailable");
     PipeIoStatus status{};
-    ACCESS_MASK access = 0;
-    PipeLocalInformation pipe{};
     if (query(handle, &status, &access, sizeof(access), FileAccessInformationClass) < 0 ||
         query(handle, &status, &pipe, sizeof(pipe), FilePipeLocalInformationClass) < 0)
-        throw std::runtime_error("poll: querying pipe descriptor " + std::to_string(descriptor) + " failed");
+        throw std::runtime_error(std::string(function) + ": querying pipe descriptor " + std::to_string(descriptor) + " failed");
+    return true;
+}
+bool PipeReadiness(int descriptor, short events, short& revents) {
+    ACCESS_MASK access = 0;
+    PipeLocalInformation pipe{};
+    if (!QueryPipe(descriptor, "poll", access, pipe)) return false;
     if ((events & GuestPollWritable) && !(access & FILE_WRITE_DATA)) ThrowReadEndWritable(descriptor);
     const bool closed = pipe.state == PipeClosingState;
     revents = 0;
@@ -796,7 +818,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
     {
         std::lock_guard lock(socketsMutex);
         const auto found = sockets.find(descriptor);
-        if (found == sockets.end()) return false;
+        if (found == sockets.end()) return !write && PipeReadState(descriptor, data, eof) && (*data > 0 || *eof);
         socket = found->second;
     }
 #ifdef _WIN32
@@ -828,6 +850,25 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
 #endif
     }
+    return true;
+}
+
+bool GuestSockets::PipeReadState(int descriptor, std::int64_t* data, bool* eof) {
+#ifdef _WIN32
+    ACCESS_MASK access = 0;
+    PipeLocalInformation pipe{};
+    if (!QueryPipe(descriptor, "kevent", access, pipe) || !(access & FILE_READ_DATA)) return false;
+    *data = pipe.readDataAvailable;
+    *eof = pipe.state == PipeClosingState;
+#else
+    if (!IsPipe(descriptor, 0) || (::fcntl(descriptor, F_GETFL) & O_ACCMODE) == O_WRONLY) return false;
+    pollfd entry{descriptor, POLLIN, 0};
+    int available = 0;
+    if (::poll(&entry, 1, 0) < 0 || ::ioctl(descriptor, FIONREAD, &available) != 0)
+        throw std::runtime_error("kevent: querying pipe descriptor " + std::to_string(descriptor) + " failed");
+    *data = available;
+    *eof = (entry.revents & POLLHUP) != 0;
+#endif
     return true;
 }
 
@@ -1057,6 +1098,10 @@ int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint
     sockaddr_storage native{};
     socklen_t size;
     if (!Address(address, length, native, size)) return -1;
+#ifdef _WIN32
+    if (socket->type == 1) RefuseClosedLoopbackAtOnce_nid_no_patch(socket->value, reinterpret_cast<const sockaddr*>(&native));
+#endif
+    if (socket->type == 1 && Listening(*socket)) return Fail(45);
     if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
     {
         std::lock_guard lock(socket->modeMutex);
@@ -1545,8 +1590,9 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
         if (!native.empty()) {
             for (auto& request : native) request.revents = 0;
             if (WSAPoll(native.data(), static_cast<ULONG>(native.size()), slice) < 0) return Fail(NativeError());
-        } else if (slice > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(slice));
+        } else if (!ready && !pipeReady) {
+            const auto wake = std::chrono::steady_clock::now() + std::chrono::milliseconds(1);
+            PreciseSleepUntil(timeout < 0 ? wake : std::min(deadline, wake));
         }
         int socketReady = 0;
         for (const auto& request : native)

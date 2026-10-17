@@ -75,6 +75,7 @@ std::uint32_t TranslationContext::f32DenormalFlushFor(const RdnaInstruction& ins
     case RdnaOpcode::VCmpxNleF32:
     case RdnaOpcode::VCmpxNlgF32:
     case RdnaOpcode::VCmpxNltF32:
+        return floatMode.has_value() && ((floatMode->floatMode >> 4u) & 1u) != 0u ? 0u : 1u;
     case RdnaOpcode::VCvtI32F32:
     case RdnaOpcode::VCvtU32F32:
     case RdnaOpcode::VCvtRpiI32F32:

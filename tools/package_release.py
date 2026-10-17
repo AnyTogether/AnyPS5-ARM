@@ -60,8 +60,12 @@ def package(platform, build, output, version):
         destination = output / name
         if destination.exists() and not destination.is_file():
             raise RuntimeError(f"Release destination is not a file: {destination}")
-        if os.name == "nt" and os.path.lexists(destination) and destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
-            raise RuntimeError(f"Release destination is read-only: {destination}")
+        if os.name == "nt" and os.path.lexists(destination):
+            attributes = destination.lstat().st_file_attributes
+            if attributes & stat.FILE_ATTRIBUTE_DIRECTORY:
+                raise RuntimeError(f"Release destination is not a file: {destination}")
+            if attributes & stat.FILE_ATTRIBUTE_READONLY:
+                raise RuntimeError(f"Release destination is read-only: {destination}")
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temporary:
         staging = Path(temporary)

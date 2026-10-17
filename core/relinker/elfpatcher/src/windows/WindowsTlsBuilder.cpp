@@ -99,7 +99,8 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
 
     std::vector<TlsAccess> accesses;
     std::set<std::uint32_t> branchTargets;
-    const auto instructions = Relinker::CodeInstructionCollector().Collect(source, headers, [&](auto completed, auto total) { report(7000 * completed / total); });
+    std::set<Domain::VirtualAddress> entryRoots;
+    const auto instructions = Relinker::CodeInstructionCollector().Collect(source, headers, [&](auto completed, auto total) { report(7000 * completed / total); }, &entryRoots);
     std::uint64_t scanned = 0;
 
     for (const auto& header : headers) {
@@ -120,6 +121,11 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
             const auto rva = image.GetRva(header.MappedAddress + offset, info.Length);
             const bool insidePrevious = *instruction < decodedEnd;
             decodedEnd = std::max(decodedEnd, *instruction + info.Length);
+            const auto checkProtectedEntry = [&](const std::size_t length) {
+                const auto entry = entryRoots.upper_bound(*instruction);
+                if (entry != entryRoots.end() && *entry - *instruction < length)
+                    throw Domain::RelinkerException("TLS rewrite would overwrite an executable entry point", header.Offset + *entry - header.MappedAddress);
+            };
 
             if (info.HasBranchTarget && !info.HasRipRelativeDisp) {
                 const auto target = static_cast<std::int64_t>(rva) + static_cast<std::int64_t>(info.Length) + info.BranchDisp;
@@ -143,7 +149,7 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
                 const bool wide = (info.RexPrefix & 8) != 0;
                 const bool isAlu = isAluReadOpcode(bytes[position]);
                 const auto address = supportedPrefixes && !loadValue && !aluRead && (bytes[position] == 0x8b || isAlu) && (wide || !hasOperandSizePrefix) ? registerAddress(bytes, position, info.Length, info.RexPrefix) : std::nullopt;
-                const auto addressRegister = static_cast<std::uint8_t>(((bytes[position + 1] >> 3) & 7) | ((info.RexPrefix & 4) << 1));
+                const auto addressRegister = address ? static_cast<std::uint8_t>(((bytes[position + 1] >> 3) & 7) | ((info.RexPrefix & 4) << 1)) : std::uint8_t{4};
                 if (address && addressRegister != 4) {
                     std::vector<MovedInstruction> moved;
                     auto length = info.Length;
@@ -175,6 +181,7 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
                         moved.push_back({CheckedRva(rva + length), std::move(movedBytes), next.HasRipRelativeDisp ? std::optional<std::size_t>(next.RipRelativeDispOffset) : std::nullopt, branchTarget, branchDisplacementOffset});
                         length += next.Length;
                     }
+                    checkProtectedEntry(length);
                     accesses.push_back({rva, header.Offset + offset, length, false, 0, addressRegister, 0, isAlu ? bytes[position] : std::uint8_t{0}, *address, wide, std::move(moved)});
                     continue;
                 }
@@ -186,6 +193,7 @@ PeDirectory WindowsTlsBuilder::Build(const std::vector<std::uint8_t>& source, co
                     message << ')';
                     throw Domain::RelinkerException(message.str(), header.Offset + offset);
                 }
+                checkProtectedEntry(info.Length);
                 accesses.push_back({rva, header.Offset + offset, info.Length, storeImmediate, storeImmediate ? Io::ReadU32(source, header.Offset + offset + position + 7) : 0, storeImmediate ? std::uint8_t{0} : loadRegister, storeImmediate ? 0 : Io::ReadU32(source, header.Offset + offset + position + 3), aluRead ? bytes[position] : std::uint8_t{0}});
             }
         }

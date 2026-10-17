@@ -20,10 +20,16 @@ extern const unsigned char _ZTVN10__cxxabiv117__class_type_infoE_nid_postfix[];
 extern const unsigned char _ZTVN10__cxxabiv120__si_class_type_infoE_nid_postfix[];
 extern const unsigned char _ZTISt12out_of_range_nid_postfix[];
 extern const unsigned char _ZTISt11regex_error_nid_postfix[];
+extern const unsigned char _ZTISt13runtime_error_nid_postfix[];
+extern const unsigned char _ZTISt11logic_error_nid_postfix[];
 void APS5_VABI _ZNSt12out_of_rangeC1EPKc_nid_postfix(Object*, const char*);
 void APS5_VABI _ZNSt12out_of_rangeC1ERKS__nid_postfix(Object*, const Object*);
 void APS5_VABI _ZNSt12out_of_rangeD1Ev_nid_postfix(Object*);
+void APS5_VABI _ZNSt11logic_errorC1EPKc_nid_postfix(Object*, const char*);
+void APS5_VABI _ZNSt11logic_errorD1Ev_nid_postfix(Object*);
 [[noreturn]] void APS5_VABI _ZSt14_Xout_of_rangePKc_nid_postfix(const char*);
+[[noreturn]] void APS5_VABI _ZSt15_Xruntime_errorPKc_nid_postfix(const char*);
+[[noreturn]] void APS5_VABI _ZNKSt11logic_error8_DoraiseEv_nid_postfix(const Object*);
 [[noreturn]] void APS5_VABI _ZSt13_Xregex_errorNSt15regex_constants10error_typeE_nid_postfix(std::regex_constants::error_type);
 int APS5_VABI GuestOuter();
 void APS5_VABI GuestStdCapture();
@@ -206,25 +212,40 @@ int main(int argc, char** argv) {
         return 0;
     }
     const bool regex = std::strstr(argv[1], "regex") != nullptr;
+    const bool runtime = std::strstr(argv[1], "runtime") != nullptr;
+    const bool doraise = std::strstr(argv[1], "doraise") != nullptr;
     regularRelease = std::strcmp(argv[1], "release") == 0;
     keepMessage = std::strstr(argv[1], "unshared") == nullptr;
     FixtureArgument = reinterpret_cast<std::uintptr_t>(FixtureMessage);
+    Object raised{};
     if (regex) {
         expectedMessage = "regular expression error";
         FixtureStdOutType = _ZTISt11regex_error_nid_postfix;
         FixtureThrow = reinterpret_cast<GuestThrowFunction>(_ZSt13_Xregex_errorNSt15regex_constants10error_typeE_nid_postfix);
         FixtureArgument = static_cast<std::uintptr_t>(std::regex_constants::error_collate);
+    } else if (runtime) {
+        expectedMessage = FixtureMessage;
+        FixtureStdOutType = _ZTISt13runtime_error_nid_postfix;
+        FixtureThrow = reinterpret_cast<GuestThrowFunction>(_ZSt15_Xruntime_errorPKc_nid_postfix);
+    } else if (doraise) {
+        _ZNSt11logic_errorC1EPKc_nid_postfix(&raised, FixtureMessage);
+        expectedMessage = FixtureMessage;
+        FixtureStdOutType = _ZTISt11logic_error_nid_postfix;
+        FixtureThrow = reinterpret_cast<GuestThrowFunction>(_ZNKSt11logic_error8_DoraiseEv_nid_postfix);
+        FixtureArgument = reinterpret_cast<std::uintptr_t>(&raised);
     }
     _ZNSt12out_of_rangeC1EPKc_nid_postfix(&decoy, "unrelated message");
     poison = std::strstr(argv[1], "zero") ? nullptr : &decoy;
     GuestStdCapture();
+    const char* expected = regex ? "regular expression error" : FixtureMessage;
     if (callbacks != (regularRelease ? 0u : 1u) ||
         (keepMessage && (MessageHeader(retained)->references.load() != 0 ||
-            std::strcmp(retained.message, regex ? "regular expression error" : FixtureMessage))) ||
+            std::strcmp(retained.message, expected))) ||
         !decoy.message || std::strcmp(decoy.message, "unrelated message")) return 44;
     _ZNSt12out_of_rangeD1Ev_nid_postfix(&retained);
     _ZNSt12out_of_rangeD1Ev_nid_postfix(&decoy);
-    if (retained.message || decoy.message) return 45;
+    if (doraise) _ZNSt11logic_errorD1Ev_nid_postfix(&raised);
+    if (retained.message || decoy.message || (doraise && raised.message)) return 45;
     std::puts("guest message callback, retained ownership and release: PASS");
     return 0;
 }

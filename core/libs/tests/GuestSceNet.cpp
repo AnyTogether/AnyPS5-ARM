@@ -30,6 +30,8 @@ extern const std::uint8_t in6addr_any_nid_postfix[16];
 extern const std::uint8_t in6addr_loopback_nid_postfix[16];
 int APS5_VABI sceNetInit_nid_postfix(void);
 int APS5_VABI sceNetShowNetstatWithMemory(int);
+int APS5_VABI sceNetShowNetstat(void);
+int APS5_VABI sceNetShowIfconfig(void);
 int APS5_VABI sceNetSocket(const char*, int, int, int);
 int APS5_VABI sceNetBind_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI sceNetListen(int, int);
@@ -42,6 +44,7 @@ std::int64_t APS5_VABI sceNetRecv(int, void*, std::size_t, int);
 std::int64_t APS5_VABI sceNetSendto(int, const void*, std::size_t, int, const void*, std::uint32_t);
 std::int64_t APS5_VABI sceNetRecvfrom(int, void*, std::size_t, int, void*, std::uint32_t*);
 int APS5_VABI sceNetSocketClose(int);
+int APS5_VABI sceNetSocketAbort(int, int);
 int APS5_VABI sceNetShutdown(int, int);
 int APS5_VABI sceNetSetsockopt(int, int, int, const void*, std::uint32_t);
 int APS5_VABI sceNetGetsockopt(int, int, int, void*, std::uint32_t*);
@@ -213,6 +216,8 @@ static std::string CaptureNetstat(int pool) {
 }
 
 static void CheckNetstat() {
+    Require(sceNetShowNetstat() == 0);
+    Require(sceNetShowIfconfig() == 0);
     Require(Failed(sceNetShowNetstatWithMemory(-1), 9));
     const int pool = sceNetPoolCreate("netstat", 4096, 0);
     Require(pool > 0);
@@ -267,6 +272,141 @@ static void CheckUnboundSocketName() {
     }
 }
 
+static void CheckUnboundDatagramReceive() {
+    const int waiting = sceNetSocket("unbound-receive", 2, 2, 17);
+    const int peer = sceNetSocket("unbound-peer", 2, 2, 17);
+    Require(waiting >= 0 && peer >= 0);
+    const int timeout = 50000;
+    Require(sceNetSetsockopt(waiting, 0xffff, 0x1106, &timeout, sizeof(timeout)) == 0);
+    char buffer[16]{};
+    NetIovec in[] = {{buffer, sizeof(buffer)}};
+    NetMsghdr receive{nullptr, 0, in, 1, nullptr, 0, 0};
+    for (int call = 0; call < 3; ++call) {
+        const auto start = std::chrono::steady_clock::now();
+        const std::int64_t result = call == 0 ? sceNetRecv(waiting, buffer, sizeof(buffer), 0)
+            : call == 1 ? sceNetRecvfrom(waiting, buffer, sizeof(buffer), 0, nullptr, nullptr)
+                        : sceNetRecvmsg(waiting, &receive, 0);
+        Require(Failed(result, 35));
+        Require(std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(40));
+    }
+    const int on = 1;
+    const int off = 0;
+    Require(sceNetSetsockopt(waiting, 0xffff, 0x1200, &on, sizeof(on)) == 0);
+    Require(Failed(sceNetRecvfrom(waiting, buffer, sizeof(buffer), 0, nullptr, nullptr), 35));
+    Require(sceNetSetsockopt(waiting, 0xffff, 0x1200, &off, sizeof(off)) == 0);
+    const int longTimeout = 2000000;
+    Require(sceNetSetsockopt(waiting, 0xffff, 0x1106, &longTimeout, sizeof(longTimeout)) == 0);
+    std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+    Require(sceNetBind_nid_postfix(peer, address.data(), address.size()) == 0);
+    std::uint32_t size = address.size();
+    Require(sceNetGetsockname(peer, address.data(), &size) == 0);
+    auto reply = std::async(std::launch::async, [waiting] {
+        char answer[16]{};
+        return sceNetRecvfrom(waiting, answer, sizeof(answer), 0, nullptr, nullptr) == 5 && std::strcmp(answer, "pong") == 0;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    Require(reply.wait_for(std::chrono::seconds(0)) == std::future_status::timeout);
+    Require(sceNetSendto(waiting, "ping", 5, 0, address.data(), address.size()) == 5);
+    std::array<std::uint8_t, 16> source{};
+    size = source.size();
+    Require(sceNetRecvfrom(peer, buffer, sizeof(buffer), 0, source.data(), &size) == 5 && std::strcmp(buffer, "ping") == 0);
+    Require(sceNetSendto(peer, "pong", 5, 0, source.data(), size) == 5);
+    Require(reply.wait_for(std::chrono::seconds(1)) == std::future_status::ready && reply.get());
+    Require(Failed(sceNetBind_nid_postfix(waiting, address.data(), address.size()), 22));
+    for (const int descriptor : {waiting, peer}) Require(sceNetSocketClose(descriptor) == 0);
+#ifdef _WIN32
+    for (const bool abort : {true, false}) {
+        const int socket = sceNetSocket("unbound-abort", 2, 2, 17);
+        Require(socket >= 0);
+        auto waiter = std::async(std::launch::async, [socket] {
+            char ignored[4];
+            return sceNetRecvfrom(socket, ignored, sizeof(ignored), 0, nullptr, nullptr);
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        Require(waiter.wait_for(std::chrono::seconds(0)) == std::future_status::timeout);
+        Require((abort ? sceNetSocketAbort(socket, 0) : sceNetSocketClose(socket)) == 0);
+        Require(waiter.wait_for(std::chrono::seconds(1)) == std::future_status::ready && waiter.get() < 0);
+        if (abort) Require(sceNetSocketClose(socket) == 0);
+    }
+#endif
+}
+
+static void CheckUnboundDatagramShutdown() {
+    const int socket = sceNetSocket("unbound-shutdown", 2, 2, 17);
+    Require(socket >= 0);
+    auto waiter = std::async(std::launch::async, [socket] {
+        char ignored[4];
+        return sceNetRecvfrom(socket, ignored, sizeof(ignored), 0, nullptr, nullptr);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    Require(waiter.wait_for(std::chrono::seconds(0)) == std::future_status::timeout);
+    sceNetShutdown(socket, 0);
+    Require(waiter.wait_for(std::chrono::seconds(1)) == std::future_status::ready && waiter.get() == 0);
+    char buffer[4]{};
+    Require(sceNetRecv(socket, buffer, sizeof(buffer), 0) == 0);
+    std::array<std::uint8_t, 16> source{};
+    NetIovec in[] = {{buffer, sizeof(buffer)}};
+    NetMsghdr receive{source.data(), static_cast<std::uint32_t>(source.size()), in, 1, nullptr, 0, 0};
+    Require(sceNetRecvmsg(socket, &receive, 0) == 0 && receive.name_length == 0);
+#ifdef _WIN32
+    std::uint32_t size = source.size();
+    Require(sceNetRecvfrom(socket, buffer, sizeof(buffer), 0, source.data(), &size) == 0 && size == 0);
+#endif
+    Require(sceNetSocketClose(socket) == 0);
+#ifdef _WIN32
+    const int empty = sceNetSocket("unbound-empty", 2, 2, 17);
+    Require(empty >= 0);
+    Require(sceNetRecv(empty, buffer, 0, 0) == 0);
+    Require(sceNetRecvfrom(empty, buffer, 0, 0, nullptr, nullptr) == 0);
+    Require(sceNetSocketClose(empty) == 0);
+#endif
+}
+
+static void CheckUnboundDatagramLaterAddress() {
+    for (const bool connect : {false, true}) {
+        const int waiting = sceNetSocket("unbound-later", 2, 2, 17);
+        const int peer = sceNetSocket("unbound-later-peer", 2, 2, 17);
+        Require(waiting >= 0 && peer >= 0);
+        std::array<std::uint8_t, 16> peerAddress{16, 2, 0, 0, 127, 0, 0, 1};
+        Require(sceNetBind_nid_postfix(peer, peerAddress.data(), peerAddress.size()) == 0);
+        std::uint32_t size = peerAddress.size();
+        Require(sceNetGetsockname(peer, peerAddress.data(), &size) == 0);
+        auto reply = std::async(std::launch::async, [waiting] {
+            char answer[16]{};
+            return sceNetRecv(waiting, answer, sizeof(answer), 0) == 5 && std::strcmp(answer, "pong") == 0;
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        Require(reply.wait_for(std::chrono::seconds(0)) == std::future_status::timeout);
+        std::array<std::uint8_t, 16> waitingAddress{16, 2, 0, 0, 127, 0, 0, 1};
+        Require((connect ? sceNetConnect(waiting, peerAddress.data(), peerAddress.size())
+                         : sceNetBind_nid_postfix(waiting, waitingAddress.data(), waitingAddress.size())) == 0);
+        size = waitingAddress.size();
+        Require(sceNetGetsockname(waiting, waitingAddress.data(), &size) == 0);
+        Require(sceNetSendto(peer, "pong", 5, 0, waitingAddress.data(), size) == 5);
+        Require(reply.wait_for(std::chrono::seconds(1)) == std::future_status::ready && reply.get());
+        for (const int descriptor : {waiting, peer}) Require(sceNetSocketClose(descriptor) == 0);
+    }
+}
+
+static void CheckUnboundDatagramTimeoutAfterAddress() {
+    const int waiting = sceNetSocket("unbound-timeout", 2, 2, 17);
+    Require(waiting >= 0);
+    const int timeout = 500000;
+    Require(sceNetSetsockopt(waiting, 0xffff, 0x1106, &timeout, sizeof(timeout)) == 0);
+    auto bound = std::async(std::launch::async, [waiting] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::array<std::uint8_t, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+        return sceNetBind_nid_postfix(waiting, address.data(), address.size()) == 0;
+    });
+    char buffer[4];
+    const auto start = std::chrono::steady_clock::now();
+    Require(Failed(sceNetRecv(waiting, buffer, sizeof(buffer), 0), 35));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    Require(bound.get());
+    Require(elapsed >= std::chrono::milliseconds(450) && elapsed < std::chrono::milliseconds(750));
+    Require(sceNetSocketClose(waiting) == 0);
+}
+
 static void CheckEmptyEpoll() {
     const int epoll = sceNetEpollCreate("empty-epoll", 0);
     Require(epoll >= 0);
@@ -316,7 +456,7 @@ static void CheckDontWait() {
     std::uint32_t size = address.size();
     Require(sceNetGetsockname(receiver, address.data(), &size) == 0);
     const int timeout = 2000000;
-    Require(sceNetSetsockopt(receiver, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    Require(sceNetSetsockopt(receiver, 0xffff, 0x1106, &timeout, sizeof(timeout)) == 0);
     char buffer[16]{};
     NetIovec in[] = {{buffer, sizeof(buffer)}};
     NetMsghdr receive{nullptr, 0, in, 1, nullptr, 0, 0};
@@ -350,8 +490,11 @@ static void CheckDontWait() {
 }
 
 static void CheckReceiveTimeout(int receiver, int sender, const std::array<std::uint8_t, 16>& address) {
-    const int timeout = 50000;
+    const KernelTimeval timeout{0, 50000};
     Require(sceNetSetsockopt(receiver, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    int microseconds = -1;
+    std::uint32_t length = sizeof(microseconds);
+    Require(sceNetGetsockopt(receiver, 0xffff, 0x1106, &microseconds, &length) == 0 && microseconds == 50000);
     char buffer[8]{};
     std::array<std::uint8_t, 16> source{};
     std::uint32_t size = source.size();
@@ -363,7 +506,7 @@ static void CheckReceiveTimeout(int receiver, int sender, const std::array<std::
     const char datagram[] = "late";
     Require(sceNetSendto(sender, datagram, sizeof(datagram), 0, address.data(), address.size()) == sizeof(datagram));
     Require(sceNetRecv(receiver, buffer, sizeof(buffer), 0) == sizeof(datagram) && std::strcmp(buffer, datagram) == 0);
-    const int disabled = 0;
+    const KernelTimeval disabled{0, 0};
     Require(sceNetSetsockopt(receiver, 0xffff, 0x1006, &disabled, sizeof(disabled)) == 0);
 }
 
@@ -474,12 +617,15 @@ static void CheckEpollWritable() {
 }
 
 static void RequireTimeout(int socket, int option, int expected) {
+    KernelTimeval timeout{-1, -1};
+    std::uint32_t size = sizeof(timeout);
+    Require(sceNetGetsockopt(socket, 0xffff, option, &timeout, &size) == 0 && size == sizeof(timeout));
     int microseconds = -1;
-    std::uint32_t size = sizeof(microseconds);
-    Require(sceNetGetsockopt(socket, 0xffff, option, &microseconds, &size) == 0 && size == sizeof(microseconds));
-    if (microseconds != expected) {
-        std::fprintf(stderr, "setsockopt(0x%x) with a struct timeval on a libSceNet socket set %d microseconds, expected %d\n",
-            option, microseconds, expected);
+    std::uint32_t length = sizeof(microseconds);
+    Require(sceNetGetsockopt(socket, 0xffff, option == 0x1006 ? 0x1106 : 0x1105, &microseconds, &length) == 0 && length == sizeof(microseconds));
+    if (timeout.tv_sec * 1000000 + timeout.tv_usec != expected || microseconds != expected) {
+        std::fprintf(stderr, "option 0x%x on a libSceNet socket reads back {%lld, %lld} and %d microseconds, expected %d\n",
+            option, static_cast<long long>(timeout.tv_sec), static_cast<long long>(timeout.tv_usec), microseconds, expected);
         std::abort();
     }
 }
@@ -501,7 +647,18 @@ static void CheckKernelTimeouts() {
     Require(setsockopt_nid_postfix(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == -1 && *__error_nid_postfix() == 22);
     RequireTimeout(descriptor, 0x1006, 1250000);
     RequireTimeout(descriptor, 0x1005, 500000);
-    Require(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)) == 0);
+    Require(Failed(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &microseconds, sizeof(microseconds)), 22));
+    Require(Failed(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &invalid, sizeof(invalid)), 33));
+    Require(Failed(sceNetSetsockopt(descriptor, 0xffff, 0x1005, &negative, sizeof(negative)), 33));
+    RequireTimeout(descriptor, 0x1006, 1250000);
+    RequireTimeout(descriptor, 0x1005, 500000);
+    int seconds = -1;
+    std::uint32_t truncated = sizeof(seconds);
+    Require(sceNetGetsockopt(descriptor, 0xffff, 0x1006, &seconds, &truncated) == 0 && truncated == sizeof(seconds) && seconds == 1);
+    const KernelTimeval quarter{0, 250000};
+    Require(sceNetSetsockopt(descriptor, 0xffff, 0x1006, &quarter, sizeof(quarter)) == 0);
+    RequireTimeout(descriptor, 0x1006, 250000);
+    Require(sceNetSetsockopt(descriptor, 0xffff, 0x1106, &microseconds, sizeof(microseconds)) == 0);
     RequireTimeout(descriptor, 0x1006, microseconds);
 #ifndef _WIN32
     std::array<std::uint8_t, 16> loopback{16, 2, 0, 0, 127, 0, 0, 1};
@@ -843,7 +1000,7 @@ static void CheckDatagramDisconnect() {
     Require(local[4] == 0 && local[5] == 0 && local[6] == 0 && local[7] == 0);
 #endif
     const int timeout = 2000000;
-    Require(sceNetSetsockopt(dissolved, 0xffff, 0x1006, &timeout, sizeof(timeout)) == 0);
+    Require(sceNetSetsockopt(dissolved, 0xffff, 0x1106, &timeout, sizeof(timeout)) == 0);
     const char unrelated[] = "unrelated sender";
     Require(sceNetSendto(other, unrelated, sizeof(unrelated), 0, dissolvedAddress.data(), dissolvedAddress.size()) == sizeof(unrelated));
     char buffer[32]{};
@@ -877,6 +1034,10 @@ int main() {
     CheckEpollIdent();
     CheckLinkLocalAllNodesIpv6();
     CheckUnboundSocketName();
+    CheckUnboundDatagramReceive();
+    CheckUnboundDatagramShutdown();
+    CheckUnboundDatagramLaterAddress();
+    CheckUnboundDatagramTimeoutAfterAddress();
     CheckUnspecifiedIpv6();
     if (!ipv6Unavailable) CheckIpv6SocketsAreIpv6Only();
     CheckDatagramDisconnect();

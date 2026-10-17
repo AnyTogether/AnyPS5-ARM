@@ -135,6 +135,52 @@ static int CheckRejectedLayout(const char* root, const char* fileName) {
     return 0;
 }
 
+static void SetUnlistedChunks(const char* value) {
+#ifdef _WIN32
+    Require(_putenv_s("APS5_PLAYGO_UNLISTED_CHUNKS", value) == 0);
+#else
+    Require(setenv("APS5_PLAYGO_UNLISTED_CHUNKS", value, 1) == 0);
+#endif
+}
+
+static int CheckNoPlayGoFileAnswered(const char* root, const char* answer) {
+    constexpr int badChunkId = static_cast<int>(0x80B2000C);
+    SetUnlistedChunks(answer);
+    std::filesystem::current_path(root);
+    PlayGoInitParams init{};
+    int handle = 0;
+    Require(scePlayGoInitialize(&init) == 0);
+    Require(scePlayGoOpen(&handle, nullptr) == 0);
+    const std::uint16_t unlisted[3] = {0, 1, 999};
+    std::int8_t loci[3] = {0, 0, 0};
+    const int result = scePlayGoGetLocus(handle, unlisted, 3, loci);
+    if (std::string_view(answer) == "installed") Require(result == 0 && loci[0] == 3 && loci[1] == 3 && loci[2] == 3);
+    else Require(result == badChunkId);
+    const std::uint16_t first = 0;
+    Require(scePlayGoGetLocus(handle, &first, 1, loci) == 0 && loci[0] == 3);
+    Require(scePlayGoClose(handle) == 0);
+    return 0;
+}
+
+static int CheckUnknownUnlistedChunkAnswer(const char* root) {
+    SetUnlistedChunks("maybe");
+    std::filesystem::current_path(root);
+    PlayGoInitParams init{};
+    int handle = 0;
+    Require(scePlayGoInitialize(&init) == 0);
+    Require(scePlayGoOpen(&handle, nullptr) == 0);
+    const std::uint16_t unlisted = 1;
+    std::int8_t locus = 0;
+    bool threw = false;
+    try {
+        scePlayGoGetLocus(handle, &unlisted, 1, &locus);
+    } catch (const std::runtime_error& error) {
+        threw = std::string_view(error.what()).find("APS5_PLAYGO_UNLISTED_CHUNKS must be installed or absent") != std::string_view::npos;
+    }
+    Require(threw);
+    return 0;
+}
+
 static void RunLayout(const char* self, const char* mode, std::initializer_list<std::pair<const char*, std::string>> files) {
     const auto root = std::filesystem::temp_directory_path() / ("guest_playgo_" + std::to_string(std::random_device{}()));
     std::filesystem::remove_all(root);
@@ -162,6 +208,9 @@ int main(int argc, char** argv) {
     if (argc == 3) {
         const std::string_view mode = argv[1];
         if (mode == "--no-file") return CheckNoPlayGoFile(argv[2]);
+        if (mode == "--no-file-installed") return CheckNoPlayGoFileAnswered(argv[2], "installed");
+        if (mode == "--no-file-absent") return CheckNoPlayGoFileAnswered(argv[2], "absent");
+        if (mode == "--no-file-unknown-answer") return CheckUnknownUnlistedChunkAnswer(argv[2]);
         if (mode == "--package-chunk-table" || mode == "--scenario-with-chunk-table") return CheckPackageChunkTable(argv[2]);
         if (mode == "--scenario-only") return CheckScenarioWithoutChunkTable(argv[2]);
         if (mode == "--ficm-only") return CheckRejectedLayout(argv[2], "playgo-ficm.dat");
@@ -169,6 +218,9 @@ int main(int argc, char** argv) {
         if (mode == "--invalid-chunk-table") return CheckRejectedLayout(argv[2], "playgo-chunk.dat");
     }
     RunLayout(argv[0], "--no-file", {});
+    RunLayout(argv[0], "--no-file-installed", {});
+    RunLayout(argv[0], "--no-file-absent", {});
+    RunLayout(argv[0], "--no-file-unknown-answer", {});
     RunLayout(argv[0], "--package-chunk-table", {{"playgo-chunk.dat", ChunkTableFile()}});
     RunLayout(argv[0], "--scenario-with-chunk-table", {{"playgo-chunk.dat", ChunkTableFile()}, {"playgo-scenario.json", "{}"}});
     RunLayout(argv[0], "--scenario-only", {{"playgo-scenario.json", "{}"}});

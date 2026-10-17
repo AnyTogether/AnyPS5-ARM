@@ -107,6 +107,7 @@ struct BufferAttributeGroup {
     VideoOutBufferAttribute2 attribute{};
     int category = VIDEO_OUT_BUFFER_ATTRIBUTE_CATEGORY_UNCOMPRESSED;
     bool occupied = false;
+    bool ps4 = false;
 };
 
 AgcDriver::DisplayBuffer DescribeVideoOutBuffer(const VideoOutBuffer& buffer, const BufferAttributeGroup& group);
@@ -132,6 +133,7 @@ struct VideoOutConfig {
     int busType = VIDEO_OUT_BUS_TYPE_MAIN;
     bool opened = false;
     bool closing = false;
+    bool ps4 = false;
     std::exception_ptr failure;
     std::stop_token shutdownToken = LibcShutdownToken_nid_postfix();
     int flipRate = 0;

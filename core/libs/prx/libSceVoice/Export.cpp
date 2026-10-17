@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <map>
 #include <mutex>
 #include <set>
@@ -19,6 +20,7 @@ constexpr std::int32_t PortOutVoice = 4;
 constexpr std::int32_t PortOutDevice = 5;
 constexpr std::int32_t PortStateReady = 1;
 constexpr std::uint32_t VoiceFrameMs = 20;
+constexpr std::int32_t PortAttrVoiceActivity = 1001;
 
 struct Port {
     std::int32_t type;
@@ -179,11 +181,14 @@ int APS5_VABI sceVoiceGetPortInfo(uint32_t port_id, VoicePortInfo* info) {
 }
 
 int APS5_VABI sceVoiceGetPortAttr(uint32_t port_id, int32_t attr, void* value, int32_t size) {
-    (void)value;
-    (void)size;
     auto& voice = State();
     std::lock_guard lock(voice.mutex);
     RequirePort(voice, port_id, __func__);
+    if (attr == PortAttrVoiceActivity) {
+        if (value == nullptr || size != 1) APS5_INVALID_ARG_EX;
+        std::memset(value, 0, 1);
+        return 0;
+    }
     Fail(__func__, "attribute " + std::to_string(attr) + " not implemented");
 }
 

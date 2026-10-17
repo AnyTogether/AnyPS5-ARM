@@ -138,6 +138,19 @@ def main():
                 result, output = convert(case, windows, ["--module-dir", rejected])
                 assert result.returncode == 2 and message in result.stderr, (rejected, result.stderr)
 
+            aliases = [["SCE_MODULE"], ["Media/Plugins", "media/plugins"]] if (case / "MEDIA").exists() else []
+            if os.name != "nt":
+                (case / "linked").symlink_to("sce_module", target_is_directory=True)
+                aliases.append(["linked"])
+            for names in aliases:
+                result, output = convert(case, windows, [option for name in names for option in ("--module-dir", name)])
+                assert result.returncode == 2 and "Duplicate guest module directory" in result.stderr, (names, result.stderr)
+            if not (case / "MEDIA").exists():
+                (case / "SCE_MODULE").mkdir()
+                result, output = convert(case, windows, ["--module-dir", "SCE_MODULE"])
+                assert result.returncode == 0, (result.stdout, result.stderr)
+                (case / "SCE_MODULE").rmdir()
+
             result, output = convert(case, windows, ["--skip-sce-module", "--module-dir", "Media/Plugins"])
             assert result.returncode != 0 and "conflicts with --skip-sce-module" in result.stderr, result.stderr
 

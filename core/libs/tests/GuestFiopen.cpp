@@ -116,6 +116,9 @@ int main() {
     stream = Open(file, In | Noreplace);
     Require(stream != nullptr);
     fclose_nid_postfix(stream);
+    stream = Open(file, In | Binary | Noreplace);
+    Require(stream != nullptr);
+    fclose_nid_postfix(stream);
 
     Require(Open(missing, Out | Nocreate) == nullptr);
     Require(!Exists(missing));

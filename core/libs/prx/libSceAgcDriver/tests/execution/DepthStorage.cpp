@@ -199,7 +199,13 @@ void Run(Context context, std::uint8_t* block) {
     Require(DepthSurfaceStorage(context, {}, PlaneResource(address, Format32Float, Side / 2), 0) == nullptr, "a storage view of another extent over the depth memory was taken for the depth surface");
     Require(DepthSurfaceTexture(context, {}, PlaneResource(address, Format32Float, Side / 2), {}) == nullptr, "a sampled view of another extent over the depth memory was taken for the depth surface");
     Require(DepthSurfaceStorage(context, {}, PlaneResource(address, Format8Uint), 0) == nullptr, "an 8-bit storage view of the depth plane was taken for the depth surface");
-    ExpectFailure([&] { static_cast<void>(DepthSurfaceStorage(context, {}, PlaneResource(address, Format32Float), 1)); }, "not implemented", "a storage view of another level of the depth plane was accepted");
+    Require(DepthSurfaceStorage(context, {}, PlaneResource(address, Format32Float), 1) == nullptr, "a storage access to a later level over the depth memory was taken for the depth surface");
+    auto later = PlaneResource(address, Format32Float);
+    later.mipCount = 2;
+    later.baseLevel = 1;
+    later.lastLevel = 1;
+    Require(DepthSurfaceStorage(context, {}, later, 0) == nullptr, "a storage view of a later level over the depth memory was taken for the depth surface");
+    Require(DepthSurfaceTexture(context, {}, later, {}) == nullptr, "a sampled view of a later level over the depth memory was taken for the depth surface");
     const auto depth = DepthSurfaceStorage(context, {}, PlaneResource(address, Format32Float), 0);
     Require(depth != nullptr, "the depth plane has no storage image");
     submit(recorder);

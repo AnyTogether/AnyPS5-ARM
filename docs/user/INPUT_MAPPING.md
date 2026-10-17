@@ -18,6 +18,31 @@ Game-controller bindings are enabled automatically and are not affected by keybo
 
 Supported actions are `Cross`, `Circle`, `Triangle`, `Square`, `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Options`, `Up`, `Right`, `Down`, `Left`, `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown`, `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown`, `TouchLeft`, `TouchRight`, `ToggleMouse`, and `ToggleFullscreen`.
 
+### Default bindings
+
+Without an `anyps5-input.ini`, or for actions the file does not mention, these bindings apply:
+
+| Action | Keyboard and mouse |
+|--------|--------------------|
+| `Cross` | Return, Space |
+| `Circle` | C |
+| `Triangle` | I |
+| `Square` | Left mouse button |
+| `L1` | Q |
+| `R1` | E, Left Alt, Right Alt |
+| `R2` | Right mouse button |
+| `L3` | Left Shift, Right Shift |
+| `R3` | Left Ctrl, Right Ctrl |
+| `Options` | Escape |
+| `Up`, `Right`, `Down`, `Left` | Arrow keys; the mouse wheel also presses `Up` (wheel up) and `Down` (wheel down) |
+| `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown` | A, D, W, S |
+| `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown` | F, H, T, G |
+| `TouchLeft`, `TouchRight` | Backspace, Tab |
+| `ToggleMouse` | Middle mouse button |
+| `ToggleFullscreen` | F11 |
+
+`L2` has no built-in keyboard or mouse binding.
+
 For example, this changes Cross to F or Space, moves the left stick to IJKL, uses the mouse buttons for Square and R2, and keeps all other built-in bindings:
 
 ```ini

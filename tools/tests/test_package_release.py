@@ -2,6 +2,7 @@ import os
 import json
 import ctypes
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -231,6 +232,33 @@ class ReleasePackageTests(unittest.TestCase):
                 self.assertEqual(archive.read("libs/libc.prx"), b"library bytes")
         finally:
             destination.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+    @unittest.skipUnless(os.name == "nt", "Windows directory junction replacement semantics")
+    def test_dangling_directory_junction_preserves_all_existing_assets(self):
+        names = ["prx-linux-v1.zip", "prx-linux-v1.tar.gz", "relinker-v1"]
+        for index, blocked in enumerate(names):
+            with self.subTest(blocked=blocked):
+                output = self.output / str(index)
+                output.mkdir(parents=True)
+                previous = {name: b"old " + name.encode() for name in names if name != blocked}
+                previous["unrelated.txt"] = b"unrelated"
+                for name, content in previous.items():
+                    (output / name).write_bytes(content)
+                target = self.root / f"target-{index}"
+                target.mkdir()
+                destination = output / blocked
+                subprocess.run(["cmd", "/c", "mklink", "/J", str(destination), str(target)],
+                               check=True, capture_output=True)
+                self.addCleanup(destination.rmdir)
+                target.rmdir()
+                self.assertFalse(destination.exists())
+                self.assertTrue(destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+                with self.assertRaises((OSError, RuntimeError)) as error:
+                    package_release.package("linux", self.build, output, "v1")
+                self.assertEqual({path.name: path.read_bytes() for path in output.iterdir() if path != destination}, previous)
+                self.assertTrue(destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+                self.assertFalse(target.exists())
+                self.assertIn("not a file", str(error.exception))
 
     def file_link(self, link, target):
         try:

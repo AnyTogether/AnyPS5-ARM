@@ -115,8 +115,8 @@ void TranslationContext::emitFloatCompare(const RdnaInstruction& inst, IrOpcode 
     IrValue* lhs = nullptr;
     IrValue* rhs = nullptr;
     if (half) {
-        lhs = &readF16AsF32(sourceAt(inst, 0u)).Value();
-        rhs = &readF16AsF32(sourceAt(inst, 1u)).Value();
+        lhs = &flushF16InputValue(readF16AsF32(sourceAt(inst, 0u))).Value();
+        rhs = &flushF16InputValue(readF16AsF32(sourceAt(inst, 1u))).Value();
     } else {
         IrValue* lhsBits = readOperand(sourceAt(inst, 0u), IrType::U32);
         IrValue* rhsBits = readOperand(sourceAt(inst, 1u), IrType::U32);

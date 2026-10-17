@@ -17,6 +17,8 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#include <cstring>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/loader.h>
@@ -233,71 +235,42 @@ void GuestAllocationsRegisterImage_nid_postfix(void*, const void* image) {
     registerImage(image);
 }
 
-void GuestAllocationsUnregisterImage_nid_postfix(void* mutation, const void* image) {
-    auto& state = registry();
-    const auto found = state.registeredImages.find(reinterpret_cast<std::uintptr_t>(image));
-    if (found == state.registeredImages.end()) return;
-    const auto [begin, end] = *found;
-    GuestAllocationsRequireUnpinned_nid_postfix(mutation, image, end - begin);
-    recordChange(mutation, image, end - begin);
-    std::erase_if(state.ranges, [&](const auto& entry) { return !entry.second->releasable && entry.second->allocationAddress >= begin && entry.second->allocationAddress < end; });
-    state.registeredImages.erase(found);
-}
 #else
-void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
-    auto& state = registry();
-    if (state.mainImageRegistered) return;
+namespace {
+struct ImagePages {
     struct Page {
         bool readable = false;
         bool writable = false;
     };
+    std::uintptr_t base = 0;
+    bool main = false;
+    bool found = false;
+    std::uint64_t pageSize = 0;
     std::map<std::uint64_t, Page> pages;
-    const auto pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE));
-    std::pair<std::map<std::uint64_t, Page>*, std::uint64_t> collection{&pages, pageSize};
-#ifdef __APPLE__
-    // System libraries live in the dyld shared cache, gigabytes that no guest image is part of, and
-    // __PAGEZERO reserves the low 4 GB with no access at all; neither is registered.
-    for (std::uint32_t image = 0; image < _dyld_image_count(); ++image) {
-        const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(image));
-        if (!header || header->magic != MH_MAGIC_64 || (header->flags & MH_DYLIB_IN_CACHE) != 0) continue;
-        const auto slide = static_cast<std::uint64_t>(_dyld_get_image_vmaddr_slide(image));
-        const auto* command = reinterpret_cast<const load_command*>(header + 1);
-        for (std::uint32_t index = 0; index < header->ncmds; ++index) {
-            if (command->cmd == LC_SEGMENT_64) {
-                const auto& segment = *reinterpret_cast<const segment_command_64*>(command);
-                const bool guestSegment = std::strncmp(segment.segname, "__ELF", 5) == 0;
-                if (segment.vmsize != 0 && (segment.initprot != VM_PROT_NONE || guestSegment)) {
-                    const auto start = (slide + segment.vmaddr) & ~(pageSize - 1);
-                    const auto end = (slide + segment.vmaddr + segment.vmsize + pageSize - 1) & ~(pageSize - 1);
-                    for (auto page = start; page < end; page += pageSize) {
-                        auto& entry = pages[page];
-                        entry.readable = entry.readable || (segment.initprot & (VM_PROT_READ | VM_PROT_WRITE)) != 0;
-                        entry.writable = entry.writable || (segment.initprot & VM_PROT_WRITE) != 0;
-                    }
-                }
-            }
-            command = reinterpret_cast<const load_command*>(reinterpret_cast<const std::uint8_t*>(command) + command->cmdsize);
+};
+
+int collectImagePages(dl_phdr_info* image, std::size_t, void* data) {
+    auto& collected = *static_cast<ImagePages*>(data);
+    if (!collected.main && image->dlpi_addr != collected.base) return 0;
+    collected.found = true;
+    for (int index = 0; index < image->dlpi_phnum; ++index) {
+        const auto& header = image->dlpi_phdr[index];
+        if (header.p_type != PT_LOAD || header.p_memsz == 0) continue;
+        const auto start = (image->dlpi_addr + header.p_vaddr) & ~(collected.pageSize - 1);
+        const auto end = (image->dlpi_addr + header.p_vaddr + header.p_memsz + collected.pageSize - 1) & ~(collected.pageSize - 1);
+        for (auto page = start; page < end; page += collected.pageSize) {
+            auto& entry = collected.pages[page];
+            entry.readable = entry.readable || (header.p_flags & (PF_R | PF_W)) != 0;
+            entry.writable = entry.writable || (header.p_flags & PF_W) != 0;
         }
     }
-    (void)collection;
-#else
-    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
-        auto& collected = *static_cast<std::pair<std::map<std::uint64_t, Page>*, std::uint64_t>*>(data);
-        for (int index = 0; index < image->dlpi_phnum; ++index) {
-            const auto& header = image->dlpi_phdr[index];
-            if (header.p_type != PT_LOAD || header.p_memsz == 0) continue;
-            const auto start = (image->dlpi_addr + header.p_vaddr) & ~(collected.second - 1);
-            const auto end = (image->dlpi_addr + header.p_vaddr + header.p_memsz + collected.second - 1) & ~(collected.second - 1);
-            for (auto page = start; page < end; page += collected.second) {
-                auto& entry = (*collected.first)[page];
-                entry.readable = entry.readable || (header.p_flags & (PF_R | PF_W)) != 0;
-                entry.writable = entry.writable || (header.p_flags & PF_W) != 0;
-            }
-        }
-        return 1;
-    }, &collection);
-#endif
-    require(!pages.empty(), "main guest image has no loadable segments");
+    return 1;
+}
+
+std::uintptr_t registerImagePages(const ImagePages& collected) {
+    auto& state = registry();
+    const auto pageSize = collected.pageSize;
+    const auto& pages = collected.pages;
     auto replacement = state.ranges;
     for (auto page = pages.begin(); page != pages.end();) {
         auto last = page;
@@ -314,9 +287,83 @@ void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
         page = std::next(last);
     }
     state.ranges.swap(replacement);
-    state.mainImageRegistered = true;
+    return static_cast<std::uintptr_t>(std::prev(pages.end())->first + pageSize);
+}
+}
+
+#ifdef __APPLE__
+// System libraries live in the dyld shared cache, gigabytes that no guest image is part of, and
+// __PAGEZERO reserves the low 4 GB with no access at all; neither is registered. Every other image
+// loaded by then, guest or host, is.
+static void collectLoadedImagePages(ImagePages& collected) {
+    const auto pageSize = collected.pageSize;
+    for (std::uint32_t image = 0; image < _dyld_image_count(); ++image) {
+        const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(image));
+        if (!header || header->magic != MH_MAGIC_64 || (header->flags & MH_DYLIB_IN_CACHE) != 0) continue;
+        const auto slide = static_cast<std::uint64_t>(_dyld_get_image_vmaddr_slide(image));
+        const auto* command = reinterpret_cast<const load_command*>(header + 1);
+        for (std::uint32_t index = 0; index < header->ncmds; ++index) {
+            if (command->cmd == LC_SEGMENT_64) {
+                const auto& segment = *reinterpret_cast<const segment_command_64*>(command);
+                const bool guestSegment = std::strncmp(segment.segname, "__ELF", 5) == 0;
+                if (segment.vmsize != 0 && (segment.initprot != VM_PROT_NONE || guestSegment)) {
+                    const auto start = (slide + segment.vmaddr) & ~(pageSize - 1);
+                    const auto end = (slide + segment.vmaddr + segment.vmsize + pageSize - 1) & ~(pageSize - 1);
+                    for (auto page = start; page < end; page += pageSize) {
+                        auto& entry = collected.pages[page];
+                        entry.readable = entry.readable || (segment.initprot & (VM_PROT_READ | VM_PROT_WRITE)) != 0;
+                        entry.writable = entry.writable || (segment.initprot & VM_PROT_WRITE) != 0;
+                    }
+                }
+            }
+            command = reinterpret_cast<const load_command*>(reinterpret_cast<const std::uint8_t*>(command) + command->cmdsize);
+        }
+    }
 }
 #endif
+
+void GuestAllocationsRegisterMainImage_nid_postfix(void*) {
+    auto& state = registry();
+    if (state.mainImageRegistered) return;
+    ImagePages collected{.main = true, .pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE))};
+#ifdef __APPLE__
+    collectLoadedImagePages(collected);
+#else
+    dl_iterate_phdr(collectImagePages, &collected);
+#endif
+    require(!collected.pages.empty(), "main guest image has no loadable segments");
+    registerImagePages(collected);
+    state.mainImageRegistered = true;
+}
+
+void GuestAllocationsRegisterImage_nid_postfix(void*, const void* image) {
+    require(image != nullptr, "cannot register a guest image without a base");
+    auto& state = registry();
+    const auto base = reinterpret_cast<std::uintptr_t>(image);
+    if (state.registeredImages.contains(base)) return;
+#ifdef __APPLE__
+    // Modules loaded before the main image registered are already part of it.
+    if (const auto range = state.ranges.upper_bound(base); range != state.ranges.begin() && base < std::prev(range)->second->address + std::prev(range)->second->bytes) return;
+#endif
+    ImagePages collected{.base = base, .pageSize = static_cast<std::uint64_t>(::sysconf(_SC_PAGESIZE))};
+    dl_iterate_phdr(collectImagePages, &collected);
+    require(collected.found, "cannot locate a guest image");
+    require(!collected.pages.empty(), "guest image has no loadable segments");
+    require(collected.pages.begin()->first == base, "guest image does not start at its base");
+    state.registeredImages.emplace(base, registerImagePages(collected));
+}
+#endif
+
+void GuestAllocationsUnregisterImage_nid_postfix(void* mutation, const void* image) {
+    auto& state = registry();
+    const auto found = state.registeredImages.find(reinterpret_cast<std::uintptr_t>(image));
+    if (found == state.registeredImages.end()) return;
+    const auto [begin, end] = *found;
+    GuestAllocationsRequireUnpinned_nid_postfix(mutation, image, end - begin);
+    recordChange(mutation, image, end - begin);
+    std::erase_if(state.ranges, [&](const auto& entry) { return !entry.second->releasable && entry.second->allocationAddress >= begin && entry.second->allocationAddress < end; });
+    state.registeredImages.erase(found);
+}
 
 void GuestAllocationsAdd_nid_postfix(void* mutation, void* pointer, std::size_t bytes, bool readable, bool writable, bool gpu) {
     recordChange(mutation, pointer, bytes);

@@ -297,6 +297,134 @@ static void TestPitchAndRepeat() {
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 
+struct PcmResetCallback {
+    std::vector<std::int16_t> pcm;
+    std::uint32_t flag;
+    int calls = 0;
+    std::uint32_t waveformFlags = SCE_NGS2_WAVEFORM_BLOCKS_FLAG_RESET;
+    bool pause = false;
+};
+
+static void APS5_VABI ResetPcm(const Ngs2VoiceCallbackInfo* info) {
+    auto& callback = *reinterpret_cast<PcmResetCallback*>(info->callback_data);
+    if (++callback.calls != 1) return;
+    Require(info->flag == callback.flag);
+    const Ngs2WaveformBlock block{0, callback.pcm.size() * sizeof(std::int16_t), 0, 0, static_cast<std::uint32_t>(callback.pcm.size()), 0, 0};
+    Control(info->voice_handle, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS,
+            Ngs2SamplerVoiceWaveformBlocksParam{{}, callback.pcm.data(), callback.waveformFlags, 1, &block});
+    if (callback.pause) Event(info->voice_handle, SCE_NGS2_VOICE_EVENT_PAUSE);
+}
+
+static void TestPcmCallbackReset() {
+    for (const auto flag : {SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END, SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_REPEAT}) {
+        const auto system = CreateSystem();
+        const std::vector<std::int16_t> pcm{16384};
+        const auto sampler = Sampler(system, pcm, flag == SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_REPEAT ? 1 : 0);
+        Patch(sampler, Mastering(system, 1));
+        Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_PITCH, Ngs2SamplerVoicePitchParam{{}, 2.0f});
+        PcmResetCallback callback{{}, flag};
+        for (std::uint32_t frame = 0; frame < Grain * 2 + 2; ++frame) callback.pcm.push_back(static_cast<std::int16_t>(1000 + frame * 100));
+        Control(sampler, SCE_NGS2_VOICE_PARAM_CALLBACK,
+                Ngs2VoiceCallbackParam{{}, ResetPcm, reinterpret_cast<std::uintptr_t>(&callback), flag, 0});
+        Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+        const auto first = RenderI16(system);
+        Require(callback.calls == 1);
+        Ngs2SamplerVoiceState state{};
+        Require(sceNgs2VoiceGetState(sampler, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+        if (state.num_decoded_samples != 1) std::fprintf(stderr, "PCM callback reset consumed %llu samples before the next grain, expected 1\n", static_cast<unsigned long long>(state.num_decoded_samples));
+        Require(state.num_decoded_samples == 1 && state.decoded_data_size == sizeof(std::int16_t) && state.waveform_data == callback.pcm.data());
+        for (std::uint32_t frame = 0; frame < Grain; ++frame) Require(first[frame] == (frame == 0 ? 16384 : 0));
+        const auto second = RenderI16(system);
+        for (std::uint32_t frame = 0; frame < Grain; ++frame) Require(second[frame] == callback.pcm[frame * 2]);
+        Require(callback.calls == 1);
+        Require(sceNgs2VoiceGetState(sampler, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+        Require(state.num_decoded_samples == 1 + Grain * 2 && state.waveform_data == callback.pcm.data() + Grain * 2);
+        Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+    }
+}
+
+static void TestPcmCallbackRefill() {
+    for (const bool pause : {false, true}) {
+        const auto system = CreateSystem();
+        const auto sampler = Voice(CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER));
+        Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP, Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1, 48000, 0, 0, 0}});
+        Patch(sampler, Mastering(system, 1));
+        const std::int16_t pcm = 16384;
+        const Ngs2WaveformBlock block{0, sizeof(pcm), 0, 0, 1, 0, 0};
+        Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS,
+                Ngs2SamplerVoiceWaveformBlocksParam{{}, &pcm, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE, 1, &block});
+        PcmResetCallback callback{{}, SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END, 0, 0, pause};
+        for (std::uint32_t frame = 0; frame < Grain * 2; ++frame) callback.pcm.push_back(static_cast<std::int16_t>(1000 + frame * 100));
+        Control(sampler, SCE_NGS2_VOICE_PARAM_CALLBACK,
+                Ngs2VoiceCallbackParam{{}, ResetPcm, reinterpret_cast<std::uintptr_t>(&callback), callback.flag, 0});
+        Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+        const auto first = RenderI16(system);
+        Require(callback.calls == 1 && first.front() == pcm);
+        for (std::uint32_t frame = 1; frame < Grain; ++frame) Require(first[frame] == (pause ? 0 : callback.pcm[frame - 1]));
+        Ngs2SamplerVoiceState state{};
+        Require(sceNgs2VoiceGetState(sampler, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+        const std::uint32_t consumed = pause ? 0 : Grain - 1;
+        Require(state.num_decoded_samples == consumed + 1 && state.waveform_data == callback.pcm.data() + consumed);
+        if (pause) Event(sampler, SCE_NGS2_VOICE_EVENT_RESUME);
+        const auto second = RenderI16(system);
+        for (std::uint32_t frame = 0; frame < Grain; ++frame) Require(second[frame] == callback.pcm[consumed + frame]);
+        Require(callback.calls == 1);
+        Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+    }
+}
+
+struct PcmSetupCallback {
+    uintptr_t master;
+    std::uint32_t channels;
+    std::uint32_t flag;
+    std::vector<std::int16_t> pcm;
+    int calls = 0;
+};
+
+static void APS5_VABI SetupPcm(const Ngs2VoiceCallbackInfo* info) {
+    auto& callback = *reinterpret_cast<PcmSetupCallback*>(info->callback_data);
+    if (++callback.calls != 1) return;
+    Require(info->flag == callback.flag);
+    Control(info->voice_handle, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP,
+            Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, callback.channels, 48000, 0, 0, 0}});
+    const Ngs2WaveformBlock block{0, callback.pcm.size() * sizeof(std::int16_t), 0, 0, Grain * 2, 0, 0};
+    Control(info->voice_handle, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS,
+            Ngs2SamplerVoiceWaveformBlocksParam{{}, callback.pcm.data(), 0, 1, &block});
+    Patch(info->voice_handle, callback.master);
+    Event(info->voice_handle, SCE_NGS2_VOICE_EVENT_PLAY);
+}
+
+static void TestPcmCallbackSetup() {
+    for (const auto channels : {2u, 8u}) {
+        for (const auto flag : {SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END, SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_REPEAT}) {
+            const auto system = CreateSystem();
+            const std::vector<std::int16_t> pcm{16384};
+            const auto sampler = Sampler(system, pcm, flag == SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_REPEAT ? 1 : 0);
+            PcmSetupCallback callback{Mastering(system, channels), channels, flag, {}};
+            for (std::uint32_t frame = 0; frame < Grain * 2; ++frame) {
+                for (std::uint32_t channel = 0; channel < channels; ++channel) callback.pcm.push_back(static_cast<std::int16_t>(1000 + frame * 25 + channel * 100));
+            }
+            Patch(sampler, callback.master);
+            Control(sampler, SCE_NGS2_VOICE_PARAM_CALLBACK,
+                    Ngs2VoiceCallbackParam{{}, SetupPcm, reinterpret_cast<std::uintptr_t>(&callback), flag, 0});
+            Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+            std::vector<std::int16_t> output(Grain * channels, -1);
+            const Ngs2RenderBufferInfo info{output.data(), output.size() * sizeof(std::int16_t), SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, channels};
+            Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+            Require(callback.calls == 1 && std::all_of(output.begin(), output.end(), [](std::int16_t sample) { return sample == 0; }));
+            Ngs2SamplerVoiceState state{};
+            Require(sceNgs2VoiceGetState(sampler, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+            Require(state.num_decoded_samples == 0 && state.decoded_data_size == 0 && state.waveform_data == callback.pcm.data());
+            Require(sceNgs2SystemRender(system, &info, 1) == SCE_NGS2_OK);
+            Require(callback.calls == 1 && std::equal(output.begin(), output.end(), callback.pcm.begin()));
+            Require(sceNgs2VoiceGetState(sampler, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+            Require(state.num_decoded_samples == Grain && state.decoded_data_size == Grain * channels * sizeof(std::int16_t));
+            Require(state.waveform_data == callback.pcm.data() + Grain * channels);
+            Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+        }
+    }
+}
+
 static void TestSubmixerMatrix() {
     const auto system = CreateSystem();
     const auto master = Mastering(system, 2);
@@ -970,6 +1098,9 @@ int main() {
     TestReverbSetup();
     TestSampleRate();
     TestUserData();
+    TestPcmCallbackReset();
+    TestPcmCallbackRefill();
+    TestPcmCallbackSetup();
     TestMasteringGain();
     TestMatrixLevelClamp();
     TestStereoIntoSurround();

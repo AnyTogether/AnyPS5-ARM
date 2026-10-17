@@ -47,6 +47,11 @@ class WrappedDeclarationTests(unittest.TestCase):
         self.assertNotIn("duplicate-export", result.stdout, result.stdout + result.stderr)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_non_ascii_declaration_path_does_not_crash_duplicate_scan(self):
+        result = self.check("caf\u00e9.cpp", "int APS5_VABI sceFooBar(int a, int b);\n")
+        self.assertNotIn("duplicate-export", result.stdout, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_cut_helpers_in_different_libraries_are_not_duplicate_nids(self):
         helper = "int APS5_VABI Support_nid_no_patch_cut() { return 3; }\n"
         result = self.check("Export.cpp", helper, helper)

@@ -23,6 +23,12 @@ int APS5_VABI sceSslFreeCaCerts(int, SceSsl::CaCerts*);
 int APS5_VABI sceSslCreateConnection(int, int, const char*);
 int APS5_VABI sceSslDeleteConnection(int);
 int APS5_VABI sceSslSetVerifyCallback(int, int (APS5_VABI *)(int, unsigned int, void**, int, void*), void*);
+int APS5_VABI sceSslGetSerialNumber(int, void*, unsigned char*, std::size_t*);
+void* APS5_VABI sceSslGetSubjectName(int, void*);
+void* APS5_VABI sceSslGetIssuerName(int, void*);
+int APS5_VABI sceSslGetNameEntryCount(int, void*);
+int APS5_VABI sceSslGetNameEntryInfo(int, void*, int, char*, std::size_t, char*, std::size_t, std::size_t*);
+int APS5_VABI sceSslFreeSslCertName(int, void*);
 }
 
 namespace {
@@ -157,6 +163,102 @@ void ClientIdentity() {
     Check(sceSslTerm_nid_postfix(id) == 0, "identity term failed");
 }
 
+void CertificateReaders() {
+    const int id = sceSslInit_nid_postfix(1024 * 1024);
+    auto data = Data(RootPem);
+    auto* pointer = &data;
+    Check(sceSslLoadCert(id, 1, &pointer, nullptr, nullptr) == 0, "CA load failed");
+    SceSsl::CaList handles{};
+    Check(sceSslGetCaList(id, &handles) == 0 && handles.num == 1 && handles.certs[0], "CA handle absent");
+    void* cert = handles.certs[0];
+
+    std::size_t querySize = 0;
+    Check(sceSslGetSerialNumber(id, cert, nullptr, &querySize) == 0 && querySize == 3, "query serial size failed");
+    querySize = 0;
+    unsigned char shortBuf[2]{};
+    Check(sceSslGetSerialNumber(id, cert, shortBuf, &querySize) == 0 && querySize == 3, "zero-len serial query failed");
+    querySize = sizeof(shortBuf);
+    Check(sceSslGetSerialNumber(id, cert, shortBuf, &querySize) == static_cast<int>(0x8095177a) && querySize == 3,
+        "short serial buffer accepted");
+    unsigned char serialData[8]{};
+    std::size_t serialLen = sizeof(serialData);
+    Check(sceSslGetSerialNumber(id, cert, serialData, &serialLen) == 0, "get serial failed");
+    Check(serialLen == 3, "serial length mismatch");
+    Check(serialData[0] == 0x00 && serialData[1] == 0x80 && serialData[2] == 0xa1, "serial bytes mismatch");
+    Check(sceSslGetSerialNumber(id, cert, serialData, nullptr) == static_cast<int>(0x8095177a), "null serial length accepted");
+    Throws([&] { sceSslGetSerialNumber(id, nullptr, serialData, &serialLen); });
+    void* fake = &serialLen;
+    Throws([&] { sceSslGetSerialNumber(id, fake, serialData, &serialLen); });
+    Throws([&] { sceSslGetSerialNumber(9999, cert, serialData, &serialLen); });
+
+    void* subject = sceSslGetSubjectName(id, cert);
+    Check(subject != nullptr, "get subject failed");
+    void* issuer = sceSslGetIssuerName(id, cert);
+    Check(issuer != nullptr, "get issuer failed");
+    Throws([&] { sceSslGetSubjectName(id, nullptr); });
+    Throws([&] { sceSslGetIssuerName(id, nullptr); });
+    Throws([&] { sceSslGetSubjectName(id, fake); });
+    Throws([&] { sceSslGetIssuerName(id, fake); });
+    Throws([&] { sceSslGetSubjectName(9999, cert); });
+    Throws([&] { sceSslGetIssuerName(9999, cert); });
+
+    Check(sceSslGetNameEntryCount(id, subject) == 3, "subject entry count mismatch");
+    Check(sceSslGetNameEntryCount(id, issuer) == 3, "issuer entry count mismatch");
+    Check(sceSslGetNameEntryCount(id, nullptr) == static_cast<int>(0x8095177a), "null cert name count accepted");
+    Throws([&] { sceSslGetNameEntryCount(id, fake); });
+    Throws([&] { sceSslGetNameEntryCount(9999, subject); });
+
+    char oid[32]{};
+    char val[64]{};
+    std::size_t vlen = 0;
+    Check(sceSslGetNameEntryInfo(id, subject, 0, oid, sizeof(oid), val, sizeof(val), &vlen) == 0, "entry 0 info failed");
+    Check(std::strcmp(oid, "C") == 0 && std::strcmp(val, "GB") == 0 && vlen == 2, "entry 0 mismatch");
+    Check(sceSslGetNameEntryInfo(id, subject, 1, oid, sizeof(oid), val, sizeof(val), &vlen) == 0, "entry 1 info failed");
+    Check(std::strcmp(oid, "O") == 0 && std::strcmp(val, "AnyPS5 Tests") == 0 && vlen == 12, "entry 1 mismatch");
+    Check(sceSslGetNameEntryInfo(id, subject, 2, oid, sizeof(oid), val, sizeof(val), &vlen) == 0, "entry 2 info failed");
+    Check(std::strcmp(oid, "CN") == 0 && std::strcmp(val, "AnyPS5 fixture root") == 0 && vlen == 19, "entry 2 mismatch");
+
+    char smallVal[4]{};
+    std::size_t fullLen = 0;
+    Check(sceSslGetNameEntryInfo(id, subject, 1, nullptr, 0, smallVal, sizeof(smallVal), &fullLen) == 0, "truncated query failed");
+    Check(std::strcmp(smallVal, "Any") == 0 && fullLen == 12, "buffer truncation mismatch");
+
+    Check(sceSslGetNameEntryInfo(id, subject, -1, oid, sizeof(oid), val, sizeof(val), &vlen) == static_cast<int>(0x8095177a), "negative index accepted");
+    Check(sceSslGetNameEntryInfo(id, subject, 3, oid, sizeof(oid), val, sizeof(val), &vlen) == static_cast<int>(0x8095177a), "out of bounds index accepted");
+    Check(sceSslGetNameEntryInfo(id, nullptr, 0, oid, sizeof(oid), val, sizeof(val), &vlen) == static_cast<int>(0x8095177a), "null certName accepted");
+    Throws([&] { sceSslGetNameEntryInfo(id, fake, 0, oid, sizeof(oid), val, sizeof(val), &vlen); });
+    Throws([&] { sceSslGetNameEntryInfo(9999, subject, 0, oid, sizeof(oid), val, sizeof(val), &vlen); });
+
+    Check(sceSslFreeSslCertName(id, subject) == 0, "free subject name failed");
+    Check(sceSslFreeSslCertName(id, issuer) == 0, "free issuer name failed");
+    Check(sceSslFreeSslCertName(id, nullptr) == static_cast<int>(0x8095177a), "null cert name free accepted");
+    Throws([&] { sceSslFreeSslCertName(id, subject); });
+    Throws([&] { sceSslFreeSslCertName(id, fake); });
+    Throws([&] { sceSslFreeSslCertName(9999, subject); });
+
+    Check(sceSslFreeCaList(id, &handles) == 0, "free ca list failed");
+    Check(sceSslTerm_nid_postfix(id) == 0, "term failed");
+    Throws([&] { sceSslGetSerialNumber(id, cert, serialData, &serialLen); });
+    Throws([&] { sceSslGetSubjectName(id, cert); });
+    Throws([&] { sceSslGetIssuerName(id, cert); });
+
+    const int id2 = sceSslInit_nid_postfix(1024 * 1024);
+    Check(sceSslLoadCert(id2, 1, &pointer, nullptr, nullptr) == 0, "CA load failed");
+    SceSsl::CaList handles2{};
+    Check(sceSslGetCaList(id2, &handles2) == 0, "get ca list failed");
+    void* cert2 = handles2.certs[0];
+    void* subject2 = sceSslGetSubjectName(id2, cert2);
+    Check(subject2 != nullptr, "get subject 2 failed");
+    Check(sceSslFreeCaList(id2, &handles2) == 0, "free ca list failed");
+    Check(sceSslUnloadCert(id2) == 0, "unload failed");
+    Throws([&] { sceSslGetSerialNumber(id2, cert2, serialData, &serialLen); });
+    Throws([&] { sceSslGetSubjectName(id2, cert2); });
+    Throws([&] { sceSslGetIssuerName(id2, cert2); });
+    Check(sceSslTerm_nid_postfix(id2) == 0, "term failed");
+    Throws([&] { sceSslGetNameEntryCount(id2, subject2); });
+    Throws([&] { sceSslFreeSslCertName(id2, subject2); });
+}
+
 }
 
 int main() {
@@ -165,6 +267,7 @@ int main() {
         AtomicFailures();
         ClientIdentity();
         ConnectionLifetime();
+        CertificateReaders();
         std::vector<std::thread> workers;
         for (int i = 0; i < 3; ++i) workers.emplace_back([] { for (int n = 0; n < 4; ++n) Lifecycle(); });
         for (auto& worker : workers) worker.join();

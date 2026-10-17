@@ -135,9 +135,16 @@ void run() {
             input[0].resource.fields[2] = records;
             Require(live.TryGet(100, input) == stored, "record count rebuilt a vertex layout");
             Require(VertexBufferReadSize(input[0], 5, 1) == 176u, "record count changed the direct fetch extent");
-            if (records != 0) Require(VertexBufferExtent(input[0]) == 32u * records, "cached layout froze the indirect descriptor extent");
-            else fails([&] { VertexBufferExtent(input[0]); });
+            if (records != 0) {
+                Require(VertexBufferExtent(input[0]) == 32u * (records - 1u) + 16u, "cached layout froze the indirect descriptor extent");
+                Require(VertexBufferExtent(input[0]) == VertexBufferReadSize(input[0], records - 1u, 1), "the indirect extent is not the fetch of the last record");
+            } else {
+                fails([&] { VertexBufferExtent(input[0]); });
+            }
         }
+        auto last = attribute();
+        last.resource.fields[0] += 16u;
+        Require(16u + VertexBufferExtent(last) == 32u * 128u, "the last element of each record was copied past the descriptor's records");
         input[0].resource.fields[1] = 0;
         input[0].resource.fields[3] |= 2u << 28u;
         input[0].resource.fields[2] = 0;

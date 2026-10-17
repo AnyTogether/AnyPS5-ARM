@@ -40,20 +40,22 @@ def entries(build):
     return json.loads(result.stdout)
 
 
-def entry_key(entry):
+def entry_key(entry, root):
     directory = Path(entry["directory"]).resolve()
     source = Path(entry["file"])
     if not source.is_absolute():
         source = directory / source
     source = source.resolve()
-    common = Path(os.path.commonpath([str(directory), str(source)]))
-    return os.path.relpath(source, common).replace(os.sep, "/")
+    try:
+        return source.relative_to(Path(root).resolve()).as_posix()
+    except ValueError:
+        return source.as_posix()
 
 
-def index(build):
+def index(build, root):
     commands = {}
     for entry in entries(build):
-        commands.setdefault(entry_key(entry), entry)
+        commands.setdefault(entry_key(entry, root), entry)
     return commands
 
 
@@ -68,9 +70,36 @@ def changed(root, base):
     return [name for name in names if name.endswith(CPP)]
 
 
+def command_arguments(command):
+    if os.name != "nt":
+        return shlex.split(command)
+    import ctypes
+    from ctypes import wintypes
+    count = ctypes.c_int()
+    split = ctypes.WinDLL("shell32", use_last_error=True).CommandLineToArgvW
+    split.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int))
+    split.restype = ctypes.POINTER(wintypes.LPWSTR)
+    free = ctypes.WinDLL("kernel32", use_last_error=True).LocalFree
+    free.argtypes = (wintypes.HLOCAL,)
+    free.restype = wintypes.HLOCAL
+    arguments = split(command, ctypes.byref(count))
+    if not arguments:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return [arguments[index] for index in range(count.value)]
+    finally:
+        free(arguments)
+
+
 def syntax_only(entry, source):
-    arguments = shlex.split(entry["command"])
+    arguments = command_arguments(entry["command"])
     directory = Path(entry["directory"])
+    return syntax_arguments(arguments, directory, source)
+
+
+def syntax_arguments(arguments, directory, source):
+    if not isinstance(arguments, list) or not arguments or any(not isinstance(argument, str) for argument in arguments) or not arguments[0]:
+        raise ValueError("arguments must be a nonempty list of strings with an executable")
     wanted = source.resolve()
     trimmed = []
     index = 0
@@ -96,7 +125,7 @@ def syntax_only(entry, source):
 
 
 def check(root, build, files):
-    commands = index(build)
+    commands = index(build, root)
     checked = 0
     failed = 0
     for file in files:
@@ -107,7 +136,9 @@ def check(root, build, files):
             print(f"{name}: no compile command in {build}", file=sys.stderr)
             continue
         checked += 1
-        result = subprocess.run(syntax_only(entry, source), cwd=entry["directory"],
+        command = (syntax_arguments(entry["arguments"], Path(entry["directory"]), source)
+                   if "arguments" in entry else syntax_only(entry, source))
+        result = subprocess.run(command, cwd=entry["directory"],
                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0:
             continue

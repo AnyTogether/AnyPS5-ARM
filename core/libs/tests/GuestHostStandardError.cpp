@@ -11,6 +11,9 @@
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 extern "C" {
 FileStream* APS5_VABI freopen_nid_postfix(const char*, const char*, FileStream*);
@@ -31,6 +34,12 @@ static constexpr const char* HostTerminateReport = "libc++abi: terminating due t
 #else
 static constexpr const char* HostTerminateReport = "  what():  report kept\n";
 #endif
+
+static void SkipCrashHandler() {
+#ifdef __linux__
+    Require(::prctl(PR_SET_DUMPABLE, 0) == 0);
+#endif
+}
 
 enum class Redirect { Duplicate, Reopen };
 
@@ -63,7 +72,10 @@ static Outcome Run(Redirect redirect, const std::filesystem::path& probe, bool t
         ::close(host[1]);
         RedirectGuest(redirect, probe);
         std::fputs("host\n", stderr);
-        if (terminate) throw std::runtime_error("report kept");
+        if (terminate) {
+            SkipCrashHandler();
+            throw std::runtime_error("report kept");
+        }
         if (redirect == Redirect::Reopen && fflush_nid_postfix(__stderrp_nid_postfix) != 0) ::_exit(71);
         ::_exit(0);
     }

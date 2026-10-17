@@ -46,13 +46,14 @@ void checkRuntimeDependencies() {
             throw std::runtime_error("Incorrect Windows runtime dependency visibility");
     };
     check({}, {});
-    check({"libkernel.prx"}, {"libkernel.prx"});
+    check({"libkernel.prx"}, {"libkernel.prx", "libc.prx"});
+    check({"libkernel.prx", "libc.prx"}, {"libkernel.prx", "libc.prx"});
     check({"libSceLibcInternal.prx", "libkernel.prx"},
           {"libSceLibcInternal.prx", "libkernel.prx", "libc.prx"});
     check({"libc.prx", "libSceLibcInternal.prx"},
           {"libc.prx", "libSceLibcInternal.prx"});
     check({"libSceVideoOut.prx", "libkernel.prx", "libSceVideoOut.prx"},
-          {"libSceVideoOut.prx", "libkernel.prx"});
+          {"libSceVideoOut.prx", "libkernel.prx", "libc.prx"});
     check({"libSceVideoOut.prx", "libSceVideoOut.prx"}, {"libSceVideoOut.prx"});
 }
 

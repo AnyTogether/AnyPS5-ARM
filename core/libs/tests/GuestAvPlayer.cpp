@@ -17,6 +17,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include "SceTypes.hpp"
@@ -1033,8 +1034,22 @@ void TestPs5ExtendedInitLayout() {
         AvPlayerInternal* player = nullptr;
         Check(sceAvPlayerInitEx(reinterpret_cast<const AvPlayerInitDataEx*>(raw.data()), &player) == 0 && player != nullptr, "PS5 extended init failed");
         Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "add source after the PS5 extended init failed");
+        AvPlayerStreamInfo audioInfo{};
+        Check(sceAvPlayerGetStreamInfo(player, EnglishAudioStream, &audioInfo) == 0, "PS5 audio stream info failed");
+        Check(audioInfo.type == 2, "PS5 audio stream must use type 2 so Unity enables it");
+        AvPlayerStreamInfoEx audioInfoEx{};
+        audioInfoEx.this_size = sizeof(audioInfoEx);
+        Check(sceAvPlayerGetStreamInfoEx(player, EnglishAudioStream, &audioInfoEx) == 0 && audioInfoEx.type == 2, "PS5 extended audio stream type is incorrect");
+        AvPlayerStreamInfoEx videoInfo{};
+        videoInfo.this_size = sizeof(videoInfo);
+        Check(sceAvPlayerGetStreamInfoEx(player, VideoStream, &videoInfo) == 0, "PS5 video stream info failed");
+        double frameRate = 0;
+        std::memcpy(&frameRate, reinterpret_cast<const std::uint8_t*>(&videoInfo) + 0x40, sizeof(frameRate));
+        Check(std::fabs(frameRate - FrameRate) < 0.01, "PS5 extended video frame rate at 0x40 is missing");
         if (autoStart) {
             Check(WaitFor([&] { return events.Seen(EventPlay); }), "auto start at 0x74 of the PS5 extended init did not start playback");
+            AvPlayerFrameInfo audioFrame{};
+            Check(WaitFor([&] { return sceAvPlayerGetAudioData(player, &audioFrame) != 0; }), "PS5 auto start did not enable audio");
         } else {
             Check(WaitFor([&] { return events.Seen(EventReady); }), "ready event missing after the PS5 extended init");
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1043,6 +1058,10 @@ void TestPs5ExtendedInitLayout() {
             Check(sceAvPlayerStart(player) == 0, "start after the PS5 extended init failed");
         }
         Check(WaitFor([&] { return TextureCount() == Buffers + DecodeAheadBuffers; }), "video frame buffer count at 0x228 of the PS5 extended init not used");
+        AvPlayerFrameInfoEx videoFrame{};
+        Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &videoFrame) != 0; }), "PS5 playback did not deliver video");
+        std::memcpy(&frameRate, reinterpret_cast<const std::uint8_t*>(&videoFrame) + 0x48, sizeof(frameRate));
+        Check(std::fabs(frameRate - FrameRate) < 0.01, "PS5 video frame rate at 0x48 is missing");
         Check(sceAvPlayerClose(player) == 0, "close after the PS5 extended init failed");
     };
     run(false);
@@ -1236,6 +1255,51 @@ void TestLoopWarningSharedByStreams() {
     Check(sceAvPlayerClose(player) == 0, "shared loop timing close failed");
 }
 
+void TestNoSyncVideoCanLeadAudioClock() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "no-sync init failed");
+    Check(sceAvPlayerSetAvSyncMode(player, 1) == 0, "no-sync mode rejected");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "no-sync source failed");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "no-sync video failed");
+    Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "no-sync audio failed");
+    Check(sceAvPlayerStart(player) == 0, "no-sync start failed");
+    AvPlayerFrameInfo audio{};
+    Check(WaitFor([&] { return sceAvPlayerGetAudioData(player, &audio) != 0; }), "no-sync audio unavailable");
+    std::uint64_t lead = 0;
+    const bool available = WaitFor([&] {
+        AvPlayerFrameInfoEx video{};
+        if (!sceAvPlayerGetVideoDataEx(player, &video)) return false;
+        CheckVideoFrame(video);
+        const auto clock = sceAvPlayerCurrentTime(player);
+        if (video.timestamp > clock) lead = std::max(lead, video.timestamp - clock);
+        return lead >= 100;
+    }, 500);
+    Check(sceAvPlayerClose(player) == 0, "no-sync close failed");
+    std::printf("No-sync video lead: %llu ms\n", static_cast<unsigned long long>(lead));
+    Check(available, "no-sync video was gated by the audio-backed player clock");
+    std::lock_guard lock(allocations.mutex);
+    Check(allocations.blocks.empty(), "no-sync allocations leaked");
+}
+
+void TestLoopWarningWaitsForPlayback() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "loop warning init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "loop warning source failed");
+    Check(sceAvPlayerSetLooping(player, 1) == 0, "loop warning setting failed");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "loop warning video failed");
+    Check(sceAvPlayerEnableStream(player, EnglishAudioStream) == 0, "loop warning audio failed");
+    Check(sceAvPlayerStart(player) == 0, "loop warning start failed");
+    AvPlayerFrameInfoEx frame{};
+    Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "loop warning first frame missing");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    Check(!events.Seen(EventWarning, LoopingBack), "loop warning arrived while the first playback still had buffered audio and video");
+    Check(sceAvPlayerClose(player) == 0, "loop warning close failed");
+}
+
 void TestEofStopLatency() {
     constexpr int Rounds = 9;
     std::array<std::chrono::steady_clock::duration, Rounds> elapsed{};
@@ -1291,10 +1355,69 @@ void TestEofStopLatency() {
     Check(median < std::chrono::milliseconds(10), "eof stop median " + std::to_string(medianMs) + " ms exceeds 10 ms");
 }
 
+struct ClosingEvents {
+    std::mutex mutex;
+    AvPlayerInternal* player = nullptr;
+    AvPlayerInternal* replacement = nullptr;
+    std::int32_t closeEvent;
+    bool closed = false;
+};
+
+void APS5_VABI CloseOnEvent(void* object, std::int32_t id, std::int32_t, void*) {
+    auto& events = *static_cast<ClosingEvents*>(object);
+    if (id != events.closeEvent) return;
+    std::lock_guard lock(events.mutex);
+    Check(sceAvPlayerClose(events.player) == 0, "close from event callback failed");
+    events.player = nullptr;
+    AvPlayerInitData init = InitData(nullptr);
+    events.replacement = sceAvPlayerInit(&init);
+    Check(events.replacement != nullptr, "replacement player init from callback failed");
+    events.closed = true;
 }
 
-int main() {
+void TestCloseFromEventCallback(std::int32_t event) {
+    ClosingEvents events;
+    events.closeEvent = event;
+    AvPlayerInitData init = InitData(nullptr);
+    init.event_replacement = {&events, CloseOnEvent};
+    init.auto_start = event == EventStop;
+    {
+        std::lock_guard lock(events.mutex);
+        events.player = sceAvPlayerInit(&init);
+        Check(events.player != nullptr, "callback-close init failed");
+        Check(sceAvPlayerAddSource(events.player, "/app0/avplayer.mp4") == 0, "callback-close source failed");
+    }
+    Check(WaitFor([&] {
+        std::lock_guard lock(events.mutex);
+        if (events.closed) return true;
+        if (event == EventStop) {
+            AvPlayerFrameInfoEx video{};
+            AvPlayerFrameInfo audio{};
+            if (sceAvPlayerGetVideoDataEx(events.player, &video)) CheckVideoFrame(video);
+            if (sceAvPlayerGetAudioData(events.player, &audio)) CheckEnglishAudio(audio);
+        }
+        return false;
+    }), "event callback did not finish closing the player");
+    {
+        std::lock_guard lock(events.mutex);
+        Check(sceAvPlayerClose(events.replacement) == 0, "replacement player close failed");
+    }
+    std::lock_guard lock(allocations.mutex);
+    Check(allocations.blocks.empty(), "callback close leaked media allocations");
+}
+
+}
+
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::strcmp(argv[1], "--callback-close") == 0) {
+            WriteMovie();
+            TestCloseFromEventCallback(EventReady);
+            TestCloseFromEventCallback(EventStop);
+            std::puts("AvPlayer callback close tests passed");
+            return 0;
+        }
+        Check(argc == 1, "unknown AvPlayer test arguments");
         WriteMovie();
         TestLoopWarningAtPlayback();
         TestAudioLoopWarningAtPlayback();
@@ -1310,6 +1433,8 @@ int main() {
         TestAutoStartKeepsStartedPlayback();
         TestRestartAfterPausedJumpKeepsClockRunning();
         TestUnsyncedVideoKeepsUpWithAudio();
+        TestNoSyncVideoCanLeadAudioClock();
+        TestLoopWarningWaitsForPlayback();
         TestEofStopLatency();
         std::puts("AvPlayer tests passed");
         return 0;

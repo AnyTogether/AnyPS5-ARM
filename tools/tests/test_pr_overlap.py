@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pr_overlap
@@ -238,7 +239,7 @@ class UnicodePathTests(unittest.TestCase):
                      "-c", "commit.gpgsign=false", *args], cwd=root,
                     capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
 
-            filename = "core/libs/prx/libSceExample/caf\u00e9.cpp"
+            filename = "core/libs/prx/libSceExample/caf\u00e9 #1 (%20).cpp"
             source = root / filename
             source.parent.mkdir(parents=True)
             source.write_text("int value = 0;\n", encoding="utf-8")
@@ -261,6 +262,13 @@ class UnicodePathTests(unittest.TestCase):
                 self.assertEqual(left["files"], {filename})
                 self.assertEqual(right["files"], {filename})
                 self.assertEqual(pr_overlap.conflicts(left, right), {filename: [(1, 1)]})
+                blob = f"https://github.com/owner/project/blob/{base}"
+                message = pr_overlap.report({7: {"conflicts": pr_overlap.conflicts(left, right), "added": set()}}, blob)
+                link = message.split("[L1](", 1)[1].split(")", 1)[0]
+                parsed = urlsplit(link)
+                self.assertEqual(unquote(parsed.path), f"/owner/project/blob/{base}/{filename}")
+                self.assertEqual(parsed.fragment, "L1")
+                self.assertEqual(parsed.query, "")
             finally:
                 os.chdir(previous)
 

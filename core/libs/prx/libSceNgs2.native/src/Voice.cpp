@@ -514,6 +514,10 @@ int APS5_VABI sceNgs2PanGetVolumeMatrix(Ngs2PanWork* work, const Ngs2PanParam* p
     return Ngs2PanGetVolumeMatrix(work, params, num_params, matrix_format, out_volume_matrix);
 }
 
+int APS5_VABI sceNgs2GeomApply(const Ngs2GeomListenerWork* listener, const Ngs2GeomSourceParam* source, Ngs2GeomAttribute* out_attrib, std::uint32_t flags) {
+    return Ngs2GeomApply(listener, source, out_attrib, flags);
+}
+
 int APS5_VABI sceNgs2GeomResetListenerParam(Ngs2GeomListenerParam* out_listener_param) {
     return Ngs2GeomResetListenerParam(out_listener_param);
 }

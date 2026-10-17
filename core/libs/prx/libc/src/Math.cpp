@@ -214,6 +214,28 @@ float FreeBsdAcosf(float x) {
 }
 #endif
 
+template<typename T>
+T GuestFmin(T x, T y) {
+    if (std::isnan(x))
+        return y;
+    if (std::isnan(y))
+        return x;
+    if (std::signbit(x) != std::signbit(y))
+        return std::signbit(x) ? x : y;
+    return x < y ? x : y;
+}
+
+template<typename T>
+T GuestFmax(T x, T y) {
+    if (std::isnan(x))
+        return y;
+    if (std::isnan(y))
+        return x;
+    if (std::signbit(x) != std::signbit(y))
+        return std::signbit(x) ? y : x;
+    return x < y ? y : x;
+}
+
 }
 
 extern "C" {
@@ -309,6 +331,12 @@ float APS5_VABI truncf_nid_postfix(float x) { return std::trunc(x); }
 float APS5_VABI ceilf_nid_postfix(float x) { return std::ceil(x); }
 float APS5_VABI floorf_nid_postfix(float x) { return std::floor(x); }
 double APS5_VABI fma_nid_postfix(double x, double y, double z) { return std::fma(x, y, z); }
+double APS5_VABI fmin_nid_postfix(double x, double y) { return GuestFmin(x, y); }
+float APS5_VABI fminf_nid_postfix(float x, float y) { return GuestFmin(x, y); }
+long double APS5_VABI fminl_nid_postfix(long double x, long double y) { return GuestFmin(x, y); }
+double APS5_VABI fmax_nid_postfix(double x, double y) { return GuestFmax(x, y); }
+float APS5_VABI fmaxf_nid_postfix(float x, float y) { return GuestFmax(x, y); }
+long double APS5_VABI fmaxl_nid_postfix(long double x, long double y) { return GuestFmax(x, y); }
 long double APS5_VABI acosl_nid_postfix(long double x) { return std::acos(x); }
 
 long double APS5_VABI asinl_nid_postfix(long double x) {

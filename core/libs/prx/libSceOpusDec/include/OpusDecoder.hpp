@@ -12,10 +12,12 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libswresample/swresample.h>
 }
 
 namespace {
@@ -54,13 +56,15 @@ public:
     int CreateEx(std::uint32_t* context, void* state, int sampleRate, int channels) {
         if (!context || !state) fail("null context or state");
         GetSize(channels);
-        if (sampleRate != 48000) fail("sample rates other than 48000 Hz are not implemented");
+        if (sampleRate != 8000 && sampleRate != 12000 && sampleRate != 16000 && sampleRate != 24000 && sampleRate != 48000)
+            fail("sample rates other than 8000, 12000, 16000, 24000 and 48000 Hz are not supported");
         std::lock_guard lock(mutex);
         if (!contexts.contains(*context)) fail("unknown context");
         if (decoders.contains(state)) fail("state already owns a decoder");
         auto decoder = std::make_unique<Decoder>();
         decoder->context = *context;
         decoder->channels = channels;
+        decoder->sampleRate = sampleRate;
         const auto* codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
         if (!codec) fail("FFmpeg Opus decoder unavailable");
         decoder->codec = avcodec_alloc_context3(codec);
@@ -68,6 +72,13 @@ public:
         av_channel_layout_default(&decoder->codec->ch_layout, channels);
         decoder->codec->sample_rate = 48000;
         if (avcodec_open2(decoder->codec, codec, nullptr) < 0) fail("cannot open FFmpeg decoder");
+        if (sampleRate != 48000) {
+            AVChannelLayout layout{};
+            av_channel_layout_default(&layout, channels);
+            if (swr_alloc_set_opts2(&decoder->resampler, &layout, AV_SAMPLE_FMT_FLT, sampleRate, &layout, AV_SAMPLE_FMT_FLT, 48000, 0, nullptr) < 0 ||
+                swr_init(decoder->resampler) < 0)
+                fail("cannot open FFmpeg resampler");
+        }
         decoders.emplace(state, std::move(decoder));
         return 0;
     }
@@ -80,7 +91,7 @@ public:
         if (found == decoders.end()) fail("unknown decoder state");
         auto& decoder = *found->second;
         if (celtOnly && (data[0] >> 3) < 16) fail("SILK and hybrid packets are not implemented");
-        const int samples = packetSamples(data, bytes);
+        const int samples = packetSamples(data, bytes) / (48000 / decoder.sampleRate);
         const int outputBytes = samples * decoder.channels * 2;
         if (capacity / 2 * 2 < outputBytes) fail("PCM buffer is too small");
         std::unique_ptr<AVPacket, void (*)(AVPacket*)> packet(av_packet_alloc(), [](AVPacket* p) { av_packet_free(&p); });
@@ -93,12 +104,26 @@ public:
         if (frame->ch_layout.nb_channels != decoder.channels || frame->sample_rate != 48000 ||
             (format != AV_SAMPLE_FMT_FLTP && format != AV_SAMPLE_FMT_FLT))
             fail("unexpected FFmpeg PCM format");
+        std::vector<float> decoded;
+        decoded.reserve(static_cast<std::size_t>(frame->nb_samples) * decoder.channels);
         for (int sample = 0; sample < frame->nb_samples; ++sample) {
             for (int channel = 0; channel < decoder.channels; ++channel) {
                 const auto* source = reinterpret_cast<const float*>(frame->extended_data[format == AV_SAMPLE_FMT_FLTP ? channel : 0]);
-                decoder.pending.push_back(source[format == AV_SAMPLE_FMT_FLTP ? sample : sample * decoder.channels + channel]);
+                decoded.push_back(source[format == AV_SAMPLE_FMT_FLTP ? sample : sample * decoder.channels + channel]);
             }
         }
+        if (decoder.resampler) {
+            const int capacitySamples = swr_get_out_samples(decoder.resampler, frame->nb_samples);
+            if (capacitySamples < 0) fail("FFmpeg resampler rejected the frame");
+            std::vector<float> resampled(static_cast<std::size_t>(capacitySamples) * decoder.channels);
+            auto* output = reinterpret_cast<std::uint8_t*>(resampled.data());
+            const auto* input = reinterpret_cast<const std::uint8_t*>(decoded.data());
+            const int converted = swr_convert(decoder.resampler, &output, capacitySamples, &input, frame->nb_samples);
+            if (converted < 0) fail("FFmpeg resampler rejected the frame");
+            resampled.resize(static_cast<std::size_t>(converted) * decoder.channels);
+            decoded = std::move(resampled);
+        }
+        decoder.pending.insert(decoder.pending.end(), decoded.begin(), decoded.end());
         const auto count = static_cast<std::size_t>(samples) * decoder.channels;
         if (decoder.pending.size() < count) decoder.pending.insert(decoder.pending.begin(), count - decoder.pending.size(), 0.0f);
         for (std::size_t index = 0; index < count; ++index) {
@@ -119,9 +144,14 @@ private:
     struct Decoder {
         std::uint32_t context;
         int channels;
+        int sampleRate;
         AVCodecContext* codec = nullptr;
+        SwrContext* resampler = nullptr;
         std::vector<float> pending;
-        ~Decoder() { avcodec_free_context(&codec); }
+        ~Decoder() {
+            swr_free(&resampler);
+            avcodec_free_context(&codec);
+        }
     };
 
     const char* name;

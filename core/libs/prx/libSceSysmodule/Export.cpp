@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -37,24 +38,87 @@ void* openHostModule(const char* name) {
     return dlopen_nid_postfix(relative.c_str(), kRtldNow);
 }
 
-bool fillModuleInfoForUnwind(std::uint64_t addr, int flags, ModuleInfoForUnwind* info) {
 #ifdef _WIN32
-    (void)flags;
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi))) {
-        return false;
-    }
+struct ImageRegion {
+    std::uint64_t end = 0;
+    std::uintptr_t image = 0;
+    DWORD stamp = 0;
+    DWORD size = 0;
+    std::string name;
+};
+
+std::mutex gRegionsMutex;
+std::map<std::uint64_t, ImageRegion> gRegions;
+
+bool imageIdentity(std::uintptr_t image, DWORD& stamp, DWORD& size) {
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+    stamp = nt->FileHeader.TimeDateStamp;
+    size = nt->OptionalHeader.SizeOfImage;
+    return true;
+}
+
+std::uintptr_t loaderImage(std::uint64_t addr) {
+    PVOID image = nullptr;
+    if (RtlPcToFileHeader(reinterpret_cast<PVOID>(addr), &image) == nullptr) return 0;
+    return reinterpret_cast<std::uintptr_t>(image);
+}
+
+void writeUnwindRegion(std::uint64_t begin, std::uint64_t size, const std::string& name, ModuleInfoForUnwind* info) {
     info->st_size = sizeof(ModuleInfoForUnwind);
     info->eh_frame_hdr_addr = 0;
     info->eh_frame_addr = 0;
     info->eh_frame_size = 0;
-    info->seg0_addr = reinterpret_cast<std::uint64_t>(mbi.BaseAddress);
-    info->seg0_size = mbi.RegionSize;
+    info->seg0_addr = begin;
+    info->seg0_size = size;
+    std::strncpy(info->name, name.c_str(), sizeof(info->name) - 1);
+    info->name[sizeof(info->name) - 1] = '\0';
+}
+
+bool fillCachedImageRegion(std::uint64_t addr, std::uintptr_t image, ModuleInfoForUnwind* info) {
+    std::lock_guard lock(gRegionsMutex);
+    auto found = gRegions.upper_bound(addr);
+    if (found == gRegions.begin()) return false;
+    --found;
+    const auto& region = found->second;
+    if (addr >= region.end) return false;
+    DWORD stamp = 0;
+    DWORD size = 0;
+    if (region.image != image || !imageIdentity(image, stamp, size) || stamp != region.stamp || size != region.size) {
+        gRegions.erase(found);
+        return false;
+    }
+    constexpr std::uint64_t page = 4096;
+    const std::uint64_t begin = addr & ~(page - 1);
+    writeUnwindRegion(begin, region.end - begin, region.name, info);
+    return true;
+}
+#endif
+
+bool fillModuleInfoForUnwind(std::uint64_t addr, int flags, ModuleInfoForUnwind* info) {
+#ifdef _WIN32
+    (void)flags;
+    const auto image = loaderImage(addr);
+    if (image != 0 && fillCachedImageRegion(addr, image, info)) return true;
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi))) {
+        return false;
+    }
     char path[4096] = {};
     DWORD len = GetMappedFileNameA(GetCurrentProcess(), mbi.BaseAddress, path, sizeof(path) - 1);
     path[len] = '\0';
-    std::strncpy(info->name, path, sizeof(info->name) - 1);
-    info->name[sizeof(info->name) - 1] = '\0';
+    const auto begin = reinterpret_cast<std::uint64_t>(mbi.BaseAddress);
+    writeUnwindRegion(begin, mbi.RegionSize, path, info);
+    ImageRegion region;
+    if (mbi.Type == MEM_IMAGE && image != 0 && imageIdentity(image, region.stamp, region.size) && begin >= image && begin + mbi.RegionSize <= image + region.size) {
+        region.end = begin + mbi.RegionSize;
+        region.image = image;
+        region.name = path;
+        std::lock_guard lock(gRegionsMutex);
+        gRegions.insert_or_assign(begin, std::move(region));
+    }
     return true;
 #else
     return sceKernelGetModuleInfoForUnwind(addr, flags, info) == 0;

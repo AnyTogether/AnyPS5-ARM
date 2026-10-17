@@ -37,9 +37,6 @@ extern "C" std::int32_t ModuleIdForImage_nid_no_patch(const void* native);
 namespace {
 
 constexpr char Caller[] = "sceKernelGetModuleInfoFromAddr";
-#ifdef __APPLE__
-constexpr std::uint32_t PF_R = 4;
-#endif
 constexpr char GuestModuleSuffix[] = ".guest.prx";
 constexpr std::uint64_t TerminatorSize = 4;
 constexpr std::int32_t ProtRead = 1;

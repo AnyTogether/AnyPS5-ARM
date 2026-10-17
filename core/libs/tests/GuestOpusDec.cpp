@@ -62,7 +62,7 @@ int main() {
     RequireThrows([&] { sceOpusDecCreateEx(&context, state.data(), 48000, 2); });
     RequireThrows([&] { sceOpusDecGetSize(3); });
     std::array<std::uint8_t, 640> unsupported{};
-    for (int rate : {8000, 12000, 16000, 24000})
+    for (int rate : {0, 22050, 44100, 96000})
         RequireThrows([&] { sceOpusDecCreateEx(&context, unsupported.data(), rate, 2); });
     std::array<std::int16_t, 1922> pcm{}, reference{};
     pcm.fill(12345);
@@ -99,6 +99,25 @@ int main() {
         Require(std::any_of(mono.begin() + 1, mono.end() - 1, [](auto value) { return value != 0; }));
         offset += bytes + 2;
     }
+    for (int rate : {8000, 12000, 16000, 24000}) {
+        std::array<std::uint8_t, 640> rateState{};
+        Require(sceOpusDecCreateEx(&context, rateState.data(), rate, 2) == 0);
+        const int samples = 960 * rate / 48000;
+        std::array<std::int16_t, 962> resampled{};
+        int peak = 0;
+        for (std::size_t at = 0, frame = 0; frame < 3; ++frame) {
+            const int bytes = OPUS_STEREO[at] | (OPUS_STEREO[at + 1] << 8);
+            resampled.fill(12345);
+            RequireThrows([&] { sceOpusDecDecode(rateState.data(), OPUS_STEREO + at + 2, bytes, resampled.data() + 1, samples * 4 - 1); });
+            Require(sceOpusDecDecode(rateState.data(), OPUS_STEREO + at + 2, bytes, resampled.data() + 1, samples * 4) == samples * 4);
+            Require(resampled[0] == 12345 && resampled[samples * 2 + 1] == 12345);
+            for (int index = 1; index <= samples * 2; ++index) peak = std::max(peak, std::abs(static_cast<int>(resampled[index])));
+            at += bytes + 2;
+        }
+        Require(peak > 900 && peak < 1200);
+        Require(sceOpusDecDestroy(rateState.data()) == 0);
+    }
+
     Require(sceOpusDecDestroy(state.data()) == 0);
     RequireThrows([&] { sceOpusDecDestroy(state.data()); });
     RequireThrows([&] { sceOpusDecDecode(state.data(), OPUS_STEREO + 2, 70, pcm.data(), 3840); });

@@ -749,6 +749,33 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual(data["unique_by_class"], {"implemented": 1, "stub": 0, "absent": 0, "module": 0})
         self.assertEqual(data["references"], 1)
 
+    def test_module_export_suffix_is_stripped_with_and_without_sections(self):
+        work = self.work
+        nid = nid_names.compute_nid("sceModuleCall")
+        (work.libs / "libSceA.prx").write_bytes(exporting())
+        (work.modules / "consumer.prx").write_bytes(build_elf([
+            (nid + "#import#module", 0, GLOBAL_FUNCTION)]))
+        provider = work.modules / "provider.prx"
+        registry, result = work.root / "game.json", work.root / "audit.json"
+        write_registry(registry, [])
+        symbols = [(nid + "#export#module", 1, GLOBAL_FUNCTION)]
+        for layout, image in (("sections", build_elf(symbols)),
+                              ("sysv", build_sectionless_elf(symbols)),
+                              ("gnu", build_sectionless_elf(symbols, gnu_hash=True))):
+            with self.subTest(layout=layout):
+                provider.write_bytes(image)
+                code, out, err = work.run(registry, "--json", str(result))
+                self.assertEqual((code, err), (0, ""))
+                record, = json.loads(result.read_text())["imports"]
+                self.assertEqual((record["nid"], record["class"], record["providers"]),
+                                 (nid, "implemented", ["provider.prx"]))
+                self.assertEqual(record["module"], "consumer.prx")
+        provider.write_bytes(exporting(nid + "other#export#module"))
+        code, out, err = work.run(registry, "--json", str(result))
+        self.assertEqual((code, err), (1, ""))
+        record, = json.loads(result.read_text())["imports"]
+        self.assertEqual((record["nid"], record["class"], record["providers"]), (nid, "absent", []))
+
     def test_clean_audit_exits_zero_and_empty_registry_is_empty(self):
         work = self.work
         (work.libs / "libSceA.prx").write_bytes(exporting("AAAAAAAAAAA"))

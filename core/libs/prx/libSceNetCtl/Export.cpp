@@ -50,12 +50,15 @@ static constexpr int NET_CTL_INFO_ETHER_ADDR = 2;
 static constexpr int NET_CTL_INFO_MTU = 3;
 static constexpr int NET_CTL_INFO_LINK = 4;
 static constexpr int NET_CTL_INFO_IP_CONFIG = 11;
+static constexpr int NET_CTL_INFO_DHCP_HOSTNAME = 12;
+static constexpr int NET_CTL_INFO_PPPOE_AUTH_NAME = 13;
 static constexpr int NET_CTL_INFO_IP_ADDRESS = 14;
 static constexpr int NET_CTL_INFO_NETMASK = 15;
 static constexpr int NET_CTL_INFO_DEFAULT_ROUTE = 16;
 static constexpr int NET_CTL_INFO_PRIMARY_DNS = 17;
 static constexpr int NET_CTL_INFO_SECONDARY_DNS = 18;
 static constexpr int NET_CTL_INFO_HTTP_PROXY_CONFIG = 19;
+static constexpr int NET_CTL_INFO_HTTP_PROXY_SERVER = 20;
 static constexpr int NET_CTL_INFO_HTTP_PROXY_PORT = 21;
 static constexpr std::uint32_t NET_CTL_DEVICE_WIRED = 0;
 static constexpr std::uint32_t NET_CTL_LINK_CONNECTED = 1;
@@ -435,6 +438,9 @@ int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
         case NET_CTL_INFO_PRIMARY_DNS: WriteInfoAddress(info, host.dns.size() > 0 ? host.dns[0] : in_addr{}); break;
         case NET_CTL_INFO_SECONDARY_DNS: WriteInfoAddress(info, host.dns.size() > 1 ? host.dns[1] : in_addr{}); break;
         case NET_CTL_INFO_HTTP_PROXY_CONFIG: WriteInfoWord(info, NET_CTL_HTTP_PROXY_OFF); break;
+        case NET_CTL_INFO_DHCP_HOSTNAME:
+        case NET_CTL_INFO_PPPOE_AUTH_NAME:
+        case NET_CTL_INFO_HTTP_PROXY_SERVER: std::memset(info->opaque, 0, sizeof(info->opaque)); break;
         default: throw std::runtime_error("sceNetCtlGetInfo: info code " + std::to_string(code) + " is not implemented");
     }
     return 0;

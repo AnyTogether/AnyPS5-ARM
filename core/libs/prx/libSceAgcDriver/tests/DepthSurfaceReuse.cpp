@@ -216,6 +216,9 @@ struct View {
     std::uint32_t tileMode = TileDepth64KB;
     std::uint32_t type = Type2D;
     std::uint32_t lastArray = 0;
+    std::uint32_t baseLevel = 0;
+    std::uint32_t lastLevel = 0;
+    std::uint32_t maxMip = 0;
 };
 
 std::array<std::uint32_t, 8> tsharp(const View& view) {
@@ -226,8 +229,9 @@ std::array<std::uint32_t, 8> tsharp(const View& view) {
     words[0] = static_cast<std::uint32_t>(base);
     words[1] = static_cast<std::uint32_t>((base >> 32u) & 0xffu) | ((view.format & 0x1ffu) << 20u) | ((widthMinus1 & 0x3u) << 30u);
     words[2] = ((widthMinus1 >> 2u) & 0xfffu) | ((heightMinus1 & 0x3fffu) << 14u);
-    words[3] = 4u | (5u << 3u) | (6u << 6u) | (7u << 9u) | ((view.tileMode & 0x1fu) << 20u) | ((view.type & 0xfu) << 28u);
+    words[3] = 4u | (5u << 3u) | (6u << 6u) | (7u << 9u) | ((view.baseLevel & 0xfu) << 12u) | ((view.lastLevel & 0xfu) << 16u) | ((view.tileMode & 0x1fu) << 20u) | ((view.type & 0xfu) << 28u);
     words[4] = view.lastArray & 0x1fffu;
+    words[5] = (view.maxMip & 0xfu) << 4u;
     return words;
 }
 
@@ -403,6 +407,8 @@ void RunDepthSurfaceReuseTests() {
     Require(lookup(context, {depth32, FormatR32Float, 512, 512, TileDepth64KB, Type2DArray, 5}) == nullptr, "a 2D array view of another extent over a depth surface must be read as reused memory");
     Require(lookup(context, {depth32, FormatR32Uint, 384, 384, TileRenderTarget64KB}) == nullptr, "an R32 uint view without a depth layout must be read as reused memory");
     Require(lookup(context, {depth16, FormatR32Float, 256, 256}) == nullptr, "an R32F view of a D16 surface's own extent must be read as reused memory");
+    Require(lookup(context, {depth32, FormatR32Float, 384, 384, TileDepth64KB, Type2D, 0, 0, 0, 4}) != nullptr, "the first level of a mipmapped R32F view of a D32 surface's own extent must sample its depth plane");
+    Require(lookup(context, {depth32, FormatR32Float, 384, 384, TileDepth64KB, Type2D, 0, 1, 1, 4}) == nullptr, "a view that starts past the first level of a D32 surface's own extent must be read as reused memory");
 
     Require(lookup(context, {stencil, FormatR8Uint, 320, 180}) != nullptr, "an 8-bit view of a stencil plane's own extent must sample the stencil plane");
     Require(lookup(context, {stencil, FormatR8G8B8A8Unorm, 320, 180, TileRenderTarget64KB}) == nullptr, "an RGBA8 view of a stencil plane's own extent must be read as reused memory");

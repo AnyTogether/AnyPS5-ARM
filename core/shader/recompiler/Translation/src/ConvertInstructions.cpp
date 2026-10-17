@@ -198,7 +198,12 @@ void TranslationContext::vCvtOffF32I4(const RdnaInstruction& inst) {
 void TranslationContext::vCvtPkrtzF16F32(const RdnaInstruction& inst) {
     const IrF32 lhs(*readOperand(sourceAt(inst, 0u), IrType::F32));
     const IrF32 rhs(*readOperand(sourceAt(inst, 1u), IrType::F32));
-    const IrU32 result(ir.Emit(IrOpcode::PackFloat2x16Rtz, IrType::U32, {&lhs.Value(), &rhs.Value()}));
+    IrU32 result(ir.Emit(IrOpcode::PackFloat2x16Rtz, IrType::U32, {&lhs.Value(), &rhs.Value()}));
+    if (floatMode.has_value() && (floatMode->floatMode & 0x80u) == 0u) {
+        const IrU32 low = flushF16Result(IrU32(ir.BitwiseAnd(result.Value(), ir.Constant(0xffffu))));
+        const IrU32 high = flushF16Result(IrU32(ir.ShiftRightLogical(result.Value(), ir.Constant(16u))));
+        result = packU16Lanes(low, high);
+    }
     writeOperand(inst.destination, &result.Value());
 }
 
@@ -229,7 +234,7 @@ void TranslationContext::vCvtPkU8F32(const RdnaInstruction& inst) {
 
 void TranslationContext::vPackB32F16(const RdnaInstruction& inst) {
     const auto half = [&](std::uint32_t index) {
-        const IrU32 bits = readF16Bits(sourceAt(inst, index));
+        const IrU32 bits = flushF16Input(readF16Bits(sourceAt(inst, index)));
         const IrU1 nan(ir.UGreaterThan(ir.BitwiseAnd(bits.Value(), ir.Constant(0x7fffu)), ir.Constant(0x7c00u)));
         return IrU32(ir.Select(nan.Value(), quietNan16(bits).Value(), bits.Value()));
     };

@@ -95,16 +95,19 @@ static void Advance(Ngs2Voice& voice, std::uint64_t frames) {
         if (block.streaming) {
             while (block.pieces.size() > 1 && block.cursor >= block.pieces.front().firstFrame + block.pieces.front().frames) block.pieces.erase(block.pieces.begin());
         }
-        if (block.cursor == block.info.num_samples || (block.streaming && !voice.acceptsBlocks && block.cursor == block.availableFrames)) Ngs2FinishBlock(voice);
+        if (block.cursor == block.info.num_samples || (block.streaming && !voice.acceptsBlocks && block.cursor == block.availableFrames)) {
+            if (!Ngs2FinishBlock(voice)) return;
+        }
     }
 }
 
 static void ConsumeSamples(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    const auto revision = voice.waveformRevision;
     const auto step = static_cast<std::uint64_t>(std::llround(voice.sampleRate * static_cast<double>(voice.pitch) / systemRate * PHASE_ONE));
     std::uint32_t written = 0;
     float current[NGS2_MAX_CHANNELS];
     float next[NGS2_MAX_CHANNELS];
-    for (; written < grain && voice.state == Ngs2PlayState::Playing && !voice.blocks.empty(); written++) {
+    for (; written < grain && voice.state == Ngs2PlayState::Playing && !voice.blocks.empty() && voice.waveformRevision == revision; written++) {
         ReadFrames(voice, current, next);
         const auto fraction = static_cast<float>(static_cast<double>(voice.phase) / PHASE_ONE);
         for (std::uint32_t channel = 0; channel < voice.channels; channel++) {
@@ -146,8 +149,14 @@ static void ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grai
 }
 
 static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    const auto channels = voice.channels;
     if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
     else ConsumeSamples(voice, grain, systemRate);
+    if (voice.channels != channels) {
+        voice.samples.assign(static_cast<std::size_t>(grain) * voice.channels, 0.0f);
+        voice.hasSamples = false;
+        return;
+    }
     for (auto& filter : voice.filters) {
         if (!filter.enabled || (!voice.hasSamples && !HasHistory(filter))) continue;
         ApplyFilter(voice, filter, grain);

@@ -63,6 +63,23 @@ def main():
                 assert result.returncode == 2 and message in result.stderr, (options, result.stderr)
                 assert not output.exists(), options
 
+            for index, (directory, executable) in enumerate((("Picker", "picker/picker.bin"), ("picker", "PICKER/picker.bin"), ("linked", "picker/picker.bin"))):
+                case = work / f"{windows}-identity-{index}"
+                case.mkdir()
+                insensitive = (work / f"{windows}-IDENTITY-{index}").exists()
+                if (directory == "linked" and os.name == "nt") or (executable != "picker/picker.bin" and not insensitive):
+                    continue
+                if directory == "linked":
+                    (case / "linked").symlink_to("picker", target_is_directory=True)
+                elif not insensitive:
+                    (case / directory).mkdir()
+                result, output = convert(case, windows, ["--module-dir", directory, "--executable", executable])
+                if insensitive or directory == "linked":
+                    assert result.returncode == 2 and "in a guest module directory" in result.stderr, (directory, executable, result.stderr)
+                    assert not output.exists(), (directory, executable)
+                else:
+                    assert result.returncode == 0, (directory, executable, result.stdout, result.stderr)
+
             case = work / f"{windows}-needed"
             (case / "Media" / "Modules").mkdir(parents=True)
             (case / "Media" / "Modules" / "needed.prx").write_bytes(module_with_symbol(True))
