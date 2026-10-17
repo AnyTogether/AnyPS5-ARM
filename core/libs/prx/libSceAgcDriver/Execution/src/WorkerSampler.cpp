@@ -11,9 +11,8 @@
 #include <map>
 #include <mutex>
 #include <pthread.h>
-#include <signal.h>
+#include <mach/mach.h>
 #include <string>
-#include <sys/ucontext.h>
 #include <thread>
 #include <vector>
 #endif
@@ -343,56 +342,45 @@ void SampleCurrentThread(const char*) {}
 namespace {
 
 // Debug aid: APS5_SAMPLE_WORKER=<file> samples the registered threads (queue 0's worker, the draw
-// committer) every millisecond with SIGPROF; the handler walks the interrupted frame pointers. Every
-// 20 s <file> gets each thread's hottest stacks as "module+offset" frames for atos.
+// committer) every millisecond: the sampler suspends each one, reads its x86 registers through Mach
+// (Rosetta reports the translated state) and walks its frame pointers, then resumes it before it
+// allocates anything. Every 20 s <file> gets each thread's hottest frames and stacks as
+// "module+offset" for atos. (SIGPROF does not work: Rosetta delivers it at system calls only.)
 constexpr int SampleDepth = 24;
-constexpr std::size_t RingSize = 1u << 15;
 constexpr int MaxThreads = 8;
 
-struct Sample {
-    std::atomic<std::uint32_t> ready{0};
-    int thread = 0;
-    int depth = 0;
-    std::uintptr_t pcs[SampleDepth] = {};
-};
-
 struct SampledThread {
-    pthread_t handle{};
+    thread_act_t port = MACH_PORT_NULL;
     std::uintptr_t stackLow = 0;
     std::uintptr_t stackHigh = 0;
     std::string name;
 };
 
-Sample* ring = nullptr;
-std::atomic<std::uint64_t> ringWrite{0};
 SampledThread threads[MaxThreads];
 std::atomic<int> threadCount{0};
-thread_local int ownSlot = -1;
 std::mutex registerMutex;
 std::string outputPath;
 std::thread samplerThread;
 std::atomic<bool> stopping{false};
 
-void OnSample(int, siginfo_t*, void* context) {
-    const int slot = ownSlot;
-    if (slot < 0 || ring == nullptr) return;
-    const auto& thread = threads[slot];
-    const auto* machine = static_cast<ucontext_t*>(context)->uc_mcontext;
-    auto& sample = ring[ringWrite.fetch_add(1, std::memory_order_relaxed) & (RingSize - 1)];
-    if (sample.ready.load(std::memory_order_acquire) != 0) return;
+int Walk(const SampledThread& thread, std::uintptr_t* pcs) {
+    x86_thread_state64_t state{};
+    mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+    if (thread_suspend(thread.port) != KERN_SUCCESS) return 0;
     int depth = 0;
-    sample.pcs[depth++] = static_cast<std::uintptr_t>(machine->__ss.__rip);
-    auto frame = static_cast<std::uintptr_t>(machine->__ss.__rbp);
-    while (depth < SampleDepth && frame >= thread.stackLow && frame + 16 <= thread.stackHigh && (frame & 7) == 0) {
-        const auto* words = reinterpret_cast<const std::uintptr_t*>(frame);
-        if (words[1] == 0) break;
-        sample.pcs[depth++] = words[1];
-        if (words[0] <= frame) break;
-        frame = words[0];
+    if (thread_get_state(thread.port, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS) {
+        pcs[depth++] = static_cast<std::uintptr_t>(state.__rip);
+        auto frame = static_cast<std::uintptr_t>(state.__rbp);
+        while (depth < SampleDepth && frame >= thread.stackLow && frame + 16 <= thread.stackHigh && (frame & 7) == 0) {
+            const auto* words = reinterpret_cast<const std::uintptr_t*>(frame);
+            if (words[1] == 0) break;
+            pcs[depth++] = words[1];
+            if (words[0] <= frame) break;
+            frame = words[0];
+        }
     }
-    sample.thread = slot;
-    sample.depth = depth;
-    sample.ready.store(1, std::memory_order_release);
+    thread_resume(thread.port);
+    return depth;
 }
 
 std::string Frame(std::uintptr_t pc) {
@@ -410,7 +398,6 @@ std::string Frame(std::uintptr_t pc) {
 void Run() {
     std::map<std::pair<int, std::vector<std::uintptr_t>>, std::uint64_t> stacks;
     std::map<std::pair<int, std::uintptr_t>, std::pair<std::uint64_t, std::uint64_t>> frames;
-    std::uint64_t read = 0;
     std::uint64_t total[MaxThreads] = {};
     auto flushed = std::chrono::steady_clock::now();
     const auto write = [&] {
@@ -422,10 +409,10 @@ void Run() {
             for (const auto& [key, value] : frames) if (key.first == t) hot.emplace_back(key.second, value);
             std::sort(hot.begin(), hot.end(), [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
             std::fprintf(file, " inclusive (frame self inclusive):\n");
-            for (std::size_t i = 0; i < hot.size() && i < 60; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
+            for (std::size_t i = 0; i < hot.size() && i < 80; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
             std::sort(hot.begin(), hot.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
             std::fprintf(file, " self:\n");
-            for (std::size_t i = 0; i < hot.size() && i < 40; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
+            for (std::size_t i = 0; i < hot.size() && i < 60; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
             std::vector<std::pair<const std::vector<std::uintptr_t>*, std::uint64_t>> top;
             for (const auto& [key, count] : stacks) if (key.first == t) top.emplace_back(&key.second, count);
             std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
@@ -438,25 +425,26 @@ void Run() {
         }
         std::fclose(file);
     };
+    std::uintptr_t pcs[SampleDepth];
     while (!stopping.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        for (int t = 0; t < threadCount.load(std::memory_order_acquire); ++t) pthread_kill(threads[t].handle, SIGPROF);
-        const auto written = ringWrite.load(std::memory_order_acquire);
-        if (written - read > RingSize) read = written - RingSize;
-        for (; read < written; ++read) {
-            auto& sample = ring[read & (RingSize - 1)];
-            if (sample.ready.load(std::memory_order_acquire) == 0) continue;
-            std::vector<std::uintptr_t> stack(sample.pcs, sample.pcs + sample.depth);
-            ++stacks[{sample.thread, stack}];
-            ++total[sample.thread];
-            if (!stack.empty()) ++frames[{sample.thread, stack.front()}].first;
+        for (int t = 0; t < threadCount.load(std::memory_order_acquire); ++t) {
+            const int depth = Walk(threads[t], pcs);
+            if (depth == 0) continue;
+            std::vector<std::uintptr_t> stack(pcs, pcs + depth);
+            ++stacks[{t, stack}];
+            ++total[t];
+            ++frames[{t, stack.front()}].first;
             std::sort(stack.begin(), stack.end());
             stack.erase(std::unique(stack.begin(), stack.end()), stack.end());
-            for (const auto pc : stack) ++frames[{sample.thread, pc}].second;
-            sample.ready.store(0, std::memory_order_release);
+            for (const auto pc : stack) ++frames[{t, pc}].second;
         }
         if (std::chrono::steady_clock::now() - flushed > std::chrono::seconds(20)) {
+            // Each write covers the last 20 s alone.
             write();
+            stacks.clear();
+            frames.clear();
+            std::fill(std::begin(total), std::end(total), 0);
             flushed = std::chrono::steady_clock::now();
         }
     }
@@ -471,28 +459,16 @@ void SampleCurrentThread(const char* name) {
     std::lock_guard lock(registerMutex);
     const int slot = threadCount.load();
     if (slot >= MaxThreads) return;
-    if (ring == nullptr) {
+    auto& thread = threads[slot];
+    thread.port = pthread_mach_thread_np(pthread_self());
+    thread.stackHigh = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    thread.stackLow = thread.stackHigh - pthread_get_stacksize_np(pthread_self());
+    thread.name = name;
+    threadCount.store(slot + 1, std::memory_order_release);
+    if (!samplerThread.joinable()) {
         outputPath = path;
-        ring = new Sample[RingSize];
-        struct sigaction action{};
-        action.sa_sigaction = OnSample;
-        action.sa_flags = SA_SIGINFO | SA_RESTART;
-        sigemptyset(&action.sa_mask);
-        sigaction(SIGPROF, &action, nullptr);
         samplerThread = std::thread(Run);
     }
-    auto& thread = threads[slot];
-    thread.handle = pthread_self();
-    thread.stackHigh = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(thread.handle));
-    thread.stackLow = thread.stackHigh - pthread_get_stacksize_np(thread.handle);
-    thread.name = name;
-    ownSlot = slot;
-    // Threads the guest's thread creation started inherit a mask that blocks every signal.
-    sigset_t profile;
-    sigemptyset(&profile);
-    sigaddset(&profile, SIGPROF);
-    pthread_sigmask(SIG_UNBLOCK, &profile, nullptr);
-    threadCount.store(slot + 1, std::memory_order_release);
 }
 
 void StartWorkerSampler() {
