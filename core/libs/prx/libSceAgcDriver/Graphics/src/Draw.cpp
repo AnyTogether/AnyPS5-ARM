@@ -332,8 +332,9 @@ TileMipLayout ColorTargetMip(const ColorTarget& color, const ColorTargetLayout& 
 
 // APS5_PROFILE_DRAW: per-draw phase timers in microseconds (a recorded draw's phases are far below
 // the millisecond the old print rounded to), totalled over 10 s in the [draws] line.
-enum DrawPhase : std::size_t { PhaseValidate, PhaseVertex, PhaseSetup, PhaseReadTarget, PhasePrepare, PhaseLookup, PhaseResources, PhasePipeline, PhaseRecord, PhaseKeep, PhaseSync, PhaseWriteBack, PhaseDescribe, PhaseCount };
-constexpr std::array<const char*, PhaseCount> DrawPhaseNames{"validate", "vertex", "setup", "readTarget", "prepare", "lookup", "resources", "pipeline", "record", "keep", "sync", "writeBack", "describe"};
+// A recorded draw's record phase is split (rec:*); "record" keeps what follows its draw commands.
+enum DrawPhase : std::size_t { PhaseValidate, PhaseVertex, PhaseSetup, PhaseReadTarget, PhasePrepare, PhaseLookup, PhaseResources, PhasePipeline, PhaseRecFlush, PhaseRecBindings, PhaseRecPassAccess, PhaseRecStartPass, PhaseRecBegin, PhaseRecBind, PhaseRecPush, PhaseRecCommands, PhaseRecord, PhaseKeep, PhaseSync, PhaseWriteBack, PhaseDescribe, PhaseCount };
+constexpr std::array<const char*, PhaseCount> DrawPhaseNames{"validate", "vertex", "setup", "readTarget", "prepare", "lookup", "resources", "pipeline", "rec:flush", "rec:bindings", "rec:passAccess", "rec:startPass", "rec:begin", "rec:bind", "rec:push", "rec:commands", "record", "keep", "sync", "writeBack", "describe"};
 
 // Why a draw did not go into the recorder without a wait (counted in the [draws] line): its targets
 // are not all resident, no recorder is active, a switch (APS5_SYNC_DRAWS, APS5_DUMP_TARGETS,
@@ -1896,7 +1897,9 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     if (recorder->HasQueuedKeyStores() && (resources.HoldsLease() || recorder->AnyQueuedKeyStore(touches))) recorder->FlushKeyStores();
     // A queued label store over such memory likewise (Recorder::RecordStore).
     if (recorder->HasQueuedStores() && (resources.HoldsLease() || recorder->AnyQueuedStore(touches))) recorder->FlushStores();
+    timer.phase(PhaseRecFlush);
     const auto drawBindings = resources.PrepareDrawBindings(*recorder, record.moved);
+    timer.phase(PhaseRecBindings);
     const bool capture = CaptureInputsEnabled();
     const bool meshIndirect = state.stages.mesh && args != nullptr;
     const bool addressBased = resources.HoldsLease();
@@ -1914,12 +1917,14 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     const bool unknownMemory = addressBased || resources.UsesAddressTable() || resources.HasCopiedWrites();
     const PassAccess passAccess{passReads, resources.GpuWrites(), passImages, passAttachments, unknownMemory, unknownMemory};
     const bool fenced = state.depth.has_value() || !record.proxies.empty();
+    timer.phase(PhaseRecPassAccess);
     const auto start = recorder->StartDrawPass(passKey, capture || readsTarget || gpuIndirect || meshIndirect || inputs.emulatedMesh != nullptr, fenced, passAccess);
     const bool continued = start.continued;
     outcome.passContinued = continued;
     outcome.passBegun = !continued;
     const auto commands = start.commands;
     if (!continued) recorder->PrepareSampleSlot();
+    timer.phase(PhaseRecStartPass);
     if (capture) captureInputs(context, *recorder, commands, resources, drawBindings, record.targets.empty() || record.targets.front() == nullptr ? 0 : record.targets.front()->Descriptor().baseAddress);
     // The draw's [gputime] class range: from its first barrier to the pass's trailing barrier (a
     // continued draw lies inside its pass's range).
@@ -1974,6 +1979,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         record.pipeline->Begin(commands, *record.framebuffer, state.renderExtent, state);
     }
     APS5_LOG_CHARS_OUT_DEBUG("Pipeline Begin OK");
+    timer.phase(PhaseRecBegin);
     if (drawBindings != nullptr) {
         const auto set = drawBindings->allocation.set;
         const auto fragmentSet = drawBindings->fragmentAllocation.set;
@@ -1983,9 +1989,11 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
         resources.Bind(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout());
     }
     APS5_LOG_CHARS_OUT_DEBUG("Resources bound");
+    timer.phase(PhaseRecBind);
     if (inputs.emulatedMesh != nullptr) pushMeshBuffers(context, commands, VK_PIPELINE_BIND_POINT_GRAPHICS, record.pipeline->Layout(), meshBuffers);
     pushDrawConstants(*record.pipeline, commands, state, draw, shaders, resources, record.pushBytes, record.pushStages, meshArguments != nullptr ? meshArguments->DeviceAddress() : 0, !inputs.restartTable.empty());
     APS5_LOG_CHARS_OUT_DEBUG("Push constants recorded");
+    timer.phase(PhaseRecPush);
     if (record.stencilReplay.empty()) recordDrawCommands(context, commands, state, draw, inputs, record.indirect, argumentBuffer, argumentOffset);
     else {
         recordStencilReplay(context, commands, state, draw, inputs, record.stencilReplay, shaders, resources, record.pushBytes, record.pushStages);
@@ -2003,6 +2011,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     if (args != nullptr) CountIndirectDraw(record.indirect->path, record.indirect->readMs, rewritten);
     auto checkRecords = indirectRecordCheck(record.indirect);
     APS5_LOG_CHARS_OUT_DEBUG("Draw recorded");
+    timer.phase(PhaseRecCommands);
     std::function<void(VkCommandBuffer)> storeProxies;
     if (!continued && !record.proxies.empty()) {
         storeProxies = [proxies = record.proxies](VkCommandBuffer passCommands) {

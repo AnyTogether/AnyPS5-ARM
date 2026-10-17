@@ -6,6 +6,8 @@ namespace AgcDriver {
 // Starts sampling the calling thread when APS5_SAMPLE_WORKER names an output file.
 void StartWorkerSampler();
 void StopWorkerSampler();
+// macOS: also samples the calling thread under APS5_SAMPLE_WORKER (the draw committer names itself).
+void SampleCurrentThread(const char* name);
 
 }
 

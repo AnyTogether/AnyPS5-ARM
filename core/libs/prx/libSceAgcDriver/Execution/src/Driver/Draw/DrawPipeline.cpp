@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Execution/include/WorkerSampler.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
@@ -117,6 +118,7 @@ void DrawPipeline::report(std::chrono::steady_clock::time_point now) {
 }
 
 void DrawPipeline::run() {
+    SampleCurrentThread("draw committer");
     for (;;) {
         Commit* commit = nullptr;
         {
