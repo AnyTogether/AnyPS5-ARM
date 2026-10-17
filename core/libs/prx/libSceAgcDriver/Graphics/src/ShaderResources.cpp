@@ -4540,8 +4540,34 @@ std::size_t ShaderResources::MaxDrawSnapshotBytes() {
     return static_cast<std::size_t>(mib * 1024ull * 1024ull);
 }
 
+namespace {
+// APS5_PROFILE_DRAW: where PrepareDrawBindings spends its time, as a [draw-bindings] line every 10 s.
+struct DrawBindingsProfile {
+    std::mutex mutex;
+    std::uint64_t calls = 0, prepared = 0, fastHits = 0, reusedHits = 0, copies = 0, copiedBytes = 0, wordBuffers = 0;
+    double snapshotUs = 0, collectUs = 0, copyUs = 0, allocateUs = 0, updateUs = 0, keepUs = 0, createUs = 0, memcpyUs = 0;
+    std::uint64_t descriptorWrites = 0;
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+};
+DrawBindingsProfile& BindingsProfile() {
+    static auto& profile = *new DrawBindingsProfile;
+    return profile;
+}
+bool BindingsProfiled() {
+    static const bool profiled = std::getenv("APS5_PROFILE_DRAW") != nullptr;
+    return profiled;
+}
+double MicrosSince(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+}
+}
+
 std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindings(Recorder& recorder, std::span<const MovedBuffer> moved) const {
     if ((_set == VK_NULL_HANDLE && fragment.set == VK_NULL_HANDLE) || usesBda) return {};
+    const bool profiled = BindingsProfiled();
+    const auto started = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    std::uint64_t fastHits = 0, reusedHits = 0, copies = 0, copiedBytes = 0, wordBuffers = 0;
+    double collectUs = 0, copyUs = 0, createUs = 0, memcpyUs = 0;
     const auto reads = guestMemory.InPlaceReads();
     const auto maxSnapshotBytes = maxDrawSnapshotBytes;
     std::size_t totalSnapshotBytes = 0;
@@ -4561,7 +4587,8 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
             if (held != movedWordBuffers.end()) {
                 buffer = held->buffer;
             } else {
-                buffer = std::make_shared<Buffer>(context, override->size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                // Every snapshot is bound with an explicit range of its size (below), so it may be class-sized.
+                buffer = std::make_shared<Buffer>(context, override->size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
                 std::memcpy(buffer->Bytes().data(), override->words.data(), override->size);
                 for (const auto& patch : dataPatches) {
                     if (patch.allocation == index && patch.byte < override->size) buffer->Bytes()[patch.byte] = static_cast<std::byte>(patch.adjustment);
@@ -4572,6 +4599,7 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
             }
             selected.push_back(index);
             result->snapshots.push_back({0, std::move(buffer)});
+            ++wordBuffers;
             continue;
         }
         std::uint64_t address = item.address;
@@ -4601,13 +4629,27 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
             if (!same) differing.fetch_add(1);
             if (checked.fetch_add(1) % 200000 == 199999) std::fprintf(stderr, "[draw-snapshots] verify: %llu fast answers checked, %llu differing%c", static_cast<unsigned long long>(checked.load()), static_cast<unsigned long long>(differing.load()), 10);
         }
+        if (buffer != nullptr) ++fastHits;
         if (buffer == nullptr) {
+            const auto collectStart = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             const auto generation = GuestMemory::CollectWrites(begin, bytes);
             buffer = recorder.ReusableDrawSnapshot(begin, bytes, Recorder::SnapshotUse::Storage, nullptr, generation);
+            if (profiled) collectUs += MicrosSince(collectStart);
+            if (buffer != nullptr) ++reusedHits;
             if (buffer == nullptr) {
-                buffer = std::make_shared<Buffer>(context, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+                const auto copyStart = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                buffer = std::make_shared<Buffer>(context, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+                const auto createdAt = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                 std::memcpy(buffer->Bytes().data(), reinterpret_cast<const void*>(begin), bytes);
+                const auto copiedAt = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                 recorder.KeepDrawSnapshot(begin, bytes, generation, registryGeneration, buffer);
+                if (profiled) {
+                    copyUs += MicrosSince(copyStart);
+                    createUs += std::chrono::duration<double, std::micro>(createdAt - copyStart).count();
+                    memcpyUs += std::chrono::duration<double, std::micro>(copiedAt - createdAt).count();
+                }
+                ++copies;
+                copiedBytes += bytes;
             }
             if (GuestMemory::TrackerGeneration() == stamp[0]) recorder.NoteUnwrittenDrawSnapshot(begin, bytes, stamp, buffer);
             else stamped = false;
@@ -4617,7 +4659,38 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
         totalSnapshotBytes += bytes;
         CaptureTrace::Log("draw-snapshot batch=%llu address=%llx bytes=%zu", static_cast<unsigned long long>(recorder.Submissions() + 1), static_cast<unsigned long long>(begin), bytes);
     }
-    if (selected.empty()) return {};
+    const auto snapshotted = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto note = [&](double allocateUs, double updateUs, double keepUs, std::size_t writeCount, bool prepared) {
+        if (!profiled) return;
+        auto& profile = BindingsProfile();
+        std::lock_guard lock(profile.mutex);
+        ++profile.calls;
+        profile.prepared += prepared ? 1 : 0;
+        profile.fastHits += fastHits;
+        profile.reusedHits += reusedHits;
+        profile.copies += copies;
+        profile.copiedBytes += copiedBytes;
+        profile.wordBuffers += wordBuffers;
+        profile.snapshotUs += std::chrono::duration<double, std::micro>(snapshotted - started).count();
+        profile.collectUs += collectUs;
+        profile.copyUs += copyUs;
+        profile.createUs += createUs;
+        profile.memcpyUs += memcpyUs;
+        profile.allocateUs += allocateUs;
+        profile.updateUs += updateUs;
+        profile.keepUs += keepUs;
+        profile.descriptorWrites += writeCount;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - profile.last < std::chrono::seconds(10)) return;
+        profile.last = now;
+        std::fprintf(stderr, "[draw-bindings] %llu calls, %llu prepared: snapshots %.0f ms (fast %llu, reused %llu after collects of %.0f ms, copied %llu / %.1f MiB in %.0f ms: create %.0f, memcpy %.0f, word buffers %llu), descriptor sets allocated in %.0f ms, %llu writes updated in %.0f ms, kept in %.0f ms\n", static_cast<unsigned long long>(profile.calls), static_cast<unsigned long long>(profile.prepared), profile.snapshotUs / 1000.0, static_cast<unsigned long long>(profile.fastHits), static_cast<unsigned long long>(profile.reusedHits), profile.collectUs / 1000.0, static_cast<unsigned long long>(profile.copies), static_cast<double>(profile.copiedBytes) / 1048576.0, profile.copyUs / 1000.0, profile.createUs / 1000.0, profile.memcpyUs / 1000.0, static_cast<unsigned long long>(profile.wordBuffers), profile.allocateUs / 1000.0, static_cast<unsigned long long>(profile.descriptorWrites), profile.updateUs / 1000.0, profile.keepUs / 1000.0);
+        profile.calls = profile.prepared = profile.fastHits = profile.reusedHits = profile.copies = profile.copiedBytes = profile.wordBuffers = profile.descriptorWrites = 0;
+        profile.snapshotUs = profile.collectUs = profile.copyUs = profile.allocateUs = profile.updateUs = profile.keepUs = profile.createUs = profile.memcpyUs = 0;
+    };
+    if (selected.empty()) {
+        note(0, 0, 0, 0, false);
+        return {};
+    }
     Require(context.descriptorCache != nullptr, "draw snapshots require a descriptor cache");
     std::array<std::vector<VkDescriptorSetLayoutBinding>, 2> descriptions;
     std::array<std::map<VkDescriptorType, std::uint32_t>, 2> counts;
@@ -4645,6 +4718,7 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
         result->fragmentLayout = fragment.layout;
         Require(result->fragmentAllocation.set != VK_NULL_HANDLE, "draw snapshot descriptor allocation failed");
     }
+    const auto allocated = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     auto buffers = descriptorBuffers;
     auto writes = descriptorWrites;
     std::vector<std::size_t> snapshotIndices(allocations.size(), selected.size());
@@ -4667,8 +4741,13 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
     }
     Require(nextWrite == writes.end(), "draw snapshot writes disagree with their descriptor bindings");
     context.Resolved(&DeviceFunctions::updateDescriptorSets, "vkUpdateDescriptorSets")(context.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    const auto updated = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     recorder.Keep(result);
     for (const auto& snapshot : result->snapshots) recorder.KeepBytes(snapshot.buffer.get(), snapshot.buffer->Bytes().size());
+    if (profiled) {
+        const auto us = [](auto from, auto to) { return std::chrono::duration<double, std::micro>(to - from).count(); };
+        note(us(snapshotted, allocated), us(allocated, updated), MicrosSince(updated), writes.size(), true);
+    }
     return result;
 }
 

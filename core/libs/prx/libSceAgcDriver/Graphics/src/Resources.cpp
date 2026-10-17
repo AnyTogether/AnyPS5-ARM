@@ -37,7 +37,8 @@ VkBuffer BindExactBuffer(const Context& context, std::size_t size, VkBufferUsage
 
 }
 
-Buffer::Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) : context(context), size(size), capacity(BufferPool::Capacity(size, properties)), usage(BufferPool::Usage(usage, properties)), properties(properties) {
+Buffer::Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, bool classSized) : context(context), size(size), capacity(BufferPool::Capacity(size, properties)), bufferBytes(size), usage(BufferPool::Usage(usage, properties)), properties(properties) {
+    constexpr std::size_t ClassSizedMinimum = 256;
     Require(size != 0, "zero-sized GPU buffer");
     const bool addressable = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
     Require(!addressable || context.bufferDeviceAddress, "buffer device address is not enabled");
@@ -51,12 +52,15 @@ Buffer::Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usag
         capacity = allocation->bytes;
         offset = allocation->offset;
         slab = allocation->slab;
-        if (allocation->bufferBytes != size) {
+        const std::size_t wanted = classSized && capacity >= ClassSizedMinimum && capacity <= allocationBytes ? capacity : size;
+        bufferBytes = allocation->bufferBytes;
+        if (allocation->bufferBytes != wanted && (!classSized || allocation->bufferBytes < size || wanted == size)) {
             context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")(context.device, buffer, nullptr);
             buffer = VK_NULL_HANDLE;
             deviceAddress = 0;
+            bufferBytes = wanted;
             try {
-                buffer = BindExactBuffer(context, size, this->usage, memory, offset, allocationBytes);
+                buffer = BindExactBuffer(context, wanted, this->usage, memory, offset, allocationBytes);
                 initializeAddress(usage);
             } catch (...) {
                 release();
@@ -68,7 +72,8 @@ Buffer::Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usag
     }
     try {
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        info.size = size;
+        bufferBytes = classSized && capacity >= ClassSizedMinimum ? capacity : size;
+        info.size = bufferBytes;
         info.usage = this->usage;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         Check(context.Function<PFN_vkCreateBuffer>("vkCreateBuffer")(context.device, &info, nullptr, &buffer), "vkCreateBuffer");
@@ -112,7 +117,7 @@ Buffer::~Buffer() {
 
 void Buffer::release() noexcept {
     if (ready && cache) {
-        cache->Put({buffer, memory, mapping, deviceAddress, allocationBytes, capacity, usage, properties, offset, slab, size});
+        cache->Put({buffer, memory, mapping, deviceAddress, allocationBytes, capacity, usage, properties, offset, slab, bufferBytes});
         return;
     }
     if (slab) {
