@@ -41,6 +41,9 @@
 #include <vector>
 #ifndef _WIN32
 #include <sys/resource.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #endif
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -609,6 +612,14 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
             rlimit native{};
             if (::getrlimit(RLIMIT_NOFILE, &native) != 0)
                 throw std::system_error(errno, std::generic_category(), "getrlimit: getrlimit failed");
+#ifdef __APPLE__
+            // The macOS hard limit reads as unlimited, but no process may open more than kern.maxfilesperproc.
+            int perProcess = 0;
+            std::size_t length = sizeof(perProcess);
+            if (::sysctlbyname("kern.maxfilesperproc", &perProcess, &length, nullptr, 0) == 0 && perProcess > 0)
+                native.rlim_max = std::min<rlim_t>(native.rlim_max, static_cast<rlim_t>(perProcess));
+            native.rlim_cur = std::min(native.rlim_cur, native.rlim_max);
+#endif
             guestOpenFileLimit = GuestResourceLimit{toGuestLimit(native.rlim_cur), toGuestLimit(native.rlim_max)};
 #endif
         }
