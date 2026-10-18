@@ -99,13 +99,13 @@ void Draw(AgcDriver::VulkanDevice& device) {
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(PixelCode.data()), PixelCode, 0, {}},
         {64, 0, pixelUserData, std::nullopt, pixel, std::nullopt, pixelMemory},
         device.Target(),
-        {0, 0, vertexPush, 128 - vertexPush}
+        PixelPushLayout(vertexPush, device.Target())
     };
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Vertex, &vertexResult, 0},
-        {ShaderStage::Fragment, &pixelResult, vertexPush}
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(vertexPush, device.Target())}
     }};
 
     AgcDriver::Graphics::State state{};
@@ -169,6 +169,8 @@ int main() {
         Check("compute lane", Threads);
         if (device->Target().subgroupSize < 32u) {
             std::printf("vertex draw skipped, subgroup size %u cannot hold a wave32\n", device->Target().subgroupSize);
+        } else if ((device->SubgroupStages() & VK_SHADER_STAGE_VERTEX_BIT) == 0u) {
+            std::puts("vertex draw skipped, the device has no subgroup operations in vertex shaders");
         } else {
             Draw(*device);
             Check("vertex", Vertices);

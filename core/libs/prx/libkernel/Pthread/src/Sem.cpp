@@ -1,5 +1,7 @@
 #include "../include/Pthread.hpp"
+#include "../include/Cancel.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include <cstdint>
 #include <memory>
@@ -10,6 +12,7 @@ namespace {
 
 constexpr int sceBusy = static_cast<int>(0x80020010u);
 constexpr int sceTimedOut = static_cast<int>(0x8002003cu);
+constexpr int sceSemValueMax = 0x7fffffff;
 std::mutex semInitializationMutex;
 
 PthreadSem destroyedSem() {
@@ -33,6 +36,8 @@ extern "C" {
 int APS5_VABI scePthreadSemInit(PthreadSem* sem, int flag, unsigned int value, const char* name) {
     if (!sem)
         throw std::invalid_argument("Semaphore pointer is null");
+    if (value > static_cast<unsigned int>(sceSemValueMax))
+        return SCE_KERNEL_ERROR_EINVAL;
     (void)flag;
     (void)name;
     auto replacement = std::make_unique<PthreadSemPrivate>(value);
@@ -57,6 +62,8 @@ int APS5_VABI scePthreadSemPost(PthreadSem* sem) {
     auto* current = resolveSem(sem);
     {
         std::lock_guard lock(current->_mutex);
+        if (current->_count == sceSemValueMax)
+            return SCE_KERNEL_ERROR_EOVERFLOW;
         ++current->_count;
     }
     current->_cv.NotifyOne();
@@ -65,8 +72,9 @@ int APS5_VABI scePthreadSemPost(PthreadSem* sem) {
 
 int APS5_VABI scePthreadSemWait(PthreadSem* sem) {
     auto* current = resolveSem(sem);
+    ThreadCancel::Check();
     std::unique_lock lock(current->_mutex);
-    current->_cv.Wait(lock, [&] { return current->_count > 0; });
+    ThreadCancel::WaitUntil(current->_cv, lock, std::nullopt, [&] { return current->_count > 0; });
     --current->_count;
     return 0;
 }
@@ -82,8 +90,9 @@ int APS5_VABI scePthreadSemTrywait(PthreadSem* sem) {
 
 int APS5_VABI scePthreadSemTimedwait(PthreadSem* sem, KernelUseconds usec) {
     auto* current = resolveSem(sem);
+    ThreadCancel::Check();
     std::unique_lock lock(current->_mutex);
-    const auto acquired = current->_cv.WaitUntil(lock, TimedWait::DeadlineNanos(usec), [&] { return current->_count > 0; });
+    const auto acquired = ThreadCancel::WaitUntil(current->_cv, lock, TimedWait::DeadlineNanos(usec), [&] { return current->_count > 0; });
     if (!acquired)
         return sceTimedOut;
     --current->_count;

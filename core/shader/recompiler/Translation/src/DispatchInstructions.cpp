@@ -24,6 +24,7 @@ void TranslationContext::TranslateInstruction(const RdnaInstruction& decoded) {
     if (instruction.op == RdnaOpcode::Unsupported) {
         throw std::runtime_error(instruction.unsupportedReason.empty() ? "unsupported decoded instruction at pc " + std::to_string(instruction.programCounter) : std::string(instruction.unsupportedReason));
     }
+    checkRoundingUse(instruction);
     f32DenormalFlush = f32DenormalFlushFor(instruction);
     bool translated = false;
     switch (instruction.family) {

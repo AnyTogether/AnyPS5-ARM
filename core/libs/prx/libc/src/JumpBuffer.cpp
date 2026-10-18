@@ -1,5 +1,5 @@
 #include "prx/libc/include/General.hpp"
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 
 // setjmp/longjmp must capture the guest's own frame, so they are written directly in assembly with
 // the guest (System V) calling convention. The saved state fits the guest's 96-byte jmp_buf:
@@ -22,6 +22,15 @@ asm(".text\n"
     "    xor %eax, %eax\n"
     "    ret\n"
     APS5_ASM_FUNCTION("longjmp_nid_postfix")
+#ifdef _WIN32
+    "    mov %rdi, %rbx\n"
+    "    mov %esi, %r12d\n"
+    "    mov 16(%rdi), %rdi\n"
+    "    and $-16, %rsp\n"
+    "    call GuestStackSwitch_nid_no_patch\n"
+    "    mov %rbx, %rdi\n"
+    "    mov %r12d, %esi\n"
+#endif
     "    mov %esi, %eax\n"
     "    test %eax, %eax\n"
     "    jnz 1f\n"

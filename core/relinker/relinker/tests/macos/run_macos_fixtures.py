@@ -223,9 +223,9 @@ def main():
                   ("threads", compiled_threads, 51, [], False),
                   ("module", compiled_module, 143, [], True),
                   ("tls-modules", compiled_tls_modules, 47, [], True),
-                  # Without --to-intel the AMD-only instructions fault under Rosetta; with it they run.
+                  # Without --to-rosetta the AMD-only instructions fault under Rosetta; with it they run.
                   ("intel-unconverted", compiled_intel, -signal.SIGILL, [], True),
-                  ("intel", compiled_intel, 47, [], True, ["--to-intel"])]
+                  ("intel", compiled_intel, 47, [], True, ["--to-rosetta"])]
     else:
         print("compiled macOS fixtures skipped: LLVM clang/llvm-objcopy/ld.lld not found")
     failures = 0

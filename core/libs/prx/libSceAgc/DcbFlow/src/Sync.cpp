@@ -36,7 +36,6 @@ std::uint32_t* APS5_VABI sceAgcDcbEventWrite(CommandBuffer* buf, std::uint8_t ev
         Agc::Command::CheckAddress(guestAddress, 8, __func__);
         return Agc::Command::Emit(buf, 0x46u, {0x100u | eventType, static_cast<std::uint32_t>(guestAddress), static_cast<std::uint32_t>(guestAddress >> 32u)}, __func__);
     }
-    Agc::Command::Require(address == nullptr, __func__, "this event does not use an address");
     const auto eventIndex = eventType == 7 || eventType == 15 || eventType == 16 ? 0x400u : 0u;
     return Agc::Command::Emit(buf, 0x46u, {eventIndex | eventType}, __func__);
 }

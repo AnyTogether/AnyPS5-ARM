@@ -12,14 +12,17 @@
 namespace {
 std::mutex g_infoMutex;
 std::map<int32_t, std::vector<unsigned char>> g_info;
+// SCE_VIDEO_RECORDING_STATUS_NONE, from SharpProspero's VideoRecording bindings.
+constexpr int VIDEO_RECORDING_STATUS_NONE = 0;
 }
 
 extern "C" {
 
+// sceVideoRecordingOpen has no encoder to open, so the recorder is never open and the calls that
+// need it fail.
 int APS5_VABI sceVideoRecordingClose(int discard) {
  (void)discard;
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ throw std::logic_error(std::string(__func__) + ": recorder is not open");
 }
 
 int APS5_VABI sceVideoRecordingGetInfo(int32_t info, void* data, size_t size) {
@@ -33,8 +36,7 @@ int APS5_VABI sceVideoRecordingGetInfo(int32_t info, void* data, size_t size) {
 }
 
 int APS5_VABI sceVideoRecordingGetStatus(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ return VIDEO_RECORDING_STATUS_NONE;
 }
 
 int APS5_VABI sceVideoRecordingOpen(const char* path, const void* param, void* heap, int heapSize) {
@@ -61,13 +63,11 @@ int APS5_VABI sceVideoRecordingSetInfo(int32_t info, const void* data, size_t si
 }
 
 int APS5_VABI sceVideoRecordingStart(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ throw std::logic_error(std::string(__func__) + ": recorder is not open");
 }
 
 int APS5_VABI sceVideoRecordingStop(void) {
- NotImplemented_nid_no_patch(__func__);
- return 0;
+ throw std::logic_error(std::string(__func__) + ": recorder is not open");
 }
 
 APS5_EXPORT("iQS6DUtLybE", videoRecordingUnknown_iQS6DUtLybE);

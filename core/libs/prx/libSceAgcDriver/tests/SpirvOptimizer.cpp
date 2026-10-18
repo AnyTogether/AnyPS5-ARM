@@ -15,8 +15,10 @@ namespace {
 
 int failures = 0;
 constexpr std::uint32_t Vulkan11 = 0x00401000u;
+constexpr std::uint32_t Vulkan13 = 0x00403000u;
 constexpr std::uint32_t Spirv11 = 0x00010100u;
 constexpr std::uint32_t Spirv13 = 0x00010300u;
+constexpr std::uint32_t Spirv16 = 0x00010600u;
 
 void check(bool condition, const std::string& message) {
     if (!condition) {
@@ -164,6 +166,8 @@ void testNarrowConversions(bool optimizationEnabled) {
                         check(opcodeCount(normalized, spv::OpStore) == (vector ? 1u : 2u), label + ": optimizer lost buffer stores");
                         if (!optimizationEnabled) {
                             check(output == input, label + ": none mode changed the shader");
+                            const auto specialized = ShaderRecompiler::ValidateAndOptimizeSpirv(input, Vulkan11, Spirv13, false, true, true);
+                            check(specialized == input, label + ": none mode changed the specialized shader");
                         } else {
                             check(opcodeCount(normalized, spv::OpIAdd) == 0, label + ": optimizer did not remove dead arithmetic");
                             if (arithmetic && !type.floating) {
@@ -241,6 +245,136 @@ OpFunctionEnd
     }
 }
 
+void testSpecializedDeadContinue() {
+    for (const bool folded : {false, true}) {
+        const std::string source = std::string(R"(OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main"
+OpExecutionMode %main LocalSize 8 1 1
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%private = OpTypePointer Private %uint
+%function = OpTypeFunction %void
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%false = OpConstantFalse %bool
+%output = OpVariable %private Private
+%main = OpFunction %void None %function
+%entry = OpLabel
+OpBranch %header
+%header = OpLabel
+%count = OpPhi %uint %zero %entry %next %continue
+OpLoopMerge %exit %continue None
+OpBranch %body
+%body = OpLabel
+OpStore %output %count
+)") + (folded ? "OpBranchConditional %false %continue %exit\n" : "OpBranch %exit\n") + R"(%continue = OpLabel
+%next = OpIAdd %uint %count %one
+OpBranch %header
+%exit = OpLabel
+OpReturn
+OpFunctionEnd
+)";
+        const std::string label = folded ? "loop exit on a constant condition" : "loop with an unreachable continue target";
+        try {
+            const auto words = assemble(source);
+            static_cast<void>(ShaderRecompiler::ValidateAndOptimizeSpirv(words, Vulkan11, Spirv13, false, false));
+            const auto specialized = ShaderRecompiler::SpecializeSpirv(words);
+            static_cast<void>(ShaderRecompiler::ValidateAndOptimizeSpirv(specialized, Vulkan11, Spirv13, false, false));
+            check(opcodeCount(specialized, spv::OpLoopMerge) == 1u, label + ": specialization lost the loop");
+            check(opcodeCount(specialized, spv::OpIAdd) == 0u, label + ": specialization retained the dead continue block");
+            check(ShaderRecompiler::SpecializeSpirv(specialized) == specialized, label + ": specialization is not stable");
+        } catch (const std::exception& error) {
+            check(false, label + ": " + error.what());
+        }
+    }
+}
+
+void testLargeFunctionArray() {
+    constexpr std::uint32_t elementCount = 1000;
+    const auto source = std::string(R"(OpCapability Shader
+OpCapability StorageBuffer8BitAccess
+OpExtension "SPV_KHR_8bit_storage"
+OpExtension "SPV_KHR_storage_buffer_storage_class"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main"
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %input Block
+OpMemberDecorate %input 0 Offset 0
+OpDecorate %inputBuffer DescriptorSet 0
+OpDecorate %inputBuffer Binding 0
+OpDecorate %secondInputBuffer DescriptorSet 0
+OpDecorate %secondInputBuffer Binding 1
+OpDecorate %output Block
+OpMemberDecorate %output 0 Offset 0
+OpDecorate %outputBuffer DescriptorSet 0
+OpDecorate %outputBuffer Binding 2
+OpDecorate %flag Block
+OpMemberDecorate %flag 0 Offset 0
+OpDecorate %flagBuffer DescriptorSet 0
+OpDecorate %flagBuffer Binding 3
+OpDecorate %array ArrayStride 4
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%small = OpTypeInt 8 0
+%function = OpTypeFunction %void
+%zero = OpConstant %uint 0
+%scope = OpConstant %uint 2
+%semantics = OpConstant %uint 264
+%length = OpConstant %uint )") + std::to_string(elementCount) + R"(
+%array = OpTypeArray %uint %length
+%arrayPointer = OpTypePointer Function %array
+%arrayPointerStorage = OpTypePointer StorageBuffer %array
+%input = OpTypeStruct %array
+%inputPointer = OpTypePointer StorageBuffer %input
+%flag = OpTypeStruct %uint
+%flagPointer = OpTypePointer StorageBuffer %flag
+%uintPointerStorage = OpTypePointer StorageBuffer %uint
+%output = OpTypeStruct %array
+%outputPointer = OpTypePointer StorageBuffer %output
+%inputBuffer = OpVariable %inputPointer StorageBuffer
+%secondInputBuffer = OpVariable %inputPointer StorageBuffer
+%outputBuffer = OpVariable %outputPointer StorageBuffer
+%flagBuffer = OpVariable %flagPointer StorageBuffer
+%main = OpFunction %void None %function
+%entry = OpLabel
+%local = OpVariable %arrayPointer Function
+%flagPointerValue = OpAccessChain %uintPointerStorage %flagBuffer %zero
+%flagValue = OpLoad %uint %flagPointerValue
+%condition = OpINotEqual %bool %flagValue %zero
+OpSelectionMerge %merge None
+OpBranchConditional %condition %then %else
+%then = OpLabel
+%inputArray = OpAccessChain %arrayPointerStorage %inputBuffer %zero
+%inputValue = OpLoad %array %inputArray
+OpStore %local %inputValue
+OpBranch %merge
+%else = OpLabel
+%secondInputArray = OpAccessChain %arrayPointerStorage %secondInputBuffer %zero
+%secondInputValue = OpLoad %array %secondInputArray
+OpStore %local %secondInputValue
+OpBranch %merge
+%merge = OpLabel
+OpMemoryBarrier %scope %semantics
+%localValue = OpLoad %array %local
+%outputArray = OpAccessChain %arrayPointerStorage %outputBuffer %zero
+OpStore %outputArray %localValue
+OpReturn
+OpFunctionEnd
+)";
+    try {
+        const auto input = assemble(source);
+        const auto output = ShaderRecompiler::ValidateAndOptimizeSpirv(input, Vulkan11, Spirv13, false);
+        spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1);
+        check(validator.Validate(output), "large function array optimizer output is invalid");
+        check(output.size() < input.size() * 4u, "large function array was scalarized");
+    } catch (const std::exception& error) {
+        check(false, std::string("large function array: ") + error.what());
+    }
+}
+
 void testInvalidInputIsRejected() {
     const auto valid = assemble(moduleSource(Types.front(), false, ArithmeticSupport::StorageOnly));
     expectRejected(valid, 0x00400000u, Spirv13, "SPIR-V 1.3 with Vulkan 1.0");
@@ -277,14 +411,143 @@ void testInvalidInputIsRejected() {
     }
 }
 
+void testSpecializedSelectionExitSpirv16() {
+    const std::string source = R"(OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %index %output
+OpExecutionMode %main LocalSize 8 1 1
+OpDecorate %index BuiltIn LocalInvocationIndex
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%input = OpTypePointer Input %uint
+%private = OpTypePointer Private %uint
+%function = OpTypeFunction %void
+%zero = OpConstant %uint 0
+%true = OpConstantTrue %bool
+%index = OpVariable %input Input
+%output = OpVariable %private Private
+%main = OpFunction %void None %function
+%entry = OpLabel
+%lane = OpLoad %uint %index
+%condition = OpIEqual %bool %lane %zero
+OpSelectionMerge %exit None
+OpBranchConditional %true %body %dead
+%body = OpLabel
+OpBranchConditional %condition %exit %nested
+%nested = OpLabel
+OpSelectionMerge %join None
+OpBranchConditional %condition %write %join
+%write = OpLabel
+OpStore %output %lane
+OpBranch %join
+%join = OpLabel
+%sum = OpIAdd %uint %lane %lane
+OpBranch %exit
+%dead = OpLabel
+OpBranch %exit
+%exit = OpLabel
+%value = OpPhi %uint %zero %body %sum %join %zero %dead
+OpStore %output %value
+OpReturn
+OpFunctionEnd
+)";
+    try {
+        auto words = assemble(source);
+        words[1] = Spirv16;
+        static_cast<void>(ShaderRecompiler::ValidateAndOptimizeSpirv(words, Vulkan13, Spirv16, false, false));
+        const auto specialized = ShaderRecompiler::SpecializeSpirv(words);
+        static_cast<void>(ShaderRecompiler::ValidateAndOptimizeSpirv(specialized, Vulkan13, Spirv16, false, false));
+        check(ShaderRecompiler::SpecializeSpirv(specialized) == specialized, "SPIR-V 1.6 selection exit specialization is not stable");
+    } catch (const std::exception& error) {
+        check(false, std::string("specialized SPIR-V 1.6 selection exit: ") + error.what());
+    }
+}
+
+void testLongControlFlow(bool optimizationEnabled, bool large) {
+    const char* mode = std::getenv("APS5_SPIRV_OPT");
+    const bool full = mode != nullptr && std::string(mode) == "full";
+    const std::size_t blocks = large && optimizationEnabled && !full ? 512 : 8;
+    std::string source = R"(OpCapability Shader
+OpCapability StorageBuffer8BitAccess
+OpExtension "SPV_KHR_8bit_storage"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main"
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %array ArrayStride 4
+OpMemberDecorate %buffer 0 Offset 0
+OpDecorate %buffer Block
+OpDecorate %data DescriptorSet 0
+OpDecorate %data Binding 0
+OpDecorate %byteArray ArrayStride 1
+OpMemberDecorate %byteBuffer 0 Offset 0
+OpDecorate %byteBuffer Block
+OpDecorate %bytes DescriptorSet 0
+OpDecorate %bytes Binding 1
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%boolean = OpTypeBool
+%byte = OpTypeInt 8 0
+%byteArray = OpTypeRuntimeArray %byte
+%byteBuffer = OpTypeStruct %byteArray
+%byteBufferPointer = OpTypePointer StorageBuffer %byteBuffer
+%bytePointer = OpTypePointer StorageBuffer %byte
+%array = OpTypeRuntimeArray %uint
+%buffer = OpTypeStruct %array
+%bufferPointer = OpTypePointer StorageBuffer %buffer
+%valuePointer = OpTypePointer StorageBuffer %uint
+%function = OpTypeFunction %void
+%data = OpVariable %bufferPointer StorageBuffer
+%bytes = OpVariable %byteBufferPointer StorageBuffer
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%two = OpConstant %uint 2
+)";
+    for (std::size_t i = 0; i < blocks * 4; ++i) source += "%index" + std::to_string(i) + " = OpConstant %uint " + std::to_string(i + 1) + "\n";
+    source += "%main = OpFunction %void None %function\n%entry = OpLabel\n%input = OpAccessChain %valuePointer %data %zero %zero\n%seed = OpLoad %uint %input Volatile\n%condition = OpINotEqual %boolean %seed %zero\nOpBranch %block0\n";
+    for (std::size_t i = 0; i < blocks; ++i) {
+        const auto number = std::to_string(i);
+        const auto previous = i == 0 ? "%seed" : "%next" + std::to_string(i - 1);
+        source += "%block" + number + " = OpLabel\n%sum" + number + " = OpIAdd %uint " + previous + " %one\n";
+        source += "%duplicate" + number + " = OpIAdd %uint " + previous + " %one\n%shared" + number + " = OpIAdd %uint %seed %one\n";
+        for (std::size_t j = 0; j < 3; ++j) {
+            const auto index = std::to_string(i * 4 + j);
+            source += "%slot" + index + " = OpAccessChain %valuePointer %data %zero %index" + index + "\n";
+            source += "OpStore %slot" + index + " %" + (j == 0 ? "sum" : j == 1 ? "duplicate" : "shared") + number + " Volatile\n";
+        }
+        const auto branchIndex = std::to_string(i * 4 + 3);
+        source += "%branchSlot" + number + " = OpAccessChain %valuePointer %data %zero %index" + branchIndex + "\n";
+        source += "OpSelectionMerge %join" + number + " None\nOpBranchConditional %condition %left" + number + " %right" + number + "\n";
+        source += "%left" + number + " = OpLabel\n%leftValue" + number + " = OpIAdd %uint %sum" + number + " %one\nOpStore %branchSlot" + number + " %leftValue" + number + " Volatile\nOpBranch %join" + number + "\n";
+        source += "%right" + number + " = OpLabel\n%rightCopy" + number + " = OpIAdd %uint %sum" + number + " %one\nOpStore %branchSlot" + number + " %rightCopy" + number + " Volatile\n";
+        source += "%rightValue" + number + " = OpIAdd %uint %sum" + number + " %two\nOpStore %branchSlot" + number + " %rightValue" + number + " Volatile\nOpBranch %join" + number + "\n";
+        source += "%join" + number + " = OpLabel\n%next" + number + " = OpPhi %uint %leftValue" + number + " %left" + number + " %rightValue" + number + " %right" + number + "\n";
+        if (i + 1 == blocks) source += "%byteSlot = OpAccessChain %bytePointer %bytes %zero %zero\n%truncated = OpUConvert %byte %next" + number + "\nOpStore %byteSlot %truncated Volatile\nOpReturn\n";
+        else source += "OpBranch %block" + std::to_string(i + 1) + "\n";
+    }
+    source += "OpFunctionEnd\n";
+    const auto input = assemble(source);
+    const auto output = ShaderRecompiler::ValidateAndOptimizeSpirv(input, Vulkan11, Spirv13, false);
+    const auto stores = opcodeCount(output, spv::OpStore);
+    check(stores >= blocks * 4 + 1 && stores <= blocks * 6 + 1, "long control-flow optimization discarded observable stores");
+    const auto adds = opcodeCount(output, spv::OpIAdd);
+    if (!optimizationEnabled) check(output == input, "disabled optimization changed the long control-flow module");
+    else check(adds >= blocks && adds <= blocks * 4, "control-flow optimization lost arithmetic or retained redundant values");
+}
+
 }
 
 int main() {
     const char* mode = std::getenv("APS5_SPIRV_OPT");
     const bool optimizationEnabled = mode == nullptr || std::string(mode) != "none";
     testNarrowConversions(optimizationEnabled);
+    testLargeFunctionArray();
+    testSpecializedSelectionExitSpirv16();
     testInvalidInputIsRejected();
     testSpecializedSelectionExit();
+    testSpecializedDeadContinue();
+    testLongControlFlow(optimizationEnabled, false);
+    testLongControlFlow(optimizationEnabled, true);
     if (failures != 0) {
         std::fprintf(stderr, "%d optimizer check(s) failed\n", failures);
         return 1;

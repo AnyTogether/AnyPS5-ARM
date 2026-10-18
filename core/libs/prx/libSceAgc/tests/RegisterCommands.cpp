@@ -116,8 +116,8 @@ void testIndirect() {
             check(storage.words == expected, "count setter modified unrelated packet data");
         }
         const auto before = storage.words;
-        for (const auto count : {0x4000u, 0xffffffffu}) {
-            expectFailure([&] { sizes[i](count); });
+        for (const auto count : {0x4000u, 0xffffffffu, 0xf5f5039cu}) {
+            check(sizes[i](count) == 20, "indirect size depends on the count");
             expectFailure([&] { setters[i](packet, count); });
         }
         expectFailure([&] { setters[i](nullptr, 0); });
@@ -193,6 +193,10 @@ void testDirectList() {
         packet = writers[i](&split.buffer, paired.data(), 4);
         check(std::equal(expectedSplit.begin(), expectedSplit.end(), packet) && split.buffer.cursor_up == packet + expectedSplit.size(), "register pairs were not written as two ranges");
         check(sizes[i](0) == 0, "an empty register list has a size");
+        Storage empty;
+        empty.words.fill(sentinel);
+        check(writers[i](&empty.buffer, nullptr, 0) == empty.words.data() && empty.buffer.cursor_up == empty.words.data() && empty.words.front() == sentinel, "an empty register list wrote a packet");
+        expectFailure([&] { writers[i](nullptr, nullptr, 0); });
         check(sizes[i](0x15555555u) == 0xfffffffcu, "largest register list size mismatch");
         for (const auto count : {0x15555556u, 0x40000000u, 0xffffffffu}) {
             expectFailure([&] { sizes[i](count); });

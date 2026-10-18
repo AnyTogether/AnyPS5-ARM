@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <vector>
 #include <stdexcept>
 #include <string>
 #include "SceTypes.hpp"
@@ -62,6 +63,90 @@ float Sn3d(std::uint32_t acn, const AudioOut2Position& direction) {
     return static_cast<float>(norm * legendre * (m < 0 ? std::sin(am * azimuth) : std::cos(am * azimuth)));
 }
 
+struct Vector {
+    double x;
+    double y;
+    double z;
+};
+
+double Length(const Vector& v) {
+    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+Vector Direction(const AudioOut2Position& position, bool height) {
+    return {position.x, position.y, height ? position.z : 0.0f};
+}
+
+double Determinant(const Vector& a, const Vector& b, const Vector& c) {
+    return a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) + a.z * (b.x * c.y - b.y * c.x);
+}
+
+// Picks the triplet whose gains towards the source are all non-negative, the most evenly spread one
+// when several enclose it (Cramer's rule on the speaker direction matrix).
+bool PanTriplet(const SpeakerArray& array, const Vector& source, std::vector<double>& gains) {
+    double best = -1.0;
+    for (std::uint32_t i = 0; i < array.numSpeakers; ++i) {
+        for (std::uint32_t j = i + 1; j < array.numSpeakers; ++j) {
+            for (std::uint32_t k = j + 1; k < array.numSpeakers; ++k) {
+                const Vector a = Direction(array.directions[i], true);
+                const Vector b = Direction(array.directions[j], true);
+                const Vector c = Direction(array.directions[k], true);
+                const double det = Determinant(a, b, c);
+                if (std::abs(det) <= 1e-9 * Length(a) * Length(b) * Length(c)) continue;
+                const double gi = Determinant(source, b, c) / det;
+                const double gj = Determinant(a, source, c) / det;
+                const double gk = Determinant(a, b, source) / det;
+                const double least = std::min({gi, gj, gk});
+                if (least < -1e-6 || least <= best) continue;
+                best = least;
+                std::fill(gains.begin(), gains.end(), 0.0);
+                gains[i] = std::max(gi, 0.0);
+                gains[j] = std::max(gj, 0.0);
+                gains[k] = std::max(gk, 0.0);
+            }
+        }
+    }
+    return best > -1.0;
+}
+
+// The same on the horizontal plane with the pairs of speakers less than half a turn apart.
+bool PanPair(const SpeakerArray& array, const Vector& source, std::vector<double>& gains) {
+    double best = -1.0;
+    for (std::uint32_t i = 0; i < array.numSpeakers; ++i) {
+        for (std::uint32_t j = i + 1; j < array.numSpeakers; ++j) {
+            const Vector a = Direction(array.directions[i], false);
+            const Vector b = Direction(array.directions[j], false);
+            const double det = a.x * b.y - a.y * b.x;
+            if (std::abs(det) <= 1e-9 * Length(a) * Length(b)) continue;
+            const double gi = (source.x * b.y - source.y * b.x) / det;
+            const double gj = (a.x * source.y - a.y * source.x) / det;
+            const double least = std::min(gi, gj);
+            if (least < -1e-6 || least <= best) continue;
+            best = least;
+            std::fill(gains.begin(), gains.end(), 0.0);
+            gains[i] = std::max(gi, 0.0);
+            gains[j] = std::max(gj, 0.0);
+        }
+    }
+    return best > -1.0;
+}
+
+std::uint32_t NearestSpeaker(const SpeakerArray& array, const Vector& source) {
+    std::uint32_t nearest = 0;
+    double closest = -2.0;
+    const double sourceLength = Length(source);
+    for (std::uint32_t speaker = 0; speaker < array.numSpeakers; ++speaker) {
+        const Vector d = Direction(array.directions[speaker], true);
+        const double length = Length(d) * sourceLength;
+        const double cosine = length > 0.0 ? (d.x * source.x + d.y * source.y + d.z * source.z) / length : -1.0;
+        if (cosine > closest) {
+            closest = cosine;
+            nearest = speaker;
+        }
+    }
+    return nearest;
+}
+
 }
 
 extern "C" {
@@ -99,15 +184,35 @@ int APS5_VABI sceAudioOut2GetSpeakerArrayAmbisonicsCoefficients(AudioOut2Speaker
     return 0;
 }
 
+// Vector base amplitude panning: the source direction is reached with non-negative gains on the pair
+// of speakers around it (on the horizontal plane) or, height aware, the triplet around it, the gains
+// normalized to unit power. The spread, raised inside the downmix spread radius as the source nears
+// the listener, blends towards an equal-power feed of every speaker.
 int APS5_VABI sceAudioOut2GetSpeakerArrayCoefficients(AudioOut2SpeakerArrayHandle handle, AudioOut2Position pos, float spread, float* coefficients, uint32_t num_coefficients, uint8_t height_aware, float downmix_spread_radius) {
-    (void)handle;
-    (void)pos;
-    (void)spread;
-    (void)coefficients;
-    (void)num_coefficients;
-    (void)height_aware;
-    (void)downmix_spread_radius;
-    NotImplemented_nid_no_patch(__func__);
+    const auto& array = Array(handle);
+    if (coefficients == nullptr || num_coefficients != array.numSpeakers || !std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(pos.z) ||
+        !std::isfinite(spread) || spread < 0.0f || spread > 1.0f || !std::isfinite(downmix_spread_radius) || downmix_spread_radius < 0.0f) {
+        APS5_INVALID_ARG_EX;
+    }
+    const std::uint32_t count = array.numSpeakers;
+    const Vector source{pos.x, pos.y, height_aware ? pos.z : 0.0f};
+    const double distance = Length(source);
+    double blend = spread;
+    if (downmix_spread_radius > 0.0f && distance < downmix_spread_radius) blend = std::max(blend, 1.0 - distance / downmix_spread_radius);
+    std::vector<double> gains(count, 0.0);
+    if (distance == 0.0) {
+        blend = 1.0;
+    } else if (!(height_aware && PanTriplet(array, source, gains)) && !PanPair(array, source, gains)) {
+        gains[NearestSpeaker(array, source)] = 1.0;
+    }
+    const double uniform = 1.0 / std::sqrt(static_cast<double>(count));
+    double power = 0.0;
+    for (double& gain : gains) {
+        gain = (1.0 - blend) * gain + blend * uniform;
+        power += gain * gain;
+    }
+    const double scale = power > 0.0 ? 1.0 / std::sqrt(power) : 0.0;
+    for (std::uint32_t speaker = 0; speaker < count; ++speaker) coefficients[speaker] = static_cast<float>(gains[speaker] * scale);
     return 0;
 }
 

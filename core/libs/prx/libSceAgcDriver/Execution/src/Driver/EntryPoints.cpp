@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include <mutex>
 
@@ -33,6 +34,10 @@ void UnregisterVideoOutput(std::uint32_t handle, const std::shared_ptr<IVideoOut
     DriverDetail::Driver::Get().UnregisterVideoOutput(handle, output);
 }
 
+void AttachWindow(const PresentationWindow& window) {
+    DriverDetail::Driver::Get().AttachWindow(window);
+}
+
 void PresentClear(const PresentationWindow& window, bool opaque, void (*gpuReady)(void*), void* context) {
     DriverDetail::Driver::Get().Present(window, nullptr, opaque, gpuReady, context);
 }
@@ -49,6 +54,10 @@ void ReportFailure(std::exception_ptr error) {
     DriverDetail::Driver::Get().ReportFailure(error);
 }
 
+}
+
+extern "C" void AgcDriverRaiseWorkerThreadPriority_nid_postfix(const char* role) {
+    AgcDriver::RaiseWorkerThreadPriority(role);
 }
 
 extern "C" void AgcDriverWaitIdle_nid_postfix() try {
@@ -86,12 +95,24 @@ extern "C" void AgcDriverSuspendPoint_nid_postfix() try {
     LibcAwaitExit_nid_postfix();
 }
 
+extern "C" std::uint32_t AgcDriverReserveEopFlip_nid_postfix(const AgcDriver::FlipInfo& info) {
+    return AgcDriver::DriverDetail::Driver::Get().ReserveEopFlip(info);
+}
+
+extern "C" std::uint64_t AgcDriverDispatchesAdoptedAhead_nid_postfix() {
+    return AgcDriver::DriverDetail::Driver::Get().DispatchesAdoptedAhead();
+}
+
 extern "C" void AgcDriverRegisterVideoOutput_nid_postfix(std::uint32_t handle, const std::shared_ptr<AgcDriver::IVideoOutput>& output) {
     AgcDriver::RegisterVideoOutput(handle, output);
 }
 
 extern "C" void AgcDriverUnregisterVideoOutput_nid_postfix(std::uint32_t handle, const std::shared_ptr<AgcDriver::IVideoOutput>& output) {
     AgcDriver::UnregisterVideoOutput(handle, output);
+}
+
+extern "C" void AgcDriverAttachWindow_nid_postfix(const AgcDriver::PresentationWindow& window) {
+    AgcDriver::AttachWindow(window);
 }
 
 extern "C" void AgcDriverPresentClear_nid_postfix(const AgcDriver::PresentationWindow& window, bool opaque, void (*gpuReady)(void*), void* context) {
@@ -110,13 +131,19 @@ extern "C" void AgcDriverReportFailure_nid_postfix(std::exception_ptr error) {
     AgcDriver::ReportFailure(error);
 }
 
-extern "C" void AgcDriverResolveShaderAbi_nid_postfix(const Shader* shader, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
+extern "C" void AgcDriverResolveShaderAbi_nid_postfix(const Shader* shader, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) try {
     AgcDriver::DriverDetail::Driver::Get().ResolveShaderAbi(shader, context, primitive);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
-extern "C" void AgcDriverResolveGraphicsAbi_nid_postfix(const Shader* vertex, const Shader* pixel, std::uint32_t primitiveType) {
+extern "C" void AgcDriverResolveGraphicsAbi_nid_postfix(const Shader* vertex, const Shader* pixel, std::uint32_t primitiveType) try {
     AgcDriver::DriverDetail::Driver::Get().ResolveGraphicsAbi(vertex, pixel, primitiveType);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
-extern "C" void AgcDriverResolveGraphicsStagesAbi_nid_postfix(std::span<const Shader* const> stages, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
+extern "C" void AgcDriverResolveGraphicsStagesAbi_nid_postfix(std::span<const Shader* const> stages, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) try {
     AgcDriver::DriverDetail::Driver::Get().ResolveGraphicsStagesAbi(stages, context, primitive);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }

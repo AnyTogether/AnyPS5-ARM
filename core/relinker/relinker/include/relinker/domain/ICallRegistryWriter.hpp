@@ -12,6 +12,8 @@ public:
     virtual ~ICallRegistryWriter() = default;
 
     virtual std::string WriteCallRegistry(const std::vector<CallRegistryEntry>& entries) = 0;
+    virtual std::string WriteModuleImports(const std::vector<CallRegistryEntry>& entries) = 0;
+    virtual std::string WriteNeededLibraries(const std::vector<std::string>& libraries) = 0;
 };
 
 }

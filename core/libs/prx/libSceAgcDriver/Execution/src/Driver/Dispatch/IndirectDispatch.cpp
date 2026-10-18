@@ -20,18 +20,30 @@ void Driver::countIndirect(int path, double readMs) {
     lastReport = now;
     std::uint64_t cpu = 0;
     for (int i = 1; i < IndirectPaths; ++i) cpu += counts[i];
-    std::fprintf(stderr, "[indirect] gpu-side %llu, cpu-side %llu (thread dimensions %llu, fill kernel %llu, pending image results %llu, pending label or copied write %llu, not imported %llu, misaligned %llu, disabled %llu); CPU argument reads took %.1f s\n", static_cast<unsigned long long>(counts[IndirectGpu]), static_cast<unsigned long long>(cpu), static_cast<unsigned long long>(counts[IndirectThreadDimensions]), static_cast<unsigned long long>(counts[IndirectFillKernel]), static_cast<unsigned long long>(counts[IndirectPendingImage]), static_cast<unsigned long long>(counts[IndirectCopiedWrite]), static_cast<unsigned long long>(counts[IndirectNotImported]), static_cast<unsigned long long>(counts[IndirectMisaligned]), static_cast<unsigned long long>(counts[IndirectDisabled]), readWaitedMs / 1000);
+    std::fprintf(stderr, "[indirect] gpu-side %llu, cpu-side %llu (thread dimensions %llu, fill kernel %llu, pending image results %llu, pending label or copied write %llu, not imported %llu, misaligned %llu, disabled %llu, device memory LDS %llu); CPU argument reads took %.1f s\n", static_cast<unsigned long long>(counts[IndirectGpu]), static_cast<unsigned long long>(cpu), static_cast<unsigned long long>(counts[IndirectThreadDimensions]), static_cast<unsigned long long>(counts[IndirectFillKernel]), static_cast<unsigned long long>(counts[IndirectPendingImage]), static_cast<unsigned long long>(counts[IndirectCopiedWrite]), static_cast<unsigned long long>(counts[IndirectNotImported]), static_cast<unsigned long long>(counts[IndirectMisaligned]), static_cast<unsigned long long>(counts[IndirectDisabled]), static_cast<unsigned long long>(counts[IndirectWorkgroupMemory]), readWaitedMs / 1000);
+}
+
+int Driver::indirectArgumentsPath(std::span<const std::uint32_t> packet, std::uint64_t arguments) {
+    static const bool gpuIndirect = std::getenv("APS5_NO_GPU_INDIRECT") == nullptr;
+    if (!gpuIndirect) return IndirectDisabled;
+    if ((packet.back() & 0x20u) != 0) return IndirectThreadDimensions;
+    if (arguments % 4 != 0) return IndirectMisaligned;
+    return IndirectGpu;
 }
 
 void Driver::dispatchIndirect(QueueState& queue, std::span<const std::uint32_t> packet, const Submission& submission) {
-    static const bool gpuIndirect = std::getenv("APS5_NO_GPU_INDIRECT") == nullptr;
     const auto arguments = Pm4::DispatchArgumentAddress(packet, queue);
     const auto initiator = packet.back();
-    int path = IndirectGpu;
-    if (!gpuIndirect) path = IndirectDisabled;
-    else if ((initiator & 0x20u) != 0) path = IndirectThreadDimensions;
-    else if (arguments % 4 != 0) path = IndirectMisaligned;
+    const int path = indirectArgumentsPath(packet, arguments);
     if (path != IndirectGpu) {
+        if (!resolvingAhead()) {
+            const auto& resolved = resolvedAhead();
+            if (const auto found = resolved.find(currentPacketOffset()); found != resolved.end() && found->second.indirectArguments == 0 && found->second.packet[0] == 0xc0031500u) {
+                const auto direct = found->second.packet;
+                dispatch(queue, direct, submission);
+                return;
+            }
+        }
         recordQueuedLabelsBeforeRead(submission.queue);
         const auto readStart = std::chrono::steady_clock::now();
         const auto direct = Pm4::ReadDispatchArguments(arguments, initiator);

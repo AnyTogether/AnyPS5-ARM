@@ -1,7 +1,9 @@
 #include "Translation/IntegerInstructions.hpp"
 #include "Translation/TranslationContext.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include <array>
 #include <stdexcept>
+#include <string>
 
 namespace ShaderRecompiler {
 
@@ -20,8 +22,38 @@ bool TranslationContext::integer16Shift(const RdnaInstruction& inst, IrOpcode op
 bool TranslationContext::integer16Binary(const RdnaInstruction& inst, IrOpcode opcode, bool sign) {
     const IrU32 lhs = readU16AsU32(sourceAt(inst, 0u), sign);
     const IrU32 rhs = readU16AsU32(sourceAt(inst, 1u), sign);
-    const IrU32 result(ir.Emit(opcode, IrType::U32, {&lhs.Value(), &rhs.Value()}));
+    const IrU32 result = saturateInteger16(inst.destination, IrU32(ir.Emit(opcode, IrType::U32, {&lhs.Value(), &rhs.Value()})), sign);
     write16Bits(inst.destination, IrU32(ir.BitwiseAnd(result.Value(), ir.Constant(0xffffu))));
+    return true;
+}
+
+IrU32 TranslationContext::readU16Factor(const RdnaOperand& operand, bool highHalf, bool negate) {
+    const IrU32 raw = applyBitSourceModifiers(operand, readRawU32(operand));
+    const IrU32 field(ir.Emit(IrOpcode::BitFieldUExtract, IrType::U32, {&raw.Value(), &ir.Constant(highHalf ? 16u : 0u), &ir.Constant(highHalf ? 16u : 24u)}));
+    return negate ? IrU32(ir.BitwiseXor(field.Value(), ir.Constant(0x8000u))) : field;
+}
+
+bool TranslationContext::vMulLoU16(const RdnaInstruction& inst) {
+    const RdnaOperand& lhs = sourceAt(inst, 0u);
+    const RdnaOperand& rhs = sourceAt(inst, 1u);
+    const IrU32 left = readU16Factor(lhs, lhs.opSel, false);
+    const IrU32 right = readU16Factor(rhs, rhs.opSel, false);
+    write16Bits(inst.destination, IrU32(ir.BitwiseAnd(ir.IMul(left.Value(), right.Value()), ir.Constant(0xffffu))));
+    return true;
+}
+
+bool TranslationContext::vPkMulLoU16(const RdnaInstruction& inst) {
+    const RdnaOperand& lhs = sourceAt(inst, 0u);
+    const RdnaOperand& rhs = sourceAt(inst, 1u);
+    const auto lane = [&](bool highLane) {
+        const IrU32 left = readU16Factor(lhs, highLane ? lhs.opSelHi : lhs.opSel, highLane ? lhs.negateHi : lhs.negate);
+        const IrU32 right = readU16Factor(rhs, highLane ? rhs.opSelHi : rhs.opSel, highLane ? rhs.negateHi : rhs.negate);
+        return IrU32(ir.IMul(left.Value(), right.Value()));
+    };
+    const IrU32 low = lane(false);
+    const IrU32 high = lane(true);
+    const IrU32 result = packU16Lanes(low, high);
+    writeOperand(inst.destination, &result.Value());
     return true;
 }
 
@@ -453,7 +485,16 @@ bool TranslationContext::vQsadU8(const RdnaInstruction& inst, bool masked, bool 
     };
     const std::array<IrU32, 2> accumulator = readU32Pair(sourceAt(inst, 2u));
     if (wide) {
-        const std::array<IrU32, 2> accumulatorHigh = readU32Pair(offsetOperand(sourceAt(inst, 2u), 2u));
+        const RdnaOperand& accumulatorSource = sourceAt(inst, 2u);
+        switch (accumulatorSource.kind) {
+            case RdnaOperandKind::SrcSharedBase:
+            case RdnaOperandKind::SrcSharedLimit:
+            case RdnaOperandKind::SrcPrivateBase:
+            case RdnaOperandKind::SrcPrivateLimit:
+                throw std::runtime_error("v_mqsad_u32_u8 at pc " + std::to_string(inst.programCounter) + " reads its 128-bit accumulator from " + RdnaOperandToString(accumulatorSource) + ", which has only two dwords");
+            default: break;
+        }
+        const std::array<IrU32, 2> accumulatorHigh = readU32Pair(offsetOperand(accumulatorSource, 2u));
         const IrU32 zero(ir.Constant(0u));
         writeU32Pair(inst.destination, {wideAdd(inst, sad(0u), zero, accumulator[0], false), wideAdd(inst, sad(8u), zero, accumulator[1], false)});
         writeU32Pair(offsetOperand(inst.destination, 2u),
@@ -625,7 +666,8 @@ bool TranslationContext::sQuadmask(const RdnaInstruction& inst, bool wide) {
 bool TranslationContext::bfmB32(const RdnaInstruction& inst) {
     const IrU32 count(ir.BitwiseAnd(readU32(sourceAt(inst, 0u)).Value(), ir.Constant(31u)));
     const IrU32 offset(ir.BitwiseAnd(readU32(sourceAt(inst, 1u)).Value(), ir.Constant(31u)));
-    const IrU32 result(ir.Emit(IrOpcode::BitFieldInsert, IrType::U32, {&ir.Constant(0u), &ir.Constant(0xffffffffu), &offset.Value(), &count.Value()}));
+    const IrU32 mask = rightMask32(count);
+    const IrU32 result(ir.ShiftLeftLogical(mask.Value(), offset.Value()));
     writeOperand(inst.destination, &result.Value());
     return true;
 }

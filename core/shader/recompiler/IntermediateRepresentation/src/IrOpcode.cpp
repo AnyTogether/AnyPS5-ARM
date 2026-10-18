@@ -114,12 +114,14 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("Void", Void),
     makeMeta("Reference", Void, U1),
     makeMeta("ReferenceU32", Void, U32),
+    makeMeta("UnlinkedCall", Void, U32, U32, U32),
     makeMeta("GetUserData", U32, ScalarReg),
     makeMeta("GetShaderBase", U64),
     makeMeta("ShaderClock", U64),
     makeMeta("RealtimeClock", U64),
     makeMeta("MeshDrawParameter", U32, U32),
     makeMeta("MeshArgument", U32, U32),
+    makeMeta("MeshRestartStart", U32, U32, U1),
     makeMeta("MeshAllocate", Void, U32),
     makeMeta("TessellationBase", U32, U32),
     makeMeta("GetTessellationAttribute", U32, U32, U32, U1),
@@ -133,6 +135,8 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("SetScalarRegister", Void, ScalarReg, U32),
     makeMeta("GetVectorRegister", U32, VectorReg),
     makeMeta("SetVectorRegister", Void, VectorReg, U32),
+    makeMeta("LoadVectorWindow", U32, U32),
+    makeMeta("StoreVectorWindow", Void, U32, U32),
     makeMeta("GetGotoVariable", U1, U32),
     makeMeta("SetGotoVariable", Void, U32, U1),
     makeMeta("GetScc", U1),
@@ -181,6 +185,8 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("CompositeExtractU32x4", U32, U32x4, U32),
     makeMeta("PackHalf2x16", U32, F32x2),
     makeMeta("PackFloat2x16Rtz", U32, F32, F32),
+    makeMeta("FPAdd16x2", U32, U32, U32),
+    makeMeta("FPMul16x2", U32, U32, U32),
     makeMeta("FPAbs32", F32, F32),
     makeMeta("FPNeg32", F32, F32),
     makeMeta("FPSaturate32", F32, F32),
@@ -334,6 +340,9 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("StoreAddressU8", Void, AddressResource, U32, U32, U8, U1),
     makeMeta("StoreAddressU16", Void, AddressResource, U32, U32, U16, U1),
     makeMeta("StoreAddressU32", Void, AddressResource, U32, U32, U32, U1),
+    makeMeta("StoreAddressU32x2", Void, AddressResource, U32, U32, U32x2, U1),
+    makeMeta("StoreAddressU32x3", Void, AddressResource, U32, U32, U32x3, U1),
+    makeMeta("StoreAddressU32x4", Void, AddressResource, U32, U32, U32x4, U1),
     makeMeta("AddressAtomicSwap32", U32, AddressResource, U32, U32, U32, U1),
     makeMeta("AddressAtomicCmpSwap32", U32, AddressResource, U32, U32, U32, U32, U1),
     makeMeta("AddressAtomicIAdd32", U32, AddressResource, U32, U32, U32, U1),
@@ -464,13 +473,14 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("SharedAtomicMskor64", U64, U32, U64, U64, U1),
     makeMeta("DataAppend", U32, U32, U1, U32, U32),
     makeMeta("DataConsume", U32, U32, U1, U32, U32),
+    makeMeta("DataOrderedCount", U32, U32, U1, U32, U32, U32),
     makeMeta("SwizzleU32", U32, U32, U32, U1),
-    makeMeta("ImageQueryDimensions", U32x4, ImageResource, ImageAddress),
-    makeMeta("ImageQueryLod", U32x4, ImageResource, SamplerResource, ImageAddress),
+    makeMeta("ImageQueryDimensions", U32x4, ImageResource, ImageAddress, U1),
+    makeMeta("ImageQueryLod", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
     makeMeta("ImageRead", U32x4, ImageResource, ImageAddress, U1),
     makeMeta("ImageWrite", Void, ImageResource, ImageAddress, U32x4, U1),
-    makeMeta("ImageSampleRaw", U32x4, ImageResource, SamplerResource, ImageAddress),
-    makeMeta("ImageGatherRaw", U32x4, ImageResource, SamplerResource, ImageAddress),
+    makeMeta("ImageSampleRaw", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
+    makeMeta("ImageGatherRaw", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
     makeMeta("ImageAtomicSwap32", U32, ImageResource, ImageAddress, U32, U1),
     makeMeta("ImageAtomicIAdd32", U32, ImageResource, ImageAddress, U32, U1),
     makeMeta("ImageAtomicUMin32", U32, ImageResource, ImageAddress, U32, U1),
@@ -501,6 +511,8 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("GetAttribute", U32, U32, U32),
     makeMeta("GetInterpolationParameter", U32, U32, U32, U32),
     makeMeta("GetInterpolationParameterF16", F32, U32, U32, U32, U32),
+    makeMeta("InterpolateHostP1", F32, U32, U32, F32),
+    makeMeta("InterpolateHostP2", Void, U32, U32, F32, F32, U1),
     makeMeta("SetAttribute", Void, U32x4, U1),
     makeMeta("ControlNop", Void),
     makeMeta("Waitcnt", Void),
@@ -685,6 +697,7 @@ SharedAccess SharedAccessOf(IrOpcode opcode) {
         case IrOpcode::SharedAtomicMskor64:
             return SharedAccess::Atomic;
         case IrOpcode::DataAppend:
+        case IrOpcode::DataOrderedCount:
             return SharedAccess::Append;
         case IrOpcode::DataConsume:
             return SharedAccess::Consume;
@@ -747,6 +760,12 @@ AddressOpcodeInfo AddressOpcodeInfoOf(IrOpcode opcode) {
             return {AddressAccess::Write, 16u};
         case IrOpcode::StoreAddressU32:
             return {AddressAccess::Write, 32u};
+        case IrOpcode::StoreAddressU32x2:
+            return {AddressAccess::Write, 32u, 2u};
+        case IrOpcode::StoreAddressU32x3:
+            return {AddressAccess::Write, 32u, 3u};
+        case IrOpcode::StoreAddressU32x4:
+            return {AddressAccess::Write, 32u, 4u};
         case IrOpcode::AddressAtomicSwap32:
         case IrOpcode::AddressAtomicCmpSwap32:
         case IrOpcode::AddressAtomicIAdd32:
@@ -872,11 +891,14 @@ bool IrOpcodeHasSideEffects(IrOpcode opcode) {
         case IrOpcode::Discard:
         case IrOpcode::Reference:
         case IrOpcode::ReferenceU32:
+        case IrOpcode::UnlinkedCall:
         case IrOpcode::SetTessellationAttribute:
+        case IrOpcode::InterpolateHostP2:
         case IrOpcode::SetThreadBitScalarRegister:
         case IrOpcode::SetScalarMaskTag:
         case IrOpcode::SetScalarRegister:
         case IrOpcode::SetVectorRegister:
+        case IrOpcode::StoreVectorWindow:
         case IrOpcode::SetGotoVariable:
         case IrOpcode::SetScc:
         case IrOpcode::SetExec:

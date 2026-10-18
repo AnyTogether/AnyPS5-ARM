@@ -98,14 +98,6 @@ static void Validation() {
     try { sceUltQueueDataResourcePoolGetWorkAreaSize(1, UINT64_MAX, 1); }
     catch (const std::out_of_range&) { overflow = true; }
     CHECK(overflow);
-    bool rejected = false;
-    try { sceUltQueueCreate(&extra, nullptr, 8, nullptr, &fixture.pool, &extra, 0); }
-    catch (const std::runtime_error&) { rejected = true; }
-    CHECK(rejected);
-    rejected = false;
-    try { sceUltQueueDataResourcePoolCreate(&extra, nullptr, 1, 8, 1, nullptr, nullptr, &extra, 0); }
-    catch (const std::runtime_error&) { rejected = true; }
-    CHECK(rejected);
     overflow = false;
     try { sceUltQueueDataResourcePoolGetWorkAreaSize(UINT32_MAX, UINT64_MAX / 2, 1); }
     catch (const std::out_of_range&) { overflow = true; }
@@ -115,6 +107,14 @@ static void Validation() {
     CHECK(sceUltQueueDestroy(&fixture.first) == State);
     CHECK(sceUltQueueDataResourcePoolDestroy(&fixture.pool) == State);
     fixture.Create(1);
+    fixture.Destroy();
+    std::array<std::uint8_t, 128> optParam{};
+    optParam.fill(0x5A);
+    CHECK(sceUltQueueDataResourcePoolCreate(&fixture.pool, "pool", 1, 8, 1, nullptr, nullptr, optParam.data(), 0) == 0);
+    CHECK(sceUltQueueCreate(&fixture.first, "first", 8, nullptr, &fixture.pool, optParam.data(), 0) == 0);
+    std::uint64_t output = 0;
+    CHECK(sceUltQueuePush(&fixture.first, &value) == 0);
+    CHECK(sceUltQueuePop(&fixture.first, &output) == 0 && output == value);
     fixture.Destroy();
 }
 

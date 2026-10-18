@@ -10,6 +10,7 @@ namespace GuestArena {
 
 #ifndef _WIN32
 using SharedBackingResolver = bool (*)(std::uintptr_t address, std::size_t bytes, int* file, std::uint64_t* offset);
+using SharedBackingWriter = bool (*)(std::uintptr_t address, const void* source, std::size_t bytes);
 #endif
 
 extern "C" {
@@ -18,38 +19,60 @@ bool GuestArenaAvailable_nid_postfix();
 bool GuestArenaContains_nid_postfix(const void* pointer, std::size_t bytes);
 void* GuestArenaAllocate_nid_postfix(std::size_t bytes, std::size_t alignment);
 void* GuestArenaAllocateAtOrAbove_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment);
+void* GuestArenaAllocateFromHint_nid_postfix(std::uintptr_t hint, std::size_t bytes, std::size_t alignment);
+std::uintptr_t GuestArenaHighestFree_nid_no_patch(std::size_t bytes, std::size_t alignment);
 void GuestArenaMarkUsed_nid_postfix(const void* pointer, std::size_t bytes);
 void GuestArenaRelease_nid_postfix(const void* pointer, std::size_t bytes);
 // The reserved range, and whether it was reserved with page write watching (Windows MEM_WRITE_WATCH).
 void GuestArenaRange_nid_postfix(std::uintptr_t* base, std::size_t* bytes);
 bool GuestArenaWriteWatched_nid_postfix();
-#ifdef _WIN32
 void GuestArenaSetProtection_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint32_t protection);
+void GuestArenaCommit_nid_postfix(void* pointer, std::size_t bytes, std::uint32_t protection, std::size_t granule);
+void GuestArenaReset_nid_postfix(void* pointer, std::size_t bytes);
+#ifdef _WIN32
 bool GuestArenaHandleWrite_nid_postfix(std::uintptr_t address);
+bool GuestArenaHandleRead_nid_postfix(std::uintptr_t address);
 void GuestArenaPinWritable_nid_postfix(const void* pointer, std::size_t bytes);
 void GuestArenaUnpinWritable_nid_postfix(const void* pointer, std::size_t bytes);
 bool GuestArenaProtection_nid_postfix(std::uintptr_t address, std::uint32_t* protection);
 bool GuestArenaCollectWrites_nid_postfix(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear);
+bool GuestArenaCollectArmedWrites_nid_postfix(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear);
+bool GuestArenaCollectFreshWrites_nid_postfix(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear);
 bool GuestArenaHostRegionOverlaps_nid_postfix(std::uintptr_t address, std::size_t bytes);
 std::uint64_t GuestArenaCommitGeneration_nid_postfix();
 void GuestArenaSetPrivateMappingObserver_nid_postfix(void (*callback)(std::uintptr_t address, std::size_t bytes, std::uint64_t generation));
-void GuestArenaCommit_nid_postfix(void* pointer, std::size_t bytes, std::uint32_t protection, std::size_t granule);
-void GuestArenaReset_nid_postfix(void* pointer, std::size_t bytes);
 void GuestArenaMap_nid_postfix(void* pointer, std::size_t bytes, void* section, std::uint64_t offset, std::uint32_t protection);
+void GuestArenaMapDirect_nid_postfix(void* pointer, std::size_t bytes, void* section, std::uint64_t offset, std::uint32_t protection);
 void* GuestArenaMapAlias_nid_postfix(std::uintptr_t address, std::size_t bytes);
 void GuestArenaUnmapAlias_nid_postfix(void* alias);
+bool GuestArenaResidentSpan_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uintptr_t* start, std::uintptr_t* end);
+void GuestArenaForgetSection_nid_postfix(void* section);
 #else
 void GuestArenaSetSharedBacking_nid_postfix(SharedBackingResolver resolver);
+void GuestArenaSetSharedBackingWriter_nid_no_patch(SharedBackingWriter writer);
+bool GuestArenaWriteSharedBacking_nid_no_patch(std::uintptr_t address, const void* source, std::size_t bytes);
 bool GuestArenaSharedBacking_nid_postfix(std::uintptr_t address, std::size_t bytes, int* file, std::uint64_t* offset);
 #endif
 bool GuestArenaBeginHostWrite_nid_postfix(void* pointer, std::size_t bytes);
+// Called before a host write (a kernel read into guest memory) lands: the GPU driver flushes the
+// GPU writes still pending over the range there, so a late write-back cannot land over the data.
+void GuestArenaSetHostWriteHook_nid_postfix(void (*hook)(std::uintptr_t address, std::size_t bytes));
+// A host write that leaves the bytes as they are (the GPU driver importing the range): no flush, which
+// would take the write watch the importer already holds.
+bool GuestArenaBeginImportWrite_nid_postfix(void* pointer, std::size_t bytes);
 void GuestArenaEndHostWrite_nid_postfix(void* pointer, std::size_t bytes);
+// APS5_TRACE_HOST_WRITES: the newest host write (a kernel read into guest memory, 4 KiB or more)
+// overlapping the range made at or after `sinceNs` (steady clock), for the GPU clobber trace.
+bool GuestArenaHostWritesTraced_nid_postfix();
+bool GuestArenaHostWriteSince_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint64_t sinceNs, std::uintptr_t* hitAddress, std::size_t* hitBytes, std::uint64_t* hitNs);
 
 }
 
 class HostWrite {
 public:
+    struct Import {};
     HostWrite(void* pointer, std::size_t bytes) : pointer(pointer), bytes(bytes), open(GuestArenaBeginHostWrite_nid_postfix(pointer, bytes)) {}
+    HostWrite(void* pointer, std::size_t bytes, Import) : pointer(pointer), bytes(bytes), open(GuestArenaBeginImportWrite_nid_postfix(pointer, bytes)) {}
     ~HostWrite() {
         if (open) GuestArenaEndHostWrite_nid_postfix(pointer, bytes);
     }

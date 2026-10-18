@@ -5,6 +5,11 @@
 #include "SpirvBackend/SpirvEmitterHelpers.hpp"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
+#include <cstdlib>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
@@ -41,6 +46,170 @@ std::uint32_t DefineInterfaceVariable(SpirvEmitterState& state, std::uint32_t ty
     return variable;
 }
 
+namespace {
+
+class WindowIndexBounds {
+public:
+    std::optional<std::uint64_t> Of(const IrValue& input) {
+        const IrValue* value = input.Resolve();
+        if (value->HasImmediate()) return value->ImmediateU32();
+        if (const auto found = memo.find(value); found != memo.end()) return found->second;
+        if (!active.insert(value).second || active.size() > 256u) return std::nullopt;
+        const auto bound = compute(*value);
+        active.erase(value);
+        memo.emplace(value, bound);
+        return bound;
+    }
+
+private:
+    using Bound = std::optional<std::uint64_t>;
+
+    Bound maxOf(std::initializer_list<Bound> bounds) {
+        std::uint64_t result = 0;
+        for (const auto& bound : bounds) {
+            if (!bound) return std::nullopt;
+            result = std::max(result, *bound);
+        }
+        return result;
+    }
+
+    static std::vector<const IrValue*> reachingStores(const IrValue& load, std::uint32_t slot) {
+        std::vector<const IrValue*> values;
+        std::unordered_set<const IrBlock*> visited;
+        std::vector<std::pair<IrBlock*, const IrValue*>> pending {{load.Parent(), &load}};
+        while (!pending.empty()) {
+            const auto [block, before] = pending.back();
+            pending.pop_back();
+            const auto& instructions = block->Instructions();
+            auto it = instructions.rbegin();
+            if (before != nullptr) it = std::next(std::find(instructions.rbegin(), instructions.rend(), before));
+            bool stored = false;
+            for (; it != instructions.rend() && !stored; ++it) {
+                if ((*it)->Opcode() != IrOpcode::StoreVectorWindow) continue;
+                const IrValue* index = (*it)->Argument(0)->Resolve();
+                if (!index->HasImmediate() || index->ImmediateU32() != slot) continue;
+                values.push_back((*it)->Argument(1));
+                stored = true;
+            }
+            if (stored) continue;
+            for (IrBlock* predecessor : block->Predecessors()) {
+                if (visited.insert(predecessor).second) pending.emplace_back(predecessor, nullptr);
+            }
+        }
+        return values;
+    }
+
+    Bound compute(const IrValue& value) {
+        const auto arg = [&](std::size_t index) { return Of(*value.Argument(index)); };
+        const auto immediate = [&](std::size_t index) -> std::optional<std::uint32_t> {
+            const IrValue* operand = value.Argument(index)->Resolve();
+            if (!operand->HasImmediate()) return std::nullopt;
+            return operand->ImmediateU32();
+        };
+        const auto fits = [](std::uint64_t bound) -> Bound { return bound <= 0xffffffffull ? Bound(bound) : std::nullopt; };
+        switch (value.Opcode()) {
+        case IrOpcode::BitFieldUExtract: {
+            const auto count = immediate(2);
+            if (count && *count < 32u) return (std::uint64_t {1} << *count) - 1u;
+            return arg(0);
+        }
+        case IrOpcode::BitwiseAnd32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (lhs && rhs) return std::min(*lhs, *rhs);
+            return lhs ? lhs : rhs;
+        }
+        case IrOpcode::UMin32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (!lhs || !rhs) return std::nullopt;
+            return std::min(*lhs, *rhs);
+        }
+        case IrOpcode::UMax32:
+            return maxOf({arg(0), arg(1)});
+        case IrOpcode::BitwiseOr32: {
+            const auto both = maxOf({arg(0), arg(1)});
+            if (!both) return std::nullopt;
+            std::uint64_t mask = 0;
+            while (mask < *both) mask = mask << 1u | 1u;
+            return mask;
+        }
+        case IrOpcode::IAdd32: {
+            const auto lhs = arg(0);
+            const auto rhs = arg(1);
+            if (!lhs || !rhs) return std::nullopt;
+            return fits(*lhs + *rhs);
+        }
+        case IrOpcode::ShiftRightLogical32: {
+            const auto shift = immediate(1);
+            const auto bound = arg(0);
+            if (!bound) return std::nullopt;
+            return shift ? *bound >> (*shift & 31u) : *bound;
+        }
+        case IrOpcode::ShiftLeftLogical32: {
+            const auto shift = immediate(1);
+            const auto bound = arg(0);
+            if (!bound || !shift) return std::nullopt;
+            return fits(*bound << (*shift & 31u));
+        }
+        case IrOpcode::ConvertU32U16:
+            return 0xffffu;
+        case IrOpcode::Select:
+        case IrOpcode::SelectU32:
+        {
+            if (value.Argument(0)->Resolve()->Opcode() == IrOpcode::GetExec || value.Argument(2)->Resolve()->Opcode() == IrOpcode::LoadVectorWindow) return arg(1);
+            const auto lhs = arg(1);
+            const auto rhs = arg(2);
+            if (lhs && rhs) return std::max(*lhs, *rhs);
+            return lhs ? lhs : rhs;
+        }
+        case IrOpcode::ReadFirstLane:
+            return arg(0);
+        case IrOpcode::Identity:
+        case IrOpcode::Phi: {
+            Bound bound;
+            for (std::size_t index = 0; index < value.ArgumentCount(); ++index) {
+                if (const auto incoming = arg(index)) bound = std::max(bound.value_or(0u), *incoming);
+            }
+            return bound;
+        }
+        case IrOpcode::LoadVectorWindow: {
+            const IrValue* index = value.Argument(0)->Resolve();
+            if (!index->HasImmediate()) return std::nullopt;
+            Bound bound = 0u;
+            for (const IrValue* stored : reachingStores(value, index->ImmediateU32())) {
+                bound = maxOf({bound, Of(*stored)});
+                if (!bound) return std::nullopt;
+            }
+            return bound;
+        }
+        default:
+            return std::nullopt;
+        }
+    }
+
+    std::unordered_map<const IrValue*, Bound> memo;
+    std::unordered_set<const IrValue*> active;
+};
+
+std::uint32_t IndexedWindowSlots(const IrProgram& program) {
+    const auto window = program.Metadata().vectorWindowSize;
+    WindowIndexBounds bounds;
+    std::uint64_t reached = 0;
+    for (const auto& block : program.Blocks()) {
+        for (const IrValue* inst : block->Instructions()) {
+            if (inst->Opcode() != IrOpcode::LoadVectorWindow && inst->Opcode() != IrOpcode::StoreVectorWindow) continue;
+            const IrValue* index = inst->Argument(0)->Resolve();
+            if (index->HasImmediate()) continue;
+            const auto bound = bounds.Of(*index);
+            if (bound && *bound < window / 2u) reached = std::max(reached, *bound + 1u);
+        }
+    }
+    return static_cast<std::uint32_t>(reached);
+}
+
+}
+
 void DefineModule(SpirvEmitterState& state) {
     state.interfaceVariables.reserve(state.program.Info().inputs.size() + state.program.Info().outputs.size());
     DefineInputs(state);
@@ -55,13 +224,26 @@ void DefineModule(SpirvEmitterState& state) {
             state.scratchVariable.at(half) = state.module.AllocateId();
         }
     }
+    if (const auto window = state.program.Metadata().vectorWindowSize; window != 0u) {
+        static const bool narrowWindow = std::getenv("APS5_NO_WINDOW_NARROWING") == nullptr;
+        state.vectorWindowIndexed = narrowWindow ? IndexedWindowSlots(state.program) : 0u;
+        for (std::uint32_t half = 0; half < state.laneCount; half++) {
+            state.vectorWindowVariable.at(half) = state.module.AllocateId();
+            if (state.vectorWindowIndexed == 0u) continue;
+            auto& slots = state.vectorWindowSlots.at(half);
+            for (std::uint32_t slot = state.vectorWindowIndexed; slot < window; slot++) slots.push_back(state.module.AllocateId());
+        }
+    }
     state.mainFunc = state.module.AllocateId();
     if (StageOf(state) == IrShaderStage::Mesh) {
         const auto& mesh = VertexInfo(state).mesh;
         state.meshGuestFunc = state.module.AllocateId();
+    }
+    if (StageOf(state) == IrShaderStage::Mesh && !state.meshAsCompute) {
+        const auto& mesh = VertexInfo(state).mesh;
         state.module.EmitCapability(spv::CapabilityMeshShadingEXT);
         state.module.EmitExtension("SPV_EXT_mesh_shader");
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputTrianglesEXT);
+        state.module.AddExecutionMode(state.mainFunc, mesh.outputPrimitiveSize == 2u ? spv::ExecutionModeOutputLinesEXT : spv::ExecutionModeOutputTrianglesEXT);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputVertices, mesh.maxVertices);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputPrimitivesEXT, mesh.maxPrimitives);
     }
@@ -69,7 +251,7 @@ void DefineModule(SpirvEmitterState& state) {
         DefineTessellationExecutionModes(state);
     }
     state.entryLabel = state.module.AllocateId();
-    EmitBaseHeader(state.module, state.program);
+    EmitBaseHeader(state.module, state.program, state.meshAsCompute);
     for (const auto capability : state.requirements.capabilities) {
         state.module.EmitCapability(capability);
     }
@@ -101,12 +283,25 @@ void DefineModule(SpirvEmitterState& state) {
     if (state.cullDistanceVariable != 0) {
         state.module.EmitCapability(spv::CapabilityCullDistance);
     }
-    if (state.layerVariable != 0) {
+    const bool layerExtension = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityShaderViewportIndexLayerEXT)) != state.supportedCapabilities.end();
+    if (state.layerVariable != 0 && layerExtension) {
+        state.module.EmitCapability(spv::CapabilityShaderViewportIndexLayerEXT);
+        state.module.EmitExtension("SPV_EXT_shader_viewport_index_layer");
+    } else if (state.layerVariable != 0) {
         state.module.RequireVersion(0x00010500u);
         state.module.EmitCapability(spv::CapabilityShaderLayer);
     }
     if (InputVariableForKind(state, StageInputKind::Layer) != 0) {
-        state.module.EmitCapability(spv::CapabilityGeometry);
+        const bool geometry = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityGeometry)) != state.supportedCapabilities.end();
+        if (geometry) {
+            state.module.EmitCapability(spv::CapabilityGeometry);
+        } else if (layerExtension) {
+            state.module.EmitCapability(spv::CapabilityShaderViewportIndexLayerEXT);
+            state.module.EmitExtension("SPV_EXT_shader_viewport_index_layer");
+        } else {
+            state.module.RequireVersion(0x00010500u);
+            state.module.EmitCapability(spv::CapabilityShaderLayer);
+        }
     }
     if (state.viewportIndexVariable != 0) {
         state.module.RequireVersion(0x00010500u);
@@ -128,13 +323,16 @@ void DefineModule(SpirvEmitterState& state) {
         state.module.EmitCapability(spv::CapabilityGroupNonUniformShuffle);
     }
     if (state.requirements.computeDerivatives && StageOf(state) == IrShaderStage::Compute) {
-        state.module.EmitCapability(spv::CapabilityComputeDerivativeGroupQuadsKHR);
+        state.module.EmitCapability(spv::CapabilityComputeDerivativeGroupLinearKHR);
         state.module.EmitExtension("SPV_KHR_compute_shader_derivatives");
+    }
+    if (std::any_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) { return input.kind == StageInputKind::BaseInstance; })) {
+        state.module.EmitCapability(spv::CapabilityDrawParameters);
     }
     const bool fragmentBarycentric = StageOf(state) == IrShaderStage::Pixel && std::any_of(state.inputs.begin(), state.inputs.end(), [](const SpirvInputBinding& input) {
         return input.perVertex || input.kind == StageInputKind::BaryCoordSmooth || input.kind == StageInputKind::BaryCoordNoPerspective;
     });
-    if (fragmentBarycentric) {
+    if (fragmentBarycentric && !state.program.Metadata().barycentricEmulation) {
         state.module.EmitCapability(spv::CapabilityFragmentBarycentricKHR);
         state.module.EmitExtension("SPV_KHR_fragment_shader_barycentric");
     }
@@ -147,20 +345,25 @@ void DefineModule(SpirvEmitterState& state) {
         }
         state.module.EmitCapability(spv::CapabilityFloat64);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeSignedZeroInfNanPreserve, 64u);
+        if (state.float64DenormPreserve) {
+            state.module.EmitCapability(spv::CapabilityDenormPreserve);
+            state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDenormPreserve, 64u);
+        }
     }
     if (const auto* workgroup = ShaderWorkgroupInput(state)) {
         const std::uint32_t derivativeDefault = state.requirements.computeDerivatives ? 2u : 1u;
         std::uint32_t localX = workgroup->threadsNum[0] != 0u ? workgroup->threadsNum[0] : derivativeDefault;
         std::uint32_t localY = workgroup->threadsNum[1] != 0u ? workgroup->threadsNum[1] : derivativeDefault;
         std::uint32_t localZ = workgroup->threadsNum[2] != 0u ? workgroup->threadsNum[2] : 1u;
+        if (state.spannedWave) {
+            localX = 64u;
+            localY = 1u;
+            localZ = 1u;
+        }
         if (state.laneCount == 2) {
             localX = ((localX * localY * localZ + 63u) / 64u) * 32u;
             localY = 1u;
             localZ = 1u;
-            if (state.requirements.computeDerivatives) {
-                localY = localX / 2u;
-                localX = 2u;
-            }
         }
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeLocalSize, localX, localY, localZ);
     }
@@ -176,7 +379,15 @@ void DefineModule(SpirvEmitterState& state) {
                 state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDepthGreater);
             }
         }
-        if (pixel.psEarlyZ && !pixel.psPixelKillEnable && !pixel.psDepthExportEnable && !pixel.psSampleMaskExportEnable) {
+        if (state.stencilRefVariable != 0 && !state.stencilReplay) {
+            if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStencilExportEXT)) == state.supportedCapabilities.end()) {
+                throw std::runtime_error("a pixel shader that exports the stencil reference needs VK_EXT_shader_stencil_export, which the device lacks");
+            }
+            state.module.EmitCapability(spv::CapabilityStencilExportEXT);
+            state.module.EmitExtension("SPV_EXT_shader_stencil_export");
+            state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeStencilRefReplacingEXT);
+        }
+        if (pixel.psEarlyZ && !pixel.psAlphaToCoverage && !pixel.QuadMasked()) {
             state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeEarlyFragmentTests);
         }
         if (pixel.psOrderedPixelShader) {
@@ -189,7 +400,7 @@ void DefineModule(SpirvEmitterState& state) {
         }
     }
     if (state.requirements.computeDerivatives && StageOf(state) == IrShaderStage::Compute) {
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDerivativeGroupQuadsKHR);
+        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDerivativeGroupLinearKHR);
     }
     state.module.AddName(state.mainFunc, "main");
     if (state.requirements.functionLds) {
@@ -198,6 +409,11 @@ void DefineModule(SpirvEmitterState& state) {
     if (state.requirements.functionScratch) {
         for (std::uint32_t half = 0; half < state.laneCount; half++) {
             state.module.AddName(state.scratchVariable.at(half), "scratch_dwords");
+        }
+    }
+    if (state.program.Metadata().vectorWindowSize != 0u) {
+        for (std::uint32_t half = 0; half < state.laneCount; half++) {
+            state.module.AddName(state.vectorWindowVariable.at(half), "vector_window");
         }
     }
 }

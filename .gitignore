@@ -99,6 +99,7 @@ downloads/
 
 *.json
 !demo/web/i18n/*.json
+!tools/macos/patches/*.json
 
 !/assets/*.jpg
 !/assets/*.png
@@ -111,4 +112,5 @@ cookies.txt
 .env.local
 
 !docs/screenshots/*.jpg
+!docs/games/img/*.jpg
 tools/macos/converter/.build/

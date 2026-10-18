@@ -37,10 +37,13 @@ def fixture(second_code: bytes, with_import: bool = False) -> bytearray:
     return image
 
 
-def run_case(relinker: Path, work: Path, name: str, args, code: bytes, with_import=False):
+def run_case(relinker: Path, work: Path, name: str, args, code: bytes, with_import=False, trailing_data=b""):
     source = work / (name + ".elf")
     output = work / (name + ".exe")
-    source.write_bytes(fixture(code, with_import))
+    image = fixture(code, with_import)
+    end = 0x800 + len(code)
+    image[end:end + len(trailing_data)] = trailing_data
+    source.write_bytes(image)
     result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", *args,
                              str(source), str(output)], capture_output=True,
                             text=True, timeout=20)
@@ -56,6 +59,43 @@ def main():
 
         result, output = run_case(relinker, work, "syscall-filter", ["unused-filter=1"], b"\x0f\x05\xc3")
         assert result.returncode == 2 and "Forbidden syscall instruction" in result.stderr and not output.exists(), result
+
+        forbidden = (
+            ("rex-syscall", b"\x48\x0f\x05"),
+            ("operand-syscall", b"\x66\x0f\x05"),
+            ("address-sysenter", b"\x67\x0f\x34"),
+            ("segment-sysenter", b"\x2e\x0f\x34"),
+            ("rex-sysret", b"\x48\x0f\x07"),
+            ("mixed-sysret", b"\x66\x67\x48\x0f\x07"),
+            ("operand-int80", b"\x66\xcd\x80"),
+            ("segment-int80", b"\x64\xcd\x80"),
+        )
+        for name, instruction in forbidden:
+            result, output = run_case(relinker, work, name, [], b"\x90" + instruction + b"\xc3")
+            assert result.returncode == 2 and not output.exists(), (name, result.stdout, result.stderr)
+            assert "Forbidden syscall instruction at code offset 0x1801" in result.stderr, (name, result.stderr)
+
+        for name, instruction in forbidden:
+            result, output = run_case(relinker, work, name + "-at-end", [], b"\x90" + instruction)
+            assert result.returncode == 2 and not output.exists(), (name, result.stdout, result.stderr)
+            assert "Forbidden syscall instruction at code offset 0x1801" in result.stderr, (name, result.stderr)
+
+        for name, instruction in forbidden:
+            result, output = run_case(relinker, work, name + "-outside", [], b"\x90\xc3",
+                                      trailing_data=instruction)
+            assert result.returncode == 0 and output.exists(), (name, result.stdout, result.stderr)
+
+            result, output = run_case(relinker, work, name + "-truncated", [], b"\x90" + instruction[:-1],
+                                      trailing_data=instruction[-1:])
+            assert result.returncode == 2 and not output.exists(), (name, result.stdout, result.stderr)
+            assert "Cannot decode instruction" in result.stderr and "offset 0x1801" in result.stderr, (name, result.stderr)
+
+        result, output = run_case(relinker, work, "immediate-decoys", [],
+                                  b"\x48\xb8\x0f\x05\xcd\x80\x0f\x34\x0f\x07\xc3")
+        assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
+
+        result, output = run_case(relinker, work, "skip-prefixed", ["--skip-syscall-check"], b"\x48\x0f\x05\xc3")
+        assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
 
         result, output = run_case(relinker, work, "skip", ["--skip-syscall-check"], b"\x0f\x05\xc3")
         assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)

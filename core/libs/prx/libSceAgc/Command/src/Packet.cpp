@@ -85,7 +85,7 @@ void ValidatePacket(const std::uint32_t* packet, std::uint32_t opcode, std::uint
 }
 
 std::uint32_t* WriteNop(CommandBuffer* buffer, std::uint32_t count, const char* function) {
-    const auto header = Header(0x10u, count);
+    const auto header = count == 1 ? 0xffff1000u : Header(0x10u, count);
     auto* packet = Allocate(buffer, count, function);
     packet[0] = header;
     std::fill_n(packet + 1, count - 1u, 0u);
@@ -107,7 +107,10 @@ std::uint32_t* WriteRegisterRange(CommandBuffer* buffer, std::uint32_t opcode, s
 }
 
 std::uint32_t* WriteRegisters(CommandBuffer* buffer, std::uint32_t opcode, const volatile ShaderRegister* registers, std::uint32_t count, bool snapshotAll, const char* function) {
-    Require(count != 0, function, "empty register list");
+    if (count == 0) {
+        Require(buffer != nullptr, function, "null command buffer");
+        return buffer->cursor_up;
+    }
     CheckAddress(reinterpret_cast<std::uintptr_t>(registers), 4, function);
     std::vector<ShaderRegister> snapshot;
     if (snapshotAll) {

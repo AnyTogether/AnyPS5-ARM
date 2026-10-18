@@ -5,17 +5,26 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <stdexcept>
-#include <string_view>
 
 extern "C" {
 int APS5_VABI sceHttpSetCookieEnabled(int, int);
 int APS5_VABI sceHttpSendRequest(int, const void*, std::size_t);
 int APS5_VABI sceNpEntitlementAccessGetEntitlementKey(
     std::uint32_t, const NpUnifiedEntitlementLabel*, NpEntitlementAccessEntitlementKey*);
+int APS5_VABI sceNpEntitlementAccessGetGameTrialsFlag(std::uint32_t*);
+int APS5_VABI sceNpEntitlementAccessGetPftFlag(std::uint32_t*);
+int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfoList();
+int APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfoList();
+int APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfoList();
+int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfoList();
+int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfo();
+int APS5_VABI sceNpEntitlementAccessPollUnifiedEntitlementInfo();
+int APS5_VABI sceNpEntitlementAccessRequestServiceEntitlementInfo();
+int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfo();
 int APS5_VABI sceRudpInit_nid_postfix(void*, int);
+int APS5_VABI sceRudpActivate();
 int APS5_VABI sceRudpGetStatus(void*, std::size_t);
-int APS5_VABI sceRudpTerminate();
+int APS5_VABI sceRudpEnd();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -25,13 +34,7 @@ int main() {
     constexpr int network = static_cast<int>(0x80431063);
     Require(sceHttpSetCookieEnabled(1, 0) == 0);
     Require(sceHttpSendRequest(1, nullptr, 0) == network);
-    bool cookieUnsupported = false;
-    try {
-        sceHttpSetCookieEnabled(1, 1);
-    } catch (const std::runtime_error& error) {
-        cookieUnsupported = std::string_view(error.what()) == "sceHttpSetCookieEnabled not implemented";
-    }
-    Require(cookieUnsupported);
+    Require(sceHttpSetCookieEnabled(1, 1) == 0);
     for (int enabled : {-1, 2, 0x100}) {
         Require(sceHttpSetCookieEnabled(1, enabled) == invalidValue);
     }
@@ -57,23 +60,39 @@ int main() {
         Require(std::memcmp(&output, original.data(), sizeof(output)) == 0);
     }
 
+    std::array<std::uint32_t, 2> trialsFlag{0xa5a5a5a5u, 0x5a5a5a5au};
+    Require(sceNpEntitlementAccessGetGameTrialsFlag(trialsFlag.data()) == 0);
+    Require(trialsFlag[0] == 0 && trialsFlag[1] == 0x5a5a5a5au);
+    Require(sceNpEntitlementAccessGetGameTrialsFlag(nullptr) == parameter);
+
+    std::array<std::uint32_t, 2> pftFlag{0xa5a5a5a5u, 0x5a5a5a5au};
+    Require(sceNpEntitlementAccessGetPftFlag(pftFlag.data()) == 0);
+    Require(pftFlag[0] == 0 && pftFlag[1] == 0x5a5a5a5au);
+    Require(sceNpEntitlementAccessGetPftFlag(nullptr) == parameter);
+
+    constexpr int signedOut = static_cast<int>(0x80550006);
+    Require(sceNpEntitlementAccessRequestUnifiedEntitlementInfoList() == signedOut);
+    Require(sceNpEntitlementAccessPollUnifiedEntitlementInfoList() == signedOut);
+    Require(sceNpEntitlementAccessRequestServiceEntitlementInfoList() == signedOut);
+    Require(sceNpEntitlementAccessPollServiceEntitlementInfoList() == signedOut);
+    Require(sceNpEntitlementAccessRequestUnifiedEntitlementInfo() == signedOut);
+    Require(sceNpEntitlementAccessPollUnifiedEntitlementInfo() == signedOut);
+    Require(sceNpEntitlementAccessRequestServiceEntitlementInfo() == signedOut);
+    Require(sceNpEntitlementAccessPollServiceEntitlementInfo() == signedOut);
+
+    Require(sceRudpActivate() == 0);
     std::array<unsigned char, 248> status;
     status.fill(0x5a);
     const auto originalStatus = status;
-    auto unsupported = [](void* data, std::size_t size) {
-        try {
-            sceRudpGetStatus(data, size);
-        } catch (const std::runtime_error& error) {
-            return std::string_view(error.what()) == "sceRudpGetStatus not implemented";
-        }
-        return false;
-    };
-    Require(unsupported(status.data(), status.size()));
+    constexpr int rudpNotInitialized = static_cast<int>(0x80770001);
+    Require(sceRudpGetStatus(status.data(), status.size()) == rudpNotInitialized);
     Require(status == originalStatus);
-    Require(sceRudpInit_nid_postfix(nullptr, 0) == 0);
-    Require(unsupported(status.data(), status.size()));
-    Require(status == originalStatus);
-    Require(unsupported(nullptr, 0));
-    Require(sceRudpTerminate() == 0);
+    alignas(8) static unsigned char rudpPool[0xC58];
+    Require(sceRudpInit_nid_postfix(rudpPool, sizeof(rudpPool)) == 0);
+    Require(sceRudpActivate() == 0);
+    Require(sceRudpGetStatus(status.data(), status.size()) == 0);
+    for (unsigned char byte : status) Require(byte == 0);
+    Require(sceRudpGetStatus(nullptr, 0) == static_cast<int>(0x80770004));
+    Require(sceRudpEnd() == 0);
     return 0;
 }

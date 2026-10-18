@@ -1,6 +1,7 @@
 #ifndef CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_DRIVER_WAITMEMORY_HPP
 #define CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_DRIVER_WAITMEMORY_HPP
 
+#include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/LabelStores.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include <array>
 #include <chrono>
@@ -9,8 +10,6 @@
 
 namespace AgcDriver::DriverDetail {
 
-inline constexpr std::size_t LabelStoreHistory = 4;
-
 inline constexpr const char* LabelRefusalNames[6] = {"none", "trust-off", "queued", "overwritten", "unclosed", "behind-completion"};
 
 inline constexpr std::chrono::microseconds PollTryInterval{1000};
@@ -18,6 +17,7 @@ inline constexpr std::chrono::microseconds PollTryInterval{1000};
 struct LabelStore {
     std::uint64_t stamp = 0;
     std::uint32_t value = 0;
+    std::uint32_t queue = 0xffffffffu;
 };
 
 struct WriteRecord {

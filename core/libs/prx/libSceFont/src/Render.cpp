@@ -6,11 +6,13 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <new>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include "prx/libSceFont/include/FontFreeType.hpp"
 #include "prx/libSceFont/include/FontInternal.hpp"
 
 namespace {
@@ -91,6 +93,71 @@ void LoadKerning(FT_Face face, float scaleW, float scaleH, std::uint32_t preCode
     FT_Vector delta{};
     FT_Get_Kerning(face, previousGlyph, glyph, FT_KERNING_DEFAULT, &delta);
     kerning->offsetX = static_cast<float>(delta.x) / 64.0f;
+}
+
+std::mutex& GlyphAttributeMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+enum class GlyphPlacement { Attribute, Horizontal, Vertical };
+
+// A glyph object renders from the face of the font that generated it, at the frame's scale when the
+// frame sets one and otherwise at the scale it was generated with. The directional calls take (x, y)
+// as the pen position, as the font-handle ones do; the plain call takes the top-left corner of the
+// glyph's em box and follows the glyph's writing attribute.
+int RenderGlyphObject(FontGlyph glyph, const FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result, GlyphPlacement placement) {
+    const auto fail = [&](int rc) {
+        ClearRenderOutputs(metrics, result);
+        return rc;
+    };
+    GeneratedGlyph* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated) return fail(SCE_FONT_ERROR_INVALID_GLYPH);
+    const auto* rendererNative = static_cast<const RendererNative*>(renderer);
+    if (!rendererNative || rendererNative->magic != RENDERER_MAGIC) return fail(SCE_FONT_ERROR_INVALID_RENDERER);
+    if (!surface || !metrics || !result) return fail(SCE_FONT_ERROR_INVALID_PARAMETER);
+    if (styleFrame && !ValidStyleFrame(styleFrame)) return fail(SCE_FONT_ERROR_INVALID_PARAMETER);
+    float scaleW = glyph->scale_x;
+    float scaleH = glyph->base_scale;
+    if (styleFrame && (styleFrame->flags1 & STYLE_FRAME_FLAG_SCALE) != 0) {
+        StyleStateBlock frameScale{};
+        frameScale.dpi_x = styleFrame->hDpi;
+        frameScale.dpi_y = styleFrame->vDpi;
+        frameScale.scale_unit = styleFrame->scaleUnit;
+        frameScale.scale_w = styleFrame->scalePixelW;
+        frameScale.scale_h = styleFrame->scalePixelH;
+        const int rc = StyleStateGetScalePixel(&frameScale, &scaleW, &scaleH);
+        if (rc != SCE_FONT_OK) return fail(rc);
+    }
+    if (!(scaleW > 0.0f) || !(scaleH > 0.0f)) return fail(SCE_FONT_ERROR_INVALID_PARAMETER);
+    if (placement == GlyphPlacement::Attribute) {
+        std::lock_guard lock(GlyphAttributeMutex());
+        placement = AttributeSlot(generated->attributes, ATTRIBUTE_WRITING_HORIZONTAL) == ATTRIBUTE_WRITING_VERTICAL ? GlyphPlacement::Vertical : GlyphPlacement::Attribute;
+    }
+    if (placement == GlyphPlacement::Attribute) {
+        const float ratio = glyph->base_scale > 0.0f ? scaleH / glyph->base_scale : 1.0f;
+        x += static_cast<float>(glyph->origin_x) * ratio;
+        y += static_cast<float>(glyph->origin_y) * ratio;
+    }
+    FontState* state = TryGetState(generated->owner);
+    if (!state) return fail(SCE_FONT_ERROR_INVALID_GLYPH);
+    auto* font = GetNativeFont(generated->owner);
+    std::uint32_t fontLock = 0;
+    if (font->magic != HANDLE_MAGIC || !AcquireFontLock(font, fontLock)) return fail(SCE_FONT_ERROR_INVALID_GLYPH);
+    int rc = SCE_FONT_ERROR_NO_SUPPORT_GLYPH;
+    const FT_Face face = state->face;
+    const FT_UInt glyphIndex = face ? ResolveGlyphIndexWithFallback(face, generated->codepoint) : 0;
+    const auto charW = static_cast<FT_F26Dot6>(static_cast<std::int32_t>(scaleW * 64.0f));
+    const auto charH = static_cast<FT_F26Dot6>(static_cast<std::int32_t>(scaleH * 64.0f));
+    if (glyphIndex != 0 && SetCharSizeCompat(face, charW, charH, 72, 72) == 0) rc = RenderFaceGlyphToSurface(face, glyphIndex, FT_Vector{}, surface, x, y, metrics, result);
+    ReleaseFontLock(font, fontLock);
+    if (rc != SCE_FONT_OK) return fail(rc);
+    const float ratioX = glyph->scale_x > 0.0f ? scaleW / glyph->scale_x : 1.0f;
+    const float ratioY = glyph->base_scale > 0.0f ? scaleH / glyph->base_scale : 1.0f;
+    metrics->Vertical.bearingX = generated->metrics.Vertical.bearingX * ratioX;
+    metrics->Vertical.bearingY = generated->metrics.Vertical.bearingY * ratioY;
+    metrics->Vertical.advance = generated->metrics.Vertical.advance * ratioY;
+    return SCE_FONT_OK;
 }
 
 int RenderDirectional(FontHandle fontHandle, std::uint32_t code, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result, std::uint16_t direction) {
@@ -419,11 +486,39 @@ int APS5_VABI sceFontDeleteGlyph(const FontMemory* memory, FontGlyph* pGlyph) {
     return SCE_FONT_OK;
 }
 
-int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph glyph, std::uint32_t attribute, std::uint64_t value) {
-    (void)attribute;
-    (void)value;
-    if (!glyph || glyph->magic != GLYPH_MAGIC) return SCE_FONT_ERROR_INVALID_GLYPH;
+int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph glyph, int attribute, int* oldAttribute) {
+    if (oldAttribute) *oldAttribute = ATTRIBUTE_NONE;
+    auto* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated) return SCE_FONT_ERROR_INVALID_GLYPH;
+    if (!ValidAttribute(attribute)) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    std::lock_guard lock(GlyphAttributeMutex());
+    std::uint8_t& slot = AttributeSlot(generated->attributes, attribute);
+    if (oldAttribute) *oldAttribute = slot;
+    slot = static_cast<std::uint8_t>(attribute);
     return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontGlyphGetAttribute(FontGlyph glyph, int attribute, int* nowAttribute) {
+    if (!nowAttribute) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    *nowAttribute = ATTRIBUTE_NONE;
+    auto* generated = TryGetGeneratedGlyph(glyph);
+    if (!generated) return SCE_FONT_ERROR_INVALID_GLYPH;
+    if (!ValidAttribute(attribute)) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    std::lock_guard lock(GlyphAttributeMutex());
+    *nowAttribute = AttributeSlot(generated->attributes, attribute);
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontGlyphRenderImage(FontGlyph glyph, FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    return RenderGlyphObject(glyph, styleFrame, renderer, surface, x, y, metrics, result, GlyphPlacement::Attribute);
+}
+
+int APS5_VABI sceFontGlyphRenderImageHorizontal(FontGlyph glyph, FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    return RenderGlyphObject(glyph, styleFrame, renderer, surface, x, y, metrics, result, GlyphPlacement::Horizontal);
+}
+
+int APS5_VABI sceFontGlyphRenderImageVertical(FontGlyph glyph, FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
+    return RenderGlyphObject(glyph, styleFrame, renderer, surface, x, y, metrics, result, GlyphPlacement::Vertical);
 }
 
 int APS5_VABI sceFontGlyphGetGlyphForm(FontGlyph glyph) {

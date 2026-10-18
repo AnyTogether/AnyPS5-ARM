@@ -1,0 +1,153 @@
+#include "prx/libc/include/ApplicationHeap.hpp"
+#include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
+#include <cstdint>
+#include <cstdlib>
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+extern "C" {
+int APS5_VABI mergesort_nid_postfix(void*, std::size_t, std::size_t, int (APS5_VABI*)(const void*, const void*));
+int* APS5_VABI __error_nid_postfix();
+void APS5_VABI qsort_nid_postfix(void*, std::size_t, std::size_t, int (APS5_VABI*)(const void*, const void*));
+}
+
+namespace {
+
+bool failAllocation = false;
+
+void* APS5_VABI Allocate(std::size_t size) { return failAllocation ? nullptr : std::malloc(size); }
+void APS5_VABI Free(void* ptr) { std::free(ptr); }
+void* APS5_VABI Reallocate(void* ptr, std::size_t size) { return std::realloc(ptr, size); }
+void* APS5_VABI Calloc(std::size_t count, std::size_t size) { return std::calloc(count, size); }
+void* APS5_VABI Align(std::size_t, std::size_t size) { return std::malloc(size); }
+void* APS5_VABI Realign(void* ptr, std::size_t size, std::size_t) { return std::realloc(ptr, size); }
+int APS5_VABI PosixAlign(void** ptr, std::size_t, std::size_t size) {
+    *ptr = std::malloc(size);
+    return *ptr ? 0 : 12;
+}
+
+void InitializeHeap() {
+    alignas(16) static std::array<std::byte, 0x40> process{};
+    alignas(16) static std::array<std::byte, 0x38> libc{};
+    alignas(16) static std::array<std::byte, 0x78> replacement{};
+    const auto write = [](auto& data, std::size_t offset, auto value) {
+        std::memcpy(data.data() + offset, &value, sizeof(value));
+    };
+    write(process, 0, std::uint64_t{0x40});
+    write(process, 8, std::uint32_t{0x4942524f});
+    write(process, 0x38, libc.data());
+    write(libc, 0, std::uint64_t{0x38});
+    write(libc, 0x30, replacement.data());
+    write(replacement, 0, std::uint64_t{0x78});
+    write(replacement, 8, std::uint64_t{2});
+    write(replacement, 0x20, reinterpret_cast<void*>(&Allocate));
+    write(replacement, 0x28, reinterpret_cast<void*>(&Free));
+    write(replacement, 0x30, reinterpret_cast<void*>(&Calloc));
+    write(replacement, 0x38, reinterpret_cast<void*>(&Reallocate));
+    write(replacement, 0x40, reinterpret_cast<void*>(&Align));
+    write(replacement, 0x48, reinterpret_cast<void*>(&Realign));
+    write(replacement, 0x50, reinterpret_cast<void*>(&PosixAlign));
+    ApplicationHeapInitialize_nid_no_patch(process.data());
+}
+
+struct Element {
+    int key;
+    int tag;
+};
+
+int APS5_VABI CompareKeys(const void* left, const void* right) {
+    const int first = static_cast<const Element*>(left)->key;
+    const int second = static_cast<const Element*>(right)->key;
+    return (first > second) - (first < second);
+}
+
+int APS5_VABI CompareFirstByte(const void* left, const void* right) {
+    const int first = *static_cast<const unsigned char*>(left);
+    const int second = *static_cast<const unsigned char*>(right);
+    return (first > second) - (first < second);
+}
+
+bool ExpectOrder(const char* name, const std::vector<int>& keys, const std::vector<int>& tags) {
+    std::vector<Element> elements;
+    for (std::size_t index = 0; index < keys.size(); ++index) elements.push_back({keys[index], static_cast<int>(index)});
+    qsort_nid_postfix(elements.data(), elements.size(), sizeof(Element), CompareKeys);
+    for (std::size_t index = 0; index < tags.size(); ++index) {
+        if (elements[index].tag != tags[index]) {
+            std::fprintf(stderr, "%s: element %zu has tag %d, expected %d\n", name, index, elements[index].tag, tags[index]);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ExpectSorted(std::size_t size, std::size_t count) {
+    std::vector<unsigned char> bytes(size * count);
+    unsigned int state = static_cast<unsigned int>(size * 31 + count);
+    for (auto& byte : bytes) {
+        state = state * 1103515245u + 12345u;
+        byte = static_cast<unsigned char>(state >> 16);
+    }
+    std::vector<unsigned char> counts(256);
+    for (std::size_t index = 0; index < count; ++index) ++counts[bytes[index * size]];
+    qsort_nid_postfix(bytes.data(), count, size, CompareFirstByte);
+    for (std::size_t index = 0; index < count; ++index) {
+        if (index > 0 && bytes[(index - 1) * size] > bytes[index * size]) {
+            std::fprintf(stderr, "qsort of %zu %zu-byte elements is not sorted at %zu\n", count, size, index);
+            return false;
+        }
+        --counts[bytes[index * size]];
+    }
+    for (const unsigned char remaining : counts) {
+        if (remaining != 0) {
+            std::fprintf(stderr, "qsort of %zu %zu-byte elements lost or duplicated elements\n", count, size);
+            return false;
+        }
+    }
+    return true;
+}
+
+
+bool CheckMergesort() {
+    InitializeHeap();
+    bool correct = true;
+    for (const std::size_t count : {0, 1, 2, 3, 7, 16, 33, 1000}) {
+        std::vector<Element> elements;
+        for (std::size_t index = 0; index < count; ++index) elements.push_back({static_cast<int>((index * 7919) % 5), static_cast<int>(index)});
+        correct &= mergesort_nid_postfix(elements.data(), count, sizeof(Element), CompareKeys) == 0;
+        for (std::size_t index = 1; index < count; ++index) {
+            const auto& before = elements[index - 1];
+            const auto& after = elements[index];
+            correct &= before.key < after.key || (before.key == after.key && before.tag < after.tag);
+        }
+    }
+    unsigned char bytes[3] = {3, 1, 2};
+    *__error_nid_postfix() = 0;
+    correct &= mergesort_nid_postfix(bytes, 3, 1, CompareFirstByte) == -1 && *__error_nid_postfix() == 22 && bytes[0] == 3;
+    correct &= mergesort_nid_postfix(nullptr, 0, 4, CompareKeys) == 0;
+    Element pair[2] = {{2, 0}, {1, 1}};
+    failAllocation = true;
+    correct &= mergesort_nid_postfix(pair, 2, sizeof(Element), CompareKeys) == -1 && pair[0].key == 2;
+    failAllocation = false;
+    if (!correct) std::fprintf(stderr, "mergesort failed\n");
+    return correct;
+}
+}
+
+int main() {
+    bool correct = true;
+    correct &= ExpectOrder("insertion sort", {1, 0, 1, 0}, {1, 3, 0, 2});
+    correct &= ExpectOrder("median of three", {2, 1, 2, 0, 1, 2, 0, 1, 0, 2, 1, 0}, {11, 3, 6, 8, 10, 1, 7, 4, 9, 5, 0, 2});
+    std::vector<int> keys;
+    for (int index = 0; index < 48; ++index) keys.push_back((index * 7 + 3) % 5);
+    correct &= ExpectOrder("pseudomedian of nine", keys,
+        {21, 11, 36, 6, 1, 31, 16, 46, 41, 26, 29, 4, 24, 44, 9, 39, 34, 14, 19, 12, 2, 7, 17, 22,
+         27, 32, 37, 42, 47, 5, 40, 30, 15, 35, 25, 20, 0, 45, 10, 28, 33, 13, 38, 8, 3, 23, 43, 18});
+    for (const std::size_t size : {1, 3, 8, 24})
+        for (const std::size_t count : {0, 1, 2, 6, 7, 8, 40, 41, 1000})
+            correct &= ExpectSorted(size, count);
+    correct &= CheckMergesort();
+    return correct ? 0 : 1;
+}

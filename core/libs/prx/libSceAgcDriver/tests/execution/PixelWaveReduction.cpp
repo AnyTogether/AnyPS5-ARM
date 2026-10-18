@@ -16,7 +16,6 @@ namespace {
 using AgcDriver::Graphics::Require;
 using ShaderRecompiler::ShaderStage;
 
-constexpr std::uint32_t ArithmeticCapability = 63;
 constexpr std::uint32_t Sentinel = 0xdeadbeefu;
 constexpr std::uint32_t Width = 192;
 constexpr std::uint32_t Height = 128;
@@ -106,13 +105,13 @@ void Draw(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> pixelC
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
         {64u, 0, pixelUserData, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
-        {0, 0, vertexPush, 128 - vertexPush}
+        PixelPushLayout(vertexPush, target)
     };
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Vertex, &vertexResult, 0},
-        {ShaderStage::Fragment, &pixelResult, vertexPush}
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(vertexPush, target)}
     }};
 
     AgcDriver::Graphics::State state{};
@@ -170,7 +169,7 @@ int main() {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         const auto target = device->Target();
-        if (std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), ArithmeticCapability) == target.supportedCapabilities.end()) {
+        if (!TargetHasCapability(target, spv::CapabilityGroupNonUniformArithmetic)) {
             std::puts("skipped, the device has no subgroup arithmetic");
             return VulkanTestSkipped;
         }
@@ -195,13 +194,16 @@ int main() {
         }};
         for (const auto& layout : layouts) {
             for (const auto& reduction : reductions) {
-                const auto code = PixelCode(reduction);
-                std::uint32_t partial = 0;
-                for (std::uint32_t pass = 0; pass < 4; ++pass) {
-                    Draw(*device, code, layout);
-                    partial += Check(reduction, target.subgroupSize);
+                for (const bool windowed : {false, true}) {
+                    auto code = PixelCode(reduction);
+                    if (windowed) code.insert(std::find(code.begin(), code.end(), 0x7e0e02f2u), 0x7e008514u);
+                    std::uint32_t partial = 0;
+                    for (std::uint32_t pass = 0; pass < 4; ++pass) {
+                        Draw(*device, code, layout);
+                        partial += Check(reduction, target.subgroupSize);
+                    }
+                    std::printf("%s%s, laid out for %u lanes on %u-lane subgroups: %u partial waves over 4 draws\n", reduction.name, windowed ? " in a v_movreld_b32 window" : "", layout.subgroupSize, target.subgroupSize, partial);
                 }
-                std::printf("%s, laid out for %u lanes on %u-lane subgroups: %u partial waves over 4 draws\n", reduction.name, layout.subgroupSize, target.subgroupSize, partial);
             }
         }
         std::puts("pixel wave reduction tests passed");

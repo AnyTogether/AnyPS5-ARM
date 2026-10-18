@@ -5,35 +5,81 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
-#if defined(__APPLE__)
+#include "prx/libkernel/Module/EhFrame.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#include <filesystem>
+#elif defined(__APPLE__)
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
-#elif !defined(_WIN32)
+#else
 #include <dlfcn.h>
 #include <link.h>
+#include <mutex>
 #include <unistd.h>
+#include <unordered_map>
 #endif
 
 extern "C" std::int32_t ModuleIdForImage_nid_no_patch(const void* native);
 
 namespace {
 
-#if !defined(_WIN32)
-#ifdef __APPLE__
-constexpr std::uint32_t PF_R = 4;
-#endif
+constexpr char Caller[] = "sceKernelGetModuleInfoFromAddr";
 constexpr char GuestModuleSuffix[] = ".guest.prx";
+constexpr std::uint64_t TerminatorSize = 4;
 constexpr std::int32_t ProtRead = 1;
 constexpr std::int32_t ProtWrite = 2;
 constexpr std::int32_t ProtExecute = 4;
 
+template<typename TInfo>
+constexpr bool Extended = std::is_same_v<TInfo, ModuleInfoEx>;
+
+std::uint32_t ToU32(std::uint64_t value, const char* field) {
+    if (value > std::numeric_limits<std::uint32_t>::max())
+        throw std::runtime_error(std::string("module info: ") + field + " exceeds 32 bits");
+    return static_cast<std::uint32_t>(value);
+}
+
+std::string ModuleName(std::string fileName) {
+    if (fileName.size() > sizeof(GuestModuleSuffix) - 1 && fileName.ends_with(GuestModuleSuffix))
+        fileName.resize(fileName.size() - (sizeof(GuestModuleSuffix) - 1));
+    return fileName;
+}
+
+template<typename TInfo>
+void SetName(TInfo& info, const std::string& name) {
+    if (name.size() >= sizeof(info.name))
+        throw std::runtime_error("module info: module name too long: " + name);
+    std::memcpy(info.name, name.c_str(), name.size() + 1);
+}
+
+struct GuestImage {
+    const void* native;
+    std::uintptr_t address;
+};
+
+std::uint64_t PageSpan(std::uint64_t address, std::uint64_t size) {
+    constexpr std::uint64_t pageMask = PS5_PAGE_SIZE - 1;
+    return ((address + size + pageMask) & ~pageMask) - (address & ~pageMask);
+}
+
+#ifndef _WIN32
+template<typename TInfo>
 struct ImageSearch {
     std::uintptr_t address;
-    ModuleInfoEx* info;
+    TInfo* info;
     bool found;
 };
 
@@ -47,61 +93,29 @@ bool Contains(const dl_phdr_info& image, std::uintptr_t begin, std::uint64_t siz
     return false;
 }
 
-std::uint32_t ToU32(std::uint64_t value, const char* field) {
-    if (value > std::numeric_limits<std::uint32_t>::max())
-        throw std::runtime_error(std::string("sceKernelGetModuleInfoFromAddr: ") + field + " exceeds 32 bits");
-    return static_cast<std::uint32_t>(value);
-}
+#ifndef __APPLE__
+struct FrameTableCache {
+    std::mutex mutex;
+    unsigned long long unloads = 0;
+    std::unordered_map<std::uintptr_t, EhFrame::Tables> tables;
+};
+#endif
 
-std::uintptr_t EhFrameAddress(const dl_phdr_info& image, std::uintptr_t header) {
-    if (!Contains(image, header, 8))
-        throw std::runtime_error("sceKernelGetModuleInfoFromAddr: eh_frame_hdr outside the image");
-    const auto* bytes = reinterpret_cast<const std::uint8_t*>(header);
-    if (bytes[0] != 1) throw std::runtime_error("sceKernelGetModuleInfoFromAddr: unsupported eh_frame_hdr version");
-    const std::uintptr_t field = header + 4;
-    switch (bytes[1]) {
-    case 0x1b: {
-        std::int32_t offset;
-        std::memcpy(&offset, bytes + 4, sizeof(offset));
-        return field + static_cast<std::intptr_t>(offset);
+EhFrame::Tables FrameTables(const dl_phdr_info& image, std::uintptr_t header) {
+    const auto contains = [&](std::uintptr_t begin, std::uint64_t size) { return Contains(image, begin, size); };
+#ifdef __APPLE__
+    // The macOS image list reports no unload count that could invalidate cached tables.
+    return EhFrame::ReadTables(contains, header, Caller);
+#else
+    static auto& cache = *new FrameTableCache();
+    std::lock_guard lock(cache.mutex);
+    if (cache.unloads != image.dlpi_subs) {
+        cache.tables.clear();
+        cache.unloads = image.dlpi_subs;
     }
-    case 0x03: {
-        std::uint32_t value;
-        std::memcpy(&value, bytes + 4, sizeof(value));
-        return value;
-    }
-    case 0x00: {
-        std::uint64_t value;
-        if (!Contains(image, header, 12))
-            throw std::runtime_error("sceKernelGetModuleInfoFromAddr: eh_frame_hdr outside the image");
-        std::memcpy(&value, bytes + 4, sizeof(value));
-        return static_cast<std::uintptr_t>(value);
-    }
-    default:
-        throw std::runtime_error("sceKernelGetModuleInfoFromAddr: unsupported eh_frame_ptr encoding");
-    }
-}
-
-std::uint64_t EhFrameSize(const dl_phdr_info& image, std::uintptr_t frame) {
-    std::uintptr_t position = frame;
-    for (;;) {
-        if (!Contains(image, position, 4))
-            throw std::runtime_error("sceKernelGetModuleInfoFromAddr: eh_frame outside the image");
-        std::uint32_t length;
-        std::memcpy(&length, reinterpret_cast<const void*>(position), sizeof(length));
-        position += 4;
-        if (length == 0) return position - frame;
-        std::uint64_t recordLength = length;
-        if (length == 0xffffffffu) {
-            if (!Contains(image, position, 8))
-                throw std::runtime_error("sceKernelGetModuleInfoFromAddr: eh_frame outside the image");
-            std::memcpy(&recordLength, reinterpret_cast<const void*>(position), sizeof(recordLength));
-            position += 8;
-        }
-        if (!Contains(image, position, recordLength))
-            throw std::runtime_error("sceKernelGetModuleInfoFromAddr: eh_frame record outside the image");
-        position += recordLength;
-    }
+    if (const auto found = cache.tables.find(header); found != cache.tables.end()) return found->second;
+    return cache.tables.emplace(header, EhFrame::ReadTables(contains, header, Caller)).first->second;
+#endif
 }
 
 std::string ImageName(const dl_phdr_info& image) {
@@ -118,19 +132,15 @@ std::string ImageName(const dl_phdr_info& image) {
         path.assign(executable, static_cast<std::size_t>(length));
 #endif
     }
-    std::string name = path.substr(path.find_last_of('/') + 1);
-    if (name.size() > sizeof(GuestModuleSuffix) - 1 && name.ends_with(GuestModuleSuffix))
-        name.resize(name.size() - (sizeof(GuestModuleSuffix) - 1));
-    return name;
+    return ModuleName(path.substr(path.find_last_of('/') + 1));
 }
 
-void Fill(const dl_phdr_info& image, ModuleInfoEx& info) {
-    const auto name = ImageName(image);
-    if (name.size() >= sizeof(info.name))
-        throw std::runtime_error("sceKernelGetModuleInfoFromAddr: module name too long: " + name);
-    std::memcpy(info.name, name.c_str(), name.size() + 1);
+template<typename TInfo>
+void Fill(const dl_phdr_info& image, TInfo& info) {
+    SetName(info, ImageName(image));
 #ifndef __APPLE__
-    info.tls_index = ToU32(image.dlpi_tls_modid, "TLS module index");
+    // A macOS image has no ELF TLS module or dynamic section; its TLS and init/fini stay zero.
+    if constexpr (Extended<TInfo>) info.tls_index = ToU32(image.dlpi_tls_modid, "TLS module index");
 #endif
     for (std::uint16_t i = 0; i < image.dlpi_phnum; ++i) {
         const auto& header = image.dlpi_phdr[i];
@@ -140,41 +150,298 @@ void Fill(const dl_phdr_info& image, ModuleInfoEx& info) {
             segment.address = address;
             segment.size = ToU32(header.p_memsz, "segment size");
             segment.prot = ((header.p_flags & PF_R) ? ProtRead : 0) | ((header.p_flags & PF_W) ? ProtWrite : 0) | ((header.p_flags & PF_X) ? ProtExecute : 0);
-        }
+        } else if constexpr (Extended<TInfo>) {
 #ifndef __APPLE__
-        else if (header.p_type == PT_TLS) {
-            info.tls_init_addr = address;
-            info.tls_init_size = ToU32(header.p_filesz, "TLS image size");
-            info.tls_size = ToU32(header.p_memsz, "TLS size");
-            info.tls_align = ToU32(header.p_align, "TLS alignment");
-        }
+            if (header.p_type == PT_TLS) {
+                info.tls_init_addr = address;
+                info.tls_init_size = ToU32(header.p_filesz, "TLS image size");
+                info.tls_size = ToU32(header.p_memsz, "TLS size");
+                info.tls_align = ToU32(header.p_align, "TLS alignment");
+            } else
 #endif
-        else if (header.p_type == PT_GNU_EH_FRAME) {
-            info.eh_frame_hdr_addr = address;
-            info.eh_frame_hdr_size = ToU32(header.p_memsz, "eh_frame_hdr size");
-            info.eh_frame_addr = EhFrameAddress(image, address);
-            info.eh_frame_size = ToU32(EhFrameSize(image, info.eh_frame_addr), "eh_frame size");
-        }
-#ifndef __APPLE__
-        else if (header.p_type == PT_DYNAMIC) {
-            for (const auto* entry = reinterpret_cast<const ElfW(Dyn)*>(address); entry->d_tag != DT_NULL; ++entry) {
-                if (entry->d_tag == DT_INIT) info.init_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
-                else if (entry->d_tag == DT_FINI) info.fini_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
+            if (header.p_type == PT_GNU_EH_FRAME) {
+                const auto tables = FrameTables(image, address);
+                info.eh_frame_hdr_addr = address;
+                info.eh_frame_hdr_size = ToU32(header.p_memsz, "eh_frame_hdr size");
+                info.eh_frame_addr = tables.frames;
+                info.eh_frame_size = ToU32(tables.framesSize + TerminatorSize, "eh_frame size");
             }
-        }
+#ifndef __APPLE__
+            else if (header.p_type == PT_DYNAMIC) {
+                for (const auto* entry = reinterpret_cast<const ElfW(Dyn)*>(address); entry->d_tag != DT_NULL; ++entry) {
+                    if (entry->d_tag == DT_INIT) info.init_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
+                    else if (entry->d_tag == DT_FINI) info.fini_proc_addr = image.dlpi_addr + entry->d_un.d_ptr;
+                }
+            }
 #endif
+        }
     }
-    info.ref_count = 1;
+    if constexpr (Extended<TInfo>) info.ref_count = 1;
 }
 
+template<typename TInfo>
 int FindImage(dl_phdr_info* image, std::size_t, void* data) {
-    auto& search = *static_cast<ImageSearch*>(data);
+    auto& search = *static_cast<ImageSearch<TInfo>*>(data);
     if (!Contains(*image, search.address, 1)) return 0;
     Fill(*image, *search.info);
     search.found = true;
     return 1;
 }
+
+int CollectGuestImage(dl_phdr_info* image, std::size_t, void* data) {
+    const std::string_view name = image->dlpi_name ? image->dlpi_name : "";
+    if (!name.empty() && !name.ends_with(".prx")) return 0;
+    for (std::uint16_t i = 0; i < image->dlpi_phnum; ++i) {
+        const auto& header = image->dlpi_phdr[i];
+        if (header.p_type != PT_LOAD) continue;
+        static_cast<std::vector<std::uintptr_t>*>(data)->push_back(image->dlpi_addr + header.p_vaddr);
+        return 0;
+    }
+    return 0;
+}
+
+#ifdef __APPLE__
+// The dlopen handle of the image holding `address` (the executable's for the main image), which
+// identifies its module; null when no image holds it. The image stays loaded, so the handle stays valid.
+const void* NativeImage(std::uintptr_t address) {
+    Dl_info symbol{};
+    if (!::dladdr(reinterpret_cast<const void*>(address), &symbol) || symbol.dli_fname == nullptr) return nullptr;
+    const bool executable = symbol.dli_fbase == _dyld_get_image_header(0);
+    void* native = ::dlopen(executable ? nullptr : symbol.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    if (native != nullptr) ::dlclose(native);
+    return native;
+}
 #endif
+
+std::vector<GuestImage> GuestImages() {
+    std::vector<std::uintptr_t> addresses;
+    dl_iterate_phdr(CollectGuestImage, &addresses);
+    std::vector<GuestImage> images;
+    for (const auto address : addresses) {
+#ifdef __APPLE__
+        const void* native = NativeImage(address);
+        if (native == nullptr) throw std::runtime_error("sceKernelGetModuleList: no image handle for a loaded image");
+#else
+        Dl_info symbol{};
+        link_map* native = nullptr;
+        if (!dladdr1(reinterpret_cast<const void*>(address), &symbol, reinterpret_cast<void**>(&native), RTLD_DL_LINKMAP) || !native)
+            throw std::runtime_error("sceKernelGetModuleList: no link map for a loaded image");
+#endif
+        images.push_back({native, address});
+    }
+    return images;
+}
+
+int AddGuestSegmentBytes(dl_phdr_info* image, std::size_t, void* data) {
+    const std::string_view name = image->dlpi_name ? image->dlpi_name : "";
+    if (!name.empty() && !name.ends_with(GuestModuleSuffix)) return 0;
+    constexpr auto allAccess = PF_R | PF_W | PF_X;
+    for (std::uint16_t i = 0; i < image->dlpi_phnum; ++i) {
+        const auto& header = image->dlpi_phdr[i];
+        if (header.p_type != PT_LOAD || header.p_offset == 0 || (header.p_flags & allAccess) == allAccess) continue;
+        *static_cast<std::uint64_t*>(data) += PageSpan(header.p_vaddr, header.p_memsz);
+    }
+    return 0;
+}
+
+std::uint64_t GuestSegmentBytes() {
+    std::uint64_t bytes = 0;
+    dl_iterate_phdr(AddGuestSegmentBytes, &bytes);
+    return bytes;
+}
+
+#ifdef __APPLE__
+// A macOS image's native handle is a dlopen handle, which carries no path: the image holding its
+// address names it, and the executable stands for the main program as Linux's unnamed image does.
+bool SystemImage(const GuestImage& image) {
+    Dl_info symbol{};
+    if (!::dladdr(reinterpret_cast<const void*>(image.address), &symbol) || symbol.dli_fname == nullptr)
+        throw std::runtime_error("module info: no image holds a loaded guest image's address");
+    if (symbol.dli_fbase == _dyld_get_image_header(0)) return false;
+    return !std::string_view(symbol.dli_fname).ends_with(GuestModuleSuffix);
+}
+#else
+bool SystemImage(const GuestImage& image) {
+    const auto* name = static_cast<const link_map*>(image.native)->l_name;
+    const std::string_view path = name ? name : "";
+    return !path.empty() && !path.ends_with(GuestModuleSuffix);
+}
+#endif
+#else
+bool SectionNamed(const IMAGE_SECTION_HEADER& section, const char* name) {
+    return std::strncmp(reinterpret_cast<const char*>(section.Name), name, IMAGE_SIZEOF_SHORT_NAME) == 0;
+}
+
+std::int32_t SectionProtection(const IMAGE_SECTION_HEADER& section) {
+    const auto characteristics = section.Characteristics;
+    return ((characteristics & IMAGE_SCN_MEM_READ) ? ProtRead : 0) | ((characteristics & IMAGE_SCN_MEM_WRITE) ? ProtWrite : 0) | ((characteristics & IMAGE_SCN_MEM_EXECUTE) ? ProtExecute : 0);
+}
+
+std::wstring ModulePath(HMODULE module) {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        const auto length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0) throw std::runtime_error("module info: GetModuleFileNameW failed with error " + std::to_string(GetLastError()));
+        if (length < path.size()) {
+            path.resize(length);
+            return path;
+        }
+        path.resize(path.size() * 2);
+    }
+}
+
+std::string ImageName(HMODULE module) {
+    const auto path = ModulePath(module);
+    const auto fileName = std::filesystem::path(path).filename().u8string();
+    return ModuleName(std::string(fileName.begin(), fileName.end()));
+}
+
+template<typename TInfo>
+bool Fill(std::uintptr_t address, TInfo& info) {
+    MEMORY_BASIC_INFORMATION memory{};
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &memory, sizeof(memory)) != sizeof(memory) || memory.Type != MEM_IMAGE) return false;
+    const auto base = reinterpret_cast<std::uintptr_t>(memory.AllocationBase);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + static_cast<std::uintptr_t>(dos->e_lfanew));
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return false;
+    SetName(info, ImageName(reinterpret_cast<HMODULE>(base)));
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    const auto sectionCount = nt->FileHeader.NumberOfSections;
+    bool relinked = false;
+    for (unsigned i = 0; i < sectionCount; ++i) relinked = relinked || SectionNamed(sections[i], ".elf0");
+    EhFrame::Tables tables;
+    const bool hasEhmeta = EhFrame::ReadEhmeta(base, *nt, Caller, tables);
+    if constexpr (Extended<TInfo>) {
+        if (hasEhmeta) {
+            info.eh_frame_hdr_addr = tables.header;
+            info.eh_frame_hdr_size = ToU32(tables.headerSize, "eh_frame_hdr size");
+            info.eh_frame_addr = tables.frames;
+            info.eh_frame_size = ToU32(tables.framesSize + TerminatorSize, "eh_frame size");
+        }
+    }
+    for (unsigned i = 0; i < sectionCount; ++i) {
+        const auto& section = sections[i];
+        const auto start = base + section.VirtualAddress;
+        if (SectionNamed(section, ".ehmeta")) continue;
+        if (SectionNamed(section, ".ehfram") && !hasEhmeta) {
+            if constexpr (Extended<TInfo>) {
+                const std::uint64_t imageSize = nt->OptionalHeader.SizeOfImage;
+                const auto contains = [&](std::uintptr_t begin, std::uint64_t size) { return begin >= base && begin - base <= imageSize && size <= imageSize - (begin - base); };
+                info.eh_frame_addr = start;
+                info.eh_frame_size = ToU32(EhFrame::FramesSize(contains, start, Caller) + TerminatorSize, "eh_frame size");
+            }
+            continue;
+        }
+        if (relinked && std::strncmp(reinterpret_cast<const char*>(section.Name), ".elf", 4) != 0) continue;
+        const auto prot = SectionProtection(section);
+        if (prot == 0 || info.segment_count >= std::size(info.segments)) continue;
+        auto& segment = info.segments[info.segment_count++];
+        segment.address = start;
+        segment.size = ToU32(section.Misc.VirtualSize, "segment size");
+        segment.prot = prot;
+    }
+    if constexpr (Extended<TInfo>) {
+        info.id = ModuleIdForImage_nid_no_patch(reinterpret_cast<const void*>(base));
+        info.ref_count = 1;
+    }
+    return true;
+}
+
+std::vector<GuestImage> GuestImages() {
+    const HANDLE process = GetCurrentProcess();
+    std::vector<HMODULE> modules(64);
+    for (;;) {
+        DWORD needed = 0;
+        const auto size = static_cast<DWORD>(modules.size() * sizeof(HMODULE));
+        if (!EnumProcessModules(process, modules.data(), size, &needed))
+            throw std::runtime_error("sceKernelGetModuleList: EnumProcessModules failed with error " + std::to_string(GetLastError()));
+        modules.resize(needed / sizeof(HMODULE));
+        if (needed <= size) break;
+    }
+    const HMODULE executable = GetModuleHandleW(nullptr);
+    constexpr std::wstring_view suffix = L".prx";
+    std::vector<GuestImage> images;
+    for (const auto module : modules) {
+        if (module != executable) {
+            const auto path = ModulePath(module);
+            if (path.size() < suffix.size() || CompareStringOrdinal(path.data() + path.size() - suffix.size(), static_cast<int>(suffix.size()), suffix.data(), static_cast<int>(suffix.size()), TRUE) != CSTR_EQUAL)
+                continue;
+        }
+        images.push_back({module, reinterpret_cast<std::uintptr_t>(module)});
+    }
+    return images;
+}
+
+std::uint64_t ImageSegmentBytes(std::uintptr_t base) {
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + static_cast<std::uintptr_t>(dos->e_lfanew));
+    const auto* sections = IMAGE_FIRST_SECTION(nt);
+    const auto sectionCount = nt->FileHeader.NumberOfSections;
+    bool relinked = false;
+    for (unsigned i = 0; i < sectionCount; ++i) relinked = relinked || SectionNamed(sections[i], ".elf0");
+    std::uint64_t bytes = 0;
+    for (unsigned i = 0; i < sectionCount; ++i) {
+        const auto& section = sections[i];
+        if (SectionProtection(section) == 0 || (relinked && std::strncmp(reinterpret_cast<const char*>(section.Name), ".elf", 4) != 0)) continue;
+        bytes += PageSpan(section.VirtualAddress, section.Misc.VirtualSize);
+    }
+    return bytes;
+}
+
+std::uint64_t GuestSegmentBytes() {
+    const auto executable = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    constexpr std::wstring_view suffix = L".guest.prx";
+    std::uint64_t bytes = 0;
+    for (const auto& image : GuestImages()) {
+        if (image.address != executable) {
+            const auto path = ModulePath(reinterpret_cast<HMODULE>(image.address));
+            if (path.size() < suffix.size() || CompareStringOrdinal(path.data() + path.size() - suffix.size(), static_cast<int>(suffix.size()), suffix.data(), static_cast<int>(suffix.size()), TRUE) != CSTR_EQUAL)
+                continue;
+        }
+        bytes += ImageSegmentBytes(image.address);
+    }
+    return bytes;
+}
+
+bool SystemImage(const GuestImage& image) {
+    if (image.address == reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr))) return false;
+    constexpr std::wstring_view suffix = L".guest.prx";
+    const auto path = ModulePath(reinterpret_cast<HMODULE>(image.address));
+    return path.size() < suffix.size() || CompareStringOrdinal(path.data() + path.size() - suffix.size(), static_cast<int>(suffix.size()), suffix.data(), static_cast<int>(suffix.size()), TRUE) != CSTR_EQUAL;
+}
+#endif
+
+int FillModuleInfo(KernelModule handle, ModuleInfo* info, bool titleOnly) {
+    if (!info) return SCE_KERNEL_ERROR_EFAULT;
+    if (info->st_size != sizeof(ModuleInfo)) return SCE_KERNEL_ERROR_EINVAL;
+    for (const auto& image : GuestImages()) {
+        if (ModuleIdForImage_nid_no_patch(image.native) != handle) continue;
+        if (titleOnly && SystemImage(image)) return SCE_KERNEL_ERROR_EPERM;
+        ModuleInfo result{};
+        result.st_size = sizeof(ModuleInfo);
+#ifdef _WIN32
+        if (!Fill(image.address, result)) return SCE_KERNEL_ERROR_ESRCH;
+#else
+        ImageSearch<ModuleInfo> search{image.address, &result, false};
+        dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+        if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
+#endif
+        *info = result;
+        return 0;
+    }
+    return SCE_KERNEL_ERROR_ESRCH;
+}
+
+int FillModuleList(KernelModule* handles, std::size_t count, std::size_t* actual, bool titleOnly) {
+    if (!handles || !actual) return SCE_KERNEL_ERROR_EFAULT;
+    auto images = GuestImages();
+    if (titleOnly) std::erase_if(images, SystemImage);
+    for (std::size_t i = 0; i < images.size() && i < count; ++i) handles[i] = ModuleIdForImage_nid_no_patch(images[i].native);
+    if (images.size() > count) return SCE_KERNEL_ERROR_ENOMEM;
+    *actual = images.size();
+    return 0;
+}
 
 }
 
@@ -183,43 +450,78 @@ extern "C" {
 int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, ModuleInfoEx* info) {
     if (!info) return SCE_KERNEL_ERROR_EFAULT;
     if (flags != 2) throw std::invalid_argument("sceKernelGetModuleInfoFromAddr: unsupported flags " + std::to_string(flags));
-#if defined(_WIN32)
-    if (info->st_size != sizeof(ModuleInfoEx))
-        throw std::invalid_argument("sceKernelGetModuleInfoFromAddr: unsupported st_size " + std::to_string(info->st_size));
-    (void)address;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-#elif defined(__APPLE__)
-    // PPSA02929 calls this on exit with st_size left uninitialized; shadPS4 does not read it either.
-    Dl_info symbol{};
-    if (!::dladdr(reinterpret_cast<const void*>(address), &symbol) || symbol.dli_fname == nullptr) return SCE_KERNEL_ERROR_ESRCH;
     ModuleInfoEx result{};
     result.st_size = sizeof(ModuleInfoEx);
-    ImageSearch search{static_cast<std::uintptr_t>(address), &result, false};
-    dl_iterate_phdr(FindImage, &search);
+#ifdef _WIN32
+    if (!Fill(static_cast<std::uintptr_t>(address), result)) return SCE_KERNEL_ERROR_ESRCH;
+#elif defined(__APPLE__)
+    const void* native = NativeImage(static_cast<std::uintptr_t>(address));
+    if (native == nullptr) return SCE_KERNEL_ERROR_ESRCH;
+    ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
+    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
     if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
-    const bool executable = symbol.dli_fbase == _dyld_get_image_header(0);
-    void* native = ::dlopen(executable ? nullptr : symbol.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
     result.id = ModuleIdForImage_nid_no_patch(native);
-    if (native != nullptr) ::dlclose(native);
-    *info = result;
-    return 0;
 #else
-    if (info->st_size != sizeof(ModuleInfoEx))
-        throw std::invalid_argument("sceKernelGetModuleInfoFromAddr: unsupported st_size " + std::to_string(info->st_size));
     Dl_info symbol{};
     link_map* native = nullptr;
     if (!dladdr1(reinterpret_cast<const void*>(address), &symbol, reinterpret_cast<void**>(&native), RTLD_DL_LINKMAP) || !native)
         return SCE_KERNEL_ERROR_ESRCH;
-    ModuleInfoEx result{};
-    result.st_size = sizeof(ModuleInfoEx);
-    ImageSearch search{static_cast<std::uintptr_t>(address), &result, false};
-    dl_iterate_phdr(FindImage, &search);
+    ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
+    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
     if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
     result.id = ModuleIdForImage_nid_no_patch(native);
+#endif
     *info = result;
     return 0;
+}
+
+int APS5_VABI sceKernelGetModuleList(KernelModule* handles, std::size_t count, std::size_t* actual) {
+    return FillModuleList(handles, count, actual, false);
+}
+
+int APS5_VABI sceKernelGetModuleList2(KernelModule* handles, std::size_t count, std::size_t* actual) {
+    return FillModuleList(handles, count, actual, true);
+}
+
+int APS5_VABI sceKernelGetModuleInfo(KernelModule handle, ModuleInfo* info) {
+    return FillModuleInfo(handle, info, false);
+}
+
+int APS5_VABI sceKernelGetModuleInfo2(KernelModule handle, ModuleInfo* info) {
+    return FillModuleInfo(handle, info, true);
+}
+
+std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** address, std::size_t* size) {
+    if (!address || !size) throw std::invalid_argument("sceKernelGetLibkernelTextLocation: null argument");
+    const auto images = GuestImages();
+    if (images.empty()) throw std::runtime_error("sceKernelGetLibkernelTextLocation: the main program is not loaded");
+    ModuleInfo info{};
+#ifdef _WIN32
+    const bool found = Fill(images.front().address, info);
+#else
+    ImageSearch<ModuleInfo> search{images.front().address, &info, false};
+    dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+    const bool found = search.found;
 #endif
+    if (!found || info.segment_count == 0)
+        throw std::runtime_error("sceKernelGetLibkernelTextLocation: the main program has no segments");
+    *address = reinterpret_cast<void*>(static_cast<std::uintptr_t>(info.segments[0].address));
+    *size = info.segments[0].size;
+    return 0;
+}
+
+std::int32_t APS5_VABI sceKernelInternalMemoryGetModuleSegmentInfo_nid_postfix(InternalSegmentInfo* result) {
+    if (!result) throw std::invalid_argument("sceKernelInternalMemoryGetModuleSegmentInfo: result is null");
+    void* address = nullptr;
+    std::size_t size = 0;
+    const auto status = sceKernelGetLibkernelTextLocation_nid_postfix(&address, &size);
+    if (status != 0) return status;
+    *result = {reinterpret_cast<std::uintptr_t>(address), size};
+    return 0;
+}
+
+std::uint64_t GuestImageSegmentBytes_nid_no_patch() {
+    return GuestSegmentBytes();
 }
 
 }

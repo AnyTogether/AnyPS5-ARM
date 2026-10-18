@@ -16,6 +16,8 @@ namespace {
 
 void Require(bool value) { if (!value) std::abort(); }
 
+constexpr int kStatusNone = 0;
+constexpr int kStatusInitialized = 1;
 constexpr int kStatusFinished = 3;
 constexpr int kErrNotInitialized = static_cast<int>(0x80B80003);
 constexpr int kErrAlreadyInitialized = static_cast<int>(0x80B80004);
@@ -31,10 +33,15 @@ int main() {
 
     Require(sceLoginDialogTerminate() == kErrNotInitialized);
     Require(sceLoginDialogOpen(&param) == kErrNotInitialized);
+    Require(sceLoginDialogClose() == kErrNotInitialized);
     Require(sceLoginDialogGetResult(result) == kErrNotInitialized);
+    Require(sceLoginDialogGetStatus() == kStatusNone);
+    Require(sceLoginDialogUpdateStatus() == kStatusNone);
 
     Require(sceLoginDialogInitialize() == 0);
     Require(sceLoginDialogInitialize() == kErrAlreadyInitialized);
+    Require(sceLoginDialogGetStatus() == kStatusInitialized);
+    Require(sceLoginDialogUpdateStatus() == kStatusInitialized);
 
     Require(sceLoginDialogOpen(nullptr) == kErrArgNull);
     Require(sceLoginDialogGetResult(result) == kErrNotFinished);
@@ -51,4 +58,5 @@ int main() {
     Require(sceLoginDialogClose() == 0);
     Require(sceLoginDialogTerminate() == 0);
     Require(sceLoginDialogTerminate() == kErrNotInitialized);
+    Require(sceLoginDialogGetStatus() == kStatusNone);
 }

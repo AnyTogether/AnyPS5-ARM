@@ -1,0 +1,10 @@
+# libSceFiber technical debt
+
+### Functional
+
+- [sceFiberGetInfo](../../../core/libs/prx/libSceFiber/Export.cpp) reports the requested-size window at the top of the host stack used for execution, rather than the original caller buffer, which is retained and pinned. The additional 1 MiB host-call margin below that window is not included in `size_context`. Planet Coaster (PPSA01736 v01.017) uses this range for ChakraCore garbage-collector stack scans; reporting the unused caller buffer makes the scan cross unmapped memory. The range is covered by a regression test while running, switching and migrating a fiber between threads. Console behavior for substituted host stacks has no direct equivalent and is not measured.
+
+### Unknown function info
+
+- [_sceFiberGetThreadFramePointerAddress](../../../core/libs/prx/libSceFiber/Export.cpp) (libSceFiber, NID `0dy4JtMUcMQ`) forwards to `sceFiberGetThreadFramePointerAddress`; that the argument list matches is inferred from the export without the underscore, as for the underscore Ult exports, not measured
+- [Fiber stacks](../../../core/libs/prx/libSceFiber/Export.cpp) (libSceFiber) - a fiber whose context is smaller than 64 KiB runs on an mmap'd host stack of its context size plus 1 MiB, so host calls made from it (21 KiB deep when PPSA01341 reaches SPIRV-Tools from a 16 KiB context) do not overwrite the contexts packed next to it; a larger context is the stack, as on the console. PPSA05684 needs the second: its job fibers have 64 KiB and 512 KiB contexts, the 512 KiB ones at 1 MiB-aligned addresses, and find their job record by masking the stack pointer (`~0xfffff` for the 512 KiB ones), which a host stack breaks (the game waits forever in GameInit, or faults later in a 64 KiB fiber). The 64 KiB limit is chosen between these two titles, not measured: a title with small contexts that also derives state from the stack pointer, or one whose host calls exceed what is left of a large context, is not covered

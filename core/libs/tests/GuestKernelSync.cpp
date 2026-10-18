@@ -6,7 +6,9 @@
 #include <filesystem>
 #include <fstream>
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
@@ -19,6 +21,7 @@ int APS5_VABI sceKernelRename(const char*, const char*);
 int APS5_VABI sceKernelUnlink(const char*);
 int APS5_VABI sceKernelChmod_nid_postfix(const char*, std::uint16_t);
 void APS5_VABI sceKernelSync();
+void APS5_VABI sync_nid_postfix();
 void* APS5_VABI fopen_nid_postfix(const char*, const char*);
 int APS5_VABI fclose_nid_postfix(void*);
 }
@@ -35,9 +38,16 @@ static bool Recorded(const char* guest) {
 }
 int main() {
     std::filesystem::remove_all("kernel_sync_probe");
+    Require(sceKernelMkdir("", 0777) == static_cast<int>(0x80020002u));
+    Require(sceKernelMkdir("/", 0777) == static_cast<int>(0x80020011u));
     Require(sceKernelMkdir("kernel_sync_probe", 0777) == 0);
     Require(Recorded("kernel_sync_probe"));
     std::ofstream("kernel_sync_probe/existing.bin") << "existing";
+    Require(sceKernelMkdir("kernel_sync_probe/nested/", 0777) == 0);
+    Require(std::filesystem::is_directory("kernel_sync_probe/nested") && Recorded("kernel_sync_probe/nested"));
+    Require(sceKernelMkdir("kernel_sync_probe/nested/", 0777) == static_cast<int>(0x80020011u));
+    Require(sceKernelMkdir("kernel_sync_probe/./", 0777) == static_cast<int>(0x80020011u));
+    Require(sceKernelMkdir("kernel_sync_probe/existing.bin/child", 0777) == static_cast<int>(0x80020014u));
     const int reader = sceKernelOpen("kernel_sync_probe/existing.bin", 0x0, 0);
     Require(reader >= 0 && sceKernelClose(reader) == 0);
     void* stream = fopen_nid_postfix("kernel_sync_probe/existing.bin", "r");
@@ -69,5 +79,11 @@ int main() {
     CloseHandle(exclusive);
 #endif
     sceKernelSync();
+    const int synced = sceKernelOpen("kernel_sync_probe/synced.bin", 0x1 | 0x200 | 0x400, 0644);
+    Require(synced >= 0 && sceKernelWrite(synced, "data", 4) == 4 && sceKernelClose(synced) == 0);
+    Require(Recorded("kernel_sync_probe/synced.bin"));
+    Require(sceKernelUnlink("kernel_sync_probe/synced.bin") == 0);
+    sync_nid_postfix();
+    Require(!Recorded("kernel_sync_probe/synced.bin"));
     std::filesystem::remove_all("kernel_sync_probe");
 }

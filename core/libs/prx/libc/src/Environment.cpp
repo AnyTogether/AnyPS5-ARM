@@ -2,21 +2,18 @@
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
 #include "prx/libc/include/general/VabiMacros.hpp"
 
-#ifndef _WIN32
-extern char** environ;
-#endif
-
 namespace {
 struct EnvironmentEntry {
-    std::string owned;
+    std::unique_ptr<std::string> owned;
     char* borrowed = nullptr;
-    char* Data() { return borrowed ? borrowed : owned.data(); }
+    char* Data() { return borrowed ? borrowed : owned->data(); }
     bool Matches(std::string_view name) {
         const char* data = Data();
         const char* separator = std::strchr(data, '=');
@@ -25,20 +22,7 @@ struct EnvironmentEntry {
 };
 std::mutex environmentMutex;
 std::vector<EnvironmentEntry>& Environment() {
-    // Seed once from the host. Guest mutations remain local to the guest runtime.
-    static std::vector<EnvironmentEntry> entries = [] {
-        std::vector<EnvironmentEntry> result;
-#ifdef _WIN32
-        char** source = _environ;
-#else
-        char** source = environ;
-#endif
-        if (source) for (; *source; ++source) {
-            if (**source && **source != '=' && std::strchr(*source, '='))
-                result.push_back({*source, nullptr});
-        }
-        return result;
-    }();
+    static std::vector<EnvironmentEntry> entries;
     return entries;
 }
 bool ValidEnvironmentName(const char* name) {
@@ -49,7 +33,7 @@ int EnvironmentError(int error) { errno = error; return -1; }
 
 extern "C" {
 char* APS5_VABI getenv_nid_postfix(const char* name) {
-    if (!ValidEnvironmentName(name)) return nullptr;
+    if (!ValidEnvironmentName(name)) { errno = 22; return nullptr; }
     try {
         std::lock_guard lock(environmentMutex);
         for (auto& entry : Environment())
@@ -66,7 +50,7 @@ int APS5_VABI setenv_nid_postfix(const char* name, const char* value, int overwr
         auto found = std::find_if(entries.begin(), entries.end(),
             [name](auto& entry) { return entry.Matches(name); });
         if (found != entries.end() && !overwrite) return 0;
-        EnvironmentEntry replacement{std::string(name) + '=' + value, nullptr};
+        EnvironmentEntry replacement{std::make_unique<std::string>(std::string(name) + '=' + value), nullptr};
         if (found != entries.end()) *found = std::move(replacement);
         else entries.push_back(std::move(replacement));
         return 0;
@@ -93,7 +77,7 @@ int APS5_VABI putenv_nid_postfix(char* text) {
         const std::string_view name(text, separator - text);
         auto found = std::find_if(entries.begin(), entries.end(),
             [name](auto& entry) { return entry.Matches(name); });
-        EnvironmentEntry replacement{{}, text};
+        EnvironmentEntry replacement{nullptr, text};
         if (found != entries.end()) *found = std::move(replacement);
         else entries.push_back(std::move(replacement));
         return 0;

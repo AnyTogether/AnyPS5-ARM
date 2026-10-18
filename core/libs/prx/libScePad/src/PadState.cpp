@@ -1,9 +1,13 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
+#include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <deque>
 #include <mutex>
 #include <stdexcept>
 
@@ -11,7 +15,15 @@ namespace {
     std::mutex stateMutex;
     PadInputState state;
     PadOutputState output;
+    std::chrono::steady_clock::time_point audioHapticEnd;
     std::uint64_t timestamp = 0;
+
+    struct QueuedInput {
+        PadInputState input;
+        std::uint64_t timestamp = 0;
+    };
+    constexpr std::size_t kQueueCapacity = 64;
+    std::deque<QueuedInput> queue;
     std::exception_ptr failure;
     bool initialized = false;
 
@@ -20,6 +32,10 @@ namespace {
     std::uint64_t lastFuseTime = 0;
     float biasIntegral[3] = {0.0f, 0.0f, 0.0f};
     bool tiltCorrection = true;
+    bool angularVelocityDeadband = false;
+    constexpr float kAngularVelocityDeadband = 0.017453292f;
+    bool angularBiasCorrection = false;
+    std::array<float, 3> gyroBias{0.0f, 0.0f, 0.0f};
     std::uint8_t nextTouchId = 0;
     bool prevTouchActive[2] = {false, false};
     std::uint8_t touchIds[2] = {0, 0};
@@ -59,6 +75,22 @@ namespace {
         normalize(orientation);
     }
 
+    constexpr float kStationaryRadians = 0.05f;
+    constexpr float kBiasLearnRate = 0.02f;
+
+    std::array<float, 3> correctAngularVelocityBias(std::array<float, 3> gyro, const std::array<float, 3>& accel) {
+        if (!angularBiasCorrection) return gyro;
+        constexpr float kGravity = 9.80665f;
+        const float an = std::sqrt(accel[0] * accel[0] + accel[1] * accel[1] + accel[2] * accel[2]);
+        bool stationary = std::fabs(an - kGravity) < 0.5f;
+        for (int axis = 0; axis < 3; ++axis) stationary = stationary && std::fabs(gyro[axis] - gyroBias[axis]) < kStationaryRadians;
+        for (int axis = 0; axis < 3; ++axis) {
+            if (stationary) gyroBias[axis] += kBiasLearnRate * (gyro[axis] - gyroBias[axis]);
+            gyro[axis] -= gyroBias[axis];
+        }
+        return gyro;
+    }
+
     void encodeZones(std::uint8_t* dst, std::uint8_t mode, const std::uint8_t* strengths, int count, std::uint8_t frequency) {
         std::uint16_t zones = 0;
         std::uint32_t packed = 0;
@@ -93,28 +125,40 @@ void Pad::Initialize() {
     if (!initialized) {
         timestamp = sceKernelGetProcessTime();
         lastFuseTime = timestamp;
+        queue.clear();
     }
     initialized = true;
 }
 
-PadData Pad::ReadState() {
+bool Pad::IsInitialized() {
     std::lock_guard lock(stateMutex);
-    if (failure) std::rethrow_exception(failure);
-    if (!initialized) throw std::runtime_error("Pad: read before initialization");
-    const std::uint64_t now = sceKernelGetProcessTime();
+    return initialized;
+}
+
+namespace {
+PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected) {
     PadData data{};
-    data.buttons = state.buttons;
-    data.left_stick_x = state.sticks[0];
-    data.left_stick_y = state.sticks[1];
-    data.right_stick_x = state.sticks[2];
-    data.right_stick_y = state.sticks[3];
-    data.analog_buttons_l2 = std::max<std::uint8_t>(state.analogButtonsL2, (state.buttons & 0x100) != 0 ? 255 : 0);
-    data.analog_buttons_r2 = std::max<std::uint8_t>(state.analogButtonsR2, (state.buttons & 0x200) != 0 ? 255 : 0);
+    data.buttons = state.buttons | injected.buttons;
+    const auto& sticks = injected.hasSticks ? injected.sticks : state.sticks;
+    data.left_stick_x = sticks[0];
+    data.left_stick_y = sticks[1];
+    data.right_stick_x = sticks[2];
+    data.right_stick_y = sticks[3];
+    const auto trigger = [&](std::uint8_t analog, std::uint32_t bit) -> std::uint8_t {
+        return (injected.buttons & bit) != 0 || (analog == 0 && (state.buttons & bit) != 0) ? 255 : analog;
+    };
+    data.analog_buttons_l2 = trigger(state.analogButtonsL2, 0x100);
+    data.analog_buttons_r2 = trigger(state.analogButtonsR2, 0x200);
 
     const bool live = state.hasMotion && output.motionEnabled;
     const std::array<float, 3> rest{0.0f, 9.80665f, 0.0f};
     const std::array<float, 3>& accel = live ? state.accel : rest;
-    const std::array<float, 3> gyro = live ? state.gyro : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> gyro = live ? correctAngularVelocityBias(state.gyro, accel) : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+    if (angularVelocityDeadband) {
+        for (float& axis : gyro) {
+            if (axis < kAngularVelocityDeadband && axis > -kAngularVelocityDeadband) axis = 0.0f;
+        }
+    }
     if (live) {
         float dt = lastFuseTime != 0 && now > lastFuseTime ? static_cast<float>(now - lastFuseTime) * 1e-6f : 0.0f;
         dt = std::min(dt, 0.1f);
@@ -138,7 +182,7 @@ PadData Pad::ReadState() {
 
     data.connected = true;
     data.connected_count = 1;
-    data.timestamp = timestamp;
+    data.timestamp = changeTime;
 
     std::uint8_t touchNum = 0;
     for (int i = 0; i < 2; ++i) {
@@ -153,15 +197,63 @@ PadData Pad::ReadState() {
         }
         ++touchNum;
     }
-    if (touchNum == 0 && (state.touchLeft || state.touchRight)) {
+    if (touchNum == 0 && (state.touchLeft || state.touchRight || injected.touchLeft || injected.touchRight)) {
         data.buttons |= 0x100000;
         touchNum = 1;
-        data.touch_data_touch0_x = state.touchRight ? 1440 : 480;
+        data.touch_data_touch0_x = state.touchRight || injected.touchRight ? 1440 : 480;
         data.touch_data_touch0_y = 471;
         data.touch_data_touch0_id = 0;
     }
     data.touch_data_touch_num = touchNum;
     return data;
+}
+
+Pad::InputCommandFile::Input InjectedInput(std::uint64_t now) {
+    static Pad::InputCommandFile commands([] {
+#ifdef _WIN32
+        const auto* path = _wgetenv(L"APS5_PAD_INPUT_FILE");
+#else
+        const auto* path = std::getenv("APS5_PAD_INPUT_FILE");
+#endif
+        return path ? std::filesystem::path(path) : std::filesystem::path{};
+    }());
+    static Pad::InputCommandFile::Input lastInjected;
+    const auto injected = commands.Poll(now);
+    if (injected != lastInjected) {
+        lastInjected = injected;
+        timestamp = now;
+    }
+    return injected;
+}
+}
+
+PadData Pad::ReadState() {
+    std::lock_guard lock(stateMutex);
+    if (failure) std::rethrow_exception(failure);
+    if (!initialized) throw std::runtime_error("Pad: read before initialization");
+    const std::uint64_t now = sceKernelGetProcessTime();
+    const auto injected = InjectedInput(now);
+    return BuildData(state, timestamp, now, injected);
+}
+
+int Pad::Read(PadData* data, int num) {
+    if (data == nullptr || num <= 0) throw std::invalid_argument("Pad: invalid read buffer");
+    std::lock_guard lock(stateMutex);
+    if (failure) std::rethrow_exception(failure);
+    if (!initialized) throw std::runtime_error("Pad: read before initialization");
+    const std::uint64_t now = sceKernelGetProcessTime();
+    const auto injected = InjectedInput(now);
+    if (queue.empty()) {
+        data[0] = BuildData(state, timestamp, now, injected);
+        return 1;
+    }
+    int count = 0;
+    while (count < num && !queue.empty()) {
+        const QueuedInput& entry = queue.front();
+        data[count++] = BuildData(entry.input, entry.timestamp, now, injected);
+        queue.pop_front();
+    }
+    return count;
 }
 
 void Pad::SetVibration(std::uint8_t large, std::uint8_t small) {
@@ -263,6 +355,17 @@ void Pad::SetTiltCorrection(bool enabled) {
     biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
 }
 
+void Pad::SetAngularVelocityDeadband(bool enabled) {
+    std::lock_guard lock(stateMutex);
+    angularVelocityDeadband = enabled;
+}
+
+void Pad::SetAngularVelocityBiasCorrection(bool enabled) {
+    std::lock_guard lock(stateMutex);
+    angularBiasCorrection = enabled;
+    gyroBias = {0.0f, 0.0f, 0.0f};
+}
+
 void Pad::SetMotionEnabled(bool enabled) {
     std::lock_guard lock(stateMutex);
     if (output.motionEnabled == enabled) return;
@@ -280,6 +383,8 @@ extern "C" void PadPublishInput_nid_postfix(const PadInputState& input) {
         state.touch == input.touch && state.deviceKind == input.deviceKind) return;
     state = input;
     timestamp = sceKernelGetProcessTime();
+    if (queue.size() == kQueueCapacity) queue.pop_front();
+    queue.push_back({input, timestamp});
 }
 
 extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
@@ -290,8 +395,23 @@ extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
 
 extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out) {
     std::lock_guard lock(stateMutex);
+    if ((output.audioVibrationLarge || output.audioVibrationSmall) && std::chrono::steady_clock::now() >= audioHapticEnd) {
+        output.audioVibrationLarge = output.audioVibrationSmall = 0;
+        ++output.sequence;
+    }
     if (seenSequence == nullptr || out == nullptr || *seenSequence == output.sequence) return false;
     *seenSequence = output.sequence;
     *out = output;
     return true;
+}
+
+extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8_t small) {
+    std::lock_guard lock(stateMutex);
+    if (large == 0 && small == 0) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= audioHapticEnd) output.audioVibrationLarge = output.audioVibrationSmall = 0;
+    output.audioVibrationLarge = std::max(output.audioVibrationLarge, large);
+    output.audioVibrationSmall = std::max(output.audioVibrationSmall, small);
+    audioHapticEnd = now + std::chrono::milliseconds(80);
+    ++output.sequence;
 }

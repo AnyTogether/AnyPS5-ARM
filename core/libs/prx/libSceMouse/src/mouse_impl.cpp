@@ -27,6 +27,11 @@ void enqueue(const MouseData& data) {
 
 namespace Mouse {
 
+bool IsOpen() {
+    std::lock_guard lock(mouseMutex);
+    return opened;
+}
+
 int Initialize() {
     std::lock_guard lock(mouseMutex);
     initialized = true;
@@ -75,6 +80,13 @@ int Read(std::int32_t handle, MouseData* data, std::int32_t num) {
     }
     count -= available;
     return available;
+}
+
+int ResetAbsolutePosition(std::int32_t handle, std::uint16_t, std::uint16_t) {
+    std::lock_guard lock(mouseMutex);
+    if (!initialized) return MOUSE_ERROR_NOT_INITIALIZED;
+    if (handle != MOUSE_HANDLE || !opened) return MOUSE_ERROR_INVALID_HANDLE;
+    return MOUSE_OK;
 }
 
 void Publish(const MouseInputEvent& event) {

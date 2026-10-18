@@ -3,6 +3,7 @@
 #include <elfpatcher/windows/WindowsLoadImage.hpp>
 #include <elfpatcher/windows/WindowsPeFormat.hpp>
 #include <io/BufferUtils.hpp>
+#include <io/NativePath.hpp>
 #include <algorithm>
 #include <map>
 
@@ -79,7 +80,8 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
                 image.WritePointer(target, symbol.Value + addend - GuestTlsBlockSize(*tls));
             } else if (type == 1 || type == 6 || type == 7) {
                 if (symbolIndex == 0 || (type != 1 && addend != 0) || tlsSymbol) throw Domain::RelinkerException("Invalid guest symbol relocation", target);
-                if (!imported) {
+                if (symbol.Section == Relinker::AbsoluteSection) image.WritePointer(target, symbol.Value + addend);
+                else if (!imported) {
                     if (symbol.Section >= 0xff00) throw Domain::RelinkerException("Unsupported special guest symbol section", target);
                     image.WritePointer(target, image.GetRelocatedAddress(symbol.Value) + addend);
                     input.Rebases.push_back(rva);
@@ -88,7 +90,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
                     image.WritePointer(target, 0);
                     // __tls_get_addr comes from libkernel unless a guest module provides one.
                     const auto name = guest.UsePlatformTlsResolver && symbol.Name == "vNe1w4diLCs" ? std::string("Aps5GuestTlsGetAddr_nid_no_patch") : DynamicName(guest, symbolIndex);
-                    input.Binds.push_back({"_" + name, rva, static_cast<std::int64_t>(addend)});
+                    input.Binds.push_back({"_" + name, rva, static_cast<std::int64_t>(addend), (symbol.Info >> 4) == 2});
                 }
             } else throw Domain::RelinkerException("Unsupported macOS guest relocation " + std::to_string(type), target);
         }
@@ -98,7 +100,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
 
     for (std::size_t index = 1; index < guest.Symbols.size(); ++index) {
         const auto& symbol = guest.Symbols[index];
-        if (symbol.Section == 0 || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
+        if (symbol.Section == 0 || symbol.Section == Relinker::AbsoluteSection || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
         if (symbol.Section >= 0xff00) throw Domain::RelinkerException("Unsupported guest export section: " + symbol.Name);
         const auto name = "_" + DynamicName(guest, index);
         if ((symbol.Info & 15) == 6) {
@@ -111,7 +113,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
     for (const auto& dependency : dependencies) input.Dylibs.push_back(MachODependency(dependency, "@loader_path"));
     if (std::find(input.Dylibs.begin(), input.Dylibs.end(), "@rpath/libkernel.prx") == input.Dylibs.end())
         input.Dylibs.push_back("@rpath/libkernel.prx");
-    input.RunPaths.push_back(MachOLoadPath(runPath, "@loader_path"));
+    input.RunPaths = MachORunPaths(runPath, "@loader_path");
     for (const auto slot : guest.InitArray) input.InitArrayRvas.push_back(image.GetRva(slot, 8));
     for (const auto slot : guest.FiniArray) input.FiniArrayRvas.push_back(image.GetRva(slot, 8));
     input.InitRva = guest.Init == 0 ? 0 : image.GetRva(guest.Init);
@@ -120,7 +122,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
     try {
         return WriteMacOsImage(input);
     } catch (Domain::RelinkerException& error) {
-        error.InputPath = guest.SourcePath.string();
+        if (error.InputPath.empty()) error.InputPath = Io::Utf8Path(guest.SourcePath);
         throw;
     }
 }

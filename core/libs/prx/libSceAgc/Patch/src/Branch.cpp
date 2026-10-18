@@ -19,6 +19,12 @@ void PatchBranchTarget(std::uint32_t* cmd, std::uint32_t field, const volatile s
     cmd[field + 2u] = (cmd[field + 2u] & ~0xfffffu) | sizeInDwords;
 }
 
+void PatchBranchTarget(std::uint32_t* cmd, std::uint32_t field, std::uint8_t cachePolicy, const volatile std::uint32_t* target, std::uint32_t sizeInDwords, const char* function) {
+    Agc::Command::CheckBits(cachePolicy, 3, function);
+    PatchBranchTarget(cmd, field, target, sizeInDwords, function);
+    cmd[field + 2u] = (cmd[field + 2u] & ~(3u << 28u)) | (static_cast<std::uint32_t>(cachePolicy) << 28u);
+}
+
 }
 
 extern "C" {
@@ -39,6 +45,16 @@ int APS5_VABI sceAgcBranchPatchSetThenTarget(std::uint32_t* cmd, const volatile 
 
 int APS5_VABI sceAgcBranchPatchSetElseTarget(std::uint32_t* cmd, const volatile std::uint32_t* target, std::uint32_t sizeInDwords) {
     PatchBranchTarget(cmd, 11, target, sizeInDwords, __func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcBranchPatchSetThenTarget_0300(std::uint32_t* cmd, std::uint8_t cachePolicy, const volatile std::uint32_t* target, std::uint32_t sizeInDwords) {
+    PatchBranchTarget(cmd, 8, cachePolicy, target, sizeInDwords, __func__);
+    return 0;
+}
+
+int APS5_VABI sceAgcBranchPatchSetElseTarget_0300(std::uint32_t* cmd, std::uint8_t cachePolicy, const volatile std::uint32_t* target, std::uint32_t sizeInDwords) {
+    PatchBranchTarget(cmd, 11, cachePolicy, target, sizeInDwords, __func__);
     return 0;
 }
 

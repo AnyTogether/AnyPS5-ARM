@@ -28,6 +28,8 @@ public:
         library = SDL_LoadObject("vulkan-1.dll");
 #elif defined(__APPLE__)
         library = SDL_LoadObject("libvulkan.1.dylib");
+#elif defined(__APPLE__)
+        library = SDL_LoadObject("libvulkan.1.dylib");
 #else
         library = SDL_LoadObject("libvulkan.so.1");
 #endif
@@ -110,6 +112,7 @@ public:
             context.bufferDeviceAddress = true;
             context.Function<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(context.device, family, 0, &context.queue);
             VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             pool.queueFamilyIndex = family;
             Check(context.Function<PFN_vkCreateCommandPool>("vkCreateCommandPool")(context.device, &pool, nullptr, &context.pool), "vkCreateCommandPool");
         } catch (...) {
@@ -170,10 +173,12 @@ int main(int argc, char** argv) {
         buffer.Bytes()[255] = std::byte{0x5a};
         Require(buffer.Bytes()[255] == std::byte{0x5a}, "real BDA buffer mapping failed");
         if (device->RunsOnCpu()) {
-            std::cout << "CPU Vulkan device: BDA execution not tested\n";
+            std::cout << "CPU Vulkan device: BDA read and multi-dword write execution not tested\n";
         } else {
             RunBdaExecutionTests(device->GetContext());
         }
+        RunBdaStoreExecutionTests(device->GetContext());
+        std::cout << "BDA store boundary tests passed\n";
         RunColorTransferTests(device->GetContext());
         std::cout << "Vulkan BDA allocation and execution tests passed\n";
         return 0;

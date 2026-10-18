@@ -12,13 +12,16 @@
 #include <vector>
 #include <atomic>
 #include <exception>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DisplayBuffer.hpp"
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libSceVideoOut/include/BufferReuseTracker.hpp"
+#include "prx/libSceVideoOut/include/HostHdrProbe.hpp"
 #include "prx/libc/include/Shutdown.hpp"
+#include "prx/libkernel/Time/include/TimedWait.hpp"
 
 #include "SDL.h"
 #include "SceTypes.hpp"
@@ -36,10 +39,14 @@ static constexpr int VIDEO_OUT_ERROR_FLIP_QUEUE_FULL = -2144796654;
 static constexpr int VIDEO_OUT_ERROR_UNSUPPORTED_OUTPUT_MODE = -2144796650;
 static constexpr int VIDEO_OUT_ERROR_UNAVAILABLE_OUTPUT_MODE = -2144796647;
 static constexpr int VIDEO_OUT_ERROR_INVALID_EVENT = -2144796659;
+static constexpr int VIDEO_OUT_ERROR_UNKNOWN_OUTPUT_MODE = -2144796642;
 
 static constexpr int VIDEO_OUT_BUS_TYPE_MAIN = 0;
 static constexpr int VIDEO_OUT_BUS_TYPE_OVERLAY = 1;
 static constexpr int VIDEO_OUT_BUS_TYPE_SUB = 2;
+
+static constexpr uint32_t VIDEO_OUT_DEFAULT_WIDTH = 1920;
+static constexpr uint32_t VIDEO_OUT_DEFAULT_HEIGHT = 1080;
 
 static constexpr std::uint32_t VIDEO_OUT_OPEN_PARAM_FIRST_WORD = 16;
 static constexpr std::int32_t VIDEO_OUT_SERVICE_THREAD_PRIORITY_HIGHEST = 256;
@@ -70,6 +77,7 @@ static constexpr int VIDEO_OUT_EVENT_FLIP = 0;
 static constexpr int VIDEO_OUT_EVENT_VBLANK = 1;
 static constexpr int VIDEO_OUT_EVENT_PRE_VBLANK_START = 2;
 static constexpr int VIDEO_OUT_EVENT_SET_MODE = 8;
+static constexpr int VIDEO_OUT_EVENT_VRR_STATUS = 16;
 
 static constexpr int VIDEO_OUT_FLIP_MODE_VSYNC = 1;
 static constexpr int VIDEO_OUT_FLIP_MODE_VSYNC_MULTI = 4;
@@ -79,6 +87,10 @@ static constexpr int VIDEO_OUT_BUFFER_INDEX_BLANK = -1;
 
 static constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_DEFAULT = 0x0000000000000001ULL;
 static constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_119_88HZ = 0x000000000000000FULL;
+
+static constexpr std::uint32_t VIDEO_OUT_DYNAMIC_RANGE_SDR = 1;
+static constexpr std::uint32_t VIDEO_OUT_DYNAMIC_RANGE_HDR = 2;
+static constexpr std::uint64_t VIDEO_OUT_OUTPUT_STATUS_FLAG_HDR = 1;
 
 static constexpr uint64_t VIDEO_OUT_REFRESH_RATE_59_94HZ = 3;
 static constexpr uint64_t VIDEO_OUT_REFRESH_RATE_119_88HZ = 13;
@@ -95,6 +107,7 @@ struct BufferAttributeGroup {
     VideoOutBufferAttribute2 attribute{};
     int category = VIDEO_OUT_BUFFER_ATTRIBUTE_CATEGORY_UNCOMPRESSED;
     bool occupied = false;
+    bool ps4 = false;
 };
 
 AgcDriver::DisplayBuffer DescribeVideoOutBuffer(const VideoOutBuffer& buffer, const BufferAttributeGroup& group);
@@ -112,12 +125,15 @@ struct VideoOutConfig {
     std::vector<EventRegistration> vblankEvents;
     std::vector<EventRegistration> preVblankEvents;
     std::vector<EventRegistration> outputModeEvents;
+    std::vector<EventRegistration> vrrStatusEvents;
 
-    uint32_t width = 1920;
-    uint32_t height = 1080;
+    uint32_t width = VIDEO_OUT_DEFAULT_WIDTH;
+    uint32_t height = VIDEO_OUT_DEFAULT_HEIGHT;
     uint64_t generation = 0;
+    int busType = VIDEO_OUT_BUS_TYPE_MAIN;
     bool opened = false;
     bool closing = false;
+    bool ps4 = false;
     std::exception_ptr failure;
     std::stop_token shutdownToken = LibcShutdownToken_nid_postfix();
     int flipRate = 0;
@@ -131,14 +147,21 @@ struct VideoOutConfig {
     VideoOutVblankStatus preVblankStatus{};
 
     std::array<VideoOutBuffer, VIDEO_OUT_BUFFER_NUM_MAX> buffers{};
+    alignas(std::atomic_ref<std::uint64_t>::required_alignment) std::array<std::uint64_t, VIDEO_OUT_BUFFER_NUM_MAX> bufferLabels{};
     std::array<uint32_t, VIDEO_OUT_BUFFER_NUM_MAX> bufferPending{};
     std::array<BufferReuseTracker, VIDEO_OUT_BUFFER_NUM_MAX> bufferReuse;
     std::array<BufferAttributeGroup, VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX> groups{};
 
-    void Check() const {
+    bool Closed() const { return !opened || closing; }
+
+    void CheckAlive() const {
         if (failure) std::rethrow_exception(failure);
         if (shutdownToken.stop_requested()) throw ProcessShutdown{};
-        if (!opened || closing) throw std::runtime_error("VideoOut: port is closed");
+    }
+
+    void Check() const {
+        CheckAlive();
+        if (Closed()) throw std::runtime_error("VideoOut: port is closed");
     }
 };
 
@@ -158,7 +181,9 @@ struct FlipRequest final : AgcDriver::IFlipRequest, std::enable_shared_from_this
     uint32_t height = 0;
     VideoOutBuffer buffer;
     BufferAttributeGroup group;
+    bool groupCaptured = false;
     bool reserved = false;
+    bool unregistered = false;
     bool ready = false;
     bool gpuComplete = false;
     bool terminal = false;
@@ -169,11 +194,13 @@ struct FlipRequest final : AgcDriver::IFlipRequest, std::enable_shared_from_this
     ~FlipRequest() override;
     void GpuReady(const std::shared_ptr<AgcDriver::FrameTiming>& frameTiming) override;
     void Fail(std::exception_ptr error) noexcept override;
+    void Cancel() noexcept;
+    void ReleaseLocked() noexcept;
 };
 
 struct FlipQueue {
     std::mutex mutex;
-    std::condition_variable changed;
+    TimedWait::Condition changed;
     std::list<std::shared_ptr<FlipRequest>> requests;
     std::atomic<std::size_t> reservations = 0;
     std::exception_ptr failure;
@@ -195,17 +222,23 @@ public:
     bool Close(int handle);
     std::shared_ptr<VideoOutConfig> GetConfig(int handle);
     bool IsOpen(int handle);
+    bool HasConfig(int handle);
+    bool SupportsHighFrameRate();
+    int GetDisplayRefreshRate();
 
     // 0, or VIDEO_OUT_ERROR_FLIP_QUEUE_FULL when the title has VIDEO_OUT_FLIP_QUEUE_CAPACITY flips pending.
     int SubmitFlip(int handle, int index, int flipMode, int64_t flipArg);
+    int SubmitEopFlip(int handle, int index, int flipMode, int64_t flipArg, std::uint32_t* token);
 
 private:
     bool close(int handle);
-    void presentLoop(std::stop_token token);
+    void presentLoop(std::stop_token token, std::promise<void>& started);
     void vblankLoop(std::stop_token token);
-    void vblankEnd();
+    void vblankEnd(std::uint64_t tick);
+    void updateDisplayRefreshRate();
     void processFlip(FlipRequest& req);
     void triggerEvents(VideoOutConfig& cfg, int eventKind, void* triggerData);
+    void pollHostHdr();
 
     std::mutex mutex;
     std::mutex shutdownMutex;
@@ -215,6 +248,9 @@ private:
     std::shared_ptr<FlipQueue> flipQueue = std::make_shared<FlipQueue>();
 
     DisplayWindow window;
+    HostHdrProbe hdrProbe;
+    std::uint64_t hdrGeneration = 0;
+    std::atomic<int> displayRefreshRate{0};
 
     std::jthread presentThread;
     std::jthread vblankThread;

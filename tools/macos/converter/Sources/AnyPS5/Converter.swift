@@ -88,7 +88,7 @@ final class Converter {
 
         report(.relink)
         let relinked = work.appendingPathComponent("out")
-        try runTool(toolkit.relinker, ["--macos", "--to-intel", input.path, relinked.appendingPathComponent("eboot").path])
+        try runTool(toolkit.relinker, ["--macos", "--to-rosetta", input.path, relinked.appendingPathComponent("eboot").path])
 
         report(.copyGame)
         if fileManager.fileExists(atPath: bundleURL.path) {

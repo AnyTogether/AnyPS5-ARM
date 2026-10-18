@@ -3,6 +3,7 @@
 
 #include "IntermediateRepresentation/IrBlock.hpp"
 #include "IntermediateRepresentation/IrMetadata.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -26,9 +27,11 @@ public:
     const IrResourcePlan& Resources() const;
     IrProgramMetadata& Metadata();
     const IrProgramMetadata& Metadata() const;
+    [[nodiscard]] CompiledShaderInfo CompiledInfo() const&;
     CompiledShaderInfo TakeCompiledInfo() &&;
     IrValue& CreateValue(IrOpcode opcode, IrType type, std::uint64_t flags);
     void SetEntryBlock(IrBlock& block);
+    std::size_t ReclaimUnusedValues();
     [[nodiscard]] std::vector<IrBlock*>& BlockOrder();
     [[nodiscard]] const std::vector<IrBlock*>& BlockOrder() const;
 

@@ -1,4 +1,4 @@
-#include "prx/libc/include/general/VabiMacros.hpp"
+#include "SceTypes.hpp"
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -9,7 +9,17 @@
 struct GuestOnce { std::int32_t state; void* mutex; };
 static_assert(sizeof(GuestOnce) == 16 && offsetof(GuestOnce, mutex) == 8);
 using Initializer = void (APS5_VABI *)();
-extern "C" int APS5_VABI pthread_once_nid_postfix(GuestOnce*, Initializer);
+extern "C" {
+int APS5_VABI pthread_once_nid_postfix(GuestOnce*, Initializer);
+int APS5_VABI scePthreadOnce(std::int32_t* once, Initializer init);
+int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
+int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
+void APS5_VABI scePthreadExit(void* retval);
+int APS5_VABI scePthreadCancel(Pthread thread);
+void APS5_VABI scePthreadTestcancel();
+Pthread APS5_VABI scePthreadSelf();
+void APS5_VABI __pthread_cleanup_push_imp_nid_postfix(void (APS5_VABI* routine)(void*), void* argument, void* info);
+}
 static void Require(bool value) { if (!value) std::abort(); }
 static GuestOnce control{}, nested{}, retry{};
 static std::atomic<int> calls{0}, arrived{0};
@@ -23,6 +33,35 @@ static void APS5_VABI Initialize() {
 }
 static void APS5_VABI Retry() {
     if (++attempts == 1) throw 7;
+}
+static GuestOnce exited{}, cancelled{};
+static std::int32_t sceExited = 0, sceCancelled = 0;
+static int retried = 0;
+static void APS5_VABI ExitInsideInitializer() { scePthreadExit(nullptr); }
+static void APS5_VABI CancelInsideInitializer() {
+    Require(scePthreadCancel(scePthreadSelf()) == 0);
+    scePthreadTestcancel();
+}
+static void APS5_VABI CountRetry() { ++retried; }
+static void APS5_VABI AbortCleanup(void*) { std::abort(); }
+static void APS5_VABI PushAndThrow() {
+    std::uintptr_t info[8];
+    __pthread_cleanup_push_imp_nid_postfix(AbortCleanup, nullptr, info);
+    throw 7;
+}
+static GuestOnce pushed{};
+static std::int32_t scePushed = 0;
+struct OnceCall { GuestOnce* control; std::int32_t* sceControl; Initializer initialize; };
+static void* APS5_VABI CallOnce(void* argument) {
+    const auto& call = *static_cast<const OnceCall*>(argument);
+    if (call.control) pthread_once_nid_postfix(call.control, call.initialize);
+    else scePthreadOnce(call.sceControl, call.initialize);
+    return nullptr;
+}
+static void LeaveInsideInitializer(OnceCall call) {
+    Pthread thread{};
+    Require(scePthreadCreate(&thread, nullptr, CallOnce, &call, nullptr) == 0);
+    Require(scePthreadJoin(thread, nullptr) == 0);
 }
 int main() {
     std::array<std::thread, 16> workers;
@@ -41,4 +80,22 @@ int main() {
     Require(pthread_once_nid_postfix(&control, nullptr) == 22);
     GuestOnce invalid{9, nullptr};
     Require(pthread_once_nid_postfix(&invalid, Initialize) == 22);
+    LeaveInsideInitializer({&exited, nullptr, ExitInsideInitializer});
+    Require(exited.state == 0);
+    Require(pthread_once_nid_postfix(&exited, CountRetry) == 0 && exited.state == 1 && retried == 1);
+    LeaveInsideInitializer({&cancelled, nullptr, CancelInsideInitializer});
+    Require(cancelled.state == 0);
+    Require(pthread_once_nid_postfix(&cancelled, CountRetry) == 0 && cancelled.state == 1 && retried == 2);
+    LeaveInsideInitializer({nullptr, &sceExited, ExitInsideInitializer});
+    Require(sceExited == 0);
+    Require(scePthreadOnce(&sceExited, CountRetry) == 0 && sceExited == 1 && retried == 3);
+    LeaveInsideInitializer({nullptr, &sceCancelled, CancelInsideInitializer});
+    Require(sceCancelled == 0);
+    Require(scePthreadOnce(&sceCancelled, CountRetry) == 0 && sceCancelled == 1 && retried == 4);
+    try { pthread_once_nid_postfix(&pushed, PushAndThrow); std::abort(); }
+    catch (int value) { Require(value == 7 && pushed.state == 0); }
+    Require(pthread_once_nid_postfix(&pushed, CountRetry) == 0 && pushed.state == 1 && retried == 5);
+    try { scePthreadOnce(&scePushed, PushAndThrow); std::abort(); }
+    catch (int value) { Require(value == 7 && scePushed == 0); }
+    Require(scePthreadOnce(&scePushed, CountRetry) == 0 && scePushed == 1 && retried == 6);
 }

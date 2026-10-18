@@ -22,6 +22,24 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
     endif()
 
+    add_test_executable(guest_savedata_convert_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataConvert.cpp)
+    target_include_directories(guest_savedata_convert_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_savedata_convert_tests PRIVATE libSceSaveData.native libc)
+    add_test(NAME guest_savedata_convert COMMAND guest_savedata_convert_tests)
+    if(WIN32)
+        set_tests_properties(guest_savedata_convert PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
+    endif()
+
+    add_test_executable(guest_savedata_mount_status_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataMountStatus.cpp)
+    target_include_directories(guest_savedata_mount_status_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_savedata_mount_status_tests PRIVATE libSceSaveData.native libc)
+    add_test(NAME guest_savedata_mount_status COMMAND guest_savedata_mount_status_tests)
+    if(WIN32)
+        set_tests_properties(guest_savedata_mount_status PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
+    endif()
+
     add_test_executable(guest_savedata_ps4_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataPs4.cpp)
     target_include_directories(guest_savedata_ps4_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_savedata_ps4_tests PRIVATE libSceSaveData.native libc)
@@ -29,6 +47,16 @@ if(BUILD_TESTING)
     add_test(NAME guest_savedata_ps4 COMMAND guest_savedata_ps4_tests)
     if(WIN32)
         set_tests_properties(guest_savedata_ps4 PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
+    endif()
+
+    add_test_executable(guest_savedata_cancel_tests ${LIBS_INCLUDE_DIR}/tests/GuestSaveDataCancel.cpp)
+    target_include_directories(guest_savedata_cancel_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_savedata_cancel_tests PRIVATE libSceSaveData.native libc)
+    configure_windows_unwind(guest_savedata_cancel_tests)
+    add_test(NAME guest_savedata_cancel COMMAND guest_savedata_cancel_tests)
+    if(WIN32)
+        set_tests_properties(guest_savedata_cancel PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceSaveData.native>")
     endif()
 endif()

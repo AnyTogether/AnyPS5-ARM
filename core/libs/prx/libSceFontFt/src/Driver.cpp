@@ -768,3 +768,15 @@ const Font::SysDriver* FontFt::DriverTable() {
 const Font::RendererSelection* FontFt::RendererTable() {
     return &rendererTable;
 }
+
+int FontFt::SupportModules(void* library, std::initializer_list<const char*> modules) {
+    auto* lib = static_cast<FontLibNative*>(library);
+    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    if (!lib->sys_driver || lib->sys_driver->init != &LibraryInit) return SCE_FONT_ERROR_NO_SUPPORT_LIBRARY;
+    const auto* ctx = static_cast<const FtLibraryContext*>(lib->fontset_registry);
+    if (!ctx || !ctx->library) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    for (const char* module : modules) {
+        if (!FT_Get_Module(ctx->library, module)) return SCE_FONT_ERROR_NO_SUPPORT_FORMAT;
+    }
+    return SCE_FONT_OK;
+}

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstring>
 #include <new>
+#include <stdexcept>
 #include <vector>
 
 #include "prx/libSceFont/include/FontInternal.hpp"
@@ -17,6 +18,7 @@ using namespace Font;
 constexpr std::uint16_t TEXT_SOURCE_MAGIC = 0x0F04;
 constexpr std::uint16_t FONT_STRING_MAGIC = 0x0F05;
 constexpr std::uint16_t FONT_WRITING_MAGIC = 0x0F06;
+constexpr std::uint16_t FONT_WORDS_MAGIC = 0x0F0B;
 constexpr std::uint16_t CREATE_STRING_DETAIL_ID = 0x0FD4;
 constexpr std::uint32_t WRITING_FORM_HORIZONTAL = 0x10;
 constexpr std::uint32_t WRITING_FORM_HORIZONTAL_LTR = 0x12;
@@ -63,13 +65,25 @@ struct FontWritingData {
     bool hasCurrentStep = false;
     bool maskFormatCharacters = true;
     bool ownsStorage = false;
+    bool hasRawGlyphMetrics = false;
     FontWritingStep step{};
     FontWritingMetrics metrics{};
     FontGlyphMetrics rawGlyphMetrics{};
-    bool hasRawGlyphMetrics = false;
+    FontWritingLetterStep letterStep{};
 };
 
 static_assert(sizeof(FontWritingData) <= sizeof(FontWriting));
+
+struct FontWordsData {
+    std::uint16_t magic = FONT_WORDS_MAGIC;
+    const FontMemory* memory = nullptr;
+    FontTextSource* source = nullptr;
+};
+
+FontWordsData* GetWordsData(void* fontWords) {
+    auto* data = static_cast<FontWordsData*>(fontWords);
+    return data && data->magic == FONT_WORDS_MAGIC ? data : nullptr;
+}
 
 FontStringData* GetStringData(FontString fontString) {
     auto* data = reinterpret_cast<FontStringData*>(fontString);
@@ -117,6 +131,26 @@ bool IsFormatCode(std::uint32_t code) {
     default:
         return false;
     }
+}
+
+// Han, kana and the CJK punctuation and compatibility blocks break between any two characters.
+bool IsIdeographicCode(std::uint32_t code) {
+    return (code >= 0x2E80 && code <= 0x2FFF) || (code >= 0x3001 && code <= 0x30FF) || (code >= 0x31C0 && code <= 0x31FF) || (code >= 0x3400 && code <= 0x4DBF) ||
+           (code >= 0x4E00 && code <= 0x9FFF) || (code >= 0xF900 && code <= 0xFAFF) || (code >= 0xFF00 && code <= 0xFF60) || (code >= 0x20000 && code <= 0x3FFFF);
+}
+
+FontTextCharacter* NextTextCharacter(const FontTextCharacter* character) {
+    for (FontTextCharacter* current = character->next; current; current = current->next) {
+        if (current->synthetic == 0 && current->clusterIndex == 0) return current;
+    }
+    return nullptr;
+}
+
+FontTextCharacter* PrevTextCharacter(const FontTextCharacter* character) {
+    for (FontTextCharacter* current = character->prev; current; current = current->prev) {
+        if (current->synthetic == 0 && current->clusterIndex == 0) return current;
+    }
+    return nullptr;
 }
 
 FontTextCharacter MakeCharacter(FontHandle font, std::uint32_t code, void* textOrder) {
@@ -204,6 +238,20 @@ void AccumulateWritingMetrics(FontWritingData& writing) {
     writing.metrics.Extent.right = std::max(previous.Extent.right, right);
     writing.metrics.Extent.top = std::min(previous.Extent.top, top);
     writing.metrics.Extent.bottom = std::max(previous.Extent.bottom, bottom);
+}
+
+constexpr std::size_t TEXT_CODES_CURRENT = 5;
+constexpr std::size_t TEXT_CODES_START = 6;
+constexpr std::size_t TEXT_CODES_TERM = 7;
+
+void StepTextCodes(FontTextCodes* textCodes, const FontTextCharacter* character) {
+    textCodes->text.order = character->textOrder;
+    textCodes->text.code = character->characterCode;
+    textCodes->systemUse[TEXT_CODES_CURRENT] = const_cast<FontTextCharacter*>(character);
+}
+
+const FontTextCharacter* TextCodesCharacter(const FontTextCodes* textCodes, std::size_t slot) {
+    return static_cast<const FontTextCharacter*>(textCodes->systemUse[slot]);
 }
 
 }
@@ -491,6 +539,16 @@ int APS5_VABI sceFontCharacterGetBidiLevel(const FontTextCharacter* textCharacte
     return SCE_FONT_OK;
 }
 
+int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter* textCharacter, int* syllableStringState) {
+    if (!textCharacter || !syllableStringState) {
+        if (syllableStringState) *syllableStringState = 0;
+        return SCE_FONT_ERROR_INVALID_PARAMETER;
+    }
+    if (textCharacter->characterCode >= 0x0E00 && textCharacter->characterCode <= 0x0E7F) throw std::runtime_error("libSceFont: sceFontCharacterGetSyllableStringState for Thai syllable clusters is not implemented");
+    *syllableStringState = 0;
+    return SCE_FONT_OK;
+}
+
 int APS5_VABI sceFontCharacterGetTextFontCode(const FontTextCharacter* textCharacter, FontHandle* pFontHandle, std::uint32_t* textCode) {
     if (!textCharacter) {
         if (pFontHandle) *pFontHandle = nullptr;
@@ -524,19 +582,101 @@ std::uint32_t APS5_VABI sceFontCharacterLooksWhiteSpace(const FontTextCharacter*
 }
 
 FontTextCharacter* APS5_VABI sceFontCharacterRefersTextBack(const FontTextCharacter* textCharacter) {
-    if (!textCharacter) return nullptr;
-    for (FontTextCharacter* current = textCharacter->prev; current; current = current->prev) {
-        if (current->synthetic == 0 && current->clusterIndex == 0) return current;
-    }
-    return nullptr;
+    return textCharacter ? PrevTextCharacter(textCharacter) : nullptr;
 }
 
 FontTextCharacter* APS5_VABI sceFontCharacterRefersTextNext(const FontTextCharacter* textCharacter) {
-    if (!textCharacter) return nullptr;
-    for (FontTextCharacter* current = textCharacter->next; current; current = current->next) {
-        if (current->synthetic == 0 && current->clusterIndex == 0) return current;
+    return textCharacter ? NextTextCharacter(textCharacter) : nullptr;
+}
+
+int APS5_VABI sceFontCreateWords(const FontMemory* fontMemory, FontTextSource* textSource, const void* detail, void** pFontWords) {
+    (void)detail;
+    if (!fontMemory || !textSource || !pFontWords) {
+        if (pFontWords) *pFontWords = nullptr;
+        return SCE_FONT_ERROR_INVALID_PARAMETER;
     }
-    return nullptr;
+    *pFontWords = nullptr;
+    if (TextSourceMagic(textSource) != TEXT_SOURCE_MAGIC) return SCE_FONT_ERROR_INVALID_TEXT_SOURCE;
+    if (fontMemory->mem_kind != MEMORY_MAGIC || !fontMemory->iface || !fontMemory->iface->alloc || !fontMemory->iface->dealloc) return SCE_FONT_ERROR_INVALID_MEMORY;
+    void* raw = fontMemory->iface->alloc(fontMemory->mspace_handle, sizeof(FontWordsData));
+    if (!raw) return SCE_FONT_ERROR_ALLOCATION_FAILED;
+    auto* data = new (raw) FontWordsData{};
+    data->memory = fontMemory;
+    data->source = textSource;
+    *pFontWords = data;
+    return SCE_FONT_OK;
+}
+
+int APS5_VABI sceFontDestroyWords(void** pFontWords) {
+    if (!pFontWords) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    auto* data = GetWordsData(*pFontWords);
+    *pFontWords = nullptr;
+    if (!data) return SCE_FONT_ERROR_INVALID_WORDS;
+    const FontMemory* memory = data->memory;
+    data->magic = 0;
+    data->~FontWordsData();
+    memory->iface->dealloc(memory->mspace_handle, data);
+    return SCE_FONT_OK;
+}
+
+// A word is a run of characters other than white space, or one ideographic character, with the white
+// space that follows it; white space at the start character is a word of its own. termCharacter, when
+// given, ends the search without being part of the word.
+int APS5_VABI sceFontWordsFindWordCharacters(void* fontWords, FontTextCharacter* startCharacter, FontTextCharacter* termCharacter, FontTextCharacter** pLastCharacter, FontTextCharacter** pNextCharacter) {
+    if (pLastCharacter) *pLastCharacter = nullptr;
+    if (pNextCharacter) *pNextCharacter = nullptr;
+    if (!GetWordsData(fontWords)) return SCE_FONT_ERROR_INVALID_WORDS;
+    if (!startCharacter || !pLastCharacter || !pNextCharacter || startCharacter == termCharacter) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    const auto atEnd = [&](const FontTextCharacter* character) { return !character || character == termCharacter; };
+    FontTextCharacter* last = startCharacter;
+    FontTextCharacter* next = NextTextCharacter(last);
+    const bool leadingSpace = IsWhitespaceCode(startCharacter->characterCode);
+    if (!leadingSpace && !IsIdeographicCode(startCharacter->characterCode)) {
+        while (!atEnd(next) && !IsWhitespaceCode(next->characterCode) && !IsIdeographicCode(next->characterCode)) {
+            last = next;
+            next = NextTextCharacter(last);
+        }
+    }
+    while (!atEnd(next) && IsWhitespaceCode(next->characterCode)) {
+        last = next;
+        next = NextTextCharacter(last);
+    }
+    *pLastCharacter = last;
+    *pNextCharacter = atEnd(next) ? nullptr : next;
+    return SCE_FONT_OK;
+}
+
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter* textCharacter, const FontTextCharacter* termCharacter, FontTextCodes* textCodes) {
+    if (!textCodes) return nullptr;
+    if (!textCharacter) throw std::runtime_error("libSceFont: sceFontCharactersRefersTextCodes without a text character");
+    if (textCharacter->clusterIndex != 0 || textCharacter->synthetic != 0) return nullptr;
+    std::memset(textCodes, 0, sizeof(FontTextCodes));
+    StepTextCodes(textCodes, textCharacter);
+    textCodes->systemUse[TEXT_CODES_START] = const_cast<FontTextCharacter*>(textCharacter);
+    textCodes->systemUse[TEXT_CODES_TERM] = const_cast<FontTextCharacter*>(termCharacter);
+    return textCodes;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = TextCodesCharacter(textCodesStep, TEXT_CODES_CURRENT);
+    if (!current || current == TextCodesCharacter(textCodesStep, TEXT_CODES_TERM)) return nullptr;
+    const FontTextCharacter* next = current->next;
+    while (next && next->synthetic != 0) next = next->next;
+    if (!next) return nullptr;
+    StepTextCodes(textCodesStep, next);
+    return textCodesStep;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) return nullptr;
+    const FontTextCharacter* current = TextCodesCharacter(textCodesStep, TEXT_CODES_CURRENT);
+    if (!current || current == TextCodesCharacter(textCodesStep, TEXT_CODES_START)) return nullptr;
+    const FontTextCharacter* previous = current->prev;
+    while (previous && previous->synthetic != 0) previous = previous->prev;
+    if (!previous) return nullptr;
+    StepTextCodes(textCodesStep, previous);
+    return textCodesStep;
 }
 
 int APS5_VABI sceFontWritingInit(FontWriting* fontWriting, FontString fontString, const FontTextCharacter* fontCharacter) {
@@ -596,21 +736,22 @@ const FontWritingStep* APS5_VABI sceFontWritingRefersRenderStep(FontWriting* fon
     return &writing->step;
 }
 
-FontTextCharacter* APS5_VABI sceFontWritingRefersRenderStepCharacter(FontWriting* fontWriting, FontWritingLetterStep* letterStep) {
-    if (letterStep) std::memset(letterStep, 0, sizeof(*letterStep));
+FontTextCharacter* APS5_VABI sceFontWritingRefersRenderStepCharacter(FontWriting* fontWriting, const FontWritingLetterStep** pLetterStep) {
+    if (pLetterStep) *pLetterStep = nullptr;
     auto* writing = GetWritingData(fontWriting);
     if (!writing || !writing->hasCurrentStep || !writing->storage || writing->currentIndex >= writing->storage->characters.size()) return nullptr;
-    if (letterStep) {
-        letterStep->x = writing->step.x;
-        letterStep->y = writing->step.y;
-        letterStep->advanceX = writing->step.advanceX;
-        letterStep->advanceY = writing->step.advanceY;
-        letterStep->Components.textsCount = 1;
-        letterStep->Components.textsIndex = static_cast<std::uint32_t>(writing->currentIndex);
-        letterStep->Components.glyphsCount = 1;
-        letterStep->Components.glyphsIndex = static_cast<std::uint32_t>(writing->currentIndex);
-        letterStep->Components.characterTextCount = static_cast<std::uint8_t>(std::max<std::uint32_t>(writing->step.Profile.characterCount, 1));
-    }
+    auto& letterStep = writing->letterStep;
+    letterStep = {};
+    letterStep.x = writing->step.x;
+    letterStep.y = writing->step.y;
+    letterStep.advanceX = writing->step.advanceX;
+    letterStep.advanceY = writing->step.advanceY;
+    letterStep.Components.textsCount = 1;
+    letterStep.Components.textsIndex = static_cast<std::uint32_t>(writing->currentIndex);
+    letterStep.Components.glyphsCount = 1;
+    letterStep.Components.glyphsIndex = static_cast<std::uint32_t>(writing->currentIndex);
+    letterStep.Components.characterTextCount = static_cast<std::uint8_t>(std::max<std::uint32_t>(writing->step.Profile.characterCount, 1));
+    if (pLetterStep) *pLetterStep = &letterStep;
     return &writing->storage->characters[writing->currentIndex];
 }
 

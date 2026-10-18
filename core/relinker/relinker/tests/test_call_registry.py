@@ -17,8 +17,10 @@ def main():
         for index, name in enumerate(names):
             strings = b"\0lib.so\0" + name.encode("utf-8") + b"\0"
             image = fixture(str_size=len(strings), table_bytes=strings)
-            struct.pack_into("<H", image, 56, 5)
-            for slot in (3, 4):
+            struct.pack_into("<H", image, 56, 6)
+            struct.pack_into("<IIQQQQQQ", image, 64,
+                             1, 7, 0x200, 0x200, 0x200, len(image) - 0x200, len(image) - 0x200, 0x1000)
+            for slot in (3, 4, 5):
                 struct.pack_into("<IIQQQQQQ", image, 64 + slot * 56,
                                  0x6fffff01, 0, 0, 0, 0, 0, 0, 1)
             source = work / (str(index) + ".elf")
@@ -33,9 +35,31 @@ def main():
                 entries = json.loads(registry.read_text(encoding="utf-8"))
                 expected = [{"nid": name, "library": "", "relocationType": "R_X86_64_GLOB_DAT",
                              "relocationOffset": "0x700", "targetSection": ".got", "targetOffset": "0x300",
-                             "callSites": ["0x200"], "callSitesResolved": True}]
+                             "callSites": ["0x200"], "callSitesResolved": True, "weak": False}]
                 if entries != expected:
                     raise AssertionError((name, options, entries))
+                needed = json.loads(output.with_suffix(".needed.json").read_text(encoding="utf-8"))
+                if needed != ["lib.so"]:
+                    raise AssertionError((name, options, needed))
+        strings = b"\0lib.so\0" + names[0].encode("utf-8") + b"\0"
+        image = fixture(str_size=len(strings), table_bytes=strings)
+        struct.pack_into("<H", image, 56, 6)
+        struct.pack_into("<IIQQQQQQ", image, 64,
+                         1, 7, 0x200, 0x200, 0x200, len(image) - 0x200, len(image) - 0x200, 0x1000)
+        for slot in (3, 4, 5):
+            struct.pack_into("<IIQQQQQQ", image, 64 + slot * 56,
+                             0x6fffff01, 0, 0, 0, 0, 0, 0, 1)
+        image[0x63C] = 0x20
+        source = work / "weak.elf"
+        source.write_bytes(image)
+        output = work / "weak-windows.exe"
+        result = subprocess.run([str(relinker), "--skip-sce-module", "--registry", "--windows",
+                                 str(source), str(output)], capture_output=True, text=True, timeout=20)
+        if result.returncode != 0 or not output.exists():
+            raise AssertionError((result.returncode, result.stdout, result.stderr))
+        entries = json.loads(output.with_suffix(".registry.json").read_text(encoding="utf-8"))
+        if not entries or entries[0]["weak"] is not True:
+            raise AssertionError(("weak", entries))
     print("Call registry JSON tests passed")
 
 

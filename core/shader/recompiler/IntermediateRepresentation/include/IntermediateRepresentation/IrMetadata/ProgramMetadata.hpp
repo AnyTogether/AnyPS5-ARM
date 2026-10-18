@@ -19,10 +19,19 @@ struct IrProgramMetadata {
     std::vector<ExportInfo> exportInfo;
     std::uint32_t pixelLinearInputs = 0;
     std::uint32_t pixelPerspectiveInputs = 0;
+    std::uint32_t pixelVertexOrderInputs = 0;
+    bool barycentricEmulation = false;
+    bool invalidatesCaches = false;
     std::vector<IrValue*> dynamicReads;
     bool shaderInfoComplete = false;
     IrBindingLayout bindings;
     bool bindingLayoutComplete = false;
+    std::uint32_t tessellationLocalStride = 0;
+    std::uint32_t vectorWindowBase = 0;
+    std::uint32_t vectorWindowSize = 0;
+    bool vectorWindowIndexedWrites = false;
+    std::uint32_t tessellationControlStride = 0;
+    std::uint32_t tessellationPatchStride = 0;
 };
 
 }

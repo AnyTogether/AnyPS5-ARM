@@ -2,6 +2,7 @@
 #include "../include/Mutex.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -87,7 +88,21 @@ int MutexOperations::Timedlock(PthreadMutex* mutex, const KernelTimespec* abstim
     if (std::chrono::duration<long double>(duration) >= std::chrono::duration<long double>(std::chrono::system_clock::duration::max()))
         throw std::overflow_error("Absolute mutex timeout exceeds the host clock range");
     const auto deadline = std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(duration));
-    return acquireMutex(resolveMutex(mutex, true), [&](auto& native) { return native.try_lock_until(deadline); }, sceTimedOut, false);
+    auto* current = resolveMutex(mutex, true);
+    return acquireMutex(current, [&](auto& native) {
+#ifdef _WIN32
+        for (;;) {
+            const auto now = std::chrono::system_clock::now();
+            if (now >= deadline) return native.try_lock();
+            const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now).count();
+            const std::uint64_t slice = TimedWait::NowNanos() + static_cast<std::uint64_t>(std::min<std::int64_t>(remaining, 100000000));
+            if (TimedWait::ParkAcquire(current, [&] { return native.try_lock(); }, &slice)) return true;
+        }
+#else
+        static_cast<void>(current);
+        return native.try_lock_until(deadline);
+#endif
+    }, sceTimedOut, false);
 }
 
 extern "C" {
@@ -101,7 +116,7 @@ int APS5_VABI scePthreadMutexattrInit(PthreadMutexattr* attr) {
 
 int APS5_VABI scePthreadMutexattrDestroy(PthreadMutexattr* attr) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     delete *attr;
     *attr = nullptr;
     return 0;
@@ -109,7 +124,7 @@ int APS5_VABI scePthreadMutexattrDestroy(PthreadMutexattr* attr) {
 
 int APS5_VABI scePthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     switch (type) {
     case 1: (*attr)->type = MutexType::ErrorCheck; break;
     case 2: (*attr)->type = MutexType::Recursive; break;
@@ -122,21 +137,19 @@ int APS5_VABI scePthreadMutexattrSettype(PthreadMutexattr* attr, int type) {
 
 int APS5_VABI scePthreadMutexattrSetprotocol(PthreadMutexattr* attr, int protocol) {
     if (!attr || !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
+        return SCE_KERNEL_ERROR_EINVAL;
     constexpr int PrioNone = 0;
-    constexpr int PrioInherit = 1;
-    if (protocol != PrioNone && protocol != PrioInherit)
-        throw std::invalid_argument("Mutex priority protection is unsupported");
+    constexpr int PrioProtect = 2;
+    if (protocol < PrioNone || protocol > PrioProtect)
+        return SCE_KERNEL_ERROR_EINVAL;
     return 0;
 }
 
 int APS5_VABI scePthreadMutexInit(PthreadMutex* mutex, const PthreadMutexattr* attr, const char*) {
     if (!mutex)
         throw std::invalid_argument("Mutex pointer is null");
-    if (attr && !*attr)
-        throw std::invalid_argument("Mutex attributes are not initialized");
     auto replacement = std::make_unique<PthreadMutexPrivate>();
-    if (attr)
+    if (attr && *attr)
         replacement->_type = (*attr)->type;
     std::lock_guard lock(initializationMutex);
     std::atomic_ref<PthreadMutex>(*mutex).store(replacement.release(), std::memory_order_release);
@@ -148,41 +161,58 @@ int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex) {
         throw std::invalid_argument("Mutex pointer is null");
     std::lock_guard lock(initializationMutex);
     if (*mutex == destroyedMutex())
-        throw std::runtime_error("Mutex has already been destroyed");
+        return SCE_KERNEL_ERROR_EINVAL;
     if (*mutex == adaptiveInitializer()) {
         std::atomic_ref<PthreadMutex>(*mutex).store(destroyedMutex(), std::memory_order_release);
         return 0;
     }
     if (*mutex && (*mutex)->_owner.load(std::memory_order_acquire) != std::thread::id{})
-        throw std::runtime_error("Cannot destroy a locked mutex");
+        return SCE_KERNEL_ERROR_EBUSY;
     delete *mutex;
     std::atomic_ref<PthreadMutex>(*mutex).store(destroyedMutex(), std::memory_order_release);
     return 0;
 }
 
 int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex) {
-    return acquireMutex(resolveMutex(mutex, true), [](auto& native) { native.lock(); return true; }, 0, false);
+    auto* current = resolveMutex(mutex, true);
+    return acquireMutex(current, [current](auto& native) {
+#ifdef _WIN32
+        return TimedWait::ParkAcquire(current, [&] { return native.try_lock(); }, nullptr);
+#else
+        static_cast<void>(current);
+        native.lock();
+        return true;
+#endif
+    }, 0, false);
 }
 
 int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex) {
     auto* current = resolveMutex(mutex, false);
     if (current->_owner.load(std::memory_order_acquire) != std::this_thread::get_id())
         return sceNotPermitted;
+    bool released = true;
     if (current->_type == MutexType::Recursive) {
-        if (--current->_count == 0)
+        released = --current->_count == 0;
+        if (released)
             current->_owner.store(std::thread::id{}, std::memory_order_release);
         current->_rmtx.unlock();
     } else {
         current->_owner.store(std::thread::id{}, std::memory_order_release);
         current->_mtx.unlock();
     }
+#ifdef _WIN32
+    if (released) TimedWait::Unpark(current);
+#else
+    static_cast<void>(released);
+#endif
     return 0;
 }
 
 int APS5_VABI scePthreadMutexTimedlock(PthreadMutex* mutex, KernelUseconds usec) {
     const auto deadline = TimedWait::DeadlineNanos(usec);
-    return acquireMutex(resolveMutex(mutex, true), [=](auto& native) {
-        return TimedWait::AcquireUntil(deadline, [&] { return native.try_lock(); }, [&](std::uint64_t micros) { return native.try_lock_for(std::chrono::microseconds(micros)); });
+    auto* current = resolveMutex(mutex, true);
+    return acquireMutex(current, [=](auto& native) {
+        return TimedWait::AcquireUntil(current, deadline, [&] { return native.try_lock(); }, [&](std::uint64_t micros) { return native.try_lock_for(std::chrono::microseconds(micros)); });
     }, sceTimedOut, false);
 }
 

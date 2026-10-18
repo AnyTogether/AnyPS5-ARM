@@ -34,11 +34,16 @@ struct ErrorDialogParam {
 int main() {
     ErrorDialogParam param{16, static_cast<std::int32_t>(0x80020001), 0, 0};
 
+    Require(sceErrorDialogGetStatus() == 0);
+    Require(sceErrorDialogUpdateStatus() == 0);
     Require(sceErrorDialogTerminate() == kErrNotInitialized);
+    Require(sceErrorDialogClose() == kErrInvalidState);
     Require(sceErrorDialogOpen(&param) == kErrInvalidState);
 
     Require(sceErrorDialogInitialize() == 0);
     Require(sceErrorDialogInitialize() == kErrAlreadyInitialized);
+    Require(sceErrorDialogGetStatus() == 1);
+    Require(sceErrorDialogUpdateStatus() == 1);
 
     Require(sceErrorDialogClose() == kErrInvalidState);
 
@@ -60,4 +65,7 @@ int main() {
 
     Require(sceErrorDialogTerminate() == 0);
     Require(sceErrorDialogTerminate() == kErrNotInitialized);
+    Require(sceErrorDialogGetStatus() == 0);
+    Require(sceErrorDialogUpdateStatus() == 0);
+    Require(sceErrorDialogClose() == kErrInvalidState);
 }

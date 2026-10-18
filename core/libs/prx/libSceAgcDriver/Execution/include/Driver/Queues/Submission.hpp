@@ -13,6 +13,7 @@
 #include <set>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace AgcDriver::DriverDetail {
@@ -29,6 +30,7 @@ struct Submission {
     std::map<std::size_t, std::vector<std::uint32_t>> registerLists;
     bool suspend = false;
     bool waitFree = false;
+    bool holdsFlip = false;
 
     std::uint64_t received = 0;
     std::vector<std::uint64_t> labelWrites;

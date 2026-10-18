@@ -1,0 +1,745 @@
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ColorTargetLayout.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ShaderInputState.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/State.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
+#include "Recompiler.hpp"
+#include "Optimization/ResourceProgram.hpp"
+#include "DepthFastClearHarness.hpp"
+#include "VulkanTestDevice.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <iostream>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace {
+
+using AgcDriver::Graphics::ColorTargetLayout;
+using AgcDriver::Graphics::ColorTileMode;
+using AgcDriver::Graphics::Require;
+using ShaderRecompiler::ShaderStage;
+using Color = std::array<float, 4>;
+
+constexpr std::uint32_t Width = 256;
+constexpr std::uint32_t Height = 128;
+constexpr std::uint32_t ScissorWidth = 128;
+constexpr std::size_t BlockBytes = 65536;
+constexpr std::uint32_t Float16x4Info = 0x0730u;
+constexpr std::uint32_t TiledAttrib3 = 0x4dc6c000u;
+constexpr std::uint32_t Float32Export = 9;
+constexpr std::uint32_t Float16Export = 4;
+constexpr std::uint32_t Unorm16Export = 5;
+constexpr std::uint32_t Snorm16Export = 6;
+
+alignas(256) constexpr std::array<std::uint32_t, 6> VertexCode{
+    0xe0382000, 0x80000005, 0xbf8c3f70, 0xf80008cf, 0x03020100, 0xbf810000,
+};
+
+constexpr std::array<std::array<float, 4>, 3> Triangle{{
+    {-1.0f, -1.0f, 0.5f, 1.0f}, {3.0f, -1.0f, 0.5f, 1.0f}, {-1.0f, 3.0f, 0.5f, 1.0f}
+}};
+
+constexpr std::array<Color, 4> Destinations{{
+    {0.5f, 0.25f, 0.75f, 0.5f}, {1.0f, 0.0f, 0.125f, 0.25f}, {0.0625f, 0.875f, 0.5f, 1.0f}, {0.25f, 0.5f, 0.375f, 0.75f}
+}};
+
+alignas(256) std::array<std::array<std::uint32_t, 64>, 16> Programs{};
+std::size_t programCount = 0;
+
+std::uint16_t Half(float value) {
+    Require(value == 0.0f || (value >= 0.0078125f && value <= 1.0f), "the test's half values are normal and at most 1");
+    if (value == 0.0f) return 0;
+    const auto bits = std::bit_cast<std::uint32_t>(value);
+    Require((bits & 0x1fffu) == 0, "the test's half values are exact");
+    return static_cast<std::uint16_t>(((((bits >> 23u) & 0xffu) - 112u) << 10u) | ((bits >> 13u) & 0x3ffu));
+}
+
+float FromHalf(std::uint16_t half) {
+    const auto exponent = (half >> 10u) & 0x1fu;
+    const auto mantissa = half & 0x3ffu;
+    Require((half & 0x8000u) == 0 && exponent != 31u, "a blended texel is negative, infinite or NaN");
+    return exponent == 0 ? std::ldexp(static_cast<float>(mantissa), -24) : std::ldexp(1.0f + static_cast<float>(mantissa) / 1024.0f, static_cast<int>(exponent) - 15);
+}
+
+std::uint32_t Packed16(float value, std::uint32_t exportFormat) {
+    if (exportFormat == Float16Export) return Half(value);
+    if (exportFormat == Unorm16Export) {
+        Require(value >= 0.0f && value <= 1.0f, "the test's UNORM16 values are in [0, 1]");
+        return static_cast<std::uint32_t>(std::lround(value * 65535.0f));
+    }
+    Require(exportFormat == Snorm16Export && value >= -1.0f && value <= 1.0f, "the test's SNORM16 values are in [-1, 1]");
+    return static_cast<std::uint16_t>(static_cast<std::int16_t>(std::lround(value * 32767.0f)));
+}
+
+std::span<const std::uint32_t> Program(const Color& color, std::uint32_t exportFormat, std::optional<std::uint32_t> sampleMask = std::nullopt, std::optional<std::uint16_t> packedAlpha = std::nullopt) {
+    Require(programCount < Programs.size(), "too many test programs");
+    auto& code = Programs[programCount++];
+    std::size_t at = 0;
+    const auto move = [&](std::uint32_t vgpr, std::uint32_t value) {
+        code[at++] = 0x7e0002ffu | (vgpr << 17u);
+        code[at++] = value;
+    };
+    if (sampleMask) {
+        move(8, *sampleMask);
+        code[at++] = 0xf8001084u;
+        code[at++] = 0x00080000u;
+    }
+    if (exportFormat != Float32Export) {
+        move(4, Packed16(color[0], exportFormat) | (Packed16(color[1], exportFormat) << 16u));
+        move(5, Packed16(color[2], exportFormat) | ((packedAlpha ? *packedAlpha : Packed16(color[3], exportFormat)) << 16u));
+        code[at++] = 0xf8001c0fu;
+        code[at++] = 0x00000504u;
+    } else {
+        for (std::uint32_t channel = 0; channel < 4; ++channel) move(4 + channel, std::bit_cast<std::uint32_t>(color[channel]));
+        code[at++] = 0xf800180fu;
+        code[at++] = 0x07060504u;
+    }
+    code[at++] = 0xbf810000u;
+    return std::span<const std::uint32_t>(code.data(), at);
+}
+
+struct Block {
+    explicit Block(std::size_t bytes) : bytes(bytes), watched(AgcDriver::GuestMemory::WriteWatched()) {
+#ifdef _WIN32
+        if (watched) {
+            data = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(bytes, BlockBytes));
+            GuestArena::GuestArenaCommit_nid_postfix(data, bytes, PAGE_READWRITE, bytes);
+        } else {
+            data = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+        }
+#else
+        if (watched) {
+            void* raw = mmap(nullptr, bytes + BlockBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            Require(raw != MAP_FAILED, "cannot map the color target");
+            const auto begin = reinterpret_cast<std::uintptr_t>(raw);
+            const auto aligned = (begin + BlockBytes - 1) & ~(static_cast<std::uintptr_t>(BlockBytes) - 1);
+            if (aligned != begin) munmap(raw, aligned - begin);
+            if (aligned + bytes != begin + bytes + BlockBytes) munmap(reinterpret_cast<void*>(aligned + bytes), begin + BlockBytes - aligned);
+            data = reinterpret_cast<std::uint8_t*>(aligned);
+            GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(data, bytes);
+        } else {
+            data = static_cast<std::uint8_t*>(std::aligned_alloc(BlockBytes, bytes));
+        }
+#endif
+        Require(data != nullptr, "cannot allocate the color target");
+        Require(!watched || AgcDriver::GuestMemory::Watched(Address(), bytes), "the color target is not write-watched");
+        GuestAllocations::Mutation mutation;
+        mutation.Add(data, bytes, true, true, true);
+    }
+    ~Block() {
+        AgcDriver::Graphics::StorageTexture::FlushPending(Address(), bytes, nullptr, "test release");
+        {
+            GuestAllocations::Mutation mutation;
+            mutation.Remove(data);
+        }
+#ifdef _WIN32
+        if (watched) {
+            GuestArena::GuestArenaReset_nid_postfix(data, bytes);
+            GuestArena::GuestArenaRelease_nid_postfix(data, bytes);
+        } else {
+            VirtualFree(data, 0, MEM_RELEASE);
+        }
+#else
+        if (watched) {
+            munmap(data, bytes);
+            GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(data, bytes);
+        } else {
+            std::free(data);
+        }
+#endif
+    }
+    Block(const Block&) = delete;
+    Block& operator=(const Block&) = delete;
+    std::uint64_t Address() const { return reinterpret_cast<std::uintptr_t>(data); }
+    std::size_t bytes;
+    bool watched;
+    std::uint8_t* data = nullptr;
+};
+
+AgcDriver::Graphics::ColorTarget DecodeTarget(const Block& block, std::uint32_t samples = 1) {
+    AgcDriver::Registers cx;
+    cx[0x318] = static_cast<std::uint32_t>(block.Address() >> 8u);
+    cx[0x31b] = 0;
+    cx[0x31c] = Float16x4Info;
+    const auto log2 = static_cast<std::uint32_t>(std::countr_zero(samples));
+    cx[0x31d] = (log2 << 12u) | (log2 << 15u);
+    cx[0x321] = 0;
+    cx[0x3b0] = ((Width - 1u) << 14u) | (Height - 1u);
+    cx[0x3b8] = TiledAttrib3;
+    cx[0x390] = static_cast<std::uint32_t>(block.Address() >> 40u);
+    const auto color = AgcDriver::Graphics::DecodeColorBuffer(cx, 0);
+    Require(color.format == VK_FORMAT_R16G16B16A16_SFLOAT && color.elementBytes == 8 && color.samples == samples && color.bytes * samples == block.bytes, "the 16_16_16_16 float target did not decode as a 256x128 RGBA16F surface");
+    return color;
+}
+
+void Draw(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget& color, bool alphaToCoverage, std::uint32_t exportFormat, std::span<const std::uint32_t> pixelCode, bool dithered = false, bool sampleMaskExport = false) {
+    VkPipelineColorBlendAttachmentState blend{};
+    blend.colorWriteMask = 0xf;
+    const auto target = device.Target();
+    constexpr std::uint32_t waveSize = 64;
+    std::vector<std::uint32_t> vertexUserData(4, 0u);
+    const auto address = reinterpret_cast<std::uintptr_t>(Triangle.data());
+    const std::array<std::uint32_t, 4> vertexBuffer{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (16u << 16u), static_cast<std::uint32_t>(Triangle.size()), 0x01016facu};
+    std::copy(vertexBuffer.begin(), vertexBuffer.end(), vertexUserData.begin());
+    const std::array<ShaderRecompiler::MemoryRegion, 1> vertexMemory{{{reinterpret_cast<std::uintptr_t>(VertexCode.data()), std::as_bytes(std::span(VertexCode))}}};
+    ShaderRecompiler::RecompileRequest vertex{
+        {ShaderStage::Vertex, reinterpret_cast<std::uintptr_t>(VertexCode.data()), VertexCode, 0, {}},
+        {waveSize, 0, vertexUserData, std::nullopt, std::nullopt, ShaderRecompiler::ShaderVertexStageInfo{}, vertexMemory},
+        target,
+        {0, 0, 0, 64}
+    };
+    vertex.useCache = false;
+    const auto vertexResult = ShaderRecompiler::Recompile(vertex);
+    const auto vertexPush = static_cast<std::uint32_t>(vertexResult.pushConstants.size());
+
+    AgcDriver::Graphics::State state{};
+    state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, waveSize, waveSize, std::nullopt, std::nullopt};
+    state.colors = {color};
+    state.color = color;
+    state.hasColorTarget = true;
+    state.renderExtent = {Width, Height};
+    state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    state.viewport = {0, static_cast<float>(Height), static_cast<float>(Width), -static_cast<float>(Height), 0, 1};
+    state.negativeOneToOne = false;
+    state.scissor = {{0, 0}, {ScissorWidth, Height}};
+    state.cullMode = VK_CULL_MODE_NONE;
+    state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    state.blends = {blend};
+    state.blend = blend;
+    state.blendConstants = {};
+    state.alphaToCoverage = alphaToCoverage;
+    state.ditheredAlphaToCoverage = dithered;
+    state.samples = color.samples;
+
+    const auto codeAddress = reinterpret_cast<std::uintptr_t>(pixelCode.data());
+    const AgcDriver::Registers context{{0x1b6, 0x8000}, {0x1b3, 0}, {0x1b4, 0}, {0x203, sampleMaskExport ? 0x100u : 0u}, {0x1c5, exportFormat}};
+    const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{codeAddress, std::as_bytes(pixelCode)}}};
+    auto prepared = AgcDriver::Graphics::DecodePixelStageInfo(context, {});
+    prepared.alphaToCoverage = alphaToCoverage;
+    prepared.ditheredAlphaToCoverage = dithered;
+    ShaderRecompiler::RecompileRequest fragment{
+        {ShaderStage::Fragment, codeAddress, pixelCode, 0, {}},
+        {waveSize, 0, {}, std::nullopt, prepared, std::nullopt, pixelMemory},
+        target,
+        PixelPushLayout(vertexPush, target)
+    };
+    const auto handle = ShaderRecompiler::PrepareShader(fragment);
+    AgcDriver::DriverDetail::ShaderSnapshot snapshot{codeAddress, 0, 1, {pixelCode.begin(), pixelCode.end()}, {}};
+    snapshot.prepared->entries.push_back({0, handle});
+    fragment.shader.code = snapshot.code;
+    fragment.context.pixel = AgcDriver::Graphics::DecodePixelStageInfo(context, AgcDriver::Graphics::ExportMappings(state));
+    fragment.context.pixel->alphaToCoverage = state.alphaToCoverage;
+    fragment.context.pixel->ditheredAlphaToCoverage = state.ditheredAlphaToCoverage;
+    const ShaderRecompiler::SrtRuntime runtime{};
+    const auto materialize = [&](const ShaderRecompiler::RecompileRequest& request) {
+        const auto invocation = AgcDriver::DriverDetail::InvocationFor(snapshot, 0, request);
+        return invocation.Materialize(*invocation.Capture(runtime));
+    };
+    const auto pixelResult = materialize(fragment);
+    Require(pixelResult->variantId == ShaderRecompiler::GetPreparedArtifact(*handle).variantId, "the draw did not use the registered pixel shader");
+    const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
+        {ShaderStage::Vertex, &vertexResult, 0},
+        {ShaderStage::Fragment, pixelResult.get(), PixelPushOffset(vertexPush, target)}
+    }};
+    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Triangle.size()), 0, 1, 0, false};
+    device.Draw(state, draw, shaders);
+}
+
+alignas(256) std::array<std::array<std::uint32_t, 9>, 3> DepthOnlyPrograms{};
+
+void DepthOnlyCoverage(AgcDriver::VulkanDevice& device, const DepthFastClearHarness::Shaders& harness, const Block& depth, float alpha, std::size_t slot, bool written, std::uint32_t enable = 0x3u, float fourth = 0.0f) {
+    namespace Harness = DepthFastClearHarness;
+    const Harness::Surface surface{depth.Address(), 0, 0, false, VK_FORMAT_D32_SFLOAT};
+    auto& code = DepthOnlyPrograms[slot];
+    code = {0x7e0802ffu, 0x3e800000u, 0x7e0a02ffu, std::bit_cast<std::uint32_t>(alpha), 0x7e0e02ffu, std::bit_cast<std::uint32_t>(fourth), 0xf8001800u | enable, 0x07060504u, 0xbf810000u};
+    const std::span<const std::uint32_t> pixelCode(code.data(), 9);
+    ShaderRecompiler::ShaderPixelStageInfo pixel{};
+    pixel.wave32 = true;
+    pixel.inputAddr = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionX) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionY);
+    pixel.posX = true;
+    pixel.posY = true;
+    pixel.targetOutputMode[0] = 3;
+    pixel.targetExportMapping.fill(0xe4u);
+    pixel.alphaToCoverage = true;
+    const std::array<ShaderRecompiler::MemoryRegion, 1> pixelMemory{{{reinterpret_cast<std::uintptr_t>(pixelCode.data()), std::as_bytes(pixelCode)}}};
+    ShaderRecompiler::RecompileRequest fragment{
+        {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
+        {32, 0, {}, std::nullopt, pixel, std::nullopt, pixelMemory},
+        device.Target(),
+        PixelPushLayout(harness.vertexPush, device.Target())
+    };
+    fragment.useCache = false;
+    const auto pixelResult = ShaderRecompiler::Recompile(fragment);
+    const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
+        {ShaderStage::Vertex, &harness.vertex, 0},
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(harness.vertexPush, device.Target())}
+    }};
+    AgcDriver::Graphics::State state{};
+    state.stages = {AgcDriver::Graphics::ShaderPath::Vertex, 0u, 32u, 32u, std::nullopt, std::nullopt};
+    state.depth = AgcDriver::Graphics::DepthTarget{surface.depth, 0, {Harness::Width, Harness::Height}, VK_FORMAT_D32_SFLOAT, 1.0f, 0, 0, false};
+    state.depthTest = true;
+    state.depthWrite = true;
+    state.depthCompare = VK_COMPARE_OP_ALWAYS;
+    state.alphaToCoverage = true;
+    state.renderExtent = {Harness::Width, Harness::Height};
+    state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    state.viewport = {0, static_cast<float>(Harness::Height), static_cast<float>(Harness::Width), -static_cast<float>(Harness::Height), 0, 1};
+    state.negativeOneToOne = false;
+    state.scissor = {{0, 0}, {Harness::Width, Harness::Height}};
+    state.cullMode = VK_CULL_MODE_NONE;
+    state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    state.blendConstants = {};
+    const AgcDriver::Pm4::DrawParameters draw{0, static_cast<std::uint32_t>(Harness::Triangles().size()), 0, 1, 0, false};
+    device.Draw(state, draw, shaders);
+    device.WaitIdle();
+    const auto passed = Harness::Draw(device, harness, surface, {.depthCompare = VK_COMPARE_OP_LESS});
+    char detail[160];
+    std::snprintf(detail, sizeof(detail), "a depth-only draw with alpha-to-coverage and a 32_AR alpha of %.2f (export mask 0x%x, fourth channel %.2f) left %u of %u pixels at the cleared depth", alpha, enable, fourth, passed, Harness::Covered);
+    Require(passed == (written ? 0u : Harness::Covered), detail);
+}
+
+std::vector<std::uint16_t> ReadBack(AgcDriver::VulkanDevice& device, const Block& block) {
+    AgcDriver::Graphics::StorageTexture::FlushPending(block.Address(), block.bytes, nullptr, "test read-back");
+    device.WaitIdle();
+    std::vector<std::uint16_t> stored(block.bytes / 2u);
+    AgcDriver::GuestMemory::Read(block.Address(), std::as_writable_bytes(std::span(stored)), 1);
+    return stored;
+}
+
+std::vector<std::uint16_t> Fill(Block& block, const ColorTargetLayout& layout) {
+    std::vector<std::uint16_t> halves(block.bytes / 2u);
+    for (std::uint32_t y = 0; y < Height; ++y) {
+        for (std::uint32_t x = 0; x < Width; ++x) {
+            const auto& color = Destinations[(x + y) % Destinations.size()];
+            const auto index = layout.Offset(x, y) / 2u;
+            for (std::uint32_t channel = 0; channel < 4; ++channel) halves[index + channel] = Half(color[channel]);
+        }
+    }
+    std::memcpy(block.data, halves.data(), block.bytes);
+    return halves;
+}
+
+void Check(AgcDriver::VulkanDevice& device, const Block& block, const ColorTargetLayout& layout, const std::vector<std::uint16_t>& before, const std::function<Color(const Color&)>& expectedColor, const std::string& what) {
+    const auto stored = ReadBack(device, block);
+    for (std::uint32_t y = 0; y < Height; ++y) {
+        for (std::uint32_t x = 0; x < Width; ++x) {
+            const auto index = layout.Offset(x, y) / 2u;
+            const auto expected = expectedColor(Destinations[(x + y) % Destinations.size()]);
+            for (std::uint32_t channel = 0; channel < 3; ++channel) {
+                const bool inside = x < ScissorWidth;
+                const bool match = inside ? std::fabs(FromHalf(stored[index + channel]) - expected[channel]) <= 1.0f / 2048.0f : stored[index + channel] == before[index + channel];
+                if (match) continue;
+                char detail[160];
+                std::snprintf(detail, sizeof(detail), ": channel %u of pixel (%u, %u) %s the scissor holds half 0x%04x, expected %.6g", channel, x, y, inside ? "inside" : "outside", stored[index + channel], inside ? expected[channel] : FromHalf(before[index + channel]));
+                throw std::runtime_error(what + detail);
+            }
+        }
+    }
+}
+
+void DitheredCoverage(AgcDriver::VulkanDevice& device) {
+    struct Case {
+        std::uint32_t bits;
+        std::uint32_t format;
+        std::array<std::uint32_t, 4> masks;
+    };
+    constexpr std::array<Case, 36> cases{{
+        {0x00000000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x80000000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x3c7fffffu, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x3c800000u, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3c800001u, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3cffffffu, 9u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x3d000000u, 9u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x3d000001u, 9u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x3effffffu, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f000000u, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f000001u, 9u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x3f77ffffu, 9u, {0xffu, 0xf7u, 0xffu, 0xffu}},
+        {0x3f780000u, 9u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x3f780001u, 9u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x3f800000u, 9u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x7f800000u, 9u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0xff800000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x7fc00000u, 9u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00000000u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00008000u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x000023ffu, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00002400u, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x00002401u, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x000027ffu, 4u, {0x10u, 0x00u, 0x00u, 0x00u}},
+        {0x00002800u, 4u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x00002801u, 4u, {0x04u, 0x00u, 0x00u, 0x00u}},
+        {0x000037ffu, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003800u, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003801u, 4u, {0x35u, 0x36u, 0x36u, 0x35u}},
+        {0x00003bbfu, 4u, {0xffu, 0xf7u, 0xffu, 0xffu}},
+        {0x00003bc0u, 4u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x00003bc1u, 4u, {0xffu, 0x7fu, 0xffu, 0xffu}},
+        {0x00003c00u, 4u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x00007c00u, 4u, {0xffu, 0xffu, 0xffu, 0xffu}},
+        {0x0000fc00u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+        {0x00007e00u, 4u, {0x00u, 0x00u, 0x00u, 0x00u}},
+    }};
+    const ColorTargetLayout layout(Width, Height, ColorTileMode::RenderTarget, 8);
+    std::vector<std::unique_ptr<Block>> blocks;
+    for (const auto& test : cases) {
+        blocks.push_back(std::make_unique<Block>(layout.Bytes() * 8u));
+        auto& source = *blocks.back();
+        std::memset(source.data, 0, source.bytes);
+        const auto multisampled = DecodeTarget(source, 8);
+        for (std::uint32_t sample = 0; sample < 8; ++sample) {
+            const Color color{std::ldexp(1.0f, static_cast<int>(sample) - 7), 0, 0, 1};
+            Draw(device, multisampled, false, Float32Export, Program(color, Float32Export, 1u << sample), false, true);
+        }
+        const auto alpha = test.format == Float32Export ? std::bit_cast<float>(test.bits) : 0.0f;
+        const Color color{0, 0, 0, alpha};
+        const auto half = test.format == Float16Export ? std::optional<std::uint16_t>(static_cast<std::uint16_t>(test.bits)) : std::nullopt;
+        Draw(device, multisampled, true, test.format, Program(color, test.format, std::nullopt, half), true);
+        blocks.push_back(std::make_unique<Block>(layout.Bytes()));
+        auto& resolved = *blocks.back();
+        std::memset(resolved.data, 0, resolved.bytes);
+        AgcDriver::Graphics::ColorMetadataPass pass{};
+        pass.mode = AgcDriver::Graphics::ColorMetadataPass::Mode::Resolve;
+        pass.source = multisampled;
+        pass.targets = {DecodeTarget(resolved)};
+        device.ColorMetadataPass(pass);
+        const auto stored = ReadBack(device, resolved);
+        for (std::uint32_t y = 0; y < Height; ++y) {
+            for (std::uint32_t x = 0; x < Width; ++x) {
+                const auto mask = test.masks[2u * (x & 1u) + (y & 1u)];
+                const auto expected = x < ScissorWidth ? static_cast<float>(255u - mask) / 1024.0f : 0.0f;
+                const auto actual = FromHalf(stored[layout.Offset(x, y) / 2u]);
+                if (actual == expected) continue;
+                char detail[192];
+                std::snprintf(detail, sizeof(detail), "dithered coverage export %u alpha 0x%08x pixel (%u,%u): resolved %.9g, expected %.9g for mask0x%02x", test.format, test.bits, x, y, actual, expected, mask);
+                throw std::runtime_error(detail);
+            }
+        }
+        programCount = 0;
+    }
+    AgcDriver::Graphics::ClearMultisampleTargets(device.Device());
+}
+
+void DccFastClearTests(AgcDriver::VulkanDevice& device, std::uint32_t selectedSamples) {
+    const ColorTargetLayout layout(Width, Height, ColorTileMode::RenderTarget, 8);
+    std::vector<std::unique_ptr<Block>> blocks;
+    struct ClearTargets {
+        AgcDriver::VulkanDevice& device;
+        ~ClearTargets() {
+            std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+            device.SubmitRecorded(true);
+            device.WaitIdle();
+            AgcDriver::Graphics::ClearMultisampleTargets(device.Device());
+            AgcDriver::Graphics::ClearCachedTextures(device.Device());
+        }
+    } clearTargets{device};
+    for (const auto samples : {2u, 4u, 8u}) {
+        if (selectedSamples != 0 && samples != selectedSamples) continue;
+        for (const auto code : {0x00u, 0x40u, 0x80u, 0xc0u}) {
+            for (const auto alphaOnMsb : {false, true}) {
+                for (const auto cmaskMode : {0u, 0xccu, 0xffu}) {
+                    blocks.push_back(std::make_unique<Block>(layout.Bytes() * samples));
+                    auto& source = *blocks.back();
+                    std::memset(source.data, 0, source.bytes);
+                    blocks.push_back(std::make_unique<Block>(BlockBytes));
+                    auto& metadata = *blocks.back();
+                    std::memset(metadata.data, code, BlockBytes);
+                    auto target = DecodeTarget(source, samples);
+                    target.dccAddress = metadata.Address();
+                    target.dccPipeAligned = true;
+                    target.dccAlphaOnMsb = alphaOnMsb;
+                    if (cmaskMode != 0) {
+                        blocks.push_back(std::make_unique<Block>(BlockBytes));
+                        auto& cmask = *blocks.back();
+                        const auto expanded = samples == 2 ? 0xddu : samples == 4 ? 0xeeu : 0xffu;
+                        std::memset(cmask.data, cmaskMode == 0xccu ? cmaskMode : expanded, BlockBytes);
+                        target.cmaskAddress = cmask.Address();
+                        target.cmaskBytes = AgcDriver::Graphics::CmaskBytes(Width, Height);
+                        target.cmaskFastClear = true;
+                    }
+                    const bool colorOne = code == 0x80u || code == 0xc0u;
+                    const bool alphaOne = code == 0x40u || code == 0xc0u;
+                    Color initial{};
+                    for (std::uint32_t channel = 0; channel < 4; ++channel) initial[channel] = channel == (alphaOnMsb ? 3u : 0u) ? static_cast<float>(alphaOne) : static_cast<float>(colorOne);
+                    const Color written{0.25f, 0.25f, 0.25f, 0.25f};
+                    if (cmaskMode != 0) device.ColorMetadataPass({AgcDriver::Graphics::ColorMetadataPass::Mode::FmaskDecompress, {target}});
+                    Draw(device, target, false, Float32Export, Program(written, Float32Export, 1u), false, true);
+                    if (cmaskMode != 0) {
+                        auto recolored = target;
+                        recolored.clearWords = {0x3c003c00u, 0x3c003c00u};
+                        device.ColorMetadataPass({AgcDriver::Graphics::ColorMetadataPass::Mode::FmaskDecompress, {recolored}});
+                    }
+                    blocks.push_back(std::make_unique<Block>(layout.Bytes()));
+                    auto& resolved = *blocks.back();
+                    std::memset(resolved.data, 0, resolved.bytes);
+                    AgcDriver::Graphics::ColorMetadataPass pass{};
+                    pass.mode = AgcDriver::Graphics::ColorMetadataPass::Mode::Resolve;
+                    pass.source = target;
+                    pass.targets = {DecodeTarget(resolved)};
+                    device.ColorMetadataPass(pass);
+                    const auto stored = ReadBack(device, resolved);
+                    for (std::uint32_t y = 0; y < Height; ++y) {
+                        for (std::uint32_t x = 0; x < Width; ++x) {
+                            for (std::uint32_t channel = 0; channel < 4; ++channel) {
+                                const auto expected = x < ScissorWidth ? initial[channel] + (written[channel] - initial[channel]) / static_cast<float>(samples) : initial[channel];
+                                const auto actual = FromHalf(stored[layout.Offset(x, y) / 2u + channel]);
+                                Require(actual == expected, "multisampled DCC clear did not preserve undrawn samples, channels or scissor pixels");
+                            }
+                        }
+                    }
+                    if (code == 0 && !alphaOnMsb && cmaskMode == 0) {
+                        const auto dccBytes = AgcDriver::Graphics::MultisampledDccBytes(target);
+                        Require(dccBytes + 8u <= metadata.bytes, "the DCC fixture has no adjacent-page control");
+                        const std::array<std::byte, 4> adjacent{std::byte{0x7b}, std::byte{0x7b}, std::byte{0x7b}, std::byte{0x7b}};
+                        AgcDriver::GuestMemory::Write(metadata.Address() + dccBytes, adjacent);
+                        device.ColorMetadataPass(pass);
+                        Require(ReadBack(device, resolved) == stored, "an adjacent driver store changed the resident DCC target");
+                        static_cast<volatile std::uint8_t*>(metadata.data)[dccBytes + 4u] = 0x7c;
+                        AgcDriver::GuestMemory::CollectWritesUncached(metadata.Address() + dccBytes, 8u);
+                        device.ColorMetadataPass(pass);
+                        Require(ReadBack(device, resolved) == stored, "an adjacent CPU store changed the resident DCC target");
+                        const std::array<std::byte, 1> same{std::byte{0}};
+                        AgcDriver::GuestMemory::Write(metadata.Address(), same);
+                        bool refused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            refused = std::string_view(error.what()).find("writes to a resident multisampled DCC") != std::string_view::npos;
+                        }
+                        Require(refused, "a same-value driver DCC store did not invalidate multisampled DCC residency");
+                    }
+                    if (code == 0 && alphaOnMsb && cmaskMode == 0) {
+                        static_cast<volatile std::uint8_t*>(source.data)[0] = 0;
+                        bool refused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            refused = std::string_view(error.what()).find("writes to a resident multisampled DCC") != std::string_view::npos;
+                        }
+                        Require(refused, "a same-value CPU color store did not invalidate multisampled DCC residency");
+                    }
+                    if (code == 0x40u && alphaOnMsb && cmaskMode == 0) {
+                        static_cast<volatile std::uint8_t*>(metadata.data)[0] = 0x40u;
+                        bool refused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            refused = std::string_view(error.what()).find("writes to a resident multisampled DCC") != std::string_view::npos;
+                        }
+                        Require(refused, "a same-value CPU DCC store did not invalidate multisampled DCC residency");
+                    }
+                    if (code == 0xc0u && alphaOnMsb && cmaskMode == 0) {
+                        AgcDriver::GuestMemory::Unwatch(metadata.Address(), 4096);
+                        bool refused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            refused = std::string_view(error.what()).find("reuse requires watched guest memory") != std::string_view::npos;
+                        }
+                        Require(refused, "an unwatched metadata range remained eligible for multisampled DCC reuse");
+                    }
+                    if (code == 0x80u && alphaOnMsb && cmaskMode == 0) {
+                        {
+                            std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+                            device.SubmitRecorded(true);
+                            device.WaitIdle();
+                        }
+                        {
+                            GuestAllocations::Mutation mutation;
+                            mutation.Remove(metadata.data);
+                        }
+                        {
+                            GuestAllocations::Mutation mutation;
+                            mutation.Add(metadata.data, metadata.bytes, true, true, true);
+                        }
+                        bool readRefused = false;
+                        try {
+                            AgcDriver::Graphics::RequireNoMultisampleTarget(source.Address(), source.bytes, "a CPU read");
+                        } catch (const std::runtime_error&) {
+                            readRefused = true;
+                        }
+                        Require(readRefused, "releasing DCC metadata removed the unpublished color read guard");
+                        bool reuseRefused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            reuseRefused = std::string_view(error.what()).find("metadata was released") != std::string_view::npos;
+                        }
+                        Require(reuseRefused, "recreated DCC metadata reused a resident color target");
+                    }
+                    programCount = 0;
+                }
+            }
+        }
+    }
+    for (const auto samples : {2u, 4u, 8u}) {
+        if (selectedSamples != 0 && samples != selectedSamples) continue;
+        for (const auto mode : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
+            blocks.push_back(std::make_unique<Block>(layout.Bytes() * samples));
+            auto& source = *blocks.back();
+            std::memset(source.data, 0, source.bytes);
+            blocks.push_back(std::make_unique<Block>(BlockBytes));
+            auto& metadata = *blocks.back();
+            std::memset(metadata.data, mode == 0 ? 0xff : 0, metadata.bytes);
+            auto target = DecodeTarget(source, samples);
+            target.dccAddress = metadata.Address();
+            target.dccPipeAligned = true;
+            std::string_view expected = "not a supported uniform fast clear";
+            if (mode == 1) {
+                metadata.data[0] = 0x40u;
+                expected = "mixed multisampled DCC metadata";
+            }
+            if (mode == 2 || mode == 3 || mode == 7) {
+                blocks.push_back(std::make_unique<Block>(BlockBytes));
+                auto& cmask = *blocks.back();
+                std::memset(cmask.data, mode == 2 ? 0 : 0xcc, cmask.bytes);
+                if (mode == 3) cmask.data[0] = 0xdd;
+                target.cmaskAddress = cmask.Address();
+                target.cmaskBytes = AgcDriver::Graphics::CmaskBytes(Width, Height);
+                target.cmaskFastClear = true;
+                expected = "CMASK compression or register clear";
+            }
+            if (mode == 4) {
+                AgcDriver::GuestMemory::Unwatch(metadata.Address(), 4096);
+                expected = "initial multisampled DCC contents require watched";
+            }
+            if (mode == 5) {
+                target.dccAddress = source.Address();
+                expected = "overlapping multisampled DCC";
+            }
+            if (mode == 6) {
+                target.dccAddress += 256u;
+                expected = "metadata base alignment";
+            }
+            if (mode == 7) {
+                target.dccControl = 0x80u;
+                expected = "color transform, lossy mode";
+            }
+            bool refused = false;
+            try {
+                if (mode == 7) device.ColorMetadataPass({AgcDriver::Graphics::ColorMetadataPass::Mode::FmaskDecompress, {target}});
+                else Draw(device, target, false, Float32Export, Program({0.25f, 0.25f, 0.25f, 0.25f}, Float32Export));
+            } catch (const std::runtime_error& error) {
+                refused = std::string_view(error.what()).find(expected) != std::string_view::npos;
+            }
+            Require(refused, "unsupported initial multisampled DCC contents were not refused explicitly");
+            programCount = 0;
+        }
+    }
+}
+
+}
+
+int main(int argc, char** argv) {
+    try {
+        const auto device = OpenVulkanTestDevice();
+        if (!device) return VulkanTestSkipped;
+        if ((argc == 2 || argc == 3) && std::string_view(argv[1]) == "--dcc-fast-clear") {
+            const auto samples = argc == 2 ? 0u : std::string_view(argv[2]) == "2" ? 2u : std::string_view(argv[2]) == "4" ? 4u : std::string_view(argv[2]) == "8" ? 8u : 0u;
+            Require(argc == 2 || samples != 0, "unknown DCC test sample count");
+            try {
+                DccFastClearTests(*device, samples);
+            } catch (const std::runtime_error& error) {
+                if (std::string_view(error.what()) != "AGC graphics: the device cannot render color with the target's sample count") throw;
+                std::printf("skipped, the device lacks the requested multisample color attachments: %s\n", error.what());
+                return VulkanTestSkipped;
+            }
+            std::cout << "Multisampled DCC fast clear tests passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--dithered8") {
+            try {
+                DitheredCoverage(*device);
+            } catch (const std::runtime_error& error) {
+                if (std::string_view(error.what()) != "AGC graphics: the device cannot render color with the target's sample count") throw;
+                std::printf("skipped, the device lacks eight-sample color attachments: %s\n", error.what());
+                return VulkanTestSkipped;
+            }
+            std::puts("dithered eight-sample alpha-to-coverage tests passed");
+            return 0;
+        }
+        Require(argc == 1, "unknown alpha-to-coverage test argument");
+        const ColorTargetLayout layout(Width, Height, ColorTileMode::RenderTarget, 8);
+        Block block(layout.Bytes());
+        struct Case {
+            std::uint32_t alpha;
+            bool alphaToCoverage;
+            bool written;
+        };
+        constexpr std::array<Case, 17> cases{{
+            {0x00000000u, true, false}, {0x80000000u, true, false}, {0x3e800000u, true, false}, {0x3efffffeu, true, false},
+            {0x3effffffu, true, false}, {0x3f000000u, true, true}, {0x3f000001u, true, true}, {0x3f000002u, true, true},
+            {0x3f400000u, true, true}, {0x3f800000u, true, true}, {0x40000000u, true, true}, {0xbf800000u, true, false},
+            {0x7f800000u, true, true}, {0xff800000u, true, false}, {0x7fc00000u, true, false}, {0xffc00000u, true, false},
+            {0x3e800000u, false, true},
+        }};
+        for (const auto& test : cases) {
+            const Color source{0.25f, 0.5f, 0.125f, std::bit_cast<float>(test.alpha)};
+            const auto before = Fill(block, layout);
+            Draw(*device, DecodeTarget(block), test.alphaToCoverage, Float32Export, Program(source, Float32Export));
+            char name[96];
+            std::snprintf(name, sizeof(name), "alpha 0x%08x with alpha-to-coverage %s", test.alpha, test.alphaToCoverage ? "on" : "off");
+            Check(*device, block, layout, before, [&](const Color& destination) { return test.written ? source : destination; }, name);
+            programCount = 0;
+        }
+        struct PackedCase {
+            std::uint32_t exportFormat;
+            const char* name;
+            float alpha;
+            bool written;
+        };
+        constexpr std::array<PackedCase, 7> packedCases{{
+            {Float16Export, "FP16_ABGR", 0.75f, true}, {Float16Export, "FP16_ABGR", 0.25f, false},
+            {Unorm16Export, "UNORM16_ABGR", 0.75f, true}, {Unorm16Export, "UNORM16_ABGR", 0.25f, false},
+            {Snorm16Export, "SNORM16_ABGR", 0.75f, true}, {Snorm16Export, "SNORM16_ABGR", 0.25f, false}, {Snorm16Export, "SNORM16_ABGR", -0.5f, false},
+        }};
+        for (const auto& test : packedCases) {
+            const Color source{0.25f, 0.5f, 0.125f, test.alpha};
+            const auto before = Fill(block, layout);
+            Draw(*device, DecodeTarget(block), true, test.exportFormat, Program(source, test.exportFormat));
+            char name[96];
+            std::snprintf(name, sizeof(name), "alpha %.2f with %s exports", test.alpha, test.name);
+            Check(*device, block, layout, before, [&](const Color& destination) { return test.written ? source : destination; }, name);
+            programCount = 0;
+        }
+        const auto harness = DepthFastClearHarness::Compile(*device);
+        const Block coveredDepth(BlockBytes);
+        const Block discardedDepth(BlockBytes);
+        DepthOnlyCoverage(*device, harness, coveredDepth, 0.75f, 0, true);
+        DepthOnlyCoverage(*device, harness, discardedDepth, 0.25f, 1, false);
+        const Block fullMaskDepth(BlockBytes);
+        DepthOnlyCoverage(*device, harness, fullMaskDepth, 0.25f, 2, false, 0xfu, 0.75f);
+        std::puts("alpha-to-coverage tests passed");
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}

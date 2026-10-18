@@ -4,9 +4,11 @@
 #ifndef CORE_LIBS_PRX_LIBSCEFONT_INCLUDE_FONTINTERNAL_HPP
 #define CORE_LIBS_PRX_LIBSCEFONT_INCLUDE_FONTINTERNAL_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -22,12 +24,33 @@ constexpr std::uint8_t STYLE_FRAME_FLAG_SCALE = 0x01;
 constexpr std::uint8_t STYLE_FRAME_FLAG_SLANT = 0x02;
 constexpr std::uint8_t STYLE_FRAME_FLAG_WEIGHT = 0x04;
 constexpr float POINTS_PER_INCH = 72.0f;
+constexpr std::uint16_t HANDLE_FLAG_VERTICAL = 0x8000;
+constexpr int ATTRIBUTE_NONE = 0;
+constexpr int ATTRIBUTE_WRITING_HORIZONTAL = 0x40;
+constexpr int ATTRIBUTE_WRITING_VERTICAL = 0x41;
+
+// An attribute is a category (high nibble, 1 to 4) and a setting (low bit); each category starts at
+// setting 0: no adjoin, no exclusive vertical forms, vertical rotation enabled, horizontal writing.
+using AttributeSet = std::array<std::uint8_t, 4>;
+constexpr AttributeSet DEFAULT_ATTRIBUTES{0x10, 0x20, 0x30, 0x40};
+
+inline bool ValidAttribute(int attribute) {
+    const int category = attribute >> 4;
+    return category >= 1 && category <= 4 && (attribute & 0x0F) <= 1;
+}
+
+inline std::uint8_t& AttributeSlot(AttributeSet& attributes, int attribute) {
+    return attributes[static_cast<std::size_t>((attribute >> 4) - 1)];
+}
 
 struct FontState {
     std::shared_ptr<const std::vector<unsigned char>> faceData;
     FT_Face face = nullptr;
     float scaleW = 16.0f;
     float scaleH = 16.0f;
+    std::map<int, int> scriptLanguages;
+    std::map<int, int> typographicFeatures;
+    AttributeSet attributes = DEFAULT_ATTRIBUTES;
 
     FontState() = default;
     FontState(const FontState&) = delete;
@@ -47,6 +70,7 @@ struct GeneratedGlyph {
     std::vector<FontGlyphOutlinePoint> outlinePoints;
     std::vector<std::uint8_t> outlineTags;
     std::vector<std::uint16_t> outlineContours;
+    AttributeSet attributes = DEFAULT_ATTRIBUTES;
     bool metricsInitialized = false;
     bool outlineInitialized = false;
 };
@@ -119,6 +143,7 @@ void ClearRenderOutputs(FontGlyphMetrics* metrics, FontRenderOutput* result);
 int ComputeHorizontalLayout(FontHandle handle, const StyleStateBlock* style, std::uint8_t* outWords);
 int ComputeVerticalLayout(FontHandle handle, const StyleStateBlock* style, std::uint8_t* outWords);
 int GetCharGlyphMetrics(FontHandle handle, std::uint32_t code, FontGlyphMetrics* metrics, bool useCachedStyle);
+int RenderFaceGlyphToSurface(FT_Face face, FT_UInt glyphIndex, FT_Vector shift, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result);
 int RenderCharGlyphImageCore(FontHandle handle, std::uint32_t code, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result);
 
 }

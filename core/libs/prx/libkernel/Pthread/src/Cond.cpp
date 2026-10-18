@@ -1,7 +1,9 @@
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include "prx/libkernel/Pthread/include/Mutex.hpp"
 #include "prx/libkernel/Pthread/include/Cond.hpp"
+#include "prx/libkernel/Pthread/include/Cancel.hpp"
 #include "prx/libkernel/Pthread/Posix/Common.hpp"
+#include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include <atomic>
@@ -21,6 +23,14 @@ PthreadCond destroyedCond() {
     return reinterpret_cast<PthreadCond>(std::uintptr_t{2});
 }
 
+PthreadMutex destroyedMutex() {
+    return reinterpret_cast<PthreadMutex>(std::uintptr_t{2});
+}
+
+PthreadMutex adaptiveInitializer() {
+    return reinterpret_cast<PthreadMutex>(std::uintptr_t{1});
+}
+
 PthreadCond resolveCond(PthreadCond* cond) {
     if (!cond)
         throw std::invalid_argument("Condition variable pointer is null");
@@ -38,18 +48,36 @@ PthreadCond resolveCond(PthreadCond* cond) {
     return created;
 }
 
-PthreadMutex lockedMutex(PthreadMutex* mutex) {
-    if (!mutex || !*mutex)
+int mutexOwnership(PthreadMutex* mutex, PthreadMutex* owned) {
+    if (!mutex)
         throw std::invalid_argument("Mutex pointer is null");
-    auto* current = *mutex;
-    if (current->_owner.load(std::memory_order_acquire) != std::this_thread::get_id())
-        throw std::runtime_error("Condition wait mutex is not owned by the current thread");
-    return current;
+    const auto current = std::atomic_ref<PthreadMutex>(*mutex).load(std::memory_order_acquire);
+    if (current == destroyedMutex())
+        return SCE_KERNEL_ERROR_EINVAL;
+    if (!current || current == adaptiveInitializer() || current->_owner.load(std::memory_order_acquire) != std::this_thread::get_id())
+        return SCE_KERNEL_ERROR_EPERM;
+    *owned = current;
+    return 0;
 }
+
+template <class TNative>
+struct WakingLock {
+    PthreadMutex mutex;
+    TNative& native;
+    void lock() { native.lock(); }
+    void unlock() {
+        native.unlock();
+#ifdef _WIN32
+        TimedWait::Unpark(mutex);
+#endif
+    }
+};
 
 int waitUntil(PthreadCond* cond, PthreadMutex* mutex, std::optional<std::uint64_t> deadlineNanos, const void* caller) {
     auto* c = resolveCond(cond);
-    auto* m = lockedMutex(mutex);
+    PthreadMutex m = nullptr;
+    if (const int error = mutexOwnership(mutex, &m))
+        return error;
     bool timedOut = false;
     const auto waitStart = std::chrono::steady_clock::now();
     struct Trace {
@@ -57,23 +85,29 @@ int waitUntil(PthreadCond* cond, PthreadMutex* mutex, std::optional<std::uint64_
         ~Trace() { KernelTraceWait_nid_postfix("cond", caller, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()), timedOut); }
     } trace{caller, timedOut, waitStart};
     if (m->_type == MutexType::Recursive) {
-        std::unique_lock<std::recursive_timed_mutex> lock(m->_rmtx, std::adopt_lock);
+        WakingLock<std::recursive_timed_mutex> waking{m, m->_rmtx};
+        std::unique_lock lock(waking, std::adopt_lock);
         const auto previousCount = m->_count;
         m->_count = 0;
         m->_owner.store(std::thread::id{}, std::memory_order_release);
-        if (deadlineNanos) timedOut = !c->_cv.WaitUntil(lock, *deadlineNanos);
-        else c->_cv.Wait(lock);
+        for (int level = 1; level < previousCount; ++level)
+            m->_rmtx.unlock();
+        timedOut = !ThreadCancel::Wait(c->_cv, lock, deadlineNanos);
+        for (int level = 1; level < previousCount; ++level)
+            m->_rmtx.lock();
         m->_owner.store(std::this_thread::get_id(), std::memory_order_release);
         m->_count = previousCount;
         lock.release();
+        ThreadCancel::Check();
         return timedOut ? sceTimedOut : 0;
     }
-    std::unique_lock<std::timed_mutex> lock(m->_mtx, std::adopt_lock);
+    WakingLock<std::timed_mutex> waking{m, m->_mtx};
+    std::unique_lock lock(waking, std::adopt_lock);
     m->_owner.store(std::thread::id{}, std::memory_order_release);
-    if (deadlineNanos) timedOut = !c->_cv.WaitUntil(lock, *deadlineNanos);
-    else c->_cv.Wait(lock);
+    timedOut = !ThreadCancel::Wait(c->_cv, lock, deadlineNanos);
     m->_owner.store(std::this_thread::get_id(), std::memory_order_release);
     lock.release();
+    ThreadCancel::Check();
     return timedOut ? sceTimedOut : 0;
 }
 
@@ -96,16 +130,14 @@ int APS5_VABI scePthreadCondattrInit(PthreadCondattr* attr) {
 }
 
 int APS5_VABI scePthreadCondattrDestroy(PthreadCondattr* attr) {
-    if (!attr || !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
+    if (!attr || !*attr) return SCE_KERNEL_ERROR_EINVAL;
     delete *attr;
     *attr = nullptr;
     return 0;
 }
 
 int APS5_VABI scePthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid clockId) {
-    if (!attr || !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
+    if (!attr || !*attr) return SCE_KERNEL_ERROR_EINVAL;
     (*attr)->_clockid = static_cast<int>(clockId);
     return 0;
 }
@@ -113,10 +145,8 @@ int APS5_VABI scePthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid cl
 int APS5_VABI scePthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr, const char*) {
     if (!cond)
         throw std::invalid_argument("Condition variable pointer is null");
-    if (attr && !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
     auto replacement = std::make_unique<PthreadCondPrivate>();
-    if (attr)
+    if (attr && *attr)
         replacement->_clockid = (*attr)->_clockid;
     std::lock_guard lock(condInitializationMutex);
     std::atomic_ref<PthreadCond>(*cond).store(replacement.release(), std::memory_order_release);

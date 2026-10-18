@@ -15,6 +15,7 @@ struct MacOsBind {
     std::string Symbol;
     std::uint32_t Rva;
     std::int64_t Addend = 0;
+    bool Weak = false;
 };
 
 struct MacOsExport {
@@ -75,6 +76,7 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input);
 
 // "$ORIGIN" rewritten to a dyld path prefix (@executable_path or @loader_path).
 std::string MachOLoadPath(const std::string& path, const std::string& origin);
+std::vector<std::string> MachORunPaths(const std::string& paths, const std::string& origin);
 
 // A DT_NEEDED name as an LC_LOAD_DYLIB path: guest modules ($ORIGIN) beside the loader, prx libraries
 // through the rpath.

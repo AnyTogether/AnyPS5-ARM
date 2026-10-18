@@ -1,12 +1,18 @@
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libkernel/Module/ModuleArgs.hpp"
 #include <nid/NidCompute.hpp>
 #include <array>
+#include <condition_variable>
 #include <filesystem>
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <string>
+#include <stdexcept>
+#include <system_error>
 #include <vector>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -14,11 +20,16 @@
 #endif
 #include <windows.h>
 #elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #else
 #include <dlfcn.h>
 #include <link.h>
+#endif
+
+#ifdef _WIN32
+extern "C" void ForgetUnloadedUnwindImages_nid_no_patch();
 #endif
 
 namespace {
@@ -36,6 +47,7 @@ struct Module {
         if (owned && native) {
 #ifdef _WIN32
             FreeLibrary(static_cast<HMODULE>(native));
+            ForgetUnloadedUnwindImages_nid_no_patch();
 #else
             ::dlclose(native);
 #endif
@@ -57,31 +69,50 @@ void* Symbol(Module& module, const char* name) {
 std::uintptr_t MainProgramBase() {
     return reinterpret_cast<std::uintptr_t>(_dyld_get_image_header(0));
 }
+
+// The base a guest module's image is registered at: its ELF load bias, which dl_iterate_phdr reports.
+std::uintptr_t GuestImageBase(void* native) {
+    struct Search {
+        void* native;
+        std::uintptr_t base;
+    } search{native, 0};
+    dl_iterate_phdr([](dl_phdr_info* image, std::size_t, void* data) {
+        auto& found = *static_cast<Search*>(data);
+        if (image->dlpi_name == nullptr || image->dlpi_name[0] == '\0') return 0;
+        void* handle = ::dlopen(image->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
+        if (handle == nullptr) return 0;
+        ::dlclose(handle);
+        if (handle != found.native) return 0;
+        found.base = image->dlpi_addr;
+        return 1;
+    }, &search);
+    return search.base;
+}
 #elif !defined(_WIN32)
-std::uintptr_t MainProgramBase() {
-    static const std::uintptr_t base = [] {
-        struct Scan {
-            std::uintptr_t value = 0;
-        };
-        Scan scan;
-        ::dl_iterate_phdr(
-            [](dl_phdr_info* info, size_t, void* data) {
-                auto* found = static_cast<Scan*>(data);
-                if (found->value == 0 && info->dlpi_name != nullptr && info->dlpi_name[0] == '\0') found->value = info->dlpi_addr;
-                return found->value == 0 ? 0 : 1;
-            },
-            &scan);
-        return scan.value;
+const link_map* MainProgramMap() {
+    static const link_map* const map = [] {
+        void* handle = ::dlopen(nullptr, RTLD_LAZY);
+        link_map* found = nullptr;
+        const bool resolved = handle != nullptr && ::dlinfo(handle, RTLD_DI_LINKMAP, &found) == 0 && found != nullptr;
+        if (handle != nullptr) ::dlclose(handle);
+        if (!resolved) throw std::runtime_error("dlsym: cannot find the link map of the main program");
+        return found;
     }();
-    return base;
+    return map;
 }
 #endif
 #ifndef _WIN32
 
 bool FromGuestModule(void* address) {
     Dl_info info{};
+#ifdef __APPLE__
     if (address == nullptr || !::dladdr(address, &info) || info.dli_fname == nullptr) return false;
     if (reinterpret_cast<std::uintptr_t>(info.dli_fbase) == MainProgramBase()) return true;
+#else
+    link_map* image = nullptr;
+    if (address == nullptr || !::dladdr1(address, &info, reinterpret_cast<void**>(&image), RTLD_DL_LINKMAP) || info.dli_fname == nullptr || image == nullptr) return false;
+    if (image == MainProgramMap()) return true;
+#endif
     const std::string path(info.dli_fname);
     return path.ends_with(".prx");
 }
@@ -112,12 +143,58 @@ char* APS5_VABI dlerror_nid_postfix() {
     pendingError = false;
     return loaderError.data();
 }
-static std::filesystem::path RelinkedModulePath(const std::filesystem::path& path) {
-    auto relinked = path;
-    relinked += ".guest.prx";
-    std::error_code error;
-    return std::filesystem::is_regular_file(relinked, error) ? relinked : path;
+#ifdef _WIN32
+static void InitializeDeferredModule(HMODULE native) {
+    using Entry = int (APS5_VABI *)(std::size_t, const void*, void*);
+    using Initializer = void (APS5_VABI *)(int, char**, char**);
+    constexpr auto initializing = std::numeric_limits<std::uint32_t>::max();
+    static std::mutex initializedLock;
+    static std::condition_variable initializedChanged;
+    auto* table = reinterpret_cast<std::uint32_t*>(GetProcAddress(native, "__aps5_guest_initialize"));
+    if (!table) return;
+    const auto owner = GetCurrentThreadId();
+    std::unique_lock lock(initializedLock);
+    while (table[1] == initializing) {
+        if (table[0] == 0) throw std::runtime_error("dlopen: deferred module initialization failed");
+        if (table[0] == owner) return;
+        initializedChanged.wait(lock);
+    }
+    const auto entry = table[0];
+    const auto count = table[1];
+    if (entry == 0 && count == 0) return;
+    DWORD protection = 0;
+    if (!VirtualProtect(table, 2 * sizeof(*table), PAGE_READWRITE, &protection))
+        throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "open deferred module initialization metadata");
+    table[0] = owner;
+    table[1] = initializing;
+    lock.unlock();
+    const auto finish = [&](bool succeeded) {
+        lock.lock();
+        table[0] = 0;
+        table[1] = succeeded ? 0 : initializing;
+        DWORD previous = 0;
+        const bool restored = VirtualProtect(table, 2 * sizeof(*table), protection, &previous);
+        const auto error = restored ? ERROR_SUCCESS : GetLastError();
+        if (!restored) table[1] = initializing;
+        lock.unlock();
+        initializedChanged.notify_all();
+        if (!restored) throw std::system_error(static_cast<int>(error), std::system_category(), "restore deferred module initialization metadata");
+    };
+    try {
+        auto* base = reinterpret_cast<std::uint8_t*>(native);
+        const auto* pending = static_cast<const PendingModuleArgs*>(__aps5_get_pending_module_args_nid_no_patch());
+        if (entry != 0) __aps5_set_module_init_result_nid_no_patch(reinterpret_cast<Entry>(base + entry)(pending->args, pending->argp, nullptr));
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto initializer = *reinterpret_cast<Initializer*>(base + table[2 + index]);
+            if (initializer) initializer(0, nullptr, nullptr);
+        }
+    } catch (...) {
+        finish(false);
+        throw;
+    }
+    finish(true);
 }
+#endif
 
 void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
     if ((flags & ~0x103) || (flags & 3) == 0 || (flags & 3) == 3) {
@@ -132,8 +209,9 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             module->owned = false;
         } else {
             if (!*path) { Error("dlopen: empty module path"); return nullptr; }
-            const auto resolved = RelinkedModulePath(ResolvePath_nid_no_patch(path));
+            const auto resolved = RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path));
             module->native = LoadLibraryExW(resolved.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            if (module->native) InitializeDeferredModule(static_cast<HMODULE>(module->native));
         }
         if (!module->native) {
             char message[128];
@@ -141,7 +219,7 @@ void* APS5_VABI dlopen_nid_postfix(const char* path, int flags) {
             Error(message); return nullptr;
         }
 #else
-        const auto resolved = path ? RelinkedModulePath(ResolvePath_nid_no_patch(path)).string() : std::string{};
+        const auto resolved = path ? RelinkedModulePath_nid_no_patch(ResolvePath_nid_no_patch(path)).string() : std::string{};
         const int nativeFlags = ((flags & 3) == 1 ? RTLD_LAZY : RTLD_NOW) |
             ((flags & 0x100) ? RTLD_GLOBAL : RTLD_LOCAL);
         module->native = ::dlopen(path ? resolved.c_str() : nullptr, nativeFlags);
@@ -173,6 +251,8 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
             if (auto* result = DefaultScopeSymbol(name)) return result;
             const auto nid = Nid::ComputeNid(name, "");
             if (auto* result = DefaultScopeSymbol(nid.c_str())) return result;
+            if (auto* result = DefaultScopeSymbol((std::string(name) + "#guest").c_str())) return result;
+            if (auto* result = DefaultScopeSymbol((nid + "#guest").c_str())) return result;
         }
 #endif
         Error("dlsym: symbol not found in supported module scope");
@@ -180,12 +260,32 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
     } catch (const std::exception& error) { Error(error.what()); return nullptr; }
 }
 int APS5_VABI dlclose_nid_postfix(void* handle) {
+    const auto key = reinterpret_cast<std::uintptr_t>(handle);
     std::shared_ptr<Module> module;
+    bool lastReference = true;
     {
         std::lock_guard lock(modulesMutex);
-        auto found = modules.find(reinterpret_cast<std::uintptr_t>(handle));
+        auto found = modules.find(key);
         if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
-        module = std::move(found->second);
+        module = found->second;
+        for (const auto& [other, entry] : modules) {
+            if (other != key && entry->native == module->native) lastReference = false;
+        }
+    }
+    if (module->owned && module->native && lastReference) {
+        GuestAllocations::Mutation mutation;
+#ifdef _WIN32
+        mutation.UnregisterImage(module->native);
+#elif defined(__APPLE__)
+        if (const auto base = GuestImageBase(module->native); base != 0) mutation.UnregisterImage(reinterpret_cast<const void*>(base));
+#else
+        mutation.UnregisterImage(reinterpret_cast<const void*>(static_cast<link_map*>(module->native)->l_addr));
+#endif
+    }
+    {
+        std::lock_guard lock(modulesMutex);
+        auto found = modules.find(key);
+        if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
         modules.erase(found);
     }
     // Unload outside the registry lock: module destructors may call loader APIs.

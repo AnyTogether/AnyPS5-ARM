@@ -1,5 +1,6 @@
 #include "AudioPropagation.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -24,7 +25,7 @@ struct SystemState {
     std::uint64_t reserved;
 };
 
-enum class Kind { Room, Portal, Source, Material };
+enum class Kind { Room, Portal, Source, Material, Path };
 
 struct Object {
     Kind kind;
@@ -288,6 +289,14 @@ std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPaths(AudioPropagationHa
     requireObject(state, source, Kind::Source, __func__);
     static_cast<void>(entries);
     requireNoPropagation(count == 0, __func__);
+    return 0;
+}
+
+std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPath(AudioPropagationHandle path, const void* data, float gain) {
+    auto& state = registry();
+    std::lock_guard lock(state.mutex);
+    requireObject(state, path, Kind::Path, __func__);
+    require(data != nullptr && std::isfinite(gain), __func__);
     return 0;
 }
 

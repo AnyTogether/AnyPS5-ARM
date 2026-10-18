@@ -30,8 +30,13 @@ struct TranslateOptions {
     std::uint32_t userDataBaseRegister = 0;
     std::uint32_t userDataCount = 64;
     std::uint32_t scratchDwords = 0;
+    std::uint32_t sharedMemoryBytes = 0;
     std::uint64_t shaderHash = 0;
     bool fragmentShaderBarycentricEnabled = false;
+    // Neither barycentrics nor the geometry stage that emulates them: v_interp_mov reads the host's value.
+    bool hostInterpolationOnly = false;
+    bool relaxedFloat = false;
+    bool nativeFloat16 = false;
     std::optional<ShaderFloatMode> floatMode;
     ShaderStageInputInfo inputInfo;
     const EmbeddedFetchPlan* embeddedFetch = nullptr;

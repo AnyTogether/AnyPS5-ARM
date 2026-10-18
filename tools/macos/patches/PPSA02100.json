@@ -1,0 +1,21 @@
+{
+    "title": "Stray",
+    "patches": [
+        {
+            "name": "keep-window-size",
+            "description": "After startup the PS5 build resizes its window to the saved ResolutionSizeX/Y through r.SetRes, which it rewrites to 3840x2160. The edit makes the r.SetRes sink skip that resize, so the window keeps the size of the output resolution below.",
+            "edits": [
+                {"address": "0x14410675e", "original": "0f84d2000000", "replacement": "90e9d2000000"}
+            ]
+        }
+    ],
+    "resolution": {
+        "description": "The window and back buffers are sized from PS5.DefaultBackBufferWidth/Height, registered read-only as 3840x2160. Each field is the 32-bit immediate a mov passes to the registration.",
+        "default": "1920x1080",
+        "choices": ["1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"],
+        "fields": [
+            {"value": "width", "address": "0x1417e90d5", "instruction": "ba000f0000", "offset": 1},
+            {"value": "height", "address": "0x1417e9148", "instruction": "ba70080000", "offset": 1}
+        ]
+    }
+}

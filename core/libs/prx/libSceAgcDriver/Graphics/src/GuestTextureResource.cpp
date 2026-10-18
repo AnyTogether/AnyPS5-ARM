@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -43,17 +44,25 @@ TextureDimension resolveDimension(std::uint32_t raw) {
         case 11: return TextureDimension::kCube;
         case 12: return TextureDimension::k1DArray;
         case 13: return TextureDimension::k2DArray;
+        case 14: return TextureDimension::k2DMsaa;
         default: throw std::runtime_error("AGC graphics: guest texture descriptor uses an unsupported image type " + std::to_string(raw));
     }
 }
 
 }
 
+bool IsNullTextureResource(std::span<const std::uint32_t> words) {
+    Require(words.size() == 8, "guest texture descriptor must contain 8 dwords");
+    const auto base40 = (static_cast<std::uint64_t>(words[0]) | (static_cast<std::uint64_t>(words[1]) << 32u)) & 0xffffffffffull;
+    const auto type = (words[3] >> 28u) & 0xfu;
+    return base40 == 0 || type <= 1;
+}
+
 GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words) {
     Require(words.size() == 8, "guest texture descriptor must contain 8 dwords");
 
     const auto base40 = (static_cast<std::uint64_t>(words[0]) | (static_cast<std::uint64_t>(words[1]) << 32u)) & 0xffffffffffull;
-    const auto baseAddress = base40 << 8u;
+    auto baseAddress = base40 << 8u;
     Require(baseAddress != 0, "guest texture descriptor has a null base address");
 
     const auto minLod = (words[1] >> 8u) & 0xfffu;
@@ -75,14 +84,14 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     const auto baseArray = (words[4] >> 16u) & 0x1fffu;
 
     const auto arrayPitch = (words[5] >> 0u) & 0xfu;
-    const auto maxMip = (words[5] >> 4u) & 0xfu;
+    auto maxMip = (words[5] >> 4u) & 0xfu;
     const auto minLodWarn = (words[5] >> 8u) & 0xfffu;
     const auto cornerSample = ((words[5] >> 23u) & 0x1u) != 0;
     const auto mipStatsCntEn = ((words[5] >> 25u) & 0x1u) != 0;
     const auto prtDefColor = ((words[5] >> 26u) & 0x1u) != 0;
 
     const auto mipStatsCntId = words[6] & 0xffu;
-    const auto msaaDepth = ((words[6] >> 10u) & 0x1u) != 0;
+    const auto iterate256 = ((words[6] >> 10u) & 0x1u) != 0;
     const auto maxUncompBlkSize = (words[6] >> 15u) & 0x3u;
     const auto maxCompBlkSize = (words[6] >> 17u) & 0x3u;
     const auto metaPipeAligned = ((words[6] >> 19u) & 0x1u) != 0;
@@ -110,7 +119,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     Require(!cornerSample, "guest texture descriptor uses corner sampling which is not implemented");
     Require(!prtDefColor, "guest texture descriptor uses a partially resident default color which is not implemented");
     Require(arrayPitch == 0, "guest texture descriptor uses a nonzero array pitch which is not implemented");
-    Require(!msaaDepth, "guest texture descriptor uses MSAA which is not implemented");
+    Require(!iterate256 || (typeRaw == 14u && tileModeRaw == 24u && (format == 7u || format == 22u)), "guest texture descriptor ITERATE_256 is implemented only for multisampled Z depth");
     static_cast<void>(maxUncompBlkSize);
     static_cast<void>(maxCompBlkSize);
     // Surfaces are always written uncompressed here (render targets and storage images bypass DCC), so
@@ -123,7 +132,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
             std::fprintf(stderr, "[gpu] texture DCC color transform is ignored (word6=0x%08x word7=0x%08x)\n", words[6], words[7]);
         }
     }
-    Require(bcSwizzle == 0, "guest texture descriptor uses a BC swizzle which is not implemented");
+    Require(bcSwizzle <= 5u, "guest texture descriptor uses a reserved BC swizzle");
 
     Require(baseLevel <= lastLevel, "guest texture descriptor has a base mip level past its last mip level");
 
@@ -137,18 +146,38 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     } catch (const std::exception& error) {
         throw std::runtime_error(std::string(error.what()) + describe());
     }
+    std::uint32_t samples = 1;
+    if (dimension == TextureDimension::k2DMsaa) {
+        Require(baseLevel == 0 && lastLevel >= 1u && lastLevel <= 4u && maxMip == lastLevel, "guest multisampled texture descriptor does not hold the same sample count of 2 to 16 in its last level and its last mip, which is not implemented" + describe());
+        samples = 1u << lastLevel;
+        lastLevel = 0;
+        maxMip = 0;
+    }
     // Views may name levels past MAX_MIP (a 512x512 view through 1x1 over a 9-level surface); the
     // hardware never addresses them, so the view ends at the surface's last level.
     if (baseLevel <= maxMip) lastLevel = std::min(lastLevel, maxMip);
-    // XOR swizzles fold a pipe/bank XOR into the low address bits; only unmodified 64 KiB bases are modeled.
-    Require(XorSwizzleMode(tileMode) == 0 || (baseAddress & (tileMode == TextureTileMode::kS4KBX || tileMode == TextureTileMode::kD4KBX ? 0xfffu : 0xffffu)) == 0, "guest texture descriptor combines an XOR swizzle with a pipe/bank XOR base which is not implemented");
+    std::uint32_t pipeBankXor = 0;
+    if (XorSwizzleMode(tileMode) != 0) {
+        pipeBankXor = static_cast<std::uint32_t>(baseAddress & (tileMode == TextureTileMode::kS4KBX || tileMode == TextureTileMode::kD4KBX ? 0xfffu : 0xffffu));
+        baseAddress -= pipeBankXor;
+        Require(baseAddress != 0, "guest texture descriptor has a null base address");
+    }
 
     switch (dimension) {
         case TextureDimension::k1D:
             Require(height == 1 && depth == 0 && baseArray == 0, "guest 1D texture descriptor has a nonzero height, depth or base array");
             break;
         case TextureDimension::k2D:
+            if (depth != 0 && tileMode == TextureTileMode::kLinear) {
+                const auto elementsPerPitchUnit = 256u / BytesPerElement(format);
+                const auto defaultPitch = (width + elementsPerPitchUnit - 1u) / elementsPerPitchUnit * elementsPerPitchUnit;
+                Require(!IsBlockCompressed(format) && maxMip == 0 && baseArray == 0 && depth + 1u == defaultPitch, "guest 2D linear texture descriptor sets a custom pitch other than its default pitch, which is not implemented" + describe());
+                depth = 0;
+            }
             Require(depth == 0 && baseArray == 0, "guest 2D texture descriptor has a nonzero depth or base array");
+            break;
+        case TextureDimension::k2DMsaa:
+            Require(depth == 0 && baseArray == 0, "guest multisampled 2D texture descriptor has a nonzero depth or base array");
             break;
         case TextureDimension::k3D:
             // word4 DEPTH holds the depth minus one; BASE_ARRAY has no meaning for volumes.
@@ -175,6 +204,7 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
 
     GuestTextureResource result{};
     result.baseAddress = baseAddress;
+    result.pipeBankXor = pipeBankXor;
     result.width = width;
     result.height = height;
     result.depthOrLastArray = depth;
@@ -190,10 +220,13 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     result.dstSelY = static_cast<std::uint8_t>(dstSelY);
     result.dstSelZ = static_cast<std::uint8_t>(dstSelZ);
     result.dstSelW = static_cast<std::uint8_t>(dstSelW);
+    result.bcSwizzle = static_cast<std::uint8_t>(bcSwizzle);
     result.dccAddress = metaCompress ? metaAddr << 8u : 0u;
     result.dccAlphaOnMsb = dccAlphaPos;
     result.dccPipeAligned = metaPipeAligned;
+    result.iterate256 = iterate256;
     result.minLod = minLod;
+    result.samples = samples;
     if (baseLevel > maxMip) {
         Require(LevelsFitAllocation(result, lastLevel + 1u), "guest texture descriptor starts past the surface's last mip level at levels that would move the surface's own" + describe());
         result.mipCount = lastLevel + 1u;
@@ -206,6 +239,10 @@ float EffectiveMinLod(const GuestTextureResource& resource) {
     return std::min(static_cast<float>(resource.minLod) / 256.0f, static_cast<float>(resource.lastLevel));
 }
 
+bool DescriptorSingleLevel(std::span<const std::uint32_t> words) {
+    return ((words[3] >> 12u) & 0xfu) == ((words[3] >> 16u) & 0xfu);
+}
+
 bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, TextureDimension dimension) {
     switch (shape) {
         case ShaderRecompiler::DescriptorImageShape::Image1D: return dimension == TextureDimension::k1D;
@@ -214,8 +251,16 @@ bool MatchesGuestDimension(ShaderRecompiler::DescriptorImageShape shape, Texture
         case ShaderRecompiler::DescriptorImageShape::ImageCube: return dimension == TextureDimension::kCube;
         case ShaderRecompiler::DescriptorImageShape::Image3D: return dimension == TextureDimension::k3D;
         case ShaderRecompiler::DescriptorImageShape::Image1DArray: return dimension == TextureDimension::k1DArray;
+        case ShaderRecompiler::DescriptorImageShape::Image2DMultisample: return dimension == TextureDimension::k2DMsaa;
     }
     throw std::runtime_error("AGC graphics: MatchesGuestDimension encountered an unknown descriptor image shape");
+}
+
+bool ArrayLayersServeView(const GuestTextureResource& surface, const GuestTextureResource& view) {
+    if (view.dimension == surface.dimension && view.depthOrLastArray == surface.depthOrLastArray) return true;
+    if (surface.dimension != TextureDimension::k2DArray) return false;
+    if (view.dimension == TextureDimension::k2D) return view.baseArray == 0;
+    return view.dimension == TextureDimension::k2DArray && view.depthOrLastArray <= surface.depthOrLastArray;
 }
 
 }

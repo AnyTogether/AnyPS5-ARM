@@ -1,12 +1,18 @@
 #include <stdexcept>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <atomic>
 #include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
+#include <future>
+#include <mutex>
 #include <thread>
 #include <cstddef>
 #include <typeinfo>
+#include <windows.h>
 #include "../prx/libc/include/general/VabiMacros.hpp"
 
 extern "C" {
@@ -51,7 +57,74 @@ static void TestTypeInfoVtables() {
     if (catchType(&other, &single, &object, 0)) throw std::runtime_error("unrelated RTTI catch succeeded");
 }
 
-extern "C" void NotImplemented_nid_no_patch(const char*);
+extern "C" [[noreturn]] void NotImplemented_nid_no_patch(const char*);
+
+static void RequireHandle(bool value) {
+    if (!value) throw std::runtime_error("child process setup failed");
+}
+
+[[gnu::noinline, noreturn]] static void ThrowUncaughtProbe() {
+    throw std::runtime_error("unhandled site probe");
+}
+
+static int RunThrowChild() {
+    std::fprintf(stderr, "probe %p\n", reinterpret_cast<const void*>(&ThrowUncaughtProbe));
+    std::fflush(stderr);
+    ThrowUncaughtProbe();
+    return 100;
+}
+
+static void testUnhandledThrowSite() {
+    SECURITY_ATTRIBUTES attributes{};
+    attributes.nLength = sizeof(attributes);
+    attributes.bInheritHandle = TRUE;
+    HANDLE readPipe = nullptr;
+    HANDLE writePipe = nullptr;
+    RequireHandle(CreatePipe(&readPipe, &writePipe, &attributes, 0) != 0);
+    RequireHandle(SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0) != 0);
+    std::array<wchar_t, 32768> image{};
+    RequireHandle(GetModuleFileNameW(nullptr, image.data(), static_cast<DWORD>(image.size())) != 0);
+    const wchar_t* argument = L"\" throw-uncaught";
+    std::array<wchar_t, 32768> command{};
+    const std::size_t imageLength = std::wcslen(image.data());
+    const std::size_t argumentLength = std::wcslen(argument);
+    RequireHandle(1 + imageLength + argumentLength + 1 < command.size());
+    command[0] = L'"';
+    std::memcpy(command.data() + 1, image.data(), imageLength * sizeof(wchar_t));
+    std::memcpy(command.data() + 1 + imageLength, argument, (argumentLength + 1) * sizeof(wchar_t));
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = writePipe;
+    startup.hStdError = writePipe;
+    PROCESS_INFORMATION child{};
+    RequireHandle(CreateProcessW(image.data(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child) != 0);
+    CloseHandle(writePipe);
+    CloseHandle(child.hThread);
+    std::array<char, 65536> output{};
+    std::size_t outputLength = 0;
+    DWORD chunk = 0;
+    while (outputLength < output.size() && ReadFile(readPipe, output.data() + outputLength, static_cast<DWORD>(output.size() - outputLength), &chunk, nullptr) != 0 && chunk != 0) {
+        outputLength += chunk;
+    }
+    CloseHandle(readPipe);
+    RequireHandle(WaitForSingleObject(child.hProcess, 20000) == WAIT_OBJECT_0);
+    DWORD exitCode = 0;
+    RequireHandle(GetExitCodeProcess(child.hProcess, &exitCode) != 0);
+    CloseHandle(child.hProcess);
+    output[outputLength < output.size() ? outputLength : output.size() - 1] = 0;
+    RequireHandle(exitCode == 0xC0000409);
+    const char* probeMarker = std::strstr(output.data(), "probe ");
+    RequireHandle(probeMarker != nullptr);
+    const auto probe = static_cast<std::uintptr_t>(std::strtoull(probeMarker + 6, nullptr, 16));
+    RequireHandle(probe != 0);
+    const char* marker = std::strstr(output.data(), "thrown from ");
+    RequireHandle(marker != nullptr);
+    const auto logged = static_cast<std::uintptr_t>(std::strtoull(marker + 13, nullptr, 16));
+    RequireHandle(logged != 0);
+    if (logged <= probe || logged - probe >= 0x1000) throw std::runtime_error("unhandled exception named the wrapper instead of the throw site");
+}
 
 static int destroyed;
 struct Guard { ~Guard() { ++destroyed; } };
@@ -105,9 +178,111 @@ static void testExceptionPointer() {
     if (std::current_exception()) throw std::runtime_error("stale current exception");
 }
 
-int main() {
+static void testFutureException() {
+    std::atomic<int> count{0};
+    {
+        std::promise<void> promise;
+        auto future = promise.get_future();
+        try {
+            throw TrackedError(&count);
+        } catch (const TrackedError&) {
+            promise.set_exception(std::current_exception());
+        }
+        try {
+            future.get();
+            throw std::runtime_error("future did not rethrow");
+        } catch (const TrackedError& error) {
+            if (std::strcmp(error.what(), "retained error")) throw std::runtime_error("future rethrew another error");
+        }
+    }
+    if (count != 1) throw std::runtime_error("future result destroyed its exception an incorrect number of times");
+}
+
+static void testMadeExceptionPointer() {
+    std::atomic<int> count{0};
+    {
+        auto made = std::make_exception_ptr(TrackedError(&count));
+        try {
+            std::rethrow_exception(made);
+        } catch (const TrackedError& error) {
+            if (std::strcmp(error.what(), "retained error")) throw std::runtime_error("made exception lost its message");
+        }
+    }
+    if (count != 2) throw std::runtime_error("made exception destroyed an incorrect number of times");
+}
+
+struct UnwindProbe {
+    int& seen;
+    ~UnwindProbe() { seen = std::uncaught_exceptions(); }
+};
+
+static void testUncaughtExceptions() {
+    if (std::uncaught_exceptions() != 0) throw std::runtime_error("uncaught exception outside unwinding");
+    int seen = -1;
+    try {
+        UnwindProbe probe{seen};
+        throw std::runtime_error("probe");
+    } catch (const std::runtime_error&) {
+    }
+    if (seen != 1) throw std::runtime_error("unwinding did not count its exception");
+}
+
+static int guestFrameDestroyed;
+struct GuestFrameGuard { ~GuestFrameGuard() { ++guestFrameDestroyed; } };
+static void ThrowThroughGuestFrames(int depth) {
+    GuestFrameGuard guard;
+    if (depth) { ThrowThroughGuestFrames(depth - 1); return; }
+    throw std::runtime_error("through guest frames");
+}
+
+static void testUnwindThroughGuestFrames() {
+    for (int depth : {0, 1, 7, 64}) {
+        guestFrameDestroyed = 0;
+        try {
+            ThrowThroughGuestFrames(depth);
+            throw std::logic_error("guest frame did not propagate");
+        } catch (const std::runtime_error& error) {
+            if (std::strcmp(error.what(), "through guest frames")) throw;
+        }
+        if (guestFrameDestroyed != depth + 1) throw std::runtime_error("unwinding through guest frames skipped a destructor");
+    }
+}
+
+static int onceDestroyed;
+struct OnceGuard { ~OnceGuard() { ++onceDestroyed; } };
+static void ThrowThroughOnce(int depth) {
+    OnceGuard guard;
+    if (depth) { ThrowThroughOnce(depth - 1); return; }
+    std::once_flag flag;
+    std::call_once(flag, [] { throw std::runtime_error("through runtime frames"); });
+}
+
+static void testUnwindThroughRuntimeModules() {
+    for (int depth : {0, 1, 7, 64}) {
+        onceDestroyed = 0;
+        try {
+            ThrowThroughOnce(depth);
+            throw std::logic_error("call_once did not propagate");
+        } catch (const std::runtime_error& error) {
+            if (std::strcmp(error.what(), "through runtime frames")) throw;
+        }
+        if (onceDestroyed != depth + 1) throw std::runtime_error("unwinding through runtime DLL frames skipped a destructor");
+    }
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        if (std::strcmp(argv[1], "throw-uncaught") == 0) return RunThrowChild();
+        return 100;
+    }
     TestTypeInfoVtables();
+    testUnhandledThrowSite();
     testExceptionPointer();
+    testFutureException();
+    testMadeExceptionPointer();
+    testUncaughtExceptions();
+    testUnwindThroughGuestFrames();
+    testUnwindThroughRuntimeModules();
     try {
         Rethrow();
         return 1;

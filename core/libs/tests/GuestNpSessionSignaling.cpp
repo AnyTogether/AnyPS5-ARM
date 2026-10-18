@@ -9,13 +9,17 @@ int APS5_VABI sceNpSessionSignalingInitialize(void* param);
 int APS5_VABI sceNpSessionSignalingCreateContext2(const void* param, std::uint32_t* contextId);
 std::int32_t APS5_VABI sceNpSessionSignalingGetLocalNetInfo(std::int32_t contextId, void* info);
 int APS5_VABI sceNpSessionSignalingRequestPrepare(std::uint32_t contextId, std::uint32_t* requestId);
+std::int32_t APS5_VABI sceNpSessionSignalingGetConnectionStatus(std::int32_t contextId, std::int32_t connectionId, std::int32_t* status, void* peerAddress, std::uint16_t* peerPort);
 int APS5_VABI sceNpSessionSignalingTerminate(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionStatistics(void);
+int APS5_VABI sceNpSessionSignalingGetConnectionFromPeerAddress(void);
 }
 
 namespace {
 
 constexpr int InvalidArgument = static_cast<int>(0x80553303u);
 constexpr int Unavailable = static_cast<int>(0x80552D06u);
+constexpr int ConnectionNotFound = static_cast<int>(0x8055330Cu);
 
 void Require(bool condition, const char* message) {
     if (!condition) {
@@ -46,6 +50,16 @@ int main() {
     Require(sceNpSessionSignalingGetLocalNetInfo(netContextId, nullptr) == InvalidArgument, "null info");
     Require(sceNpSessionSignalingGetLocalNetInfo(netContextId, info) == Unavailable, "local net info without network");
     Require(std::memcmp(info, untouched, sizeof(info)) == 0, "failed query modified the info");
+
+    std::int32_t status = 0x5a5a5a5a;
+    std::uint32_t peerAddress = 0xa5a5a5a5u;
+    std::uint16_t peerPort = 0xa5a5;
+    Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, nullptr, &peerAddress, &peerPort) == InvalidArgument, "null connection status");
+    Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, &peerAddress, &peerPort) == ConnectionNotFound, "connection without network");
+    Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, nullptr, nullptr) == ConnectionNotFound, "connection without peer outputs");
+    Require(status == 0x5a5a5a5a && peerAddress == 0xa5a5a5a5u && peerPort == 0xa5a5, "failed status query wrote an output");
+    Require(sceNpSessionSignalingGetConnectionStatistics() == Unavailable, "connection statistics without network");
+    Require(sceNpSessionSignalingGetConnectionFromPeerAddress() == Unavailable, "peer lookup without network");
 
     Require(sceNpSessionSignalingTerminate() == 0, "terminate failed");
 }

@@ -182,7 +182,7 @@ int APS5_VABI sceHttpUriBuild(char* out, size_t* require, size_t prepare, const 
 
     std::string uri;
     if (option & URI_BUILD_WITH_SCHEME && !scheme.empty()) uri.append(scheme).push_back(':');
-    if (!src_element->opaque && option & URI_BUILD_WITH_HOSTNAME) uri.append("//");
+    if (!src_element->opaque) uri.append("//");
     uri.append(username);
     if (!password.empty()) uri.append(":").append(password);
     if (!username.empty() || !password.empty()) uri.push_back('@');
@@ -205,7 +205,8 @@ int APS5_VABI sceHttpUriEscape(char* out, size_t* require, size_t prepare, const
     std::string escaped;
     for (const char* c = in; *c; ++c) {
         const auto value = static_cast<unsigned char>(*c);
-        if (std::isalnum(value) || value == '-' || value == '_' || value == '.' || value == '~') {
+        if ((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9')
+            || value == '-' || value == '_' || value == '.' || value == '~') {
             escaped.push_back(*c);
         } else {
             escaped.push_back('%');
@@ -298,7 +299,7 @@ int APS5_VABI sceHttpUriParse(SceHttpUriElement* out, const char* src_url, void*
     char* strings[7];
     for (size_t i = 0; i < 7; ++i) {
         strings[i] = next;
-        std::memcpy(next, fields[i].data(), fields[i].size());
+        if (!fields[i].empty()) std::memcpy(next, fields[i].data(), fields[i].size());
         next[fields[i].size()] = '\0';
         next += fields[i].size() + 1;
     }

@@ -1,7 +1,9 @@
 #include <relinker/analysis/UnusedNidFilter/IRelativeRelocationIndex.hpp>
+#include <relinker/parsing/ElfReader.hpp>
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <unordered_map>
 #include <cstring>
+#include <limits>
 
 namespace Relinker::UnusedNidFilter {
 
@@ -33,10 +35,22 @@ struct LoadSegment {
     std::uint64_t fileSize;
 };
 
-std::uint64_t vaddrToFileOffset(const std::vector<LoadSegment>& loads, VirtualAddress va) {
+std::uint64_t vaddrToFileOffset(
+    const std::vector<LoadSegment>& loads,
+    VirtualAddress va,
+    std::uint64_t size
+) {
     for (const auto& seg : loads) {
-        if (va >= seg.vaddr && va < seg.vaddr + seg.fileSize)
-            return seg.fileOffset + (va - seg.vaddr);
+        if (va >= seg.vaddr) {
+            std::uint64_t relative = va - seg.vaddr;
+            if (relative < seg.fileSize) {
+                if (size > seg.fileSize - relative)
+                    throw RelinkerException("Relocation table out of bounds", va);
+                if (relative > std::numeric_limits<std::uint64_t>::max() - seg.fileOffset)
+                    throw RelinkerException("Relocation table file offset overflow", va);
+                return seg.fileOffset + relative;
+            }
+        }
     }
     throw RelinkerException("Cannot translate virtual address to file offset", va);
 }
@@ -46,16 +60,27 @@ constexpr std::size_t RelaEntSize = 24;
 void collectRelativeEntries(
     const std::vector<std::uint8_t>& elfBytes,
     const std::vector<LoadSegment>& loads,
-    VirtualAddress tableVaddr,
+    std::uint64_t tableAddress,
     std::uint64_t tableSize,
+    bool sceTable,
+    std::uint64_t sceTableBase,
     std::unordered_map<VirtualAddress, VirtualAddress>& out
 ) {
-    if (tableVaddr == 0 || tableSize == 0) return;
-    std::uint64_t tableFileOff = vaddrToFileOffset(loads, tableVaddr);
+    if (tableSize == 0 && !sceTable) return;
+    if (tableSize % RelaEntSize != 0)
+        throw RelinkerException("Invalid relocation table size", tableSize);
 
-    for (std::uint64_t off = 0; off + RelaEntSize <= tableSize; off += RelaEntSize) {
+    if (sceTable && tableAddress > std::numeric_limits<std::uint64_t>::max() - sceTableBase)
+        throw RelinkerException("Relocation table file offset overflow", tableAddress);
+    std::uint64_t tableFileOff = sceTable ? sceTableBase + tableAddress : vaddrToFileOffset(loads, tableAddress, tableSize);
+    if (tableFileOff > elfBytes.size())
+        throw RelinkerException("Relocation table out of bounds", tableFileOff);
+    if (tableSize > elfBytes.size() - tableFileOff)
+        throw RelinkerException("Relocation table out of bounds", tableFileOff);
+
+    for (std::uint64_t off = 0; off < tableSize; off += RelaEntSize) {
         std::size_t pos = static_cast<std::size_t>(tableFileOff + off);
-        if (pos + RelaEntSize > elfBytes.size())
+        if (pos > elfBytes.size() || RelaEntSize > elfBytes.size() - pos)
             throw RelinkerException("Relocation entry out of bounds", pos);
 
         std::uint64_t rOffset = read64(elfBytes, pos);
@@ -82,6 +107,13 @@ public:
         return it->second;
     }
 
+    std::vector<VirtualAddress> Targets() const override {
+        std::vector<VirtualAddress> result;
+        result.reserve(_targets.size());
+        for (const auto& entry : _targets) result.push_back(entry.second);
+        return result;
+    }
+
 private:
     std::unordered_map<VirtualAddress, VirtualAddress> _targets;
 };
@@ -101,18 +133,25 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
     std::uint16_t phCount = read16(elfBytes, 56);
 
     if (phEntSize < 56) throw RelinkerException("ELF program header entry too small");
+    if (phOff > elfBytes.size() || phCount > (elfBytes.size() - phOff) / phEntSize)
+        throw RelinkerException("Program header out of bounds");
 
     std::vector<LoadSegment> loads;
+    std::uint64_t sceTableBase = 0;
+    bool hasSceDynlibData = false;
     for (std::uint16_t i = 0; i < phCount; ++i) {
         std::size_t phPos = static_cast<std::size_t>(phOff) + i * phEntSize;
         if (phPos + 56 > elfBytes.size()) throw RelinkerException("Program header out of bounds");
         std::uint32_t type = read32(elfBytes, phPos);
-        if (type != PT_LOAD) continue;
-        LoadSegment seg;
-        seg.fileOffset = read64(elfBytes, phPos + 8);
-        seg.vaddr = read64(elfBytes, phPos + 16);
-        seg.fileSize = read64(elfBytes, phPos + 32);
-        loads.push_back(seg);
+        if (type == PT_SCE_DYNLIBDATA) {
+            if (hasSceDynlibData) throw RelinkerException("Multiple PT_SCE_DYNLIBDATA segments", phPos);
+            hasSceDynlibData = true;
+            sceTableBase = read64(elfBytes, phPos + 8);
+        }
+    }
+    for (const auto& header : ElfReader(elfBytes).ReadProgramHeaders()) {
+        if (header.Type != PT_LOAD) continue;
+        loads.push_back({header.MappedAddress, header.Offset, header.FileSize});
     }
 
     std::unordered_map<VirtualAddress, VirtualAddress> targets;
@@ -126,27 +165,35 @@ std::unique_ptr<IRelativeRelocationIndex> BuildRelativeRelocationIndex(
 
         std::uint64_t segOff = read64(elfBytes, phPos + 8);
         std::uint64_t segSz = read64(elfBytes, phPos + 32);
-        if (segOff + segSz > elfBytes.size()) throw RelinkerException("PT_DYNAMIC segment out of bounds");
+        if (segOff > elfBytes.size() || segSz > elfBytes.size() - segOff) throw RelinkerException("PT_DYNAMIC segment out of bounds");
 
         VirtualAddress relaVa = 0;
         std::uint64_t relaSz = 0;
         VirtualAddress jmprelVa = 0;
         std::uint64_t pltrelsz = 0;
+        bool relaSce = false;
+        bool jmprelSce = false;
 
-        for (std::uint64_t off = 0; off + 16 <= segSz; off += 16) {
+        for (std::uint64_t off = 0; off <= segSz && segSz - off >= 16; off += 16) {
             std::size_t pos = static_cast<std::size_t>(segOff + off);
             std::int64_t tag = static_cast<std::int64_t>(read64(elfBytes, pos));
             std::uint64_t val = read64(elfBytes, pos + 8);
 
             if (tag == DT_NULL) break;
-            if (tag == DT_RELA || tag == DT_OS_RELA) relaVa = val;
+            if (tag == DT_RELA || tag == DT_OS_RELA) {
+                relaVa = val;
+                relaSce = tag == DT_OS_RELA;
+            }
             if (tag == DT_RELASZ || tag == DT_OS_RELASZ) relaSz = val;
-            if (tag == DT_JMPREL || tag == DT_OS_JMPREL) jmprelVa = val;
+            if (tag == DT_JMPREL || tag == DT_OS_JMPREL) {
+                jmprelVa = val;
+                jmprelSce = tag == DT_OS_JMPREL;
+            }
             if (tag == DT_PLTRELSZ || tag == DT_OS_PLTRELSZ) pltrelsz = val;
         }
 
-        collectRelativeEntries(elfBytes, loads, relaVa, relaSz, targets);
-        collectRelativeEntries(elfBytes, loads, jmprelVa, pltrelsz, targets);
+        collectRelativeEntries(elfBytes, loads, relaVa, relaSz, relaSce, sceTableBase, targets);
+        collectRelativeEntries(elfBytes, loads, jmprelVa, pltrelsz, jmprelSce, sceTableBase, targets);
 
         break;
     }

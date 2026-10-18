@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <stdexcept>
 
 namespace {
@@ -28,18 +29,14 @@ void LibcHeapTraceInfo_nid_no_patch(LibcHeapInfo* info) {
     info->mstate_table = mstateTable.data();
 }
 
-// unknown signature
 void APS5_VABI sceLibcInternalBacktraceForGame_nid_postfix(const char* heapName) {
-    (void)heapName;
-    NotImplemented_nid_no_patch(__func__);
+    std::fprintf(stderr, "[%s] backtrace requested from guest 0x%llx\n", heapName ? heapName : "",
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(__builtin_return_address(0))));
 }
 
-// unknown signature
 void APS5_VABI sceLibcInternalHeapErrorReportForGame_nid_postfix(void* heap, void* block, std::uint32_t error) {
-    (void)heap;
-    (void)block;
-    (void)error;
-    NotImplemented_nid_no_patch(__func__);
+    std::fprintf(stderr, "[libc] heap error 0x%x: heap %p, block %p, reported from guest 0x%llx\n", error, heap, block,
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(__builtin_return_address(0))));
 }
 
 }

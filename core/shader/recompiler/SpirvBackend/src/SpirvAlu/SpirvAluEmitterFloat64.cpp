@@ -5,6 +5,8 @@
 #include <initializer_list>
 #include <iterator>
 #include <span>
+#include <string>
+#include <utility>
 
 namespace ShaderRecompiler {
 namespace {
@@ -223,6 +225,23 @@ std::uint32_t RoundToPrecision(SpirvEmitterState& state, std::uint32_t value, st
     return ToF64(state, Join(state, {rounded.low, Binary(state, spv::OpBitwiseOr, u32, Binary(state, spv::OpBitwiseAnd, u32, rounded.high, ConstantU32(state, 0x7fffffffu)), sign)}));
 }
 
+std::uint32_t RoundToPrecisionDirected(SpirvEmitterState& state, std::uint32_t value, std::uint32_t fractionBits, std::uint32_t smallestStep, std::uint32_t rounding) {
+    const auto bits = Split(state, FromF64(state, value));
+    const auto exponent = Unary(state, spv::OpBitcast, TypeI32(state), ExponentField(state, bits.high));
+    const auto step = Glsl(state, TypeI32(state), GLSLstd450SMax, Binary(state, spv::OpISub, TypeI32(state), exponent, ConstantI32(state, static_cast<std::int32_t>(fractionBits))), ConstantI32(state, static_cast<std::int32_t>(smallestStep)));
+    const auto unbiased = Binary(state, spv::OpISub, TypeI32(state), step, ConstantI32(state, 1023));
+    const auto scaled = Exact(state, spv::OpFMul, value, PowerOfTwo(state, Unary(state, spv::OpSNegate, TypeI32(state), unbiased)));
+    std::uint32_t integral = 0;
+    if (rounding == 3u) {
+        integral = Trunc(state, FromF64(state, scaled));
+    } else if (rounding == 2u) {
+        integral = Floor(state, FromF64(state, scaled));
+    } else {
+        integral = Unary(state, spv::OpFNegate, TypeF64(state), Floor(state, FromF64(state, Unary(state, spv::OpFNegate, TypeF64(state), scaled))));
+    }
+    return Exact(state, spv::OpFMul, integral, PowerOfTwo(state, unbiased));
+}
+
 std::uint32_t F32BitsOfRounded(SpirvEmitterState& state, std::uint32_t value) {
     const auto u32 = TypeU32(state);
     const auto bits = Split(state, FromF64(state, value));
@@ -265,12 +284,32 @@ std::uint32_t Interpolate(SpirvEmitterState& state, std::uint32_t delta, std::ui
     base = halfResult ? FlushDenormal32(state, base, flush32, 0x00800000u) : FlushDenormal32(state, base, flush16, 0x38800000u);
     const auto product = Exact(state, spv::OpFMul, FromF32Exact(state, delta), FromF32Exact(state, coordinate));
     const auto sum = AddRoundToOdd(state, product, FromF32Exact(state, base));
-    auto rounded = halfResult ? RoundToPrecision(state, sum, 10u, 999u) : RoundToPrecision(state, sum, 23u, 874u);
+    const std::uint32_t rounding16 = halfResult ? (mode >> InterpolationRound16Shift) & 3u : 0u;
+    auto rounded = halfResult ? (rounding16 == 0u ? RoundToPrecision(state, sum, 10u, 999u) : RoundToPrecisionDirected(state, sum, 10u, 999u, rounding16)) : RoundToPrecision(state, sum, 23u, 874u);
     if (halfResult) {
         const auto bits = Split(state, FromF64(state, rounded));
         const auto sign = Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x80000000u));
-        const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x7fffffffu)), ConstantU32(state, 0x40f00000u));
-        rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, ConstantU32(state, 0x40f00000u))}, bits)));
+        const auto magnitude = Binary(state, spv::OpBitwiseAnd, u32, bits.high, ConstantU32(state, 0x7fffffffu));
+        if (rounding16 == 0u) {
+            const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), magnitude, ConstantU32(state, 0x40f00000u));
+            rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, ConstantU32(state, 0x40f00000u))}, bits)));
+        } else {
+            const auto overflow = Binary(state, spv::OpUGreaterThan, TypeBool(state), magnitude, ConstantU32(state, 0x40effc00u));
+            const auto negative = Binary(state, spv::OpINotEqual, TypeBool(state), sign, ConstantU32(state, 0u));
+            auto limit = ConstantU32(state, 0x40effc00u);
+            if (rounding16 == 1u) limit = Select(state, u32, negative, ConstantU32(state, 0x40effc00u), ConstantU32(state, 0x40f00000u));
+            if (rounding16 == 2u) limit = Select(state, u32, negative, ConstantU32(state, 0x40f00000u), ConstantU32(state, 0x40effc00u));
+            rounded = ToF64(state, Join(state, SelectBits(state, overflow, {ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, u32, sign, limit)}, bits)));
+            if (rounding16 == 2u) {
+                const auto boolean = TypeBool(state);
+                const auto zeroBits = [&](F64Bits value, std::uint32_t highMask) {
+                    return Binary(state, spv::OpLogicalAnd, boolean, Binary(state, spv::OpIEqual, boolean, Binary(state, spv::OpBitwiseAnd, u32, value.high, ConstantU32(state, highMask)), ConstantU32(state, 0u)), Binary(state, spv::OpIEqual, boolean, value.low, ConstantU32(state, 0u)));
+                };
+                const auto positiveZeros = Binary(state, spv::OpLogicalAnd, boolean, zeroBits(Split(state, FromF64(state, product)), 0xffffffffu), zeroBits(Split(state, FromF64(state, FromF32Exact(state, base))), 0xffffffffu));
+                const auto negativeZero = Binary(state, spv::OpLogicalAnd, boolean, zeroBits(Split(state, FromF64(state, sum)), 0x7fffffffu), Unary(state, spv::OpLogicalNot, boolean, positiveZeros));
+                rounded = ToF64(state, Join(state, SelectBits(state, negativeZero, {ConstantU32(state, 0u), ConstantU32(state, 0x80000000u)}, Split(state, FromF64(state, rounded)))));
+            }
+        }
     }
     const auto finite = F32BitsOfRounded(state, rounded);
     const auto inputs = std::array{Unary(state, spv::OpBitcast, u32, delta), Unary(state, spv::OpBitcast, u32, coordinate), Unary(state, spv::OpBitcast, u32, base)};
@@ -306,32 +345,89 @@ std::uint32_t FusedMultiplyAdd(SpirvEmitterState& state, std::uint32_t arg0, std
     };
 
     const auto signedInt = [&](std::uint32_t value) { return Unary(state, spv::OpBitcast, TypeI32(state), value); };
-    const auto product = Binary(state, spv::OpISub, TypeI32(state), signedInt(Binary(state, spv::OpIAdd, TypeU32(state), exponentA, exponentB)), ConstantI32(state, 2046));
-    const auto distance = Binary(state, spv::OpISub, TypeI32(state), Binary(state, spv::OpISub, TypeI32(state), signedInt(exponentC), ConstantI32(state, 1023)), product);
-    const auto far = Binary(state, spv::OpLogicalAnd, TypeBool(state), Binary(state, spv::OpSGreaterThanEqual, TypeBool(state), distance, ConstantI32(state, 60)), Unary(state, spv::OpLogicalNot, TypeBool(state), c.zero));
+    const auto both = [&](std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, spv::OpLogicalAnd, TypeBool(state), lhs, rhs); };
+    const auto either = [&](std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, spv::OpLogicalOr, TypeBool(state), lhs, rhs); };
+    const auto negate = [&](std::uint32_t value) { return Unary(state, spv::OpLogicalNot, TypeBool(state), value); };
+    struct Normalized {
+        F64Bits bits;
+        std::uint32_t exponent = 0;
+    };
+    const auto normalize = [&](const F64Class& value, std::uint32_t bits, std::uint32_t field) {
+        const auto subnormal = isField(field, 0u);
+        const auto widened = Split(state, FromF64(state, Exact(state, spv::OpFMul, ToF64(state, bits), ConstantF64(state, 0x43f0000000000000ull))));
+        const auto normal = SelectBits(state, subnormal, widened, value.bits);
+        const auto bias = Select(state, TypeI32(state), subnormal, ConstantI32(state, 64), ConstantI32(state, 0));
+        return Normalized{normal, Binary(state, spv::OpISub, TypeI32(state), signedInt(ExponentField(state, normal.high)), bias)};
+    };
+    const auto normalA = normalize(a, arg0, exponentA);
+    const auto normalB = normalize(b, arg1, exponentB);
+    const auto normalC = normalize(c, arg2, exponentC);
+    const auto product = Binary(state, spv::OpISub, TypeI32(state), Binary(state, spv::OpIAdd, TypeI32(state), normalA.exponent, normalB.exponent), ConstantI32(state, 2046));
+    const auto distance = Binary(state, spv::OpISub, TypeI32(state), Binary(state, spv::OpISub, TypeI32(state), normalC.exponent, ConstantI32(state, 1023)), product);
+    const auto far = both(Binary(state, spv::OpSGreaterThanEqual, TypeBool(state), distance, ConstantI32(state, 60)), negate(c.zero));
     const auto tiny = Binary(state, spv::OpSLessThan, TypeBool(state), distance, ConstantI32(state, -150));
     const auto clamped = Glsl(state, TypeI32(state), GLSLstd450SClamp, distance, ConstantI32(state, -150), ConstantI32(state, 60));
     const auto sign = Binary(state, spv::OpBitwiseAnd, TypeU32(state), c.bits.high, ConstantU32(state, 0x80000000u));
     const F64Bits tinyBits{ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, TypeU32(state), sign, ConstantU32(state, (1023u - 150u) << 20u))};
     const auto rebiased = Unary(state, spv::OpBitcast, TypeU32(state), Binary(state, spv::OpIAdd, TypeI32(state), clamped, ConstantI32(state, 1023)));
-    const auto scaledC = SelectBits(state, c.zero, c.bits, SelectBits(state, tiny, tinyBits, WithExponent(state, c.bits, rebiased)));
+    const auto scaledC = SelectBits(state, c.zero, c.bits, SelectBits(state, tiny, tinyBits, WithExponent(state, normalC.bits, rebiased)));
 
-    const auto exact = TwoProduct(state, ToF64(state, Join(state, WithExponent(state, a.bits, ConstantU32(state, 1023u)))), ToF64(state, Join(state, WithExponent(state, b.bits, ConstantU32(state, 1023u)))));
+    const auto exact = TwoProduct(state, ToF64(state, Join(state, WithExponent(state, normalA.bits, ConstantU32(state, 1023u)))), ToF64(state, Join(state, WithExponent(state, normalB.bits, ConstantU32(state, 1023u)))));
     const auto sum = TwoSum(state, ToF64(state, Join(state, scaledC)), exact.high);
-    const auto scaled = Exact(state, spv::OpFAdd, sum.high, AddRoundToOdd(state, sum.low, exact.low));
-    const auto power = PowerOfTwo(state, scale);
-    const auto total = Glsl(state, TypeI32(state), GLSLstd450SClamp, Binary(state, spv::OpIAdd, TypeI32(state), product, scale), ConstantI32(state, -2044), ConstantI32(state, 2046));
-    const auto half = Binary(state, spv::OpSDiv, TypeI32(state), total, ConstantI32(state, 2));
-    const auto rescaled = Exact(state, spv::OpFMul, Exact(state, spv::OpFMul, scaled, PowerOfTwo(state, half)), PowerOfTwo(state, Binary(state, spv::OpISub, TypeI32(state), total, half)));
-    const auto farValue = Split(state, FromF64(state, Exact(state, spv::OpFMul, ToF64(state, arg2), power)));
-    const auto finite = SelectBits(state, far, farValue, Split(state, FromF64(state, rescaled)));
+    const auto remainder = TwoSum(state, sum.low, exact.low);
+    const auto odd = AddRoundToOdd(state, sum.low, exact.low);
+    const auto rounded = TwoSum(state, sum.high, odd);
+    const auto residual = Exact(state, spv::OpFAdd, rounded.low, Exact(state, spv::OpFAdd, Exact(state, spv::OpFSub, remainder.high, odd), remainder.low));
+    const auto productSign = Binary(state, spv::OpBitwiseAnd, TypeU32(state), Binary(state, spv::OpBitwiseXor, TypeU32(state), a.bits.high, b.bits.high), ConstantU32(state, 0x80000000u));
+    const auto productNegative = Binary(state, spv::OpINotEqual, TypeBool(state), productSign, ConstantU32(state, 0u));
+    const auto above = either(both(far, negate(productNegative)), both(negate(far), Binary(state, spv::OpFOrdGreaterThan, TypeBool(state), residual, ConstantF64(state, 0u))));
+    const auto below = either(both(far, productNegative), both(negate(far), Binary(state, spv::OpFOrdLessThan, TypeBool(state), residual, ConstantF64(state, 0u))));
 
+    auto value = SelectBits(state, far, normalC.bits, Split(state, FromF64(state, rounded.high)));
+    const auto farTotal = Binary(state, spv::OpISub, TypeI32(state), Binary(state, spv::OpIAdd, TypeI32(state), normalC.exponent, scale), signedInt(ExponentField(state, normalC.bits.high)));
+    const auto total = Select(state, TypeI32(state), far, farTotal, Binary(state, spv::OpIAdd, TypeI32(state), product, scale));
+    const auto resultExponent = [&](F64Bits bits) { return Binary(state, spv::OpIAdd, TypeI32(state), signedInt(ExponentField(state, bits.high)), total); };
+    const auto magnitude = Binary(state, spv::OpBitwiseOr, TypeU32(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), value.high, ConstantU32(state, 0x7fffffffu)), value.low);
+    const auto zero = Binary(state, spv::OpIEqual, TypeBool(state), magnitude, ConstantU32(state, 0u));
+    const auto unrounded = resultExponent(value);
+    const auto shift = Binary(state, spv::OpISub, TypeI32(state), ConstantI32(state, 1), unrounded);
+    const auto dropped = Unary(state, spv::OpBitcast, TypeU32(state), Glsl(state, TypeI32(state), GLSLstd450SClamp, shift, ConstantI32(state, 1), ConstantI32(state, 54)));
+    const auto isHalf = [&](std::uint32_t word, std::uint32_t bits) {
+        const auto mask = Binary(state, spv::OpShiftRightLogical, TypeU32(state), ConstantU32(state, 0xffffffffu), Binary(state, spv::OpISub, TypeU32(state), ConstantU32(state, 32u), bits));
+        const auto half = Binary(state, spv::OpShiftLeftLogical, TypeU32(state), ConstantU32(state, 1u), Binary(state, spv::OpISub, TypeU32(state), bits, ConstantU32(state, 1u)));
+        return Binary(state, spv::OpIEqual, TypeBool(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), word, mask), half);
+    };
+    const auto lowHalf = isHalf(value.low, Glsl(state, TypeU32(state), GLSLstd450UMin, dropped, ConstantU32(state, 32u)));
+    const auto significandHigh = Binary(state, spv::OpBitwiseOr, TypeU32(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), value.high, ConstantU32(state, 0x000fffffu)), ConstantU32(state, 0x00100000u));
+    const auto highBits = Binary(state, spv::OpISub, TypeU32(state), Glsl(state, TypeU32(state), GLSLstd450UMax, dropped, ConstantU32(state, 33u)), ConstantU32(state, 32u));
+    const auto highHalf = both(Binary(state, spv::OpIEqual, TypeBool(state), value.low, ConstantU32(state, 0u)), isHalf(significandHigh, highBits));
+    const auto wide = Binary(state, spv::OpUGreaterThan, TypeBool(state), dropped, ConstantU32(state, 32u));
+    const auto onHalf = either(both(wide, highHalf), both(negate(wide), lowHalf));
+    const auto inRange = both(Binary(state, spv::OpSLessThanEqual, TypeBool(state), unrounded, ConstantI32(state, 0)), Binary(state, spv::OpSLessThanEqual, TypeBool(state), shift, ConstantI32(state, 54)));
+    const auto midpoint = both(both(negate(zero), inRange), both(onHalf, either(above, below)));
+    const auto negative = Binary(state, spv::OpINotEqual, TypeBool(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), value.high, ConstantU32(state, 0x80000000u)), ConstantU32(state, 0u));
+    const auto away = either(both(above, negate(negative)), both(below, negative));
+    const auto carry = Select(state, TypeU32(state), Binary(state, spv::OpIEqual, TypeBool(state), value.low, ConstantU32(state, 0xffffffffu)), ConstantU32(state, 1u), ConstantU32(state, 0u));
+    const auto borrow = Select(state, TypeU32(state), Binary(state, spv::OpIEqual, TypeBool(state), value.low, ConstantU32(state, 0u)), ConstantU32(state, 1u), ConstantU32(state, 0u));
+    const F64Bits increased{Binary(state, spv::OpIAdd, TypeU32(state), value.low, ConstantU32(state, 1u)), Binary(state, spv::OpIAdd, TypeU32(state), value.high, carry)};
+    const F64Bits decreased{Binary(state, spv::OpISub, TypeU32(state), value.low, ConstantU32(state, 1u)), Binary(state, spv::OpISub, TypeU32(state), value.high, borrow)};
+    value = SelectBits(state, midpoint, SelectBits(state, away, increased, decreased), value);
+
+    const auto exponent = resultExponent(value);
+    const auto normalResult = WithExponent(state, value, Unary(state, spv::OpBitcast, TypeU32(state), Glsl(state, TypeI32(state), GLSLstd450SClamp, exponent, ConstantI32(state, 1), ConstantI32(state, 2046))));
+    const auto lowest = PowerOfTwo(state, Glsl(state, TypeI32(state), GLSLstd450SMax, Binary(state, spv::OpISub, TypeI32(state), exponent, ConstantI32(state, 1)), ConstantI32(state, -60)));
+    const auto subnormalResult = Split(state, FromF64(state, Exact(state, spv::OpFMul, ToF64(state, Join(state, WithExponent(state, value, ConstantU32(state, 1u)))), lowest)));
+    const F64Bits infinity{ConstantU32(state, 0u), Binary(state, spv::OpBitwiseOr, TypeU32(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), value.high, ConstantU32(state, 0x80000000u)), ConstantU32(state, 0x7ff00000u))};
+    auto finite = SelectBits(state, Binary(state, spv::OpSGreaterThanEqual, TypeBool(state), exponent, ConstantI32(state, 1)), normalResult, subnormalResult);
+    finite = SelectBits(state, Binary(state, spv::OpSGreaterThanEqual, TypeBool(state), exponent, ConstantI32(state, 2047)), infinity, finite);
+    finite = SelectBits(state, zero, value, finite);
+
+    const auto power = PowerOfTwo(state, scale);
     auto fallback = Split(state, FromF64(state, Exact(state, spv::OpFMul, Exact(state, spv::OpFAdd, Exact(state, spv::OpFMul, ToF64(state, arg0), ToF64(state, arg1)), ToF64(state, arg2)), power)));
     const auto finiteProduct = Binary(state, spv::OpLogicalAnd, TypeBool(state), Unary(state, spv::OpLogicalNot, TypeBool(state), isField(exponentA, 0x7ffu)), Unary(state, spv::OpLogicalNot, TypeBool(state), isField(exponentB, 0x7ffu)));
     fallback = SelectBits(state, Binary(state, spv::OpLogicalAnd, TypeBool(state), c.infinite, finiteProduct), c.bits, fallback);
     fallback = SelectBits(state, Classify(state, Join(state, fallback)).nan, {ConstantU32(state, 0u), ConstantU32(state, 0xfff80000u)}, fallback);
-    const auto subnormalC = Binary(state, spv::OpLogicalAnd, TypeBool(state), isField(exponentC, 0u), Unary(state, spv::OpLogicalNot, TypeBool(state), c.zero));
-    const auto special = any({isField(exponentA, 0u), isField(exponentB, 0u), isField(exponentA, 0x7ffu), isField(exponentB, 0x7ffu), isField(exponentC, 0x7ffu), subnormalC});
+    const auto special = any({a.zero, b.zero, isField(exponentA, 0x7ffu), isField(exponentB, 0x7ffu), isField(exponentC, 0x7ffu)});
 
     auto result = SelectBits(state, special, fallback, finite);
     result = SelectBits(state, c.nan, Quiet(state, c.bits), result);
@@ -534,7 +630,9 @@ std::uint32_t EmitFPTrigPreop64(SpirvEmitterState& state, std::uint32_t arg0, st
     return FromF64(state, Exact(state, spv::OpFMul, Exact(state, spv::OpFMul, mantissa, scale), ConstantF64(state, 0x1a70000000000000ull)));
 }
 
-std::uint32_t EmitFPDot2F32F16(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2) {
+namespace {
+
+std::uint32_t Dot2F32F16Exact(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2) {
     const auto u32 = TypeU32(state);
     const auto op = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, u32, lhs, ConstantU32(state, value)); };
     const auto test = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, TypeBool(state), lhs, ConstantU32(state, value)); };
@@ -624,12 +722,138 @@ std::uint32_t EmitFPDot2F32F16(SpirvEmitterState& state, std::uint32_t arg0, std
     return pick(aLow.nan, quietHalf(aLow), result);
 }
 
+
+std::uint32_t ExactF32(SpirvEmitterState& state, std::uint32_t opcode, std::uint32_t lhs, std::uint32_t rhs) {
+    const auto result = Binary(state, opcode, TypeF32(state), lhs, rhs);
+    state.module.AddAnnotation(spv::OpDecorate, result, spv::DecorationNoContraction);
+    return result;
+}
+
+std::array<std::uint32_t, 2> TwoSumF32(SpirvEmitterState& state, std::uint32_t lhs, std::uint32_t rhs) {
+    const auto sum = ExactF32(state, spv::OpFAdd, lhs, rhs);
+    const auto rhsPart = ExactF32(state, spv::OpFSub, sum, lhs);
+    const auto lhsPart = ExactF32(state, spv::OpFSub, sum, rhsPart);
+    return {sum, ExactF32(state, spv::OpFAdd, ExactF32(state, spv::OpFSub, lhs, lhsPart), ExactF32(state, spv::OpFSub, rhs, rhsPart))};
+}
+
+std::uint32_t Dot2F32F16Fast(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, std::uint32_t& fast) {
+    const auto u32 = TypeU32(state);
+    const auto f32 = TypeF32(state);
+    const auto boolean = TypeBool(state);
+    const auto op = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, u32, lhs, ConstantU32(state, value)); };
+    const auto test = [&](spv::Op opcode, std::uint32_t lhs, std::uint32_t value) { return Binary(state, opcode, boolean, lhs, ConstantU32(state, value)); };
+    const auto all = [&](std::uint32_t lhs, std::uint32_t rhs) { return Binary(state, spv::OpLogicalAnd, boolean, lhs, rhs); };
+    const auto half = [&](std::uint32_t packed, std::uint32_t shift, std::uint32_t& finite) {
+        const auto bits = op(spv::OpBitwiseAnd, op(spv::OpShiftRightLogical, packed, shift), 0xffffu);
+        const auto magnitude = op(spv::OpBitwiseAnd, bits, 0x7fffu);
+        const auto sign = op(spv::OpShiftLeftLogical, op(spv::OpBitwiseAnd, bits, 0x8000u), 16u);
+        const auto normal = op(spv::OpIAdd, op(spv::OpShiftLeftLogical, magnitude, 13u), 112u << 23u);
+        const auto subnormal = Unary(state, spv::OpBitcast, u32, ExactF32(state, spv::OpFMul, Unary(state, spv::OpConvertUToF, f32, magnitude), ConstantF32(state, 0x33800000u)));
+        const auto unsignedBits = Select(state, u32, test(spv::OpULessThan, magnitude, 0x400u), subnormal, normal);
+        finite = all(finite, test(spv::OpULessThan, magnitude, 0x7c00u));
+        return Unary(state, spv::OpBitcast, f32, Binary(state, spv::OpBitwiseOr, u32, unsignedBits, sign));
+    };
+    const auto magnitudeC = op(spv::OpBitwiseAnd, arg2, 0x7fffffffu);
+    const auto flushedC = test(spv::OpULessThan, magnitudeC, 0x00800000u);
+    fast = all(test(spv::OpULessThan, magnitudeC, 0x7f800000u), Binary(state, spv::OpLogicalOr, boolean, flushedC, test(spv::OpUGreaterThanEqual, magnitudeC, 0x0d800000u)));
+    const auto valueC = Unary(state, spv::OpBitcast, f32, Select(state, u32, flushedC, op(spv::OpBitwiseAnd, arg2, 0x80000000u), arg2));
+    const auto productLow = ExactF32(state, spv::OpFMul, half(arg0, 0u, fast), half(arg1, 0u, fast));
+    const auto productHigh = ExactF32(state, spv::OpFMul, half(arg0, 16u, fast), half(arg1, 16u, fast));
+    const auto upper = TwoSumF32(state, productHigh, valueC);
+    const auto total = TwoSumF32(state, productLow, upper[0]);
+    const auto errors = TwoSumF32(state, total[1], upper[1]);
+    const auto nearestBits = Unary(state, spv::OpBitcast, u32, errors[0]);
+    const auto errorBits = Unary(state, spv::OpBitcast, u32, errors[1]);
+    const auto inexact = test(spv::OpINotEqual, op(spv::OpBitwiseAnd, errorBits, 0x7fffffffu), 0u);
+    const auto even = test(spv::OpIEqual, op(spv::OpBitwiseAnd, nearestBits, 1u), 0u);
+    const auto sameSign = test(spv::OpIEqual, op(spv::OpBitwiseAnd, Binary(state, spv::OpBitwiseXor, u32, nearestBits, errorBits), 0x80000000u), 0u);
+    const auto odd = Binary(state, spv::OpIAdd, u32, nearestBits, Select(state, u32, sameSign, ConstantU32(state, 1u), ConstantU32(state, 0xffffffffu)));
+    const auto roundedToOdd = Unary(state, spv::OpBitcast, f32, Select(state, u32, all(inexact, even), odd, nearestBits));
+    const auto result = Unary(state, spv::OpBitcast, u32, ExactF32(state, spv::OpFAdd, total[0], roundedToOdd));
+    const auto magnitude = op(spv::OpBitwiseAnd, result, 0x7fffffffu);
+    fast = all(fast, all(test(spv::OpUGreaterThanEqual, magnitude, 0x0d800000u), test(spv::OpULessThan, magnitude, 0x7f000000u)));
+    return result;
+}
+
+}
+
+void DefineDot2F32F16Function(SpirvEmitterState& state) {
+    bool used = false;
+    for (const IrBlock* block : state.program.BlockOrder()) {
+        for (const IrValue* inst : block->Instructions()) used = used || inst->Opcode() == IrOpcode::FPDot2F32F16;
+    }
+    if (!used) return;
+    const auto u32 = TypeU32(state);
+    state.dot2F32F16Function = state.module.AllocateId();
+    state.module.AddName(state.dot2F32F16Function, "dot2_f32_f16_exact");
+    state.module.AddFunction(spv::OpFunction, u32, state.dot2F32F16Function, spv::FunctionControlDontInlineMask, state.module.Type(spv::OpTypeFunction, u32, u32, u32, u32));
+    std::array<std::uint32_t, 3> parameters{};
+    for (auto& parameter : parameters) {
+        parameter = state.module.AllocateId();
+        state.module.AddFunction(spv::OpFunctionParameter, u32, parameter);
+    }
+    EmitLabel(state, state.module.AllocateId());
+    state.module.AddFunction(spv::OpReturnValue, Dot2F32F16Exact(state, parameters[0], parameters[1], parameters[2]));
+    state.module.AddFunction(spv::OpFunctionEnd);
+}
+
+std::uint32_t EmitFPDot2F32F16(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2) {
+    if (state.dot2F32F16Function == 0u) FailEmit("v_dot2_f32_f16 function was not defined before function emission");
+    std::uint32_t fast = 0;
+    const auto fastResult = Dot2F32F16Fast(state, arg0, arg1, arg2, fast);
+    return EmitValueOrDefaultIfCondition(state, Unary(state, spv::OpLogicalNot, TypeBool(state), fast), TypeU32(state), fastResult, [&] {
+        const auto result = state.module.AllocateId();
+        state.module.AddFunction(spv::OpFunctionCall, TypeU32(state), result, state.dot2F32F16Function, arg0, arg1, arg2);
+        return result;
+    });
+}
+
+namespace {
+
+std::uint32_t InterpolateFunction(SpirvEmitterState& state, bool halfResult, std::uint32_t mode) {
+    const auto key = std::make_pair(halfResult, mode);
+    if (const auto found = state.interpolateFunctions.find(key); found != state.interpolateFunctions.end()) return found->second;
+    const auto f32 = TypeF32(state);
+    const auto id = state.module.AllocateId();
+    struct Restore {
+        SpirvEmitterState& state;
+        std::uint32_t label;
+        ~Restore() {
+            state.module.EndHelperFunction();
+            state.currentLabel = label;
+        }
+    };
+    state.module.BeginHelperFunction();
+    const Restore restore{state, state.currentLabel};
+    state.module.AddName(id, std::string(halfResult ? "interpolate_f16_mode_" : "interpolate_f32_mode_") + std::to_string(mode));
+    state.module.AddFunction(spv::OpFunction, f32, id, spv::FunctionControlDontInlineMask, state.module.Type(spv::OpTypeFunction, f32, f32, f32, f32));
+    std::array<std::uint32_t, 3> parameters{};
+    for (auto& parameter : parameters) {
+        parameter = state.module.AllocateId();
+        state.module.AddFunction(spv::OpFunctionParameter, f32, parameter);
+    }
+    EmitLabel(state, state.module.AllocateId());
+    state.module.AddFunction(spv::OpReturnValue, Interpolate(state, parameters[0], parameters[1], parameters[2], halfResult, mode));
+    state.module.AddFunction(spv::OpFunctionEnd);
+    state.interpolateFunctions.emplace(key, id);
+    return id;
+}
+
+std::uint32_t CallInterpolate(SpirvEmitterState& state, std::uint32_t delta, std::uint32_t coordinate, std::uint32_t base, bool halfResult, std::uint32_t mode) {
+    const auto function = InterpolateFunction(state, halfResult, mode);
+    const auto result = state.module.AllocateId();
+    state.module.AddFunction(spv::OpFunctionCall, TypeF32(state), result, function, delta, coordinate, base);
+    return result;
+}
+
+}
+
 std::uint32_t EmitFPInterpolateF32(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, const IrValue* mode) {
-    return Interpolate(state, arg0, arg1, arg2, false, mode->ImmediateU32());
+    return CallInterpolate(state, arg0, arg1, arg2, false, mode->ImmediateU32());
 }
 
 std::uint32_t EmitFPInterpolateF16(SpirvEmitterState& state, std::uint32_t arg0, std::uint32_t arg1, std::uint32_t arg2, const IrValue* mode) {
-    return Interpolate(state, arg0, arg1, arg2, true, mode->ImmediateU32());
+    return CallInterpolate(state, arg0, arg1, arg2, true, mode->ImmediateU32());
 }
 
 std::uint32_t EmitConvertF32F64(SpirvEmitterState& state, std::uint32_t arg0) {

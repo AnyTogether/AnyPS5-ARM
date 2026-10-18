@@ -55,6 +55,7 @@ static_assert(sizeof(Context) + HANDLE_ALIGNMENT - 1 <= MEMORY_SIZE);
 
 std::int32_t validateCreateParam(const PngDecCreateParam* param) {
     if (!param) return SCE_PNG_DEC_ERROR_INVALID_PARAM;
+    if (param->this_size != sizeof(PngDecCreateParam)) return SCE_PNG_DEC_ERROR_INVALID_SIZE;
     if (param->attribute != ATTRIBUTE_NONE && param->attribute != ATTRIBUTE_BIT_DEPTH_16) return SCE_PNG_DEC_ERROR_INVALID_PARAM;
     if (param->max_image_width == 0 || param->max_image_width - 1 > MAX_IMAGE_WIDTH) return SCE_PNG_DEC_ERROR_INVALID_SIZE;
     return 0;

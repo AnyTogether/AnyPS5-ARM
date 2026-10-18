@@ -1,3 +1,4 @@
+import argparse
 import os
 from pathlib import Path
 import platform
@@ -188,8 +189,8 @@ def displacement_load(register, displacement, flags, round_trip=False):
     return load_offset, code
 
 
-def displacement_cases():
-    for register in range(16):
+def displacement_cases(registers=range(16)):
+    for register in registers:
         if register == 4:
             continue
         for flags in (0x202, 0xad7):
@@ -233,6 +234,18 @@ REGISTER_LOADS = (
 REGISTER_LOAD_FOLLOWERS = (
     ("rax-rbx-rip-follower", bytes.fromhex("64 48 8b 03"), 0, True, {3: -8}, -8, b"", 0x0fedcba987654321),
     ("edx-rbx-nop-follower", bytes.fromhex("64 8b 13"), 2, False, {3: 0x10}, 0x10, b"\x90", None),
+)
+REGISTER_ALUS = (
+    ("xor-rax-rbx", bytes.fromhex("64 48 33 03"), 0x33, 0, True, {3: -8}, -8),
+    ("xor-rcx-rax", bytes.fromhex("64 48 33 08"), 0x33, 1, True, {0: 0x10}, 0x10),
+    ("xor-rbx-rax", bytes.fromhex("64 48 33 18"), 0x33, 3, True, {0: 0x28}, 0x28),
+    ("add-rax-rbx", bytes.fromhex("64 48 03 03"), 0x03, 0, True, {3: -8}, -8),
+    ("cmp-rax-rbx", bytes.fromhex("64 48 3b 03"), 0x3b, 0, True, {3: -8}, -8),
+    ("xor-r13-rbx-rcx-disp8", bytes.fromhex("64 4c 33 6c 0b f0"), 0x33, 13, True, {3: 0x18, 1: -0x10}, -8),
+    ("xor-edx-rbx", bytes.fromhex("64 33 13"), 0x33, 2, False, {3: 0x10}, 0x10),
+    ("cmp-ecx-rax", bytes.fromhex("64 3b 08"), 0x3b, 1, False, {0: 0x10}, 0x10),
+    ("adc-rax-rbx", bytes.fromhex("64 48 13 03"), 0x13, 0, True, {3: -8}, -8),
+    ("sbb-rcx-rax", bytes.fromhex("64 48 1b 08"), 0x1b, 1, True, {0: 0x10}, 0x10),
 )
 
 
@@ -323,6 +336,114 @@ def register_load_stub(instruction, register, wide):
     return bytes.fromhex("48 8d 64 24 80 51 50") + address + b"\x50", b"\x59" + move + restore + bytes.fromhex("48 8d a4 24 80 00 00 00")
 
 
+def register_alu_body(instruction, opcode, register, wide, address, offset, flags, follower=b"\x90"):
+    saved = (3, 5, 6, 7, 12, 13, 14, 15)
+    mask = (1 << 64) - 1
+    code = bytearray()
+    failures = []
+
+    def emit(data):
+        code.extend(data)
+
+    def immediate(target, value):
+        emit(bytes([0x48 | (target >> 3), 0xb8 | (target & 7)]) + struct.pack("<Q", value & mask))
+
+    def check(slot):
+        emit(bytes.fromhex("48 39 84 24") + struct.pack("<i", slot * 8) + bytes.fromhex("0f 85 00 00 00 00"))
+        failures.append(len(code) - 4)
+
+    for target in saved:
+        emit((b"\x41" if target >= 8 else b"") + bytes([0x50 | (target & 7)]))
+    emit(bytes.fromhex("48 8d a4 24 00 ff ff ff"))
+    emit(fs_load(0, 0))
+    for displacement, value in REGISTER_VALUES.items():
+        immediate(1, value)
+        emit(bytes([0x48, 0x89, 0x48, displacement & 255]))
+    markers = [0x1020304050607000 + target * 0x101 for target in range(16)]
+    expected = list(markers)
+    for target in range(16):
+        if target != 4:
+            immediate(target, markers[target])
+    for target, value in address.items():
+        immediate(target, value)
+        expected[target] = value & mask
+    value = REGISTER_VALUES[offset]
+    base_val = expected[register] if wide else expected[register] & 0xffffffff
+    operand_val = value if wide else value & 0xffffffff
+    if opcode == 0x33:
+        res = base_val ^ operand_val
+    elif opcode == 0x23:
+        res = base_val & operand_val
+    elif opcode == 0x0b:
+        res = base_val | operand_val
+    elif opcode == 0x03:
+        res = (base_val + operand_val) & (mask if wide else 0xffffffff)
+    elif opcode == 0x2b:
+        res = (base_val - operand_val) & (mask if wide else 0xffffffff)
+    elif opcode == 0x3b:
+        res = base_val
+    elif opcode == 0x13:
+        res = (base_val + operand_val + (flags & 1)) & (mask if wide else 0xffffffff)
+    elif opcode == 0x1b:
+        res = (base_val - operand_val - (flags & 1)) & (mask if wide else 0xffffffff)
+    else:
+        raise ValueError(f"Unknown opcode: {opcode}")
+    if opcode != 0x3b:
+        expected[register] = res if wide else res & 0xffffffff
+    emit(b"\x68" + struct.pack("<I", flags) + b"\x9d")
+    load_offset = len(code)
+    emit(instruction)
+    emit(follower)
+    for target in range(16):
+        emit(bytes([0x48 | (target >> 3) << 2, 0x89, 0x84 | (target & 7) << 3, 0x24]) + struct.pack("<i", target * 8))
+    for target in range(16):
+        if target == 4:
+            emit(bytes.fromhex("48 8d 04 24"))
+        else:
+            immediate(0, expected[target])
+        check(target)
+    emit(bytes.fromhex("b8 2a 00 00 00 eb 05"))
+    failure = len(code)
+    emit(bytes.fromhex("b8 01 00 00 00 48 8d a4 24 00 01 00 00"))
+    for target in reversed(saved):
+        emit((b"\x41" if target >= 8 else b"") + bytes([0x58 | (target & 7)]))
+    emit(b"\xc3")
+    for position in failures:
+        struct.pack_into("<i", code, position, failure - position - 4)
+    return load_offset, bytes(code)
+
+
+def register_alu_cases():
+    follower = b"\x90"
+    for name, instruction, opcode, register, wide, address, offset in REGISTER_ALUS:
+        for flags in (0x202, 0xad7):
+            load_offset, body = register_alu_body(instruction, opcode, register, wide, address, offset, flags, follower)
+            moved = follower if len(instruction) < 5 else b""
+            yield f"register-alu-{name}-{flags:x}", make_image("register", "unwind", body=body), 0x1240 + load_offset, instruction, opcode, register, wide, moved
+
+
+def register_alu_stub(instruction, opcode, register, wide):
+    position = 1
+    while instruction[position] != opcode:
+        position += 1
+    rex = instruction[position - 1] if 0x40 <= instruction[position - 1] <= 0x4f else 0
+    address = bytes([0x48 | (rex & 3), 0x8d, instruction[position + 1] & 0xc7]) + instruction[position + 2:]
+    if register == 0:
+        load = (b"\x48" if wide else b"") + bytes.fromhex("8b 14 08")
+        alu = bytes([0x48, opcode, 0xc2]) if wide else bytes([opcode, 0xc2])
+        return bytes.fromhex("48 8d 64 24 80 51 52 50") + address + b"\x50", b"\x59" + load + b"\x58" + alu + bytes.fromhex("5a 59 48 8d a4 24 80 00 00 00")
+    elif register == 1:
+        load = (b"\x48" if wide else b"") + bytes.fromhex("8b 04 08")
+        restore_rcx = bytes.fromhex("48 8b 4c 24 08 48") + bytes([opcode, 0xc8]) if wide else bytes.fromhex("48 8b 4c 24 08") + bytes([opcode, 0xc8])
+        return bytes.fromhex("48 8d 64 24 80 51 50") + address + b"\x50", b"\x59" + load + restore_rcx + bytes.fromhex("58 48 8d 64 24 08 48 8d a4 24 80 00 00 00")
+    else:
+        load = (b"\x48" if wide else b"") + bytes.fromhex("8b 04 08")
+        rex_alu = (bytes([(0x48 if wide else 0x40) | (register >> 3) << 2]) if wide or register >= 8 else b"")
+        alu = rex_alu + bytes([opcode, 0xc0 | (register & 7) << 3])
+        return bytes.fromhex("48 8d 64 24 80 51 50") + address + b"\x50", b"\x59" + load + alu + bytes.fromhex("58 59 48 8d a4 24 80 00 00 00")
+
+
+
 def make_image(transfer, metadata, extent=None, body=None):
     image = fixture()
     image.extend(b"\x90" * 0x1000)
@@ -370,6 +491,25 @@ def make_image(transfer, metadata, extent=None, body=None):
     return image
 
 
+def make_eof_segment_prefix_image():
+    image = bytearray(0x1000)
+    image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0x1200, 64, 0, 0, 64, 56, 4, 64, 0, 0)
+    image[0x200:0x206] = bytes.fromhex("ff 25 fa 00 00 00")
+    image[0x210:0x216] = bytes.fromhex("b8 2a 00 00 00 c3")
+    struct.pack_into("<QQq", image, 0x700, 0x300, 8, 0x210)
+    tags = [(5, 0x600), (10, 1), (6, 0x620), (11, 24), (7, 0x700), (8, 24), (9, 24), (0, 0)]
+    struct.pack_into("<IIQQQQQQ", image, 64, 1, 7, 0, 0, 0, len(image), len(image), 0x1000)
+    struct.pack_into("<IIQQQQQQ", image, 120, 2, 6, 0x400, 0x400, 0x400, len(tags) * 16, len(tags) * 16, 8)
+    image.extend(b"\x90" * 0x1000)
+    struct.pack_into("<IIQQQQQQ", image, 176, 7, 4, 0x800, 0x800, 0x800, 8, 16, 16)
+    struct.pack_into("<IIQQQQQQ", image, 232, 1, 5, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000)
+    for index, tag in enumerate(tags):
+        struct.pack_into("<qQ", image, 0x400 + index * 16, *tag)
+    image[0x1ffe:0x2000] = bytes.fromhex("64 90")
+    return image
+
+
 def pe_bytes_at(pe, rva, size):
     header = struct.unpack_from("<I", pe, 0x3c)[0]
     count = struct.unpack_from("<H", pe, header + 6)[0]
@@ -389,8 +529,16 @@ def add_alias(image, size, begin=0x1200):
 
 
 def main():
-    relinker = Path(sys.argv[1]).resolve()
-    with tempfile.TemporaryDirectory(prefix="anyps5-tls-coverage-") as directory:
+    groups = ("metadata", "padding", "register_loads", "displacement_bounds", "alu_execution",
+              "register_address_loads", "moved_branch", "rejected")
+    groups += tuple(f"displacement_r{register}" for register in range(16) if register != 4)
+    groups += tuple(f"alu_{name}" for name in ALU_READ)
+    parser = argparse.ArgumentParser(description="Run Windows guest TLS function coverage fixtures")
+    parser.add_argument("relinker", type=Path)
+    parser.add_argument("group", nargs="?", default="all", choices=("all",) + groups)
+    args = parser.parse_args()
+    relinker = args.relinker.resolve()
+    with tempfile.TemporaryDirectory(prefix=f"anyps5-tls-{args.group}-") as directory:
         work = Path(directory)
 
         def convert(name, image, error=None, tls_address=0x1240, displacement=0, error_offset=None):
@@ -422,144 +570,214 @@ def main():
                 executed = subprocess.run([sys.executable, str(RUNNER), str(output), hex(entry)], capture_output=True, timeout=30)
                 assert executed.returncode == 42, (name, executed.returncode, executed.stderr)
 
-        for metadata in ("unwind", "symbol"):
-            for transfer in ("table", "register", "memory"):
-                convert(metadata + "-" + transfer, make_image(transfer, metadata))
-            convert(metadata + "-truncated", make_image("register", metadata, 0x46), "Code analysis:")
-            convert(metadata + "-outside", make_image("register", metadata, 0x1000), "Code analysis: function exceeds executable segment")
-        for first, second in ((0x47, 0x51), (0x51, 0x47), (0, 0x51), (0x51, 0)):
-            convert(f"symbol-alias-{first:x}-{second:x}",
-                    add_alias(make_image("register", "symbol", first), second))
-        for first, second in ((0x47, 0x1000), (0x1000, 0x47)):
-            convert(f"symbol-alias-outside-{first:x}-{second:x}",
-                    add_alias(make_image("register", "symbol", first), second),
-                    "Code analysis: function exceeds executable segment")
-        alias_tail = add_alias(make_image("register", "symbol", 0x51), 0x60)
-        alias_tail[0x1258:0x1260] = bytes.fromhex("64 8b 04 25 28 00 00 00")
-        convert("symbol-alias-unreachable-tls-tail", alias_tail,
-                "Unsupported Windows guest TLS instruction", error_offset=0x1258)
-        for metadata in ("unwind", "symbol"):
-            convert(f"branch-into-cut-tail-{metadata}",
-                    make_image("register", metadata, 0x50, TLS_LOAD + bytes.fromhex("eb 00 8b 40 f0 c3")))
-        convert("branch-into-undecodable-tail",
-                make_image("register", "unwind", 0x50, TLS_LOAD + bytes.fromhex("eb 01 66 0f 78 c0 01 02 c3")),
-                "Code analysis: branch into skipped range tail", error_offset=0x124f)
-        split_body = TLS_LOAD + bytes.fromhex("eb 00 8b 40 f0 48 b9 00 00 00 65 2e 62 69 6e") + b"\xc3" * 8
-        convert("function-begins-inside-instruction",
-                add_alias(make_image("register", "symbol", 0x55, split_body), 0x0c, 0x1256))
-        overlapping = make_image("register", "unwind")
-        overlapping[0x1200:0x1205] = b"\xe9" + struct.pack("<i", 0x1245 - 0x1205)
-        convert("overlapping-entry", overlapping, "Code analysis: overlapping instruction boundaries")
-        fs_overlap = make_image("register", "unwind")
-        fs_overlap[0x1209:0x1211] = bytes.fromhex("48 8b 04 25 64 00 00 00")
-        fs_overlap[0x1211:0x1216] = b"\xe8" + struct.pack("<i", 0x120D - 0x1216)
-        convert("overlapping-fs-prefix", fs_overlap, "Code analysis: overlapping instruction boundaries")
-        fs66_overlap = make_image("register", "unwind")
-        fs66_overlap[0x1209:0x1216] = bytes.fromhex("66 66 66 66 64 48 8b 04 25 78 56 00 00")
-        fs66_overlap[0x1216:0x121B] = b"\xe8" + struct.pack("<i", 0x1211 - 0x121B)
-        convert("overlapping-fs-prefix-66", fs66_overlap, "Code analysis: overlapping instruction boundaries")
-        external = make_image("register", "unwind")
-        external[0x1300:0x1310] = external[0x1240:0x1250]
-        external[0x1240:0x1250] = b"\xe8" + struct.pack("<i", 0x1300 - 0x1245) + b"\xc3" + b"\x90" * 10
-        convert("direct-call-from-indirect-block", external, tls_address=0x1300)
+        if args.group in ("all", "metadata"):
+            for metadata in ("unwind", "symbol"):
+                for transfer in ("table", "register", "memory"):
+                    convert(metadata + "-" + transfer, make_image(transfer, metadata))
+                convert(metadata + "-truncated", make_image("register", metadata, 0x46), "Code analysis:")
+                convert(metadata + "-outside", make_image("register", metadata, 0x1000), "Code analysis: function exceeds executable segment")
+            for first, second in ((0x47, 0x51), (0x51, 0x47), (0, 0x51), (0x51, 0)):
+                convert(f"symbol-alias-{first:x}-{second:x}",
+                        add_alias(make_image("register", "symbol", first), second))
+            for first, second in ((0x47, 0x1000), (0x1000, 0x47)):
+                convert(f"symbol-alias-outside-{first:x}-{second:x}",
+                        add_alias(make_image("register", "symbol", first), second),
+                        "Code analysis: function exceeds executable segment")
+            alias_tail = add_alias(make_image("register", "symbol", 0x51), 0x60)
+            alias_tail[0x1258:0x1260] = bytes.fromhex("64 8b 04 25 28 00 00 00")
+            convert("symbol-alias-unreachable-tls-tail", alias_tail,
+                    "Unsupported Windows guest TLS instruction", error_offset=0x1258)
+            for metadata in ("unwind", "symbol"):
+                convert(f"branch-into-cut-tail-{metadata}",
+                        make_image("register", metadata, 0x50, TLS_LOAD + bytes.fromhex("eb 00 8b 40 f0 c3")))
+            convert("branch-into-undecodable-tail",
+                    make_image("register", "unwind", 0x50, TLS_LOAD + bytes.fromhex("eb 01 66 0f 78 c0 01 02 c3")),
+                    "Code analysis: branch into skipped range tail", error_offset=0x124f)
+            split_body = TLS_LOAD + bytes.fromhex("eb 00 8b 40 f0 48 b9 00 00 00 65 2e 62 69 6e") + b"\xc3" * 8
+            convert("function-begins-inside-instruction",
+                    add_alias(make_image("register", "symbol", 0x55, split_body), 0x0c, 0x1256))
+            overlapping = make_image("register", "unwind")
+            overlapping[0x1200:0x1205] = b"\xe9" + struct.pack("<i", 0x1245 - 0x1205)
+            convert("overlapping-entry", overlapping, "Code analysis: overlapping instruction boundaries")
+            fs_overlap = make_image("register", "unwind")
+            fs_overlap[0x1209:0x1211] = bytes.fromhex("48 8b 04 25 64 00 00 00")
+            fs_overlap[0x1211:0x1216] = b"\xe8" + struct.pack("<i", 0x120D - 0x1216)
+            convert("overlapping-fs-prefix", fs_overlap, "Code analysis: overlapping instruction boundaries")
+            fs66_overlap = make_image("register", "unwind")
+            fs66_overlap[0x1209:0x1216] = bytes.fromhex("66 66 66 66 64 48 8b 04 25 78 56 00 00")
+            fs66_overlap[0x1216:0x121B] = b"\xe8" + struct.pack("<i", 0x1211 - 0x121B)
+            convert("overlapping-fs-prefix-66", fs66_overlap, "Code analysis: overlapping instruction boundaries")
+            external = make_image("register", "unwind")
+            external[0x1300:0x1310] = external[0x1240:0x1250]
+            external[0x1240:0x1250] = b"\xe8" + struct.pack("<i", 0x1300 - 0x1245) + b"\xc3" + b"\x90" * 10
+            convert("direct-call-from-indirect-block", external, tls_address=0x1300)
+            address_taken = make_image("register", "unwind")
+            address_taken[0x1300:0x1310] = address_taken[0x1240:0x1250]
+            address_taken[0x1240:0x1250] = bytes.fromhex("48 8d 05") + struct.pack("<i", 0x1300 - 0x1247) + bytes.fromhex("ff d0 c3") + b"\x90" * 6
+            convert("address-taken-tls-callback", address_taken, tls_address=0x1300)
 
-        def convert_padded(name, image):
-            source = work / (name + ".elf")
-            output = source.with_suffix(".exe")
-            source.write_bytes(image)
-            result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
-                                    capture_output=True, text=True, timeout=30)
-            assert result.returncode == 0, (name, result.stdout, result.stderr)
-            return output.read_bytes()
+        if args.group in ("all", "padding"):
+            def convert_padded(name, image):
+                source = work / (name + ".elf")
+                output = source.with_suffix(".exe")
+                source.write_bytes(image)
+                result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
+                                        capture_output=True, text=True, timeout=30)
+                assert result.returncode == 0, (name, result.stdout, result.stderr)
+                return output.read_bytes()
 
-        unreferenced = make_image("register", "unwind")
-        unreferenced[0x18f0:0x1900] = b"\xcc" * 16
-        unreferenced[0x1900:0x1900 + len(TLS_LOAD) + 4] = TLS_LOAD + bytes.fromhex("8b 40 f0 c3")
-        pe = convert_padded("unreferenced-padded-function", unreferenced)
-        assert pe_bytes_at(pe, 0x11900, 1)[0] == 0xe9, "unreferenced-padded-function"
-        assert pe_bytes_at(pe, 0x11850, len(TLS_LOAD)) == TLS_LOAD, "unreferenced-padded-function"
-        zero_filled = make_image("register", "unwind")
-        zero_filled[0x18f0:0x1900] = b"\xcc" * 16
-        zero_filled[0x1900:0x1910] = bytes(16)
-        zero_filled[0x1910:0x1910 + len(TLS_LOAD)] = TLS_LOAD
-        pe = convert_padded("zero-filled-after-padding", zero_filled)
-        assert pe_bytes_at(pe, 0x11910, len(TLS_LOAD)) == TLS_LOAD, "zero-filled-after-padding"
-        for register in range(16):
-            offset, body = register_load(register)
-            image = make_image("register", "unwind", body=body)
-            if register == 4:
-                convert("load-register-4", image, "Unsupported Windows guest TLS instruction")
-            else:
-                convert("load-register-" + str(register), image, tls_address=0x1240 + offset)
-        for name, image, address in displacement_cases():
-            displacement = struct.unpack_from("<i", image, address + 5)[0]
-            convert(name, image, tls_address=address, displacement=displacement)
-        for name, image, error in displacement_bounds_cases():
-            convert(name, image, error, error_offset=0x1240)
-        for name, opcode in ALU_READ.items():
-            for register in (0, 1, 2, 3, 8, 13):
-                for displacement in (0, 40, -8):
-                    body = fs_alu(opcode, register, displacement) + b"\xc3"
-                    case = f"alu-{name}-{register}-{displacement}"
-                    image = make_image("register", "unwind", body=body)
-                    source = work / (case + ".elf")
-                    output = source.with_suffix(".exe")
-                    source.write_bytes(image)
-                    result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
-                                            capture_output=True, text=True, timeout=30)
-                    assert result.returncode == 0, (case, result.stderr)
-                    pe = output.read_bytes()
-                    patched_address = 0x10000 + 0x1240
-                    patched = pe_bytes_at(pe, patched_address, 5)
-                    assert patched[0] == 0xe9, case
-                    stub_address = patched_address + 5 + struct.unpack_from("<i", patched, 1)[0]
-                    stub = pe_bytes_at(pe, stub_address, 96)
-                    if register == 0:
-                        expected = bytes.fromhex("48 8b 90") + struct.pack("<i", displacement) + bytes([0x58, 0x48, opcode, 0xc2])
-                    elif register == 1:
-                        expected = bytes.fromhex("48 8b 80") + struct.pack("<i", displacement) + bytes.fromhex("48 8b 4c 24 08") + bytes([0x48, opcode, 0xc8])
-                    else:
-                        expected = bytes.fromhex("48 8b 80") + struct.pack("<i", displacement) + bytes([0x48 | ((register >> 3) << 2), opcode, 0xc0 | ((register & 7) << 3)])
-                    assert expected in stub, (case, expected.hex(), stub.hex())
-        for name, image in alu_execution_cases():
-            convert(name, image)
-        for name, image, address, instruction, register, wide, moved in register_load_cases():
-            convert(name, image, tls_address=address)
-            pe = (work / (name + ".exe")).read_bytes()
-            patched = pe_bytes_at(pe, 0x10000 + address, 5)
-            stub = pe_bytes_at(pe, 0x10000 + address + 5 + struct.unpack_from("<i", patched, 1)[0], 96)
-            head, tail = register_load_stub(instruction, register, wide)
-            assert stub.startswith(head) and tail + moved in stub, (name, head.hex(), (tail + moved).hex(), stub.hex())
-        for name, instruction in {
-            "short-before-return": bytes.fromhex("64 48 8b 03 c3"),
-            "short-before-call": bytes.fromhex("64 48 8b 03 e8 00 00 00 00 c3"),
-            "short-before-tls": bytes.fromhex("64 48 8b 03 64 48 8b 03 c3"),
-        }.items():
-            convert(name, make_image("register", "unwind", body=instruction),
-                    "Short guest TLS instruction is followed by an instruction that cannot move", error_offset=0x1244)
-        rejected = {
-            "rsp-displacement": fs_load(4, 40),
-            "rsp-alu": fs_alu(0x33, 4, 40),
-            "dword-load": bytes.fromhex("64 8b 04 25 28 00 00 00"),
-            "gs-load": bytes.fromhex("65 48 8b 04 25 28 00 00 00"),
-            "rex-b-load": bytes.fromhex("64 49 8b 04 25 28 00 00 00"),
-            "rsp-base-load": bytes.fromhex("64 48 8b 04 24"),
-            "rsp-register-address": bytes.fromhex("64 48 8b 20"),
-            "rip-relative-load": bytes.fromhex("64 48 8b 05 00 00 00 00"),
-            "word-register-address": bytes.fromhex("66 64 8b 00"),
-            "register-address-store": bytes.fromhex("64 48 89 03"),
-            "register-address-alu": bytes.fromhex("64 48 33 03"),
-        }
-        for name, instruction in rejected.items():
-            convert(name, make_image("register", "unwind", body=instruction + b"\xc3"),
+            unreferenced = make_image("register", "unwind")
+            unreferenced[0x18f0:0x1900] = b"\xcc" * 16
+            unreferenced[0x1900:0x1900 + len(TLS_LOAD) + 4] = TLS_LOAD + bytes.fromhex("8b 40 f0 c3")
+            pe = convert_padded("unreferenced-padded-function", unreferenced)
+            assert pe_bytes_at(pe, 0x11900, 1)[0] == 0xe9, "unreferenced-padded-function"
+            assert pe_bytes_at(pe, 0x11850, len(TLS_LOAD)) == TLS_LOAD, "unreferenced-padded-function"
+            zero_filled = make_image("register", "unwind")
+            zero_filled[0x18f0:0x1900] = b"\xcc" * 16
+            zero_filled[0x1900:0x1910] = bytes(16)
+            zero_filled[0x1910:0x1910 + len(TLS_LOAD)] = TLS_LOAD
+            pe = convert_padded("zero-filled-after-padding", zero_filled)
+            assert pe_bytes_at(pe, 0x11910, len(TLS_LOAD)) == TLS_LOAD, "zero-filled-after-padding"
+            stack_guard = bytes.fromhex("64 48 8b 04 25 28 00 00 00")
+            zero_aligned = make_image("register", "unwind")
+            zero_aligned[0x18f0:0x1900] = b"\xcc" * 16
+            zero_aligned[0x1900:0x1910] = bytes.fromhex("31 c0 c3") + bytes(13)
+            zero_aligned[0x1910:0x1920] = stack_guard + b"\xe8" + struct.pack("<i", 0x1900 - 0x191e) + bytes(2)
+            zero_aligned[0x1920:0x1930] = TLS_LOAD + bytes.fromhex("89 c0 c3") + bytes(1)
+            zero_aligned[0x1930:0x1940] = stack_guard + b"\xeb" + struct.pack("<b", 0x1900 - 0x193b) + bytes(5)
+            zero_aligned[0x1940:0x1940 + len(stack_guard) + 1] = stack_guard + b"\xc3"
+            pe = convert_padded("zero-aligned-functions", zero_aligned)
+            for address in (0x11910, 0x11920, 0x11930, 0x11940):
+                assert pe_bytes_at(pe, address, 1)[0] == 0xe9, ("zero-aligned-functions", hex(address))
+            assert pe_bytes_at(pe, 0x11850, len(TLS_LOAD)) == TLS_LOAD, "zero-aligned-functions"
+            straight_line = make_image("register", "unwind")
+            straight_line[0x18f0:0x1900] = b"\xcc" * 16
+            straight_line[0x1900:0x1910] = b"\x90" + bytes(15)
+            straight_line[0x1910:0x1910 + len(stack_guard)] = stack_guard
+            pe = convert_padded("zero-fill-after-straight-line-code", straight_line)
+            assert pe_bytes_at(pe, 0x11910, len(stack_guard)) == stack_guard, "zero-fill-after-straight-line-code"
+        if args.group in ("all", "register_loads"):
+            for register in range(16):
+                offset, body = register_load(register)
+                image = make_image("register", "unwind", body=body)
+                if register == 4:
+                    convert("load-register-4", image, "Unsupported Windows guest TLS instruction")
+                else:
+                    convert("load-register-" + str(register), image, tls_address=0x1240 + offset)
+        if args.group == "all" or args.group.startswith("displacement_r"):
+            registers = range(16) if args.group == "all" else (int(args.group[len("displacement_r"):]),)
+            for name, image, address in displacement_cases(registers):
+                displacement = struct.unpack_from("<i", image, address + 5)[0]
+                convert(name, image, tls_address=address, displacement=displacement)
+        if args.group in ("all", "displacement_bounds"):
+            for name, image, error in displacement_bounds_cases():
+                convert(name, image, error, error_offset=0x1240)
+        if args.group == "all" or args.group in {f"alu_{name}" for name in ALU_READ}:
+            for name, opcode in ALU_READ.items():
+                if args.group not in ("all", f"alu_{name}"):
+                    continue
+                for register in (0, 1, 2, 3, 8, 13):
+                    for displacement in (0, 40, -8):
+                        body = fs_alu(opcode, register, displacement) + b"\xc3"
+                        case = f"alu-{name}-{register}-{displacement}"
+                        image = make_image("register", "unwind", body=body)
+                        source = work / (case + ".elf")
+                        output = source.with_suffix(".exe")
+                        source.write_bytes(image)
+                        result = subprocess.run([str(relinker), "--skip-sce-module", "--windows", str(source), str(output)],
+                                                capture_output=True, text=True, timeout=30)
+                        assert result.returncode == 0, (case, result.stderr)
+                        pe = output.read_bytes()
+                        patched_address = 0x10000 + 0x1240
+                        patched = pe_bytes_at(pe, patched_address, 5)
+                        assert patched[0] == 0xe9, case
+                        stub_address = patched_address + 5 + struct.unpack_from("<i", patched, 1)[0]
+                        stub = pe_bytes_at(pe, stub_address, 96)
+                        if register == 0:
+                            expected = bytes.fromhex("48 8b 90") + struct.pack("<i", displacement) + bytes([0x58, 0x48, opcode, 0xc2])
+                        elif register == 1:
+                            expected = bytes.fromhex("48 8b 80") + struct.pack("<i", displacement) + bytes.fromhex("48 8b 4c 24 08") + bytes([0x48, opcode, 0xc8])
+                        else:
+                            expected = bytes.fromhex("48 8b 80") + struct.pack("<i", displacement) + bytes([0x48 | ((register >> 3) << 2), opcode, 0xc0 | ((register & 7) << 3)])
+                        assert expected in stub, (case, expected.hex(), stub.hex())
+        if args.group in ("all", "alu_execution"):
+            for name, image in alu_execution_cases():
+                convert(name, image)
+        if args.group in ("all", "register_address_loads"):
+            for name, image, address, instruction, register, wide, moved in register_load_cases():
+                convert(name, image, tls_address=address)
+                pe = (work / (name + ".exe")).read_bytes()
+                patched = pe_bytes_at(pe, 0x10000 + address, 5)
+                stub = pe_bytes_at(pe, 0x10000 + address + 5 + struct.unpack_from("<i", patched, 1)[0], 96)
+                head, tail = register_load_stub(instruction, register, wide)
+                assert stub.startswith(head) and tail + moved in stub, (name, head.hex(), (tail + moved).hex(), stub.hex())
+            for name, image, address, instruction, opcode, register, wide, moved in register_alu_cases():
+                convert(name, image, tls_address=address)
+                pe = (work / (name + ".exe")).read_bytes()
+                patched = pe_bytes_at(pe, 0x10000 + address, 5)
+                stub = pe_bytes_at(pe, 0x10000 + address + 5 + struct.unpack_from("<i", patched, 1)[0], 96)
+                head, tail = register_alu_stub(instruction, opcode, register, wide)
+                assert stub.startswith(head) and tail + moved in stub, (name, head.hex(), (tail + moved).hex(), stub.hex())
+        if args.group in ("all", "moved_branch"):
+            prologue = bytes.fromhex("48 c7 c3 f0 ff ff ff 48 31 c0")
+            rel8_body = prologue + bytes.fromhex("64 48 33 03 75 06 31 c0 c3 90 90 90 b8 2a 00 00 00 c3")
+            rel32_body = prologue + bytes.fromhex("64 48 33 03 0f 85") + struct.pack("<i", 0x1259 - 0x1254) + bytes.fromhex("31 c0 c3 90 90 b8 2a 00 00 00 c3")
+            jmp_body = prologue + bytes.fromhex("64 48 33 03 eb 06 b8 01 00 00 00 c3 90 b8 2a 00 00 00 c3")
+            for name, body, access, target, branch_opcode in (
+                ("moved-rel8-branch", rel8_body, 0x124A, 0x1256, "0f 85"),
+                ("moved-rel32-branch", rel32_body, 0x124A, 0x1259, "0f 85"),
+                ("moved-rel8-jump", jmp_body, 0x124A, 0x1256, "e9"),
+            ):
+                image = make_image("register", "unwind", body=body)
+                convert(name, image, tls_address=access)
+                pe = (work / (name + ".exe")).read_bytes()
+                patched = pe_bytes_at(pe, 0x10000 + access, 6)
+                assert patched[0] == 0xe9 and patched[5] == 0x90, (name, patched.hex())
+                stub_address = 0x10000 + access + 5 + struct.unpack_from("<i", patched, 1)[0]
+                stub = pe_bytes_at(pe, stub_address, 128)
+                encoding = bytes.fromhex(branch_opcode)
+                offset = stub.find(encoding)
+                assert offset >= 0, (name, stub.hex())
+                displacement = struct.unpack_from("<i", stub, offset + len(encoding))[0]
+                assert displacement == (0x10000 + target) - (stub_address + offset + len(encoding) + 4), (name, displacement)
+        if args.group in ("all", "rejected"):
+            for name, instruction in {
+                "short-before-return": bytes.fromhex("64 48 8b 03 c3"),
+                "short-before-call": bytes.fromhex("64 48 8b 03 e8 00 00 00 00 c3"),
+                "short-before-tls": bytes.fromhex("64 48 8b 03 64 48 8b 03 c3"),
+                "short-alu-before-return": bytes.fromhex("64 48 33 03 c3"),
+                "short-before-loop": bytes.fromhex("64 48 33 03 e2 00"),
+                "short-before-word-jcc8": bytes.fromhex("64 48 33 03 66 75 00 c3"),
+                "short-before-word-jmp8": bytes.fromhex("64 48 33 03 66 eb 00 c3"),
+                "short-before-word-jmp16": bytes.fromhex("64 48 33 03 66 e9 00 00 c3"),
+                "short-before-word-jcc16": bytes.fromhex("64 48 33 03 66 0f 85 00 00 c3"),
+            }.items():
+                convert(name, make_image("register", "unwind", body=instruction),
+                        "Short guest TLS instruction is followed by an instruction that cannot move", error_offset=0x1244)
+            rejected = {
+                "rsp-displacement": fs_load(4, 40),
+                "rsp-alu": fs_alu(0x33, 4, 40),
+                "dword-load": bytes.fromhex("64 8b 04 25 28 00 00 00"),
+                "gs-load": bytes.fromhex("65 48 8b 04 25 28 00 00 00"),
+                "rex-b-load": bytes.fromhex("64 49 8b 04 25 28 00 00 00"),
+                "rsp-base-load": bytes.fromhex("64 48 8b 04 24"),
+                "rsp-register-address": bytes.fromhex("64 48 8b 20"),
+                "rip-relative-load": bytes.fromhex("64 48 8b 05 00 00 00 00"),
+                "word-register-address": bytes.fromhex("66 64 8b 00"),
+                "register-address-store": bytes.fromhex("64 48 89 03"),
+            }
+            for name, instruction in rejected.items():
+                convert(name, make_image("register", "unwind", body=instruction + b"\xc3"),
+                        "Unsupported Windows guest TLS instruction")
+            convert("segment-prefix-at-eof", make_eof_segment_prefix_image(),
                     "Unsupported Windows guest TLS instruction")
-        conflicting = make_image("register", "symbol")
-        unwind = make_image("register", "unwind", 0x51)
-        conflicting[0x900:0x9a0] = unwind[0x900:0x9a0]
-        conflicting[232:344] = unwind[232:344]
-        struct.pack_into("<H", conflicting, 56, 5)
-        convert("conflicting-function-extents", conflicting, "Code analysis: conflicting function ranges")
-    print("TLS function coverage integration tests passed")
+            conflicting = make_image("register", "symbol")
+            unwind = make_image("register", "unwind", 0x51)
+            conflicting[0x900:0x9a0] = unwind[0x900:0x9a0]
+            conflicting[232:344] = unwind[232:344]
+            struct.pack_into("<H", conflicting, 56, 5)
+            convert("conflicting-function-extents", conflicting, "Code analysis: conflicting function ranges")
+    print(f"TLS function coverage integration tests passed: {args.group}")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ int APS5_VABI sceRtcGetTickResolution(void);
 int APS5_VABI sceRtcGetTick(const RtcDateTime*, RtcTick*);
 int APS5_VABI sceRtcSetTick(RtcDateTime*, const RtcTick*);
 int APS5_VABI sceRtcGetCurrentTick(RtcTick*);
+int APS5_VABI sceRtcGetCurrentClock(RtcDateTime*, int);
+int APS5_VABI sceRtcGetCurrentClockLocalTime(RtcDateTime*);
 int APS5_VABI sceRtcConvertUtcToLocalTime(const RtcTick*, RtcTick*);
 int APS5_VABI sceRtcConvertLocalTimeToUtc(const RtcTick*, RtcTick*);
 int APS5_VABI sceRtcGetTime_t(const RtcDateTime*, std::int64_t*);
@@ -71,8 +73,12 @@ int main() {
     Require(sceRtcGetTickResolution() == 1000000);
     Require(sceRtcIsLeapYear(2000) == 1 && sceRtcIsLeapYear(1900) == 0 && sceRtcIsLeapYear(2024) == 1);
     Require(sceRtcIsLeapYear(0) == invalidYear);
+    Require(sceRtcIsLeapYear(10000) == 1);
+    Require(sceRtcIsLeapYear(9999) == 0 && sceRtcIsLeapYear(9996) == 1);
     Require(sceRtcGetDaysInMonth(2023, 2) == 28 && sceRtcGetDaysInMonth(2024, 2) == 29 && sceRtcGetDaysInMonth(2024, 4) == 30);
     Require(sceRtcGetDaysInMonth(2024, 13) == invalidMonth);
+    Require(sceRtcGetDaysInMonth(10000, 1) == 31);
+    Require(sceRtcGetDaysInMonth(9999, 1) == 31);
     Require(sceRtcGetDayOfWeek(1, 1, 1) == 1 && sceRtcGetDayOfWeek(2026, 9, 26) == 6);
     Require(sceRtcGetDayOfWeek(2023, 2, 29) == invalidDay);
 
@@ -97,6 +103,13 @@ int main() {
     Require(sceRtcSetTick(&converted, &tick) == 0 && Equal(converted, RtcDateTime{9999, 12, 31, 23, 59, 59, 999999}));
     tick.tick = maxTick + 1;
     Require(sceRtcSetTick(&converted, &tick) == invalidValue);
+
+    Require(sceRtcGetCurrentClock(nullptr, 0) == invalidPointer);
+    Require(sceRtcGetCurrentClock(&converted, 0) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClock(&converted, 60) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClock(&converted, -300) == 0 && sceRtcCheckValid(&converted) == 0);
+    Require(sceRtcGetCurrentClockLocalTime(nullptr) == invalidPointer);
+    Require(sceRtcGetCurrentClockLocalTime(&converted) == 0 && sceRtcCheckValid(&converted) == 0);
 
     RtcDateTime epoch{1970, 1, 1, 0, 0, 0, 0};
     std::int64_t seconds = -1;
@@ -262,6 +275,9 @@ int main() {
         {"Thu, 01 Mar 2024 12:34:56 ", 0, march, 0},
         {"Thu, 01 Mar 2024 12:34:567 EST", 0, march, 0},
         {"Thu, 01 Mar 2024 12:34 EST", 0, at(2024, 3, 1, 12, 34, 0), 0},
+        {"Thu, 29 Feb 2024 12:34", badParse, untouched, 0},
+        {"Thu, 01 Mar 2024 12:34", badParse, untouched, 0},
+        {"Thu, 29 Feb 2024 12:34 ", 0, at(2024, 2, 29, 12, 34, 0), 0},
         {"Thu, 01 Mar 2024 12:34EST", badParse, untouched, 0},
         {"Thu, 01 Mar 2024 1:2:3 EST", 0, at(2024, 3, 1, 1, 2, 3), -300},
         {"Thu, 01 Mar 2024 26:00:00 GMT", badParse, untouched, 0},
@@ -297,6 +313,35 @@ int main() {
         tick.tick = untouched;
         Require(sceRtcParseDateTime(&tick, dateTime.text) == dateTime.result);
         Require(tick.tick == dateTime.local - static_cast<std::uint64_t>(dateTime.minutes * 60000000));
+    }
+
+    const struct {
+        const char* name;
+        std::int64_t minutes;
+    } additionalZones[] = {
+        {"SWT", 60}, {"MEZ", 60}, {"WETDST", 60}, {"METDST", 120}, {"EETDST", 180},
+        {"AESST", 660}, {"ACSST", 630}, {"CAST", 570}, {"CADT", 630}, {"SAST", 570}, {"SADT", 630}, {"WST", 480}, {"WDT", 540},
+    };
+    for (const auto& zone : additionalZones) {
+        char text[80];
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %s", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        char lower[16]{};
+        for (std::size_t i = 0; zone.name[i] != 0; ++i) lower[i] = static_cast<char>(zone.name[i] + ('a' - 'A'));
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %s", lower);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        std::snprintf(text, sizeof(text), "Thu, 29 Feb 2024 12:34:56 %sextra", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == leapDayTick - 789000ull - static_cast<std::uint64_t>(zone.minutes * 60000000));
+        std::snprintf(text, sizeof(text), "Wed, 01 Mar 2000 08:09:10 %s", zone.name);
+        tick.tick = untouched;
+        Require(sceRtcParseDateTime(&tick, text) == 0);
+        Require(tick.tick == at(2000, 3, 1, 8, 9, 10) - static_cast<std::uint64_t>(zone.minutes * 60000000));
     }
 
     RtcTick source{leapDayTick};
@@ -402,4 +447,51 @@ int main() {
     Require(sceRtcFormatRFC2822LocalTime(rfc2822, nullptr) == invalidPointer);
     Require(sceRtcFormatRFC3339LocalTime(nullptr, &tick) == invalidPointer);
     Require(sceRtcFormatRFC3339LocalTime(text, nullptr) == invalidPointer);
+    for (const char* zone : {"UTC0", "XXX-5:30", "XXX+3"}) {
+        SetTimeZone(zone);
+        for (std::uint64_t invalidTick : {maxTick + 1, std::uint64_t{1} << 63u, std::numeric_limits<std::uint64_t>::max()}) {
+            source.tick = invalidTick;
+            result.tick = 123;
+            Require(sceRtcConvertUtcToLocalTime(&source, &result) == invalidValue && result.tick == 123);
+            Require(sceRtcConvertLocalTimeToUtc(&source, &result) == invalidValue && result.tick == 123);
+            Require(sceRtcConvertUtcToLocalTime(&source, &source) == invalidValue && source.tick == invalidTick);
+            Require(sceRtcConvertLocalTimeToUtc(&source, &source) == invalidValue && source.tick == invalidTick);
+            std::memset(text, 'x', sizeof(text));
+            char originalText[sizeof(text)];
+            std::memcpy(originalText, text, sizeof(text));
+            Require(sceRtcFormatRFC3339LocalTime(text, &source) == invalidValue);
+            Require(std::memcmp(text, originalText, sizeof(text)) == 0);
+            std::memset(rfc2822, 'x', sizeof(rfc2822));
+            char originalRfc2822[sizeof(rfc2822)];
+            std::memcpy(originalRfc2822, rfc2822, sizeof(rfc2822));
+            Require(sceRtcFormatRFC2822LocalTime(rfc2822, &source) == invalidValue);
+            Require(std::memcmp(rfc2822, originalRfc2822, sizeof(rfc2822)) == 0);
+        }
+        source.tick = leapDayTick;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0);
+        Require(sceRtcConvertLocalTimeToUtc(&result, &result) == 0 && result.tick == source.tick);
+    }
+    SetTimeZone("UTC0");
+
+#ifndef _WIN32
+    SetTimeZone("STD0DST,J1/0,J2/0");
+    const std::time_t beforeTransition = -1;
+    const std::time_t atTransition = 0;
+    std::tm beforeState{}, afterState{};
+    Require(localtime_r(&beforeTransition, &beforeState) != nullptr && beforeState.tm_isdst == 0);
+    Require(localtime_r(&atTransition, &afterState) != nullptr && afterState.tm_isdst == 1);
+    for (const std::uint64_t distance : {1000000ull, 500000ull, 1ull}) {
+        source.tick = unixEpochTick - distance;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0 && result.tick == source.tick);
+        Require(sceRtcConvertUtcToLocalTime(&source, &source) == 0 && source.tick == unixEpochTick - distance);
+    }
+    for (const std::uint64_t distance : {0ull, 500000ull}) {
+        source.tick = unixEpochTick + distance;
+        Require(sceRtcConvertUtcToLocalTime(&source, &result) == 0 && result.tick == source.tick + 3600000000ull);
+    }
+    tick.tick = unixEpochTick - 500000ull;
+    Require(sceRtcFormatRFC3339LocalTime(text, &tick) == 0 && std::strcmp(text, "1969-12-31T23:59:59.50Z") == 0);
+    Require(sceRtcFormatRFC2822LocalTime(rfc2822, &tick) == 0 && std::strcmp(rfc2822, "Wed, 31 Dec 1969 23:59:59 +0000") == 0);
+    SetTimeZone("UTC0");
+#endif
 }

@@ -436,6 +436,10 @@ RdnaOperand scalarSource(std::uint32_t code) {
         case 125u: operand.kind = RdnaOperandKind::Null; return operand;
         case 126u: operand.kind = RdnaOperandKind::ExecLo; return operand;
         case 127u: operand.kind = RdnaOperandKind::ExecHi; return operand;
+        case 235u: operand.kind = RdnaOperandKind::SrcSharedBase; return operand;
+        case 236u: operand.kind = RdnaOperandKind::SrcSharedLimit; return operand;
+        case 237u: operand.kind = RdnaOperandKind::SrcPrivateBase; return operand;
+        case 238u: operand.kind = RdnaOperandKind::SrcPrivateLimit; return operand;
         case 239u: operand.kind = RdnaOperandKind::PopsExitingWaveId; return operand;
         case 248u: operand.kind = RdnaOperandKind::FloatInlineConstant; operand.value = floatBits(0.15915494309189535f); return operand;
         case 251u: operand.kind = RdnaOperandKind::VccZ; return operand;
@@ -465,6 +469,9 @@ RdnaOperand scalarDestination(std::uint32_t code) {
 
 RdnaOperand scalarDescriptorBase(std::uint32_t reg, std::uint32_t registerCount, const char* reason) {
     const auto operand = scalarSource(reg);
+    if (registerCount == 4u && reg == 104u && operand.kind == RdnaOperandKind::ScalarRegister) {
+        return operand;
+    }
     if (registerCount == 2u && operand.kind == RdnaOperandKind::VccLo) {
         return operand;
     }
@@ -696,7 +703,7 @@ void setRawWords(RdnaInstruction& instruction, std::span<const std::uint32_t> co
 void requireTwoWords(std::span<const std::uint32_t> code, std::uint32_t wordIndex, std::uint32_t programCounter, const char* reason) {
     const std::size_t index = wordIndex;
     if (index >= code.size() || code.size() - index < 2u) {
-        throw std::runtime_error(reason);
+        throw std::out_of_range(reason);
     }
     if (programCounter % 4u != 0u || programCounter > std::numeric_limits<std::uint32_t>::max() - 7u) {
         throw std::runtime_error("invalid memory instruction program counter");
@@ -813,6 +820,9 @@ RdnaInstruction DecodeRdnaMubuf(std::uint32_t programCounter, std::span<const st
         return cacheControlInstruction(RdnaInstructionFamily::MUBUF, cacheOp, opcode, programCounter, code, wordIndex);
     }
     const auto& info = lookupOpcode(mubufOpcodes, opcode, "MUBUF opcode is not supported");
+    if (((word0 >> 16u) & 1u) != 0u) {
+        throw std::runtime_error("unsupported MUBUF lds modifier");
+    }
 
     RdnaInstruction instruction{};
     instruction.programCounter = programCounter;
@@ -970,13 +980,8 @@ RdnaInstruction DecodeRdnaDs(std::uint32_t programCounter, std::span<const std::
     if (gds && (info.opcode == RdnaOpcode::DsSwizzleB32 || info.opcode == RdnaOpcode::DsBpermuteB32 || info.opcode == RdnaOpcode::DsPermuteB32 || info.opcode == RdnaOpcode::DsWriteAddtidB32 || info.opcode == RdnaOpcode::DsReadAddtidB32)) {
         throw std::runtime_error("DS lane operation is available only for LDS");
     }
-    if (info.opcode == RdnaOpcode::DsWrxchg2RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2RtnB64 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB64) {
-        if (offset0 == offset1) {
-            throw std::runtime_error("DS write exchange of one location through both offsets is not supported");
-        }
-        if (vdst + info.dataDwords > 256u) {
-            throw std::runtime_error("DS write exchange destination register range overflow");
-        }
+    if ((info.opcode == RdnaOpcode::DsWrxchg2RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB32 || info.opcode == RdnaOpcode::DsWrxchg2RtnB64 || info.opcode == RdnaOpcode::DsWrxchg2st64RtnB64) && vdst + info.dataDwords > 256u) {
+        throw std::runtime_error("DS write exchange destination register range overflow");
     }
     if (info.opcode == RdnaOpcode::DsWriteAddtidB32 && data1 != 0u) {
         throw std::runtime_error("DS write addtid data1 operand is not supported");
@@ -1036,7 +1041,7 @@ RdnaInstruction DecodeRdnaDs(std::uint32_t programCounter, std::span<const std::
 RdnaInstruction DecodeRdnaMemoryOp(std::span<const std::uint32_t> code, std::uint32_t wordIndex) {
     const auto programCounter = toProgramCounter(wordIndex);
     if (static_cast<std::size_t>(wordIndex) >= code.size()) {
-        throw std::runtime_error("truncated memory instruction");
+        throw std::out_of_range("truncated memory instruction");
     }
     switch (code[wordIndex] >> 26u) {
         case 0x36u: return DecodeRdnaDs(programCounter, code, wordIndex);

@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/SlimMutex.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
@@ -66,11 +67,12 @@ Statistics& Stats() {
 
 struct UnitShadow {
     Context context;
-    // The import's range and buffer (taken at creation: a publish under the import table's mutex
-    // must not look them up), and the unit base (the import's base rounded down to a unit).
+    // The import's range, buffer and lead (taken at creation: a publish under the import table's
+    // mutex must not look them up), and the unit base (the import's base rounded down to a unit).
     std::uint64_t importBase = 0;
     std::uint64_t importBytes = 0;
     VkBuffer importBuffer = VK_NULL_HANDLE;
+    std::uint64_t importLead = 0;
     std::uint64_t base = 0;
     // Per unit: 0 = never shadowed, else the tracker generation the slab bytes are current at;
     // whether a slab -> import copy was recorded at that generation.
@@ -97,14 +99,28 @@ struct UnitShadow {
 };
 
 struct Shadows {
-    std::mutex mutex;
+    SlimMutex mutex;
     std::map<std::uint64_t, std::shared_ptr<UnitShadow>> byBase;
     std::uint64_t liveBytes = 0;
     std::uint64_t peakBytes = 0;
     std::uint32_t liveSlabs = 0;
+    // Live units over every shadow, kept with each Recount under the mutex: AnyShadowedOverlaps answers
+    // without the mutex while it is zero (the draw committer and the packet worker queued on it,
+    // ~5% of the committer's time, mostly when nothing was shadowed).
+    std::atomic<std::uint64_t> liveTotal{0};
     // Counted for the [storage] segment: shadows retired and the slab bytes they returned.
     std::uint64_t retired = 0;
 };
+
+void Recount(Shadows& registry, UnitShadow& shadow) {
+    const auto before = shadow.liveUnits;
+    shadow.Recount();
+    registry.liveTotal.fetch_add(static_cast<std::uint64_t>(shadow.liveUnits) - before, std::memory_order_release);
+}
+
+void Forget(Shadows& registry, const UnitShadow& shadow) {
+    registry.liveTotal.fetch_sub(shadow.liveUnits, std::memory_order_release);
+}
 
 Shadows& Registry() {
     static Shadows shadows;
@@ -116,15 +132,24 @@ VkDeviceSize SlabBytes(const ShadowSlab& slab) {
 }
 
 // The shadows overlapping [address, end): imports never overlap, so at most a few.
-std::vector<std::shared_ptr<UnitShadow>> overlapping(const Shadows& registry, std::uint64_t address, std::uint64_t end) {
-    std::vector<std::shared_ptr<UnitShadow>> result;
-    if (end <= address || registry.byBase.empty()) return result;
+template<typename TVisit>
+bool anyOverlapping(const Shadows& registry, std::uint64_t address, std::uint64_t end, TVisit&& visit) {
+    if (end <= address || registry.byBase.empty()) return false;
     auto it = registry.byBase.upper_bound(address);
     if (it != registry.byBase.begin()) --it;
     for (; it != registry.byBase.end() && it->first < end; ++it) {
         const auto& shadow = it->second;
-        if (address < shadow->ImportEnd() && shadow->importBase < end) result.push_back(shadow);
+        if (address < shadow->ImportEnd() && shadow->importBase < end && visit(shadow)) return true;
     }
+    return false;
+}
+
+std::vector<std::shared_ptr<UnitShadow>> overlapping(const Shadows& registry, std::uint64_t address, std::uint64_t end) {
+    std::vector<std::shared_ptr<UnitShadow>> result;
+    anyOverlapping(registry, address, end, [&](const std::shared_ptr<UnitShadow>& shadow) {
+        result.push_back(shadow);
+        return false;
+    });
     return result;
 }
 
@@ -145,6 +170,7 @@ std::shared_ptr<UnitShadow> findOrCreate(Shadows& registry, const Context& conte
             registry.liveBytes -= SlabBytes(*slab);
             --registry.liveSlabs;
         }
+        Forget(registry, *found->second);
         registry.byBase.erase(found);
     }
     auto shadow = std::make_shared<UnitShadow>();
@@ -152,6 +178,7 @@ std::shared_ptr<UnitShadow> findOrCreate(Shadows& registry, const Context& conte
     shadow->importBase = import.base;
     shadow->importBytes = import.bytes;
     shadow->importBuffer = import.buffer;
+    shadow->importLead = import.lead;
     shadow->base = import.base & ~(UnitBytes - 1);
     const auto units = (import.base + import.bytes - shadow->base + UnitBytes - 1) / UnitBytes;
     shadow->generation.assign(static_cast<std::size_t>(units), 0);
@@ -269,7 +296,7 @@ void verifyPublished(const UnitShadow& shadow, const std::vector<SlabCopies>& co
             RecordMemoryBarrier(context, batch.Handle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
             batch.SubmitAndWait();
             host.Invalidate();
-            const auto address = shadow.importBase + region.dstOffset;
+            const auto address = shadow.importBase + region.dstOffset - shadow.importLead;
             Stats().verified.fetch_add(1, std::memory_order_relaxed);
             if (!GuestMemory::Accessible(reinterpret_cast<const void*>(address), static_cast<std::size_t>(region.size)) || std::memcmp(reinterpret_cast<const void*>(address), host.Bytes().data(), static_cast<std::size_t>(region.size)) != 0) {
                 Stats().mismatches.fetch_add(1, std::memory_order_relaxed);
@@ -326,7 +353,7 @@ std::size_t publishUnits(const std::shared_ptr<UnitShadow>& shadow, std::uint64_
             }
             const auto [begin, end] = shadow->UnitRange(unit);
             if (end <= begin) continue;
-            const VkBufferCopy region{(unit - slab->firstUnit) * UnitBytes + (begin - shadow->UnitBegin(unit)), begin - shadow->importBase, end - begin};
+            const VkBufferCopy region{(unit - slab->firstUnit) * UnitBytes + (begin - shadow->UnitBegin(unit)), begin - shadow->importBase + shadow->importLead, end - begin};
             if (!copies.empty() && copies.back().slab == slab && copies.back().regions.back().dstOffset + copies.back().regions.back().size == region.dstOffset) {
                 copies.back().regions.back().size += region.size;
                 ranges.back().second = end;
@@ -340,7 +367,7 @@ std::size_t publishUnits(const std::shared_ptr<UnitShadow>& shadow, std::uint64_
             bytes += end - begin;
             ++units;
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (units == 0) return 0;
     Stats().published[static_cast<std::size_t>(reason)].fetch_add(1, std::memory_order_relaxed);
@@ -405,7 +432,7 @@ bool evictOne(Shadows& registry) {
         victim->generation[unit] = 0;
         victim->published[unit] = 0;
     }
-    victim->Recount();
+    Recount(registry, *victim);
     registry.liveBytes -= SlabBytes(*slab);
     --registry.liveSlabs;
     slab.reset();
@@ -484,16 +511,17 @@ bool AnyShadowedOverlaps(std::uint64_t address, std::size_t bytes) {
     if (!UnitShadowEnabled() || bytes == 0) return false;
     const auto end = bytes > std::numeric_limits<std::uint64_t>::max() - address ? std::numeric_limits<std::uint64_t>::max() : address + bytes;
     auto& registry = Registry();
+    if (registry.liveTotal.load(std::memory_order_acquire) == 0) return false;
     std::lock_guard lock(registry.mutex);
-    for (const auto& shadow : overlapping(registry, address, end)) {
-        if (shadow->liveUnits == 0) continue;
+    return anyOverlapping(registry, address, end, [&](const std::shared_ptr<UnitShadow>& shadow) {
+        if (shadow->liveUnits == 0) return false;
         const auto begin = std::max(address, shadow->importBase);
         const auto stop = std::min(end, shadow->ImportEnd());
         for (auto unit = shadow->UnitOf(begin); unit <= shadow->UnitOf(stop - 1); ++unit) {
             if (shadow->Live(unit)) return true;
         }
-    }
-    return false;
+        return false;
+    });
 }
 
 bool AnyShadowedOverlaps(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
@@ -596,7 +624,7 @@ std::vector<ShadowRun> ShadowSources(const Context& context, const HostImport& i
     std::vector<ShadowRun> result;
     if (runs.empty()) return result;
     const auto importPiece = [&](std::uint64_t begin, std::uint64_t end) {
-        result.push_back({begin, end, import.buffer, surfaceBase + begin - import.base, false, nullptr});
+        result.push_back({begin, end, import.buffer, HostImportOffset(import, surfaceBase + begin), false, nullptr});
         if (countReads) Stats().detiledImportBytes.fetch_add(end - begin, std::memory_order_relaxed);
     };
     std::shared_ptr<UnitShadow> shadow;
@@ -658,7 +686,7 @@ std::vector<ShadowRun> ShadowSources(const Context& context, const HostImport& i
                 slab->lastUse = present;
                 result.push_back({pieceBegin, pieceEnd, slab->buffer, SlabOffset(import, *slab, surfaceBase + pieceBegin), true, slab});
             } else {
-                result.push_back({pieceBegin, pieceEnd, import.buffer, surfaceBase + pieceBegin - import.base, false, nullptr});
+                result.push_back({pieceBegin, pieceEnd, import.buffer, HostImportOffset(import, surfaceBase + pieceBegin), false, nullptr});
             }
             (isFresh ? shadowBytes : importBytes) += pieceEnd - pieceBegin;
         }
@@ -713,7 +741,7 @@ void MarkShadowed(const HostImport& import, std::span<const ShadowedRange> range
                 current->lastUse = present;
             }
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (lost != 0) {
         Stats().slabLost.fetch_add(lost, std::memory_order_relaxed);
@@ -727,7 +755,7 @@ void MarkShadowed(const HostImport& import, std::span<const ShadowedRange> range
     StorageTexture::BumpPendingSerial();
 }
 
-void RetireShadow(const Context& context, const HostImport& import, const std::function<bool(std::uint64_t, std::uint64_t)>& registered) {
+void RetireShadow(VkDevice device, const HostImport& import, const std::function<bool(std::uint64_t, std::uint64_t)>& registered) {
     if (!UnitShadowEnabled()) return;
     auto& registry = Registry();
     std::shared_ptr<UnitShadow> shadow;
@@ -752,12 +780,12 @@ void RetireShadow(const Context& context, const HostImport& import, const std::f
                 ++dropped;
             }
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (dropped != 0) Stats().droppedOnRetire.fetch_add(dropped, std::memory_order_relaxed);
     std::size_t published = 0;
     if (any) {
-        if (GuestMemory::GpuMutex().HeldByThisThread() && shadow->context.device == context.device) {
+        if (GuestMemory::GpuMutex().HeldByThisThread() && shadow->context.device == device) {
             published = publishUnits(shadow, 0, shadow->Units() - 1, selected, PublishReason::Retire);
         } else {
             Stats().lostOnRetire.fetch_add(shadow->liveUnits, std::memory_order_relaxed);
@@ -775,6 +803,7 @@ void RetireShadow(const Context& context, const HostImport& import, const std::f
     }
     ++registry.retired;
     if (TraceEnabled()) std::fprintf(stderr, "[shadow] retire import 0x%llx+0x%llx: %zu units published, %llu dropped (memory no longer registered)\n", static_cast<unsigned long long>(import.base), static_cast<unsigned long long>(import.bytes), published, static_cast<unsigned long long>(dropped));
+    Forget(registry, *found->second);
     registry.byBase.erase(found);
 }
 
@@ -804,6 +833,7 @@ void DestroyShadows(VkDevice device) {
             registry.liveBytes -= SlabBytes(*slab);
             --registry.liveSlabs;
         }
+        Forget(registry, *it->second);
         it = registry.byBase.erase(it);
     }
 }

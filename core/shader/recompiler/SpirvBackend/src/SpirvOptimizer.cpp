@@ -10,6 +10,8 @@ namespace ShaderRecompiler {
 
 namespace {
 
+constexpr std::uint32_t ScalarReplacementLimit = 64;
+
 bool HasLimitedUseTypes(std::span<const std::uint32_t> spirv) {
     if (spirv.size() < 5) throw std::runtime_error("SPIRV-Tools: incomplete module header");
     bool int8 = false, int16 = false, float16 = false;
@@ -94,7 +96,7 @@ std::vector<std::uint32_t> ValidateAndOptimizeSpirv(std::span<const std::uint32_
     spvtools::Optimizer optimizer(environment);
     optimizer.SetMessageConsumer(consumer);
     static const char* mode = std::getenv("APS5_SPIRV_OPT");
-    if (!specialize && mode != nullptr && std::string(mode) == "none") return std::vector<std::uint32_t>(spirv.begin(), spirv.end());
+    if (mode != nullptr && std::string(mode) == "none") return std::vector<std::uint32_t>(spirv.begin(), spirv.end());
     // The recompiler emits helpers (BDA lookup, fault reporting) as functions called from every memory
     // access. Exhaustive inlining multiplies module size by ~10x and optimization time by ~20x, so the
     // default pipeline keeps the performance passes that work per function and leaves inlining to the driver.
@@ -116,7 +118,7 @@ std::vector<std::uint32_t> ValidateAndOptimizeSpirv(std::span<const std::uint32_
             .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
             .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())
             .RegisterPass(spvtools::CreateAggressiveDCEPass(true))
-            .RegisterPass(spvtools::CreateScalarReplacementPass(0))
+            .RegisterPass(spvtools::CreateScalarReplacementPass(ScalarReplacementLimit))
             .RegisterPass(spvtools::CreateLocalAccessChainConvertPass())
             .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
             .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())
@@ -131,7 +133,7 @@ std::vector<std::uint32_t> ValidateAndOptimizeSpirv(std::span<const std::uint32_
         if (full) optimizer.RegisterPass(spvtools::CreateCombineAccessChainsPass());
         if (allowFolding) optimizer.RegisterPass(spvtools::CreateSimplificationPass());
         if (full) {
-            optimizer.RegisterPass(spvtools::CreateScalarReplacementPass(0))
+            optimizer.RegisterPass(spvtools::CreateScalarReplacementPass(ScalarReplacementLimit))
                 .RegisterPass(spvtools::CreateLocalAccessChainConvertPass())
                 .RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass())
                 .RegisterPass(spvtools::CreateLocalSingleStoreElimPass())

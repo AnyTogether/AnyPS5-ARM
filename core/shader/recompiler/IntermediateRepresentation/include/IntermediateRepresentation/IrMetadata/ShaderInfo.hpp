@@ -33,10 +33,17 @@ struct ShaderInfo {
     bool hasBitwiseXor = false;
     bool usesDma = false;
     bool bdaWrites = false;
+    bool usesFaultBuffer = false;
     bool dispatchThreadLimit = false;
+    bool rasterPrimitive = false;
+    bool layerExported = false;
 
     bool operator==(const ShaderInfo& other) const = default;
 };
+
+[[nodiscard]] inline std::uint32_t WorkgroupMemoryStrideDwords(const ShaderInfo& info) {
+    return info.sharedMemoryBytes == 0u ? 0u : info.sharedMemoryBytes / 4u + 1u;
+}
 
 }
 

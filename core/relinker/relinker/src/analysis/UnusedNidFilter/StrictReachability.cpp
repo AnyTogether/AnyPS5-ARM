@@ -102,16 +102,17 @@ private:
         return {address, info};
     }
 
-    bool isZeroPadding(VirtualAddress begin, VirtualAddress end) const {
-        const auto first = input.Text.begin() + static_cast<std::ptrdiff_t>(begin - input.TextVaddr);
-        const auto last = input.Text.begin() + static_cast<std::ptrdiff_t>(end - input.TextVaddr);
-        return std::all_of(first, last, [](std::uint8_t byte) { return byte == 0; });
+    VirtualAddress trailingZeroStart(VirtualAddress begin, VirtualAddress end) const {
+        auto pos = input.Text.data() + static_cast<std::ptrdiff_t>(end - input.TextVaddr);
+        const auto first = input.Text.data() + static_cast<std::ptrdiff_t>(begin - input.TextVaddr);
+        while (pos != first && *(pos - 1) == 0) --pos;
+        return input.TextVaddr + static_cast<VirtualAddress>(pos - input.Text.data());
     }
 
     void addGap(VirtualAddress begin, VirtualAddress end) {
+        const auto effectiveEnd = trailingZeroStart(begin, end);
         VirtualAddress regionBegin = begin;
-        for (auto address = begin; address < end;) {
-            if (isZeroPadding(address, end)) break;
+        for (auto address = begin; address < effectiveEnd;) {
             const auto instruction = decode(address, end);
             address += instruction.Info.Length;
             if (endsFlow(instruction.Info.FlowKind)) {
@@ -145,12 +146,10 @@ private:
 
     void buildEdges() {
         for (auto& [begin, region] : regions) {
+            const auto effectiveEnd = trailingZeroStart(begin, region.End);
             Codegen::ControlFlowKind lastFlow = Codegen::ControlFlowKind::Sequential;
-            for (auto address = begin; address < region.End;) {
-                if (isZeroPadding(address, region.End)) {
-                    lastFlow = Codegen::ControlFlowKind::Sequential;
-                    break;
-                }
+            auto address = begin;
+            while (address < effectiveEnd) {
                 const auto instruction = decode(address, region.End);
                 const auto& info = instruction.Info;
                 const auto next = address + info.Length;
@@ -164,7 +163,8 @@ private:
                 if (info.HasRipRelativeDisp) {
                     std::int32_t displacement;
                     std::memcpy(&displacement, input.Text.data() + offset + info.RipRelativeDispOffset, sizeof(displacement));
-                    const auto target = next + static_cast<VirtualAddress>(static_cast<std::int64_t>(displacement));
+                    auto target = next + static_cast<VirtualAddress>(static_cast<std::int64_t>(displacement));
+                    if (info.AddressSize32) target = static_cast<std::uint32_t>(target);
                     if (input.ImportSlots.contains(target)) region.Imports.insert(target);
                     if (!info.IsTwoByteOpcode && info.Opcode == 0x8D) {
                         addAddressTaken(target);
@@ -185,6 +185,7 @@ private:
                 lastFlow = info.FlowKind;
                 address = next;
             }
+            if (address < region.End) lastFlow = Codegen::ControlFlowKind::Sequential;
             if (!endsFlow(lastFlow) && isCode(region.End)) region.Edges.insert(region.End);
         }
     }
@@ -201,16 +202,7 @@ private:
 
     void collectRelativeTables() {
         for (const auto base : tableBases) {
-            for (const auto& data : input.Data) {
-                if (base < data.Address || base - data.Address >= data.Bytes.size()) continue;
-                for (auto offset = static_cast<std::size_t>(base - data.Address); offset + 4 <= data.Bytes.size(); offset += 4) {
-                    std::int32_t displacement;
-                    std::memcpy(&displacement, data.Bytes.data() + offset, sizeof(displacement));
-                    const auto target = base + static_cast<std::uint64_t>(static_cast<std::int64_t>(displacement));
-                    if (!isCode(target)) break;
-                    addAddressTaken(target);
-                }
-            }
+            for (const auto target : ReadRelativeTableTargets(input.Data, base, input.TextVaddr, input.Text.size())) addAddressTaken(target);
         }
     }
 };
@@ -219,6 +211,21 @@ private:
 
 StrictReachabilityResult AnalyzeStrictReachability(const StrictReachabilityInput& input) {
     return Analyzer(input).Run();
+}
+
+std::vector<VirtualAddress> ReadRelativeTableTargets(const std::vector<StrictDataRegion>& data, VirtualAddress base, VirtualAddress textVaddr, std::size_t textSize) {
+    std::vector<VirtualAddress> targets;
+    for (const auto& region : data) {
+        if (base < region.Address || base - region.Address >= region.Bytes.size()) continue;
+        for (auto offset = static_cast<std::size_t>(base - region.Address); offset + 4 <= region.Bytes.size(); offset += 4) {
+            std::int32_t displacement;
+            std::memcpy(&displacement, region.Bytes.data() + offset, sizeof(displacement));
+            const auto target = base + static_cast<std::uint64_t>(static_cast<std::int64_t>(displacement));
+            if (target < textVaddr || target - textVaddr >= textSize) break;
+            targets.push_back(target);
+        }
+    }
+    return targets;
 }
 
 }

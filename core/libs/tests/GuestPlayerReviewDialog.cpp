@@ -18,6 +18,7 @@ constexpr int COMMON_DIALOG_STATUS_NONE = 0;
 constexpr int COMMON_DIALOG_STATUS_INITIALIZED = 1;
 constexpr int COMMON_DIALOG_STATUS_FINISHED = 3;
 constexpr int COMMON_DIALOG_RESULT_USER_CANCELED = 1;
+constexpr int COMMON_DIALOG_ERROR_ALREADY_INITIALIZED = static_cast<int>(0x80B80004u);
 constexpr int COMMON_DIALOG_ERROR_NOT_INITIALIZED = static_cast<int>(0x80B80003u);
 constexpr int COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<int>(0x80B80005u);
 constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
@@ -29,16 +30,19 @@ void Require(bool value) { if (!value) std::abort(); }
 int main() {
     std::uint8_t param[64] = {};
     std::int32_t result[8] = {};
+    Require(scePlayerReviewDialogTerminate() == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
     Require(scePlayerReviewDialogOpen(param) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(scePlayerReviewDialogClose() == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(scePlayerReviewDialogGetResult(result) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
 
     Require(scePlayerReviewDialogInitialize() == 0);
+    Require(scePlayerReviewDialogInitialize() == COMMON_DIALOG_ERROR_ALREADY_INITIALIZED);
     Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
     Require(scePlayerReviewDialogUpdateStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
     Require(scePlayerReviewDialogGetResult(result) == COMMON_DIALOG_ERROR_NOT_FINISHED);
     Require(scePlayerReviewDialogTerminate() == 0);
+    Require(scePlayerReviewDialogTerminate() == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
 
     Require(scePlayerReviewDialogInitialize() == 0);

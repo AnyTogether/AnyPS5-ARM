@@ -2,10 +2,14 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <regex>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 // The game is fully installed on the host, so every chunk is local and nothing is pending.
@@ -16,6 +20,7 @@ static constexpr int8_t PLAYGO_LOCUS_NOT_DOWNLOADED = 0;
 static constexpr int8_t PLAYGO_LOCUS_LOCAL_SLOW = 2;
 static constexpr int8_t PLAYGO_LOCUS_LOCAL_FAST = 3;
 static constexpr uint64_t PLAYGO_LANGUAGE_MASK_ALL = ~0ull;
+static constexpr uint64_t PLAYGO_OPTIONAL_CHUNK_MASK_ALL = ~0ull;
 static constexpr int32_t PLAYGO_INSTALL_SPEED_FULL = 2;
 
 static int32_t g_installSpeed = PLAYGO_INSTALL_SPEED_FULL;
@@ -24,14 +29,49 @@ static constexpr int SCE_PLAYGO_ERROR_BAD_CHUNK_ID = static_cast<int>(0x80B2000C
 static constexpr int SCE_PLAYGO_ERROR_BAD_SIZE = static_cast<int>(0x80B2000B);
 static constexpr int SCE_PLAYGO_ERROR_BAD_LOCUS = static_cast<int>(0x80B20010);
 
-// The package's chunk table is not part of the dump, so the chunk set comes from the title's
-// playgo-chunkdefs.xml: every listed chunk plus chunks 0 through the default chunk. Games probe
-// chunk IDs and size arrays from the result, so unknown IDs must be rejected.
-static const std::set<uint16_t>& ValidChunks() {
-    static const std::set<uint16_t> chunks = [] {
-        std::set<uint16_t> result{0};
+struct ChunkTable {
+    std::set<uint16_t> ids{0};
+    bool defined = false;
+    bool scenario = false;
+};
+
+static bool ReadPackageChunks(ChunkTable& table) {
+    constexpr std::size_t CountOffset = 0x0A;
+    std::ifstream file(ResolvePath_nid_no_patch("/app0/sce_sys/playgo-chunk.dat"), std::ios::binary);
+    char header[CountOffset + sizeof(uint16_t)]{};
+    if (!file) return false;
+    const auto unreadable = [] { return std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat is not a chunk table this library reads (expected a plgx header with a nonzero chunk count)"); };
+    if (!file.read(header, sizeof(header)) || std::memcmp(header, "plgx", 4) != 0) throw unreadable();
+    uint16_t count = 0;
+    std::memcpy(&count, header + CountOffset, sizeof(count));
+    if (count == 0) throw unreadable();
+    for (uint32_t id = 0; id < count; ++id) table.ids.insert(static_cast<uint16_t>(id));
+    table.defined = true;
+    return true;
+}
+
+static void RejectUnreadablePlayGoFiles() {
+    std::error_code error;
+    const std::filesystem::path directory = ResolvePath_nid_no_patch("/app0/sce_sys");
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+        const auto name = entry.path().filename().string();
+        if (name.rfind("playgo-", 0) == 0)
+            throw std::runtime_error("scePlayGo: sce_sys/" + name + " is present but no chunk table (playgo-chunk.dat) or scenario file (playgo-scenario.json) is, so the chunk ids are unknown");
+    }
+}
+
+static const ChunkTable& Chunks() {
+    static const ChunkTable chunks = [] {
+        ChunkTable table;
         std::ifstream file(ResolvePath_nid_no_patch("/app0/playgo-chunkdefs.xml"));
-        if (!file) return result;
+        if (!file) {
+            if (ReadPackageChunks(table)) return table;
+            table.scenario = std::ifstream(ResolvePath_nid_no_patch("/app0/sce_sys/playgo-scenario.json")).good();
+            if (!table.scenario) RejectUnreadablePlayGoFiles();
+            return table;
+        }
+        table.defined = true;
+        auto& result = table.ids;
         const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         static const std::regex chunk(R"re(<chunk\s+id="(\d+)")re");
         for (auto it = std::sregex_iterator(text.begin(), text.end(), chunk); it != std::sregex_iterator(); ++it)
@@ -42,17 +82,40 @@ static const std::set<uint16_t>& ValidChunks() {
             const auto last = std::stoul(match[1].str());
             for (unsigned long id = 0; id <= last && id <= 0xFFFF; ++id) result.insert(static_cast<uint16_t>(id));
         }
-        return result;
+        return table;
     }();
     return chunks;
+}
+
+enum class UnlistedChunkAnswer { Stop, Installed, Absent };
+
+static UnlistedChunkAnswer UnlistedChunks() {
+    static const UnlistedChunkAnswer answer = [] {
+        const char* text = std::getenv("APS5_PLAYGO_UNLISTED_CHUNKS");
+        if (text == nullptr || text[0] == '\0') return UnlistedChunkAnswer::Stop;
+        const std::string value(text);
+        if (value == "installed") return UnlistedChunkAnswer::Installed;
+        if (value == "absent") return UnlistedChunkAnswer::Absent;
+        throw std::runtime_error("scePlayGo: APS5_PLAYGO_UNLISTED_CHUNKS must be installed or absent, not \"" + value + "\"");
+    }();
+    return answer;
+}
+
+static bool IsKnownChunk(uint16_t id) {
+    const auto& chunks = Chunks();
+    if (chunks.defined) return chunks.ids.contains(id);
+    if (chunks.scenario || id == 0) return true;
+    // Unlike upstream, an unset APS5_PLAYGO_UNLISTED_CHUNKS takes a dump without any playgo-* file as
+    // fully installed, as with only playgo-scenario.json: Stray (PPSA02100) asks for chunk 1 at startup
+    // and ships neither file.
+    return UnlistedChunks() != UnlistedChunkAnswer::Absent;
 }
 
 static int ValidateChunks(const uint16_t* chunk_ids, uint32_t number_of_entries) {
     if (!chunk_ids) return SCE_PLAYGO_ERROR_BAD_POINTER;
     if (number_of_entries == 0) return SCE_PLAYGO_ERROR_BAD_SIZE;
-    const auto& valid = ValidChunks();
     for (uint32_t index = 0; index < number_of_entries; ++index)
-        if (!valid.contains(chunk_ids[index])) return SCE_PLAYGO_ERROR_BAD_CHUNK_ID;
+        if (!IsKnownChunk(chunk_ids[index])) return SCE_PLAYGO_ERROR_BAD_CHUNK_ID;
     return 0;
 }
 
@@ -66,7 +129,7 @@ int APS5_VABI scePlayGoClose(int handle) {
 int APS5_VABI scePlayGoGetChunkId(int handle, uint16_t* out_chunk_id_list, uint32_t number_of_entries, uint32_t* out_entries) {
     if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
     if (!out_entries) return SCE_PLAYGO_ERROR_BAD_POINTER;
-    const auto& valid = ValidChunks();
+    const auto& valid = Chunks().ids;
     if (!out_chunk_id_list) {
         *out_entries = static_cast<uint32_t>(valid.size());
         return 0;
@@ -118,7 +181,7 @@ int APS5_VABI scePlayGoGetOptionalChunk(int handle, int32_t type, PlayGoOptional
     if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
     (void)type;
     if (!option) return SCE_PLAYGO_ERROR_BAD_POINTER;
-    option->bitmask = 0;
+    option->bitmask = PLAYGO_OPTIONAL_CHUNK_MASK_ALL;
     return 0;
 }
 
@@ -135,7 +198,7 @@ int APS5_VABI scePlayGoGetSupportedOptionalChunk(int handle, int32_t type, PlayG
     if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
     (void)type;
     if (!option) return SCE_PLAYGO_ERROR_BAD_POINTER;
-    option->bitmask = 0;
+    option->bitmask = PLAYGO_OPTIONAL_CHUNK_MASK_ALL;
     return 0;
 }
 
@@ -183,9 +246,8 @@ int APS5_VABI scePlayGoSetToDoList(int handle, const PlayGoToDo* todo_list, uint
     if (handle != PLAYGO_HANDLE) return SCE_PLAYGO_ERROR_BAD_HANDLE;
     if (!todo_list) return SCE_PLAYGO_ERROR_BAD_POINTER;
     if (number_of_entries == 0) return SCE_PLAYGO_ERROR_BAD_SIZE;
-    const auto& valid = ValidChunks();
     for (uint32_t index = 0; index < number_of_entries; ++index) {
-        if (!valid.contains(todo_list[index].chunk_id)) return SCE_PLAYGO_ERROR_BAD_CHUNK_ID;
+        if (!IsKnownChunk(todo_list[index].chunk_id)) return SCE_PLAYGO_ERROR_BAD_CHUNK_ID;
         const int8_t locus = todo_list[index].locus;
         if (locus != PLAYGO_LOCUS_NOT_DOWNLOADED && locus != PLAYGO_LOCUS_LOCAL_SLOW && locus != PLAYGO_LOCUS_LOCAL_FAST) return SCE_PLAYGO_ERROR_BAD_LOCUS;
     }

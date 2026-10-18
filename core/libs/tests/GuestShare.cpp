@@ -5,12 +5,16 @@
 #include <initializer_list>
 
 extern "C" {
+#ifndef SHARE_NATIVE_BACKEND
 int APS5_VABI sceShareCaptureScreenshotExtended(const void* extended_param, std::int32_t* req_id);
+int APS5_VABI sceShareCaptureVideoClipExtended(const void* extended_param, std::int32_t* req_id);
+int APS5_VABI sceShareGetRunningStatus(std::uint32_t* status);
+int APS5_VABI sceShareSetContentParamForApplicationTitle(const char* application_title);
+#endif
 int APS5_VABI sceShareCaptureScreenshot(const void* param, std::int32_t* req_id);
 int APS5_VABI sceShareCaptureVideoClip(const void* param, std::int32_t* req_id);
 int APS5_VABI sceShareGetCurrentStatus(std::uint32_t feature_flag, void* status);
 int APS5_VABI sceShareOpenMenuForContent(const void* content_id);
-int APS5_VABI sceShareGetRunningStatus(std::uint32_t* status);
 }
 
 namespace {
@@ -24,17 +28,20 @@ int main() {
     std::uint8_t param[64]{};
 
     std::int32_t reqId = 7;
-    Require(sceShareCaptureScreenshotExtended(param, &reqId) == notSupported);
-    Require(reqId == -1);
-
-    reqId = 7;
-    Require(sceShareCaptureScreenshotExtended(nullptr, &reqId) == notSupported);
-    Require(reqId == -1);
-
-    Require(sceShareCaptureScreenshotExtended(param, nullptr) == notSupported);
-    Require(sceShareCaptureScreenshotExtended(nullptr, nullptr) == notSupported);
-
     using Capture = int (APS5_VABI*)(const void*, std::int32_t*);
+#ifndef SHARE_NATIVE_BACKEND
+    for (Capture capture : {sceShareCaptureScreenshotExtended, sceShareCaptureVideoClipExtended}) {
+        reqId = 7;
+        Require(capture(param, &reqId) == notSupported);
+        Require(reqId == -1);
+        reqId = 7;
+        Require(capture(nullptr, &reqId) == notSupported);
+        Require(reqId == -1);
+        Require(capture(param, nullptr) == notSupported);
+        Require(capture(nullptr, nullptr) == notSupported);
+    }
+#endif
+
     for (Capture capture : {sceShareCaptureScreenshot, sceShareCaptureVideoClip}) {
         reqId = 7;
         Require(capture(param, &reqId) == notSupported);
@@ -60,9 +67,13 @@ int main() {
     Require(sceShareGetCurrentStatus(0, status) == invalidParam);
     Require(status[0] == 0x5a);
     Require(sceShareGetCurrentStatus(1, nullptr) == invalidParam);
+#ifndef SHARE_NATIVE_BACKEND
     std::uint32_t running[2]{0xffffffffu, 0x5a5a5a5au};
     Require(sceShareGetRunningStatus(running) == 0);
     Require(running[0] == 0 && running[1] == 0x5a5a5a5au);
     Require(sceShareGetRunningStatus(nullptr) == invalidParam);
+    Require(sceShareSetContentParamForApplicationTitle("title") == 0);
+    Require(sceShareSetContentParamForApplicationTitle(nullptr) == invalidParam);
+#endif
     return 0;
 }

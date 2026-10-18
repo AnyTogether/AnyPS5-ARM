@@ -39,6 +39,8 @@ public:
 
 class __pointer_type_info : public __pbase_type_info {};
 
+class __function_type_info : public std::type_info {};
+
 class __pointer_to_member_type_info : public __pbase_type_info {
 public:
     const __class_type_info* __context;

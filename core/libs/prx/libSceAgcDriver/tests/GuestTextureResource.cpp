@@ -1,6 +1,7 @@
 #include "GraphicsTests.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DccMetadata.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestTextureResource.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/ShaderResources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
 #include <algorithm>
 #include <array>
@@ -95,6 +96,18 @@ void rejectFields(const Fields& f, std::string_view reason) {
 
 void RunGuestTextureResourceTests() {
     Fields base;
+    const auto baseWords = pack(base);
+    Require(!IsNullTextureResource(baseWords), "a nonzero 2D texture was classified as null");
+    Fields nullBase = base;
+    nullBase.base40 = 0;
+    Require(IsNullTextureResource(pack(nullBase)), "a zero-base texture was not classified as null");
+    Fields nullType = base;
+    nullType.typeRaw = 0;
+    Require(IsNullTextureResource(pack(nullType)), "a type-0 texture with a nonzero base was not classified as null");
+    nullType.typeRaw = 1;
+    Require(IsNullTextureResource(pack(nullType)), "a type-1 texture with a nonzero base was not classified as null");
+    nullType.typeRaw = 2;
+    Require(!IsNullTextureResource(pack(nullType)), "a reserved type-2 texture was classified as null");
     auto result = DecodeTextureResource(pack(base));
     Require(result.baseAddress == (base.base40 << 8u), "decoded base address changed");
     Require(result.width == 16 && result.height == 16, "decoded width or height changed");
@@ -119,8 +132,10 @@ void RunGuestTextureResourceTests() {
     tileModes.tileModeRaw = 0x09;
     Require(DecodeTextureResource(pack(tileModes)).tileMode == TextureTileMode::kStandard64KB, "tile mode 0x09 must decode to standard 64KB");
     tileModes.tileModeRaw = 0x1b;
-    rejectFields(tileModes, "pipe/bank XOR base");
+    const auto xorBase = DecodeTextureResource(pack(tileModes));
+    Require(xorBase.baseAddress == 0x12340000ull && xorBase.pipeBankXor == 0x5600u, "a 64 KiB XOR swizzle did not split its base into the block base and its pipe/bank XOR");
     tileModes.base40 = 0x120000ull;
+    Require(DecodeTextureResource(pack(tileModes)).pipeBankXor == 0u, "an aligned 64 KiB XOR base gained a pipe/bank XOR");
     Require(DecodeTextureResource(pack(tileModes)).tileMode == TextureTileMode::RenderTarget64KB, "tile mode 0x1b must decode to render target 64KB");
     constexpr std::array<std::pair<std::uint32_t, TextureTileMode>, 7> added{{{0x02, TextureTileMode::kD256B}, {0x06, TextureTileMode::kD4KB}, {0x0a, TextureTileMode::kD64KB}, {0x11, TextureTileMode::kS64KBT}, {0x12, TextureTileMode::kD64KBT}, {0x15, TextureTileMode::kS4KBX}, {0x16, TextureTileMode::kD4KBX}}};
     for (const auto& [raw, mode] : added) {
@@ -131,10 +146,18 @@ void RunGuestTextureResourceTests() {
     tileModes.base40 = 0x120010ull;
     Require(DecodeTextureResource(pack(tileModes)).tileMode == TextureTileMode::kD4KBX, "a 4 KiB XOR swizzle must accept a 4 KiB aligned base");
     tileModes.base40 = 0x120011ull;
-    rejectFields(tileModes, "pipe/bank XOR base");
+    const auto xor4Kb = DecodeTextureResource(pack(tileModes));
+    Require(xor4Kb.baseAddress == 0x12001000ull && xor4Kb.pipeBankXor == 0x100u, "a 4 KiB XOR swizzle did not split its base into the block base and its pipe/bank XOR");
     tileModes.tileModeRaw = 0x12;
     tileModes.base40 = 0x120010ull;
-    rejectFields(tileModes, "pipe/bank XOR base");
+    const auto xorT = DecodeTextureResource(pack(tileModes));
+    Require(xorT.baseAddress == 0x12000000ull && xorT.pipeBankXor == 0x1000u, "a 64 KiB T swizzle did not split its base into the block base and its pipe/bank XOR");
+    tileModes.tileModeRaw = 0x09;
+    const auto standard = DecodeTextureResource(pack(tileModes));
+    Require(standard.baseAddress == 0x12001000ull && standard.pipeBankXor == 0u, "a swizzle without XOR addressing split its base");
+    tileModes.tileModeRaw = 0x1b;
+    tileModes.base40 = 0x56ull;
+    rejectFields(tileModes, "null base address");
     tileModes.base40 = base.base40;
     tileModes.tileModeRaw = 0x03;
     rejectFields(tileModes, "unsupported tile mode");
@@ -149,7 +172,26 @@ void RunGuestTextureResourceTests() {
 
     Fields twoD = base;
     twoD.depth = 1;
+    rejectFields(twoD, "custom pitch other than its default pitch");
+    twoD.tileModeRaw = 0x09;
     rejectFields(twoD, "nonzero depth or base array");
+    Fields pitched = base;
+    pitched.width = 72;
+    pitched.height = 72;
+    pitched.depth = 127;
+    result = DecodeTextureResource(pack(pitched));
+    Require(result.dimension == TextureDimension::k2D && result.width == 72 && result.depthOrLastArray == 0, "linear 2D descriptor with its default pitch in DEPTH decoded incorrectly");
+    pitched.width = 8;
+    pitched.height = 8;
+    pitched.depth = 63;
+    result = DecodeTextureResource(pack(pitched));
+    Require(result.width == 8 && result.depthOrLastArray == 0, "linear 2D descriptor with a one-unit default pitch decoded incorrectly");
+    pitched.depth = 127;
+    rejectFields(pitched, "custom pitch other than its default pitch");
+    pitched.depth = 63;
+    pitched.maxMip = 1;
+    pitched.lastLevel = 1;
+    rejectFields(pitched, "custom pitch other than its default pitch");
     twoD = base;
     twoD.baseArray = 1;
     rejectFields(twoD, "nonzero depth or base array");
@@ -214,6 +256,65 @@ void RunGuestTextureResourceTests() {
     cubeNotMultiple.depth = 4;
     rejectFields(cubeNotMultiple, "multiple of 6");
 
+    Fields multisampled = base;
+    multisampled.typeRaw = 14;
+    multisampled.width = 297;
+    multisampled.height = 297;
+    multisampled.tileModeRaw = 0x1b;
+    multisampled.lastLevel = 2;
+    multisampled.maxMip = 2;
+    result = DecodeTextureResource(pack(multisampled));
+    Require(result.dimension == TextureDimension::k2DMsaa && result.samples == 4 && result.width == 297 && result.height == 297, "4x multisampled descriptor decoded incorrectly");
+    Require(result.mipCount == 1 && result.allocatedMipCount == 1 && result.baseLevel == 0 && result.lastLevel == 0, "a multisampled descriptor's sample count was decoded as mip levels");
+    Require(DecodeTextureResource(pack(base)).samples == 1, "a single-sample descriptor decoded with several samples");
+    const std::array<std::uint32_t, 8> canvas{0x021f2000u, 0x03800000u, 0x804a004au, 0xe1b20facu, 0x00000000u, 0x00400020u, 0x00000000u, 0x00000000u};
+    result = DecodeTextureResource(canvas);
+    Require(result.dimension == TextureDimension::k2DMsaa && result.samples == 4 && result.baseAddress == 0x21f200000ull && result.width == 297 && result.height == 297 && result.format == 56 && result.tileMode == TextureTileMode::kR64KBX, "the 4x canvas descriptor of PPSA99006 decoded incorrectly");
+    Fields fewerFragments = multisampled;
+    fewerFragments.maxMip = 1;
+    rejectFields(fewerFragments, "same sample count");
+    Fields singleSampleType = multisampled;
+    singleSampleType.lastLevel = 0;
+    singleSampleType.maxMip = 0;
+    rejectFields(singleSampleType, "same sample count");
+    Fields offsetLevel = multisampled;
+    offsetLevel.baseLevel = 1;
+    rejectFields(offsetLevel, "same sample count");
+    Fields multisampledSlice = multisampled;
+    multisampledSlice.depth = 1;
+    rejectFields(multisampledSlice, "nonzero depth or base array");
+    Fields multisampledArray = multisampled;
+    multisampledArray.typeRaw = 15;
+    rejectFields(multisampledArray, "unsupported image type");
+
+    for (const auto format : {7u, 22u}) {
+        for (const auto log2 : {1u, 2u, 3u}) {
+            auto nativeDepth = base;
+            nativeDepth.typeRaw = 14;
+            nativeDepth.format = format;
+            nativeDepth.tileModeRaw = 24;
+            nativeDepth.lastLevel = log2;
+            nativeDepth.maxMip = log2;
+            nativeDepth.msaaDepth = true;
+            const auto decoded = DecodeTextureResource(pack(nativeDepth));
+            Require(decoded.iterate256 && decoded.samples == (1u << log2) && decoded.tileMode == TextureTileMode::kZ64KBX && decoded.format == format, "a native multisampled depth descriptor lost ITERATE_256 or its identity");
+            Require(decoded.mipCount == 1 && decoded.allocatedMipCount == 1 && decoded.baseLevel == 0 && decoded.lastLevel == 0, "native multisampled depth retained sample counts as mip levels");
+            auto wrongTile = nativeDepth;
+            wrongTile.tileModeRaw = 27;
+            rejectFields(wrongTile, "ITERATE_256");
+            auto wrongFormat = nativeDepth;
+            wrongFormat.format = 56;
+            rejectFields(wrongFormat, "ITERATE_256");
+            auto wrongType = nativeDepth;
+            wrongType.typeRaw = 9;
+            rejectFields(wrongType, "ITERATE_256");
+            wrongType.typeRaw = 15;
+            rejectFields(wrongType, "ITERATE_256");
+            auto mismatchedSamples = nativeDepth;
+            mismatchedSamples.maxMip = log2 - 1u;
+            rejectFields(mismatchedSamples, "same sample count");
+        }
+    }
     Fields badType = base;
     badType.typeRaw = 0;
     rejectFields(badType, "unsupported image type");
@@ -285,7 +386,7 @@ void RunGuestTextureResourceTests() {
 
     Fields badMsaa = base;
     badMsaa.msaaDepth = true;
-    rejectFields(badMsaa, "MSAA");
+    rejectFields(badMsaa, "ITERATE_256");
 
     Fields blockSize = base;
     blockSize.maxUncompBlkSize = 1;
@@ -326,9 +427,16 @@ void RunGuestTextureResourceTests() {
         Require(image.dccPipeAligned == pipeAligned && stored == expected && std::all_of(keys, keys + expected, [](std::uint8_t key) { return key == 0xff; }), std::string("a 1920x1080 SW_64KB_R_X storage image with ") + (pipeAligned ? "pipe-aligned" : "unaligned") + " DCC stored " + std::to_string(stored) + " uncompressed keys, expected " + std::to_string(expected));
     }
 
-    Fields badSwizzle = base;
-    badSwizzle.bcSwizzle = 1;
-    rejectFields(badSwizzle, "BC swizzle");
+    for (std::uint32_t swizzle = 0; swizzle <= 5u; ++swizzle) {
+        Fields borderSwizzle = base;
+        borderSwizzle.bcSwizzle = swizzle;
+        Require(DecodeTextureResource(pack(borderSwizzle)).bcSwizzle == swizzle, "a texture descriptor lost its BC swizzle " + std::to_string(swizzle));
+    }
+    for (std::uint32_t swizzle : {6u, 7u}) {
+        Fields badSwizzle = base;
+        badSwizzle.bcSwizzle = swizzle;
+        rejectFields(badSwizzle, "reserved BC swizzle");
+    }
 
     Fields badLevels = base;
     badLevels.baseLevel = 2;
@@ -401,6 +509,9 @@ void RunGuestTextureResourceTests() {
     Require(MatchesGuestDimension(Shape::Image2D, TextureDimension::k2D), "2D shape must match 2D dimension");
     Require(!MatchesGuestDimension(Shape::Image2D, TextureDimension::k2DArray), "2D shape must not match 2D array dimension");
     Require(MatchesGuestDimension(Shape::Image2DArray, TextureDimension::k2DArray), "2D array shape must match 2D array dimension");
+    Require(MatchesGuestDimension(Shape::Image2DMultisample, TextureDimension::k2DMsaa), "multisampled shape must match the multisampled dimension");
+    Require(!MatchesGuestDimension(Shape::Image2DMultisample, TextureDimension::k2D), "multisampled shape must not match 2D dimension");
+    Require(!MatchesGuestDimension(Shape::Image2D, TextureDimension::k2DMsaa), "2D shape must not match the multisampled dimension");
     Require(MatchesGuestDimension(Shape::Image2DArray, TextureDimension::kCube), "a cube must be readable as a 2D array of its faces");
     Require(MatchesGuestDimension(Shape::ImageCube, TextureDimension::kCube), "cube shape must match cube dimension");
     Require(!MatchesGuestDimension(Shape::ImageCube, TextureDimension::k1D), "cube shape must not match 1D dimension");
@@ -408,4 +519,42 @@ void RunGuestTextureResourceTests() {
     Require(!MatchesGuestDimension(Shape::Image3D, TextureDimension::k2D), "3D shape must never match a guest dimension");
     Require(!MatchesGuestDimension(Shape::Image3D, TextureDimension::k2DArray), "3D shape must never match a guest dimension");
     Require(!MatchesGuestDimension(Shape::Image3D, TextureDimension::kCube), "3D shape must never match a guest dimension");
+
+    const auto layered = [](TextureDimension dimension, std::uint32_t lastLayer, std::uint32_t baseArray = 0) {
+        GuestTextureResource resource{};
+        resource.dimension = dimension;
+        resource.depthOrLastArray = lastLayer;
+        resource.baseArray = baseArray;
+        return resource;
+    };
+    const auto twoSlices = layered(TextureDimension::k2DArray, 1);
+    Require(ArrayLayersServeView(twoSlices, layered(TextureDimension::k2D, 0)), "a 2D texture must view the first layer of a 2D array color surface (slice-0 view with MIP0_DEPTH 1)");
+    Require(ArrayLayersServeView(twoSlices, twoSlices), "a 2D array must view the same 2D array");
+    Require(ArrayLayersServeView(layered(TextureDimension::k2DArray, 3), twoSlices), "a 2D array must view the first layers of a larger 2D array");
+    Require(!ArrayLayersServeView(twoSlices, layered(TextureDimension::k2DArray, 3)), "a 2D array view must not reach past the surface's layers");
+    Require(!ArrayLayersServeView(twoSlices, layered(TextureDimension::k2D, 0, 1)), "a 2D view of a later layer must not be served by the array's first layer");
+    Require(ArrayLayersServeView(layered(TextureDimension::k2D, 0), layered(TextureDimension::k2D, 0)), "a 2D texture must view the same 2D surface");
+    Require(!ArrayLayersServeView(layered(TextureDimension::k2D, 0), twoSlices), "a 2D surface must not serve a 2D array view");
+    Require(!ArrayLayersServeView(layered(TextureDimension::k3D, 1), layered(TextureDimension::k2D, 0)), "a 3D surface's first slice must not serve a 2D texture");
+    Require(!ArrayLayersServeView(layered(TextureDimension::kCube, 5), layered(TextureDimension::k2D, 0)), "a cube's first face must not serve a 2D texture");
+
+    Fields streamed = base;
+    streamed.minLodWarn = 0xabc;
+    streamed.mipStatsCntEn = true;
+    streamed.mipStatsCntId = 0x5a;
+    Require(SampledTexturesShareEntry(pack(base), pack(streamed)), "T#s differing only in MIN_LOD_WARN, MIP_STATS_COUNTER_EN and MIP_STATS_COUNTER_ID must share a sampled texture entry");
+    for (const auto& field : {&Fields::minLodWarn, &Fields::mipStatsCntId}) {
+        Fields one = base;
+        one.*field = 1;
+        Require(SampledTexturesShareEntry(pack(base), pack(one)), "a T# differing in one streaming-feedback field must share a sampled texture entry");
+    }
+    Fields moved = streamed;
+    moved.base40 = base.base40 + 1;
+    Require(!SampledTexturesShareEntry(pack(base), pack(moved)), "T#s with different base addresses must not share a sampled texture entry");
+    Fields reformatted = streamed;
+    reformatted.format = 57;
+    Require(!SampledTexturesShareEntry(pack(base), pack(reformatted)), "T#s with different formats must not share a sampled texture entry");
+    Fields cornered = base;
+    cornered.cornerSample = true;
+    Require(!SampledTexturesShareEntry(pack(base), pack(cornered)), "T#s differing in a field next to the feedback fields must not share a sampled texture entry");
 }

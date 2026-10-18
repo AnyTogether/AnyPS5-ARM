@@ -2,6 +2,7 @@
 #include "RdnaDecoder/RdnaImageOpDecoder.hpp"
 #include <array>
 #include <stdexcept>
+#include <string_view>
 
 using namespace ShaderRecompiler;
 static void Require(bool value) { if (!value) throw std::runtime_error("image sample/gather regression"); }
@@ -27,6 +28,30 @@ static void CheckPck(std::uint32_t encoding, RdnaOpcode opcode, std::uint32_t dm
     Require(instruction.dataDwordCount == dataComponents);
     Require(IsImageOpcode(instruction.op));
 }
+static void CheckSamplerVccTuple() {
+    const std::array<std::uint32_t, 2> code{0xf0800f08u, 26u << 21u};
+    const RdnaInstruction instruction = DecodeRdnaMimg(0u, code, 0u);
+    Require(instruction.op == RdnaOpcode::ImageSample);
+    Require(instruction.source1.reg == 0u);
+    Require(instruction.source2.kind == RdnaOperandKind::ScalarRegister && instruction.source2.reg == 104u);
+    IrProgram program;
+    auto& block = program.CreateBlock();
+    program.SetEntryBlock(block);
+    TranslationContext context(program, block, 256);
+    context.TranslateInstruction(instruction);
+    Require(program.Resources().memoryInfo.size() == 1u);
+    Require(program.Resources().memoryInfo.back().sampler == 26u);
+}
+static void CheckSamplerVccTupleOverflow() {
+    const std::array<std::uint32_t, 2> code{0xf0800f08u, 27u << 21u};
+    bool rejected = false;
+    try {
+        DecodeRdnaMimg(0u, code, 0u);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    Require(rejected);
+}
 static void CheckPckRejectsZeroMask(std::uint32_t encoding) {
     const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | (encoding << 18u) | (1u << 3u), 0u};
     bool rejected = false;
@@ -37,7 +62,19 @@ static void CheckPckRejectsZeroMask(std::uint32_t encoding) {
     }
     Require(rejected);
 }
+static void CheckUnsupportedOpcodeDiagnostic(std::uint32_t encoding, std::string_view expected) {
+    const std::array<std::uint32_t, 2> code{(0x3cu << 26u) | ((encoding & 0x7fu) << 18u) | (encoding >> 7u), 0u};
+    try {
+        DecodeRdnaMimg(0u, code, 0u);
+    } catch (const std::runtime_error& error) {
+        Require(std::string_view(error.what()).find(expected) != std::string_view::npos);
+        return;
+    }
+    Require(false);
+}
 int main() {
+    CheckSamplerVccTuple();
+    CheckSamplerVccTupleOverflow();
     Check(0x26u, RdnaOpcode::ImageSampleBCl, 0xfu);
     Check(0x36u, RdnaOpcode::ImageSampleBClO, 0xfu);
     Check(0x35u, RdnaOpcode::ImageSampleBO, 0xfu);
@@ -88,4 +125,6 @@ int main() {
     CheckPck(0x63u, RdnaOpcode::ImageGather8hPck, 0xFu, 4u);
     CheckPckRejectsZeroMask(0x62u);
     CheckPckRejectsZeroMask(0x63u);
+    CheckUnsupportedOpcodeDiagnostic(0x06u, "MIMG opcode 0x06");
+    CheckUnsupportedOpcodeDiagnostic(0xffu, "MIMG opcode 0xff");
 }

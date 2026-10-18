@@ -6,10 +6,12 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <stdexcept>
 #include <string>
 extern "C" {
 void* APS5_VABI opendir_nid_postfix(const char*);
 GuestDirectoryEntry* APS5_VABI readdir_nid_postfix(void*);
+int APS5_VABI readdir_r_nid_postfix(void*, GuestDirectoryEntry*, GuestDirectoryEntry**);
 int APS5_VABI closedir_nid_postfix(void*);
 void APS5_VABI rewinddir_nid_postfix(void*);
 int* APS5_VABI __error_nid_postfix();
@@ -39,13 +41,79 @@ int main() {
     std::size_t count = 0;
     while (readdir_nid_postfix(directory)) ++count;
     Require(count == entries.size());
+    rewinddir_nid_postfix(directory);
+    std::map<std::string, int> copies;
+    GuestDirectoryEntry buffer;
+    GuestDirectoryEntry* result = nullptr;
+    *__error_nid_postfix() = 13;
+    for (;;) {
+        std::memset(&buffer, 0x7f, sizeof(buffer));
+        Require(readdir_r_nid_postfix(directory, &buffer, &result) == 0);
+        if (!result) break;
+        Require(result == &buffer);
+        Require(buffer.nameLength == std::strlen(buffer.name));
+        Require(buffer.recordLength == 8 + ((buffer.nameLength + 4) & ~3));
+        for (std::size_t i = buffer.recordLength; i < sizeof(buffer); ++i)
+            Require(reinterpret_cast<const unsigned char*>(&buffer)[i] == 0x7f);
+        copies[buffer.name] = buffer.type;
+    }
+    Require(copies == entries);
+    Require(*__error_nid_postfix() == 13);
+    result = &buffer;
+    Require(readdir_r_nid_postfix(directory, &buffer, &result) == 0 && result == nullptr);
+    rewinddir_nid_postfix(directory);
+    *__error_nid_postfix() = 13;
+    auto* first = readdir_nid_postfix(directory);
+    Require(first != nullptr);
+    const std::string firstName = first->name;
+    Require(readdir_r_nid_postfix(directory, &buffer, &result) == 0 && result == &buffer);
+    Require(firstName != buffer.name && entries.count(buffer.name) == 1);
+    result = &buffer;
+    Require(readdir_r_nid_postfix(nullptr, &buffer, &result) == 9);
+    Require(result == &buffer && *__error_nid_postfix() == 13);
+    bool nullEntryThrows = false;
+    try {
+        readdir_r_nid_postfix(directory, nullptr, &result);
+    } catch (const std::invalid_argument&) {
+        nullEntryThrows = true;
+    }
+    Require(nullEntryThrows);
+    bool nullResultThrows = false;
+    try {
+        readdir_r_nid_postfix(directory, &buffer, nullptr);
+    } catch (const std::invalid_argument&) {
+        nullResultThrows = true;
+    }
+    Require(nullResultThrows);
     Require(closedir_nid_postfix(directory) == 0);
     Require(opendir_nid_postfix((root / "missing").string().c_str()) == nullptr);
     Require(*__error_nid_postfix() == 2);
+#ifndef _WIN32
+    const auto symlinkLoop = root / "symlink-loop";
+    std::filesystem::create_symlink("symlink-loop", symlinkLoop);
+    Require(opendir_nid_postfix(symlinkLoop.string().c_str()) == nullptr);
+    Require(*__error_nid_postfix() == 62);
+    Require(std::filesystem::remove(symlinkLoop));
+#endif
     Require(opendir_nid_postfix((root / "sample.txt").string().c_str()) == nullptr);
     Require(*__error_nid_postfix() == 20);
     Require(opendir_nid_postfix("") == nullptr && *__error_nid_postfix() == 2);
     Require(closedir_nid_postfix(nullptr) == -1 && *__error_nid_postfix() == 9);
+    const std::u8string folder = u8"セーブ";
+    const std::u8string file = u8"été.txt";
+    Require(std::filesystem::create_directory(root / std::filesystem::path(folder)));
+    { std::ofstream stream(root / std::filesystem::path(folder) / std::filesystem::path(file)); stream << "x"; }
+    const std::string guestFolder = root.string() + "/" + std::string(folder.begin(), folder.end());
+    void* unicode = opendir_nid_postfix(guestFolder.c_str());
+    Require(unicode != nullptr);
+    std::map<std::string, int> names;
+    while (auto* entry = readdir_nid_postfix(unicode)) {
+        Require(entry->nameLength == std::strlen(entry->name));
+        names[entry->name] = entry->type;
+    }
+    Require(names.at(std::string(file.begin(), file.end())) == 8 && names.size() == 3);
+    Require(closedir_nid_postfix(unicode) == 0);
+    std::filesystem::remove_all(root / std::filesystem::path(folder));
     std::filesystem::remove(root / "sample.txt");
     std::filesystem::remove(root / "subdirectory");
     std::filesystem::remove(root);

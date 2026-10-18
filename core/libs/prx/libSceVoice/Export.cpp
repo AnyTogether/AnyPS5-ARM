@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <map>
 #include <mutex>
 #include <set>
@@ -19,11 +20,13 @@ constexpr std::int32_t PortOutVoice = 4;
 constexpr std::int32_t PortOutDevice = 5;
 constexpr std::int32_t PortStateReady = 1;
 constexpr std::uint32_t VoiceFrameMs = 20;
+constexpr std::int32_t PortAttrVoiceActivity = 1001;
 
 struct Port {
     std::int32_t type;
     float volume;
     std::uint32_t bitrate;
+    bool muted = false;
 };
 
 struct Voice {
@@ -178,11 +181,14 @@ int APS5_VABI sceVoiceGetPortInfo(uint32_t port_id, VoicePortInfo* info) {
 }
 
 int APS5_VABI sceVoiceGetPortAttr(uint32_t port_id, int32_t attr, void* value, int32_t size) {
-    (void)value;
-    (void)size;
     auto& voice = State();
     std::lock_guard lock(voice.mutex);
     RequirePort(voice, port_id, __func__);
+    if (attr == PortAttrVoiceActivity) {
+        if (value == nullptr || size != 1) APS5_INVALID_ARG_EX;
+        std::memset(value, 0, 1);
+        return 0;
+    }
     Fail(__func__, "attribute " + std::to_string(attr) + " not implemented");
 }
 
@@ -195,22 +201,43 @@ int APS5_VABI sceVoiceReadFromOPort(uint32_t output_port_id, void* data, uint32_
     return 0;
 }
 
+// Only PCM and voice input ports take written data. It is all accepted (the size is left as given)
+// and then dropped: no output reaches a host device, and output ports report nothing to read.
 int APS5_VABI sceVoiceWriteToIPort(uint32_t input_port_id, const void* data, uint32_t* size, int16_t frame_gaps) {
-    (void)input_port_id;
-    (void)data;
-    (void)size;
     (void)frame_gaps;
-    NotImplemented_nid_no_patch(__func__);
+    if (data == nullptr || size == nullptr) APS5_INVALID_ARG_EX;
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    const auto type = RequirePort(voice, input_port_id, __func__).type;
+    if (type != PortInPcm && type != PortInVoice) Fail(__func__, "port does not take written data");
     return 0;
 }
 
-int APS5_VABI sceVoiceSetMuteFlag() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVoiceSetMuteFlag(uint32_t port_id, bool muted) {
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    RequirePort(voice, port_id, __func__).muted = muted;
     return 0;
 }
 
-int APS5_VABI sceVoiceGetResourceInfo(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVoiceGetMuteFlag(uint32_t port_id, bool* muted) {
+    if (muted == nullptr) APS5_INVALID_ARG_EX;
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    *muted = RequirePort(voice, port_id, __func__).muted;
+    return 0;
+}
+
+int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo* info) {
+    if (info == nullptr) APS5_INVALID_ARG_EX;
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    if (!voice.initialized) Fail(__func__, "library not initialized");
+    info->max_voice_input_ports = 7;
+    info->max_voice_output_ports = 7;
+    info->max_device_input_ports = 1;
+    info->max_device_output_ports = 1;
+    info->max_ports = 64;
     return 0;
 }
 
@@ -219,8 +246,10 @@ int APS5_VABI sceVoiceEnableChat(void) {
     return 0;
 }
 
-int APS5_VABI sceVoiceResetPort(void) {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI sceVoiceResetPort(uint32_t port_id) {
+    auto& voice = State();
+    std::lock_guard lock(voice.mutex);
+    RequirePort(voice, port_id, __func__);
     return 0;
 }
 

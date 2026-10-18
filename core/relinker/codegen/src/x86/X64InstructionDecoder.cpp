@@ -8,6 +8,7 @@ namespace Codegen {
 using namespace X64OpcodeConstants;
 
 std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t available) const {
+    constexpr std::size_t maxInstructionLength = 15;
     std::size_t pos = 0;
     bool rexPresent = false;
     std::uint8_t rex = 0;
@@ -16,6 +17,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
     bool repnePrefix = false;
 
     while (pos < available) {
+        if (pos == maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
         const std::uint8_t b = data[pos];
 
         if (b >= RexMin && b <= RexMax) {
@@ -55,6 +57,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
     bool vexPresent = false;
     bool evexPresent = false;
     std::uint8_t vexMap = 0;
+    std::uint8_t xopMap = 0;
     std::uint8_t threeByteMap = 0;
     bool threeByteEscape = false;
 
@@ -76,6 +79,12 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
             throw CodegenException("Instruction truncated after VEX3 prefix");
         }
         pos += 1;
+    } else if (opcode == XopPrefix && pos < available && (data[pos] & Vex3MapMask) >= XopMapMin) {
+        if (pos + 1 >= available) {
+            throw CodegenException("Instruction truncated after XOP prefix");
+        }
+        xopMap = static_cast<std::uint8_t>(data[pos] & Vex3MapMask);
+        pos += 2;
     } else if (opcode == EvexPrefix) {
         if (pos + 2 >= available) {
             throw CodegenException("Instruction truncated after EVEX prefix");
@@ -101,7 +110,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
         }
     }
 
-    if (vexPresent || evexPresent) {
+    if (vexPresent || evexPresent || xopMap != 0) {
         if (pos >= available) {
             throw CodegenException("Instruction truncated after VEX prefix");
         }
@@ -114,7 +123,14 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
 
     const bool vectorImmediate = vexMap == 1 && ((opcode >= 0x70 && opcode <= 0x73) || opcode == 0xC2 || opcode == 0xC4 || opcode == 0xC5 || opcode == 0xC6);
 
-    if (vexPresent) {
+    if (xopMap != 0) {
+        hasModRm = true;
+        if (xopMap == XopMap8) {
+            immediateSize = ImmSize8;
+        } else if (xopMap == XopMapA) {
+            immediateSize = ImmSize32;
+        }
+    } else if (vexPresent) {
         if (vexMap == 1 && opcode >= VexNoModRmMin && opcode <= VexNoModRmMax) {
             hasModRm = false;
         } else {
@@ -191,7 +207,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
         }
 
         if (opcode == OneByteCallRel32 || opcode == OneByteJmpRel32) {
-            immediateSize = ImmSize32;
+            immediateSize = operandImmediateSize;
         }
 
         if (opcode == OneByteJmpRel8 || opcode == OneByteJrcxz ||
@@ -225,8 +241,8 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
             }
             hasModRm = true;
         } else if (opcode >= TwoByteJccRel32Min && opcode <= TwoByteJccRel32Max) {
-            immediateSize = ImmSize32;
-        } else if (opcode == TwoByteMovImm8ModRm) {
+            immediateSize = operandImmediateSize;
+        } else if (opcode == TwoByteMovImm8ModRm || opcode == TwoByte3DNow) {
             hasModRm = true;
             immediateSize = ImmSize8;
         } else if (opcode >= TwoByteShiftImm8Min && opcode <= TwoByteShiftImm8Max) {
@@ -267,6 +283,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
     }
 
     if (!hasModRm) {
+        if (pos + immediateSize > maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
         if (pos + immediateSize > available) {
             throw CodegenException("Instruction truncated in immediate operand");
         }
@@ -316,6 +333,7 @@ std::size_t X64InstructionDecoder::Decode(const std::uint8_t* data, std::size_t 
 
     pos += immediateSize;
 
+    if (pos > maxInstructionLength) throw CodegenException("Instruction exceeds 15 bytes");
     if (pos > available) {
         throw CodegenException("Instruction truncated in displacement or immediate operand");
     }
@@ -337,6 +355,7 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
     info.Length = Decode(data, available);
 
     std::size_t pos = 0;
+    bool operandSizeOverride = false;
 
     while (pos < info.Length) {
         std::uint8_t b = data[pos];
@@ -351,6 +370,10 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
             b == PrefixOperandSize || b == PrefixAddressSize) {
             if (b >= PrefixSegFs && b <= PrefixSegGs)
                 info.SegmentPrefix = b;
+            if (b == PrefixAddressSize)
+                info.AddressSize32 = true;
+            if (b == PrefixOperandSize)
+                operandSizeOverride = true;
             info.RexPrefix = 0;
             ++pos;
             continue;
@@ -379,8 +402,9 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
     std::uint8_t op = data[pos++];
     bool twoByteOpcode = false;
 
-    if (op == OneByteVex2 || op == OneByteVex3 || op == EvexPrefix) {
-        pos += (op == OneByteVex2 ? 1 : (op == OneByteVex3 ? 2 : EvexPrefixLength - 1)) + 1;
+    const bool xop = op == XopPrefix && pos < info.Length && (data[pos] & Vex3MapMask) >= XopMapMin;
+    if (op == OneByteVex2 || op == OneByteVex3 || op == EvexPrefix || xop) {
+        pos += (op == OneByteVex2 ? 1 : (op == OneByteVex3 || xop ? 2 : EvexPrefixLength - 1)) + 1;
         if (pos < info.Length)
             readModRm(pos, false);
         info.FlowKind = ControlFlowKind::Sequential;
@@ -395,6 +419,19 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
 
     info.Opcode = op;
     info.IsTwoByteOpcode = twoByteOpcode;
+
+    const bool relativeNearBranch = twoByteOpcode
+        ? op >= TwoByteJccRel32Min && op <= TwoByteJccRel32Max
+        : op == OneByteCallRel32 || op == OneByteJmpRel32 || op == OneByteJmpRel8 ||
+          (op >= OneByteJccRel8Min && op <= OneByteJccRel8Max) ||
+          op == OneByteJrcxz || (op >= OneByteLoop && op <= OneByteLoopMax);
+    if (relativeNearBranch && operandSizeOverride && (info.RexPrefix & RexWBit) == 0) {
+        info.TruncatesBranchTarget = true;
+        info.FlowKind = twoByteOpcode || (op != OneByteCallRel32 && op != OneByteJmpRel32 && op != OneByteJmpRel8)
+            ? ControlFlowKind::ConditionalBranch
+            : op == OneByteCallRel32 ? ControlFlowKind::Call : ControlFlowKind::UnconditionalJump;
+        return info;
+    }
 
     if (!twoByteOpcode) {
         if (op == OneByteCallRel32) {
@@ -467,12 +504,12 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
                 }
                 return info;
             }
-            if (reg == 3) {
-                info.FlowKind = ControlFlowKind::IndirectCall;
-                return info;
-            }
-            if (reg == 5) {
-                info.FlowKind = ControlFlowKind::IndirectJump;
+            if (reg == 3 || reg == 5) {
+                if (mod == ModRmModIndirect && rm == ModRmRmRipRelative) {
+                    info.HasRipRelativeDisp = true;
+                    info.RipRelativeDispOffset = pos + 1;
+                }
+                info.FlowKind = reg == 3 ? ControlFlowKind::IndirectCall : ControlFlowKind::IndirectJump;
                 return info;
             }
         }
@@ -537,7 +574,7 @@ DecodedInstructionInfo X64InstructionDecoder::DecodeInstruction(
             op == TwoByteImulRmModRm || op == TwoByteGrp7 ||
             op == TwoByteGrp15 || op == TwoByteXadd ||
             op == TwoByteGrp9 || op == TwoByteNopModRm ||
-            op == TwoByteEndbr || op == TwoByteMovImm8ModRm ||
+            op == TwoByteEndbr || op == TwoByteMovImm8ModRm || op == TwoByte3DNow ||
             op == ThreeByteEscape38 || op == ThreeByteEscape3A ||
             (op >= TwoByteShiftImm8Min && op <= TwoByteShiftImm8Max) ||
             op == TwoByteShldImm8 || op == TwoByteShrdImm8 ||

@@ -1,10 +1,12 @@
 #ifndef CORE_LIBS_PRX_LIBSCEULT_SCEULTTYPES_HPP
 #define CORE_LIBS_PRX_LIBSCEULT_SCEULTTYPES_HPP
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 #include "SceTypes.hpp"
 
@@ -18,8 +20,14 @@ constexpr int ULT_ERROR_BUSY = -2139029497;
 constexpr int ULT_ERROR_AGAIN = -2139029496;
 
 struct UltMutexState {
-    std::recursive_mutex _mutex;
+    std::mutex _mutex;
+    std::condition_variable _available;
+    std::thread::id _owner{};
+    std::uint32_t _lockCount = 0;
+    std::uint32_t _waiters = 0;
+    bool _alive = true;
     std::uint32_t _attribute = 0;
+    void* _waitingPool = nullptr;
 };
 
 struct UltSemaphoreState {
@@ -28,6 +36,7 @@ struct UltSemaphoreState {
     std::int32_t _resources = 0;
     std::uint32_t _waiters = 0;
     bool _alive = true;
+    void* _waitingPool = nullptr;
 };
 
 struct UltResourcePoolState {
@@ -70,6 +79,8 @@ struct UltUlthreadState {
     UltUlthreadEntry _entry = nullptr;
     std::uint64_t _arg = 0;
     Pthread _thread = nullptr;
+    void* _runtime = nullptr;
+    std::atomic<bool> _exited{false};
 };
 
 #endif

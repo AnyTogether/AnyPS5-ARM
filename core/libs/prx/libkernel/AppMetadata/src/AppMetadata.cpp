@@ -6,18 +6,21 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
+std::mutex g_metadataMutex;
 bool g_titleLoaded = false;
 bool g_iconAttempted = false;
 bool g_iconLoaded = false;
 char g_title[128] = {};
 char g_titleId[12] = {};
 std::uint64_t g_downloadDataSizeMiB = 0;
+std::uint32_t g_attribute3 = 0;
 std::int32_t g_userDefinedParams[4] = {};
 std::vector<std::uint8_t> g_iconBytes;
 
@@ -31,6 +34,7 @@ void copyToFixedBuffer(char* destination, std::size_t destinationSize, const std
 }
 
 void ensureTitleLoaded() {
+    std::lock_guard lock(g_metadataMutex);
     if (g_titleLoaded) return;
     const auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataParamJsonGuestPath);
     if (!std::filesystem::exists(resolvedPath)) throw std::runtime_error("param.json not found");
@@ -38,11 +42,36 @@ void ensureTitleLoaded() {
     copyToFixedBuffer(g_title, sizeof(g_title), parsed.title);
     copyToFixedBuffer(g_titleId, sizeof(g_titleId), parsed.titleId);
     g_downloadDataSizeMiB = parsed.downloadDataSizeMiB;
+    g_attribute3 = parsed.attribute3;
     std::memcpy(g_userDefinedParams, parsed.userDefinedParams, sizeof(g_userDefinedParams));
     g_titleLoaded = true;
 }
 
+const bool g_downloadDataMounted = [] {
+    try {
+        const auto run = std::filesystem::current_path();
+        const auto paramJson = run / "app0" / "sce_sys" / "param.json";
+        if (!std::filesystem::exists(paramJson) || parseParamJson(paramJson).downloadDataSizeMiB == 0) return false;
+        std::filesystem::create_directories(run / "download0");
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}();
+
+const bool g_dataMounted = [] {
+    try {
+        const auto run = std::filesystem::current_path();
+        if (!std::filesystem::exists(run / "app0" / "sce_sys" / "param.json")) return false;
+        std::filesystem::create_directories(run / "data");
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}();
+
 void ensureIconLoaded() {
+    std::lock_guard lock(g_metadataMutex);
     if (g_iconAttempted) return;
     g_iconAttempted = true;
     const auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataIconGuestPath);
@@ -51,10 +80,11 @@ void ensureIconLoaded() {
     if (!file.is_open()) throw std::runtime_error("failed to open icon0.png");
     file.seekg(0, std::ios::end);
     const auto fileSize = file.tellg();
+    if (file.fail() || fileSize <= 0) throw std::runtime_error("icon0.png is empty or unreadable");
     file.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
-    if (!bytes.empty()) file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (bytes.empty()) throw std::runtime_error("icon0.png is empty");
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file || file.gcount() != static_cast<std::streamsize>(bytes.size())) throw std::runtime_error("failed to read icon0.png");
     constexpr std::uint8_t PngSignature[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     if (bytes.size() < 8 || std::memcmp(bytes.data(), PngSignature, sizeof(PngSignature)) != 0) throw std::runtime_error("icon0.png is not a valid PNG file");
     g_iconBytes = std::move(bytes);
@@ -75,6 +105,11 @@ AppTitle GetAppTitle_nid_postfix() {
 std::uint64_t GetAppDownloadDataSizeMiB_nid_postfix() {
     ensureTitleLoaded();
     return g_downloadDataSizeMiB;
+}
+
+std::uint32_t GetAppAttribute3_nid_no_patch() {
+    ensureTitleLoaded();
+    return g_attribute3;
 }
 
 std::int32_t GetAppUserDefinedParam_nid_postfix(std::uint32_t index) {

@@ -68,7 +68,8 @@ int main() {
             encode.color_space = colorSpace;
             PngEncOutputInfo info{};
             const int size = scePngEncEncode(handle, &encode, &info);
-            Require(size > 0 && info.data_size == static_cast<std::uint32_t>(size) && info.processed_height == height);
+            Require(size > 1 && static_cast<std::size_t>(size) < png.size()
+                    && info.data_size == static_cast<std::uint32_t>(size) && info.processed_height == height);
             const auto header = Decoder::Png::ParseHeader(std::span<const std::uint8_t>(png.data(), size));
             Require(header.has_value());
             Require(header->colorType == (colorSpace == 19 ? Decoder::Png::ColorType::Rgba : Decoder::Png::ColorType::Rgb));
@@ -83,6 +84,22 @@ int main() {
                     Require(result[3] == (colorSpace == 19 ? source[3] : 0xFF));
                 }
             }
+            const std::vector<std::uint8_t> expected(png.begin(), png.begin() + size);
+            for (const int capacity : {size - 1, size}) {
+                std::fill(png.begin(), png.end(), 0xA5);
+                encode.png_mem_size = static_cast<std::uint32_t>(capacity);
+                info = {1, 1};
+                const int result = scePngEncEncode(handle, &encode, &info);
+                if (capacity < size) {
+                    Require(result == dataOverflow && info.data_size == 0 && info.processed_height == 0);
+                    Require(std::all_of(png.begin(), png.end(), [](auto byte) { return byte == 0xA5; }));
+                } else {
+                    Require(result == size && info.data_size == static_cast<std::uint32_t>(size) && info.processed_height == height);
+                    Require(std::equal(expected.begin(), expected.end(), png.begin()));
+                    Require(std::all_of(png.begin() + size, png.end(), [](auto byte) { return byte == 0xA5; }));
+                }
+            }
+            encode.png_mem_size = static_cast<std::uint32_t>(png.size());
         }
     }
 

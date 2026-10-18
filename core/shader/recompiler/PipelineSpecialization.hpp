@@ -24,12 +24,18 @@ inline constexpr std::uint32_t VertexBase = 4096u;
 inline constexpr std::uint32_t VertexWords = 6u;
 inline constexpr std::uint32_t PushDataOffset = 8188u;
 inline constexpr std::uint32_t ExportBase = 8192u;
+inline constexpr std::uint32_t ExportPackingBase = 8224u;
+inline constexpr std::uint32_t DualSourceBlend = 8232u;
+inline constexpr std::uint32_t RasterPrimitive = 8233u;
+inline constexpr std::uint32_t LayerExported = 8234u;
+inline constexpr std::uint32_t StencilReferenceOffset = 8235u;
+inline constexpr std::uint32_t ReversedBlend = 8236u;
 inline constexpr std::uint32_t HeapCountBase = 8256u;
 inline constexpr std::uint32_t MipCountBase = 8320u;
 inline constexpr std::uint32_t DescriptorIndexBase = 16384u;
 inline constexpr std::uint32_t DescriptorIndexStride = 128u;
-inline constexpr std::uint32_t ImageModeBase = 32768u;
-inline constexpr std::uint32_t ImageModeStride = 256u;
+inline constexpr std::uint32_t FoldOffsetBase = 57344u;
+inline constexpr std::uint32_t UnnormalizedBaseLevelBase = 57408u;
 
 inline constexpr std::uint32_t DescriptorIndex(std::uint32_t binding, std::uint32_t element) {
     return DescriptorIndexBase + binding * DescriptorIndexStride + element;

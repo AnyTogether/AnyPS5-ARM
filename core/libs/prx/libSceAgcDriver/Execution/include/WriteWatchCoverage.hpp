@@ -26,18 +26,18 @@ public:
         return std::none_of(excluded.begin() + first, excluded.begin() + last + 1, [](auto generation) { return generation != 0; });
     }
 
+    bool ExcludedSpan(std::uint64_t address, std::size_t bytes, std::uint64_t* begin, std::uint64_t* end) const {
+        std::size_t first = 0;
+        std::size_t last = 0;
+        if (!excludedBlocks(address, bytes, first, last)) return false;
+        *begin = base + first * BlockBytes;
+        *end = std::min<std::uint64_t>(base + (last + 1) * BlockBytes, base + size);
+        return true;
+    }
     bool Exclude(std::uint64_t address, std::size_t bytes, std::uint64_t generation = 1) {
-        if (bytes == 0 || size == 0) return false;
-        if (address < base) {
-            if (base - address >= bytes) return false;
-            bytes -= base - address;
-            address = base;
-        }
-        const auto offset = address - base;
-        if (offset >= size) return false;
-        bytes = static_cast<std::size_t>(std::min<std::uint64_t>(bytes, size - offset));
-        const auto first = offset / BlockBytes;
-        const auto last = (offset + bytes - 1) / BlockBytes;
+        std::size_t first = 0;
+        std::size_t last = 0;
+        if (!excludedBlocks(address, bytes, first, last)) return false;
         bool changed = false;
         for (auto block = first; block <= last; ++block) {
             changed = changed || excluded[block] == 0;
@@ -73,6 +73,20 @@ public:
     }
 
 private:
+    bool excludedBlocks(std::uint64_t address, std::size_t bytes, std::size_t& first, std::size_t& last) const {
+        if (bytes == 0 || size == 0) return false;
+        if (address < base) {
+            if (base - address >= bytes) return false;
+            bytes -= base - address;
+            address = base;
+        }
+        const auto offset = address - base;
+        if (offset >= size) return false;
+        bytes = static_cast<std::size_t>(std::min<std::uint64_t>(bytes, size - offset));
+        first = offset / BlockBytes;
+        last = (offset + bytes - 1) / BlockBytes;
+        return true;
+    }
     static constexpr std::size_t BlockBytes = 65536;
     std::uint64_t base = 0;
     std::size_t size = 0;

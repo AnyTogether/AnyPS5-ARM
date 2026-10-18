@@ -6,10 +6,11 @@
 #include <system_error>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #endif
 
 #include "prx/libSceFont/include/FontInternal.hpp"
-#include "prx/libc/include/specifics/macos/ExecutablePath.hpp"
 
 namespace {
 
@@ -93,7 +94,14 @@ std::filesystem::path ExecutableDirectory() {
     if (length == 0 || length == MAX_PATH) throw std::runtime_error("libSceFont: cannot locate the executable");
     return std::filesystem::path(module).parent_path();
 #elif defined(__APPLE__)
-    return MacOsExecutablePath().parent_path();
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> executable(size);
+    std::error_code error;
+    std::filesystem::path path;
+    if (_NSGetExecutablePath(executable.data(), &size) == 0) path = std::filesystem::canonical(executable.data(), error);
+    if (path.empty()) throw std::runtime_error("libSceFont: cannot locate the executable");
+    return path.parent_path();
 #else
     return std::filesystem::read_symlink("/proc/self/exe").parent_path();
 #endif

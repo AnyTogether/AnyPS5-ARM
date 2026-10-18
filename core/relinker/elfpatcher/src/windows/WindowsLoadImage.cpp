@@ -5,7 +5,7 @@
 
 namespace Elfpatcher::Windows {
 
-WindowsLoadImage::WindowsLoadImage(const std::vector<std::uint8_t>& source, const std::vector<Domain::ProgramHeader>& headers, const bool requireEntry) {
+WindowsLoadImage::WindowsLoadImage(const std::vector<std::uint8_t>& source, const std::vector<Domain::ProgramHeader>& headers, const bool requireEntry, const std::uint64_t imageBase) : imageBase(imageBase) {
     if (source.size() < 64 || Io::ReadU32(source, 0) != 0x464c457f || source[4] != 2 || source[5] != 1 || source[6] != 1 || Io::ReadU16(source, 18) != 62)
         throw Domain::RelinkerException("Windows output requires a little-endian ELF64 x86-64 image");
     const auto type = Io::ReadU16(source, 16);
@@ -78,7 +78,11 @@ std::uint32_t WindowsLoadImage::GetEntryRva() const {
 std::uint64_t WindowsLoadImage::GetRelocatedAddress(const std::uint64_t address) const {
     if (address < firstAddress || address - firstAddress > data.size())
         throw Domain::RelinkerException("Relative relocation addend is outside the ELF image", address);
-    return ImageBase + LoadRva + address - firstAddress;
+    return imageBase + LoadRva + address - firstAddress;
+}
+
+std::uint64_t WindowsLoadImage::GetImageBase() const {
+    return imageBase;
 }
 
 void WindowsLoadImage::WritePointer(const std::uint64_t address, const std::uint64_t value) {

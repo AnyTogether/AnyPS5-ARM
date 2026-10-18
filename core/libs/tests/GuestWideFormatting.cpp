@@ -1,13 +1,22 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/GuestTime.hpp"
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 
 extern "C" int APS5_VABI vswprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
 extern "C" int APS5_VABI snwprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
+extern "C" int APS5_VABI vswprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
+extern "C" int APS5_VABI swprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
+extern "C" int APS5_VABI vsnwprintf_s_nid_postfix(char16_t*, std::size_t, const char16_t*, VaList*);
+extern "C" int APS5_VABI swprintf_nid_postfix(char16_t*, std::size_t, const char16_t*, ...);
+extern "C" std::size_t APS5_VABI strftime_nid_postfix(char*, std::size_t, const char*, const GuestTm*);
+extern "C" std::size_t APS5_VABI wcsftime_nid_postfix(char16_t*, std::size_t, const char16_t*, const GuestTm*);
+extern "C" int* APS5_VABI __error_nid_postfix();
 
 static int APS5_VABI Format(char16_t* buffer, std::size_t size, const char16_t* format, ...) {
 #ifdef _WIN32
@@ -88,6 +97,29 @@ static void CheckBounded() {
     Require(Format(buffer, 16, u"%s", nullNarrow) == 6 && buffer == std::u16string(u"(null)"), "vswprintf null %s argument");
 }
 
+static void CheckPositional() {
+    char16_t buffer[32];
+    Require(swprintf_nid_postfix(buffer, 32, u"%2$d-%1$d", 1, 2) == 3 && buffer == std::u16string(u"2-1"),
+        "swprintf positional integers");
+    Require(swprintf_nid_postfix(buffer, 32, u"%2$ls %1$ls", u"world", u"hello") == 11 && buffer == std::u16string(u"hello world"),
+        "swprintf positional wide strings");
+    Require(swprintf_nid_postfix(buffer, 32, u"[%1$*2$d|%3$.*2$f]", 7, 2, 2.5) == 9 && buffer == std::u16string(u"[ 7|2.50]"),
+        "swprintf positional width and precision");
+    Require(swprintf_nid_postfix(buffer, 32, u"%1$Lg %2$d %d", 0.5L, 3, 9) == 7 && buffer == std::u16string(u"0.5 3 9"),
+        "swprintf positional long double and the next argument");
+    Require(snwprintf_s_nid_postfix(buffer, 32, u"%2$s%1$lc", 0x20ac, "\xc3\xa9") == 2 && buffer == std::u16string(u"\u00e9\u20ac"),
+        "snwprintf_s positional arguments");
+}
+
+static void CheckPointer() {
+    char16_t buffer[64];
+    const auto address = [](std::uintptr_t value) { return reinterpret_cast<void*>(value); };
+    Require(Format(buffer, 64, u"%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 23 &&
+        buffer == std::u16string(u"0x0|0x1234|0xdeadbeef12"), "vswprintf %p uses the 0x form");
+    Require(Format(buffer, 64, u"[%8p][%-8p][%08p][%.6p]", address(0x1a), address(0x1a), address(0x1a), address(0x1a)) == 40 &&
+        buffer == std::u16string(u"[    0x1a][0x1a    ][0x00001a][0x00001a]"), "vswprintf %p width and precision");
+}
+
 static void CheckCount() {
     char16_t buffer[16];
     int count = -7;
@@ -111,9 +143,144 @@ static void CheckCount() {
     Require(Format(buffer, 16, u"a%n", nullCount) < 0, "vswprintf null %n argument");
 }
 
+static void CheckGroupingFlag() {
+    char16_t buffer[48];
+    Require(swprintf_nid_postfix(buffer, 48, u"%'d|%'-6u|%'.2f|%'+05d|%'g", 1234567, 42u, 1234.5, 12, 1e6) == 34 &&
+        buffer == std::u16string(u"1234567|42    |1234.50|+0012|1e+06"), "swprintf ' flag");
+    Require(snwprintf_s_nid_postfix(buffer, 48, u"%'lld %ls", 9876543210ll, u"x") == 12 && buffer == std::u16string(u"9876543210 x"),
+        "snwprintf_s ' flag");
+}
+
+static void CheckSecureWideBoundary() {
+    constexpr std::size_t wideRsizeMax = (SIZE_MAX >> 1) / sizeof(char16_t);
+    char16_t buffer[4];
+    for (auto& unit : buffer) unit = u'x';
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(swprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n") < 0 && buffer[0] == 0, "swprintf_s accepted-boundary failure clears");
+    Require(buffer[1] == u'y', "swprintf_s does not clear beyond the first unit");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(swprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n") < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "swprintf_s oversized size leaves the buffer untouched");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vswprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n", nullptr) < 0 && buffer[0] == 0, "vswprintf_s accepted-boundary failure clears");
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vswprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n", nullptr) < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "vswprintf_s oversized size leaves the buffer untouched");
+
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vsnwprintf_s_nid_postfix(buffer, wideRsizeMax, u"%n", nullptr) < 0 && buffer[0] == 0, "vsnwprintf_s accepted-boundary failure clears");
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(vsnwprintf_s_nid_postfix(buffer, wideRsizeMax + 1, u"%n", nullptr) < 0 && buffer[0] == u'x' && buffer[1] == u'y',
+        "vsnwprintf_s oversized size leaves the buffer untouched");
+}
+
+static void CheckSwprintf() {
+    char16_t buffer[8];
+    for (auto& unit : buffer) unit = u'x';
+    Require(swprintf_nid_postfix(buffer, 8, u"%d-%ls", 42, u"ab") == 5, "swprintf length");
+    Require(buffer == std::u16string(u"42-ab") && buffer[6] == u'x', "swprintf output");
+    Require(swprintf_nid_postfix(buffer, 8, u"中%ls%s", u"文", "\xc3\xa9") == 3, "swprintf non-ASCII length");
+    Require(buffer == std::u16string(u"中文é"), "swprintf non-ASCII output");
+    Require(swprintf_nid_postfix(buffer, 8, u"%s", "\xf0\x9f\x98\x80") == 2, "swprintf surrogate pair length");
+    Require(buffer == std::u16string(u"\U0001f600"), "swprintf surrogate pair output");
+    Require(swprintf_nid_postfix(buffer, 8, u"") == 0 && buffer[0] == 0, "swprintf empty format");
+    for (auto& unit : buffer) unit = u'x';
+    Require(swprintf_nid_postfix(buffer, 3, u"%ls", u"abcd") < 0, "swprintf truncation result");
+    Require(buffer == std::u16string(u"ab") && buffer[3] == u'x', "swprintf truncation output");
+    Require(swprintf_nid_postfix(buffer, 3, u"abc") < 0, "swprintf terminator does not fit");
+    buffer[0] = u'x';
+    Require(swprintf_nid_postfix(buffer, 0, u"a") < 0 && buffer[0] == u'x', "swprintf zero size");
+    Require(swprintf_nid_postfix(nullptr, 8, u"a") < 0, "swprintf null buffer");
+    Require(swprintf_nid_postfix(buffer, 5, u"%ls", u"abcd") == 4 && buffer == std::u16string(u"abcd"), "swprintf exact fit");
+    char16_t wide[16];
+    Require(swprintf_nid_postfix(wide, 16, u"%5ls|%-3c|%lc", u"wide", 'z', 0x20ac) == 11, "swprintf padded length");
+    Require(wide == std::u16string(u" wide|z  |€"), "swprintf padded output");
+    Require(swprintf_nid_postfix(wide, 16, u"%q") < 0 && wide[0] == 0, "swprintf invalid conversion");
+}
+
+static bool WcsftimeThrows(char16_t* buffer, const char16_t* format, const GuestTm* time) {
+    try {
+        wcsftime_nid_postfix(buffer, 16, format, time);
+    } catch (const std::invalid_argument&) {
+        return true;
+    }
+    return false;
+}
+
+static void CheckWcsftime() {
+    GuestTm time{};
+    time.tm_sec = 9;
+    time.tm_min = 5;
+    time.tm_hour = 13;
+    time.tm_mday = 29;
+    time.tm_mon = 1;
+    time.tm_year = 124;
+    time.tm_wday = 4;
+    time.tm_yday = 59;
+    time.tm_zone = "UTC";
+    struct Case {
+        const char16_t* wide;
+        const char* narrow;
+    };
+    const Case cases[] = {
+        {u"%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"},
+        {u"%a %b %j %p %Z", "%a %b %j %p %Z"},
+        {u"%%", "%%"},
+        {u"%k|%l|%v|%+", "%k|%l|%v|%+"},
+        {u"\u00e9t\u00e9 %Y", "\xe9t\xe9 %Y"},
+    };
+    for (const auto& item : cases) {
+        char narrow[128];
+        char16_t wide[128];
+        const std::size_t length = strftime_nid_postfix(narrow, sizeof(narrow), item.narrow, &time);
+        Require(length != 0, "wcsftime reference strftime");
+        Require(wcsftime_nid_postfix(wide, 128, item.wide, &time) == length, "wcsftime length matches strftime");
+        for (std::size_t index = 0; index <= length; ++index)
+            Require(wide[index] == static_cast<unsigned char>(narrow[index]), "wcsftime output matches strftime");
+    }
+    char16_t buffer[32];
+    Require(wcsftime_nid_postfix(buffer, 32, u"%Y-%m-%d %H:%M:%S", &time) == 19
+        && buffer == std::u16string(u"2024-02-29 13:05:09"), "wcsftime date and time");
+    Require(wcsftime_nid_postfix(buffer, 32, u"%a %b %j %p", &time) == 14
+        && buffer == std::u16string(u"Thu Feb 060 PM"), "wcsftime names");
+    Require(wcsftime_nid_postfix(buffer, 32, u"%%", &time) == 1 && buffer == std::u16string(u"%"), "wcsftime percent");
+    Require(wcsftime_nid_postfix(buffer, 20, u"%Y-%m-%d %H:%M:%S", &time) == 19, "wcsftime exact fit");
+
+    int& error = *__error_nid_postfix();
+    for (auto& unit : buffer) unit = u'x';
+    error = 5;
+    Require(wcsftime_nid_postfix(buffer, 19, u"%Y-%m-%d %H:%M:%S", &time) == 0 && error == 5 && buffer[0] == u'x',
+        "wcsftime overflow");
+    Require(wcsftime_nid_postfix(buffer, 1, u"%Y", &time) == 0 && error == 5 && buffer[0] == u'x', "wcsftime one unit");
+    Require(wcsftime_nid_postfix(buffer, 0, u"%Y", &time) == 0 && error == 5 && buffer[0] == u'x', "wcsftime zero size");
+    Require(wcsftime_nid_postfix(buffer, 32, u"", &time) == 0 && error == 5 && buffer[0] == u'x', "wcsftime empty format");
+    Require(wcsftime_nid_postfix(nullptr, 32, u"%Y", &time) == 0 && error == 5, "wcsftime null buffer");
+    Require(wcsftime_nid_postfix(buffer, 32, u"%Y \u20ac", &time) == 0 && error == 86 && buffer[0] == u'x',
+        "wcsftime unconvertible format");
+    error = 5;
+    Require(wcsftime_nid_postfix(buffer, SIZE_MAX, u"%Y", &time) == 0 && error == 22 && buffer[0] == u'x',
+        "wcsftime oversized buffer");
+    Require(WcsftimeThrows(buffer, nullptr, &time), "wcsftime null format");
+    Require(WcsftimeThrows(buffer, u"%Y", nullptr), "wcsftime null time");
+}
+
 int main() {
     CheckBounded();
+    CheckPositional();
+    CheckPointer();
     CheckCount();
+    CheckSwprintf();
+    CheckSecureWideBoundary();
+    CheckWcsftime();
     Check(u"%.2s", "\xc3\xa9\xc3\xa8", u"\u00e9\u00e8");
     Check(u"%.1s", "\xc3\xa9\xc3\xa8", u"\u00e9");
     Check(u"%.0s", "\xc3\xa9", u"");
@@ -125,4 +292,5 @@ int main() {
     Check(u"%.2s", "\xf0\x9f\x98\x80x", u"\U0001f600");
     Check(u"%.1s", "\xf0\x9f\x98\x80x", u"");
     Check(u"%.3s", "\xf0\x9f\x98\x80x", u"\U0001f600x");
+    CheckGroupingFlag();
 }

@@ -4,6 +4,7 @@
 #include <nid/NidCompute.hpp>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -14,6 +15,11 @@ namespace Nid {
 
 namespace {
 
+
+void RequireElfRange(const std::vector<std::uint8_t>& elf, std::uint64_t offset, std::uint64_t size, const char* table) {
+    if (offset > elf.size() || size > elf.size() - offset)
+        throw std::runtime_error(std::string("invalid ELF ") + table + " range");
+}
 
 std::uint32_t GnuHash(const std::string& name) {
     std::uint32_t h = 5381u;
@@ -34,6 +40,18 @@ GnuHashLayout ReadGnuHashLayout(const std::vector<std::uint8_t>& elf, std::size_
     layout.BucketsOffset = layout.BloomOffset + static_cast<std::size_t>(layout.BloomSize) * 8u;
     layout.ChainOffset = layout.BucketsOffset + static_cast<std::size_t>(layout.NBuckets) * 4u;
     return layout;
+}
+
+void ValidateGnuHash(const std::vector<std::uint8_t>& elf, std::size_t offset, std::size_t size, std::size_t symCount) {
+    if (offset > elf.size() || size > elf.size() - offset || size < 16u)
+        throw std::runtime_error("invalid gnu.hash section range");
+    const auto layout = ReadGnuHashLayout(elf, offset);
+    if (layout.SymOffset > symCount || !layout.BloomSize || (layout.BloomSize & (layout.BloomSize - 1u)) ||
+        layout.BloomShift >= 32u || (!layout.NBuckets && layout.SymOffset != symCount))
+        throw std::runtime_error("invalid gnu.hash geometry");
+    const std::uint64_t required = 16u + std::uint64_t{layout.BloomSize} * 8u +
+        std::uint64_t{layout.NBuckets} * 4u + (symCount - layout.SymOffset) * 4u;
+    if (required > size) throw std::runtime_error("gnu.hash section too small to rebuild in place");
 }
 
 void ReorderDynSymForGnuHash(
@@ -204,49 +222,65 @@ void RemapDynamicNeededOffsets(
     }
 }
 
+struct VersionNameField {
+    std::size_t Offset;
+    std::uint32_t Name;
+};
+
+std::vector<VersionNameField> ReadVersionNameFields(const std::vector<std::uint8_t>& elf, const Elf64_Ehdr& ehdr) {
+    using namespace Internal;
+    std::vector<VersionNameField> fields;
+    for (std::uint16_t i = 0u; i < ehdr.e_shnum; ++i) {
+        const auto section = Read<Elf64_Shdr>(elf, static_cast<std::size_t>(ehdr.e_shoff) + i * sizeof(Elf64_Shdr));
+        if (section.sh_type != kShtGnuVerneed || section.sh_size == 0u) continue;
+        if (section.sh_offset > elf.size() || section.sh_size > elf.size() - section.sh_offset)
+            throw std::runtime_error("invalid .gnu.version_r section range");
+        const auto location = [&](std::uint64_t relative, std::size_t size) {
+            if (relative > section.sh_size || size > section.sh_size - relative)
+                throw std::runtime_error(".gnu.version_r record outside section");
+            return static_cast<std::size_t>(section.sh_offset + relative);
+        };
+        const auto advance = [&](std::uint64_t current, std::uint32_t step, std::size_t size) {
+            if (step < size || step > section.sh_size - current)
+                throw std::runtime_error("invalid .gnu.version_r record link");
+            return current + step;
+        };
+        std::uint64_t current = 0u;
+        while (true) {
+            const auto offset = location(current, sizeof(Elf64_Verneed));
+            const auto need = Read<Elf64_Verneed>(elf, offset);
+            if (need.vn_version != 1u) throw std::runtime_error("unsupported .gnu.version_r structure version");
+            fields.push_back({offset + offsetof(Elf64_Verneed, vn_file), need.vn_file});
+            if (need.vn_cnt != 0u) {
+                auto auxiliary = advance(current, need.vn_aux, sizeof(Elf64_Verneed));
+                for (std::uint16_t index = 0u; index < need.vn_cnt; ++index) {
+                    const auto auxOffset = location(auxiliary, sizeof(Elf64_Vernaux));
+                    const auto aux = Read<Elf64_Vernaux>(elf, auxOffset);
+                    fields.push_back({auxOffset + offsetof(Elf64_Vernaux, vna_name), aux.vna_name});
+                    if (index + 1u == need.vn_cnt) {
+                        if (aux.vna_next != 0u) throw std::runtime_error(".gnu.version_r auxiliary count mismatch");
+                    } else {
+                        auxiliary = advance(auxiliary, aux.vna_next, sizeof(Elf64_Vernaux));
+                    }
+                }
+            }
+            if (need.vn_next == 0u) break;
+            current = advance(current, need.vn_next, sizeof(Elf64_Verneed));
+        }
+    }
+    return fields;
+}
+
 void RemapVerneedOffsets(
     std::vector<std::uint8_t>& elf,
     const Elf64_Ehdr& ehdr,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>>& oldToNewOffset
 ) {
     using namespace Internal;
-
-    for (std::uint16_t i = 0u; i < ehdr.e_shnum; ++i) {
-        const std::size_t shOffset = static_cast<std::size_t>(ehdr.e_shoff) + i * sizeof(Elf64_Shdr);
-        const auto shdr = Read<Elf64_Shdr>(elf, shOffset);
-        if (shdr.sh_type != kShtGnuVerneed) continue;
-
-        const std::size_t verneedOffset = static_cast<std::size_t>(shdr.sh_offset);
-        std::size_t entryOffset = verneedOffset;
-
-        while (true) {
-            const auto verneed = Read<Elf64_Verneed>(elf, entryOffset);
-
-            const auto mappedFile = std::find_if(
-                oldToNewOffset.begin(), oldToNewOffset.end(),
-                [&](const auto& entry) { return entry.first == verneed.vn_file; }
-            );
-            if (mappedFile != oldToNewOffset.end())
-                Write(elf, entryOffset + offsetof(Elf64_Verneed, vn_file), mappedFile->second);
-
-            std::size_t auxOffset = entryOffset + verneed.vn_aux;
-            for (std::uint16_t a = 0u; a < verneed.vn_cnt; ++a) {
-                const auto vernaux = Read<Elf64_Vernaux>(elf, auxOffset);
-
-                const auto mappedName = std::find_if(
-                    oldToNewOffset.begin(), oldToNewOffset.end(),
-                    [&](const auto& entry) { return entry.first == vernaux.vna_name; }
-                );
-                if (mappedName != oldToNewOffset.end())
-                    Write(elf, auxOffset + offsetof(Elf64_Vernaux, vna_name), mappedName->second);
-
-                if (vernaux.vna_next == 0u) break;
-                auxOffset += vernaux.vna_next;
-            }
-
-            if (verneed.vn_next == 0u) break;
-            entryOffset += verneed.vn_next;
-        }
+    for (const auto& field : ReadVersionNameFields(elf, ehdr)) {
+        const auto mapped = std::find_if(oldToNewOffset.begin(), oldToNewOffset.end(),
+            [&](const auto& entry) { return entry.first == field.Name; });
+        if (mapped != oldToNewOffset.end()) Write(elf, field.Offset, mapped->second);
     }
 }
 
@@ -275,35 +309,8 @@ std::vector<std::uint32_t> CollectDynamicNameOffsets(const std::vector<std::uint
 }
 
 std::vector<std::uint32_t> CollectVerneedNameOffsets(const std::vector<std::uint8_t>& elf, const Elf64_Ehdr& ehdr) {
-    using namespace Internal;
-
     std::vector<std::uint32_t> offsets;
-
-    for (std::uint16_t i = 0u; i < ehdr.e_shnum; ++i) {
-        const std::size_t shOffset = static_cast<std::size_t>(ehdr.e_shoff) + i * sizeof(Elf64_Shdr);
-        const auto shdr = Read<Elf64_Shdr>(elf, shOffset);
-        if (shdr.sh_type != kShtGnuVerneed) continue;
-
-        std::size_t entryOffset = static_cast<std::size_t>(shdr.sh_offset);
-
-        while (true) {
-            const auto verneed = Read<Elf64_Verneed>(elf, entryOffset);
-            offsets.push_back(verneed.vn_file);
-
-            std::size_t auxOffset = entryOffset + verneed.vn_aux;
-            for (std::uint16_t a = 0u; a < verneed.vn_cnt; ++a) {
-                const auto vernaux = Read<Elf64_Vernaux>(elf, auxOffset);
-                offsets.push_back(vernaux.vna_name);
-
-                if (vernaux.vna_next == 0u) break;
-                auxOffset += vernaux.vna_next;
-            }
-
-            if (verneed.vn_next == 0u) break;
-            entryOffset += verneed.vn_next;
-        }
-    }
-
+    for (const auto& field : ReadVersionNameFields(elf, ehdr)) offsets.push_back(field.Name);
     return offsets;
 }
 
@@ -316,6 +323,9 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     if (elf[4] != 2) throw std::runtime_error("not ELF64");
 
     const auto ehdr = Read<Elf64_Ehdr>(elf, 0u);
+    if (ehdr.e_ident[5] != 1 || ehdr.e_shentsize != sizeof(Elf64_Shdr))
+        throw std::runtime_error("unsupported ELF byte order or section header size");
+    RequireElfRange(elf, ehdr.e_shoff, std::uint64_t{ehdr.e_shnum} * sizeof(Elf64_Shdr), "section table");
 
     std::size_t dynSymOffset = 0u, dynSymSize = 0u;
     std::size_t gnuHashOffset = 0u, gnuHashSize = 0u;
@@ -326,6 +336,9 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         const std::size_t shOffset = static_cast<std::size_t>(ehdr.e_shoff) + i * sizeof(Elf64_Shdr);
         const auto shdr = Read<Elf64_Shdr>(elf, shOffset);
         if (shdr.sh_type == kShtDynsym) {
+            if (shdr.sh_entsize != sizeof(Elf64_Sym) || shdr.sh_size % sizeof(Elf64_Sym) || shdr.sh_link >= ehdr.e_shnum)
+                throw std::runtime_error("invalid ELF dynsym layout");
+            RequireElfRange(elf, shdr.sh_offset, shdr.sh_size, "dynsym");
             dynSymOffset = static_cast<std::size_t>(shdr.sh_offset);
             dynSymSize = static_cast<std::size_t>(shdr.sh_size);
             dynSymSectionIndex = i;
@@ -333,7 +346,6 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         if (shdr.sh_type == kShtGnuHash) {
             gnuHashOffset = static_cast<std::size_t>(shdr.sh_offset);
             gnuHashSize = static_cast<std::size_t>(shdr.sh_size);
-            gnuHashSymOffset = Read<std::uint32_t>(elf, gnuHashOffset + 4u);
         }
         if (shdr.sh_type == kShtGnuVersym)
             versymOffset = static_cast<std::size_t>(shdr.sh_offset);
@@ -345,6 +357,10 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
 
     const std::size_t symCount = dynSymSize / sizeof(Elf64_Sym);
     if (symCount == 0u) throw std::runtime_error(".dynsym is empty");
+    if (gnuHashOffset != 0u) {
+        ValidateGnuHash(elf, gnuHashOffset, gnuHashSize, symCount);
+        gnuHashSymOffset = Read<std::uint32_t>(elf, gnuHashOffset + 4u);
+    }
 
     const std::size_t dynStrSectionLink = [&]() -> std::size_t {
         for (std::uint16_t i = 0u; i < ehdr.e_shnum; ++i) {
@@ -359,6 +375,8 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     {
         const std::size_t shOffset = static_cast<std::size_t>(ehdr.e_shoff) + dynStrSectionLink * sizeof(Elf64_Shdr);
         const auto shdr = Read<Elf64_Shdr>(elf, shOffset);
+        if (shdr.sh_type != 3) throw std::runtime_error("invalid ELF dynstr section type");
+        RequireElfRange(elf, shdr.sh_offset, shdr.sh_size, "dynstr");
         dynStrOffset = static_cast<std::size_t>(shdr.sh_offset);
         dynStrSize = static_cast<std::size_t>(shdr.sh_size);
     }
@@ -391,6 +409,7 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     };
 
     std::vector<SymbolNameUse> uses;
+    std::unordered_map<std::string, std::pair<std::uint64_t, std::uint16_t>> patchedExports;
     for (std::size_t i = 1u; i < symCount; ++i) {
         const std::size_t symOffset = dynSymOffset + i * sizeof(Elf64_Sym);
         const auto sym = Read<Elf64_Sym>(elf, symOffset);
@@ -407,6 +426,9 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
             const auto it = nidMap.find(symName);
             if (it != nidMap.end())
                 newValue = it->second;
+            const auto [existing, inserted] = patchedExports.try_emplace(newValue, sym.st_value, sym.st_shndx);
+            if (!inserted && existing->second != std::pair{sym.st_value, sym.st_shndx})
+                throw std::runtime_error("duplicate patched export name: " + newValue);
         } else if (binding != kStbLocal && sym.st_shndx == kShnUndef) {
             const bool isUnversioned = versymOffset == 0u ||
                 (Read<std::uint16_t>(elf, versymOffset + i * sizeof(std::uint16_t)) <= 1u);
@@ -427,7 +449,7 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     const auto addName = [&](std::uint32_t oldOffset, std::string value) {
         const auto existing = std::find_if(
             names.begin(), names.end(),
-            [&](const auto& entry) { return entry.first == oldOffset; }
+            [&](const auto& entry) { return entry.first == oldOffset && entry.second == value; }
         );
         if (existing == names.end()) names.emplace_back(oldOffset, std::move(value));
     };
@@ -463,8 +485,9 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
         newDynStr.push_back(0u);
     }
 
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> oldToNewOffset;
-    for (const auto& name : names) oldToNewOffset.emplace_back(name.first, valueOffsets.at(name.second));
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> preservedToNewOffset;
+    for (const auto offset : preservedOffsets)
+        preservedToNewOffset.emplace_back(offset, valueOffsets.at(ReadCStr(origDynStr, offset)));
 
     if (newDynStr.size() > dynStrSize) {
         throw std::runtime_error(
@@ -475,25 +498,15 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
     newDynStr.resize(dynStrSize, 0u);
 
     std::vector<std::string> newSymbolNames(symCount);
-    for (std::size_t i = 1u; i < symCount; ++i) {
-        const std::size_t symOffset = dynSymOffset + i * sizeof(Elf64_Sym);
-        const auto sym = Read<Elf64_Sym>(elf, symOffset);
-        if (sym.st_name == 0u) continue;
-
-        const auto mapped = std::find_if(
-            oldToNewOffset.begin(), oldToNewOffset.end(),
-            [&](const auto& entry) { return entry.first == sym.st_name; }
-        );
-        if (mapped == oldToNewOffset.end()) continue;
-
-        newSymbolNames[i] = ReadCStr(newDynStr, mapped->second);
-        Write(elf, symOffset + offsetof(Elf64_Sym, st_name), mapped->second);
+    for (const auto& use : uses) {
+        newSymbolNames[use.symIndex] = use.newValue;
+        Write(elf, dynSymOffset + use.symIndex * sizeof(Elf64_Sym) + offsetof(Elf64_Sym, st_name), valueOffsets.at(use.newValue));
     }
 
     std::memcpy(elf.data() + dynStrOffset, newDynStr.data(), newDynStr.size());
 
-    RemapDynamicNeededOffsets(elf, ehdr, oldToNewOffset);
-    RemapVerneedOffsets(elf, ehdr, oldToNewOffset);
+    RemapDynamicNeededOffsets(elf, ehdr, preservedToNewOffset);
+    RemapVerneedOffsets(elf, ehdr, preservedToNewOffset);
 
     if (gnuHashOffset != 0u) {
         const auto bucketCount = Read<std::uint32_t>(elf, gnuHashOffset);

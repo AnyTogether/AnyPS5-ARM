@@ -11,8 +11,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/Mouse.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../libSceVideoOut/src/MouseInput.cpp
     )
-    target_include_directories(mouse_tests PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/3rdparty/SDL2/include)
-    target_link_libraries(mouse_tests PRIVATE libSceMouse libkernel libc)
+    target_include_directories(mouse_tests PRIVATE ${LIBS_INCLUDE_DIR} ${ANYPS5_SDL2_INCLUDE_DIR})
+    target_link_libraries(mouse_tests PRIVATE libSceMouse libkernel libc SDL2-static)
     configure_windows_unwind(mouse_tests)
     add_test(NAME mouse_input COMMAND mouse_tests)
     if(WIN32)

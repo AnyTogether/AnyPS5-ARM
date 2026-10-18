@@ -50,6 +50,8 @@ struct MemoryInfo {
     bool planningOnly = false;
     bool coherent = false;
     bool gpuDescriptor = false;
+    bool flushDenormals = false;
+    bool flushDenormalResults = false;
 
     bool operator==(const MemoryInfo& other) const = default;
 };

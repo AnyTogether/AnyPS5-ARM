@@ -76,6 +76,8 @@ int main() {
     const std::int32_t memorySize = scePngDecQueryMemorySize(&param);
     Require(memorySize > 0);
     Require(scePngDecQueryMemorySize(nullptr) == invalidParam);
+    const PngDecCreateParam badSize{sizeof(PngDecCreateParam) - 1, 0, 1920};
+    Require(scePngDecQueryMemorySize(&badSize) == invalidSize);
     const PngDecCreateParam badAttribute{sizeof(PngDecCreateParam), 2, 1920};
     Require(scePngDecQueryMemorySize(&badAttribute) == invalidParam);
     const PngDecCreateParam zeroWidth{sizeof(PngDecCreateParam), 0, 0};
@@ -89,6 +91,7 @@ int main() {
     unsigned char* unaligned = memory.data() + 1;
     void* handle = nullptr;
     Require(scePngDecCreate(nullptr, unaligned, static_cast<std::uint32_t>(memorySize), &handle) == invalidParam);
+    Require(scePngDecCreate(&badSize, unaligned, static_cast<std::uint32_t>(memorySize), &handle) == invalidSize);
     Require(scePngDecCreate(&param, nullptr, static_cast<std::uint32_t>(memorySize), &handle) == invalidAddr);
     Require(scePngDecCreate(&param, unaligned, static_cast<std::uint32_t>(memorySize), nullptr) == invalidAddr);
     Require(scePngDecCreate(&param, unaligned, static_cast<std::uint32_t>(memorySize) - 1, &handle) == invalidWorkMemory);
@@ -105,6 +108,13 @@ int main() {
     const PngDecParseParam parsePalette{PALETTE_TRNS, sizeof(PALETTE_TRNS), 0};
     Require(scePngDecParseHeader(&parsePalette, &info) == 0);
     Require(info.color_space == 4 && info.bit_depth == 2 && info.image_flag == 2);
+    for (const std::uint32_t size : {69u, 71u}) {
+        const PngDecParseParam truncatedPalette{PALETTE_TRNS, size, 0};
+        Require(scePngDecParseHeader(&truncatedPalette, &info) == 0);
+        Require(info.color_space == 4 && info.bit_depth == 2 && info.image_flag == 0);
+    }
+    const PngDecParseParam completeTransparency{PALETTE_TRNS, 73, 0};
+    Require(scePngDecParseHeader(&completeTransparency, &info) == 0 && info.image_flag == 2);
     Require(scePngDecParseHeader(nullptr, &info) == invalidParam);
     Require(scePngDecParseHeader(&parse, nullptr) == invalidAddr);
     const PngDecParseParam parseNull{nullptr, 16, 0};

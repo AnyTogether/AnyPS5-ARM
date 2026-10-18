@@ -10,6 +10,8 @@ int APS5_VABI scePthreadKeyCreate(PthreadKey* key, pthread_key_destructor_func_t
 int APS5_VABI scePthreadKeyDelete(PthreadKey key);
 void* APS5_VABI scePthreadGetspecific(PthreadKey key);
 int APS5_VABI scePthreadSetspecific(PthreadKey key, void* value);
+int APS5_VABI pthread_key_create_nid_postfix(PthreadKey* key, pthread_key_destructor_func_t destructor);
+int APS5_VABI pthread_key_delete_nid_postfix(PthreadKey key);
 }
 
 static constexpr int SCE_OK = 0;
@@ -62,8 +64,16 @@ static void* APS5_VABI HoldAcrossReuse(void*) {
 }
 
 int main() {
+    PthreadKey posixKey = 0;
+    Require(pthread_key_create_nid_postfix(&posixKey, nullptr) == 0 && posixKey != 0);
+    Require(scePthreadSetspecific(0, &first) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadGetspecific(0) == nullptr);
+    Require(scePthreadKeyDelete(0) == SCE_KERNEL_ERROR_EINVAL);
+    Require(pthread_key_delete_nid_postfix(posixKey) == 0);
+
     PthreadKey key = -1;
     Require(scePthreadKeyCreate(&key, nullptr) == SCE_OK);
+    Require(key != 0);
     Require(scePthreadGetspecific(key) == nullptr);
     Require(scePthreadSetspecific(key, &first) == SCE_OK);
     Require(scePthreadGetspecific(key) == &first);

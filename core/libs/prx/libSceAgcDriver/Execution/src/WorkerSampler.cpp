@@ -2,10 +2,26 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#ifdef __APPLE__
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <dlfcn.h>
+#include <map>
+#include <mutex>
+#include <pthread.h>
+#include <mach/mach.h>
+#include <string>
+#include <thread>
+#include <vector>
+#endif
 #ifdef _WIN32
+#include "prx/libSceAgcDriver/Execution/include/StackWalk.hpp"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <map>
@@ -29,43 +45,134 @@ std::jthread workerSamplerThread;
 // Debug aid: APS5_SAMPLE_WORKER=<file> samples the calling thread every millisecond and, every 20 s,
 // writes "module+offset self inclusive" lines to <file> for offline symbolization with nm.
 struct Sampler {
+    static constexpr int ProcessDepth = 12;
+    static constexpr int WorkerDepth = 64;
+
     HANDLE target = nullptr;
     std::string path;
+    int depth = ProcessDepth;
+    bool keepStacks = false;
+    std::uint64_t stackLow = 0;
+    std::uint64_t stackHigh = 0;
+    std::vector<DwarfFrames> modules;
+    std::uint64_t pendingModule = 0;
     std::mutex mutex;
     std::map<std::uint64_t, std::pair<std::uint64_t, std::uint64_t>> counts;
+    CollapsedStacks stacks;
     std::uint64_t samples = 0;
+    std::int64_t suspendedTicks = 0;
+    std::int64_t longestSuspendedTicks = 0;
 
     ~Sampler() noexcept(false) {
         if (target != nullptr && !CloseHandle(target)) throw std::system_error(GetLastError(), std::system_category(), "Closing sampler thread handle");
     }
 
-    void sample() {
-        CONTEXT context{};
-        context.ContextFlags = CONTEXT_FULL;
-        if (SuspendThread(target) == static_cast<DWORD>(-1)) return;
-        const bool captured = GetThreadContext(target, &context) != 0;
-        std::vector<std::uint64_t> frames;
-        if (captured) {
-            // Unwinding reads the target's stack while it is suspended; frames without unwind data
-            // (JIT/guest code) end the walk.
-            for (int depth = 0; depth < 12 && context.Rip != 0; ++depth) {
-                frames.push_back(context.Rip);
-                DWORD64 imageBase = 0;
-                auto* entry = RtlLookupFunctionEntry(context.Rip, &imageBase, nullptr);
-                if (entry == nullptr) break;
+    bool readStack(std::uint64_t address, std::uint64_t& value) const {
+        if (address < stackLow || address > stackHigh - sizeof(value)) return false;
+        std::memcpy(&value, reinterpret_cast<const void*>(address), sizeof(value));
+        return true;
+    }
+
+    const DwarfFrames* moduleOf(std::uint64_t pc) const {
+        const auto found = std::upper_bound(modules.begin(), modules.end(), pc, [](std::uint64_t value, const DwarfFrames& module) { return value < module.Base(); });
+        return found != modules.begin() && std::prev(found)->Contains(pc) ? &*std::prev(found) : nullptr;
+    }
+
+    bool hasUnwindData(std::uint64_t pc) const {
+        DWORD64 imageBase = 0;
+        const auto* module = moduleOf(pc - 1);
+        return RtlLookupFunctionEntry(pc, &imageBase, nullptr) != nullptr || (module != nullptr && module->Covers(pc - 1));
+    }
+
+    DwarfFrames::Step stepDwarf(CONTEXT& context, bool leaf) {
+        const auto* module = moduleOf(context.Rip - (leaf ? 0 : 1));
+        if (module == nullptr) {
+            MEMORY_BASIC_INFORMATION memory{};
+            if (VirtualQuery(reinterpret_cast<LPCVOID>(context.Rip), &memory, sizeof(memory)) != 0 && memory.Type == MEM_IMAGE) pendingModule = reinterpret_cast<std::uint64_t>(memory.AllocationBase);
+            return DwarfFrames::Step::Failed;
+        }
+        DwarfFrames::Registers registers{context.Rax, context.Rdx, context.Rcx, context.Rbx, context.Rsi, context.Rdi, context.Rbp, context.Rsp, context.R8, context.R9, context.R10, context.R11, context.R12, context.R13, context.R14, context.R15, context.Rip};
+        const auto step = module->Unwind(registers, leaf, [&](std::uint64_t address, std::uint64_t& value) { return readStack(address, value); });
+        if (step != DwarfFrames::Step::Stepped) return step;
+        DWORD64* columns[] = {&context.Rax, &context.Rdx, &context.Rcx, &context.Rbx, &context.Rsi, &context.Rdi, &context.Rbp, &context.Rsp, &context.R8, &context.R9, &context.R10, &context.R11, &context.R12, &context.R13, &context.R14, &context.R15, &context.Rip};
+        for (std::size_t column = 0; column < registers.size(); ++column) *columns[column] = registers[column];
+        return step;
+    }
+
+    int walk(CONTEXT& context, std::array<std::uint64_t, WorkerDepth>& frames) {
+        const bool dwarf = stackHigh != 0 && context.Rsp >= stackLow && context.Rsp < stackHigh;
+        int count = 0;
+        while (count < depth && context.Rip != 0) {
+            frames[count++] = context.Rip;
+            DWORD64 imageBase = 0;
+            if (auto* entry = RtlLookupFunctionEntry(context.Rip, &imageBase, nullptr)) {
                 PVOID handler = nullptr;
                 DWORD64 establisher = 0;
                 RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, context.Rip, entry, &context, &handler, &establisher, nullptr);
+                continue;
             }
+            if (!dwarf) break;
+            const auto step = stepDwarf(context, count == 1);
+            if (step == DwarfFrames::Step::Stepped) continue;
+            std::uint64_t returnAddress = 0;
+            if (step == DwarfFrames::Step::Failed || count != 1 || !readStack(context.Rsp, returnAddress) || !hasUnwindData(returnAddress)) break;
+            context.Rip = returnAddress;
+            context.Rsp += sizeof(returnAddress);
         }
+        return count;
+    }
+
+    void indexModule() {
+        const auto base = std::exchange(pendingModule, 0);
+        if (moduleOf(base) != nullptr) return;
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+        const auto* sections = IMAGE_FIRST_SECTION(nt);
+        const DwarfFrames::Byte* frames = nullptr;
+        const DwarfFrames::Byte* framesEnd = nullptr;
+        for (unsigned index = 0; index < nt->FileHeader.NumberOfSections; ++index) {
+            if (std::memcmp(sections[index].Name, ".ehfram", 8) != 0) continue;
+            frames = reinterpret_cast<const DwarfFrames::Byte*>(base + sections[index].VirtualAddress);
+            framesEnd = frames + sections[index].Misc.VirtualSize;
+        }
+        const auto at = std::upper_bound(modules.begin(), modules.end(), base, [](std::uint64_t value, const DwarfFrames& module) { return value < module.Base(); });
+        modules.emplace(at, base, base + nt->OptionalHeader.SizeOfImage, frames, framesEnd);
+    }
+
+    void sample() {
+        CONTEXT context{};
+        context.ContextFlags = CONTEXT_FULL;
+        std::array<std::uint64_t, WorkerDepth> frames;
+        int count = 0;
+        LARGE_INTEGER suspended{};
+        LARGE_INTEGER resumed{};
+        QueryPerformanceCounter(&suspended);
+        if (SuspendThread(target) == static_cast<DWORD>(-1)) return;
+        if (GetThreadContext(target, &context) != 0) count = walk(context, frames);
         ResumeThread(target);
+        QueryPerformanceCounter(&resumed);
+        if (pendingModule != 0) indexModule();
         std::lock_guard lock(mutex);
         ++samples;
-        for (std::size_t i = 0; i < frames.size(); ++i) {
-            auto& count = counts[frames[i]];
-            if (i == 0) ++count.first;
-            ++count.second;
+        suspendedTicks += resumed.QuadPart - suspended.QuadPart;
+        longestSuspendedTicks = std::max(longestSuspendedTicks, resumed.QuadPart - suspended.QuadPart);
+        for (int i = 0; i < count; ++i) {
+            auto& entry = counts[frames[i]];
+            if (i == 0) ++entry.first;
+            ++entry.second;
         }
+        if (keepStacks && count != 0) stacks.Add({frames.data(), static_cast<std::size_t>(count)}, context.Rip != 0);
+    }
+
+    static std::string frameName(std::uint64_t address, std::map<std::uint64_t, std::string>& loaded) {
+        HMODULE module = nullptr;
+        char name[MAX_PATH] = "?";
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCSTR>(address), &module)) GetModuleFileNameA(module, name, sizeof(name));
+        const char* base = std::strrchr(name, '\\');
+        if (module != nullptr) loaded.emplace(reinterpret_cast<std::uint64_t>(module), base ? base + 1 : name);
+        char frame[MAX_PATH + 32];
+        std::snprintf(frame, sizeof(frame), "%s+0x%llx", base ? base + 1 : name, static_cast<unsigned long long>(address - reinterpret_cast<std::uint64_t>(module)));
+        return frame;
     }
 
     void write() {
@@ -81,6 +188,34 @@ struct Sampler {
             std::fprintf(file, "%s 0x%llx %llu %llu\n", base ? base + 1 : name, static_cast<unsigned long long>(address - reinterpret_cast<std::uint64_t>(module)), static_cast<unsigned long long>(count.first), static_cast<unsigned long long>(count.second));
         }
         std::fclose(file);
+        if (keepStacks) writeStacks();
+    }
+
+    void writeStacks() {
+        const auto dot = path.rfind('.');
+        const auto slash = path.find_last_of("\\/");
+        const auto stem = dot != std::string::npos && (slash == std::string::npos || dot > slash) ? path.substr(0, dot) : path;
+        const auto collapsed = stem + ".collapsed.txt";
+        const auto temporary = collapsed + ".tmp";
+        std::map<std::uint64_t, std::string> names;
+        std::map<std::uint64_t, std::string> loaded;
+        for (const auto& [address, count] : counts) names.emplace(address, frameName(address, loaded));
+        std::FILE* file = std::fopen(temporary.c_str(), "w");
+        if (file == nullptr) return;
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
+        const double tickUs = 1e6 / static_cast<double>(frequency.QuadPart);
+        std::fprintf(file, "# samples=%llu depth=%d truncated=%llu suspended_us_mean=%.1f suspended_us_max=%.1f\n", static_cast<unsigned long long>(samples), depth, static_cast<unsigned long long>(stacks.Truncated()),
+            samples != 0 ? static_cast<double>(suspendedTicks) * tickUs / static_cast<double>(samples) : 0.0, static_cast<double>(longestSuspendedTicks) * tickUs);
+        for (const auto& [base, name] : loaded) {
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+            std::fprintf(file, "# module %s 0x%lx 0x%lx\n", name.c_str(), static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage), static_cast<unsigned long>(nt->FileHeader.TimeDateStamp));
+        }
+        const auto text = stacks.Format([&](std::uint64_t address) { return names.at(address); });
+        const bool written = std::fwrite(text.data(), 1, text.size(), file) == text.size();
+        if (std::fclose(file) != 0 || !written) return;
+        MoveFileExA(temporary.c_str(), collapsed.c_str(), MOVEFILE_REPLACE_EXISTING);
     }
 };
 
@@ -172,6 +307,14 @@ void StartWorkerSampler() {
     if (path == nullptr) return;
     auto sampler = std::make_unique<Sampler>();
     sampler->path = path;
+    sampler->depth = Sampler::WorkerDepth;
+    sampler->keepStacks = true;
+    const auto* block = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+    MEMORY_BASIC_INFORMATION stack{};
+    if (VirtualQuery(block->StackLimit, &stack, sizeof(stack)) != 0) {
+        sampler->stackLow = reinterpret_cast<std::uint64_t>(stack.AllocationBase);
+        sampler->stackHigh = reinterpret_cast<std::uint64_t>(block->StackBase);
+    }
     if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &sampler->target, THREAD_ALL_ACCESS, FALSE, 0)) throw std::system_error(GetLastError(), std::system_category(), "Duplicating sampler thread handle");
     workerSamplerThread = std::jthread([sampler = std::move(sampler)](std::stop_token token) {
         auto flushed = std::chrono::steady_clock::now();
@@ -193,9 +336,154 @@ void StopWorkerSampler() {
     if (processSamplerThread.joinable()) processSamplerThread.join();
     if (workerSamplerThread.joinable()) workerSamplerThread.join();
 }
+
+void SampleCurrentThread(const char*) {}
+#elif defined(__APPLE__)
+namespace {
+
+// Debug aid: APS5_SAMPLE_WORKER=<file> samples the registered threads (queue 0's worker, the draw
+// committer) every millisecond: the sampler suspends each one, reads its x86 registers through Mach
+// (Rosetta reports the translated state) and walks its frame pointers, then resumes it before it
+// allocates anything. Every 20 s <file> gets each thread's hottest frames and stacks as
+// "module+offset" for atos. (SIGPROF does not work: Rosetta delivers it at system calls only.)
+constexpr int SampleDepth = 24;
+constexpr int MaxThreads = 8;
+
+struct SampledThread {
+    thread_act_t port = MACH_PORT_NULL;
+    std::uintptr_t stackLow = 0;
+    std::uintptr_t stackHigh = 0;
+    std::string name;
+};
+
+SampledThread threads[MaxThreads];
+std::atomic<int> threadCount{0};
+std::mutex registerMutex;
+std::string outputPath;
+std::thread samplerThread;
+std::atomic<bool> stopping{false};
+
+int Walk(const SampledThread& thread, std::uintptr_t* pcs) {
+    x86_thread_state64_t state{};
+    mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+    if (thread_suspend(thread.port) != KERN_SUCCESS) return 0;
+    int depth = 0;
+    if (thread_get_state(thread.port, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS) {
+        pcs[depth++] = static_cast<std::uintptr_t>(state.__rip);
+        auto frame = static_cast<std::uintptr_t>(state.__rbp);
+        while (depth < SampleDepth && frame >= thread.stackLow && frame + 16 <= thread.stackHigh && (frame & 7) == 0) {
+            const auto* words = reinterpret_cast<const std::uintptr_t*>(frame);
+            if (words[1] == 0) break;
+            pcs[depth++] = words[1];
+            if (words[0] <= frame) break;
+            frame = words[0];
+        }
+    }
+    thread_resume(thread.port);
+    return depth;
+}
+
+std::string Frame(std::uintptr_t pc) {
+    Dl_info info{};
+    char text[160];
+    if (::dladdr(reinterpret_cast<void*>(pc), &info) && info.dli_fname != nullptr) {
+        const char* name = std::strrchr(info.dli_fname, '/');
+        std::snprintf(text, sizeof(text), "%s+0x%llx", name ? name + 1 : info.dli_fname, static_cast<unsigned long long>(pc - reinterpret_cast<std::uintptr_t>(info.dli_fbase)));
+    } else {
+        std::snprintf(text, sizeof(text), "0x%llx", static_cast<unsigned long long>(pc));
+    }
+    return text;
+}
+
+void Run() {
+    std::map<std::pair<int, std::vector<std::uintptr_t>>, std::uint64_t> stacks;
+    std::map<std::pair<int, std::uintptr_t>, std::pair<std::uint64_t, std::uint64_t>> frames;
+    std::uint64_t total[MaxThreads] = {};
+    auto flushed = std::chrono::steady_clock::now();
+    const auto write = [&] {
+        std::FILE* file = std::fopen(outputPath.c_str(), "w");
+        if (file == nullptr) return;
+        for (int t = 0; t < threadCount.load(); ++t) {
+            std::fprintf(file, "thread %s: %llu samples\n", threads[t].name.c_str(), static_cast<unsigned long long>(total[t]));
+            std::vector<std::pair<std::uintptr_t, std::pair<std::uint64_t, std::uint64_t>>> hot;
+            for (const auto& [key, value] : frames) if (key.first == t) hot.emplace_back(key.second, value);
+            std::sort(hot.begin(), hot.end(), [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
+            std::fprintf(file, " inclusive (frame self inclusive):\n");
+            for (std::size_t i = 0; i < hot.size() && i < 80; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
+            std::sort(hot.begin(), hot.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+            std::fprintf(file, " self:\n");
+            for (std::size_t i = 0; i < hot.size() && i < 60; ++i) std::fprintf(file, "  %s %llu %llu\n", Frame(hot[i].first).c_str(), static_cast<unsigned long long>(hot[i].second.first), static_cast<unsigned long long>(hot[i].second.second));
+            std::vector<std::pair<const std::vector<std::uintptr_t>*, std::uint64_t>> top;
+            for (const auto& [key, count] : stacks) if (key.first == t) top.emplace_back(&key.second, count);
+            std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+            std::fprintf(file, " stacks:\n");
+            for (std::size_t i = 0; i < top.size() && i < 400; ++i) {
+                std::fprintf(file, "  %llu", static_cast<unsigned long long>(top[i].second));
+                for (const auto pc : *top[i].first) std::fprintf(file, " %s", Frame(pc).c_str());
+                std::fprintf(file, "\n");
+            }
+        }
+        std::fclose(file);
+    };
+    std::uintptr_t pcs[SampleDepth];
+    while (!stopping.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        for (int t = 0; t < threadCount.load(std::memory_order_acquire); ++t) {
+            const int depth = Walk(threads[t], pcs);
+            if (depth == 0) continue;
+            std::vector<std::uintptr_t> stack(pcs, pcs + depth);
+            ++stacks[{t, stack}];
+            ++total[t];
+            ++frames[{t, stack.front()}].first;
+            std::sort(stack.begin(), stack.end());
+            stack.erase(std::unique(stack.begin(), stack.end()), stack.end());
+            for (const auto pc : stack) ++frames[{t, pc}].second;
+        }
+        if (std::chrono::steady_clock::now() - flushed > std::chrono::seconds(20)) {
+            // Each write covers the last 20 s alone.
+            write();
+            stacks.clear();
+            frames.clear();
+            std::fill(std::begin(total), std::end(total), 0);
+            flushed = std::chrono::steady_clock::now();
+        }
+    }
+    write();
+}
+
+}
+
+void SampleCurrentThread(const char* name) {
+    const char* path = std::getenv("APS5_SAMPLE_WORKER");
+    if (path == nullptr) return;
+    std::lock_guard lock(registerMutex);
+    const int slot = threadCount.load();
+    if (slot >= MaxThreads) return;
+    auto& thread = threads[slot];
+    thread.port = pthread_mach_thread_np(pthread_self());
+    thread.stackHigh = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    thread.stackLow = thread.stackHigh - pthread_get_stacksize_np(pthread_self());
+    thread.name = name;
+    threadCount.store(slot + 1, std::memory_order_release);
+    if (!samplerThread.joinable()) {
+        outputPath = path;
+        samplerThread = std::thread(Run);
+    }
+}
+
+void StartWorkerSampler() {
+    SampleCurrentThread("queue 0");
+}
+
+void StopWorkerSampler() {
+    if (!samplerThread.joinable()) return;
+    stopping.store(true);
+    samplerThread.join();
+}
 #else
 void StartWorkerSampler() {}
 void StopWorkerSampler() {}
+void SampleCurrentThread(const char*) {}
 #endif
 
 }

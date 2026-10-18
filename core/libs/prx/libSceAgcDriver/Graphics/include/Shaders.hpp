@@ -9,7 +9,29 @@
 
 namespace AgcDriver::Graphics {
 
-inline constexpr std::uint32_t PipelinePushConstantBytes = 128;
+inline constexpr std::uint32_t PipelinePushConstantBytes = 256;
+inline constexpr std::uint32_t PipelinePushSlotBytes = 128;
+inline constexpr std::uint32_t ComputePushConstantBytes = 128;
+
+inline std::uint32_t PushBlockBytes(bool libraries) {
+    return libraries ? PipelinePushConstantBytes : PipelinePushSlotBytes;
+}
+
+inline VkShaderStageFlags PreRasterizationPushStages(bool meshShader, bool tessellation, bool geometry) {
+    VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT;
+    if (tessellation) stages |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+    if (geometry) stages |= VK_SHADER_STAGE_GEOMETRY_BIT;
+    if (meshShader) stages |= VK_SHADER_STAGE_MESH_BIT_EXT;
+    return stages;
+}
+
+inline std::uint32_t FixedPushOffset(ShaderRecompiler::ShaderStage stage) {
+    return stage == ShaderRecompiler::ShaderStage::Fragment ? PipelinePushSlotBytes : 0u;
+}
+
+inline std::uint32_t StagePushOffset(std::uint32_t cursor, ShaderRecompiler::ShaderStage stage, bool fixedSlots) {
+    return fixedSlots && stage == ShaderRecompiler::ShaderStage::Fragment ? PipelinePushSlotBytes : cursor;
+}
 
 struct CompiledShader {
     ShaderRecompiler::ShaderStage stage;
@@ -23,6 +45,7 @@ inline VkShaderStageFlagBits VulkanStage(ShaderRecompiler::ShaderStage stage) {
         case ShaderRecompiler::ShaderStage::Local: return VK_SHADER_STAGE_VERTEX_BIT;
         case ShaderRecompiler::ShaderStage::TessellationControl: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
         case ShaderRecompiler::ShaderStage::TessellationEvaluation: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+        case ShaderRecompiler::ShaderStage::Geometry: return VK_SHADER_STAGE_GEOMETRY_BIT;
         case ShaderRecompiler::ShaderStage::Mesh: return VK_SHADER_STAGE_MESH_BIT_EXT;
         case ShaderRecompiler::ShaderStage::Fragment: return VK_SHADER_STAGE_FRAGMENT_BIT;
         case ShaderRecompiler::ShaderStage::Compute: return VK_SHADER_STAGE_COMPUTE_BIT;
@@ -30,15 +53,25 @@ inline VkShaderStageFlagBits VulkanStage(ShaderRecompiler::ShaderStage stage) {
     }
 }
 
+inline bool EmulatedMesh(const CompiledShader& shader) {
+    return shader.program != nullptr && shader.program->meshEmulation == ShaderRecompiler::MeshEmulationRole::Compute;
+}
+
+inline VkShaderStageFlagBits VulkanStage(const CompiledShader& shader) {
+    return EmulatedMesh(shader) ? VK_SHADER_STAGE_COMPUTE_BIT : VulkanStage(shader.stage);
+}
+
 inline VkPipelineStageFlags PipelineStages(std::span<const CompiledShader> shaders) {
     VkPipelineStageFlags result = 0;
     for (const auto& shader : shaders) {
-        switch (VulkanStage(shader.stage)) {
+        switch (VulkanStage(shader)) {
             case VK_SHADER_STAGE_VERTEX_BIT: result |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT; break;
             case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: result |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT; break;
             case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: result |= VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT; break;
+            case VK_SHADER_STAGE_GEOMETRY_BIT: result |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT; break;
             case VK_SHADER_STAGE_MESH_BIT_EXT: result |= VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT; break;
             case VK_SHADER_STAGE_FRAGMENT_BIT: result |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT; break;
+            case VK_SHADER_STAGE_COMPUTE_BIT: result |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT; break;
             default: throw std::runtime_error("AGC graphics: invalid graphics pipeline stage");
         }
     }
@@ -49,7 +82,7 @@ inline VkShaderStageFlags PushConstantStages(std::span<const CompiledShader> sha
     VkShaderStageFlags result = 0;
     for (const auto& shader : shaders) {
         Require(shader.program != nullptr, "missing compiled shader");
-        if (!shader.program->pushConstants.empty() || shader.stage == ShaderRecompiler::ShaderStage::Mesh) result |= VulkanStage(shader.stage);
+        if (!shader.program->pushConstants.empty() || shader.stage == ShaderRecompiler::ShaderStage::Mesh || shader.stage == ShaderRecompiler::ShaderStage::TessellationControl) result |= VulkanStage(shader);
     }
     return result;
 }
@@ -63,6 +96,7 @@ inline std::array<std::byte, PipelinePushConstantBytes> AssemblePushConstants(st
         if (bytes.empty()) continue;
         Require(bytes.size() % 4 == 0 && shader.pushConstantOffset % 4 == 0, "shader push constant range is not DWORD aligned");
         Require(shader.pushConstantOffset < PipelinePushConstantBytes && bytes.size() <= PipelinePushConstantBytes - shader.pushConstantOffset, "shader push constant range lies outside the pipeline push constant block");
+        Require(bytes.size() <= PipelinePushSlotBytes - shader.pushConstantOffset % PipelinePushSlotBytes, "shader push constant range crosses a push constant slot");
         for (std::size_t i = 0; i < bytes.size(); ++i) {
             const auto position = shader.pushConstantOffset + i;
             Require(!occupied[position], "shader push constant ranges of different stages overlap");

@@ -1,5 +1,6 @@
 add_library(libSceHmd2 SHARED EXCLUDE_FROM_ALL Export.cpp)
 target_include_directories(libSceHmd2 PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(libSceHmd2 PRIVATE libc)
 configure_windows_unwind(libSceHmd2)
 
 if(BUILD_TESTING)
@@ -8,6 +9,7 @@ if(BUILD_TESTING)
     target_link_libraries(guest_hmd2_tests PRIVATE libSceHmd2 libc)
     configure_windows_unwind(guest_hmd2_tests)
     add_test(NAME guest_hmd2 COMMAND guest_hmd2_tests)
+    set_tests_properties(guest_hmd2 PROPERTIES SKIP_RETURN_CODE 77)
     if(WIN32)
         set_tests_properties(guest_hmd2 PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHmd2>")

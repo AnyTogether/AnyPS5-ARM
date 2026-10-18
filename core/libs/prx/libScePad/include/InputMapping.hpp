@@ -11,9 +11,27 @@
 
 namespace Pad {
 
-inline constexpr int MousePollIntervalMs = 33;
 inline constexpr int WheelPressDurationMs = 80;
-inline constexpr double MouseSensitivity = 1.0;
+inline constexpr double DefaultMouseSensitivity = 1.0;
+inline constexpr double MaxMouseSensitivity = 10.0;
+inline constexpr int MaxStickDeadzonePercent = 90;
+
+struct InputSettings {
+    int leftStickDeadzonePercent = 0;
+    int rightStickDeadzonePercent = 0;
+    double mouseSensitivity = DefaultMouseSensitivity;
+    double mouseVerticalScale = 1.0;
+    double mouseCurve = 1.0;
+    double mouseDeadzoneOffset = 0.2;
+    double mouseMaxSpeed = 1.0;
+    double mouseSmoothingMs = 10.0;
+    double mouseDecayMs = 30.0;
+};
+
+struct InputConfiguration {
+    std::vector<InputBinding> bindings;
+    InputSettings settings;
+};
 
 inline constexpr std::array InputMapping{
     InputBinding{SDL_SCANCODE_F11, MouseButton::None, InputControl::ToggleFullscreen},
@@ -51,7 +69,8 @@ inline constexpr std::array InputMapping{
     InputBinding{SDL_SCANCODE_UNKNOWN, MouseButton::None, InputControl::Button, PadButton::Down, -1}
 };
 
-std::vector<InputBinding> LoadInputMapping();
+InputConfiguration LoadInputMapping();
+std::array<std::uint8_t, 2> StickWithDeadzone(std::int16_t x, std::int16_t y, int deadzonePercent);
 
 }
 

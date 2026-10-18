@@ -2,9 +2,10 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
-#include "prx/libc/include/general/AsmFunction.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +19,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #include "prx/libc/include/GuestArena.hpp"
+#else
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
 
 static constexpr int32_t SCE_OK = 0;
@@ -32,6 +36,8 @@ static constexpr std::size_t FIBER_OBJECT_SIZE = 0x100;
 static constexpr std::size_t FIBER_OPT_PARAM_SIZE = 0x80;
 static constexpr std::size_t FIBER_MIN_CONTEXT_SIZE = 512;
 static constexpr std::uint64_t FIBER_CONTEXT_FILL = 0xdeadbeefdeadbeefull;
+static constexpr std::size_t FIBER_HOST_STACK_MARGIN = 1u << 20;
+static constexpr std::size_t FIBER_GUEST_STACK_MIN = 64u << 10;
 
 using GuestFiberEntry = void (APS5_VABI*)(std::uint64_t argOnInitialize, std::uint64_t argOnRun);
 
@@ -56,6 +62,8 @@ struct Fiber {
     void* savedStack;
     char name[FIBER_MAX_NAME_LENGTH + 1];
     bool contextSizeCheck;
+    std::uint8_t* hostStack;
+    std::uint64_t hostStackBytes;
 };
 static_assert(sizeof(Fiber) <= FIBER_OBJECT_SIZE, "guest reserves 0x100 bytes for SceFiber");
 
@@ -161,6 +169,9 @@ Aps5FiberSwitchStack_nid_no_patch:
 Aps5FiberTrampoline_nid_no_patch:
     mov %r12, %rcx
     and $-16, %rsp
+    push $0
+    push $0
+    mov %rsp, %rbp
     sub $32, %rsp
     call Aps5FiberMain_nid_no_patch
     ud2
@@ -230,6 +241,9 @@ asm(".text\n"
     APS5_ASM_FUNCTION("Aps5FiberTrampoline_nid_no_patch") R"(
     mov %r12, %rdi
     and $-16, %rsp
+    push $0
+    push $0
+    mov %rsp, %rbp
     call )" APS5_ASM_SYMBOL("Aps5FiberMain_nid_no_patch") R"(
     ud2
 )" APS5_ASM_FUNCTION_END("Aps5FiberTrampoline_nid_no_patch"));
@@ -276,9 +290,88 @@ static void UnpinStack(const void*, std::uint64_t) {}
 
 #endif
 
+#ifdef _WIN32
+
+static std::uint64_t HostStackGuardBytes() {
+    static const std::uint64_t bytes = [] {
+        SYSTEM_INFO system{};
+        GetSystemInfo(&system);
+        return static_cast<std::uint64_t>(system.dwPageSize);
+    }();
+    return bytes;
+}
+
+static void AllocateHostStack(Fiber* fiber) {
+    const auto page = HostStackGuardBytes();
+    const auto bytes = (fiber->contextSize + FIBER_HOST_STACK_MARGIN + page - 1) / page * page + page;
+    auto* mapping = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (mapping == nullptr) throw std::runtime_error(std::string("sceFiberInitialize: no host stack of ") + std::to_string(bytes) + " bytes for fiber '" + fiber->name + "' (error " + std::to_string(GetLastError()) + ")");
+    DWORD previous = 0;
+    if (!VirtualProtect(mapping, page, PAGE_NOACCESS, &previous)) {
+        const auto error = GetLastError();
+        VirtualFree(mapping, 0, MEM_RELEASE);
+        throw std::runtime_error(std::string("sceFiberInitialize: cannot protect the guard page of the host stack of fiber '") + fiber->name + "' (error " + std::to_string(error) + ")");
+    }
+    fiber->hostStack = mapping;
+    fiber->hostStackBytes = bytes;
+}
+
+static void ReleaseHostStack(Fiber* fiber) {
+    if (fiber->hostStack && !VirtualFree(fiber->hostStack, 0, MEM_RELEASE)) throw std::runtime_error(std::string("sceFiberFinalize: cannot release the host stack of fiber '") + fiber->name + "' (error " + std::to_string(GetLastError()) + ")");
+    fiber->hostStack = nullptr;
+    fiber->hostStackBytes = 0;
+}
+
+#else
+
+static void AllocateHostStack(Fiber* fiber) {
+    const auto page = static_cast<std::uint64_t>(sysconf(_SC_PAGESIZE));
+    const auto bytes = (fiber->contextSize + FIBER_HOST_STACK_MARGIN + page - 1) / page * page + page;
+    int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+#ifdef MAP_STACK
+    flags |= MAP_STACK;
+#endif
+    void* mapping = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, flags, -1, 0);
+    if (mapping == MAP_FAILED) throw std::runtime_error(std::string("sceFiberInitialize: no host stack of ") + std::to_string(bytes) + " bytes for fiber '" + fiber->name + "' (errno " + std::to_string(errno) + ")");
+    if (mprotect(mapping, page, PROT_NONE) != 0) {
+        const int error = errno;
+        munmap(mapping, bytes);
+        throw std::runtime_error(std::string("sceFiberInitialize: cannot protect the guard page of the host stack of fiber '") + fiber->name + "' (errno " + std::to_string(error) + ")");
+    }
+    fiber->hostStack = static_cast<std::uint8_t*>(mapping);
+    fiber->hostStackBytes = bytes;
+}
+
+static void ReleaseHostStack(Fiber* fiber) {
+    if (fiber->hostStack) munmap(fiber->hostStack, fiber->hostStackBytes);
+    fiber->hostStack = nullptr;
+    fiber->hostStackBytes = 0;
+}
+
+#endif
+
+static std::uint8_t* StackTop(const Fiber* fiber) {
+    return fiber->hostStack ? fiber->hostStack + fiber->hostStackBytes : fiber->context + fiber->contextSize;
+}
+
+static std::uint64_t* SizedWindow(const Fiber* fiber) {
+    return reinterpret_cast<std::uint64_t*>(StackTop(fiber) - fiber->contextSize);
+}
+
+#ifdef _WIN32
+
+static StackBounds FiberBounds(const Fiber* fiber) {
+    if (!fiber->hostStack) return {fiber->context + fiber->contextSize, fiber->context, fiber->context};
+    return {fiber->hostStack + fiber->hostStackBytes, fiber->hostStack + HostStackGuardBytes(), fiber->hostStack};
+}
+
+#else
+
 static StackBounds FiberBounds(const Fiber* fiber) {
     return {fiber->context + fiber->contextSize, fiber->context, fiber->context};
 }
+
+#endif
 
 static Fiber* AsFiber(FiberObject* object) {
     auto* fiber = reinterpret_cast<Fiber*>(object);
@@ -296,7 +389,7 @@ static void PrepareInitialStack(Fiber* fiber) {
     static_cast<void>(fiber);
     NotImplemented_nid_no_patch(__func__);
 #else
-    const auto top = reinterpret_cast<std::uintptr_t>(fiber->context + fiber->contextSize) & ~static_cast<std::uintptr_t>(15);
+    const auto top = reinterpret_cast<std::uintptr_t>(StackTop(fiber)) & ~static_cast<std::uintptr_t>(15);
     auto* frame = reinterpret_cast<InitialFrame*>(top - 256);
     std::memset(frame, 0, sizeof(*frame));
     frame->mxcsr = _mm_getcsr();
@@ -352,7 +445,10 @@ int32_t APS5_VABI _sceFiberInitializeImpl_nid_postfix(FiberObject* object, const
     if (addr_context == nullptr) return SCE_FIBER_ERROR_INVALID;
     if (size_context < FIBER_MIN_CONTEXT_SIZE) return SCE_FIBER_ERROR_RANGE;
     auto* fiber = reinterpret_cast<Fiber*>(object);
-    if (fiber->magic == FIBER_MAGIC) UnpinStack(fiber->context, fiber->contextSize);
+    if (fiber->magic == FIBER_MAGIC) {
+        UnpinStack(fiber->context, fiber->contextSize);
+        ReleaseHostStack(fiber);
+    }
     std::memset(object, 0, FIBER_OBJECT_SIZE);
     fiber->magic = FIBER_MAGIC;
     fiber->state.store(FiberState::Idle, std::memory_order_relaxed);
@@ -361,9 +457,10 @@ int32_t APS5_VABI _sceFiberInitializeImpl_nid_postfix(FiberObject* object, const
     fiber->context = static_cast<std::uint8_t*>(addr_context);
     fiber->contextSize = size_context;
     std::strncpy(fiber->name, name, FIBER_MAX_NAME_LENGTH);
+    if (size_context < FIBER_GUEST_STACK_MIN) AllocateHostStack(fiber);
     fiber->contextSizeCheck = g_contextSizeCheck.load(std::memory_order_relaxed);
     if (fiber->contextSizeCheck) {
-        auto* words = static_cast<std::uint64_t*>(addr_context);
+        auto* words = SizedWindow(fiber);
         std::fill(words, words + size_context / sizeof(std::uint64_t), FIBER_CONTEXT_FILL);
     }
     PinStack(addr_context, size_context);
@@ -378,6 +475,7 @@ int32_t APS5_VABI sceFiberFinalize(FiberObject* object) {
     if (state == FiberState::Running || state == FiberState::Suspending) return SCE_FIBER_ERROR_STATE;
     fiber->magic = 0;
     UnpinStack(fiber->context, fiber->contextSize);
+    ReleaseHostStack(fiber);
     return SCE_OK;
 }
 
@@ -447,12 +545,12 @@ int32_t APS5_VABI sceFiberGetInfo(FiberObject* object, FiberInfo* fiber_info) {
     if (fiber_info->size != sizeof(FiberInfo)) return SCE_FIBER_ERROR_INVALID;
     fiber_info->entry = reinterpret_cast<FiberEntry>(fiber->entry);
     fiber_info->arg_on_initialize = fiber->argOnInitialize;
-    fiber_info->addr_context = fiber->context;
+    fiber_info->addr_context = SizedWindow(fiber);
     fiber_info->size_context = fiber->contextSize;
     std::memcpy(fiber_info->name, fiber->name, sizeof(fiber_info->name));
     fiber_info->size_context_margin = static_cast<uint64_t>(-1);
     if (fiber->contextSizeCheck) {
-        const auto* words = reinterpret_cast<const std::uint64_t*>(fiber->context);
+        const auto* words = SizedWindow(fiber);
         const auto* end = words + fiber->contextSize / sizeof(std::uint64_t);
         fiber_info->size_context_margin = static_cast<uint64_t>(std::find_if(words, end, [](std::uint64_t word) { return word != FIBER_CONTEXT_FILL; }) - words) * sizeof(std::uint64_t);
     }
@@ -478,6 +576,10 @@ int32_t APS5_VABI sceFiberGetThreadFramePointerAddress(uint64_t* addr_frame_poin
     if (!ThreadState().current) return SCE_FIBER_ERROR_PERMISSION;
     *addr_frame_pointer = ThreadState().threadFramePointer;
     return SCE_OK;
+}
+
+int32_t APS5_VABI _sceFiberGetThreadFramePointerAddress(uint64_t* addr_frame_pointer) {
+    return sceFiberGetThreadFramePointerAddress(addr_frame_pointer);
 }
 
 int32_t APS5_VABI sceFiberStartContextSizeCheck(uint32_t flags) {

@@ -116,6 +116,10 @@ bool GetMipTailLayout(TextureTileMode tileMode, const BlockLayout& block, std::u
         case TextureTileMode::kD64KBX:
         case TextureTileMode::kR64KBX:
             out = MakeMipTailLayout(kMipTailThin64KB[index], block.blockWidth >> 1u, block.blockHeight);
+            if (tileMode == TextureTileMode::kZ64KBX && bytesPerElement <= 2u) {
+                out.widthLimit >>= 1u;
+                if (bytesPerElement == 1u) out.heightLimit >>= 1u;
+            }
             return true;
     }
     throw std::runtime_error("AGC graphics: GetMipTailLayout encountered an unknown tile mode");
@@ -258,10 +262,12 @@ std::array<std::uint32_t, 3> ThickBlockExtent(TextureTileMode tileMode, std::uin
     Require(std::has_single_bit(bytesPerElement) && bytesPerElement <= 16u, "unsupported bytes per element for thick texture geometry");
     const auto index = static_cast<std::size_t>(std::countr_zero(bytesPerElement));
     switch (tileMode) {
-        case TextureTileMode::kStandard4KB: return {1u << thick4KB[index][0], 1u << thick4KB[index][1], 1u << thick4KB[index][2]};
+        case TextureTileMode::kStandard4KB:
+        case TextureTileMode::kS4KBX: return {1u << thick4KB[index][0], 1u << thick4KB[index][1], 1u << thick4KB[index][2]};
         case TextureTileMode::kStandard64KB:
-        case TextureTileMode::kS64KBX: return {1u << thick64KB[index][0], 1u << thick64KB[index][1], 1u << thick64KB[index][2]};
-        default: throw std::runtime_error("AGC graphics: thick 3D textures are only supported in SW_4KB_S, SW_64KB_S and SW_64KB_S_X, not in swizzle mode " + std::to_string(EquationSwizzleMode(tileMode)) + " at " + std::to_string(bytesPerElement) + " bytes per element");
+        case TextureTileMode::kS64KBX:
+        case TextureTileMode::kD64KBX: return {1u << thick64KB[index][0], 1u << thick64KB[index][1], 1u << thick64KB[index][2]};
+        default: throw std::runtime_error("AGC graphics: thick 3D textures are only supported in SW_4KB_S, SW_4KB_S_X, SW_64KB_S, SW_64KB_S_X and SW_64KB_D_X, not in swizzle mode " + std::to_string(EquationSwizzleMode(tileMode)) + " at " + std::to_string(bytesPerElement) + " bytes per element");
     }
 }
 
@@ -311,7 +317,7 @@ ThickLayout ComputeThickLayout(TextureTileMode tileMode, std::uint32_t format, s
     auto firstTailLevel = mipCount;
     if (tileMode != TextureTileMode::kLinear) {
         block = ThickBlockExtent(tileMode, bytesPerElement);
-        blockBytes = tileMode == TextureTileMode::kStandard4KB ? 4096u : 65536u;
+        blockBytes = tileMode == TextureTileMode::kStandard4KB || tileMode == TextureTileMode::kS4KBX ? 4096u : 65536u;
         const auto log2BlockBytes = static_cast<std::uint32_t>(std::countr_zero(blockBytes));
         const auto tailWidth = log2BlockBytes % 3u == 1u ? block[0] >> 1u : block[0];
         const auto tailHeight = log2BlockBytes % 3u == 0u ? block[1] >> 1u : block[1];
@@ -335,8 +341,8 @@ ThickLayout ComputeThickLayout(TextureTileMode tileMode, std::uint32_t format, s
         mip.tailX = 0;
         mip.tailY = 0;
         const bool tiled = tileMode != TextureTileMode::kLinear;
-        const auto levelWidth = tiled ? std::max(ShiftCeil(elementsWidth0, level), 1u) : mip.width;
-        const auto levelHeight = tiled ? std::max(ShiftCeil(elementsHeight0, level), 1u) : mip.height;
+        const auto levelWidth = std::max(ShiftCeil(elementsWidth0, level), 1u);
+        const auto levelHeight = std::max(ShiftCeil(elementsHeight0, level), 1u);
         const auto paddedWidth = AlignUp(levelWidth, block[0]);
         mip.pitchBytes = paddedWidth * bytesPerElement;
         if (mip.tail) {
@@ -356,7 +362,7 @@ ThickLayout ComputeThickLayout(TextureTileMode tileMode, std::uint32_t format, s
             mip.tiledSize = blockBytes;
         } else if (!tiled) {
             mip.blocksPerRow = paddedWidth;
-            mip.tiledSize = static_cast<std::uint64_t>(mip.pitchBytes) * mip.height;
+            mip.tiledSize = static_cast<std::uint64_t>(mip.pitchBytes) * levelHeight;
         } else {
             mip.blocksPerRow = paddedWidth / block[0];
             mip.tiledSize = static_cast<std::uint64_t>(mip.blocksPerRow) * (AlignUp(levelHeight, block[1]) / block[1]) * blockBytes;
@@ -377,7 +383,7 @@ ThickLayout ComputeThickLayout(TextureTileMode tileMode, std::uint32_t format, s
 
 SurfaceGeometry DescribeSurface(const GuestTextureResource& descriptor) {
     SurfaceGeometry geometry;
-    if (descriptor.dimension == TextureDimension::k3D && (descriptor.tileMode == TextureTileMode::kZ64KBX || descriptor.tileMode == TextureTileMode::kD64KBX || descriptor.tileMode == TextureTileMode::kR64KBX)) {
+    if (descriptor.dimension == TextureDimension::k3D && (descriptor.tileMode == TextureTileMode::kZ64KBX || descriptor.tileMode == TextureTileMode::kR64KBX)) {
         const auto depth = descriptor.depthOrLastArray + 1u;
         geometry.mips = ComputeMipLayout(descriptor.tileMode, descriptor.format, descriptor.width, descriptor.height, descriptor.mipCount);
         geometry.layers = depth;

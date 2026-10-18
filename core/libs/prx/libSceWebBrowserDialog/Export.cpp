@@ -1,6 +1,5 @@
 #include <atomic>
 #include <cstdint>
-#include <stdexcept>
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
@@ -13,6 +12,7 @@ constexpr int COMMON_DIALOG_STATUS_RUNNING = 2;
 constexpr int COMMON_DIALOG_STATUS_FINISHED = 3;
 constexpr int COMMON_DIALOG_RESULT_USER_CANCELED = 1;
 constexpr int COMMON_DIALOG_ERROR_NOT_INITIALIZED = static_cast<int>(0x80B80003u);
+constexpr int COMMON_DIALOG_ERROR_ALREADY_INITIALIZED = static_cast<int>(0x80B80004u);
 constexpr int COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<int>(0x80B80005u);
 constexpr int COMMON_DIALOG_ERROR_BUSY = static_cast<int>(0x80B80007u);
 constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
@@ -21,15 +21,18 @@ constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
 extern "C" {
 
 int APS5_VABI sceWebBrowserDialogInitialize(void) {
-    int expected = 0;
-    if (!g_status.compare_exchange_strong(expected, 1)) throw std::logic_error("sceWebBrowserDialogInitialize: already initialized");
+    int expected = COMMON_DIALOG_STATUS_NONE;
+    if (!g_status.compare_exchange_strong(expected, 1)) return COMMON_DIALOG_ERROR_ALREADY_INITIALIZED;
     return 0;
 }
 
 int APS5_VABI sceWebBrowserDialogTerminate(void) {
     int expected = 1;
-    if (!g_status.compare_exchange_strong(expected, 0)) throw std::logic_error("sceWebBrowserDialogTerminate: not initialized or still running");
-    return 0;
+    if (g_status.compare_exchange_strong(expected, COMMON_DIALOG_STATUS_NONE)) return 0;
+    expected = COMMON_DIALOG_STATUS_FINISHED;
+    if (g_status.compare_exchange_strong(expected, COMMON_DIALOG_STATUS_NONE)) return 0;
+    if (g_status.load() == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    return COMMON_DIALOG_ERROR_BUSY;
 }
 
 int APS5_VABI sceWebBrowserDialogClose(void) {
@@ -64,19 +67,26 @@ int APS5_VABI sceWebBrowserDialogUpdateStatus(void) {
 }
 
 
-int APS5_VABI sceWebBrowserDialogSetCookie(void) {
-    NotImplemented_nid_no_patch(__func__);
+// No browser runs, so cookies have nowhere to live: the calls validate and are accepted.
+int APS5_VABI sceWebBrowserDialogSetCookie(const void* param) {
+ if (g_status.load() == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+ if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+ return 0;
+}
+
+int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent(const void* param) {
+    const int status = g_status.load();
+    if (status == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+    if (status == COMMON_DIALOG_STATUS_RUNNING) return COMMON_DIALOG_ERROR_BUSY;
+    if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+    g_status = COMMON_DIALOG_STATUS_FINISHED;
     return 0;
 }
 
-int APS5_VABI sceWebBrowserDialogOpenForPredeterminedContent() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceWebBrowserDialogResetCookie() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceWebBrowserDialogResetCookie(const void* param) {
+ if (g_status.load() == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
+ if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+ return 0;
 }
 
 }

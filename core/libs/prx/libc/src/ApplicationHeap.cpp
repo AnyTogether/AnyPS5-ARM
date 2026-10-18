@@ -22,6 +22,8 @@ using Align = void* (APS5_VABI *)(std::size_t, std::size_t);
 using Realign = void* (APS5_VABI *)(void*, std::size_t, std::size_t);
 using PosixAlign = int (APS5_VABI *)(void**, std::size_t, std::size_t);
 using Initialize = void (APS5_VABI *)();
+using Stats = int (APS5_VABI *)(void*);
+using UsableSize = std::size_t (APS5_VABI *)(void*);
 
 std::mutex heapMutex;
 std::array<void*, 10> heapApi{};
@@ -46,6 +48,7 @@ int APS5_VABI defaultPosixAlign(void** pointer, std::size_t alignment, std::size
     if (pointer == nullptr || alignment < sizeof(void*) || (alignment & (alignment - 1)) != 0) return 22;
     try { *pointer = defaultAlign(alignment, bytes); return 0; }
     catch (const std::bad_alloc&) { return 12; }
+    catch (const std::length_error&) { return 12; }
 }
 
 std::array<void*, 10> defaultApi() {
@@ -73,9 +76,17 @@ TValue read(const void* pointer, std::size_t offset) {
     return value;
 }
 
+void ensureInitialized(std::unique_lock<std::mutex>& lock) {
+    if (heapApi[0] != nullptr || heapFailure || heapFinalized) return;
+    lock.unlock();
+    ApplicationHeapInitialize_nid_no_patch(ApplicationProcessParameters_nid_no_patch());
+    lock.lock();
+}
+
 template<typename TCallback>
 TCallback callback(std::size_t index) {
-    std::lock_guard lock(heapMutex);
+    std::unique_lock lock(heapMutex);
+    ensureInitialized(lock);
     if (heapFailure) std::rethrow_exception(heapFailure);
     if (heapFinalized) throw std::runtime_error("application heap: allocator has been finalized");
     if (heapApi[index] == nullptr) throw std::runtime_error("application heap: allocator API is not registered");
@@ -173,7 +184,7 @@ void ApplicationHeapFree_nid_no_patch(void* pointer) {
 }
 
 void* ApplicationHeapReallocate_nid_no_patch(void* pointer, std::size_t bytes) {
-    if (bytes == 0) {
+    if (bytes == 0 && pointer != nullptr) {
         ApplicationHeapFree_nid_no_patch(pointer);
         return nullptr;
     }
@@ -191,6 +202,20 @@ void* ApplicationHeapAlign_nid_no_patch(std::size_t alignment, std::size_t bytes
     return pointer;
 }
 
+extern "C" void* APS5_VABI scriptingGetMem_nid_postfix(std::size_t alignment, std::size_t bytes) {
+    alignment = std::max<std::size_t>(alignment, 16);
+    if ((alignment & (alignment - 1)) != 0) return nullptr;
+    try {
+        return ApplicationHeapAlign_nid_no_patch(alignment, bytes);
+    } catch (const std::bad_alloc&) {
+        return nullptr;
+    }
+}
+
+extern "C" void APS5_VABI scriptingFreeMem_nid_postfix(void* pointer) {
+    ApplicationHeapFree_nid_no_patch(pointer);
+}
+
 void* ApplicationHeapRealign_nid_no_patch(void* pointer, std::size_t bytes, std::size_t alignment) {
     if (bytes == 0) {
         ApplicationHeapFree_nid_no_patch(pointer);
@@ -199,7 +224,8 @@ void* ApplicationHeapRealign_nid_no_patch(void* pointer, std::size_t bytes, std:
     requireAlignment(alignment);
     Realign realign;
     {
-        std::lock_guard lock(heapMutex);
+        std::unique_lock lock(heapMutex);
+        ensureInitialized(lock);
         if (heapFailure) std::rethrow_exception(heapFailure);
         if (heapFinalized) throw std::runtime_error("application heap: allocator has been finalized");
         if (heapApi[0] == nullptr) throw std::runtime_error("application heap: allocator API is not registered");
@@ -232,4 +258,37 @@ int ApplicationHeapPosixAlign_nid_no_patch(void** pointer, std::size_t alignment
     if (reinterpret_cast<std::uintptr_t>(result) % alignment != 0) throw std::runtime_error("application heap: allocator returned a misaligned pointer");
     *pointer = result;
     return 0;
+}
+
+int ApplicationHeapStatsFast_nid_no_patch(void* stats) {
+    Stats statsFast;
+    {
+        std::unique_lock lock(heapMutex);
+        ensureInitialized(lock);
+        if (heapFailure) std::rethrow_exception(heapFailure);
+        if (heapFinalized) throw std::runtime_error("application heap: allocator has been finalized");
+        if (heapApi[0] == nullptr) throw std::runtime_error("application heap: allocator API is not registered");
+        if (heapApi[8] == nullptr) throw std::runtime_error("malloc_stats_fast: implemented only for an application allocator that provides it");
+        std::memcpy(&statsFast, &heapApi[8], sizeof(statsFast));
+    }
+    CallbackScope scope;
+    return statsFast(stats);
+}
+
+std::size_t ApplicationHeapUsableSize_nid_no_patch(void* pointer) {
+    UsableSize usableSize = nullptr;
+    {
+        std::unique_lock lock(heapMutex);
+        ensureInitialized(lock);
+        if (heapFailure) std::rethrow_exception(heapFailure);
+        if (heapFinalized) throw std::runtime_error("application heap: allocator has been finalized");
+        if (heapApi[0] == nullptr) throw std::runtime_error("application heap: allocator API is not registered");
+        if (heapApi != defaultApi()) {
+            if (heapApi[9] == nullptr) throw std::runtime_error("malloc_usable_size: implemented only for an application allocator that provides it");
+            std::memcpy(&usableSize, &heapApi[9], sizeof(usableSize));
+        }
+    }
+    if (usableSize == nullptr) return GuestHeap::GuestHeapUsableSize_nid_postfix(pointer);
+    CallbackScope scope;
+    return usableSize(pointer);
 }

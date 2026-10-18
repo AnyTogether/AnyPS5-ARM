@@ -1,4 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libkernel/File/include/File.hpp"
+#include <string>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -8,6 +10,7 @@
 #include <mutex>
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
 #else
 #include <unistd.h>
 #endif
@@ -17,6 +20,15 @@ extern "C" int APS5_VABI sceKernelDebugOutText(int channel, const char* text) {
     if (!text) return static_cast<int>(0x8002000eu);
     static std::mutex outputMutex;
     const std::lock_guard lock(outputMutex);
+    if (const int host = File::HostStandardError(); host >= 0) {
+        const auto line = "[debug:" + std::to_string(channel) + "] " + text;
+#ifdef _WIN32
+        const auto written = _write(host, line.data(), static_cast<unsigned>(line.size()));
+#else
+        const auto written = ::write(host, line.data(), line.size());
+#endif
+        return written == static_cast<decltype(written)>(line.size()) ? 0 : static_cast<int>(0x80020005u);
+    }
     if (std::fprintf(stderr, "[debug:%d] %s", channel, text) < 0 || std::fflush(stderr) != 0)
         return static_cast<int>(0x80020005u);
     return 0;

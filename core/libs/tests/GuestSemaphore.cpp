@@ -18,6 +18,7 @@ static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EBUSY = static_cast<int>(0x80020010);
 static constexpr int SCE_KERNEL_ERROR_EINVAL = static_cast<int>(0x80020016);
 static constexpr int SCE_KERNEL_ERROR_ECANCELED = static_cast<int>(0x80020055);
+static constexpr int SCE_KERNEL_ERROR_ETIMEDOUT = static_cast<int>(0x8002003C);
 
 static void Require(bool value) { if (!value) std::abort(); }
 
@@ -74,6 +75,12 @@ int main() {
     Require(timed.result == SCE_KERNEL_ERROR_ECANCELED);
     Require(sceKernelCancelSema(sem, 0, &waiters) == SCE_OK && waiters == 0);
     Require(sceKernelPollSema(sem, 1) == SCE_KERNEL_ERROR_EBUSY);
+
+    KernelUseconds remaining = 1000;
+    Require(sceKernelWaitSema(sem, 1, &remaining) == SCE_KERNEL_ERROR_ETIMEDOUT && remaining == 0);
+    Require(sceKernelSignalSema(sem, 1) == SCE_OK);
+    remaining = 5000000;
+    Require(sceKernelWaitSema(sem, 1, &remaining) == SCE_OK && remaining > 0 && remaining <= 5000000);
 
     Require(sceKernelSignalSema(sem, 1) == SCE_OK);
     Require(sceKernelWaitSema(sem, 1, nullptr) == SCE_OK);

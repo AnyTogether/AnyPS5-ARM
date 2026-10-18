@@ -1,13 +1,18 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
 #include <cstdlib>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
 #include <stdexcept>
+#include <source_location>
 #include <thread>
 extern "C" {
+int APS5_VABI sceKernelDlsym(std::int32_t, const char*, void**);
 void* APS5_VABI dlopen_nid_postfix(const char*, int);
 void* APS5_VABI dlsym_nid_postfix(void*, const char*);
 int APS5_VABI dlclose_nid_postfix(void*);
@@ -15,10 +20,12 @@ char* APS5_VABI dlerror_nid_postfix();
 int APS5_VABI _sceKernelRtldThreadAtexitIncrement_nid_postfix(const void*);
 int APS5_VABI _sceKernelRtldThreadAtexitDecrement_nid_postfix(const void*);
 }
-static void Require(bool value) { if (!value) std::abort(); }
-#ifndef _WIN32
+static void Require(bool value, const std::source_location& location = std::source_location::current()) {
+    if (value) return;
+    std::fprintf(stderr, "guest_dynamic_loader: failed at %s:%u\n", location.file_name(), location.line());
+    std::abort();
+}
 extern "C" int APS5_VABI GuestDefaultScopeOnly(int a, int b) { return a * b; }
-#endif
 template<typename TFunction>
 static bool ThrowsRuntimeError(TFunction function) {
     try {
@@ -36,6 +43,14 @@ int main(int argc, char** argv) {
     Require(dlerror_nid_postfix() == nullptr);
     Require(dlopen_nid_postfix("anyps5-missing-module-for-test.prx", 2) == nullptr);
     Require(dlerror_nid_postfix() != nullptr);
+    void* mainSymbol = nullptr;
+    const int mainResult = sceKernelDlsym(0, "GuestDefaultScopeOnly", &mainSymbol);
+    std::fprintf(stderr, "sceKernelDlsym(0, GuestDefaultScopeOnly): result=0x%08x, symbol=%p\n", static_cast<unsigned>(mainResult), mainSymbol);
+    Require(mainResult == 0 && mainSymbol != nullptr);
+    using MainFunction = int (APS5_VABI *)(int, int);
+    Require(reinterpret_cast<MainFunction>(mainSymbol)(6, 7) == 42);
+    Require(sceKernelDlsym(0, "anyps5_missing_main_symbol", &mainSymbol) == static_cast<int>(0x80020003u));
+    dlerror_nid_postfix();
     void* executable = dlopen_nid_postfix(nullptr, 2);
     Require(executable != nullptr && dlclose_nid_postfix(executable) == 0);
     void* module = dlopen_nid_postfix(argv[1], 2 | 0x100);
@@ -108,7 +123,18 @@ int main(int argc, char** argv) {
     void* hostAdd = ::dlsym(host, "3qcG+yBRS+s");
     Require(hostAdd != nullptr);
     Require(dlsym_nid_postfix(nullptr, "GuestModuleAdd") == hostAdd);
+    void* hostMul = ::dlsym(host, "GuestModuleMul#guest");
+    void* hostSub = ::dlsym(host, "BOyBJaKwOa8#guest");
+    Require(hostMul != nullptr && hostSub != nullptr);
+    for (void* scope : std::array<void*, 2>{nullptr, reinterpret_cast<void*>(-2)}) {
+        auto defaultMul = reinterpret_cast<Add>(dlsym_nid_postfix(scope, "GuestModuleMul"));
+        auto defaultSub = reinterpret_cast<Add>(dlsym_nid_postfix(scope, "GuestModuleSub"));
+        Require(reinterpret_cast<void*>(defaultMul) == hostMul);
+        Require(reinterpret_cast<void*>(defaultSub) == hostSub);
+        Require(defaultMul(6, 7) == 42 && defaultSub(50, 8) == 42);
+    }
     Require(dlsym_nid_postfix(nullptr, "malloc") == nullptr);
     Require(::dlclose(host) == 0);
 #endif
+    std::puts("guest_dynamic_loader: all checks passed");
 }

@@ -128,9 +128,86 @@ static void TestStreamRejections() {
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 
+static const std::int16_t Unused = 0;
+
+static void TestSilenceBlock() {
+    const auto system = CreateSystem();
+    const auto master = Mastering(system, 1);
+    const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
+    const auto voice = StreamVoice(rack, 0, master);
+
+    AddBlock(voice, &Unused, 0, Grain, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_SILENCE);
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+    auto out = RenderI16(system);
+    for (std::uint32_t i = 0; i < Grain; i++) Require(out[i] == 0);
+    Require(Flags(voice) == 0);
+    Ngs2SamplerVoiceState state{};
+    Require(sceNgs2VoiceGetState(voice, &state.voice_state, sizeof(state)) == SCE_NGS2_OK);
+    Require(state.num_decoded_samples == Grain && state.decoded_data_size == Grain * 2);
+
+    const auto withData = StreamVoice(rack, 1, master);
+    const std::vector<std::int16_t> pcm(Grain, 1234);
+    AddBlock(withData, pcm.data(), pcm.size() * 2, Grain, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_SILENCE);
+    Event(withData, SCE_NGS2_VOICE_EVENT_PLAY);
+    out = RenderI16(system);
+    for (std::uint32_t i = 0; i < Grain; i++) Require(out[i] == 1234);
+    Require(Flags(withData) == 0);
+
+    const auto dataless = StreamVoice(rack, 2, master);
+    Require(Throws([&] { AddBlock(dataless, &Unused, 0, Grain, 0); }));
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
+static void TestNoBlocksForClearedVoice() {
+    const auto system = CreateSystem();
+    const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
+    const auto voice = RackVoice(rack, 0);
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP, Ngs2SamplerVoiceSetupParam{{}, {}});
+    const Ngs2WaveformBlock unused{};
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, &Unused, 0, 0, &unused});
+    Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, &Unused, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_RESET, 0, &unused});
+    const float level = 1.0f;
+    Control(voice, SCE_NGS2_VOICE_PARAM_MATRIX_LEVELS, Ngs2VoiceMatrixLevelsParam{{}, 0, 0, &level});
+    Require(Throws([&] { Control(voice, SCE_NGS2_VOICE_PARAM_MATRIX_LEVELS, Ngs2VoiceMatrixLevelsParam{{}, 1, 0, &level}); }));
+    Require(Flags(voice) == 0);
+    const std::vector<std::int16_t> pcm(4, 16384);
+    Require(Throws([&] { AddBlock(voice, pcm.data(), pcm.size() * 2, 4, 0); }));
+    Require(Throws([&] { Control(voice, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, &Unused, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_APPEND, 0, &unused}); }));
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
+static void TestDrainedStreamReportsEmpty() {
+    const auto system = CreateSystem();
+    const auto master = Mastering(system, 1);
+    const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
+    const auto voice = StreamVoice(rack, 0, master);
+    const std::vector<std::int16_t> pcm(4, 16384);
+    constexpr std::uint32_t playing = SCE_NGS2_VOICE_STATE_FLAG_INUSE | SCE_NGS2_VOICE_STATE_FLAG_PLAYING;
+
+    AddBlock(voice, pcm.data(), pcm.size() * 2, 4, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_RESET | SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE);
+    Event(voice, SCE_NGS2_VOICE_EVENT_PLAY);
+    RenderI16(system);
+    Require(Flags(voice) == (playing | SCE_NGS2_VOICE_STATE_FLAG_EMPTY));
+
+    const std::vector<std::int16_t> longer(Grain * 2, 8192);
+    AddBlock(voice, longer.data(), longer.size() * 2, Grain * 2, SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE);
+    const auto out = RenderI16(system);
+    Require(out[0] == 8192);
+    Require(Flags(voice) == playing);
+
+    AddBlock(voice, pcm.data(), pcm.size() * 2, 4, 0);
+    RenderI16(system);
+    RenderI16(system);
+    Require((Flags(voice) & SCE_NGS2_VOICE_STATE_FLAG_EMPTY) == 0);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 int main() {
     TestStreamEndsAtDeclaredSamples();
     TestStreamClosedBeforeDeclaredSamples();
     TestStreamRejections();
+    TestSilenceBlock();
+    TestDrainedStreamReportsEmpty();
+    TestNoBlocksForClearedVoice();
     return 0;
 }

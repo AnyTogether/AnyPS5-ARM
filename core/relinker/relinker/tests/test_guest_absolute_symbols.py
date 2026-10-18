@@ -6,6 +6,7 @@ import tempfile
 
 from test_guest_intel_trampolines import elf_loads, main_fixture, pe_sections
 from test_guest_module_directories import module_with_symbol
+from test_macos_output import MachO
 
 
 ABSOLUTE = 0xFFF1
@@ -27,6 +28,14 @@ def pe_qwords(data):
     for name, rva, raw_size, raw_offset, _ in pe_sections(data):
         for position in range(0, raw_size - 7, 8):
             yield rva + position, struct.unpack_from("<Q", data, raw_offset + position)[0]
+
+
+def macho_qwords(data):
+    for segment in MachO(data).segments:
+        if not segment["name"].startswith("__ELF"):
+            continue
+        for position in range(0, segment["filesize"] - 7, 8):
+            yield segment["vmaddr"] + position, struct.unpack_from("<Q", data, segment["fileoff"] + position)[0]
 
 
 def elf_relocation(data):
@@ -64,27 +73,30 @@ def main():
     with tempfile.TemporaryDirectory(prefix="anyps5-guest-absolute-") as directory:
         work = Path(directory)
 
-        def convert(name, windows, section):
-            case = work / f"{name}-{windows}"
+        def convert(name, system, section):
+            case = work / f"{name}-{system}"
             (case / "sce_module").mkdir(parents=True)
             (case / "sce_module" / "module.prx").write_bytes(module_with_section(section))
             source = case / "input.elf"
             source.write_bytes(main_fixture())
-            output = case / ("output.exe" if windows else "output.elf")
-            result = subprocess.run([str(relinker), *(["--windows"] if windows else []), str(source), str(output)],
+            output = case / ("output.exe" if system == "windows" else "output.elf")
+            flags = {"linux": [], "windows": ["--windows"], "macos": ["--macos"]}[system]
+            result = subprocess.run([str(relinker), *flags, str(source), str(output)],
                                     capture_output=True, text=True, timeout=30)
             return result, case / "app0" / "sce_module" / "module.prx.guest.prx"
 
-        for windows in (False, True):
-            result, artifact = convert("absolute", windows, ABSOLUTE)
-            assert result.returncode == 0, (result.stdout, result.stderr)
+        for system in ("linux", "windows", "macos"):
+            result, artifact = convert("absolute", system, ABSOLUTE)
+            assert result.returncode == 0, (system, result.stdout, result.stderr)
             data = artifact.read_bytes()
-            if windows:
+            if system == "windows":
                 assert any(value == VALUE + ADDEND for _, value in pe_qwords(data)), "absolute relocation value missing"
+            elif system == "macos":
+                assert any(value == VALUE + ADDEND for _, value in macho_qwords(data)), "absolute relocation value missing"
             else:
                 assert elf_relocation(data) == (1, ABSOLUTE, VALUE, ADDEND)
 
-            result, artifact = convert("common", windows, COMMON)
+            result, artifact = convert("common", system, COMMON)
             assert result.returncode == 2 and "Unsupported special symbol section" in result.stderr, result.stderr
             assert not artifact.exists(), artifact
     print("Guest absolute symbol tests passed")

@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -38,6 +40,51 @@ alignas(256) constexpr std::array<std::uint32_t, 29> DivisionCode{
 alignas(256) constexpr std::array<std::uint32_t, 13> FmaCode{
     0x34020082, 0xe0302000, 0x80000401, 0xe0302004, 0x80000501, 0xe0302008, 0x80000601, 0xbf8c3f70,
     0xd54b000a, 0x041a0b04, 0xe0702000, 0x80010a01, 0xbf810000,
+};
+
+alignas(256) constexpr std::array<std::uint32_t, 19> ScaleCode{
+    0x34020082u, 0xe0302000u, 0x80000401u, 0xe0302004u, 0x80000501u, 0xe0302008u, 0x80000601u, 0xe030200cu,
+    0x80000701u, 0xbf8c3f70u, 0xd56d140au, 0x041a0b04u, 0xd501000bu, 0x00510280u, 0xe0702000u, 0x80010a01u,
+    0xe0702004u, 0x80010b01u, 0xbf810000u,
+};
+
+struct ScaleVector {
+    std::uint32_t s0, s1, s2, flushed, kept, vcc;
+};
+
+constexpr ScaleVector ScaleVectors[] = {
+    {0x00000001u, 0x3f800000u, 0x3f800000u, 0x00000000u, 0x00000001u, 0x00000000u},
+    {0x3f800000u, 0x00000001u, 0x3f800000u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x00000001u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x80000001u, 0x3f800000u, 0x3f800000u, 0x80000000u, 0x80000001u, 0x00000000u},
+    {0x3f800000u, 0x80000001u, 0x3f800000u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x80000001u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x007fffffu, 0x3f800000u, 0x3f800000u, 0x00000000u, 0x007fffffu, 0x00000000u},
+    {0x3f800000u, 0x007fffffu, 0x3f800000u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x007fffffu, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x807fffffu, 0x3f800000u, 0x3f800000u, 0x80000000u, 0x807fffffu, 0x00000000u},
+    {0x3f800000u, 0x807fffffu, 0x3f800000u, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x807fffffu, 0xffc00000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x00000001u, 0x00000001u, 0xffc00000u, 0x5f800000u, 0x00000000u},
+    {0xbf800000u, 0x80000001u, 0x80000001u, 0xffc00000u, 0xdf800000u, 0x00000000u},
+    {0x3f800000u, 0x00000001u, 0x80000001u, 0xffc00000u, 0x5f800000u, 0x00000000u},
+    {0x00000000u, 0x3f800000u, 0x3f800000u, 0x00000000u, 0x00000000u, 0x00000000u},
+    {0x80000000u, 0x3f800000u, 0x3f800000u, 0x80000000u, 0x80000000u, 0x00000000u},
+    {0x3f800000u, 0x3f800000u, 0x3f800000u, 0x3f800000u, 0x3f800000u, 0x00000000u},
+    {0xbfc00000u, 0x3f800000u, 0x3f800000u, 0xbfc00000u, 0xbfc00000u, 0x00000000u},
+    {0x00800000u, 0x3f800000u, 0x3f800000u, 0x00800000u, 0x00800000u, 0x00000000u},
+    {0x80800000u, 0x3f800000u, 0x3f800000u, 0x80800000u, 0x80800000u, 0x00000000u},
+    {0x7f800000u, 0x3f800000u, 0x3f800000u, 0x7f800000u, 0x7f800000u, 0x00000000u},
+    {0xff800000u, 0x3f800000u, 0x3f800000u, 0xff800000u, 0xff800000u, 0x00000000u},
+    {0x7fc12345u, 0x3f800000u, 0x3f800000u, 0x7fc12345u, 0x7fc12345u, 0x00000000u},
+    {0xff812345u, 0x3f800000u, 0x3f800000u, 0xff812345u, 0xff812345u, 0x00000000u},
+    {0x3f800000u, 0x00000000u, 0x3f800000u, 0xffc00000u, 0xffc00000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x00000000u, 0xffc00000u, 0xffc00000u, 0x00000001u},
+    {0x3f800000u, 0x80000000u, 0x3f800000u, 0xffc00000u, 0xffc00000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x80000000u, 0xffc00000u, 0xffc00000u, 0x00000001u},
+    {0x3f800000u, 0x00800000u, 0x3f800000u, 0x3f800000u, 0x3f800000u, 0x00000001u},
+    {0x3f800000u, 0x3f800000u, 0x00800000u, 0x3f800000u, 0x3f800000u, 0x00000001u},
+    {0x00800000u, 0x00800000u, 0x3f800000u, 0x20800000u, 0x20800000u, 0x00000001u},
 };
 
 struct HelperVector {
@@ -302,6 +349,13 @@ constexpr HelperVector HelperVectors[] = {
     {0x8c367fd8u, 0xbf976e24u, 0x8c367fd8u, 1u, 0xac367fd8u, 1u, 0x00000000u, 0x0c367fd8u},
     {0x00f745cfu, 0x7f7fffffu, 0x00f745cfu, 0u, 0x00f745cfu, 1u, 0x40f745ceu, 0x00000000u},
     {0xcb7cf32du, 0xbfe52415u, 0xbf6a1e62u, 0u, 0xcb7cf32du, 0u, 0x4be2692eu, 0x4b7cf32du},
+    {0x3f800000u, 0x7f7fffffu, 0xff7fffffu, 1u, 0x1f800000u, 0u, 0x00000000u, 0xbf800000u},
+    {0x3f800000u, 0xf1800000u, 0x71800000u, 1u, 0x3f800000u, 0u, 0x00000000u, 0xbf800000u},
+    {0x7f7fffffu, 0xbf800000u, 0x7f7fffffu, 1u, 0x7f7fffffu, 1u, 0x00000000u, 0xff7fffffu},
+    {0x3f800000u, 0xdf800000u, 0x5f800000u, 1u, 0x3f800000u, 0u, 0x00000000u, 0xbf800000u},
+    {0x5f400000u, 0xdf200000u, 0x7ef00000u, 1u, 0x5f400000u, 0u, 0x00000000u, 0xdf400000u},
+    {0xe40a117du, 0xbf800000u, 0xe40a117du, 1u, 0xe40a117du, 0u, 0x00000000u, 0x640a117du},
+    {0x3f800000u, 0xdf7fffffu, 0x5f7fffffu, 1u, 0x3f800000u, 0u, 0x00000000u, 0xbf800000u},
 };
 
 struct DivisionVector {
@@ -567,6 +621,29 @@ constexpr DivisionVector DivisionVectors[] = {
     {0x2210592fu, 0x0ac8fdd3u, 0x56b7dabeu},
 };
 
+struct FmasNanVector {
+    std::uint32_t s0, s1, s2, noIeee, ieee;
+};
+
+constexpr FmasNanVector FmasNanVectors[] = {
+    {0xff812345u, 0x3f800000u, 0x3f800000u, 0xff812345u, 0xffc12345u},
+    {0x7f812345u, 0x3f800000u, 0x3f800000u, 0x7f812345u, 0x7fc12345u},
+    {0x3f800000u, 0xff812345u, 0x3f800000u, 0xff812345u, 0xffc12345u},
+    {0x3f800000u, 0x3f800000u, 0xff812345u, 0xff812345u, 0xffc12345u},
+    {0x7fc12345u, 0xff812345u, 0xff812345u, 0x7fc12345u, 0x7fc12345u},
+    {0xff812345u, 0x7fc12345u, 0x7f812345u, 0xff812345u, 0xffc12345u},
+    {0x3f800000u, 0x7fc12345u, 0xff812345u, 0x7fc12345u, 0x7fc12345u},
+    {0x3f800000u, 0x3f800000u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u},
+    {0x7f800000u, 0x00000000u, 0x7fc12345u, 0xffc00000u, 0xffc00000u},
+    {0xff800000u, 0x80000000u, 0xff812345u, 0xffc00000u, 0xffc00000u},
+    {0x00000000u, 0xff800000u, 0x7f812345u, 0xffc00000u, 0xffc00000u},
+    {0x80000000u, 0x7f800000u, 0xffc12345u, 0xffc00000u, 0xffc00000u},
+    {0x7f800000u, 0x3f800000u, 0xff800000u, 0xffc00000u, 0xffc00000u},
+    {0x3f800000u, 0x7f7fffffu, 0xff7fffffu, 0x00000000u, 0x00000000u},
+    {0x3f800000u, 0xf1800000u, 0x71800000u, 0x00000000u, 0x00000000u},
+    {0x7f800000u, 0x3f800000u, 0x3f800000u, 0x7f800000u, 0x7f800000u},
+};
+
 std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t count) {
     const auto address = reinterpret_cast<std::uintptr_t>(data);
     return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>((address >> 32u) & 0xffffu) | (4u << 16u), count, 0x11016facu};
@@ -574,7 +651,8 @@ std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t co
 
 class Shader {
 public:
-    Shader(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code) : device(device), code(code) {
+    Shader(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code,
+        const std::optional<ShaderRecompiler::ShaderFloatMode>& floatMode = ShaderRecompiler::ShaderFloatMode{0xf0u, true, true, false}) : device(device), code(code) {
         std::vector<std::uint32_t> userData(8, 0u);
         const auto input = BufferDescriptor(Input.data(), static_cast<std::uint32_t>(Input.size()));
         const auto output = BufferDescriptor(Output.data(), static_cast<std::uint32_t>(Output.size()));
@@ -589,7 +667,7 @@ public:
             {0, 0, 0, 128}
         };
         request.useCache = false;
-        request.context.floatMode = ShaderRecompiler::ShaderFloatMode{0xf0u, true, true, false};
+        request.context.floatMode = floatMode;
         result = ShaderRecompiler::Recompile(request);
     }
 
@@ -621,6 +699,41 @@ bool HostFusesFma(AgcDriver::VulkanDevice& device) {
     return Output[0] == 0x2f8e8ae0u;
 }
 
+void CheckScaleDenormals(AgcDriver::VulkanDevice& device) {
+    const std::array<std::optional<ShaderRecompiler::ShaderFloatMode>, 5> modes{{
+        std::nullopt,
+        ShaderRecompiler::ShaderFloatMode{0xc0u, true, false, false},
+        ShaderRecompiler::ShaderFloatMode{0xc0u, true, true, false},
+        ShaderRecompiler::ShaderFloatMode{0xf0u, true, false, false},
+        ShaderRecompiler::ShaderFloatMode{0xf0u, true, true, false},
+    }};
+    for (const auto& mode : modes) {
+        Shader shader(device, ScaleCode, mode);
+        Input.fill(0u);
+        for (std::uint32_t lane = 0; lane < std::size(ScaleVectors); ++lane) {
+            const auto& vector = ScaleVectors[lane];
+            std::copy_n(std::array<std::uint32_t, 4>{vector.s0, vector.s1, vector.s2, 0u}.begin(), 4, Input.begin() + lane * Stride);
+        }
+        shader.Run();
+        for (std::uint32_t lane = 0; lane < std::size(ScaleVectors); ++lane) {
+            const auto& vector = ScaleVectors[lane];
+            const auto* out = &Output[lane * Stride];
+            const auto expected = mode.has_value() && ((mode->floatMode >> 4u) & 3u) == 3u ? vector.kept : vector.flushed;
+            const std::string where = "division scale denormals: lane " + std::to_string(lane) + " mode " + (mode.has_value() ? Hex(mode->floatMode) : "unknown");
+            Require(out[0] == expected && out[1] == vector.vcc, where + ": v_div_scale_f32 is " + Hex(out[0]) + " vcc " + std::to_string(out[1]) + ", expected " + Hex(expected) + " vcc " + std::to_string(vector.vcc));
+        }
+    }
+    for (const std::uint32_t mode : {0xd0u, 0xe0u}) {
+        bool refused = false;
+        try {
+            Shader shader(device, ScaleCode, ShaderRecompiler::ShaderFloatMode{mode, true, false, false});
+        } catch (const std::runtime_error& error) {
+            refused = std::string(error.what()).find("f32 denormal mode") != std::string::npos;
+        }
+        Require(refused, "division scale denormals: FLOAT_MODE " + Hex(mode) + " was not refused");
+    }
+}
+
 void CheckHelpers(AgcDriver::VulkanDevice& device, bool fused) {
     Shader shader(device, HelperCode);
     constexpr std::uint32_t count = sizeof(HelperVectors) / sizeof(HelperVectors[0]);
@@ -641,6 +754,24 @@ void CheckHelpers(AgcDriver::VulkanDevice& device, bool fused) {
             Require(!fused || out[2] == vector.fmas, where + " vcc " + std::to_string(vector.vcc) + ": v_div_fmas_f32 is " + Hex(out[2]) + ", expected " + Hex(vector.fmas));
             Require(out[3] == vector.fixup, where + ": v_div_fixup_f32 is " + Hex(out[3]) + ", expected " + Hex(vector.fixup));
         }
+    }
+}
+
+void CheckFmasNan(AgcDriver::VulkanDevice& device, const std::optional<ShaderRecompiler::ShaderFloatMode>& floatMode) {
+    Shader shader(device, HelperCode, floatMode);
+    Input.fill(0u);
+    for (std::uint32_t lane = 0; lane < std::size(FmasNanVectors) * 2u; ++lane) {
+        const auto& vector = FmasNanVectors[lane / 2u];
+        std::copy_n(std::array<std::uint32_t, 4>{vector.s0, vector.s1, vector.s2, lane & 1u}.begin(), 4, Input.begin() + lane * Stride);
+    }
+    shader.Run();
+    const bool ieee = floatMode.has_value() && floatMode->ieeeMode;
+    for (std::uint32_t lane = 0; lane < std::size(FmasNanVectors) * 2u; ++lane) {
+        const auto& vector = FmasNanVectors[lane / 2u];
+        const auto actual = Output[lane * Stride + 2u];
+        const auto expected = ieee ? vector.ieee : vector.noIeee;
+        const std::string mode = floatMode.has_value() ? Hex(floatMode->floatMode) + " IEEE=" + std::to_string(ieee) : "no float mode";
+        Require(actual == expected, "division fmas nan: lane " + std::to_string(lane) + " " + mode + " vcc " + std::to_string(lane & 1u) + ": v_div_fmas_f32 is " + Hex(actual) + ", expected " + Hex(expected));
     }
 }
 
@@ -668,12 +799,18 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        CheckScaleDenormals(*device);
         const bool fused = HostFusesFma(*device);
         CheckHelpers(*device, fused);
+        CheckFmasNan(*device, std::nullopt);
+        CheckFmasNan(*device, ShaderRecompiler::ShaderFloatMode{0xf0u, true, true, false});
+        CheckFmasNan(*device, ShaderRecompiler::ShaderFloatMode{0xc0u, true, false, false});
+        CheckFmasNan(*device, ShaderRecompiler::ShaderFloatMode{0xf0u, false, false, false});
+        CheckFmasNan(*device, ShaderRecompiler::ShaderFloatMode{0xc0u, false, true, false});
         if (fused) {
             CheckDivision(*device);
         } else {
-            std::puts("the device splits fma into a multiply and an add, so v_div_fmas_f32 and the division macro are not checked");
+            std::puts("the device splits fma into a multiply and an add, so only the directed v_div_fmas_f32 rows are checked and the division macro is not checked");
         }
         std::puts("division tests passed");
         return 0;

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -67,42 +68,134 @@ void Ngs2RestartAtrac9(Ngs2Voice& voice) {
     atrac9.decoder.reset(Atrac9GetHandle());
     if (atrac9.decoder == nullptr || Atrac9InitDecoder(atrac9.decoder.get(), atrac9.config) != 0) throw std::runtime_error("NGS2: ATRAC9 decoder init failed");
     atrac9.window.clear();
-    atrac9.windowStart = 0;
+    atrac9.windowCursor = 0;
+    atrac9.input.clear();
+    atrac9.remainingSamples = 0;
+    atrac9.skipSamples = 0;
+    atrac9.finishOnDrain = false;
 }
 
-static void DecodeSuperframe(Ngs2Voice& voice, Ngs2Block& block) {
+static std::size_t BufferedFrames(const Ngs2Voice& voice) {
+    return voice.atrac9.window.size() / voice.channels - voice.atrac9.windowCursor;
+}
+
+static bool GatherSuperframe(Ngs2Voice& voice) {
     auto& atrac9 = voice.atrac9;
-    if (block.dataCursor + atrac9.superframeBytes > block.info.data_size) throw std::invalid_argument("NGS2: the ATRAC9 block ends inside a superframe");
+    while (atrac9.input.size() < atrac9.superframeBytes) {
+        if (voice.blocks.empty()) {
+            if (!voice.acceptsBlocks && atrac9.remainingSamples != 0)
+                throw std::invalid_argument("NGS2: the ATRAC9 stream ends before its declared samples");
+            return false;
+        }
+        auto& block = voice.blocks.front();
+        if (!block.started) {
+            if (block.info.num_samples != 0) {
+                if (atrac9.remainingSamples != 0 || !atrac9.input.empty())
+                    throw std::invalid_argument("NGS2: a new ATRAC9 waveform interrupts an incomplete stream");
+                atrac9.remainingSamples = block.info.num_samples;
+                atrac9.skipSamples = block.info.num_skip_samples;
+            } else if (atrac9.remainingSamples == 0) {
+                throw std::invalid_argument("NGS2: an ATRAC9 data-only block has no waveform to continue");
+            }
+            block.started = true;
+        }
+        const auto count = std::min<std::size_t>(atrac9.superframeBytes - atrac9.input.size(), block.info.data_size - block.dataCursor);
+        atrac9.input.insert(atrac9.input.end(), block.data + block.dataCursor, block.data + block.dataCursor + count);
+        block.dataCursor += count;
+        voice.decodedBytes += count;
+        if (atrac9.input.size() == atrac9.superframeBytes) return true;
+        if (!Ngs2FinishBlock(voice)) return false;
+    }
+    return true;
+}
+
+static bool DecodeSuperframe(Ngs2Voice& voice) {
+    if (!GatherSuperframe(voice)) return false;
+    auto& atrac9 = voice.atrac9;
+    if (atrac9.windowCursor != 0) {
+        atrac9.window.erase(atrac9.window.begin(), atrac9.window.begin() + static_cast<std::ptrdiff_t>(atrac9.windowCursor) * voice.channels);
+        atrac9.windowCursor = 0;
+    }
     const std::size_t frameValues = static_cast<std::size_t>(atrac9.frameSamples) * voice.channels;
-    const std::size_t superframeValues = frameValues * atrac9.framesInSuperframe;
-    if (atrac9.window.size() >= 2 * superframeValues) {
-        atrac9.window.erase(atrac9.window.begin(), atrac9.window.begin() + static_cast<std::ptrdiff_t>(superframeValues));
-        atrac9.windowStart += atrac9.frameSamples * atrac9.framesInSuperframe;
-    }
-    std::size_t end = atrac9.window.size();
-    atrac9.window.resize(end + superframeValues);
-    const auto* superframe = block.data + block.dataCursor;
+    const auto superframeSamples = atrac9.frameSamples * atrac9.framesInSuperframe;
+    const auto end = atrac9.window.size();
+    atrac9.window.resize(end + static_cast<std::size_t>(superframeSamples) * voice.channels);
     std::size_t consumed = 0;
-    for (std::uint32_t frame = 0; frame < atrac9.framesInSuperframe; frame++, end += frameValues) {
+    for (std::uint32_t frame = 0; frame < atrac9.framesInSuperframe; ++frame) {
         int used = 0;
-        const int status = Atrac9DecodeF32(atrac9.decoder.get(), superframe + consumed, static_cast<int>(atrac9.superframeBytes - consumed), atrac9.window.data() + end, &used, 0);
-        consumed += static_cast<std::size_t>(std::max(used, 0));
-        if (status != 0 || consumed > atrac9.superframeBytes) throw std::runtime_error("NGS2: ATRAC9 decode failed with " + Ngs2Hex(static_cast<std::uint32_t>(status)));
+        const int status = Atrac9DecodeF32(atrac9.decoder.get(), atrac9.input.data() + consumed,
+            static_cast<int>(atrac9.superframeBytes - consumed), atrac9.window.data() + end + frame * frameValues, &used, 0);
+        if (status != 0 || used <= 0 || static_cast<std::size_t>(used) > atrac9.superframeBytes - consumed)
+            throw std::runtime_error("NGS2: ATRAC9 decode failed with " + Ngs2Hex(static_cast<std::uint32_t>(status)));
+        consumed += static_cast<std::size_t>(used);
     }
-    block.dataCursor += atrac9.superframeBytes;
-    voice.decodedBytes += atrac9.superframeBytes;
+    atrac9.input.clear();
+    const auto skipped = std::min(atrac9.skipSamples, superframeSamples);
+    const auto samples = std::min(atrac9.remainingSamples, superframeSamples - skipped);
+    atrac9.skipSamples -= skipped;
+    atrac9.remainingSamples -= samples;
+    std::memmove(atrac9.window.data() + end, atrac9.window.data() + end + static_cast<std::size_t>(skipped) * voice.channels,
+        static_cast<std::size_t>(samples) * voice.channels * sizeof(float));
+    atrac9.window.resize(end + static_cast<std::size_t>(samples) * voice.channels);
+    if (atrac9.remainingSamples == 0) {
+        atrac9.finishOnDrain = true;
+    } else if (voice.blocks.front().dataCursor == voice.blocks.front().info.data_size) {
+        if (!Ngs2FinishBlock(voice)) return false;
+    }
+    return true;
 }
 
-const float* Ngs2Atrac9Frame(Ngs2Voice& voice, Ngs2Block& block, std::uint32_t frame) {
+static bool EnsureFrames(Ngs2Voice& voice, std::size_t count) {
     auto& atrac9 = voice.atrac9;
-    const std::uint32_t position = block.info.num_skip_samples + frame;
-    if (block.dataCursor == 0) {
-        atrac9.window.clear();
-        atrac9.windowStart = 0;
+    while (voice.state == Ngs2PlayState::Playing && BufferedFrames(voice) < count) {
+        if (atrac9.finishOnDrain) {
+            if (BufferedFrames(voice) != 0) return false;
+            atrac9.finishOnDrain = false;
+            if (!Ngs2FinishBlock(voice)) return false;
+        }
+        if (!DecodeSuperframe(voice)) return false;
     }
-    if (position < atrac9.windowStart) throw std::logic_error("NGS2: ATRAC9 frames are read backwards");
-    while (position >= atrac9.windowStart + atrac9.window.size() / voice.channels) DecodeSuperframe(voice, block);
-    return atrac9.window.data() + static_cast<std::size_t>(position - atrac9.windowStart) * voice.channels;
+    return voice.state == Ngs2PlayState::Playing;
+}
+
+static bool AdvanceAtrac9(Ngs2Voice& voice) {
+    while ((voice.phase >> 32) != 0 && voice.state == Ngs2PlayState::Playing) {
+        if (!EnsureFrames(voice, 1)) return false;
+        const auto count = std::min<std::uint64_t>(voice.phase >> 32, BufferedFrames(voice));
+        voice.atrac9.windowCursor += static_cast<std::uint32_t>(count);
+        voice.decodedSamples += count;
+        voice.phase -= count << 32;
+        if (BufferedFrames(voice) == 0 && voice.atrac9.finishOnDrain) {
+            voice.atrac9.finishOnDrain = false;
+            if (!Ngs2FinishBlock(voice)) return false;
+        }
+    }
+    return voice.state == Ngs2PlayState::Playing;
+}
+
+void Ngs2ConsumeAtrac9(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    constexpr double phaseOne = 4294967296.0;
+    const auto initialRevision = voice.waveformRevision;
+    const auto step = static_cast<std::uint64_t>(std::llround(voice.sampleRate * static_cast<double>(voice.pitch) / systemRate * phaseOne));
+    std::uint32_t written = 0;
+    for (; written < grain; ++written) {
+        if (!AdvanceAtrac9(voice) || !EnsureFrames(voice, 1)) break;
+        const auto revision = voice.waveformRevision;
+        const auto fraction = static_cast<float>(voice.phase / phaseOne);
+        if (fraction != 0.0f) EnsureFrames(voice, 2);
+        if (voice.state != Ngs2PlayState::Playing || voice.waveformRevision != revision) break;
+        const auto* current = voice.atrac9.window.data() + static_cast<std::size_t>(voice.atrac9.windowCursor) * voice.channels;
+        const auto* next = BufferedFrames(voice) > 1 ? current + voice.channels : current;
+        for (std::uint32_t channel = 0; channel < voice.channels; ++channel)
+            voice.samples[static_cast<std::size_t>(channel) * grain + written] = std::lerp(current[channel], next[channel], fraction);
+        voice.phase += step;
+    }
+    voice.hasSamples = written != 0;
+    if (voice.state != Ngs2PlayState::Playing || voice.waveformRevision != initialRevision) return;
+    AdvanceAtrac9(voice);
+    if (voice.state != Ngs2PlayState::Playing || voice.waveformRevision != initialRevision) return;
+    if (!voice.acceptsBlocks && voice.blocks.empty() && BufferedFrames(voice) == 0 && voice.atrac9.remainingSamples != 0)
+        throw std::invalid_argument("NGS2: the ATRAC9 stream ends before its declared samples");
 }
 
 static std::uint16_t ReadLe16(const std::uint8_t* data) {
@@ -124,14 +217,16 @@ struct RiffChunks {
     std::size_t dataSize = 0;
 };
 
-static int ReadChunks(const std::uint8_t* bytes, std::size_t size, RiffChunks& chunks) {
+template <class TRead>
+static int ReadChunks(std::size_t size, TRead&& read, RiffChunks& chunks) {
     if (size < 12) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
-    if (std::memcmp(bytes, "RIFF", 4) != 0 || std::memcmp(bytes + 8, "WAVE", 4) != 0) return SCE_NGS2_ERROR_UNKNOWN_WAVEFORM_FORMAT;
-    const std::size_t riffEnd = 8 + static_cast<std::size_t>(ReadLe32(bytes + 4));
+    const auto* header = read(0, 12);
+    if (std::memcmp(header, "RIFF", 4) != 0 || std::memcmp(header + 8, "WAVE", 4) != 0) return SCE_NGS2_ERROR_UNKNOWN_WAVEFORM_FORMAT;
+    const std::size_t riffEnd = 8 + static_cast<std::size_t>(ReadLe32(header + 4));
     if (riffEnd < 12) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
     const std::size_t end = std::min(size, riffEnd);
     for (std::size_t offset = 12; offset + 8 <= end;) {
-        const auto* chunk = bytes + offset;
+        const auto* chunk = read(offset, 8);
         const std::size_t payload = offset + 8;
         const std::size_t chunkSize = ReadLe32(chunk + 4);
         if (chunkSize > riffEnd - payload) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
@@ -143,13 +238,13 @@ static int ReadChunks(const std::uint8_t* bytes, std::size_t size, RiffChunks& c
         }
         if (chunkSize > end - payload) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
         if (std::memcmp(chunk, "fmt ", 4) == 0) {
-            chunks.format = bytes + payload;
+            chunks.format = read(payload, chunkSize);
             chunks.formatSize = chunkSize;
         } else if (std::memcmp(chunk, "fact", 4) == 0) {
-            chunks.fact = bytes + payload;
+            chunks.fact = read(payload, chunkSize);
             chunks.factSize = chunkSize;
         } else if (std::memcmp(chunk, "smpl", 4) == 0) {
-            chunks.sampler = bytes + payload;
+            chunks.sampler = read(payload, chunkSize);
             chunks.samplerSize = chunkSize;
         }
         offset = payload + chunkSize + (chunkSize & 1);
@@ -256,6 +351,17 @@ static int ParsePcm16(const RiffChunks& chunks, std::size_t size, Ngs2WaveformIn
     return SCE_NGS2_OK;
 }
 
+static int ParseWaveform(const RiffChunks& chunks, std::size_t size, Ngs2WaveformInfo& info) {
+    if (chunks.formatSize < 2) return SCE_NGS2_ERROR_INVALID_WAVEFORM_FORMAT;
+    const std::uint16_t tag = ReadLe16(chunks.format);
+    if (tag == WAVE_FORMAT_EXTENSIBLE && chunks.formatSize >= FMT_GUID_OFFSET + sizeof(ATRAC9_GUID) &&
+        std::memcmp(chunks.format + FMT_GUID_OFFSET, ATRAC9_GUID, sizeof(ATRAC9_GUID)) == 0) {
+        return ParseAtrac9(chunks, info);
+    }
+    if (tag == WAVE_FORMAT_PCM) return ParsePcm16(chunks, size, info);
+    throw std::runtime_error("NGS2: parsing waveform format tag " + Ngs2Hex(tag) + " is not implemented");
+}
+
 #pragma GCC visibility push(default)
 
 extern "C" {
@@ -264,17 +370,11 @@ int APS5_VABI sceNgs2ParseWaveformData(const void* data, size_t data_size, Ngs2W
     if (info == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     *info = {};
     if (data == nullptr) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
     RiffChunks chunks;
-    const int result = ReadChunks(static_cast<const std::uint8_t*>(data), data_size, chunks);
+    const int result = ReadChunks(data_size, [bytes](std::size_t at, std::size_t) { return bytes + at; }, chunks);
     if (result != SCE_NGS2_OK) return result;
-    if (chunks.formatSize < 2) return SCE_NGS2_ERROR_INVALID_WAVEFORM_FORMAT;
-    const std::uint16_t tag = ReadLe16(chunks.format);
-    if (tag == WAVE_FORMAT_EXTENSIBLE && chunks.formatSize >= FMT_GUID_OFFSET + sizeof(ATRAC9_GUID) &&
-        std::memcmp(chunks.format + FMT_GUID_OFFSET, ATRAC9_GUID, sizeof(ATRAC9_GUID)) == 0) {
-        return ParseAtrac9(chunks, *info);
-    }
-    if (tag == WAVE_FORMAT_PCM) return ParsePcm16(chunks, data_size, *info);
-    throw std::runtime_error("NGS2: parsing waveform format tag " + Ngs2Hex(tag) + " is not implemented");
+    return ParseWaveform(chunks, data_size, *info);
 }
 
 int APS5_VABI sceNgs2ParseWaveformFile(const char* path, uint32_t offset, Ngs2WaveformInfo* info) {
@@ -286,11 +386,18 @@ int APS5_VABI sceNgs2ParseWaveformFile(const char* path, uint32_t offset, Ngs2Wa
     if (!file) throw std::runtime_error(std::string(__func__) + ": cannot open " + host.string());
     const auto fileSize = static_cast<std::uint64_t>(file.tellg());
     if (offset > fileSize) return SCE_NGS2_ERROR_INVALID_WAVEFORM_DATA;
-    const std::uint64_t length = fileSize - offset;
-    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
-    file.seekg(offset);
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) throw std::runtime_error(std::string(__func__) + ": read failed for " + host.string());
-    const int result = sceNgs2ParseWaveformData(bytes.data(), bytes.size(), info);
+    const auto length = static_cast<std::size_t>(fileSize - offset);
+    const std::string function = __func__;
+    std::vector<std::vector<std::uint8_t>> pieces;
+    const auto readBytes = [&](std::size_t at, std::size_t count) {
+        auto& piece = pieces.emplace_back(std::max<std::size_t>(count, 1));
+        file.seekg(static_cast<std::streamoff>(offset + at));
+        if (!file.read(reinterpret_cast<char*>(piece.data()), static_cast<std::streamsize>(count))) throw std::runtime_error(function + ": read failed for " + host.string());
+        return static_cast<const std::uint8_t*>(piece.data());
+    };
+    RiffChunks chunks;
+    int result = ReadChunks(length, readBytes, chunks);
+    if (result == SCE_NGS2_OK) result = ParseWaveform(chunks, length, *info);
     if (result != SCE_NGS2_OK) return result;
     info->data_offset += offset;
     for (std::uint32_t i = 0; i < info->num_blocks; i++) info->block[i].data_offset += offset;

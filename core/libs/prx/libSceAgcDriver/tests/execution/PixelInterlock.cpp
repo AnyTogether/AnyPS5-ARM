@@ -27,7 +27,6 @@ using ShaderRecompiler::ShaderStage;
 constexpr std::uint32_t Width = 64;
 constexpr std::uint32_t Height = 32;
 constexpr std::uint32_t Layers = 64;
-constexpr std::uint32_t PixelInterlockCapability = 5378;
 constexpr std::size_t GuestBytes = 65536;
 constexpr std::uint32_t FaultColumns = 8;
 alignas(256) std::array<std::byte, Width * Height * 4> Pixels{};
@@ -59,7 +58,7 @@ public:
         block = static_cast<std::uint8_t*>(std::aligned_alloc(GuestBytes, 2 * GuestBytes));
 #endif
         Require(block != nullptr, "pixel interlock: cannot allocate the guest block");
-        GuestAllocations::Mutation().Add(block, GuestBytes, true, true);
+        GuestAllocations::Mutation().Add(block, GuestBytes, true, true, true);
     }
 
     ~GuestCounters() {
@@ -138,13 +137,13 @@ void Draw(AgcDriver::VulkanDevice& device, std::uint32_t waveSize, std::span<con
         {ShaderStage::Fragment, reinterpret_cast<std::uintptr_t>(pixelCode.data()), pixelCode, 0, {}},
         {waveSize, 0, pixelUserData, std::nullopt, pixel, std::nullopt, pixelMemory},
         target,
-        {0, 0, vertexPush, 128 - vertexPush}
+        PixelPushLayout(vertexPush, target)
     };
     fragment.useCache = false;
     const auto pixelResult = ShaderRecompiler::Recompile(fragment);
     const std::array<AgcDriver::Graphics::CompiledShader, 2> shaders{{
         {ShaderStage::Vertex, &vertexResult, 0},
-        {ShaderStage::Fragment, &pixelResult, vertexPush}
+        {ShaderStage::Fragment, &pixelResult, PixelPushOffset(vertexPush, target)}
     }};
 
     AgcDriver::Graphics::State state{};
@@ -215,8 +214,7 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
-        const auto capabilities = device->Target().supportedCapabilities;
-        if (std::find(capabilities.begin(), capabilities.end(), PixelInterlockCapability) == capabilities.end()) {
+        if (!TargetHasCapability(device->Target(), spv::CapabilityFragmentShaderPixelInterlockEXT)) {
             std::puts("skipped, the device lacks fragmentShaderPixelInterlock");
             return VulkanTestSkipped;
         }

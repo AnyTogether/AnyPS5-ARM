@@ -8,32 +8,19 @@
 #include <elfpatcher/windows/WindowsTrampolineBuilder.hpp>
 #include <io/BufferUtils.hpp>
 #include <filesystem>
-#include <fstream>
-#include <iostream>
+
+
 #include <utility>
 
 namespace Elfpatcher::Windows {
 
 namespace {
 
-void writeDiagnosticsImports(const std::vector<PeImport>& imports) {
-    const std::filesystem::path path = std::filesystem::absolute("windows-diagnostics-imports.txt");
-    std::ofstream stream(path, std::ios::trunc);
-    if (!stream)
-        throw Domain::RelinkerException("Cannot open windows-diagnostics-imports.txt for writing");
-    for (const auto& import : imports)
-        stream << import.Name << '\n';
-    if (!stream)
-        throw Domain::RelinkerException("Cannot write windows-diagnostics-imports.txt");
-    stream.close();
-    std::cout << "Wrote Windows import diagnostics to " << path.string() << '\n';
-}
-
-void writeGotStub(std::vector<PeSection>& sections, const std::uint32_t targetRva, const std::uint32_t stubRva) {
+void writeGotStub(std::vector<PeSection>& sections, const std::uint32_t targetRva, const std::uint32_t stubRva, const std::uint64_t imageBase) {
     for (auto& section : sections) {
         if (section.Data.size() < 8 || targetRva < section.Rva || targetRva - section.Rva > section.Data.size() - 8)
             continue;
-        Io::WriteU64(section.Data, targetRva - section.Rva, ImageBase + stubRva);
+        Io::WriteU64(section.Data, targetRva - section.Rva, imageBase + stubRva);
         return;
     }
     throw Domain::RelinkerException("Lazy import GOT slot is not contained in any section", targetRva);
@@ -41,16 +28,26 @@ void writeGotStub(std::vector<PeSection>& sections, const std::uint32_t targetRv
 
 }
 
-WindowsPePatcher::WindowsPePatcher(const bool windowsGui, std::filesystem::path iconPath) : _windowsGui(windowsGui), _iconPath(std::move(iconPath)) {
+WindowsPePatcher::WindowsPePatcher(const bool windowsGui, std::optional<std::vector<std::uint8_t>> icon, std::filesystem::path iconName, std::function<void(std::uint64_t, std::uint64_t)> progress, const std::optional<std::uint64_t> fixedBase, const bool traceImports) : progress(std::move(progress)), windowsGui(windowsGui), icon(std::move(icon)), iconName(std::move(iconName)), fixedBase(fixedBase), traceImports(traceImports) {
+    if (fixedBase && (*fixedBase < 0x20000 || *fixedBase > 0x7fffffff0000 || (*fixedBase & 0xffff) != 0))
+        throw Domain::RelinkerException("Invalid fixed Windows guest image base");
 }
 
-std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t>& sourceElf, const std::vector<Domain::ProgramHeader>& originalHeaders, const Domain::SysVDynamicSection& dynamicSection, const std::uint64_t originalPltGotVaddr, const std::string& runPath, const bool lazyBinding, const bool dependencyDiagnostics, const std::vector<Codegen::TrampolineSite>& trampolines) {
-    WindowsLoadImage image(sourceElf, originalHeaders);
+const std::string& WindowsPePatcher::GetDiagnostics() const { return diagnostics; }
+
+std::vector<std::uint8_t> WindowsPePatcher::Patch(std::vector<std::uint8_t> sourceElf, const std::vector<Domain::ProgramHeader>& originalHeaders, const Domain::SysVDynamicSection& dynamicSection, const std::uint64_t originalPltGotVaddr, const std::string& runPath, const bool lazyBinding, const bool dependencyDiagnostics, const std::vector<Codegen::TrampolineSite>& trampolines) {
+    const auto report = [&](std::uint64_t completed) { if (progress) progress(completed, 10000); };
+    report(0);
+    diagnostics.clear();
+    WindowsLoadImage image(sourceElf, originalHeaders, true, fixedBase ? *fixedBase - LoadRva : ImageBase);
     if (originalPltGotVaddr != 0)
         image.GetRva(originalPltGotVaddr, 8);
+    report(500);
     const WindowsRelocationBuilder relocationBuilder;
-    auto relocations = relocationBuilder.Apply(image, dynamicSection);
+    auto relocations = relocationBuilder.Apply(image, dynamicSection, originalHeaders);
+    report(1000);
     auto sections = image.BuildSections();
+    report(1500);
     std::array<PeDirectory, 16> directories{};
     auto nextRva = image.GetEndRva();
     bool hasProcessParameters = false;
@@ -71,7 +68,8 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t
         sections.push_back({".ehmeta", nextRva, SectionRead | 0x40u, std::move(metadata)});
         nextRva = AlignRva(nextRva + sections.back().Data.size());
     }
-    directories[9] = WindowsTlsBuilder().Build(sourceElf, originalHeaders, image, sections, relocations.BaseRelocations, nextRva);
+    directories[9] = WindowsTlsBuilder().Build(sourceElf, originalHeaders, image, sections, relocations.BaseRelocations, nextRva, nullptr, [&](auto completed, auto total) { report(1500 + 6500 * completed / total); });
+    report(8000);
     WindowsTrampolineBuilder().Build(trampolines, image, sections, nextRva);
     const WindowsImportBuilder importBuilder;
     auto nativeImports = importBuilder.Build(nextRva);
@@ -83,12 +81,17 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t
     for (std::size_t index = 0; index < dynamicSection.GuestModules.size(); ++index) {
         const auto& module = dynamicSection.GuestModules[index];
         guestPaths.push_back(module.Path);
-        for (const auto& import : module.Imports) relocations.Imports.push_back({import.Name, import.TargetRva, import.Addend, static_cast<std::int32_t>(index), import.RelocationType, import.Library});
+        for (const auto& import : module.Imports) {
+            relocations.Imports.push_back({import.Name, import.TargetRva, import.Addend, static_cast<std::int32_t>(index), import.RelocationType, import.Library});
+            relocations.Imports.back().Function = import.Function;
+        }
     }
     libraries.insert(libraries.begin(), guestPaths.begin(), guestPaths.end());
     if (dependencyDiagnostics)
-        writeDiagnosticsImports(relocations.Imports);
-    auto entry = WindowsEntryStubBuilder().Build(nextRva, image.GetEntryRva(), nativeImports, libraries, relocations.Imports, runPath, lazyBinding, dependencyDiagnostics, dynamicSection.GuestModules);
+        for (const auto& import : relocations.Imports) diagnostics += import.Name + '\n';
+    report(8500);
+    auto entry = WindowsEntryStubBuilder().Build(nextRva, image.GetEntryRva(), nativeImports, libraries, relocations.Imports, runPath, lazyBinding, dependencyDiagnostics, dynamicSection.GuestModules, dynamicSection.UnmatchedImportModules, traceImports);
+    report(9000);
     directories[3] = entry.ExceptionDirectory;
     const auto entryRva = entry.Code.Rva;
     nextRva = AlignRva(entry.Code.Rva + entry.Code.Data.size());
@@ -96,17 +99,20 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(const std::vector<std::uint8_t
     sections.push_back(std::move(entry.Data));
     sections.push_back(std::move(entry.Code));
     for (const auto& lazyStub : entry.LazyStubs) {
-        writeGotStub(sections, lazyStub.TargetRva, lazyStub.StubRva);
+        writeGotStub(sections, lazyStub.TargetRva, lazyStub.StubRva, image.GetImageBase());
         relocations.BaseRelocations.push_back(lazyStub.TargetRva);
     }
-    auto relocationData = relocationBuilder.BuildBaseRelocations(relocations.BaseRelocations);
+    auto relocationData = fixedBase ? std::vector<std::uint8_t>{} : relocationBuilder.BuildBaseRelocations(relocations.BaseRelocations);
     if (!relocationData.empty()) {
         directories[5] = {nextRva, CheckedRva(relocationData.size())};
         sections.push_back({".reloc", nextRva, SectionRead | 0x02000040u, std::move(relocationData)});
         nextRva = AlignRva(nextRva + sections.back().Data.size());
     }
-    directories[2] = WindowsIconResourceBuilder().Build(_iconPath, sections, nextRva);
-    return WindowsPeWriter().Write(sections, entryRva, directories, _windowsGui);
+    directories[2] = icon ? WindowsIconResourceBuilder().Build(*icon, iconName, sections, nextRva) : PeDirectory{};
+    report(9500);
+    auto result = WindowsPeWriter().Write(sections, entryRva, directories, windowsGui, fixedBase ? std::optional<std::uint64_t>(image.GetImageBase()) : std::nullopt, false);
+    report(10000);
+    return result;
 }
 
 }

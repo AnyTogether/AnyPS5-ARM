@@ -29,13 +29,17 @@ void APS5_VABI GuestDeallocate_nid_no_patch(void*, void* memory) {
     GuestHeap::GuestHeapFree_nid_postfix(memory);
 }
 
+void* APS5_VABI GuestAllocateTexture_nid_no_patch(void*, std::uint32_t alignment, std::uint32_t size) {
+    return GuestHeap::GuestHeapAlignForGpu_nid_postfix(std::max<std::uint32_t>(alignment, 16), size);
+}
+
 AvPlayerMemAllocator WithGuestHeapFallback(AvPlayerMemAllocator memory) {
     if (!memory.allocate || !memory.deallocate) {
         memory.allocate = GuestAllocate_nid_no_patch;
         memory.deallocate = GuestDeallocate_nid_no_patch;
     }
     if (!memory.allocate_texture || !memory.deallocate_texture) {
-        memory.allocate_texture = GuestAllocate_nid_no_patch;
+        memory.allocate_texture = GuestAllocateTexture_nid_no_patch;
         memory.deallocate_texture = GuestDeallocate_nid_no_patch;
     }
     return memory;
@@ -57,8 +61,8 @@ std::uint32_t DetectSourceType(std::string_view path) {
     return SourceTypeUnknown;
 }
 
-Player::Player(const AvPlayerInitData& init, std::uint32_t bufferCount)
-    : memory(WithGuestHeapFallback(init.memory_replacement)), callback(init.event_replacement), videoBuffers(bufferCount) {
+Player::Player(const AvPlayerInitData& init, std::uint32_t bufferCount, bool ps5Layout)
+    : memory(WithGuestHeapFallback(init.memory_replacement)), callback(init.event_replacement), ps5Layout(ps5Layout), videoBuffers(bufferCount) {
     if (init.file_replacement.open && init.file_replacement.close && init.file_replacement.read_offset && init.file_replacement.size) {
         file = init.file_replacement;
     }
@@ -66,7 +70,7 @@ Player::Player(const AvPlayerInitData& init, std::uint32_t bufferCount)
     if (init.default_language) {
         for (std::size_t index = 0; index < 3 && init.default_language[index] != '\0'; ++index) language[index] = init.default_language[index];
     }
-    controller = std::thread([this] { controllerLoop(); });
+    controller = std::thread([this, closed = controllerClosed] { controllerLoop(*closed); });
 }
 
 Player::~Player() {
@@ -74,8 +78,13 @@ Player::~Player() {
         std::lock_guard lock(eventMutex);
         quit = true;
     }
-    eventCondition.notify_all();
-    controller.join();
+    eventCondition.NotifyAll();
+    if (controller.get_id() == std::this_thread::get_id()) {
+        *controllerClosed = true;
+        controller.detach();
+    } else {
+        controller.join();
+    }
     std::lock_guard lock(mutex);
     source.reset();
 }
@@ -85,7 +94,7 @@ void Player::queue(const Event& event) {
         std::lock_guard lock(eventMutex);
         events.push_back(event);
     }
-    eventCondition.notify_all();
+    eventCondition.NotifyAll();
 }
 
 void Player::OnWarning(std::int32_t code) {
@@ -96,13 +105,13 @@ void Player::OnError() {
     queue({0, 0, false, true});
 }
 
-void Player::controllerLoop() {
+void Player::controllerLoop(const bool& closed) {
     for (;;) {
         Event event{};
         bool pending = false;
         {
             std::unique_lock lock(eventMutex);
-            eventCondition.wait_for(lock, std::chrono::milliseconds(5), [this] { return quit || !events.empty(); });
+            eventCondition.WaitUntil(lock, TimedWait::DeadlineNanos(5000), [this] { return quit || !events.empty(); });
             if (quit) return;
             if (!events.empty()) {
                 event = events.front();
@@ -115,6 +124,7 @@ void Player::controllerLoop() {
         } else {
             checkEndOfFile();
         }
+        if (closed) return;
     }
 }
 
@@ -136,7 +146,15 @@ void Player::deliver(const Event& event) {
     callback.event_callback(callback.object_ptr, event.id, 0, event.id == EventWarningId ? &warning : nullptr);
 }
 
+bool Player::readyLocked() const {
+    return source && state == State::Ready;
+}
+
 void Player::autoStart() {
+    {
+        std::lock_guard lock(mutex);
+        if (!readyLocked()) return;
+    }
     const int count = StreamCount();
     if (count <= 0) {
         Stop();
@@ -151,11 +169,12 @@ void Player::autoStart() {
             return;
         }
         if (info.type == StreamTypeVideo && (video == -1 || SameLanguage(language, info.details.video.language_code))) video = index;
-        if (info.type == StreamTypeAudio && (audio == -1 || SameLanguage(language, info.details.audio.language_code))) audio = index;
+        if (info.type == (ps5Layout ? Ps5StreamTypeAudio : StreamTypeAudio) && (audio == -1 || SameLanguage(language, info.details.audio.language_code))) audio = index;
     }
     if (video != -1) EnableStream(static_cast<std::uint32_t>(video));
     if (audio != -1) EnableStream(static_cast<std::uint32_t>(audio));
-    Start();
+    std::lock_guard lock(mutex);
+    if (readyLocked()) startLocked();
 }
 
 void Player::checkEndOfFile() {
@@ -214,6 +233,7 @@ int Player::StreamCount() {
 int Player::GetStreamInfo(std::uint32_t index, AvPlayerStreamInfo& info) {
     std::lock_guard lock(mutex);
     if (!source || !source->GetStreamInfo(index, info)) return SCE_AVPLAYER_ERROR_OPERATION_FAILED;
+    if (ps5Layout && info.type == StreamTypeAudio) info.type = Ps5StreamTypeAudio;
     return SCE_OK;
 }
 
@@ -221,6 +241,7 @@ int Player::GetStreamInfoEx(std::uint32_t index, AvPlayerStreamInfoEx& info) {
     std::lock_guard lock(mutex);
     AvPlayerStreamInfoEx described{};
     if (!source || !source->GetStreamInfoEx(index, described)) return SCE_AVPLAYER_ERROR_OPERATION_FAILED;
+    if (ps5Layout && described.type == StreamTypeAudio) described.type = Ps5StreamTypeAudio;
     described.this_size = info.this_size;
     info = described;
     return SCE_OK;
@@ -246,6 +267,10 @@ int Player::ChangeStream(std::uint32_t from, std::uint32_t to) {
 
 int Player::Start() {
     std::lock_guard lock(mutex);
+    return startLocked();
+}
+
+int Player::startLocked() {
     if (!source) return SCE_AVPLAYER_ERROR_OPERATION_FAILED;
     if (state != State::Ready && state != State::Stop && stopLocked() != SCE_OK) return SCE_AVPLAYER_ERROR_OPERATION_FAILED;
     const int result = source->Start();

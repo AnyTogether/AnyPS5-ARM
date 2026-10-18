@@ -207,6 +207,45 @@ std::string valueToString(const std::map<const IrValue*, std::size_t>& ids, cons
 
 }
 
+std::size_t IrProgram::ReclaimUnusedValues() {
+    std::unordered_set<IrValue*> live;
+    std::vector<IrValue*> pending;
+    const auto keep = [&](IrValue* value) { if (value != nullptr && live.insert(value).second) pending.push_back(value); };
+    const auto keepBlocks = [&](const auto& storage) {
+        for (const auto& block : storage) {
+            for (IrValue* instruction : block->Instructions()) keep(instruction);
+            for (IrValue* value : block->ssaScalarValues) keep(value);
+            for (IrValue* value : block->ssaVectorValues) keep(value);
+            for (IrValue* value : block->ssaThreadBitScalarValues) keep(value);
+            for (IrValue* value : block->ssaScalarMaskTags) keep(value);
+        }
+    };
+    keepBlocks(blocks);
+    keepBlocks(resourcePlan.blockStorage);
+    for (auto& value : resourcePlan.valueStorage) keep(&value);
+    for (const auto& source : resourcePlan.descriptorSources) for (IrValue* word : source.dwords) keep(word);
+    for (const auto& read : resourcePlan.srtReads) keep(read.value);
+    for (const auto& block : resourcePlan.controlFlow) keep(block.condition);
+    for (IrValue* value : resourcePlan.uniformFill.values) keep(value);
+    for (const auto& block : metadata.blockInfo) { keep(block.condition); keep(block.indirectTarget); }
+    for (IrValue* value : metadata.dynamicReads) keep(value);
+    while (!pending.empty()) {
+        IrValue* value = pending.back();
+        pending.pop_back();
+        for (std::size_t index = 0; index < value->ArgumentCount(); ++index) keep(value->Argument(index));
+    }
+    for (const auto& value : values) {
+        if (live.contains(value.get())) continue;
+        for (std::size_t index = 0; index < value->ArgumentCount(); ++index) value->ReplaceArgument(index, nullptr);
+    }
+    for (const auto& value : values) {
+        if (!live.contains(value.get()) && value->HasUses()) throw std::runtime_error("an unused IR value has an external user");
+    }
+    const auto removed = std::erase_if(values, [&](const auto& value) { return !live.contains(value.get()); });
+    values.shrink_to_fit();
+    return removed;
+}
+
 std::vector<std::unique_ptr<IrBlock>>& IrProgram::Blocks() {
     return blocks;
 }
@@ -270,22 +309,34 @@ const IrProgramMetadata& IrProgram::Metadata() const {
     return metadata;
 }
 
-CompiledShaderInfo IrProgram::TakeCompiledInfo() && {
+namespace {
+
+CompiledShaderInfo compiledInfo(const IrResourcePlan& resourcePlan, std::uint32_t waveSize, ShaderInfo info, IrBindingLayout bindings) {
     CompiledShaderInfo result;
     result.stage = resourcePlan.stage;
     result.shaderHash = resourcePlan.shaderHash;
     result.waveSize = waveSize;
     result.userDataBase = resourcePlan.userDataBase;
     result.userDataCount = resourcePlan.userDataCount;
-    result.scratchDwords = resourcePlan.info.scratchDwords;
-    result.info = std::move(resourcePlan.info);
-    result.bindings = std::move(metadata.bindings);
+    result.scratchDwords = info.scratchDwords;
+    result.info = std::move(info);
+    result.bindings = std::move(bindings);
     for (const auto& output : result.info.outputs) {
         if (output.kind == StageOutputKind::Parameter && output.index < 32u) {
             result.paramExportMask |= 1u << output.index;
         }
     }
     return result;
+}
+
+}
+
+CompiledShaderInfo IrProgram::CompiledInfo() const& {
+    return compiledInfo(resourcePlan, waveSize, resourcePlan.info, metadata.bindings);
+}
+
+CompiledShaderInfo IrProgram::TakeCompiledInfo() && {
+    return compiledInfo(resourcePlan, waveSize, std::move(resourcePlan.info), std::move(metadata.bindings));
 }
 
 IrValue& IrProgram::CreateValue(IrOpcode opcode, IrType type, std::uint64_t flags) {

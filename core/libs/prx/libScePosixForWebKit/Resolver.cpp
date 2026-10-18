@@ -8,12 +8,132 @@
 #include <netinet/in.h>
 #endif
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/HostThreadLocal.hpp"
 #include <cstdint>
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
+#include <new>
+#include <string>
+#include <type_traits>
+#include <vector>
 #include "GuestResolver.hpp"
 
+extern "C" int* APS5_VABI sceNetErrnoLoc();
+
 namespace {
+struct HostLookup {
+    GuestResolver::HostEntry entry{};
+    std::string name;
+    std::vector<std::string> aliasNames;
+    std::vector<char*> aliases;
+    std::vector<std::string> addressBytes;
+    std::vector<char*> addresses;
+};
+
+struct ServiceRecord {
+    const char* name;
+    std::uint16_t port;
+    const char* protocol;
+    std::array<const char*, 2> aliases;
+};
+
+constexpr ServiceRecord Services[]{
+    {"ftp-data", 20, "tcp", {}}, {"ftp-data", 20, "udp", {}}, {"ftp-data", 20, "sctp", {}},
+    {"ftp", 21, "tcp", {}}, {"ftp", 21, "udp", {}}, {"ftp", 21, "sctp", {}},
+    {"ssh", 22, "tcp", {}}, {"ssh", 22, "udp", {}}, {"ssh", 22, "sctp", {}},
+    {"telnet", 23, "tcp", {}}, {"telnet", 23, "udp", {}},
+    {"smtp", 25, "tcp", {"mail"}}, {"smtp", 25, "udp", {"mail"}},
+    {"domain", 53, "tcp", {}}, {"domain", 53, "udp", {}},
+    {"tftp", 69, "tcp", {}}, {"tftp", 69, "udp", {}},
+    {"http", 80, "tcp", {"www", "www-http"}}, {"http", 80, "udp", {"www", "www-http"}},
+    {"http", 80, "sctp", {"www", "www-http"}},
+    {"pop3", 110, "tcp", {}}, {"pop3", 110, "udp", {}},
+    {"ntp", 123, "tcp", {}}, {"ntp", 123, "udp", {}},
+    {"imap", 143, "tcp", {"imap2", "imap4"}}, {"imap", 143, "udp", {"imap2", "imap4"}},
+    {"https", 443, "tcp", {}}, {"https", 443, "udp", {}}, {"https", 443, "sctp", {}},
+    {"rtsp", 554, "tcp", {}}, {"rtsp", 554, "udp", {}},
+    {"submission", 587, "tcp", {}}, {"submission", 587, "udp", {}},
+    {"imaps", 993, "tcp", {}}, {"imaps", 993, "udp", {}},
+    {"pop3s", 995, "tcp", {"spop3"}}, {"pop3s", 995, "udp", {"spop3"}},
+};
+
+constexpr std::size_t ServiceNameSize = 11;
+constexpr std::size_t ServiceAliasSize = 9;
+constexpr std::size_t ServiceProtocolSize = 5;
+constexpr std::size_t ServiceAliasCount = std::tuple_size_v<decltype(ServiceRecord::aliases)>;
+
+template<typename TSelect>
+constexpr std::size_t LongestServiceText(TSelect select) {
+    std::size_t longest = 0;
+    for (const auto& service : Services)
+        for (const char* text : select(service))
+            if (text) longest = std::max(longest, std::char_traits<char>::length(text));
+    return longest;
+}
+
+static_assert(ServiceNameSize == LongestServiceText([](const ServiceRecord& record) { return std::array{record.name}; }) + 1);
+static_assert(ServiceAliasSize == LongestServiceText([](const ServiceRecord& record) { return record.aliases; }) + 1);
+static_assert(ServiceProtocolSize == LongestServiceText([](const ServiceRecord& record) { return std::array{record.protocol}; }) + 1);
+
+struct ServiceLookup {
+    GuestResolver::ServiceEntry entry;
+    std::array<char, ServiceNameSize> name;
+    std::array<char, ServiceProtocolSize> protocol;
+    std::array<std::array<char, ServiceAliasSize>, ServiceAliasCount> aliasNames;
+    std::array<char*, ServiceAliasCount + 1> aliases;
+};
+static_assert(std::is_trivially_destructible_v<ServiceLookup>);
+
+template<std::size_t Size>
+char* CopyServiceText(std::array<char, Size>& target, const char* text) {
+    std::memcpy(target.data(), text, std::strlen(text) + 1);
+    return target.data();
+}
+
+bool NumericAddress(const char* name, std::array<unsigned char, 4>& address) {
+    std::array<unsigned char, 3> parts{};
+    std::size_t count = 0;
+    std::uint64_t value;
+    bool digit;
+    for (;;) {
+        if (*name < '0' || *name > '9') return false;
+        value = 0;
+        int base = 10;
+        digit = false;
+        if (*name == '0') {
+            ++name;
+            if (*name == 'x' || *name == 'X') { base = 16; ++name; }
+            else { base = 8; digit = true; }
+        }
+        for (;;) {
+            const int next = *name >= '0' && *name <= '9' ? *name - '0' :
+                *name >= 'a' && *name <= 'f' ? *name - 'a' + 10 :
+                *name >= 'A' && *name <= 'F' ? *name - 'A' + 10 : -1;
+            if (next < 0 || next >= base) break;
+            value = value * base + next;
+            digit = true;
+            ++name;
+        }
+        if (*name != '.') break;
+        if (count == parts.size() || value > 255) return false;
+        parts[count++] = static_cast<unsigned char>(value);
+        ++name;
+    }
+    if (!digit) return false;
+    if (*name != '\0' && *name != ' ' && *name != '\t' && *name != '\n' &&
+        *name != '\r' && *name != '\f' && *name != '\v') return false;
+    if (count && value >= (std::uint64_t{1} << (8 * (4 - count)))) return false;
+    auto result = static_cast<std::uint32_t>(value);
+    for (std::size_t i = 0; i < count; ++i)
+        result |= static_cast<std::uint32_t>(parts[i]) << (24 - 8 * i);
+    for (std::size_t i = 0; i < address.size(); ++i)
+        address[i] = static_cast<unsigned char>(result >> (24 - 8 * i));
+    return true;
+}
+
 bool Ready() {
 #ifdef _WIN32
     static const int status = [] { WSADATA data{}; return WSAStartup(MAKEWORD(2, 2), &data); }();
@@ -41,6 +161,90 @@ int GuestError(int error) {
 }
 
 extern "C" {
+GuestResolver::HostEntry* APS5_VABI gethostbyname_nid_postfix(const char* name) {
+    if (!name || !Ready()) { *sceNetErrnoLoc() = 3; return nullptr; }
+    try {
+        std::array<unsigned char, 4> numericAddress{};
+        char* numericAliases[]{nullptr};
+        char* numericAddresses[]{reinterpret_cast<char*>(numericAddress.data()), nullptr};
+        hostent nativeEntry{const_cast<char*>(name), numericAliases, AF_INET, 4, numericAddresses};
+        hostent* native = &nativeEntry;
+        const bool numeric = NumericAddress(name, numericAddress);
+#ifdef _WIN32
+        if (!numeric) native = ::gethostbyname(name);
+        if (!native) {
+            const auto error = WSAGetLastError();
+            *sceNetErrnoLoc() = error == WSAHOST_NOT_FOUND ? 1 : error == WSATRY_AGAIN ? 2 : error == WSANO_DATA ? 4 : 3;
+            return nullptr;
+        }
+#elif defined(__APPLE__)
+        // macOS has no gethostbyname_r; its gethostbyname keeps the result per thread.
+        if (!numeric) native = ::gethostbyname(name);
+        if (!native) {
+            *sceNetErrnoLoc() = h_errno != 0 ? h_errno : 3;
+            return nullptr;
+        }
+#else
+        std::vector<char> buffer;
+        int hostError = 0;
+        int error = 0;
+        if (!numeric) {
+            buffer.resize(1024);
+            while ((error = ::gethostbyname_r(name, &nativeEntry, buffer.data(), buffer.size(), &native, &hostError)) == ERANGE)
+                buffer.resize(buffer.size() * 2);
+        }
+        if (error != 0 || !native) {
+            *sceNetErrnoLoc() = hostError != 0 ? hostError : 3;
+            if (hostError == -1) errno = error == EAGAIN ? 35 : error;
+            return nullptr;
+        }
+#endif
+        struct LookupTag {};
+        auto& lookup = HostThreadLocal<HostLookup, LookupTag>();
+        lookup.name = native->h_name;
+        lookup.aliasNames.clear();
+        lookup.aliases.clear();
+        lookup.addressBytes.clear();
+        lookup.addresses.clear();
+        for (auto** alias = native->h_aliases; *alias; ++alias) lookup.aliasNames.emplace_back(*alias);
+        for (auto& alias : lookup.aliasNames) lookup.aliases.push_back(alias.data());
+        lookup.aliases.push_back(nullptr);
+        for (auto** address = native->h_addr_list; *address; ++address)
+            lookup.addressBytes.emplace_back(*address, native->h_length);
+        for (auto& address : lookup.addressBytes) lookup.addresses.push_back(address.data());
+        lookup.addresses.push_back(nullptr);
+        lookup.entry = {lookup.name.data(), lookup.aliases.data(), native->h_addrtype == AF_INET6 ? 28 : 2,
+            native->h_length, lookup.addresses.data()};
+        if (numeric) *sceNetErrnoLoc() = 0;
+        return &lookup.entry;
+    } catch (const std::bad_alloc&) {
+        *sceNetErrnoLoc() = -1;
+        errno = ENOMEM;
+        return nullptr;
+    }
+}
+
+GuestResolver::ServiceEntry* APS5_VABI getservbyname_nid_postfix(const char* name, const char* protocol) {
+    for (const auto& service : Services) {
+        bool named = std::strcmp(name, service.name) == 0;
+        for (const char* alias : service.aliases)
+            named = named || (alias && std::strcmp(name, alias) == 0);
+        if (!named || (protocol && std::strcmp(protocol, service.protocol) != 0)) continue;
+        static thread_local ServiceLookup lookup;
+        std::size_t count = 0;
+        for (const char* alias : service.aliases) {
+            if (!alias) continue;
+            lookup.aliases[count] = CopyServiceText(lookup.aliasNames[count], alias);
+            ++count;
+        }
+        lookup.aliases[count] = nullptr;
+        lookup.entry = {CopyServiceText(lookup.name, service.name), lookup.aliases.data(), htons(service.port),
+            CopyServiceText(lookup.protocol, service.protocol)};
+        return &lookup.entry;
+    }
+    return nullptr;
+}
+
 void APS5_VABI freeaddrinfo_nid_postfix(GuestResolver::AddressInfo* first) {
     while (first) {
         auto* next = first->next;
@@ -172,13 +376,13 @@ int APS5_VABI getnameinfo_nid_postfix(const void* address, std::uint32_t length,
 const char* APS5_VABI gai_strerror_nid_postfix(int error) {
     static const char* messages[] = {
         "Success", "Address family for hostname not supported", "Temporary failure in name resolution",
-        "Invalid flags", "Name resolution failed", "Address family not supported",
-        "Memory allocation failed", "No address for hostname", "Name or service not known",
-        "Service not supported for socket type", "Socket type not supported", "System error",
-        "Invalid hints", "Unknown protocol", "Buffer too small"
+        "Invalid value for ai_flags", "Non-recoverable failure in name resolution", "ai_family not supported",
+        "Memory allocation failure", "No address associated with hostname", "hostname nor servname provided, or not known",
+        "servname not supported for ai_socktype", "ai_socktype not supported", "System error returned in errno",
+        "Invalid value for hints", "Resolved protocol is unknown", "Argument buffer overflow"
     };
     if (error < 0 || error >= static_cast<int>(sizeof(messages) / sizeof(messages[0])))
-        return "Unknown address resolution error";
+        return "Unknown error";
     return messages[error];
 }
 }
