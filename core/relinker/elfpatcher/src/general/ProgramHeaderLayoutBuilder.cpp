@@ -6,9 +6,48 @@
 
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Elfpatcher {
+
+namespace {
+
+bool hasWritableLoadCoverage(
+    const std::vector<Domain::ProgramHeader>& headers,
+    const Domain::ProgramHeader& relro
+) {
+    if (relro.MemorySize == 0) return true;
+    if (relro.MemorySize > std::numeric_limits<std::uint64_t>::max() - relro.MappedAddress) return false;
+    const std::uint64_t pageMask = kDefaultLoadAlignment - 1;
+    const std::uint64_t relroStart = relro.MappedAddress & ~pageMask;
+    const std::uint64_t relroEndBytes = relro.MappedAddress + relro.MemorySize;
+    if (relroEndBytes > std::numeric_limits<std::uint64_t>::max() - pageMask) return false;
+    const std::uint64_t relroEnd = (relroEndBytes + pageMask) & ~pageMask;
+    if (relroStart == relroEnd) return true;
+
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> writableRanges;
+    for (const auto& header : headers) {
+        if (header.Type != PT_LOAD || (header.Flags & PF_W) == 0) continue;
+        const std::uint64_t size = std::max(header.FileSize, header.MemorySize);
+        if (size > std::numeric_limits<std::uint64_t>::max() - header.MappedAddress) continue;
+        const std::uint64_t start = header.MappedAddress & ~pageMask;
+        const std::uint64_t endBytes = header.MappedAddress + size;
+        if (endBytes > std::numeric_limits<std::uint64_t>::max() - pageMask) continue;
+        const std::uint64_t end = (endBytes + pageMask) & ~pageMask;
+        if (start < end) writableRanges.emplace_back(start, end);
+    }
+    std::sort(writableRanges.begin(), writableRanges.end());
+    std::uint64_t coveredUntil = relroStart;
+    for (const auto& [start, end] : writableRanges) {
+        if (start > coveredUntil) break;
+        if (end > coveredUntil) coveredUntil = end;
+        if (coveredUntil >= relroEnd) return true;
+    }
+    return false;
+}
+
+}
 
 ProgramHeaderLayoutBuilder::ProgramHeaderLayoutBuilder(
     std::shared_ptr<ISegmentFilter> segmentFilter,
@@ -102,8 +141,9 @@ std::uint64_t ProgramHeaderLayoutBuilder::ComputeExtraBlockVaddr(
 std::vector<Domain::ProgramHeader> ProgramHeaderLayoutBuilder::_keptHeaders(const std::vector<Domain::ProgramHeader>& originalHeaders) const {
     std::vector<Domain::ProgramHeader> kept;
     for (const auto& ph : originalHeaders) {
-        if (!_segmentFilter->ShouldSkip(ph))
-            kept.push_back(ph);
+        if (_segmentFilter->ShouldSkip(ph)) continue;
+        if (ph.Type == PT_GNU_RELRO && !hasWritableLoadCoverage(originalHeaders, ph)) continue;
+        kept.push_back(ph);
     }
     return kept;
 }

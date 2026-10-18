@@ -809,7 +809,7 @@ int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPFiRcPvES5_(Value* out, Pars
 }
 
 int APS5_VABI _ZN3sce4Json6Parser5parseERNS0_5ValueEPKcm(Value* out, const char* text, std::size_t size) {
-    if (text == nullptr) throw std::invalid_argument("sce::Json::Parser::parse: null text");
+    if (text == nullptr || size == 0) return JsonErrorParse;
     Node parsed{};
     Parser parser(text, size);
     bool parsedOk = false;

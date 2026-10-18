@@ -196,6 +196,9 @@ public:
         }
         perVertexType = builder.DecoratedType(spv::OpTypeStruct, {{spv::OpMemberDecorate, {0u, spv::DecorationBuiltIn, spv::BuiltInPosition}}, {spv::OpDecorate, {spv::DecorationBlock}}}, vec4FloatType);
         perVertexArrayType = builder.Type(spv::OpTypeArray, perVertexType, constant(uintType, 3u));
+        stageVertexType = perVertexType;
+        if (clipDistances != 0u) stageVertexType = builder.DecoratedType(spv::OpTypeStruct, {{spv::OpMemberDecorate, {0u, spv::DecorationBuiltIn, spv::BuiltInPosition}}, {spv::OpMemberDecorate, {1u, spv::DecorationBuiltIn, spv::BuiltInClipDistance}}, {spv::OpDecorate, {spv::DecorationBlock}}}, vec4FloatType, clipArrayType);
+        stageVertexArrayType = builder.Type(spv::OpTypeArray, stageVertexType, constant(uintType, 3u));
         ptrInputVec4 = builder.Type(spv::OpTypePointer, spv::StorageClassInput, vec4FloatType);
         ptrOutputVec4 = builder.Type(spv::OpTypePointer, spv::StorageClassOutput, vec4FloatType);
     }
@@ -207,14 +210,11 @@ public:
         const auto invocationId = addInterface(spv::StorageClassInput, intType);
         decorate(invocationId, spv::DecorationBuiltIn, spv::BuiltInInvocationId);
         const auto glIn = addInterface(spv::StorageClassInput, perVertexArrayType);
-        const auto glOut = addInterface(spv::StorageClassOutput, perVertexArrayType);
+        const auto glOut = addInterface(spv::StorageClassOutput, stageVertexArrayType);
         std::uint32_t clipIn = 0u;
-        std::uint32_t clipOut = 0u;
         if (clipDistances != 0u) {
             clipIn = addInterface(spv::StorageClassInput, controlInputClipType);
             decorate(clipIn, spv::DecorationBuiltIn, spv::BuiltInClipDistance);
-            clipOut = addInterface(spv::StorageClassOutput, controlInputClipType);
-            decorate(clipOut, spv::DecorationBuiltIn, spv::BuiltInClipDistance);
         }
         const auto floatArray = [&](std::uint32_t size) { return builder.Type(spv::OpTypeArray, floatType, constant(uintType, size)); };
         const auto outer = addInterface(spv::StorageClassOutput, floatArray(4u));
@@ -248,7 +248,7 @@ public:
         builder.AddFunction(spv::OpBranch, afterLevels);
         builder.AddFunction(spv::OpLabel, afterLevels);
         store(result(spv::OpAccessChain, ptrOutputVec4, glOut, invocation, constant(intType, 0u)), load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, glIn, invocation, constant(intType, 0u))));
-        if (clipDistances != 0u) store(result(spv::OpAccessChain, ptrControlOutputClip, clipOut, invocation), load(clipArrayType, result(spv::OpAccessChain, ptrControlInputClip, clipIn, invocation)));
+        if (clipDistances != 0u) store(result(spv::OpAccessChain, ptrControlOutputClip, glOut, invocation, constant(intType, 1u)), load(clipArrayType, result(spv::OpAccessChain, ptrControlInputClip, clipIn, invocation)));
         for (const auto& [input, output] : parameters) store(result(spv::OpAccessChain, ptrOutputVec4, output, invocation), load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, input, invocation)));
         return finish();
     }
@@ -258,22 +258,13 @@ public:
         addDomain();
         const auto tessCoord = addInterface(spv::StorageClassInput, vec3FloatType);
         decorate(tessCoord, spv::DecorationBuiltIn, spv::BuiltInTessCoord);
-        const auto glIn = addInterface(spv::StorageClassInput, perVertexArrayType);
-        std::uint32_t clipIn = 0u;
-        if (clipDistances != 0u) {
-            clipIn = addInterface(spv::StorageClassInput, controlInputClipType);
-            decorate(clipIn, spv::DecorationBuiltIn, spv::BuiltInClipDistance);
-        }
+        const auto glIn = addInterface(spv::StorageClassInput, stageVertexArrayType);
         std::array<std::uint32_t, ParameterLocations> inputs {};
         for (const auto location : sources) {
             inputs[location] = addInterface(spv::StorageClassInput, vertexArrayType);
             decorate(inputs[location], spv::DecorationLocation, location);
         }
-        const auto glOut = addInterface(spv::StorageClassOutput, perVertexType);
-        if (clipDistances != 0u) {
-            evaluationClipOutput = addInterface(spv::StorageClassOutput, clipArrayType);
-            decorate(evaluationClipOutput, spv::DecorationBuiltIn, spv::BuiltInClipDistance);
-        }
+        const auto glOut = addInterface(spv::StorageClassOutput, stageVertexType);
         std::vector<std::uint32_t> passedOutputs;
         for (const auto location : passed) {
             passedOutputs.push_back(addInterface(spv::StorageClassOutput, vec4FloatType));
@@ -307,7 +298,7 @@ public:
         const auto weights = result(spv::OpCompositeConstruct, vec3FloatType, weight(0u), weight(1u), weight(2u));
 
         store(result(spv::OpAccessChain, ptrOutputVec4, glOut, constant(intType, 0u)), load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, glIn, index, constant(intType, 0u))));
-        if (clipDistances != 0u) store(result(spv::OpAccessChain, ptrEvaluationOutputClip, evaluationClipOutput), load(clipArrayType, result(spv::OpAccessChain, ptrEvaluationInputClip, clipIn, index)));
+        if (clipDistances != 0u) store(result(spv::OpAccessChain, ptrEvaluationOutputClip, glOut, constant(intType, 1u)), load(clipArrayType, result(spv::OpAccessChain, ptrEvaluationInputClip, glIn, index, constant(intType, 1u))));
         for (std::size_t i = 0; i < passed.size(); ++i) store(passedOutputs[i], load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, inputs[passed[i]], passedFlat[i] ? constant(intType, 0u) : index)));
         if (smooth != 0u) store(smooth, weights);
         if (linear != 0u) store(linear, weights);
@@ -341,7 +332,8 @@ private:
     std::uint32_t ptrControlOutputClip = 0;
     std::uint32_t ptrEvaluationInputClip = 0;
     std::uint32_t ptrEvaluationOutputClip = 0;
-    std::uint32_t evaluationClipOutput = 0;
+    std::uint32_t stageVertexType = 0;
+    std::uint32_t stageVertexArrayType = 0;
 
     void begin() {
         builder.EmitCapability(spv::CapabilityShader);
