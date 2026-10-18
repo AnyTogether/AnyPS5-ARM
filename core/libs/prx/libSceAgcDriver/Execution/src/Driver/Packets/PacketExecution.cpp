@@ -38,6 +38,9 @@ bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t head
     switch (opcode) {
         case 0x11: case 0x12: case 0x13: case 0x26: case 0x2a: case 0x2f: case 0x42: case 0x58: case 0x59: case 0x69: case 0x76: case 0x79: case 0x7a: case 0x81: return true;
         case 0x46: return packet.size() >= 2 && (packet[1] & 0x3fu) != 0x39u;
+        // SET_PREDICATION only stores the predicate's address: each predicated packet reads it when it
+        // runs, draining first when a queued draw writes it.
+        case 0x20: return true;
         case 0x15: return orderedFills();
         case 0x63: case 0x64: case 0x9f:
             return packet.size() >= 5 && !DrawPipeline::Queue0().Overlaps(packet[1] | (static_cast<std::uint64_t>(packet[2]) << 32u), static_cast<std::size_t>(packet[4]) * 8);
@@ -192,6 +195,22 @@ void Driver::execute(const Submission& submission) {
             const std::uint64_t awaited = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
             if (const auto value = DrawPipeline::Queue0().PendingLabel(awaited, Pm4::WaitAwaitedBytes(packet)); value.has_value() && Pm4::WaitComparesValue(packet, *value)) {
                 ++waitOutcomes().fromRecorderSameQueue;
+                gateOpened() = true;
+                recent.Record(cursor);
+                cursor = nextCursor;
+                continue;
+            }
+        }
+        // A memory wait on a word no queued draw writes that already holds passes as waitMemory's entry
+        // check would pass it after the drain, so the queued draws keep running behind it.
+        // APS5_DRAIN_SATISFIED_WAITS=1 drains for it as before.
+        static const bool unblockedWaits = std::getenv("APS5_DRAIN_SATISFIED_WAITS") == nullptr;
+        if (unblockedWaits && pipelined && !predicated && (opcode == 0x3c || opcode == 0x93) && header != RenderingWaitPacketHeader && !submission.heldAtSubmit.contains(cursor) && DrawPipeline::Queue0().Busy()) {
+            const std::uint64_t awaited = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
+            const auto awaitedBytes = Pm4::WaitAwaitedBytes(packet);
+            if (!DrawPipeline::Queue0().Overlaps(awaited, awaitedBytes) && GuestMemory::Accessible(reinterpret_cast<const void*>(awaited), awaitedBytes) && Pm4::WaitSatisfiedUnchecked(packet)) {
+                ++waitOutcomes().atEntry;
+                bumpEpoch(&EpochBumps::waits);
                 gateOpened() = true;
                 recent.Record(cursor);
                 cursor = nextCursor;

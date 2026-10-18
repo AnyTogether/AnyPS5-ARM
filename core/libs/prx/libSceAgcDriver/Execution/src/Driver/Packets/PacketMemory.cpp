@@ -268,7 +268,16 @@ void Driver::dumpSampleCounters(std::uint64_t address) {
 }
 
 bool Driver::enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue, const QueueState& state) {
-    static const bool enabled = std::getenv("APS5_PIPELINE_DMA") != nullptr;
+    // On macOS by default (APS5_PIPELINE_DMA=0 drains for every DMA_DATA as elsewhere): Stray drained
+    // the draw pipeline ~9000 times per 10 s for them, idling the draw committer meanwhile.
+    static const bool enabled = [] {
+        const char* text = std::getenv("APS5_PIPELINE_DMA");
+#ifdef __APPLE__
+        return text == nullptr || (text[0] != '\0' && text[0] != '0');
+#else
+        return text != nullptr;
+#endif
+    }();
     if (!enabled || opcode != 0x50 || queue != 0 || packet.size() < 7 || !DrawPipeline::Active() || !deferredLabels().labels.empty()) return false;
     const auto source = ((packet[1] >> 29u) & 3u) | ((packet[6] >> 24u) & 4u) | ((packet[6] >> 25u) & 8u);
     constexpr std::size_t immediateLimit = std::size_t{16} << 20u;
