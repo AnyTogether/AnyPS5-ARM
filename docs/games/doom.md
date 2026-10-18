@@ -18,6 +18,7 @@ Plays in game. The relinker now recognizes the empty placeholder functions in th
 | ✅ | **Conversion and packaging** | Homebrew package, SELF → ELF, with its own libc.prx. |
 | ✅ | **Root cause found** | In the packaged libc.prx, exports such as memset and snprintf are placeholders that only return 0; the real ones are in the system's libSceLibcInternal. On macOS the guest export won, so logs and messages stayed empty and the game could not find its WAD. |
 | ✅ | **General relinker rule** | On macOS, guest exports that only return 0 (the `xor eax,eax; ret` and `pxor xmm0` forms) are left to the host library; real functions still use the guest's. This is the macOS counterpart of the Windows loader's ZeroReturnExports rule. |
+| ✅ | **Native arm64 (branch `native-arm64`)** | Translated ahead of time to arm64, it runs E1M1 at 35 FPS with no Rosetta: [native mode](../dev/NATIVE_ARM64.md). |
 | ✅ | **Playable** | It finds the WAD and enters E1M1 and later maps; checked together with Dreaming Sarah, PvZ and Silksong. |
 
 ✅ done · 🔧 in progress · ⏭️ next

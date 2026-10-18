@@ -18,6 +18,7 @@ Oyun içinde oynanıyor. Paketle gelen libc.prx'teki boş yer tutucu fonksiyonla
 | ✅ | **Dönüştürme ve paketleme** | Homebrew paket, SELF → ELF, kendi libc.prx'i ile. |
 | ✅ | **Kök neden bulundu** | Paketteki libc.prx'te memset/snprintf gibi export'lar yalnızca 0 döndüren yer tutucular; gerçekleri sistemin libSceLibcInternal'ında. macOS'ta guest export'u kazandığı için log ve mesajlar boş kalıyor, oyun WAD'ı bulamıyordu. |
 | ✅ | **Genel relinker kuralı** | macOS'ta sadece 0 döndüren guest export'ları (xor eax,eax; ret ve pxor xmm0 biçimi) host kütüphanesine bırakılıyor; gerçek fonksiyonlarda guest kazanmaya devam ediyor. Windows yükleyicisinin ZeroReturnExports kuralının macOS karşılığı. |
+| ✅ | **Native arm64 (`native-arm64` dalı)** | Önceden arm64'e çevrilerek Rosetta olmadan E1M1'i 35 FPS'te çalıştırıyor: [native mod](../../dev/NATIVE_ARM64.md). |
 | ✅ | **Oynanabilir** | WAD'ı buluyor, E1M1 ve sonrasına giriyor; Dreaming Sarah, PvZ ve Silksong ile birlikte kontrol edildi. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada

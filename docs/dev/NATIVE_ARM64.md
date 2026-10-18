@@ -76,7 +76,7 @@ python3 tools/translator/tests/run_native_fixtures.py build-translator build-arm
 
 1. ✅ The prx libraries build for arm64. The x86-only parts throw until they are ported.
 2. ✅ The smallest fixture (`import_fixture`: `puts` and `exit` through the GOT) runs as an arm64 process.
-2b. ✅ DOOM (homebrew, `PPSA99666`) reaches its launcher natively, rendered through AGC at 60 FPS: SIMD/BMI lifting checked against Rosetta (`vector_smoke.c`), functions found through rip-relative code addresses and switch jump tables, guest TLS and image metadata (`__APS5DATA,__meta` for `dl_iterate_phdr`).
+2b. ✅ DOOM (homebrew, `PPSA99666`) plays natively: launcher, attract demo and E1M1 at the game's 35 FPS, rendered through AGC, with no Rosetta in the process ([screenshot](../games/img/doom-native-e1m1.jpg)). What it took: SIMD/BMI lifting checked against Rosetta (`vector_smoke.c`), functions found through rip-relative code addresses and switch jump tables, guest TLS and image metadata (`__APS5DATA,__meta` for `dl_iterate_phdr`).
 3. The C and C++ fixtures run: TLS, threads, modules, exceptions.
 4. Breakout runs with video, pad and audio.
 5. Dreaming Sarah runs.
