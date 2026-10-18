@@ -10,6 +10,8 @@
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "prx/libSceAgcDriver/Eq/include/Event.hpp"
+#include <array>
+#include <chrono>
 #include <cstdlib>
 #include <functional>
 #include <mutex>
@@ -41,6 +43,9 @@ bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t head
         // SET_PREDICATION only stores the predicate's address: each predicated packet reads it when it
         // runs, draining first when a queued draw writes it.
         case 0x20: return true;
+        // INDIRECT_BUFFER was inlined at submission: the packet left behind only marks where (a predicated
+        // one is skipped past its range after the predicate check, which drains as above).
+        case 0x3f: return true;
         case 0x15: return orderedFills();
         case 0x63: case 0x64: case 0x9f:
             return packet.size() >= 5 && !DrawPipeline::Queue0().Overlaps(packet[1] | (static_cast<std::uint64_t>(packet[2]) << 32u), static_cast<std::size_t>(packet[4]) * 8);
@@ -208,7 +213,20 @@ void Driver::execute(const Submission& submission) {
         if (unblockedWaits && pipelined && !predicated && (opcode == 0x3c || opcode == 0x93) && header != RenderingWaitPacketHeader && !submission.heldAtSubmit.contains(cursor) && DrawPipeline::Queue0().Busy()) {
             const std::uint64_t awaited = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
             const auto awaitedBytes = Pm4::WaitAwaitedBytes(packet);
-            if (!DrawPipeline::Queue0().Overlaps(awaited, awaitedBytes) && GuestMemory::Accessible(reinterpret_cast<const void*>(awaited), awaitedBytes) && Pm4::WaitSatisfiedUnchecked(packet)) {
+            const bool overlapped = DrawPipeline::Queue0().Overlaps(awaited, awaitedBytes);
+            if (profilePackets) {
+                // APS5_PROFILE_DRAW: why a memory wait still drains ([waits] line every 10 s).
+                static std::array<std::uint64_t, 4> reasons{};
+                static auto last = std::chrono::steady_clock::now();
+                const bool labelled = overlapped && DrawPipeline::Queue0().PendingLabel(awaited, awaitedBytes).has_value();
+                ++reasons[!overlapped ? (Pm4::WaitSatisfiedUnchecked(packet) ? 0 : 1) : labelled ? 2 : 3];
+                if (const auto now = std::chrono::steady_clock::now(); now - last >= std::chrono::seconds(10)) {
+                    last = now;
+                    AgcDriver::ProfilePrint_nid_no_patch("[waits] memory waits behind queued draws (10 s): %llu held already, %llu not yet (no queued write), %llu behind a queued label of another value, %llu behind another queued write\n", static_cast<unsigned long long>(reasons[0]), static_cast<unsigned long long>(reasons[1]), static_cast<unsigned long long>(reasons[2]), static_cast<unsigned long long>(reasons[3]));
+                    reasons = {};
+                }
+            }
+            if (!overlapped && GuestMemory::Accessible(reinterpret_cast<const void*>(awaited), awaitedBytes) && Pm4::WaitSatisfiedUnchecked(packet)) {
                 ++waitOutcomes().atEntry;
                 bumpEpoch(&EpochBumps::waits);
                 gateOpened() = true;
