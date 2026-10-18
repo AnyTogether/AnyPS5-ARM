@@ -1031,6 +1031,11 @@ int APS5_VABI sceKernelGetdirentries(int fd, char* buf, int nbytes, int64_t* bas
     File::RefuseArchivedFile(fd, "getdirentries");
     if (buf == nullptr) return SceErrorFromErrno(GUEST_EFAULT);
     if (nbytes <= 0) return SceErrorFromErrno(GUEST_EINVAL);
+    // FreeBSD 11.4 answers EINVAL for any descriptor that is not a directory vnode (openat below would
+    // give ENOTDIR for a file, and the lseek ESPIPE for a pipe), EBADF for one that is not open.
+    struct stat status{};
+    if (::fstat(fd, &status) != 0) return SceErrorFromErrno(errno);
+    if (!S_ISDIR(status.st_mode)) return SceErrorFromErrno(GUEST_EINVAL);
     const off_t base = ::lseek(fd, 0, SEEK_CUR);
     if (base < 0) return SceErrorFromErrno(errno);
     if (basep != nullptr) *basep = static_cast<int64_t>(base);
