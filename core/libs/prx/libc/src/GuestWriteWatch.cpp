@@ -368,6 +368,7 @@ public:
         erase(begin, end);
         const auto count = pages.size();
         _ranges.emplace(begin, Range{end, std::move(pages), std::vector<std::uint8_t>(count, 0)});
+        _coverageStale.store(true, std::memory_order_release);
     }
 
     bool Unregister(std::uintptr_t begin, std::uintptr_t end) {
@@ -379,10 +380,35 @@ public:
         return erase(begin, end);
     }
 
+    // Answered without the lock from a coalesced copy of the ranges, rebuilt under the lock after a
+    // change: the draw committer asks per storage layer and per clear, and queued behind faults and
+    // collections (which hold the lock over page compares and mprotect) it spent ~7% of its time here.
+    // APS5_LOCKED_WATCH_COVERS=1 answers under the lock as before.
     bool Covers(std::uintptr_t begin, std::uintptr_t end) {
         if (!_available) return false;
-        const Lock lock(_lock);
-        return covers(begin, end);
+        static const bool locked = std::getenv("APS5_LOCKED_WATCH_COVERS") != nullptr;
+        if (locked) {
+            const Lock lock(_lock);
+            return covers(begin, end);
+        }
+        if (_coverageStale.load(std::memory_order_acquire)) {
+            const Lock lock(_lock);
+            if (_coverageStale.load(std::memory_order_relaxed)) {
+                auto built = std::make_shared<std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>();
+                for (const auto& [first, range] : _ranges) {
+                    if (!built->empty() && first <= built->back().second) built->back().second = std::max(built->back().second, range.end);
+                    else built->emplace_back(first, range.end);
+                }
+                std::atomic_store_explicit(&_coverage, std::shared_ptr<const std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>(std::move(built)), std::memory_order_release);
+                _coverageStale.store(false, std::memory_order_release);
+            }
+        }
+        const auto coverage = std::atomic_load_explicit(&_coverage, std::memory_order_acquire);
+        if (coverage == nullptr) return false;
+        auto it = std::upper_bound(coverage->begin(), coverage->end(), begin, [](std::uintptr_t address, const auto& run) { return address < run.first; });
+        if (it == coverage->begin()) return false;
+        --it;
+        return begin < it->second && end <= it->second;
     }
 
     // Fresh pages were never collected since they were registered: Take::Fresh reports and arms only them,
@@ -738,6 +764,7 @@ private:
             auto pages = std::move(it->second.pages);
             auto heat = std::move(it->second.heat);
             it = _ranges.erase(it);
+            _coverageStale.store(true, std::memory_order_release);
             const auto cutBegin = std::max(begin, rangeBegin);
             const auto cutEnd = std::min(end, rangeEnd);
             for (auto page = cutBegin; page < cutEnd; page += _page) {
@@ -757,6 +784,9 @@ private:
     bool _available = false;
     Turns _lock;
     std::map<std::uintptr_t, Range> _ranges;
+    // Covers' copy of the ranges, coalesced and sorted, and whether a change since made it stale.
+    std::shared_ptr<const std::vector<std::pair<std::uintptr_t, std::uintptr_t>>> _coverage;
+    std::atomic<bool> _coverageStale{true};
     std::unordered_map<std::uintptr_t, std::unique_ptr<std::uint8_t[]>> _snapshots;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> _hostWrites;
     struct sigaction _previousBus {};
