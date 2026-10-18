@@ -50,7 +50,7 @@ if __name__ == "__main__":
         parser.error(str(error))
     if args.list:
         for name, output in found:
-            reason = next((line.strip() for line in output.splitlines() if line.startswith("skipped")), "")
+            reason = next((line.strip() for line in output.splitlines() if line.strip().lower().startswith("skipped")), "")
             print(f"{name}: {reason}")
         raise SystemExit
     if args.job == "windows":

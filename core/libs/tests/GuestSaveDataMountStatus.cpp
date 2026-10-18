@@ -12,6 +12,8 @@ extern "C" {
 int APS5_VABI sceSaveDataInitialize3(const void*);
 int APS5_VABI sceSaveDataMount3(const SaveDataMount3*, SaveDataMountResult*);
 int APS5_VABI sceSaveDataUmount2(std::uint32_t, const SaveDataMountPoint*);
+int APS5_VABI sceSaveDataGetMountInfo(const SaveDataMountPoint*, SaveDataMountInfo*);
+int APS5_VABI sceSaveDataGetParam(const SaveDataMountPoint*, std::uint32_t, void*, std::size_t, std::size_t*);
 }
 
 namespace {
@@ -20,6 +22,7 @@ constexpr std::uint32_t MountReadWrite = 2;
 constexpr std::uint32_t MountCreate = 4;
 constexpr std::uint32_t MountCreate2 = 32;
 constexpr int SaveDataErrorParameter = -2137063424;
+constexpr int SaveDataErrorNotMounted = -2137063420;
 constexpr int SaveDataErrorBusy = -2137063421;
 constexpr int SaveDataErrorNotFound = -2137063416;
 
@@ -29,6 +32,40 @@ void Check(bool condition, const std::string& what) {
     if (condition) return;
     std::fprintf(stderr, "savedata mount status check failed: %s\n", what.c_str());
     ++failures;
+}
+
+void CheckUnmountedCalls() {
+    SaveDataMountPoint point{};
+    std::memcpy(point.data, "test", sizeof("test"));
+    SaveDataMountInfo info{};
+    char buf[128]{};
+    std::size_t gotSize = 0;
+    Check(sceSaveDataGetMountInfo(nullptr, &info) == SaveDataErrorParameter, "getMountInfo null point is PARAMETER");
+    Check(sceSaveDataGetMountInfo(&point, nullptr) == SaveDataErrorParameter, "getMountInfo null info is PARAMETER");
+    Check(sceSaveDataGetMountInfo(&point, &info) == SaveDataErrorNotMounted, "getMountInfo unmounted point is NOT_MOUNTED");
+    Check(sceSaveDataGetParam(nullptr, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null point is PARAMETER");
+    Check(sceSaveDataGetParam(&point, 1, nullptr, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null buf is PARAMETER");
+    Check(sceSaveDataGetParam(&point, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorNotMounted, "getParam unmounted point is NOT_MOUNTED");
+}
+
+void CheckMountInfoAndParam(const SaveDataMountPoint* point) {
+    SaveDataMountInfo info{};
+    char buf[128]{};
+    char smallBuf[64]{};
+    std::size_t gotSize = 0;
+    SaveDataMountPoint unmounted{};
+    std::memcpy(unmounted.data, "unmounted", sizeof("unmounted"));
+    Check(sceSaveDataGetMountInfo(nullptr, &info) == SaveDataErrorParameter, "getMountInfo null point is PARAMETER");
+    Check(sceSaveDataGetMountInfo(point, nullptr) == SaveDataErrorParameter, "getMountInfo null info is PARAMETER");
+    Check(sceSaveDataGetMountInfo(&unmounted, &info) == SaveDataErrorNotMounted, "getMountInfo unmounted point is NOT_MOUNTED");
+    Check(sceSaveDataGetMountInfo(point, &info) == 0, "getMountInfo on mounted save succeeds");
+    Check(sceSaveDataGetParam(nullptr, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null point is PARAMETER");
+    Check(sceSaveDataGetParam(point, 1, nullptr, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null buf is PARAMETER");
+    Check(sceSaveDataGetParam(point, 1, smallBuf, sizeof(smallBuf), &gotSize) == SaveDataErrorParameter, "getParam small buf is PARAMETER");
+    Check(sceSaveDataGetParam(&unmounted, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorNotMounted, "getParam unmounted point is NOT_MOUNTED");
+    Check(sceSaveDataGetParam(point, 1, buf, sizeof(buf), &gotSize) == 0, "getParam on mounted save succeeds");
+    Check(gotSize == sizeof(buf), "getParam reports expected size");
+    Check(sceSaveDataGetParam(point, 1, buf, sizeof(buf), nullptr) == 0, "getParam with null got_size on mounted save succeeds");
 }
 
 void MountAndCheck(const char* name, std::uint32_t mode, std::uint32_t expectedStatus, const std::string& what) {
@@ -42,6 +79,7 @@ void MountAndCheck(const char* name, std::uint32_t mode, std::uint32_t expectedS
     Check(code == 0, what + ": mounts");
     if (code != 0) return;
     Check(result.mount_status == expectedStatus, what + ": status is " + std::to_string(result.mount_status) + ", expected " + std::to_string(expectedStatus));
+    CheckMountInfoAndParam(&result.mount_point);
     Check(sceSaveDataUmount2(0, &result.mount_point) == 0, what + ": unmounts");
 }
 
@@ -106,6 +144,7 @@ int main() {
     std::filesystem::create_directories(root);
     const auto previous = std::filesystem::current_path();
     std::filesystem::current_path(root);
+    CheckUnmountedCalls();
     Check(sceSaveDataInitialize3(nullptr) == 0, "SaveData initializes");
     MountAndCheck("fresh", MountReadWrite | MountCreate2, 1u, "CREATE2 of a missing save");
     MountAndCheck("fresh", MountReadWrite | MountCreate2, 0u, "CREATE2 of an existing save");

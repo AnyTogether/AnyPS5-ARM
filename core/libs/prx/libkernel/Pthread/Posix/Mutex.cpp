@@ -13,7 +13,6 @@ namespace {
 
 constexpr int POSIX_EINVAL = 22;
 constexpr int POSIX_PROCESS_PRIVATE = 0;
-constexpr int POSIX_PROCESS_SHARED = 1;
 constexpr int GUEST_REALTIME_CLOCK = 0;
 constexpr int POSIX_PRIO_PROTECT = 2;
 constexpr int POSIX_SCHED_RR = 3;
@@ -62,7 +61,7 @@ int APS5_VABI pthread_mutex_lock_nid_postfix(PthreadMutex* mutex) {
 }
 
 int APS5_VABI pthread_mutex_timedlock_nid_postfix(PthreadMutex* mutex, const KernelTimespec* abstime) {
-    if (!abstime) throw std::runtime_error("pthread_mutex_timedlock: null abstime");
+    if (!abstime) return pthread_mutex_lock_nid_postfix(mutex);
     _initializeStatic(mutex, __func__);
     if (scePthreadMutexTrylock(mutex) == 0) return 0;
     KernelUseconds usec = 0;
@@ -99,13 +98,13 @@ int APS5_VABI pthread_mutexattr_getpshared_nid_postfix(const PthreadMutexattr* a
 
 int APS5_VABI pthread_mutexattr_setpshared_nid_postfix(PthreadMutexattr* attr, int pshared) {
     if (!attr || !*attr) return POSIX_EINVAL;
-    if (pshared != POSIX_PROCESS_PRIVATE && pshared != POSIX_PROCESS_SHARED) return POSIX_EINVAL;
+    if (pshared != POSIX_PROCESS_PRIVATE) return POSIX_EINVAL;
     (*attr)->pshared = pshared;
     return 0;
 }
 
 int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, int protocol) {
-    if (!attr || !*attr) throw std::runtime_error("pthread_mutexattr_setprotocol: null attr");
+    if (!attr || !*attr) return PosixThread::GUEST_EINVAL;
     if (protocol < 0 || protocol > POSIX_PRIO_PROTECT) return POSIX_EINVAL;
     (*attr)->protocol = protocol;
     (*attr)->ceiling = sched_get_priority_max_nid_postfix(POSIX_SCHED_RR);
@@ -113,14 +112,14 @@ int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, 
 }
 
 int APS5_VABI pthread_mutexattr_setprioceiling_nid_postfix(PthreadMutexattr* attr, int prioceiling) {
-    if (!attr || !*attr) throw std::runtime_error("pthread_mutexattr_setprioceiling: null attr");
+    if (!attr || !*attr) return PosixThread::GUEST_EINVAL;
     if ((*attr)->protocol != POSIX_PRIO_PROTECT) return POSIX_EINVAL;
     (*attr)->ceiling = prioceiling;
     return 0;
 }
 
 int APS5_VABI pthread_mutexattr_getprioceiling_nid_postfix(const PthreadMutexattr* attr, int* prioceiling) {
-    if (!attr || !*attr) throw std::runtime_error("pthread_mutexattr_getprioceiling: null attr");
+    if (!attr || !*attr) return PosixThread::GUEST_EINVAL;
     if (!prioceiling) throw std::runtime_error("pthread_mutexattr_getprioceiling: null prioceiling");
     if ((*attr)->protocol != POSIX_PRIO_PROTECT) return POSIX_EINVAL;
     *prioceiling = (*attr)->ceiling;

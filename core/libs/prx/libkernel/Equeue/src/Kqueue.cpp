@@ -98,9 +98,6 @@ std::optional<std::uint64_t> TimerPeriodNanos(std::int64_t data, std::uint32_t f
         unit = 1000ULL;
         break;
     case NOTE_NSECONDS:
-        if (data >= 1000000000LL && data % 1000000000LL != 0) {
-            NotImplemented_nid_no_patch("kevent: EVFILT_TIMER NOTE_NSECONDS period above one second with a fraction");
-        }
         unit = 1;
         break;
     default:
@@ -127,6 +124,22 @@ int DescriptorFilterError(int kqueueDescriptor, std::uintptr_t ident) {
     return descriptor == kqueueDescriptor ? GUEST_EINVAL : 0;
 }
 
+std::int64_t DescriptorLowWater(const KernelEvent& change) {
+    if ((change.fflags & NOTE_LOWAT) == 0 || !GuestSockets::IsOpen(static_cast<int>(change.ident))) {
+        return 0;
+    }
+    if (change.data < 1) {
+        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT below 1 on a socket");
+    }
+    if (change.filter == EVFILT_WRITE && change.data > 1) {
+        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on EVFILT_WRITE");
+    }
+    if (change.data > 1 && GuestSockets::Type(static_cast<int>(change.ident)) != 1) {
+        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on a socket that is not a stream");
+    }
+    return change.data;
+}
+
 int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::uint16_t flags) {
     const int descriptor = static_cast<int>(change.ident);
     if (IsKqueueDescriptor(descriptor)) {
@@ -142,13 +155,12 @@ int AddDescriptorKnote(const KernelEqueueRef& queue, KernelEvent& change, std::u
     if (!socket && !pipe) {
         NotImplemented_nid_no_patch(change.filter == EVFILT_READ ? "kevent: EVFILT_READ on a descriptor that is neither a socket nor the read end of a pipe" : "kevent: EVFILT_WRITE on a non-socket descriptor");
     }
-    if ((change.fflags & NOTE_LOWAT) != 0) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT");
-    }
+    const auto lowWater = DescriptorLowWater(change);
     if ((flags & EV_CLEAR) != 0) {
         NotImplemented_nid_no_patch(pipe ? "kevent: EV_CLEAR on a pipe" : "kevent: EV_CLEAR on a socket");
     }
     auto event = EqueueDescriptorEvent(descriptor, change.filter, flags, change.udata);
+    event.lowWater = lowWater;
     change.fflags = 0;
     change.data = 0;
     return GuestErrno(queue->AddEvent(event));
@@ -219,14 +231,16 @@ int ModifyKnote(const KernelEqueueRef& queue, KernelEvent& change) {
     if (change.filter == EVFILT_TIMER) {
         NotImplemented_nid_no_patch("kevent: changing an existing EVFILT_TIMER");
     }
-    if ((change.filter == EVFILT_READ || change.filter == EVFILT_WRITE) && (change.fflags & NOTE_LOWAT) != 0) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT");
-    }
+    const bool descriptor = change.filter == EVFILT_READ || change.filter == EVFILT_WRITE;
+    const auto lowWater = descriptor ? DescriptorLowWater(change) : 0;
     if (change.filter == EVFILT_VNODE) {
         RequireVnodeNotes(change.fflags);
     }
-    return GuestErrno(queue->EditEvent(change.ident, change.filter, [&change](KernelEqueueEvent& event) {
+    return GuestErrno(queue->EditEvent(change.ident, change.filter, [&change, descriptor, lowWater](KernelEqueueEvent& event) {
         event.event.udata = change.udata;
+        if (descriptor) {
+            event.lowWater = lowWater;
+        }
         if ((change.flags & EV_ENABLE) != 0) {
             event.enabled = true;
         }
@@ -301,6 +315,12 @@ std::optional<std::uint64_t> ScanDeadline(const KernelTimespec& timeout) {
 
 bool IsKqueueDescriptor(int descriptor) {
     return static_cast<bool>(FindKqueue(descriptor));
+}
+
+std::optional<bool> KqueueReadable(int descriptor) {
+    const auto queue = FindKqueue(descriptor);
+    if (!queue) return std::nullopt;
+    return queue->HasTriggeredEvents();
 }
 
 void KqueueDescriptorClosed(int descriptor) {

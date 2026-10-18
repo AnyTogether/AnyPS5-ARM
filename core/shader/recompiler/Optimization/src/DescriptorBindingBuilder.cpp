@@ -41,6 +41,9 @@ DescriptorKind PhysicalKindFor(DescriptorBindingKind kind) {
     if (kind == DescriptorBindingKind::ImageTable) {
         return DescriptorKind::SampledImage;
     }
+    if (kind == DescriptorBindingKind::ImageStorageTable) {
+        return DescriptorKind::StorageImage;
+    }
     const ImageResourceClass imageClass = ImageBindingResourceClass(kind);
     if (imageClass == ImageResourceClass::Sampled) {
         return DescriptorKind::SampledImage;
@@ -81,6 +84,9 @@ DescriptorRole RoleFor(DescriptorBindingKind kind) {
     }
     if (kind == DescriptorBindingKind::ImageTableMap) {
         return DescriptorRole::ImageTableMap;
+    }
+    if (kind == DescriptorBindingKind::ImageStorageTable) {
+        return DescriptorRole::ImageStorageTable;
     }
     if (ImageBindingResourceClass(kind) != ImageResourceClass::None) {
         return DescriptorRole::GuestImages;
@@ -313,7 +319,6 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
         const bool present = descriptor.dwords[2] != 0u && (descriptor.dwords[0] != 0u || (descriptor.dwords[1] & 0xffffu) != 0u);
         if (buffer.descriptorFormatted && (format > static_cast<std::uint32_t>(IrBufferFormat::Format32_32_32_32Float) || (present && format == 0u))) fail("buffer specialization has an unsupported format");
         const auto misalignment = present ? descriptor.dwords[0] & 3u : 0u;
-        if (buffer.atomic && misalignment != 0u) fail("buffer atomic on a V# whose base is not DWORD aligned");
         auto alignment = static_cast<std::uint32_t>(buffer.typedAlignment);
         if (buffer.descriptorFormatted && format != 0u) alignment = std::max(alignment, std::min(GetFormatInfo(static_cast<IrBufferFormat>(format)).byteSize, 4u));
         if (alignment == 0u || misalignment % alignment != 0u) fail("is a formatted buffer access through a V# whose base is not aligned to its element");
@@ -494,7 +499,7 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
         }
     }
     for (auto& binding : plan.bindings) {
-        if (binding.descriptor.role == DescriptorRole::ImageTable) binding.tableSamplerMasks = samplerMasks;
+        if (binding.descriptor.role == DescriptorRole::ImageTable || binding.descriptor.role == DescriptorRole::ImageStorageTable) binding.tableSamplerMasks = samplerMasks;
     }
     return plan;
 }
@@ -563,6 +568,7 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
             }
             break;
         case DescriptorRole::ImageTable:
+        case DescriptorRole::ImageStorageTable:
             if (tables == nullptr) fail("DescriptorBindingBuilder::Populate image table elements were not resolved");
             physical.guestDescriptor.reserve(tables->elements.size() * 8u);
             for (const auto& element : tables->elements) {
@@ -571,7 +577,7 @@ void DescriptorBindingBuilder::Populate(BindingAllocationResult& allocation, con
                 shape.dimension = element.dimension;
                 physical.imageShapes.push_back(ImageShapeForResource(shape));
                 physical.imageDepthCompare.push_back(element.depthCompare);
-                physical.imageWritten.push_back(false);
+                physical.imageWritten.push_back(ImageBindingResourceClass(element.kind) == ImageResourceClass::Storage);
                 physical.imageAtomic.push_back(false);
                 std::uint32_t samplers = 0;
                 for (std::uint32_t sampler = 0; sampler < entry.tableSamplerMasks.size(); ++sampler) {

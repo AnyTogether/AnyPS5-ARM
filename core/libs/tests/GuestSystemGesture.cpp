@@ -14,6 +14,7 @@ int APS5_VABI sceSystemGestureGetPrimitiveTouchEvents(std::int32_t, void*, std::
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEventsCount(std::int32_t);
 int APS5_VABI sceSystemGestureGetTouchEvents(std::int32_t, const void*, void*, std::uint32_t, std::uint32_t*);
 int APS5_VABI sceSystemGestureGetPrimitiveTouchEventByIndex(std::int32_t, std::uint32_t, void*);
+int APS5_VABI sceSystemGestureGetTouchEventByIndex(std::int32_t, const void*, std::uint32_t, void*);
 int APS5_VABI sceSystemGestureAppendTouchRecognizer(std::int32_t, void*);
 int APS5_VABI sceSystemGestureCreateTouchRecognizer(std::int32_t, void*, std::int32_t, const void*, const void*);
 int APS5_VABI sceSystemGestureGetTouchRecognizerInformation(std::int32_t, const void*, void*);
@@ -108,6 +109,9 @@ int main() {
     Require(sceSystemGestureGetTouchEvents(handle + 1, &recognizer, buffer.data(), 4, &count) == invalidHandle);
     Require(sceSystemGestureGetPrimitiveTouchEventByIndex(handle, 0, buffer.data()) == indexOutOfArray);
     Require(sceSystemGestureGetPrimitiveTouchEventByIndex(handle + 1, 0, buffer.data()) == invalidHandle);
+    Require(sceSystemGestureGetTouchEventByIndex(handle, &recognizer, 0, buffer.data()) == indexOutOfArray);
+    Require(sceSystemGestureGetTouchEventByIndex(handle + 1, &recognizer, 0, buffer.data()) == invalidHandle);
+    Require(sceSystemGestureGetTouchEventByIndex(handle, nullptr, 0, buffer.data()) == invalidArgument);
     Require(buffer == original);
 
     Require(sceSystemGestureAppendTouchRecognizer(handle, &recognizer) == 0);

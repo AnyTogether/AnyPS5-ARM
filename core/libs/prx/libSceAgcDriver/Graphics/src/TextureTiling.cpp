@@ -262,11 +262,12 @@ std::array<std::uint32_t, 3> ThickBlockExtent(TextureTileMode tileMode, std::uin
     Require(std::has_single_bit(bytesPerElement) && bytesPerElement <= 16u, "unsupported bytes per element for thick texture geometry");
     const auto index = static_cast<std::size_t>(std::countr_zero(bytesPerElement));
     switch (tileMode) {
-        case TextureTileMode::kStandard4KB: return {1u << thick4KB[index][0], 1u << thick4KB[index][1], 1u << thick4KB[index][2]};
+        case TextureTileMode::kStandard4KB:
+        case TextureTileMode::kS4KBX: return {1u << thick4KB[index][0], 1u << thick4KB[index][1], 1u << thick4KB[index][2]};
         case TextureTileMode::kStandard64KB:
         case TextureTileMode::kS64KBX:
         case TextureTileMode::kD64KBX: return {1u << thick64KB[index][0], 1u << thick64KB[index][1], 1u << thick64KB[index][2]};
-        default: throw std::runtime_error("AGC graphics: thick 3D textures are only supported in SW_4KB_S, SW_64KB_S, SW_64KB_S_X and SW_64KB_D_X, not in swizzle mode " + std::to_string(EquationSwizzleMode(tileMode)) + " at " + std::to_string(bytesPerElement) + " bytes per element");
+        default: throw std::runtime_error("AGC graphics: thick 3D textures are only supported in SW_4KB_S, SW_4KB_S_X, SW_64KB_S, SW_64KB_S_X and SW_64KB_D_X, not in swizzle mode " + std::to_string(EquationSwizzleMode(tileMode)) + " at " + std::to_string(bytesPerElement) + " bytes per element");
     }
 }
 
@@ -316,7 +317,7 @@ ThickLayout ComputeThickLayout(TextureTileMode tileMode, std::uint32_t format, s
     auto firstTailLevel = mipCount;
     if (tileMode != TextureTileMode::kLinear) {
         block = ThickBlockExtent(tileMode, bytesPerElement);
-        blockBytes = tileMode == TextureTileMode::kStandard4KB ? 4096u : 65536u;
+        blockBytes = tileMode == TextureTileMode::kStandard4KB || tileMode == TextureTileMode::kS4KBX ? 4096u : 65536u;
         const auto log2BlockBytes = static_cast<std::uint32_t>(std::countr_zero(blockBytes));
         const auto tailWidth = log2BlockBytes % 3u == 1u ? block[0] >> 1u : block[0];
         const auto tailHeight = log2BlockBytes % 3u == 0u ? block[1] >> 1u : block[1];

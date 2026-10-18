@@ -60,6 +60,72 @@ int APS5_VABI posix_spawnattr_setsigdefault_nid_postfix(PosixSpawnAttributes** a
     return 0;
 }
 
+int APS5_VABI posix_spawnattr_getflags_nid_postfix(PosixSpawnAttributes* const* attributes, std::int16_t* flags) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getflags");
+    if (flags == nullptr) throw std::invalid_argument("posix_spawnattr_getflags: null flags");
+    *flags = source.flags;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_getpgroup_nid_postfix(PosixSpawnAttributes* const* attributes, std::int32_t* processGroup) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getpgroup");
+    if (processGroup == nullptr) throw std::invalid_argument("posix_spawnattr_getpgroup: null process group");
+    *processGroup = source.processGroup;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_getschedparam_nid_postfix(PosixSpawnAttributes* const* attributes, std::int32_t* schedulingParameter) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getschedparam");
+    if (schedulingParameter == nullptr) throw std::invalid_argument("posix_spawnattr_getschedparam: null scheduling parameter");
+    *schedulingParameter = source.schedulingPriority;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_getschedpolicy_nid_postfix(PosixSpawnAttributes* const* attributes, std::int32_t* schedulingPolicy) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getschedpolicy");
+    if (schedulingPolicy == nullptr) throw std::invalid_argument("posix_spawnattr_getschedpolicy: null scheduling policy");
+    *schedulingPolicy = source.schedulingPolicy;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_getsigdefault_nid_postfix(PosixSpawnAttributes* const* attributes, GuestSignalSet* signalDefault) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getsigdefault");
+    if (signalDefault == nullptr) throw std::invalid_argument("posix_spawnattr_getsigdefault: null signal set");
+    *signalDefault = source.signalDefault;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_getsigmask_nid_postfix(PosixSpawnAttributes* const* attributes, GuestSignalSet* signalMask) {
+    const auto& source = Attributes(attributes, "posix_spawnattr_getsigmask");
+    if (signalMask == nullptr) throw std::invalid_argument("posix_spawnattr_getsigmask: null signal set");
+    *signalMask = source.signalMask;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_setpgroup_nid_postfix(PosixSpawnAttributes** attributes, std::int32_t processGroup) {
+    Attributes(attributes, "posix_spawnattr_setpgroup").processGroup = processGroup;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_setschedparam_nid_postfix(PosixSpawnAttributes** attributes, const std::int32_t* schedulingParameter) {
+    auto& target = Attributes(attributes, "posix_spawnattr_setschedparam");
+    if (schedulingParameter == nullptr) throw std::invalid_argument("posix_spawnattr_setschedparam: null scheduling parameter");
+    target.schedulingPriority = *schedulingParameter;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_setschedpolicy_nid_postfix(PosixSpawnAttributes** attributes, std::int32_t schedulingPolicy) {
+    Attributes(attributes, "posix_spawnattr_setschedpolicy").schedulingPolicy = schedulingPolicy;
+    return 0;
+}
+
+int APS5_VABI posix_spawnattr_setsigmask_nid_postfix(PosixSpawnAttributes** attributes, const GuestSignalSet* signalMask) {
+    auto& target = Attributes(attributes, "posix_spawnattr_setsigmask");
+    if (signalMask == nullptr) throw std::invalid_argument("posix_spawnattr_setsigmask: null signal set");
+    target.signalMask = *signalMask;
+    return 0;
+}
+
 int APS5_VABI posix_spawn_file_actions_init_nid_postfix(PosixSpawnFileActions** actions) {
     if (actions == nullptr) throw std::invalid_argument("posix_spawn_file_actions_init: null file actions");
     auto* created = new (std::nothrow) PosixSpawnFileActions{};

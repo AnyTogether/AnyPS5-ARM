@@ -14,6 +14,8 @@ int APS5_VABI pthread_rwlock_destroy_nid_postfix(PthreadRwlock* rwlock);
 int APS5_VABI pthread_rwlock_init_nid_postfix(PthreadRwlock* rwlock, const PthreadRwlockattr* attr);
 int APS5_VABI pthread_rwlockattr_init_nid_postfix(PthreadRwlockattr* attr);
 int APS5_VABI pthread_rwlockattr_destroy_nid_postfix(PthreadRwlockattr* attr);
+int APS5_VABI pthread_rwlockattr_getpshared_nid_postfix(const PthreadRwlockattr* attr, int* pshared);
+int APS5_VABI pthread_rwlockattr_setpshared_nid_postfix(PthreadRwlockattr* attr, int pshared);
 int APS5_VABI pthread_rwlock_rdlock_nid_postfix(PthreadRwlock* rwlock);
 int APS5_VABI pthread_rwlock_wrlock_nid_postfix(PthreadRwlock* rwlock);
 int APS5_VABI pthread_rwlock_unlock_nid_postfix(PthreadRwlock* rwlock);
@@ -39,6 +41,7 @@ static constexpr int GUEST_EBUSY = 16;
 static constexpr int GUEST_EINVAL = 22;
 static constexpr int GUEST_ETIMEDOUT = 60;
 static constexpr int GUEST_REALTIME_CLOCK = 0;
+static constexpr int PROCESS_PRIVATE = 0;
 static constexpr std::int64_t NANOS_PER_SECOND = 1000000000;
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -309,7 +312,45 @@ static void CheckWaitingWriterHoldsBackNewReaders() {
     Require(pthread_rwlock_destroy_nid_postfix(&recursive) == 0);
 }
 
+template <typename Call>
+static bool Throws(Call call) {
+    try {
+        call();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+static void CheckAttrProcessSharing() {
+    PthreadRwlockattr attr = nullptr;
+    Require(pthread_rwlockattr_init_nid_postfix(&attr) == 0);
+    int pshared = -1;
+    Require(pthread_rwlockattr_getpshared_nid_postfix(&attr, &pshared) == 0 && pshared == PROCESS_PRIVATE);
+    for (const int invalid : {1, 2, -1}) {
+        Require(pthread_rwlockattr_setpshared_nid_postfix(&attr, invalid) == GUEST_EINVAL);
+        pshared = -1;
+        Require(pthread_rwlockattr_getpshared_nid_postfix(&attr, &pshared) == 0 && pshared == PROCESS_PRIVATE);
+    }
+    Require(pthread_rwlockattr_setpshared_nid_postfix(&attr, PROCESS_PRIVATE) == 0);
+    pshared = -1;
+    Require(pthread_rwlockattr_getpshared_nid_postfix(&attr, &pshared) == 0 && pshared == PROCESS_PRIVATE);
+    Require(Throws([&] { pthread_rwlockattr_getpshared_nid_postfix(&attr, nullptr); }));
+
+    PthreadRwlockattr unset = nullptr;
+    for (const int invalid : {1, 2, -1}) {
+        Require(pthread_rwlockattr_setpshared_nid_postfix(nullptr, invalid) == GUEST_EINVAL);
+        Require(pthread_rwlockattr_setpshared_nid_postfix(&unset, invalid) == GUEST_EINVAL);
+    }
+    Require(Throws([&] { pthread_rwlockattr_setpshared_nid_postfix(nullptr, PROCESS_PRIVATE); }));
+    Require(Throws([&] { pthread_rwlockattr_setpshared_nid_postfix(&unset, PROCESS_PRIVATE); }));
+    Require(Throws([&] { pthread_rwlockattr_getpshared_nid_postfix(nullptr, &pshared); }));
+    Require(Throws([&] { pthread_rwlockattr_getpshared_nid_postfix(&unset, &pshared); }));
+    Require(pthread_rwlockattr_destroy_nid_postfix(&attr) == 0);
+}
+
 int main() {
+    CheckAttrProcessSharing();
     CheckWaitingWriterHoldsBackNewReaders();
     CheckConcurrentFirstWrlockExcludes();
     CheckDeadlinesBeyondTheClockRange();
@@ -379,10 +420,8 @@ int main() {
     Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
     Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == GUEST_EPERM);
 
-    bool rejected = false;
-    try { pthread_rwlock_timedrdlock_nid_postfix(&rwlock, nullptr); }
-    catch (const std::runtime_error&) { rejected = true; }
-    Require(rejected);
+    Require(pthread_rwlock_timedrdlock_nid_postfix(&rwlock, nullptr) == 0);
+    Require(pthread_rwlock_unlock_nid_postfix(&rwlock) == 0);
     Require(pthread_rwlock_destroy_nid_postfix(&rwlock) == 0);
     Require(rwlock == DestroyedRwlock);
 

@@ -195,8 +195,19 @@ async function selectFile(selected, files) {
   worker.postMessage(files ? { type: "inspect", files } : { type: "inspect", file });
 }
 
-$("choose").onclick = () => $("file").click();
-$("change").onclick = () => { $("drop").hidden = false; };
+$("choose").onclick = () => { $("file").value = ""; $("file").click(); };
+$("change").onclick = () => {
+  if (working) return;
+  if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
+  file = null;
+  summary = null;
+  $("file").value = "";
+  $("folder").value = "";
+  for (const id of ["selection", "warnings", "error", "done", "download"]) $(id).hidden = true;
+  $("acknowledge").checked = false;
+  $("drop").hidden = false;
+  update();
+};
 $("choose-folder").onclick = () => { $("folder").value = ""; $("folder").click(); };
 $("folder").onchange = () => {
   const files = [...$("folder").files].map(file => ({ path: file.webkitRelativePath, file }));

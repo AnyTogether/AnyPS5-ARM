@@ -109,6 +109,13 @@ def parse_elf(data):
         offset = inner + program_offset + index * 56
         kind, flags, file_offset, vaddr, _, file_size, memory_size, alignment = struct.unpack_from(
             "<IIQQQQQQ", data, offset)
+        if kind == PT_LOAD:
+            if file_size > memory_size:
+                raise Refused("segment %d file size exceeds memory size" % index)
+            if alignment and alignment & (alignment - 1):
+                raise Refused("segment %d alignment is not a power of two" % index)
+            if memory_size > (1 << 64) - vaddr:
+                raise Refused("segment %d memory range exceeds ELF64" % index)
         headers.append({
             "index": index, "type": kind, "flags": flags, "offset": file_offset,
             "vaddr": vaddr, "size": file_size, "memory": memory_size,
@@ -146,6 +153,9 @@ def place_segments(data, headers, records):
         if header["vaddr"] != 0:
             host = load_for(header["vaddr"], header["size"])
             if host is None:
+                if header["size"] == 0:
+                    header["source"] = 0
+                    continue
                 raise Refused("segment %d vaddr %#x is in no PT_LOAD" % (header["index"], header["vaddr"]))
             header["host"] = host
             header["source"] = host["source"] + (header["vaddr"] - host["vaddr"])
@@ -160,6 +170,8 @@ def place_segments(data, headers, records):
             header["memory"] = min(header["memory"], keep)
 
     for header in headers:
+        if header["type"] == PT_LOAD and header["size"] == 0:
+            continue
         if header["source"] > len(data) or header["size"] > len(data) - header["source"]:
             raise Refused("segment %d does not fit the file" % header["index"])
 
@@ -179,7 +191,10 @@ def check_decrypted(data, headers):
 
 
 def unwrap(path, output, verbose=False):
-    data = bytes(Path(path).read_bytes())
+    source, destination = Path(path), Path(output)
+    if source.resolve() == destination.resolve() or (destination.exists() and source.samefile(destination)):
+        raise Refused("output aliases the input container")
+    data = bytes(source.read_bytes())
     if len(data) < FIRST_REGION:
         raise Refused("file is smaller than the SELF header area")
     magic = struct.unpack_from("<I", data, 0)[0]
@@ -225,7 +240,7 @@ def unwrap(path, output, verbose=False):
         result[region["new"]:region["new"] + region["size"]] = data[region["old"]:region["old"] + region["size"]]
 
     for header in headers:
-        if header["size"] == 0 and header["type"] == PT_LOAD:
+        if header["size"] == 0 and (header["type"] == PT_LOAD or header["source"] == 0):
             header["new"] = 0
             continue
         region = region_for(header["source"], header["size"])

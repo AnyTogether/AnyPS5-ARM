@@ -6,7 +6,6 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
-#include <charconv>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -28,20 +27,6 @@
 #include "prx/libSceAgcDriver/Execution/include/HostHdr.hpp"
 
 namespace {
-
-int ConsoleLanguage() {
-    const char* configured = std::getenv("ANYPS5_LANGUAGE");
-    if (configured == nullptr || configured[0] == '\0') return SYSTEM_SERVICE_PARAM_LANG_ENGLISH_US;
-    const std::string_view text(configured);
-    int language = -1;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), language);
-    if (error != std::errc{} || end != text.data() + text.size() || language < SYSTEM_SERVICE_PARAM_LANG_JAPANESE || language > SYSTEM_SERVICE_PARAM_LANG_UKRAINIAN) {
-        throw std::runtime_error("sceSystemServiceParamGetInt: ANYPS5_LANGUAGE must be a console language number from " +
-            std::to_string(SYSTEM_SERVICE_PARAM_LANG_JAPANESE) + " to " + std::to_string(SYSTEM_SERVICE_PARAM_LANG_UKRAINIAN) +
-            ", not \"" + std::string(text) + "\"");
-    }
-    return language;
-}
 
 struct ConsoleTimeZone {
     int minutes;
@@ -245,6 +230,7 @@ int APS5_VABI sceSystemServiceLoadExec(const char* path, const char* const* argu
 #if defined(_WIN32) || defined(__linux__)
     LoadConvertedExecutable_nid_no_patch(std::filesystem::path(launch.executable), arguments);
 #endif
+    LibcStartExit_nid_postfix();
     LibcRunShutdown_nid_postfix();
     std::fflush(nullptr);
     StartHostExecutable(launch);
@@ -302,7 +288,7 @@ int APS5_VABI sceSystemServiceParamGetInt(int paramId, int* value) {
  }
  switch (paramId) {
   case SYSTEM_SERVICE_PARAM_ID_LANG:
-  case SYSTEM_SERVICE_PARAM_ID_400: *value = ConsoleLanguage(); break;
+  case SYSTEM_SERVICE_PARAM_ID_400: *value = SystemServiceConsoleLanguage("sceSystemServiceParamGetInt"); break;
   case SYSTEM_SERVICE_PARAM_ID_DATE_FORMAT: *value = SYSTEM_SERVICE_PARAM_DATE_FORMAT_DDMMYYYY; break;
   case SYSTEM_SERVICE_PARAM_ID_TIME_FORMAT: *value = SYSTEM_SERVICE_PARAM_TIME_FORMAT_24HOUR; break;
   case SYSTEM_SERVICE_PARAM_ID_TIME_ZONE: *value = HostTimeZone().minutes; break;

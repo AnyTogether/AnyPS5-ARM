@@ -875,6 +875,28 @@ static void CheckBufferSizes() {
     Require(sceNetSocketClose(socket) == 0);
 }
 
+static void CheckOnesBroadcast() {
+    const auto read = [](int socket) {
+        int value = -1;
+        std::uint32_t size = sizeof(value);
+        Require(sceNetGetsockopt(socket, 0xffff, 0x10000, &value, &size) == 0 && size == sizeof(value));
+        return value;
+    };
+    const int socket = sceNetSocket("ones-broadcast", 2, 2, 17);
+    const int other = sceNetSocket("ones-broadcast-other", 2, 2, 17);
+    Require(socket >= 0 && other >= 0);
+    Require(read(socket) == 0);
+    for (const int requested : {1, 0, 7}) {
+        Require(sceNetSetsockopt(socket, 0xffff, 0x10000, &requested, sizeof(requested)) == 0);
+        Require(read(socket) == requested);
+    }
+    Require(read(other) == 0);
+    const std::uint8_t truncated = 1;
+    Require(Failed(sceNetSetsockopt(socket, 0xffff, 0x10000, &truncated, sizeof(truncated)), 22));
+    Require(read(socket) == 7);
+    for (const int descriptor : {socket, other}) Require(sceNetSocketClose(descriptor) == 0);
+}
+
 static void CheckUnspecifiedIpv6() {
     std::array<std::uint8_t, 16> unspecified{};
     Require(sceNetInetPton(28, "::", unspecified.data()) == 1);
@@ -1086,6 +1108,7 @@ int main() {
     CheckDatagramAddressLengths(28);
     CheckStreamAddressLengths();
     CheckBufferSizes();
+    CheckOnesBroadcast();
 
     const int epoll = sceNetEpollCreate("guest-sce-net", 0);
     Require(epoll >= 0);

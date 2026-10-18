@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
@@ -54,8 +55,11 @@ struct LibraryStore {
     std::deque<std::pair<VkDevice, std::function<void()>>> jobs;
     std::map<VkDevice, std::size_t> pending;
     std::map<VkDevice, std::size_t> activeBuilds;
-    bool started = false;
+    std::thread worker;
+    bool stopping = false;
 };
+
+std::atomic<unsigned> runningWorkers{0};
 
 LibraryStore& Libraries() {
     static auto* store = new LibraryStore();
@@ -65,7 +69,8 @@ LibraryStore& Libraries() {
 void runJobs(LibraryStore& store) {
     std::unique_lock lock(store.mutex);
     for (;;) {
-        store.work.wait(lock, [&] { return !store.jobs.empty(); });
+        store.work.wait(lock, [&] { return !store.jobs.empty() || store.stopping; });
+        if (store.stopping) break;
         auto [device, job] = std::move(store.jobs.front());
         store.jobs.pop_front();
         lock.unlock();
@@ -73,15 +78,18 @@ void runJobs(LibraryStore& store) {
         lock.lock();
         if (--store.pending[device] == 0) store.idle.notify_all();
     }
+    runningWorkers.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void enqueue(LibraryStore& store, VkDevice device, std::function<void()> job) {
-    if (!store.started) {
-        std::thread(runJobs, std::ref(store)).detach();
-        store.started = true;
+    if (store.stopping) return;
+    if (!store.worker.joinable()) {
+        store.worker = std::thread(runJobs, std::ref(store));
+        runningWorkers.fetch_add(1, std::memory_order_acq_rel);
     }
-    ++store.pending[device];
+    auto& pending = store.pending[device];
     store.jobs.emplace_back(device, std::move(job));
+    ++pending;
     store.work.notify_one();
 }
 
@@ -333,6 +341,27 @@ void ClearPipelineLibraries(VkDevice device) {
     for (const auto& [key, handle] : libraries.layouts) libraries.destroyLayout(device, handle, nullptr);
     for (const auto module : libraries.modules) libraries.destroyModule(device, module, nullptr);
     store.devices.erase(found);
+}
+
+void StopPipelineLibraryWorker() {
+    auto& store = Libraries();
+    std::thread worker;
+    {
+        std::lock_guard lock(store.mutex);
+        store.stopping = true;
+        for (const auto& [device, job] : store.jobs) --store.pending[device];
+        store.jobs.clear();
+        worker = std::move(store.worker);
+    }
+    store.idle.notify_all();
+    store.work.notify_all();
+    if (!worker.joinable()) return;
+    if (worker.get_id() == std::this_thread::get_id()) worker.detach();
+    else worker.join();
+}
+
+unsigned PipelineLibraryWorkers() {
+    return runningWorkers.load(std::memory_order_acquire);
 }
 
 PipelineLibraryCounters PipelineLibraryCountersOf(VkDevice device) {

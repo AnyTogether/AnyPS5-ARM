@@ -391,13 +391,19 @@ constexpr std::array<std::uint32_t, 256> SrgbToLinear{
     0x3f700000u, 0x3f730000u, 0x3f750000u, 0x3f770000u, 0x3f790000u, 0x3f7b0000u, 0x3f7e0000u, 0x3f800000u,
 };
 
-std::uint32_t DecodeSrgbTexel(SpirvEmitterState& state, std::uint32_t color) {
-    const auto pointerType = TypePointer(state, spv::StorageClassPrivate, TypeU32(state));
+std::uint32_t SrgbTable(SpirvEmitterState& state) {
+    if (state.srgbTableVariable != 0u) return state.srgbTableVariable;
     std::array<std::uint32_t, SrgbToLinear.size()> words{};
     for (std::size_t index = 0; index < words.size(); ++index) words[index] = ConstantU32(state, SrgbToLinear[index]);
     const auto arrayType = state.module.Type(spv::OpTypeArray, TypeU32(state), ConstantU32(state, static_cast<std::uint32_t>(words.size())));
-    if (state.srgbTableVariable == 0) state.srgbTableVariable = state.module.DefineGlobalVariable(TypePointer(state, spv::StorageClassPrivate, arrayType), spv::StorageClassPrivate);
-    state.module.AddFunction(spv::OpStore, state.srgbTableVariable, state.module.Constant(spv::OpConstantComposite, arrayType, std::span<const std::uint32_t>(words)));
+    const auto table = state.module.Constant(spv::OpConstantComposite, arrayType, std::span<const std::uint32_t>(words));
+    state.srgbTableVariable = state.module.DefineInitializedGlobalVariable(TypePointer(state, spv::StorageClassPrivate, arrayType), spv::StorageClassPrivate, table);
+    return state.srgbTableVariable;
+}
+
+std::uint32_t DecodeSrgbTexel(SpirvEmitterState& state, std::uint32_t color) {
+    const auto pointerType = TypePointer(state, spv::StorageClassPrivate, TypeU32(state));
+    const auto table = SrgbTable(state);
     std::uint32_t components[4] = {};
     for (std::uint32_t index = 0; index < 4u; index++) {
         const auto value = state.module.AllocateId();
@@ -406,7 +412,7 @@ std::uint32_t DecodeSrgbTexel(SpirvEmitterState& state, std::uint32_t color) {
         const auto code = state.module.AllocateId();
         state.module.AddFunction(spv::OpExtInst, TypeU32(state), code, GlslStd450(state), GLSLstd450UMin, Unary(state, spv::OpConvertFToU, TypeU32(state), scaled), ConstantU32(state, 255u));
         const auto pointer = state.module.AllocateId();
-        state.module.AddFunction(spv::OpAccessChain, pointerType, pointer, state.srgbTableVariable, code);
+        state.module.AddFunction(spv::OpAccessChain, pointerType, pointer, table, code);
         const auto bits = state.module.AllocateId();
         state.module.AddFunction(spv::OpLoad, TypeU32(state), bits, pointer);
         components[index] = Unary(state, spv::OpBitcast, TypeF32(state), bits);
@@ -1471,7 +1477,7 @@ void EmitSampleOp(SpirvValueEmitContext& ctx, const ImageEmitAccess& access, con
         const auto selector = state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::UnnormalizedBaseLevelBase + mem.sampler, 0u);
         const auto unnormalized = Binary(state, spv::OpINotEqual, TypeBool(state), selector, ConstantU32(state, 0u));
         sample = EmitValueIfElse(state, unnormalized, resultType, [&] {
-            return emitSample(setup.coord, spv::ImageOperandsLodMask, {ZeroF32(state)}, spv::OpImageSampleExplicitLod);
+            return emitSample(hasOffset ? FoldedOffsetCoord(ctx, access, setup) : setup.coord, spv::ImageOperandsLodMask, {ZeroF32(state)}, spv::OpImageSampleExplicitLod);
         }, [&] {
             return emitSample(setup.coord, operandMask, operands, opcode);
         });
@@ -1707,7 +1713,9 @@ TableAccessResult EmitTableAccess(SpirvValueEmitContext& ctx, const IrValue& ins
         result.flags = flags;
         live = selected;
         state.tableAccess.element = Binary(state, spv::OpIAdd, u32, LoadTableMap(state, ConstantU32(state, ImageTableAbi::HeaderElementBase)), element);
-        DecorateTableNonUniform(state, state.tableAccess.element);
+        const auto& sources = state.program.Resources().descriptorSources;
+        state.tableAccess.uniform = base.source < sources.size() && sources[base.source].tableColumn.has_value() && sources[base.source].tableColumn->selected;
+        if (!state.tableAccess.uniform) DecorateTableNonUniform(state, state.tableAccess.element);
         state.tableAccess.dword3 = dword3;
     }
     if (tableSampler) {

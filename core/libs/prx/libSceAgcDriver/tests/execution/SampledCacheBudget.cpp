@@ -130,6 +130,7 @@ public:
             if (hasExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) context.memoryProperties2 = function<PFN_vkGetPhysicalDeviceMemoryProperties2>("vkGetPhysicalDeviceMemoryProperties2");
             context.Function<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(context.device, family, 0, &context.queue);
             VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+            pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             pool.queueFamilyIndex = family;
             Check(context.Function<PFN_vkCreateCommandPool>("vkCreateCommandPool")(context.device, &pool, nullptr, &context.pool), "vkCreateCommandPool");
         } catch (...) {
@@ -624,6 +625,21 @@ std::uint64_t ReadBudget(const Context& context) {
     return SampledTextureCacheBudget(context);
 }
 
+constexpr std::uint64_t PressedUsage = ReportedBudget - 11ull * (1ull << 30u);
+
+void VKAPI_PTR ReportPressure(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2* properties) {
+    auto* reported = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
+    for (std::uint32_t heap = 0; heap < VK_MAX_MEMORY_HEAPS; ++heap) {
+        reported->heapBudget[heap] = ReportedBudget;
+        reported->heapUsage[heap] = PressedUsage;
+    }
+}
+
+std::uint64_t ReadStorageBudget(const Context& context) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    return StorageTextureCacheBudget(context);
+}
+
 void memoryTests(Context context) {
     context.memoryProperties2 = &ReportBudget;
     const auto before = SampledTextureMemory();
@@ -639,6 +655,20 @@ void memoryTests(Context context) {
     std::printf("reported heap budget %llu MiB with %llu MiB in use: sampled texture cache budget %llu MiB with a %llu KiB texture held outside the cache\n", static_cast<unsigned long long>(ReportedBudget >> 20u), static_cast<unsigned long long>(ReportedUsage >> 20u), static_cast<unsigned long long>(budget >> 20u), static_cast<unsigned long long>(held->AllocationBytes() >> 10u));
     held.reset();
     Require(SampledTextureMemory() == before, "a released texture still counts as sampled texture memory");
+}
+
+void storageMemoryTests(Context context) {
+    constexpr std::uint64_t GiB = 1ull << 30u;
+    context.memoryProperties2 = &ReportBudget;
+    Block block(context);
+    auto held = Sampled(context, block.Surface(0));
+    const auto quarter = std::min<std::uint64_t>(StorageTextureBudget(context.memory, nullptr, 0, 0), ReportedBudget / 4u);
+    Require(ReadStorageBudget(context) == quarter, "52 GiB free of a 64 GiB budget does not leave the storage image cache its quarter");
+    context.memoryProperties2 = &ReportPressure;
+    const auto pressed = ReadStorageBudget(context);
+    const auto expected = GiB + SampledTextureMemory() + TextureCacheUsage().storageBytes;
+    Require(pressed == expected, "53 GiB in use of a 64 GiB budget leaves the storage image cache " + std::to_string(pressed >> 20u) + " MiB, not the " + std::to_string(expected >> 20u) + " MiB left after the use outside the texture caches, the sampled textures' 2 GiB floor and 8 GiB of headroom");
+    std::printf("reported heap budget %llu MiB with %llu MiB in use: storage image cache budget %llu MiB\n", static_cast<unsigned long long>(ReportedBudget >> 20u), static_cast<unsigned long long>(PressedUsage >> 20u), static_cast<unsigned long long>(pressed >> 20u));
 }
 
 }
@@ -673,6 +703,7 @@ int main(int argc, char** argv) {
         if (memory) {
             std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
             memoryTests(context);
+            storageMemoryTests(context);
             ClearCachedTextures(context.device);
             std::puts("sampled texture memory budget tests passed");
             return 0;

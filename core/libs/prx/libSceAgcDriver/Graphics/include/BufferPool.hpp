@@ -54,7 +54,8 @@ struct SlabSlot {
 class BufferPool {
 public:
     explicit BufferPool(const Context& context);
-    static VkDeviceSize DeviceBudget(const VkPhysicalDeviceMemoryProperties& memory);
+    static VkDeviceSize DeviceBudget(const VkPhysicalDeviceMemoryProperties& memory, const VkPhysicalDeviceMemoryBudgetPropertiesEXT* reported = nullptr);
+    static VkDeviceSize ReclaimTarget(VkDeviceSize bytes);
     ~BufferPool();
     BufferPool(const BufferPool&) = delete;
     BufferPool& operator=(const BufferPool&) = delete;
@@ -116,6 +117,7 @@ private:
     // when shared; the device tier for device-local memory while it has a budget).
     Tier& tierFor(std::size_t capacity, VkMemoryPropertyFlags properties);
     static bool DeviceTierEnabled();
+    static VkDeviceSize deviceBudget(const Context& context);
     static bool DeviceTiered(VkMemoryPropertyFlags properties);
     static std::size_t NextCapacity(std::size_t capacity);
     VkDeviceSize destroy(const BufferAllocation& allocation) noexcept;
@@ -127,6 +129,7 @@ private:
     // The retained-slot bound of each tier (APS5_BUFFER_POOL_SLOTS, default `defaultSlots`), read once.
     static std::size_t MaxSlots();
     std::size_t maxSlots;
+    VkDeviceSize (*cacheReclaim)(VkDeviceSize bytes);
     VkDevice device;
     PFN_vkUnmapMemory unmap;
     PFN_vkDestroyBuffer destroyBuffer;

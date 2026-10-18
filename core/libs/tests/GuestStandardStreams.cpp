@@ -22,6 +22,9 @@
 #endif
 extern "C" {
 FileStream* APS5_VABI fopen_nid_postfix(const char*, const char*);
+void APS5_VABI clearerr_unlocked_nid_postfix(FileStream*);
+int APS5_VABI fileno_unlocked_nid_postfix(FileStream*);
+char* APS5_VABI fgetln_nid_postfix(FileStream*, std::size_t*);
 std::size_t APS5_VABI fread_nid_postfix(void*, std::size_t, std::size_t, FileStream*);
 std::size_t APS5_VABI fwrite_nid_postfix(const void*, std::size_t, std::size_t, FileStream*);
 FileStream* APS5_VABI freopen_nid_postfix(const char*, const char*, FileStream*);
@@ -167,6 +170,22 @@ static void CheckUnlockedStreams() {
     readOnly.Close();
     Require(CheckFileBytes(filename, "A", "rb", false));
     Require(std::filesystem::remove(filename));
+}
+
+static void CheckUnlockedQueries() {
+    FileStream stream(std::tmpfile());
+    Require(fputc_nid_postfix(0x7f, &stream) == 0x7f);
+    std::rewind(stream.GetHandle());
+    Require(fgetc_nid_postfix(&stream) == 0x7f && feof_nid_postfix(&stream) == 0);
+    Require(fgetc_nid_postfix(&stream) == -1 && feof_nid_postfix(&stream) != 0);
+    clearerr_unlocked_nid_postfix(&stream);
+    Require(feof_nid_postfix(&stream) == 0 && ferror_nid_postfix(&stream) == 0);
+    Require(fileno_unlocked_nid_postfix(&stream) == fileno_nid_postfix(&stream) && fileno_unlocked_nid_postfix(&stream) >= 0);
+    Require(fileno_unlocked_nid_postfix(nullptr) == -1);
+    bool halted = false;
+    std::size_t length = 0;
+    try { fgetln_nid_postfix(&stream, &length); } catch (const std::runtime_error&) { halted = true; }
+    Require(halted);
 }
 
 static void CheckTryLock() {
@@ -843,5 +862,6 @@ int main(int argc, char** argv) {
     CheckUnlockedStreamLock(false);
     CheckUnlockedStreamLock(true);
     CheckTryLock();
+    CheckUnlockedQueries();
     return CheckBinaryModes() ? 0 : 1;
 }

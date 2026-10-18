@@ -152,6 +152,23 @@ class CheckSkipsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("all expected", result.stdout)
 
+    def test_list_reports_skipped_reasons_including_indented_lines(self):
+        xml = (
+            '<testsuite>'
+            '<testcase name="normal"><skipped message="device limitation"/></testcase>'
+            '<testcase name="indented"><skipped/><system-out>\n  skipped, host imports are unavailable\n</system-out></testcase>'
+            '<testcase name="capitalized"><skipped/><system-err>\n    Skipped, no display\n</system-err></testcase>'
+            '</testsuite>'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            junit = Path(directory) / "junit.xml"
+            junit.write_text(xml, encoding="utf-8")
+            result = subprocess.run([sys.executable, "-I", str(TOOL), str(junit), "--list"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("normal: skipped, device limitation", result.stdout)
+            self.assertIn("indented: skipped, host imports are unavailable", result.stdout)
+            self.assertIn("capitalized: Skipped, no display", result.stdout)
+
 
 
 

@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libSceSysmodule/ModuleTable.hpp"
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -108,6 +109,30 @@ void CheckUnwindInfo() {
 }
 #endif
 
+std::uint16_t UnknownModuleId() {
+    for (std::uint32_t id = 0xffff; id != 0; --id) {
+        if (kModuleTable.find(id) == kModuleTable.end()) return static_cast<std::uint16_t>(id);
+    }
+    std::abort();
+}
+
+void CheckUnknownIds() {
+    const std::uint16_t id = UnknownModuleId();
+    const std::uint32_t internalId = id | kInternalFlag;
+    Require(kModuleTable.find(internalId) == kModuleTable.end());
+    Require(sceSysmoduleIsLoaded(id) == 0);
+    Require(sceSysmoduleLoadModule(id) == 0);
+    Require(sceSysmoduleIsLoaded(id) == 0);
+    Require(sceSysmoduleUnloadModule(id) == 0);
+    Require(sceSysmoduleUnloadModule(id) == 0);
+    Require(sceSysmoduleIsLoaded(id) == 0);
+    Require(ThrowsRuntimeError([internalId] { sceSysmoduleLoadModuleInternal(internalId); }));
+    Require(ThrowsRuntimeError([internalId] { sceSysmoduleUnloadModuleInternal(internalId); }));
+    int result = 0x5a5a5a5a;
+    Require(ThrowsRuntimeError([internalId, &result] { sceSysmoduleLoadModuleInternalWithArg(internalId, 0, nullptr, 0, &result); }));
+    Require(result == 0x5a5a5a5a);
+}
+
 #ifdef _WIN32
 void RequireUnwindMatchesRegion(const void* pointer) {
     const auto address = reinterpret_cast<std::uint64_t>(pointer);
@@ -172,6 +197,7 @@ void CheckUnwindInfo() {
 }
 
 int main() {
+    CheckUnknownIds();
     Require(sceSysmoduleIsLoaded(0) == kInvalidValue);
     Require(sceSysmoduleLoadModule(0) == kInvalidValue);
     Require(sceSysmoduleUnloadModule(0) == kInvalidValue);

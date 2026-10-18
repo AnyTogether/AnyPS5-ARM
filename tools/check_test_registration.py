@@ -94,21 +94,24 @@ def registered(build):
         if directory in visited or not file.is_file():
             continue
         visited.add(directory)
-        tests, disabled = [], {}
+        tests, latest = [], {}
         for command, arguments in commands(file.read_text(encoding="utf-8", errors="replace")):
             if command == "subdirs":
                 pending.extend(directory / argument for argument in arguments)
             elif command == "add_test" and arguments:
-                tests.append((arguments[0], arguments[1:]))
+                test = [arguments[1:], False]
+                tests.append(test)
+                latest[arguments[0]] = test
             elif command == "set_tests_properties" and "PROPERTIES" in arguments:
                 properties = arguments.index("PROPERTIES")
                 values = arguments[properties + 1:]
                 for key, value in zip(values[::2], values[1::2]):
                     if key == "DISABLED":
                         for name in arguments[:properties]:
-                            disabled[name] = value.upper() in ("1", "ON", "YES", "TRUE", "Y")
-        for test, arguments in tests:
-            if disabled.get(test, False):
+                            if name in latest:
+                                latest[name][1] = value.upper() in ("1", "ON", "YES", "TRUE", "Y")
+        for arguments, disabled in tests:
+            if disabled:
                 continue
             for index, argument in enumerate(arguments):
                 if index and (argument.startswith("-") or re.match(r"^[A-Za-z_]\w*=", argument)):

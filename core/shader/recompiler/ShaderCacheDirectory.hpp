@@ -1,6 +1,7 @@
 #ifndef CORE_SHADER_RECOMPILER_SHADERCACHEDIRECTORY_HPP
 #define CORE_SHADER_RECOMPILER_SHADERCACHEDIRECTORY_HPP
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -56,7 +57,12 @@ inline bool WriteFileAtomically(const std::filesystem::path& path, std::span<con
     {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         if (!file) return false;
-        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        constexpr std::size_t largestWrite = std::size_t{1} << 30u;
+        for (std::size_t offset = 0; offset < bytes.size() && file;) {
+            const auto chunk = std::min(bytes.size() - offset, largestWrite);
+            file.write(reinterpret_cast<const char*>(bytes.data() + offset), static_cast<std::streamsize>(chunk));
+            offset += chunk;
+        }
         file.close();
         written = !file.fail();
     }

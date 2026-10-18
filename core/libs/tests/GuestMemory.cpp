@@ -237,6 +237,59 @@ static void CheckInternalNamedFlexibleMapping() {
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
 }
 
+static void CheckFlexibleFixedReplacement() {
+    constexpr std::size_t page = 0x4000;
+    std::size_t before = 0;
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&before) == 0);
+    void* base = nullptr;
+    Require(sceKernelMapFlexibleMemory(&base, page * 4, 3, 0) == 0 && base != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 4);
+    auto* bytes = static_cast<unsigned char*>(base);
+    for (std::size_t index = 0; index < 4; ++index) bytes[index * page] = static_cast<unsigned char>(17 + index);
+    void* middle = bytes + page;
+    void* replacement = middle;
+    Require(sceKernelMapFlexibleMemory(&replacement, page, 3, 0x10) == 0 && replacement == middle);
+    Require(bytes[0] == 17 && bytes[page] == 0 && bytes[page * 2] == 19 && bytes[page * 3] == 20);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 4);
+    Require(sceKernelMunmap(base, page * 4) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+}
+
+static void CheckMunmapScopedFlexibleRelease() {
+    constexpr std::size_t page = 0x4000;
+    std::size_t before = 0;
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&before) == 0);
+    void* base = nullptr;
+    Require(sceKernelMapFlexibleMemory(&base, page * 2, 3, 0) == 0 && base != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 2);
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page, 0, 0, &phys) == 0);
+    void* direct = static_cast<unsigned char*>(base) + page;
+    Require(sceKernelMapDirectMemory(&direct, page, 3, 0x10, phys, 0) == 0 && direct == static_cast<unsigned char*>(base) + page);
+    std::size_t mid = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&mid) == 0);
+    Require(sceKernelMunmap(direct, page) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == mid);
+    void* reserved = nullptr;
+    Require(sceKernelReserveVirtualRange(&reserved, page * 2, 0, 0) == 0 && reserved != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == mid);
+    Require(sceKernelMunmap(reserved, page * 2) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == mid);
+    Require(sceKernelMunmap(base, page) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == mid + page);
+    Require(sceKernelReleaseDirectMemory(phys, page) == 0);
+    void* fresh = nullptr;
+    Require(sceKernelMapFlexibleMemory(&fresh, page * 4, 3, 0) == 0 && fresh != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 4);
+    Require(sceKernelMunmap(static_cast<unsigned char*>(fresh) + page, page * 2) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 2);
+    Require(sceKernelMunmap(fresh, page) == 0);
+    Require(sceKernelMunmap(static_cast<unsigned char*>(fresh) + page * 3, page) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+}
+
 static void CheckGuestModuleUsesFlexibleMemory() {
     constexpr std::size_t moduleData = 0x10000;
     const auto path = std::filesystem::relative(GUEST_MEMORY_MODULE).generic_string();
@@ -1265,6 +1318,28 @@ static void CheckAliasAcrossDirectAllocations() {
     Require(bytes[5] == 0x11 && bytes[page + 5] == 0x22 && bytes[page * 2 + 5] == 0x33);
     Require(sceKernelMunmap(mapped, page * 3) == 0);
     Require(sceKernelReleaseDirectMemory(first, page * 3) == 0);
+}
+
+static void CheckAliasLeavesResidentRunsUnderAHostWrite() {
+    constexpr std::size_t page = 0x4000;
+    std::int64_t phys = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, page * 2, 0, 0, &phys) == 0);
+    void* mapped = nullptr;
+    Require(sceKernelMapDirectMemory(&mapped, page * 2, 3, 0, phys, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapped);
+    bytes[5] = 0x11;
+    {
+        const GuestArena::HostWrite open(static_cast<unsigned char*>(mapped) + page, page);
+        Require(open.Open());
+        Require(GuestArena::GuestArenaMapAlias_nid_postfix(reinterpret_cast<std::uintptr_t>(mapped), page * 2) == nullptr);
+        bytes[page + 5] = 0x22;
+    }
+    auto* alias = static_cast<volatile unsigned char*>(GuestArena::GuestArenaMapAlias_nid_postfix(reinterpret_cast<std::uintptr_t>(mapped), page * 2));
+    Require(alias != nullptr && alias[5] == 0x11 && alias[page + 5] == 0x22);
+    GuestArena::GuestArenaUnmapAlias_nid_postfix(const_cast<unsigned char*>(alias));
+    Require(bytes[5] == 0x11 && bytes[page + 5] == 0x22);
+    Require(sceKernelMunmap(mapped, page * 2) == 0);
+    Require(sceKernelReleaseDirectMemory(phys, page * 2) == 0);
 }
 
 static void CheckAliasRefusesPagesThatAreNotSharedViews() {
@@ -2535,6 +2610,58 @@ static void CheckPosixFixedAnonymousMapping() {
     Require(munmap_nid_postfix(memory, page * 4) == 0);
 }
 
+static void CheckPosixFixedAnonymousReleasesFlexibleAccounting() {
+    constexpr std::size_t page = 0x4000;
+    constexpr int fixed = 0x1012;
+    std::size_t before = 0;
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&before) == 0);
+    void* base = nullptr;
+    Require(sceKernelMapFlexibleMemory(&base, page * 3, 3, 0) == 0 && base != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 3);
+    auto* bytes = static_cast<unsigned char*>(base);
+    bytes[0] = 0x31;
+    bytes[page] = 0x41;
+    bytes[page * 2] = 0x51;
+    Require(mmap_nid_postfix(bytes + page, page, 3, fixed, -1, 0) == bytes + page);
+    Require(bytes[0] == 0x31 && bytes[page] == 0 && bytes[page * 2] == 0x51);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 2);
+    Require(sceKernelMunmap(base, page * 3) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+}
+
+#if defined(__linux__)
+static void CheckPosixFixedFileReleasesFlexibleAccounting() {
+    constexpr std::size_t page = 0x4000;
+    constexpr int fixedShared = 0x11;
+    const auto path = std::filesystem::path("anyps5-fixed-file-accounting-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin");
+    {
+        std::ofstream stream(path, std::ios::binary);
+        std::vector<char> data(page, 0x6d);
+        stream.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+    const int fd = sceKernelOpen(path.string().c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(fd >= 0);
+    std::size_t before = 0;
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&before) == 0);
+    void* base = nullptr;
+    Require(sceKernelMapFlexibleMemory(&base, page * 3, 3, 0) == 0 && base != nullptr);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 3);
+    auto* bytes = static_cast<unsigned char*>(base);
+    bytes[0] = 0x31;
+    bytes[page * 2] = 0x51;
+    Require(mmap_nid_postfix(bytes + page, page, 1, fixedShared, fd, 0) == bytes + page);
+    Require(bytes[0] == 0x31 && bytes[page] == 0x6d && bytes[page * 2] == 0x51);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - page * 2);
+    Require(sceKernelMunmap(base, page * 3) == 0);
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+    Require(sceKernelClose(fd) == 0);
+    std::filesystem::remove(path);
+}
+#endif
+
 static void CheckSceKernelMmap() {
     constexpr std::size_t page = 0x4000;
     void* mapped = nullptr;
@@ -2634,6 +2761,10 @@ int main(int argc, char** argv) {
 #endif
     if (argc == 2 && std::strcmp(argv[1], "fixed-anonymous") == 0) {
         CheckPosixFixedAnonymousMapping();
+        CheckPosixFixedAnonymousReleasesFlexibleAccounting();
+#if defined(__linux__)
+        CheckPosixFixedFileReleasesFlexibleAccounting();
+#endif
         return 0;
     }
     Require(argc == 1);
@@ -2650,6 +2781,8 @@ int main(int argc, char** argv) {
     CheckVirtualQueryWireLayout();
     CheckNamedAndHintedMappings();
     CheckInternalNamedFlexibleMapping();
+    CheckFlexibleFixedReplacement();
+    CheckMunmapScopedFlexibleRelease();
 #ifndef __APPLE__
     // macOS lists only relinked guest images (their __APS5DATA metadata) to dl_iterate_phdr; the fixture
     // is a host-built library named like a guest module, so its segments are not in the budget there.
@@ -2694,6 +2827,7 @@ int main(int argc, char** argv) {
     CheckAliasAcrossDirectAllocations();
     CheckAliasOfReorderedSharedPages();
     CheckAliasRefusesPagesThatAreNotSharedViews();
+    CheckAliasLeavesResidentRunsUnderAHostWrite();
 #endif
 #ifndef __APPLE__
     CheckUnhintedKernelMappingsLandInTheWindow();

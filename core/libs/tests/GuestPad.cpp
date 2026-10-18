@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 extern "C" {
 int APS5_VABI scePadOpen_nid_postfix(int, int, int, const void*);
@@ -104,8 +105,16 @@ static void CheckInputCommands() {
     write("7 8192 300 1 2 3 4");
     const auto accepted = commands.Poll(2601000);
     Require(accepted.buttons == 0x2000 && accepted.hasSticks && accepted.sticks[3] == 4);
+    write("8 2097152 300");
+    const auto left = commands.Poll(3001000);
+    Require(left.buttons == 0 && left.touchLeft && !left.touchRight && !left.hasSticks);
+    write("9 4210688 300");
+    const auto right = commands.Poll(3401000);
+    Require(right.buttons == 0x4000 && !right.touchLeft && right.touchRight);
+    write("10 8388608 300");
+    Require(commands.Poll(3801000) == none);
     std::filesystem::remove(path);
-    Require(commands.Buttons(3001000) == 0);
+    Require(commands.Buttons(4201000) == 0);
     Pad::InputCommandFile disabled(std::filesystem::path{});
     Require(disabled.Buttons(0) == 0);
 }
@@ -293,6 +302,21 @@ static void CheckInjectedState(const std::filesystem::path& path) {
     const auto centred = Pad::ReadState();
     Require(centred.left_stick_x == 42 && centred.right_stick_y == 17);
     Require(centred.timestamp > moved.timestamp);
+    for (const auto& [command, x] : {std::pair{"3 2097152 300\n", 480}, std::pair{"4 4194304 300\n", 1440}}) {
+        std::ofstream(path) << command;
+        PadData touched{};
+        const auto touchDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            touched = Pad::ReadState();
+            if (touched.touch_data_touch_num != 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < touchDeadline);
+        Require(touched.touch_data_touch_num == 1 && touched.touch_data_touch0_x == x && touched.touch_data_touch0_y == 471);
+        Require(touched.buttons == (0x2000 | 0x100000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(310));
+        const auto lifted = Pad::ReadState();
+        Require(lifted.touch_data_touch_num == 0 && lifted.buttons == 0x2000);
+    }
     PadPublishInput_nid_postfix(PadInputState{});
 }
 

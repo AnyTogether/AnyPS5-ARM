@@ -104,6 +104,10 @@ void Pad::KeyboardMouse::SetMouseMode(bool enabled) {
     mouse.Reset();
 }
 
+void Pad::KeyboardMouse::SetTitleReadsMouse(bool reads) {
+    titleReadsMouse = reads;
+}
+
 void Pad::KeyboardMouse::Release() {
     std::fill(pressed.begin(), pressed.end(), false);
     std::fill(wheelReleaseTimes.begin(), wheelReleaseTimes.end(), Clock::time_point{});
@@ -118,10 +122,11 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
         return requests;
     }
     if (event.type == SDL_MOUSEMOTION) {
-        if (mouseMode) mouse.Move(event.motion.xrel, event.motion.yrel);
+        if (mouseMode && !titleReadsMouse) mouse.Move(event.motion.xrel, event.motion.yrel);
         return requests;
     }
     if (event.type == SDL_MOUSEWHEEL) {
+        if (titleReadsMouse) return requests;
         int direction = (event.wheel.y > 0) - (event.wheel.y < 0);
         if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) direction = -direction;
         if (direction == 0) return requests;
@@ -138,6 +143,7 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
     const bool mouseButton = event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP;
     if (!keyboard && !mouseButton) return requests;
     if (keyboard && event.key.repeat != 0) return requests;
+    if (event.type == SDL_MOUSEBUTTONDOWN && titleReadsMouse) return requests;
     const bool down = event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN;
     for (std::size_t index = 0; index < configuration.bindings.size(); ++index) {
         const auto& binding = configuration.bindings[index];

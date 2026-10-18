@@ -747,6 +747,10 @@ def main():
                 "short-before-tls": bytes.fromhex("64 48 8b 03 64 48 8b 03 c3"),
                 "short-alu-before-return": bytes.fromhex("64 48 33 03 c3"),
                 "short-before-loop": bytes.fromhex("64 48 33 03 e2 00"),
+                "short-before-word-jcc8": bytes.fromhex("64 48 33 03 66 75 00 c3"),
+                "short-before-word-jmp8": bytes.fromhex("64 48 33 03 66 eb 00 c3"),
+                "short-before-word-jmp16": bytes.fromhex("64 48 33 03 66 e9 00 00 c3"),
+                "short-before-word-jcc16": bytes.fromhex("64 48 33 03 66 0f 85 00 00 c3"),
             }.items():
                 convert(name, make_image("register", "unwind", body=instruction),
                         "Short guest TLS instruction is followed by an instruction that cannot move", error_offset=0x1244)

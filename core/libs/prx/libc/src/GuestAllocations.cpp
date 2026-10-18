@@ -127,12 +127,24 @@ std::vector<std::pair<std::uintptr_t, std::size_t>> fileBackedWritableImage() {
     return mappings;
 }
 
+#ifdef ANYPS5_ENABLE_ASAN
+[[gnu::no_sanitize("address")]] void copyImagePages(void* target, const void* source, std::size_t bytes) {
+    auto* to = static_cast<volatile std::uintptr_t*>(target);
+    const auto* from = static_cast<const volatile std::uintptr_t*>(source);
+    for (std::size_t word = 0; word < bytes / sizeof(std::uintptr_t); ++word) to[word] = from[word];
+}
+#endif
+
 bool backWritableImageAnonymously() {
     for (const auto& [address, bytes] : fileBackedWritableImage()) {
         auto* image = reinterpret_cast<void*>(address);
         auto* copy = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (copy == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "mmap of an anonymous main image copy failed");
+#ifdef ANYPS5_ENABLE_ASAN
+        copyImagePages(copy, image, bytes);
+#else
         std::memcpy(copy, image, bytes);
+#endif
         if (mremap(copy, bytes, bytes, MREMAP_MAYMOVE | MREMAP_FIXED, image) == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "mremap of an anonymous main image copy failed");
     }
     return true;
@@ -456,8 +468,13 @@ void GuestAllocationsRequireUnpinned_nid_postfix(void* mutation, const void* poi
         bool progressed = false;
         if (state != nullptr && state->lock.owns_lock()) {
             state->lock.unlock();
-            if (waiter != nullptr) progressed = waiter(address, bytes);
-            else std::this_thread::yield();
+            try {
+                if (waiter != nullptr) progressed = waiter(address, bytes);
+                else std::this_thread::yield();
+            } catch (...) {
+                state->lock.lock();
+                throw;
+            }
             state->lock.lock();
         } else {
             std::this_thread::yield();

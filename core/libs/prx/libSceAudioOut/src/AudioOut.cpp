@@ -92,6 +92,14 @@ static std::uint32_t bytesPerSample(Format f) {
     return formatIsFloat(f) ? sizeof(float) : sizeof(std::int16_t);
 }
 
+static std::uint32_t checkedBufferSize(std::uint32_t frames, std::uint32_t channels, std::uint32_t bps) {
+    const std::uint64_t size = static_cast<std::uint64_t>(frames) * channels * bps;
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
+        throw std::runtime_error("checkedBufferSize: audio buffer size overflows");
+    }
+    return static_cast<std::uint32_t>(size);
+}
+
 struct Port {
     bool used = false;
     int type = 0;
@@ -158,7 +166,7 @@ static const void* prepareBuffer(const Port& port, const void* data, std::vector
     const auto frames = port.samplesNum;
     const auto ch = static_cast<std::uint32_t>(port.channels);
     const auto bps = bytesPerSample(port.format);
-    const auto size = frames * ch * bps;
+    const auto size = checkedBufferSize(frames, ch, bps);
 
     bool volumeChanged = port.mixLevel != DEFAULT_VOLUME;
     for (std::uint32_t i = 0; i < ch; i++) {
@@ -225,8 +233,8 @@ static void queueAudio(Port& port, const void* data, std::unique_lock<std::mutex
 
     std::vector<std::uint8_t> prepareBuf;
     const void* prepared = prepareBuffer(port, data, prepareBuf);
-    const std::uint32_t preparedSize = port.samplesNum *
-        static_cast<std::uint32_t>(port.channels) * bytesPerSample(port.format);
+    const std::uint32_t preparedSize = checkedBufferSize(port.samplesNum,
+        static_cast<std::uint32_t>(port.channels), bytesPerSample(port.format));
 
     const void* queueData = prepared;
     const std::uint32_t queueSize = preparedSize;

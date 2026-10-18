@@ -360,6 +360,7 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        const bool lodClamp = TargetHasCapability(device->Target(), spv::CapabilityMinLod);
         const auto* forced = std::getenv("APS5_SRGB_SHADER_DECODE");
         if (forced != nullptr && std::string_view(forced) == "1") Require((device->Target().srgbDecodeFormats & 3u) == 3u, "forced R8 and RG8 sRGB shader decoding is unavailable");
         FillTexels();
@@ -408,7 +409,7 @@ int main() {
         }
         Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge");
         Run(*device, {ClampWrap, FilterPoint}, "point, wrap");
-        Run(*device, {ClampWrap, FilterPoint}, "point, wrap with negative offsets", true);
+        if (lodClamp) Run(*device, {ClampWrap, FilterPoint}, "point, wrap with negative offsets", true);
         Run(*device, {ClampEdge, FilterBilinear}, "bilinear, 2D array instruction on a 2D texture", false, false, true);
         Run(*device, {ClampEdge, FilterBilinear}, "bilinear, clamp to edge");
         Run(*device, {ClampWrap, FilterBilinear}, "bilinear, wrap");
@@ -417,12 +418,14 @@ int main() {
         Run(*device, {ClampBorder, FilterBilinear, BorderWhite}, "bilinear, white border");
         Run(*device, {ClampBorder, FilterBilinear, BorderBlack}, "bilinear, black border");
         Run(*device, {ClampEdge, FilterPoint, BorderBlack, 0u, 0x0140u}, "point, clamp to edge, sampler LOD bias");
-        Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge, offsets, bias and LOD clamp", true);
-        Run(*device, {ClampWrap, FilterBilinear}, "bilinear, wrap, offsets, bias and LOD clamp", true);
-        Run(*device, {ClampBorder, FilterBilinear, BorderWhite, 0u, 0x3f00u}, "bilinear, white border, offsets, bias and LOD clamp", true);
+        if (lodClamp) {
+            Run(*device, {ClampEdge, FilterPoint}, "point, clamp to edge, offsets, bias and LOD clamp", true);
+            Run(*device, {ClampWrap, FilterBilinear}, "bilinear, wrap, offsets, bias and LOD clamp", true);
+            Run(*device, {ClampBorder, FilterBilinear, BorderWhite, 0u, 0x3f00u}, "bilinear, white border, offsets, bias and LOD clamp", true);
+        }
         for (unsigned iteration = 0; iteration < 2; ++iteration) {
             Run(*device, {ClampEdge, FilterPoint}, "cached point comparison", false, true);
-            Run(*device, {ClampWrap, FilterBilinear}, "cached bilinear comparison with offsets", true, true);
+            if (lodClamp) Run(*device, {ClampWrap, FilterBilinear}, "cached bilinear comparison with offsets", true, true);
         }
         Reject(*device, Format32Float, {ClampEdge, FilterPoint}, "native comparison with a nonconstant texel offset requires", OffsetCode, false);
         RunChannels(*device, QuadCode, {4, 5, 6, 7}, 4, 0, "view R,G,B,A");
@@ -443,7 +446,7 @@ int main() {
         Reject(*device, Format8888UNorm, {ClampHalfBorder, FilterPoint}, "wrap, clamp-to-edge or clamp-to-border");
         Reject(*device, Format8888UNorm, {ClampBorder, FilterPoint, BorderTable}, "border color table");
         Reject(*device, Format8888UNorm, {ClampEdge, FilterBilinear, BorderBlack, ReductionMin}, "min or max reduction");
-        std::puts("emulated color compare tests passed");
+        std::puts(lodClamp ? "emulated color compare tests passed" : "emulated color compare tests passed, the offset and LOD clamp cases were skipped without shaderResourceMinLod");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

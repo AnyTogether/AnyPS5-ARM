@@ -31,7 +31,7 @@ static void CheckContentDelete() {
     Require(Throws<std::logic_error>([] { sceContentDeleteByPath("/data/a.png"); }));
     ContentDeleteInitParam param{};
     Require(sceContentDeleteInitialize(&param) == 0);
-    Require(Throws<std::runtime_error>([] { sceContentDeleteByPath("/data/a.png"); }));
+    Require(Throws<std::logic_error>([] { sceContentDeleteByPath("/data/a.png"); }));
     Require(sceContentDeleteTerminate() == 0);
 }
 

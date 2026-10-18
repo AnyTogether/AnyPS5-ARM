@@ -9,10 +9,10 @@
 #include <netinet/in.h>
 #include <cerrno>
 #endif
+#include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <stdexcept>
@@ -213,7 +213,7 @@ int APS5_VABI getifaddrs_nid_postfix(GuestInterfaceAddress** list) {
         std::size_t size = entries.size() * sizeof(GuestInterfaceAddress);
         for (const auto& entry : entries)
             size += Aligned(entry.name.size() + 1) + Aligned(entry.address.size()) + Aligned(entry.netmask.size()) + Aligned(entry.destination.size());
-        auto* block = static_cast<std::uint8_t*>(std::malloc(size));
+        auto* block = static_cast<std::uint8_t*>(ApplicationHeapAllocate_nid_no_patch(size));
         if (!block) {
             *__error_nid_postfix() = 12;
             return -1;
@@ -243,7 +243,7 @@ int APS5_VABI getifaddrs_nid_postfix(GuestInterfaceAddress** list) {
 }
 
 void APS5_VABI freeifaddrs_nid_postfix(GuestInterfaceAddress* list) {
-    std::free(list);
+    ApplicationHeapFree_nid_no_patch(list);
 }
 
 }

@@ -186,6 +186,7 @@ public:
     void MarkDirty();
     void MarkSliceDirty(std::uint32_t slice);
     void Flush();
+    bool Dirty() const;
     // Stores every pending image overlapping the range, except `except`; returns whether any was.
     // Stores into host-imported memory are recorded (not waited for): a CPU reader syncs afterwards.
     // Then the unit shadows over the range are published into their imports as `scope` says (see

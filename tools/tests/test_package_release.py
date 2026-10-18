@@ -412,6 +412,31 @@ class ReleaseAssetsTests(unittest.TestCase):
 
 
 class ReleaseNotesTests(unittest.TestCase):
+    def test_aliased_paths_preserve_input_and_existing_outputs(self):
+        for pair in ((0, 1), (0, 2), (1, 2)):
+            for alias in ("same", "symlink", "hardlink"):
+                with self.subTest(pair=pair, alias=alias), tempfile.TemporaryDirectory() as directory:
+                    paths = [Path(directory) / name for name in ("notes.json", "body.md", "full.md")]
+                    paths[0].write_text(json.dumps({"body": "release notes"}), encoding="utf-8")
+                    paths[1].write_bytes(b"previous body")
+                    paths[2].write_bytes(b"previous full")
+                    first, second = pair
+                    paths[second].unlink()
+                    if alias == "same":
+                        paths[second] = paths[first]
+                    elif alias == "symlink":
+                        try:
+                            paths[second].symlink_to(paths[first])
+                        except OSError as error:
+                            self.skipTest(str(error))
+                    else:
+                        os.link(paths[first], paths[second])
+                    previous = [path.read_bytes() for path in paths]
+                    with self.assertRaisesRegex(ValueError, "distinct files"):
+                        prepare_release_notes.prepare_notes(*paths)
+                    self.assertEqual([path.read_bytes() for path in paths], previous)
+
+
     def test_short_notes_are_unchanged_including_unicode_at_limit(self):
         for notes in ("", "## What's Changed\n* Fix\n", "я" * 125000):
             self.assertEqual(prepare_release_notes.release_body(notes), notes)

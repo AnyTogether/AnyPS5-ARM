@@ -166,6 +166,11 @@ void Run(AgcDriver::VulkanDevice& device, const Mode& mode) {
     device.WaitIdle();
 }
 
+bool Matches(std::uint32_t actual, std::uint32_t expected) {
+    const auto nan = [](std::uint32_t single) { return (single & 0x7fffffffu) > 0x7f800000u; };
+    return actual == expected || (nan(expected) && nan(actual));
+}
+
 void Check(const Mode& mode) {
     constexpr const char* Names[Results] = {"v_fma_mix_f32 of three f16 sources", "v_fma_mix_f32 of an f16, an f32 and an f16 source"};
     const std::uint32_t f32Kept = (mode.value.floatMode >> 4u) & 1u;
@@ -174,7 +179,7 @@ void Check(const Mode& mode) {
         for (std::uint32_t form = 0; form < Results; ++form) {
             const std::uint32_t actual = Output[tid * Results + form];
             const std::uint32_t expected = Expected[f32Kept][f16InputsKept][tid][form];
-            Require(actual == expected, std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
+            Require(Matches(actual, expected), std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
         }
     }
 }

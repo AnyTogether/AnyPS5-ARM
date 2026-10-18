@@ -438,6 +438,7 @@ int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
         case NET_CTL_INFO_PRIMARY_DNS: WriteInfoAddress(info, host.dns.size() > 0 ? host.dns[0] : in_addr{}); break;
         case NET_CTL_INFO_SECONDARY_DNS: WriteInfoAddress(info, host.dns.size() > 1 ? host.dns[1] : in_addr{}); break;
         case NET_CTL_INFO_HTTP_PROXY_CONFIG: WriteInfoWord(info, NET_CTL_HTTP_PROXY_OFF); break;
+        case NET_CTL_INFO_HTTP_PROXY_PORT: WriteInfoWord(info, 0); break;
         case NET_CTL_INFO_DHCP_HOSTNAME:
         case NET_CTL_INFO_PPPOE_AUTH_NAME:
         case NET_CTL_INFO_HTTP_PROXY_SERVER: std::memset(info->opaque, 0, sizeof(info->opaque)); break;
@@ -447,7 +448,7 @@ int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
 }
 
 int APS5_VABI sceNetCtlGetNatInfo(NetCtlNatInfo* nat_info) {
-    (void)nat_info;
+    if (!nat_info) return SCE_NET_CTL_ERROR_INVALID_ADDR;
     return SCE_NET_CTL_ERROR_NOT_CONNECTED;
 }
 

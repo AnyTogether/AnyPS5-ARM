@@ -550,6 +550,137 @@ void importJoinTests(const Context& context) {
     ::operator delete(block, std::align_val_t{window});
 }
 
+class ImportBudgetRanges {
+public:
+    static constexpr std::size_t piece = 65536;
+    static constexpr std::size_t bytes = 3 * piece;
+
+    explicit ImportBudgetRanges(const Context& context) : importing(context) {
+        block = static_cast<std::byte*>(::operator new(4 * bytes, std::align_val_t{piece}));
+        importing.hostImportAlignment = piece;
+        ClearHostImports(importing.device);
+        SetHostImportWindow(2 * piece);
+        SetHostImportRangeWindow(0);
+        SetHostImportBudget(2 * bytes);
+        GuestAllocations::Mutation mutation;
+        for (std::size_t index = 0; index < 4; ++index) {
+            std::memset(block + index * bytes, static_cast<int>(0x31 + index), bytes);
+            mutation.Add(block + index * bytes, bytes, true, false, true);
+        }
+    }
+
+    ~ImportBudgetRanges() {
+        ClearHostImports(importing.device);
+        {
+            GuestAllocations::Mutation mutation;
+            for (std::size_t index = 0; index < 4; ++index) mutation.Remove(block + index * bytes);
+        }
+        SetHostImportBudget(0);
+        SetHostImportRangeWindow(std::uint64_t{64} << 20u);
+        SetHostImportWindow(0);
+        ::operator delete(block, std::align_val_t{piece});
+    }
+
+    ImportBudgetRanges(const ImportBudgetRanges&) = delete;
+    ImportBudgetRanges& operator=(const ImportBudgetRanges&) = delete;
+
+    std::uintptr_t Address(std::size_t index) const { return reinterpret_cast<std::uintptr_t>(block + index * bytes); }
+
+    void CheckUnchanged() const {
+        for (std::size_t index = 0; index < 4; ++index) {
+            const auto expected = static_cast<std::byte>(0x31 + index);
+            Require(std::all_of(block + index * bytes, block + (index + 1) * bytes, [expected](std::byte value) { return value == expected; }), "import budget probes changed guest bytes");
+        }
+    }
+
+    Context importing;
+
+private:
+    std::byte* block = nullptr;
+};
+
+void importCoverageHintBudgetTests(const Context& context, const BdaTestAccess& access) {
+    for (const bool acquired : {true, false}) {
+        ImportBudgetRanges ranges(context);
+        const auto a = ranges.Address(0);
+        const auto c = ranges.Address(2);
+        const auto d = ranges.Address(3);
+        const auto* first = HostImportFor(ranges.importing, a, 16);
+        Require(first != nullptr && first->base == a && first->bytes == ranges.bytes, "coverage budget fixture did not import its first range");
+        const auto firstBuffer = first->buffer;
+        const auto firstSerial = HostImportSerial(ranges.importing, a, 16, false);
+        for (int use = 0; use < 300; ++use) Require(HostImportFor(ranges.importing, d, 16) != nullptr, "coverage budget fixture did not import its hot range");
+        const auto hotSerial = HostImportSerial(ranges.importing, d, 16, false);
+        Require(firstSerial != 0 && hotSerial != 0 && HostImportLiveBytes() == 2 * ranges.bytes, "coverage budget fixture has unexpected import ownership or usage");
+        {
+            GuestBufferMemory memory(ranges.importing);
+            memory.AddReadable(c, 32);
+            memory.UploadPrepare(false);
+            if (acquired) {
+                const auto* held = HostImportFor(ranges.importing, a, 16);
+                Require(held != nullptr && held->buffer == firstBuffer, "a genuine import acquisition replaced the retained range");
+            } else {
+                Require(HostImportCovers(ranges.importing, a, 16), "a coverage hint missed the existing range");
+            }
+            memory.UploadFinish(false);
+            std::uint32_t adjustment = 0;
+            const auto view = memory.Descriptor(c, 32, adjustment);
+            Require(view.range == 32 + adjustment, "a disjoint descriptor has an incorrect extent");
+            Require(HostImportSerial(ranges.importing, d, 16, false) == hotSerial && HostImportLiveBytes() == 2 * ranges.bytes, "a coverage probe displaced the hot import or changed the budget");
+            if (acquired) {
+                Require(view.buffer != firstBuffer, "a disjoint descriptor uses the retained range's import");
+                Require(HostImportSerial(ranges.importing, a, 16, false) == firstSerial && HostImportSerial(ranges.importing, c, 16, false) == 0, "a genuine import acquisition did not protect its buffer from eviction");
+                Require(memory.CopiedBytes() == 32, "a disjoint descriptor at the budget was not copied while an import was held");
+                const auto copied = access.bytes(view.buffer);
+                const auto offset = static_cast<std::size_t>(view.offset + adjustment);
+                Require(offset + 32 <= copied.size() && std::memcmp(copied.data() + offset, reinterpret_cast<const void*>(c), 32) == 0, "the descriptor copied behind a held import lost its guest bytes");
+            } else {
+                const auto importedSerial = HostImportSerial(ranges.importing, c, 16, false);
+                Require(HostImportSerial(ranges.importing, a, 16, false) == 0 && importedSerial != 0 && importedSerial != firstSerial, "a coverage hint prevented eviction of an unused import");
+                const auto* imported = ExistingHostImportFor(ranges.importing, c, 32);
+                Require(imported != nullptr && imported->base == c && imported->bytes == ranges.bytes && view.buffer == imported->buffer && view.offset + adjustment == c - imported->base, "a descriptor does not bind the import obtained after a coverage hint");
+                Require(memory.CopiedBytes() == 0, "a coverage hint forced the disjoint imported descriptor to copy");
+            }
+            memory.WriteBack();
+        }
+        ranges.CheckUnchanged();
+    }
+}
+
+void failedImportJoinProbeBudgetTests(const Context& context, const BdaTestAccess& access) {
+    ImportBudgetRanges ranges(context);
+    const auto a = ranges.Address(0);
+    const auto crossing = ranges.Address(1) - 16;
+    const auto c = ranges.Address(2);
+    const auto d = ranges.Address(3);
+    const auto* first = HostImportFor(ranges.importing, a, 16);
+    Require(first != nullptr && first->base == a && first->bytes == ranges.bytes, "failed join budget fixture did not import its first range");
+    const auto firstSerial = HostImportSerial(ranges.importing, a, 16, false);
+    for (int use = 0; use < 300; ++use) Require(HostImportFor(ranges.importing, d, 16) != nullptr, "failed join budget fixture did not import its hot range");
+    const auto hotSerial = HostImportSerial(ranges.importing, d, 16, false);
+    Require(firstSerial != 0 && hotSerial != 0 && HostImportLiveBytes() == 2 * ranges.bytes, "failed join budget fixture has unexpected import ownership or usage");
+    {
+        GuestBufferMemory memory(ranges.importing);
+        memory.AddReadable(crossing, 32);
+        memory.AddReadable(c, 32);
+        memory.Upload(false);
+        std::uint32_t adjustment = 0;
+        const auto copiedView = memory.Descriptor(crossing, 32, adjustment);
+        const auto copied = access.bytes(copiedView.buffer);
+        const auto offset = static_cast<std::size_t>(copiedView.offset + adjustment);
+        Require(copiedView.range == 32 + adjustment && offset + 32 <= copied.size() && std::memcmp(copied.data() + offset, reinterpret_cast<const void*>(crossing), 32) == 0, "the refused joined descriptor lost either side's guest bytes");
+        Require(HostImportSerial(ranges.importing, crossing, 32, false) == 0, "a join over the available budget unexpectedly produced an import");
+        const auto importedSerial = HostImportSerial(ranges.importing, c, 16, false);
+        Require(HostImportSerial(ranges.importing, a, 16, false) == 0 && importedSerial != 0 && importedSerial != firstSerial, "a failed join endpoint probe prevented eviction of an unused import");
+        const auto* imported = ExistingHostImportFor(ranges.importing, c, 32);
+        const auto view = memory.Descriptor(c, 32, adjustment);
+        Require(imported != nullptr && imported->base == c && imported->bytes == ranges.bytes && view.buffer == imported->buffer && view.offset + adjustment == c - imported->base && view.range == 32 + adjustment, "the descriptor after a failed join does not bind its complete import");
+        Require(memory.CopiedBytes() == 32 && HostImportLiveBytes() == 2 * ranges.bytes && HostImportSerial(ranges.importing, d, 16, false) == hotSerial, "a failed join forced a second copy or displaced the hot import");
+        memory.WriteBack();
+    }
+    ranges.CheckUnchanged();
+}
+
 // One registered range of `cells` import windows of `window` bytes, with the window and the import budget set for the
 // test and reset after it.
 class WindowedRange {
@@ -1934,6 +2065,8 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     spaceWriteMergedPastImportTests(context, access);
     spaceReadOverWritableImportTableTests(context);
     importJoinTests(context);
+    importCoverageHintBudgetTests(context, access);
+    failedImportJoinProbeBudgetTests(context, access);
     importWholeRangeOverWindowTests(context);
     importRefusedWholeRangeTests(context);
     importNeighbouringEdgesTests(context);

@@ -79,6 +79,59 @@ class OracleCacheTests(unittest.TestCase):
 
 
 class InputRowsTests(unittest.TestCase):
+    def test_cli_reports_invalid_input_before_tool_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body, rows = Path(tmp) / "body.s", Path(tmp) / "rows.txt"
+            body.write_text("s_nop 0", encoding="utf-8")
+            argv = ["hw_oracle.py", str(body), str(rows)]
+            argv += [part for name, value in MODES.items()
+                     for part in ["--" + name.replace("_", "-"), str(value)]]
+            for contents in (None, b"not a number\n", b"1 2 3\n", b"-1 0 0 0\n", b"4294967296 0 0 0\n", b"\xff"):
+                with self.subTest(contents=contents):
+                    rows.unlink(missing_ok=True)
+                    if contents is not None:
+                        rows.write_bytes(contents)
+                    with patch("sys.argv", argv), patch.object(hw_oracle, "assemble") as assemble, \
+                            patch.object(hw_oracle, "oracle") as oracle, \
+                            contextlib.redirect_stdout(io.StringIO()) as output, \
+                            contextlib.redirect_stderr(io.StringIO()) as errors, \
+                            self.assertRaises(SystemExit) as exited:
+                        hw_oracle.main()
+                    self.assertEqual(exited.exception.code, 2)
+                    self.assertIn("error:", errors.getvalue())
+                    self.assertEqual(output.getvalue(), "")
+                    assemble.assert_not_called()
+                    oracle.assert_not_called()
+
+    def test_successful_dispatch_without_output_cannot_reuse_previous_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Path(directory) / "runner.py"
+            runner.write_text(
+                "import sys\nfrom pathlib import Path\n"
+                "output = Path(sys.argv[3])\n"
+                "marker = output.with_suffix('.seen')\n"
+                "if not marker.exists():\n"
+                "    output.write_bytes(bytes(int(sys.argv[1]) * 64))\n"
+                "    marker.touch()\n", encoding="utf-8")
+            for wave64 in (False, True):
+                with self.subTest(wave64=wave64), patch.object(hw_oracle, "assemble", return_value=runner), \
+                        patch.object(hw_oracle, "oracle", return_value=sys.executable):
+                    with self.assertRaises(FileNotFoundError):
+                        hw_oracle.run("s_nop 0", [(0, 0, 0, 0)] * 1025, wave64=wave64, **MODES)
+
+
+    def test_oracle_output_must_match_the_padded_dispatch_size(self):
+        for delta in (-1, 1, 64):
+            def dispatch(command, **kwargs):
+                Path(command[4]).write_bytes(bytes(int(command[2]) * 64 + delta))
+
+            with self.subTest(delta=delta), patch.object(hw_oracle, "assemble", return_value="kernel.co"), \
+                    patch.object(hw_oracle, "oracle", return_value="oracle"), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=dispatch):
+                with self.assertRaisesRegex(ValueError, "Oracle output size"):
+                    hw_oracle.run("s_nop 0", [(0, 0, 0, 0)], **MODES)
+
+
     def test_invalid_rows_fail_before_assembler_or_gpu_lookup(self):
         for row in ((1, 2, 3), (1, 2, 3, 4, 5), (-1, 0, 0, 0),
                     (0x100000000, 0, 0, 0), (1.5, 0, 0, 0), ("1", 0, 0, 0)):
@@ -228,8 +281,9 @@ class JsonReportTests(unittest.TestCase):
         self.rows.write_text("0x100000000 0 0 0\n", encoding="utf-8")
         output = io.StringIO()
         with patch.object(hw_oracle, "target", side_effect=AssertionError("target lookup")) as target:
-            with self.assertRaisesRegex(ValueError, "row 1"):
+            with self.assertRaises(SystemExit) as exited:
                 self.cli("--json", output=output)
+            self.assertEqual(exited.exception.code, 2)
             target.assert_not_called()
         self.assertEqual(output.getvalue(), "")
 
@@ -354,6 +408,30 @@ class TargetOverrideTests(unittest.TestCase):
 
 
 class OracleConfigurationTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX executable compiler fixture")
+    def test_path_selecting_another_compiler_invalidates_the_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("first", "second"):
+                compiler = root / name / "fixture-cc"
+                compiler.parent.mkdir()
+                compiler.write_text(
+                    "#!" + sys.executable + "\nimport sys\nfrom pathlib import Path\n"
+                    "Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(" + repr(name.encode()) + ")\n",
+                    encoding="utf-8")
+                compiler.chmod(0o755)
+            with patch.object(hw_oracle, "CACHE", root / "cache"), \
+                    patch.object(hw_oracle, "rocm_root", return_value=None):
+                with patch.dict(os.environ, {"CC": "fixture-cc", "PATH": str(root / "first")}):
+                    first = hw_oracle.oracle()
+                    self.assertEqual(first.read_bytes(), b"first")
+                    self.assertEqual(hw_oracle.oracle(), first)
+                with patch.dict(os.environ, {"CC": "fixture-cc", "PATH": str(root / "second")}):
+                    second = hw_oracle.oracle()
+                    self.assertEqual(second.read_bytes(), b"second")
+                    self.assertNotEqual(first, second)
+
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux compiler and shared-library fixture")
     def test_cache_and_compiler_command_with_host_toolchain(self):
         compiler = shutil.which("cc")

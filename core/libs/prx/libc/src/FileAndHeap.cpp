@@ -26,6 +26,7 @@
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
+#include "prx/libc/include/HostErrno.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 
@@ -67,7 +68,16 @@ static std::FILE* OpenNative(const std::filesystem::path& path, const std::strin
     const DWORD disposition = access == 'r' ? OPEN_EXISTING
         : nativeMode.find('x') != std::string::npos ? CREATE_NEW : access == 'w' ? CREATE_ALWAYS : OPEN_ALWAYS;
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    const auto handle = CreateFileW(path.c_str(), desired, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &security,
+    auto filename = path.native();
+    if (!filename.starts_with(L"\\\\?\\") && !filename.starts_with(L"\\\\.\\")) {
+        std::error_code pathError;
+        auto absolutePath = std::filesystem::absolute(path, pathError);
+        if (pathError) { errno = pathError.default_error_condition().value(); return nullptr; }
+        const auto absolute = absolutePath.lexically_normal().make_preferred().native();
+        if (absolute.size() >= MAX_PATH)
+            filename = absolute.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + absolute.substr(2) : L"\\\\?\\" + absolute;
+    }
+    const auto handle = CreateFileW(filename.c_str(), desired, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &security,
         disposition, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         errno = WindowsOpenError_nid_no_patch(GetLastError());
@@ -284,7 +294,7 @@ FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode
             if (!path.empty() && parsed->writes) RecordWrittenPath_nid_no_patch(path);
             return stream;
         }
-        const int error = errno;
+        const int error = GuestErrnoFromHost_nid_no_patch(errno);
         if (stream->IsDynamic()) delete stream;
         errno = error;
         return nullptr;
@@ -303,8 +313,7 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
     if (const int error = ResolvePathError_nid_no_patch(filename, fpath)) { errno = error; return nullptr; }
     std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(OpenNative(fpath, parsed->native), std::fclose);
     if (!handle) {
-        const int error = errno;
-        errno = error;
+        errno = GuestErrnoFromHost_nid_no_patch(errno);
         return nullptr;
     }
     // APS5_LOG_OUT("success: \"%s\"", abs_path.c_str());
@@ -317,12 +326,11 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
 
 int APS5_VABI fopen_s_nid_postfix(FileStream** result, const char* filename, const char* mode) {
     constexpr int GuestEinval = 22;
-    constexpr int GuestEnoent = 2;
     if (!result) return GuestEinval;
     *result = nullptr;
     if (!filename || !mode) return GuestEinval;
     *result = fopen_nid_postfix(filename, mode);
-    return *result ? 0 : GuestEnoent;
+    return *result ? 0 : errno;
 }
 
 int APS5_VABI fclose_nid_postfix(FileStream* stream) {
@@ -546,6 +554,39 @@ void* APS5_VABI bsearch_nid_postfix(const void* key, const void* base, size_t co
         else { first = middle + 1; count -= half + 1; }
     }
     return nullptr;
+}
+
+int APS5_VABI mergesort_nid_postfix(void* base, size_t count, size_t size, GuestCompare compare) {
+    if (size < 4) {
+        errno = 22;
+        return -1;
+    }
+    if (count == 0) return 0;
+    if (!compare) throw std::invalid_argument("mergesort: null comparator");
+    if (!base) throw std::invalid_argument("mergesort: null base");
+    if (count > (std::numeric_limits<size_t>::max() - 8) / size) throw std::overflow_error("mergesort: array size overflow");
+    auto* const scratch = static_cast<unsigned char*>(malloc_nid_postfix(count * size + 8));
+    if (!scratch) return -1;
+    auto* source = static_cast<unsigned char*>(base);
+    auto* target = scratch;
+    for (size_t width = 1; width < count; width *= 2) {
+        for (size_t low = 0; low < count; low += 2 * width) {
+            const size_t middle = std::min(low + width, count);
+            const size_t high = std::min(low + 2 * width, count);
+            size_t left = low, right = middle, out = low;
+            while (left < middle && right < high) {
+                const size_t taken = compare(source + left * size, source + right * size) <= 0 ? left++ : right++;
+                std::memcpy(target + out++ * size, source + taken * size, size);
+            }
+            std::memcpy(target + out * size, source + left * size, (middle - left) * size);
+            out += middle - left;
+            std::memcpy(target + out * size, source + right * size, (high - right) * size);
+        }
+        std::swap(source, target);
+    }
+    if (source != base) std::memcpy(base, source, count * size);
+    free_nid_postfix(scratch);
+    return 0;
 }
 
 void APS5_VABI qsort_nid_postfix(void* base, size_t count, size_t size, int (APS5_VABI *compare)(const void*, const void*)) {

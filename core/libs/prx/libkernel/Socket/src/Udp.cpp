@@ -7,6 +7,9 @@
 #else
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#ifdef __linux__
+#include <linux/sockios.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
@@ -29,6 +32,7 @@
 #include "prx/libkernel/File/include/DescriptorControl.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "prx/libkernel/File/include/File.hpp"
+#include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
 #include "prx/libkernel/Socket/include/SocketConnect.hpp"
@@ -443,6 +447,23 @@ int GuestSockets::Family(int descriptor) {
     const auto found = sockets.find(descriptor);
     return found == sockets.end() ? -1 : found->second->family;
 }
+int GuestSockets::Type(int descriptor) {
+    std::lock_guard lock(socketsMutex);
+    const auto found = sockets.find(descriptor);
+    return found == sockets.end() ? -1 : found->second->type;
+}
+bool GuestSockets::Listening(int descriptor) {
+    std::shared_ptr<Socket> socket;
+    {
+        std::lock_guard lock(socketsMutex);
+        const auto found = sockets.find(descriptor);
+        if (found == sockets.end()) return false;
+        socket = found->second;
+    }
+    int accepting = 0;
+    socklen_t length = sizeof(accepting);
+    return getsockopt(socket->value, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<char*>(&accepting), &length) == 0 && accepting != 0;
+}
 
 extern "C" bool GuestSocketIsOpen_nid_no_patch(int descriptor) {
     return GuestSockets::IsOpen(descriptor);
@@ -492,6 +513,7 @@ std::shared_ptr<Socket> Find(int descriptor) {
 }
 constexpr short GuestPollReadable = 0x1 | 0x40;
 constexpr short GuestPollWritable = 0x4;
+constexpr short GuestPollVnodeReady = GuestPollReadable | GuestPollWritable;
 constexpr short GuestPollHangUp = 0x10;
 constexpr short GuestPollError = 0x8;
 [[noreturn]] void ThrowReadEndWritable(int descriptor) {
@@ -848,6 +870,10 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         int size = 0;
         socklen_t length = sizeof(size);
         if (getsockopt(socket->value, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&size), &length) == 0) *data = size;
+#ifdef __linux__
+        int queued = 0;
+        if (*data > 0 && ::ioctl(socket->value, SIOCOUTQ, &queued) == 0) *data = std::max<std::int64_t>(0, *data - queued);
+#endif
     } else {
 #ifdef _WIN32
         unsigned long available = 0;
@@ -922,6 +948,15 @@ int GuestSockets::Poll(KernelSocketPoll::Entry* entries, int count, int timeoutM
         if (revents != 0) ++ready;
     }
     return ready;
+}
+
+extern "C" bool KernelLookupSocketNative_nid_no_patch(int descriptor, std::shared_ptr<void>* owner, std::uintptr_t* native) {
+    if (auto socket = Find(descriptor)) {
+        *native = static_cast<std::uintptr_t>(socket->value);
+        *owner = std::move(socket);
+        return true;
+    }
+    return KernelFindSocketNative_nid_no_patch(descriptor, owner, native);
 }
 
 extern "C" {
@@ -1032,7 +1067,9 @@ int APS5_VABI socket_nid_postfix(int family, int type, int protocol) {
     if (family != 2 && family != 28) return Fail(47);
     const int nativeType = plainType == 1 ? SOCK_STREAM : plainType == 2 ? SOCK_DGRAM : -1;
     const int expectedProtocol = plainType == 1 ? 6 : 17;
-    if (nativeType == -1 || (protocol != 0 && protocol != expectedProtocol)) return Fail(43);
+    const bool inetKnowsType = plainType == 3 || plainType == 5;
+    if (nativeType == -1) return Fail(protocol == 0 && plainType != 0 && !inetKnowsType ? 41 : 43);
+    if (protocol != 0 && protocol != expectedProtocol) return Fail(43);
 #ifdef _WIN32
     static const int startup = [] { WSADATA data{}; return WSAStartup(MAKEWORD(2, 2), &data); }();
     if (startup) return Fail(5);
@@ -1531,13 +1568,29 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
                 ++ready;
                 continue;
             }
+            if (File::IsRandomDevice(entry.descriptor)) {
+                const short readable = static_cast<short>(entry.events & GuestPollReadable);
+                entry.revents = readable != 0 ? readable : entry.events;
+                if (entry.revents) ++ready;
+                continue;
+            }
+            if (entry.descriptor <= 2) {
+                entry.revents = static_cast<short>(entry.descriptor == 0 ? 0 : entry.events & GuestPollWritable);
+                if (entry.revents) ++ready;
+                continue;
+            }
+            if (File::IsVnode(entry.descriptor)) {
+                entry.revents = static_cast<short>(entry.events & GuestPollVnodeReady);
+                if (entry.revents) ++ready;
+                continue;
+            }
 #ifdef _WIN32
             short revents = 0;
             if (!PipeReadiness(entry.descriptor, entry.events, revents))
 #else
             if (!IsPipe(entry.descriptor, entry.events))
 #endif
-                throw std::runtime_error("poll: descriptor " + std::to_string(entry.descriptor) + " is neither a socket nor a pipe");
+                throw std::runtime_error("poll: descriptor " + std::to_string(entry.descriptor) + " is neither a socket, a pipe, a file nor a directory");
             pipes.push_back(i);
             continue;
         }

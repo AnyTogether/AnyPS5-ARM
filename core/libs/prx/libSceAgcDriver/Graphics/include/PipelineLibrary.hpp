@@ -48,6 +48,9 @@ void WaitForOptimizedPipelines(VkDevice device);
 
 void ClearPipelineLibraries(VkDevice device);
 
+void StopPipelineLibraryWorker();
+unsigned PipelineLibraryWorkers();
+
 struct PipelineLibraryCounters {
     std::array<std::uint64_t, 4> built{};
     std::uint64_t linked = 0;

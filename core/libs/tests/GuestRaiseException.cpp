@@ -613,7 +613,8 @@ int main() {
         leaving.started.store(false);
         std::this_thread::sleep_for(std::chrono::microseconds(200));
         Require(sceKernelSignalSema(leaving.sem, 1) == 0);
-        for (int spin = 0; spin < round % 16 * 64; ++spin) std::this_thread::yield();
+        const auto offset = std::chrono::steady_clock::now() + std::chrono::microseconds(round % 16 * 8);
+        while (std::chrono::steady_clock::now() < offset) {}
         Require(sceKernelRaiseException(leavingThread, GuestSigusr1) == 0);
         ExpectDelivery(1 + 2 * Repeats + HostRounds + round, leaving.id);
         leavingRound.store(round + 1);

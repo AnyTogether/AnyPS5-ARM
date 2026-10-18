@@ -77,6 +77,10 @@ class PadInputTests(unittest.TestCase):
         self.assertEqual(self.queue(2000, "release", "--right-stick", "0", "255"),
                          [2000, 0, 300, 128, 128, 0, 255])
 
+    def test_touchpad_halves_queue_their_bits_and_preserve_sequence(self):
+        self.assertEqual(self.queue(1000, "touch-left"), [1000, 0x200000, 300])
+        self.assertEqual(self.queue(1000, "touch-right"), [1001, 0x400000, 300])
+
     def test_valid_stick_command_and_unsigned_tokens_preserve_sequence(self):
         self.path.write_text("+2000 +16384 +300 +0 +255 +128 +128\n", encoding="utf-8")
         self.assertEqual(self.queue(1000, "release"), [2001, 0, 300])

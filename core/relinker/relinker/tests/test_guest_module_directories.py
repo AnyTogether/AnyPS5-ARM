@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 
+from guest_import_fixtures import dynamic
 from test_guest_intel_trampolines import PLAIN_SITE, elf_loads, guest_fixture, main_fixture
 
 
@@ -20,6 +21,15 @@ def module_with_symbol(exported):
     if not exported:
         struct.pack_into("<Q", image, 0x668, 24)
         struct.pack_into("<QQq", image, 0x900, 0x2320, (1 << 32) | 6, 0)
+    return image
+
+
+def module_with_soname(soname):
+    image = module_with_symbol(True)
+    strings = b"\0shared#A#B\0" + soname.encode() + b"\0"
+    image[0x800:0x800 + len(strings)] = strings
+    dynamic(image, 0x600, 176, [(5, 0x2200), (10, len(strings)), (6, 0x2280), (11, 24),
+                                (4, 0x2240), (7, 0x2300), (8, 0), (9, 24), (14, 12)])
     return image
 
 
@@ -127,6 +137,35 @@ def main():
                 assert result.returncode == 0 and output.exists(), result.stderr
                 assert warning not in result.stdout, result.stdout
                 assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"provider.prx.guest.prx"}
+
+            case = work / f"{windows}-backup-copies"
+            (case / "sce_module").mkdir(parents=True)
+            for name in ("libSceFace.prx", "libSceFace.prx.esbak", "libSceFace.prxbak"):
+                (case / "sce_module" / name).write_bytes(module_with_soname("libSceFace.prx"))
+            result, output = convert(case, windows)
+            assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
+            for name in ("libSceFace.prx.esbak", "libSceFace.prxbak"):
+                skipped = f"Skipping backup copy: sce_module/{name} (same SONAME as sce_module/libSceFace.prx)"
+                assert result.stdout.count(skipped) == 1, result.stdout
+            assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"libSceFace.prx.guest.prx"}
+
+            case = work / f"{windows}-prefixed-libraries"
+            (case / "sce_module").mkdir(parents=True)
+            for name in ("libfoo.so.1", "libfoo.so.10"):
+                (case / "sce_module" / name).write_bytes(module_with_soname(name))
+            result, output = convert(case, windows)
+            assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
+            assert "Skipping backup copy" not in result.stdout, result.stdout
+            assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"libfoo.so.1.guest.prx", "libfoo.so.10.guest.prx"}
+
+            case = work / f"{windows}-backup-of-self"
+            (case / "sce_module").mkdir(parents=True)
+            (case / "sce_module" / "libSceFace.prx").write_bytes(b"\x4f\x15\x3d\x1d" + bytes(0x1000))
+            (case / "sce_module" / "libSceFace.prx.esbak").write_bytes(module_with_soname("libSceFace.prx"))
+            result, output = convert(case, windows)
+            assert result.returncode == 0 and output.exists(), (result.stdout, result.stderr)
+            assert "Skipping backup copy" not in result.stdout, result.stdout
+            assert {path.name for path in (case / "app0").rglob("*.guest.prx")} == {"libSceFace.prx.esbak.guest.prx"}
 
             case = work / f"{windows}-ambiguous"
             for name in ("sce_module", "sce_modules", "prx"):

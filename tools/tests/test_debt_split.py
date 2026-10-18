@@ -25,6 +25,17 @@ ORIGINAL = index([A_STUB, B_STUB, C_STUB], [A_FUNCTIONAL, SHADER, SHARED])
 
 
 class DebtSplitTests(unittest.TestCase):
+    def test_split_preserves_root_relative_links(self):
+        targets = ("/AnyPS5/guide.html#usage", "/images/example.png", "/")
+        references = " ".join(f"[reference]({target})" for target in targets)
+        self.write(INDEX, ORIGINAL.replace(A_STUB, A_STUB + " " + references))
+        self.split()
+        moved = self.read("docs/dev/debt/libSceA.md")
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertIn(f"[reference]({target})", moved)
+        self.assertIn("../../../core/libs/prx/libSceA/Export.cpp", moved)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)

@@ -491,9 +491,14 @@ int APS5_VABI fchmodat_nid_postfix(int fd, const char* path, int mode, int flag)
         const bool symbolic = std::filesystem::is_symlink(std::filesystem::symlink_status(native, status));
 #endif
         if (symbolic) {
-            NotImplemented_nid_no_patch("fchmodat: AT_SYMLINK_NOFOLLOW on a symbolic link");
-            return -1;
+#ifdef __APPLE__
+        if (::fchmodat(AT_FDCWD, native.c_str(), static_cast<mode_t>(mode & 07777), AT_SYMLINK_NOFOLLOW) != 0) {
+            return static_cast<int>(Fail(GuestFileError(errno)));
         }
+#endif
+        RecordWrittenPath_nid_no_patch(native);
+        return 0;
+    }
     }
 #ifdef _WIN32
     if (::_wchmod(native.wstring().c_str(), mode & 07777) != 0) return static_cast<int>(Fail(GuestFileError(errno)));

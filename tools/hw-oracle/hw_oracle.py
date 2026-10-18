@@ -44,7 +44,9 @@ def oracle():
     root = rocm_root()
     if root is not None:
         root = root.resolve()
-    configuration = repr((compiler, str(root))).encode("utf-8")
+    executable = shutil.which(compiler[0])
+    selected = str(Path(executable).resolve()) if executable is not None else None
+    configuration = repr((compiler, selected, str(root))).encode("utf-8")
     key = hashlib.sha256(source.read_bytes() + configuration).hexdigest()
     directory = CACHE / key
     binary = directory / "oracle"
@@ -100,7 +102,7 @@ def assemble(body, work, wave64, *, ieee, denorm32, denorm16, dx10_clamp, round3
     return work / "k.co"
 
 
-def run(body, rows, extra=b"", wave64=False, coarse=False, *, ieee, denorm32, denorm16, dx10_clamp, round32, round16, fp16_overflow, lds=DEFAULT_LDS):
+def validated_rows(rows):
     validated = []
     for index, row in enumerate(rows, 1):
         try:
@@ -110,7 +112,11 @@ def run(body, rows, extra=b"", wave64=False, coarse=False, *, ieee, denorm32, de
         if len(values) != 4 or any(value < 0 or value > 0xffffffff for value in values):
             raise ValueError(f"row {index} needs 4 unsigned 32-bit integers")
         validated.append(values)
-    rows = validated
+    return validated
+
+
+def run(body, rows, extra=b"", wave64=False, coarse=False, *, ieee, denorm32, denorm16, dx10_clamp, round32, round16, fp16_overflow, lds=DEFAULT_LDS):
+    rows = validated_rows(rows)
     wave = 64 if wave64 else 32
     padded = rows + [(0, 0, 0, 0)] * (-len(rows) % wave)
     env = dict(os.environ)
@@ -126,8 +132,12 @@ def run(body, rows, extra=b"", wave64=False, coarse=False, *, ieee, denorm32, de
         for start in range(0, len(padded), rows_per_dispatch):
             chunk = padded[start:start + rows_per_dispatch]
             (work / "in.bin").write_bytes(b"".join(struct.pack("<4I", *r) for r in chunk) + extra)
+            (work / "out.bin").unlink(missing_ok=True)
             subprocess.run([oracle(), str(code), str(len(chunk)), str(work / "in.bin"), str(work / "out.bin"), "16"], check=True, env=env, stdout=sys.stderr)
             data = (work / "out.bin").read_bytes()
+            expected = len(chunk) * 64
+            if len(data) != expected:
+                raise ValueError(f"Oracle output size: expected {expected} bytes, got {len(data)}")
             out += [struct.unpack_from("<16I", data, lane * 64) for lane in range(len(chunk))]
     return out[:len(rows)]
 
@@ -157,13 +167,15 @@ def main():
     parser.add_argument("--outs", type=int, choices=range(1, 17), default=16, metavar="N", help="print v10..v(10+N-1)")
     parser.add_argument("--json", action="store_true", help="emit inputs, results and run settings as JSON; target is the assembly target, not a GPU model or driver")
     args = parser.parse_args()
-    rows = [tuple(parse_word(v) for v in line.split()) for line in args.rows.read_text().splitlines() if line.strip()]
-    if not rows:
-        parser.error("rows file must contain at least one input row")
-    if any(len(r) != 4 for r in rows):
-        sys.exit("every row needs 4 values")
-    extra = args.extra.read_bytes() if args.extra else b""
-    body = args.body.read_text()
+    try:
+        rows = validated_rows(tuple(parse_word(v) for v in line.split())
+                              for line in args.rows.read_text(encoding="utf-8").splitlines() if line.strip())
+        if not rows:
+            parser.error("rows file must contain at least one input row")
+        extra = args.extra.read_bytes() if args.extra else b""
+        body = args.body.read_text(encoding="utf-8")
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     modes = {name: getattr(args, name) for name in ("ieee", "denorm32", "denorm16", "dx10_clamp", "round32", "round16", "fp16_overflow")}
     results = run(body, rows, extra, args.wave64, args.coarse, **modes, lds=args.lds)
     if args.json:

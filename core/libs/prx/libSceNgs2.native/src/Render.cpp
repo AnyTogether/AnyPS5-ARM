@@ -298,7 +298,7 @@ static void WriteOutput(const Ngs2RenderBufferInfo& output, const std::vector<fl
     }
 }
 
-void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
+static std::vector<std::size_t> OutputBytes(const Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
     const auto grain = system.option.num_grain_samples;
     std::vector<std::size_t> outputBytes(numBufferInfo);
     for (std::uint32_t i = 0; i < numBufferInfo; i++) {
@@ -310,6 +310,19 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
         outputBytes[i] = static_cast<std::size_t>(grain) * output.num_channels * SampleBytes(output.waveform_type);
         if (output.buffer_size < outputBytes[i]) throw std::invalid_argument("NGS2: render buffer " + std::to_string(i) + " is too small");
     }
+    return outputBytes;
+}
+
+void Ngs2RenderSilence(const Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
+    const auto outputBytes = OutputBytes(system, bufferInfo, numBufferInfo);
+    for (std::uint32_t i = 0; i < numBufferInfo; i++) {
+        if (outputBytes[i] != 0) std::memset(bufferInfo[i].buffer, 0, outputBytes[i]);
+    }
+}
+
+void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
+    const auto grain = system.option.num_grain_samples;
+    const auto outputBytes = OutputBytes(system, bufferInfo, numBufferInfo);
     std::vector<Ngs2Voice*> voices;
     for (auto* rack : system.racks) {
         for (auto& voice : rack->voices) {

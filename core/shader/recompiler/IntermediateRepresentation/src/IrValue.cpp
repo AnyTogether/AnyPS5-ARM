@@ -65,10 +65,30 @@ void IrValue::ReplaceAllUsesWith(IrValue* replacement) {
     if (replacement == this) {
         return;
     }
-    while (!operandUses.empty()) {
-        const IrUse use = operandUses.back();
-        use.user->ReplaceArgument(use.operand, replacement);
+    if (replacement != nullptr) {
+        const auto reserveAdditional = [count = operandUses.size()](auto& list) {
+            const auto maximum = list.max_size();
+            if (count > maximum - list.size()) {
+                throw std::length_error("IrValue::ReplaceAllUsesWith use list is too large");
+            }
+            const auto required = list.size() + count;
+            if (required > list.capacity()) {
+                const auto grown = list.capacity() > maximum / 2 ? maximum : list.capacity() * 2;
+                list.reserve(std::max(required, grown));
+            }
+        };
+        reserveAdditional(replacement->uses);
+        reserveAdditional(replacement->operandUses);
     }
+    for (auto use = operandUses.rbegin(); use != operandUses.rend(); ++use) {
+        use->user->arguments[use->operand] = replacement;
+        if (replacement != nullptr) {
+            replacement->uses.push_back(use->user);
+            replacement->operandUses.push_back(*use);
+        }
+    }
+    uses.clear();
+    operandUses.clear();
 }
 
 void IrValue::SetImmediateU32(std::uint32_t value) {

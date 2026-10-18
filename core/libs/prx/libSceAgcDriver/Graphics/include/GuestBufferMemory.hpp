@@ -40,7 +40,12 @@ struct HostImport {
     bool joined = false;
     std::shared_ptr<void> chunk;
     mutable std::uint64_t lastUse = 0;
+    std::uint64_t lead = 0;
 };
+
+inline VkDeviceSize HostImportOffset(const HostImport& import, std::uint64_t address) {
+    return address - import.base + import.lead;
+}
 
 enum class ImportWatch : std::uint8_t { Watch, Unwatch };
 
@@ -63,15 +68,24 @@ ImportWatch PrepareImportWatch(const Context& context);
 void SetImportWatch(const Context& context, ImportWatch watch);
 
 // The host import of the registered allocation containing [address, address + bytes), made on demand
-// (alignment and budget permitting), or null. Bytes at `address` are at `address - import->base` in
-// the import's buffer.
+// (alignment and budget permitting), or null. Bytes at `address` are at `HostImportOffset(*import,
+// address)` in the import's buffer.
 const HostImport* HostImportFor(const Context& context, std::uint64_t address, std::size_t bytes);
 const HostImport* ExistingHostImportFor(const Context& context, std::uint64_t address, std::size_t bytes);
 void SetHostImportWindow(std::uint64_t bytes);
 // Tests: the window of one large registered range (64 MiB) and the import budget (0: the configured one).
 void SetHostImportRangeWindow(std::uint64_t bytes);
 void SetHostImportBudget(std::uint64_t bytes);
+void SetHostImportDeferredSettles(bool enabled);
 std::uint64_t HostImportLiveBytes();
+struct HostImportSettleCounts {
+    std::uint64_t submitted = 0;
+    std::uint64_t waited = 0;
+    std::uint64_t rewatched = 0;
+    std::uint64_t parked = 0;
+    std::uint64_t unmapWaits = 0;
+};
+HostImportSettleCounts HostImportSettles();
 // Tests: how many imports settleImport has used on the settle queue.
 std::uint64_t HostImportsSettled();
 bool ImportMappedRanges(const Context& context, const GuestAllocations::Mapped& ranges, std::uint64_t generation, bool adoptDevice);

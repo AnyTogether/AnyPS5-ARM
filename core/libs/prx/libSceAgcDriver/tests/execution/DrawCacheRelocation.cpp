@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "VulkanTestDevice.hpp"
 #include <array>
@@ -22,7 +23,18 @@ using AgcDriver::DriverDetail::DrawMiss;
 alignas(256) constexpr std::array<std::uint32_t, 8> VertexCode{0x7e000208u, 0x7e020280u, 0x7e040280u, 0x7e0602f2u, 0xf80008cfu, 0x03020100u, 0xbf810000u, 0xbf810000u};
 alignas(256) constexpr std::array<std::uint32_t, 8> SecondVertexCode = VertexCode;
 alignas(256) constexpr std::array<std::uint32_t, 8> PixelCode{0xf4000100u, 0xfa000000u, 0x7e000204u, 0x7e020280u, 0xf800180fu, 0x00010100u, 0xbf810000u, 0xbf810000u};
+alignas(256) constexpr std::array<std::uint32_t, 16> TriangleVertexCode{
+    0x7e000d05u, 0x080200f4u, 0x10020300u, 0x100202f4u, 0x060202f3u, 0x060400f3u, 0x10040500u, 0x060404f3u,
+    0x7e060280u, 0x7e0802f2u, 0xf80008cfu, 0x04030201u, 0xbf810000u,
+};
+alignas(256) constexpr std::array<std::uint32_t, 16> ForwardedPixelCode{
+    0xf4040080u, 0xfa000000u, 0xbf8cc07fu, 0xf4000101u, 0xfa000000u, 0xbf8cc07fu, 0x7e000204u, 0xd5480001u,
+    0x02050800u, 0x7e020d01u, 0xf800180fu, 0x00010100u, 0xbf810000u, 0xbf810000u, 0xbf810000u, 0xbf810000u,
+};
 alignas(16) std::array<float, 4> Other{0.5f, 0.0f, 0.0f, 0.0f};
+alignas(16) std::array<float, 4> ForwardedData{};
+alignas(32) std::array<std::array<std::uint64_t, 4>, 6> AlignedTables{};
+alignas(32) std::array<std::uint64_t, 4> OffsetTable{};
 alignas(256) std::array<std::byte, 1024> ColorMemory{};
 
 struct Header {
@@ -33,6 +45,8 @@ struct Header {
 alignas(8) Header VertexHeader{};
 alignas(8) Header PixelHeader{};
 alignas(8) Header SecondVertexHeader{};
+alignas(8) Header TriangleVertexHeader{};
+alignas(8) Header ForwardedPixelHeader{};
 
 const Shader* Registered(Header& header, const std::uint32_t* code, std::size_t bytes, std::uint8_t type) {
     header.shader.file_header = 0x34333231u;
@@ -51,10 +65,10 @@ void Append(std::vector<std::uint32_t>& commands, std::uint32_t opcode, std::ini
     commands.insert(commands.end(), payload);
 }
 
-std::vector<std::uint32_t> DrawFrom(std::initializer_list<const float*> sources, const std::uint32_t* vertexCode = VertexCode.data()) {
+std::vector<std::uint32_t> DrawFrom(std::initializer_list<const void*> sources, const std::uint32_t* vertexCode = VertexCode.data(), const std::uint32_t* pixelCode = PixelCode.data()) {
     const auto color = reinterpret_cast<std::uintptr_t>(ColorMemory.data());
     const auto vertex = reinterpret_cast<std::uintptr_t>(vertexCode);
-    const auto pixel = reinterpret_cast<std::uintptr_t>(PixelCode.data());
+    const auto pixel = reinterpret_cast<std::uintptr_t>(pixelCode);
     const std::vector<std::pair<std::uint32_t, std::uint32_t>> context{
         {0x2d5, 0x2000},
         {0x1b6, 0}, {0x207, 0}, {0x200, 0}, {0x203, 0x800},
@@ -97,7 +111,7 @@ void MovedDataHitsTheCache(bool libraries) {
     Registered(VertexHeader, VertexCode.data(), sizeof(VertexCode), 2);
     Registered(PixelHeader, PixelCode.data(), sizeof(PixelCode), 1);
     const auto mode = std::string(libraries ? "with" : "without") + " graphics pipeline libraries";
-    const auto draw = [&](std::initializer_list<const float*> sources) {
+    const auto draw = [&](std::initializer_list<const void*> sources) {
         auto commands = DrawFrom(sources);
         Packet packet{commands.data(), static_cast<std::uint32_t>(commands.size()), 0, {}};
         Require(sceAgcDriverSubmitDcb(&packet) == 0, "the draw submission failed");
@@ -145,6 +159,48 @@ void UnrelocatedAliasesStayOut(bool libraries) {
     Require(counters.hits - start.hits == twice.size(), mode + ": the exact key of a repeated draw lost its hits next to draws whose alias never relocates (" + std::to_string(counters.hits - start.hits) + " hits in " + std::to_string(twice.size()) + " draws)");
 }
 
+void MovedForwardedWordReachesStageDataHit(bool libraries) {
+    Registered(TriangleVertexHeader, TriangleVertexCode.data(), sizeof(TriangleVertexCode), 2);
+    Registered(ForwardedPixelHeader, ForwardedPixelCode.data(), sizeof(ForwardedPixelCode), 1);
+    const auto mode = std::string(libraries ? "with" : "without") + " graphics pipeline libraries";
+    constexpr std::byte Kept{0x40};
+    const auto draw = [&](const void* table) {
+        ColorMemory.fill(Kept);
+        auto commands = DrawFrom({table}, TriangleVertexCode.data(), ForwardedPixelCode.data());
+        Packet packet{commands.data(), static_cast<std::uint32_t>(commands.size()), 0, {}};
+        Require(sceAgcDriverSubmitDcb(&packet) == 0, "the draw submission failed");
+        AgcDriverWaitIdle_nid_postfix();
+        AgcDriver::GuestMemory::FlushGpuWrites(reinterpret_cast<std::uintptr_t>(ColorMemory.data()), ColorMemory.size());
+        return AgcDriver::DriverDetail::Driver::Get().DrawCacheCounters();
+    };
+    const auto pixels = [&](std::array<std::uint8_t, 4> expected) {
+        std::size_t drawn = 0;
+        for (std::size_t at = 0; at < ColorMemory.size(); at += 4) {
+            const std::array<std::uint8_t, 4> pixel{static_cast<std::uint8_t>(ColorMemory[at]), static_cast<std::uint8_t>(ColorMemory[at + 1]), static_cast<std::uint8_t>(ColorMemory[at + 2]), static_cast<std::uint8_t>(ColorMemory[at + 3])};
+            if (pixel == std::array<std::uint8_t, 4>{0x40, 0x40, 0x40, 0x40}) continue;
+            if (pixel != expected) return "pixel " + std::to_string(at / 4) + " is " + std::to_string(pixel[0]) + "," + std::to_string(pixel[1]) + "," + std::to_string(pixel[2]) + "," + std::to_string(pixel[3]) + ", expected " + std::to_string(expected[0]) + "," + std::to_string(expected[1]) + "," + std::to_string(expected[2]) + "," + std::to_string(expected[3]);
+            ++drawn;
+        }
+        return drawn == 0 ? std::string("the draw wrote no pixel") : std::string();
+    };
+    const auto data = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(ForwardedData.data()));
+    for (auto& table : AlignedTables) table[0] = data;
+    OffsetTable[2] = data;
+    ForwardedData = {1.0f, 0.0f, 0.0f, 0.0f};
+    const auto start = AgcDriver::DriverDetail::Driver::Get().DrawCacheCounters();
+    AgcDriver::DriverDetail::DrawEntryCounters counters{};
+    for (const auto& table : AlignedTables) counters = draw(table.data());
+    Require(counters.hits != start.hits, mode + ": draws whose pointer table moved to identical contents never reused the cached draw (" + std::to_string(counters.lookups - start.lookups) + " lookups, " + std::to_string(counters.inserts - start.inserts) + " inserts)");
+    const auto taught = pixels({255, 0, 0, 255});
+    Require(taught.empty(), mode + ": a draw through a pointer table with bit 4 of its address clear: " + taught);
+    ForwardedData[0] = 0.25f;
+    const auto before = counters;
+    counters = draw(&OffsetTable[2]);
+    Require(counters.lookups == before.lookups + 1 && counters.hits == before.hits + 1 && counters.stageDataHits == before.stageDataHits + 1, mode + ": a draw whose pointer table moved and whose data changed in place was not a relocated stage data hit (" + std::to_string(counters.hits - before.hits) + " hits, " + std::to_string(counters.stageDataHits - before.stageDataHits) + " stage data hits)");
+    const auto moved = pixels({64, 255, 255, 64});
+    Require(moved.empty(), mode + ": a relocated stage data hit did not draw with the moved user word: " + moved);
+}
+
 }
 
 int main() {
@@ -158,6 +214,7 @@ int main() {
         if (!libraries && std::getenv("APS5_NO_GPL") == nullptr) return VulkanTestSkipped;
         MovedDataHitsTheCache(libraries);
         UnrelocatedAliasesStayOut(libraries);
+        MovedForwardedWordReachesStageDataHit(libraries);
         AgcDriverShutdown_nid_postfix();
         std::cout << "A draw whose data moved reused the cached draw " << (libraries ? "with" : "without") << " graphics pipeline libraries\n";
         return 0;

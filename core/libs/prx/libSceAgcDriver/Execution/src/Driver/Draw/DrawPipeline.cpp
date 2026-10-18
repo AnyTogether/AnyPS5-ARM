@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
+#include "prx/libSceAgcDriver/Execution/include/HandoffSpin.hpp"
 #include <algorithm>
 #ifdef __APPLE__
 #include <pthread.h>
@@ -19,6 +20,8 @@ namespace AgcDriver::DriverDetail {
 namespace {
 
 constexpr std::array<const char*, static_cast<std::size_t>(DrawPipeline::DrainReason::Count)> DrainNames{"packet", "flush", "labels", "capture", "indirect", "submission"};
+
+std::atomic<unsigned> runningCommitters{0};
 
 std::uint64_t elapsedNs(std::chrono::steady_clock::time_point since) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - since).count());
@@ -65,6 +68,10 @@ void DrawPipeline::FollowEpoch(std::uint64_t token) {
     GuestMemory::BumpCollectEpoch();
 }
 
+unsigned DrawPipeline::Committers() {
+    return runningCommitters.load(std::memory_order_acquire);
+}
+
 void DrawPipeline::rethrowFailure() {
     if (failure == nullptr) return;
     auto error = std::exchange(failure, nullptr);
@@ -75,6 +82,11 @@ void DrawPipeline::Enqueue(Commit commit, std::vector<Range> writes, std::uint64
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     std::unique_lock lock(mutex);
     rethrowFailure();
+    if (closing) {
+        lock.unlock();
+        commit();
+        return;
+    }
     if (items.size() >= Depth()) {
         if (GuestMemory::GpuMutex().HeldByThisThread()) throw std::runtime_error("draw pipeline full while the enqueuing thread holds the GPU lock");
         const auto start = std::chrono::steady_clock::now();
@@ -88,7 +100,10 @@ void DrawPipeline::Enqueue(Commit commit, std::vector<Range> writes, std::uint64
     ++enqueued;
     items.push_back({std::move(commit), std::move(writes), labelAddress, std::move(labelBytes)});
     outstanding.fetch_add(1, std::memory_order_release);
-    if (!thread.joinable()) thread = std::thread([this] { run(); });
+    if (!thread.joinable()) {
+        thread = std::thread([this] { run(); });
+        runningCommitters.fetch_add(1, std::memory_order_acq_rel);
+    }
     if (committerWaiting) wake.notify_one();
     if (!profile) return;
     const auto now = std::chrono::steady_clock::now();
@@ -146,11 +161,13 @@ void DrawPipeline::run() {
 #endif
     for (;;) {
         Commit* commit = nullptr;
+        SpinUntil(HandoffSpinWindow(), [&] { return outstanding.load(std::memory_order_acquire) != 0; });
         {
             std::unique_lock lock(mutex);
             committerWaiting = true;
-            wake.wait(lock, [&] { return !items.empty(); });
+            wake.wait(lock, [&] { return !items.empty() || closing; });
             committerWaiting = false;
+            if (items.empty()) break;
             commit = stopped ? nullptr : &items.front().commit;
         }
         const auto start = std::chrono::steady_clock::now();
@@ -182,6 +199,20 @@ void DrawPipeline::run() {
         outstanding.fetch_sub(1, std::memory_order_release);
         if (idleWaiters != 0) idle.notify_all();
     }
+    runningCommitters.fetch_sub(1, std::memory_order_acq_rel);
+}
+
+void DrawPipeline::Stop() {
+    std::thread committer;
+    {
+        std::lock_guard lock(mutex);
+        closing = true;
+        committer = std::move(thread);
+    }
+    wake.notify_all();
+    if (!committer.joinable()) return;
+    if (committer.get_id() == std::this_thread::get_id()) committer.detach();
+    else committer.join();
 }
 
 void DrawPipeline::Drain(DrainReason reason, std::uint32_t opcode) {
@@ -189,6 +220,7 @@ void DrawPipeline::Drain(DrainReason reason, std::uint32_t opcode) {
     if (!Busy()) return;
     if (GuestMemory::GpuMutex().HeldByThisThread()) throw std::runtime_error("draw pipeline drain under the GPU lock (reason " + std::to_string(static_cast<unsigned>(reason)) + ", opcode " + std::to_string(opcode) + ")");
     const auto start = std::chrono::steady_clock::now();
+    SpinUntil(HandoffSpinWindow() * 2, [&] { return !Busy(); });
     std::unique_lock lock(mutex);
     ++idleWaiters;
     idle.wait(lock, [&] { return items.empty(); });

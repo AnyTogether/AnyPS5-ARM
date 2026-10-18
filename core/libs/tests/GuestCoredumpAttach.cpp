@@ -14,9 +14,13 @@ int APS5_VABI sceCoredumpAttachMemoryRegion(uint32_t userValue, const void* mem,
 int APS5_VABI sceCoredumpAttachUserMemoryFile(uint32_t userValue, const void* mem, size_t size);
 int APS5_VABI sceCoredumpGetStopInfoCpu(void* info, size_t size);
 int APS5_VABI sceCoredumpGetThreadContextInfo(void* threadContextInfo, size_t threadContextInfoSize);
+int APS5_VABI sceCoredumpGetStopInfoGpu_Agc(void* info, size_t size);
+int APS5_VABI sceCoredumpWriteUserString(uint32_t first, const char* text, int third);
+int APS5_VABI sceCoredumpConfigDumpMode(int mode);
 }
 
 namespace {
+constexpr int InvalidArgument = static_cast<int>(0x81180000u);
 constexpr int NotInCoredumpHandler = static_cast<int>(0x81180003u);
 constexpr uint32_t UserFileTruncateIfExceedLimit = 0x80000000u;
 bool handlerRan = false;
@@ -90,5 +94,18 @@ int main() {
     Require(sceCoredumpGetThreadContextInfo(context.data() + 8, 144) == NotInCoredumpHandler);
     Require(region == original && context == originalContext);
     Require(!handlerRan);
+
+    Require(sceCoredumpGetStopInfoGpu_Agc(region.data() + 8, 8) == NotInCoredumpHandler);
+    Require(sceCoredumpGetStopInfoGpu_Agc(region.data() + 8, 3) == NotInCoredumpHandler);
+    Require(sceCoredumpGetStopInfoGpu_Agc(nullptr, 8) == InvalidArgument);
+    Require(sceCoredumpWriteUserString(1, "text", 4) == 0);
+    Require(sceCoredumpWriteUserString(0, "", 0) == 0);
+    Require(sceCoredumpWriteUserString(1, nullptr, 4) == InvalidArgument);
+    Require(sceCoredumpWriteUserString(15, "x", 256) == 0 && sceCoredumpWriteUserString(0, "x", 0) == 0);
+    Require(sceCoredumpWriteUserString(16, "x", 1) == InvalidArgument && sceCoredumpWriteUserString(0x80000000u, "x", 1) == InvalidArgument);
+    Require(sceCoredumpWriteUserString(1, "x", 257) == InvalidArgument && sceCoredumpWriteUserString(1, "x", -1) == InvalidArgument);
+    Require(region == original);
+    Require(sceCoredumpConfigDumpMode(1) == 0);
+    for (const int mode : {0, 2, -1}) Require(sceCoredumpConfigDumpMode(mode) == InvalidArgument);
     return 0;
 }

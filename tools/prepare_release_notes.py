@@ -19,12 +19,17 @@ def release_body(notes):
 
 
 def prepare_notes(source, body, full):
+    paths = (source, body, full)
+    for index, first in enumerate(paths):
+        for second in paths[index + 1:]:
+            if first.resolve() == second.resolve() or (first.exists() and second.exists() and first.samefile(second)):
+                raise ValueError("Release note input and outputs must be distinct files")
     notes = json.loads(source.read_text(encoding="utf-8"))["body"]
     if not isinstance(notes, str):
         raise ValueError("Generated release notes body must be a string")
     full.parent.mkdir(parents=True, exist_ok=True)
-    full.write_text(notes, encoding="utf-8", newline="")
-    body.write_text(release_body(notes), encoding="utf-8", newline="")
+    full.write_bytes(notes.encode("utf-8"))
+    body.write_bytes(release_body(notes).encode("utf-8"))
 
 
 def main():

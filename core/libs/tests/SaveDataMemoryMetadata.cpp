@@ -20,8 +20,14 @@
 extern "C" {
 int APS5_VABI sceSaveDataInitialize3(const void*);
 int APS5_VABI sceSaveDataTerminate();
+int APS5_VABI sceSaveDataCreateTransactionResource(std::uint32_t);
+int APS5_VABI sceSaveDataDeleteTransactionResource(std::int32_t);
 int APS5_VABI sceSaveDataSetSaveDataMemory2(const SaveDataMemorySet2*);
 int APS5_VABI sceSaveDataSetupSaveDataMemory2(const SaveDataMemorySetup2*, SaveDataMemorySetupResult*);
+}
+
+namespace {
+constexpr int kSaveDataNotInitialized = -2137063423;
 }
 
 static void Check(bool value, int line) {
@@ -39,6 +45,8 @@ static std::vector<char> Read(const std::filesystem::path& path) {
 }
 
 int main() {
+    Require(sceSaveDataCreateTransactionResource(1024) == kSaveDataNotInitialized);
+    Require(sceSaveDataDeleteTransactionResource(1) == kSaveDataNotInitialized);
     const auto previous = std::filesystem::current_path();
     const auto root = std::filesystem::temp_directory_path() /
         ("anyps5-metadata-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -54,6 +62,12 @@ int main() {
         Require(static_cast<bool>(file));
     }
     Require(sceSaveDataInitialize3(nullptr) == 0);
+    const int tx0 = sceSaveDataCreateTransactionResource(0);
+    Require(tx0 > 0);
+    Require(sceSaveDataDeleteTransactionResource(tx0) == 0);
+    const int tx = sceSaveDataCreateTransactionResource(1024);
+    Require(tx > 0);
+    Require(sceSaveDataDeleteTransactionResource(tx) == 0);
     Require(sceSaveDataInitialize3(nullptr) == 0);
     Require(sceSaveDataTerminate() == 0);
     SaveDataParam param{};
@@ -307,6 +321,8 @@ int main() {
     Require(Read(setupBinPath) == expectedBlob512);
     Require(Read(setupParamPath) == std::vector<char>(param300Bytes, param300Bytes + sizeof(setupParam)));
     Require(sceSaveDataTerminate() == 0);
+    Require(sceSaveDataCreateTransactionResource(1024) == kSaveDataNotInitialized);
+    Require(sceSaveDataDeleteTransactionResource(tx) == kSaveDataNotInitialized);
     std::filesystem::current_path(previous);
     std::filesystem::remove_all(root);
 }

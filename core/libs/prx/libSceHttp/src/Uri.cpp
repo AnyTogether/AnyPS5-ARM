@@ -205,7 +205,8 @@ int APS5_VABI sceHttpUriEscape(char* out, size_t* require, size_t prepare, const
     std::string escaped;
     for (const char* c = in; *c; ++c) {
         const auto value = static_cast<unsigned char>(*c);
-        if (std::isalnum(value) || value == '-' || value == '_' || value == '.' || value == '~') {
+        if ((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9')
+            || value == '-' || value == '_' || value == '.' || value == '~') {
             escaped.push_back(*c);
         } else {
             escaped.push_back('%');

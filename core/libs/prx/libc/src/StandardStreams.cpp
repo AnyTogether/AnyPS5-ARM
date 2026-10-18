@@ -1,6 +1,9 @@
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -133,6 +136,16 @@ int APS5_VABI fileno_nid_postfix(FileStream* stream) {
 #endif
     stream->GuestState().descriptor = static_cast<std::int16_t>(descriptor);
     return descriptor;
+}
+void APS5_VABI clearerr_unlocked_nid_postfix(FileStream* stream) {
+    stream->ClearError();
+}
+int APS5_VABI fileno_unlocked_nid_postfix(FileStream* stream) {
+    if (stream == nullptr || !stream->IsOpen()) return -1;
+    return fileno_nid_postfix(stream);
+}
+[[noreturn]] char* APS5_VABI fgetln_nid_postfix(FileStream*, std::size_t*) {
+    throw std::runtime_error("fgetln: the console's export is a hlt instruction, which ends the process");
 }
 int APS5_VABI setvbuf_nid_postfix(FileStream* stream, char* buffer, int mode, std::size_t size) {
     if (stream && !stream->IsOpen()) { errno = 9; return -1; }

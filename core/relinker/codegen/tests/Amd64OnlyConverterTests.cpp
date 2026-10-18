@@ -24,7 +24,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
 #include <functional>
@@ -825,6 +825,19 @@ void converterWideStoreWindows() {
         require(!preceded.Trampolines.empty() && preceded.Trampolines[0].Offset == 0x200 && preceded.Trampolines[0].Length == 8 && body(preceded.Trampolines[0]) == expected, "A 256-bit store moved a following instruction that cannot leave its place instead of the one before it");
     }
 
+    const Bytes fsRead = {0x66, 0x66, 0x66, 0x64, 0x48, 0x8B, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00};
+    const Bytes gsRead = {0x65, 0x48, 0x8B, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00};
+    for (const auto& segmentRead : {fsRead, gsRead}) {
+        const auto beforeSegment = convert(withStore(add, segmentRead));
+        expected = add;
+        expected.insert(expected.end(), halves.begin(), halves.end());
+        require(beforeSegment.Trampolines.size() == 1 && beforeSegment.Trampolines[0].Offset == 0x200 && beforeSegment.Trampolines[0].Length == 8 && body(beforeSegment.Trampolines[0]) == expected, "A 256-bit store moved a following FS or GS access, which the macOS writer cannot rewrite in a stub, instead of the instruction before it");
+        const auto onlySegment = convert(withStore({}, segmentRead));
+        expected = halves;
+        expected.insert(expected.end(), segmentRead.begin(), segmentRead.end());
+        require(onlySegment.Trampolines.size() == 1 && onlySegment.Trampolines[0].Offset == 0x200 && onlySegment.Trampolines[0].Length == store.size() + segmentRead.size() && body(onlySegment.Trampolines[0]) == expected, "A 256-bit store with no other movable neighbour did not fall back to the following FS or GS access");
+    }
+
     Bytes throwing = {0xC3, 0xEB, 0xFD};
     for (int index = 0; index < 3; ++index)
         throwing.insert(throwing.end(), add.begin(), add.end());
@@ -1289,7 +1302,7 @@ void linuxRipRelativePlacement() {
 
 }
 
-#if defined(__linux__) && defined(__x86_64__)
+#if (defined(__linux__) || defined(__APPLE__)) && defined(__x86_64__)
 std::uint64_t extrqReference(std::uint64_t value, std::uint64_t control) {
     const auto length = static_cast<unsigned>(control & 0x3f);
     const auto index = static_cast<unsigned>((control >> 8) & 0x3f);

@@ -97,6 +97,13 @@ public:
         return covers(begin, end);
     }
 
+    bool Overlaps(std::uintptr_t begin, std::uintptr_t end) {
+        if (!Available()) return false;
+        std::shared_lock lock(_lock);
+        const auto next = _ranges.upper_bound(begin);
+        return (next != _ranges.begin() && std::prev(next)->second > begin) || (next != _ranges.end() && next->first < end);
+    }
+
     bool Collect(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context) {
         if (!Available()) return false;
         begin &= ~(PageBytes - 1);
@@ -456,6 +463,22 @@ public:
         return begin < it->second && end <= it->second;
     }
 
+    // Answered without the lock from the same coalesced copy as Covers (the driver asks per stored block);
+    // APS5_LOCKED_WATCH_COVERS=1 answers under the lock as well.
+    bool Overlaps(std::uintptr_t begin, std::uintptr_t end) {
+        if (!_available) return false;
+        static const bool locked = std::getenv("APS5_LOCKED_WATCH_COVERS") != nullptr;
+        if (locked) {
+            const Lock lock(_lock, SiteOverlaps);
+            const auto next = _ranges.upper_bound(begin);
+            return (next != _ranges.begin() && std::prev(next)->second.end > begin) || (next != _ranges.end() && next->first < end);
+        }
+        const auto coverage = std::atomic_load_explicit(&_coverage, std::memory_order_acquire);
+        if (coverage == nullptr) return false;
+        const auto next = std::upper_bound(coverage->begin(), coverage->end(), begin, [](std::uintptr_t address, const auto& run) { return address < run.first; });
+        return (next != coverage->begin() && std::prev(next)->second > begin) || (next != coverage->end() && next->first < end);
+    }
+
     // Fresh pages were never collected since they were registered: Take::Fresh reports and arms only them,
     // Take::Armed leaves them for the caller that tracks them separately, as the Linux watch does.
     enum class Take { All, Armed, Fresh };
@@ -634,8 +657,8 @@ private:
     };
 
     // Who holds the lock when another thread has to wait (APS5_PROFILE_DRAW, the [watch] line).
-    enum Site : std::uint8_t { SiteRegister, SiteUnregister, SiteCollect, SiteHostWrites, SiteProtectionChanged, SiteBeginHost, SiteEndHost, SiteOpenImport, SiteCloseImport, SiteProtection, SiteFault, SiteCovers, SiteCount };
-    static constexpr const char* SiteNames[SiteCount] = {"register", "unregister", "collect", "host writes", "protection change", "host write begin", "host write end", "import open", "import close", "protection query", "fault", "covers"};
+    enum Site : std::uint8_t { SiteRegister, SiteUnregister, SiteCollect, SiteHostWrites, SiteProtectionChanged, SiteBeginHost, SiteEndHost, SiteOpenImport, SiteCloseImport, SiteProtection, SiteFault, SiteCovers, SiteOverlaps, SiteCount };
+    static constexpr const char* SiteNames[SiteCount] = {"register", "unregister", "collect", "host writes", "protection change", "host write begin", "host write end", "import open", "import close", "protection query", "fault", "covers", "overlaps"};
 
     struct Turns {
         std::atomic<std::uint64_t> next{0};
@@ -793,7 +816,7 @@ private:
         }
     }
 
-    // Rebuilds Covers' copy of the ranges (under the lock, after a change to them).
+    // Rebuilds Covers' and Overlaps' copy of the ranges (under the lock, after a change to them).
     void publishCoverage() {
         auto built = std::make_shared<std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>();
         built->reserve(_ranges.size());
@@ -952,6 +975,16 @@ bool GuestWriteWatchUnregister_nid_postfix(const void* pointer, std::size_t byte
 bool GuestWriteWatchCovers_nid_postfix(std::uintptr_t address, std::size_t bytes) {
 #ifdef APS5_GUEST_WRITE_WATCH
     return bytes != 0 && address + bytes > address && Watch::Get().Covers(address, address + bytes);
+#else
+    static_cast<void>(address);
+    static_cast<void>(bytes);
+    return false;
+#endif
+}
+
+bool GuestWriteWatchOverlaps_nid_postfix(std::uintptr_t address, std::size_t bytes) {
+#ifdef APS5_GUEST_WRITE_WATCH
+    return bytes != 0 && address + bytes > address && Watch::Get().Overlaps(address, address + bytes);
 #else
     static_cast<void>(address);
     static_cast<void>(bytes);

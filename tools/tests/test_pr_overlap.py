@@ -228,6 +228,45 @@ class ConflictTests(unittest.TestCase):
 
 
 class UnicodePathTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX filenames containing control characters")
+    def test_control_characters_keep_exact_paths_in_scans_and_conflicts(self):
+        previous = os.getcwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-c", "user.name=Overlap Test", "-c", "user.email=test@example.com",
+                     "-c", "commit.gpgsign=false", *args], cwd=root,
+                    capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
+            filenames = {"core/libs/prx/libExample/return\r.cpp", "core/libs/prx/libExample/tab\t.cpp", "core/libs/prx/libExample/line\n.cpp",
+                         "core/libs/prx/libExample/quote\".cpp"}
+            for filename in filenames:
+                source = root / filename
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("int value = 0;\n", encoding="utf-8")
+            git("init", "-q")
+            git("add", ".")
+            git("commit", "-qm", "test: create base")
+            base = git("rev-parse", "HEAD")
+            git("update-ref", "refs/pr/base", base)
+            for branch, value in (("left", 1), ("right", 2)):
+                git("checkout", "-qb", branch, base)
+                for filename in filenames:
+                    (root / filename).write_text(f"int value = {value};\n", encoding="utf-8")
+                git("add", ".")
+                git("commit", "-qm", "fix: change value")
+            try:
+                os.chdir(root)
+                left, right = {"ref": "left"}, {"ref": "right"}
+                pr_overlap.scan(left)
+                pr_overlap.scan(right)
+                self.assertEqual(left["files"], filenames)
+                self.assertEqual(right["files"], filenames)
+                self.assertEqual(pr_overlap.conflicts(left, right), {name: [(1, 1)] for name in filenames})
+            finally:
+                os.chdir(previous)
+
+
     def test_scans_and_reports_conflicts_with_git_path_quoting_enabled(self):
         previous = os.getcwd()
         with tempfile.TemporaryDirectory() as directory:
@@ -300,8 +339,8 @@ class CommentStateTests(unittest.TestCase):
         return pr_overlap.report(found, f"https://github.com/owner/project/blob/{commit}")
 
     def run_step(self, report, comment):
-        (self.root / "overlap" / "42.md").write_text(report, encoding="utf-8", newline="\n")
-        (self.root / "comment").write_text(json.dumps([5, comment]) + "\n" if comment else "", encoding="utf-8", newline="\n")
+        (self.root / "overlap" / "42.md").write_bytes(report.encode("utf-8"))
+        (self.root / "comment").write_bytes((json.dumps([5, comment]) + "\n" if comment else "").encode("utf-8"))
         calls = self.root / "calls"
         calls.write_text("", encoding="utf-8")
         script = "\n".join([
@@ -310,7 +349,7 @@ class CommentStateTests(unittest.TestCase):
             'gh() { printf \'%s\\n\' "$*" >> "$RUNNER_TEMP/calls"; case "$*" in "api repos/"*) cat "$RUNNER_TEMP/comment";; esac; }',
             self.step,
         ])
-        (self.root / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+        (self.root / "step.sh").write_bytes(script.encode("utf-8"))
         environment = dict(os.environ, RUNNER_TEMP=str(self.root), GH_REPO="owner/project")
         result = subprocess.run(["bash", "step.sh"], cwd=self.root, env=environment, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

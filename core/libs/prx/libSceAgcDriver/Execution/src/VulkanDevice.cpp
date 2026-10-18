@@ -15,6 +15,7 @@
 #include "prx/libSceAgcDriver/Execution/include/DeviceFault.hpp"
 #include "prx/libSceAgcDriver/Execution/include/FragmentBarycentric.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PipelineLinkOptimization.hpp"
+#include "prx/libSceAgcDriver/Execution/include/RobustBufferAccess.hpp"
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
@@ -279,6 +280,7 @@ struct VulkanDevice::State {
     VkDeviceSize uploadSize = 0;
     VkPhysicalDeviceProperties properties{};
     std::string driverInfo;
+    bool individuallyFreeDescriptorSets = false;
     PFN_vkGetCalibratedTimestampsKHR calibratedTimestamps = nullptr;
     PFN_vkCmdSetCheckpointNV checkpointMarker = nullptr;
     bool deviceLostHook = false;
@@ -303,6 +305,7 @@ struct VulkanDevice::State {
     bool float16DenormPreserve = false;
     bool demoteToHelperInvocation = false;
     bool earlyFragmentSampleMaskTestBeforeSampleCounting = false;
+    bool robustBufferAccess2 = false;
     // VK_EXT_descriptor_indexing with non-uniform image array indexing (bindless image tables in
     // graphics stages, and compute workgroups wider than a wave).
     bool descriptorIndexing = false;
@@ -1154,6 +1157,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
         state->driverInfo = std::string(driver.driverName) + " " + driver.driverInfo;
+        state->individuallyFreeDescriptorSets = driver.driverID == VK_DRIVER_ID_MESA_LLVMPIPE;
     }
     auto byteFeatures = QueryBdaByteFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
     auto bdaFeatures = QueryBdaFeatures(selected, state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2"), availableExtensions);
@@ -1868,9 +1872,19 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         VkPhysicalDeviceFeatures2 queried{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &robustness2};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2")(selected, &queried);
     }
-    if (robustness2.nullDescriptor == VK_TRUE) {
+    VkDriverId robustnessDriver = VK_DRIVER_ID_MAX_ENUM;
+    if (hasExtension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
+        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 driverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
+        state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &driverProperties);
+        robustnessDriver = driver.driverID;
+    }
+    state->robustBufferAccess2 = robustness2.robustBufferAccess2 == VK_TRUE && enabled.robustBufferAccess == VK_TRUE && RobustBufferAccess2Usable(robustnessDriver);
+    if (robustness2.nullDescriptor == VK_TRUE || state->robustBufferAccess2) {
+        const bool nullDescriptor = robustness2.nullDescriptor == VK_TRUE;
         robustness2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
-        robustness2.nullDescriptor = VK_TRUE;
+        robustness2.nullDescriptor = nullDescriptor ? VK_TRUE : VK_FALSE;
+        robustness2.robustBufferAccess2 = state->robustBufferAccess2 ? VK_TRUE : VK_FALSE;
         robustness2.pNext = bdaFeatures.pNext;
         bdaFeatures.pNext = &robustness2;
         deviceExtensions.push_back(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
@@ -2233,7 +2247,7 @@ int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::by
     // pair for a whole group of labels recorded back to back (Recorder::RecordStore orders the
     // stores of a run against each other and against the work before and after, the queued DCC
     // key stores included).
-    const auto recordStore = [&] { recorder.RecordStore(import->buffer, address - import->base, bytes, address); };
+    const auto recordStore = [&] { recorder.RecordStore(import->buffer, Graphics::HostImportOffset(*import, address), bytes, address); };
     // Only a write-back that can land over these bytes (a listed copied writer of the range, as
     // FillBuffer tests) puts the label behind the completions; any other pending completion
     // stores elsewhere. Debug aid: APS5_LABEL_GATE_ALL=1 gates on any completion, as before (a
@@ -2434,7 +2448,7 @@ bool VulkanDevice::FillBuffer(std::uint64_t address, std::size_t bytes, std::spa
         Graphics::RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
         Graphics::Recorder::CountBarriers(CommandClass::Fill);
     }
-    const auto offset = address - import->base;
+    const auto offset = Graphics::HostImportOffset(*import, address);
     if (uniform) {
         ++uniformFills;
         context.Resolved(&Graphics::DeviceFunctions::cmdFillBuffer, "vkCmdFillBuffer")(commands, import->buffer, offset, bytes, pattern[0]);
@@ -2701,7 +2715,7 @@ VulkanDevice::CopyOutcome VulkanDevice::CopyBuffer(std::uint64_t destination, st
         Graphics::Recorder::CountBarriers(CommandClass::Copy);
     }
     const auto gpuTiming = recorder.BeginGpuTiming(programAddress);
-    const VkBufferCopy region{source - sourceImport->base, destination - destinationImport->base, bytes};
+    const VkBufferCopy region{Graphics::HostImportOffset(*sourceImport, source), Graphics::HostImportOffset(*destinationImport, destination), bytes};
     context.Resolved(&Graphics::DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer")(commands, sourceImport->buffer, destinationImport->buffer, 1, &region);
     recorder.EndGpuTiming(gpuTiming, bytes);
     // The copied bytes are visible to everything recorded after and to the host, as after a fill.
@@ -3544,6 +3558,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     static const bool exactFloat = std::getenv("APS5_EXACT_FLOAT") != nullptr;
     static const bool relaxedFloat = std::getenv("APS5_RELAXED_FLOAT") != nullptr;
     target.relaxedFloat = !exactFloat && (relaxedFloat || (state->moltenVk && state->window != nullptr));
+    target.robustBufferAccess2 = state->robustBufferAccess2;
     target.srgbDecodeFormats = state->srgbDecodeFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
     static const bool meshEmulation = std::getenv("APS5_NO_MESH_EMULATION") == nullptr;
@@ -3560,6 +3575,10 @@ std::optional<ShaderRecompiler::GeometryStageLimits> VulkanDevice::GeometryLimit
     if (!state->geometryShader) return std::nullopt;
     const auto& limits = state->properties.limits;
     return ShaderRecompiler::GeometryStageLimits{limits.maxGeometryInputComponents, limits.maxGeometryOutputComponents, limits.maxGeometryOutputVertices, limits.maxGeometryTotalOutputComponents, limits.maxFragmentInputComponents};
+}
+
+std::uint32_t VulkanDevice::MaxFragmentInputComponents() const {
+    return state->properties.limits.maxFragmentInputComponents;
 }
 
 bool VulkanDevice::PrimitiveListRestart() const {
@@ -3634,6 +3653,7 @@ Graphics::Context VulkanDevice::buildContext() const {
         state->hostImportAlignment
     };
     context.pipelineCacheSynchronization = state->pipelineCache ? &state->pipelineCache->Synchronization() : nullptr;
+    context.individuallyFreeDescriptorSets = state->individuallyFreeDescriptorSets;
     context.dmaBufImport = state->dmaBufImport;
     context.sparseBinding = state->sparseBinding;
     context.queueFamily = state->queueFamily;
@@ -3695,6 +3715,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.sampleLocationGridSampleCounts = state->sampleLocationGridSampleCounts;
     context.memoryProperties2 = state->memoryBudget ? state->InstanceFunction<PFN_vkGetPhysicalDeviceMemoryProperties2>("vkGetPhysicalDeviceMemoryProperties2") : nullptr;
     context.singlePassStorage = state->storageImageWithoutFormat;
+    context.cacheReclaim = Graphics::ReleaseTextureCaches;
     return context;
 }
 
@@ -3782,11 +3803,24 @@ bool TemplateDataRefresh() {
     return enabled;
 }
 
+bool DispatchMove() {
+    static const bool enabled = std::getenv("APS5_NO_DISPATCH_MOVE") == nullptr && TemplateDataRefresh();
+    return enabled;
+}
+
+std::size_t DispatchMoveBytes() {
+    static const std::size_t bytes = [] {
+        const char* text = std::getenv("APS5_DISPMOVE_MAX_KIB");
+        return static_cast<std::size_t>(text != nullptr ? std::strtoull(text, nullptr, 10) : 1024ull) * 1024u;
+    }();
+    return bytes;
+}
+
 // The content key of a compute stage, naming the device: the cache is process-wide and the driver
 // replaces the headless device with the windowed one while workers may still use the old one, so
 // the key names the device that built the entry (its descriptor set and pooled buffers belong to it).
-ResourceCache::Key DispatchContentKey(const Graphics::CompiledShader& shader, VkDevice device) {
-    auto key = Graphics::ShaderResources::ContentKey(shader, !TemplateDataRefresh());
+ResourceCache::Key DispatchContentKey(const Graphics::CompiledShader& shader, VkDevice device, bool movable = true) {
+    auto key = Graphics::ShaderResources::ContentKey(shader, !TemplateDataRefresh(), movable && DispatchMove());
     const auto deviceHandle = reinterpret_cast<std::uint64_t>(device);
     key.push_back(static_cast<std::uint32_t>(deviceHandle));
     key.push_back(static_cast<std::uint32_t>(deviceHandle >> 32u));
@@ -3817,6 +3851,7 @@ struct PreparedDispatch {
     std::shared_ptr<Graphics::ShaderResources> resources;
     std::shared_ptr<Graphics::ShaderResources> cached;
     ResourceCache::Key key;
+    bool exact = false;
     // APS5_PROFILE_DRAW: stage A's time, added to the [dispatch] phase totals by the dispatch, and
     // the prepare's parts for the driver's 'prepare:' rows (PreparePhase order).
     double prepareMs = 0;
@@ -3849,6 +3884,8 @@ struct PresyncCounters {
     std::atomic<std::uint64_t> checked{0};
     std::atomic<std::uint64_t> presyncs{0};
     std::atomic<std::uint64_t> waitedUs{0};
+    std::atomic<std::uint64_t> keyChecks{0};
+    std::atomic<std::uint64_t> keyWaits{0};
     std::atomic<std::int64_t> lastReport{0};
 };
 
@@ -4014,6 +4051,63 @@ RecipeCounters& Recipes() {
     return counters;
 }
 
+constexpr std::size_t MoveRefusals = static_cast<std::size_t>(Graphics::ShaderResources::MoveRefusal::Count);
+
+struct DispatchMoveCounters {
+    std::atomic<std::uint64_t> checked{0}, exact{0}, moved{0}, buffers{0}, bytes{0};
+    std::atomic<std::uint64_t> rebuilt{0}, kept{0}, served{0};
+    std::array<std::atomic<std::uint64_t>, 5> sizes{};
+    std::array<std::atomic<std::uint64_t>, MoveRefusals> refused{};
+    std::array<std::atomic<std::uint64_t>, MoveRefusals> filtered{};
+    std::atomic<std::int64_t> lastReport{0};
+};
+
+DispatchMoveCounters& DispatchMoves() {
+    static DispatchMoveCounters counters;
+    return counters;
+}
+
+void reportDispatchMove() {
+    auto& moves = DispatchMoves();
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto last = moves.lastReport.load();
+    if (nowMs - last < 10000 || !moves.lastReport.compare_exchange_strong(last, nowMs)) return;
+    const auto take = [](std::atomic<std::uint64_t>& counter) { return static_cast<unsigned long long>(counter.exchange(0, std::memory_order_relaxed)); };
+    const auto list = [&](std::array<std::atomic<std::uint64_t>, MoveRefusals>& counters) {
+        std::string text;
+        unsigned long long total = 0;
+        char item[80];
+        for (std::size_t i = 1; i < MoveRefusals; ++i) {
+            const auto count = take(counters[i]);
+            total += count;
+            if (count == 0) continue;
+            std::snprintf(item, sizeof(item), "%s %s %llu", text.empty() ? "" : ",", Graphics::ShaderResources::MoveRefusalName(static_cast<Graphics::ShaderResources::MoveRefusal>(i)), count);
+            text += item;
+        }
+        std::snprintf(item, sizeof(item), "%llu (", total);
+        return std::string(item) + text + ")";
+    };
+    const auto checked = take(moves.checked);
+    const auto exact = take(moves.exact);
+    const auto moved = take(moves.moved);
+    const auto buffers = take(moves.buffers);
+    const auto bytes = take(moves.bytes);
+    const auto rebuilt = take(moves.rebuilt);
+    const auto kept = take(moves.kept);
+    const auto served = take(moves.served);
+    unsigned long long sizes[5];
+    for (std::size_t i = 0; i < 5; ++i) sizes[i] = take(moves.sizes[i]);
+    const auto refused = list(moves.refused);
+    const auto filtered = list(moves.filtered);
+    AgcDriver::ProfilePrint_nid_no_patch("[dispmove] (10 s) %llu template hits checked: %llu with every read-only buffer where it was built, %llu with %llu moved ones (%.2f MiB snapshotted; per dispatch up to 1 KiB %llu, 16 KiB %llu, 256 KiB %llu, 4 MiB %llu, more %llu); refused %s at stage A (the hit was dropped before the record), %s at record; after a refusal: %llu rebuilt, %llu inserted beside the movable template (kept), %llu served by an exact entry\n", checked, exact, moved, buffers, static_cast<double>(bytes) / 1048576.0, sizes[0], sizes[1], sizes[2], sizes[3], sizes[4], filtered.c_str(), refused.c_str(), rebuilt, kept, served);
+}
+
+void noteDispatchMoveSize(std::size_t bytes) {
+    auto& moves = DispatchMoves();
+    const std::size_t bucket = bytes <= 1024 ? 0 : bytes <= 16384 ? 1 : bytes <= 262144 ? 2 : bytes <= 4194304 ? 3 : 4;
+    moves.sizes[bucket].fetch_add(1, std::memory_order_relaxed);
+}
+
 void reportRecipes() {
     auto& recipes = Recipes();
     const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -4164,10 +4258,21 @@ struct RecordedDispatch {
     // Whether the data refresh recorded anything.
     bool refreshed = false;
     bool resourceKeyMatched = false;
+    std::shared_ptr<Graphics::ShaderResources::DrawBindings> bindings{};
 };
 
 VkDevice VulkanDevice::Device() const {
     return state->device;
+}
+
+VulkanDevice::DispatchMoveCount VulkanDevice::DispatchMoveCounts() {
+    auto& moves = DispatchMoves();
+    DispatchMoveCount count{moves.checked.load(), moves.exact.load(), moves.moved.load(), 0, 0, moves.rebuilt.load(), moves.kept.load(), moves.served.load()};
+    for (std::size_t i = 1; i < MoveRefusals; ++i) {
+        count.refused += moves.refused[i].load();
+        count.filtered += moves.filtered[i].load();
+    }
+    return count;
 }
 
 bool VulkanDevice::DispatchRecipes() {
@@ -4231,23 +4336,31 @@ RecipeOutcome VulkanDevice::DrawFromRecipe(const Graphics::State& graphics, cons
     return RecipeOutcome::Recorded;
 }
 
-std::uint64_t VulkanDevice::presync(std::span<const std::pair<std::uint64_t, std::uint64_t>> surfaces) {
+std::uint64_t VulkanDevice::presync(std::span<const Graphics::PresyncSurface> surfaces) {
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     auto& counters = Presyncs();
     bool overlaps = false;
-    for (const auto& [address, bytes] : surfaces) overlaps = overlaps || Graphics::Recorder::SnapshotWriteOverlaps(address, static_cast<std::size_t>(bytes));
+    for (const auto& surface : surfaces) {
+        const auto bytes = static_cast<std::size_t>(surface.bytes);
+        if (surface.dccKeys) counters.keyChecks.fetch_add(1, std::memory_order_relaxed);
+        overlaps = overlaps || (surface.dccKeys ? Graphics::DccKeyWritersPending(surface.address, bytes) : Graphics::Recorder::SnapshotWriteOverlaps(surface.address, bytes));
+    }
     std::uint64_t serial = 0;
+    bool texelsPending = false;
     if (overlaps) {
         // No reap here (SubmitAndEpoch's would run completions, which a compute worker must not do
         // on queue 0's behalf, see SubmitRecorded): the dispatch reaps after the wait.
         std::lock_guard lock(GuestMemory::GpuMutex());
         if (state->recorder) {
             bool open = false;
-            for (const auto& [address, bytes] : surfaces) {
-                const auto info = state->recorder->DescribePendingWrite(address, static_cast<std::size_t>(bytes));
+            for (const auto& surface : surfaces) {
+                const auto bytes = static_cast<std::size_t>(surface.bytes);
+                if (surface.dccKeys && !Graphics::DccKeyWriterNeedsSync(surface.address, bytes)) continue;
+                const auto info = state->recorder->DescribePendingWrite(surface.address, bytes);
                 if (!info.has_value()) continue;
                 open = open || info->open;
                 serial = std::max(serial, info->serial);
+                texelsPending = texelsPending || !surface.dccKeys;
             }
             if (open) serial = state->recorder->SubmitAndEpoch();
         }
@@ -4256,14 +4369,23 @@ std::uint64_t VulkanDevice::presync(std::span<const std::pair<std::uint64_t, std
         const auto waitStart = std::chrono::steady_clock::now();
         WaitRecorded(serial);
         counters.presyncs.fetch_add(1, std::memory_order_relaxed);
+        if (!texelsPending) counters.keyWaits.fetch_add(1, std::memory_order_relaxed);
         counters.waitedUs.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - waitStart).count()), std::memory_order_relaxed);
     }
     if (profile) {
         const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         auto last = counters.lastReport.load();
-        if (nowMs - last >= 10000 && counters.lastReport.compare_exchange_strong(last, nowMs)) AgcDriver::ProfilePrint_nid_no_patch("[presync] %llu dispatches checked, %llu pre-syncs waited %.0f ms (cumulative)\n", static_cast<unsigned long long>(counters.checked.load()), static_cast<unsigned long long>(counters.presyncs.load()), counters.waitedUs.load() / 1000.0);
+        if (nowMs - last >= 10000 && counters.lastReport.compare_exchange_strong(last, nowMs)) {
+            const auto keyWaitCounts = Graphics::KeyWaitCounts();
+            AgcDriver::ProfilePrint_nid_no_patch("[presync] %llu dispatches checked, %llu pre-syncs waited %.0f ms (cumulative); key ranges %llu checked, %llu pre-syncs that only the keys required; WaitForKeyWriters %llu calls: %llu without a pending writer, %llu known keys, %llu fills leaving uncompressed, %llu synced\n", static_cast<unsigned long long>(counters.checked.load()), static_cast<unsigned long long>(counters.presyncs.load()), counters.waitedUs.load() / 1000.0, static_cast<unsigned long long>(counters.keyChecks.load()), static_cast<unsigned long long>(counters.keyWaits.load()), static_cast<unsigned long long>(keyWaitCounts.calls), static_cast<unsigned long long>(keyWaitCounts.noPending), static_cast<unsigned long long>(keyWaitCounts.known), static_cast<unsigned long long>(keyWaitCounts.fillsUncompressed), static_cast<unsigned long long>(keyWaitCounts.synced));
+        }
     }
     return serial;
+}
+
+VulkanDevice::PresyncStatistics VulkanDevice::PresyncCounts() {
+    const auto& counters = Presyncs();
+    return {counters.checked.load(std::memory_order_relaxed), counters.presyncs.load(std::memory_order_relaxed), counters.keyChecks.load(std::memory_order_relaxed), counters.keyWaits.load(std::memory_order_relaxed)};
 }
 
 std::shared_ptr<PreparedDispatch> VulkanDevice::PrepareDispatch(const ShaderRecompiler::RecompileResult& shader, std::span<const Graphics::GuestMemorySnapshot> snapshots, std::uint64_t dispatchThreads, std::uint64_t programAddress) {
@@ -4292,6 +4414,15 @@ std::shared_ptr<PreparedDispatch> VulkanDevice::PrepareDispatch(const ShaderReco
         prepared->key = DispatchContentKey(compute, context.device);
         phase(PreparedDispatch::PrepareKey);
         cached = state->resourceCache.Find(prepared->key);
+        if (cached != nullptr && DispatchMove()) {
+            Graphics::ShaderResources::MoveProof proof;
+            if (!cached->MovedDispatchBuffers(compute, nullptr, DispatchMoveBytes(), proof).has_value()) {
+                DispatchMoves().filtered[static_cast<std::size_t>(proof.refusal)].fetch_add(1, std::memory_order_relaxed);
+                prepared->key = DispatchContentKey(compute, context.device, false);
+                prepared->exact = true;
+                cached = state->resourceCache.Find(prepared->key);
+            }
+        }
         prepared->cached = cached;
         phase(PreparedDispatch::PrepareFind);
     }
@@ -4489,6 +4620,10 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     recorder.Keep(record.objects);
     recorder.Keep(record.resources);
     if (record.resources != nullptr) recorder.KeepBytes(record.resources.get(), record.resources->CopiedBytes());
+    if (record.bindings != nullptr) {
+        recorder.Keep(record.bindings);
+        for (const auto& snapshot : record.bindings->snapshots) recorder.KeepBytes(snapshot.buffer.get(), snapshot.buffer->Bytes().size());
+    }
     recordStep(PhaseRecordKeeps);
     if (record.dataRefresh != RecordedDispatch::DataRefresh::None) {
         // The template's data buffers take this dispatch's words: a transfer write the pre-dispatch
@@ -4538,7 +4673,9 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
         ++d.preBarriersRecorded;
     }
     context.Resolved(&Graphics::DeviceFunctions::cmdBindPipeline, "vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->pipeline);
-    resources.Bind(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout);
+    if (record.bindings != nullptr) Graphics::Require(record.bindings->allocation.set != VK_NULL_HANDLE, "dispatch overlay has no descriptor set");
+    if (record.bindings != nullptr) context.Resolved(&Graphics::DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout, 0, 1, &record.bindings->allocation.set, 0, nullptr);
+    else resources.Bind(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout);
     if (const auto dwords = record.shader->program->workgroupMemoryDwords; dwords != 0) {
         auto memory = state->WorkgroupMemoryFor(context, record.x, record.y, record.z, dwords);
         context.Resolved(&Graphics::DeviceFunctions::cmdBindDescriptorSets, "vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, record.objects->layout, ShaderRecompiler::WorkgroupMemoryDescriptorSet, 1, &memory->set, 0, nullptr);
@@ -4550,7 +4687,7 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     const auto gpuTiming = recorder.BeginGpuTiming(record.programAddress != 0 ? record.programAddress : record.shader->program->variantId);
     if (state->checkpointMarker != nullptr) state->checkpointMarker(commands, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(record.programAddress)));
     if (argumentImport != nullptr) {
-        context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, arguments - argumentImport->base);
+        context.Resolved(&Graphics::DeviceFunctions::cmdDispatchIndirect, "vkCmdDispatchIndirect")(commands, argumentImport->buffer, Graphics::HostImportOffset(*argumentImport, arguments));
     } else {
         const auto* limit = state->properties.limits.maxComputeWorkGroupCount;
         if (record.x <= limit[0] && record.y <= limit[1] && record.z <= limit[2]) {
@@ -4751,7 +4888,9 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     // The object came from the resource cache: a compute template whose data buffers take this
     // dispatch's words at the record (ShaderResources::RefreshData).
     bool fromCache = false;
+    bool refusedMove = false;
     double revalidateMs = 0;
+    std::shared_ptr<Graphics::ShaderResources::DrawBindings> overlay;
     // The batches the pre-sync (PrepareDispatch) waited for are reaped first: their completions
     // (CPU write-backs) land before stage B or a cached object's Revalidate reads, and the flush
     // hook then finds nothing pending over their surfaces.
@@ -4771,6 +4910,11 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     // The image lookups of this call by outcome (stage B, a Revalidate or a locked build), for the
     // [indirect] line: reset here, read after the resources phase.
     if (profile && arguments != 0) Graphics::ThreadLookupOutcomes() = {};
+    const auto noteRefusalBuild = [](bool inserted) {
+        auto& moves = DispatchMoves();
+        moves.rebuilt.fetch_add(1, std::memory_order_relaxed);
+        if (inserted) moves.kept.fetch_add(1, std::memory_order_relaxed);
+    };
     // The resource cache insert evicts the oldest entry, destroying its ShaderResources here when the
     // cache was the last owner: timed apart from the build.
     const auto insert = [&] {
@@ -4819,6 +4963,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         }
         if (cacheable) {
             ++d.cacheMisses;
+            if (prepared->exact) noteRefusalBuild(resources->Reusable());
             if (resources->Reusable()) insert();
         }
     } else if (cacheable) {
@@ -4826,13 +4971,54 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         // object it found: revalidated as a map hit would be (an entry replaced meanwhile is left
         // alone by the pointer-conditional Remove). APS5_NO_PREPARED_FIND=1 looks the key up again.
         static const bool preparedFind = std::getenv("APS5_NO_PREPARED_FIND") == nullptr;
+        const bool exactEntry = prepared != nullptr && prepared->exact;
         contentKey = prepared != nullptr && !prepared->key.empty() ? std::move(prepared->key) : DispatchContentKey(shaders[0], context.device);
         auto cached = preparedFind && prepared != nullptr && prepared->cached != nullptr ? std::move(prepared->cached) : state->resourceCache.Find(contentKey);
         if (cached != nullptr) {
             if (cached->Revalidate(shaders[0])) {
-                resources = std::move(cached);
-                fromCache = true;
-                ++d.cacheHits;
+                bool usable = true;
+                if (DispatchMove() && !exactEntry) {
+                    auto& moves = DispatchMoves();
+                    Graphics::ShaderResources::MoveProof proof;
+                    auto moved = cached->MovedDispatchBuffers(shaders[0], state->recorder.get(), DispatchMoveBytes(), proof);
+                    moves.checked.fetch_add(1, std::memory_order_relaxed);
+                    if (moved.has_value() && !moved->empty()) {
+                        overlay = cached->PrepareDrawBindings(*state->recorder, *moved, true);
+                        if (overlay != nullptr && overlay->allocation.set == VK_NULL_HANDLE) overlay.reset();
+                        if (overlay == nullptr) {
+                            proof.refusal = Graphics::ShaderResources::MoveRefusal::Bindings;
+                            moved.reset();
+                        }
+                    }
+                    if (!moved.has_value()) {
+                        usable = false;
+                        moves.refused[static_cast<std::size_t>(proof.refusal)].fetch_add(1, std::memory_order_relaxed);
+                    } else if (moved->empty()) {
+                        moves.exact.fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        moves.moved.fetch_add(1, std::memory_order_relaxed);
+                        moves.buffers.fetch_add(proof.buffers, std::memory_order_relaxed);
+                        moves.bytes.fetch_add(proof.bytes, std::memory_order_relaxed);
+                        noteDispatchMoveSize(proof.bytes);
+                    }
+                }
+                if (!usable) {
+                    contentKey = DispatchContentKey(shaders[0], context.device, false);
+                    refusedMove = true;
+                    cached = state->resourceCache.Find(contentKey);
+                    if (cached != nullptr && cached->Revalidate(shaders[0])) usable = true;
+                    else if (cached != nullptr) {
+                        state->resourceCache.Remove(contentKey, cached.get());
+                        ++d.cacheInvalidated;
+                        state->recorder->Keep(std::move(cached));
+                    }
+                }
+                if (usable) {
+                    if (refusedMove || exactEntry) DispatchMoves().served.fetch_add(1, std::memory_order_relaxed);
+                    resources = std::move(cached);
+                    fromCache = true;
+                    ++d.cacheHits;
+                }
             } else {
                 state->resourceCache.Remove(contentKey, cached.get());
                 ++d.cacheInvalidated;
@@ -4851,6 +5037,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         if (profile) timer.add(PhaseResourcesFullBuild, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - buildStart).count());
         if (cacheable) {
             ++d.cacheMisses;
+            if (refusedMove) noteRefusalBuild(resources->Reusable());
             if (resources->Reusable()) insert();
         }
     }
@@ -4873,6 +5060,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         AgcDriver::ProfilePrint_nid_no_patch("[rescache] %llu hits, %llu misses, %llu invalidated, %zu entries (dispatch + draw); template hits: %llu refreshed the data buffers (revalidate %.1f ms), %llu had the same words; Find calls %llu, Touch calls %llu\n", static_cast<unsigned long long>(d.cacheHits), static_cast<unsigned long long>(d.cacheMisses), static_cast<unsigned long long>(d.cacheInvalidated), state->resourceCache.Size(), static_cast<unsigned long long>(d.templateRefreshed), d.templateRevalidateMs, static_cast<unsigned long long>(d.templateSameWords), static_cast<unsigned long long>(ResourceCache::Finds()), static_cast<unsigned long long>(ResourceCache::Touches()));
         AgcDriver::ProfilePrint_nid_no_patch("[vk] deviceProc lookups inside the device call: %llu (%.2f per dispatch); pre-dispatch barriers recorded %llu, skipped %llu; compute pipelines created %llu (%llu under the GPU mutex)\n", static_cast<unsigned long long>(d.procLookups), d.profiledDispatches != 0 ? static_cast<double>(d.procLookups) / static_cast<double>(d.profiledDispatches) : 0.0, static_cast<unsigned long long>(d.preBarriersRecorded), static_cast<unsigned long long>(d.preBarriersSkipped), static_cast<unsigned long long>(computePipelinesCreated.load(std::memory_order_relaxed)), static_cast<unsigned long long>(computePipelinesCreatedLocked.load(std::memory_order_relaxed)));
         reportRecipes();
+        reportDispatchMove();
     }
     timing.Mark("shader_resources");
     timer.phase(PhaseResources);
@@ -4894,6 +5082,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     IndirectOutcome outcome{0, 0};
     RecordedDispatch record{&context, &shaders[0], resources, objects, pushStages, &pushBytes, x, y, z, arguments, nullptr, programAddress, fromCache && TemplateDataRefresh() ? RecordedDispatch::DataRefresh::Words : RecordedDispatch::DataRefresh::None, 0, revalidateMs, &timer};
     record.resourceKeyMatched = fromCache;
+    record.bindings = overlay;
     if (arguments != 0) decideIndirect(record, outcome, groupsText);
     // The indirect hold total below still covers the whole call of a CPU-resolved one.
     const bool indirect = record.arguments != 0 || outcome.cpuReason != 0;
@@ -4947,7 +5136,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     // object the resource cache serves under this content key (reusable: no lease, no copied
     // writes, every direct region import- or mirror-served), so a hit's proof is the template's
     // Revalidate and nothing needs completion work.
-    if (recipeOut != nullptr && DispatchRecipes() && cacheable && resources->Reusable() && !resources->NeedsCompletion() && objects != nullptr && !contentKey.empty()) {
+    if (recipeOut != nullptr && DispatchRecipes() && cacheable && overlay == nullptr && resources->Reusable() && !resources->NeedsCompletion() && objects != nullptr && !contentKey.empty()) {
         auto recipe = std::make_shared<Recipe>();
         recipe->device = state->device;
         recipe->templateRef = resources;

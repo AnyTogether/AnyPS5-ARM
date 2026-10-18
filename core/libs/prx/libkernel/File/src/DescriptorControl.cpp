@@ -379,10 +379,8 @@ int RecordLock(int fd, int command, std::intptr_t argument) {
     struct flock host{};
     if (lock.type == ReadLock) host.l_type = F_RDLCK;
     else if (lock.type == WriteLock) host.l_type = F_WRLCK;
-    else if (lock.type == Unlock) host.l_type = F_UNLCK;
+    else if (lock.type == Unlock) host.l_type = current == GetLock ? F_RDLCK : F_UNLCK;
     else return Fail(GuestEinval);
-    if (current == GetLock && lock.type == Unlock)
-        throw std::runtime_error("fcntl: F_GETLK with F_UNLCK is not implemented, fd=" + std::to_string(fd));
     host.l_whence = lock.whence;
     host.l_start = static_cast<off_t>(lock.start);
     host.l_len = static_cast<off_t>(lock.length);
@@ -570,6 +568,18 @@ bool Appends(int fd) {
     std::lock_guard lock(g_mutex);
     const auto found = g_entries.find(fd);
     return found != g_entries.end() && found->second.status && (*found->second.status & Append) != 0;
+}
+
+bool IsVnode(int fd) {
+    if (fd < 0 || File::IsRandomDevice(fd)) return false;
+    if (File::IsArchivedFile(fd)) return true;
+#ifdef _WIN32
+    if (!DescriptorIsOpen_nid_no_patch(fd)) return false;
+    return File::DirectoryDescriptorPath(fd) || ::GetFileType(WindowsDescriptorHandle_nid_no_patch(fd)) == FILE_TYPE_DISK;
+#else
+    struct stat status{};
+    return ::fstat(fd, &status) == 0 && (S_ISREG(status.st_mode) || S_ISDIR(status.st_mode));
+#endif
 }
 
 }

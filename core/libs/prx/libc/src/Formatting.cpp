@@ -142,6 +142,7 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
         if (conversion == 'n') {
             if (!suppress) {
                 void* target = nextPointer();
+                if (target == nullptr) return EOF;
                 const auto count = input - buffer;
                 if (length == "hh") *static_cast<signed char*>(target) = static_cast<signed char>(count);
                 else if (length == "h") *static_cast<short*>(target) = static_cast<short>(count);
@@ -163,7 +164,10 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
         std::string directive = "%";
         void* target = nullptr;
         if (suppress) directive += '*';
-        else target = nextPointer();
+        else {
+            target = nextPointer();
+            if (target == nullptr) return EOF;
+        }
         if (sized && !suppress) {
             const auto capacity = static_cast<unsigned long>(nextCapacity());
             const unsigned long limit = conversion == 'c' ? capacity : (capacity == 0 ? 0 : capacity - 1);

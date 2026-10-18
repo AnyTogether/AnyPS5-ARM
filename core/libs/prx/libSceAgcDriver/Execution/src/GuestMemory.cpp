@@ -1,5 +1,6 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/HandoffSpin.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
 #include "prx/libSceAgcDriver/Execution/include/WriteWatchCoverage.hpp"
 #include "ThreadOwned.hpp"
@@ -748,8 +749,7 @@ bool onOwnLiveStack(std::uintptr_t address, std::size_t bytes) {
         }
     };
     thread_local const Bounds bounds;
-    const volatile unsigned char marker = 0;
-    const auto frame = reinterpret_cast<std::uintptr_t>(&marker);
+    const auto frame = reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0));
     return bounds.high != 0 && frame >= bounds.low && frame < bounds.high && address >= frame && address < bounds.high && bytes <= bounds.high - address;
 }
 
@@ -1006,6 +1006,32 @@ struct WriteTracker {
                 auto& stamp = entry.pages[page];
                 stamp = std::max(stamp, stampGeneration);
             }
+        }
+    }
+
+    bool blockPartWatched(std::uint64_t first, std::uint64_t stop) const {
+#ifdef _WIN32
+        return covers(first, 1) || covers(stop - 1, 1);
+#else
+        return GuestWriteWatch::GuestWriteWatchOverlaps_nid_postfix(static_cast<std::uintptr_t>(first), static_cast<std::size_t>(stop - first));
+#endif
+    }
+
+    void stampWatchedPart(std::uint64_t address, std::uint64_t end, std::uint32_t stampGeneration) {
+#ifdef _WIN32
+        address = std::max<std::uint64_t>(address, base);
+        end = std::min<std::uint64_t>(end, base + size);
+        if (address >= end) return;
+#else
+        end = std::min<std::uint64_t>(end, LeafCount * LeafBlocks * WriteBlockBytes);
+        if (address >= end || !GuestWriteWatch::GuestWriteWatchOverlaps_nid_postfix(static_cast<std::uintptr_t>(address), static_cast<std::size_t>(end - address))) return;
+#endif
+        for (auto block = blockOf(address); block <= blockOf(end - 1); ++block) {
+            const auto first = std::max(address, blockBegin(block));
+            const auto stop = std::min<std::uint64_t>(end, blockBegin(block) + WriteBlockBytes);
+            if (!blockPartWatched(first, stop)) continue;
+            stamp(block, stampGeneration, StampKind::Driver);
+            noteDriverStore(block, address, end, stampGeneration);
         }
     }
 
@@ -1413,6 +1439,31 @@ void Unwatch(std::uint64_t address, std::size_t bytes) {
     unwatchLocked(tracker, address, bytes);
 }
 
+void Rewatch(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
+#ifdef _WIN32
+    auto& tracker = Tracker();
+    const auto lock = lockTracker(tracker);
+    tracker.initialize();
+    if (!tracker.watched) return;
+    bool restored = false;
+    for (const auto& [begin, end] : ranges) {
+        if (end <= begin || begin < tracker.base || end - tracker.base > tracker.size || (begin - tracker.base) % WriteBlockBytes != 0 || (end - tracker.base) % WriteBlockBytes != 0) continue;
+        const auto bytes = static_cast<std::size_t>(end - begin);
+        if (tracker.coverage.Covers(begin, bytes) || !walkWrites(tracker, begin, end, StampKind::Cpu) || !tracker.coverage.Restore(begin, bytes)) continue;
+        ++tracker.generation;
+        tracker.noteCpuStore(begin, end, tracker.generation);
+        for (auto block = tracker.blockOf(begin); block <= tracker.blockOf(end - 1); ++block) {
+            tracker.driverPieces.erase(block);
+            tracker.stamp(block, tracker.generation, StampKind::Cpu);
+        }
+        restored = true;
+    }
+    if (restored) unwatchSerial.fetch_add(1, std::memory_order_release);
+#else
+    static_cast<void>(ranges);
+#endif
+}
+
 bool ImportWatched(std::uint64_t address, std::size_t bytes, const std::function<bool()>& import, bool staysWatched) {
     if (bytes == 0 || bytes > std::numeric_limits<std::uint64_t>::max() - address) return import();
     if (!staysWatched) {
@@ -1538,6 +1589,7 @@ std::uint64_t storeOwn(std::uint64_t address, std::size_t bytes, const std::func
         ++tracker.generation;
         if (!tracker.watched || !tracker.covers(stored.first, static_cast<std::size_t>(stored.second - stored.first))) {
             tracker.noteUnstampedStore(stored.first, stored.second);
+            if (tracker.watched) tracker.stampWatchedPart(stored.first, stored.second, tracker.generation);
             return 0;
         }
         for (auto block = tracker.blockOf(stored.first); block <= tracker.blockOf(stored.second - 1); ++block) {
@@ -1591,6 +1643,7 @@ std::uint64_t MarkWritten(std::uint64_t address, std::size_t bytes) {
     ++tracker.generation;
     if (!tracker.watched || !tracker.covers(address, bytes)) {
         tracker.noteUnstampedStore(address, address + bytes);
+        if (tracker.watched) tracker.stampWatchedPart(address, address + bytes, tracker.generation);
         return 0;
     }
     {
@@ -2080,12 +2133,12 @@ void GpuMutexType::lock() {
     if (!GpuLockProfiled()) {
         auto* trace = PerformanceTrace::Recording() ? PerformanceTrace::Thread() : nullptr;
         if (trace == nullptr) {
-            mutex.lock();
+            LockSpinning(mutex, HandoffSpinWindow());
         } else {
             const auto site = static_cast<std::size_t>(std::exchange(LockStats().nextSite, GpuLockSite::Other));
             if (!mutex.try_lock()) {
                 const auto start = std::chrono::steady_clock::now();
-                mutex.lock();
+                LockSpinning(mutex, HandoffSpinWindow());
                 trace->Add("GpuMutex.wait", GpuLockSiteNames[site], start, std::chrono::steady_clock::now());
             }
         }
@@ -2103,7 +2156,7 @@ void GpuMutexType::lock() {
         HolderMatrixValues before{};
         if (holders) Holders().Snapshot(before);
         const auto start = std::chrono::steady_clock::now();
-        mutex.lock();
+        LockSpinning(mutex, HandoffSpinWindow());
         acquired();
         const auto now = std::chrono::steady_clock::now();
         if (auto* trace = PerformanceTrace::Recording() ? PerformanceTrace::Thread() : nullptr) trace->Add("GpuMutex.wait", GpuLockSiteNames[site], start, now);
@@ -2251,8 +2304,25 @@ void Read(std::uint64_t address, std::span<std::byte> destination, std::size_t a
         if (trace) std::fprintf(stderr, "[unreadable]   read from +0x%llx\n", ModuleOffset(__builtin_return_address(0)));
         throw;
     }
-    std::memcpy(destination.data(), source, destination.size());
+    CopyGuestBytes(destination.data(), source, destination.size());
 }
+
+#ifdef ANYPS5_ENABLE_ASAN
+[[gnu::no_sanitize("address")]] void CopyGuestBytes(void* destination, const void* source, std::size_t bytes) {
+    auto* to = static_cast<unsigned char*>(destination);
+    const auto* from = static_cast<const unsigned char*>(source);
+    std::size_t index = 0;
+    for (; index + sizeof(std::uint64_t) <= bytes; index += sizeof(std::uint64_t)) {
+        const std::uint64_t word = *reinterpret_cast<const volatile std::uint64_t*>(from + index);
+        std::memcpy(to + index, &word, sizeof(word));
+    }
+    for (; index < bytes; ++index) to[index] = static_cast<const volatile unsigned char*>(from)[index];
+}
+#else
+void CopyGuestBytes(void* destination, const void* source, std::size_t bytes) {
+    std::memcpy(destination, source, bytes);
+}
+#endif
 
 namespace {
 

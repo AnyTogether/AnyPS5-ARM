@@ -13,7 +13,7 @@
 
 namespace ShaderRecompiler::ShaderDiskCache {
 
-inline constexpr std::uint32_t FormatVersion = 36;
+inline constexpr std::uint32_t FormatVersion = 37;
 
 enum class LoadStatus {
     Loaded,
@@ -73,6 +73,8 @@ void Store(std::vector<std::byte> key, std::shared_ptr<const CompiledVariant> va
 [[nodiscard]] bool LoadPlan(std::span<const std::byte> key, IrResourcePlan& plan);
 void StorePlan(std::vector<std::byte> key, std::shared_ptr<const IrResourcePlan> plan);
 void Flush();
+void Shutdown();
+[[nodiscard]] unsigned Writers();
 [[nodiscard]] Counters Totals();
 
 }

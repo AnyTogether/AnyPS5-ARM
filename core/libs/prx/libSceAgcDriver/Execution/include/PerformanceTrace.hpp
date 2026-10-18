@@ -22,6 +22,13 @@
 #include <vector>
 
 namespace AgcDriver {
+class TraceThread;
+}
+
+extern "C" bool AgcDriverTraceRecording_nid_postfix();
+extern "C" AgcDriver::TraceThread* AgcDriverTraceThread_nid_postfix();
+
+namespace AgcDriver {
 
 class VulkanDevice;
 
@@ -532,23 +539,26 @@ public:
     }
 
     static bool Recording() {
-        return recording.load(std::memory_order_relaxed);
+        return AgcDriverTraceRecording_nid_postfix();
     }
 
     static TraceThread* Thread() {
-        return local;
+        return AgcDriverTraceThread_nid_postfix();
     }
 
     static void StopOutput();
 
 private:
+    friend bool ::AgcDriverTraceRecording_nid_postfix();
+    friend TraceThread* ::AgcDriverTraceThread_nid_postfix();
+
     static void OpenInterval(std::chrono::steady_clock::time_point now, std::uint64_t present);
     static void FlushInterval(std::chrono::steady_clock::time_point now, std::uint32_t width, std::uint32_t height, const VulkanDevice* device);
 
-    inline static std::atomic<bool> recording{false};
+    static std::atomic<bool> recording;
     inline static std::atomic<bool> buffering{false};
     inline static std::atomic<std::uint64_t> presentCount{0};
-    inline static thread_local TraceThread* local = nullptr;
+    static thread_local TraceThread* local;
     inline static std::mutex gpuMutex;
     inline static std::vector<TraceGpuRange> gpuRanges;
     inline static std::uint64_t gpuLost = 0;

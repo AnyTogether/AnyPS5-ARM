@@ -1,3 +1,27 @@
+if(BUILD_TESTING)
+    add_test_executable(guest_binary_word_tests ${LIBS_INCLUDE_DIR}/tests/GuestBinaryWord.cpp)
+    target_include_directories(guest_binary_word_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_binary_word_tests PRIVATE libc)
+    configure_windows_unwind(guest_binary_word_tests)
+    add_test(NAME guest_binary_word COMMAND guest_binary_word_tests guest_binary_word.tmp)
+    set_tests_properties(guest_binary_word PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_binary_word PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+
+    add_test_executable(guest_safe_error_tests ${LIBS_INCLUDE_DIR}/tests/GuestSafeErrors.cpp)
+    target_include_directories(guest_safe_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_safe_error_tests PRIVATE libc)
+    configure_windows_unwind(guest_safe_error_tests)
+    add_test(NAME guest_safe_errors COMMAND guest_safe_error_tests)
+    set_tests_properties(guest_safe_errors PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_safe_errors PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
 target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/General.cpp
@@ -18,8 +42,10 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Math.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Random.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostEntropy.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Backtrace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Time.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileAndHeap.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/HostErrno.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileLock.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StdioExtras.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardStreams.cpp
@@ -54,6 +80,8 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception/Exports.cpp
 )
 
+target_sources(libc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryWordIo.cpp)
+
 target_include_directories(libc PRIVATE
         ${LIBS_INCLUDE_DIR}
 )
@@ -65,6 +93,14 @@ if(WIN32)
 endif()
 
 if(BUILD_TESTING)
+    if(UNIX)
+        add_test_executable(guest_fopen_errors_tests ${LIBS_INCLUDE_DIR}/tests/GuestFopenErrors.cpp)
+        target_include_directories(guest_fopen_errors_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_fopen_errors_tests PRIVATE libc)
+        add_test(NAME guest_fopen_errors COMMAND guest_fopen_errors_tests)
+        set_tests_properties(guest_fopen_errors PROPERTIES TIMEOUT 20)
+    endif()
+
     add_test_executable(guest_allocating_strings_tests ${LIBS_INCLUDE_DIR}/tests/GuestAllocatingStrings.cpp)
     target_include_directories(guest_allocating_strings_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_allocating_strings_tests PRIVATE libc)
@@ -163,6 +199,15 @@ if(BUILD_TESTING)
     add_test(NAME file_position COMMAND file_position_tests)
     if(WIN32)
         set_tests_properties(file_position PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    if(WIN32)
+        add_test_executable(guest_fopen_long_host_path_tests ${LIBS_INCLUDE_DIR}/tests/GuestFopenLongHostPath.cpp)
+        target_include_directories(guest_fopen_long_host_path_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_fopen_long_host_path_tests PRIVATE libc)
+        configure_windows_unwind(guest_fopen_long_host_path_tests)
+        add_test(NAME guest_fopen_long_host_path COMMAND guest_fopen_long_host_path_tests)
+        set_tests_properties(guest_fopen_long_host_path PROPERTIES TIMEOUT 20 ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(guest_wide_formatting_tests ${LIBS_INCLUDE_DIR}/tests/GuestWideFormatting.cpp)
@@ -645,6 +690,11 @@ if(BUILD_TESTING)
         add_test_executable(cpu_topology_tests ${LIBS_INCLUDE_DIR}/tests/CpuTopology.cpp)
         target_include_directories(cpu_topology_tests PRIVATE ${LIBS_INCLUDE_DIR})
         add_test(NAME cpu_topology COMMAND cpu_topology_tests)
+        add_test_executable(guest_backtrace_tests ${LIBS_INCLUDE_DIR}/tests/GuestBacktrace.cpp)
+        target_include_directories(guest_backtrace_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_backtrace_tests PRIVATE libc)
+        set_target_properties(guest_backtrace_tests PROPERTIES ENABLE_EXPORTS ON)
+        add_test(NAME guest_backtrace COMMAND guest_backtrace_tests)
     endif()
     add_test_executable(log_macros_tests ${LIBS_INCLUDE_DIR}/tests/LogMacros.cpp)
     target_include_directories(log_macros_tests PRIVATE ${LIBS_INCLUDE_DIR})

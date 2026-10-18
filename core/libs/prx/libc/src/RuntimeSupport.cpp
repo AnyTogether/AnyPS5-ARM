@@ -181,4 +181,8 @@ unsigned __int128 APS5_VABI __umodti3_nid_postfix(unsigned __int128 dividend, un
     return SonyUmodti3(dividend, divisor);
 }
 
+__int128 APS5_VABI __modti3_nid_postfix(__int128 dividend, __int128 divisor) {
+    return SonyModti3(dividend, divisor);
+}
+
 }
