@@ -15,7 +15,7 @@ Test hardware: MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. Last upda
 | <img src="img/doom-e1m1.jpg" width="180"> | [**DOOM (homebrew)**](doom.md) | `PPSA99666` | lowbit/ps5-doom | 🟢 Playable, E1M1 onwards | 35 (the game's own target) |
 | <img src="img/dreaming-sarah.jpg" width="180"> | [**Dreaming Sarah**](dreaming-sarah.md) | `PPSA02929` | Construct 2 | 🟢 Playable | 60 |
 | <img src="img/breakout.jpg" width="180"> | [**AnyPS5 Breakout**](breakout.md) | `APS5TEST1` | The project's test game | 🟢 Playable | 60 |
-| <img src="img/stray-family.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🟢 Playable, first chapter (FPS very low) | In game ~1-11 (1080p) |
+| <img src="img/stray-family.jpg" width="180"> | [**Stray**](stray.md) | `PPSA02100` | Unreal Engine 4 | 🟢 Playable, first chapter (FPS low) | In game ~12 (1080p) |
 | <img src="img/minecraft-ingame.jpg" width="180"> | [**Minecraft**](minecraft.md) | `PPSA17221` | Bedrock Edition | 🟡 Reaches a world, crashes ~20 s in | Menus 60 · in game ~7-8 |
 | <img src="img/quake2-base1.jpg" width="180"> | [**Quake II and Quake III**](quake.md) | `PPSA99007 · PPSA99303` | PS5_Mesa (OpenGL / RADV) | 🟡 Quake II in game · Quake III needs data files | Menu ~48 · in game ~40 |
 | <img src="img/katamari-title.jpg" width="180"> | [**Once Upon a KATAMARI**](katamari.md) | `PPSA21904` | Unity (IL2CPP) | 🟡 Title and tutorial render; hold Esc to skip black opening cutscene (M1, community report) | Title 30.45 · tutorial 1.19 (snapshots; warm-cache FPS unknown) |

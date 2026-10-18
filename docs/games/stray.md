@@ -4,9 +4,9 @@
 
 `PPSA02100` · Unreal Engine 4
 
-**Status:** 🟢 Playable, first chapter without problems · **FPS:** ~1-11 in game, mostly 4-8 (M3 Pro, 1080p)
+**Status:** 🟢 Playable, first chapter without problems · **FPS:** ~12 in game (M3 Pro, 1080p)
 
-The first chapter plays from start to end: the opening in the overgrown pipes, the cat family, the climbs and the cardboard nap. The picture is right, with no missing or broken graphics. The frame rate is the only problem and it is very low. That is the next step.
+The first chapter plays from start to end: the opening in the overgrown pipes, the cat family, the climbs and the cardboard nap. The picture is right, with no missing or broken graphics. The frame rate is still low: ~12 FPS in game, up from ~7.6 at the start of the macOS performance work.
 
 ![The opening in the overgrown pipes](img/stray-opening.jpg)
 *The opening in the overgrown pipes*
@@ -37,7 +37,9 @@ Captured on 15 October 2026 from main after the third upstream merge (`cc213ee99
 | ✅ | **PlayGo without metadata** | The dump has no `playgo-*` file. Upstream now refuses every chunk id but 0 for such a dump, and Stray asks for chunk 1 at startup; the port takes it as fully installed. |
 | ✅ | **Loading crash** | About one start in ten stopped with "MaterialInstanceConstant ... Serial size mismatch": a file read landed in guest memory while a GPU batch still in flight held an older write-back to the same range, which then overwrote the file data. A kernel read now first flushes the GPU writes pending over its range. |
 | ✅ | **First chapter** | Plays through with correct graphics. |
-| 🔧 | **FPS** | ~1-11 FPS in game at 1080p. Earlier measurements at 1080p put the limit on the driver thread (~52 ms per frame against ~31 ms on the GPU): GPU syncs, write-backs and queue submits. |
+| ✅ | **Startup and loading** | The first seconds ran at 2 frames per 10 s and the loading screen at 15: every guest memory registration copied the write watch's state for the whole 512 GiB arena (~128 MiB) under its lock. Registrations inside it now reset their pages in place. |
+| ✅ | **FPS, first steps** | ~7.6 → ~12.2 FPS in game at 1080p (+62%, 3 interleaved rounds against the start of the work): lock-free write watch and allocation queries, fewer draw pipeline drains (DMA, predication, satisfied waits, inlined indirect buffers), reused descriptor sets, evicted shader results freed on a helper thread, GPU copies recorded ahead of the render pass. |
+| 🔧 | **FPS** | The limit is the driver's per-draw work on its one draw committer thread (~50 us for each of ~1000 draws a frame): resource preparation takes ~75% of it (buffer snapshots, cache lookups, vertex inputs), Vulkan recording ~2%. 720p is barely faster than 1080p. The next steps are moving that preparation off the committer and running the guest code without Rosetta. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 
@@ -48,7 +50,7 @@ Captured on 15 October 2026 from main after the third upstream merge (`cc213ee99
 | Engine | `Unreal Engine 4` |
 | Split 256-bit stores | `211,077` |
 | Output | `1920x1080 with the patch, 3840x2160 without` |
-| Now | `First chapter playable, ~1-11 FPS` |
+| Now | `First chapter playable, ~12 FPS` |
 
 ## Links
 

@@ -4,9 +4,9 @@
 
 `PPSA02100` · Unreal Engine 4
 
-**Durum:** 🟢 Oynanabilir, ilk bölüm sorunsuz · **FPS:** oyun içinde ~1-11, çoğunlukla 4-8 (M3 Pro, 1080p)
+**Durum:** 🟢 Oynanabilir, ilk bölüm sorunsuz · **FPS:** oyun içinde ~12 (M3 Pro, 1080p)
 
-İlk bölüm baştan sona oynanıyor: sarmaşıklı borulardaki açılış, kedi ailesi, tırmanışlar ve kartonda uyuma. Görüntü doğru, eksik ya da bozuk grafik yok. Tek sorun FPS ve çok düşük. Sıradaki iş o.
+İlk bölüm baştan sona oynanıyor: sarmaşıklı borulardaki açılış, kedi ailesi, tırmanışlar ve kartonda uyuma. Görüntü doğru, eksik ya da bozuk grafik yok. FPS hâlâ düşük: macOS performans çalışmasının başındaki ~7.6'dan oyun içinde ~12'ye çıktı.
 
 ![Sarmaşıklı borulardaki açılış](../img/stray-opening.jpg)
 *Sarmaşıklı borulardaki açılış*
@@ -37,7 +37,9 @@
 | ✅ | **PlayGo dosyası olmayan dump** | Dump'ta hiç `playgo-*` dosyası yok. Upstream artık böyle bir dump'ta 0 dışındaki her chunk'ı reddediyor, Stray de açılışta chunk 1'i soruyor; port bu dump'ı tam kurulu sayıyor. |
 | ✅ | **Yükleme çökmesi** | Yaklaşık on açılıştan biri "MaterialInstanceConstant ... Serial size mismatch" ile duruyordu: bir dosya okuması guest belleğe düşerken hâlâ çalışan bir GPU batch'i aynı aralığa eski bir write-back taşıyordu ve sonra dosya verisinin üstüne yazıyordu. Kernel okuması artık önce o aralıkta bekleyen GPU yazmalarını boşaltıyor. |
 | ✅ | **İlk bölüm** | Doğru grafiklerle baştan sona oynanıyor. |
-| 🔧 | **FPS** | 1080p'de oyun içinde ~1-11 FPS. Daha önceki 1080p ölçümlerinde sınır sürücü iş parçacığıydı (frame başına ~52 ms, GPU'da ~31 ms): GPU senkronları, write-back'ler ve kuyruk gönderimleri. |
+| ✅ | **Açılış ve yükleme** | İlk saniyeler 10 saniyede 2 kare, yükleme ekranı 15 kareyle gidiyordu: her guest bellek kaydı, write watch'un 512 GiB'lık arena durumunu (~128 MiB) kilit altında baştan kopyalıyordu. Arenanın içindeki kayıtlar artık sayfaları yerinde sıfırlıyor. |
+| ✅ | **FPS, ilk adımlar** | 1080p'de oyun içinde ~7.6 → ~12.2 FPS (+%62, işin başıyla art arda 3 tur karşılaştırma): kilitsiz write watch ve bellek tahsisi sorguları, daha az draw pipeline boşaltma (DMA, predication, sağlanmış beklemeler, satır içi indirect buffer'lar), yeniden kullanılan descriptor set'ler, yardımcı thread'de serbest bırakılan shader sonuçları, render pass'ten önce kaydedilen GPU kopyaları. |
+| 🔧 | **FPS** | Sınır, sürücünün tek draw committer thread'indeki draw başına iş (karede ~1000 draw'un her biri için ~50 µs): bunun ~%75'i kaynak hazırlığı (tampon snapshot'ları, önbellek aramaları, vertex girdileri), Vulkan kaydı ~%2. 720p, 1080p'den neredeyse hiç hızlı değil. Sıradaki adımlar bu hazırlığı committer'dan almak ve guest kodunu Rosetta'sız çalıştırmak. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
@@ -48,7 +50,7 @@
 | Motor | `Unreal Engine 4` |
 | Bölünen 256-bit yazma | `211.077` |
 | Çıkış | `Yamayla 1920x1080, yamasız 3840x2160` |
-| Şu an | `İlk bölüm oynanabilir, ~1-11 FPS` |
+| Şu an | `İlk bölüm oynanabilir, ~12 FPS` |
 
 ## Bağlantılar
 
