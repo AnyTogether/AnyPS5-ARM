@@ -29,7 +29,16 @@ void InstallProcessParameters() {
     const std::uint32_t magic = 0x4942524f;
     std::memcpy(process.data(), &size, sizeof(size));
     std::memcpy(process.data() + 8, &magic, sizeof(magic));
+#ifdef __APPLE__
+    // The fixture installs the parameters through the main image's PE section or ELF program header;
+    // a macOS test executable has neither, so the test is skipped there.
+    if (!ProcessParametersFixture::Install(process.data(), process.size())) {
+        std::puts("HMD2: process parameters cannot be installed in a macOS executable; skipped");
+        std::exit(77);
+    }
+#else
     Require(ProcessParametersFixture::Install(process.data(), process.size()), "process parameters were not installed");
+#endif
 }
 
 bool IsDefaultFieldOfView(const Hmd2::FieldOfView& fieldOfView) {
