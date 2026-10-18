@@ -177,6 +177,8 @@ public:
         library = SDL_LoadObject("vulkan-1.dll");
 #elif defined(__APPLE__)
         library = SDL_LoadObject("libvulkan.1.dylib");
+#elif defined(__APPLE__)
+        library = SDL_LoadObject("libvulkan.1.dylib");
 #else
         library = SDL_LoadObject("libvulkan.so.1");
 #endif
