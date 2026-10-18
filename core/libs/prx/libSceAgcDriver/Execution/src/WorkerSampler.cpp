@@ -417,7 +417,7 @@ void Run() {
             for (const auto& [key, count] : stacks) if (key.first == t) top.emplace_back(&key.second, count);
             std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
             std::fprintf(file, " stacks:\n");
-            for (std::size_t i = 0; i < top.size() && i < 60; ++i) {
+            for (std::size_t i = 0; i < top.size() && i < 400; ++i) {
                 std::fprintf(file, "  %llu", static_cast<unsigned long long>(top[i].second));
                 for (const auto pc : *top[i].first) std::fprintf(file, " %s", Frame(pc).c_str());
                 std::fprintf(file, "\n");
