@@ -1167,6 +1167,9 @@ void ReleaseEvictedResults(std::vector<std::shared_ptr<const RecompileResult>>&&
         std::condition_variable wake;
         std::vector<std::shared_ptr<const RecompileResult>> items;
         bool started = false;
+        // Set while the helper waits: only then does a hand-off signal it (a system call under Rosetta,
+        // one per memo miss otherwise); a busy helper takes the new items on its next round.
+        bool sleeping = false;
     };
     static Queue* const queue = new Queue;
     constexpr std::size_t bound = 16384;
@@ -1179,7 +1182,9 @@ void ReleaseEvictedResults(std::vector<std::shared_ptr<const RecompileResult>>&&
                 std::thread([] {
                     std::unique_lock lock(queue->mutex);
                     for (;;) {
+                        queue->sleeping = true;
                         queue->wake.wait(lock, [] { return !queue->items.empty(); });
+                        queue->sleeping = false;
                         auto items = std::move(queue->items);
                         queue->items.clear();
                         lock.unlock();
@@ -1193,6 +1198,7 @@ void ReleaseEvictedResults(std::vector<std::shared_ptr<const RecompileResult>>&&
             queue->started = true;
         }
         for (auto& result : results) queue->items.push_back(std::move(result));
+        if (!queue->sleeping) return;
     }
     queue->wake.notify_one();
 }
