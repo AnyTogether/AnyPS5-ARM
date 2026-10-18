@@ -104,9 +104,23 @@ struct Shadows {
     std::uint64_t liveBytes = 0;
     std::uint64_t peakBytes = 0;
     std::uint32_t liveSlabs = 0;
+    // Live units over every shadow, kept with each Recount under the mutex: AnyShadowedOverlaps answers
+    // without the mutex while it is zero (the draw committer and the packet worker queued on it,
+    // ~5% of the committer's time, mostly when nothing was shadowed).
+    std::atomic<std::uint64_t> liveTotal{0};
     // Counted for the [storage] segment: shadows retired and the slab bytes they returned.
     std::uint64_t retired = 0;
 };
+
+void Recount(Shadows& registry, UnitShadow& shadow) {
+    const auto before = shadow.liveUnits;
+    shadow.Recount();
+    registry.liveTotal.fetch_add(static_cast<std::uint64_t>(shadow.liveUnits) - before, std::memory_order_release);
+}
+
+void Forget(Shadows& registry, const UnitShadow& shadow) {
+    registry.liveTotal.fetch_sub(shadow.liveUnits, std::memory_order_release);
+}
 
 Shadows& Registry() {
     static Shadows shadows;
@@ -156,6 +170,7 @@ std::shared_ptr<UnitShadow> findOrCreate(Shadows& registry, const Context& conte
             registry.liveBytes -= SlabBytes(*slab);
             --registry.liveSlabs;
         }
+        Forget(registry, *found->second);
         registry.byBase.erase(found);
     }
     auto shadow = std::make_shared<UnitShadow>();
@@ -352,7 +367,7 @@ std::size_t publishUnits(const std::shared_ptr<UnitShadow>& shadow, std::uint64_
             bytes += end - begin;
             ++units;
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (units == 0) return 0;
     Stats().published[static_cast<std::size_t>(reason)].fetch_add(1, std::memory_order_relaxed);
@@ -417,7 +432,7 @@ bool evictOne(Shadows& registry) {
         victim->generation[unit] = 0;
         victim->published[unit] = 0;
     }
-    victim->Recount();
+    Recount(registry, *victim);
     registry.liveBytes -= SlabBytes(*slab);
     --registry.liveSlabs;
     slab.reset();
@@ -496,6 +511,7 @@ bool AnyShadowedOverlaps(std::uint64_t address, std::size_t bytes) {
     if (!UnitShadowEnabled() || bytes == 0) return false;
     const auto end = bytes > std::numeric_limits<std::uint64_t>::max() - address ? std::numeric_limits<std::uint64_t>::max() : address + bytes;
     auto& registry = Registry();
+    if (registry.liveTotal.load(std::memory_order_acquire) == 0) return false;
     std::lock_guard lock(registry.mutex);
     return anyOverlapping(registry, address, end, [&](const std::shared_ptr<UnitShadow>& shadow) {
         if (shadow->liveUnits == 0) return false;
@@ -725,7 +741,7 @@ void MarkShadowed(const HostImport& import, std::span<const ShadowedRange> range
                 current->lastUse = present;
             }
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (lost != 0) {
         Stats().slabLost.fetch_add(lost, std::memory_order_relaxed);
@@ -764,7 +780,7 @@ void RetireShadow(VkDevice device, const HostImport& import, const std::function
                 ++dropped;
             }
         }
-        shadow->Recount();
+        Recount(registry, *shadow);
     }
     if (dropped != 0) Stats().droppedOnRetire.fetch_add(dropped, std::memory_order_relaxed);
     std::size_t published = 0;
@@ -787,6 +803,7 @@ void RetireShadow(VkDevice device, const HostImport& import, const std::function
     }
     ++registry.retired;
     if (TraceEnabled()) std::fprintf(stderr, "[shadow] retire import 0x%llx+0x%llx: %zu units published, %llu dropped (memory no longer registered)\n", static_cast<unsigned long long>(import.base), static_cast<unsigned long long>(import.bytes), published, static_cast<unsigned long long>(dropped));
+    Forget(registry, *found->second);
     registry.byBase.erase(found);
 }
 
@@ -816,6 +833,7 @@ void DestroyShadows(VkDevice device) {
             registry.liveBytes -= SlabBytes(*slab);
             --registry.liveSlabs;
         }
+        Forget(registry, *it->second);
         it = registry.byBase.erase(it);
     }
 }
