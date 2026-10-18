@@ -148,6 +148,8 @@ __attribute__((noinline)) static void floats(double x, double y) {
     mixpd(_mm256_cvtepi32_pd(_mm256_castsi256_si128(random256()))); mix128(_mm256_cvttpd_epi32(pd));
     mixps(_mm256_broadcastss_ps(fa)); mixpd(_mm256_broadcastsd_pd(b));
     mixps(_mm256_zextps128_ps256(_mm_insert_ps(fa, fb, 0x5a))); mixps(_mm256_zextps128_ps256(_mm_movelh_ps(fa, fb)));
+    mixd(_mm_cvtsd_f64(_mm_fmadd_sd(a, b, a))); mixd(_mm_cvtsd_f64(_mm_fnmadd_sd(a, b, b))); mixf(_mm_cvtss_f32(_mm_fmsub_ss(fa, fb, fa)));
+    mixps(_mm256_fmadd_ps(ps, ps, ps)); mixpd(_mm256_fnmsub_pd(pd, pd, pd));
     mixpd(_mm256_zextpd128_pd256(_mm_unpacklo_pd(a, b))); mix256(_mm256_castps_si256(_mm256_cmp_ps(ps, _mm256_set1_ps(1.0f), _CMP_GE_OQ)));
 }
 

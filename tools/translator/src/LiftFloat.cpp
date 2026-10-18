@@ -94,6 +94,32 @@ bool Lifter::Impl::EmitVectorFloat(const Instruction& instruction) {
         }
         return true;
     }
+    // FMA3: vfmadd132 a, b, c = a*c + b; 213 = b*a + c; 231 = b*c + a. msub subtracts the addend,
+    // nmadd negates the product, nmsub both. Fused, like the hardware.
+    if ((scalar || packed) && vex && (StartsWith(op, "fmadd") || StartsWith(op, "fmsub") || StartsWith(op, "fnmadd") || StartsWith(op, "fnmsub")) &&
+        op.size() >= 10) {
+        const bool negateProduct = op[1] == 'n';
+        const std::string form = op.substr(negateProduct ? 6 : 5, 3);
+        const bool subtract = op.substr(negateProduct ? 2 : 1, 3) == "msu";
+        if (form != "132" && form != "213" && form != "231") return false;
+        auto operand = [&](unsigned index) -> llvm::Value* {
+            if (scalar) return scalarOf(index, elementBits, element);
+            return Lanes(Read(instruction, index), element);
+        };
+        auto* a = operand(0);
+        auto* b = operand(1);
+        auto* c = operand(2);
+        llvm::Value *x = nullptr, *y = nullptr, *z = nullptr;
+        if (form == "132") x = a, y = c, z = b;
+        else if (form == "213") x = b, y = a, z = c;
+        else x = b, y = c, z = a;
+        if (negateProduct) x = builder.CreateFNeg(x);
+        if (subtract) z = builder.CreateFNeg(z);
+        auto* result = builder.CreateIntrinsic(llvm::Intrinsic::fma, {x->getType()}, {x, y, z});
+        if (scalar) write(replaceLow(Read(instruction, 0), result));
+        else write(Flat(result));
+        return true;
+    }
     if ((scalar || packed) && (stem == "rcp" || stem == "rsqrt")) {
         // Exact results where x86 gives 12-bit approximations; titles only rely on the approximation bound.
         auto approximate = [&](llvm::Value* value) -> llvm::Value* {

@@ -11,7 +11,7 @@ import guesttools
 from import_fixture import fixture as import_fixture
 
 
-VECTOR_FLAGS = ["-mavx2", "-mbmi", "-mbmi2", "-mlzcnt", "-mpopcnt"]
+VECTOR_FLAGS = ["-mavx2", "-mfma", "-mbmi", "-mbmi2", "-mlzcnt", "-mpopcnt"]
 
 
 def compiled(source, flags=()):
