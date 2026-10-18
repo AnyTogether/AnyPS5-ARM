@@ -4,6 +4,8 @@
 
 [Full guide in English and Turkish / Türkçe rehber](docs/user/GUIDE.md)
 
+**Native mode (no Rosetta):** [docs/native](docs/native/README.md) ([Türkçe](docs/native/tr/README.md)), DOOM runs as an arm64 process on this branch.
+
 [**Web converter**](https://boykopovar.github.io/AnyPS5/) - files stay on your device.
 
 ![anyps5_collage1](https://github.com/user-attachments/assets/ed2f0b2d-33d3-46d7-ab88-767ca872fc99)

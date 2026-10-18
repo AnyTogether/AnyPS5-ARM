@@ -1,6 +1,6 @@
 # Native arm64 (no Rosetta): design and plan
 
-Branch `native-arm64`. The goal is to run converted titles as arm64 processes, with no Rosetta. `main` keeps the Rosetta port ([MACOS_PORT.md](MACOS_PORT.md)).
+Branch `native-arm64`. How to build and use it: [docs/native](../native/README.md). The goal is to run converted titles as arm64 processes, with no Rosetta. `main` keeps the Rosetta port ([MACOS_PORT.md](MACOS_PORT.md)).
 
 ## Where Rosetta sits today
 
