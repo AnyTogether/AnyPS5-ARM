@@ -4545,7 +4545,7 @@ namespace {
 // APS5_PROFILE_DRAW: where PrepareDrawBindings spends its time, as a [draw-bindings] line every 10 s.
 struct DrawBindingsProfile {
     std::mutex mutex;
-    std::uint64_t calls = 0, prepared = 0, fastHits = 0, reusedHits = 0, copies = 0, copiedBytes = 0, wordBuffers = 0;
+    std::uint64_t calls = 0, prepared = 0, fastHits = 0, reusedHits = 0, copies = 0, copiedBytes = 0, wordBuffers = 0, setsReused = 0;
     double snapshotUs = 0, collectUs = 0, copyUs = 0, allocateUs = 0, updateUs = 0, keepUs = 0, createUs = 0, memcpyUs = 0;
     std::uint64_t descriptorWrites = 0;
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
@@ -4661,11 +4661,12 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
         CaptureTrace::Log("draw-snapshot batch=%llu address=%llx bytes=%zu", static_cast<unsigned long long>(recorder.Submissions() + 1), static_cast<unsigned long long>(begin), bytes);
     }
     const auto snapshotted = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    const auto note = [&](double allocateUs, double updateUs, double keepUs, std::size_t writeCount, bool prepared) {
+    const auto note = [&](double allocateUs, double updateUs, double keepUs, std::size_t writeCount, bool prepared, bool reused = false) {
         if (!profiled) return;
         auto& profile = BindingsProfile();
         std::lock_guard lock(profile.mutex);
         ++profile.calls;
+        profile.setsReused += reused ? 1 : 0;
         profile.prepared += prepared ? 1 : 0;
         profile.fastHits += fastHits;
         profile.reusedHits += reusedHits;
@@ -4684,13 +4685,27 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
         const auto now = std::chrono::steady_clock::now();
         if (now - profile.last < std::chrono::seconds(10)) return;
         profile.last = now;
-        std::fprintf(stderr, "[draw-bindings] %llu calls, %llu prepared: snapshots %.0f ms (fast %llu, reused %llu after collects of %.0f ms, copied %llu / %.1f MiB in %.0f ms: create %.0f, memcpy %.0f, word buffers %llu), descriptor sets allocated in %.0f ms, %llu writes updated in %.0f ms, kept in %.0f ms\n", static_cast<unsigned long long>(profile.calls), static_cast<unsigned long long>(profile.prepared), profile.snapshotUs / 1000.0, static_cast<unsigned long long>(profile.fastHits), static_cast<unsigned long long>(profile.reusedHits), profile.collectUs / 1000.0, static_cast<unsigned long long>(profile.copies), static_cast<double>(profile.copiedBytes) / 1048576.0, profile.copyUs / 1000.0, profile.createUs / 1000.0, profile.memcpyUs / 1000.0, static_cast<unsigned long long>(profile.wordBuffers), profile.allocateUs / 1000.0, static_cast<unsigned long long>(profile.descriptorWrites), profile.updateUs / 1000.0, profile.keepUs / 1000.0);
-        profile.calls = profile.prepared = profile.fastHits = profile.reusedHits = profile.copies = profile.copiedBytes = profile.wordBuffers = profile.descriptorWrites = 0;
+        std::fprintf(stderr, "[draw-bindings] %llu calls, %llu prepared: snapshots %.0f ms (fast %llu, reused %llu after collects of %.0f ms, copied %llu / %.1f MiB in %.0f ms: create %.0f, memcpy %.0f, word buffers %llu), descriptor sets allocated in %.0f ms (%llu reused from the previous draw), %llu writes updated in %.0f ms, kept in %.0f ms\n", static_cast<unsigned long long>(profile.calls), static_cast<unsigned long long>(profile.prepared), profile.snapshotUs / 1000.0, static_cast<unsigned long long>(profile.fastHits), static_cast<unsigned long long>(profile.reusedHits), profile.collectUs / 1000.0, static_cast<unsigned long long>(profile.copies), static_cast<double>(profile.copiedBytes) / 1048576.0, profile.copyUs / 1000.0, profile.createUs / 1000.0, profile.memcpyUs / 1000.0, static_cast<unsigned long long>(profile.wordBuffers), profile.allocateUs / 1000.0, static_cast<unsigned long long>(profile.setsReused), static_cast<unsigned long long>(profile.descriptorWrites), profile.updateUs / 1000.0, profile.keepUs / 1000.0);
+        profile.calls = profile.prepared = profile.fastHits = profile.reusedHits = profile.copies = profile.copiedBytes = profile.wordBuffers = profile.descriptorWrites = profile.setsReused = 0;
         profile.snapshotUs = profile.collectUs = profile.copyUs = profile.allocateUs = profile.updateUs = profile.keepUs = profile.createUs = profile.memcpyUs = 0;
     };
     if (selected.empty()) {
         note(0, 0, 0, 0, false);
         return {};
+    }
+    // The same snapshots as this object's previous draw: that draw's sets, written for them and never
+    // updated since (the base descriptors are fixed at build), are bound again; a set may be bound by
+    // any number of command buffers. The previous result holds its snapshot buffers, so equal
+    // pointers are the same buffers. APS5_NO_DRAW_SET_REUSE=1 writes new sets every draw.
+    static const bool reuseSets = std::getenv("APS5_NO_DRAW_SET_REUSE") == nullptr;
+    if (reuseSets) {
+        if (auto last = lastDrawBindings.lock(); last != nullptr && lastDrawSelected == selected && std::equal(last->snapshots.begin(), last->snapshots.end(), result->snapshots.begin(), result->snapshots.end(), [](const auto& left, const auto& right) { return left.address == right.address && left.buffer == right.buffer; })) {
+            const auto keepStart = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            recorder.Keep(last);
+            for (const auto& snapshot : last->snapshots) recorder.KeepBytes(snapshot.buffer.get(), snapshot.buffer->Bytes().size());
+            if (profiled) note(0, 0, MicrosSince(keepStart), 0, true, true);
+            return last;
+        }
     }
     Require(context.descriptorCache != nullptr, "draw snapshots require a descriptor cache");
     std::array<std::vector<VkDescriptorSetLayoutBinding>, 2> descriptions;
@@ -4745,6 +4760,10 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
     const auto updated = profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     recorder.Keep(result);
     for (const auto& snapshot : result->snapshots) recorder.KeepBytes(snapshot.buffer.get(), snapshot.buffer->Bytes().size());
+    if (reuseSets) {
+        lastDrawBindings = result;
+        lastDrawSelected.assign(selected.begin(), selected.end());
+    }
     if (profiled) {
         const auto us = [](auto from, auto to) { return std::chrono::duration<double, std::micro>(to - from).count(); };
         note(us(snapshotted, allocated), us(allocated, updated), MicrosSince(updated), writes.size(), true);

@@ -520,6 +520,10 @@ private:
     mutable std::vector<MovedWordBuffer> movedWordBuffers;
     mutable std::size_t movedWordBufferNext = 0;
     mutable std::vector<VkDescriptorPoolSize> drawPoolSizes;
+    // The previous PrepareDrawBindings result and the allocations it snapshotted, reused when the next
+    // draw selects the same snapshot buffers.
+    mutable std::weak_ptr<DrawBindings> lastDrawBindings;
+    mutable std::vector<std::size_t> lastDrawSelected;
     // Guest buffer elements bound read-only: each use of this object skips that many pending-write
     // notes (counted in MarkGpuWrites for the [buffers] line).
     std::size_t readOnlyBuffers = 0;
