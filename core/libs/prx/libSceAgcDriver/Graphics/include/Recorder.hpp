@@ -57,6 +57,14 @@ public:
     // (the [barriers] line counts the merges). The call clears the mask (whatever the caller
     // records is assumed uncovered until it marks); a new batch starts uncovered.
     VkCommandBuffer Commands(VkAccessFlags* coveredAccess = nullptr);
+    // The open batch, opened if need be, without ending a render pass a draw left open.
+    void EnsureBatch();
+    // The open batch's prologue (opened if need be): for transfers that read nothing an earlier command
+    // of the batch writes and write only memory no earlier command uses. They run before the batch's
+    // other commands, and the barrier recorded at Submit makes their writes visible to all of them.
+    // APS5_NO_BATCH_PROLOGUE=1: callers record into Commands() instead.
+    VkCommandBuffer PrologueCommands();
+    static bool PrologueEnabled();
     // After a trailing barrier with ALL_COMMANDS as its destination stage: `access` is its
     // destination access mask.
     void MarkCovered(VkAccessFlags access);
@@ -532,6 +540,9 @@ public:
 private:
     struct Batch {
         VkCommandBuffer commands = VK_NULL_HANDLE;
+        // Transfers that depend on no earlier command of the batch (PrologueCommands), submitted ahead
+        // of `commands` behind one barrier, so that recording them leaves an open render pass open.
+        VkCommandBuffer prologue = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         std::vector<std::shared_ptr<void>> kept;
         std::size_t keptBytes = 0;
@@ -827,6 +838,7 @@ private:
     // Command buffers and fences of completed batches, reused by later ones (hundreds of batches per
     // frame would otherwise allocate and free their objects each time).
     std::vector<std::pair<VkCommandBuffer, VkFence>> spare;
+    std::vector<VkCommandBuffer> sparePrologues;
     std::vector<VkQueryPool> sparePools;
     mutable std::mutex completedMutex;
     std::array<Completed, CompletedRingSize> completed;

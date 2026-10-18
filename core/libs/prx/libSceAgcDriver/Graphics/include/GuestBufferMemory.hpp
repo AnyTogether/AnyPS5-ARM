@@ -349,6 +349,9 @@ private:
         // The mirror is a descriptor sub-range one found by UploadPrepare (not a lease mirror), which
         // UploadFinish confirms still has its Range before the region binds it.
         bool subrangeMirror = false;
+        // The storage flush before a GPU copy recorded a store or publish over the region: the copy
+        // follows it in the batch (no prologue).
+        bool flushRecorded = false;
         // Set by UploadPrepare when UploadFinish still has device-lock work for the region: a copy a
         // descriptor writes, a writable mirror's refresh, an import to reconcile or make, or the
         // pending-results flush of an import it took.

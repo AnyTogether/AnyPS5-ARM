@@ -15,6 +15,7 @@
 #include "prx/libc/include/CpuTopology.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include <dlfcn.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -29,6 +30,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <thread>
 #include <tuple>
 #include "prx/libc/include/general/AtomicSharedPtr.hpp"
@@ -599,6 +601,51 @@ bool LabelRunsPerBatch() {
     return perBatch;
 }
 std::atomic<std::uint64_t> storeRunsAtSubmit{0}, storeRunsForced{0};
+
+// APS5_PROFILE_DRAW: why open render passes end ([passes] line every 10 s); Commands() callers are
+// counted by return address (module offsets, for atos). Under the GpuMutex.
+enum class PassEnd : std::uint8_t { Submit, Label, Samples, KeyChange, Hazard, Forced, Segment, Commands, Count };
+constexpr const char* PassEndNames[static_cast<std::size_t>(PassEnd::Count)] = {"submit", "label", "samples", "target change", "hazard", "forced", "sample segment", "other command"};
+struct PassEndStats {
+    std::array<std::uint64_t, static_cast<std::size_t>(PassEnd::Count)> reasons{};
+    std::unordered_map<std::uintptr_t, std::uint64_t> callers;
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+};
+PassEndStats& PassEnds() {
+    static auto* stats = new PassEndStats;
+    return *stats;
+}
+void CountPassEnd(PassEnd reason, const void* caller = nullptr) {
+    if (!DrawProfiled()) return;
+    auto& stats = PassEnds();
+    ++stats.reasons[static_cast<std::size_t>(reason)];
+    if (caller != nullptr) {
+        Dl_info info{};
+        const auto base = dladdr(caller, &info) != 0 ? reinterpret_cast<std::uintptr_t>(info.dli_fbase) : 0;
+        ++stats.callers[reinterpret_cast<std::uintptr_t>(caller) - base];
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - stats.last < std::chrono::seconds(10)) return;
+    stats.last = now;
+    std::string text;
+    for (std::size_t i = 0; i < stats.reasons.size(); ++i) {
+        char item[48];
+        std::snprintf(item, sizeof(item), " %s %llu", PassEndNames[i], static_cast<unsigned long long>(stats.reasons[i]));
+        text += item;
+    }
+    std::vector<std::pair<std::uint64_t, std::uintptr_t>> top;
+    for (const auto& [offset, count] : stats.callers) top.emplace_back(count, offset);
+    std::sort(top.rbegin(), top.rend());
+    text += "; other commands from:";
+    for (std::size_t i = 0; i < top.size() && i < 12; ++i) {
+        char item[48];
+        std::snprintf(item, sizeof(item), " +0x%llx x%llu", static_cast<unsigned long long>(top[i].second), static_cast<unsigned long long>(top[i].first));
+        text += item;
+    }
+    AgcDriver::ProfilePrint_nid_no_patch("[passes] render pass ends (10 s):%s\n", text.c_str());
+    stats.reasons = {};
+    stats.callers.clear();
+}
 
 // APS5_NO_JOIN_WAW_CHECK=1: a contiguous store joins the pending one without the check against
 // the run's recorded stores, as before (see RecordStore).
@@ -1188,6 +1235,8 @@ Recorder::~Recorder() {
         context.Function<PFN_vkDestroyFence>("vkDestroyFence")(context.device, fence, nullptr);
     }
     spare.clear();
+    for (auto prologue : sparePrologues) context.Function<PFN_vkFreeCommandBuffers>("vkFreeCommandBuffers")(context.device, context.pool, 1, &prologue);
+    sparePrologues.clear();
     for (const auto pool : sparePools) context.Function<PFN_vkDestroyQueryPool>("vkDestroyQueryPool")(context.device, pool, nullptr);
     sparePools.clear();
     // Sync() above waited for every batch, so no submission still signals the timeline.
@@ -1379,11 +1428,49 @@ VkCommandBuffer Recorder::Commands(VkAccessFlags* coveredAccess) {
     // Work recorded after a draw's render pass or an inline store run must see their writes: the
     // pass's end and the run's trailing barrier go in first (a per-batch run waits for Submit, or
     // for a caller whose ranges overlap a queued store: FlushStores).
-    if (open->renderPass.open) endOpenRenderPass();
+    if (open->renderPass.open) {
+        CountPassEnd(PassEnd::Commands, __builtin_return_address(0));
+        endOpenRenderPass();
+    }
     if (open->run.open && !LabelRunsPerBatch()) closeStoreRun();
     if (coveredAccess != nullptr) *coveredAccess = open->coveredAccess;
     open->coveredAccess = 0;
     return open->commands;
+}
+
+void Recorder::EnsureBatch() {
+    ensureOpen();
+}
+
+bool Recorder::PrologueEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_BATCH_PROLOGUE") == nullptr;
+    return enabled;
+}
+
+VkCommandBuffer Recorder::PrologueCommands() {
+    ensureOpen();
+    if (open->prologue != VK_NULL_HANDLE) return open->prologue;
+    VkCommandBuffer prologue = VK_NULL_HANDLE;
+    if (!sparePrologues.empty()) {
+        prologue = sparePrologues.back();
+        sparePrologues.pop_back();
+    } else {
+        VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        allocation.commandPool = context.pool;
+        allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocation.commandBufferCount = 1;
+        Check(context.Function<PFN_vkAllocateCommandBuffers>("vkAllocateCommandBuffers")(context.device, &allocation, &prologue), "vkAllocateCommandBuffers recorder prologue");
+    }
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (const auto result = function(beginCommandBuffer, "vkBeginCommandBuffer")(prologue, &begin); result != VK_SUCCESS) {
+        context.Function<PFN_vkFreeCommandBuffers>("vkFreeCommandBuffers")(context.device, context.pool, 1, &prologue);
+        Check(result, "vkBeginCommandBuffer recorder prologue");
+    }
+    open->prologue = prologue;
+    // Earlier batches' writes (a GPU store into an import the copies read) land before them.
+    recordBarrier(prologue, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    return prologue;
 }
 
 void Recorder::MarkCovered(VkAccessFlags access) {
@@ -1394,6 +1481,10 @@ Recorder::DrawPassStart Recorder::StartDrawPass(std::uint64_t key, bool forced, 
     ensureOpen();
     auto& pass = open->renderPass;
     if (!pass.open || forced || (countingSamples && segmentMode() && !segmentSlotReady(*open))) {
+        if (pass.open) {
+            CountPassEnd(forced ? PassEnd::Forced : PassEnd::Segment);
+            endOpenRenderPass();
+        }
         const auto commands = Commands();
         open->passHazards.Clear();
         open->passHazards.BeginPass();
@@ -1403,6 +1494,7 @@ Recorder::DrawPassStart Recorder::StartDrawPass(std::uint64_t key, bool forced, 
     if (hazard == PassHazard::None && pass.key == key) return {open->commands, true, false};
     const bool merge = MergeBarriers() && !fenced && !pass.fenced && !pass.afterPass;
     const bool elide = merge && hazard == PassHazard::None;
+    CountPassEnd(hazard != PassHazard::None ? PassEnd::Hazard : PassEnd::KeyChange);
     endOpenRenderPass(!merge);
     const auto commands = Commands();
     if (!elide) open->passHazards.Clear();
@@ -1578,7 +1670,10 @@ void Recorder::RecordStore(VkBuffer buffer, VkDeviceSize offset, std::span<const
     // A label says the work before it is done: the queued key stores (results of that work) land
     // ahead of every store of the run.
     if (!open->keyStores.empty()) recordKeyStores(true);
-    if (open->renderPass.open) endOpenRenderPass();
+    if (open->renderPass.open) {
+        CountPassEnd(PassEnd::Label);
+        endOpenRenderPass();
+    }
     open->coveredAccess = 0;
     // Two transfers to the same bytes have no order of their own within the run.
     const auto overlapsRecorded = [&] { return std::any_of(run.recorded.begin(), run.recorded.end(), [&](const auto& store) { return std::get<0>(store) == buffer && offset < std::get<2>(store) && std::get<1>(store) < end; }); };
@@ -1650,7 +1745,10 @@ bool Recorder::closeStoreRun(bool atSubmit) {
         // A label says the work before it is done: the queued key stores (results of that work)
         // land ahead of every store of the run, and the pass a draw left open ends.
         if (!open->keyStores.empty()) recordKeyStores(true);
-        if (open->renderPass.open) endOpenRenderPass();
+        if (open->renderPass.open) {
+            CountPassEnd(atSubmit ? PassEnd::Submit : PassEnd::Label);
+            endOpenRenderPass();
+        }
         const auto commands = open->commands;
         run.timing = beginTiming(ClassKey(CommandClass::LabelRun));
         if (BarrierValidate()) {
@@ -1967,7 +2065,10 @@ void Recorder::CountSamples() {
     gpuSampleCounter();
     countingSamples = true;
     if (segmentMode() || open == nullptr || open->samples != VK_NULL_HANDLE) return;
-    if (open->renderPass.open) endOpenRenderPass();
+    if (open->renderPass.open) {
+        CountPassEnd(PassEnd::Samples);
+        endOpenRenderPass();
+    }
     beginSamples(*open);
 }
 
@@ -3321,7 +3422,10 @@ void Recorder::Submit() {
     if (open == nullptr) return;
     GuestMemory::AssertGpuLockHeld("Recorder::Submit");
     if (!open->keyStores.empty()) recordKeyStores(false);
-    if (open->renderPass.open) endOpenRenderPass();
+    if (open->renderPass.open) {
+        CountPassEnd(PassEnd::Submit);
+        endOpenRenderPass();
+    }
     const bool segments = segmentMode();
     if (!segments) {
         endSamples(*open);
@@ -3352,9 +3456,16 @@ void Recorder::Submit() {
         }
     } discardUnsubmitted{*this, batch};
     Check(function(endCommandBuffer, "vkEndCommandBuffer")(batch->commands), "vkEndCommandBuffer recorder");
+    std::array<VkCommandBuffer, 2> submitted{batch->commands, VK_NULL_HANDLE};
+    if (batch->prologue != VK_NULL_HANDLE) {
+        // The prologue's writes are visible to every command of the batch after it.
+        recordBarrier(batch->prologue, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+        Check(function(endCommandBuffer, "vkEndCommandBuffer")(batch->prologue), "vkEndCommandBuffer recorder prologue");
+        submitted = {batch->prologue, batch->commands};
+    }
     VkSubmitInfo submission{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submission.commandBufferCount = 1;
-    submission.pCommandBuffers = &batch->commands;
+    submission.commandBufferCount = batch->prologue != VK_NULL_HANDLE ? 2 : 1;
+    submission.pCommandBuffers = submitted.data();
     // The timeline reaches this batch's serial when it completes (see WaitSerial).
     const std::uint64_t serial = submissions + 1;
     CaptureTrace::Log("submit batch=%llu reads=%zu writes=%zu", static_cast<unsigned long long>(serial), batch->reads.size(), batch->writes.size());
@@ -3960,6 +4071,19 @@ void Recorder::release(Batch& batch) noexcept {
     batch.samplePool.reset();
     batch.segments = VK_NULL_HANDLE;
     batch.segmentPool.reset();
+    if (batch.prologue != VK_NULL_HANDLE) {
+        bool kept = false;
+        // One never submitted may still be recording, which a later begin may not find.
+        if (batch.submitted && sparePrologues.size() < 64) {
+            try {
+                sparePrologues.push_back(batch.prologue);
+                kept = true;
+            } catch (...) {
+            }
+        }
+        if (!kept) context.Function<PFN_vkFreeCommandBuffers>("vkFreeCommandBuffers")(context.device, context.pool, 1, &batch.prologue);
+        batch.prologue = VK_NULL_HANDLE;
+    }
     // A completed (or never submitted) batch's objects are kept for reuse: the fence is signaled or
     // untouched, so resetting it cannot block, and the command buffer is no longer pending.
     if (batch.commands != VK_NULL_HANDLE && batch.fence != VK_NULL_HANDLE && spare.size() < 64 && function(resetFences, "vkResetFences")(context.device, 1, &batch.fence) == VK_SUCCESS) {

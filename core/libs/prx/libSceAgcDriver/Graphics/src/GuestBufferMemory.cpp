@@ -3866,8 +3866,10 @@ void GuestBufferMemory::UploadFinish(bool addressable) {
             // in the same batch. The batch is opened first so that an import the flush's own
             // reconcile retires is handed to it (retireImport keeps nothing while the recorder is
             // idle) and outlives the copy.
-            static_cast<void>(recorder->Commands());
-            StorageTexture::FlushPending(region.begin, static_cast<std::size_t>(bytes), nullptr, "copied buffer region");
+            if (Recorder::PrologueEnabled()) recorder->EnsureBatch();
+            else static_cast<void>(recorder->Commands());
+            bool published = false;
+            region.flushRecorded = StorageTexture::FlushPending(region.begin, static_cast<std::size_t>(bytes), nullptr, "copied buffer region", PublishScope::Whole, &published) || published;
             region.gpuCopy = true;
             gpuCopies.push_back(&region);
             continue;
@@ -4005,24 +4007,45 @@ void GuestBufferMemory::recordGpuCopies(std::span<Region* const> copies, bool ad
     Require(!capture || CaptureTrace::Enabled(), "GPU copy capture requires APS5_CAPTURE_TRACE");
     auto* recorder = Recorder::Active();
     Require(recorder != nullptr, "GPU buffer copies need an active recorder");
+    // A copy that reads nothing a recorded GPU write still pending covers (no queued key or label store,
+    // no storage flush recorded over it either) into a buffer made for it goes in the batch's prologue:
+    // recorded inline it ended the render pass the previous draw left open (Stray: ~54 passes a frame,
+    // each storing and reloading its attachments on the tile GPU). Its source is then the CPU snapshot
+    // taken below or an import nothing in flight writes.
+    const bool prologueAllowed = Recorder::PrologueEnabled() && !capture && !Recorder::BarrierValidate();
+    std::vector<bool> early(copies.size(), false);
+    bool anyInline = false;
+    for (std::size_t index = 0; index < copies.size(); ++index) {
+        const auto* region = copies[index];
+        const auto bytes = static_cast<std::size_t>(region->end - region->begin);
+        early[index] = prologueAllowed && !region->flushRecorded && region->copySpans.empty() && !(recorder->HasQueuedKeyStores() && recorder->QueuedKeyStoreOverlaps(region->begin, bytes)) && !(recorder->HasQueuedStores() && recorder->QueuedStoreOverlaps(region->begin, bytes)) && !recorder->PendingWriteOverlaps(region->begin, bytes);
+        anyInline = anyInline || !early[index];
+    }
     // A queued DCC key store or label store over a copied range lands before the copy reads it.
     for (const auto* region : copies) {
         recorder->FlushKeyStoresOverlapping(region->begin, static_cast<std::size_t>(region->end - region->begin));
         recorder->FlushStoresOverlapping(region->begin, static_cast<std::size_t>(region->end - region->begin));
     }
-    const auto commands = recorder->Commands();
-    const auto timing = recorder->BeginGpuTiming(StagingCopyInKey);
-    if (Recorder::BarrierValidate()) {
-        std::vector<std::pair<std::uint64_t, std::uint64_t>> reads;
-        for (const auto* region : copies) reads.emplace_back(region->begin, region->end);
-        recorder->NoteAccess(Recorder::CommandClass::StagingIn, Recorder::Access{reads, {}, {}, VK_PIPELINE_STAGE_TRANSFER_BIT});
+    VkCommandBuffer commands = VK_NULL_HANDLE;
+    auto timing = Recorder::NoTiming;
+    if (anyInline) {
+        commands = recorder->Commands();
+        timing = recorder->BeginGpuTiming(StagingCopyInKey);
+        if (Recorder::BarrierValidate()) {
+            std::vector<std::pair<std::uint64_t, std::uint64_t>> reads;
+            for (const auto* region : copies) reads.emplace_back(region->begin, region->end);
+            recorder->NoteAccess(Recorder::CommandClass::StagingIn, Recorder::Access{reads, {}, {}, VK_PIPELINE_STAGE_TRANSFER_BIT});
+        }
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        Recorder::CountBarriers(Recorder::CommandClass::StagingIn);
     }
-    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    Recorder::CountBarriers(Recorder::CommandClass::StagingIn);
+    const VkCommandBuffer prologue = std::find(early.begin(), early.end(), true) != early.end() ? recorder->PrologueCommands() : VK_NULL_HANDLE;
+    std::size_t regionIndex = 0;
     bool stagedAny = false;
     std::uint64_t copiedBytes = 0;
     for (auto* region : copies) {
         const auto bytes = region->end - region->begin;
+        const auto target = early[regionIndex++] ? prologue : commands;
         copiedBytes += bytes;
         if (region->buffer == nullptr) {
             // Not made by UploadPrepare (the registry was stale then): made here, under the lock.
@@ -4060,9 +4083,9 @@ void GuestBufferMemory::recordGpuCopies(std::span<Region* const> copies, bool ad
             }
         }
         if (inputSnapshot == nullptr && !region->copySpans.empty()) {
-            for (const auto& span : region->copySpans) CopyBuffer(context, commands, span.buffer, span.begin - span.base, region->buffer->Handle(), span.begin - region->begin, span.end - span.begin);
+            for (const auto& span : region->copySpans) CopyBuffer(context, target, span.buffer, span.begin - span.base, region->buffer->Handle(), span.begin - region->begin, span.end - span.begin);
         } else {
-            CopyBuffer(context, commands, copySource, copyOffset, region->buffer->Handle(), 0, bytes);
+            CopyBuffer(context, target, copySource, copyOffset, region->buffer->Handle(), 0, bytes);
         }
         if (!expected.empty()) {
             auto readback = std::make_shared<Buffer>(context, expected.size(), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -4100,9 +4123,11 @@ void GuestBufferMemory::recordGpuCopies(std::span<Region* const> copies, bool ad
         }
     }
     if (stagedAny) reportStaging();
+    if (!anyInline) return;
     // The copied bytes are visible to the shaders bound to the buffers, which may also store into
     // them. Every stage: dispatches and draws share this path, and draws run mesh, task and
-    // tessellation shaders too (the batch's own barriers around dispatches are as wide).
+    // tessellation shaders too (the batch's own barriers around dispatches are as wide). The
+    // prologue's copies have the barrier Submit records after them.
     RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
     Recorder::CountBarriers(Recorder::CommandClass::StagingIn);
     recorder->MarkCovered(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
