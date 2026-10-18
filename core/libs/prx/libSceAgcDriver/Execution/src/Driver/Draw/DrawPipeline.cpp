@@ -2,7 +2,12 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include <algorithm>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -119,6 +124,26 @@ void DrawPipeline::report(std::chrono::steady_clock::time_point now) {
 
 void DrawPipeline::run() {
     SampleCurrentThread("draw committer");
+#ifdef __APPLE__
+    // APS5_TRACE_QOS: the committer's QoS class before and after it takes the workers' priority.
+    const auto traceQos = [](const char* when) {
+        if (std::getenv("APS5_TRACE_QOS") == nullptr) return;
+        qos_class_t qos = QOS_CLASS_UNSPECIFIED;
+        int relative = 0;
+        pthread_get_qos_class_np(pthread_self(), &qos, &relative);
+        std::fprintf(stderr, "[qos] draw committer %s: QoS 0x%x\n", when, static_cast<unsigned>(qos));
+    };
+    traceQos("at start");
+#endif
+    // The committer records every pipelined draw: it takes the queue workers' priority.
+    try {
+        RaiseWorkerThreadPriority("draw committer");
+    } catch (...) {
+        Driver::Get().ReportFailure(std::current_exception());
+    }
+#ifdef __APPLE__
+    traceQos("raised");
+#endif
     for (;;) {
         Commit* commit = nullptr;
         {
