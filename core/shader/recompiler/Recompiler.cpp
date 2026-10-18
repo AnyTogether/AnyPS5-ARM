@@ -284,6 +284,9 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
             simplify();
         } else {
             // Without geometry shaders (MoltenVK) the emulating stage cannot run: keep host interpolation.
+            // The tessellation route (BuildBarycentricTessellationShaders) forwards clip distances as
+            // separate ClipDistance variables, which MoltenVK's shader conversion rejects
+            // ("no member named 'gl_ClipDistance' in 'main0_out'").
             translateOptions.hostInterpolationOnly = true;
             program = translator.Translate(decoded, cfg, translateOptions);
             simplify();
