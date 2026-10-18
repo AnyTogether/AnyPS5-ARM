@@ -4,6 +4,7 @@
 #include <cstring>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstdio>
 #include "CacheKey.hpp"
@@ -20,6 +21,7 @@
 #include <mutex>
 #include <new>
 #include <shared_mutex>
+#include <thread>
 #include <unordered_map>
 #include "ControlFlow/include/ControlFlow/GraphBuilder.hpp"
 #include "ControlFlow/include/ControlFlow/Structurizer.hpp"
@@ -1153,6 +1155,48 @@ bool ResultMemo() {
 
 constexpr std::size_t ResultMemoEntries = 256;
 
+// Evicted memo results are dropped on a helper thread: freeing a result's bindings and code copies
+// costs several microseconds under Rosetta, and a title whose descriptors move every draw (Stray)
+// evicts one per memo miss on the packet thread, ~8% of its time. The queue is leaked and the
+// thread detached, so neither races a static destructor at exit; past the bound, or with
+// APS5_NO_RESULT_REAPER=1, results are dropped in place.
+void ReleaseEvictedResults(std::vector<std::shared_ptr<const RecompileResult>>&& results) {
+    static const bool inPlace = std::getenv("APS5_NO_RESULT_REAPER") != nullptr;
+    struct Queue {
+        std::mutex mutex;
+        std::condition_variable wake;
+        std::vector<std::shared_ptr<const RecompileResult>> items;
+        bool started = false;
+    };
+    static Queue* const queue = new Queue;
+    constexpr std::size_t bound = 16384;
+    if (inPlace) return;
+    {
+        std::lock_guard lock(queue->mutex);
+        if (queue->items.size() + results.size() > bound) return;
+        if (!queue->started) {
+            try {
+                std::thread([] {
+                    std::unique_lock lock(queue->mutex);
+                    for (;;) {
+                        queue->wake.wait(lock, [] { return !queue->items.empty(); });
+                        auto items = std::move(queue->items);
+                        queue->items.clear();
+                        lock.unlock();
+                        items.clear();
+                        lock.lock();
+                    }
+                }).detach();
+            } catch (...) {
+                return;
+            }
+            queue->started = true;
+        }
+        for (auto& result : results) queue->items.push_back(std::move(result));
+    }
+    queue->wake.notify_one();
+}
+
 struct ResultMemoCounters {
     std::atomic<std::uint64_t> hits{0}, misses{0}, evictions{0}, populateNanoseconds{0};
     std::atomic<std::int64_t> lastReport{0};
@@ -1285,6 +1329,7 @@ std::shared_ptr<const RecompileResult> materializePreparedMemoized(SourceEntry& 
     if (profile) counters.populateNanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count()), std::memory_order_relaxed);
     counters.misses.fetch_add(1, std::memory_order_relaxed);
     std::shared_ptr<const RecompileResult> shared = std::move(result);
+    std::vector<std::shared_ptr<const RecompileResult>> evicted;
     {
         std::lock_guard lock(source.mutex);
         const auto found = source.memoIndex.find(index);
@@ -1293,6 +1338,7 @@ std::shared_ptr<const RecompileResult> materializePreparedMemoized(SourceEntry& 
                 source.memo.splice(source.memo.begin(), source.memo, found->second);
                 shared = found->second->result;
             } else {
+                evicted.push_back(std::move(found->second->result));
                 source.memo.erase(found->second);
                 source.memoIndex.erase(found);
             }
@@ -1303,11 +1349,13 @@ std::shared_ptr<const RecompileResult> materializePreparedMemoized(SourceEntry& 
             while (source.memo.size() > ResultMemoEntries) {
                 const auto& last = source.memo.back();
                 source.memoIndex.erase((last.variantId * 0x9e3779b97f4a7c15ull) ^ last.hash);
+                evicted.push_back(std::move(source.memo.back().result));
                 source.memo.pop_back();
                 counters.evictions.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
+    if (!evicted.empty()) ReleaseEvictedResults(std::move(evicted));
     reportResultMemo();
     return shared;
 }
