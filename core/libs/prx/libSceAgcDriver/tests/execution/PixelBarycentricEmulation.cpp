@@ -288,6 +288,12 @@ int main() {
             std::puts("skipped, the device lacks geometryShader and tessellationShader");
             return VulkanTestSkipped;
         }
+        if (!geometry) {
+            // Without geometry shaders the pixel shader keeps host interpolation (MoltenVK cannot convert
+            // the tessellation route's separate clip distance interface), so no route is taken.
+            std::puts("skipped, the device lacks geometryShader and pixel shaders keep host interpolation");
+            return VulkanTestSkipped;
+        }
         if (geometry) RunEmulation(*device, Emulation::Geometry);
         else std::puts("geometry stage skipped, the device lacks geometryShader");
         if (tessellation) RunEmulation(*device, Emulation::Tessellation);

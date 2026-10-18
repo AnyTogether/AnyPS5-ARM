@@ -263,7 +263,8 @@ ShaderRecompiler::SpirvTarget OfflineTarget(bool barycentric) {
     target.spirvVersion = 0x00010300u;
     target.subgroupSize = 64;
     target.fragmentShaderBarycentricEnabled = barycentric;
-    static constexpr std::array<std::uint32_t, 1> capabilities{spv::CapabilityFloat64};
+    // Geometry shaders: without them (MoltenVK) the pixel shader keeps host interpolation, not the emulation.
+    static constexpr std::array<std::uint32_t, 2> capabilities{spv::CapabilityFloat64, spv::CapabilityGeometry};
     target.supportedCapabilities = capabilities;
     return target;
 }
