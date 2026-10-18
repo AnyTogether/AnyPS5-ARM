@@ -807,6 +807,29 @@ int UnnamedAddress(void* address, std::uint32_t* length) {
 }
 }
 
+namespace {
+
+// The bytes a read would see, as the guest's kevent data and st_size count them: macOS FIONREAD also
+// counts each datagram's source address (a 1-byte AF_UNIX datagram reads as 17), so a datagram socket
+// answers with SO_NREAD, the next datagram's size, as the FIONREAD ioctl does.
+std::int64_t ReadableBytes(const Socket& socket) {
+#ifdef _WIN32
+    unsigned long count = 0;
+    return ioctlsocket(socket.value, FIONREAD, &count) == 0 ? static_cast<std::int64_t>(count) : 0;
+#else
+    int count = 0;
+#ifdef __APPLE__
+    if (socket.type == 2) {
+        socklen_t size = sizeof(count);
+        return ::getsockopt(socket.value, SOL_SOCKET, SO_NREAD, &count, &size) == 0 ? count : 0;
+    }
+#endif
+    return ::ioctl(socket.value, FIONREAD, &count) == 0 ? count : 0;
+#endif
+}
+
+}
+
 int GuestSockets::Stat(int descriptor, FileStat* status) {
     std::shared_ptr<Socket> socket;
     {
@@ -822,14 +845,7 @@ int GuestSockets::Stat(int descriptor, FileStat* status) {
         receiveShut = socket->receiveShut;
         sendShut = socket->sendShut;
     }
-    std::int64_t available = 0;
-#ifdef _WIN32
-    unsigned long count = 0;
-    if (ioctlsocket(socket->value, FIONREAD, &count) == 0) available = static_cast<std::int64_t>(count);
-#else
-    int count = 0;
-    if (::ioctl(socket->value, FIONREAD, &count) == 0) available = count;
-#endif
+    const std::int64_t available = ReadableBytes(*socket);
     int sendBuffer = 0;
     socklen_t length = sizeof(sendBuffer);
     if (getsockopt(socket->value, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char*>(&sendBuffer), &length) != 0) sendBuffer = 0;
@@ -875,13 +891,7 @@ bool GuestSockets::Ready(int descriptor, bool write, std::int64_t* data, bool* e
         if (*data > 0 && ::ioctl(socket->value, SIOCOUTQ, &queued) == 0) *data = std::max<std::int64_t>(0, *data - queued);
 #endif
     } else {
-#ifdef _WIN32
-        unsigned long available = 0;
-        if (ioctlsocket(socket->value, FIONREAD, &available) == 0) *data = static_cast<std::int64_t>(available);
-#else
-        int available = 0;
-        if (::ioctl(socket->value, FIONREAD, &available) == 0) *data = available;
-#endif
+        *data = ReadableBytes(*socket);
     }
     return true;
 }
