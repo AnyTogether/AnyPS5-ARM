@@ -53,6 +53,30 @@ Registry& registry() {
     return *value;
 }
 
+// Guards Registry::readableLease alone: a lease still alive is handed out without the registry
+// mutex, which mutations hold over pin waits and observer calls (the draw committer queued behind
+// them for ~7% of its time). Every mutation resets the lease first, so no lease taken this way
+// outlives the state it was built from by more than the mutation's own start.
+std::atomic_flag readableLeaseGuard = ATOMIC_FLAG_INIT;
+
+struct ReadableLeaseHold {
+    ReadableLeaseHold() {
+        while (readableLeaseGuard.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
+    }
+    ~ReadableLeaseHold() { readableLeaseGuard.clear(std::memory_order_release); }
+};
+
+std::shared_ptr<const Lease::Ranges> heldReadableLease() {
+    const ReadableLeaseHold hold;
+    return registry().readableLease.lock();
+}
+
+void setReadableLease(const std::shared_ptr<const Lease::Ranges>& lease) {
+    const ReadableLeaseHold hold;
+    if (lease != nullptr) registry().readableLease = lease;
+    else registry().readableLease.reset();
+}
+
 std::atomic<std::uint64_t> generation{1};
 std::atomic<void (*)(std::uintptr_t, std::size_t)> invalidator{nullptr};
 std::atomic<bool (*)(std::uintptr_t, std::size_t)> pinWaiter{nullptr};
@@ -130,7 +154,7 @@ bool GuestAllocationsHeldByThisThread_nid_postfix() {
 void* GuestAllocationsBegin_nid_postfix() {
     auto* state = new MutationState{std::unique_lock<std::mutex>(registry().mutex), {}};
     ++mutationDepth;
-    registry().readableLease.reset();
+    setReadableLease(nullptr);
     registry().allLease.reset();
     return state;
 }
@@ -163,7 +187,7 @@ void GuestAllocationsEnd_nid_postfix(void* mutation) noexcept {
     const Mapped weak(mapped.begin(), mapped.end());
     mapped.clear();
     const bool noted = !state->gpuMapped.empty();
-    registry().readableLease.reset();
+    setReadableLease(nullptr);
     registry().allLease.reset();
     delete state;
     if (!weak.empty()) observer(weak, ended);
@@ -413,7 +437,7 @@ void GuestAllocationsRequireUnpinned_nid_postfix(void* mutation, const void* poi
     const auto deadline = std::chrono::steady_clock::now() + pinWait();
     int syncedRounds = 0;
     for (;;) {
-        registry().readableLease.reset();
+        setReadableLease(nullptr);
         registry().allLease.reset();
         bool pinned = false;
         auto it = ranges.upper_bound(address);
@@ -661,20 +685,24 @@ void GuestAllocationsSetUnmapObserver_nid_postfix(void (*callback)(std::uintptr_
 }
 
 Lease GuestAllocationsAcquire_nid_postfix() {
+    static const bool locked = std::getenv("APS5_LOCKED_LEASES") != nullptr;
+    if (!locked) {
+        if (auto shared = heldReadableLease()) return Lease(std::move(shared));
+    }
     std::lock_guard lock(registry().mutex);
-    if (auto shared = registry().readableLease.lock()) return Lease(std::move(shared));
+    if (auto shared = heldReadableLease()) return Lease(std::move(shared));
     auto ranges = std::make_shared<Lease::Ranges>();
     for (const auto& [address, range] : registry().ranges) {
         if (range->readable && range->bytes != 0) ranges->push_back(range);
     }
-    registry().readableLease = ranges;
+    setReadableLease(ranges);
     return Lease(std::move(ranges));
 }
 
 bool GuestAllocationsTryAcquire_nid_postfix(Lease& lease) {
     std::unique_lock lock(registry().mutex, std::try_to_lock);
     if (!lock.owns_lock()) return false;
-    if (auto shared = registry().readableLease.lock()) {
+    if (auto shared = heldReadableLease()) {
         lease = Lease(std::move(shared));
         return true;
     }
@@ -682,7 +710,7 @@ bool GuestAllocationsTryAcquire_nid_postfix(Lease& lease) {
     for (const auto& [address, range] : registry().ranges) {
         if (range->readable && range->bytes != 0) ranges->push_back(range);
     }
-    registry().readableLease = ranges;
+    setReadableLease(ranges);
     lease = Lease(std::move(ranges));
     return true;
 }

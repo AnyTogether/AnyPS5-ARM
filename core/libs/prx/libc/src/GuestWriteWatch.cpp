@@ -368,7 +368,7 @@ public:
         erase(begin, end);
         const auto count = pages.size();
         _ranges.emplace(begin, Range{end, std::move(pages), std::vector<std::uint8_t>(count, 0)});
-        _coverageStale.store(true, std::memory_order_release);
+        publishCoverage();
     }
 
     bool Unregister(std::uintptr_t begin, std::uintptr_t end) {
@@ -377,10 +377,12 @@ public:
         end = pageEnd(end);
         if (end <= begin) return false;
         const Lock lock(_lock);
-        return erase(begin, end);
+        const bool removed = erase(begin, end);
+        if (removed) publishCoverage();
+        return removed;
     }
 
-    // Answered without the lock from a coalesced copy of the ranges, rebuilt under the lock after a
+    // Answered without the lock from a coalesced copy of the ranges, published under the lock by every
     // change: the draw committer asks per storage layer and per clear, and queued behind faults and
     // collections (which hold the lock over page compares and mprotect) it spent ~7% of its time here.
     // APS5_LOCKED_WATCH_COVERS=1 answers under the lock as before.
@@ -390,18 +392,6 @@ public:
         if (locked) {
             const Lock lock(_lock);
             return covers(begin, end);
-        }
-        if (_coverageStale.load(std::memory_order_acquire)) {
-            const Lock lock(_lock);
-            if (_coverageStale.load(std::memory_order_relaxed)) {
-                auto built = std::make_shared<std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>();
-                for (const auto& [first, range] : _ranges) {
-                    if (!built->empty() && first <= built->back().second) built->back().second = std::max(built->back().second, range.end);
-                    else built->emplace_back(first, range.end);
-                }
-                std::atomic_store_explicit(&_coverage, std::shared_ptr<const std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>(std::move(built)), std::memory_order_release);
-                _coverageStale.store(false, std::memory_order_release);
-            }
         }
         const auto coverage = std::atomic_load_explicit(&_coverage, std::memory_order_acquire);
         if (coverage == nullptr) return false;
@@ -694,6 +684,17 @@ private:
         return guarded([&] { std::memcpy(_snapshots.at(page).get(), reinterpret_cast<const void*>(page), _page); });
     }
 
+    // Rebuilds Covers' copy of the ranges (under the lock, after a change to them).
+    void publishCoverage() {
+        auto built = std::make_shared<std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>();
+        built->reserve(_ranges.size());
+        for (const auto& [first, range] : _ranges) {
+            if (!built->empty() && first <= built->back().second) built->back().second = std::max(built->back().second, range.end);
+            else built->emplace_back(first, range.end);
+        }
+        std::atomic_store_explicit(&_coverage, std::shared_ptr<const std::vector<std::pair<std::uintptr_t, std::uintptr_t>>>(std::move(built)), std::memory_order_release);
+    }
+
     std::uintptr_t pageStart(std::uintptr_t address) const {
         return address & ~(_page - 1);
     }
@@ -764,7 +765,6 @@ private:
             auto pages = std::move(it->second.pages);
             auto heat = std::move(it->second.heat);
             it = _ranges.erase(it);
-            _coverageStale.store(true, std::memory_order_release);
             const auto cutBegin = std::max(begin, rangeBegin);
             const auto cutEnd = std::min(end, rangeEnd);
             for (auto page = cutBegin; page < cutEnd; page += _page) {
@@ -784,9 +784,8 @@ private:
     bool _available = false;
     Turns _lock;
     std::map<std::uintptr_t, Range> _ranges;
-    // Covers' copy of the ranges, coalesced and sorted, and whether a change since made it stale.
+    // Covers' copy of the ranges, coalesced and sorted.
     std::shared_ptr<const std::vector<std::pair<std::uintptr_t, std::uintptr_t>>> _coverage;
-    std::atomic<bool> _coverageStale{true};
     std::unordered_map<std::uintptr_t, std::unique_ptr<std::uint8_t[]>> _snapshots;
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> _hostWrites;
     struct sigaction _previousBus {};
