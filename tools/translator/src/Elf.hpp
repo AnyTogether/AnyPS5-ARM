@@ -66,6 +66,7 @@ private:
 
     std::vector<std::uint8_t> bytes;
     std::vector<Segment> loads;
+    std::vector<Segment> dynamicData;
     std::multimap<std::int64_t, std::uint64_t> tags;
     std::uint64_t entry = 0;
     std::uint64_t stringsOffset = 0;

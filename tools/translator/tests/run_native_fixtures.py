@@ -11,12 +11,35 @@ import guesttools
 from import_fixture import fixture as import_fixture
 
 
-def compiled_smoke(directory):
-    guesttools.compile(str(HERE / "lifter_smoke.c"), str(directory / "main.o"), extra=["-x", "c"])
+VECTOR_FLAGS = ["-mavx2", "-mbmi", "-mbmi2", "-mlzcnt", "-mpopcnt"]
+
+
+def compiled(source, flags=()):
+    def build(directory):
+        compiled_guest(directory, source, flags)
+    return build
+
+
+def compiled_guest(directory, source, flags):
+    guesttools.compile(str(HERE / source), str(directory / "main.o"), extra=["-x", "c", *flags])
     names = guesttools.symbols(str(directory / "main.o"), "-u")
     guesttools.nidify(str(directory / "main.o"), str(directory / "main.nid.o"))
     guesttools.stub_library(names, str(directory / "libc.prx"), "libc.prx")
     guesttools.link_executable([str(directory / "main.nid.o")], [str(directory / "libc.prx")], str(directory / "eboot.elf"))
+
+
+def host_reference(source, flags, work):
+    """Builds the source for x86-64 macOS and runs it under Rosetta: (exit code, output), or None.
+
+    The reference is built without optimization: Rosetta (macOS 26) miscomputes some optimized AVX
+    sequences, such as a vcvtss2sd of a reloaded register right after vcmpunordss and vextractps."""
+    binary = work / (pathlib.Path(source).stem + "-host")
+    built = subprocess.run([f"{guesttools.LLVM}/clang", "-arch", "x86_64", "-O0", *flags, "-DMAIN_WRAPPER", str(HERE / source), "-o", str(binary)], capture_output=True, text=True)
+    if built.returncode != 0:
+        print(f"SKIP {source}: host build failed: {built.stderr.strip()[-300:]}")
+        return None
+    executed = subprocess.run(["arch", "-x86_64", str(binary)], capture_output=True, text=True, timeout=60)
+    return executed.returncode, executed.stdout.strip()
 
 
 def translate_and_run(build, libraries, directory, expected_exit, expected_output):
@@ -41,7 +64,10 @@ def main():
     cases = [("import", lambda d: (d / "eboot.elf").write_bytes(import_fixture()), 0, "hello from a PS5 ELF on macOS")]
     if guesttools.available():
         # The expected values come from the same source compiled for the host.
-        cases.append(("lifter-smoke", compiled_smoke, 28, "3b0c6e4bf8726a1c"))
+        cases.append(("lifter-smoke", compiled("lifter_smoke.c"), 28, "3b0c6e4bf8726a1c"))
+        expected = host_reference("vector_smoke.c", VECTOR_FLAGS, work)
+        if expected is not None:
+            cases.append(("vector-smoke", compiled("vector_smoke.c", VECTOR_FLAGS), *expected))
     failures = 0
     for name, build_fixture, expected_exit, expected_output in cases:
         directory = work / name

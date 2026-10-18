@@ -46,8 +46,10 @@ Elf::Elf(const std::filesystem::path& path) {
         const auto vaddr = Read<std::uint64_t>(bytes, header + 16);
         const auto fileSize = Read<std::uint64_t>(bytes, header + 32);
         const auto memorySize = Read<std::uint64_t>(bytes, header + 40);
-        // A PT_LOAD without permissions is the PS5 dynamic data, which is not mapped.
+        // A PT_LOAD without permissions is the PS5 dynamic data, which is not mapped; SysV tags of
+        // homebrew images still point into it by virtual address.
         if (type == PtLoad && flags != 0) loads.push_back({vaddr, offset, fileSize, memorySize, flags});
+        if (type == PtLoad && flags == 0) dynamicData.push_back({vaddr, offset, fileSize, memorySize, flags});
         if (type == PtDynamic) {
             dynamicOffset = offset;
             dynamicSize = fileSize;
@@ -125,8 +127,10 @@ bool Elf::InExecutable(std::uint64_t vaddr) const {
 }
 
 std::uint64_t Elf::Translate(std::uint64_t vaddr) const {
-    for (const auto& segment : loads) {
-        if (vaddr >= segment.vaddr && vaddr < segment.vaddr + segment.fileSize) return segment.fileOffset + (vaddr - segment.vaddr);
+    for (const auto* segments : {&loads, &dynamicData}) {
+        for (const auto& segment : *segments) {
+            if (vaddr >= segment.vaddr && vaddr < segment.vaddr + segment.fileSize) return segment.fileOffset + (vaddr - segment.vaddr);
+        }
     }
     throw std::runtime_error("dynamic table address outside the loaded segments");
 }

@@ -12,7 +12,7 @@ find_library(CAPSTONE_LIBRARY NAMES libcapstone.a capstone HINTS /opt/homebrew/o
 
 llvm_map_components_to_libnames(translatorLlvmLibraries core support passes target aarch64codegen aarch64desc aarch64info)
 
-add_executable(aps5-translator src/Main.cpp src/Lifter.cpp src/Elf.cpp)
+add_executable(aps5-translator src/Main.cpp src/Lifter.cpp src/LiftVector.cpp src/LiftFloat.cpp src/LiftBits.cpp src/Elf.cpp)
 target_include_directories(aps5-translator SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CAPSTONE_INCLUDE_DIR})
 target_compile_definitions(aps5-translator PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(aps5-translator PRIVATE ${translatorLlvmLibraries} ${CAPSTONE_LIBRARY})
