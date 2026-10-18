@@ -1004,9 +1004,14 @@ private:
 // dereferenced under the GpuMutex (it is destroyed with its device under that lock).
 // A kernel read landing in guest memory is a store: the GPU writes still pending over the range land
 // first (Stray's loading read a package into memory a stale storage image's write-back, recorded
-// 12 ms before, then overwrote: "Serial size mismatch").
+// 12 ms before, then overwrote: "Serial size mismatch"). The flush runs under the GpuMutex: the
+// hook's lock-free snapshot check could otherwise run while another thread holds the mutex midway
+// through publishing a storage image over the range (taken off the pending list, its write not yet
+// noted), find nothing, and let the read land before that write-back.
 void FlushForHostWrite(std::uintptr_t address, std::size_t bytes) {
     const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::Store);
+    GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Hook);
+    std::lock_guard gpu(GuestMemory::GpuMutex());
     GuestMemory::FlushGpuWrites(address, bytes);
 }
 
@@ -3864,7 +3869,7 @@ void Recorder::finish(std::unique_ptr<Batch> batch, bool wait, int source, bool 
             std::size_t hitBytes = 0;
             std::uint64_t hitNs = 0;
             if (!GuestArena::GuestArenaHostWriteSince_nid_postfix(begin, end - begin, since, &hit, &hitBytes, &hitNs)) continue;
-            AgcDriver::LogCoalescedStderr_nid_no_patch("[clobber] batch %llu writes 0x%llx+0x%llx over a host write 0x%llx+0x%zx made %.3f ms after its submission\n", static_cast<unsigned long long>(batch->serial), static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin), static_cast<unsigned long long>(hit), hitBytes, static_cast<double>(hitNs - since) / 1e6);
+            AgcDriver::LogCoalescedStderr_nid_no_patch("[clobber] batch %llu writes 0x%llx+0x%llx over a host write 0x%llx+0x%zx made %.3f ms after its submission (host write at %llu, finished %s at depth %zu)\n", static_cast<unsigned long long>(batch->serial), static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin), static_cast<unsigned long long>(hit), hitBytes, static_cast<double>(hitNs - since) / 1e6, static_cast<unsigned long long>(hitNs), wait ? "waiting" : "reaped", static_cast<std::size_t>(GuestMemory::GpuMutex().DepthOnThisThread()));
         }
     }
     {
