@@ -14,6 +14,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Pm4Opcodes.hpp"
 #include "prx/libc/include/CpuTopology.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1001,6 +1002,14 @@ private:
 // GuestMemory flush hook: a CPU access to memory that recorded GPU work will write waits for that
 // work first; then storage image results pending for the range are stored. The recorder is only
 // dereferenced under the GpuMutex (it is destroyed with its device under that lock).
+// A kernel read landing in guest memory is a store: the GPU writes still pending over the range land
+// first (Stray's loading read a package into memory a stale storage image's write-back, recorded
+// 12 ms before, then overwrote: "Serial size mismatch").
+void FlushForHostWrite(std::uintptr_t address, std::size_t bytes) {
+    const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::Store);
+    GuestMemory::FlushGpuWrites(address, bytes);
+}
+
 void FlushForAccess(std::uint64_t address, std::size_t bytes) {
     hookCalls.fetch_add(1, std::memory_order_relaxed);
     // A label this worker queued but has not recorded writes the range: in queue order the label
@@ -1222,6 +1231,7 @@ void Recorder::Activate() {
         labelTableOwner = this;
     }
     GuestMemory::SetFlushHook(&FlushForAccess);
+    GuestArena::GuestArenaSetHostWriteHook_nid_postfix(&FlushForHostWrite);
 }
 
 std::optional<Recorder::LabelHit> Recorder::LookupLabel(std::uint64_t address, std::size_t bytes, std::uint64_t afterStamp, LabelRefusal* refusal) {
@@ -3845,6 +3855,18 @@ void Recorder::finish(std::unique_ptr<Batch> batch, bool wait, int source, bool 
     // reaped or synced the batch. Inside them the flush hook makes no pending-write wait (SyncThrough).
     const bool profile = DrawProfiled();
     const auto completionStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    if (GuestArena::GuestArenaHostWritesTraced_nid_postfix() && batch->submittedAt != std::chrono::steady_clock::time_point{}) {
+        // APS5_TRACE_HOST_WRITES: a kernel read into memory this batch writes, made after the batch
+        // was submitted, is overwritten by the GPU result (or its write-back) once the batch lands.
+        const auto since = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(batch->submittedAt.time_since_epoch()).count());
+        for (const auto& [begin, end] : batch->writes) {
+            std::uintptr_t hit = 0;
+            std::size_t hitBytes = 0;
+            std::uint64_t hitNs = 0;
+            if (!GuestArena::GuestArenaHostWriteSince_nid_postfix(begin, end - begin, since, &hit, &hitBytes, &hitNs)) continue;
+            AgcDriver::LogCoalescedStderr_nid_no_patch("[clobber] batch %llu writes 0x%llx+0x%llx over a host write 0x%llx+0x%zx made %.3f ms after its submission\n", static_cast<unsigned long long>(batch->serial), static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin), static_cast<unsigned long long>(hit), hitBytes, static_cast<double>(hitNs - since) / 1e6);
+        }
+    }
     {
         struct InCompletion {
             InCompletion() { ++completionDepth; }

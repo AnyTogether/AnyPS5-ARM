@@ -35,6 +35,7 @@
 | ✅ | **Shader aritmetiği** | Pixel ve compute shader'larda her f32 toplama ve çarpma MoltenVK altında artık optimize edilmeyen bir yardımcı çağrıya dönüşmüyor (en ağır shader: 17 → 5 ms). |
 | ✅ | **Çıkış çözünürlüğü** | PS5 sürümü 3840x2160 çıkışı sabit kodluyor. `tools/package_macos_app.py`'nin uyguladığı [tools/macos/patches/PPSA02100.json](../../../tools/macos/patches/PPSA02100.json) ile (`--no-game-patches` atlıyor) uygulama açılırken 720p, 900p, 1080p (varsayılan), 1440p ya da 4K soruyor; `APS5_RESOLUTION=1280x720` önceden cevaplıyor. |
 | ✅ | **PlayGo dosyası olmayan dump** | Dump'ta hiç `playgo-*` dosyası yok. Upstream artık böyle bir dump'ta 0 dışındaki her chunk'ı reddediyor, Stray de açılışta chunk 1'i soruyor; port bu dump'ı tam kurulu sayıyor. |
+| ✅ | **Yükleme çökmesi** | Yaklaşık on açılıştan biri "MaterialInstanceConstant ... Serial size mismatch" ile duruyordu: bir dosya okuması guest belleğe düşerken hâlâ çalışan bir GPU batch'i aynı aralığa eski bir write-back taşıyordu ve sonra dosya verisinin üstüne yazıyordu. Kernel okuması artık önce o aralıkta bekleyen GPU yazmalarını boşaltıyor. |
 | ✅ | **İlk bölüm** | Doğru grafiklerle baştan sona oynanıyor. |
 | 🔧 | **FPS** | 1080p'de oyun içinde ~1-11 FPS. Daha önceki 1080p ölçümlerinde sınır sürücü iş parçacığıydı (frame başına ~52 ms, GPU'da ~31 ms): GPU senkronları, write-back'ler ve kuyruk gönderimleri. |
 

@@ -3,6 +3,8 @@
 #include "prx/libc/include/WindowsMappings.hpp"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #ifndef _WIN32
 #include <cerrno>
@@ -480,7 +482,67 @@ bool GuestArenaWriteWatched_nid_postfix() {
     return Arena::Get().WriteWatched();
 }
 
+namespace {
+
+struct TracedHostWrite {
+    std::uintptr_t address = 0;
+    std::size_t bytes = 0;
+    std::uint64_t ns = 0;
+};
+constexpr std::size_t TracedHostWriteSlots = 4096;
+std::mutex tracedHostWritesMutex;
+std::vector<TracedHostWrite> tracedHostWrites;
+std::size_t tracedHostWriteNext = 0;
+
+std::uint64_t SteadyNs() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+void TraceHostWrite(void* pointer, std::size_t bytes) {
+    if (!GuestArenaHostWritesTraced_nid_postfix() || bytes < 4096) return;
+    std::lock_guard lock(tracedHostWritesMutex);
+    if (tracedHostWrites.empty()) tracedHostWrites.resize(TracedHostWriteSlots);
+    tracedHostWrites[tracedHostWriteNext++ % TracedHostWriteSlots] = {reinterpret_cast<std::uintptr_t>(pointer), bytes, SteadyNs()};
+}
+
+}
+
+bool GuestArenaHostWritesTraced_nid_postfix() {
+    static const bool traced = std::getenv("APS5_TRACE_HOST_WRITES") != nullptr;
+    return traced;
+}
+
+bool GuestArenaHostWriteSince_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint64_t sinceNs, std::uintptr_t* hitAddress, std::size_t* hitBytes, std::uint64_t* hitNs) {
+    if (!GuestArenaHostWritesTraced_nid_postfix()) return false;
+    std::lock_guard lock(tracedHostWritesMutex);
+    bool found = false;
+    for (const auto& write : tracedHostWrites) {
+        if (write.bytes == 0 || write.ns < sinceNs || write.address >= address + bytes || address >= write.address + write.bytes) continue;
+        if (found && write.ns <= *hitNs) continue;
+        *hitAddress = write.address;
+        *hitBytes = write.bytes;
+        *hitNs = write.ns;
+        found = true;
+    }
+    return found;
+}
+
+namespace {
+std::atomic<void (*)(std::uintptr_t, std::size_t)> hostWriteHook{nullptr};
+}
+
+void GuestArenaSetHostWriteHook_nid_postfix(void (*hook)(std::uintptr_t address, std::size_t bytes)) {
+    hostWriteHook.store(hook, std::memory_order_release);
+}
+
 bool GuestArenaBeginHostWrite_nid_postfix(void* pointer, std::size_t bytes) {
+    static const bool unhooked = std::getenv("APS5_NO_HOST_WRITE_FLUSH") != nullptr;
+    if (const auto hook = hostWriteHook.load(std::memory_order_acquire); hook != nullptr && !unhooked && pointer != nullptr && bytes != 0) hook(reinterpret_cast<std::uintptr_t>(pointer), bytes);
+    TraceHostWrite(pointer, bytes);
+    return GuestArenaBeginImportWrite_nid_postfix(pointer, bytes);
+}
+
+bool GuestArenaBeginImportWrite_nid_postfix(void* pointer, std::size_t bytes) {
 #ifdef _WIN32
     return WindowsMappings::Get().BeginHostWrite(reinterpret_cast<std::uintptr_t>(pointer), bytes);
 #else

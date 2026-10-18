@@ -35,6 +35,7 @@ Captured on 15 October 2026 from main after the third upstream merge (`cc213ee99
 | ✅ | **Shader arithmetic** | Pixel and compute shaders no longer turn every f32 add and mul into an unoptimized helper call under MoltenVK (the hottest shader: 17 → 5 ms). |
 | ✅ | **Output resolution** | The PS5 build hardcodes 3840x2160 output. With [tools/macos/patches/PPSA02100.json](../../tools/macos/patches/PPSA02100.json), applied by `tools/package_macos_app.py` (`--no-game-patches` skips it), the bundle asks for 720p, 900p, 1080p (default), 1440p or 4K when it starts; `APS5_RESOLUTION=1280x720` answers in advance. |
 | ✅ | **PlayGo without metadata** | The dump has no `playgo-*` file. Upstream now refuses every chunk id but 0 for such a dump, and Stray asks for chunk 1 at startup; the port takes it as fully installed. |
+| ✅ | **Loading crash** | About one start in ten stopped with "MaterialInstanceConstant ... Serial size mismatch": a file read landed in guest memory while a GPU batch still in flight held an older write-back to the same range, which then overwrote the file data. A kernel read now first flushes the GPU writes pending over its range. |
 | ✅ | **First chapter** | Plays through with correct graphics. |
 | 🔧 | **FPS** | ~1-11 FPS in game at 1080p. Earlier measurements at 1080p put the limit on the driver thread (~52 ms per frame against ~31 ms on the GPU): GPU syncs, write-backs and queue submits. |
 

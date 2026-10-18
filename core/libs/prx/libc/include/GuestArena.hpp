@@ -54,13 +54,25 @@ bool GuestArenaWriteSharedBacking_nid_no_patch(std::uintptr_t address, const voi
 bool GuestArenaSharedBacking_nid_postfix(std::uintptr_t address, std::size_t bytes, int* file, std::uint64_t* offset);
 #endif
 bool GuestArenaBeginHostWrite_nid_postfix(void* pointer, std::size_t bytes);
+// Called before a host write (a kernel read into guest memory) lands: the GPU driver flushes the
+// GPU writes still pending over the range there, so a late write-back cannot land over the data.
+void GuestArenaSetHostWriteHook_nid_postfix(void (*hook)(std::uintptr_t address, std::size_t bytes));
+// A host write that leaves the bytes as they are (the GPU driver importing the range): no flush, which
+// would take the write watch the importer already holds.
+bool GuestArenaBeginImportWrite_nid_postfix(void* pointer, std::size_t bytes);
 void GuestArenaEndHostWrite_nid_postfix(void* pointer, std::size_t bytes);
+// APS5_TRACE_HOST_WRITES: the newest host write (a kernel read into guest memory, 4 KiB or more)
+// overlapping the range made at or after `sinceNs` (steady clock), for the GPU clobber trace.
+bool GuestArenaHostWritesTraced_nid_postfix();
+bool GuestArenaHostWriteSince_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint64_t sinceNs, std::uintptr_t* hitAddress, std::size_t* hitBytes, std::uint64_t* hitNs);
 
 }
 
 class HostWrite {
 public:
+    struct Import {};
     HostWrite(void* pointer, std::size_t bytes) : pointer(pointer), bytes(bytes), open(GuestArenaBeginHostWrite_nid_postfix(pointer, bytes)) {}
+    HostWrite(void* pointer, std::size_t bytes, Import) : pointer(pointer), bytes(bytes), open(GuestArenaBeginImportWrite_nid_postfix(pointer, bytes)) {}
     ~HostWrite() {
         if (open) GuestArenaEndHostWrite_nid_postfix(pointer, bytes);
     }
