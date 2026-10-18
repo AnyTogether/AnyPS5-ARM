@@ -682,7 +682,13 @@ private:
                     behind = _turns.holder.load(std::memory_order_relaxed);
                     if (behind < SiteCount) _turns.waitsBehind[behind].fetch_add(1, std::memory_order_relaxed);
                 }
-                if (spins < 2048) __builtin_ia32_pause();
+                if (spins < 2048) {
+#if defined(__x86_64__)
+                    __builtin_ia32_pause();
+#else
+                    __builtin_arm_yield();
+#endif
+                }
                 else {
                     if (profiled && behind < SiteCount) _turns.yieldsBehind[behind].fetch_add(1, std::memory_order_relaxed);
                     ::sched_yield();

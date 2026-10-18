@@ -6,8 +6,9 @@ if(NOT WIN32)
 endif()
 
 # The guest unwinder steps through the runtime's own frames, and on macOS it reads them from DWARF
-# (__eh_frame); ld64 otherwise folds that into compact unwind info and drops it.
-if(APPLE)
+# (__eh_frame); ld64 otherwise folds that into compact unwind info and drops it. arm64 code has
+# compact unwind info only, so there the flag would leave it with none at all.
+if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     add_link_options(LINKER:-no_compact_unwind)
 endif()
 

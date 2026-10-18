@@ -10,7 +10,7 @@ find_package(LLVM REQUIRED CONFIG)
 find_path(CAPSTONE_INCLUDE_DIR capstone/capstone.h HINTS /opt/homebrew/opt/capstone/include REQUIRED)
 find_library(CAPSTONE_LIBRARY NAMES libcapstone.a capstone HINTS /opt/homebrew/opt/capstone/lib REQUIRED)
 
-llvm_map_components_to_libnames(translatorLlvmLibraries core support passes target aarch64codegen aarch64desc aarch64info)
+llvm_map_components_to_libnames(translatorLlvmLibraries core support passes target transformutils aarch64codegen aarch64desc aarch64info)
 
 add_executable(aps5-translator src/Main.cpp src/Lifter.cpp src/LiftVector.cpp src/LiftFloat.cpp src/LiftBits.cpp src/Elf.cpp)
 target_include_directories(aps5-translator SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS} ${CAPSTONE_INCLUDE_DIR})

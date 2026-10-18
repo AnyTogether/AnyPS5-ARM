@@ -229,8 +229,9 @@ if(ANYPS5_RELINKER_ONLY)
     return()
 endif()
 
-if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
-    message(FATAL_ERROR "The full build on macOS is x86-64 only; configure without CMAKE_OSX_ARCHITECTURES or set it to x86_64")
+# arm64 builds the host libraries for the native mode (docs/dev/NATIVE_ARM64.md).
+if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    message(FATAL_ERROR "The full build on macOS is x86-64 (or arm64 for the native mode); configure without CMAKE_OSX_ARCHITECTURES or set it to x86_64 or arm64")
 endif()
 
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)

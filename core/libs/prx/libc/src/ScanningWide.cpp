@@ -283,7 +283,9 @@ private:
     }
 
     Outcome Float(const Directive& directive) {
+#if defined(__x86_64__)
         static_assert(sizeof(long double) == 16 && std::numeric_limits<long double>::digits == 64);
+#endif
         if (!directive.length.empty() && directive.length != "l" && directive.length != "L")
             Fail("invalid floating length modifier " + directive.length);
         void* target = nullptr;
@@ -295,8 +297,13 @@ private:
         input += field.size();
         if (target != nullptr) {
             if (directive.length == "L") {
+#if defined(__x86_64__)
                 const long double value = std::strtold(field.c_str(), nullptr);
                 std::memcpy(target, &value, sizeof(value));
+#else
+                // TODO(native-arm64): store the guest's 80-bit x87 format.
+                Fail("%Lf scanning is not ported to arm64");
+#endif
             } else if (directive.length == "l") {
                 const double value = std::strtod(field.c_str(), nullptr);
                 std::memcpy(target, &value, sizeof(value));

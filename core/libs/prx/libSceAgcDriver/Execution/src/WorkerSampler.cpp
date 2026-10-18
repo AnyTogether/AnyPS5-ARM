@@ -364,13 +364,25 @@ std::thread samplerThread;
 std::atomic<bool> stopping{false};
 
 int Walk(const SampledThread& thread, std::uintptr_t* pcs) {
+#if defined(__x86_64__)
     x86_thread_state64_t state{};
     mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+    const auto flavor = x86_THREAD_STATE64;
+#else
+    arm_thread_state64_t state{};
+    mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+    const auto flavor = ARM_THREAD_STATE64;
+#endif
     if (thread_suspend(thread.port) != KERN_SUCCESS) return 0;
     int depth = 0;
-    if (thread_get_state(thread.port, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS) {
+    if (thread_get_state(thread.port, flavor, reinterpret_cast<thread_state_t>(&state), &count) == KERN_SUCCESS) {
+#if defined(__x86_64__)
         pcs[depth++] = static_cast<std::uintptr_t>(state.__rip);
         auto frame = static_cast<std::uintptr_t>(state.__rbp);
+#else
+        pcs[depth++] = static_cast<std::uintptr_t>(arm_thread_state64_get_pc(state));
+        auto frame = static_cast<std::uintptr_t>(arm_thread_state64_get_fp(state));
+#endif
         while (depth < SampleDepth && frame >= thread.stackLow && frame + 16 <= thread.stackHigh && (frame & 7) == 0) {
             const auto* words = reinterpret_cast<const std::uintptr_t*>(frame);
             if (words[1] == 0) break;

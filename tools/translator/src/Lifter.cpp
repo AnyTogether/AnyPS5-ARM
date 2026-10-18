@@ -1,5 +1,7 @@
 #include "LifterImpl.hpp"
 
+#include <llvm/Transforms/Utils/ModuleUtils.h>
+
 namespace Translator {
 
 Lifter::Impl::Impl(const Elf& elf, llvm::LLVMContext& context) : elf(elf), context(context), builder(context), imageBegin(elf.ImageBegin()) {
@@ -36,13 +38,26 @@ void Lifter::Impl::Explore(std::uint64_t entry, std::deque<std::uint64_t>& pendi
     while (!work.empty()) {
         auto address = work.back();
         work.pop_back();
+        std::vector<std::uint64_t> path;
         while (addresses.insert(address).second) {
             const auto& instruction = Decode(address);
             if (instruction.size == 0) break;
+            path.push_back(address);
+            if (instruction.id == X86_INS_JMP && instruction.x86.op_count == 1 && instruction.Op(0).type == X86_OP_REG) {
+                for (const auto target : JumpTable(path, addresses)) {
+                    tableTargets[entry].insert(target);
+                    work.push_back(target);
+                }
+            }
             const auto target = instruction.DirectTarget();
             const bool internal = target && elf.InExecutable(*target) && functions.count(*target) == 0;
             if (instruction.id == X86_INS_CALL) {
                 if (target && elf.InExecutable(*target)) pending.push_back(*target);
+            } else if (instruction.id == X86_INS_LEA && instruction.Op(1).mem.base == X86_REG_RIP) {
+                // A code address taken rip-relative (a thread entry, a callback) needs no relocation in
+                // position-independent code, so this is the only place it shows.
+                const auto taken = instruction.Next() + static_cast<std::uint64_t>(instruction.Op(1).mem.disp);
+                if (elf.InExecutable(taken)) pending.push_back(taken);
             } else if (instruction.id == X86_INS_JMP || IsConditionalJump(instruction.id)) {
                 if (internal) work.push_back(*target);
             }
@@ -50,6 +65,78 @@ void Lifter::Impl::Explore(std::uint64_t entry, std::deque<std::uint64_t>& pendi
             address = instruction.Next();
         }
     }
+}
+
+// The targets of a switch jump table, from the instructions leading to "jmp reg". Clang emits
+// position-independent tables as 32-bit offsets from the table:
+//     cmp idx, N-1; ja default; lea base, [rip+T]; movsxd t, [base + 4*idx]; add t, base; jmp t
+// The lea may be hoisted out of a loop, so it is also looked up in the rest of the function. Without
+// the bounds check, entries are taken while they land in executable code near the jump; an extra
+// target only costs translated code, it is never jumped to.
+std::vector<std::uint64_t> Lifter::Impl::JumpTable(const std::vector<std::uint64_t>& path, const std::set<std::uint64_t>& function) {
+    const auto& jump = decoded.at(path.back());
+    const auto jumpReg = RegisterOf(jump.Op(0).reg).index;
+    std::optional<std::uint64_t> table;
+    std::optional<std::uint64_t> count;
+    unsigned baseReg = ~0u, indexReg = ~0u;
+    auto tableLea = [&](const Instruction& instruction) -> std::optional<std::uint64_t> {
+        const auto& x86 = instruction.x86;
+        if (instruction.id != X86_INS_LEA || x86.operands[1].mem.base != X86_REG_RIP || RegisterOf(x86.operands[0].reg).index != baseReg) return std::nullopt;
+        const auto address = instruction.Next() + static_cast<std::uint64_t>(x86.operands[1].mem.disp);
+        if (elf.InExecutable(address) || elf.At(address, 4) == nullptr) return std::nullopt;
+        return address;
+    };
+    const std::size_t first = path.size() > 16 ? path.size() - 16 : 0;
+    for (std::size_t i = path.size() - 1; i-- > first;) {
+        const auto& instruction = decoded.at(path[i]);
+        const auto& x86 = instruction.x86;
+        if (baseReg == ~0u) {
+            if (instruction.id == X86_INS_MOVSXD && x86.op_count == 2 && x86.operands[1].type == X86_OP_MEM && x86.operands[1].mem.scale == 4 &&
+                RegisterOf(x86.operands[0].reg).index == jumpReg) {
+                baseReg = RegisterOf(x86.operands[1].mem.base).index;
+                indexReg = RegisterOf(x86.operands[1].mem.index).index;
+            }
+            continue;
+        }
+        if (!table) {
+            if (const auto found = tableLea(instruction); found && (*found & 3) == 0) table = found;
+        }
+        if (!count && instruction.id == X86_INS_CMP && x86.op_count == 2 && x86.operands[0].type == X86_OP_REG && x86.operands[1].type == X86_OP_IMM &&
+            RegisterOf(x86.operands[0].reg).index == indexReg && x86.operands[1].imm >= 0)
+            count = static_cast<std::uint64_t>(x86.operands[1].imm) + 1;
+    }
+    if (baseReg == ~0u) return {};
+    if (!table) {
+        // Tables are 4-byte aligned; of several candidates, the closest one before the jump.
+        std::uint64_t from = 0;
+        for (const auto address : function) {
+            const auto found = tableLea(decoded.at(address));
+            if (!found || (*found & 3) != 0) continue;
+            const bool before = address < jump.address, bestBefore = from < jump.address;
+            const bool closer = !table || (before && !bestBefore) || (before == bestBefore && (before ? address > from : address < from));
+            if (closer) {
+                table = found;
+                from = address;
+            }
+        }
+    }
+    std::vector<std::uint64_t> targets;
+    if (std::getenv("APS5_TRANSLATOR_TRACE_TABLES"))
+        std::fprintf(stderr, "jump table at %llx: base reg %u index %u table %llx count %lld\n", (unsigned long long)jump.address, baseReg, indexReg,
+                     (unsigned long long)table.value_or(0), count ? (long long)*count : -1ll);
+    if (!table) return targets;
+    const std::uint64_t limit = count.value_or(256);
+    for (std::uint64_t i = 0; i < limit && i < 4096; ++i) {
+        const auto* slot = elf.At(*table + i * 4, 4);
+        if (slot == nullptr) break;
+        std::int32_t offset;
+        std::memcpy(&offset, slot, 4);
+        const auto target = *table + static_cast<std::uint64_t>(static_cast<std::int64_t>(offset));
+        if (!elf.InExecutable(target)) break;
+        if (!count && (target + 0x10000 < jump.address || target > jump.address + 0x10000)) break;
+        targets.push_back(target);
+    }
+    return targets;
 }
 
 llvm::ConstantInt* Lifter::Impl::Const(unsigned bits, std::uint64_t value) {
@@ -866,6 +953,11 @@ void Lifter::Impl::LiftFunction(std::uint64_t entry, const std::set<std::uint64_
         if (target && (instruction.id == X86_INS_JMP || IsConditionalJump(instruction.id)) && blocks.count(*target) != 0) branchTargets.insert(*target);
     }
     branchTargets.insert(entry);
+    if (const auto found = tableTargets.find(entry); found != tableTargets.end()) {
+        for (const auto target : found->second) {
+            if (blocks.count(target) != 0) branchTargets.insert(target);
+        }
+    }
     builder.SetInsertPoint(prologue);
     builder.CreateBr(blocks.at(entry));
     for (const auto address : addresses) {
@@ -964,6 +1056,28 @@ void Lifter::Impl::EmitTables() {
     constant(builder.getInt64Ty(), builder.getInt64(rows.size()), "aps5_guest_function_count");
     constant(builder.getInt64Ty(), builder.getInt64(elf.ImageEnd() - imageBegin), "aps5_guest_image_size");
     constant(builder.getInt64Ty(), builder.getInt64(elf.Entry() - imageBegin), "aps5_guest_entry");
+    const auto& tls = elf.Tls();
+    auto* tlsType = llvm::ArrayType::get(builder.getInt64Ty(), 4);
+    constant(tlsType, llvm::ConstantDataArray::get(context, llvm::ArrayRef<std::uint64_t>{tls.memorySize != 0 ? tls.vaddr - imageBegin : 0, tls.fileSize, tls.memorySize, elf.TlsAlign()}),
+             "aps5_guest_tls");
+}
+
+// __APS5DATA,__meta, as the relinker writes it for the Rosetta mode (MacOsImage.cpp): libc emulates
+// dl_iterate_phdr from the load bias and the original program headers, which is how the guest finds
+// its PT_SCE_PROCPARAM. The TLS slots stay zero; the translator runtime sets up guest TLS itself.
+void Lifter::Impl::EmitImageMetadata() {
+    constexpr std::uint64_t Version = 2, ReservedWords = 9;
+    const auto& headers = elf.ProgramHeaders();
+    auto* i64 = builder.getInt64Ty();
+    auto* headerBytes = llvm::ArrayType::get(builder.getInt8Ty(), headers.size());
+    auto* type = llvm::StructType::get(context, {i64, builder.getPtrTy(), llvm::ArrayType::get(i64, ReservedWords), i64, headerBytes}, true);
+    auto* loadBias = llvm::ConstantExpr::getGetElementPtr(builder.getInt8Ty(), image, builder.getInt64(0 - imageBegin));
+    auto* value = llvm::ConstantStruct::get(type, {builder.getInt64(Version), loadBias, llvm::ConstantAggregateZero::get(llvm::ArrayType::get(i64, ReservedWords)),
+                                                   builder.getInt64(headers.size() / 56), llvm::ConstantDataArray::get(context, llvm::ArrayRef<std::uint8_t>(headers))});
+    auto* meta = new llvm::GlobalVariable(*module, type, false, llvm::GlobalValue::InternalLinkage, value, "aps5_guest_meta");
+    meta->setSection("__APS5DATA,__meta");
+    meta->setAlignment(llvm::Align(8));
+    llvm::appendToUsed(*module, {meta});
 }
 
 Lifter::Lifter(const Elf& elf, llvm::LLVMContext& context) : impl(std::make_unique<Impl>(elf, context)) {}
@@ -1020,6 +1134,7 @@ std::unique_ptr<llvm::Module> Lifter::Lift() {
     }
     for (const auto& [entry, addresses] : lifter.functions) lifter.LiftFunction(entry, addresses, stats);
     lifter.EmitTables();
+    lifter.EmitImageMetadata();
     lifter.module = nullptr;
     return module;
 }

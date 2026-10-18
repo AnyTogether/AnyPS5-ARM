@@ -10,7 +10,9 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#if defined(__x86_64__)
 #include <xmmintrin.h>
+#endif
 
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
@@ -119,7 +121,11 @@ float AtanhfLog1p(float x) {
     return kFloat * Ln2High - ((halfSquare - (s * (halfSquare + r) + (kFloat * Ln2Low + c))) - f);
 }
 
+#if defined(__x86_64__)
 static_assert(std::numeric_limits<long double>::digits == 64, "guest long double is the x87 80-bit format");
+#endif
+// TODO(native-arm64): the long double exports take the guest's 80-bit x87 values; on arm64 they still
+// compute with the host's 64-bit long double.
 
 struct ExtendedParts {
     std::uint64_t mantissa;
@@ -646,12 +652,16 @@ int APS5_VABI __fpclassifyf_nid_postfix(float x) {
 }
 int APS5_VABI __signbitf_nid_postfix(float x) { return std::signbit(x) ? 1 : 0; }
 int APS5_VABI __signbitl_nid_postfix(long double x) {
+#if defined(__x86_64__)
     static_assert(sizeof(long double) == 16, "guest long double requires x87 extended precision storage");
+#endif
     return std::signbit(x) ? 1 : 0;
 }
 
 int APS5_VABI __isfinitel_nid_postfix(long double x) {
+#if defined(__x86_64__)
     static_assert(sizeof(long double) == 16 && std::numeric_limits<long double>::digits == 64 && std::numeric_limits<long double>::max_exponent == 16384 && std::endian::native == std::endian::little, "guest long double requires little-endian x87 extended precision storage");
+#endif
     std::uint16_t exponent;
     std::memcpy(&exponent, reinterpret_cast<const std::uint8_t*>(&x) + 8, sizeof(exponent));
     return (exponent & 0x7fffu) != 0x7fffu;
@@ -709,8 +719,16 @@ static_assert(sizeof(GuestFloatingPointEnvironment) == 32 && offsetof(GuestFloat
 
 int APS5_VABI fegetenv_nid_postfix(GuestFloatingPointEnvironment* environment) {
     if (environment == nullptr) throw std::invalid_argument("fegetenv: null environment");
+#if defined(__x86_64__)
     asm volatile("fnstenv %0\n\tfldcw %0" : "+m"(*environment));
     environment->mxcsr = _mm_getcsr();
+#else
+    // TODO(native-arm64): the translated guest's x87 and MXCSR state; the defaults for now.
+    *environment = {};
+    environment->control = 0x037f;
+    environment->tag = 0xffff;
+    environment->mxcsr = 0x1f80;
+#endif
     return 0;
 }
 

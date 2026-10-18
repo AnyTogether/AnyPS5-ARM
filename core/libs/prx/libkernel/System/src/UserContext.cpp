@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#if defined(__x86_64__)
 #include <immintrin.h>
 
 extern "C" int* APS5_VABI __error_nid_postfix();
@@ -217,3 +218,22 @@ int APS5_VABI setcontext_nid_postfix(const UserUcontext* context) {
 }
 
 }
+
+#else
+
+#include "prx/libc/include/General.hpp"
+
+// TODO(native-arm64): getcontext/setcontext over the translator's GuestState.
+extern "C" {
+
+int APS5_VABI getcontext_nid_postfix(UserUcontext*) {
+    NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI setcontext_nid_postfix(const UserUcontext*) {
+    NotImplemented_nid_no_patch(__func__);
+}
+
+}
+
+#endif

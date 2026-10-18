@@ -42,6 +42,11 @@ public:
 
     const std::vector<std::uint8_t>& Bytes() const { return bytes; }
     const std::vector<Segment>& Loads() const { return loads; }
+    // PT_TLS: the initialization image (vaddr, fileSize) and the block size and alignment.
+    const Segment& Tls() const { return tls; }
+    std::uint64_t TlsAlign() const { return tlsAlign; }
+    // The raw program header table (56-byte entries), for dl_iterate_phdr.
+    const std::vector<std::uint8_t>& ProgramHeaders() const { return programHeaders; }
     std::uint64_t Entry() const { return entry; }
     std::uint64_t ImageBegin() const;
     std::uint64_t ImageEnd() const;
@@ -67,6 +72,9 @@ private:
     std::vector<std::uint8_t> bytes;
     std::vector<Segment> loads;
     std::vector<Segment> dynamicData;
+    Segment tls{};
+    std::vector<std::uint8_t> programHeaders;
+    std::uint64_t tlsAlign = 1;
     std::multimap<std::int64_t, std::uint64_t> tags;
     std::uint64_t entry = 0;
     std::uint64_t stringsOffset = 0;

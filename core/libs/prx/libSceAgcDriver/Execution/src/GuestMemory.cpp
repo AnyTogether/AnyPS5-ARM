@@ -14,7 +14,9 @@
 #include <atomic>
 #include <algorithm>
 #include <bit>
+#if defined(__x86_64__)
 #include <emmintrin.h>
+#endif
 #include <functional>
 #include <cstdio>
 #include <cstdlib>
@@ -2424,6 +2426,7 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
         std::size_t firstChanged = size;
         std::size_t lastChanged = 0;
         std::size_t at = 0;
+#if defined(__x86_64__)
         for (; at + 16 <= size; at += 16) {
             const auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current.data() + at));
             const auto same = _mm_cmpeq_epi8(bytes, _mm_loadu_si128(reinterpret_cast<const __m128i*>(original.data() + at)));
@@ -2436,6 +2439,7 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
             lastChanged = std::max(lastChanged, at + 32 - static_cast<std::size_t>(std::countl_zero(changed)));
         }
         _mm_sfence();
+#endif
         for (; at < size; ++at) {
             if (current[at] == original[at]) continue;
             destination[at] = current[at];

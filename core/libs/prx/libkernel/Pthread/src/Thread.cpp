@@ -589,6 +589,12 @@ void ThreadCancel::EndWait() {
 
 extern "C" void* APS5_VABI Aps5CallGuestEntry_nid_no_patch(PthreadEntry entry, void* arg);
 
+#if !defined(__x86_64__)
+// Native arm64: entry is guest code, which the translator runtime runs when it is called.
+extern "C" void* APS5_VABI Aps5CallGuestEntry_nid_no_patch(PthreadEntry entry, void* arg) {
+    return entry(arg);
+}
+#else
 asm(".text\n"
     APS5_ASM_FUNCTION("Aps5CallGuestEntry_nid_no_patch") R"(
     .cfi_startproc
@@ -611,6 +617,7 @@ asm(".text\n"
     ret
     .cfi_endproc
 )" APS5_ASM_FUNCTION_END("Aps5CallGuestEntry_nid_no_patch"));
+#endif
 
 static void RunThread(std::unique_ptr<ThreadArgs> args) {
     APS5_LOG_OUT("RunThread entry=0x%llx arg=%p self=%p", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(args->entry)), args->arg, static_cast<void*>(args->self));

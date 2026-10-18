@@ -38,3 +38,29 @@ _aps5_host_bridge:
     ldp x19, x20, [sp, #16]
     ldp x29, x30, [sp], #32
     ret
+
+// aps5_enter: a host (AAPCS64) call of a guest function, reached through the fault redirect with the
+// translated function in x16. Saves x0-x7 and q0-q7, runs aps5_enter_guest(frame, x16) and returns
+// its x0/x1 and q0/q1 to the host caller, whose return address is still in x30.
+    .p2align 2
+    .globl _aps5_enter
+_aps5_enter:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    sub sp, sp, #192
+    stp x0, x1, [sp, #0]
+    stp x2, x3, [sp, #16]
+    stp x4, x5, [sp, #32]
+    stp x6, x7, [sp, #48]
+    stp q0, q1, [sp, #64]
+    stp q2, q3, [sp, #96]
+    stp q4, q5, [sp, #128]
+    stp q6, q7, [sp, #160]
+    mov x0, sp
+    mov x1, x16
+    bl _aps5_enter_guest
+    ldp x0, x1, [sp, #0]
+    ldp q0, q1, [sp, #64]
+    add sp, sp, #192
+    ldp x29, x30, [sp], #16
+    ret

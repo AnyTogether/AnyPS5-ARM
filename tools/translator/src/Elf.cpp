@@ -11,6 +11,7 @@ namespace {
 
 constexpr std::uint32_t PtLoad = 1;
 constexpr std::uint32_t PtDynamic = 2;
+constexpr std::uint32_t PtTls = 7;
 constexpr std::int64_t DtNull = 0, DtNeeded = 1, DtPltRelSz = 2, DtStrTab = 5, DtSymTab = 6, DtRela = 7, DtRelaSz = 8;
 constexpr std::int64_t DtInit = 12, DtStrSz = 10, DtJmpRel = 23, DtInitArray = 25, DtInitArraySz = 27;
 constexpr std::int64_t DtOsInit = 0x6000000c, DtOsInitArray = 0x60000019, DtOsInitArraySz = 0x6000001b;
@@ -37,6 +38,8 @@ Elf::Elf(const std::filesystem::path& path) {
     const auto phoff = Read<std::uint64_t>(bytes, 32);
     const auto phentsize = Read<std::uint16_t>(bytes, 54);
     const auto phnum = Read<std::uint16_t>(bytes, 56);
+    if (phentsize != 56 || phoff + static_cast<std::uint64_t>(phnum) * 56 > bytes.size()) throw std::runtime_error("bad program header table");
+    programHeaders.assign(bytes.begin() + static_cast<std::ptrdiff_t>(phoff), bytes.begin() + static_cast<std::ptrdiff_t>(phoff + phnum * 56ull));
     std::uint64_t dynamicOffset = 0, dynamicSize = 0;
     for (std::uint16_t i = 0; i < phnum; ++i) {
         const auto header = phoff + static_cast<std::uint64_t>(i) * phentsize;
@@ -50,6 +53,10 @@ Elf::Elf(const std::filesystem::path& path) {
         // homebrew images still point into it by virtual address.
         if (type == PtLoad && flags != 0) loads.push_back({vaddr, offset, fileSize, memorySize, flags});
         if (type == PtLoad && flags == 0) dynamicData.push_back({vaddr, offset, fileSize, memorySize, flags});
+        if (type == PtTls) {
+            tls = {vaddr, offset, fileSize, memorySize, flags};
+            tlsAlign = std::max<std::uint64_t>(Read<std::uint64_t>(bytes, header + 48), 1);
+        }
         if (type == PtDynamic) {
             dynamicOffset = offset;
             dynamicSize = fileSize;

@@ -145,10 +145,12 @@ struct Lifter::Impl {
 
     const Instruction& Decode(std::uint64_t address);
     void Explore(std::uint64_t entry, std::deque<std::uint64_t>& pending);
+    std::vector<std::uint64_t> JumpTable(const std::vector<std::uint64_t>& path, const std::set<std::uint64_t>& function);
 
     void EmitImage(Statistics& stats);
     llvm::Constant* SlotValue(const Relocation& relocation);
     void EmitTables();
+    void EmitImageMetadata();
     void LiftFunction(std::uint64_t entry, const std::set<std::uint64_t>& addresses, Statistics& stats);
     void Emit(const Instruction& instruction);
     void Discard(llvm::BasicBlock* block, std::size_t keepBlocks);
@@ -229,6 +231,7 @@ struct Lifter::Impl {
     std::uint64_t imageBegin = 0;
     std::map<std::uint64_t, Instruction> decoded;
     std::map<std::uint64_t, std::set<std::uint64_t>> functions;
+    std::map<std::uint64_t, std::set<std::uint64_t>> tableTargets; // per function: its jump table targets
 
     llvm::Module* module = nullptr;
     llvm::GlobalVariable* image = nullptr;

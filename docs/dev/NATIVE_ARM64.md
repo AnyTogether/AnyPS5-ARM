@@ -49,7 +49,8 @@ The relinker already decodes guest code (TLS scan, `--to-intel`). In the arm64 m
 ### Calling across the boundary
 
 - **Guest to host:** a call whose target is outside the guest code ranges is a host function. The bridge passes rdi, rsi, rdx, rcx, r8, r9 as x0–x5, guest stack arguments 7 and 8 as x6 and x7, and xmm0–7 as v0–v7. It returns x0/x1 into rax/rdx and v0/v1 into xmm0/xmm1. Both ABIs split integer and vector arguments into separate register files, so this covers every export with up to 8 integer and 8 vector arguments passed in registers. Variadic exports differ (Apple arm64 passes variadic arguments on the stack), and so do `va_list`, structure returns (rdi vs x8) and `long double`. Those exports need per-signature bridges; there are 26 variadic `APS5_VABI` exports.
-- **Host to guest:** at each discovered guest function entry, the original x86 bytes are overwritten with one arm64 instruction, `b <native entry>`. A host function pointer to guest code therefore runs natively, with no change to the many callback sites. The native entry builds or reuses the thread's `GuestState`, copies the AAPCS arguments into the SysV registers, pushes a sentinel return address on the guest stack, runs the translated function, and returns rax/xmm0 as x0/v0. This needs function entries aligned to 4 bytes, which clang's 16-byte function alignment gives. Guest code that reads its own instruction bytes would see the overlay.
+- **Host to guest:** the guest image lives in a data segment, so a host function pointer to guest code faults when it is called. The runtime's SIGBUS/SIGSEGV handler looks the address up in the function table and resumes at `aps5_enter` with the translated function in x16, so the many callback sites (the process entry through `Aps5StartGuest`, thread entries, atexit, library callbacks) need no change. `aps5_enter` builds or reuses the thread's `GuestState` and TLS block, copies the AAPCS arguments into the SysV registers and the guest stack, pushes a return address, runs the translated function, and returns rax/rdx and xmm0/xmm1 as x0/x1 and q0/q1. Faults the redirect does not own go to the previous handler (the write watch chains the same way).
+- **Variadic exports:** Apple arm64 passes variadic arguments on the stack, so a host `printf(fmt, ...)` cannot read the guest's registers. On arm64 the libc exports start a System V va_list over the running guest call instead (`aps5_guest_va_start` in the runtime, `GuestVarargs.hpp` in libc) and format with the same code the Windows build uses.
 - **TLS:** `fs:` accesses read `GuestState.fsBase`, which is set per thread from the guest TLS allocator. The `gs:`/pthread-key stubs of the Rosetta mode are not used.
 
 ### Hard parts, in order of risk
@@ -73,8 +74,9 @@ python3 tools/translator/tests/run_native_fixtures.py build-translator build-arm
 
 ## Milestones
 
-1. The prx libraries build for arm64. The x86-only parts throw until they are ported.
-2. The smallest fixture (`import_fixture`: `puts` and `exit` through the GOT) runs as an arm64 process.
+1. ✅ The prx libraries build for arm64. The x86-only parts throw until they are ported.
+2. ✅ The smallest fixture (`import_fixture`: `puts` and `exit` through the GOT) runs as an arm64 process.
+2b. ✅ DOOM (homebrew, `PPSA99666`) reaches its launcher natively, rendered through AGC at 60 FPS: SIMD/BMI lifting checked against Rosetta (`vector_smoke.c`), functions found through rip-relative code addresses and switch jump tables, guest TLS and image metadata (`__APS5DATA,__meta` for `dl_iterate_phdr`).
 3. The C and C++ fixtures run: TLS, threads, modules, exceptions.
 4. Breakout runs with video, pad and audio.
 5. Dreaming Sarah runs.
