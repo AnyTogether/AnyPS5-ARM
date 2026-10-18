@@ -55,12 +55,16 @@ public:
     ) : _seg(seg), _matches(matches), _ph(ph), _branchTargets(branchTargets), _pending(pending), _claimed(claimed), _matcher(matcher) {}
 
     [[nodiscard]] std::optional<Placement> Window(const std::size_t index) const {
-        if (index + 1 < _matches.size() && (_pending.contains(index + 1) || _movable(index + 1, true))) {
-            if (auto placement = _relocate(index, index, index + 1))
-                return placement;
+        for (const bool avoidSegment : {true, false}) {
+            if (index + 1 < _matches.size() && (_pending.contains(index + 1) || _movable(index + 1, true, avoidSegment))) {
+                if (auto placement = _relocate(index, index, index + 1))
+                    return placement;
+            }
+            if (index > 0 && _movable(index - 1, false, avoidSegment)) {
+                if (auto placement = _relocate(index, index - 1, index))
+                    return placement;
+            }
         }
-        if (index > 0 && _movable(index - 1, false))
-            return _relocate(index, index - 1, index);
         return std::nullopt;
     }
 
@@ -108,8 +112,8 @@ private:
         return kind != ControlFlowKind::Sequential && kind != ControlFlowKind::ConditionalBranch;
     }
 
-    [[nodiscard]] bool _movable(const std::size_t index, const bool last) const {
-        return !_claimed.contains(index) && !_pending.contains(index) && (last || !_blocksFollowing(index));
+    [[nodiscard]] bool _movable(const std::size_t index, const bool last, const bool avoidSegment = false) const {
+        return !_claimed.contains(index) && !_pending.contains(index) && (last || !_blocksFollowing(index)) && !(avoidSegment && _info(index).SegmentPrefix != 0);
     }
 
     [[nodiscard]] TrampolineSite _site(const std::uint64_t start, const std::size_t length, LoweredBody body) const {

@@ -175,12 +175,8 @@ std::int64_t APS5_VABI CollateHash(const GuestLocale::CollateFacet*, const char*
 
 const GuestLocale::CollateVtable g_collateVtable{{DestroyCollate, DeleteCollate, RetainFacet, ReleaseFacet}, CollateCompare, CollateTransform, CollateHash};
 
-// The guest's wchar_t is 16 bits, so the wide facet needs its own entries: collate<wchar_t> reaches the
-// same slots with ranges of 16-bit characters, whose length is a count of characters and not of bytes.
-// The C locale orders them by value, as Dinkumware's char_traits<wchar_t>::compare does, mixes one
-// whole character per hash round, and copies them into the result, whose size and capacity are bytes.
 constexpr std::size_t GuestWideCharacterSize = 2;
-constexpr std::size_t GuestWideInlineCapacity = sizeof(GuestLocale::String::buffer) - GuestWideCharacterSize;
+constexpr std::size_t GuestWideInlineCapacity = sizeof(GuestLocale::String::buffer) / GuestWideCharacterSize - 1;
 
 void ValidateWideCharacterRange(const std::uint16_t* first, const std::uint16_t* last, const char* function) {
     if ((first == nullptr) != (last == nullptr) || last < first) throw std::invalid_argument(std::string(function) + ": invalid character range");
@@ -213,15 +209,15 @@ GuestLocale::String* APS5_VABI WideCollateTransform(GuestLocale::String* result,
     const auto bytes = length * GuestWideCharacterSize;
     char* data = result->buffer;
     std::size_t capacity = GuestWideInlineCapacity;
-    if (bytes > GuestWideInlineCapacity) {
-        capacity = bytes | GuestStringCapacityMask;
-        data = static_cast<char*>(AllocateStringStorage(capacity + GuestWideCharacterSize));
+    if (length > GuestWideInlineCapacity) {
+        capacity = length | GuestWideInlineCapacity;
+        data = static_cast<char*>(AllocateStringStorage((capacity + 1) * GuestWideCharacterSize));
     }
     if (length != 0) std::memcpy(data, characters, bytes);
     data[bytes] = 0;
     data[bytes + 1] = 0;
     if (data != result->buffer) result->pointer = data;
-    result->size = bytes;
+    result->size = length;
     result->capacity = capacity;
     return result;
 }

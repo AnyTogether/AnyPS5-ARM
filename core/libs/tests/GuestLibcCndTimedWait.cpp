@@ -99,6 +99,26 @@ int main() {
     }
     signaler.join();
 
+    constexpr std::int64_t farSeconds = 10000000000;
+    const Xtime farTime{farSeconds, 999999999};
+    constexpr auto clockSeconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::duration::max()).count();
+    if (farSeconds < clockSeconds) {
+        bool farReady = false;
+        std::thread farSignaler([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            Require(_Mtx_lock_nid_postfix(&mutex) == success);
+            farReady = true;
+            Require(_Cnd_broadcast_nid_postfix(&condition) == success);
+            Require(_Mtx_unlock_nid_postfix(&mutex) == success);
+        });
+        while (!farReady) {
+            Require(_Cnd_timedwait_nid_postfix(&condition, &mutex, &farTime) == success);
+        }
+        farSignaler.join();
+    } else {
+        RequireThrows<std::overflow_error>([&] { _Cnd_timedwait_nid_postfix(&condition, &mutex, &farTime); });
+    }
+
     Require(_Mtx_unlock_nid_postfix(&mutex) == success);
     RequireThrows<std::invalid_argument>([&] { _Cnd_timedwait_nid_postfix(&condition, &mutex, nullptr); });
     const Xtime overflowCarryTime{std::numeric_limits<std::int64_t>::max(), 1000000000};

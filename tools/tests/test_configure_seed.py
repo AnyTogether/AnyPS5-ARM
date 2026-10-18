@@ -26,6 +26,15 @@ set(MINI_OPTION "value" CACHE STRING "An option, not a check result")
 
 @unittest.skipUnless(shutil.which("ninja") and (shutil.which("gcc") or shutil.which("cc")), "needs ninja and a C compiler")
 class ConfigureSeedTests(unittest.TestCase):
+    def test_check_names_with_spaces_round_trip_through_cmake(self):
+        cache = self.root / "named-check.txt"
+        cache.write_text('//Test HAVE FEATURE\nHAVE FEATURE:INTERNAL=1\n', encoding="utf-8")
+        output = self.configure("named-check", "-C", str(self.seed(cache, "named-check.cmake")))
+        self.assertNotRegex(output, r"CMake Error")
+        seeded = self.root / "named-check" / "CMakeCache.txt"
+        self.assertEqual(configure_seed.checks(seeded)["HAVE FEATURE"][0], "1")
+        self.assertNotIn("HAVE:INTERNAL=", seeded.read_text(encoding="utf-8"))
+
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()

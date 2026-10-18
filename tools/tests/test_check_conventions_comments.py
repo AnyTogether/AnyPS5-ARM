@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from check_conventions import STUB_BODY, SYSTEM_DEPENDENCY, Check, function_body, links, output
 
-CONVENTIONS_TEST_SHARDS = 6
+CONVENTIONS_TEST_SHARDS = 12
 
 
 def iter_test_cases(suite):
@@ -155,6 +155,54 @@ class RawLiteralCommentTests(unittest.TestCase):
         for comment in ('// " R"text(https://example.test)text"', '/* " R"text(https://example.test)text" */'):
             with self.subTest(comment=comment):
                 self.assertEqual(self.findings(comment, [1]), [("comment", self.path, 1, "")])
+
+
+class HashCommentTests(unittest.TestCase):
+    def findings(self, path, source, added):
+        check = Check.__new__(Check)
+        check.tree = set()
+        check.status = {}
+        check.findings = []
+        lines = source.split("\n")
+        check.added = {path: [(number, lines[number - 1]) for number in added]}
+        with patch.object(check, "show", return_value=source), patch.object(check, "duplicates"):
+            check.code()
+        return check.findings
+
+    def test_hash_inside_python_multiline_string_is_not_a_comment(self):
+        for quote in ('"""', "'''"):
+            with self.subTest(quote=quote):
+                source = f'TEMPLATE = {quote}\n#include <cstdint>\n{quote}\nprint("#ok")\n'
+                self.assertEqual(self.findings("tools/generate.py", source, [1, 2, 3, 4]), [])
+
+    def test_python_comment_after_a_multiline_string_is_reported(self):
+        source = 'TEMPLATE = """\n#include <cstdint>\n"""  # pending\nvalue = 1 # pending\n'
+        self.assertEqual(self.findings("tools/generate.py", source, [2, 3, 4]),
+                         [("comment", "tools/generate.py", 3, ""), ("comment", "tools/generate.py", 4, "")])
+
+    def test_python_shebang_is_not_a_comment(self):
+        for source in ("#!/usr/bin/env python3\nprint(1)\n", "\ufeff#!/usr/bin/env python3\nprint(1)\n"):
+            with self.subTest(source=source):
+                self.assertEqual(self.findings("tools/generate.py", source, [1, 2]), [])
+
+    def test_unparsable_python_falls_back_to_the_line_check(self):
+        source = 'TEMPLATE = """\n#include <cstdint>\n'
+        self.assertEqual(self.findings("tools/generate.py", source, [2]), [("comment", "tools/generate.py", 2, "")])
+
+    def test_hash_inside_cmake_quoted_and_bracket_arguments_is_not_a_comment(self):
+        for source in ('set(content "#ifndef GUARD\n#define GUARD\n#endif\n")\n',
+                       'set(patch [=[\n#include <utility>\n]=])\n',
+                       'set(patch [[\n#include <utility>\n]])\n',
+                       'message(STATUS "a\\"#b")\n',
+                       'string(REPLACE \\# x out "${in}")\n'):
+            with self.subTest(source=source):
+                added = list(range(1, source.count("\n") + 1))
+                self.assertEqual(self.findings("cmake/Generate.cmake", source, added), [])
+
+    def test_cmake_line_and_bracket_comments_are_reported(self):
+        source = 'set(value 1) # pending\n#[[\npending\n]]\nset(patch [=[\n#include <utility>\n]=]) # pending\n'
+        self.assertEqual(self.findings("CMakeLists.txt", source, [1, 2, 3, 4, 6, 7]),
+                         [("comment", "CMakeLists.txt", number, "") for number in (1, 2, 3, 4, 7)])
 
 
 class SilentStubTests(unittest.TestCase):
@@ -345,7 +393,8 @@ class SilentStubSectionTests(unittest.TestCase):
 
 
 class TestFixtureExportTests(unittest.TestCase):
-    def check(self, path, text):
+    def check(self, path, text=None):
+        files = path if text is None else {path: text}
         checker = Path(__file__).resolve().parents[1] / "check_conventions.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -367,7 +416,8 @@ class TestFixtureExportTests(unittest.TestCase):
             write("core/libs/prx/libSceNgs2/tests/Render.cpp", "static int APS5_VABI Process(int value) { return value; }\n")
             git("add", ".")
             git("commit", "-qm", "feat: add libraries")
-            write(path, text)
+            for relative, content in files.items():
+                write(relative, content)
             git("add", ".")
             git("commit", "-qm", "feat: add source")
             env = {key: value for key, value in os.environ.items()
@@ -396,12 +446,16 @@ class TestFixtureExportTests(unittest.TestCase):
         self.assertIn("sceKernelGetProcessTime is also in libkernel", result.stdout)
 
     def test_comment_in_a_shader_is_reported(self):
+        shaders = {}
         for path in ("core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.comp", "core/libs/prx/libSceAgcDriver/tests/shaders/Fill.frag", "core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.glsl"):
-            for line in ("    // fill the target", "    /* fill the target */"):
-                with self.subTest(path=path, line=line):
-                    result = self.check(path, f"#version 450\nvoid main() {{\n{line}\n}}\n")
-                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                    self.assertIn(f"{path}:3: error: [comment]", result.stdout)
+            for style, line in (("Line", "    // fill the target"), ("Block", "    /* fill the target */")):
+                stem, extension = path.rsplit(".", 1)
+                shaders[f"{stem}{style}.{extension}"] = f"#version 450\nvoid main() {{\n{line}\n}}\n"
+        result = self.check(shaders)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        for path in shaders:
+            with self.subTest(path=path):
+                self.assertIn(f"{path}:3: error: [comment]", result.stdout)
 
     def test_shader_without_comments_passes(self):
         result = self.check("core/libs/prx/libSceAgcDriver/Graphics/shaders/Fill.vert",

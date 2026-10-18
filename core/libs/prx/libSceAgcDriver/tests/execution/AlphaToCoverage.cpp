@@ -514,6 +514,27 @@ void DccFastClearTests(AgcDriver::VulkanDevice& device, std::uint32_t selectedSa
                             }
                         }
                     }
+                    if (code == 0 && !alphaOnMsb && cmaskMode == 0) {
+                        const auto dccBytes = AgcDriver::Graphics::MultisampledDccBytes(target);
+                        Require(dccBytes + 8u <= metadata.bytes, "the DCC fixture has no adjacent-page control");
+                        const std::array<std::byte, 4> adjacent{std::byte{0x7b}, std::byte{0x7b}, std::byte{0x7b}, std::byte{0x7b}};
+                        AgcDriver::GuestMemory::Write(metadata.Address() + dccBytes, adjacent);
+                        device.ColorMetadataPass(pass);
+                        Require(ReadBack(device, resolved) == stored, "an adjacent driver store changed the resident DCC target");
+                        static_cast<volatile std::uint8_t*>(metadata.data)[dccBytes + 4u] = 0x7c;
+                        AgcDriver::GuestMemory::CollectWritesUncached(metadata.Address() + dccBytes, 8u);
+                        device.ColorMetadataPass(pass);
+                        Require(ReadBack(device, resolved) == stored, "an adjacent CPU store changed the resident DCC target");
+                        const std::array<std::byte, 1> same{std::byte{0}};
+                        AgcDriver::GuestMemory::Write(metadata.Address(), same);
+                        bool refused = false;
+                        try {
+                            device.ColorMetadataPass(pass);
+                        } catch (const std::runtime_error& error) {
+                            refused = std::string_view(error.what()).find("writes to a resident multisampled DCC") != std::string_view::npos;
+                        }
+                        Require(refused, "a same-value driver DCC store did not invalidate multisampled DCC residency");
+                    }
                     if (code == 0 && alphaOnMsb && cmaskMode == 0) {
                         static_cast<volatile std::uint8_t*>(source.data)[0] = 0;
                         bool refused = false;

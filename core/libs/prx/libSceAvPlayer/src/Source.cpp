@@ -63,7 +63,7 @@ std::uint64_t FrameMillis(const AVFrame& frame, AVRational timeBase) {
 
 bool IsStreamSupported(const AVStream& stream) {
     const auto codec = stream.codecpar->codec_id;
-    return codec == AV_CODEC_ID_H264 || codec == AV_CODEC_ID_HEVC || codec == AV_CODEC_ID_AAC;
+    return codec == AV_CODEC_ID_H264 || codec == AV_CODEC_ID_HEVC || codec == AV_CODEC_ID_AAC || codec == AV_CODEC_ID_VP9 || codec == AV_CODEC_ID_OPUS;
 }
 
 float DisplayAspect(int width, int height, AVRational sampleAspect) {

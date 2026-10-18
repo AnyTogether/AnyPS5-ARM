@@ -57,7 +57,7 @@ static void TestTypeInfoVtables() {
     if (catchType(&other, &single, &object, 0)) throw std::runtime_error("unrelated RTTI catch succeeded");
 }
 
-extern "C" void NotImplemented_nid_no_patch(const char*);
+extern "C" [[noreturn]] void NotImplemented_nid_no_patch(const char*);
 
 static void RequireHandle(bool value) {
     if (!value) throw std::runtime_error("child process setup failed");

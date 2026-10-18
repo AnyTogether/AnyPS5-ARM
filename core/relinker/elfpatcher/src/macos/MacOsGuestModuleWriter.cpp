@@ -90,7 +90,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
                     image.WritePointer(target, 0);
                     // __tls_get_addr comes from libkernel unless a guest module provides one.
                     const auto name = guest.UsePlatformTlsResolver && symbol.Name == "vNe1w4diLCs" ? std::string("Aps5GuestTlsGetAddr_nid_no_patch") : DynamicName(guest, symbolIndex);
-                    input.Binds.push_back({"_" + name, rva, static_cast<std::int64_t>(addend)});
+                    input.Binds.push_back({"_" + name, rva, static_cast<std::int64_t>(addend), (symbol.Info >> 4) == 2});
                 }
             } else throw Domain::RelinkerException("Unsupported macOS guest relocation " + std::to_string(type), target);
         }

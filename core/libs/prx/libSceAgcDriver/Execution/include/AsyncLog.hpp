@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -171,6 +172,16 @@ public:
         return true;
     }
 
+    static void FlushAtEnd() {
+        auto& log = Get();
+        if (log.abandoned.load(std::memory_order_acquire)) return;
+        if (!log.FlushFor(EndFlushLimit)) log.abandoned.store(true, std::memory_order_release);
+    }
+
+    std::unique_lock<std::mutex> Hold() {
+        return std::unique_lock(mutex);
+    }
+
 private:
     struct Window {
         Clock::time_point first;
@@ -193,14 +204,14 @@ private:
         if (!asynchronous) return;
         LogSink().store(&AsyncLog::Sink, std::memory_order_release);
         std::atexit(&AsyncLog::FlushAtEnd);
+        InitializeWaits();
         std::thread([this] { Run(); }).detach();
         LibcSetEndFlush_nid_no_patch(&AsyncLog::FlushAtEnd);
     }
 
-    static void FlushAtEnd() {
-        auto& log = Get();
-        if (log.abandoned.load(std::memory_order_acquire)) return;
-        if (!log.FlushFor(EndFlushLimit)) log.abandoned.store(true, std::memory_order_release);
+    void InitializeWaits() {
+        std::unique_lock lock(mutex);
+        for (auto* condition : {&wake, &space, &idle}) static_cast<void>(condition->wait_for(lock, std::chrono::nanoseconds(0)));
     }
 
     static int Sink(std::FILE* stream, const char* text, std::size_t length) {
@@ -382,6 +393,12 @@ inline void InstallAsyncLog_nid_no_patch() {
 inline void FlushAsyncLog_nid_no_patch() {
     AsyncLog::Get().Flush();
 }
+
+inline void FlushAsyncLogAtEnd_nid_no_patch() {
+    AsyncLog::FlushAtEnd();
+}
+
+std::unique_lock<std::mutex> HoldAsyncLog();
 
 template<typename... TArgs>
 void LogCoalescedStderr_nid_no_patch(const char* format, TArgs... args) {

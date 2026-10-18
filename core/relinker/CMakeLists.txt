@@ -378,6 +378,9 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include
         ${CMAKE_CURRENT_SOURCE_DIR}/io/include
     )
+    if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")))
+        target_link_options(amd64_only_converter_tests PRIVATE "LINKER:-pagezero_size,0x10000")
+    endif()
     add_test(NAME amd64_only_converter COMMAND amd64_only_converter_tests)
     if((APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64") OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))
         add_test_executable(masked_store_stub_tests
@@ -569,6 +572,9 @@ if(BUILD_TESTING)
         add_test(NAME guest_module_fini COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_fini.py
             $<TARGET_FILE:relinker> $<TARGET_FILE:guest_module_args_host>)
+        add_asan_test_options(guest_module_args verify_asan_link_order=0)
+        add_asan_test_options(guest_deferred_dependencies verify_asan_link_order=0)
+        add_asan_test_options(guest_module_fini verify_asan_link_order=0)
         add_test(NAME guest_needed_nested_modules COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_needed_nested_modules.py $<TARGET_FILE:relinker>)
         set(windows_stdio_host_arguments)
@@ -769,4 +775,16 @@ if(BUILD_TESTING)
         )
         add_test(NAME reloc_table_bounds COMMAND reloc_table_bounds_tests $<TARGET_FILE:relinker>)
     endif()
+
+    set(relinkerTestTemp ${CMAKE_CURRENT_BINARY_DIR}/test-temp)
+    file(MAKE_DIRECTORY ${relinkerTestTemp})
+    get_property(relinkerTests DIRECTORY PROPERTY TESTS)
+    set_property(TEST ${relinkerTests} APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        "TMPDIR=set:${relinkerTestTemp};TEMP=set:${relinkerTestTemp};TMP=set:${relinkerTestTemp}")
+endif()
+
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+    add_test(NAME macos_guest_weak_imports COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_guest_weak_imports.py $<TARGET_FILE:relinker>)
+    set_property(TEST macos_guest_weak_imports APPEND PROPERTY LABELS relinker)
 endif()

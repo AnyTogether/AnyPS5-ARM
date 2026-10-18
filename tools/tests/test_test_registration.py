@@ -12,6 +12,20 @@ import check_test_registration
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_disabled_property_is_local_to_each_configuration(self):
+        for configurations in (("OFF", "TRUE"), ("TRUE", "OFF"), ("TRUE", "TRUE")):
+            with self.subTest(configurations=configurations):
+                content = 'if(CTEST_CONFIGURATION_TYPE STREQUAL "Debug")\n'
+                for index, disabled in enumerate(configurations):
+                    if index:
+                        content += 'else()\n'
+                    content += f'add_test("bounds" "/build/tests/config{index}/buffer_bounds_tests")\n'
+                    content += f'set_tests_properties("bounds" PROPERTIES DISABLED {disabled})\n'
+                content += 'endif()\n'
+                names = self.registered(content)
+                self.assertEqual("buffer_bounds_tests" in names, "OFF" in configurations)
+
+
     def registered(self, content):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)

@@ -287,8 +287,13 @@ static void RecordLocksBelongToTheProcess() {
     Require(fcntl_nid_postfix(writer, SetLock, &release) == 0);
     Require(fcntl_nid_postfix(reader, SetLock, &release) == 0);
 
-#ifdef _WIN32
     Require(NoConflict(file, {0, 0, 0, Unlock, FromStart, 0}));
+    Require(NoConflict(reader, {2, 3, 0, Unlock, FromStart, 9}));
+    Require(sceKernelLseek(file, 7, 0) == 7);
+    GuestLock currentUnlock{-3, 2, 0, Unlock, FromCurrent, 0};
+    Require(fcntl_nid_postfix(file, GetLock, &currentUnlock) == 0);
+    Require(currentUnlock.type == Unlock && currentUnlock.start == 4 && currentUnlock.length == 2 && currentUnlock.whence == FromCurrent);
+#ifdef _WIN32
     GuestLock tooLong{std::numeric_limits<std::int64_t>::max(), 2, 0, WriteLock, FromStart, 0};
     RequireFailure(fcntl_nid_postfix(file, SetLock, &tooLong), GuestEoverflow);
     RequireFailure(fcntl_nid_postfix(file, GetLock, &tooLong), GuestEoverflow);

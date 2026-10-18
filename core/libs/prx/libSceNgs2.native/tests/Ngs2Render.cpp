@@ -41,8 +41,8 @@ static void TestErrorsAndInfo() {
     Require(sceNgs2RackQueryBufferSize(SCE_NGS2_RACK_ID_SAMPLER, nullptr, nullptr) == SCE_NGS2_ERROR_INVALID_OUT_ADDRESS);
 
     Ngs2SystemInfo info{};
-    Require(sceNgs2SystemGetInfo(0x1234, &info, sizeof(info)) == static_cast<int>(0x804A0230u));
-    Require(sceNgs2RackDestroy(0x1234, nullptr) == static_cast<int>(0x804A0261u));
+    Require(sceNgs2SystemGetInfo(0x1234, &info, sizeof(info)) == static_cast<int>(0x804A8201u));
+    Require(sceNgs2RackDestroy(0x1234, nullptr) == static_cast<int>(0x804A8202u));
 
     const auto system = CreateSystem();
     const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
@@ -881,23 +881,57 @@ static void TestStereoIntoSurround() {
 
 static void TestLock() {
     const auto system = CreateSystem();
+    const auto voice = Voice(CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER));
     Require(sceNgs2SystemLock(0x1234) == SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE);
     Require(sceNgs2SystemUnlock(0x1234) == SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE);
-    Ngs2SystemInfo info{};
-    std::thread free([&] { Require(sceNgs2SystemGetInfo(system, &info, sizeof(info)) == SCE_NGS2_OK); });
-    free.join();
+    Require(sceNgs2SystemUnlock(system) == SCE_NGS2_OK);
 
+    Ngs2SystemInfo info{};
     Require(sceNgs2SystemLock(system) == SCE_NGS2_OK);
+    Require(sceNgs2SystemLock(system) == SCE_NGS2_OK);
+    std::atomic<bool> otherDone = false;
+    std::thread other([&] {
+        Ngs2SystemInfo otherInfo{};
+        std::uint32_t flags = 0;
+        Require(sceNgs2SystemGetInfo(system, &otherInfo, sizeof(otherInfo)) == SCE_NGS2_OK);
+        Require(sceNgs2VoiceGetStateFlags(voice, &flags) == SCE_NGS2_OK);
+        std::vector<std::int16_t> out(Grain * 2, -1);
+        const Ngs2RenderBufferInfo buffer{out.data(), out.size() * sizeof(std::int16_t), SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1};
+        Require(sceNgs2SystemRender(system, &buffer, 1) == SCE_NGS2_OK);
+        Require(std::all_of(out.begin(), out.begin() + Grain, [](std::int16_t sample) { return sample == 0; }));
+        Require(std::all_of(out.begin() + Grain, out.end(), [](std::int16_t sample) { return sample == -1; }));
+        Require(sceNgs2SystemGetInfo(system, &otherInfo, sizeof(otherInfo)) == SCE_NGS2_OK && otherInfo.render_count == 0);
+        otherDone = true;
+    });
+    for (int i = 0; i < 200 && !otherDone; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    Require(otherDone);
+    other.join();
+    RenderI16(system);
+    Require(sceNgs2SystemGetInfo(system, &info, sizeof(info)) == SCE_NGS2_OK && info.render_count == 1);
+
     std::atomic<bool> done = false;
     std::thread blocked([&] {
-        Require(sceNgs2SystemGetInfo(system, &info, sizeof(info)) == SCE_NGS2_OK);
+        Require(sceNgs2SystemLock(system) == SCE_NGS2_OK);
         done = true;
+        RenderI16(system);
+        Require(sceNgs2SystemUnlock(system) == SCE_NGS2_OK);
     });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    Require(!done);
+    Require(sceNgs2SystemUnlock(system) == SCE_NGS2_OK);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     Require(!done);
     Require(sceNgs2SystemUnlock(system) == SCE_NGS2_OK);
     blocked.join();
     Require(done);
+    Require(sceNgs2SystemGetInfo(system, &info, sizeof(info)) == SCE_NGS2_OK && info.render_count == 2);
+
+    Require(sceNgs2SystemLock(system) == SCE_NGS2_OK);
+    std::thread unlocker([&] { Require(sceNgs2SystemUnlock(system) == SCE_NGS2_OK); });
+    unlocker.join();
+    std::thread renderer([&] { RenderI16(system); });
+    renderer.join();
+    Require(sceNgs2SystemGetInfo(system, &info, sizeof(info)) == SCE_NGS2_OK && info.render_count == 3);
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 

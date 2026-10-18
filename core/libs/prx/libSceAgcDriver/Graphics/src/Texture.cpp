@@ -4,6 +4,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/SlimMutex.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GuestBufferMemory.hpp"
@@ -292,7 +293,7 @@ Texture::Texture(const Context& context, TextureDetiler& detiler, const GuestTex
         allocation.allocationSize = requirements.size;
         allocationBytes = requirements.size;
         allocation.memoryTypeIndex = context.DeviceMemoryType(requirements.memoryTypeBits, requirements.size, "texture");
-        Check(context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &owned->memory), "vkAllocateMemory texture");
+        owned->memory = GetBufferPool(context)->AllocateMemory(allocation, "vkAllocateMemory texture");
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, owned->memory, 0), "vkBindImageMemory");
 
         {
@@ -590,7 +591,7 @@ Texture::Texture(const Context& context, const std::shared_ptr<StorageTexture>& 
         allocation.allocationSize = requirements.size;
         allocationBytes = requirements.size;
         allocation.memoryTypeIndex = context.MemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        Check(context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &owned->memory), "vkAllocateMemory depth copy");
+        owned->memory = GetBufferPool(context)->AllocateMemory(allocation, "vkAllocateMemory depth copy");
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, owned->memory, 0), "vkBindImageMemory depth copy");
 
         const auto viewLevelCount = std::min(descriptor.lastLevel, descriptor.mipCount - 1u) - descriptor.baseLevel + 1u;
@@ -871,7 +872,13 @@ VkImageView Texture::SrgbView(bool firstLayer, bool baseLevel) const {
 VkImageView Texture::BaseLevelView() const {
     Require(baseLevelInfo.has_value(), "a base-level view needs a mipmapped 1D, 2D or 2D array texture");
     std::lock_guard lock(baseLevelMutex);
-    if (!baseLevelView) Check(context.Function<PFN_vkCreateImageView>("vkCreateImageView")(context.device, &*baseLevelInfo, nullptr, &baseLevelView), "vkCreateImageView base level");
+    if (!baseLevelView) {
+        auto info = *baseLevelInfo;
+        VkImageViewUsageCreateInfo usage{VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO};
+        usage.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+        info.pNext = &usage;
+        Check(context.Function<PFN_vkCreateImageView>("vkCreateImageView")(context.device, &info, nullptr, &baseLevelView), "vkCreateImageView base level");
+    }
     return baseLevelView;
 }
 
@@ -1148,7 +1155,7 @@ StorageTexture::StorageTexture(const Context& context, TextureDetiler& detiler, 
         allocation.allocationSize = requirements.size;
         memoryBytes = requirements.size;
         allocation.memoryTypeIndex = context.DeviceMemoryType(requirements.memoryTypeBits, requirements.size, "storage texture");
-        Check(context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")(context.device, &allocation, nullptr, &memory), "vkAllocateMemory storage texture");
+        memory = GetBufferPool(context)->AllocateMemory(allocation, "vkAllocateMemory storage texture");
         Check(context.Function<PFN_vkBindImageMemory>("vkBindImageMemory")(context.device, image, memory, 0), "vkBindImageMemory storage");
     } catch (...) {
         release();
@@ -2324,7 +2331,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
             batch = std::make_unique<CommandBatch>(context);
             commands = batch->Handle();
         }
-        const auto importOffset = descriptor.baseAddress - import->base;
+        const auto importOffset = HostImportOffset(*import, descriptor.baseAddress);
         if (direct) {
             recordDirectUploadBarrier(commands, layers == nullptr);
             for (std::uint32_t layer = 0; layer < arrayLayers; ++layer) {
@@ -2750,7 +2757,7 @@ std::uint64_t StorageTexture::uploadWindows(const HostImport& import, std::span<
         batch = std::make_unique<CommandBatch>(context);
         commands = batch->Handle();
     }
-    const auto importOffset = descriptor.baseAddress - import.base;
+    const auto importOffset = HostImportOffset(import, descriptor.baseAddress);
     if (direct) {
         recordDirectUploadBarrier(commands, discard);
         for (const auto& window : windows) {
@@ -2883,7 +2890,7 @@ std::uint64_t StorageTexture::writeBackWindows(std::span<const ImportSegment> se
                 if (!shadowed.empty() && shadowed.back().end == guestBegin && shadowed.back().slab == destination->slab) shadowed.back().end = pieceEnd;
                 else shadowed.push_back({guestBegin, pieceEnd, destination->slab});
             } else {
-                importCopies[segment].push_back({scratchOffset, guestBegin - import.base, pieceEnd - guestBegin});
+                importCopies[segment].push_back({scratchOffset, HostImportOffset(import, guestBegin), pieceEnd - guestBegin});
                 if (!imported.empty() && imported.back().second == guestBegin) imported.back().second = pieceEnd;
                 else imported.emplace_back(guestBegin, pieceEnd);
             }
@@ -2978,7 +2985,7 @@ std::uint64_t StorageTexture::writeBackWindows(std::span<const ImportSegment> se
         }
         for (const auto& [begin, end, slab, import] : seeds) {
             // The piece's own slab (a seeded unit is one the piece covers partly).
-            const VkBufferCopy seed{begin - import->base, SlabOffset(*import, *slab, begin), end - begin};
+            const VkBufferCopy seed{HostImportOffset(*import, begin), SlabOffset(*import, *slab, begin), end - begin};
             context.Resolved(&DeviceFunctions::cmdCopyBuffer, "vkCmdCopyBuffer")(commands, import->buffer, slab->buffer, 1, &seed);
             NoteShadowSeed(begin, end);
         }
@@ -3215,6 +3222,12 @@ void StorageTexture::reconcilePending() {
     if (any) pending.textures.push_back(this);
     else pending.textures.remove(this);
     BumpPendingSerial();
+}
+
+bool StorageTexture::Dirty() const {
+    auto& pending = Pending();
+    std::lock_guard lock(pending.mutex);
+    return dirty;
 }
 
 void StorageTexture::Flush() {
@@ -4821,7 +4834,7 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
                 for (const auto& [from, to] : keep) {
                     const auto begin = std::max(from, segment.begin);
                     const auto end = std::min(to, segment.end);
-                    if (begin < end) copies.push_back({begin - descriptor.baseAddress, begin - segment.import->base, end - begin});
+                    if (begin < end) copies.push_back({begin - descriptor.baseAddress, HostImportOffset(*segment.import, begin), end - begin});
                 }
                 if (!copies.empty()) context.Function<PFN_vkCmdCopyBuffer>("vkCmdCopyBuffer")(commands, tiledScratch->Handle(), segment.import->buffer, static_cast<std::uint32_t>(copies.size()), copies.data());
             }

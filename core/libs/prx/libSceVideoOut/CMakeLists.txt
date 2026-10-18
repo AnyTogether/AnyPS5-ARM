@@ -184,6 +184,17 @@ if(BUILD_TESTING)
         set_tests_properties(guest_video_out_output_mode PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+
+    add_test_executable(guest_video_out_color_space_tests ${LIBS_INCLUDE_DIR}/tests/GuestVideoOutColorSpace.cpp)
+    target_include_directories(guest_video_out_color_space_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_video_out_color_space_tests PRIVATE libSceVideoOut libSceAgcDriver libkernel libc)
+    configure_windows_unwind(guest_video_out_color_space_tests)
+    add_test(NAME guest_video_out_color_space COMMAND guest_video_out_color_space_tests)
+    set_tests_properties(guest_video_out_color_space PROPERTIES TIMEOUT 20 SKIP_RETURN_CODE 77 RESOURCE_LOCK videoout_app0)
+    if(WIN32)
+        set_tests_properties(guest_video_out_color_space PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
 
 if(BUILD_TESTING)

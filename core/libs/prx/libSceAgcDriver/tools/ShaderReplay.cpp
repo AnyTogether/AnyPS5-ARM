@@ -49,6 +49,7 @@ bool g_graph = false;
 bool g_maintenance8 = false;
 // The driver sets relaxedFloat on MoltenVK with a window; requests do not carry it.
 bool g_relaxed = false;
+bool g_robust2 = false;
 bool g_code = false;
 
 bool Replay(const char* path) {
@@ -148,6 +149,7 @@ bool Replay(const char* path) {
     try {
         if (g_maintenance8) request.request.target.nonConstantImageOffsets = true;
         if (g_relaxed) request.request.target.relaxedFloat = true;
+        if (g_robust2) request.request.target.robustBufferAccess2 = true;
         const auto result = ShaderRecompiler::Recompile(request.request);
         std::printf("  recompiled: %zu SPIR-V words\n", result.spirv.size());
         if (g_spirv) {
@@ -185,7 +187,7 @@ bool Replay(const char* path) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: agc_shader_replay [--dis] [--asm] [--cfg] [--mem] [--spv] [--prepare] [--materialize] [--code] [--maintenance8] [--relaxed] <shader.req>...\n  the driver writes shader_<address>.req files when APS5_DUMP_SHADERS is set\n");
+        std::fprintf(stderr, "usage: agc_shader_replay [--dis] [--asm] [--cfg] [--mem] [--spv] [--prepare] [--materialize] [--code] [--maintenance8] [--relaxed] [--robust2] <shader.req>...\n  the driver writes shader_<address>.req files when APS5_DUMP_SHADERS is set\n");
         return 2;
     }
     int failures = 0;
@@ -208,6 +210,10 @@ int main(int argc, char** argv) {
         }
         if (std::string(argv[i]) == "--relaxed") {
             g_relaxed = true;
+            continue;
+        }
+        if (std::string(argv[i]) == "--robust2") {
+            g_robust2 = true;
             continue;
         }
         if (std::string(argv[i]) == "--mem") {

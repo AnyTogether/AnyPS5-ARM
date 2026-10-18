@@ -7,6 +7,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -61,6 +62,7 @@ struct KernelEqueueEvent {
     bool enabled = true;
     uint64_t deadlineNs = 0;
     uint64_t intervalNs = 0;
+    std::int64_t lowWater = 0;
     KernelEvent event;
     KernelFilter filter;
     std::deque<KernelEvent> pendingEvents;
@@ -83,6 +85,7 @@ public:
     bool HasEvent(uintptr_t ident, int16_t filter);
     int EditEvent(uintptr_t ident, int16_t filter, const std::function<void(KernelEqueueEvent&)>& edit);
     int GetTriggeredEvents(KernelEvent* ev, int num);
+    bool HasTriggeredEvents();
     int WaitForEvents(KernelEvent* ev, int num, uint32_t micros);
     int WaitForEventsUntil(KernelEvent* ev, int num, std::uint64_t deadlineNanos);
     void RemoveDescriptorEvents(uintptr_t ident);
@@ -112,6 +115,7 @@ using KernelEqueueRef = std::shared_ptr<KernelEqueuePrivate>;
 void EqueueDescriptorClosed(int descriptor);
 void KqueueDescriptorClosed(int descriptor);
 bool IsKqueueDescriptor(int descriptor);
+std::optional<bool> KqueueReadable(int descriptor);
 KernelEqueueEvent EqueueDescriptorEvent(int descriptor, int16_t filter, uint16_t flags, void* udata);
 void RequireVnodeNotes(uint32_t fflags);
 void SetVnodeNotes(KernelEqueueEvent& event, uint32_t fflags);

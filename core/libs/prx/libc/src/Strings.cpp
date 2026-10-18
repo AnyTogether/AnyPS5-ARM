@@ -169,6 +169,14 @@ char* APS5_VABI strrchr_nid_postfix(const char* s, int c) {
     return std::strrchr(const_cast<char*>(s), c);
 }
 
+char* APS5_VABI rindex_nid_postfix(const char* s, int c) {
+    return strrchr_nid_postfix(s, c);
+}
+
+int APS5_VABI flsl_nid_postfix(std::int64_t mask) {
+    return mask == 0 ? 0 : 64 - std::countl_zero(static_cast<std::uint64_t>(mask));
+}
+
 char* APS5_VABI strstr_nid_postfix(const char* haystack, const char* needle) {
     return std::strstr(const_cast<char*>(haystack), needle);
 }
@@ -225,6 +233,10 @@ std::intmax_t APS5_VABI strtoimax_nid_postfix(const char* str, char** endptr, in
 std::uintmax_t APS5_VABI strtoumax_nid_postfix(const char* str, char** endptr, int base) {
     if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ConvertInteger(str, endptr, base, std::strtoumax);
+}
+
+unsigned long long APS5_VABI strtouq_nid_postfix(const char* str, char** endptr, int base) {
+    return strtoull_nid_postfix(str, endptr, base);
 }
 
 double APS5_VABI strtod_nid_postfix(const char* str, char** endptr) {
@@ -505,6 +517,12 @@ size_t APS5_VABI wcsspn_nid_postfix(const char16_t* s, const char16_t* accept) {
     return count;
 }
 
+size_t APS5_VABI wcscspn_nid_postfix(const char16_t* s, const char16_t* reject) {
+    size_t count = 0;
+    while (s[count] != 0 && !Contains(reject, s[count])) ++count;
+    return count;
+}
+
 char16_t* APS5_VABI wcstok_nid_postfix(char16_t* text, const char16_t* delimiters, char16_t** last) {
     if (text == nullptr) text = *last;
     if (text == nullptr) return nullptr;
@@ -557,6 +575,14 @@ unsigned long long APS5_VABI wcstoul_nid_postfix(const char16_t* str, char16_t**
 
 unsigned long long APS5_VABI wcstoull_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
     return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0ULL : std::strtoull(text, end, base); });
+}
+
+long long APS5_VABI wcstoimax_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
+    return wcstoll_nid_postfix(str, endptr, base);
+}
+
+unsigned long long APS5_VABI wcstoumax_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
+    return wcstoull_nid_postfix(str, endptr, base);
 }
 
 std::uint64_t APS5_VABI _WStoul_nid_postfix(const char16_t* str, char16_t** endptr, int base) {

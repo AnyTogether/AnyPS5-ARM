@@ -1,10 +1,12 @@
 import argparse
+import io
 import json
 import os
 import posixpath
 import re
 import subprocess
 import sys
+import tokenize
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
@@ -43,6 +45,7 @@ DEBT_TARGET = re.compile(r"\]\((?:\.\./)+(core/[^)#\s]+)")
 CONVENTIONAL = re.compile(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: \S")
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 ALLOWED_COMMENT = re.compile(r"^\s*(#\s*endif\b|}\s*;?\s*//\s*(end\s+)?namespace\b)")
+CMAKE_TOKEN = re.compile(r'\[(=*)\[.*?\]\1\]|"(?:\\.|[^"\\])*"|(?P<comment>#\[(?P<level>=*)\[.*?\](?P=level)\]|#[^\n]*)|\\.', re.S)
 EXPORT = re.compile(r"\bAPS5_VABI\s+(\w+)\s*\(")
 STUB_BODY = re.compile(r"^(?:\(void\)\s*\w+\s*;|static_cast<void>\(\s*\w+\s*\)\s*;)*"
                        r"(?:return\s*\(?\s*(?:-?(?:0x[0-9a-fA-F]+|\d+)[uUlL]*|nullptr|true|false|\w*_OK)?\s*\)?\s*;)?$")
@@ -159,9 +162,12 @@ class Check:
                         self.report("silent-stub", path, number, match.group(1))
         self.duplicates(exports)
         for path, lines in self.files(lambda p: p.suffix in (".py", ".cmake") or p.name == "CMakeLists.txt"):
+            source = self.show(path)
+            comments = python_comments(source) if path.endswith(".py") else cmake_comments(source)
             for number, text in lines:
                 shebang = text.startswith("#!") or (number == 1 and text.startswith("\ufeff#!"))
-                if "#" in STRINGS.sub('""', text) and not shebang:
+                comment = number in comments if comments is not None else "#" in STRINGS.sub('""', text)
+                if comment and not shebang:
                     self.report("comment", path, number)
         if any(is_debt(path) for path in self.status):
             self.findings = [finding for finding in self.findings if finding[0] != "comment"]
@@ -173,10 +179,17 @@ class Check:
         result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nE", "--full-name", pattern, self.head, "--", ":(top)core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
         hits = [line.split(":", 3)[1:] for line in filter(None, result.stdout.split("\n"))]
         self.read(path for path, _, _ in hits)
+        sources = {}
         for path, number, text in hits:
-            name = EXPORT.search(text).group(1)
+            if path not in sources:
+                sources[path] = cpp_text(self.show(path)).split("\n")
+            source = sources[path]
+            match = next((match for match in EXPORT.finditer(source[int(number) - 1]) if match.group(1) in exports), None)
+            if match is None:
+                continue
+            name = match.group(1)
             own, own_number = exports[name]
-            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(self.show(path).splitlines(), int(number) - 1) is not None:
+            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(source, int(number) - 1) is not None:
                 self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def build(self):
@@ -399,6 +412,23 @@ def allowed_notes(path):
     if p.suffix.lower() not in NOTES:
         return None
     return path in ("README.md", "CONTRIBUTING.md") or p.parts[0] == ".github" or p.parts[:2] in (("docs", "dev"), ("docs", "user"))
+
+
+def python_comments(text):
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text.removeprefix("\ufeff")).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    return {token.start[0] for token in tokens if token.type == tokenize.COMMENT}
+
+
+def cmake_comments(text):
+    lines = set()
+    for match in CMAKE_TOKEN.finditer(text):
+        if match.group("comment") is not None:
+            first = text.count("\n", 0, match.start()) + 1
+            lines.update(range(first, first + match.group().count("\n") + 1))
+    return lines
 
 
 def cpp_text(text, preserve_comments=False):

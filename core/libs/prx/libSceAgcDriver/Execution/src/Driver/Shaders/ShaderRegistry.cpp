@@ -14,6 +14,7 @@
 #include <sys/sysctl.h>
 #endif
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <set>
@@ -945,7 +946,8 @@ class RegistrationPreparePool {
 public:
     static RegistrationPreparePool& Instance() {
         static auto* pool = [] {
-            auto* created = new RegistrationPreparePool(std::max(2u, std::thread::hardware_concurrency() / 2u));
+            std::lock_guard lifecycle(Lifecycle());
+            auto* created = new RegistrationPreparePool(Closing() ? 0u : std::max(2u, std::thread::hardware_concurrency() / 2u));
             PreparationSlot().store(created);
             return created;
         }();
@@ -959,7 +961,8 @@ public:
     static RegistrationPreparePool& Prebuild() {
         static auto* pool = [] {
             const char* text = std::getenv("APS5_PREBUILD_THREADS");
-            auto* created = new RegistrationPreparePool(text != nullptr ? std::max(1u, static_cast<unsigned>(std::strtoul(text, nullptr, 10))) : 1u);
+            std::lock_guard lifecycle(Lifecycle());
+            auto* created = new RegistrationPreparePool(Closing() ? 0u : text != nullptr ? std::max(1u, static_cast<unsigned>(std::strtoul(text, nullptr, 10))) : 1u);
             PrebuildSlot().store(created);
             return created;
         }();
@@ -970,7 +973,33 @@ public:
         return PrebuildSlot().load();
     }
 
+    static unsigned LiveWorkers() {
+        return liveWorkers.load(std::memory_order_acquire);
+    }
+
+    static void CloseAll() {
+        std::array<RegistrationPreparePool*, 2> pools{};
+        {
+            std::lock_guard lifecycle(Lifecycle());
+            Closing() = true;
+            pools = {Existing(), ExistingPrebuild()};
+        }
+        for (auto* pool : pools) {
+            if (pool != nullptr) pool->Close();
+        }
+    }
+
 private:
+    static std::mutex& Lifecycle() {
+        static std::mutex lifecycle;
+        return lifecycle;
+    }
+
+    static bool& Closing() {
+        static bool closing = false;
+        return closing;
+    }
+
     static std::atomic<RegistrationPreparePool*>& PreparationSlot() {
         static std::atomic<RegistrationPreparePool*> slot{nullptr};
         return slot;
@@ -1014,9 +1043,17 @@ public:
     }
 
     void Close() {
-        std::unique_lock lock(mutex);
-        closed = true;
-        idle.wait(lock, [&] { return tasks.empty() && running == 0; });
+        std::vector<pthread_t> joined;
+        {
+            std::unique_lock lock(mutex);
+            closed = true;
+            idle.wait(lock, [&] { return tasks.empty() && running == 0; });
+            joined.swap(workers);
+        }
+        ready.notify_all();
+        for (const auto worker : joined) {
+            if (!pthread_equal(worker, pthread_self())) pthread_join(worker, nullptr);
+        }
     }
 
 private:
@@ -1027,8 +1064,9 @@ private:
         for (unsigned index = 0; index < count; ++index) {
             pthread_t thread;
             if (pthread_create(&thread, &attributes, &RegistrationPreparePool::Main, this) == 0) {
-                pthread_detach(thread);
+                workers.push_back(thread);
                 ++threads;
+                liveWorkers.fetch_add(1, std::memory_order_acq_rel);
             }
         }
         pthread_attr_destroy(&attributes);
@@ -1041,7 +1079,11 @@ private:
             Task task;
             {
                 std::unique_lock lock(pool.mutex);
-                pool.ready.wait(lock, [&] { return !pool.tasks.empty(); });
+                pool.ready.wait(lock, [&] { return !pool.tasks.empty() || pool.closed; });
+                if (pool.tasks.empty()) {
+                    liveWorkers.fetch_sub(1, std::memory_order_acq_rel);
+                    return nullptr;
+                }
                 task = std::move(pool.tasks.front());
                 pool.tasks.pop_front();
                 ++pool.running;
@@ -1074,7 +1116,9 @@ private:
     std::condition_variable ready;
     std::condition_variable idle;
     std::deque<Task> tasks;
+    std::vector<pthread_t> workers;
     unsigned threads = 0;
+    inline static std::atomic<unsigned> liveWorkers{0};
     unsigned running = 0;
     std::uint64_t submitted = 0;
     std::set<std::uint64_t> unfinished;
@@ -1154,8 +1198,11 @@ void AwaitLibraryPrebuilds() {
 }
 
 void CloseRegistrationPreparation() {
-    RegistrationPreparePool::Instance().Close();
-    if (auto* prebuild = RegistrationPreparePool::ExistingPrebuild()) prebuild->Close();
+    RegistrationPreparePool::CloseAll();
+}
+
+unsigned RegistrationPreparationThreads() {
+    return RegistrationPreparePool::LiveWorkers();
 }
 
 std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decoded, const ShaderRecompiler::SpirvTarget& target) {
@@ -1228,7 +1275,16 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
     return prepared;
 }
 
+namespace {
+
+void BindTitleThread() {
+    if (PerformanceTrace::Configured()) PerformanceTrace::BindThread("title", TraceThread::DefaultCapacity / 8);
+}
+
+}
+
 void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
+    BindTitleThread();
     PerformanceContext timingContext(FrameTiming::Preparation());
     PerformanceTimer timing("Shader.ResolveGraphicsStagesAbi");
     ShaderPreparationTransaction transaction;
@@ -1305,6 +1361,7 @@ void Driver::ResolveGraphicsStagesAbi(std::span<const Shader* const> stages, std
 }
 
 void Driver::ResolveShaderAbi(const Shader* shader, std::span<const ShaderRegister> context, std::span<const ShaderRegister> primitive) {
+    BindTitleThread();
     PerformanceContext timingContext(FrameTiming::Preparation());
     PerformanceTimer timing("Shader.ResolveAbi");
     ShaderPreparationTransaction transaction;
@@ -1376,6 +1433,7 @@ std::uint64_t NullPixelProgramAddress() {
 }
 
 void Driver::ResolveGraphicsAbi(const Shader* vertex, const Shader* pixel, std::uint32_t primitiveType) {
+    BindTitleThread();
     PerformanceContext timingContext(FrameTiming::Preparation());
     PerformanceTimer timing("Shader.ResolveGraphicsAbi");
     CheckFailure();
@@ -1502,6 +1560,7 @@ std::shared_ptr<const ShaderRegistry> Driver::RegisteredShaders() {
 }
 
 void Driver::RegisterShader(const Shader* shader) {
+    BindTitleThread();
     PerformanceContext timingContext(FrameTiming::Preparation());
     PerformanceTimer timing("Shader.Register");
     ShaderPreparationTransaction transaction;

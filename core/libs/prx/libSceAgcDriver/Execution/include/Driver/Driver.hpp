@@ -103,6 +103,7 @@ private:
     static bool& completionDeferred();
     void deferCompletion(const Submission& submission);
     void submitOpenWork();
+    void wakeQueueZeroForCompletions();
     void completeSubmission(std::uint64_t serial, std::uint64_t received, std::span<const std::uint64_t> labelWrites);
     static bool waitFree(const Submission& submission);
     bool queue0Before(std::uint64_t received) const;

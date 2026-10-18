@@ -1,13 +1,16 @@
 #include <algorithm>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "prx/libc/include/General.hpp"
@@ -28,6 +31,34 @@ std::string Ngs2Hex(std::uint32_t value) {
 std::recursive_mutex& Ngs2Mutex() {
     static auto* const mutex = new std::recursive_mutex();
     return *mutex;
+}
+
+struct SystemLockState {
+    std::thread::id owner;
+    std::uint32_t depth = 0;
+};
+
+static std::mutex& SystemLockMutex() {
+    static auto* const mutex = new std::mutex();
+    return *mutex;
+}
+
+static std::condition_variable& SystemLockReleased() {
+    static auto* const released = new std::condition_variable();
+    return *released;
+}
+
+static std::map<Ngs2Handle, SystemLockState>& SystemLocks() {
+    static auto* const locks = new std::map<Ngs2Handle, SystemLockState>();
+    return *locks;
+}
+
+static void ReleaseSystemLock(SystemLockState& state) {
+    if (state.depth == 0) return;
+    if (--state.depth == 0) {
+        state.owner = {};
+        SystemLockReleased().notify_all();
+    }
 }
 
 Ngs2System* Ngs2FindSystem(Ngs2Handle handle) {
@@ -110,6 +141,8 @@ static int CreateSystem(const Ngs2SystemOption& option, const Ngs2ContextBufferI
     system->uid = nextUid++;
     Systems().push_back(system);
     *handle = reinterpret_cast<Ngs2Handle>(system);
+    std::lock_guard lock(SystemLockMutex());
+    SystemLocks()[*handle] = {};
     return SCE_NGS2_OK;
 }
 
@@ -151,6 +184,11 @@ int APS5_VABI sceNgs2SystemDestroy(uintptr_t system_handle, Ngs2ContextBufferInf
         if (result != SCE_NGS2_OK) return result;
     }
     std::erase(Systems(), system);
+    {
+        std::lock_guard locks(SystemLockMutex());
+        SystemLocks().erase(system_handle);
+        SystemLockReleased().notify_all();
+    }
     const auto bufferInfo = system->bufferInfo;
     const auto allocator = system->allocator;
     std::destroy_at(system);
@@ -223,16 +261,25 @@ int APS5_VABI sceNgs2SystemGetUserData(uintptr_t system_handle, uintptr_t* user_
 }
 
 int APS5_VABI sceNgs2SystemLock(uintptr_t system_handle) {
-    Ngs2Mutex().lock();
-    if (Ngs2FindSystem(system_handle) != nullptr) return SCE_NGS2_OK;
-    Ngs2Mutex().unlock();
-    return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
+    const auto self = std::this_thread::get_id();
+    std::unique_lock lock(SystemLockMutex());
+    auto& locks = SystemLocks();
+    SystemLockReleased().wait(lock, [&] {
+        const auto found = locks.find(system_handle);
+        return found == locks.end() || found->second.depth == 0 || found->second.owner == self;
+    });
+    const auto found = locks.find(system_handle);
+    if (found == locks.end()) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
+    found->second.owner = self;
+    found->second.depth++;
+    return SCE_NGS2_OK;
 }
 
 int APS5_VABI sceNgs2SystemUnlock(uintptr_t system_handle) {
-    std::lock_guard lock(Ngs2Mutex());
-    if (Ngs2FindSystem(system_handle) == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
-    Ngs2Mutex().unlock();
+    std::lock_guard lock(SystemLockMutex());
+    const auto found = SystemLocks().find(system_handle);
+    if (found == SystemLocks().end()) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
+    ReleaseSystemLock(found->second);
     return SCE_NGS2_OK;
 }
 
@@ -241,6 +288,26 @@ int APS5_VABI sceNgs2SystemRender(uintptr_t system_handle, const Ngs2RenderBuffe
     auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     if (buffer_info == nullptr || num_buffer_info == 0) APS5_INVALID_ARG_EX;
+    SystemLockState* state = nullptr;
+    {
+        const auto self = std::this_thread::get_id();
+        std::lock_guard locks(SystemLockMutex());
+        auto& found = SystemLocks().at(system_handle);
+        if (found.depth != 0 && found.owner != self) {
+            Ngs2RenderSilence(*system, buffer_info, num_buffer_info);
+            return SCE_NGS2_OK;
+        }
+        found.owner = self;
+        found.depth++;
+        state = &found;
+    }
+    struct Release {
+        SystemLockState* state;
+        ~Release() {
+            std::lock_guard locks(SystemLockMutex());
+            ReleaseSystemLock(*state);
+        }
+    } release{state};
     Ngs2RenderSystem(*system, buffer_info, num_buffer_info);
     return SCE_NGS2_OK;
 }

@@ -144,7 +144,8 @@ int main() {
     Require(pthread_getthreadid_np_nid_postfix() == static_cast<int>(mainTid));
     int local = 0;
     Require(StackContains(mainSelf, &local));
-    Require(scePthreadJoin(mainSelf, nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(scePthreadJoin(mainSelf, nullptr) == SCE_KERNEL_ERROR_EDEADLK);
+    Require(pthread_join_nid_postfix(mainSelf, nullptr) == GUEST_EDEADLK);
     Require(scePthreadDetach(mainSelf) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadJoin(nullptr, nullptr) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadDetach(nullptr) == SCE_KERNEL_ERROR_EINVAL);

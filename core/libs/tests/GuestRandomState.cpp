@@ -23,6 +23,8 @@ double APS5_VABI drand48_nid_postfix();
 std::int64_t APS5_VABI lrand48_nid_postfix();
 std::int64_t APS5_VABI mrand48_nid_postfix();
 void APS5_VABI srand48_nid_postfix(std::int64_t);
+std::uint16_t* APS5_VABI seed48_nid_postfix(const std::uint16_t*);
+void APS5_VABI lcong48_nid_postfix(const std::uint16_t*);
 }
 
 static int failures = 0;
@@ -73,6 +75,23 @@ static void CheckRand48() {
     Require(lrand48_nid_postfix() == nrand48_nid_postfix(expectedSeed), "lrand48 matches nrand48 on initialized seed");
     Require(mrand48_nid_postfix() == jrand48_nid_postfix(expectedSeed), "mrand48 matches jrand48 on initialized seed");
     Require(drand48_nid_postfix() == erand48_nid_postfix(expectedSeed), "drand48 fourth value matches erand48");
+
+    const std::uint16_t parameters[7] = {1, 0, 0, 3, 0, 0, 5};
+    lcong48_nid_postfix(parameters);
+    Require(lrand48_nid_postfix() == 0 && mrand48_nid_postfix() == 0, "lcong48 sets seed, multiplier and addend");
+    std::uint16_t high[3] = {0, 0, 1};
+    Require(jrand48_nid_postfix(high) == 196608 && SeedIs(high, 5, 0, 3), "lcong48 multiplier scales the seed");
+    std::uint16_t custom[3] = {2, 0, 0};
+    Require(nrand48_nid_postfix(custom) == 0 && SeedIs(custom, 11, 0, 0), "lcong48 parameters apply to nrand48");
+    const std::uint16_t newSeed[3] = {0x330e, 0xabcd, 0x1234};
+    std::uint16_t* const echoed = seed48_nid_postfix(newSeed);
+    Require(SeedIs(echoed, 0x330e, 0xabcd, 0x1234), "seed48 returns a copy of the new seed");
+    std::uint16_t again[3] = {0x330e, 0xabcd, 0x1234};
+    Require(drand48_nid_postfix() == erand48_nid_postfix(again), "seed48 restores the default multiplier and addend");
+    lcong48_nid_postfix(parameters);
+    srand48_nid_postfix(0x1234abcd);
+    std::uint16_t reset[3] = {0x330e, 0xabcd, 0x1234};
+    Require(lrand48_nid_postfix() == nrand48_nid_postfix(reset), "srand48 restores the default multiplier and addend");
 
 #ifndef _WIN32
     std::uint16_t guest[3] = {0x1234, 0x5678, 0x9abc};

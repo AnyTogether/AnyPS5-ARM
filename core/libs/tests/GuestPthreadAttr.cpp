@@ -27,6 +27,9 @@ int APS5_VABI pthread_attr_setinheritsched_nid_postfix(PthreadAttr* attr, int in
 int APS5_VABI pthread_attr_getscope_nid_postfix(const PthreadAttr* attr, int* scope);
 int APS5_VABI pthread_attr_setscope_nid_postfix(PthreadAttr* attr, int scope);
 int APS5_VABI pthread_attr_get_np_nid_postfix(Pthread thread, PthreadAttr* attr);
+int APS5_VABI pthread_attr_setschedparam_nid_postfix(PthreadAttr* attr, const KernelSchedParam* param);
+int APS5_VABI pthread_attr_setschedpolicy_nid_postfix(PthreadAttr* attr, int policy);
+int APS5_VABI pthread_attr_getschedpolicy_nid_postfix(const PthreadAttr* attr, int* policy);
 }
 
 static constexpr int SCE_OK = 0;
@@ -114,6 +117,42 @@ static void CheckSoloSched() {
     Require(scePthreadAttrGetsolosched(&unset, &soloSched) == SCE_KERNEL_ERROR_EINVAL);
     Require(scePthreadAttrDestroy(&attr) == SCE_OK);
     Require(pthread_attr_setsolosched_np_nid_postfix(&attr, 1) == GUEST_EINVAL);
+}
+
+static void CheckSchedArguments() {
+    constexpr int SchedFifo = 1;
+    constexpr int SchedOther = 2;
+    constexpr int SchedRr = 3;
+    PthreadAttr attr = nullptr;
+    PthreadAttr unset = nullptr;
+    KernelSchedParam param{CREATION_PRIORITY};
+    Require(pthread_attr_setschedparam_nid_postfix(nullptr, &param) == GUEST_EINVAL);
+    Require(pthread_attr_setschedparam_nid_postfix(&unset, &param) == GUEST_EINVAL);
+    Require(pthread_attr_setschedpolicy_nid_postfix(&unset, SchedRr) == GUEST_EINVAL);
+    Require(scePthreadAttrInit(&attr) == SCE_OK);
+    Require(pthread_attr_setschedparam_nid_postfix(&attr, nullptr) == GUEST_ENOTSUP);
+    for (const int policy : {SchedFifo, SchedRr}) {
+        Require(pthread_attr_setschedpolicy_nid_postfix(&attr, policy) == 0);
+        Require(pthread_attr_setschedparam_nid_postfix(&attr, &param) == 0);
+        for (const int rejected : {0, 1, CREATION_PRIORITY - 1, UPDATED_PRIORITY + 1, 1000}) {
+            KernelSchedParam outside{rejected};
+            Require(pthread_attr_setschedparam_nid_postfix(&attr, &outside) == GUEST_ENOTSUP);
+            KernelSchedParam reported{-1};
+            Require(scePthreadAttrGetschedparam(&attr, &reported) == SCE_OK && reported.sched_priority == CREATION_PRIORITY);
+        }
+        KernelSchedParam highest{UPDATED_PRIORITY};
+        Require(pthread_attr_setschedparam_nid_postfix(&attr, &highest) == 0);
+        Require(pthread_attr_setschedparam_nid_postfix(&attr, &param) == 0);
+    }
+    Require(pthread_attr_setschedpolicy_nid_postfix(&attr, SchedOther) == 0);
+    KernelSchedParam other{1000};
+    Require(pthread_attr_setschedparam_nid_postfix(&attr, &other) == 0);
+    int policy = -1;
+    for (const int rejected : {-1, 0, 4, 100}) {
+        Require(pthread_attr_setschedpolicy_nid_postfix(&attr, rejected) == GUEST_ENOTSUP);
+        Require(pthread_attr_getschedpolicy_nid_postfix(&attr, &policy) == 0 && policy == SchedOther);
+    }
+    Require(scePthreadAttrDestroy(&attr) == SCE_OK);
 }
 
 static void* APS5_VABI Worker(void* arg) {
@@ -220,6 +259,7 @@ static void CheckThreadScope() {
 int main() {
     CheckStackSizeLimit();
     CheckSoloSched();
+    CheckSchedArguments();
     CheckSchedulingAttributes();
     CheckThreadScope();
     PthreadAttr attr = nullptr;

@@ -226,6 +226,20 @@ inline __int128 SonyDivti3(__int128 dividend, __int128 divisor) {
     return (__int128)(negative ? (unsigned __int128)0 - magnitude : magnitude);
 }
 
+inline __int128 SonyModti3(__int128 dividend, __int128 divisor) {
+    if (divisor == 0) throw std::runtime_error("__modti3: integer divide by zero");
+    const bool negative = dividend < 0;
+    const unsigned __int128 magnitudeDividend = negative
+        ? (unsigned __int128)0 - (unsigned __int128)dividend
+        : (unsigned __int128)dividend;
+    const unsigned __int128 magnitudeDivisor = divisor < 0
+        ? (unsigned __int128)0 - (unsigned __int128)divisor
+        : (unsigned __int128)divisor;
+    unsigned __int128 remainder = 0;
+    SonyUdivmod128(magnitudeDividend, magnitudeDivisor, &remainder);
+    return (__int128)(negative ? (unsigned __int128)0 - remainder : remainder);
+}
+
 }
 
 #endif

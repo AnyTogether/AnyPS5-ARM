@@ -38,8 +38,14 @@ class SelectTests(unittest.TestCase):
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory()
         (Path(cls.directory.name) / "real").mkdir()
-        (Path(cls.directory.name) / "link").symlink_to("real", target_is_directory=True)
         root = Path(cls.directory.name) / "link"
+        try:
+            root.symlink_to("real", target_is_directory=True)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 1314:
+                raise
+            import _winapi
+            _winapi.CreateJunction(str(Path(cls.directory.name) / "real"), str(root))
         cls.source, cls.build, cls.graph = root / "source", root / "build", root / "graph.json"
         for name, content in PROJECT.items():
             (cls.source / name).parent.mkdir(parents=True, exist_ok=True)
@@ -128,6 +134,16 @@ class CaseInsensitivePathTests(unittest.TestCase):
             self.assertEqual(build.repo(os.path.join(os.sep, "work", "source", "core", "libSceAgc", "Driver.cpp")), "core/libSceAgc/Driver.cpp")
             self.assertIsNone(build.repo(os.path.join(os.sep, "WORK", "SOURCE", "BUILD", "Generated.h")))
             self.assertEqual(build.key(os.path.join("tests", "MemoryPoolTest.exe")), build.key(os.path.join(os.sep, "WORK", "SOURCE", "BUILD", "TESTS", "memorypooltest.exe")))
+
+    def test_trailing_separator_in_root_is_handled(self):
+        with mock.patch.object(select_tests.os.path, "normcase", str.lower):
+            build = self.build()
+            build.source = build.source + os.sep
+            build.path = build.path + os.sep
+            self.assertEqual(build.output(os.path.join(os.sep, "work", "source", "build", "tests", "MemoryPoolTest.exe")), "tests/MemoryPoolTest.exe")
+            self.assertEqual(build.output(os.path.join("tests", "MemoryPoolTest.exe")), "tests/MemoryPoolTest.exe")
+            self.assertEqual(build.repo(os.path.join(os.sep, "work", "source", "core", "libSceAgc", "Driver.cpp")), "core/libSceAgc/Driver.cpp")
+            self.assertIsNone(build.repo(os.path.join(os.sep, "WORK", "SOURCE", "BUILD", "Generated.h")))
 
 
 if __name__ == "__main__":

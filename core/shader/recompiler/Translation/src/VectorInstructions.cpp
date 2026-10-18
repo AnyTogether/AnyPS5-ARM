@@ -856,7 +856,7 @@ bool TranslationContext::emitVector(const RdnaInstruction& inst) {
     case RdnaOpcode::VPkMadU16:
         return packedInteger16Mad(inst, false);
     case RdnaOpcode::VPkMulLoU16:
-        return packedInteger16Binary(inst, IrOpcode::IMul32, false);
+        return vPkMulLoU16(inst);
     case RdnaOpcode::VPkAddI16:
         return packedInteger16Binary(inst, IrOpcode::IAdd32, true);
     case RdnaOpcode::VPkAddU16:
@@ -1141,7 +1141,7 @@ bool TranslationContext::emitVector(const RdnaInstruction& inst) {
     case RdnaOpcode::VSubNcI32:
         return vAddSubNcI32(inst, true);
     case RdnaOpcode::VMulLoU16:
-        return integer16Binary(inst, IrOpcode::IMul32, false);
+        return vMulLoU16(inst);
     case RdnaOpcode::VMadU16:
         return integer16Mad(inst, false, false);
     case RdnaOpcode::VMadI16:

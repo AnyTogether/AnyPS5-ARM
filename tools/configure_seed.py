@@ -30,7 +30,7 @@ def main():
     parser.add_argument("seed", help="file to pass to cmake -C")
     args = parser.parse_args()
     found = checks(args.cache)
-    Path(args.seed).write_text("".join(f"set({name} {quote(value)} CACHE INTERNAL {quote(doc)})\n"
+    Path(args.seed).write_text("".join(f"set({quote(name)} {quote(value)} CACHE INTERNAL {quote(doc)})\n"
                                        for name, (value, doc) in sorted(found.items())), encoding="utf-8")
     print(f"{len(found)} check results")
     return 0

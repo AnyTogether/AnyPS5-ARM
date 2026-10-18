@@ -217,6 +217,7 @@ void Driver::relocateDrawEntry(const QueueState& queue, std::uint64_t alias, std
             copy->words = variant->words;
             copy->forgetSerial = variant->forgetSerial;
             copy->compiled = variant->compiled;
+            copy->meshIndexDescriptor = variant->meshIndexDescriptor;
             copy->shader = variant->shader;
             copy->dataPositions = variant->dataPositions;
             copy->dataSlots = variant->dataSlots;

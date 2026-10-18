@@ -27,6 +27,7 @@ if(BUILD_TESTING)
             $<TARGET_FILE:relinker> $<TARGET_FILE:guest_loadexec_host>
             $<TARGET_FILE:libSceSystemService> $<TARGET_FILE:libSceAgcDriver> $<TARGET_FILE:libc> $<TARGET_FILE:libkernel> ${CMAKE_CXX_COMPILER})
         set_tests_properties(loadexec_arguments PROPERTIES TIMEOUT 30)
+        add_asan_test_options(loadexec_arguments verify_asan_link_order=0)
     endif()
     add_test_executable(guest_system_exit_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemExit.cpp)
     target_include_directories(guest_system_exit_tests PRIVATE ${LIBS_INCLUDE_DIR})

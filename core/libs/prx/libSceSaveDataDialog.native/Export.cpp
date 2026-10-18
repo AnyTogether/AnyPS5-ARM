@@ -104,12 +104,18 @@ int APS5_VABI sceSaveDataDialogTerminate(void) {
 int APS5_VABI sceSaveDataDialogProgressBarInc(int target, std::uint32_t delta) {
  (void)target;
  (void)delta;
+ if (g_status != SAVE_DATA_DIALOG_STATUS_RUNNING) {
+  return SAVE_DATA_DIALOG_ERROR_NOT_RUNNING;
+ }
  return SAVE_DATA_DIALOG_OK;
 }
 
 int APS5_VABI sceSaveDataDialogProgressBarSetValue(int target, std::uint32_t rate) {
  (void)target;
  (void)rate;
+ if (g_status != SAVE_DATA_DIALOG_STATUS_RUNNING) {
+  return SAVE_DATA_DIALOG_ERROR_NOT_RUNNING;
+ }
  return SAVE_DATA_DIALOG_OK;
 }
 

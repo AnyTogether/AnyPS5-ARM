@@ -122,6 +122,7 @@ function(add_shader_recompiler target runtimeTarget)
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Optimization/src/SrtWalker/SrtInstructionPredicates.cpp
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Optimization/src/SrtWalker/SrtPlanBuilder.cpp
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Optimization/src/SrtWalker/SrtRuntimeValidator.cpp
+            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Optimization/src/SrtWalker/SrtTape.cpp
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/Optimization/src/SrtWalker/SrtWalker.cpp
 
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SpirvBackend/src/SpirvModule.cpp
@@ -222,6 +223,7 @@ function(add_shader_recompiler target runtimeTarget)
     endif()
     set(shaderCacheReviewedNames
             BuildBarycentricGeometryShader
+            BuildBarycentricTessellationShaders
             BuildMeshPassthroughVertexShader
             BuildPreparedShaderKey
             BuildRectListShaders
@@ -257,6 +259,7 @@ function(add_shader_recompiler target runtimeTarget)
             SampledTextureNumericClass
             SetDebugProbeActive
             ShaderCacheDirectory
+            ShaderDiskCache::Shutdown
             ShaderStage
             HashSpirvWords
             ShaderDiskCache::DecodeResult

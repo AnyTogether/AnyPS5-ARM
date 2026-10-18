@@ -48,6 +48,7 @@ public:
     InputRequests HandleEvent(const SDL_Event& event, Clock::time_point now);
     bool Advance(Clock::time_point now);
     void SetMouseMode(bool enabled);
+    void SetTitleReadsMouse(bool reads);
     void Release();
     bool MouseMode() const;
     PadInputState Compose(const PadInputState& controller) const;
@@ -61,6 +62,7 @@ private:
     Clock::time_point lastAdvance{};
     bool advanced = false;
     bool mouseMode = false;
+    bool titleReadsMouse = false;
 };
 
 std::uint8_t StickByte(double deflection);

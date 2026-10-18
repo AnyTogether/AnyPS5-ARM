@@ -122,6 +122,10 @@ bool ReadsProvokingVertex(std::span<const CompiledShader> shaders) {
     });
 }
 
+bool BarycentricPatches(const State& state, std::span<const CompiledShader> shaders) {
+    return !state.rectList && state.stages.path == ShaderPath::Vertex && std::any_of(shaders.begin(), shaders.end(), [](const CompiledShader& shader) { return shader.stage == ShaderRecompiler::ShaderStage::TessellationControl; });
+}
+
 void ValidateProvokingVertex(const Context& context, const State& state, std::span<const CompiledShader> shaders) {
     Require(state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT || state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT, "invalid provoking vertex mode");
     if (state.provokingVertexMode == VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT) {
@@ -133,11 +137,13 @@ void ValidateProvokingVertex(const Context& context, const State& state, std::sp
     }
     if (!context.provokingVertexLast) {
         // Without flat or per-vertex fragment inputs no shader can tell which vertex provokes, so the first one serves.
-        Require(!ReadsProvokingVertex(shaders), "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
+        // A rect list needs no device support either: its generated last-vertex control stage
+        // (RectListShaders::lastVertexControl) gives every corner the third vertex's flat inputs.
+        Require(state.rectList || !ReadsProvokingVertex(shaders), "last provoking vertex requires VK_EXT_provoking_vertex with provokingVertexLast enabled");
         return;
     }
-    Require(!state.rectList && state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "last provoking vertex is unsupported for generated primitive pipelines");
-    Require(state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "last provoking vertex is unsupported for this primitive topology");
+    Require(!BarycentricPatches(state, shaders) && state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "last provoking vertex is unsupported for generated primitive pipelines");
+    Require(state.rectList || state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN, "last provoking vertex is unsupported for this primitive topology");
     for (const auto& shader : shaders) {
         if (shader.stage != ShaderRecompiler::ShaderStage::Fragment) continue;
         Require(shader.program != nullptr, "missing compiled fragment shader");
@@ -244,7 +250,7 @@ void appendKey(std::vector<std::byte>& key, const TValue& value) {
 
 bool libraryKeys(PipelineLibraryKeys& keys, const Context& context, const State& state, const VertexInputLayout& input, const PipelineSetLayouts& resources, std::span<const CompiledShader> shaders) {
     using Stage = ShaderRecompiler::ShaderStage;
-    if (!context.graphicsPipelineLibrary || context.pipelineExecutableInfo || state.depthBiasPerFace || state.rectList || SplitsAlternateAlpha(state)) return false;
+    if (!context.graphicsPipelineLibrary || context.pipelineExecutableInfo || state.depthBiasPerFace || state.rectList || BarycentricPatches(state, shaders) || SplitsAlternateAlpha(state)) return false;
     keys = {};
     for (const auto& shader : shaders) {
         const auto identity = shader.program->Identity();
@@ -367,6 +373,8 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
     Require(state.conservativeRasterization == VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT || context.conservativeRasterization, "conservative rasterization requires VK_EXT_conservative_rasterization with at most 1/256 pixel of overestimation and degenerate triangles rasterized");
     ValidateProvokingVertex(context, state, shaders);
     if (state.rectList) Require(context.tessellationShader && context.limits.maxTessellationPatchSize >= 4, "rect-list requires tessellation with four output control points");
+    const bool barycentricPatches = BarycentricPatches(state, shaders);
+    if (barycentricPatches) Require(context.tessellationShader && state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST && !state.primitiveRestart, "emulated barycentrics through tessellation require a triangle list without primitive restart");
     if (std::any_of(shaders.begin(), shaders.end(), [](const CompiledShader& shader) { return shader.stage == ShaderRecompiler::ShaderStage::Geometry; })) Require(context.geometryShader, "device does not support geometry shaders");
     if (state.stages.tessellation) {
         Require(context.tessellationShader, "device does not support tessellation shaders");
@@ -514,7 +522,7 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         input.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(vertexInput.attributes.size());
         input.pVertexAttributeDescriptions = vertexInput.attributes.data();
         VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-        assembly.topology = state.topology;
+        assembly.topology = BarycentricPatches(state, shaders) ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : state.topology;
         const bool listTopology = state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_LINE_LIST || state.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         assembly.primitiveRestartEnable = state.primitiveRestart && (!listTopology || context.primitiveListRestart) ? VK_TRUE : VK_FALSE;
         // Viewport and scissor are set per draw (Begin), so they do not multiply pipelines; the depth
@@ -601,8 +609,8 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
         pipelineInfo.stageCount = static_cast<std::uint32_t>(stages.size());
         pipelineInfo.pStages = stages.data();
         VkPipelineTessellationStateCreateInfo tessellation{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
-        if (state.rectList || state.stages.tessellation) {
-            tessellation.patchControlPoints = state.rectList ? 3u : state.stages.tessellation->inputControlPoints;
+        if (state.rectList || state.stages.tessellation || barycentricPatches) {
+            tessellation.patchControlPoints = state.stages.tessellation ? state.stages.tessellation->inputControlPoints : 3u;
             pipelineInfo.pTessellationState = &tessellation;
         }
         const VkPipelineVertexInputStateCreateInfo noInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -1016,6 +1024,7 @@ struct PipelineStore {
         // The device's buffer pool at insertion: it is made and reset with the device, so it tells
         // the device instance apart from a later one the loader gave the same handle value.
         std::weak_ptr<BufferPool> pool;
+        bool tracksPool;
         std::uint64_t hash;
         std::vector<std::byte> key;
         std::shared_ptr<Pipeline> pipeline;
@@ -1041,8 +1050,12 @@ PipelineStore& Pipelines() {
 
 // Whether the entry's objects belong to the device the context names. A context without a buffer
 // pool (tests) is identified by the handle alone.
-bool alive(const PipelineStore::Entry& entry, const Context& context) {
+bool alive(PipelineStore::Entry& entry, const Context& context) {
     if (entry.device != context.device) return false;
+    if (!entry.tracksPool && context.bufferPool != nullptr) {
+        entry.pool = context.bufferPool;
+        entry.tracksPool = true;
+    }
     return context.bufferPool == nullptr || entry.pool.lock() == context.bufferPool;
 }
 
@@ -1153,10 +1166,10 @@ std::shared_ptr<Pipeline> CachedPipeline(const Context& context, const State& st
         // the title's own pipelines evict it first, and a full store takes none.
         if (replaying && store.entries.size() >= bound) return pipeline;
         if (replaying) {
-            store.entries.push_front({context.device, context.bufferPool, hash, std::vector<std::byte>(key), pipeline});
+            store.entries.push_front({context.device, context.bufferPool, context.bufferPool != nullptr, hash, std::vector<std::byte>(key), pipeline});
             store.index[hash] = store.entries.begin();
         } else {
-            store.entries.push_back({context.device, context.bufferPool, hash, std::vector<std::byte>(key), pipeline});
+            store.entries.push_back({context.device, context.bufferPool, context.bufferPool != nullptr, hash, std::vector<std::byte>(key), pipeline});
             store.index[hash] = std::prev(store.entries.end());
         }
         while (store.entries.size() > bound) {

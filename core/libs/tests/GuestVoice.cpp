@@ -18,6 +18,7 @@ int APS5_VABI sceVoiceGetMuteFlag(std::uint32_t, bool*);
 int APS5_VABI sceVoiceGetPortInfo(std::uint32_t, VoicePortInfo*);
 int APS5_VABI sceVoiceReadFromOPort(std::uint32_t, void*, std::uint32_t*);
 int APS5_VABI sceVoiceResetPort(std::uint32_t);
+int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo*);
 }
 
 namespace {
@@ -44,10 +45,19 @@ std::uint32_t CreatePort(std::int32_t type, float volume) {
 
 int main() {
     RequireThrows([] { sceVoiceResetPort(0); });
+    RequireThrows([] { VoiceResourceInfo info{}; sceVoiceGetResourceInfo(&info); });
     VoiceInitParam init{};
     VoiceStartParam start{};
     Require(sceVoiceInit(&init, 0) == 0);
     Require(sceVoiceStart(&start) == 0);
+    RequireThrows([] { sceVoiceGetResourceInfo(nullptr); });
+    VoiceResourceInfo resourceInfo{};
+    Require(sceVoiceGetResourceInfo(&resourceInfo) == 0);
+    Require(resourceInfo.max_voice_input_ports == 7);
+    Require(resourceInfo.max_voice_output_ports == 7);
+    Require(resourceInfo.max_device_input_ports == 1);
+    Require(resourceInfo.max_device_output_ports == 1);
+    Require(resourceInfo.max_ports == 64);
     const auto input = CreatePort(2, 0.5f);
     const auto output = CreatePort(3, 0.25f);
     Require(sceVoiceConnectIPortToOPort(input, output) == 0);
@@ -76,4 +86,5 @@ int main() {
     Require(sceVoiceResetPort(output) == 0);
     Require(sceVoiceEnd_nid_postfix() == 0);
     RequireThrows([&] { sceVoiceResetPort(output); });
+    RequireThrows([] { VoiceResourceInfo info{}; sceVoiceGetResourceInfo(&info); });
 }

@@ -253,6 +253,9 @@ private:
     bool floatCube(const RdnaInstruction& inst, std::uint32_t resultKind);
     bool integer16Shift(const RdnaInstruction& inst, IrOpcode opcode, bool arithmetic);
     bool integer16Binary(const RdnaInstruction& inst, IrOpcode opcode, bool sign);
+    IrU32 readU16Factor(const RdnaOperand& operand, bool highHalf, bool negate);
+    bool vMulLoU16(const RdnaInstruction& inst);
+    bool vPkMulLoU16(const RdnaInstruction& inst);
     bool integer16Mad(const RdnaInstruction& inst, bool sign, bool wide);
     IrU32 saturateU16Result(const RdnaInstruction& inst, const IrU32& value, bool sign);
     IrU32 wideAdd(const RdnaInstruction& inst, const IrU32& low, const IrU32& high, const IrU32& addend, bool sign);

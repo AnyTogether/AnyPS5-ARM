@@ -142,6 +142,7 @@ void ValidateDepthBounds(const Context& context, const State& state);
 void ValidateProvokingVertex(const Context& context, const State& state, std::span<const CompiledShader> shaders = {});
 // Whether a fragment stage reads flat or per-vertex inputs, so that the provoking vertex shows.
 bool ReadsProvokingVertex(std::span<const CompiledShader> shaders);
+bool BarycentricPatches(const State& state, std::span<const CompiledShader> shaders);
 bool ValidateSampleLocations(const Context& context, const State& state);
 
 void ValidateShaderPair(const ShaderRecompiler::RecompileResult& vertex, const ShaderRecompiler::RecompileResult& fragment);

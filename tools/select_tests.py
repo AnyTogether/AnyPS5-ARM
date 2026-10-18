@@ -101,11 +101,13 @@ class Build:
 
 
 def inside(path, root):
-    return os.path.normcase(path).startswith(os.path.normcase(root) + os.sep)
+    prefix = os.path.normcase(root).rstrip(os.sep) + os.sep
+    return os.path.normcase(path).startswith(prefix)
 
 
 def relative(path, root):
-    return path[len(root) + 1:].replace(os.sep, "/")
+    root_len = len(root.rstrip(os.sep))
+    return path[root_len + 1:].replace(os.sep, "/")
 
 
 def chunks(names):

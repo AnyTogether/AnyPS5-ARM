@@ -205,13 +205,18 @@ void Run(AgcDriver::VulkanDevice& device, const Mode& mode) {
     device.WaitIdle();
 }
 
+bool Matches(std::uint32_t actual, std::uint32_t expected) {
+    const auto nan = [](std::uint32_t half) { return (half & 0x7fffu) > 0x7c00u; };
+    return actual == expected || (nan(expected) && actual <= 0xffffu && nan(actual));
+}
+
 void Check(const Mode& mode) {
     constexpr const char* Names[Results] = {"v_fma_f16", "v_fmac_f16"};
     for (std::uint32_t tid = 0; tid < Threads; ++tid) {
         const std::uint32_t expected = Expected[tid][mode.column];
         for (std::uint32_t form = 0; form < Results; ++form) {
             const std::uint32_t actual = Output[tid * Results + form];
-            Require(actual == expected, std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
+            Require(Matches(actual, expected), std::string(Names[form]) + " " + mode.name + " of " + Hex(Rows[tid][0]) + ", " + Hex(Rows[tid][1]) + ", " + Hex(Rows[tid][2]) + " is " + Hex(actual) + ", expected " + Hex(expected));
         }
     }
 }

@@ -7,7 +7,9 @@
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #endif
+#include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -33,6 +35,7 @@ static_assert(offsetof(GuestInterfaceAddress, data) == 48);
 extern "C" {
 int APS5_VABI getifaddrs_nid_postfix(GuestInterfaceAddress** list);
 void APS5_VABI freeifaddrs_nid_postfix(GuestInterfaceAddress* list);
+void APS5_VABI free_nid_postfix(void* pointer);
 int* APS5_VABI __error_nid_postfix();
 }
 
@@ -106,6 +109,8 @@ static std::vector<HostInterfaceAddress> HostSnapshot() {
 }
 
 int main() {
+    std::array<void*, 10> api{};
+    ApplicationHeapRegister_nid_no_patch(api.data());
     constexpr std::uint32_t knownFlags = 0x1 | 0x2 | 0x8 | 0x10 | 0x40 | 0x80 | 0x100 | 0x200 | 0x8000;
     const std::uint8_t loopbackAddress[] = {127, 0, 0, 1};
     const std::uint8_t loopbackMask[] = {255, 0, 0, 0};
@@ -167,6 +172,9 @@ int main() {
         freeifaddrs_nid_postfix(list);
     }
     Require(matched);
+    GuestInterfaceAddress* released = nullptr;
+    Require(getifaddrs_nid_postfix(&released) == 0 && released != nullptr);
+    free_nid_postfix(released);
     freeifaddrs_nid_postfix(nullptr);
     *__error_nid_postfix() = 0;
     Require(getifaddrs_nid_postfix(nullptr) == -1);

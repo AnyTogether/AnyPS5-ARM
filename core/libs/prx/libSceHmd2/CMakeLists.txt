@@ -1,5 +1,6 @@
 add_library(libSceHmd2 SHARED EXCLUDE_FROM_ALL Export.cpp)
 target_include_directories(libSceHmd2 PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(libSceHmd2 PRIVATE libc)
 configure_windows_unwind(libSceHmd2)
 
 if(BUILD_TESTING)

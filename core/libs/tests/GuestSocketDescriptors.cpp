@@ -156,7 +156,7 @@ static void CloseReleasesNumber() {
     unsigned char bytes[4]{};
     Require(read_nid_postfix(socket, bytes, sizeof(bytes)) == sizeof(bytes));
     PollDescriptor entry{socket, In, 0};
-    Require(Throws([&] { poll_nid_postfix(&entry, 1, 0); }));
+    Require(poll_nid_postfix(&entry, 1, 0) == 1 && entry.revents == In);
     for (const int file : files) Require(close_nid_postfix(file) == 0);
     const int kernelClosed = Socket();
     Require(sceKernelClose(kernelClosed) == 0);
@@ -181,7 +181,24 @@ static void DuplicateKeepsSocket() {
     Require(close_nid_postfix(sender) == 0);
 }
 
+static void SocketTypeErrors() {
+    constexpr int PrototypeError = 41;
+    constexpr int ProtocolError = 43;
+    constexpr int FamilyError = 47;
+    constexpr int Inet6 = 28;
+    for (const int family : {Inet, Inet6}) {
+        Require(socket_nid_postfix(family, 99, 0) == -1 && *__error_nid_postfix() == PrototypeError);
+        Require(socket_nid_postfix(family, 4, 0) == -1 && *__error_nid_postfix() == PrototypeError);
+        Require(socket_nid_postfix(family, 0, 0) == -1 && *__error_nid_postfix() == ProtocolError);
+        Require(socket_nid_postfix(family, 99, 6) == -1 && *__error_nid_postfix() == ProtocolError);
+        Require(socket_nid_postfix(family, 1, 17) == -1 && *__error_nid_postfix() == ProtocolError);
+        Require(socket_nid_postfix(family, 2, 6) == -1 && *__error_nid_postfix() == ProtocolError);
+    }
+    Require(socket_nid_postfix(99, 1, 0) == -1 && *__error_nid_postfix() == FamilyError);
+}
+
 int main() {
+    SocketTypeErrors();
     SelectSocketAndFile();
     CloseReleasesNumber();
     DuplicateKeepsSocket();

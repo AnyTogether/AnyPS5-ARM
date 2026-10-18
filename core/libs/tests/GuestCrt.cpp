@@ -33,6 +33,7 @@ int APS5_VABI __fpclassifyd_nid_postfix(double value);
 unsigned __int128 APS5_VABI __udivti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor);
 __int128 APS5_VABI __divti3_nid_postfix(__int128 dividend, __int128 divisor);
 unsigned __int128 APS5_VABI __umodti3_nid_postfix(unsigned __int128 dividend, unsigned __int128 divisor);
+__int128 APS5_VABI __modti3_nid_postfix(__int128 dividend, __int128 divisor);
 SonyLconv* APS5_VABI localeconv_nid_postfix(void);
 int APS5_VABI sceAmprFpclassifyd(double value);
 unsigned int APS5_VABI _ZSt14_Random_devicev_nid_postfix();
@@ -105,6 +106,31 @@ int main() {
     trapped = false;
     try {
         SonyDivti3(1, 0);
+    } catch (const std::exception&) {
+        trapped = true;
+    }
+    Require(trapped);
+
+    Require(__modti3_nid_postfix(100, 3) == 1);
+    Require(__modti3_nid_postfix(-100, 3) == -1);
+    Require(__modti3_nid_postfix(100, -3) == 1);
+    Require(__modti3_nid_postfix(-100, -3) == -1);
+    Require(SonyModti3(0, 5) == 0);
+    Require(SonyModti3(3, 100) == 3);
+    Require(SonyModti3(-3, 100) == -3);
+    Require(SonyModti3(3, -100) == 3);
+    Require(SonyModti3(-3, -100) == -3);
+    Require(SonyModti3(large, 3) == large % 3);
+    Require(SonyModti3(-large, 3) == -(large % 3));
+    Require(SonyModti3(large, -3) == large % 3);
+    Require(SonyModti3(-large, -3) == -(large % 3));
+    Require(SonyModti3(minimum, 1) == 0);
+    Require(SonyModti3(minimum, -1) == 0);
+    Require(SonyModti3(maximum, 1) == 0);
+    Require(SonyModti3(maximum, -1) == 0);
+    trapped = false;
+    try {
+        SonyModti3(1, 0);
     } catch (const std::exception&) {
         trapped = true;
     }

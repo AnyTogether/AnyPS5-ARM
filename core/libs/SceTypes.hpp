@@ -975,6 +975,14 @@ struct VoicePortInfo {
     std::uint16_t reserved;
 };
 
+struct VoiceResourceInfo {
+    std::uint16_t max_voice_input_ports;
+    std::uint16_t max_voice_output_ports;
+    std::uint16_t max_device_input_ports;
+    std::uint16_t max_device_output_ports;
+    std::uint16_t max_ports;
+};
+
 struct VoiceStartParam {
     void* container;
     std::uint32_t mem_size;
@@ -1425,10 +1433,6 @@ struct NpUniversalDataSystemMemoryStat {
     std::size_t max_inuse_size;
     std::size_t current_inuse_size;
 };
-
-struct NpUniversalDataSystemEvent {};
-struct NpUniversalDataSystemEventPropertyObject {};
-struct NpUniversalDataSystemEventPropertyArray {};
 
 struct NpUniversalDataSystemStorageStat {
     std::size_t in_events;
@@ -2085,6 +2089,11 @@ struct VideoOutColorSettings {
     float gamma = 1.0f;
     std::uint32_t reserved[3] = {};
 };
+
+struct VideoOutColorSpaceConversionSettings {
+    std::uint32_t internalData[8] = {};
+};
+static_assert(sizeof(VideoOutColorSpaceConversionSettings) == 32);
 
 
 using atexit_func_t = void (*)();

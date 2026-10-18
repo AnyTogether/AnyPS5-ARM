@@ -1,14 +1,57 @@
+#include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 
 extern "C" {
+int APS5_VABI mergesort_nid_postfix(void*, std::size_t, std::size_t, int (APS5_VABI*)(const void*, const void*));
+int* APS5_VABI __error_nid_postfix();
 void APS5_VABI qsort_nid_postfix(void*, std::size_t, std::size_t, int (APS5_VABI*)(const void*, const void*));
 }
 
 namespace {
+
+bool failAllocation = false;
+
+void* APS5_VABI Allocate(std::size_t size) { return failAllocation ? nullptr : std::malloc(size); }
+void APS5_VABI Free(void* ptr) { std::free(ptr); }
+void* APS5_VABI Reallocate(void* ptr, std::size_t size) { return std::realloc(ptr, size); }
+void* APS5_VABI Calloc(std::size_t count, std::size_t size) { return std::calloc(count, size); }
+void* APS5_VABI Align(std::size_t, std::size_t size) { return std::malloc(size); }
+void* APS5_VABI Realign(void* ptr, std::size_t size, std::size_t) { return std::realloc(ptr, size); }
+int APS5_VABI PosixAlign(void** ptr, std::size_t, std::size_t size) {
+    *ptr = std::malloc(size);
+    return *ptr ? 0 : 12;
+}
+
+void InitializeHeap() {
+    alignas(16) static std::array<std::byte, 0x40> process{};
+    alignas(16) static std::array<std::byte, 0x38> libc{};
+    alignas(16) static std::array<std::byte, 0x78> replacement{};
+    const auto write = [](auto& data, std::size_t offset, auto value) {
+        std::memcpy(data.data() + offset, &value, sizeof(value));
+    };
+    write(process, 0, std::uint64_t{0x40});
+    write(process, 8, std::uint32_t{0x4942524f});
+    write(process, 0x38, libc.data());
+    write(libc, 0, std::uint64_t{0x38});
+    write(libc, 0x30, replacement.data());
+    write(replacement, 0, std::uint64_t{0x78});
+    write(replacement, 8, std::uint64_t{2});
+    write(replacement, 0x20, reinterpret_cast<void*>(&Allocate));
+    write(replacement, 0x28, reinterpret_cast<void*>(&Free));
+    write(replacement, 0x30, reinterpret_cast<void*>(&Calloc));
+    write(replacement, 0x38, reinterpret_cast<void*>(&Reallocate));
+    write(replacement, 0x40, reinterpret_cast<void*>(&Align));
+    write(replacement, 0x48, reinterpret_cast<void*>(&Realign));
+    write(replacement, 0x50, reinterpret_cast<void*>(&PosixAlign));
+    ApplicationHeapInitialize_nid_no_patch(process.data());
+}
 
 struct Element {
     int key;
@@ -66,6 +109,31 @@ bool ExpectSorted(std::size_t size, std::size_t count) {
     return true;
 }
 
+
+bool CheckMergesort() {
+    InitializeHeap();
+    bool correct = true;
+    for (const std::size_t count : {0, 1, 2, 3, 7, 16, 33, 1000}) {
+        std::vector<Element> elements;
+        for (std::size_t index = 0; index < count; ++index) elements.push_back({static_cast<int>((index * 7919) % 5), static_cast<int>(index)});
+        correct &= mergesort_nid_postfix(elements.data(), count, sizeof(Element), CompareKeys) == 0;
+        for (std::size_t index = 1; index < count; ++index) {
+            const auto& before = elements[index - 1];
+            const auto& after = elements[index];
+            correct &= before.key < after.key || (before.key == after.key && before.tag < after.tag);
+        }
+    }
+    unsigned char bytes[3] = {3, 1, 2};
+    *__error_nid_postfix() = 0;
+    correct &= mergesort_nid_postfix(bytes, 3, 1, CompareFirstByte) == -1 && *__error_nid_postfix() == 22 && bytes[0] == 3;
+    correct &= mergesort_nid_postfix(nullptr, 0, 4, CompareKeys) == 0;
+    Element pair[2] = {{2, 0}, {1, 1}};
+    failAllocation = true;
+    correct &= mergesort_nid_postfix(pair, 2, sizeof(Element), CompareKeys) == -1 && pair[0].key == 2;
+    failAllocation = false;
+    if (!correct) std::fprintf(stderr, "mergesort failed\n");
+    return correct;
+}
 }
 
 int main() {
@@ -80,5 +148,6 @@ int main() {
     for (const std::size_t size : {1, 3, 8, 24})
         for (const std::size_t count : {0, 1, 2, 6, 7, 8, 40, 41, 1000})
             correct &= ExpectSorted(size, count);
+    correct &= CheckMergesort();
     return correct ? 0 : 1;
 }

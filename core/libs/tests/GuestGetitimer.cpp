@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <thread>
 
 struct GuestItimerval {
@@ -62,16 +61,14 @@ int main() {
         Require(getitimer_nid_postfix(invalid, nullptr) == -1 && *__error_nid_postfix() == 22, "invalid timer validation order changed");
     }
     Require(getitimer_nid_postfix(0, nullptr) == -1 && *__error_nid_postfix() == 14, "null output did not report EFAULT");
-    for (int unsupported : {1, 2}) {
+    for (int disarmed : {1, 2}) {
         GuestItimerval output{{11, 22}, {33, 44}};
-        const auto saved = output;
-        bool threw = false;
-        try {
-            getitimer_nid_postfix(unsupported, &output);
-        } catch (const std::runtime_error&) {
-            threw = true;
-        }
-        Require(threw && std::memcmp(&output, &saved, sizeof(output)) == 0, "unsupported CPU timer reported fabricated state");
+        *__error_nid_postfix() = 12345;
+        Require(getitimer_nid_postfix(disarmed, &output) == 0, "CPU timer read failed");
+        Require(*__error_nid_postfix() == 12345, "CPU timer read changed errno");
+        Require(output.interval.tv_sec == 0 && output.interval.tv_usec == 0 && output.value.tv_sec == 0 && output.value.tv_usec == 0,
+            "a CPU timer that cannot be armed did not read as disarmed");
+        Require(getitimer_nid_postfix(disarmed, nullptr) == -1 && *__error_nid_postfix() == 14, "null CPU timer output did not report EFAULT");
     }
 
     const auto ignore = reinterpret_cast<Handler>(std::uintptr_t{1});

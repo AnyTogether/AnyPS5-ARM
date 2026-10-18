@@ -93,7 +93,12 @@ void AppendMarker(const std::string& line) {
     Require(marker != nullptr);
     std::ofstream(marker, std::ios::app) << line << '\n';
 }
-void MainShutdown() { AppendMarker("shutdown"); }
+void MainShutdown() {
+    AppendMarker("shutdown");
+    std::thread(AwaitExit).detach();
+    awaiting.wait(false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+}
 void SecondaryShutdown() { AppendMarker("secondary shutdown"); }
 void APS5_VABI RemainingHandler(void*) { AppendMarker("remaining handler"); }
 void APS5_VABI ExitingHandler(void*) { exit_nid_postfix(7); }

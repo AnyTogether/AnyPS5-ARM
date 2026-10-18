@@ -162,6 +162,10 @@ extern "C" {
     std::_Exit(code);
 }
 
+void LibcStartExit_nid_postfix() {
+    StartExit();
+}
+
 [[noreturn]] void LibcExit_nid_no_patch(int code) {
     StartExit();
 #ifdef __APPLE__

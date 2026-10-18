@@ -39,11 +39,15 @@ int main() {
     Require(sceSaveDataDialogClose(nullptr) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "close before init");
     SaveDataDialogResult uninitResult{};
     Require(sceSaveDataDialogGetResult(&uninitResult) == SAVE_DATA_DIALOG_ERROR_NOT_FINISHED, "get result before init");
+    Require(sceSaveDataDialogProgressBarInc(0, 10) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress inc before init");
+    Require(sceSaveDataDialogProgressBarSetValue(0, 50) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress set value before init");
 
     Require(sceSaveDataDialogInitialize() == 0, "initialize");
     Require(sceSaveDataDialogInitialize() == SAVE_DATA_DIALOG_ERROR_ALREADY_INITIALIZED, "double init");
     Require(sceSaveDataDialogClose(nullptr) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "close while initialized not running");
     Require(sceSaveDataDialogGetResult(&uninitResult) == SAVE_DATA_DIALOG_ERROR_NOT_FINISHED, "get result before open");
+    Require(sceSaveDataDialogProgressBarInc(0, 10) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress inc while initialized not running");
+    Require(sceSaveDataDialogProgressBarSetValue(0, 50) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress set value while initialized not running");
 
     SaveDataDirName names[2]{{}, {"SDU1"}};
     SaveDataDialogItems items{};
@@ -64,6 +68,7 @@ int main() {
         Require(sceSaveDataDialogProgressBarSetValue(0, 25) == 0, "set progress");
         Require(sceSaveDataDialogProgressBarInc(0, 25) == 0, "increment progress");
         RequireRunning();
+        Require(sceSaveDataDialogProgressBarInc(0, 10) == 0, "inc progress while running");
         Require(sceSaveDataDialogProgressBarSetValue(0, 100) == 0, "complete progress");
         RequireRunning();
         Require(sceSaveDataDialogGetResult(&uninitResult) == SAVE_DATA_DIALOG_ERROR_NOT_FINISHED,
@@ -94,4 +99,6 @@ int main() {
     Require(sceSaveDataDialogTerminate() == 0, "terminate");
     Require(sceSaveDataDialogTerminate() == SAVE_DATA_DIALOG_ERROR_NOT_INITIALIZED, "terminate when already terminated");
     Require(sceSaveDataDialogGetStatus() == SAVE_DATA_DIALOG_STATUS_NONE, "terminated state");
+    Require(sceSaveDataDialogProgressBarInc(0, 10) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress inc after terminate");
+    Require(sceSaveDataDialogProgressBarSetValue(0, 50) == SAVE_DATA_DIALOG_ERROR_NOT_RUNNING, "progress set value after terminate");
 }

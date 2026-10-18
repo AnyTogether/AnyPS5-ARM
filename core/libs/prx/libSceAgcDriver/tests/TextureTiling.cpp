@@ -32,6 +32,7 @@ struct ElementAddress {
     std::uint32_t y;
     std::uint32_t z;
     std::uint64_t address;
+    std::uint32_t pipeBankXor = 0;
 };
 
 std::uint64_t equationOffset(const TextureSwizzleEquation& equation, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
@@ -60,7 +61,7 @@ void requireThickAddresses(const GuestTextureResource& resource, std::uint32_t b
     const auto geometry = DescribeSurface(resource);
     Require(geometry.thick && geometry.mips.size() == resource.mipCount && geometry.guestBytes == guestBytes, what + ": guest size differs from addrlib");
     for (std::uint32_t level = 0; level < resource.mipCount; ++level) Require(geometry.mips[level].tail == (level >= firstTailLevel), what + ": mip " + std::to_string(level) + " is on the wrong side of the mip tail");
-    const auto blockBytes = resource.tileMode == TextureTileMode::kStandard4KB ? 4096u : 65536u;
+    const auto blockBytes = resource.tileMode == TextureTileMode::kStandard4KB || resource.tileMode == TextureTileMode::kS4KBX ? 4096u : 65536u;
     const auto* equation = FindTextureSwizzleEquation(0x100u | (resource.tileMode == TextureTileMode::kStandard4KB ? 5u : resource.tileMode == TextureTileMode::kStandard64KB ? 9u : XorSwizzleMode(resource.tileMode)), bytesPerElement);
     Require(equation != nullptr, what + ": missing thick swizzle equation");
     const auto block = ThickBlockExtent(resource.tileMode, bytesPerElement);
@@ -73,6 +74,7 @@ void requireThickAddresses(const GuestTextureResource& resource, std::uint32_t b
         } else {
             address += (static_cast<std::uint64_t>(element.y / block[1]) * mip.blocksPerRow + element.x / block[0]) * blockBytes + equationOffset(*equation, element.x, element.y, element.z);
         }
+        address ^= element.pipeBankXor;
         Require(address == element.address, what + ": mip " + std::to_string(element.mip) + " element (" + std::to_string(element.x) + ", " + std::to_string(element.y) + ", " + std::to_string(element.z) + ") detiles from " + std::to_string(address) + " instead of addrlib's " + std::to_string(element.address));
     }
 }
@@ -256,6 +258,22 @@ void RunTextureTilingTests() {
         const auto odd = DescribeSurface(volume);
         Require(odd.mips[1].width == 16 && odd.mips[1].blocksPerRow == 3 && odd.mips[1].tiledSize == 12288, "a 3D level must be padded from its size rounded up, as addrlib does");
         Require(odd.mips[0].blocksPerRow == 5 && odd.mips[0].tiledOffset == 12288 && odd.mips[0].tiledSize == 40960, "3D mip 0 of a non-power-of-two volume changed");
+    }
+
+    {
+        constexpr ElementAddress s4xTail1[] = {{0, 0, 0, 0, 0x3000, 0x0}, {0, 32, 19, 11, 0x843c, 0x0}, {0, 8, 9, 8, 0x3e08, 0x0}, {0, 15, 2, 8, 0x3163, 0x700}, {1, 0, 0, 0, 0x1000, 0x0}, {1, 15, 9, 5, 0x1acf, 0x0}, {1, 12, 4, 0, 0x1340, 0x0}, {1, 7, 2, 5, 0x17e7, 0x700}, {2, 0, 0, 0, 0x800, 0x0}, {2, 7, 4, 2, 0x953, 0x0}, {2, 2, 2, 0, 0x822, 0x0}, {2, 0, 1, 1, 0xf0c, 0x700}, {3, 0, 0, 0, 0x300, 0x0}, {3, 3, 1, 0, 0x30b, 0x0}, {3, 3, 1, 0, 0x30b, 0x0}, {3, 0, 0, 0, 0x400, 0x700}, {4, 0, 0, 0, 0x200, 0x0}, {4, 1, 0, 0, 0x201, 0x0}, {4, 0, 0, 0, 0x200, 0x0}, {4, 0, 0, 0, 0x500, 0x700}, {5, 0, 0, 0, 0x100, 0x0}, {5, 0, 0, 0, 0x100, 0x0}, {5, 0, 0, 0, 0x100, 0x0}, {5, 0, 0, 0, 0x600, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 1, 33, 20, 12, 6), 1, 2, 36864, s4xTail1, "SW_4KB_S_X 8 bpp 33x20x12, 6 levels");
+        constexpr ElementAddress s4xTail2[] = {{0, 0, 0, 0, 0x6000, 0x0}, {0, 32, 19, 11, 0xf13c, 0x0}, {0, 8, 9, 8, 0x7408, 0x0}, {0, 15, 2, 8, 0x7962, 0x700}, {1, 0, 0, 0, 0x3000, 0x0}, {1, 15, 9, 5, 0x42ce, 0x0}, {1, 12, 4, 0, 0x4b00, 0x0}, {1, 7, 2, 5, 0x35e6, 0x700}, {2, 0, 0, 0, 0x1000, 0x0}, {2, 7, 4, 2, 0x1352, 0x0}, {2, 2, 2, 0, 0x1060, 0x0}, {2, 0, 1, 1, 0x170c, 0x700}, {3, 0, 0, 0, 0x800, 0x0}, {3, 3, 1, 0, 0x84a, 0x0}, {3, 3, 1, 0, 0x84a, 0x0}, {3, 0, 0, 0, 0xf00, 0x700}, {4, 0, 0, 0, 0x300, 0x0}, {4, 1, 0, 0, 0x302, 0x0}, {4, 0, 0, 0, 0x300, 0x0}, {4, 0, 0, 0, 0x400, 0x700}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x500, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 12, 33, 20, 12, 6), 2, 3, 65536, s4xTail2, "SW_4KB_S_X 16 bpp 33x20x12, 6 levels");
+        constexpr ElementAddress s4xWide4[] = {{0, 0, 0, 0, 0x20000, 0x0}, {0, 127, 127, 7, 0x9f4fc, 0x0}, {0, 24, 93, 0, 0x73108, 0x0}, {0, 42, 22, 4, 0x35f60, 0x700}, {1, 0, 0, 0, 0x0, 0x0}, {1, 63, 63, 3, 0x1f0fc, 0x0}, {1, 28, 38, 2, 0x13da0, 0x0}, {1, 55, 52, 1, 0x1e754, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 56, 128, 128, 8, 2), 4, 2, 655360, s4xWide4, "SW_4KB_S_X 32 bpp 128x128x8, 2 levels");
+        constexpr ElementAddress s4xTail4[] = {{0, 0, 0, 0, 0x6000, 0x0}, {0, 32, 19, 11, 0x1fdb8, 0x0}, {0, 8, 9, 8, 0x17808, 0x0}, {0, 15, 2, 8, 0x17564, 0x700}, {1, 0, 0, 0, 0x3000, 0x0}, {1, 15, 9, 5, 0x465c, 0x0}, {1, 12, 4, 0, 0x4b00, 0x0}, {1, 7, 2, 5, 0x3174, 0x700}, {2, 0, 0, 0, 0x1000, 0x0}, {2, 7, 4, 2, 0x13c4, 0x0}, {2, 2, 2, 0, 0x1060, 0x0}, {2, 0, 1, 1, 0x1718, 0x700}, {3, 0, 0, 0, 0x800, 0x0}, {3, 3, 1, 0, 0x84c, 0x0}, {3, 3, 1, 0, 0x84c, 0x0}, {3, 0, 0, 0, 0xf00, 0x700}, {4, 0, 0, 0, 0x300, 0x0}, {4, 1, 0, 0, 0x304, 0x0}, {4, 0, 0, 0, 0x300, 0x0}, {4, 0, 0, 0, 0x400, 0x700}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x500, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 56, 33, 20, 12, 6), 4, 3, 131072, s4xTail4, "SW_4KB_S_X 32 bpp 33x20x12, 6 levels");
+        constexpr ElementAddress s4xTail8[] = {{0, 0, 0, 0, 0x9000, 0x0}, {0, 32, 19, 11, 0x2fab0, 0x0}, {0, 8, 9, 8, 0x27420, 0x0}, {0, 15, 2, 8, 0x22448, 0x700}, {1, 0, 0, 0, 0x3000, 0x0}, {1, 15, 9, 5, 0x7a78, 0x0}, {1, 12, 4, 0, 0x4200, 0x0}, {1, 7, 2, 5, 0x3058, 0x700}, {2, 0, 0, 0, 0x1000, 0x0}, {2, 7, 4, 2, 0x1ac8, 0x0}, {2, 2, 2, 0, 0x1140, 0x0}, {2, 0, 1, 1, 0x1730, 0x700}, {3, 0, 0, 0, 0x800, 0x0}, {3, 3, 1, 0, 0x868, 0x0}, {3, 3, 1, 0, 0x868, 0x0}, {3, 0, 0, 0, 0xf00, 0x700}, {4, 0, 0, 0, 0x300, 0x0}, {4, 1, 0, 0, 0x308, 0x0}, {4, 0, 0, 0, 0x300, 0x0}, {4, 0, 0, 0, 0x400, 0x700}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x200, 0x0}, {5, 0, 0, 0, 0x500, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 71, 33, 20, 12, 6), 8, 3, 196608, s4xTail8, "SW_4KB_S_X 64 bpp 33x20x12, 6 levels");
+        constexpr ElementAddress s4xTail16[] = {{0, 0, 0, 0, 0x10000, 0x0}, {0, 32, 19, 11, 0x55bb0, 0x0}, {0, 8, 9, 8, 0x46820, 0x0}, {0, 15, 2, 8, 0x3e040, 0x700}, {1, 0, 0, 0, 0x6000, 0x0}, {1, 15, 9, 5, 0xee70, 0x0}, {1, 12, 4, 0, 0x9400, 0x0}, {1, 7, 2, 5, 0x7850, 0x700}, {2, 0, 0, 0, 0x3000, 0x0}, {2, 7, 4, 2, 0x42c0, 0x0}, {2, 2, 2, 0, 0x3300, 0x0}, {2, 0, 1, 1, 0x3730, 0x700}, {3, 0, 0, 0, 0x1000, 0x0}, {3, 3, 1, 0, 0x1260, 0x0}, {3, 3, 1, 0, 0x1260, 0x0}, {3, 0, 0, 0, 0x1700, 0x700}, {4, 0, 0, 0, 0x800, 0x0}, {4, 1, 0, 0, 0x840, 0x0}, {4, 0, 0, 0, 0x800, 0x0}, {4, 0, 0, 0, 0xf00, 0x700}, {5, 0, 0, 0, 0x300, 0x0}, {5, 0, 0, 0, 0x300, 0x0}, {5, 0, 0, 0, 0x300, 0x0}, {5, 0, 0, 0, 0x400, 0x700}};
+        requireThickAddresses(thickVolume(TextureTileMode::kS4KBX, 77, 33, 20, 12, 6), 16, 4, 352256, s4xTail16, "SW_4KB_S_X 128 bpp 33x20x12, 6 levels");
+        requireBlockVolumeLayout(TextureTileMode::kS4KBX, 169, 71, 60, 36, 20, 5, "SW_4KB_S_X BC1 60x36x20, 5 levels");
     }
 
     {

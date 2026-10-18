@@ -17,7 +17,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -29,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -54,6 +57,30 @@ void setEnvironment(const char* name, const std::string& value) {
 #else
     setenv(name, value.c_str(), 1);
 #endif
+}
+
+void removeCacheDirectory(const std::filesystem::path& directory) {
+    std::error_code error;
+#ifdef _WIN32
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
+        if (!entry.is_directory()) files.push_back(entry.path());
+    }
+    constexpr auto dispositionInfoEx = static_cast<FILE_INFO_BY_HANDLE_CLASS>(21);
+    constexpr DWORD deleteFile = 0x00000001, posixSemantics = 0x00000002;
+    for (const auto& file : files) {
+        const auto handle = CreateFileW(file.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) error.assign(static_cast<int>(GetLastError()), std::system_category());
+        require(!error, "cannot open " + file.string() + " for deletion: " + error.message());
+        struct Close { HANDLE file; ~Close() { CloseHandle(file); } } close{handle};
+        DWORD flags = deleteFile | posixSemantics;
+        if (!SetFileInformationByHandle(handle, dispositionInfoEx, &flags, sizeof(flags))) error.assign(static_cast<int>(GetLastError()), std::system_category());
+        require(!error, "cannot delete " + file.string() + ": " + error.message());
+    }
+#endif
+    std::filesystem::remove_all(directory, error);
+    require(!error, "cannot remove the shader cache test directory: " + error.message());
 }
 
 bool sameBinding(const DescriptorBinding& left, const DescriptorBinding& right) {
@@ -622,6 +649,7 @@ void verifyKeySensitivity() {
     changes("f64 denormal preservation", [](SampleRequest& sample) { sample.request.target.float64DenormPreserve = true; });
     changes("f16 denormal preservation", [](SampleRequest& sample) { sample.request.target.float16DenormPreserve = true; });
     changes("spanned waves", [](SampleRequest& sample) { sample.request.target.spannedWaves = true; });
+    changes("robust buffer access 2", [](SampleRequest& sample) { sample.request.target.robustBufferAccess2 = true; });
     changes("the workgroup size limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupSize[2] = 128; });
     changes("the invocation limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupInvocations = 512; });
     changes("the shared memory limit", [](SampleRequest& sample) { sample.request.target.maxWorkgroupSharedMemoryBytes = 32768; });
@@ -704,6 +732,64 @@ void verifyFloatModeSerialization() {
     sample.request.context.floatMode = mode;
     const auto back = serializer.Deserialize(serializer.Serialize(sample.request));
     require(back.request.context.floatMode == mode, "the float mode did not survive serialization");
+}
+
+int runLargeFileWrite() {
+    constexpr std::size_t size = (std::size_t{2} << 30u) + 4096u;
+    const auto directory = std::filesystem::temp_directory_path() / ("aps5-shader-disk-cache-large-file-test-" + std::to_string(std::random_device{}()));
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory, error);
+    const auto space = std::filesystem::space(directory, error);
+    if (error || space.available < size + (std::uintmax_t{1} << 30u)) {
+        std::cout << "skipping: not enough free disk space for a file of more than 2 GiB\n";
+        return 77;
+    }
+    std::vector<std::byte> bytes;
+    try {
+        bytes.resize(size);
+    } catch (const std::bad_alloc&) {
+        std::cout << "skipping: cannot allocate a buffer of more than 2 GiB\n";
+        return 77;
+    }
+    const std::array<std::size_t, 6> samples{0u, (std::size_t{1} << 30u) - 1u, std::size_t{1} << 30u, (std::size_t{2} << 30u) - 1u, std::size_t{2} << 30u, size - 1u};
+    for (std::size_t index = 0; index < samples.size(); ++index) bytes[samples[index]] = static_cast<std::byte>(0xa0u + index);
+    const auto path = directory / "pipelines.bin";
+    auto written = std::make_shared<std::promise<bool>>();
+    auto result = written->get_future();
+    std::thread([written, &bytes, path] {
+        try {
+            written->set_value(WriteFileAtomically(path, bytes));
+        } catch (...) {
+            written->set_exception(std::current_exception());
+        }
+    }).detach();
+    if (result.wait_for(std::chrono::seconds(200)) != std::future_status::ready) {
+        std::cerr << "WriteFileAtomically did not return within 200 s for a file of more than 2 GiB\n";
+        std::cerr.flush();
+        std::_Exit(1);
+    }
+    require(result.get(), "cannot write a cache file of more than 2 GiB");
+    require(std::filesystem::file_size(path) == size, "the cache file of more than 2 GiB has the wrong size");
+    {
+        std::ifstream file(path, std::ios::binary);
+        require(static_cast<bool>(file), "cannot open the cache file of more than 2 GiB");
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            file.seekg(static_cast<std::streamoff>(samples[index]));
+            char value = 0;
+            require(file.get(value) && static_cast<std::byte>(value) == bytes[samples[index]], "the cache file of more than 2 GiB differs at byte " + std::to_string(samples[index]));
+        }
+    }
+    std::size_t entries = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        static_cast<void>(entry);
+        ++entries;
+    }
+    require(entries == 1u, "the cache file of more than 2 GiB left a temporary file behind");
+    std::filesystem::remove_all(directory, error);
+    require(!error, "cannot remove the large file test directory: " + error.message());
+    std::cout << "large cache file write test passed\n";
+    return 0;
 }
 
 void verifyAtomicReplacement(const std::filesystem::path& directory) {
@@ -1111,7 +1197,8 @@ void verifyBindingPlanSelection() {
         throw std::runtime_error("binding plan accepted an unsupported buffer alignment");
     };
     snapshot.buffers[0].dwords[0] |= 2u;
-    rejectsAlignment("buffer atomic on a V# whose base is not DWORD aligned");
+    const auto atomicPlan = builder.Prepare(compiled.layout, info, IrShaderStage::Compute, snapshot);
+    require(std::ranges::any_of(atomicPlan.specialization, [](const PipelineSpecializationConstant& constant) { return constant.id == PipelineSpecialization::BufferBase + 3u && constant.value == 2u; }), "a buffer atomic V# off a DWORD boundary did not record its misalignment");
     snapshot.buffers[0].dwords[0] &= ~3u;
     info.buffers[1].typedAlignment = 2u;
     snapshot.buffers[1].dwords[0] |= 2u;
@@ -1419,6 +1506,10 @@ std::vector<PlanFixture> planFixtures() {
     add("bindless material table", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x93109010u, 0xf4200406u, 0x20000004u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
     add("bindless whole table", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
     add("bindless sample in a loop latch", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0x7e200500u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xbea80380u, 0xf09c0f08u, 0x00450000u, 0x80288128u, 0xbf0a8428u, 0xbf85fffbu, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, tables}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
+    auto keyed = tables;
+    keyed.resize(20u, 0u);
+    keyed[16] = 3u;
+    add("bindless selected record", 64, {0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0xf4000400u, 0xfa000040u, 0x8f108510u, 0xf42c0502u, 0x20000000u, 0xf09c0f08u, 0x00450000u, 0xe0700000u, 0x80070000u, 0xbf810000u}, srtPointer, {{PlanSrtAddress, keyed}, {PlanTableAddress, heap}, {PlanMaterialAddress, materials}});
 
     std::vector<std::uint32_t> phis(32, 0u);
     place(phis, 0, imageWords(PlanTextureAddress));
@@ -1564,6 +1655,8 @@ IrResourcePlan handBuiltPlan() {
     table.dwordCount = 8u;
     table.dwords[0] = &readConst(3);
     table.tableColumn = TableColumn{2u, 32u, 16u, 4u, 8u, 0xffu, false, true, {KeyDomain{3u, 4u, 16u, false}, KeyDomain{2u, 8u, 4u, true}}, false};
+    table.tableColumn->selected = true;
+    table.tableColumn->selection = 2u;
     DescriptorSource heap;
     heap.dwordCount = 4u;
     heap.dwords[1] = &readConst(6);
@@ -1812,6 +1905,7 @@ void verifyMalformedPlans() {
     rejects("a uniform fill of five words", [](IrResourcePlan& plan) { plan.uniformFill.fill.words = 5u; });
     rejects("an image table heap past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->heapSource = 4u; });
     rejects("an image table key past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->keyDomains[1].source = 4u; });
+    rejects("an image table selection past the sources", [](IrResourcePlan& plan) { plan.descriptorSources[1].tableColumn->selection = 4u; });
     auto foreign = handBuiltPlan();
     IrValue stray(IrOpcode::Void, IrType::U32, 99u);
     foreign.srtReads[0].value = &stray;
@@ -1871,6 +1965,7 @@ void verifyPlanRoundTrip() {
     require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.descriptorSources.begin(), plan.descriptorSources.end(), [](const DescriptorSource& source) { return source.tableColumn.has_value() && source.tableColumn->keyDomains.empty(); }); }), "no fixture plans a whole image table");
     require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.descriptorSources.begin(), plan.descriptorSources.end(), [](const DescriptorSource& source) { return source.tableColumn.has_value() && !source.tableColumn->keyDomains.empty(); }); }), "no fixture plans an image table with a key domain");
     require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.descriptorSources.begin(), plan.descriptorSources.end(), [](const DescriptorSource& source) { return source.tableColumn.has_value() && source.tableColumn->address; }); }), "no fixture plans an image table through a pointer");
+    require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.descriptorSources.begin(), plan.descriptorSources.end(), [](const DescriptorSource& source) { return source.tableColumn.has_value() && source.tableColumn->selected; }); }), "no fixture plans a selected image table record");
     require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.controlFlow.begin(), plan.controlFlow.end(), [](const ResourceBlock& block) { return block.condition != nullptr; }); }), "no fixture plans a control-flow condition");
     require(covers([](const IrResourcePlan& plan) { return std::any_of(plan.valueStorage.begin(), plan.valueStorage.end(), [](const auto& value) { return value.IsPhi(); }); }), "no fixture plans a phi");
     require(covers([](const IrResourcePlan& plan) { return !plan.guardedSrtSlots.empty(); }), "no fixture plans a guarded SRT read");
@@ -2100,6 +2195,7 @@ int main(int argc, char** argv) {
             std::cout << "artifact codec tests passed\n";
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--large-file") return runLargeFileWrite();
         if (argc == 2 && std::string_view(argv[1]) == "--load") return runLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--load-prebuilt") return runPrebuiltLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--no-failure-memo") return runWithoutFailureMemo();
@@ -2132,9 +2228,7 @@ int main(int argc, char** argv) {
         verifyBuiltinSpecialization();
         verifySpecializationLiveness();
         ShaderRecompiler::ShaderDiskCache::Flush();
-        std::error_code error;
-        std::filesystem::remove_all(directory, error);
-        require(!error, "cannot remove the shader cache test directory: " + error.message());
+        removeCacheDirectory(directory);
         std::cout << "shader disk cache tests passed\n";
         return 0;
     } catch (const std::exception& error) {

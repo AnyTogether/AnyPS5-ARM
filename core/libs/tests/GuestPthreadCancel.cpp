@@ -8,6 +8,7 @@
 extern "C" {
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI scePthreadJoin(Pthread thread, void** retval);
+Pthread APS5_VABI scePthreadSelf();
 void APS5_VABI scePthreadExit(void* retval);
 int APS5_VABI scePthreadCancel(Pthread thread);
 int APS5_VABI scePthreadSetcancelstate(int state, int* old_state);
@@ -29,6 +30,8 @@ int APS5_VABI pthread_setcanceltype_nid_postfix(int type, int* old_type);
 int APS5_VABI sem_init_nid_postfix(void* sem, int pshared, unsigned int value);
 int APS5_VABI sem_destroy_nid_postfix(void* sem);
 int APS5_VABI sem_wait_nid_postfix(void* sem);
+int APS5_VABI sem_timedwait_nid_postfix(void* sem, const KernelTimespec* abstime);
+int APS5_VABI sem_getvalue_nid_postfix(void* sem, int* value);
 void APS5_VABI __pthread_cleanup_push_imp_nid_postfix(void (APS5_VABI* routine)(void*), void* argument, void* info);
 void APS5_VABI __pthread_cleanup_pop_imp_nid_postfix(int execute);
 }
@@ -91,6 +94,44 @@ static void* APS5_VABI PosixSemWaiter(void*) {
     sem_wait_nid_postfix(&shared.posixSem);
     shared.returned.store(true);
     return nullptr;
+}
+
+struct AvailableTimedSemaphore {
+    void* semaphore = nullptr;
+    bool pending;
+    bool disabled;
+    bool expired;
+    bool returned = false;
+    int result = -2;
+};
+
+static void* APS5_VABI AvailableTimedSemaphoreWaiter(void* argument) {
+    auto& value = *static_cast<AvailableTimedSemaphore*>(argument);
+    if (value.disabled) Require(scePthreadSetcancelstate(CANCEL_DISABLE, nullptr) == SCE_OK);
+    if (value.pending) Require(pthread_cancel_nid_postfix(scePthreadSelf()) == 0);
+    KernelTimespec deadline{};
+    if (!value.expired)
+        deadline.tv_sec = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() + 60;
+    value.result = sem_timedwait_nid_postfix(&value.semaphore, &deadline);
+    value.returned = true;
+    return reinterpret_cast<void*>(std::intptr_t{7});
+}
+
+static void CheckAvailableTimedSemaphore(bool pending, bool disabled, bool expired) {
+    AvailableTimedSemaphore value{nullptr, pending, disabled, expired};
+    Require(sem_init_nid_postfix(&value.semaphore, 0, 1) == 0);
+    Pthread thread = nullptr;
+    Require(scePthreadCreate(&thread, nullptr, AvailableTimedSemaphoreWaiter, &value, nullptr) == SCE_OK);
+    void* result = nullptr;
+    Require(scePthreadJoin(thread, &result) == SCE_OK);
+    const bool canceled = pending && !disabled;
+    Require(result == (canceled ? CANCELED : reinterpret_cast<void*>(std::intptr_t{7})));
+    Require(value.returned != canceled);
+    if (!canceled) Require(value.result == 0);
+    int permits = -1;
+    Require(sem_getvalue_nid_postfix(&value.semaphore, &permits) == 0);
+    Require(permits == (canceled ? 1 : 0));
+    Require(sem_destroy_nid_postfix(&value.semaphore) == 0);
 }
 
 static void* APS5_VABI Idler(void*) {
@@ -196,6 +237,11 @@ int main() {
     thread = Start(PosixSemWaiter);
     Require(pthread_cancel_nid_postfix(thread) == 0);
     JoinCanceled(thread);
+
+    CheckAvailableTimedSemaphore(true, false, false);
+    CheckAvailableTimedSemaphore(true, false, true);
+    CheckAvailableTimedSemaphore(true, true, false);
+    CheckAvailableTimedSemaphore(false, false, true);
 
     Require(scePthreadCreate(&shared.target, nullptr, Idler, nullptr, nullptr) == SCE_OK);
     thread = Start(Joiner);

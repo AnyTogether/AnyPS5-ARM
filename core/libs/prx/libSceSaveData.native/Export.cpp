@@ -217,6 +217,7 @@ int APS5_VABI sceSaveDataCommit(const SaveDataCommitParam* param) {
 
 int APS5_VABI sceSaveDataCreateTransactionResource(uint32_t size) {
     (void)size;
+    if (g_initializations == 0) return SAVE_DATA_ERROR_NOT_INITIALIZED;
     return g_transaction_counter.fetch_add(1);
 }
 
@@ -271,6 +272,7 @@ int APS5_VABI sceSaveDataDelete(const SaveDataDelete* del) {
 
 int APS5_VABI sceSaveDataDeleteTransactionResource(int32_t resource) {
     (void)resource;
+    if (g_initializations == 0) return SAVE_DATA_ERROR_NOT_INITIALIZED;
     return SAVE_DATA_OK;
 }
 
@@ -403,7 +405,7 @@ int APS5_VABI sceSaveDataGetEventResult(const void* event_param, SaveDataEvent* 
 
 static int getMountInfo(const SaveDataMountPoint* mount_point, SaveDataMountInfo* info) {
     if (mount_point == nullptr || info == nullptr) {
-        throw std::runtime_error("sceSaveDataGetMountInfo: null argument");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     const int slot = find_slot_by_mount_point(mount_point->data);
@@ -425,7 +427,7 @@ int APS5_VABI sceSaveDataGetMountInfo(const SaveDataMountPoint* mount_point, Sav
 
 static int getParam(const SaveDataMountPoint* mount_point, uint32_t param_type, void* param_buf, size_t param_buf_size, size_t* got_size) {
     if (mount_point == nullptr || param_buf == nullptr) {
-        throw std::runtime_error("sceSaveDataGetParam: null argument");
+        return SAVE_DATA_ERROR_PARAMETER;
     }
     std::lock_guard lock(g_slots_mutex);
     const int slot = find_slot_by_mount_point(mount_point->data);

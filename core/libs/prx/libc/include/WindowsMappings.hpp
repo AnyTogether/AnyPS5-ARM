@@ -261,6 +261,9 @@ public:
             if (found == views.end() || !found->second.resident) continue;
             const auto run = std::prev(residentRuns.upper_bound(address + done));
             if (run->first < address || run->second.end > address + bytes) throw refuse("a resident run of direct memory extends outside the range");
+            for (auto page = views.find(run->first); page != views.end() && page->first < run->second.end; ++page) {
+                if (page->second.hostWrites != 0) return nullptr;
+            }
         }
         for (std::size_t done = 0; done < bytes; done += pageBytes) {
             const auto found = views.find(address + done);

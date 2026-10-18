@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024
 
 
 def copy_sources(output):
@@ -62,18 +63,24 @@ def publish_libraries(output):
                 files = archive.infolist()
                 if not files or len(files) > 4096:
                     raise ValueError("Invalid library archive")
-                names = set()
+                names = {}
                 for file in files:
                     if not file.filename.startswith("libs/") or any(part in ("..", ".", "") for part in file.filename.rstrip("/").split("/")) or "\\" in file.filename:
                         raise ValueError("Invalid library archive layout")
                     name = file.filename.rstrip("/").lower()
                     if name in names:
                         raise ValueError(f"Duplicate library archive path: {file.filename}")
-                    names.add(name)
+                    names[name] = file.is_dir()
+                for name in names:
+                    parts = name.split("/")
+                    if any(names.get("/".join(parts[:index])) is False for index in range(1, len(parts))):
+                        raise ValueError(f"Library archive file is also used as a directory: {name}")
+                expanded = sum(file.file_size for file in files)
+                if expanded > MAX_EXPANDED_BYTES:
+                    raise ValueError("Release archive exceeds maximum expanded size")
                 corrupt = archive.testzip()
                 if corrupt:
                     raise ValueError(f"Corrupt release entry: {corrupt}")
-                expanded = sum(file.file_size for file in files)
             path = f"libraries/{platform}-{checksum}.zip"
             temporary.replace(output / path)
             manifest["platforms"][platform] = {"path": path, "size": size, "expandedBytes": expanded, "sha256": checksum}
