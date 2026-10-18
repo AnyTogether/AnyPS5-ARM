@@ -1,6 +1,7 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include <algorithm>
 #include <array>
+#include <string>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -24,6 +25,7 @@
 
 #if defined(__APPLE__)
 #include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -341,8 +343,34 @@ public:
         if (end <= begin) return;
         std::vector<std::uint8_t> pages((end - begin) / _page, Written | Fresh);
         std::vector<bool> queried(pages.size(), false);
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteRegister);
+        struct HoldTimer {
+            Watch& watch;
+            std::uintptr_t bytes;
+            std::chrono::steady_clock::time_point start;
+            ~HoldTimer() {
+                if (!watch._lock.profiled) return;
+                const auto us = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
+                watch._collectStats.registers.fetch_add(1, std::memory_order_relaxed);
+                watch._collectStats.registerUs.fetch_add(us, std::memory_order_relaxed);
+                for (auto seen = watch._collectStats.registerMaxUs.load(); us > seen && !watch._collectStats.registerMaxUs.compare_exchange_weak(seen, us);) {
+                }
+                for (auto seen = watch._collectStats.registerMaxBytes.load(); bytes > seen && !watch._collectStats.registerMaxBytes.compare_exchange_weak(seen, bytes);) {
+                }
+            }
+        } holdTimer{*this, end - begin, _lock.profiled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}};
+        const auto phaseStart = holdTimer.start;
+        std::uint64_t regionQueries = 0;
+        const auto phaseUs = [&](std::chrono::steady_clock::time_point& from) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto us = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now - from).count());
+            from = now;
+            return us;
+        };
+        auto phaseAt = phaseStart;
+        std::array<std::uint64_t, 4> phases{};
         for (auto cursor = begin; cursor < end;) {
+            ++regionQueries;
             mach_vm_address_t address = cursor;
             mach_vm_size_t size = 0;
             vm_region_basic_info_data_64_t info{};
@@ -358,6 +386,7 @@ public:
             }
             cursor = last;
         }
+        if (_lock.profiled) phases[0] = phaseUs(phaseAt);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
             auto& entry = pages[(page - begin) / _page];
             const std::uint8_t recorded = state & ProtectionMask;
@@ -365,10 +394,36 @@ public:
             if (armed || !queried[(page - begin) / _page]) entry = static_cast<std::uint8_t>(Written | Fresh | recorded);
             else state = static_cast<std::uint8_t>(state & ~Protected);
         });
+        if (_lock.profiled) phases[1] = phaseUs(phaseAt);
+        // Inside one registered range (the arena's, registered whole): its states are reset in place, as
+        // erase and a new range would leave them. Splitting it copied all of its page states, ~128 MB each
+        // for the arena's, and held the lock ~20-130 ms per registration.
+        // APS5_SPLIT_WATCH_REGISTER=1 splits as before.
+        static const bool split = std::getenv("APS5_SPLIT_WATCH_REGISTER") != nullptr;
+        if (auto host = _ranges.upper_bound(begin); !split && host != _ranges.begin() && std::prev(host)->second.end >= end) {
+            --host;
+            auto& range = host->second;
+            for (auto page = begin; page < end; page += _page) {
+                const auto index = (page - host->first) / _page;
+                auto& state = range.pages[index];
+                if ((state & Protected) != 0) ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
+                if ((state & Hot) != 0) _snapshots.erase(page);
+                state = pages[(page - begin) / _page];
+                range.heat[index] = 0;
+            }
+            if (_lock.profiled) phases[2] = phaseUs(phaseAt);
+            return;
+        }
         erase(begin, end);
+        if (_lock.profiled) phases[2] = phaseUs(phaseAt);
         const auto count = pages.size();
         _ranges.emplace(begin, Range{end, std::move(pages), std::vector<std::uint8_t>(count, 0)});
         publishCoverage();
+        if (_lock.profiled) {
+            phases[3] = phaseUs(phaseAt);
+            const auto total = phases[0] + phases[1] + phases[2] + phases[3];
+            if (total > 20000) std::fprintf(stderr, "[watch] register 0x%llx+0x%llx held the lock %.1f ms: %llu region queries %.1f ms, reconcile %.1f ms, erase %.1f ms, publish %.1f ms (%zu ranges)\n", static_cast<unsigned long long>(begin), static_cast<unsigned long long>(end - begin), total / 1000.0, static_cast<unsigned long long>(regionQueries), phases[0] / 1000.0, phases[1] / 1000.0, phases[2] / 1000.0, phases[3] / 1000.0, _ranges.size());
+        }
     }
 
     bool Unregister(std::uintptr_t begin, std::uintptr_t end) {
@@ -376,7 +431,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (end <= begin) return false;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteUnregister);
         const bool removed = erase(begin, end);
         if (removed) publishCoverage();
         return removed;
@@ -390,7 +445,7 @@ public:
         if (!_available) return false;
         static const bool locked = std::getenv("APS5_LOCKED_WATCH_COVERS") != nullptr;
         if (locked) {
-            const Lock lock(_lock);
+            const Lock lock(_lock, SiteCovers);
             return covers(begin, end);
         }
         const auto coverage = std::atomic_load_explicit(&_coverage, std::memory_order_acquire);
@@ -407,12 +462,14 @@ public:
 
     bool Collect(std::uintptr_t begin, std::uintptr_t end, void (*written)(void*, std::uintptr_t, std::uintptr_t), void* context, Take take = Take::All) {
         if (!_available) return false;
+        static const bool profiled = std::getenv("APS5_PROFILE_DRAW") != nullptr;
+        if (profiled) countCollect(begin, end);
         begin = pageStart(begin);
         end = pageEnd(end);
         if (end <= begin) return true;
         std::vector<std::pair<std::uintptr_t, std::uintptr_t>> runs;
         {
-            const Lock lock(_lock);
+            const Lock lock(_lock, SiteCollect);
             if (take != Take::Fresh && !covers(begin, end)) return false;
             forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state, std::uint8_t& heat) {
                 const bool fresh = (state & Fresh) != 0;
@@ -421,7 +478,9 @@ public:
                 // frame) is left open, as a fault costs ~20 us under Rosetta: a change of its bytes since
                 // the last collection is its write. Unchanged for 256 collections, it is re-armed.
                 if ((state & (Hot | Written)) == Hot) {
+                    if (profiled) _collectStats.hotCompares.fetch_add(1, std::memory_order_relaxed);
                     if (differs(page)) {
+                        if (profiled) _collectStats.hotChanged.fetch_add(1, std::memory_order_relaxed);
                         state |= Written;
                     } else {
                         if (++heat != 0) return;
@@ -463,7 +522,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (!_available || end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteHostWrites);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state, std::uint8_t& heat) {
             if ((state & Hot) != 0) cool(page, state, heat);
         });
@@ -485,7 +544,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteProtectionChanged);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
             if ((state & Hot) != 0) _snapshots.erase(page);
             state = static_cast<std::uint8_t>(Written | (state & Fresh) | (protection & ProtectionMask));
@@ -497,7 +556,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteBeginHost);
         _hostWrites.emplace_back(begin, end);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
             if ((state & Protected) != 0) ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
@@ -510,7 +569,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteEndHost);
         const auto found = std::find(_hostWrites.begin(), _hostWrites.end(), std::pair{begin, end});
         if (found != _hostWrites.end()) _hostWrites.erase(found);
     }
@@ -519,7 +578,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (!_available || end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteOpenImport);
         forEachPage(begin, end, [&](std::uintptr_t page, std::uint8_t& state) {
             if ((state & Protected) == 0) return;
             ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
@@ -531,7 +590,7 @@ public:
         begin = pageStart(begin);
         end = pageEnd(end);
         if (!_available || end <= begin) return;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteCloseImport);
         forEachPage(begin, end, [&](std::uintptr_t, std::uint8_t& state) {
             if ((state & Opened) == 0) return;
             state = static_cast<std::uint8_t>(state & ~Opened);
@@ -542,7 +601,7 @@ public:
 
     int Protection(std::uintptr_t address, std::uintptr_t limit, std::uintptr_t* runEnd) {
         const auto page = pageStart(address);
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteProtection);
         auto it = _ranges.upper_bound(page);
         if (_available && it != _ranges.begin() && page < std::prev(it)->second.end) {
             --it;
@@ -574,19 +633,39 @@ private:
         std::vector<std::uint8_t> heat;
     };
 
+    // Who holds the lock when another thread has to wait (APS5_PROFILE_DRAW, the [watch] line).
+    enum Site : std::uint8_t { SiteRegister, SiteUnregister, SiteCollect, SiteHostWrites, SiteProtectionChanged, SiteBeginHost, SiteEndHost, SiteOpenImport, SiteCloseImport, SiteProtection, SiteFault, SiteCovers, SiteCount };
+    static constexpr const char* SiteNames[SiteCount] = {"register", "unregister", "collect", "host writes", "protection change", "host write begin", "host write end", "import open", "import close", "protection query", "fault", "covers"};
+
     struct Turns {
         std::atomic<std::uint64_t> next{0};
         std::atomic<std::uint64_t> serving{0};
+        // Set once by the constructor: the lock is also taken in the fault handler, where a function
+        // static's first initialization must not run.
+        bool profiled = false;
+        std::atomic<std::uint8_t> holder{SiteCount};
+        std::array<std::atomic<std::uint64_t>, SiteCount> waitsBehind{};
+        std::array<std::atomic<std::uint64_t>, SiteCount> yieldsBehind{};
     };
 
     struct Lock {
         // The holds are short (a page table lookup), so a waiter spins before it yields: under Rosetta
         // every sched_yield is a system call, and the queued waiters of a hot watch paid one per turn.
-        explicit Lock(Turns& turns) : _turns(turns), _turn(turns.next.fetch_add(1, std::memory_order_relaxed)) {
+        explicit Lock(Turns& turns, Site site) : _turns(turns), _turn(turns.next.fetch_add(1, std::memory_order_relaxed)) {
+            const bool profiled = turns.profiled;
+            std::uint8_t behind = SiteCount;
             for (unsigned spins = 0; _turns.serving.load(std::memory_order_acquire) != _turn; ++spins) {
+                if (profiled && spins == 0) {
+                    behind = _turns.holder.load(std::memory_order_relaxed);
+                    if (behind < SiteCount) _turns.waitsBehind[behind].fetch_add(1, std::memory_order_relaxed);
+                }
                 if (spins < 2048) __builtin_ia32_pause();
-                else ::sched_yield();
+                else {
+                    if (profiled && behind < SiteCount) _turns.yieldsBehind[behind].fetch_add(1, std::memory_order_relaxed);
+                    ::sched_yield();
+                }
             }
+            if (profiled) _turns.holder.store(site, std::memory_order_relaxed);
         }
         ~Lock() {
             _turns.serving.store(_turn + 1, std::memory_order_release);
@@ -596,6 +675,7 @@ private:
     };
 
     Watch() {
+        _lock.profiled = std::getenv("APS5_PROFILE_DRAW") != nullptr;
         if (std::getenv("APS5_NO_WRITE_WATCH") != nullptr) return;
         struct sigaction action {};
         action.sa_sigaction = &Watch::fault;
@@ -633,7 +713,8 @@ private:
 
     bool record(std::uintptr_t address) {
         const auto page = pageStart(address);
-        const Lock lock(_lock);
+        _collectStats.faults.fetch_add(1, std::memory_order_relaxed);
+        const Lock lock(_lock, SiteFault);
         auto it = _ranges.upper_bound(page);
         if (it == _ranges.begin()) return false;
         --it;
@@ -682,6 +763,34 @@ private:
 
     bool snapshot(std::uintptr_t page) {
         return guarded([&] { std::memcpy(_snapshots.at(page).get(), reinterpret_cast<const void*>(page), _page); });
+    }
+
+    // APS5_PROFILE_DRAW: what collections walk ([watch] line every 10 s).
+    struct CollectStats {
+        std::atomic<std::uint64_t> calls{0}, pages{0}, hotCompares{0}, hotChanged{0}, faults{0}, registers{0}, registerUs{0}, registerMaxUs{0}, registerMaxBytes{0};
+        std::atomic<std::int64_t> last{0};
+    };
+    CollectStats _collectStats;
+
+    void countCollect(std::uintptr_t begin, std::uintptr_t end) {
+        auto& stats = _collectStats;
+        stats.calls.fetch_add(1, std::memory_order_relaxed);
+        stats.pages.fetch_add((pageEnd(end) - pageStart(begin)) / _page, std::memory_order_relaxed);
+        const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        auto last = stats.last.load(std::memory_order_relaxed);
+        if (last == 0) stats.last.compare_exchange_strong(last, now);
+        else if (now - last >= 10 && stats.last.compare_exchange_strong(last, now)) {
+            std::string behind;
+            for (std::size_t site = 0; site < SiteCount; ++site) {
+                const auto waits = _lock.waitsBehind[site].exchange(0, std::memory_order_relaxed);
+                const auto yields = _lock.yieldsBehind[site].exchange(0, std::memory_order_relaxed);
+                if (waits == 0) continue;
+                char item[64];
+                std::snprintf(item, sizeof(item), " %s %llu/%llu", SiteNames[site], static_cast<unsigned long long>(waits), static_cast<unsigned long long>(yields));
+                behind += item;
+            }
+            std::fprintf(stderr, "[watch] collections (10 s): %llu walks over %llu pages, %llu hot pages compared (%llu changed), %llu faults recorded; %llu registers held the lock %.1f ms (longest %.1f ms, largest 0x%llx bytes); lock waits behind (waits/yields):%s\n", static_cast<unsigned long long>(stats.calls.exchange(0)), static_cast<unsigned long long>(stats.pages.exchange(0)), static_cast<unsigned long long>(stats.hotCompares.exchange(0)), static_cast<unsigned long long>(stats.hotChanged.exchange(0)), static_cast<unsigned long long>(stats.faults.exchange(0)), static_cast<unsigned long long>(stats.registers.exchange(0)), static_cast<double>(stats.registerUs.exchange(0)) / 1000.0, static_cast<double>(stats.registerMaxUs.exchange(0)) / 1000.0, static_cast<unsigned long long>(stats.registerMaxBytes.exchange(0)), behind.c_str());
+        }
     }
 
     // Rebuilds Covers' copy of the ranges (under the lock, after a change to them).
@@ -772,10 +881,24 @@ private:
                 if ((state & Protected) != 0) ::mprotect(reinterpret_cast<void*>(page), _page, state & ProtectionMask);
                 if ((state & Hot) != 0) _snapshots.erase(page);
             }
-            const auto head = static_cast<std::ptrdiff_t>((cutBegin - rangeBegin) / _page);
+            const auto head = static_cast<std::size_t>((cutBegin - rangeBegin) / _page);
             const auto tail = static_cast<std::ptrdiff_t>((cutEnd - rangeBegin) / _page);
-            if (rangeBegin < cutBegin) _ranges.emplace(rangeBegin, Range{cutBegin, std::vector<std::uint8_t>(pages.begin(), pages.begin() + head), std::vector<std::uint8_t>(heat.begin(), heat.begin() + head)});
-            if (cutEnd < rangeEnd) it = _ranges.emplace(cutEnd, Range{rangeEnd, std::vector<std::uint8_t>(pages.begin() + tail, pages.end()), std::vector<std::uint8_t>(heat.begin() + tail, heat.end())}).first;
+            // The tail is copied out and the head keeps the range's own vectors (cut, not copied).
+            std::vector<std::uint8_t> tailPages, tailHeat;
+            if (cutEnd < rangeEnd) {
+                tailPages.assign(pages.begin() + tail, pages.end());
+                tailHeat.assign(heat.begin() + tail, heat.end());
+            }
+            if (rangeBegin < cutBegin) {
+                pages.resize(head);
+                heat.resize(head);
+                if (head * 4 < pages.capacity()) {
+                    pages.shrink_to_fit();
+                    heat.shrink_to_fit();
+                }
+                _ranges.emplace(rangeBegin, Range{cutBegin, std::move(pages), std::move(heat)});
+            }
+            if (cutEnd < rangeEnd) it = _ranges.emplace(cutEnd, Range{rangeEnd, std::move(tailPages), std::move(tailHeat)}).first;
         }
         return removed;
     }
