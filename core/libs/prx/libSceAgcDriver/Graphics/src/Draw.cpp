@@ -1,4 +1,5 @@
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
+#include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/ColorTargetTransfer.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/GpuColorTransfer.hpp"
@@ -1904,6 +1905,33 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     // draw neither reads its attachments (a barrier would be owed, which no pass allows) nor
     // records anything outside a pass (an indirect draw's argument barrier and scratch copies).
     const auto passKey = DrawRenderPassKey(context, state, record.targetViews);
+    static const bool profileKeys = std::getenv("APS5_PROFILE_DRAW") != nullptr;
+    if (profileKeys) {
+        // APS5_PROFILE_DRAW: which part of the pass key changed between consecutive draws ([passkey]).
+        struct KeyParts {
+            std::vector<VkImageView> views;
+            std::uint32_t width = 0, height = 0, samples = 0, provoking = 0;
+            std::uint64_t key = 0;
+        };
+        static KeyParts last;
+        static std::array<std::uint64_t, 6> changes{};
+        static auto reported = std::chrono::steady_clock::now();
+        if (passKey != last.key && last.key != 0) {
+            const std::vector<VkImageView> views(record.targetViews.begin(), record.targetViews.end());
+            const bool viewsChanged = views != last.views;
+            const bool sameCount = views.size() == last.views.size();
+            ++changes[viewsChanged ? (sameCount ? 0 : 1) : 5];
+            if (state.renderExtent.width != last.width || state.renderExtent.height != last.height) ++changes[2];
+            if (state.samples != last.samples) ++changes[3];
+            if (static_cast<std::uint32_t>(state.provokingVertexMode) != last.provoking) ++changes[4];
+        }
+        last = {std::vector<VkImageView>(record.targetViews.begin(), record.targetViews.end()), state.renderExtent.width, state.renderExtent.height, static_cast<std::uint32_t>(state.samples), static_cast<std::uint32_t>(state.provokingVertexMode), passKey};
+        if (const auto now = std::chrono::steady_clock::now(); now - reported >= std::chrono::seconds(10)) {
+            reported = now;
+            AgcDriver::ProfilePrint_nid_no_patch("[passkey] key changes (10 s): views %llu (same count) / %llu (count changed), extent %llu, samples %llu, provoking mode %llu, other %llu; provoking mode per pipeline %d\n", static_cast<unsigned long long>(changes[0]), static_cast<unsigned long long>(changes[1]), static_cast<unsigned long long>(changes[2]), static_cast<unsigned long long>(changes[3]), static_cast<unsigned long long>(changes[4]), static_cast<unsigned long long>(changes[5]), context.provokingVertexModePerPipeline ? 1 : 0);
+            changes = {};
+        }
+    }
     const bool readsTarget = std::any_of(record.targets.begin(), record.targets.end(), [&](const std::shared_ptr<StorageTexture>& target) { return resources.ReadsImage(target.get()); });
     // A queued DCC key store over memory the draw writes or reads in place (unknown for an
     // address-based build), or over its GPU-side records, lands before it, as before a dispatch

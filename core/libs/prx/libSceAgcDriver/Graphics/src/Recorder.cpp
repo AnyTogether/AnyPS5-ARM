@@ -608,6 +608,9 @@ enum class PassEnd : std::uint8_t { Submit, Label, Samples, KeyChange, Hazard, F
 constexpr const char* PassEndNames[static_cast<std::size_t>(PassEnd::Count)] = {"submit", "label", "samples", "target change", "hazard", "forced", "sample segment", "other command"};
 struct PassEndStats {
     std::array<std::uint64_t, static_cast<std::size_t>(PassEnd::Count)> reasons{};
+    // Hazard ends by kind (PassHazard order: none, read after write, write after write, write after
+    // read, image, unknown read, unknown write).
+    std::array<std::uint64_t, 7> hazards{};
     std::unordered_map<std::uintptr_t, std::uint64_t> callers;
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
 };
@@ -633,6 +636,15 @@ void CountPassEnd(PassEnd reason, const void* caller = nullptr) {
         std::snprintf(item, sizeof(item), " %s %llu", PassEndNames[i], static_cast<unsigned long long>(stats.reasons[i]));
         text += item;
     }
+    constexpr std::array<const char*, 7> hazardNames{"none", "read after write", "write after write", "write after read", "image", "unknown read", "unknown write"};
+    text += " (hazards:";
+    for (std::size_t i = 1; i < stats.hazards.size(); ++i) {
+        char item[48];
+        std::snprintf(item, sizeof(item), " %s %llu", hazardNames[i], static_cast<unsigned long long>(stats.hazards[i]));
+        text += item;
+    }
+    text += ")";
+    stats.hazards = {};
     std::vector<std::pair<std::uint64_t, std::uintptr_t>> top;
     for (const auto& [offset, count] : stats.callers) top.emplace_back(count, offset);
     std::sort(top.rbegin(), top.rend());
@@ -1494,6 +1506,7 @@ Recorder::DrawPassStart Recorder::StartDrawPass(std::uint64_t key, bool forced, 
     if (hazard == PassHazard::None && pass.key == key) return {open->commands, true, false};
     const bool merge = MergeBarriers() && !fenced && !pass.fenced && !pass.afterPass;
     const bool elide = merge && hazard == PassHazard::None;
+    if (DrawProfiled() && hazard != PassHazard::None) ++PassEnds().hazards[static_cast<std::size_t>(hazard)];
     CountPassEnd(hazard != PassHazard::None ? PassEnd::Hazard : PassEnd::KeyChange);
     endOpenRenderPass(!merge);
     const auto commands = Commands();
