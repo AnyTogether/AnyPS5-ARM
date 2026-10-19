@@ -1,4 +1,5 @@
 #include <elfpatcher/macos/MacOsImage.hpp>
+#include <elfpatcher/general/ElfConstants.hpp>
 #include <elfpatcher/windows/WindowsStubEmitter.hpp>
 #include <elfpatcher/windows/WindowsTrampolineBuilder.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
@@ -214,6 +215,11 @@ void AppendPathCommand(std::vector<std::uint8_t>& out, const std::uint32_t cmd, 
     out.resize(start + size, 0);
 }
 
+struct GsTrap {
+    std::uint32_t Rva;
+    std::size_t Length;
+};
+
 // A guest %fs access the stubs can replace: a 64-bit load from fs:disp32 into a register, or the
 // 32-bit immediate store to the stack guard at fs:0x28. The same forms the Windows target handles.
 struct TlsAccess {
@@ -223,12 +229,18 @@ struct TlsAccess {
     std::uint32_t Immediate;
     std::uint8_t Register;
     std::uint32_t Displacement;
+    std::uint8_t AluOpcode;
 };
+
+bool IsAluReadOpcode(std::uint8_t opcode) {
+    return opcode == 0x03 || opcode == 0x0b || opcode == 0x13 || opcode == 0x1b || opcode == 0x23 || opcode == 0x2b || opcode == 0x33 || opcode == 0x3b;
+}
 
 struct TlsScan {
     const Domain::ProgramHeader* Tls = nullptr;
     std::vector<TlsAccess> Accesses;
     std::set<std::uint32_t> BranchTargets;
+    std::vector<GsTrap> GsTraps;
 };
 
 TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domain::ProgramHeader>& headers, const Windows::WindowsLoadImage& image) {
@@ -241,16 +253,23 @@ TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domai
             scan.Tls = &header;
         }
         if (header.Type != 1 || (header.Flags & 1) == 0) continue;
+        std::uint64_t decodedEnd = 0;
         for (auto instruction = instructions.lower_bound(header.MappedAddress); instruction != instructions.end() && *instruction - header.MappedAddress < header.FileSize; ++instruction) {
             const auto offset = *instruction - header.MappedAddress;
             const auto* bytes = source.data() + header.Offset + offset;
             const auto info = decoder.DecodeInstruction(bytes, header.FileSize - offset);
             const auto rva = image.GetRva(header.MappedAddress + offset, info.Length);
+            const bool insidePrevious = *instruction < decodedEnd;
+            decodedEnd = std::max(decodedEnd, *instruction + info.Length);
             if (info.HasBranchTarget && !info.HasRipRelativeDisp) {
                 const auto target = static_cast<std::int64_t>(rva) + static_cast<std::int64_t>(info.Length) + info.BranchDisp;
                 if (target >= 0 && target <= std::numeric_limits<std::uint32_t>::max()) scan.BranchTargets.insert(static_cast<std::uint32_t>(target));
             }
-            if (info.SegmentPrefix == 0) continue;
+            if (info.SegmentPrefix == 0 || (insidePrevious && info.SegmentPrefix != 0x64)) continue;
+            if (info.SegmentPrefix == 0x65) {
+                scan.GsTraps.push_back({rva, info.Length});
+                continue;
+            }
             const auto position = info.OpcodeOffset;
             bool hasOperandSizePrefix = false;
             bool supportedPrefixes = info.SegmentPrefix == 0x64;
@@ -262,14 +281,15 @@ TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domai
             const auto loadRegister = info.Length - position == 7 ? static_cast<std::uint8_t>(((bytes[position + 1] >> 3) & 7) | ((info.RexPrefix & 4) << 1)) : std::uint8_t{4};
             const bool loadValue = supportedPrefixes && (info.RexPrefix == 0x48 || info.RexPrefix == 0x4c) && loadRegister != 4 && bytes[position] == 0x8b && (bytes[position + 1] & 0xc7) == 0x04 && bytes[position + 2] == 0x25;
             const bool storeImmediate = supportedPrefixes && !hasOperandSizePrefix && (info.RexPrefix == 0 || info.RexPrefix == 0x40) && info.Length - position == 11 && bytes[position] == 0xc7 && bytes[position + 1] == 0x04 && bytes[position + 2] == 0x25 && Io::ReadU32(source, header.Offset + offset + position + 3) == 0x28;
-            if (!loadValue && !storeImmediate) {
+            const bool aluRead = supportedPrefixes && (info.RexPrefix == 0x48 || info.RexPrefix == 0x4c) && loadRegister != 4 && IsAluReadOpcode(bytes[position]) && (bytes[position + 1] & 0xc7) == 0x04 && bytes[position + 2] == 0x25;
+            if (!loadValue && !storeImmediate && !aluRead) {
                 std::ostringstream message;
                 message << "Unsupported macOS guest TLS instruction (bytes:" << std::hex << std::setfill('0');
                 for (std::size_t index = 0; index < info.Length; ++index) message << ' ' << std::setw(2) << static_cast<unsigned int>(bytes[index]);
                 message << ')';
                 throw Domain::RelinkerException(message.str(), header.Offset + offset);
             }
-            scan.Accesses.push_back({rva, info.Length, storeImmediate, storeImmediate ? Io::ReadU32(source, header.Offset + offset + position + 7) : 0, storeImmediate ? std::uint8_t{0} : loadRegister, storeImmediate ? 0 : Io::ReadU32(source, header.Offset + offset + position + 3)});
+            scan.Accesses.push_back({rva, info.Length, storeImmediate, storeImmediate ? Io::ReadU32(source, header.Offset + offset + position + 7) : 0, storeImmediate ? std::uint8_t{0} : loadRegister, storeImmediate ? 0 : Io::ReadU32(source, header.Offset + offset + position + 3), aluRead ? bytes[position] : std::uint8_t{0}});
         }
     }
     return scan;
@@ -396,6 +416,23 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     segments.push_back({"__TEXT", 0, LoadRva, VmProtRead | VmProtExecute, {}, {}});
     const auto guestSegments = segments.size();
     auto sections = image.BuildSections();
+    for (const auto& trap : tls.GsTraps) {
+        if (input.Trampolines != nullptr) {
+            for (const auto& site : *input.Trampolines) {
+                const auto siteRva = image.GetRva(site.Address, site.Length);
+                if (siteRva < trap.Rva + trap.Length && trap.Rva < siteRva + site.Length)
+                    throw Domain::RelinkerException("AMD-only instruction is also a guest GS access", siteRva);
+            }
+        }
+        const auto section = std::find_if(sections.begin(), sections.end(), [&](const auto& candidate) {
+            return trap.Rva >= candidate.Rva && trap.Rva - candidate.Rva < candidate.Data.size();
+        });
+        if (section == sections.end()) throw Domain::RelinkerException("Guest GS instruction is outside the image", trap.Rva);
+        const auto offset = trap.Rva - section->Rva;
+        if (trap.Length > section->Data.size() - offset) throw Domain::RelinkerException("Guest GS instruction crosses a section boundary", trap.Rva);
+        std::fill_n(section->Data.begin() + offset, trap.Length, 0x90);
+        std::copy(std::begin(kStubOpUd2), std::end(kStubOpUd2), section->Data.begin() + offset);
+    }
     // --to-intel stubs go after the guest pages, as on Windows; each site becomes a jump to its stub.
     if (input.Trampolines != nullptr && !input.Trampolines->empty()) {
         for (const auto& access : tls.Accesses) {
@@ -415,8 +452,8 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         if (section.Characteristics & Windows::SectionWrite) protection |= VmProtWrite;
         if (section.Characteristics & Windows::SectionExecute) protection |= VmProtExecute;
         auto name = section.Name == ".amdstub" ? std::string("__AMDSTUB") : "__ELF" + std::to_string(segments.size() - guestSegments);
-        guestEnd = std::max<std::uint64_t>(guestEnd, section.Rva + section.Data.size());
-        segments.push_back({std::move(name), section.Rva, section.Data.size(), protection, std::move(section.Data), {}});
+        guestEnd = std::max<std::uint64_t>(guestEnd, section.Rva + section.MemorySize());
+        segments.push_back({std::move(name), section.Rva, section.MemorySize(), protection, std::move(section.Data), {}});
     }
 
     // __APS5DATA: the metadata and, when the image has an initializer, its __mod_init_func pointer.
@@ -512,15 +549,20 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
                 throw Domain::RelinkerException("Branch enters a guest TLS instruction", *target);
             const auto stub = code.GetRva();
             const bool preserveAccumulator = access.StoreImmediate || access.Register != 0;
-            code.Emit({0x48, 0x8d, 0x64, 0x24, 0x80});                       // lea rsp, [rsp - 0x80]: skip the red zone
-            code.Emit({0x9c});                                               // pushfq
-            if (preserveAccumulator) code.Emit({0x50});                      // push rax
-            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(MetaTlsKey)); // mov rax, [rip + key]
-            code.Emit({0x65, 0x48, 0x8b, 0x04, 0xc5, 0, 0, 0, 0});           // mov rax, gs:[rax * 8]
-            code.Emit({0x48, 0x85, 0xc0});                                   // test rax, rax
-            const auto allocated = code.Branch({0x0f, 0x85});                // jnz
-            code.Rip({0x48, 0x8d, 0x05}, descriptor);                        // lea rax, [rip + descriptor]
-            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaAllocateSlot)); // call [rip + allocate]
+            code.Emit({0x48, 0x8d, 0x64, 0x24, 0x80});
+            if (access.AluOpcode != 0) {
+                code.Emit({0x50});
+                code.Emit({0x9c});
+            } else {
+                code.Emit({0x9c});
+                if (preserveAccumulator) code.Emit({0x50});
+            }
+            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(MetaTlsKey));
+            code.Emit({0x65, 0x48, 0x8b, 0x04, 0xc5, 0, 0, 0, 0});
+            code.Emit({0x48, 0x85, 0xc0});
+            const auto allocated = code.Branch({0x0f, 0x85});
+            code.Rip({0x48, 0x8d, 0x05}, descriptor);
+            code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaAllocateSlot));
             code.PatchBranch(allocated, code.GetRva());
             if (access.StoreImmediate) {
                 code.Emit({0xc7, 0x40, 0x28});                               // mov dword [rax + 0x28], imm32
@@ -529,11 +571,22 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
                 code.Emit({0x48, 0x8b, 0x80});                               // mov rax, [rax + disp32]
                 code.U32(access.Displacement);
             }
-            if (!access.StoreImmediate && access.Register != 0)               // mov reg, rax
-                code.Emit({static_cast<std::uint8_t>(0x48 | (access.Register >> 3)), 0x89, static_cast<std::uint8_t>(0xc0 | (access.Register & 7))});
-            if (preserveAccumulator) code.Emit({0x58});                       // pop rax
-            code.Emit({0x9d});                                               // popfq
-            code.Emit({0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0});              // lea rsp, [rsp + 0x80]
+            if (access.AluOpcode != 0 && access.Register == 0) {
+                code.Emit({0x9d});
+                code.Emit({0x48, 0x87, 0x04, 0x24});
+                code.Emit({0x48, access.AluOpcode, 0x04, 0x24});
+                code.Emit({0x48, 0x8d, 0x64, 0x24, 0x08});
+            } else if (access.AluOpcode != 0) {
+                code.Emit({0x9d});
+                code.Emit({static_cast<std::uint8_t>(0x48 | ((access.Register >> 3) << 2)), access.AluOpcode, static_cast<std::uint8_t>(0xc0 | ((access.Register & 7) << 3))});
+                code.Emit({0x58});
+            } else {
+                if (!access.StoreImmediate && access.Register != 0)
+                    code.Emit({static_cast<std::uint8_t>(0x48 | (access.Register >> 3)), 0x89, static_cast<std::uint8_t>(0xc0 | (access.Register & 7))});
+                if (preserveAccumulator) code.Emit({0x58});
+                code.Emit({0x9d});
+            }
+            code.Emit({0x48, 0x8d, 0xa4, 0x24, 0x80, 0, 0, 0});
             code.Rip({0xe9}, static_cast<std::uint32_t>(access.Rva + access.Length));
 
             // The guest instruction becomes a jump to its stub.

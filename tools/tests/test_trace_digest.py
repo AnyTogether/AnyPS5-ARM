@@ -280,6 +280,26 @@ class TraceDigestTests(unittest.TestCase):
         self.assertAlmostEqual(waits[0]["ms"], 14.5)
         self.assertEqual(waits[1]["name"], "Driver.WorkerWait")
 
+    def test_wait_subscope_without_parent_is_not_busy(self):
+        events = [EVENTS[1], complete(1, "Driver.WorkerWait.dequeue_order", 0, 4000),
+                  complete(1, "Driver.Packet", 4000, 5000), EVENTS[-3], EVENTS[-2]]
+        result = trace_digest.digest(trace_digest.Trace({"traceEvents": events}))
+        worker = result["threads"][0]
+        self.assertAlmostEqual(worker["wait_pct"], 40.0)
+        self.assertAlmostEqual(worker["busy_pct"], 50.0)
+        self.assertEqual(result["longest_waits"][0]["name"], "Driver.WorkerWait.dequeue_order")
+        self.assertEqual(worker["top"][0]["name"], "Driver.Packet")
+
+    def test_nested_wait_subscope_does_not_double_count(self):
+        events = [EVENTS[1], complete(1, "Driver.WorkerWait", 0, 4000),
+                  complete(1, "Driver.WorkerWait.dequeue_order", 1000, 2000),
+                  complete(1, "Driver.Packet", 4000, 5000), EVENTS[-3], EVENTS[-2]]
+        result = trace_digest.digest(trace_digest.Trace({"traceEvents": events}))
+        worker = result["threads"][0]
+        self.assertAlmostEqual(worker["wait_pct"], 40.0)
+        self.assertAlmostEqual(worker["busy_pct"], 50.0)
+        self.assertEqual(len(result["longest_waits"]), 1)
+
     def test_gpu_mutex_waits_with_site_names(self):
         for site in ("other", "dispatch", "indirect", "draw", "hook", "wait", "label", "flush", "present", "fill", "copy", "end", "try"):
             with self.subTest(site=site):

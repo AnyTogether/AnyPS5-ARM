@@ -66,6 +66,9 @@ public:
     Texture(const Context& context, VkImage depthImage, VkFormat depthFormat, VkImageAspectFlags aspect, VkComponentMapping components, VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D, std::uint32_t baseLayer = 0, std::shared_ptr<OwnedImage> owner = {});
     struct DepthCopyTag {};
     Texture(const Context& context, const std::shared_ptr<StorageTexture>& source, const GuestTextureResource& descriptor, VkComponentMapping components, DepthCopyTag);
+    struct SrgbExpandTag {};
+    Texture(const Context& context, const std::shared_ptr<StorageTexture>& source, const GuestTextureResource& descriptor, VkComponentMapping components, SrgbExpandTag);
+    static bool CanSrgbExpandFrom(const Context& context, const StorageTexture& source, const GuestTextureResource& descriptor);
     static VkFormat DepthCopyFormat(VkFormat colorFormat);
     static bool CanDepthCopyFrom(const StorageTexture& source, const GuestTextureResource& descriptor);
     struct BlockCopyTag {};
@@ -113,10 +116,13 @@ public:
     PerUseCopy CopyKind() const { return perUseCopy; }
     bool RefreshedPerUse() const { return perUseCopy == PerUseCopy::RemadePerUse; }
     void MarkRefreshedPerUse() { perUseCopy = PerUseCopy::RemadePerUse; }
+    bool Released() const { return released.load(std::memory_order_acquire); }
+    void MarkReleased() { released.store(true, std::memory_order_release); }
 
 private:
     void release() noexcept;
     bool refreshBlockCopy();
+    bool refreshSrgbExpand();
     void createFirstLayerView(const GuestTextureResource& descriptor, VkImageViewCreateInfo viewInfo);
     void prepareBaseLevelView(const GuestTextureResource& descriptor, VkImageViewCreateInfo viewInfo);
     void prepareSrgbView(const GuestTextureResource& descriptor, VkImageViewCreateInfo viewInfo);
@@ -146,7 +152,10 @@ private:
     std::shared_ptr<StorageTexture> storageSource;
     std::unique_ptr<CommandBatch> upload;
     PerUseCopy perUseCopy = PerUseCopy::None;
+    std::atomic<bool> released{false};
     bool copiedOnce = false;
+    bool srgbExpand = false;
+    GuestTextureResource sourceDescriptor{};
     std::uint64_t copiedVersion = 0;
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
     VkFormat blockFormat = VK_FORMAT_UNDEFINED;
@@ -353,9 +362,11 @@ public:
     // Keeps the image current with guest memory (see GuestMemory::CollectWrites).
     bool Refresh();
     static std::uint64_t SinglePassMoves();
+    static std::uint64_t SlabRetiles();
     static std::uint64_t RefreshesProved();
     static std::uint64_t UntrackedCompares();
     std::uint64_t GuestBytes() const;
+    std::uint64_t BudgetBytes() const;
     std::size_t OriginalSnapshotBytes() const { return original.capacity(); }
     VkDeviceSize AllocationBytes() const { return memoryBytes; }
 

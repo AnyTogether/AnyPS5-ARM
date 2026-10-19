@@ -26,6 +26,7 @@ struct DecodedInstruction {
     // Instructions Intel hosts have and Rosetta does not.
     [[nodiscard]] bool IsRdseed() const;
     [[nodiscard]] bool IsRdpid() const;
+    [[nodiscard]] bool IsRdtscp() const;
     [[nodiscard]] bool IsClwb() const;
 
 private:

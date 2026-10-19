@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 namespace ShaderRecompiler {
@@ -203,6 +204,28 @@ std::uint32_t GuestAddress(SpirvValueEmitContext& ctx, const IrValue& inst, cons
     return AddBdaImmediate(ctx, inst, address, immediate);
 }
 
+std::uint32_t GuestAddressLow(SpirvValueEmitContext& ctx, const IrValue& inst, const MemoryInfo& mem) {
+    const auto low = ctx.Arg(inst, 1);
+    if (mem.kind != ResourceKind::ScalarAddress) return low;
+    return Binary(ctx.state, spv::OpBitwiseAnd, TypeU32(ctx.state), low, ConstantU32(ctx.state, ~3u));
+}
+
+std::array<std::uint32_t, 4> ReadBdaDwords(SpirvValueEmitContext& ctx, const IrValue& inst, const MemoryInfo& mem, std::uint32_t dwords, std::uint32_t used) {
+    const auto lookup = [&] { return EmitBdaDwordReads(ctx, inst, GuestAddressBase(ctx, inst, mem), mem.offset, dwords, false, used); };
+    const auto* anchor = FindBdaAnchor(ctx.state, inst);
+    if (anchor == nullptr) return lookup();
+    return EmitAnchoredBdaRead(ctx.state, inst, *anchor, GuestAddressLow(ctx, inst, mem), static_cast<std::int32_t>(mem.offset), 32u, dwords, used, lookup);
+}
+
+std::uint32_t ReadBda(SpirvValueEmitContext& ctx, const IrValue& inst, const MemoryInfo& mem, std::uint32_t bits) {
+    const auto lookup = [&] { return std::array<std::uint32_t, 4>{EmitBdaRead(ctx, inst, GuestAddress(ctx, inst, mem), bits)}; };
+    const auto* anchor = FindBdaAnchor(ctx.state, inst);
+    if (anchor == nullptr) return lookup()[0];
+    auto immediate = mem.offset;
+    if (mem.kind == ResourceKind::ScalarAddress) immediate &= ~3u;
+    return EmitAnchoredBdaRead(ctx.state, inst, *anchor, GuestAddressLow(ctx, inst, mem), static_cast<std::int32_t>(immediate), bits, 1u, 1u, lookup)[0];
+}
+
 bool SameAddressValue(const IrValue* left, const IrValue* right, std::uint32_t depth = 0u) {
     if (left == right) return true;
     if (left == nullptr || right == nullptr || depth > 3u || left->Opcode() != right->Opcode() || left->ArgumentCount() != right->ArgumentCount()) return false;
@@ -225,10 +248,10 @@ bool WritesMemory(IrOpcode opcode) {
         image == ImageAccess::Write || image == ImageAccess::Atomic || opcode == IrOpcode::Barrier || opcode == IrOpcode::StoreVectorWindow;
 }
 
-std::vector<std::pair<const IrValue*, std::uint32_t>> AdjacentBdaLoads(SpirvValueEmitContext& ctx, const IrValue& inst, const MemoryInfo& mem) {
+std::vector<std::pair<const IrValue*, std::uint32_t>> AdjacentBdaLoads(const SpirvEmitterState& state, const IrValue& inst, const MemoryInfo& mem) {
     std::vector<std::pair<const IrValue*, std::uint32_t>> members;
     const IrBlock* block = inst.Parent();
-    if (block == nullptr || ctx.state.laneCount != 1u || (mem.offset & 3u) != 0u) return members;
+    if (block == nullptr || state.laneCount != 1u || (mem.offset & 3u) != 0u) return members;
     const auto& instructions = block->Instructions();
     auto next = std::find(instructions.begin(), instructions.end(), &inst);
     if (next == instructions.end()) return members;
@@ -239,7 +262,7 @@ std::vector<std::pair<const IrValue*, std::uint32_t>> AdjacentBdaLoads(SpirvValu
             if (WritesMemory(other->Opcode())) break;
             continue;
         }
-        const auto& otherMemory = ctx.Memory(*other);
+        const auto& otherMemory = state.program.Resources().memoryInfo.at(other->Flags<MemoryFlags>().index);
         if (otherMemory.planningOnly || otherMemory.kind != mem.kind || otherMemory.addressIsFull != mem.addressIsFull || otherMemory.coherent != mem.coherent || other->ArgumentCount() != inst.ArgumentCount()) continue;
         bool sameArguments = true;
         for (std::size_t index = 0; index < inst.ArgumentCount(); ++index) {
@@ -263,7 +286,7 @@ std::uint32_t LoadBda(SpirvValueEmitContext& ctx, const IrValue& inst, const Mem
             state.module.AddFunction(spv::OpCompositeExtract, TypeU32(state), value, grouped->second.first, grouped->second.second);
             return value;
         }
-        const auto members = AdjacentBdaLoads(ctx, inst, mem);
+        const auto members = AdjacentBdaLoads(state, inst, mem);
         if (!members.empty()) {
             std::uint32_t used = 1u;
             for (const auto& member : members) used |= 1u << member.second;
@@ -272,7 +295,7 @@ std::uint32_t LoadBda(SpirvValueEmitContext& ctx, const IrValue& inst, const Mem
             const auto none = state.module.AllocateId();
             state.module.AddFunction(spv::OpCompositeConstruct, vector, none, zero, zero, zero, zero);
             const auto all = EmitValueOrDefaultIfCondition(state, ActiveArgument(ctx, inst), vector, none, [&]() {
-                const auto values = EmitBdaDwordReads(ctx, inst, GuestAddressBase(ctx, inst, mem), mem.offset, 4u, false, used);
+                const auto values = ReadBdaDwords(ctx, inst, mem, 4u, used);
                 const auto read = state.module.AllocateId();
                 state.module.AddFunction(spv::OpCompositeConstruct, vector, read, values[0], values[1], values[2], values[3]);
                 return read;
@@ -284,7 +307,7 @@ std::uint32_t LoadBda(SpirvValueEmitContext& ctx, const IrValue& inst, const Mem
         }
     }
     return EmitValueOrZeroIfCondition(ctx.state, ActiveArgument(ctx, inst), [&]() {
-        return EmitBdaRead(ctx, inst, GuestAddress(ctx, inst, mem), bits);
+        return ReadBda(ctx, inst, mem, bits);
     });
 }
 
@@ -415,9 +438,33 @@ const MemoryInfo& SharedMemory(SpirvValueEmitContext& ctx, const IrValue& inst) 
     return mem;
 }
 
-bool RoutesApertures(const SpirvEmitterState& state, const MemoryInfo& mem) {
-    return mem.kind == ResourceKind::Flat && state.program.Resources().stage == IrShaderStage::Compute;
+
 }
+
+std::vector<const IrValue*> BdaReadSites(const SpirvEmitterState& state) {
+    std::vector<const IrValue*> sites;
+    std::unordered_set<const IrValue*> grouped;
+    const auto& memory = state.program.Resources().memoryInfo;
+    for (const IrBlock* block : state.program.BlockOrder()) {
+        for (const IrValue* inst : block->Instructions()) {
+            const auto info = AddressOpcodeInfoOf(inst->Opcode());
+            const auto index = inst->Flags<MemoryFlags>().index;
+            if (info.access != AddressAccess::Read || index >= memory.size() || grouped.contains(inst)) continue;
+            const auto& mem = memory[index];
+            if (mem.planningOnly || RoutesApertures(state, mem)) continue;
+            if (mem.kind != ResourceKind::ScalarAddress && mem.kind != ResourceKind::Flat && mem.kind != ResourceKind::Global) continue;
+            if (info.dataBits == 32u && info.components == 1u) {
+                for (const auto& member : AdjacentBdaLoads(state, *inst, mem)) grouped.insert(member.first);
+            } else if (info.components > 1u && UsedBdaDwords(*inst, info.components) == 0u) {
+                continue;
+            }
+            sites.push_back(inst);
+        }
+    }
+    return sites;
+}
+
+namespace {
 
 struct ApertureAddress {
     std::uint32_t low = 0;
@@ -577,7 +624,7 @@ void LoadAddress(SpirvValueEmitContext& ctx, const IrValue& inst, std::uint32_t 
 std::uint32_t LoadBdaWide(SpirvValueEmitContext& ctx, const IrValue& inst, const MemoryInfo& mem, std::uint32_t components) {
     auto& state = ctx.state;
     return EmitValueOrDefaultIfCondition(state, ActiveArgument(ctx, inst), TypeU32Composite(state, components), ConstantU32CompositeZero(state, components), [&]() {
-        return ConstructU32Composite(state, components, EmitBdaDwordReads(ctx, inst, GuestAddressBase(ctx, inst, mem), mem.offset, components));
+        return ConstructU32Composite(state, components, ReadBdaDwords(ctx, inst, mem, components, 0u));
     });
 }
 
@@ -761,6 +808,11 @@ std::uint32_t UpdateFunctionElement(SpirvEmitterState& state, std::uint32_t poin
 
 template<typename TUpdate>
 std::uint32_t LockedLdsUpdate(SpirvEmitterState& state, std::uint32_t type, std::uint32_t zero, TUpdate&& update);
+
+template<typename TNext>
+std::uint32_t LdsBufferAtomic64(SpirvEmitterState& state, std::uint32_t low, TNext&& next) {
+    return Unary(state, spv::OpBitcast, TypeU64(state), AtomicUpdateTyped(state, EmitLdsBufferU64Pointer(state, low), ResourceKind::Lds, TypeScalarU64(state), next));
+}
 
 template<typename TOperation>
 std::uint32_t EmitLdsAtomic32(SpirvEmitterState& state, const MemoryInfo& mem, TOperation&& operation) {
@@ -1146,7 +1198,7 @@ std::uint32_t ApertureAtomic64(SpirvValueEmitContext& ctx, const IrValue& inst, 
     const auto unaligned = Binary(state, spv::OpINotEqual, TypeBool(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), byteOffset, ConstantU32(state, 7u)), ConstantU32(state, 0u));
     EmitIfCondition(state, unaligned, [&] { RecordBdaFault(state, address, ConstantU32(state, 8u), instruction, BdaAbi::FaultReason::Unaligned); });
     if (kind == ResourceKind::Scratch && state.program.Info().scratchDwords == 0u) return ConstantU64(state, 0u);
-    if (kind == ResourceKind::Lds && !state.requirements.ldsLock) ctx.Fail(inst, "64-bit LDS atomic reached through a flat address without the workgroup lock");
+    if (kind == ResourceKind::Lds && !state.requirements.ldsLock && !state.requirements.ldsBufferInt64Atomics) ctx.Fail(inst, "64-bit LDS atomic reached through a flat address without the workgroup lock");
     MemoryInfo storage{};
     storage.kind = kind;
     const auto resource = PrepareMemoryResourceAccess(state, storage);
@@ -1156,6 +1208,7 @@ std::uint32_t ApertureAtomic64(SpirvValueEmitContext& ctx, const IrValue& inst, 
     const auto opcode = inst.Opcode();
     return EmitValueOrDefaultIfCondition(state, aligned, TypeU64(state), ConstantU64(state, 0u), [&] {
         return EmitValueOrDefaultIfCondition(state, EmitMemoryElementInBounds(state, resource, high), TypeU64(state), ConstantU64(state, 0u), [&] {
+            if (kind == ResourceKind::Lds && state.requirements.ldsBufferInt64Atomics) return LdsBufferAtomic64(state, low, [&](std::uint32_t old) { return FlatAtomicNext64(state, opcode, old, value, comparator); });
             const auto update = [&]() {
                 const auto lowPointer = EmitMemoryElementPointer(state, resource, low);
                 const auto highPointer = EmitMemoryElementPointer(state, resource, high);
@@ -1282,11 +1335,7 @@ std::uint32_t AppendConsume(SpirvValueEmitContext& ctx, const IrValue& inst, boo
     const auto count = Binary(state, spv::OpIAdd, TypeU32(state), Unary(state, spv::OpBitCount, TypeU32(state), low), Unary(state, spv::OpBitCount, TypeU32(state), high));
     const auto first = ctx.FirstLane(ballot);
     const auto sourceLane = wave64 ? Binary(state, spv::OpBitwiseAnd, TypeU32(state), first, ConstantU32(state, 31u)) : first;
-    auto amount = count;
-    if (ordered) {
-        amount = state.module.AllocateId();
-        state.module.AddFunction(spv::OpGroupNonUniformShuffle, TypeU32(state), amount, ConstantU32(state, spv::ScopeSubgroup), ctx.Arg(inst, 4), EmitHostSubgroupLane(state, sourceLane));
-    }
+    const auto amount = ordered ? ctx.Shuffle(inst, 4, first) : count;
     const auto isFirst = Binary(state, spv::OpIEqual, TypeBool(state), EmitSubgroupLocalInvocationId(state), sourceLane);
     const auto storageBounds = EmitMemoryElementInBounds(state, access, index);
     const auto bounds = m0Address ? AndCondition(state, storageBounds, m0Bounds) : storageBounds;
@@ -1386,6 +1435,12 @@ std::uint32_t SharedAtomic64(SpirvValueEmitContext& ctx, const IrValue& inst, TR
         const auto low = EmitMemoryElementIndex(state, resource, rawIndex);
         const auto high = EmitMemoryElementIndex(state, resource, Binary(state, spv::OpIAdd, TypeU32(state), rawIndex, ConstantU32(state, 1u)));
         return EmitValueOrDefaultIfCondition(state, EmitMemoryElementInBounds(state, resource, high), TypeU64(state), ConstantU64(state, 0u), [&]() {
+            if (state.requirements.ldsBufferInt64Atomics) {
+                const auto unaligned = Binary(state, spv::OpINotEqual, TypeBool(state), Binary(state, spv::OpBitwiseAnd, TypeU32(state), low, ConstantU32(state, 1u)), ConstantU32(state, 0u));
+                EmitIfCondition(state, unaligned, [&] { RecordBdaFaultWords(state, Binary(state, spv::OpShiftLeftLogical, TypeU32(state), rawIndex, ConstantU32(state, 2u)), ConstantU32(state, 0u), ConstantU32(state, 8u), ConstantU32(state, inst.Flags<MemoryFlags>().pc), BdaAbi::FaultReason::Unaligned); });
+                const auto aligned = Unary(state, spv::OpLogicalNot, TypeBool(state), unaligned);
+                return EmitValueOrDefaultIfCondition(state, aligned, TypeU64(state), ConstantU64(state, 0u), [&]() { return LdsBufferAtomic64(state, low, [&](std::uint32_t old) { return replacement(state, old); }); });
+            }
             const auto update = [&]() {
                 const auto lowPointer = EmitMemoryElementPointer(state, resource, low);
                 const auto highPointer = EmitMemoryElementPointer(state, resource, high);

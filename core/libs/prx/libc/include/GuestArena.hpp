@@ -29,6 +29,7 @@ bool GuestArenaWriteWatched_nid_postfix();
 void GuestArenaSetProtection_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint32_t protection);
 void GuestArenaCommit_nid_postfix(void* pointer, std::size_t bytes, std::uint32_t protection, std::size_t granule);
 void GuestArenaReset_nid_postfix(void* pointer, std::size_t bytes);
+void GuestArenaSetAccessObserver_nid_postfix(void (*callback)(std::uintptr_t address, std::size_t bytes));
 #ifdef _WIN32
 bool GuestArenaHandleWrite_nid_postfix(std::uintptr_t address);
 bool GuestArenaHandleRead_nid_postfix(std::uintptr_t address);
@@ -65,6 +66,8 @@ void GuestArenaEndHostWrite_nid_postfix(void* pointer, std::size_t bytes);
 // overlapping the range made at or after `sinceNs` (steady clock), for the GPU clobber trace.
 bool GuestArenaHostWritesTraced_nid_postfix();
 bool GuestArenaHostWriteSince_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint64_t sinceNs, std::uintptr_t* hitAddress, std::size_t* hitBytes, std::uint64_t* hitNs);
+void GuestArenaSetHostReadHook_nid_no_patch(void (*hook)(std::uintptr_t address, std::size_t bytes));
+void GuestArenaPrepareHostRead_nid_no_patch(const void* pointer, std::size_t bytes);
 
 }
 

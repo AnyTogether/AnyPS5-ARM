@@ -15,6 +15,9 @@ extern "C" {
     int APS5_VABI nanosleep_nid_postfix(const KernelTimespec* rqtp, KernelTimespec* rmtp);
     int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
     int APS5_VABI clock_getres_nid_postfix(int clockId, KernelTimespec* res);
+#ifdef _WIN32
+    int APS5_VABI ClockTimeWin32ErrorToGuestErrno_nid_no_patch(std::uint32_t error);
+#endif
     int APS5_VABI gettimeofday_nid_postfix(KernelTimeval* tv, KernelTimezone* tz);
 
     // Debug aid: APS5_TRACE_WAITS=1 aggregates blocking waits (event flags, semaphores, condition

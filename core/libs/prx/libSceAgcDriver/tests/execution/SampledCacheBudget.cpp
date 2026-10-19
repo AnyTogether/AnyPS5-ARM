@@ -50,7 +50,7 @@ constexpr std::uint64_t Ceiling = Budget + Budget / 4u;
 
 class Device {
 public:
-    explicit Device(bool resourceImages = false) {
+    explicit Device(bool enableStorageImageMultisample = true) {
 #ifdef _WIN32
         library = SDL_LoadObject("vulkan-1.dll");
 #else
@@ -96,13 +96,12 @@ public:
             queue.queueFamilyIndex = family;
             queue.queueCount = 1;
             queue.pQueuePriorities = &priority;
+            VkPhysicalDeviceFeatures supported{};
+            function<PFN_vkGetPhysicalDeviceFeatures>("vkGetPhysicalDeviceFeatures")(context.physical, &supported);
             VkPhysicalDeviceFeatures enabled{};
             enabled.shaderInt64 = VK_TRUE;
-            if (resourceImages) {
-                VkPhysicalDeviceFeatures supported{};
-                function<PFN_vkGetPhysicalDeviceFeatures>("vkGetPhysicalDeviceFeatures")(context.physical, &supported);
-                enabled.shaderStorageImageMultisample = supported.shaderStorageImageMultisample;
-            }
+            enabled.shaderStorageImageMultisample = enableStorageImageMultisample && supported.shaderStorageImageMultisample;
+            context.storageImageMultisample = enabled.shaderStorageImageMultisample == VK_TRUE;
             address.pNext = &bytes;
             std::vector<const char*> extensionsEnabled{VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME};
             if (hasExtension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) {
@@ -469,6 +468,48 @@ void heldTests(const Context& context) {
     Require(TextureCacheUsage().sampledEntries == capacity && TextureCacheUsage().sampledBytes <= Budget, "released textures were not evicted down to the budget");
 }
 
+void releasedTests(Context context) {
+    PlaceholderImages placeholders(context);
+    context.placeholderImages = &placeholders;
+    TextureCache textures(context);
+    context.textureCache = &textures;
+    ClearCachedTextures(context.device);
+    auto& cache = SharedResourceCache();
+    cache.Clear();
+    try {
+        Block block(context);
+        auto pinned = ImageResources(context, block, 0, 1, true);
+        Require(pinned->SampledTextures().size() == 1 && !pinned->SampledTextures().front()->ViewsStorageImage(), "the pinned descriptor set does not hold a sampled snapshot");
+        const std::weak_ptr<Texture> texture = pinned->SampledTextures().front();
+        const std::weak_ptr<ShaderResources> pinnedSet = pinned;
+        cache.Insert({1}, pinned);
+        Require(cache.Find({1}) == pinned, "the resource cache rejected a descriptor set whose texture is cached");
+        pinned.reset();
+        ClearCachedTextures(context.device);
+        Require(!texture.expired() && texture.lock()->Released(), "the sampled texture cache dropped a texture the resource cache holds without marking it released");
+        auto live = ImageResources(context, block, 1, 1, true);
+        std::vector<std::shared_ptr<ShaderResources>> displaced;
+        cache.Insert({2}, live, &displaced);
+        Require(cache.Find({1}) == nullptr && cache.Find({2}) == live && cache.Size() == 1, "the resource cache kept an entry holding a released texture");
+        Require(displaced.size() == 1 && displaced.front() == pinnedSet.lock(), "the entry holding a released texture was not handed back to the caller");
+        displaced.clear();
+        Require(pinnedSet.expired() && texture.expired(), "the resource cache kept a released texture alive");
+        auto stale = ImageResources(context, block, 2, 1, true);
+        ClearCachedTextures(context.device);
+        Require(stale->SampledTextures().front()->Released(), "a held texture the sampled cache dropped is not marked released");
+        cache.Insert({3}, stale, &displaced);
+        Require(cache.Find({3}) == nullptr, "a descriptor set holding a released texture entered the resource cache");
+        Require(cache.Size() == 0 && displaced.size() == 1 && displaced.front() == live, "the live entry whose texture was released stayed in the resource cache");
+        displaced.clear();
+    } catch (...) {
+        cache.Clear();
+        throw;
+    }
+    cache.Clear();
+    ClearCachedTextures(context.device);
+    std::puts("resource cache released texture tests passed");
+}
+
 void rescanTests(const Context& context) {
     constexpr std::uint32_t SmallSide = 128;
     constexpr std::size_t SmallBytes = std::size_t{SmallSide} * SmallSide * 4u;
@@ -678,6 +719,7 @@ int main(int argc, char** argv) {
         const bool memory = argc > 1 && std::string(argv[1]) == "memory";
         const std::string mode = argc > 1 ? argv[1] : "";
         const bool resources = mode == "resource-admission" || mode == "resource-oversized" || mode == "resource-clear";
+        const bool disableStorageImageMultisample = mode == "without-storage-image-multisample";
 #ifdef _WIN32
         if (!memory) _putenv_s("APS5_TEXTURE_CACHE_MIB", "1");
 #else
@@ -685,13 +727,28 @@ int main(int argc, char** argv) {
 #endif
         std::unique_ptr<Device> device;
         try {
-            device = std::make_unique<Device>(resources);
+            device = std::make_unique<Device>(!disableStorageImageMultisample);
         } catch (const std::exception& error) {
             if (std::getenv("ANYPS5_REQUIRE_VULKAN") != nullptr) throw;
             std::printf("skipped, no usable Vulkan device: %s\n", error.what());
             return VulkanTestSkipped;
         }
         auto context = device->GetContext();
+        if (disableStorageImageMultisample) {
+            PlaceholderImages placeholders(context);
+            for (std::uint32_t heap = ShaderRecompiler::RuntimeAbi::FirstStorageImageBinding;
+                 heap < ShaderRecompiler::RuntimeAbi::FirstImageBinding + ShaderRecompiler::RuntimeAbi::ImageBindingCount; ++heap) {
+                const auto shape = PlaceholderImageShapeOf(heap);
+                if (shape.samples == VK_SAMPLE_COUNT_1_BIT) continue;
+                bool refused = false;
+                try {
+                    placeholders.View(heap);
+                } catch (const std::runtime_error&) {
+                    refused = true;
+                }
+                Require(refused, "a device without storage-image MSAA returned a placeholder for typed multisample storage heap " + std::to_string(heap));
+            }
+        }
         TextureDetiler detiler(context);
         context.detiler = &detiler;
         if (resources) {
@@ -713,6 +770,7 @@ int main(int argc, char** argv) {
             reportedBudgetTests(context);
             snapshotTests(context);
             heldTests(context);
+            releasedTests(context);
             rescanTests(context);
             viewEvictionTests(context);
             viewTests(context);

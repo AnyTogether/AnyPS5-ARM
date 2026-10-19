@@ -111,6 +111,15 @@ std::uint32_t EmitLdsLockPointer(SpirvEmitterState& state) {
     return pointer;
 }
 
+std::uint32_t EmitLdsBufferU64Pointer(SpirvEmitterState& state, std::uint32_t index) {
+    if (!state.requirements.ldsBufferInt64Atomics || state.ldsBufferU64Variable == 0u || state.ldsBufferBase == 0u) {
+        FailEmit("64-bit device memory LDS atomics were not prepared at function entry");
+    }
+    const auto pointer = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassStorageBuffer, TypeScalarU64(state)), pointer, state.ldsBufferU64Variable, ConstantU32(state, 0u), EmitBinaryU32(state, spv::OpShiftRightLogical, EmitAddU32(state, state.ldsBufferBase, index), ConstantU32(state, 1u)));
+    return pointer;
+}
+
 MemoryResourceAccess PrepareMemoryResourceAccess(SpirvEmitterState& state, const MemoryInfo& mem) {
     MemoryResourceAccess access;
     access.kind = mem.kind;

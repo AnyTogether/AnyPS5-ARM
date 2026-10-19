@@ -52,6 +52,7 @@ public:
         append(key, request.context.pixel);
         append(key, request.context.vertex);
         append(key, request.context.floatMode);
+        append(key, request.context.convertedSamples);
         appendFallbacks(key, request);
         appendMesh(key, request);
         appendTessellation(key, request);
@@ -85,6 +86,7 @@ private:
         append(key, request.context.pixel);
         append(key, request.context.vertex);
         append(key, request.context.floatMode);
+        append(key, request.context.convertedSamples);
         appendFallbacks(key, request);
         appendMesh(key, request);
         appendTessellation(key, request);
@@ -193,6 +195,9 @@ private:
         append(key, value.ditheredAlphaToCoverage);
         append(key, value.quadPixelMask);
         append(key, value.quadSampleMask);
+        append(key, value.iteratesSamples);
+        append(key, value.positionLocation);
+        append(key, value.sampleLocations);
         append(key, value.targetOutputMode);
     }
 

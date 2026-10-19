@@ -24,8 +24,8 @@ struct Archive {
 // Leaked like the descriptors below: paths resolve from exit handlers that run after static
 // destructors, and macOS refuses to lock a destroyed mutex.
 Archive& State() {
-    static auto& archive = *new Archive;
-    return archive;
+    static auto* archive = new Archive;
+    return *archive;
 }
 
 bool SameComponent(std::string_view left, std::string_view right) {

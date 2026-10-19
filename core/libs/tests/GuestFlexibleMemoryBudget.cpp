@@ -2,6 +2,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "SceTypes.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,8 @@ int APS5_VABI sceKernelConfiguredFlexibleMemorySize(std::size_t*);
 int APS5_VABI sceKernelAvailableFlexibleMemorySize(std::size_t*);
 int APS5_VABI sceKernelMapFlexibleMemory(void**, std::size_t, int, int);
 int APS5_VABI sceKernelReleaseFlexibleMemory(void*, std::size_t);
+int APS5_VABI munmap_nid_postfix(void*, std::size_t) noexcept;
+int APS5_VABI sceKernelVirtualQuery(const void*, int, VirtualQueryInfo*, std::uint64_t);
 std::uint64_t GuestImageSegmentBytes_nid_no_patch();
 void* APS5_VABI dlopen_nid_postfix(const char*, int);
 char* APS5_VABI dlerror_nid_postfix();
@@ -26,6 +29,45 @@ static void Require(bool condition, std::source_location location = std::source_
         std::fprintf(stderr, "Flexible memory budget check failed at %s:%u\n", location.file_name(), static_cast<unsigned>(location.line()));
         std::abort();
     }
+}
+
+static void CheckPosixRelease(std::size_t before) {
+    constexpr std::size_t page = PS5_PAGE_SIZE;
+    const auto checkBudget = [&](const char* stage, std::size_t expected) {
+        std::size_t available = 0;
+        Require(sceKernelAvailableFlexibleMemorySize(&available) == 0);
+        std::printf("POSIX flexible release %s: available=%zu expected=%zu\n", stage, available, expected);
+        std::fflush(stdout);
+        Require(available == expected);
+    };
+    void* mapped = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapped, page * 4, 3, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapped);
+    bytes[0] = 17;
+    bytes[page * 4 - 1] = 29;
+    checkBudget("allocated", before - page * 4);
+    auto* middle = static_cast<unsigned char*>(mapped) + page;
+    Require(munmap_nid_postfix(middle, page + 1) == 0);
+    VirtualQueryInfo info{};
+    Require(sceKernelVirtualQuery(middle, 0, &info, sizeof(info)) != 0);
+    Require(sceKernelVirtualQuery(middle + page, 0, &info, sizeof(info)) != 0);
+    Require(bytes[0] == 17 && bytes[page * 4 - 1] == 29);
+    checkBudget("rounded partial unmap", before - page * 2);
+    Require(sceKernelReleaseFlexibleMemory(mapped, page) == 0);
+    checkBudget("kernel releases first page", before - page);
+    auto* last = static_cast<unsigned char*>(mapped) + page * 3;
+    Require(munmap_nid_postfix(last, 1) == 0);
+    Require(sceKernelVirtualQuery(last, 0, &info, sizeof(info)) != 0);
+    checkBudget("POSIX releases last page", before);
+    Require(munmap_nid_postfix(mapped, page * 4) == 0);
+    checkBudget("already unmapped", before);
+    mapped = nullptr;
+    Require(sceKernelMapFlexibleMemory(&mapped, page * 3, 3, 0) == 0);
+    Require(munmap_nid_postfix(mapped, page * 3 - 1) == 0);
+    for (std::size_t offset = 0; offset < page * 3; offset += page) {
+        Require(sceKernelVirtualQuery(static_cast<unsigned char*>(mapped) + offset, 0, &info, sizeof(info)) != 0);
+    }
+    checkBudget("rounded full unmap", before);
 }
 
 int main(int argc, char** argv) {
@@ -68,15 +110,76 @@ int main(int argc, char** argv) {
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before - length / 2);
     Require(sceKernelReleaseFlexibleMemory(static_cast<unsigned char*>(mapped) + length / 2, length / 2) == 0);
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
+    CheckPosixRelease(before);
     void* oversized = nullptr;
     Require(sceKernelMapFlexibleMemory(&oversized, before + PS5_PAGE_SIZE, 3, 0) == SCE_KERNEL_ERROR_ENOMEM && oversized == nullptr);
     Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
     if (mode == "limited") {
+        const auto checkBudget = [&](std::size_t expected) {
+            std::size_t current = 0;
+            Require(sceKernelAvailableFlexibleMemorySize(&current) == 0);
+            std::printf("Fixed flexible mapping: available=%zu expected=%zu\n", current, expected);
+            std::fflush(stdout);
+            Require(current == expected);
+        };
+        constexpr auto page = PS5_PAGE_SIZE;
+        void* original = nullptr;
+        Require(sceKernelMapFlexibleMemory(&original, page * 4, 3, 0) == 0);
+        auto* bytes = static_cast<volatile unsigned char*>(original);
+        for (std::size_t i = 0; i < 4; ++i) bytes[i * page] = static_cast<unsigned char>(17 + i);
+        auto* middle = static_cast<unsigned char*>(original) + page;
+        void* replacement = middle;
+        Require(sceKernelMapFlexibleMemory(&replacement, page, 3, 0x10) == 0 && replacement == middle);
+        Require(bytes[0] == 17 && bytes[page] == 0 && bytes[page * 2] == 19 && bytes[page * 3] == 20);
+        checkBudget(before - page * 4);
+        bytes[page] = 23;
+        Require(sceKernelMapFlexibleMemory(&replacement, page, 3, 0x90) == SCE_KERNEL_ERROR_ENOMEM);
+        Require(bytes[page] == 23);
+        checkBudget(before - page * 4);
+        replacement = original;
+        Require(sceKernelMapFlexibleMemory(&replacement, page, 3, 0x10) == 0 && replacement == original);
+        Require(bytes[0] == 0 && bytes[page] == 23 && bytes[page * 3] == 20);
+        checkBudget(before - page * 4);
+        Require(sceKernelMapFlexibleMemory(&replacement, page * 3, 3, 0x10) == 0 && replacement == original);
+        Require(bytes[0] == 0 && bytes[page] == 0 && bytes[page * 2] == 0 && bytes[page * 3] == 20);
+        checkBudget(before - page * 4);
+        Require(sceKernelReleaseFlexibleMemory(middle, page * 2) == 0);
+        checkBudget(before - page * 2);
+        replacement = middle;
+        Require(sceKernelMapFlexibleMemory(&replacement, page * 3, 3, 0x10) == 0 && replacement == middle);
+        Require(bytes[page] == 0 && bytes[page * 3] == 0);
+        checkBudget(before - page * 4);
+        Require(sceKernelReleaseFlexibleMemory(original, page * 4) == 0);
+        checkBudget(before);
         const auto length = before & ~(PS5_PAGE_SIZE - 1);
         void* full = nullptr;
         Require(sceKernelMapFlexibleMemory(&full, length, 3, 0) == 0);
         void* extra = nullptr;
         Require(sceKernelMapFlexibleMemory(&extra, PS5_PAGE_SIZE, 3, 0) == SCE_KERNEL_ERROR_ENOMEM && extra == nullptr);
+        static_cast<volatile unsigned char*>(full)[0] = 31;
+        replacement = full;
+        Require(sceKernelMapFlexibleMemory(&replacement, length, 3, 0x90) == SCE_KERNEL_ERROR_ENOMEM);
+        Require(static_cast<volatile unsigned char*>(full)[0] == 31);
+        checkBudget(before - length);
+        auto* fullBytes = static_cast<volatile unsigned char*>(full);
+        fullBytes[page] = 37;
+        fullBytes[length - page] = 41;
+        auto* fullMiddle = static_cast<unsigned char*>(full) + page;
+        replacement = fullMiddle;
+        Require(sceKernelMapFlexibleMemory(&replacement, page, 3, 0x10) == 0 && replacement == fullMiddle);
+        Require(fullBytes[0] == 31 && fullBytes[page] == 0 && fullBytes[length - page] == 41);
+        checkBudget(before - length);
+        replacement = static_cast<unsigned char*>(full) + length - page;
+        Require(sceKernelMapFlexibleMemory(&replacement, page * 2, 3, 0x10) == SCE_KERNEL_ERROR_ENOMEM);
+        Require(fullBytes[0] == 31 && fullBytes[length - page] == 41);
+        checkBudget(before - length);
+        replacement = full;
+        Require(sceKernelMapFlexibleMemory(&replacement, length + page, 3, 0x10) == SCE_KERNEL_ERROR_ENOMEM);
+        Require(static_cast<volatile unsigned char*>(full)[0] == 31);
+        checkBudget(before - length);
+        Require(sceKernelMapFlexibleMemory(&replacement, length, 3, 0x10) == 0 && replacement == full);
+        Require(static_cast<volatile unsigned char*>(full)[0] == 0);
+        checkBudget(before - length);
         Require(sceKernelReleaseFlexibleMemory(full, length) == 0);
         Require(sceKernelAvailableFlexibleMemorySize(&available) == 0 && available == before);
     }

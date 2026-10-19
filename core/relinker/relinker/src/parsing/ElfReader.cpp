@@ -2,6 +2,7 @@
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <relinker/domain/Types.hpp>
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <utility>
 
@@ -165,6 +166,23 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
         }
     }
 
+    bool hasTls = false;
+    for (const auto& tls : headers) {
+        if (tls.Type != PT_TLS) continue;
+        if (hasTls)
+            throw RelinkerException("Multiple ELF TLS segments", tls.Offset);
+        hasTls = true;
+        if (tls.FileSize > tls.MemorySize || (tls.Alignment > 1 && !std::has_single_bit(tls.Alignment)))
+            throw RelinkerException("Invalid or unsupported ELF TLS layout", tls.Offset);
+        if (tls.FileSize == 0) continue;
+        const bool covered = std::any_of(headers.begin(), headers.end(), [&](const ProgramHeader& load) {
+            return load.Type == PT_LOAD && tls.MappedAddress >= load.MappedAddress && tls.MappedAddress - load.MappedAddress <= load.MemorySize
+                && tls.FileSize <= load.MemorySize - (tls.MappedAddress - load.MappedAddress);
+        });
+        if (!covered)
+            throw RelinkerException("PT_TLS initialization image is outside PT_LOAD memory", tls.Offset);
+    }
+
     return headers;
 }
 
@@ -272,16 +290,6 @@ FileByteOffset ElfReader::TranslateVirtualAddress(VirtualAddress address) const 
     }
 
     throw RelinkerException("Virtual address not mapped by any PT_LOAD segment", address);
-}
-
-std::vector<std::uint8_t> ElfReader::ReadSection(const SectionHeader& header) const {
-    if (!_rangeFits(header.Offset, header.SectionSize, _fileBuffer.size())) {
-        throw RelinkerException("Section offset out of bounds", header.Offset);
-    }
-
-    return std::vector<std::uint8_t>(
-        _fileBuffer.begin() + header.Offset,
-        _fileBuffer.begin() + header.Offset + header.SectionSize);
 }
 
 std::vector<std::uint8_t> ElfReader::ReadSegment(const ProgramHeader& header) const {

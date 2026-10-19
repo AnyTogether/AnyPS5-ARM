@@ -3,6 +3,17 @@ name: Pages
 on:
   push:
     branches: [main]
+    paths:
+      - .github/workflows/pages.yml
+      - CMakeLists.txt
+      - core/relinker/**
+      - demo/web/**
+      - tools/build_web.py
+      - tools/nid_names.py
+      - tools/progress.py
+      - tools/progress_history.py
+      - tools/rdna_isa.txt
+      - tools/test_web.py
   workflow_dispatch:
   release:
     types: [published]

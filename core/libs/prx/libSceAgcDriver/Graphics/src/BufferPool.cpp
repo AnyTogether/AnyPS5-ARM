@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Execution/include/ProfileOutput.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdio>
@@ -51,7 +52,8 @@ BufferPool::~BufferPool() {
     for (auto& [memory, block] : slabBlocks) freeBlock(*block);
 }
 
-VkDeviceMemory BufferPool::AllocateMemory(const VkMemoryAllocateInfo& allocation, const char* operation) {
+VkDeviceMemory BufferPool::AllocateMemory(const VkMemoryAllocateInfo& allocation, const char* operation, std::optional<std::uint32_t> hostType, std::uint32_t* allocatedType) {
+    if (allocatedType != nullptr) *allocatedType = allocation.memoryTypeIndex;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     auto result = allocateMemory(device, &allocation, nullptr, &memory);
     const auto initialResult = result;
@@ -73,6 +75,21 @@ VkDeviceMemory BufferPool::AllocateMemory(const VkMemoryAllocateInfo& allocation
             memory = VK_NULL_HANDLE;
             result = allocateMemory(device, &allocation, nullptr, &memory);
             ++attempts;
+        }
+    }
+    if (result == VK_ERROR_OUT_OF_DEVICE_MEMORY && hostType.has_value() && *hostType != allocation.memoryTypeIndex) {
+        auto host = allocation;
+        host.memoryTypeIndex = *hostType;
+        memory = VK_NULL_HANDLE;
+        result = allocateMemory(device, &host, nullptr, &memory);
+        ++attempts;
+        if (result == VK_SUCCESS) {
+            if (allocatedType != nullptr) *allocatedType = *hostType;
+            static std::atomic<std::uint64_t> placements{0}, placedBytes{0};
+            const auto count = placements.fetch_add(1, std::memory_order_relaxed) + 1;
+            const auto total = placedBytes.fetch_add(allocation.allocationSize, std::memory_order_relaxed) + allocation.allocationSize;
+            if (count <= 5 || (count & (count - 1)) == 0) std::fprintf(stderr, "[bufferpool] %s: memory type %u is out of device memory for %llu bytes after reclaiming %llu and releasing %llu; placed in host memory type %u until it is released; %llu such allocations, %llu MiB\n", operation, allocation.memoryTypeIndex, static_cast<unsigned long long>(allocation.allocationSize), static_cast<unsigned long long>(reclaimed), static_cast<unsigned long long>(released), *hostType, static_cast<unsigned long long>(count), static_cast<unsigned long long>(total >> 20u));
+            return memory;
         }
     }
     if (result == VK_SUCCESS) {
@@ -368,6 +385,10 @@ void BufferPool::Put(const BufferAllocation& allocation) noexcept {
 std::shared_ptr<BufferPool> GetBufferPool(const Context& context) {
     if (!context.bufferPool) context.bufferPool = std::make_shared<BufferPool>(context);
     return context.bufferPool;
+}
+
+VkDeviceMemory AllocateImageMemory(const Context& context, const VkMemoryAllocateInfo& allocation, std::uint32_t mask, const char* operation) {
+    return GetBufferPool(context)->AllocateMemory(allocation, operation, context.RefusedDeviceMemoryFallback(mask, allocation.memoryTypeIndex));
 }
 
 }

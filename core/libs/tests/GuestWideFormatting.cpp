@@ -114,10 +114,13 @@ static void CheckPositional() {
 static void CheckPointer() {
     char16_t buffer[64];
     const auto address = [](std::uintptr_t value) { return reinterpret_cast<void*>(value); };
-    Require(Format(buffer, 64, u"%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 23 &&
-        buffer == std::u16string(u"0x0|0x1234|0xdeadbeef12"), "vswprintf %p uses the 0x form");
-    Require(Format(buffer, 64, u"[%8p][%-8p][%08p][%.6p]", address(0x1a), address(0x1a), address(0x1a), address(0x1a)) == 40 &&
-        buffer == std::u16string(u"[    0x1a][0x1a    ][0x00001a][0x00001a]"), "vswprintf %p width and precision");
+    Require(Format(buffer, 64, u"%p|%p|%p", address(0), address(0x1234), address(0xdeadbeef12)) == 17 &&
+        buffer == std::u16string(u"0|1234|deadbeef12"), "vswprintf %p uses the console form");
+    Require(Format(buffer, 64, u"[%10p][%-10p][%.8p][%08p]", address(0x1234), address(0x1234), address(0x1234), address(0x1a)) == 44 &&
+        buffer == std::u16string(u"[      1234][1234      ][00001234][0000001a]"), "vswprintf %p width and precision");
+    Require(Format(buffer, 64, u"[%.0p][%p]", address(0), address(0)) == 5 &&
+        buffer == std::u16string(u"[][0]"), "vswprintf %p with a zero precision prints nothing");
+    Require(Format(buffer, 64, u"[%lp]", address(0x1234)) == -1, "vswprintf %lp is refused");
 }
 
 static void CheckCount() {

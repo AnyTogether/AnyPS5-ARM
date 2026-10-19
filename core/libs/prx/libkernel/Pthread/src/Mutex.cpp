@@ -39,7 +39,7 @@ PthreadMutex resolveMutex(PthreadMutex* mutex, bool initialize) {
     std::lock_guard lock(initializationMutex);
     const auto current = slot.load(std::memory_order_acquire);
     if (current == destroyedMutex())
-        throw std::runtime_error("Mutex has been destroyed");
+        return nullptr;
     if (current && current != adaptiveInitializer())
         return current;
     if (!initialize)
@@ -53,6 +53,8 @@ PthreadMutex resolveMutex(PthreadMutex* mutex, bool initialize) {
 
 template<typename TAcquire>
 int acquireMutex(PthreadMutex mutex, TAcquire acquire, int unavailable, bool tryOnly) {
+    if (!mutex)
+        return SCE_KERNEL_ERROR_EINVAL;
     const auto thread = std::this_thread::get_id();
     const bool owned = mutex->_owner.load(std::memory_order_acquire) == thread;
     if (owned && mutex->_type != MutexType::Recursive) {
@@ -188,6 +190,8 @@ int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex) {
 
 int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex) {
     auto* current = resolveMutex(mutex, false);
+    if (!current)
+        return SCE_KERNEL_ERROR_EINVAL;
     if (current->_owner.load(std::memory_order_acquire) != std::this_thread::get_id())
         return sceNotPermitted;
     bool released = true;

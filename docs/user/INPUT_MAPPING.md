@@ -16,7 +16,7 @@ While a title has a mouse open (`sceMouseOpen`) and the window is focused, AnyPS
 
 Game-controller bindings are enabled automatically and are not affected by keyboard or mouse overrides in this file.
 
-Supported actions are `Cross`, `Circle`, `Triangle`, `Square`, `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Options`, `Up`, `Right`, `Down`, `Left`, `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown`, `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown`, `TouchLeft`, `TouchRight`, `ToggleMouse`, and `ToggleFullscreen`.
+Supported actions are `Cross`, `Circle`, `Triangle`, `Square`, `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Options`, `Up`, `Right`, `Down`, `Left`, `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown`, `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown`, `TouchLeft`, `TouchRight`, `StickModifier`, `Shake`, `ToggleMouse`, `ToggleFullscreen` (F11), and `TogglePerformanceOverlay` (F10, the [performance overlay](USAGE.md#performance-overlay)). `ToggleFullscreen` and `TogglePerformanceOverlay` accept only keyboard keys.
 
 ### Default bindings
 
@@ -30,6 +30,7 @@ Without an `anyps5-input.ini`, or for actions the file does not mention, these b
 | `Square` | Left mouse button |
 | `L1` | Q |
 | `R1` | E, Left Alt, Right Alt |
+| `L2` | R, Mouse button 4 (X1) |
 | `R2` | Right mouse button |
 | `L3` | Left Shift, Right Shift |
 | `R3` | Left Ctrl, Right Ctrl |
@@ -38,10 +39,9 @@ Without an `anyps5-input.ini`, or for actions the file does not mention, these b
 | `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown` | A, D, W, S |
 | `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown` | F, H, T, G |
 | `TouchLeft`, `TouchRight` | Backspace, Tab |
-| `ToggleMouse` | Middle mouse button |
+| `Shake` | X (reports a swinging acceleration and angular velocity while held) |
+| `ToggleMouse` | Middle mouse button, F7 |
 | `ToggleFullscreen` | F11 |
-
-`L2` has no built-in keyboard or mouse binding.
 
 For example, this changes Cross to F or Space, moves the left stick to IJKL, uses the mouse buttons for Square and R2, and keeps all other built-in bindings:
 
@@ -67,8 +67,11 @@ The same file also accepts these settings, each at most once, in the form `Setti
 | `MouseCurve` | Number from 0.2 to 5, the response exponent. Above 1 gives finer control at low speed; below 1 reaches large tilts sooner. | `1` |
 | `MouseDeadzoneOffset` | Number from 0 to 0.9, the smallest tilt any movement produces as a fraction of full tilt. Set it just above the game's own deadzone: raise it if slow movement doesn't move the camera, lower it if small movements jump. | `0.2` |
 | `MouseMaxSpeed` | Number from 0.1 to 10, the highest tracked speed as a multiple of the full-tilt speed. Above 1, a fast flick keeps the stick at full tilt a little longer after the mouse stops. | `1` |
-| `MouseSmoothingMs` | Number from 0 to 500, the smoothing time constant in milliseconds. 0 follows every mouse report directly. | `10` |
+| `MouseSmoothingMs` | Number from 0 to 500, the smoothing time constant in milliseconds. A mouse that reports fewer than 300 times per second, such as a 125 or 250 Hz mouse, is smoothed over at least three of its report intervals, up to 30 ms; the report rate is measured from the movement itself. 0 follows every mouse report directly and turns this off too. | `10` |
 | `MouseDecayMs` | Number from 1 to 1000, the milliseconds without movement after which the stick is centered. | `30` |
+| `StickModifierScale` | Number from 0.05 to 1, the tilt of keyboard stick bindings while a `StickModifier` binding is held. | `0.5` |
+| `KeyboardRampMs` | Number from 0 to 2000, the milliseconds a keyboard stick binding takes to move the stick from the center to full tilt. 0 tilts at once. | `0` |
+| `TriggerRampMs` | Number from 0 to 2000, the milliseconds a key or mouse button bound to `L2` or `R2` takes to press the trigger from 0 to full. 0 presses it fully at once. | `0` |
 
 ```ini
 LeftStickDeadzone = 12
@@ -76,9 +79,26 @@ RightStickDeadzone = 8
 MouseSensitivity = 2.5
 ```
 
+## Analog keyboard input
+
+`StickModifier` has no built-in binding. While a key or mouse button bound to it is held, the keyboard stick bindings tilt the stick by `StickModifierScale` of its range instead of fully, for walking or fine aim. Controller sticks and the mouse stick are not affected, and opposite keys still cancel each other.
+
+```ini
+StickModifier = KEY:Z
+StickModifierScale = 0.4
+```
+
+With `KeyboardRampMs` above 0, keyboard stick bindings move the stick toward their tilt at a steady speed instead of jumping, and back to the center the same way when the keys are let go. Opposite keys held together move the stick to the center at the same speed.
+
+With `TriggerRampMs` above 0, a key or mouse button bound to `L2` or `R2` presses the analog trigger gradually and lets it go the same way, for throttle and brake in racing titles. A pressed controller trigger is not slowed, and the larger of the two values is passed on.
+
+## Shake
+
+While the `Shake` input is held (X by default), the controller reports its acceleration and angular velocity swinging back and forth every 50 ms, for titles that ask the player to shake the controller. A controller's own motion sensors are used otherwise.
+
 ## Mouse as the right stick
 
-`ToggleMouse` (the middle mouse button by default) captures the mouse and drives the right stick from how fast the mouse moves. Capture uses raw relative input, so the pointer speed and acceleration set in the operating system don't apply. Press it again to release the mouse. Capture also ends, and every held key is let go, when the window loses focus.
+`ToggleMouse` (the middle mouse button or F7 by default; a mouse without a middle button can use F7) captures the mouse and drives the right stick from how fast the mouse moves. Capture uses raw relative input, so the pointer speed and acceleration set in the operating system don't apply. Press it again to release the mouse. Capture also ends, and every held key is let go, when the window loses focus.
 
 The stick tilts in the direction the mouse moves, and further the faster it moves. Speed is measured in counts per second over the time between updates, so the same hand speed gives the same tilt at any frame rate. Any movement tilts the stick at least `MouseDeadzoneOffset`, so slow movement isn't lost inside the game's own deadzone. When the mouse stops, the stick eases back and is centered `MouseDecayMs` after the last movement.
 

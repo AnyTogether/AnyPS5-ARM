@@ -17,6 +17,7 @@
 #include <span>
 #include <array>
 #include <sstream>
+#include <string_view>
 
 namespace AgcDriver::Graphics {
 namespace {
@@ -48,6 +49,25 @@ std::string zeroMessage(std::uint32_t offset, std::uint32_t value, const char* n
     char detail[64];
     std::snprintf(detail, sizeof(detail), " (register 0x%x = 0x%08x)", offset, value);
     return std::string(name) + " is unsupported" + detail;
+}
+
+std::string tessellationMessage(std::uint32_t config, std::uint32_t parameters, const ShaderRecompiler::TessellationConfiguration& tess) {
+    static constexpr std::array<std::string_view, 3> Types{"TESS_ISOLINE", "TESS_TRIANGLE", "TESS_QUAD"};
+    static constexpr std::array<std::string_view, 4> Partitionings{"PART_INTEGER", "PART_POW2", "PART_FRAC_ODD", "PART_FRAC_EVEN"};
+    static constexpr std::array<std::string_view, 4> Topologies{"OUTPUT_POINT", "OUTPUT_LINE", "OUTPUT_TRIANGLE_CW", "OUTPUT_TRIANGLE_CCW"};
+    std::ostringstream message;
+    const auto field = [&](std::string_view name, std::uint32_t value, std::span<const std::string_view> names) {
+        message << name << '=' << value;
+        if (value < names.size()) message << ' ' << names[value];
+    };
+    message << "VGT_TF_PARAM=0x" << std::hex << parameters << std::dec << " (";
+    field("TYPE", tess.domain, Types);
+    message << ", ";
+    field("PARTITIONING", tess.partitioning, Partitionings);
+    message << ", ";
+    field("TOPOLOGY", tess.outputTopology, Topologies);
+    message << "), VGT_LS_HS_CONFIG=0x" << std::hex << config << std::dec << " (NUM_PATCHES=" << tess.patchesPerGroup << ", HS_NUM_INPUT_CP=" << tess.inputControlPoints << ", HS_NUM_OUTPUT_CP=" << tess.outputControlPoints << "): only triangle and quad domains with integer, fractional-even or fractional-odd partitioning and triangle output are supported by the reference path";
+    return message.str();
 }
 
 void zero(const Registers& registers, std::uint32_t offset, std::uint32_t mask, const char* name, RegisterBank bank = RegisterBank::Context) {
@@ -94,7 +114,7 @@ VkConservativeRasterizationModeEXT decodeConservativeRasterization(const QueueSt
         const auto primitive = read(queue.userConfig, 0x242, RegisterBank::UserConfig);
         requireConservativeTriangles(primitive == 4u || primitive == 5u || primitive == 6u || primitive == 21u, primitive == 1u ? "points" : primitive == 2u || primitive == 3u ? "lines" : primitive == 7u || primitive == 17u ? "rectangles" : "other primitive types", "VGT_PRIMITIVE_TYPE", primitive);
     }
-    Require((read(cx, 0x1b3) & 0x44u) == 0, "conservative rasterization with centroid interpolation is unsupported");
+    Require((read(cx, 0x1b3) & 0x44u) == 0 || (read(cx, 0x2f8) & 7u) == 0, "conservative rasterization with centroid interpolation of more than one rasterized sample is unsupported");
     return VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
 }
 
@@ -439,7 +459,6 @@ std::string singleSampleDepthScanRejection(const QueueState& queue) {
 
 constexpr std::uint32_t CoveredCentroidIsCenter = 1u << 29u;
 constexpr std::uint32_t SampleZeroRefusedInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage);
-constexpr std::uint32_t PixelCenterPositionInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionX) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PositionY);
 constexpr std::uint32_t CentroidInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid);
 
 bool coveredCentroidSupported(const QueueState& queue) {
@@ -518,8 +537,7 @@ bool rasterizesSampleZeroOnly(const Registers& cx, const State& state) {
     if (state.samples <= 1 || state.alphaToCoverage || (read(cx, 0x292) & 1u) == 0) return false;
     const auto inputs = read(cx, 0x1b3) & read(cx, 0x1b4);
     const auto refused = state.perSampleShading ? ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage) : SampleZeroRefusedInputs;
-    const bool sampleIndexMovesPosition = (inputs & ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary)) != 0 && (inputs & PixelCenterPositionInputs) != 0;
-    return (inputs & refused) == 0 && !sampleIndexMovesPosition;
+    return (inputs & refused) == 0;
 }
 
 void rasterizeSampleZero(State& state) {
@@ -777,6 +795,7 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
             const auto mapping = static_cast<std::uint8_t>(alternate ? 0xecu : 0xe4u);
             if (number == unorm) return {VK_FORMAT_R8G8_UNORM, 2, mapping};
             if (number == snorm) return {VK_FORMAT_R8G8_SNORM, 2, mapping};
+            if (number == uint) return {VK_FORMAT_R8G8_UINT, 2, mapping};
             return fail();
         }
         case 4:
@@ -848,7 +867,6 @@ void intersect(VkRect2D& result, const Registers& registers, std::uint32_t offse
     const auto y = (tl >> 16u) & (screen ? 0xffffu : 0x7fffu);
     const auto right = br & 0xffffu;
     const auto bottom = br >> 16u;
-    Require(x <= right && y <= bottom, "inverted scissor rectangle");
     const auto oldRight = static_cast<std::uint32_t>(result.offset.x) + result.extent.width;
     const auto oldBottom = static_cast<std::uint32_t>(result.offset.y) + result.extent.height;
     const auto left = std::max(static_cast<std::uint32_t>(result.offset.x), x);
@@ -878,6 +896,27 @@ std::array<VkSampleLocationEXT, 32> SampleLocations(const State& state) {
                 position = {standard[0], standard[1]};
             }
             locations[pixel * state.samples + sample] = {0.5f + position[0] / 16.0f, 0.5f + position[1] / 16.0f};
+        }
+    }
+    return locations;
+}
+
+std::array<std::uint8_t, 32> PixelSampleLocations(const State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) {
+    using ShaderRecompiler::PixelInput;
+    using ShaderRecompiler::PixelInputBit;
+    std::array<std::uint8_t, 32> locations{};
+    const bool sampleBarycentrics = (pixel.inputAddr & (PixelInputBit(PixelInput::PerspectiveSample) | PixelInputBit(PixelInput::LinearSample))) != 0u;
+    const bool samplePosition = !state.perSampleShading && (pixel.posX || pixel.posY) && pixel.positionLocation == ShaderRecompiler::PixelPositionLocation::Sample;
+    if (!sampleBarycentrics && !samplePosition) return locations;
+    const auto samples = state.perSampleShading ? state.samples : 1u;
+    for (std::uint32_t pixelIndex = 0; pixelIndex < 4u; ++pixelIndex) {
+        for (std::uint32_t sample = 0; sample < samples; ++sample) {
+            if (state.customSampleLocations) {
+                locations[pixelIndex * 8u + sample] = state.sampleLocations[pixelIndex * 8u + sample];
+            } else if (state.samples != 1) {
+                const auto& standard = state.samples == 2 ? StandardLocations2[sample] : state.samples == 4 ? StandardLocations4[sample] : StandardLocations8[sample];
+                locations[pixelIndex * 8u + sample] = static_cast<std::uint8_t>((standard[0] & 0xf) | ((standard[1] & 0xf) << 4u));
+            }
         }
     }
     return locations;
@@ -915,7 +954,7 @@ ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
         validate(tess.inputControlPoints != 0 && tess.inputControlPoints <= 32 && tess.outputControlPoints != 0 && tess.outputControlPoints <= 32, "invalid tessellation control-point counts");
         validate(tess.patchesPerGroup != 0, "VGT_LS_HS_CONFIG.NUM_PATCHES is zero");
         if ((parameters & ~0x000600ffu) != 0) Require(false, zeroMessage(0x2db, parameters, "VGT_TF_PARAM donut, factor detection, memory type or reserved state"));
-        validate((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2 || tess.partitioning == 3) && (tess.outputTopology == 2 || tess.outputTopology == 3), "only triangle and quad domains with integer, fractional-even or fractional-odd partitioning and triangle output are supported by the reference path");
+        if (!((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2 || tess.partitioning == 3) && (tess.outputTopology == 2 || tess.outputTopology == 3))) validate(false, tessellationMessage(config, parameters, tess).c_str());
         result.minTessellationLevel = readFloat(queue.context, 0x287);
         result.maxTessellationLevel = readFloat(queue.context, 0x286);
         Require(result.minTessellationLevel >= 0.0f && result.minTessellationLevel <= 63.0f && result.minTessellationLevel <= result.maxTessellationLevel && result.maxTessellationLevel >= 1.0f, "tessellation level clamps need 0 <= VGT_HOS_MIN_TESS_LEVEL <= 63, VGT_HOS_MAX_TESS_LEVEL >= 1 and the minimum at most the maximum");
@@ -1094,9 +1133,20 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     const bool depthKeepsSampleZero = result.depth && result.depth->samples == 1 && result.samples > 1;
     zero(cx, 0x292, ScanModeMask & ~1u, "scan conversion mode");
+    if (depthKeepsSampleZero && (read(cx, 0x292) & 1u) == 0) {
+        const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+        const auto sampleInputs = read(cx, 0x1b3) & read(cx, 0x1b4) & (ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage));
+        Require(filled && !result.alphaToCoverage && (PixelProgramSkipped(queue) || ((read(cx, 0x293) & PixelShaderIteratesSamples) == 0 && sampleInputs == 0)) && (read(cx, 0x203) & 0x100u) == 0 && (read(cx, 0x201) & 0x0f0c0000u) == 0, "a one-sample depth target under a multisampled rasterizer without MSAA_ENABLE is unsupported for points or lines and with alpha-to-coverage, PS_ITER_SAMPLE, a sample index or coverage input, a sample-mask export, or DB_EQAA Z interpolation or overrasterization");
+        result.samples = 1;
+        result.customSampleLocations = false;
+        result.sampleLocations.fill(0);
+        result.sampleLocationGrid = false;
+    }
     if (result.samples > 1 && (read(cx, 0x292) & 1u) == 0) {
         const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-        Require(filled && !result.depth && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines, a depth target or alpha-to-coverage");
+        Require(filled && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines or alpha-to-coverage");
+        if (const auto eqaa = find(cx, 0x201); result.depth && eqaa != cx.end() && (eqaa->second & 0x0f0c0000u) != 0) throw std::runtime_error(zeroMessage(0x201, eqaa->second, "a multisampled depth target rasterized without MSAA_ENABLE with Z interpolation or overrasterization (DB_EQAA)"));
+        if (const auto control = find(cx, 0x203); result.depth && control != cx.end() && (control->second & 0x100u) != 0) throw std::runtime_error(zeroMessage(0x203, control->second, "a multisampled depth target rasterized without MSAA_ENABLE with a sample-mask export"));
         result.customSampleLocations = true;
         result.sampleLocations.fill(0);
         result.sampleLocationGrid = false;
@@ -1107,7 +1157,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     zero(cx, 0x293, ScanControlMask, "primitive discard or out-of-order rasterization");
     result.perSampleShading = result.samples > 1 && (read(cx, 0x293) & PixelShaderIteratesSamples) != 0;
-    if (depthKeepsSampleZero) {
+    if (depthKeepsSampleZero && result.samples > 1) {
         Require(rasterizesSampleZeroOnly(cx, result), "the depth target's sample count differs from the rasterizer's");
         rasterizeSampleZero(result);
     }
@@ -1179,7 +1229,14 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         if (slotExport == 7 && ((read(cx, 0x31c + slot * 0xfu) >> 8u) & 7u) != 4u) throw std::runtime_error("AGC graphics: color export format 7 (UINT16_ABGR) into a target that is not unsigned integer is unsupported");
         color.exportIndex = index;
         color.uintExport = slotExport == 7;
+        if (color.samples == 1 && result.samples > 1 && result.colors.empty() && !result.depth && (read(cx, 0x292) & 1u) == 0) {
+            const auto sampleInputs = read(cx, 0x1b3) & read(cx, 0x1b4) & (ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage));
+            Require(!result.perSampleShading && sampleInputs == 0 && (read(cx, 0x203) & 0x100u) == 0, "a one-sample color target under a multisampled rasterizer without MSAA_ENABLE is unsupported with PS_ITER_SAMPLE, a sample index or coverage input, or a sample-mask export");
+            result.samples = 1;
+            result.customSampleLocations = false;
+        }
         if (color.samples > 1 && result.samples == 1 && result.colors.empty() && !result.depth && !result.alphaToCoverage && (read(cx, 0x292) & 1u) == 0) {
+            Require(result.conservativeRasterization == VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT || (read(cx, 0x1b3) & 0x44u) == 0, "conservative rasterization with centroid interpolation of a draw raised to a multisampled target is unsupported");
             result.samples = color.samples;
             result.customSampleLocations = true;
             result.sampleLocations.fill(0);

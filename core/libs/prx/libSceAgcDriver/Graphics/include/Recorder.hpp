@@ -110,10 +110,17 @@ public:
     static constexpr std::size_t UnwrittenSnapshotEntries = 4096;
     static constexpr std::size_t DrawInputBudget = std::size_t{1024} << 20u;
     static constexpr std::size_t DrawInputEntries = 16384;
-    std::shared_ptr<Buffer> UnwrittenDrawSnapshot(std::uint64_t address, std::size_t bytes, const std::array<std::uint64_t, 3>& stamp);
-    void NoteUnwrittenDrawSnapshot(std::uint64_t address, std::size_t bytes, const std::array<std::uint64_t, 3>& stamp, std::shared_ptr<Buffer> buffer);
+    std::shared_ptr<Buffer> UnwrittenDrawSnapshot(std::uint64_t address, std::size_t bytes, const std::array<std::uint64_t, 3>& stamp, VkDeviceSize* offset = nullptr);
+    void NoteUnwrittenDrawSnapshot(std::uint64_t address, std::size_t bytes, const std::array<std::uint64_t, 3>& stamp, std::shared_ptr<Buffer> buffer, VkDeviceSize offset = 0);
     std::shared_ptr<Buffer> ReusableDrawSnapshot(std::uint64_t address, std::size_t bytes, SnapshotUse use = SnapshotUse::Storage, std::uint32_t* derived = nullptr, std::uint64_t generation = 0);
     void KeepDrawSnapshot(std::uint64_t address, std::size_t bytes, std::uint64_t generation, std::uint64_t registryGeneration, std::shared_ptr<Buffer> buffer, SnapshotUse use = SnapshotUse::Storage, std::uint32_t derived = 0);
+    static constexpr std::size_t DrawUploadChunk = std::size_t{1} << 20u;
+    struct UploadSlice {
+        std::shared_ptr<Buffer> buffer;
+        VkDeviceSize offset = 0;
+        std::byte* bytes = nullptr;
+    };
+    UploadSlice DrawUpload(std::size_t bytes);
     static constexpr std::size_t IndexRangeEntries = 16384;
     static constexpr std::size_t KeptIndexRangeIndices = 4096;
     bool KnownHighestIndex(std::uint64_t address, std::size_t bytes, SnapshotUse use, std::optional<std::uint32_t>& highest);
@@ -181,6 +188,7 @@ public:
     static ReadStatistics ReadCounts();
     // Whether the OPEN (unsubmitted) batch writes the range: a wait on such a range must submit it.
     bool OpenWriteOverlaps(std::uint64_t address, std::size_t bytes) const;
+    std::uint64_t PendingWriterSerial(std::uint64_t address, std::size_t bytes) const;
     // What SyncThrough(address, bytes) would wait for, for the [hooksync] attribution: the newest
     // batch whose noted range overlaps the access (the open batch counts first, with the serial it
     // will get), whether that batch's fence has already signaled (its GPU work is done, so the
@@ -771,7 +779,7 @@ private:
     void removeLabels(Batch& batch);
     void release(Batch& batch) noexcept;
     static bool overlaps(const Batch& batch, std::uint64_t address, std::uint64_t end);
-    static std::optional<ReadKind> readOverlap(const Batch& batch, std::uint64_t address, std::uint64_t end);
+    static std::optional<ReadKind> readOverlap(const Batch& batch, std::uint64_t address, std::uint64_t end, std::optional<ReadKind> only = std::nullopt);
     static std::vector<std::pair<std::uint64_t, std::uint64_t>> notedReads(const Batch& batch);
     bool signaled(const Batch& batch) const;
     // Rebuilds the lock-free snapshot of pending writes from open, inFlight and finishing.
@@ -835,6 +843,8 @@ private:
     std::uint64_t submissions = 0;
     std::size_t inFlightKeptBytes = 0;
     std::uint64_t writeNoteCount = 0;
+    std::shared_ptr<Buffer> drawUpload;
+    VkDeviceSize drawUploadUsed = 0;
     // Command buffers and fences of completed batches, reused by later ones (hundreds of batches per
     // frame would otherwise allocate and free their objects each time).
     std::vector<std::pair<VkCommandBuffer, VkFence>> spare;
@@ -860,6 +870,7 @@ private:
     struct UnwrittenSnapshot {
         std::size_t bytes;
         std::shared_ptr<Buffer> buffer;
+        VkDeviceSize offset = 0;
     };
     std::unordered_map<std::uint64_t, UnwrittenSnapshot> unwrittenSnapshots;
     std::array<std::uint64_t, 3> unwrittenStamp{};

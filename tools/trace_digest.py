@@ -23,7 +23,7 @@ RAMP = "._:-=+*#%@"
 
 
 def is_wait(name):
-    return name.startswith("GpuMutex.wait.") or "wait" in name.rsplit(".", 1)[-1].lower()
+    return "wait" in name.lower()
 
 
 class Trace:

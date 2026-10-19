@@ -4,6 +4,8 @@
 
 [Full guide in English and Turkish / Türkçe rehber](docs/user/GUIDE.md)
 
+The relinker-only build runs on macOS, including Apple silicon.
+
 [**Web converter**](https://boykopovar.github.io/AnyPS5/) - files stay on your device.
 
 ![anyps5_collage1](https://github.com/user-attachments/assets/ed2f0b2d-33d3-46d7-ab88-767ca872fc99)

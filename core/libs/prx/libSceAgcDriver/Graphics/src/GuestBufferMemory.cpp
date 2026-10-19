@@ -1288,6 +1288,12 @@ bool wouldRetireImport(const HostImports& state, const ImportRun& run) {
     return previous.base + previous.bytes > run.base;
 }
 
+bool sameRange(const ImportFailure& entry, const GuestAllocations::Lease& lease) {
+    const auto current = entry.ranges.size() == 1 ? leasedRangeOwner(lease, entry.base, entry.base + entry.bytes) : nullptr;
+    if (current != nullptr && entry.bytes < current->bytes) return !entry.ranges.front().owner_before(current) && !current.owner_before(entry.ranges.front());
+    return sameRun(entry, importRun(lease, entry.base));
+}
+
 bool sameRange(const HostImport& entry, const GuestAllocations::Lease& lease) {
     if (entry.ranges.size() == 1 && !entry.joined && entry.bytes < entry.ranges.front()->bytes) {
         const auto current = leasedRangeOwner(lease, entry.base, entry.base + entry.bytes);
@@ -1429,7 +1435,10 @@ const HostImport* importAllocation(const Context& context, HostImports& state, s
     if (fresh && end != 0) {
         if (const auto* current = findImport(state, address, end)) return current;
     } else if (!fresh) {
-        if (const auto* current = findImport(state, address, address + 1); current != nullptr && current->joined && sameRange(*current, lease)) return current;
+        if (const auto* current = peekImport(state, address, address + 1); current != nullptr && current->joined && sameRange(*current, lease)) {
+            current->lastUse = ++state.useCounter;
+            return current;
+        }
     }
     auto run = importRun(lease, address);
     // Without an end the caller views the whole run through the import (AcquireRegistered): a window that holds the
@@ -1460,7 +1469,10 @@ const HostImport* importRunAt(const Context& context, HostImports& state, Import
         failures.insert_or_assign(base, ImportFailure{base, bytes, GuestAllocations::Mapped(run.ranges.begin(), run.ranges.end())});
         return nullptr;
     }
-    if (const auto found = state.imports.find(base); found != state.imports.end() && sameRun(found->second, run)) return &found->second;
+    if (const auto found = state.imports.find(base); found != state.imports.end() && sameRun(found->second, run)) {
+        found->second.lastUse = ++state.useCounter;
+        return &found->second;
+    }
     if (alignment == 0 || base % alignment != 0 || bytes % alignment != 0) return nullptr;
     if (const auto failed = failures.find(base); failed != failures.end()) {
         if (sameRun(failed->second, run)) return nullptr;
@@ -1715,7 +1727,7 @@ void refreshImports(const Context& context, HostImports& state, const GuestAlloc
         retireImport(context.device, state, it, lease);
         it = next;
     }
-    for (auto it = state.failed.begin(); it != state.failed.end();) it = sameRun(it->second, importRun(lease, it->first)) ? std::next(it) : state.failed.erase(it);
+    for (auto it = state.failed.begin(); it != state.failed.end();) it = sameRange(it->second, lease) ? std::next(it) : state.failed.erase(it);
     for (auto it = state.failedJoins.begin(); it != state.failedJoins.end();) it = sameRun(it->second, joinedRun(lease, it->second.base, it->second.base + it->second.bytes)) ? std::next(it) : state.failedJoins.erase(it);
 }
 
@@ -4477,7 +4489,7 @@ void GuestBufferMemory::recordGpuCopies(std::span<Region* const> copies, bool ad
             std::memcpy(inputSnapshot->Bytes().data(), reinterpret_cast<const void*>(address), static_cast<std::size_t>(bytes));
             copySource = inputSnapshot->Handle();
             copyOffset = 0;
-            recorder->Keep(inputSnapshot);
+            recorder->Keep(inputSnapshot, inputSnapshot->Bytes().size());
             CaptureTrace::Log("copy-input-snapshot batch=%llu address=%llx bytes=%llu", batch, static_cast<unsigned long long>(address), static_cast<unsigned long long>(bytes));
         }
         if (capture && bytes == 32) {

@@ -13,10 +13,14 @@
 #include "prx/libSceAgcDriver/Graphics/include/PipelineLibrary.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "ShaderDiskCache.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cerrno>
 #include <exception>
+#include <stdexcept>
+#include <string>
 #include <system_error>
 #include <thread>
 #ifdef _WIN32
@@ -26,6 +30,11 @@
 #include <windows.h>
 #else
 #include <pthread.h>
+#include <sys/mman.h>
+#endif
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #endif
 
 namespace AgcDriver::DriverDetail {
@@ -46,6 +55,55 @@ void PrintFailure(std::exception_ptr error) {
     }
     FlushAsyncLog_nid_no_patch();
     std::fflush(stderr);
+}
+
+constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull;
+constexpr std::size_t DriverMemoryBytes = 2u << 20u;
+constexpr std::uint64_t FsTableAddress = 0xfe0040000ull;
+constexpr std::uint64_t FsTableSlotBytes = 16u;
+constexpr std::uint64_t FsTableSlots = 6u;
+constexpr std::uint64_t FsRoutineRecords = 8u;
+constexpr std::uint64_t FsRoutineRecordBytes = 16u;
+constexpr std::uint64_t FsRoutineTableBytes = FsRoutineRecords * FsRoutineRecordBytes;
+constexpr std::uint64_t FsRoutineTableAddress = FsTableAddress + FsTableSlots * FsTableSlotBytes;
+constexpr std::uint64_t FsRoutineAddress = FsRoutineTableAddress + FsRoutineTableBytes;
+constexpr std::uint32_t ScalarSetpcB64LinkS14 = 0xbe80200eu;
+constexpr std::uint32_t ScalarEndProgram = 0xbf810000u;
+constexpr std::uint64_t FsTableDword3 = 0x5204u;
+
+void MapDriverMemory() {
+    void* mapped;
+#ifdef _WIN32
+    mapped = reinterpret_cast<void*>(DriverMemoryAddress);
+    GuestArena::GuestArenaCommit_nid_postfix(mapped, DriverMemoryBytes, PAGE_READWRITE, DriverMemoryBytes);
+#elif defined(__APPLE__)
+    // macOS has no MAP_FIXED_NOREPLACE; a fixed mach_vm_allocate fails instead of replacing a mapping.
+    // Rosetta keeps 0xF_C0000000-0x10_00000000 unmappable (maximum protection none), so there the
+    // table is left out and FS table calls stay unlinked.
+    mach_vm_address_t address = DriverMemoryAddress;
+    if (const auto result = mach_vm_allocate(mach_task_self(), &address, DriverMemoryBytes, VM_FLAGS_FIXED); result != KERN_SUCCESS) {
+        std::fprintf(stderr, "[gpu] the AGC FS table at 0x%llx cannot be mapped (mach_vm_allocate %d); FS table calls stay unlinked\n", static_cast<unsigned long long>(DriverMemoryAddress), result);
+        return;
+    }
+    mapped = reinterpret_cast<void*>(address);
+#else
+    mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (mapped == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map the AGC driver memory");
+#endif
+    if (reinterpret_cast<std::uint64_t>(mapped) != DriverMemoryAddress) throw std::runtime_error("the AGC driver memory was not mapped at its fixed address");
+    auto* routineTable = reinterpret_cast<std::uint64_t*>(FsRoutineTableAddress);
+    for (std::uint64_t record = 0; record < FsRoutineRecords; ++record) {
+        routineTable[record * 2u] = FsRoutineAddress;
+        routineTable[record * 2u + 1u] = 0u;
+    }
+    auto* routine = reinterpret_cast<std::uint32_t*>(FsRoutineAddress);
+    routine[0] = ScalarSetpcB64LinkS14;
+    routine[1] = ScalarEndProgram;
+    auto* slot = reinterpret_cast<std::uint64_t*>(FsTableAddress);
+    slot[0] = (FsRoutineTableAddress & 0xffffffffffffull) | 16ull << 48u;
+    slot[1] = FsTableDword3 << 32u | FsRoutineRecords;
+    GuestAllocations::Mutation mutation;
+    mutation.Add(mapped, DriverMemoryBytes, true, true, true);
 }
 
 bool StackHoldsImport() {
@@ -147,6 +205,8 @@ void Driver::stop() {
 
 Driver::Driver() {
     InstallAsyncLog_nid_no_patch();
+    static const bool driverMemory = (MapDriverMemory(), true);
+    static_cast<void>(driverMemory);
     static_cast<void>(GuestMemory::TrackerGeneration());
     ShaderMemory::SetWaitedMsProvider(&Graphics::Recorder::ThreadWaitedMs);
     try {

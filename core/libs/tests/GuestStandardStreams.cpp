@@ -566,11 +566,25 @@ static int CheckClosedStandardOutput() {
     Require(puts_nid_postfix("text") == -1 && *__error_nid_postfix() == 9);
     Require(PrintStandard("%d", 1) == -1 && *__error_nid_postfix() == 9);
     Require(fputs_nid_postfix("text", __stdoutp_nid_postfix) == -1 && *__error_nid_postfix() == 9);
+    Require(std::fputs("host output\n", stdout) >= 0 && std::fflush(stdout) == 0 && !std::ferror(stdout));
+    Require(freopen_nid_postfix("missing-closed-stream-dir/err.log", "a", __stderrp_nid_postfix) == nullptr);
+    Require(std::fputs("host error\n", stderr) >= 0 && std::fflush(stderr) == 0 && !std::ferror(stderr));
+    return 0;
+}
+
+static int CheckExclusiveStandardOutput() {
+    const auto filename = "anyps5-exclusive-stdout-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    Require(freopen_nid_postfix(filename.c_str(), "wx", __stdoutp_nid_postfix) == __stdoutp_nid_postfix);
+    Require(fputs_nid_postfix("exclusive\n", __stdoutp_nid_postfix) >= 0 && fflush_nid_postfix(__stdoutp_nid_postfix) == 0);
+    Require(fclose_nid_postfix(__stdoutp_nid_postfix) == 0);
+    Require(CheckFileBytes(filename, "exclusive\n", "wx", true));
+    Require(std::filesystem::remove(filename));
     return 0;
 }
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--closed-stdout") return CheckClosedStandardOutput();
+    if (argc > 1 && std::string_view(argv[1]) == "--exclusive-stdout") return CheckExclusiveStandardOutput();
     CheckClosedStreamWrites();
     CheckDescriptorAccessModes();
     Require(_Getmbcurmax_nid_postfix() == 1 && _Getmbcurmax_nid_postfix() == ___mb_cur_max_nid_postfix());

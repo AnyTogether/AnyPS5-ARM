@@ -253,6 +253,14 @@ RasterPrimitive readRasterPrimitive(Reader& reader) {
     return static_cast<RasterPrimitive>(value);
 }
 
+PixelPositionLocation readPixelPositionLocation(Reader& reader) {
+    const auto value = reader.ReadU8();
+    if (value > static_cast<std::uint8_t>(PixelPositionLocation::UpperLeft)) {
+        throw std::runtime_error("RequestSerializer: invalid PixelPositionLocation value");
+    }
+    return static_cast<PixelPositionLocation>(value);
+}
+
 void writeShaderBinary(Writer& writer, const ShaderBinary& binary) {
     writer.WriteU8(static_cast<std::uint8_t>(binary.stage));
     writer.WriteU64(binary.codeAddress);
@@ -343,6 +351,9 @@ void writePixelInfo(Writer& writer, const ShaderPixelStageInfo& info) {
     writer.WriteU8(info.quadPixelMask);
     for (const std::uint16_t mask : info.quadSampleMask) writer.WriteU32(mask);
     writer.WriteU32(info.reversedBlend);
+    writer.WriteBool(info.iteratesSamples);
+    writer.WriteU8(static_cast<std::uint8_t>(info.positionLocation));
+    for (const std::uint8_t location : info.sampleLocations) writer.WriteU8(location);
 }
 
 ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
@@ -405,6 +416,11 @@ ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
         }
     }
     if (version >= 30u) info.reversedBlend = reader.ReadU32();
+    if (version >= 34u) {
+        info.iteratesSamples = reader.ReadBool();
+        info.positionLocation = readPixelPositionLocation(reader);
+        for (std::uint8_t& location : info.sampleLocations) location = reader.ReadU8();
+    }
     if (version < 5u) {
         const auto input = [](PixelInput value, bool present) { return present ? PixelInputBit(value) : 0u; };
         info.inputAddr = input(PixelInput::PerspectiveSample, info.hasPerspectiveCenterVgpr && inputAddrOrCenterVgpr == 2u) | input(PixelInput::PerspectiveCenter, info.hasPerspectiveCenterVgpr) |
@@ -778,7 +794,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(33u);
+    writer.WriteU32(35u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -814,7 +830,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 33u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 35u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -851,7 +867,8 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.request.context.linkedCallFallbacks = result.linkedCallFallbacks;
     }
     if (version >= 32u) result.request.target.spannedWaves = reader.ReadBool();
-    if (version >= 33u) {
+    // The fork's fields: version 33 (upstream skipped it) and 35 on, after upstream's 34.
+    if (version == 33u || version >= 35u) {
         result.request.target.subgroupStages = reader.ReadU32();
         result.request.target.meshAsCompute = reader.ReadBool();
     }

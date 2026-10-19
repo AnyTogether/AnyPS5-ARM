@@ -1,5 +1,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
+#include "SceTypes.hpp"
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -9,6 +11,7 @@
 #include <fstream>
 #include <source_location>
 #include <stdexcept>
+#include <set>
 #include <string>
 #ifdef _WIN32
 #include <windows.h>
@@ -34,6 +37,13 @@ int APS5_VABI chroot_nid_postfix(const char*);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
+int APS5_VABI sceKernelRename(const char*, const char*);
+int APS5_VABI sceKernelFstat(int, FileStat*);
+int APS5_VABI sceKernelGetdents(int, char*, int);
+std::int64_t APS5_VABI sceKernelLseek(int, std::int64_t, int);
+std::int64_t APS5_VABI sceKernelPread(int, void*, std::size_t, std::int64_t);
+int APS5_VABI dup_nid_postfix(int);
+int APS5_VABI dup2_nid_postfix(int, int);
 int APS5_VABI setsid_nid_postfix(void);
 int APS5_VABI link_nid_postfix(const char*, const char*);
 int APS5_VABI symlink_nid_postfix(const char*, const char*);
@@ -43,6 +53,7 @@ std::int64_t APS5_VABI readlinkat_nid_postfix(int, const char*, char*, std::size
 int APS5_VABI mkdirat_nid_postfix(int, const char*, std::uint16_t);
 int APS5_VABI renameat_nid_postfix(int, const char*, int, const char*);
 int APS5_VABI fchmodat_nid_postfix(int, const char*, int, int);
+int APS5_VABI fchown_nid_postfix(int, std::uint32_t, std::uint32_t);
 std::int64_t APS5_VABI sceKernelRead(int, void*, std::size_t);
 std::uint16_t APS5_VABI umask_nid_postfix(std::uint16_t);
 int* APS5_VABI __error_nid_postfix();
@@ -75,6 +86,44 @@ bool ChrootThrows(const std::string& path) {
         return std::strstr(error.what(), path.c_str()) != nullptr;
     }
     return false;
+}
+
+bool SymlinkTargetThrows(const char* target, const std::string& created) {
+    try {
+        symlink_nid_postfix(target, created.c_str());
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
+void CheckSymlinkTargetRestrictions(const std::filesystem::path& root) {
+    const auto created = (root / "rejected").string();
+    for (const auto& target : {std::string(".."), std::string("../x"), std::string("a/../b"), std::string("a/../../x"), std::string("/abs")})
+        Require(SymlinkTargetThrows(target.c_str(), created));
+#ifdef _WIN32
+    for (const auto& target : {std::string("C:/"), std::string("\\\\server\\share")})
+        Require(SymlinkTargetThrows(target.c_str(), created));
+#endif
+    const auto links = [](const std::string& created, const char* target) {
+        char buffer[16];
+        const auto length = std::strlen(target);
+        return readlink_nid_postfix(created.c_str(), buffer, sizeof(buffer)) == static_cast<std::int64_t>(length) &&
+            std::memcmp(buffer, target, length) == 0;
+    };
+    const auto nested = (root / "accepted-nested").string();
+    const int link = symlink_nid_postfix("sub/dir", nested.c_str());
+    if (link == 0) {
+        Require(links(nested, "sub/dir"));
+        const auto dots = (root / "accepted-dots").string();
+        Require(symlink_nid_postfix("a..b", dots.c_str()) == 0 && links(dots, "a..b"));
+        const auto ellipsis = (root / "accepted-ellipsis").string();
+        Require(symlink_nid_postfix("...", ellipsis.c_str()) == 0 && links(ellipsis, "..."));
+        Require(std::filesystem::remove(nested) && std::filesystem::remove(dots) && std::filesystem::remove(ellipsis));
+    } else {
+        Require(link == -1 && Error() == 1);
+        std::fprintf(stderr, "symbolic links unavailable: the symlink target success cases not tested\n");
+    }
 }
 
 void CheckPathconf(const std::filesystem::path& root, const std::string& file) {
@@ -110,7 +159,93 @@ void CheckPathconf(const std::filesystem::path& root, const std::string& file) {
     Require(pathconf_nid_postfix(longPath.c_str(), 4) == -1 && Error() == 63);
 }
 
+void DirectoryRenameTests(const std::filesystem::path& parent) {
+    const auto fixture = parent / "directory-identity";
+    const auto original = fixture / "original";
+    const auto moved = fixture / "moved";
+    const auto twice = fixture / "twice";
+    Require(std::filesystem::create_directory(fixture));
+    Require(std::filesystem::create_directory(original));
+    { std::ofstream(original / "marker").put('o'); }
+    { std::ofstream(original / "old-only").put('a'); }
+    const auto readMarker = [](int directory) {
+        const int file = openat_nid_postfix(directory, "marker", SCE_KERNEL_O_RDONLY);
+        Require(file >= 0);
+        char marker = 0;
+        Require(sceKernelRead(file, &marker, 1) == 1);
+        Require(sceKernelClose(file) == 0);
+        return marker;
+    };
+    const auto names = [](int directory) {
+        std::set<std::string> result;
+        std::array<char, 4096> buffer{};
+        for (;;) {
+            const int bytes = sceKernelGetdents(directory, buffer.data(), buffer.size());
+            Require(bytes >= 0);
+            if (bytes == 0) return result;
+            for (int offset = 0; offset < bytes;) {
+                std::uint16_t length = 0;
+                std::memcpy(&length, buffer.data() + offset + 4, sizeof(length));
+                Require(length >= 12 && offset + length <= bytes);
+                result.emplace(buffer.data() + offset + 8);
+                offset += length;
+            }
+        }
+    };
+    const int first = sceKernelOpen(original.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Require(first >= 0 && readMarker(first) == 'o');
+    FileStat before{};
+    Require(sceKernelFstat(first, &before) == 0 && (before.st_mode & 0170000) == 0040000);
+    const int duplicate = dup_nid_postfix(first);
+    const int target = sceKernelOpen((original / "marker").string().c_str(), SCE_KERNEL_O_RDONLY, 0);
+    Require(duplicate >= 0 && target >= 0);
+    Require(dup2_nid_postfix(first, target) == target);
+    Require(sceKernelClose(first) == 0);
+    Require(sceKernelRename(original.string().c_str(), moved.string().c_str()) == 0);
+    Require(std::filesystem::create_directory(original));
+    { std::ofstream(original / "marker").put('r'); }
+    { std::ofstream(original / "new-only").put('b'); }
+    const char marker = readMarker(duplicate);
+    std::fprintf(stderr, "directory marker after rename/replacement: %c, expected o\n", marker);
+    Require(marker == 'o' && readMarker(target) == 'o');
+    const std::set<std::string> expected{".", "..", "marker", "old-only"};
+    Require(names(duplicate) == expected);
+    Require(names(target).empty());
+    FileStat after{};
+    Require(sceKernelFstat(target, &after) == 0 && after.st_dev == before.st_dev && after.st_ino == before.st_ino);
+    Require(sceKernelLseek(target, 0, 0) == 0);
+    char directoryByte = 0;
+    Require(sceKernelRead(target, &directoryByte, 1) == static_cast<int>(0x80020015u));
+    Require(sceKernelPread(target, &directoryByte, 1, 0) == static_cast<int>(0x80020015u));
+    char previous[4096];
+    Require(getcwd_nid_postfix(previous, sizeof(previous)) == previous);
+    Require(fchdir_nid_postfix(target) == 0 && readMarker(-100) == 'o');
+    Require(chdir_nid_postfix(previous) == 0);
+    Require(mkdirat_nid_postfix(target, "created", 0755) == 0);
+    Require(std::filesystem::is_directory(moved / "created") && !std::filesystem::exists(original / "created"));
+    Require(unlinkat_nid_postfix(duplicate, "created", 0x800) == 0);
+    Require(sceKernelRename(moved.string().c_str(), twice.string().c_str()) == 0);
+    Require(std::filesystem::create_directory(moved));
+    { std::ofstream(moved / "different").put('c'); }
+    Require(sceKernelLseek(target, 0, 0) == 0 && names(target) == expected);
+    Require(sceKernelClose(duplicate) == 0);
+    Require(readMarker(target) == 'o');
+    Require(unlinkat_nid_postfix(target, "marker", 0) == 0);
+    Require(unlinkat_nid_postfix(target, "old-only", 0) == 0);
+    Require(std::filesystem::remove(twice));
+    Require(sceKernelFstat(target, &after) == 0 && after.st_dev == before.st_dev && after.st_ino == before.st_ino && (after.st_mode & 0170000) == 0040000);
+    Require(sceKernelClose(target) == 0);
+    Require(std::filesystem::remove(original / "marker") && std::filesystem::remove(original / "new-only"));
+    Require(std::filesystem::remove(moved / "different"));
+    Require(std::filesystem::remove(original) && std::filesystem::remove(moved) && std::filesystem::remove(fixture));
+}
+
 int main() {
+#ifdef _WIN32
+    auto hostDirectorySpelling = std::filesystem::current_path().native();
+    CharUpperBuffW(hostDirectorySpelling.data(), static_cast<DWORD>(hostDirectorySpelling.size()));
+    Require(SetCurrentDirectoryW(hostDirectorySpelling.c_str()) != 0);
+#endif
     Require(setsid_nid_postfix() == -1 && Error() == 1);
     Require(umask_nid_postfix(0) == 022);
     Require(umask_nid_postfix(07777) == 0);
@@ -118,6 +253,7 @@ int main() {
     const auto root = std::filesystem::path("anyps5-kernel-sys-test-" +
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     Require(std::filesystem::create_directory(root));
+    DirectoryRenameTests(root);
     const auto file = (root / "file.txt").string();
     std::ofstream(file).put('x');
     CheckPathconf(root, file);
@@ -317,6 +453,7 @@ int main() {
     Require(symlink_nid_postfix("original.bin", (root / "missing" / "symbolic").string().c_str()) == -1 && Error() == 2);
     Require(symlink_nid_postfix(nullptr, symbolic.c_str()) == -1 && Error() == 14);
     Require(symlink_nid_postfix("original.bin", "") == -1 && Error() == 2);
+    CheckSymlinkTargetRestrictions(root);
     const int base = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
     Require(base >= 0);
     const int relative = openat_nid_postfix(base, "file.txt", SCE_KERNEL_O_RDONLY);
@@ -469,6 +606,15 @@ int main() {
     Require(fchmodat_nid_postfix(base, "loop/x", 0600, 0) == -1 && Error() == 62);
     Require(fchmodat_nid_postfix(base, longName.c_str(), 0600, 0) == -1 && Error() == 63);
 #endif
+    Require(fchown_nid_postfix(base, 0, 0) == 0);
+    Require(fchown_nid_postfix(base, 0xFFFFFFFFu, 0xFFFFFFFFu) == 0);
+    Require(fchown_nid_postfix(-1, 0, 0) == -1 && Error() == 9);
+    bool fchownThrew = false;
+    try { fchown_nid_postfix(base, 1, 0); } catch (const std::exception&) { fchownThrew = true; }
+    Require(fchownThrew);
+    fchownThrew = false;
+    try { fchown_nid_postfix(base, 0, 1); } catch (const std::exception&) { fchownThrew = true; }
+    Require(fchownThrew);
     Require(sceKernelClose(base) == 0);
 #ifdef _WIN32
     const auto junctionTarget = root / "junction-target";

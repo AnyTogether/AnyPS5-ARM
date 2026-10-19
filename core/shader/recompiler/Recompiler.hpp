@@ -124,6 +124,18 @@ enum class RasterPrimitive : std::uint8_t {
     Rectangle
 };
 
+enum class PixelPositionLocation : std::uint8_t {
+    Center,
+    Centroid,
+    Sample,
+    UpperLeft
+};
+
+constexpr float SampleLocationOffset(std::uint8_t location, std::uint32_t axis) {
+    const auto nibble = (static_cast<std::uint32_t>(location) >> (4u * axis)) & 0xfu;
+    return static_cast<float>(static_cast<std::int32_t>(nibble & 7u) - static_cast<std::int32_t>(nibble & 8u)) / 16.0f;
+}
+
 namespace ReversedBlendCode {
 
 inline constexpr std::uint32_t Enable = 1u;
@@ -175,6 +187,9 @@ struct ShaderPixelStageInfo {
     std::uint8_t quadPixelMask = 0xf;
     std::array<std::uint16_t, 4> quadSampleMask{0xffffu, 0xffffu, 0xffffu, 0xffffu};
     std::uint32_t reversedBlend = 0;
+    bool iteratesSamples = false;
+    PixelPositionLocation positionLocation = PixelPositionLocation::Center;
+    std::array<std::uint8_t, 32> sampleLocations{};
 };
 
 struct ShaderVertexBufferResource {
@@ -223,6 +238,7 @@ struct GuestContext {
     std::span<const MemoryRegion> memory;
     std::optional<ShaderFloatMode> floatMode;
     std::span<const std::uint32_t> linkedCallFallbacks;
+    bool convertedSamples = false;
 };
 
 struct MeshTargetLimits {
@@ -393,7 +409,8 @@ enum class DescriptorImageShape {
     ImageCube,
     Image3D,
     Image1DArray,
-    Image2DMultisample
+    Image2DMultisample,
+    Image2DMultisampleArray
 };
 
 enum class DescriptorRole {
@@ -439,10 +456,12 @@ struct DescriptorBinding {
     std::vector<bool> bufferWritten;
     std::vector<bool> samplerUnnormalized;
     std::vector<bool> samplerIntegerBorder;
+    std::vector<bool> samplerCoordinatesIgnored;
     std::vector<bool> imageUnnormalized;
     std::vector<bool> imageUnnormalizedBaseLevel;
     std::vector<std::uint32_t> imageSamplers;
     std::vector<bool> bufferRead;
+    std::vector<std::uint32_t> bufferExtent;
 };
 
 struct ImageTableEntryPoison {

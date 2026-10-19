@@ -1,6 +1,6 @@
 # Progress reporting
 
-[`tools/progress.py`](../../tools/progress.py) generates `progress.json`, HTML, SVG maps and badges. The [Progress workflow](../../.github/workflows/progress.yml) publishes them after pushes to `main`. The [Progress report workflow](../../.github/workflows/progress-report.yml) compares the base and head trees of pull requests.
+[`tools/progress.py`](../../tools/progress.py) generates `progress.json`, HTML, SVG maps and badges. The [Pages workflow](../../.github/workflows/pages.yml) publishes them with the web converter after pushes to `main` that change the converter, the web page or these tools. The [Pages progress workflow](../../.github/workflows/pages-progress.yml) runs after pushes that change `core/libs/prx` or the opcode list, compares the generated `progress.json` with the deployed one and dispatches the Pages workflow only when they differ, so the history chart gains new days only when the progress changes. The [Progress report workflow](../../.github/workflows/progress-report.yml) compares the base and head trees of pull requests.
 
 ## Library counts
 
@@ -24,11 +24,17 @@ Real removals and transitions back to stubs remain visible. Percentages retain t
 
 Implemented definitions are also classified as behaviourally empty when their body holds only `(void)name;` discards and at most one constant return, bare `return;` or `throw`, including a return of a local `static` wrapper that is itself behaviourally empty; wrapper calls whose arguments contain calls do not qualify. Comparisons list newly implemented behaviourally empty functions without changing any count. Older JSON snapshots without `inert_names` are accepted.
 
+## One library
+
+`--module NAME` limits the library totals to those directories under `core/libs/prx`. Repeat the flag to include several. A name that is not a directory is an error. Shader counts stay complete. A shared-source wrapper is included only when its own directory is named. `--json` prints the object written to `progress.json` on stdout, instead of the two summary lines. Either flag makes the output directory optional. Without them the directory is still required, and a run that names only the directory still writes the whole tree.
+
 ## Verification
 
 ```sh
 python3 tools/tests/test_progress.py
 python3 tools/progress.py /tmp/anyps5-progress
+python3 tools/progress.py --module libScePad
+python3 tools/progress.py --json
 python3 tools/tests/test_progress_history.py
 ```
 

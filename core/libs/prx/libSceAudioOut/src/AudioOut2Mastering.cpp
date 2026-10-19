@@ -8,27 +8,18 @@
 
 namespace {
 
-constexpr int SCE_AUDIO_OUT2_ERROR_INVALID_ARGUMENT = static_cast<int>(0x80260502);
-constexpr std::uint32_t MASTERING_OUTPUT_RECORDING = 2;
-constexpr std::uint32_t MASTERING_STATES_ID_DEFAULT = 1;
-constexpr std::uint32_t MASTERING_STATES_ID_V2 = 2;
-constexpr std::uint32_t MASTERING_STATES_COMPRESSOR_DEFAULT = 0x01010001;
-constexpr std::uint32_t MASTERING_STATES_COMPRESSOR_V2 = 0x01020001;
-constexpr std::uint32_t MASTERING_STATES_LIMITER_DEFAULT = 0x01010003;
+constexpr int SCE_AUDIO_OUT2_ERROR_MASTERING_INVALID_API_PARAM = static_cast<int>(0x80268201);
+constexpr int SCE_AUDIO_OUT2_ERROR_MASTERING_INVALID_STATES_ID = static_cast<int>(0x80268204);
+constexpr std::uint32_t AUDIO_OUT2_MASTERING_STATES_ID_DEFAULT = 1;
+constexpr std::uint32_t AUDIO_OUT2_MASTERING_STATES_ID_V2 = 2;
+constexpr std::uint32_t AUDIO_OUT2_MASTERING_STRUCT_ID_COMPRESSOR_DEFAULT = 0x01010001;
+constexpr std::uint32_t AUDIO_OUT2_MASTERING_STRUCT_ID_COMPRESSOR_V2 = 0x01020001;
+constexpr std::uint32_t AUDIO_OUT2_MASTERING_STRUCT_ID_LIMITER_DEFAULT = 0x01010003;
 
 std::string hex(std::uint32_t value) {
     char text[16];
     std::snprintf(text, sizeof(text), "%x", value);
     return text;
-}
-
-template<typename TStates>
-void writeIdleStates(AudioOut2MasteringStatesHeader* state, std::uint32_t statesId, std::uint32_t compressorId) {
-    TStates states{};
-    states.header.states_id = statesId;
-    states.compressor.desc = {compressorId, static_cast<std::uint32_t>(sizeof(states.compressor))};
-    states.limiter.desc = {MASTERING_STATES_LIMITER_DEFAULT, static_cast<std::uint32_t>(sizeof(states.limiter))};
-    std::memcpy(state, &states, sizeof(states));
 }
 
 }
@@ -45,17 +36,32 @@ int APS5_VABI sceAudioOut2MasteringTerm(void) {
 }
 
 int APS5_VABI sceAudioOut2MasteringGetState(AudioOut2MasteringStatesHeader* state, uint32_t output, AudioOut2UserHandle user) {
+    (void)output;
     (void)user;
-    if (state == nullptr || output > MASTERING_OUTPUT_RECORDING) return SCE_AUDIO_OUT2_ERROR_INVALID_ARGUMENT;
+    if (state == nullptr) return SCE_AUDIO_OUT2_ERROR_MASTERING_INVALID_API_PARAM;
     switch (state->states_id) {
-        case MASTERING_STATES_ID_DEFAULT:
-            writeIdleStates<AudioOut2MasteringStates>(state, MASTERING_STATES_ID_DEFAULT, MASTERING_STATES_COMPRESSOR_DEFAULT);
+        case AUDIO_OUT2_MASTERING_STATES_ID_DEFAULT: {
+            auto* full = static_cast<AudioOut2MasteringStates*>(static_cast<void*>(state));
+            std::memset(full, 0, sizeof(*full));
+            full->states_header.states_id = AUDIO_OUT2_MASTERING_STATES_ID_DEFAULT;
+            full->compressor_states.descriptor.id = AUDIO_OUT2_MASTERING_STRUCT_ID_COMPRESSOR_DEFAULT;
+            full->compressor_states.descriptor.size = sizeof(AudioOut2MasteringCompressorStates);
+            full->limiter_states.descriptor.id = AUDIO_OUT2_MASTERING_STRUCT_ID_LIMITER_DEFAULT;
+            full->limiter_states.descriptor.size = sizeof(AudioOut2MasteringLimiterStates);
             return 0;
-        case MASTERING_STATES_ID_V2:
-            writeIdleStates<AudioOut2MasteringStatesV2>(state, MASTERING_STATES_ID_V2, MASTERING_STATES_COMPRESSOR_V2);
+        }
+        case AUDIO_OUT2_MASTERING_STATES_ID_V2: {
+            auto* full = static_cast<AudioOut2MasteringStatesV2*>(static_cast<void*>(state));
+            std::memset(full, 0, sizeof(*full));
+            full->states_header.states_id = AUDIO_OUT2_MASTERING_STATES_ID_V2;
+            full->compressor_states.descriptor.id = AUDIO_OUT2_MASTERING_STRUCT_ID_COMPRESSOR_V2;
+            full->compressor_states.descriptor.size = sizeof(AudioOut2MasteringCompressorStatesV2);
+            full->limiter_states.descriptor.id = AUDIO_OUT2_MASTERING_STRUCT_ID_LIMITER_DEFAULT;
+            full->limiter_states.descriptor.size = sizeof(AudioOut2MasteringLimiterStates);
             return 0;
+        }
         default:
-            return SCE_AUDIO_OUT2_ERROR_INVALID_ARGUMENT;
+            return SCE_AUDIO_OUT2_ERROR_MASTERING_INVALID_STATES_ID;
     }
 }
 
@@ -63,7 +69,7 @@ int APS5_VABI sceAudioOut2MasteringGetState(AudioOut2MasteringStatesHeader* stat
 int APS5_VABI sceAudioOut2MasteringSetParam(const AudioOut2MasteringParamsHeader* param, uint32_t output, uint32_t flags) {
     (void)output;
     (void)flags;
-    if (param == nullptr) return static_cast<int>(0x80260502);
+    if (param == nullptr) return SCE_AUDIO_OUT2_ERROR_MASTERING_INVALID_API_PARAM;
     return 0;
 }
 

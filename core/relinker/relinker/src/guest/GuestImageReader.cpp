@@ -12,82 +12,6 @@
 
 namespace Relinker {
 
-std::vector<std::string> GuestImageReader::ReadModuleNames(const std::vector<std::uint8_t>& bytes) const {
-    if (bytes.size() < 64 || Io::ReadU32(bytes, 0) != 0x464c457f || bytes[4] != 2 || bytes[5] != 1 || bytes[6] != 1 || Io::ReadU16(bytes, 18) != 62)
-        throw Domain::RelinkerException("Expected little-endian ELF64 x86-64 module metadata");
-    const auto type = Io::ReadU16(bytes, 16);
-    if (type != 3 && type != 0xfe18) return {};
-    if (Io::ReadU16(bytes, 52) != 64 || Io::ReadU16(bytes, 54) != 56 || Io::ReadU16(bytes, 56) == 0)
-        throw Domain::RelinkerException("Invalid module metadata program headers");
-    const auto range = [&](std::uint64_t offset, std::uint64_t size) {
-        if (offset > bytes.size() || size > bytes.size() - offset) throw Domain::RelinkerException("Module metadata exceeds file");
-    };
-    range(Io::ReadU64(bytes, 32), static_cast<std::uint64_t>(Io::ReadU16(bytes, 56)) * 56);
-    ElfReader reader(bytes);
-    const auto headers = reader.ReadProgramHeaders();
-    const Domain::ProgramHeader* dynamic = nullptr;
-    const Domain::ProgramHeader* dynlib = nullptr;
-    for (const auto& header : headers) {
-        if (header.Type == 2) {
-            if (dynamic) throw Domain::RelinkerException("Duplicate module metadata dynamic segment");
-            dynamic = &header;
-        }
-        if (header.Type == 0x61000000) {
-            if (dynlib) throw Domain::RelinkerException("Duplicate module metadata dynamic data");
-            dynlib = &header;
-        }
-    }
-    if (!dynamic) throw Domain::RelinkerException("Missing module metadata dynamic segment");
-    std::map<std::uint64_t, std::uint64_t> strings;
-    std::vector<std::uint64_t> modules;
-    for (const auto& tag : reader.ReadDynamicTags(*dynamic)) {
-        if (tag.Tag == 0x6100000d || tag.Tag == 0x61000043) modules.push_back(tag.Value);
-        else if (tag.Tag == 5 || tag.Tag == 10 || tag.Tag == 0x61000035 || tag.Tag == 0x61000037) {
-            if (!strings.emplace(tag.Tag, tag.Value).second) throw Domain::RelinkerException("Duplicate module metadata string tag");
-        }
-    }
-    if (modules.empty()) return {};
-    const auto get = [&](std::uint64_t standard, std::uint64_t sce) {
-        if (strings.contains(standard) == strings.contains(sce)) throw Domain::RelinkerException("Missing or ambiguous module metadata string tag");
-        return strings.at(strings.contains(standard) ? standard : sce);
-    };
-    const auto size = get(10, 0x61000037);
-    const auto address = get(5, 0x61000035);
-    std::uint64_t offset = 0;
-    if (strings.contains(5)) {
-        bool found = false;
-        for (const auto& header : headers) {
-            if (header.Type != 1 || address < header.MappedAddress || address - header.MappedAddress > header.FileSize || size > header.FileSize - (address - header.MappedAddress)) continue;
-            range(header.Offset, header.FileSize);
-            if (found) throw Domain::RelinkerException("Ambiguous module metadata string mapping");
-            offset = header.Offset + address - header.MappedAddress;
-            found = true;
-        }
-        if (!found) throw Domain::RelinkerException("Unmapped module metadata strings");
-    } else {
-        if (!dynlib || address > dynlib->FileSize || size > dynlib->FileSize - address) throw Domain::RelinkerException("Module metadata strings exceed dynamic data");
-        range(dynlib->Offset, dynlib->FileSize);
-        offset = dynlib->Offset + address;
-    }
-    range(offset, size);
-    if (size == 0 || bytes[offset] != 0) throw Domain::RelinkerException("Invalid module metadata strings");
-    std::vector<std::string> names;
-    std::set<std::uint64_t> ids;
-    for (const auto value : modules) {
-        const auto nameOffset = value & 0xffffffffu;
-        if (nameOffset >= size) throw Domain::RelinkerException("Module metadata string offset out of bounds");
-        const auto start = bytes.begin() + static_cast<std::ptrdiff_t>(offset + nameOffset);
-        const auto end = bytes.begin() + static_cast<std::ptrdiff_t>(offset + size);
-        const auto zero = std::find(start, end, 0);
-        if (zero == end) throw Domain::RelinkerException("Unterminated module metadata string");
-        const std::string name(start, zero);
-        if (name.empty() || name.find_first_of("/\\:$\r\n") != std::string::npos) throw Domain::RelinkerException("Invalid module metadata name");
-        if (!ids.insert(value >> 48).second) throw Domain::RelinkerException("Duplicate module metadata export ID");
-        names.push_back(name);
-    }
-    return names;
-}
-
 GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector<std::uint8_t> bytes, const bool windows) const try {
     const auto fail = [&](const std::string& message) { throw Domain::RelinkerException(Io::Utf8Path(path) + ": " + message); };
     const auto range = [&](std::uint64_t offset, std::uint64_t size) {
@@ -140,6 +64,7 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
     std::map<std::uint64_t, std::uint64_t> tags;
     std::vector<std::uint64_t> needed;
     std::vector<std::uint64_t> moduleImports;
+    std::vector<std::uint64_t> ps4ModuleImports;
     std::vector<std::uint64_t> moduleExports;
     bool terminated = false;
     for (std::uint64_t offset = dynamic->Offset; offset < dynamic->Offset + dynamic->FileSize; offset += 16) {
@@ -148,6 +73,7 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
         if (tag == 0) { terminated = true; break; }
         if (tag == 1) needed.push_back(value);
         else if (tag == 0x61000045) moduleImports.push_back(value);
+        else if (tag == 0x6100000f) ps4ModuleImports.push_back(value);
         else if (tag == 0x6100000d || tag == 0x61000043) moduleExports.push_back(value);
         else if (tag < 0x60000000 || tag == 0x6ffffef5 || tag == 0x6100003f || (tag >= 0x61000027 && tag <= 0x6100003b)) {
             if (!tags.emplace(tag, value).second) fail("Duplicate dynamic tag " + std::to_string(tag));
@@ -157,7 +83,8 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
     for (const auto unsupported : {15u, 16u, 17u, 18u, 19u, 22u, 35u, 36u, 37u}) {
         if (tags.contains(unsupported)) fail("Unsupported dynamic tag " + std::to_string(unsupported));
     }
-    if (tags.contains(30) && (tags.at(30) & ~8ull) != 0) fail("Unsupported guest dynamic flags");
+    if (tags.contains(30) && (tags.at(30) & ~(2ull | 8ull)) != 0) fail("Unsupported guest dynamic flags");
+    image.Symbolic = tags.contains(30) && (tags.at(30) & 2ull) != 0;
     const auto mapped = [&](std::uint64_t address, std::uint64_t size, std::uint32_t flags) {
         for (const auto& header : image.Headers) {
             if (header.Type == 1 && (header.Flags & flags) == flags && address >= header.MappedAddress && address - header.MappedAddress <= header.MemorySize && size <= header.MemorySize - (address - header.MappedAddress)) return;
@@ -229,7 +156,8 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
     image.Dynamic.DynSymData.assign(bytes.begin() + symOffset, bytes.begin() + symOffset + symSize);
     image.Dynamic.DynStrData.push_back(0);
     std::map<std::uint64_t, std::string> importModules;
-    for (const auto value : moduleImports)
+    if (!moduleImports.empty() && !ps4ModuleImports.empty()) fail("Guest module mixes PS4 and PS5 needed-module tags");
+    for (const auto value : moduleImports.empty() ? ps4ModuleImports : moduleImports)
         if (!importModules.emplace(value >> 48, string(value & 0xffffffffu)).second) fail("Duplicate import module ID");
     std::vector<std::string> neededLibraries;
     for (const auto offset : needed) neededLibraries.push_back(string(offset));
@@ -305,7 +233,16 @@ GuestImage GuestImageReader::Read(const std::filesystem::path& path, std::vector
             if ((next != relocationTargets.end() && next->first < target + 8) || (next != relocationTargets.begin() && std::prev(next)->second > target)) fail("Overlapping guest relocations");
             relocationTargets.emplace(target, target + 8);
             if (relocation == 8) {
-                if ((info >> 32) != 0) fail("RELATIVE relocation has a symbol");
+                if ((info >> 32) != 0) {
+                    const auto& symbol = image.Symbols[info >> 32];
+                    if (symbol.Section == 0 || addend > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) || symbol.Value != addend)
+                        fail("RELATIVE relocation has a symbol");
+                    mapped(addend, 0, 0);
+                    Io::AppendU64(output, target);
+                    Io::AppendU64(output, relocation);
+                    Io::AppendU64(output, addend);
+                    continue;
+                }
                 mapped(addend, 0, 0);
             } else if (relocation == 1 || relocation == 6 || relocation == 7) {
                 const auto& symbol = image.Symbols[info >> 32];

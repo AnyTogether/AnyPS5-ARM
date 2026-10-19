@@ -7,10 +7,12 @@
 #include <cstring>
 #include <cstdio>
 #include <deque>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <new>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -175,8 +177,7 @@ VKAPI_ATTR void VKAPI_CALL mockMemoryProperties2(VkPhysicalDevice, VkPhysicalDev
     reported->heapUsage[0] = reportedUsage;
 }
 
-void HostPlacement() {
-    mock = MockDevice{};
+Context budgetContext() {
     auto context = mockContext();
     context.physical = reinterpret_cast<VkPhysicalDevice>(std::uintptr_t{1});
     context.memoryProperties2 = mockMemoryProperties2;
@@ -185,6 +186,12 @@ void HostPlacement() {
     context.memory.memoryHeaps[1] = {16384 * MiB, 0};
     context.memory.memoryTypes[0].heapIndex = 0;
     context.memory.memoryTypes[1].heapIndex = 1;
+    return context;
+}
+
+void HostPlacement() {
+    mock = MockDevice{};
+    auto context = budgetContext();
     constexpr auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     reportedBudget = 1620 * MiB;
     reportedUsage = 1600 * MiB;
@@ -205,6 +212,57 @@ void HostPlacement() {
     Expect(mock.memoryBytes.contains(device), "a device-local buffer was not kept in the device pool after its release");
     DeviceBuffer again(context, 176 * MiB, usage);
     Expect(MemoryOf(again.Handle()) == device, "a retained device-local buffer was not reused");
+}
+
+void RefusedDevicePlacement() {
+    mock = MockDevice{};
+    auto context = budgetContext();
+    constexpr auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    reportedBudget = 1620 * MiB;
+    reportedUsage = 200 * MiB;
+    mock.results = {VK_ERROR_OUT_OF_DEVICE_MEMORY};
+    VkDeviceMemory placed = VK_NULL_HANDLE;
+    {
+        DeviceBuffer refused(context, 9 * MiB, usage);
+        placed = MemoryOf(refused.Handle());
+        Expect(mock.memoryTypes.at(placed) == 1, "a device buffer whose device-local allocation ran out of device memory within the reported budget was not placed in the host memory type");
+    }
+    Expect(!mock.memoryBytes.contains(placed) && mock.liveBuffers.empty(), "a device buffer placed in host memory after a refused device-local allocation was kept in the device pool after its release");
+    mock.results = {VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY};
+    context.memory.memoryHeaps[1].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+    bool threw = false;
+    try {
+        DeviceBuffer refused(context, 9 * MiB, usage);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Expect(threw, "a refused device-local allocation without a host memory type did not fail");
+    Expect(mock.liveBuffers.empty(), "a failed device buffer left its VkBuffer alive");
+}
+
+void AttachmentReclaim() {
+    mock = MockDevice{};
+    auto context = budgetContext();
+    constexpr auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    reportedBudget = 1620 * MiB;
+    reportedUsage = 200 * MiB;
+    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocation.allocationSize = 8 * MiB;
+    allocation.memoryTypeIndex = 0;
+    const auto refuse = [&](std::initializer_list<VkResult> results) {
+        { DeviceBuffer idle(context, 4 * MiB, usage); }
+        Expect(mock.memoryBytes.size() == 1, "a released device buffer was not kept in the device pool");
+        const auto pooled = mock.memoryBytes.begin()->first;
+        mock.results = results;
+        const auto memory = AllocateImageMemory(context, allocation, 3, "vkAllocateMemory attachment");
+        Expect(!mock.memoryBytes.contains(pooled), "an attachment refused device memory did not reclaim the pool before retrying");
+        const auto type = mock.memoryTypes.at(memory);
+        mockFreeMemory(VK_NULL_HANDLE, memory, nullptr);
+        return type;
+    };
+    Expect(refuse({VK_ERROR_OUT_OF_DEVICE_MEMORY}) == 0, "an attachment was placed in host memory although reclaiming the pool made room in device memory");
+    Expect(refuse({VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY}) == 1, "an attachment still refused device memory after reclaiming the pool was not placed in host memory");
+    Expect(mock.liveBytes == 0, "an attachment allocation leaked memory");
 }
 
 void SizeClassesAndDirections() {
@@ -693,6 +751,31 @@ void CacheReclaimRecovery() {
     Expect(mock.liveBytes == 0 && mock.liveBuffers.empty(), "the failed cache release leaked a resource");
 }
 
+void ImageCacheReclaim() {
+    mock = MockDevice{};
+    reclaimMock = ReclaimMock{};
+    auto context = budgetContext();
+    context.cacheReclaim = mockCacheReclaim;
+    reportedBudget = 1620 * MiB;
+    reportedUsage = 200 * MiB;
+    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocation.allocationSize = 8 * MiB;
+    allocation.memoryTypeIndex = 0;
+    const auto refuse = [&](std::initializer_list<VkResult> results) {
+        ExternalAllocation(4 * MiB);
+        mock.results = results;
+        const auto requests = reclaimMock.requests;
+        const auto memory = AllocateImageMemory(context, allocation, 3, "vkAllocateMemory texture");
+        Expect(reclaimMock.requests == requests + 1 && reclaimMock.external == VK_NULL_HANDLE, "a texture refused device memory did not release the texture caches before retrying");
+        const auto type = mock.memoryTypes.at(memory);
+        mockFreeMemory(VK_NULL_HANDLE, memory, nullptr);
+        return type;
+    };
+    Expect(refuse({VK_ERROR_OUT_OF_DEVICE_MEMORY}) == 0, "a texture was placed in host memory although releasing the texture caches made room in device memory");
+    Expect(refuse({VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY}) == 1, "a texture still refused device memory after releasing the texture caches was not placed in host memory");
+    Expect(mock.liveBytes == 0, "a texture allocation leaked memory");
+}
+
 void SuccessfulAllocationKeepsPool() {
     mock = MockDevice{};
     {
@@ -788,7 +871,10 @@ int main(int argc, char** argv) {
         SuccessfulAllocationKeepsPool();
         PartialSlabDoesNotRetry();
         CacheReclaimRecovery();
+        ImageCacheReclaim();
         HostPlacement();
+        RefusedDevicePlacement();
+        AttachmentReclaim();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());
         return 1;

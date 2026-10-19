@@ -19,6 +19,7 @@
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationScaler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
@@ -118,6 +119,7 @@ void CreateComputePipeline(VkDevice device, PFN_vkCreateComputePipelines create,
     info.layout = layout;
     auto cacheLock = synchronization != nullptr ? synchronization->LockForPipelineUse() : Graphics::PipelineCacheSynchronization::PipelineUseLock{};
     check(create(device, cache, 1, &info, nullptr, pipeline), "vkCreateComputePipelines");
+    PerformanceCounters::CountPipeline();
 }
 
 bool CaptureComputePipeline(std::size_t words) {
@@ -325,6 +327,7 @@ struct VulkanDevice::State {
     bool pipelineExecutableInfo = false;
     bool maintenance8 = false;
     std::uint32_t srgbDecodeFormats = 0;
+    std::uint32_t srgbCopyFormats = 0;
     bool storageImageWithoutFormat = false;
     VkSampleCountFlags sampleLocationSampleCounts = 0;
     VkSampleCountFlags sampleLocationGridSampleCounts = 0;
@@ -409,6 +412,7 @@ struct VulkanDevice::State {
     VkPhysicalDeviceMeshShaderPropertiesEXT meshLimits{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
     std::unique_ptr<PresentationScaler> scaler;
     std::unique_ptr<PresentationPass> presentation;
+    std::unique_ptr<PerformanceOverlay> overlay;
     VkFormat surfaceFormat = VK_FORMAT_B8G8R8A8_UNORM;
     VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     bool swapchainColorSpaces = false;
@@ -768,6 +772,7 @@ struct VulkanDevice::State {
             textureCache.reset();
             detiler.reset();
             colorTransfer.reset();
+            overlay.reset();
             presentation.reset();
             scaler.reset();
             hdrScaler.reset();
@@ -1136,6 +1141,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     state->properties = properties.properties;
     state->physical = selected;
     state->srgbDecodeFormats = Graphics::SrgbDecodeFormats(state->InstanceFunction<PFN_vkGetPhysicalDeviceFormatProperties>("vkGetPhysicalDeviceFormatProperties"), selected);
+    state->srgbCopyFormats = Graphics::SrgbCopyFormats(state->InstanceFunction<PFN_vkGetPhysicalDeviceFormatProperties>("vkGetPhysicalDeviceFormatProperties"), selected, state->srgbDecodeFormats);
     if ((state->subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0) {
         state->capabilities.push_back(spv::CapabilityGroupNonUniform);
         if ((state->subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0) state->capabilities.push_back(spv::CapabilityGroupNonUniformBallot);
@@ -1643,6 +1649,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     enabled.geometryShader = available.geometryShader;
     state->geometryShader = enabled.geometryShader == VK_TRUE;
     state->sampleRateShading = enabled.sampleRateShading == VK_TRUE;
+    if (enabled.sampleRateShading) state->capabilities.push_back(spv::CapabilityInterpolationFunction);
     if (enabled.geometryShader) state->capabilities.push_back(spv::CapabilityGeometry);
     enabled.shaderClipDistance = available.shaderClipDistance;
     enabled.shaderCullDistance = available.shaderCullDistance;
@@ -2157,6 +2164,7 @@ void VulkanDevice::StoreIdleResults(bool reapFirst) {
     if (!Graphics::StorageTexture::AnyPending()) return;
     GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Flush);
     std::lock_guard gpuLock(GuestMemory::GpuMutex());
+    const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
     Graphics::StorageTexture::FlushAllPending("idle");
     SubmitRecorded(reapFirst);
 }
@@ -2266,10 +2274,10 @@ int VulkanDevice::WriteLabelOnGpu(std::uint64_t address, std::span<const std::by
         // a title misbehaves with this path.
         if (drain) return 2;
         recordStore();
-        GuestMemory::MarkWritten(address, bytes.size());
         // Commands() opened the batch the store went into, so the completion is appended to that
         // batch and runs at its reap, after the write-backs of every batch before it.
         recorder.AfterCompletions(address, bytes, stamp, queue, true);
+        GuestMemory::MarkWritten(address, bytes.size());
         return 5;
     }
     recordStore();
@@ -2384,7 +2392,7 @@ bool VulkanDevice::FillBuffer(std::uint64_t address, std::size_t bytes, std::spa
         const auto now = std::chrono::steady_clock::now();
         if (now - lastReport > std::chrono::seconds(10)) {
             lastReport = now;
-            AgcDriver::ProfilePrint_nid_no_patch("[fill-sync] fills: %llu synced (%llu with a completion label pending) waited %.0f ms, %llu ordered by barrier, %llu with no pending write; phases ms: decide %.0f record %.0f notes %.0f; %llu uniform, %llu pattern (%llu doubling steps in place; pattern buffers reused %llu, made %llu)\n", static_cast<unsigned long long>(synced), static_cast<unsigned long long>(labelSynced), syncedMs, static_cast<unsigned long long>(ordered), static_cast<unsigned long long>(fills - synced - ordered), decideMs, recordMs, notesMs, static_cast<unsigned long long>(uniformFills), static_cast<unsigned long long>(patternFills), static_cast<unsigned long long>(doublingSteps), static_cast<unsigned long long>(patternBuffersReused), static_cast<unsigned long long>(patternBuffersMade));
+            AgcDriver::ProfilePrint_nid_no_patch("[fill-sync] fills (cumulative): %llu synced (%llu with a completion label pending) waited %.0f ms, %llu ordered by barrier, %llu with no pending write; phases ms: decide %.0f record %.0f notes %.0f; %llu uniform, %llu pattern (%llu doubling steps in place; pattern buffers reused %llu, made %llu)\n", static_cast<unsigned long long>(synced), static_cast<unsigned long long>(labelSynced), syncedMs, static_cast<unsigned long long>(ordered), static_cast<unsigned long long>(fills - synced - ordered), decideMs, recordMs, notesMs, static_cast<unsigned long long>(uniformFills), static_cast<unsigned long long>(patternFills), static_cast<unsigned long long>(doublingSteps), static_cast<unsigned long long>(patternBuffersReused), static_cast<unsigned long long>(patternBuffersMade));
         }
     }
     auto phaseStart = fillStart;
@@ -2666,12 +2674,10 @@ VulkanDevice::CopyOutcome VulkanDevice::CopyBuffer(std::uint64_t destination, st
         }
         outcome.syncMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - syncStart).count();
     }
-    // A whole surface copied into another: a device copy between their images, whose results reach
-    // the destination's memory through the image's deferred write-back (nothing crosses to host
-    // memory for the copy itself).
     if (AliasCopy(context, destination, source, bytes)) {
         noteWriter({}, 0);
         recorder.NotePendingWrite(destination, bytes);
+        Graphics::StorageTexture::FlushPending(destination, bytes, nullptr, "buffer copy destination", Graphics::PublishScope::Whole);
         outcome.path = 3;
         return outcome;
     }
@@ -2725,6 +2731,8 @@ VulkanDevice::CopyOutcome VulkanDevice::CopyBuffer(std::uint64_t destination, st
     recorder.EndGpuTiming(classTiming, bytes);
     recorder.MarkCovered(copiedAccess);
     recorder.NotePendingRead(source, bytes, Graphics::Recorder::ReadKind::CopySource);
+    GuestMemory::MarkWritten(destination, bytes);
+    recorder.NotePendingWrite(destination, bytes);
     // The destination's bytes after the transfer are the source's now when nothing recorded,
     // pending or still to land can change the source before the transfer reads it (a CPU store
     // to it in between is a hardware race too): the caller's ring entry carries them, stamped
@@ -3099,6 +3107,8 @@ bool VulkanDevice::PresentDisplayBuffer(const DisplayBuffer& buffer) {
             // image first, as a sampled texture of the image would (see cachedTexture). The uncached
             // walk: the collect memo is per worker packet, so on this thread a memoized answer could
             // miss a CPU write that landed after a worker's walk of the same range.
+            static const bool noAdopt = std::getenv("APS5_NO_PRESENT_EPOCH") != nullptr;
+            if (!noAdopt) GuestMemory::AdoptLatestCollectEpoch();
             GuestMemory::CollectWritesUncached(buffer.address, bytes);
             if (!GuestMemory::UnchangedSince(buffer.address, bytes, resident->Generation()) || (buffer.dccAddress != 0 && ResidentKeysMoved(*resident))) {
                 resident->Refresh();
@@ -3122,7 +3132,7 @@ bool VulkanDevice::PresentDisplayBuffer(const DisplayBuffer& buffer) {
     }
     if (profile && std::chrono::steady_clock::now() - lastReport > std::chrono::seconds(10)) {
         lastReport = std::chrono::steady_clock::now();
-        AgcDriver::ProfilePrint_nid_no_patch("[flip] %llu presents from the resident image (%llu refreshed first), through guest memory: %llu not pending, %llu unsuitable; %llu GPU frame dumps\n", static_cast<unsigned long long>(residentPresents), static_cast<unsigned long long>(refreshedPresents), static_cast<unsigned long long>(notPending), static_cast<unsigned long long>(unsuitable), static_cast<unsigned long long>(gpuDumps));
+        AgcDriver::ProfilePrint_nid_no_patch("[flip] (cumulative): %llu presents from the resident image (%llu refreshed first), through guest memory: %llu not pending, %llu unsuitable; %llu GPU frame dumps\n", static_cast<unsigned long long>(residentPresents), static_cast<unsigned long long>(refreshedPresents), static_cast<unsigned long long>(notPending), static_cast<unsigned long long>(unsuitable), static_cast<unsigned long long>(gpuDumps));
     }
     CaptureTrace::Log("present dump=%d address=%llx width=%u height=%u resident=%d generation=%llu", dumpFrame ? state->nextDumpIndex : -1, static_cast<unsigned long long>(buffer.address), buffer.width, buffer.height, resident != nullptr, static_cast<unsigned long long>(resident ? resident->Generation() : 0));
     if (passthrough && resident == nullptr) ensureHdrScaler(DisplayTexelFormat(buffer.pixelFormat));
@@ -3215,6 +3225,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     if (state->presentSlots[state->presentCursor].inFlight) RetirePresents(state->presentSlots.size() - 1);
     auto& slot = state->presentSlots[state->presentCursor];
     require(!slot.inFlight, "presentation slot is still in flight");
+    const bool overlay = PerformanceOverlay::Visible();
     if (display != nullptr && resident == nullptr) {
         static_cast<void>(DisplayBufferSize(*display));
         state->colorTransfer->Upload(display->address, width, height, Graphics::ColorTileMode::RenderTarget, DisplayTexelBytes(display->pixelFormat));
@@ -3306,7 +3317,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         }
         if (drawn) {
             state->presentation->Bind(slotIndex, resident->Image(), width, height, display->pixelFormat, whiteNits, residentLayer);
-            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, overlay ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         } else {
             scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
             if (direct) PresentationScaler::RecordBlitFrom(graphicsContext(), commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, residentFilter, barrier.image, state->extent.width, state->extent.height, residentLayer);
@@ -3344,7 +3355,11 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
         }
     }
-    if (!drawn) {
+    if (overlay) {
+        if (!state->overlay) state->overlay = std::make_unique<PerformanceOverlay>(graphicsContext(), state->presentSlots.size());
+        state->overlay->NotePresent(std::chrono::steady_clock::now(), clearOnly ? VkExtent2D{} : VkExtent2D{width, height});
+        state->overlay->Record(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawn ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    } else if (!drawn) {
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = 0;
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -3559,7 +3574,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     static const bool relaxedFloat = std::getenv("APS5_RELAXED_FLOAT") != nullptr;
     target.relaxedFloat = !exactFloat && (relaxedFloat || (state->moltenVk && state->window != nullptr));
     target.robustBufferAccess2 = state->robustBufferAccess2;
-    target.srgbDecodeFormats = state->srgbDecodeFormats;
+    target.srgbDecodeFormats = state->srgbDecodeFormats & ~state->srgbCopyFormats;
     target.vertexSubgroups = (state->subgroup.supportedStages & VK_SHADER_STAGE_VERTEX_BIT) != 0;
     static const bool meshEmulation = std::getenv("APS5_NO_MESH_EMULATION") == nullptr;
     target.meshAsCompute = !state->meshShader && state->pushDescriptor && meshEmulation;
@@ -3711,6 +3726,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.imageViewMinLod = state->imageViewMinLod;
     context.pipelineExecutableInfo = state->pipelineExecutableInfo;
     context.srgbDecodeFormats = state->srgbDecodeFormats;
+    context.srgbCopyFormats = state->srgbCopyFormats;
     context.sampleLocationSampleCounts = state->sampleLocationSampleCounts;
     context.sampleLocationGridSampleCounts = state->sampleLocationGridSampleCounts;
     context.memoryProperties2 = state->memoryBudget ? state->InstanceFunction<PFN_vkGetPhysicalDeviceMemoryProperties2>("vkGetPhysicalDeviceMemoryProperties2") : nullptr;
@@ -4618,6 +4634,7 @@ void VulkanDevice::recordDispatch(RecordedDispatch& record) {
     const auto commands = recorder.Commands(&covered);
     recordStep(PhaseRecordCommands);
     recorder.Keep(record.objects);
+    if (record.resources != nullptr) record.resources->KeepStorageImageBytes(recorder);
     recorder.Keep(record.resources);
     if (record.resources != nullptr) recorder.KeepBytes(record.resources.get(), record.resources->CopiedBytes());
     if (record.bindings != nullptr) {
@@ -4774,7 +4791,7 @@ std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(cons
     const Graphics::PipelineSpecialization specialization(shader);
     const auto subgroupSize = computeSubgroupSize(shader);
     const auto stageFlags = computeStageFlags(shader);
-    if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
+    if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && ComputePipelineCapture::OptionalEnabled() && CaptureComputePipeline(shader.spirv.size())) {
         ComputePipelineCapture capture;
         capture.spirv = shader.spirv.Copy();
         ComputeDescriptorSetLayout resourcesLayout;
@@ -4797,8 +4814,8 @@ std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(cons
         capture.driverVersion = state->properties.driverVersion;
         capture.apiVersion = state->properties.apiVersion;
         std::copy_n(state->properties.pipelineCacheUUID, VK_UUID_SIZE, capture.pipelineCacheUuid.begin());
-        const auto path = capture.Write(directory);
-        std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
+        const auto path = capture.WriteOptional(directory);
+        if (!path.empty()) std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
     }
     if (profile && shader.spirv.size() > 100000) std::fprintf(stderr, "[dispatch] creating a pipeline for %zu SPIR-V words (program 0x%llx)\n", shader.spirv.size(), static_cast<unsigned long long>(programAddress));
     CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, stageFlags, specialization.Info(), subgroupSize, &objects->pipeline, context.pipelineCacheSynchronization);
@@ -4925,7 +4942,10 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
         static const bool deferEviction = std::getenv("APS5_NO_DEFERRED_EVICTION") == nullptr;
         std::vector<std::shared_ptr<Graphics::ShaderResources>> evicted;
         state->resourceCache.Insert(contentKey, resources, deferEviction ? &evicted : nullptr);
-        for (auto& object : evicted) state->recorder->Keep(std::move(object));
+        for (auto& object : evicted) {
+            object->KeepStorageImageBytes(*state->recorder);
+            state->recorder->Keep(std::move(object));
+        }
         if (profile) {
             timer.add(PhaseResourcesInsert, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - insertStart).count());
             if (arguments != 0) d.indirectHold.phaseCounts[PhaseResourcesInsert] += evicted.size();
@@ -5023,6 +5043,7 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
                 state->resourceCache.Remove(contentKey, cached.get());
                 ++d.cacheInvalidated;
                 // Off the mutex with its batch, as an evicted entry (insert()).
+                cached->KeepStorageImageBytes(*state->recorder);
                 state->recorder->Keep(std::move(cached));
             }
             if (profile) {
@@ -5057,8 +5078,8 @@ VulkanDevice::IndirectOutcome VulkanDevice::dispatch(const ShaderRecompiler::Rec
     }
     if (profile && std::chrono::steady_clock::now() - d.cacheReport > std::chrono::seconds(10)) {
         d.cacheReport = std::chrono::steady_clock::now();
-        AgcDriver::ProfilePrint_nid_no_patch("[rescache] %llu hits, %llu misses, %llu invalidated, %zu entries (dispatch + draw); template hits: %llu refreshed the data buffers (revalidate %.1f ms), %llu had the same words; Find calls %llu, Touch calls %llu\n", static_cast<unsigned long long>(d.cacheHits), static_cast<unsigned long long>(d.cacheMisses), static_cast<unsigned long long>(d.cacheInvalidated), state->resourceCache.Size(), static_cast<unsigned long long>(d.templateRefreshed), d.templateRevalidateMs, static_cast<unsigned long long>(d.templateSameWords), static_cast<unsigned long long>(ResourceCache::Finds()), static_cast<unsigned long long>(ResourceCache::Touches()));
-        AgcDriver::ProfilePrint_nid_no_patch("[vk] deviceProc lookups inside the device call: %llu (%.2f per dispatch); pre-dispatch barriers recorded %llu, skipped %llu; compute pipelines created %llu (%llu under the GPU mutex)\n", static_cast<unsigned long long>(d.procLookups), d.profiledDispatches != 0 ? static_cast<double>(d.procLookups) / static_cast<double>(d.profiledDispatches) : 0.0, static_cast<unsigned long long>(d.preBarriersRecorded), static_cast<unsigned long long>(d.preBarriersSkipped), static_cast<unsigned long long>(computePipelinesCreated.load(std::memory_order_relaxed)), static_cast<unsigned long long>(computePipelinesCreatedLocked.load(std::memory_order_relaxed)));
+        AgcDriver::ProfilePrint_nid_no_patch("[rescache] (cumulative): %llu hits, %llu misses, %llu invalidated, %zu entries (dispatch + draw); template hits: %llu refreshed the data buffers (revalidate %.1f ms), %llu had the same words; Find calls %llu, Touch calls %llu\n", static_cast<unsigned long long>(d.cacheHits), static_cast<unsigned long long>(d.cacheMisses), static_cast<unsigned long long>(d.cacheInvalidated), state->resourceCache.Size(), static_cast<unsigned long long>(d.templateRefreshed), d.templateRevalidateMs, static_cast<unsigned long long>(d.templateSameWords), static_cast<unsigned long long>(ResourceCache::Finds()), static_cast<unsigned long long>(ResourceCache::Touches()));
+        AgcDriver::ProfilePrint_nid_no_patch("[vk] deviceProc lookups inside the device call (cumulative): %llu (%.2f per dispatch); pre-dispatch barriers recorded %llu, skipped %llu; compute pipelines created %llu (%llu under the GPU mutex)\n", static_cast<unsigned long long>(d.procLookups), d.profiledDispatches != 0 ? static_cast<double>(d.procLookups) / static_cast<double>(d.profiledDispatches) : 0.0, static_cast<unsigned long long>(d.preBarriersRecorded), static_cast<unsigned long long>(d.preBarriersSkipped), static_cast<unsigned long long>(computePipelinesCreated.load(std::memory_order_relaxed)), static_cast<unsigned long long>(computePipelinesCreatedLocked.load(std::memory_order_relaxed)));
         reportRecipes();
         reportDispatchMove();
     }
@@ -5201,6 +5222,7 @@ RecipeOutcome VulkanDevice::DispatchRecipe(const ShaderRecompiler::RecompileResu
         // ordinary path runs with the prepared find (C10: the template goes to the batch).
         if (verify->cached.get() != hit->resources.get()) {
             counters.verifyReplaced.fetch_add(1, std::memory_order_relaxed);
+            hit->resources->KeepStorageImageBytes(*state->recorder);
             state->recorder->Keep(std::move(hit->resources));
             return RecipeOutcome::Rebuild;
         }
@@ -5237,6 +5259,7 @@ RecipeOutcome VulkanDevice::DispatchRecipe(const ShaderRecompiler::RecompileResu
         state->resourceCache.Remove(recipe.key, hit->resources.get());
         ++d.cacheInvalidated;
         // Off the mutex with its batch, as an evicted entry.
+        hit->resources->KeepStorageImageBytes(*state->recorder);
         state->recorder->Keep(std::move(hit->resources));
         counters.rebuilds[static_cast<std::size_t>(report.failure)].fetch_add(1, std::memory_order_relaxed);
         return RecipeOutcome::Rebuild;

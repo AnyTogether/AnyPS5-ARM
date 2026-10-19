@@ -256,6 +256,58 @@ bool ReadWord(std::uint64_t address, std::uint64_t* value) {
     return ReadCode(address, reinterpret_cast<std::uint8_t*>(value), sizeof(*value)) == sizeof(*value);
 }
 
+std::uint64_t EnvironmentNumber(const char* name) {
+    char text[32];
+    const DWORD length = GetEnvironmentVariableA(name, text, sizeof(text));
+    if (length == 0 || length >= sizeof(text)) return 0;
+    return std::strtoull(text, nullptr, 0);
+}
+
+void ReportStackWords(std::uint64_t rsp) {
+    const auto bytes = std::min<std::uint64_t>(EnvironmentNumber("APS5_CRASH_STACK_BYTES"), std::uint64_t{1} << 20);
+    if (bytes == 0) return;
+    const auto* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+    const auto stackLow = reinterpret_cast<std::uint64_t>(tib->StackLimit);
+    const auto stackHigh = reinterpret_cast<std::uint64_t>(tib->StackBase);
+    const auto first = rsp & ~std::uint64_t{7};
+    Report("  stack words from rsp 0x%016llx (APS5_CRASH_STACK_BYTES):\n", static_cast<unsigned long long>(rsp));
+    const auto limit = std::min(first + bytes, stackHigh);
+    std::uint64_t end = first;
+    std::uint64_t readablePage = 0;
+    for (std::uint64_t at = first; at < limit; at += 32) {
+        std::uint64_t words[4] = {};
+        int count = 0;
+        for (; count < 4; ++count) {
+            const auto slot = at + static_cast<std::uint64_t>(count) * 8;
+            const auto page = slot & ~std::uint64_t{0xfff};
+            if (page != readablePage) {
+                if (!IsReadable(slot)) break;
+                readablePage = page;
+            }
+            words[count] = *reinterpret_cast<const std::uint64_t*>(slot);
+        }
+        if (count == 0) break;
+        static char text[192];
+        int used = std::snprintf(text, sizeof(text), "    +0x%04llx:", static_cast<unsigned long long>(at - first));
+        for (int k = 0; k < count && used > 0 && used < static_cast<int>(sizeof(text)); ++k) used += std::snprintf(text + used, sizeof(text) - static_cast<std::size_t>(used), " %016llx", static_cast<unsigned long long>(words[k]));
+        Report("%s\n", text);
+        end = at + static_cast<std::uint64_t>(count) * 8;
+        if (count < 4) break;
+    }
+    static std::uint64_t seen[256];
+    std::size_t seenCount = 0;
+    Report("  data at stack words that point outside the stack (8 words each):\n");
+    for (std::uint64_t slot = first; slot + 8 <= end && seenCount < std::size(seen); slot += 8) {
+        const auto value = *reinterpret_cast<const std::uint64_t*>(slot);
+        if (value < 0x10000 || (value & 7) != 0 || value > 0x7fffffffffffull || (value >= stackLow && value < stackHigh)) continue;
+        if (std::find(seen, seen + seenCount, value) != seen + seenCount) continue;
+        if (IsExecutable(value) || !IsReadable(value) || !IsReadable(value + 0x38)) continue;
+        seen[seenCount++] = value;
+        const auto* words = reinterpret_cast<const std::uint64_t*>(value);
+        Report("    [+0x%04llx] 0x%016llx: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n", static_cast<unsigned long long>(slot - first), static_cast<unsigned long long>(value), words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]);
+    }
+}
+
 void ReportUndeliverableException(const EXCEPTION_POINTERS* info, std::uint64_t frame) {
     const auto* record = info->ExceptionRecord;
     char type[256] = "of unknown type";
@@ -329,6 +381,9 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2) {
         const char* kind = record->ExceptionInformation[0] == 0 ? "read" : record->ExceptionInformation[0] == 1 ? "write" : "execute";
         Report("  %s of 0x%016llx\n", kind, static_cast<unsigned long long>(record->ExceptionInformation[1]));
+        std::uint8_t trap[2];
+        if (record->ExceptionInformation[0] == 0 && record->ExceptionInformation[1] == ~0ull && ReadCode(context->Rip, trap, sizeof(trap)) == sizeof(trap) && trap[0] == 0xcd && trap[1] == 0x45)
+            Report("  guest abort() (int 0x45)\n");
     }
     Report("  rax %016llx rbx %016llx rcx %016llx rdx %016llx\n", context->Rax, context->Rbx, context->Rcx, context->Rdx);
     Report("  rsi %016llx rdi %016llx rbp %016llx rsp %016llx\n", context->Rsi, context->Rdi, context->Rbp, context->Rsp);
@@ -377,7 +432,8 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
         frame = next;
     }
     ReportStackCandidates(context->Rsp, 16, 0x2000);
-    if (context->Rip == 0 || !IsExecutable(context->Rip)) {
+    ReportStackWords(context->Rsp);
+    if (context->Rip == 0 ||!IsExecutable(context->Rip)) {
         // A jump into nothing usually follows a return through a clobbered frame; the frames that just
         // returned are still below rsp.
         Report("  recently popped return address candidates:\n");

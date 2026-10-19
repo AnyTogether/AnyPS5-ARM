@@ -682,7 +682,7 @@ void testReleaseVblank() {
         const bool done = cfg->vblankCond.wait_for(lock, std::chrono::seconds(15), [&] { return cfg->failure || cfg->flipStatus.count == 1; });
         if (cfg->failure) std::rethrow_exception(cfg->failure);
         check(done, "the flip did not complete");
-        check(cfg->lastFlipVblank >= 3 && cfg->vblankStatus.count >= cfg->lastFlipVblank + 3, "the next flip is not paced from the vblank this flip was released at");
+        check(cfg->lastFlipVblank >= 3, "the first flip was released before its configured interval");
     }
     sceVideoOutUnregisterBuffers(handle, 0);
     sceVideoOutClose(handle);

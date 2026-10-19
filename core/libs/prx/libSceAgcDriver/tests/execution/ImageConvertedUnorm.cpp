@@ -2,6 +2,8 @@
 #include "prx/libSceAgcDriver/Graphics/include/Draw.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include "Optimization/ResourceMaterializer.hpp"
+#include "Optimization/ResourceProgram.hpp"
 #include "Recompiler.hpp"
 #include "VulkanTestDevice.hpp"
 #ifdef _WIN32
@@ -48,6 +50,15 @@ constexpr std::size_t BlockBytes = 65536;
 constexpr std::size_t RoundTripOffset = 16384;
 constexpr std::size_t StoreOffset = 32768;
 constexpr std::array<std::uint32_t, 4> PointSampler{0x00000092u, 0x00fff000u, 0u, 0u};
+constexpr std::array<std::uint32_t, 4> BilinearSampler{0x00000092u, 0x00fff000u, 0x00500000u, 0u};
+constexpr std::array<std::uint32_t, 4> WrapBilinearSampler{0x00000090u, 0x00fff000u, 0x00500000u, 0u};
+constexpr std::array<std::uint32_t, 4> WrapPointSampler{0x00000090u, 0x00fff000u, 0u, 0u};
+constexpr std::array<std::uint32_t, 4> BorderSampler{0x000000b6u, 0x00fff000u, 0u, 0u};
+constexpr std::uint32_t SampleStep = 0x3a200000u;
+constexpr std::uint32_t OffGridStep = 0x3a206000u;
+constexpr std::uint32_t SampleStart = 0x39c00000u;
+constexpr std::uint32_t WrappedStart = 0xbac00000u;
+constexpr double SampleTolerance = 1.0e-5;
 
 alignas(256) std::array<std::uint32_t, LoadWidth * 4> Output{};
 alignas(256) std::array<std::uint32_t, Threads * 4> Input{};
@@ -73,6 +84,13 @@ constexpr std::array<std::uint32_t, 9> SamplerCode(std::uint32_t word0) {
     };
 }
 
+constexpr std::array<std::uint32_t, 13> SampleAtCode(std::uint32_t step, std::uint32_t start) {
+    return {
+        0x34060084u, 0x7e280d00u, 0x102828ffu, step, 0x062828ffu, start, 0x7e2a0280u, 0xf09c0f08u,
+        0x00610a14u, 0xbf8c3f70u, 0xe0781000u, 0x80000a03u, 0xbf810000u,
+    };
+}
+
 alignas(256) constexpr std::array<std::uint32_t, 10> RoundTrip{
     0x7e080218u, 0x343c0885u, 0x4a3c3d00u, 0x7e3e0280u, 0xf0001708u, 0x00010a1eu, 0xbf8c3f70u, 0xf0201708u,
     0x00040a1eu, 0xbf810000u,
@@ -88,6 +106,10 @@ alignas(256) constexpr auto StoreD16 = StoreCode(0x7u, D16);
 alignas(256) constexpr auto SampleLz = SamplerCode(0xf09c0f08u);
 alignas(256) constexpr auto Gather4Lz = SamplerCode(0xf11c0108u);
 alignas(256) constexpr auto GetLod = SamplerCode(0xf1800308u);
+alignas(256) constexpr auto SampleAt = SampleAtCode(SampleStep, SampleStart);
+alignas(256) constexpr auto SampleWrapped = SampleAtCode(SampleStep, WrappedStart);
+alignas(256) constexpr auto SampleOffGrid = SampleAtCode(OffGridStep, SampleStart);
+alignas(256) constexpr auto SampleWrappedOffGrid = SampleAtCode(OffGridStep, WrappedStart);
 
 constexpr std::array<std::uint32_t, 11> StoreValues{
     0x00000000u, 0x3f800000u, 0x3f000000u, 0x3eaaaaabu, 0x80000000u, 0xbf800000u,
@@ -333,6 +355,83 @@ void CheckFloatSample(AgcDriver::VulkanDevice& device, const std::uint8_t* texel
     }
 }
 
+double ChannelValue(std::uint32_t texel, std::uint32_t swizzle, std::uint32_t component) {
+    const auto selector = (swizzle >> (component * 3u)) & 7u;
+    if (selector == 0u) return 0.0;
+    if (selector == 1u) return 1.0;
+    return static_cast<double>(Field(texel, selector - 4u)) / (selector == 6u ? 1023.0 : 2047.0);
+}
+
+void CheckSample(AgcDriver::VulkanDevice& device, const std::uint8_t* texels, std::span<const std::uint32_t> code, std::uint32_t step, std::uint32_t start, std::uint32_t swizzle, const std::array<std::uint32_t, 4>& sampler, bool linear, bool wrap, const std::string& what) {
+    Run(device, code, TextureDescriptor(texels, UnormFormat, swizzle, LoadWidth), sampler, 1);
+    const auto texelAt = [&](std::int64_t index) {
+        const auto width = static_cast<std::int64_t>(LoadWidth);
+        const auto addressed = wrap ? ((index % width) + width) % width : std::clamp<std::int64_t>(index, 0, width - 1);
+        std::uint32_t texel = 0;
+        std::memcpy(&texel, texels + addressed * 4u, 4u);
+        return texel;
+    };
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        const auto x = (static_cast<double>(tid) * static_cast<double>(std::bit_cast<float>(step)) + static_cast<double>(std::bit_cast<float>(start))) * LoadWidth;
+        for (std::uint32_t component = 0; component < 4u; ++component) {
+            double expected = 0.0;
+            if (linear) {
+                const auto centre = x - 0.5;
+                const auto first = static_cast<std::int64_t>(std::floor(centre));
+                const auto weight = std::nearbyint((centre - std::floor(centre)) * 256.0) / 256.0;
+                const auto left = ChannelValue(texelAt(first), swizzle, component);
+                const auto right = ChannelValue(texelAt(first + 1), swizzle, component);
+                expected = left + (right - left) * weight;
+            } else {
+                expected = ChannelValue(texelAt(static_cast<std::int64_t>(std::floor(x))), swizzle, component);
+            }
+            const auto actual = static_cast<double>(std::bit_cast<float>(Output[tid * 4u + component]));
+            Require(std::fabs(actual - expected) <= SampleTolerance * std::max(1.0, std::fabs(expected)), what + ": thread " + std::to_string(tid) + " component " + std::to_string(component) + " is " + std::to_string(actual) + ", expected " + std::to_string(expected));
+        }
+    }
+}
+
+void CheckConvertedPreparation(AgcDriver::VulkanDevice& device, const std::uint8_t* texels) {
+    std::vector<std::uint32_t> userData(24, 0u);
+    const auto texture = TextureDescriptor(texels, UnormFormat, SwizzleXYZ1, LoadWidth);
+    std::copy(texture.begin(), texture.end(), userData.begin() + 4);
+    std::copy(PointSampler.begin(), PointSampler.end(), userData.begin() + 12);
+    const std::span<const std::uint32_t> code = SampleAt;
+    const std::array<ShaderRecompiler::MemoryRegion, 1> memory{{{reinterpret_cast<std::uintptr_t>(code.data()), std::as_bytes(code)}}};
+    const ShaderRecompiler::ShaderComputeStageInfo compute{{Threads, 1, 1}, 0u, {true, false, false}, false, 1};
+    ShaderRecompiler::RecompileRequest request{
+        {ShaderStage::Compute, reinterpret_cast<std::uintptr_t>(code.data()), code, 0, {}},
+        {32, 0, userData, compute, std::nullopt, std::nullopt, memory},
+        device.Target(),
+        {0, 0, 0, 128}
+    };
+    auto converted = request;
+    converted.context.convertedSamples = true;
+    const auto convertedMode = [](const ShaderRecompiler::ImageResource& mode) { return mode.conversionFormat == ShaderRecompiler::IrBufferFormat::Format11_11_10UNorm; };
+    const auto plain = ShaderRecompiler::GetResourcePlan(request);
+    Require(plain->info.images.size() == 1u && std::ranges::none_of(plain->info.runtimeImageModes.at(0), convertedMode), "a sampled image is prepared with converted-sample modes before a converted descriptor was seen");
+    const auto prepared = ShaderRecompiler::GetResourcePlan(converted);
+    Require(prepared->info.images.size() == 1u && std::ranges::count_if(prepared->info.runtimeImageModes.at(0), convertedMode) == 1, "a sampled image is not prepared with the converted unorm sample mode once a converted descriptor was seen");
+    const auto handle = ShaderRecompiler::PrepareShader(request);
+    Require(!ShaderRecompiler::PreparedShaderInvocation::TryCreate(converted, handle).has_value(), "an artifact prepared without converted-sample modes matches a request that asks for them");
+    const auto invocation = ShaderRecompiler::PreparedShaderInvocation::TryCreate(request, handle);
+    Require(invocation.has_value(), "the prepared artifact does not match its own request");
+    ShaderRecompiler::SrtRuntime runtime;
+    runtime.userData = userData;
+    runtime.shaderBase = request.shader.codeAddress;
+    std::string reason;
+    try {
+        static_cast<void>(invocation->Capture(runtime));
+    } catch (const ShaderRecompiler::ConvertedSampleRequired& error) {
+        reason = error.what();
+    }
+    Require(!reason.empty(), "capturing a converted descriptor through an artifact prepared without converted-sample modes does not ask for them");
+    const auto convertedHandle = ShaderRecompiler::PrepareShader(converted);
+    const auto convertedInvocation = ShaderRecompiler::PreparedShaderInvocation::TryCreate(converted, convertedHandle);
+    Require(convertedInvocation.has_value(), "the artifact prepared with converted-sample modes does not match its request");
+    static_cast<void>(convertedInvocation->Capture(runtime));
+}
+
 void RequireRefused(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code, const std::uint8_t* texels, std::uint32_t swizzle, const std::array<std::uint32_t, 4>& extra, const std::string& reason, const std::string& what, std::uint32_t format = UnormFormat) {
     std::string refusal;
     try {
@@ -368,7 +467,14 @@ int main() {
         CheckFloatSample(*device, texels + FloatOffset, {0u, 0u, 0x7fc00000u, 0x3f800000u}, "image_sample_lz of R10_G11_B11_FLOAT results still on the GPU");
         CheckFloatLoad(*device, texels + FloatOffset);
         CheckFloatSample(*device, texels + FloatOffset, {0x7f800000u, 0x7f800000u, 0x387c0000u, 0x3f800000u}, "image_sample_lz of R10_G11_B11_FLOAT");
-        RequireRefused(*device, SampleLz, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_sample_lz");
+        CheckSample(*device, texels, SampleAt, SampleStep, SampleStart, SwizzleXYZ1, PointSampler, false, false, "point image_sample_lz X Y Z 1");
+        CheckSample(*device, texels, SampleAt, SampleStep, SampleStart, SwizzleZYX1, BilinearSampler, true, false, "bilinear image_sample_lz Z Y X 1");
+        CheckSample(*device, texels, SampleWrapped, SampleStep, WrappedStart, SwizzleX011, WrapPointSampler, false, true, "wrapped point image_sample_lz X 0 1 1");
+        CheckSample(*device, texels, SampleWrapped, SampleStep, WrappedStart, SwizzleXYZ1, WrapBilinearSampler, true, true, "wrapped bilinear image_sample_lz X Y Z 1");
+        CheckSample(*device, texels, SampleOffGrid, OffGridStep, SampleStart, SwizzleZYX1, BilinearSampler, true, false, "off-grid bilinear image_sample_lz Z Y X 1");
+        CheckSample(*device, texels, SampleWrappedOffGrid, OffGridStep, WrappedStart, SwizzleXYZ1, WrapBilinearSampler, true, true, "off-grid wrapped bilinear image_sample_lz X Y Z 1");
+        CheckConvertedPreparation(*device, texels);
+        RequireRefused(*device, SampleLz, texels, SwizzleXYZ1, BorderSampler, "implemented only with wrap or clamp-to-edge addressing", "image_sample_lz with clamp-to-border addressing");
         RequireRefused(*device, Gather4Lz, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_gather4_lz");
         RequireRefused(*device, GetLod, texels, SwizzleXYZ1, PointSampler, "sampling, gathering or querying LOD of a converted unorm image", "image_get_lod");
         RequireRefused(*device, LoadD16, texels, SwizzleXYZ1, {}, "converted unorm image with 16-bit data", "image_load d16");

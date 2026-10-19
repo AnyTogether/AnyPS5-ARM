@@ -54,7 +54,7 @@ if(BUILD_TESTING)
         PASS_REGULAR_EXPRESSION "Guest nested exit completed" TIMEOUT 30)
     set_tests_properties(guest_exit_finalizers_before_shutdown PROPERTIES
         PASS_REGULAR_EXPRESSION "Guest finalizers ran before shutdown" TIMEOUT 30)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
         add_test_executable(guest_system_load_exec_standard_error_tests ${LIBS_INCLUDE_DIR}/tests/GuestSystemServiceLoadExecStandardError.cpp)
         target_include_directories(guest_system_load_exec_standard_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
         target_link_libraries(guest_system_load_exec_standard_error_tests PRIVATE libSceSystemService libkernel libc)

@@ -54,7 +54,7 @@ bool Driver::preparePacketMemory(const Submission& submission, QueueState& queue
             }
             if (reason == 0 || reason == 5) {
                 const auto queueId = submission.queue;
-                interruptDeferred = localDevice->AfterRecordedWork([queueId] { AgcDriverDeliverEopInterrupt(queueId); }, submission.queue == 0);
+                interruptDeferred = localDevice->AfterRecordedWork([this, queueId] { deliverGuestEopInterrupt(queueId); }, submission.queue == 0);
                 if (interruptDeferred && workOpen) localDevice->SubmitRecorded(submission.queue == 0);
                 wroteOnGpu = true;
             } else if (reason == 1) {
@@ -281,6 +281,21 @@ bool Driver::enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32
     if (!enabled || opcode != 0x50 || queue != 0 || packet.size() < 7 || !DrawPipeline::Active() || !deferredLabels().labels.empty()) return false;
     const auto source = ((packet[1] >> 29u) & 3u) | ((packet[6] >> 24u) & 4u) | ((packet[6] >> 25u) & 8u);
     constexpr std::size_t immediateLimit = std::size_t{16} << 20u;
+    constexpr std::size_t gpuStoreLimit = 65536;
+    if (source == 2 && Pm4::DmaBytes(packet) > gpuStoreLimit && Pm4::DmaDestination(packet) != Pm4::DmaSelectGds) {
+        const auto fillAddress = packet[4] | (static_cast<std::uint64_t>(packet[5]) << 32u);
+        const auto fillBytes = Pm4::DmaBytes(packet);
+        const auto pattern = packet[2];
+        if (fillAddress % 16 != 0 || fillBytes % 16 != 0 || !GuestMemory::Accessible(reinterpret_cast<const void*>(fillAddress), fillBytes, true) || !device.Load()) return false;
+        DrawPipeline::Queue0().Enqueue([this, queue, fillAddress, fillBytes, pattern] {
+            GuestMemory::SetCurrentPacket(0x50, queue);
+            if (const auto localDevice = device.Load()) {
+                storeBufferFill(queue, fillAddress, fillBytes, {pattern, pattern, pattern, pattern}, localDevice, false, false);
+                ++dmaFills;
+            }
+        }, {{fillAddress, fillAddress + fillBytes}});
+        return true;
+    }
     if (source == 2) {
         const auto store = Pm4::ResolveStore(packet, state, immediateLimit);
         if (!store.has_value() || store->Bytes().empty() || !GuestMemory::Accessible(reinterpret_cast<const void*>(store->address), store->Bytes().size(), true)) return false;
@@ -314,6 +329,7 @@ bool Driver::enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32
                 recordDeferredLabels(localDevice.get(), queue);
                 const auto outcome = localDevice->CopyBuffer(copy.destination, copy.source, copy.bytes, 0, std::numeric_limits<std::size_t>::max(), 0, 0, queue, [](std::span<const std::byte>, std::uint64_t) {});
                 if (outcome.path == 1 || outcome.path == 3) return;
+                if (outcome.path == 2 && !Graphics::RegisteredReadableCovers(copy.destination, copy.bytes) && !localDevice->StoresPendingOver(copy.destination, copy.bytes)) ++copiesToHostMemory;
             }
         }
         std::vector<std::byte> bytes(copy.bytes);
@@ -432,10 +448,10 @@ void Driver::commitLabel(std::uint32_t queue, std::uint64_t address, std::span<c
     if (endOfPipeInterrupt) {
         bool deferred = false;
         if (localDevice != nullptr && (reason == 0 || reason == 5 || reason == 6)) {
-            deferred = localDevice->AfterRecordedWork([queue] { AgcDriverDeliverEopInterrupt(queue); }, queue == 0);
+            deferred = localDevice->AfterRecordedWork([this, queue] { deliverGuestEopInterrupt(queue); }, queue == 0);
             if (deferred && workOpen) localDevice->SubmitRecorded(queue == 0);
         }
-        if (!deferred) AgcDriverDeliverEopInterrupt(queue);
+        if (!deferred) deliverGuestEopInterrupt(queue);
     }
     submitDueAfterCommit(localDevice.get());
 }

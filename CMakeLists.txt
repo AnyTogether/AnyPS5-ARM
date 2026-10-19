@@ -122,6 +122,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap_dependencies.py)
         add_test(NAME pr_overlap_tools COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_overlap.py)
+        add_test(NAME pr_labels COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_pr_labels.py)
         add_test(NAME progress_history COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_progress_history.py)
         add_test(NAME progress_report COMMAND ${Python3_EXECUTABLE}
@@ -154,6 +156,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_ci_gate.py)
         add_test(NAME conventions_doc_links COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_doc_links.py)
+        add_test(NAME conventions_unknown_nids COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_check_conventions_unknown_nids.py)
         add_test(NAME test_registration COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_test_registration.py)
         add_test(NAME build_eligibility COMMAND ${Python3_EXECUTABLE}
@@ -307,6 +311,22 @@ add_subdirectory(3rdparty/libusb-cmake EXCLUDE_FROM_ALL)
 set_target_properties(usb-1.0 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 include(cmake/ZArchive.cmake)
+if(WIN32)
+    set(MI_BUILD_SHARED ON CACHE BOOL "" FORCE)
+    set(MI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+    set(MI_WIN_REDIRECT ON CACHE BOOL "" FORCE)
+    set(MI_FREE_IS_CHECKED SHARED CACHE STRING "" FORCE)
+    add_subdirectory(3rdparty/mimalloc EXCLUDE_FROM_ALL)
+    if(MINGW)
+        target_compile_definitions(mimalloc PRIVATE MI_MINGW_UCRT64=1)
+        target_link_options(mimalloc PRIVATE -static
+                LINKER:--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=strdup,--wrap=_strdup)
+        target_sources(mimalloc PRIVATE ${CMAKE_SOURCE_DIR}/core/libs/allocator/RuntimeHeap.c)
+    endif()
+endif()
 
 add_subdirectory(core/shader/recompiler)
 add_subdirectory(core/Decoder/Jpeg)

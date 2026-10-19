@@ -402,6 +402,10 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.hostSubgroupSize = target.subgroupSize;
     state.singleLane = (target.subgroupStages & SubgroupStageBit(state.meshAsCompute ? IrShaderStage::Compute : program.Resources().stage)) == 0u;
     state.singleSampleImages = std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityStorageImageMultisample)) == target.supportedCapabilities.end();
+    if (state.requirements.ldsLock && LdsInDeviceMemory(state) && std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityInt64Atomics)) != target.supportedCapabilities.end()) {
+        state.requirements.ldsLock = false;
+        state.requirements.ldsBufferInt64Atomics = true;
+    }
     if (HostSubgroupSingleLane(state)) {
         state.requirements.subgroupBallot = false;
         state.requirements.subgroupShuffle = false;

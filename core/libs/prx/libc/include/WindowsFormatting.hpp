@@ -21,6 +21,11 @@ namespace LibcDetail {
 
 enum class ArgumentClass : unsigned char { Integer, Double, LongDouble };
 
+class FormatConstraintViolation : public std::invalid_argument {
+public:
+    using std::invalid_argument::invalid_argument;
+};
+
 class FormatArguments {
     VaList args;
     std::vector<std::array<unsigned char, 16>> numbered;
@@ -193,11 +198,10 @@ inline std::string FormatPointer(const std::string& spec, const void* pointer) {
     for (unsigned long long rest = value; rest != 0; rest >>= 4) digits.insert(digits.begin(), "0123456789abcdef"[rest & 15]);
     if (digits.empty() && !(hasPrecision && precision == 0)) digits = "0";
     if (digits.size() < precision) digits.insert(0, precision - digits.size(), '0');
-    const std::size_t used = digits.size() + 2;
-    const std::size_t padding = width > used ? width - used : 0;
-    if (left) return "0x" + digits + std::string(padding, ' ');
-    if (zero && !hasPrecision) return "0x" + std::string(padding, '0') + digits;
-    return std::string(padding, ' ') + "0x" + digits;
+    const std::size_t padding = width > digits.size() ? width - digits.size() : 0;
+    if (left) return digits + std::string(padding, ' ');
+    if (zero && !hasPrecision) return std::string(padding, '0') + digits;
+    return std::string(padding, ' ') + digits;
 }
 
 constexpr size_t maximumArgumentPosition = 99;
@@ -251,7 +255,7 @@ inline std::vector<ArgumentClass> NumberedArgumentClasses(const char* format) {
     return classes;
 }
 
-inline int FormatWindows(char* buffer, size_t size, const char* format, const void* source, std::string* complete = nullptr) {
+inline int FormatWindows(char* buffer, size_t size, const char* format, const void* source, std::string* complete = nullptr, bool secure = false) {
     if (!format || !source) throw std::invalid_argument("Null formatting argument");
     const int savedError = errno;
     const char* const formatStart = format;
@@ -363,10 +367,12 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
             else output.Value(spec + 's', utf8.c_str());
         } else if (conversion == 's' && (length.empty() || length == "h")) {
             const char* value = args.Next<const char*>();
+            if (!value && secure) throw FormatConstraintViolation("Null string argument");
             if (!value) value = "(null)";
             output.Value(spec + 's', value);
         } else if ((conversion == 's' && length == "l") || (conversion == 'S' && length.empty())) {
             const char16_t* value = args.Next<const char16_t*>();
+            if (!value && secure) throw FormatConstraintViolation("Null string argument");
             if (!value) value = u"(null)";
             std::string utf8;
             while (utf8.size() < precisionLimit && *value) {
@@ -380,13 +386,15 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
                 }
             }
             output.Value(spec + 's', utf8.c_str());
-        } else if (conversion == 'p' && length.empty()) {
+        } else if (conversion == 'p' && (length.empty() || length == "l")) {
             const std::string text = FormatPointer(spec, args.Next<void*>());
             output.Append(text.data(), text.size());
         } else if (conversion == 'm') {
             char message[128];
             strerror_r_nid_postfix(savedError, message, sizeof(message));
             output.Value(spec + 's', static_cast<const char*>(message));
+        } else if (conversion == 'n' && secure) {
+            throw FormatConstraintViolation("Format count conversion");
         } else if (conversion == 'n' && integerLength && spec == "%") {
             void* pointer = args.Next<void*>();
             if (!pointer) throw std::invalid_argument("Null format count pointer");

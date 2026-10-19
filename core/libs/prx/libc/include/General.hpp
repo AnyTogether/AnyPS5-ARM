@@ -35,6 +35,7 @@ extern "C" void RecordWrittenPath_nid_no_patch(const std::filesystem::path& path
 extern "C" std::vector<std::filesystem::path> WrittenPaths_nid_no_patch();
 extern "C" void SyncWrittenPaths_nid_no_patch();
 extern "C" void BlockPathAlias_nid_no_patch(const char* guestPrefix);
+extern "C" int DuplicateHostDescriptor_nid_no_patch(int descriptor);
 #ifdef _WIN32
 extern "C" int WindowsOpenError_nid_no_patch(unsigned long error);
 extern "C" void* HostStandardHandle_nid_no_patch(int descriptor);

@@ -70,6 +70,7 @@ add_library(relinker_core STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/ValidationPolicy.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/output/SysVDynamicSectionBuilder.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/output/CallRegistryWriter.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/patching/GamePatch.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/pipeline/Conversion.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/pipeline/RelinkerPipeline.cpp
 )
@@ -94,6 +95,10 @@ if(BUILD_TESTING)
     target_link_libraries(relinker_conversion_tests PRIVATE relinker_core)
     add_test(NAME relinker_conversion COMMAND relinker_conversion_tests)
     set_tests_properties(relinker_conversion PROPERTIES TIMEOUT 20)
+    add_test_executable(relinker_game_patch_tests ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/GamePatchTests.cpp)
+    target_link_libraries(relinker_game_patch_tests PRIVATE relinker_core)
+    add_test(NAME relinker_game_patch COMMAND relinker_game_patch_tests)
+    set_tests_properties(relinker_game_patch PROPERTIES TIMEOUT 30)
 endif()
 
 if(ANYPS5_BUILD_WASM)
@@ -460,6 +465,8 @@ if(BUILD_TESTING)
         set_tests_properties(guest_none_relocations PROPERTIES TIMEOUT 20)
         add_test(NAME optional_plt COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_optional_plt.py $<TARGET_FILE:relinker>)
+        add_test(NAME optional_rela COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_optional_rela.py $<TARGET_FILE:relinker>)
         add_test(NAME empty_tls COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_empty_tls.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_tls_protected_entries COMMAND ${Python3_EXECUTABLE}
@@ -471,6 +478,7 @@ if(BUILD_TESTING)
         foreach(opcode IN ITEMS add or adc sbb and sub xor cmp)
             list(APPEND tlsCoverageGroups alu_${opcode})
         endforeach()
+        list(APPEND tlsCoverageGroups gs_traps)
         foreach(group IN LISTS tlsCoverageGroups)
             add_test(NAME tls_function_coverage_${group} COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_tls_function_coverage.py $<TARGET_FILE:relinker> ${group})
@@ -478,6 +486,9 @@ if(BUILD_TESTING)
         endforeach()
         add_test(NAME tls_diagnostics COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_tls_diagnostics.py $<TARGET_FILE:relinker>)
+        add_test(NAME macos_tls_alu COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_tls_alu.py $<TARGET_FILE:relinker>)
+        set_tests_properties(macos_tls_alu PROPERTIES TIMEOUT 60)
         add_test(NAME linux_load_alignment COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_load_alignment.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_eh_frame_header COMMAND ${Python3_EXECUTABLE}
@@ -515,6 +526,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_tls_thread_pointer.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_bss COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_bss.py $<TARGET_FILE:relinker>)
+        add_test(NAME windows_sparse_load COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_sparse_load.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_icon COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_icon.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_desktop_entry_output COMMAND ${Python3_EXECUTABLE}
@@ -533,6 +546,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_directories.py $<TARGET_FILE:relinker>)
         add_test(NAME relinker_executables COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_executables.py $<TARGET_FILE:relinker>)
+        add_test(NAME game_patches COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_game_patches.py $<TARGET_FILE:relinker>)
         add_test(NAME sce_module_path COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_module_path.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_guest_stack COMMAND ${Python3_EXECUTABLE}
@@ -551,6 +566,12 @@ if(BUILD_TESTING)
             add_test(NAME macos_fixtures COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/macos/run_macos_fixtures.py $<TARGET_FILE:relinker> ${CMAKE_BINARY_DIR}/core/libs/libs)
         endif()
+        add_test(NAME macos_tls_overlap COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_tls_overlap.py $<TARGET_FILE:relinker>)
+        set_tests_properties(macos_tls_overlap PROPERTIES TIMEOUT 60)
+        add_test(NAME macos_gs_traps COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_gs_traps.py $<TARGET_FILE:relinker>)
+        set_tests_properties(macos_gs_traps PROPERTIES TIMEOUT 60)
         add_test(NAME guest_host_libc COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_host_libc.py $<TARGET_FILE:relinker>)
         add_test(NAME macos_placeholder_exports COMMAND ${Python3_EXECUTABLE}
@@ -644,6 +665,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_code_extent.py $<TARGET_FILE:relinker>)
         add_test(NAME sce_relro COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_relro.py $<TARGET_FILE:relinker>)
+        add_test(NAME sce_module_code_extent COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_sce_module_code_extent.py $<TARGET_FILE:relinker>)
         add_test(NAME call_registry COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_call_registry.py $<TARGET_FILE:relinker>)
         add_test(NAME jmprel_table_bounds COMMAND ${Python3_EXECUTABLE}
@@ -699,14 +722,8 @@ if(BUILD_TESTING)
     )
     add_test(NAME windows_icon_resource COMMAND windows_icon_resource_tests)
 
-    add_test_executable(entry_stub_tests
-        ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/tests/EntryStubTests.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/src/general/EntryStubBuilder.cpp
-    )
-    target_include_directories(entry_stub_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/domain/include
-    )
+    add_test_executable(entry_stub_tests ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/tests/EntryStubTests.cpp)
+    target_link_libraries(entry_stub_tests PRIVATE relinker_core)
     add_test(NAME entry_stub COMMAND entry_stub_tests)
 
     add_test_executable(control_flow_graph_tests

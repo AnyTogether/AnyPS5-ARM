@@ -53,7 +53,7 @@ struct PreparedGraphicsStage {
     std::shared_ptr<const ShaderRecompiler::RecompileResult> registration;
 };
 
-std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decoded, const ShaderRecompiler::SpirvTarget& target);
+std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decoded, const ShaderRecompiler::SpirvTarget& target, bool deferUnprepared = false);
 
 struct DrawRecipeRecord {
     std::vector<std::weak_ptr<const DispatchVariant>> stages;
@@ -119,6 +119,7 @@ struct StageCapture {
     std::shared_ptr<const ShaderRecompiler::RecompileResult> compiled;
     std::shared_ptr<const ShaderRecompiler::ResourceCapture> capture;
     std::vector<ShaderRecompiler::MemoryRegion> regions;
+    std::vector<std::shared_ptr<const ShaderRecompiler::SrtGuestWords>> supplied;
     std::uint64_t forgetSerial = 0;
     std::uint32_t pushOffset = 0;
     ShaderRecompiler::SrtUserDataUse userDataUse;

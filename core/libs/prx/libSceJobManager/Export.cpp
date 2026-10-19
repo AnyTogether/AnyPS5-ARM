@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <condition_variable>
@@ -198,7 +199,6 @@ private:
     std::uint32_t outstanding = 0;
     std::size_t cursor = 0;
     std::deque<Item> items;
-    std::mutex waiters;
     std::condition_variable passed;
     Label label{};
     std::uint64_t labelSeen = 0;
@@ -221,7 +221,6 @@ public:
 struct Manager {
     std::mutex lock;
     std::condition_variable work;
-    std::condition_variable nodeFreed;
     bool running = false;
     std::uint32_t blockedWaiters = 0;
     std::uint32_t freeNodes = 0;
@@ -251,7 +250,6 @@ bool TakeNode(Manager& manager) {
 
 void ReturnNodes(Manager& manager, std::uint32_t count) {
     manager.freeNodes += count;
-    manager.nodeFreed.notify_all();
 }
 
 int Sequence::Latch(int code) {
@@ -303,8 +301,8 @@ void Sequence::Advance() {
             continue;
         }
         bool* const waiter = item.passed;
-        const auto retired = static_cast<std::uint32_t>(cursor) + 1;
-        items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(retired));
+        const auto retired = static_cast<std::uint32_t>(cursor);
+        items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(retired + 1));
         cursor = 0;
         commands.clear();
         batchStarted = false;
@@ -439,7 +437,8 @@ int Sequence::Wait() {
 int Sequence::WaitAndClose(std::uint32_t index) {
     std::unique_lock guard(manager->lock);
     const int result = WaitLocked(guard);
-    ReturnNodes(*manager, static_cast<std::uint32_t>(items.size()) + 1);
+    const auto remaining = static_cast<std::uint32_t>(std::count_if(items.begin(), items.end(), [](const Item& item) { return item.type != ItemType::Wait; }));
+    ReturnNodes(*manager, remaining + 1);
     items.clear();
     commands.clear();
     cursor = 0;
@@ -457,13 +456,7 @@ int Sequence::WaitLocked(std::unique_lock<std::mutex>& guard) {
     } else if (submitted.waits++ >= limits.waits) {
         result = Latch(SequenceLimitExceeded);
     }
-    if (manager->freeNodes == 0 && result == 0) result = Latch(SequenceNoNodes);
     ++manager->blockedWaiters;
-    manager->nodeFreed.wait(guard, [this] { return manager->freeNodes != 0; });
-    --manager->freeNodes;
-    guard.unlock();
-    const std::lock_guard serial(waiters);
-    guard.lock();
     bool done = false;
     items.push_back({ItemType::Wait, this, nullptr, nullptr, 0, 0, 0, &done});
     Advance();
@@ -700,10 +693,16 @@ void APS5_VABI _ZN3sce3Job10JobManagerC2Ev(void* self) {
     Implementation(self) = nullptr;
 }
 
-void APS5_VABI _ZN3sce3Job10JobManagerD1Ev(void*) {
+int APS5_VABI _ZN3sce3Job10JobManager8shutdownEv(void* self);
+
+void APS5_VABI _ZN3sce3Job10JobManagerD1Ev(void* self) {
+    if (Implementation(self) != nullptr) {
+        static_cast<void>(_ZN3sce3Job10JobManager8shutdownEv(self));
+    }
 }
 
-void APS5_VABI _ZN3sce3Job10JobManagerD2Ev(void*) {
+void APS5_VABI _ZN3sce3Job10JobManagerD2Ev(void* self) {
+    _ZN3sce3Job10JobManagerD1Ev(self);
 }
 
 std::uint64_t APS5_VABI _ZN3sce3Job10JobManager27calculateRequiredMemorySizeEPKNS1_21MemorySizeQueryParamsE(const MemorySizeQueryParams* params) {

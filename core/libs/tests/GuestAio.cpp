@@ -328,6 +328,16 @@ int main(int argc, char** argv) {
     Check(sceKernelAioSubmitWriteCommandsMultiple(writeBatch, 0, 0, writeIds) == SCE_KERNEL_ERROR_EINVAL);
     KernelAioRwRequest noResult{0, 1, readBack.data(), nullptr, batchFd};
     Check(sceKernelAioSubmitWriteCommandsMultiple(&noResult, 1, 0, writeIds) == SCE_KERNEL_ERROR_EFAULT);
+    std::array<KernelAioRwRequest, 129> unread{};
+    std::array<std::int32_t, 129> unreadIds{};
+    for (const auto submit : {sceKernelAioSubmitReadCommandsMultiple, sceKernelAioSubmitWriteCommandsMultiple}) {
+        bool limited = false;
+        try { submit(unread.data(), 129, 0, unreadIds.data()); } catch (const std::runtime_error&) { limited = true; }
+        Check(limited);
+    }
+    std::int32_t unreadId = 0;
+    Check(sceKernelAioSubmitReadCommands(unread.data(), 129, 0, &unreadId) == SCE_KERNEL_ERROR_EFAULT);
+    Check(sceKernelAioSubmitWriteCommands(unread.data(), 129, 0, &unreadId) == SCE_KERNEL_ERROR_EFAULT);
     Check(sceKernelAioWaitRequests(readIds, 2, nullptr, 1, nullptr) == SCE_KERNEL_ERROR_EFAULT);
     Check(sceKernelAioWaitRequests(nullptr, 2, readStates, 1, nullptr) == SCE_KERNEL_ERROR_EFAULT);
     Check(sceKernelAioWaitRequests(readIds, -1, readStates, 1, nullptr) == SCE_KERNEL_ERROR_EINVAL);

@@ -128,7 +128,20 @@ int _mapFlexible(void** addr, size_t len, int prot, int flags) {
     const size_t configured = _configuredFlexibleSize();
     const size_t images = GuestImageSegmentBytes_nid_no_patch();
     std::lock_guard lock(g_flexibleLock);
-    const size_t used = images + _flexibleUsedLocked();
+    size_t replaced = 0;
+    constexpr int MapFixed = 0x10;
+    constexpr int MapNoOverwrite = 0x80;
+    if (addr != nullptr && *addr != nullptr && (flags & (MapFixed | MapNoOverwrite)) == MapFixed) {
+        const auto start = reinterpret_cast<uintptr_t>(*addr);
+        if (len <= std::numeric_limits<uintptr_t>::max() - start) {
+            const auto end = start + len;
+            for (const auto& [rangeStart, rangeLength] : g_flexibleRanges) {
+                const auto rangeEnd = rangeStart + rangeLength;
+                if (rangeStart < end && rangeEnd > start) replaced += std::min(end, rangeEnd) - std::max(start, rangeStart);
+            }
+        }
+    }
+    const size_t used = images + _flexibleUsedLocked() - replaced;
     if (len > configured - std::min(configured, used)) {
         std::fprintf(stderr, "[memory] flexible memory exhausted: request 0x%zx with 0x%zx of 0x%zx in use\n", len, used, configured);
         return SCE_KERNEL_ERROR_ENOMEM;

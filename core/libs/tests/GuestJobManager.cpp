@@ -354,6 +354,34 @@ static void LimitsCase() {
     while (accepted < 0x3ff && (result = sequence->Dispatch(Nothing, nullptr, 1, nullptr)) == 0) ++accepted;
     Require(result == NoNodes && accepted == 33);
     Require(sequence->Dispatch(Nothing, nullptr, 1, nullptr) == Invalid);
+    Require(sequence->Wait() == Invalid);
+    Require(factory->Destroy(sequence) == 0);
+    Require(factory->Create(&sequence, 0x7fff, 0x3ff, 0xff, 10, "recycle") == 0);
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        for (int index = 0; index < 33; ++index) {
+            Require(sequence->Dispatch(Nothing, nullptr, 1, nullptr) == 0);
+        }
+        Require(sequence->Wait() == 0);
+    }
+    int finalAccepted = 0;
+    int finalResult = 0;
+    while (finalAccepted < 0x3ff && (finalResult = sequence->Dispatch(Nothing, nullptr, 1, nullptr)) == 0) ++finalAccepted;
+    Require(finalResult == NoNodes && finalAccepted == 33);
+    Require(sequence->Wait() == Invalid);
+    Require(factory->Destroy(sequence) == 0);
+    for (int round = 0; round < 5; ++round) {
+        Require(factory->Create(&sequence, 0x7fff, 0x3ff, 0xff, 2, "recycle_round") == 0);
+        for (int index = 0; index < 33; ++index) {
+            Require(sequence->Dispatch(Nothing, nullptr, 1, nullptr) == 0);
+        }
+        Require(sequence->Wait() == 0);
+        int acceptedInRound = 0;
+        int resultInRound = 0;
+        while (acceptedInRound < 0x3ff && (resultInRound = sequence->Dispatch(Nothing, nullptr, 1, nullptr)) == 0) ++acceptedInRound;
+        Require(resultInRound == NoNodes && acceptedInRound == 33);
+        Require(sequence->Wait() == Invalid);
+        Require(factory->Destroy(sequence) == 0);
+    }
     Require(Shutdown(manager.storage) == 0);
 }
 
@@ -417,6 +445,11 @@ static void ShutdownCase() {
         Require(Shutdown(manager.storage) == 0);
         Require(Shutdown(manager.storage) == NotInitialized);
         Require(Factories(manager.storage, 0) == nullptr);
+    }
+    {
+        Block scopedBlock(SizeFor(2, 2, 8, 2, 2));
+        ManagerObject scoped;
+        Require(Initialize(scoped.storage, scopedBlock.memory, scopedBlock.bytes, 2, 2, nullptr) == 0);
     }
 }
 
