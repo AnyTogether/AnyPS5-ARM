@@ -82,9 +82,11 @@ With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/r
 
 The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
 
-| Home | Game settings | Unlocking |
-|---|---|---|
-| ![Home screen](../screenshots/launcher-home.jpg) | ![Game settings](../screenshots/launcher-game-settings.jpg) | ![Unlocking](../screenshots/launcher-unlocking.jpg) |
+| Home | Game settings | Unlocking | Game library |
+|---|---|---|---|
+| ![Home screen](../screenshots/launcher-home.jpg) | ![Game settings](../screenshots/launcher-game-settings.jpg) | ![Unlocking](../screenshots/launcher-unlocking.jpg) | ![Game library](../screenshots/launcher-library.jpg) |
+
+[▶ Watch the launcher in action](../videos/launcher.mp4) (1:39)
 
 ### About the project
 
@@ -285,9 +287,11 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, ✕, ○, △) ya da fare ve trackpad ile kullanılır.
 
-| Ana ekran | Oyun ayarları | Kilit açılıyor |
-|---|---|---|
-| ![Ana ekran](../screenshots/launcher-home.jpg) | ![Oyun ayarları](../screenshots/launcher-game-settings.jpg) | ![Kilit açılıyor](../screenshots/launcher-unlocking.jpg) |
+| Ana ekran | Oyun ayarları | Kilit açılıyor | Oyun kütüphanesi |
+|---|---|---|---|
+| ![Ana ekran](../screenshots/launcher-home.jpg) | ![Oyun ayarları](../screenshots/launcher-game-settings.jpg) | ![Kilit açılıyor](../screenshots/launcher-unlocking.jpg) | ![Oyun kütüphanesi](../screenshots/launcher-library.jpg) |
+
+[▶ Launcher'ın videosunu izle](../videos/launcher.mp4) (1:39)
 
 ### Proje hakkında
 

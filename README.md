@@ -6,15 +6,38 @@
 
 ## The AnyPS5 app
 
-**AnyPS5.app** is a PS5-style launcher: it finds the dumps in your games folder, unlocks (converts) a game in one click and starts it, with per-game resolution, display and language settings, three animated themes and your own picture or video as the background.
+**AnyPS5.app** is a launcher laid out like the PS5 home screen. Point it at the folder with your game dumps and it does the rest: it finds the games, unlocks (converts) them for the Mac and starts them.
+
+[![Watch the AnyPS5 launcher in action (1:39)](docs/screenshots/launcher-home.jpg)](docs/videos/launcher.mp4)
+
+<p align="center"><a href="docs/videos/launcher.mp4"><b>▶ Watch the launcher in action</b></a> (1:39)</p>
 
 ```sh
 curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
 ```
 
-[⬇ Download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
-![The AnyPS5 launcher](docs/screenshots/launcher-home.jpg)
+- **First start in three steps:** language (Türkçe or English), one of three animated themes (Cosmic, Aurora, Sunset) and the games folder.
+- **Finds your games:** the folder and its subfolders are scanned, and games added later show up on their own, with their icon, artwork, size, title ID and version.
+- **One-click unlock:** a game that is not converted yet shows a lock.
+  - **Unlock** opens `eboot.bin` and the modules even when they are still SELF containers, and relinks them for macOS.
+  - The game app is ready in seconds to a few minutes, with a PS5-style progress bar.
+  - The game files are APFS clones of the dump, so an unlocked game takes no extra space.
+- **Per-game settings:**
+  - output resolution (for titles with a resolution patch, such as Stray);
+  - window or full screen, and the window size;
+  - vertical sync, the performance overlay and the game's language;
+  - Show in Finder, the log, clearing the shader cache, unlocking again, removing the installation.
+- **Personal:**
+  - the theme, the accent color, and the background (the theme animation, your own picture or a looping video);
+  - the selected game's artwork drifting behind the home screen;
+  - animations, interface sounds, the profile name.
+- **Console-style controls:** arrow keys, Return and Esc; a game controller (D-pad, ✕, ○, △); or the mouse and trackpad. A game library grid shows everything at once.
+
+| First start | Unlocking | Game settings | Game library |
+|---|---|---|---|
+| ![Picking a theme](docs/screenshots/launcher-themes.jpg) | ![Unlocking a game](docs/screenshots/launcher-unlocking.jpg) | ![Game settings](docs/screenshots/launcher-game-settings.jpg) | ![Game library](docs/screenshots/launcher-library.jpg) |
 
 ## Games on a Mac
 
