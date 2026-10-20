@@ -415,6 +415,7 @@ std::uint64_t APS5_VABI sceAmprMeasureCommandSizeWaitOnCounter() { return sizeof
 std::uint64_t APS5_VABI sceAmprMeasureCommandSizeWriteKernelEventQueueOnCompletion() { return sizeof(Apr::WriteKernelEventQueueCommand); }
 
 int APS5_VABI sceAmprAprCommandBufferConstructor(Apr::CommandBufferObject* buffer, uint64_t* gatherState, uint64_t* scatterState) {
+    if (!buffer || !gatherState || !scatterState) return SCE_KERNEL_ERROR_EINVAL;
     buffer->type = Apr::BufferType::Apr;
     *gatherState = 0;
     *scatterState = 0;
@@ -520,6 +521,7 @@ int APS5_VABI sceAmprCommandBufferConstructNop(Apr::CommandBufferObject* buffer,
 }
 
 int APS5_VABI sceAmprCommandBufferConstructor(Apr::CommandBufferObject* buffer) {
+    if (!buffer) return SCE_KERNEL_ERROR_EINVAL;
     *buffer = {Apr::BufferType::Generic, 0, 0, 0, 0, nullptr};
     return 0;
 }
@@ -574,12 +576,14 @@ int APS5_VABI sceAmprCommandBufferPushMarkerWithColor(Apr::CommandBufferObject* 
 }
 
 int APS5_VABI sceAmprCommandBufferReset(Apr::CommandBufferObject* buffer) {
+    if (!buffer) return SCE_KERNEL_ERROR_EINVAL;
     buffer->offset = 0;
     buffer->numCommands = 0;
     return 0;
 }
 
 int APS5_VABI sceAmprCommandBufferSetBuffer(Apr::CommandBufferObject* buffer, void* memory, uint32_t size) {
+    if (!buffer) return SCE_KERNEL_ERROR_EINVAL;
     buffer->base = static_cast<uint8_t*>(memory);
     buffer->size = size;
     buffer->offset = 0;

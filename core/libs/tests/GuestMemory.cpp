@@ -208,12 +208,83 @@ static void CheckAudioCoprocessorProtection() {
 
 static void CheckMprotectIgnoresUndefinedBits() {
     constexpr std::size_t length = 0x4000;
+    const auto check = [&](void* mapping, int protection) {
+        Require(sceKernelMprotect(mapping, length, protection) == 0);
+        VirtualQueryInfo info{};
+        Require(sceKernelVirtualQuery(mapping, 0, &info, sizeof(info)) == 0);
+        int expected = protection & 0x3f7;
+        if ((expected & 0x2) != 0) expected |= 0x1;
+        if ((expected & 0x80) != 0) expected |= 0x40;
+        if ((expected & 0x200) != 0) expected |= 0x100;
+        if (info.protection != expected)
+            std::fprintf(stderr, "Memory protection 0x%x reported 0x%x, expected 0x%x\n", static_cast<unsigned>(protection), static_cast<unsigned>(info.protection), static_cast<unsigned>(expected));
+        Require(info.protection == expected);
+        auto* bytes = static_cast<volatile unsigned char*>(mapping);
+        if ((protection & 0x222) != 0) {
+            bytes[0] = 5;
+            bytes[length - 1] = 7;
+            Require(bytes[0] == 5 && bytes[length - 1] == 7);
+        } else if ((protection & 0x117) != 0) {
+            Require(bytes[0] == 5 && bytes[length - 1] == 7);
+        }
+    };
     void* mapping = nullptr;
     Require(sceKernelMapFlexibleMemory(&mapping, length, 3, 0) == 0);
-    Require(sceKernelMprotect(mapping, length, static_cast<int>(0xfffffff2u)) == 0);
-    static_cast<volatile unsigned char*>(mapping)[length - 1] = 5;
-    Require(static_cast<volatile unsigned char*>(mapping)[length - 1] == 5);
+    for (int byte = 0x80; byte <= 0xff; ++byte) check(mapping, byte - 0x100);
+    for (const int protection : {0, 1, 2, 3, 4, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x3f7}) {
+        for (const auto undefined : {0u, 8u, 0x400u, 0x80000000u, 0xfffffc08u})
+            check(mapping, static_cast<int>(static_cast<std::uint32_t>(protection) | undefined));
+    }
     Require(sceKernelMunmap(mapping, length) == 0);
+    std::int64_t physical = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, length, 0, 0, &physical) == 0);
+    mapping = nullptr;
+    Require(sceKernelMapDirectMemory(&mapping, length, 0xf2, 0, physical, 0) == 0);
+    check(mapping, -14);
+    check(mapping, 0x400);
+    check(mapping, 0x100);
+    check(mapping, 0x200);
+    check(mapping, 0x3f7);
+    Require(sceKernelMunmap(mapping, length) == 0);
+    Require(sceKernelReleaseDirectMemory(physical, length) == 0);
+}
+
+static void CheckStrictMemoryProtectionBits() {
+    constexpr std::size_t length = 0x4000;
+    std::int64_t physical = 0;
+    Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, length, 0, 0, &physical) == 0);
+    void* mapping = nullptr;
+    Require(sceKernelMapDirectMemory(&mapping, length, 3, 0, physical, 0) == 0);
+    auto* bytes = static_cast<volatile unsigned char*>(mapping);
+    bytes[0] = 5;
+    bytes[length - 1] = 7;
+    const auto rejected = [&](auto operation) {
+        bool threw = false;
+        try { operation(); } catch (const std::invalid_argument&) { threw = true; }
+        Require(threw);
+    };
+    std::size_t available = 0;
+    Require(sceKernelAvailableFlexibleMemorySize(&available) == 0);
+    for (const int protection : {-256, -129, -128, -14, -1, 8, 0x400, std::numeric_limits<int>::min()}) {
+        void* invalid = nullptr;
+        rejected([&] { sceKernelMapFlexibleMemory(&invalid, length, protection, 0); });
+        Require(invalid == nullptr);
+        std::size_t after = 0;
+        Require(sceKernelAvailableFlexibleMemorySize(&after) == 0 && after == available);
+        rejected([&] { sceKernelMapDirectMemory(&invalid, length, protection, 0, physical, 0); });
+        Require(invalid == nullptr);
+        rejected([&] { sceKernelMtypeprotect(mapping, length, 2, protection); });
+        VirtualQueryInfo info{};
+        Require(sceKernelVirtualQuery(mapping, 0, &info, sizeof(info)) == 0);
+        Require(info.protection == 3 && info.memory_type == 0);
+        int type = -1;
+        std::int64_t start = -1;
+        std::int64_t end = -1;
+        Require(sceKernelGetDirectMemoryType(physical, &type, &start, &end) == 0 && type == 0);
+        Require(bytes[0] == 5 && bytes[length - 1] == 7);
+    }
+    Require(sceKernelMunmap(mapping, length) == 0);
+    Require(sceKernelReleaseDirectMemory(physical, length) == 0);
 }
 
 static void CheckInternalNamedFlexibleMapping() {
@@ -2908,6 +2979,7 @@ int main(int argc, char** argv) {
     CheckCheckedReleaseDirectMemory();
     CheckAudioCoprocessorProtection();
     CheckMprotectIgnoresUndefinedBits();
+    CheckStrictMemoryProtectionBits();
     CheckDirectMemoryFollowsPhysicalPages();
     CheckSparseDirectMemoryBacking();
     CheckReleaseDirectMemoryClearsMappings();

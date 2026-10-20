@@ -89,6 +89,7 @@ constexpr std::uint32_t HOST_NOTE_OOB = NOTE_OOB;
 #endif
 
 extern "C" int* APS5_VABI __error_nid_postfix();
+extern "C" int APS5_VABI dup2_nid_postfix(int from, int to);
 namespace {
 #ifdef _WIN32
 using NativeSocket = SOCKET;
@@ -215,9 +216,20 @@ int ReserveNumber(NativeSocket) {
     }
     return number;
 }
-int CopyNumber(int number) {
-    const int copy = ::_dup(number);
-    return copy < 0 ? Fail(errno == EMFILE ? 24 : 9) : copy;
+int CopyNumber(int number, int minimum = 0) {
+    std::vector<int> below;
+    int copy = -1;
+    int error = 0;
+    try {
+        while ((copy = ::_dup(number)) >= 0 && copy < minimum) below.push_back(copy);
+        if (copy < 0) error = errno == EMFILE ? 24 : 9;
+    } catch (const std::bad_alloc&) {
+        if (copy >= 0) ::_close(copy);
+        copy = -1;
+        error = 12;
+    }
+    for (const int temporary : below) ::_close(temporary);
+    return copy < 0 ? Fail(error) : copy;
 }
 int CopyNumberTo(int number, int target) {
     return ::_dup2(number, target) != 0 ? Fail(errno == EMFILE ? 24 : 9) : 0;
@@ -230,8 +242,8 @@ int ReserveNumber(NativeSocket native) {
     const int number = ::fcntl(native, F_DUPFD_CLOEXEC, 0);
     return number < 0 ? Fail(NativeError()) : number;
 }
-int CopyNumber(int number) {
-    const int copy = ::fcntl(number, F_DUPFD_CLOEXEC, 0);
+int CopyNumber(int number, int minimum = 0) {
+    const int copy = ::fcntl(number, F_DUPFD_CLOEXEC, minimum);
     return copy < 0 ? Fail(NativeError()) : copy;
 }
 int CopyNumberTo(int number, int target) {
@@ -665,20 +677,29 @@ bool GuestSockets::PipeReady(int descriptor, short events, short& revents) {
 }
 #endif
 
-int GuestSockets::Duplicate(int descriptor) {
+namespace {
+int DuplicateSocket_nid_no_patch(int descriptor, int minimum, bool closeOnExec) {
+    if (minimum < 0) return Fail(22);
     std::lock_guard lock(socketsMutex);
     const auto found = sockets.find(descriptor);
     if (found == sockets.end()) return Fail(9);
-    const int duplicate = CopyNumber(descriptor);
+    const int duplicate = CopyNumber(descriptor, minimum);
     if (duplicate < 0) return -1;
     try {
         sockets.insert_or_assign(duplicate, found->second);
-        closeOnExecDescriptors.erase(duplicate);
+        if (closeOnExec) closeOnExecDescriptors.insert(duplicate);
+        else closeOnExecDescriptors.erase(duplicate);
     } catch (const std::bad_alloc&) {
+        sockets.erase(duplicate);
         ReleaseNumber(duplicate);
         return Fail(12);
     }
     return duplicate;
+}
+}
+
+int GuestSockets::Duplicate(int descriptor) {
+    return DuplicateSocket_nid_no_patch(descriptor, 0, false);
 }
 
 int GuestSockets::DuplicateTo(int descriptor, int target) {
@@ -1045,30 +1066,36 @@ extern "C" bool KernelLookupSocketNative_nid_no_patch(int descriptor, std::share
 
 extern "C" {
 int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...) {
-    if (!GuestSockets::IsOpen(descriptor)) {
-        const auto type = File::FcntlArgumentOf(command);
-        std::intptr_t argument = 0;
-        if (type != File::FcntlArgument::None) {
+    const auto type = File::FcntlArgumentOf(command);
+    std::intptr_t argument = 0;
+    if (type != File::FcntlArgument::None) {
 #ifdef _WIN32
-            __builtin_sysv_va_list arguments;
-            __builtin_sysv_va_start(arguments, command);
-            argument = type == File::FcntlArgument::Int ? __builtin_va_arg(arguments, int)
-                                                        : reinterpret_cast<std::intptr_t>(__builtin_va_arg(arguments, void*));
-            __builtin_sysv_va_end(arguments);
+        __builtin_sysv_va_list arguments;
+        __builtin_sysv_va_start(arguments, command);
+        argument = type == File::FcntlArgument::Int ? __builtin_va_arg(arguments, int)
+                                                    : reinterpret_cast<std::intptr_t>(__builtin_va_arg(arguments, void*));
+        __builtin_sysv_va_end(arguments);
 #else
-            std::va_list arguments;
-            va_start(arguments, command);
-            argument = type == File::FcntlArgument::Int ? va_arg(arguments, int)
-                                                        : reinterpret_cast<std::intptr_t>(va_arg(arguments, void*));
-            va_end(arguments);
+        std::va_list arguments;
+        va_start(arguments, command);
+        argument = type == File::FcntlArgument::Int ? va_arg(arguments, int)
+                                                    : reinterpret_cast<std::intptr_t>(va_arg(arguments, void*));
+        va_end(arguments);
 #endif
-        }
+    }
+    if (!GuestSockets::IsOpen(descriptor)) {
         int result = 0;
         int netError = 0;
         if (KernelControlSocketStatus_nid_no_patch(descriptor, command, static_cast<int>(argument), &result, &netError)) {
             return netError == 0 ? result : Fail(netError);
         }
         return File::Fcntl(descriptor, command, argument);
+    }
+    if (command == 0 || command == 17) return DuplicateSocket_nid_no_patch(descriptor, static_cast<int>(argument), command == 17);
+    if (command == 10 || command == 18) {
+        const int duplicate = dup2_nid_postfix(descriptor, static_cast<int>(argument));
+        if (duplicate >= 0 && command == 18) fcntl_nid_postfix(duplicate, 2, 1);
+        return duplicate;
     }
     const auto socket = Lookup(descriptor);
     if (!socket) return -1;
@@ -1078,17 +1105,7 @@ int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...) {
         return closeOnExecDescriptors.count(descriptor) != 0 ? 1 : 0;
     }
     if (command == 2) {
-#ifdef _WIN32
-        __builtin_sysv_va_list arguments;
-        __builtin_sysv_va_start(arguments, command);
-        const int flags = __builtin_va_arg(arguments, int);
-        __builtin_sysv_va_end(arguments);
-#else
-        std::va_list arguments;
-        va_start(arguments, command);
-        const int flags = va_arg(arguments, int);
-        va_end(arguments);
-#endif
+        const int flags = static_cast<int>(argument);
         std::lock_guard registry(socketsMutex);
         if ((flags & 1) != 0) closeOnExecDescriptors.insert(descriptor);
         else closeOnExecDescriptors.erase(descriptor);
@@ -1096,17 +1113,7 @@ int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...) {
     }
     if (command == 3) return 2 | (socket->options.nonblocking ? 4 : 0); // F_GETFL, O_RDWR
     if (command != 4) return Fail(22);
-#ifdef _WIN32
-    __builtin_sysv_va_list arguments;
-    __builtin_sysv_va_start(arguments, command);
-    const int flags = __builtin_va_arg(arguments, int);
-    __builtin_sysv_va_end(arguments);
-#else
-    std::va_list arguments;
-    va_start(arguments, command);
-    const int flags = va_arg(arguments, int);
-    va_end(arguments);
-#endif
+    const int flags = static_cast<int>(argument);
     if ((flags & ~7) != 0) return Fail(45);
 #ifdef _WIN32
     unsigned long enabled = (flags & 4) != 0;

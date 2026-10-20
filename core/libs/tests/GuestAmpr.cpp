@@ -243,6 +243,16 @@ void TestRejectedArguments() {
     Require(sceAmprMeasureCommandSizePushMarkerWithColor(nullptr, color) == rejected);
     Require(sceAmprMeasureCommandSizeSetMarker(nullptr) == rejected);
     Require(sceAmprMeasureCommandSizeSetMarkerWithColor(nullptr, color) == rejected);
+
+    std::uint64_t gatherState = 0;
+    std::uint64_t scatterState = 0;
+    std::array<std::uint8_t, 64> memory{};
+    Require(sceAmprCommandBufferConstructor(nullptr) == invalidArgument);
+    Require(sceAmprAprCommandBufferConstructor(nullptr, &gatherState, &scatterState) == invalidArgument);
+    Require(sceAmprAprCommandBufferConstructor(&recorder.buffer, nullptr, &scatterState) == invalidArgument);
+    Require(sceAmprAprCommandBufferConstructor(&recorder.buffer, &gatherState, nullptr) == invalidArgument);
+    Require(sceAmprCommandBufferReset(nullptr) == invalidArgument);
+    Require(sceAmprCommandBufferSetBuffer(nullptr, memory.data(), memory.size()) == invalidArgument);
 }
 
 void TestFullBuffer() {

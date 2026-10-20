@@ -175,7 +175,6 @@ static int MapFlags(int sceFlags) {
 
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...);
-static constexpr int GuestSetFlags = 4;
 
 static int SceErrorFromErrno(int error) {
     const int guest = error > 0 && error <= 34 ? error : FilesystemError(std::error_code(error, std::generic_category()));
@@ -458,7 +457,8 @@ int APS5_VABI sceKernelFcntl(int d, int command, ...) {
     }
     int result;
     if (GuestSockets::IsOpen(d)) {
-        if (command == GuestSetFlags) result = fcntl_nid_postfix(d, command, static_cast<int>(argument));
+        if (type == File::FcntlArgument::Int) result = fcntl_nid_postfix(d, command, static_cast<int>(argument));
+        else if (type == File::FcntlArgument::Pointer) result = fcntl_nid_postfix(d, command, reinterpret_cast<void*>(argument));
         else result = fcntl_nid_postfix(d, command);
     } else {
         result = File::Fcntl(d, command, argument);
