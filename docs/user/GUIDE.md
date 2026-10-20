@@ -60,23 +60,31 @@ Measured with Vulkan SDK 1.4.363.0. The 7 failing tests hit Apple GPU or Metal l
 
 ### The AnyPS5 app
 
-**AnyPS5.app** turns a game folder into a Mac app: no Terminal, no build, no Vulkan SDK.
+**AnyPS5.app** is a launcher laid out like the PS5 home screen. It finds the game dumps in a folder, unlocks (converts) them for the Mac and starts them: no Terminal, no build, no Vulkan SDK.
 
 <p><a href="https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip"><b>⬇ Download AnyPS5 for macOS</b></a> · Apple silicon · macOS 14+</p>
 
-1. Download **AnyPS5-macOS.zip** from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest), unzip it and move **AnyPS5.app** to Applications.
-2. Open it. The app is not notarized, so the first time macOS blocks it. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/AnyPS5.app` once.
-3. Follow the four steps:
+**Install.** The quickest way is one line in Terminal; a download through `curl` is not quarantined, so macOS opens the app without any "cannot be opened" warning:
 
-| 1. Check this Mac | 2. Choose the game | 3. Convert | 4. Play |
-|---|---|---|---|
-| Checks Apple silicon and Rosetta 2, and installs Rosetta with one click if it is missing. | Drag the game folder onto the window or the Dock icon. Shows the game's icon, name and size, and catches a still-encrypted dump before you start. | Relinks the game and bundles the system libraries and the Metal driver into one app, in seconds. | Opens the game. From then on it starts like any other app. |
+```sh
+curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
+```
 
-| Choose the game | Converting | Ready to play |
+With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest) instead, the app is not notarized, so macOS blocks it the first time: open **System Settings → Privacy & Security** and click **Open Anyway**. If it then runs from the read-only copy macOS makes of downloaded apps, the launcher offers to move itself to Applications and reopen from there.
+
+**First start.** Pick the language, one of three animated themes (Cosmic, Aurora, Sunset) and the folder that holds your PS5 dumps. Subfolders are scanned, and games added later show up on their own.
+
+**Unlocking.** A game that has not been converted yet shows a lock. **Unlock** opens its `eboot.bin` and modules even when they are still SELF containers, relinks them for macOS and makes the game app, with a PS5-style progress bar. The game files are APFS clones of the dump, so an unlocked game takes no extra space. A dump that is still encrypted is reported instead of converted.
+
+**Playing.** **Play** starts the game. **⋯** (or `O` / △) opens its settings: output resolution (for titles with a resolution patch, such as Stray), window or full screen, window size, vertical sync, the performance overlay, the game's language, and Show in Finder, the log, clearing the shader cache, unlocking again or removing the installation.
+
+**Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name.
+
+The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
+
+| Home | Game settings | Unlocking |
 |---|---|---|
-| ![Choosing the game folder](../screenshots/converter-game.jpg) | ![Converting](../screenshots/converter-converting.jpg) | ![Ready to play](../screenshots/converter-done.jpg) |
-
-The app checks the folder before converting. If the dump's `eboot.bin` is signed but has a decrypted `.esbak` backup next to it, the backup is used. The converted game lands in `/Applications`, or in `~/Applications` if `/Applications` is not writable, and starts on its own from then on.
+| ![Home screen](../screenshots/launcher-home.jpg) | ![Game settings](../screenshots/launcher-game-settings.jpg) | ![Unlocking](../screenshots/launcher-unlocking.jpg) |
 
 ### About the project
 
@@ -147,7 +155,7 @@ python3 tools/package_macos_app.py \
 
 The bundle contains everything it needs: the game, the system libraries, the Vulkan loader and MoltenVK. Its name and icon come from `sce_sys/param.json` and `icon0.png`. You can move it to `/Applications` and start it from Finder or Launchpad. The app is not signed: if macOS refuses to open it, right-click it and choose **Open** once.
 
-To build AnyPS5.app itself from this build, run `tools/macos/build_converter_app.sh build-mac ~/VulkanSDK/<version>/macOS dist`.
+To build AnyPS5.app itself from this build, run `tools/macos/build_launcher_app.sh build-mac ~/VulkanSDK/<version>/macOS dist`. `AnyPS5.app/Contents/MacOS/AnyPS5 --render-preview <folder> <games folder>` draws its screens into PNG files without opening a window.
 
 #### 4. Play
 
@@ -255,23 +263,31 @@ Artık varsayılan ayarlarla çalışıyor. Yazı tipinin bazı harfleri eksik (
 
 ### AnyPS5 uygulaması
 
-**AnyPS5.app**, oyun klasörünü bir Mac uygulamasına dönüştürür: Terminal, derleme ya da Vulkan SDK gerekmez.
+**AnyPS5.app**, PS5 ana ekranı gibi tasarlanmış bir launcher. Bir klasördeki oyun dump'larını bulur, Mac için kilidini açar (dönüştürür) ve başlatır: Terminal, derleme ya da Vulkan SDK gerekmez.
 
 <p><a href="https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip"><b>⬇ AnyPS5'i indir</b></a> · Apple silicon · macOS 14+</p>
 
-1. [Son sürümden](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest) **AnyPS5-macOS.zip** dosyasını indir, zip'i aç ve **AnyPS5.app**'i Uygulamalar klasörüne taşı.
-2. Aç. Uygulama Apple tarafından onaylanmadığı (notarize edilmediği) için macOS ilk seferde engeller. **Sistem Ayarları → Gizlilik ve Güvenlik**'e gidip **Yine de Aç**'a tıkla ya da bir kere `xattr -dr com.apple.quarantine /Applications/AnyPS5.app` çalıştır.
-3. Dört adımı takip et:
+**Kurulum.** En kolayı Terminal'de tek satır. `curl` ile inen dosya karantinaya alınmadığı için macOS uygulamayı "açılamıyor" uyarısı vermeden açar:
 
-| 1. Bu Mac | 2. Oyunu seç | 3. Dönüştür | 4. Oyna |
-|---|---|---|---|
-| Apple silicon ve Rosetta 2'yi kontrol eder; Rosetta yoksa tek tıkla kurar. | Oyun klasörünü pencereye ya da Dock'taki simgeye sürükle. Oyunun simgesini, adını ve boyutunu gösterir; dump hâlâ şifreliyse başlamadan uyarır. | Oyunu relink eder; sistem kütüphanelerini ve Metal sürücüsünü tek bir uygulamada toplar, birkaç saniyede. | Oyunu açar. Bundan sonra diğer uygulamalar gibi açılır. |
+```sh
+curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
+```
 
-| Oyunu seç | Dönüştürülüyor | Oynamaya hazır |
+[Son sürümdeki](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest) zip'i kullanırsan uygulama notarize edilmediği için macOS ilk seferde engeller: **Sistem Ayarları → Gizlilik ve Güvenlik**'te **Yine de Aç**'a tıkla. macOS indirilen uygulamayı salt okunur bir kopyadan açarsa launcher kendini Uygulamalar'a taşıyıp oradan yeniden açmayı önerir.
+
+**İlk açılış.** Dili, üç hareketli temadan birini (Kozmik, Aurora, Gün Batımı) ve PS5 dump'larının olduğu klasörü seç. Alt klasörler de taranır, sonradan eklenen oyunlar kendiliğinden görünür.
+
+**Kilidi açmak.** Henüz dönüştürülmemiş oyunlarda kilit işareti olur. **Kilidi Aç**, `eboot.bin` ve modüller hâlâ SELF kabı olsa bile açar, macOS için relink eder ve oyun uygulamasını hazırlar; ilerleme PS5'teki gibi bir çubukla görünür. Oyun dosyaları dump'ın APFS klonlarıdır, kilidi açılan oyun ek yer kaplamaz. Hâlâ şifreli bir dump dönüştürülmez, bildirilir.
+
+**Oynamak.** **Oyna** oyunu başlatır. **⋯** (ya da `O` / △) oyunun ayarlarını açar: çıkış çözünürlüğü (Stray gibi çözünürlük yaması olan oyunlarda), pencere ya da tam ekran, pencere boyutu, dikey senkronizasyon, performans göstergesi, oyun dili; ayrıca Finder'da göster, günlük, shader önbelleğini temizleme, kilidi yeniden açma ya da kurulumu kaldırma.
+
+**Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir.
+
+Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, ✕, ○, △) ya da fare ve trackpad ile kullanılır.
+
+| Ana ekran | Oyun ayarları | Kilit açılıyor |
 |---|---|---|
-| ![Oyun klasörünü seçme](../screenshots/converter-game.jpg) | ![Dönüştürme](../screenshots/converter-converting.jpg) | ![Oynamaya hazır](../screenshots/converter-done.jpg) |
-
-Uygulama, dönüştürmeden önce klasörü kontrol eder. Dump'taki `eboot.bin` imzalıysa ama yanında şifresi çözülmüş bir `.esbak` yedeği varsa, o yedek kullanılır. Dönüştürülen oyun `/Applications` klasörüne kaydedilir; oraya yazılamıyorsa `~/Applications` kullanılır. Bundan sonra oyunu doğrudan açabilirsin.
+| ![Ana ekran](../screenshots/launcher-home.jpg) | ![Oyun ayarları](../screenshots/launcher-game-settings.jpg) | ![Kilit açılıyor](../screenshots/launcher-unlocking.jpg) |
 
 ### Proje hakkında
 
@@ -342,7 +358,7 @@ python3 tools/package_macos_app.py \
 
 Paket, çalışmak için gereken her şeyi içerir: oyun, sistem kütüphaneleri, Vulkan yükleyicisi ve MoltenVK. Adı ve simgesi `sce_sys/param.json` ile `icon0.png`'den alınır. Uygulamayı `/Applications` klasörüne taşıyıp Finder'dan ya da Launchpad'den açabilirsin. Uygulama imzasız: macOS açmayı reddederse, uygulamaya sağ tıklayıp bir kere **Aç**'ı seç.
 
-AnyPS5.app'in kendisini bu derlemeden üretmek için `tools/macos/build_converter_app.sh build-mac ~/VulkanSDK/<sürüm>/macOS dist` çalıştır.
+AnyPS5.app'in kendisini bu derlemeden üretmek için `tools/macos/build_launcher_app.sh build-mac ~/VulkanSDK/<sürüm>/macOS dist` çalıştır. `AnyPS5.app/Contents/MacOS/AnyPS5 --render-preview <klasör> <oyun klasörü>` ekranlarını pencere açmadan PNG dosyalarına çizer.
 
 #### 4. Oynama
 

@@ -1,0 +1,524 @@
+import AnyPS5Core
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// A settings row the panels draw and the input moves through.
+struct PanelRow: Identifiable {
+    enum Kind {
+        case choice(options: [String], selected: Int, set: (Int) -> Void)
+        case toggle(Bool, set: (Bool) -> Void)
+        case stepper(value: Int, range: ClosedRange<Int>, step: Int, unit: String, set: (Int) -> Void)
+        case action(destructive: Bool, run: () -> Void)
+        case info(String)
+        case text(String, set: (String) -> Void)
+    }
+
+    let id: String
+    let title: String
+    var detail: String?
+    var symbol: String?
+    let kind: Kind
+
+    var focusable: Bool {
+        if case .info = kind { return false }
+        return true
+    }
+}
+
+struct PanelCategory: Identifiable {
+    let id: String
+    let title: String
+    let symbol: String
+    let rows: [PanelRow]
+}
+
+extension AppModel {
+    func panelCategories() -> [PanelCategory] {
+        switch overlay {
+        case .settings: return settingsCategories()
+        case .gameSettings: return selectedGame.map { [PanelCategory(id: "game", title: $0.name, symbol: "gamecontroller", rows: gameRows($0))] } ?? []
+        case .confirmUninstall:
+            guard let game = selectedGame else { return [] }
+            return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
+                PanelRow(id: "confirm", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in
+                    self?.uninstall(game)
+                    self?.closeOverlay()
+                }),
+                PanelRow(id: "cancel", title: T.text(.cancel), kind: .action(destructive: false) { [weak self] in self?.closeOverlay() }),
+            ])]
+        default: return []
+        }
+    }
+
+    private func settingsCategories() -> [PanelCategory] {
+        let preferences = self.preferences
+        var appearance: [PanelRow] = [
+            PanelRow(id: "theme", title: T.text(.theme), symbol: "paintpalette", kind: .choice(options: Theme.allCases.map(\.title), selected: preferences.theme.rawValue) { [weak self] index in
+                self?.preferences.theme = Theme(rawValue: index) ?? .cosmic
+            }),
+            PanelRow(id: "accent", title: T.text(.accent), symbol: "circle.lefthalf.filled", kind: .choice(options: AccentColor.allCases.map(\.title), selected: AccentColor.allCases.firstIndex(of: preferences.accent ?? preferences.theme.defaultAccent) ?? 0) { [weak self] index in
+                self?.preferences.accent = AccentColor.allCases[index]
+            }),
+            PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
+                let backdrop = [Preferences.Backdrop.theme, .image, .video][index]
+                if backdrop != .theme && (self?.preferences.backdropFile == nil || self?.preferences.backdrop != backdrop) {
+                    self?.chooseBackdrop(backdrop)
+                } else {
+                    self?.preferences.backdrop = backdrop
+                }
+            }),
+        ]
+        if preferences.backdrop != .theme {
+            appearance.append(PanelRow(id: "file", title: T.text(.chooseFile), detail: preferences.backdropFile.map { URL(fileURLWithPath: $0).lastPathComponent }, symbol: "folder", kind: .action(destructive: false) { [weak self] in
+                self?.chooseBackdrop(preferences.backdrop)
+            }))
+        }
+        appearance += [
+            PanelRow(id: "artwork", title: T.text(.gameArtwork), symbol: "photo", kind: .toggle(preferences.gameArtwork) { [weak self] value in self?.preferences.gameArtwork = value }),
+            PanelRow(id: "motion", title: T.text(.motion), symbol: "wind", kind: .choice(options: [T.text(.motionFull), T.text(.motionReduced)], selected: preferences.reducedMotion ? 1 : 0) { [weak self] index in
+                self?.preferences.reducedMotion = index == 1
+            }),
+        ]
+
+        let library: [PanelRow] = [
+            PanelRow(id: "folder", title: T.text(.folder), detail: preferences.gamesFolder ?? "—", symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.pickGamesFolder() }),
+            PanelRow(id: "rescan", title: T.text(.rescan), detail: T.format(.gamesFound, games.count), symbol: "arrow.clockwise", kind: .action(destructive: false) { [weak self] in
+                self?.rescan()
+                Sounds.shared.play(.select)
+            }),
+            PanelRow(id: "clones", title: T.text(.installedSize), kind: .info("")),
+        ]
+
+        let language = PanelRow(id: "language", title: T.text(.language), symbol: "globe", kind: .choice(options: Language.allCases.map(\.displayName), selected: Language.allCases.firstIndex(of: preferences.language) ?? 0) { [weak self] index in
+            self?.preferences.language = Language.allCases[index]
+        })
+
+        var behaviour: [PanelRow] = [
+            PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
+            PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2", kind: .toggle(preferences.sounds) { [weak self] value in self?.preferences.sounds = value }),
+            PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
+        ]
+        if rosettaMissing {
+            behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstall), detail: T.text(.rosettaMissing), symbol: "cpu", kind: .action(destructive: false) { [weak self] in self?.installRosetta() }))
+        } else {
+            behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstalled), symbol: "checkmark.seal", kind: .info("")))
+        }
+
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        var about: [PanelRow] = [
+            PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
+            PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
+            PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
+        ]
+        if translocated {
+            about.append(PanelRow(id: "move", title: T.text(.moveToApplications), symbol: "arrow.down.app", kind: .action(destructive: false) { _ = AppLocation.moveToApplications() }))
+        }
+        about.append(PanelRow(id: "quit", title: T.text(.quit), symbol: "power", kind: .action(destructive: true) { NSApp.terminate(nil) }))
+
+        return [
+            PanelCategory(id: "appearance", title: T.text(.appearance), symbol: "paintbrush", rows: appearance),
+            PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
+            PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
+            PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
+            PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
+        ]
+    }
+
+    private func gameRows(_ game: Game) -> [PanelRow] {
+        let settings = settings(for: game)
+        var rows: [PanelRow] = []
+        let choices = resolutionChoices(for: game)
+        if !choices.isEmpty {
+            let options = [T.text(.resolutionDefault)] + choices
+            rows.append(PanelRow(id: "resolution", title: T.text(.resolution), symbol: "rectangle.on.rectangle", kind: .choice(options: options, selected: settings.resolution.flatMap { choices.firstIndex(of: $0) }.map { $0 + 1 } ?? 0) { [weak self] index in
+                self?.update(game) { $0.resolution = index == 0 ? nil : choices[index - 1] }
+            }))
+        }
+        rows.append(PanelRow(id: "display", title: T.text(.display), symbol: "macwindow", kind: .choice(options: [T.text(.windowed), T.text(.fullscreen)], selected: settings.fullscreen ? 1 : 0) { [weak self] index in
+            self?.update(game) { $0.fullscreen = index == 1 }
+        }))
+        if !settings.fullscreen {
+            rows.append(PanelRow(id: "size", title: T.text(.windowSize), symbol: "arrow.up.left.and.arrow.down.right", kind: .stepper(value: settings.windowSize, range: 40...100, step: 5, unit: "%") { [weak self] value in
+                self?.update(game) { $0.windowSize = value }
+            }))
+        }
+        rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync) { [weak self] value in self?.update(game) { $0.vsync = value } }))
+        let overlays = GameSettings.Overlay.allCases
+        let overlayNames = [T.text(.overlayOff), T.text(.overlayTopLeft), T.text(.overlayTopRight), T.text(.overlayBottomLeft), T.text(.overlayBottomRight)]
+        rows.append(PanelRow(id: "overlay", title: T.text(.overlay), symbol: "speedometer", kind: .choice(options: overlayNames, selected: overlays.firstIndex(of: settings.overlay) ?? 0) { [weak self] index in
+            self?.update(game) { $0.overlay = overlays[index] }
+        }))
+        let languages = ConsoleLanguage.all
+        rows.append(PanelRow(id: "language", title: T.text(.gameLanguage), symbol: "character.bubble", kind: .choice(options: [T.text(.followLauncher)] + languages.map(\.name), selected: settings.language.flatMap { number in languages.firstIndex { $0.number == number } }.map { $0 + 1 } ?? 0) { [weak self] index in
+            self?.update(game) { $0.language = index == 0 ? nil : languages[index - 1].number }
+        }))
+        let state = state(of: game)
+        if case .installed = state {
+            rows.append(PanelRow(id: "reinstall", title: T.text(.reinstall), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.unlock(game)
+            }))
+        }
+        rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
+        rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
+        rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
+        if case .installed = state {
+            rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
+        }
+        return rows
+    }
+
+    func pickGamesFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = T.text(.pickFolder)
+        if let root { panel.directoryURL = root }
+        if panel.runModal() == .OK, let url = panel.url { chooseFolder(url) }
+    }
+
+    func chooseBackdrop(_ kind: Preferences.Backdrop) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = kind == .video ? [.movie, .mpeg4Movie, .quickTimeMovie] : [.image]
+        panel.prompt = T.text(.chooseFile)
+        if panel.runModal() == .OK, let url = panel.url {
+            preferences.backdropFile = url.path
+            preferences.backdrop = kind
+        }
+    }
+
+    // MARK: Panel input
+
+    /// Moves through the open panel; returns whether the command was used.
+    func panelCommand(_ command: Command) -> Bool {
+        let categories = panelCategories()
+        guard !categories.isEmpty else { return false }
+        panelCategory = min(panelCategory, categories.count - 1)
+        let rows = categories[panelCategory].rows
+        let single = categories.count == 1
+        if !panelInRows && !single {
+            switch command {
+            case .up: movePanelCategory(-1, count: categories.count)
+            case .down: movePanelCategory(1, count: categories.count)
+            case .right, .select: enterRows(rows)
+            case .back, .options: closeOverlay()
+            case .left: break
+            }
+            return true
+        }
+        guard !rows.isEmpty else {
+            if command == .back || command == .left { leaveRows(single) }
+            return true
+        }
+        panelRow = min(panelRow, rows.count - 1)
+        if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { panelRow = first }
+        let row = rows[panelRow]
+        switch command {
+        case .up: movePanelRow(-1, rows)
+        case .down: movePanelRow(1, rows)
+        case .left:
+            if !change(row, by: -1) { leaveRows(single) }
+        case .right:
+            _ = change(row, by: 1)
+        case .select:
+            activate(row)
+        case .back:
+            leaveRows(single)
+        case .options:
+            closeOverlay()
+        }
+        return true
+    }
+
+    private func movePanelCategory(_ delta: Int, count: Int) {
+        let next = min(count - 1, max(0, panelCategory + delta))
+        guard next != panelCategory else { return }
+        panelCategory = next
+        panelRow = 0
+        Sounds.shared.play(.move)
+    }
+
+    private func enterRows(_ rows: [PanelRow]) {
+        guard let first = rows.firstIndex(where: \.focusable) else { return }
+        panelRow = first
+        panelInRows = true
+        Sounds.shared.play(.move)
+    }
+
+    private func leaveRows(_ single: Bool) {
+        if single { closeOverlay(); return }
+        panelInRows = false
+        Sounds.shared.play(.back)
+    }
+
+    private func movePanelRow(_ delta: Int, _ rows: [PanelRow]) {
+        var next = panelRow + delta
+        while rows.indices.contains(next) && !rows[next].focusable { next += delta }
+        guard rows.indices.contains(next) else { return }
+        panelRow = next
+        Sounds.shared.play(.move)
+    }
+
+    @discardableResult
+    func change(_ row: PanelRow, by delta: Int) -> Bool {
+        switch row.kind {
+        case .choice(let options, let selected, let set):
+            let next = min(options.count - 1, max(0, selected + delta))
+            if next != selected { set(next); Sounds.shared.play(.move) }
+            return true
+        case .toggle(let value, let set):
+            if (delta > 0) != value { set(delta > 0); Sounds.shared.play(.move) }
+            return true
+        case .stepper(let value, let range, let step, _, let set):
+            let next = min(range.upperBound, max(range.lowerBound, value + delta * step))
+            if next != value { set(next); Sounds.shared.play(.move) }
+            return true
+        default:
+            return false
+        }
+    }
+
+    func activate(_ row: PanelRow) {
+        switch row.kind {
+        case .choice(let options, let selected, let set):
+            set((selected + 1) % options.count)
+            Sounds.shared.play(.move)
+        case .toggle(let value, let set):
+            set(!value)
+            Sounds.shared.play(.move)
+        case .stepper(let value, let range, let step, _, let set):
+            set(value + step > range.upperBound ? range.lowerBound : value + step)
+            Sounds.shared.play(.move)
+        case .action(_, let run):
+            Sounds.shared.play(.select)
+            run()
+        case .info, .text:
+            break
+        }
+    }
+}
+
+/// The settings screen: categories on the left, their rows on the right.
+struct SettingsPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        let categories = model.panelCategories()
+        let current = categories.indices.contains(model.panelCategory) ? categories[model.panelCategory] : nil
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6 * scale) {
+                Text(T.text(.settings)).font(.display(40 * scale, .light)).foregroundStyle(.white).padding(.bottom, 26 * scale)
+                ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+                    let selected = index == model.panelCategory
+                    let focused = selected && !model.panelInRows
+                    HStack(spacing: 14 * scale) {
+                        Image(systemName: category.symbol).font(.system(size: 18 * scale, weight: .medium)).frame(width: 26 * scale)
+                        Text(category.title).font(.display(19 * scale, selected ? .semibold : .regular))
+                        Spacer()
+                    }
+                    .foregroundStyle(focused ? Color.black : .white.opacity(selected ? 1 : 0.7))
+                    .padding(.horizontal, 18 * scale)
+                    .frame(height: 52 * scale)
+                    .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(selected ? 0.12 : 0)))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.panelCategory = index
+                        model.panelRow = 0
+                        model.panelInRows = false
+                        Sounds.shared.play(.move)
+                    }
+                }
+                Spacer()
+            }
+            .frame(width: 330 * scale)
+            .padding(.trailing, 36 * scale)
+            if let current {
+                RowList(rows: current.rows, focusedRow: model.panelInRows ? model.panelRow : nil)
+                    .id(current.id)
+                    .transition(.opacity.combined(with: .offset(x: 18 * scale)))
+            }
+        }
+        .padding(.horizontal, 90 * scale)
+        .padding(.top, 70 * scale)
+        .padding(.bottom, 50 * scale)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .animation(Motion.focus, value: model.panelCategory)
+    }
+}
+
+/// A game's settings, sliding in from the right.
+struct SidePanel: View {
+    let title: String
+    var subtitle: String?
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        let rows = model.panelCategories().first?.rows ?? []
+        HStack(spacing: 0) {
+            Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closeOverlay() }
+            VStack(alignment: .leading, spacing: 8 * scale) {
+                Text(title).font(.display(30 * scale, .light)).foregroundStyle(.white).lineLimit(2)
+                if let subtitle { Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)) }
+                RowList(rows: rows, focusedRow: model.panelRow)
+                    .padding(.top, 18 * scale)
+            }
+            .padding(36 * scale)
+            .frame(width: 560 * scale, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(white: 0.06).opacity(0.92).background(.ultraThinMaterial))
+            .overlay(Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1), alignment: .leading)
+        }
+    }
+}
+
+struct RowList: View {
+    let rows: [PanelRow]
+    let focusedRow: Int?
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @Environment(\.previewRender) private var previewRender
+
+    var body: some View {
+        if previewRender {
+            content.frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            scrolling
+        }
+    }
+
+    private var content: some View {
+        VStack(spacing: 8 * scale) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                RowView(row: row, focused: focusedRow == index)
+                    .id(row.id)
+                    .onTapGesture {
+                        if model.overlay == .settings { model.panelInRows = true }
+                        model.panelRow = index
+                        model.activate(row)
+                    }
+            }
+        }
+        .padding(6 * scale)
+    }
+
+    private var scrolling: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                content
+            }
+            .onChange(of: focusedRow) { _, row in
+                guard let row, rows.indices.contains(row) else { return }
+                withAnimation(Motion.focus) { proxy.scrollTo(rows[row].id, anchor: .center) }
+            }
+        }
+    }
+}
+
+struct RowView: View {
+    let row: PanelRow
+    let focused: Bool
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @State private var text = ""
+
+    var body: some View {
+        let foreground: Color = focused ? .black : .white
+        HStack(spacing: 14 * scale) {
+            if let symbol = row.symbol {
+                Image(systemName: symbol).font(.system(size: 17 * scale, weight: .medium)).frame(width: 24 * scale)
+                    .foregroundStyle(destructive && !focused ? Color(red: 1, green: 0.55, blue: 0.5) : foreground.opacity(0.85))
+            }
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                Text(row.title).font(.display(17 * scale, .medium)).lineLimit(2).minimumScaleFactor(0.85)
+                    .foregroundStyle(destructive && !focused ? Color(red: 1, green: 0.6, blue: 0.55) : foreground.opacity(row.focusable ? 1 : 0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail = row.detail {
+                    Text(detail).font(.display(13 * scale)).foregroundStyle(foreground.opacity(0.55)).lineLimit(2).truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 12 * scale)
+            value.foregroundStyle(foreground)
+        }
+        .padding(.horizontal, 18 * scale)
+        .frame(minHeight: 58 * scale)
+        .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(row.focusable ? 0.07 : 0)))
+        .shadow(color: .white.opacity(focused ? 0.22 : 0), radius: 12 * scale)
+        .scaleEffect(focused ? 1.015 : 1)
+        .animation(Motion.focus, value: focused)
+        .contentShape(Rectangle())
+    }
+
+    private var destructive: Bool {
+        if case .action(let destructive, _) = row.kind { return destructive }
+        return false
+    }
+
+    @ViewBuilder private var value: some View {
+        switch row.kind {
+        case .choice(let options, let selected, let set):
+            HStack(spacing: 12 * scale) {
+                chevron("chevron.left", enabled: selected > 0) { set(selected - 1) }
+                Text(options.indices.contains(selected) ? options[selected] : "").font(.display(16 * scale, .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.7).frame(minWidth: 120 * scale, maxWidth: 190 * scale)
+                chevron("chevron.right", enabled: selected < options.count - 1) { set(selected + 1) }
+            }
+        case .toggle(let value, let set):
+            Switch(on: value, accent: model.accent, focused: focused) { set(!value); Sounds.shared.play(.move) }
+        case .stepper(let value, let range, _, let unit, let set):
+            HStack(spacing: 12 * scale) {
+                chevron("minus", enabled: value > range.lowerBound) { set(value - 5) }
+                Text("\(value)\(unit)").font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 60 * scale)
+                chevron("plus", enabled: value < range.upperBound) { set(value + 5) }
+            }
+        case .action:
+            Image(systemName: "chevron.right").font(.system(size: 14 * scale, weight: .semibold)).opacity(0.6)
+        case .info(let value):
+            Text(value).font(.display(15 * scale, .medium)).opacity(0.7).textSelection(.enabled)
+        case .text(let value, let set):
+            TextField("", text: $text)
+                .textFieldStyle(.plain)
+                .font(.display(16 * scale, .semibold))
+                .multilineTextAlignment(.trailing)
+                .frame(width: 200 * scale)
+                .onAppear { text = value }
+                .onSubmit { set(text) }
+                .onChange(of: text) { _, new in set(new) }
+        }
+    }
+
+    private func chevron(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: { action(); Sounds.shared.play(.move) }) {
+            Image(systemName: symbol).font(.system(size: 13 * scale, weight: .bold)).frame(width: 26 * scale, height: 26 * scale).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(enabled ? 0.85 : 0.25)
+        .disabled(!enabled)
+    }
+}
+
+/// An on and off switch drawn like the console's.
+struct Switch: View {
+    let on: Bool
+    let accent: Color
+    let focused: Bool
+    let toggle: () -> Void
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        ZStack(alignment: on ? .trailing : .leading) {
+            Capsule().fill(on ? accent : (focused ? Color.black.opacity(0.18) : Color.white.opacity(0.18)))
+            Circle().fill(Color.white).padding(3 * scale).shadow(color: .black.opacity(0.25), radius: 2 * scale, y: 1)
+        }
+        .frame(width: 50 * scale, height: 28 * scale)
+        .animation(Motion.focus, value: on)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+    }
+}

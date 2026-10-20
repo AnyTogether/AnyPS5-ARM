@@ -114,3 +114,4 @@ cookies.txt
 !docs/screenshots/*.jpg
 !docs/games/img/*.jpg
 tools/macos/converter/.build/
+tools/macos/launcher/.build/

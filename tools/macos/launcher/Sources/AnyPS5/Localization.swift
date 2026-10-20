@@ -1,0 +1,305 @@
+import Foundation
+
+enum Language: String, Codable, CaseIterable, Identifiable {
+    case turkish = "tr"
+    case english = "en"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .turkish: return "Türkçe"
+        case .english: return "English"
+        }
+    }
+
+    /// The console language a game starts in when its own setting follows the launcher.
+    var consoleLanguage: Int {
+        switch self {
+        case .turkish: return 19
+        case .english: return 1
+        }
+    }
+
+    static var system: Language {
+        Locale.preferredLanguages.first?.hasPrefix("tr") == true ? .turkish : .english
+    }
+}
+
+/// Every user-facing text, in both languages. `T.text(.key)` reads the current language.
+enum T {
+    nonisolated(unsafe) static var language: Language = .system
+
+    static func text(_ key: Key) -> String {
+        let table = language == .turkish ? turkish : english
+        return table[key] ?? english[key] ?? key.rawValue
+    }
+
+    static func format(_ key: Key, _ arguments: CVarArg...) -> String {
+        String(format: text(key), arguments: arguments)
+    }
+
+    enum Key: String {
+        case welcome, welcomeSubtitle, chooseLanguage, chooseTheme, chooseThemeSubtitle, chooseFolder, chooseFolderSubtitle
+        case pickFolder, changeFolder, gamesFound, noGamesFound, continueAction, back, start, skip
+        case games, library, settings, play, unlock, unlocking, cancel, queued, update, retry, options
+        case locked, ready, updateAvailable, failed, running
+        case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
+        case titleID, version, size, status, folder
+        case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, gameLanguage, followLauncher
+        case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
+        case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
+        case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
+        case profileName, behaviour, hideWhilePlaying, rosettaMissing, rosettaInstall, rosettaInstalled
+        case moveToApplications, moveToApplicationsText, moveNow, later, noToolkit
+        case emptyLibraryTitle, emptyLibraryText, scanning, allGames, sortName, playTime
+        case themeCosmic, themeAurora, themeSunset, hintMove, hintSelect, hintBack, hintOptions
+        case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
+        case unreadableDump
+    }
+
+    static let turkish: [Key: String] = [
+        .welcome: "AnyPS5'e hoş geldin",
+        .welcomeSubtitle: "PS5 oyunlarını Mac'inde oyna. Önce birkaç şeyi ayarlayalım.",
+        .chooseLanguage: "Dil",
+        .chooseTheme: "Bir tema seç",
+        .chooseThemeSubtitle: "Sonra Ayarlar'dan değiştirebilir, kendi resmini ya da videonu koyabilirsin.",
+        .chooseFolder: "Oyunların nerede?",
+        .chooseFolderSubtitle: "PS5 dump'larının olduğu klasörü seç. Alt klasörleri de tararım, yeni oyunları kendim bulurum.",
+        .pickFolder: "Klasör Seç",
+        .changeFolder: "Klasörü Değiştir",
+        .gamesFound: "%d oyun bulundu",
+        .noGamesFound: "Bu klasörde oyun bulamadım",
+        .continueAction: "Devam",
+        .back: "Geri",
+        .start: "Başla",
+        .skip: "Atla",
+        .games: "Oyunlar",
+        .library: "Oyun Kütüphanesi",
+        .settings: "Ayarlar",
+        .play: "Oyna",
+        .unlock: "Kilidi Aç",
+        .unlocking: "Kilit açılıyor",
+        .cancel: "İptal",
+        .queued: "Sırada",
+        .update: "Güncelle",
+        .retry: "Tekrar Dene",
+        .options: "Seçenekler",
+        .locked: "Kilitli",
+        .ready: "Oynamaya hazır",
+        .updateAvailable: "Yeni sürümle yeniden kurulabilir",
+        .failed: "Kilit açılamadı",
+        .running: "Oynanıyor",
+        .stepUnwrap: "Oyun dosyaları açılıyor",
+        .stepRelink: "Mac için çevriliyor",
+        .stepCopy: "Oyun hazırlanıyor",
+        .stepBundle: "Paketleniyor",
+        .stepFinish: "Son dokunuşlar",
+        .titleID: "Oyun Kimliği",
+        .version: "Sürüm",
+        .size: "Boyut",
+        .status: "Durum",
+        .folder: "Klasör",
+        .gameSettings: "Oyun Ayarları",
+        .resolution: "Çözünürlük",
+        .resolutionDefault: "Oyunun varsayılanı",
+        .display: "Görüntü",
+        .windowed: "Pencere",
+        .fullscreen: "Tam Ekran",
+        .windowSize: "Pencere Boyutu",
+        .vsync: "Dikey Senkronizasyon",
+        .on: "Açık",
+        .off: "Kapalı",
+        .overlay: "Performans Göstergesi",
+        .overlayOff: "Kapalı",
+        .overlayTopLeft: "Sol Üst",
+        .overlayTopRight: "Sağ Üst",
+        .overlayBottomLeft: "Sol Alt",
+        .overlayBottomRight: "Sağ Alt",
+        .gameLanguage: "Oyun Dili",
+        .followLauncher: "Launcher ile aynı",
+        .reinstall: "Kilidi Yeniden Aç",
+        .showInFinder: "Finder'da Göster",
+        .openLog: "Günlüğü Aç",
+        .uninstall: "Kurulumu Kaldır",
+        .clearShaderCache: "Shader Önbelleğini Temizle",
+        .uninstallConfirm: "Kurulum kaldırılsın mı? Oyun dosyaların silinmez, oyun tekrar kilitli görünür.",
+        .uninstallDone: "Kurulum kaldırıldı",
+        .cacheCleared: "Shader önbelleği temizlendi",
+        .appearance: "Görünüm",
+        .theme: "Tema",
+        .accent: "Vurgu Rengi",
+        .background: "Arka Plan",
+        .backgroundTheme: "Tema animasyonu",
+        .backgroundImage: "Kendi resmim",
+        .backgroundVideo: "Kendi videom",
+        .chooseFile: "Dosya Seç",
+        .gameArtwork: "Seçili oyunun görselini göster",
+        .motion: "Animasyonlar",
+        .motionFull: "Tam",
+        .motionReduced: "Azaltılmış",
+        .sounds: "Arayüz Sesleri",
+        .language: "Dil",
+        .storage: "Kütüphane",
+        .rescan: "Yeniden Tara",
+        .installedSize: "Kurulu oyunlar APFS klonu olarak saklanır, ek yer kaplamaz.",
+        .about: "Hakkında",
+        .aboutText: "AnyPS5, PS5 oyunlarını Rosetta ve MoltenVK üzerinden Mac'te çalıştırır.",
+        .toolkitVersion: "Araç seti",
+        .profileName: "Profil Adı",
+        .behaviour: "Davranış",
+        .hideWhilePlaying: "Oyun açılınca launcher'ı gizle",
+        .rosettaMissing: "Oyunlar Rosetta ile çalışır, bu Mac'te kurulu değil.",
+        .rosettaInstall: "Rosetta'yı Kur",
+        .rosettaInstalled: "Rosetta kurulu",
+        .moveToApplications: "AnyPS5'i Uygulamalar'a taşı",
+        .moveToApplicationsText: "macOS indirilen uygulamaları kilitli, salt okunur bir kopyadan açıyor. Uygulamalar klasörüne taşıyıp yeniden açayım, bir daha bununla uğraşmazsın.",
+        .moveNow: "Taşı ve Yeniden Aç",
+        .later: "Sonra",
+        .noToolkit: "Bu kopyada dönüştürme araçları yok. Release'deki AnyPS5.app'i kullan.",
+        .emptyLibraryTitle: "Henüz oyun yok",
+        .emptyLibraryText: "Oyun klasörüne PS5 dump'larını koy, burada otomatik görünsünler.",
+        .scanning: "Oyunlar aranıyor",
+        .allGames: "Tüm Oyunlar",
+        .sortName: "Ada göre",
+        .playTime: "Son oynanan",
+        .themeCosmic: "Kozmik",
+        .themeAurora: "Aurora",
+        .themeSunset: "Gün Batımı",
+        .hintMove: "Gezin",
+        .hintSelect: "Seç",
+        .hintBack: "Geri",
+        .hintOptions: "Seçenekler",
+        .unlockFailed: "Kilit açılamadı",
+        .startFailed: "Oyun başlatılamadı",
+        .gameEnded: "Oyun kapandı",
+        .logTitle: "Günlük",
+        .close: "Kapat",
+        .quit: "Çık",
+        .confirm: "Onayla",
+        .unreadableDump: "Bu dump şifreli ya da bozuk, açılamaz.",
+    ]
+
+    static let english: [Key: String] = [
+        .welcome: "Welcome to AnyPS5",
+        .welcomeSubtitle: "Play PS5 games on your Mac. Let's set a few things up first.",
+        .chooseLanguage: "Language",
+        .chooseTheme: "Pick a theme",
+        .chooseThemeSubtitle: "You can change it later in Settings, or use your own picture or video.",
+        .chooseFolder: "Where are your games?",
+        .chooseFolderSubtitle: "Choose the folder that holds your PS5 dumps. Subfolders are scanned too, and new games show up on their own.",
+        .pickFolder: "Choose Folder",
+        .changeFolder: "Change Folder",
+        .gamesFound: "%d games found",
+        .noGamesFound: "No games in this folder",
+        .continueAction: "Continue",
+        .back: "Back",
+        .start: "Start",
+        .skip: "Skip",
+        .games: "Games",
+        .library: "Game Library",
+        .settings: "Settings",
+        .play: "Play",
+        .unlock: "Unlock",
+        .unlocking: "Unlocking",
+        .cancel: "Cancel",
+        .queued: "Queued",
+        .update: "Update",
+        .retry: "Try Again",
+        .options: "Options",
+        .locked: "Locked",
+        .ready: "Ready to play",
+        .updateAvailable: "Can be installed again with the new version",
+        .failed: "Could not unlock",
+        .running: "Playing",
+        .stepUnwrap: "Opening the game files",
+        .stepRelink: "Converting for Mac",
+        .stepCopy: "Preparing the game",
+        .stepBundle: "Packaging",
+        .stepFinish: "Finishing touches",
+        .titleID: "Title ID",
+        .version: "Version",
+        .size: "Size",
+        .status: "Status",
+        .folder: "Folder",
+        .gameSettings: "Game Settings",
+        .resolution: "Resolution",
+        .resolutionDefault: "Game default",
+        .display: "Display",
+        .windowed: "Window",
+        .fullscreen: "Full Screen",
+        .windowSize: "Window Size",
+        .vsync: "Vertical Sync",
+        .on: "On",
+        .off: "Off",
+        .overlay: "Performance Overlay",
+        .overlayOff: "Off",
+        .overlayTopLeft: "Top Left",
+        .overlayTopRight: "Top Right",
+        .overlayBottomLeft: "Bottom Left",
+        .overlayBottomRight: "Bottom Right",
+        .gameLanguage: "Game Language",
+        .followLauncher: "Same as the launcher",
+        .reinstall: "Unlock Again",
+        .showInFinder: "Show in Finder",
+        .openLog: "Open Log",
+        .uninstall: "Remove Installation",
+        .clearShaderCache: "Clear Shader Cache",
+        .uninstallConfirm: "Remove the installation? Your game files stay; the game shows as locked again.",
+        .uninstallDone: "Installation removed",
+        .cacheCleared: "Shader cache cleared",
+        .appearance: "Appearance",
+        .theme: "Theme",
+        .accent: "Accent Color",
+        .background: "Background",
+        .backgroundTheme: "Theme animation",
+        .backgroundImage: "My picture",
+        .backgroundVideo: "My video",
+        .chooseFile: "Choose File",
+        .gameArtwork: "Show the selected game's artwork",
+        .motion: "Animations",
+        .motionFull: "Full",
+        .motionReduced: "Reduced",
+        .sounds: "Interface Sounds",
+        .language: "Language",
+        .storage: "Library",
+        .rescan: "Scan Again",
+        .installedSize: "Installed games are kept as APFS clones and take no extra space.",
+        .about: "About",
+        .aboutText: "AnyPS5 runs PS5 games on the Mac through Rosetta and MoltenVK.",
+        .toolkitVersion: "Toolkit",
+        .profileName: "Profile Name",
+        .behaviour: "Behaviour",
+        .hideWhilePlaying: "Hide the launcher while a game runs",
+        .rosettaMissing: "Games run through Rosetta, which this Mac does not have yet.",
+        .rosettaInstall: "Install Rosetta",
+        .rosettaInstalled: "Rosetta is installed",
+        .moveToApplications: "Move AnyPS5 to Applications",
+        .moveToApplicationsText: "macOS opens downloaded apps from a locked, read-only copy. Let me move it to Applications and reopen it, so this never gets in the way again.",
+        .moveNow: "Move and Reopen",
+        .later: "Later",
+        .noToolkit: "This copy has no conversion tools. Use AnyPS5.app from the release.",
+        .emptyLibraryTitle: "No games yet",
+        .emptyLibraryText: "Put PS5 dumps in your games folder and they show up here on their own.",
+        .scanning: "Looking for games",
+        .allGames: "All Games",
+        .sortName: "By name",
+        .playTime: "Last played",
+        .themeCosmic: "Cosmic",
+        .themeAurora: "Aurora",
+        .themeSunset: "Sunset",
+        .hintMove: "Move",
+        .hintSelect: "Select",
+        .hintBack: "Back",
+        .hintOptions: "Options",
+        .unlockFailed: "Could not unlock",
+        .startFailed: "The game could not start",
+        .gameEnded: "The game closed",
+        .logTitle: "Log",
+        .close: "Close",
+        .quit: "Quit",
+        .confirm: "Confirm",
+        .unreadableDump: "This dump is encrypted or damaged and cannot be opened.",
+    ]
+}

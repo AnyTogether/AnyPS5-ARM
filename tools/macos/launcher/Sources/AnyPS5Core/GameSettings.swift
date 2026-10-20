@@ -1,0 +1,56 @@
+import Foundation
+
+/// The per-game choices the launcher passes to a started game as environment variables.
+public struct GameSettings: Codable, Equatable, Sendable {
+    public enum Overlay: String, Codable, CaseIterable, Sendable {
+        case off, topLeft, topRight, bottomLeft, bottomRight
+
+        var position: String? {
+            switch self {
+            case .off: return nil
+            case .topLeft: return "tl"
+            case .topRight: return "tr"
+            case .bottomLeft: return "bl"
+            case .bottomRight: return "br"
+            }
+        }
+    }
+
+    /// A WIDTHxHEIGHT the title's patches can set, nil for the title's default.
+    public var resolution: String?
+    public var fullscreen = false
+    /// The share of the display the window takes, in percent.
+    public var windowSize = 75
+    public var vsync = true
+    public var overlay = Overlay.off
+    /// The console language number (ANYPS5_LANGUAGE), nil to follow the launcher's language.
+    public var language: Int?
+
+    public init() {}
+
+    /// The environment a game starts with.
+    public func environment(launcherLanguage: Int) -> [String: String] {
+        var environment: [String: String] = [
+            "ANYPS5_FULLSCREEN": fullscreen ? "1" : "0",
+            "ANYPS5_WINDOW_SIZE": String(min(100, max(30, windowSize))),
+            "ANYPS5_PRESENT_MODE": vsync ? "fifo" : "immediate",
+            "ANYPS5_LANGUAGE": String(language ?? launcherLanguage),
+        ]
+        if let position = overlay.position {
+            environment["ANYPS5_OVERLAY"] = "1"
+            environment["ANYPS5_OVERLAY_POS"] = position
+        }
+        if let resolution { environment["APS5_RESOLUTION"] = resolution }
+        return environment
+    }
+}
+
+/// Console language numbers (sceSystemServiceParamGetInt) a game can be started with.
+public enum ConsoleLanguage {
+    public static let all: [(number: Int, name: String)] = [
+        (19, "Türkçe"), (1, "English (US)"), (18, "English (UK)"), (4, "Deutsch"), (2, "Français"),
+        (3, "Español"), (20, "Español (Latinoamérica)"), (5, "Italiano"), (17, "Português (Brasil)"),
+        (7, "Português"), (8, "Русский"), (16, "Polski"), (6, "Nederlands"), (0, "日本語"), (9, "한국어"),
+        (11, "简体中文"), (10, "繁體中文"), (21, "العربية"),
+    ]
+}

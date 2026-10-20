@@ -46,7 +46,15 @@ Per-game progress (stage reached, open blockers, libraries and GPU coverage) is 
 
 ## The AnyPS5 app
 
-**AnyPS5.app** turns a game folder into a Mac app in four clicks: no Terminal, no build. [⬇ Download](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+**AnyPS5.app** is a PS5-style launcher: it finds the dumps in your games folder, unlocks (converts) a game in one click and starts it, with per-game resolution, display and language settings, three animated themes and your own picture or video as the background.
+
+```sh
+curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
+```
+
+[⬇ Download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+
+![The AnyPS5 launcher](docs/screenshots/launcher-home.jpg)
 
 ## About
 
