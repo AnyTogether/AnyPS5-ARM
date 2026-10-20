@@ -972,20 +972,12 @@ static void CheckLongDoubleFunctions() {
     Require(hypot3l_nid_postfix(-infinity, 1.0L, 2.0L) == infinity && hypot3_nid_postfix(1.0, -std::numeric_limits<double>::infinity(), 0.0) == std::numeric_limits<double>::infinity());
     Require(hypot3_nid_postfix(0x1p1000, 0x1p1000, 0x1p1000) == std::hypot(0x1p1000, std::hypot(0x1p1000, 0x1p1000)));
 
-    // libc++ (macOS) has no C++17 special functions: the host libm's POSIX Bessel functions are the reference there.
-#ifdef __APPLE__
-    const auto besselJ = [](int order, double x) { return ::jn(order, x); };
-    const auto besselY = [](int order, double x) { return ::yn(order, x); };
-#else
-    const auto besselJ = [](int order, double x) { return std::cyl_bessel_j(static_cast<double>(order), x); };
-    const auto besselY = [](int order, double x) { return std::cyl_neumann(static_cast<double>(order), x); };
-#endif
     Require(j0f_nid_postfix(0.0f) == 1.0f && j1f_nid_postfix(0.0f) == 0.0f && jnf_nid_postfix(2, 0.0f) == 0.0f);
-    Require(std::fabs(j0f_nid_postfix(2.5f) - static_cast<float>(besselJ(0, 2.5))) < 1e-6f);
-    Require(std::fabs(jnf_nid_postfix(3, 4.0f) - static_cast<float>(besselJ(3, 4.0))) < 1e-6f);
+    Require(std::fabs(j0f_nid_postfix(2.5f) - static_cast<float>(-0.048383776468198)) < 1e-6f);
+    Require(std::fabs(jnf_nid_postfix(3, 4.0f) - static_cast<float>(0.430171473875622)) < 1e-6f);
     Require(y0f_nid_postfix(0.0f) == -std::numeric_limits<float>::infinity() && y1f_nid_postfix(0.0f) == -std::numeric_limits<float>::infinity());
     Require(ynf_nid_postfix(2, 0.0f) == -std::numeric_limits<float>::infinity());
-    Require(std::fabs(ynf_nid_postfix(2, 3.0f) - static_cast<float>(besselY(2, 3.0))) < 1e-6f);
+    Require(std::fabs(ynf_nid_postfix(2, 3.0f) - static_cast<float>(-0.160400393484924)) < 1e-6f);
     Require(std::isnan(y0f_nid_postfix(-1.0f)));
 }
 

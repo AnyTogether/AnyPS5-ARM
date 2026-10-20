@@ -690,10 +690,7 @@ IrU32 TranslationContext::minMaxF16Bits(bool maxValue, IrU32 lhs, IrU32 rhs) {
         return ir.BitwiseXor(value, ir.BitwiseAnd(ir.ShiftRightArithmetic(value, ir.Constant(31u)), ir.Constant(0x7fffu)));
     };
     const IrU1 ordered(ir.Emit(maxValue ? IrOpcode::SGreaterThanEqual32 : IrOpcode::SLessThan32, IrType::U1, {&order(lhs), &order(rhs)}));
-    const IrU32 either(ir.BitwiseOr(lhs.Value(), rhs.Value()));
-    const IrU1 bothZero(ir.IEqual(ir.BitwiseAnd(either.Value(), ir.Constant(0x7fffu)), ir.Constant(0u)));
-    const IrU32 zero = maxValue ? IrU32(ir.BitwiseAnd(lhs.Value(), rhs.Value())) : either;
-    return IrU32(ir.Select(bothZero.Value(), zero.Value(), ir.Select(ordered.Value(), lhs.Value(), rhs.Value())));
+    return IrU32(ir.Select(ordered.Value(), lhs.Value(), rhs.Value()));
 }
 
 bool TranslationContext::minMaxF16(const RdnaInstruction& inst, IrOpcode opcode) {
