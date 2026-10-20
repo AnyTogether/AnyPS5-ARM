@@ -8,9 +8,9 @@
 
 **AnyPS5.app** is a launcher laid out like the PS5 home screen. Point it at the folder with your game dumps and it does the rest: it finds the games, unlocks (converts) them for the Mac and starts them.
 
-[![Watch the AnyPS5 launcher in action (1:39)](docs/screenshots/launcher-home.jpg)](docs/videos/launcher.mp4)
+![The AnyPS5 launcher in action](docs/videos/launcher-preview.webp)
 
-<p align="center"><a href="docs/videos/launcher.mp4"><b>▶ Watch the launcher in action</b></a> (1:39)</p>
+<p align="center"><a href="https://github.com/utkuhalis/AnyPS5-ARM/raw/main/docs/videos/launcher.mp4"><b>▶ Full video with sound</b></a> (1:39, MP4)</p>
 
 ```sh
 curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
