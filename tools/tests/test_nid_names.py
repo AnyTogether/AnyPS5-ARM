@@ -305,6 +305,16 @@ auto example = "APS5_ASM_FUNCTION(\"sceQuoted_nid_postfix\")";
             "sigAsmCall", "sigAsmCall_nid_postfix",
         })
 
+    def test_disambiguated_definitions_are_real_names_of_their_symbol(self):
+        self.write_source('int APS5_VABI fstat_nid_disambig1_nid_postfix(int fd) { return 0; }\n'
+                          'int APS5_VABI pwrite_nid_disambig12(int fd) { return 0; }\n'
+                          'int APS5_VABI sceKeep_nid_disambigA() { return 0; }\n')
+        self.assertEqual(nid_names.collect_real_names(), {
+            "fstat", "fstat_nid_disambig1_nid_postfix",
+            "pwrite", "pwrite_nid_disambig12",
+            "sceKeep_nid_disambigA",
+        })
+
     def test_formatted_alias_macro_is_detected(self):
         self.write_source('APS5_EXPORT (\n "AAAAAAAAAAA" ,\n exampleUnknown00\n );\n')
         self.assertEqual(nid_names.collect_unknowns(), {"AAAAAAAAAAA": "core/libs/prx/libSceExample/Export.cpp:exampleUnknown00"})

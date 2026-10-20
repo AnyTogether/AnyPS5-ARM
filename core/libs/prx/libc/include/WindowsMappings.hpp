@@ -76,11 +76,12 @@ public:
         reset(reinterpret_cast<std::uintptr_t>(address), bytes);
     }
 
-    void Map(void* address, std::size_t bytes, HANDLE section, std::uint64_t offset, DWORD protection, bool watched = false, bool resident = false, DWORD viewProtection = PAGE_EXECUTE_READWRITE, std::size_t sectionBytes = SIZE_MAX) {
+    void Map(void* address, std::size_t bytes, HANDLE section, std::uint64_t offset, DWORD protection, bool watched = false, bool resident = false, DWORD viewProtection = PAGE_EXECUTE_READWRITE, std::size_t sectionBytes = SIZE_MAX, std::vector<std::pair<std::uintptr_t, std::size_t>>* createdPrivate = nullptr) {
         if (sectionBytes < bytes && (resident || sectionBytes == 0 || bytes - sectionBytes >= pageBytes)) throw std::runtime_error("shared guest mapping extends a whole page past its section");
         std::lock_guard lock(mutex);
         collectableRanges.clear();
         auto cursor = reinterpret_cast<std::uintptr_t>(address);
+        if (createdPrivate != nullptr) createdPrivate->reserve(createdPrivate->size() + bytes / pageBytes);
         reset(cursor, bytes);
         if (resident) watchResident = watched;
         HANDLE duplicate = nullptr;
@@ -111,6 +112,10 @@ public:
                 while (done + runBytes < bytes && (base + runBytes) % chunkBytes != 0 && single(done + runBytes)) runBytes += pageBytes;
                 split(base, runBytes);
                 commitResident(base, runBytes);
+                if (createdPrivate != nullptr) {
+                    if (!createdPrivate->empty() && createdPrivate->back().first + createdPrivate->back().second == base) createdPrivate->back().second += runBytes;
+                    else createdPrivate->emplace_back(base, runBytes);
+                }
                 residentRuns.emplace(base, Run{base + runBytes, {}, static_cast<std::uint32_t>(runBytes >> 12)});
                 for (std::size_t at = 0; at < runBytes; at += pageBytes) {
                     const auto slot = slotOf(done + at);

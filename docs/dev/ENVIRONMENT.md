@@ -320,6 +320,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_NO_WORKER_AFFINITY` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Queues/WorkerAffinity.cpp` |  | leaves the queue workers and presenter unpinned (affinity mask 0) |
 | `APS5_NO_WRITER_KEYED_EVIDENCE` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Memory/WriteEvidence.cpp` |  | records written-element evidence without keying it by writer |
 | `APS5_NO_WRITE_EVIDENCE` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Memory/WriteEvidence.cpp` |  | disables the written-element evidence that lets a read skip the flush hook |
+| `APS5_NO_WRITE_ONLY_PASSES` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Draw.cpp` |  | counts a buffer a draw only stores to as read and written, so the next draw storing to it begins a new render pass |
 | `APS5_NO_WRITTEN_SHADOW` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/GuestBufferMemory.cpp` |  | binds written staging elements in place instead of through the written shadow |
 | `APS5_PACKET_EPOCH` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Synchronization/WaitStatistics.cpp` |  | makes queue workers bump the collect epoch before every packet |
 | `APS5_PIPELINED_DRAWS` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/DrawPipeline.cpp` | 8 | depth of the queue-0 draw pipeline: 0 records draws inline, 1 selects the default depth of 8, and any other value is the depth capped at 256 |

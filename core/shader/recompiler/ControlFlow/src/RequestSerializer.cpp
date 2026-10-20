@@ -563,6 +563,7 @@ void writeTessellationConfiguration(Writer& writer, const TessellationConfigurat
     writer.WriteU32(configuration.patchesPerGroup);
     writer.WriteU32(configuration.primitiveGroupSize);
     writer.WriteBool(configuration.breakAtInstance);
+    writer.WriteBool(configuration.mergedHull);
 }
 
 TessellationConfiguration readTessellationConfiguration(Reader& reader, std::uint32_t version) {
@@ -577,6 +578,7 @@ TessellationConfiguration readTessellationConfiguration(Reader& reader, std::uin
         configuration.primitiveGroupSize = reader.ReadU32();
         configuration.breakAtInstance = reader.ReadBool();
     }
+    if (version >= 39u) configuration.mergedHull = reader.ReadBool();
     return configuration;
 }
 
@@ -825,7 +827,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(39u);
+    writer.WriteU32(40u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -866,7 +868,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 39u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 40u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -903,8 +905,8 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.request.context.linkedCallFallbacks = result.linkedCallFallbacks;
     }
     if (version >= 32u) result.request.target.spannedWaves = reader.ReadBool();
-    // The fork's fields: version 33 (upstream skipped it), then 39 on, after upstream's 38. The
-    // fork's version 35 requests (its fields right after the spanned-waves flag) are not read.
+    // The fork's fields: version 33 (upstream skipped it), then 40 on, after upstream's 39. The
+    // fork's version 35 and 39 requests (other field orders) are not read.
     if (version == 33u) {
         result.request.target.subgroupStages = reader.ReadU32();
         result.request.target.meshAsCompute = reader.ReadBool();
@@ -917,7 +919,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         }
     }
     if (version >= 36u) result.request.target.float32FlushToZero = reader.ReadBool();
-    if (version >= 39u) {
+    if (version >= 40u) {
         result.request.target.subgroupStages = reader.ReadU32();
         result.request.target.meshAsCompute = reader.ReadBool();
     }

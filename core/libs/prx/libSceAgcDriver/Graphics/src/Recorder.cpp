@@ -1540,6 +1540,10 @@ void Recorder::LeaveRenderPassOpen(std::uint64_t key, std::uint32_t timing, bool
     open->passHazards.Add(access);
 }
 
+void Recorder::SealPassWriteOnly() {
+    if (open != nullptr) open->passHazards.SealWriteOnly();
+}
+
 void Recorder::endOpenRenderPass(bool barrier) {
     auto& pass = open->renderPass;
     if (open->segmentActive) endSegment(*open);

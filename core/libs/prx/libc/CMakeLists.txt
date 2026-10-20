@@ -49,6 +49,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Backtrace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/DinkumwareAtomics.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Time.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/TimeExtras.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AtomicBuiltins.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FileAndHeap.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostErrno.cpp
@@ -186,6 +187,16 @@ if(BUILD_TESTING)
     set_tests_properties(guest_mktime PROPERTIES TIMEOUT 10)
     if(WIN32)
         set_tests_properties(guest_mktime PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+    add_test_executable(guest_time_extras_tests ${LIBS_INCLUDE_DIR}/tests/GuestTimeExtras.cpp)
+    target_include_directories(guest_time_extras_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_time_extras_tests PRIVATE libc)
+    configure_windows_unwind(guest_time_extras_tests)
+    add_test(NAME guest_time_extras COMMAND guest_time_extras_tests)
+    set_tests_properties(guest_time_extras PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_time_extras PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(precise_wait_tests ${LIBS_INCLUDE_DIR}/tests/PreciseWait.cpp)

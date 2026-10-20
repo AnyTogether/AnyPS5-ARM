@@ -13,7 +13,6 @@ import progress
 
 ROOT = Path(__file__).resolve().parent.parent
 PRX = ROOT / "core" / "libs" / "prx"
-NID_POSTFIX = "_nid_postfix"
 MODULE_SUFFIX = "#"
 CLASSES = ("implemented", "stub", "absent", "module")
 PE_DIRECTORY_OFFSET = {0x20b: 112, 0x10b: 96}
@@ -542,7 +541,7 @@ def read_modules(directories):
 def nids_of(name, aliases):
     if name in aliases:
         return aliases[name]
-    return {nid_names.compute_nid(name.removesuffix(NID_POSTFIX))}
+    return {nid_names.compute_nid(nid_names.strip_nid_postfix(name))}
 
 
 def source_stubs(source):

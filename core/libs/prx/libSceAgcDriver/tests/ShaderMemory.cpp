@@ -850,7 +850,8 @@ void verifyOutOfRangeConstantReads() {
     require(plan->info.images.size() == 2u && plan->info.samplers.size() == 1u, "out-of-range s_buffer_load: the two T#s were not planned as one image each");
     AgcDriver::ShaderMemory memory({});
     const auto capture = memory.Capture(request);
-    request.context.memory = memory.Regions();
+    const auto memoryRegions = memory.Regions();
+    request.context.memory = memoryRegions;
     static_cast<void>(Recompile(request, *capture));
     const auto holds = [&](const std::array<std::uint32_t, 8>& words) {
         return std::ranges::any_of(capture->snapshot.images, [&](const DescriptorValue& value) {
@@ -1025,8 +1026,10 @@ void verifyGuardedDescriptorSources() {
         fill(valid, mode);
         AgcDriver::ShaderMemory memory({});
         const auto capture = memory.Capture(storeRequest);
-        storeRequest.context.memory = memory.Regions();
-        return Recompile(storeRequest, *capture);
+        const auto memoryRegions = memory.Regions();
+        auto compileRequest = storeRequest;
+        compileRequest.context.memory = memoryRegions;
+        return Recompile(compileRequest, *capture);
     };
     const auto storePlan = GetResourcePlan(storeRequest);
     require(storePlan->info.images.size() == 2u && storePlan->descriptorSources.size() == 1u, "guarded images: the two stores were not planned as two images of one T#");
@@ -3614,7 +3617,8 @@ void verifyDescriptorPhis() {
         require(plan->info.images.size() == images && plan->info.samplers.size() == samplers && plan->info.sampledPairs.size() == 2u, "descriptor Phi: the edges were not given one resource each");
         AgcDriver::ShaderMemory memory({});
         const auto capture = memory.Capture(request);
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         const auto compiled = Recompile(request, *capture);
         require(countOps(compiled->spirv, OpImageSampleExplicitLod) == 2u, "descriptor Phi: the specialized SPIR-V does not sample once per edge");
 #if ANYPS5_ENABLE_SPIRV_TOOLS
@@ -3645,7 +3649,8 @@ void verifyDescriptorPhis() {
     auto twoLane = makeRequest(samplerCode, 64u);
     AgcDriver::ShaderMemory twoLaneMemory({});
     const auto twoLaneCapture = twoLaneMemory.Capture(twoLane);
-    twoLane.context.memory = twoLaneMemory.Regions();
+    const auto twoLaneRegions = twoLaneMemory.Regions();
+    twoLane.context.memory = twoLaneRegions;
     require(countOps(Recompile(twoLane, *twoLaneCapture)->spirv, OpImageSampleExplicitLod) == 4u, "descriptor Phi: the specialized two-lane SPIR-V does not sample once per edge and half");
 
     auto dynamic = makeRequest(dynamicCode);
@@ -3667,7 +3672,8 @@ void verifyDescriptorPhis() {
     require(sequentialPlan->info.images.size() == 2u && sequentialPlan->info.samplers.size() == 2u, "descriptor Phi: a T# and an S# chosen in separate blocks were not split into their SRT descriptors");
     AgcDriver::ShaderMemory sequentialMemory({});
     const auto sequentialCapture = sequentialMemory.Capture(sequential);
-    sequential.context.memory = sequentialMemory.Regions();
+    const auto sequentialRegions = sequentialMemory.Regions();
+    sequential.context.memory = sequentialRegions;
     static_cast<void>(Recompile(sequential, *sequentialCapture));
 
     const auto planRestoredSampler = [&](std::span<const std::uint32_t> code, const char* message) {
@@ -3676,7 +3682,8 @@ void verifyDescriptorPhis() {
         require(plan->info.samplers.size() == 1u && plan->info.sampledPairs.size() == 1u, message);
         AgcDriver::ShaderMemory memory({});
         const auto capture = memory.Capture(request);
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         static_cast<void>(Recompile(request, *capture));
     };
     std::vector<std::uint32_t> restoredSamplerCode{0xf40c0200u, 0xfa000000u, 0xf4080500u, 0xfa000020u, 0xf4080600u, 0xfa000040u, 0xbe930380u, 0xbf8cc07fu, 0xf09c0f08u, 0x00a20400u, 0xbe900380u, 0xbe910380u, 0xbe9c0414u, 0xbe9e0416u, 0xbf068011u, 0xbf850001u, 0x80128112u, 0xbe94041cu, 0xbe96041eu, 0x80118111u, 0xbf0a8211u, 0xbf85fff6u, 0xf09c0f08u, 0x00a20000u, 0x80108110u, 0xbf0a8210u, 0xbf85fff0u, 0x80138113u, 0xbf0a8213u, 0xbf85ffecu, 0xbf8c3f70u, 0xe0700000u, 0x80060000u, 0xe0700000u, 0x80060400u, 0x7d880090u, 0xbea23c6au, 0x4a020081u, 0xe0700000u, 0x80060100u, 0xbf810000u};
@@ -3850,7 +3857,8 @@ void verifyLaneSelectedDescriptors() {
     require(plan->info.images.size() == 2u && plan->info.samplers.size() == 1u, "lane-selected T#: the T#s selected per lane were not planned as one image each");
     AgcDriver::ShaderMemory memory({});
     const auto capture = memory.Capture(request);
-    request.context.memory = memory.Regions();
+    const auto memoryRegions = memory.Regions();
+    request.context.memory = memoryRegions;
     static_cast<void>(Recompile(request, *capture));
     const auto holds = [&](const std::array<std::uint32_t, 8>& words) {
         return std::ranges::any_of(capture->snapshot.images, [&](const DescriptorValue& value) {
@@ -3896,7 +3904,8 @@ void verifyProgramCounterRelativeData() {
     };
     AgcDriver::ShaderMemory memory({});
     static_cast<void>(memory.Capture(request));
-    request.context.memory = memory.Regions();
+    const auto memoryRegions = memory.Regions();
+    request.context.memory = memoryRegions;
     const auto first = Recompile(request);
     require(dataBase(first) == codeAddress + 56u, "program counter data: the V# does not name the data at the shader's address");
     auto relocated = request;
@@ -4839,7 +4848,7 @@ void verifyPixelRequestSerialization() {
     minimal.context.pixel->layerExported = true;
     minimal.context.pixel->ditheredAlphaToCoverage = true;
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQScAAAA=", "new requests did not use serialization version 39");
+    require(requestPrefix(encoded, 8u) == "NVNQQSgAAAA=", "new requests did not use serialization version 40");
     const std::array<std::uint32_t, 2> fallbacks{0x40u, 0x1ac4u};
     auto withFallbacks = minimal;
     withFallbacks.context.linkedCallFallbacks = fallbacks;
@@ -4957,7 +4966,7 @@ void verifyPixelRequestSerialization() {
     for (std::size_t bytes = 0; bytes < 45u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage, stencil reference export flag, primitive class, layer export, dither or front-face flag, quad pixel mask or quad sample mask was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSgAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQSkAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
     static constexpr std::string_view version18Request{
@@ -5108,7 +5117,7 @@ void verifyVertexInfoVersion19() {
     const auto sampledBytes = decodeBase64(serializer.Serialize(sampledPixel));
     require(std::equal(maskedBytes.begin(), maskedBytes.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u), sampledBytes.begin()) && sampledBytes[maskOffset + 1u] == 0x1u && sampledBytes[maskOffset + 5u] == 0x2u && sampledBytes[maskOffset + 9u] == 0x4u && sampledBytes[maskOffset + 13u] == 0x8u, "the quad sample masks are not the four words after the quad pixel mask");
     auto version30 = sampledBytes;
-    // The fork's version 39 fields (subgroup stage mask, mesh-as-compute flag) follow the spanned-waves flag.
+    // The fork's version 40 fields (subgroup stage mask, mesh-as-compute flag) follow the spanned-waves flag.
     version30.resize(version30.size() - 5u);
     version30.pop_back();
     version30.pop_back();
@@ -5133,7 +5142,7 @@ void verifyVertexInfoVersion19() {
     version29.pop_back();
     version29.pop_back();
     version29.erase(version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes), version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes));
-    // The fork's version 39 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
+    // The fork's version 40 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
     version29.resize(version29.size() - 5u);
     auto version36 = sampledBytes;
     version36.erase(version36.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes - 1u));
@@ -5216,7 +5225,7 @@ void verifyDepthRemapRequests() {
     require(serializer.Serialize(replay.request) == remapped, "a version 35 depth remap request changed on re-serialization");
     auto plainBytes = decodeBase64(plain);
     auto remappedBytes = decodeBase64(remapped);
-    // The fork's version 39 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
+    // The fork's version 40 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
     plainBytes.resize(plainBytes.size() - 5u);
     remappedBytes.resize(remappedBytes.size() - 5u);
     require(plainBytes.size() == remappedBytes.size() && plainBytes.size() > 5u && std::equal(plainBytes.begin(), plainBytes.end() - 6, remappedBytes.begin()), "the depth remap flag and mode are not the last 6 bytes before the f32 flush flag of a vertex request");
@@ -5253,6 +5262,45 @@ void verifyDepthRemapRequests() {
     zeroToOne.context.vertex->depthRemapMode = 1u;
     RecompileCacheKey::Build(zeroToOne, other);
     require(key != other, "the depth remap mode did not change the shader cache key");
+}
+
+void verifyMergedHullConfiguration() {
+    using namespace ShaderRecompiler;
+    static constexpr std::array<std::uint32_t, 1> code{0xbf810000u};
+    const RequestSerializer serializer;
+    RecompileRequest request{};
+    request.shader = {ShaderStage::TessellationControl, 0x10000u, code, 0, {}};
+    request.context.waveSize = 64;
+    request.context.vertex = ShaderVertexStageInfo{};
+    request.graphics = GraphicsCompileContext{0u, {}, std::nullopt, TessellationConfiguration{3u, 3u, 1u, 2u, 2u}, {}};
+    const auto separate = serializer.Serialize(request);
+    std::vector<std::uint64_t> separateKey;
+    RecompileCacheKey::Build(request, separateKey);
+    request.graphics->tessellation->mergedHull = true;
+    const auto merged = serializer.Serialize(request);
+    std::vector<std::uint64_t> mergedKey;
+    RecompileCacheKey::Build(request, mergedKey);
+    const auto replay = serializer.Deserialize(merged);
+    require(replay.request.graphics.has_value() && replay.request.graphics->tessellation.has_value() && replay.request.graphics->tessellation->mergedHull, "a merged hull configuration was lost in serialization");
+    require(!serializer.Deserialize(separate).request.graphics->tessellation->mergedHull, "a separate hull configuration was read as merged");
+    auto legacy = decodeBase64(merged);
+    // The fork's version 40 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
+    legacy.resize(legacy.size() - 5u);
+    require(legacy.size() > 52u && legacy[legacy.size() - 52u] == 1u, "the merged hull flag is not the last byte of the tessellation configuration");
+    legacy.erase(legacy.end() - 52);
+    for (const auto version : {30u, 31u, 32u, 34u, 35u, 36u, 37u, 38u}) {
+        auto older = legacy;
+        older[4] = static_cast<std::uint8_t>(version);
+        if (version < 38u) older.erase(older.end() - 31);
+        if (version < 36u) older.pop_back();
+        if (version < 35u) older.resize(older.size() - 5u);
+        if (version < 32u) older.pop_back();
+        const auto upgraded = serializer.Deserialize(encodeBase64(older));
+        const auto what = "a main version " + std::to_string(version) + " tessellation request";
+        require(upgraded.request.graphics.has_value() && upgraded.request.graphics->tessellation.has_value() && !upgraded.request.graphics->tessellation->mergedHull, (what + " read a merged hull flag").c_str());
+        require(serializer.Serialize(upgraded.request) == separate, (what + " misread the fields after its tessellation configuration").c_str());
+    }
+    require(mergedKey != separateKey && RecompileCacheKey::ContextHash(request) != RecompileCacheKey::ContextHash(serializer.Deserialize(separate).request), "the cache keys ignore whether the hull program is merged");
 }
 
 void verifyLegacyPixelRequests() {
@@ -5582,7 +5630,8 @@ void verifyComputedTexelOffsets() {
         request.useCache = false;
         AgcDriver::ShaderMemory memory({});
         static_cast<void>(memory.Capture(request));
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         return Recompile(request).spirv;
     };
     const auto sampleOperands = [](std::span<const std::uint32_t> words) {
@@ -5632,7 +5681,8 @@ void verifyShaderClockScopes() {
         request.useCache = false;
         AgcDriver::ShaderMemory memory({});
         static_cast<void>(memory.Capture(request));
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         const auto words = Recompile(request).spirv;
         std::map<std::uint32_t, std::uint32_t> constants;
         std::vector<std::uint32_t> scopeIds;
@@ -5946,7 +5996,8 @@ void verifyUnnormalizedSamplers() {
         request.layout.pushConstantSizeBytes = 128;
         AgcDriver::ShaderMemory memory({});
         static_cast<void>(memory.Capture(request));
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         return Recompile(request);
     };
     const auto flags = [](const RecompileResult& result, DescriptorRole role) {
@@ -6369,7 +6420,8 @@ void verifyTwoLaneUniformValues() {
         request.layout.pushConstantSizeBytes = 128;
         AgcDriver::ShaderMemory memory({});
         const auto capture = memory.Capture(request);
-        request.context.memory = memory.Regions();
+        const auto memoryRegions = memory.Regions();
+        request.context.memory = memoryRegions;
         const auto words = Recompile(request, *capture)->spirv;
         std::size_t count = 0;
         for (std::size_t cursor = 5; cursor < words.size();) {
@@ -6950,7 +7002,8 @@ void verifyGuardedNullPointers() {
     const auto valid = validMemory.Capture(branch.request);
     require(valid->snapshot.srtPoison.empty() && valid->plan->guardedSrtSlots.size() == 1u && slotPc(*valid->plan, valid->plan->guardedSrtSlots[0]) == 0x2cu && GuardRecords(*valid), "guarded pointer: a mapped nested pointer was poisoned, or its read has no guard");
     require(valid->snapshot.flattenedSrt.at(valid->plan->guardedSrtSlots[0]) == payload, "guarded pointer: a mapped nested read does not hold its word");
-    branch.request.context.memory = validMemory.Regions();
+    const auto validRegions = validMemory.Regions();
+    branch.request.context.memory = validRegions;
     const auto validResult = Recompile(branch.request, *valid);
     require(validResult->poisonedSrtReads == 0u && faultBinding(*validResult) && validResult->bdaAbiVersion == BdaAbi::Version, "guarded pointer: a guarded program has no fault buffer");
 
@@ -6992,20 +7045,23 @@ void verifyGuardedNullPointers() {
         const bool throughPointer = own == 0x38u && poison.address == unmapped;
         require(poison.pc == 0x2cu && (pointerWord || throughPointer), "guarded pointer: a derived poison does not name the inaccessible read");
     }
-    chain.request.context.memory = chainMemory.Regions();
+    const auto chainRegions = chainMemory.Regions();
+    chain.request.context.memory = chainRegions;
     const auto chainResult = Recompile(chain.request, *chained);
     indirect = 0;
     point(static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&indirect)));
     AgcDriver::ShaderMemory nullChainMemory({});
     const auto nullChain = nullChainMemory.Capture(chain.request);
     require(nullChain->snapshot.srtPoison.size() == 1u && nullChain->snapshot.srtPoison[0].pc == 0x38u && nullChain->snapshot.srtPoison[0].address == 0u && GuardRecords(*nullChain), "guarded pointer: a null pointer read from memory did not poison the read through it");
-    chain.request.context.memory = nullChainMemory.Regions();
+    const auto nullChainRegions = nullChainMemory.Regions();
+    chain.request.context.memory = nullChainRegions;
     const auto nullChainResult = Recompile(chain.request, *nullChain);
     indirect = payloadAddress;
     AgcDriver::ShaderMemory mappedChainMemory({});
     const auto mappedChain = mappedChainMemory.Capture(chain.request);
     require(mappedChain->snapshot.srtPoison.empty() && mappedChain->plan->guardedSrtSlots.size() == 3u && GuardRecords(*mappedChain), "guarded pointer: a mapped pointer chain was poisoned, or its reads have no guards");
-    chain.request.context.memory = mappedChainMemory.Regions();
+    const auto mappedChainRegions = mappedChainMemory.Regions();
+    chain.request.context.memory = mappedChainRegions;
     const auto mappedChainResult = Recompile(chain.request, *mappedChain);
     require(chainResult->poisonedSrtReads == 3u && nullChainResult->poisonedSrtReads == 1u && mappedChainResult->poisonedSrtReads == 0u, "guarded pointer: a chain result does not count its poisoned reads");
     require(samePipeline(*chainResult, *mappedChainResult) && samePipeline(*nullChainResult, *mappedChainResult), "guarded pointer: a chain's poison changed the variant, the specialization or the module");
@@ -7028,7 +7084,8 @@ void verifyGuardedNullPointers() {
     AgcDriver::ShaderMemory zeroMemory({});
     const auto zeroCapture = zeroMemory.Capture(descriptor.request);
     require(zeroCapture->snapshot.srtPoison.empty() && zeroBuffer(*zeroCapture) && GuardRecords(*zeroCapture), "guarded pointer: a zero V# read from mapped memory was poisoned or not read");
-    descriptor.request.context.memory = zeroMemory.Regions();
+    const auto zeroRegions = zeroMemory.Regions();
+    descriptor.request.context.memory = zeroRegions;
     const auto zeroResult = Recompile(descriptor.request, *zeroCapture);
     for (const auto pointer : {std::uint64_t{0}, unmapped}) {
         point(pointer);
@@ -7084,7 +7141,8 @@ void verifyGuardedNullPointers() {
     const auto rootlessCapture = rootlessMemory.Capture(rootless.request);
     require(rootlessCapture->snapshot.nullRootReads != 0u && GuardRecords(*rootlessCapture), "guarded pointer: reads through a null user-data pointer were not counted");
     require(std::all_of(rootlessCapture->snapshot.buffers.begin(), rootlessCapture->snapshot.buffers.end(), [](const DescriptorValue& value) { return std::all_of(value.dwords.begin(), value.dwords.end(), [](std::uint32_t word) { return word == 0u; }); }), "guarded pointer: a V# read through a null user-data pointer is not zero");
-    rootless.request.context.memory = rootlessMemory.Regions();
+    const auto rootlessRegions = rootlessMemory.Regions();
+    rootless.request.context.memory = rootlessRegions;
     const auto rootlessResult = Recompile(rootless.request, *rootlessCapture);
     require(rootlessResult->poisonedSrtReads >= rootlessCapture->snapshot.nullRootReads, "guarded pointer: a capture through a null user-data pointer is cacheable");
     point(0u);
@@ -7424,6 +7482,7 @@ int main(int argc, char** argv) {
         verifyPixelRequestSerialization();
         verifyVertexInfoVersion19();
         verifyDepthRemapRequests();
+        verifyMergedHullConfiguration();
         verifyPositionExportComponents();
         verifyLegacyPixelRequests();
         verifyPixelExportReplay();
@@ -7628,7 +7687,8 @@ int main(int argc, char** argv) {
             const auto changedCapture = changedMemory.Capture(request);
             auto changed = updated;
             changed.useCache = true;
-            changed.context.memory = changedMemory.Regions();
+            const auto changedRegions = changedMemory.Regions();
+            changed.context.memory = changedRegions;
             auto before = updated;
             before.useCache = true;
             before.context.memory = updatedRegions;
@@ -7691,7 +7751,8 @@ int main(int argc, char** argv) {
         AgcDriver::ShaderMemory nullRoot({});
         const auto nullRootCapture = nullRoot.Capture(request);
         require(nullRootCapture->snapshot.nullRootReads != 0u, "reads through a null user-data pointer were not counted");
-        request.context.memory = nullRoot.Regions();
+        const auto nullRootRegions = nullRoot.Regions();
+        request.context.memory = nullRootRegions;
         require(Recompile(request, *nullRootCapture)->poisonedSrtReads >= nullRootCapture->snapshot.nullRootReads, "a capture through a null user-data pointer is cacheable");
         std::cout << "Shader memory capture, strict validation and deterministic replay passed\n";
         return 0;

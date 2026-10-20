@@ -1168,6 +1168,19 @@ class ImportAuditTests(unittest.TestCase):
         self.assertNotIn(("libSceTwin.native.prx", twin), stubs)
         self.assertNotEqual(nid_names.compute_nid("printf"), nid_names.compute_nid("printf_nid_postfix"))
 
+    def test_disambiguated_stubs_use_the_nid_of_their_symbol(self):
+        source = self.work.source
+        write_source(source, "libkernel", STUB_SOURCE.format(name="fstat_nid_disambig1_nid_postfix")
+                     + STUB_SOURCE.format(name="pwrite_nid_disambig12") + STUB_SOURCE.format(name="sceKeep_nid_disambigA"))
+        stubs = import_audit.source_stubs(source)
+        fstat = nid_names.compute_nid("fstat")
+        self.assertEqual(stubs, {
+            ("libkernel.prx", fstat): "fstat_nid_disambig1_nid_postfix",
+            ("libkernel.prx", nid_names.compute_nid("pwrite")): "pwrite_nid_disambig12",
+            ("libkernel.prx", nid_names.compute_nid("sceKeep_nid_disambigA")): "sceKeep_nid_disambigA"})
+        records, _ = import_audit.audit([(fstat, "libkernel.prx", False)], {fstat: ["libkernel.prx"]}, stubs, {"libkernel.prx"}, set())
+        self.assertEqual((records[0]["class"], records[0]["name"]), ("stub", "fstat_nid_disambig1_nid_postfix"))
+
     def test_stub_in_one_library_is_not_hidden_by_another(self):
         source = self.work.source
         write_source(source, "libA", DONE_SOURCE.format(name="sceTwinCall"))

@@ -812,7 +812,7 @@ std::uint64_t ReadBudget(const Context& context) {
     return SampledTextureCacheBudget(context);
 }
 
-constexpr std::uint64_t PressedUsage = ReportedBudget - 11ull * (1ull << 30u);
+constexpr std::uint64_t PressedUsage = ReportedBudget - 9ull * (1ull << 30u);
 
 void VKAPI_PTR ReportPressure(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2* properties) {
     auto* reported = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
@@ -853,8 +853,8 @@ void storageMemoryTests(Context context) {
     Require(ReadStorageBudget(context) == quarter, "52 GiB free of a 64 GiB budget does not leave the storage image cache its quarter");
     context.memoryProperties2 = &ReportPressure;
     const auto pressed = ReadStorageBudget(context);
-    const auto expected = GiB + SampledTextureMemory() + TextureCacheUsage().storageBytes;
-    Require(pressed == expected, "53 GiB in use of a 64 GiB budget leaves the storage image cache " + std::to_string(pressed >> 20u) + " MiB, not the " + std::to_string(expected >> 20u) + " MiB left after the use outside the texture caches, the sampled textures' 2 GiB floor and 8 GiB of headroom");
+    const auto expected = GiB + TextureCacheUsage().storageBytes;
+    Require(pressed == expected, "55 GiB in use of a 64 GiB budget leaves the storage image cache " + std::to_string(pressed >> 20u) + " MiB, not the " + std::to_string(expected >> 20u) + " MiB left after the use outside the texture caches, the sampled textures and 8 GiB of headroom");
     std::printf("reported heap budget %llu MiB with %llu MiB in use: storage image cache budget %llu MiB\n", static_cast<unsigned long long>(ReportedBudget >> 20u), static_cast<unsigned long long>(PressedUsage >> 20u), static_cast<unsigned long long>(pressed >> 20u));
 }
 

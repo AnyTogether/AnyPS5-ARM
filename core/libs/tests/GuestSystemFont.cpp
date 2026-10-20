@@ -5,11 +5,17 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 extern "C" {
 int APS5_VABI sceFontMemoryInit(FontMemory*, void*, std::uint32_t, const FontMemoryInterface*, void*, FontMemoryDestroyFunction, void*);
@@ -118,6 +124,41 @@ static void SetFontDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
+template <typename TRun>
+static std::string CaptureStderr(const std::filesystem::path& path, TRun run) {
+    std::fflush(stderr);
+#ifdef _WIN32
+    const int saved = _dup(2);
+#else
+    const int saved = dup(2);
+#endif
+    std::FILE* file = std::fopen(path.string().c_str(), "wb");
+    Require(saved >= 0 && file != nullptr);
+#ifdef _WIN32
+    Require(_dup2(_fileno(file), 2) == 0);
+#else
+    Require(dup2(fileno(file), 2) == 2);
+#endif
+    run();
+    std::fflush(stderr);
+#ifdef _WIN32
+    Require(_dup2(saved, 2) == 0);
+    _close(saved);
+#else
+    Require(dup2(saved, 2) == 2);
+    close(saved);
+#endif
+    std::fclose(file);
+    std::ifstream input(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+static std::size_t Occurrences(const std::string& text, const std::string& pattern) {
+    std::size_t count = 0;
+    for (auto at = text.find(pattern); at != std::string::npos; at = text.find(pattern, at + pattern.size())) ++count;
+    return count;
+}
+
 static float AdvanceOf(FontHandle font, std::uint32_t code) {
     FontGlyphMetrics metrics{};
     Require(sceFontGetCharGlyphMetrics(font, code, &metrics) == SCE_FONT_OK);
@@ -155,8 +196,13 @@ int main() {
 
     FontHandle font = nullptr;
     SetFontDirectory(empty);
-    Require(sceFontOpenFontSet(library, EuropeanBold, 1, nullptr, &font) == SCE_FONT_ERROR_FONT_OPEN_FAILED && font == nullptr);
-    Require(sceFontOpenFontSet(library, 0x18070046u, 1, nullptr, &font) == SCE_FONT_ERROR_NO_SUPPORT_FONTSET && font == nullptr);
+    const std::string warnings = CaptureStderr(root / "stderr.txt", [&] {
+        Require(sceFontOpenFontSet(library, EuropeanBold, 1, nullptr, &font) == SCE_FONT_ERROR_FONT_OPEN_FAILED && font == nullptr);
+        Require(sceFontOpenFontSet(library, EuropeanLight, 1, nullptr, &font) == SCE_FONT_ERROR_FONT_OPEN_FAILED && font == nullptr);
+        Require(sceFontOpenFontSet(library, 0x18070046u, 1, nullptr, &font) == SCE_FONT_ERROR_NO_SUPPORT_FONTSET && font == nullptr);
+    });
+    Require(Occurrences(warnings, "[libSceFont] no file for system font set") == 1);
+    Require(Occurrences(warnings, "0x180700C7 in " + empty.string()) == 1 && Occurrences(warnings, "ANYPS5_SYSTEM_FONTS") == 1);
     SetFontDirectory(root / "missing");
     bool threw = false;
     try {

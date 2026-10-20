@@ -43,6 +43,10 @@ def compute_nid(symbol):
     return "".join(out)
 
 
+def strip_nid_postfix(name):
+    return re.sub(r"_nid_disambig[0-9]+$", "", name.removesuffix(NID_POSTFIX))
+
+
 def load_db(path):
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,12 +130,10 @@ def collect_real_names():
         for match in source_definitions(text):
             name = match.group(1)
             names.add(name)
-            if name.endswith(NID_POSTFIX):
-                names.add(name[:-len(NID_POSTFIX)])
+            names.add(strip_nid_postfix(name))
         for name in source_assembly_definitions(text):
             names.add(name)
-            if name.endswith(NID_POSTFIX):
-                names.add(name[:-len(NID_POSTFIX)])
+            names.add(strip_nid_postfix(name))
     return names
 
 

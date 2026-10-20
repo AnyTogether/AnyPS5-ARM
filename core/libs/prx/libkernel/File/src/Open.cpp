@@ -374,16 +374,12 @@ std::int64_t APS5_VABI sceKernelLseek(int d, std::int64_t offset, int whence) {
 
 constexpr int GuestEfault = 14;
 
-int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
-    if (path == nullptr) return SceErrorFromErrno(GuestEfault);
-    if (*path == '\0') return SceErrorFromErrno(2);
-    std::filesystem::path native;
-    if (const int error = ResolvePathError_nid_no_patch(path, native, true, true)) return SceKernelError(error);
+static int StatNative(const std::filesystem::path& native, bool directory, FileStat* sb) {
     std::error_code error;
     constexpr int GuestEnotdir = 20;
     FileStat archived{};
     if (File::FillArchivedStat(native, &archived)) {
-        if (std::string_view(path).back() == '/' && (archived.st_mode & 0170000) != 0040000) return SceErrorFromErrno(GuestEnotdir);
+        if (directory && (archived.st_mode & 0170000) != 0040000) return SceErrorFromErrno(GuestEnotdir);
         if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
         *sb = archived;
         return 0;
@@ -402,10 +398,28 @@ int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
 #endif
         return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
     }
-    const std::string_view guestPath(path);
-    if (!guestPath.empty() && guestPath.back() == '/' && !std::filesystem::is_directory(status)) return SceErrorFromErrno(GuestEnotdir);
+    if (directory && !std::filesystem::is_directory(status)) return SceErrorFromErrno(GuestEnotdir);
     if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
     if (!File::TryFillFileStat(metadataPath, sb)) return SceStatErrorFromErrno(errno);
+    return 0;
+}
+
+int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
+    if (path == nullptr) return SceErrorFromErrno(GuestEfault);
+    if (*path == '\0') return SceErrorFromErrno(2);
+    std::filesystem::path native;
+    if (const int error = ResolvePathError_nid_no_patch(path, native, true, true)) return SceKernelError(error);
+    return StatNative(native, std::string_view(path).back() == '/', sb);
+}
+
+int StatInDirectory_nid_no_patch(int directory, const char* path, FileStat* sb, bool follow) {
+    int error = 0;
+    const char* base = GetDirectoryDescriptorPath_nid_no_patch(directory, &error);
+    if (base == nullptr) return SceErrorFromErrno(error);
+    const auto native = std::filesystem::path(reinterpret_cast<const char8_t*>(base)) / std::filesystem::path(reinterpret_cast<const char8_t*>(path));
+    if (follow) return StatNative(native, std::string_view(path).back() == '/', sb);
+    if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
+    if (!File::FillLinkStat(native, sb)) return SceErrorFromErrno(errno);
     return 0;
 }
 

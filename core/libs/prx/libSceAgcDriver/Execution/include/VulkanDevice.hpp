@@ -106,6 +106,7 @@ public:
     // Pending-label table lookup and open-batch overlap test for WAIT_REG_MEM (see Recorder).
     std::optional<Graphics::Recorder::LabelHit> PendingLabel(std::uint64_t address, std::size_t bytes, std::uint64_t afterStamp, Graphics::Recorder::LabelRefusal* refusal = nullptr) const;
     bool OpenWriteOverlaps(std::uint64_t address, std::size_t bytes) const;
+    void SealPassWriteOnly();
     bool RecordedWritesSettled(std::uint64_t address, std::size_t bytes) const;
     bool StoresPendingOver(std::uint64_t address, std::size_t bytes) const;
     // Fills [address, address + bytes) of host-imported guest memory with a repeating 16-byte pattern,

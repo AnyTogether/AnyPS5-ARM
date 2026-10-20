@@ -2288,6 +2288,10 @@ bool VulkanDevice::OpenWriteOverlaps(std::uint64_t address, std::size_t bytes) c
     return state->recorder && state->recorder->OpenWriteOverlaps(address, bytes);
 }
 
+void VulkanDevice::SealPassWriteOnly() {
+    if (state->recorder) state->recorder->SealPassWriteOnly();
+}
+
 bool VulkanDevice::RecordedWritesSettled(std::uint64_t address, std::size_t bytes) const {
     if (!state->recorder) return true;
     const auto& recorder = *state->recorder;

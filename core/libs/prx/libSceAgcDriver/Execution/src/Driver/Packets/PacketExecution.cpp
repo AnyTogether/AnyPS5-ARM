@@ -20,6 +20,7 @@
 #include <mutex>
 #include <set>
 #include <shared_mutex>
+#include <utility>
 
 namespace AgcDriver::DriverDetail {
 
@@ -84,6 +85,20 @@ bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t head
         }
         default: return false;
     }
+}
+
+bool sealsWriteOnly(std::span<const std::uint32_t> packet, std::uint32_t opcode) {
+    if (opcode == 0x58) return true;
+    if (opcode != 0x46 || packet.size() < 2) return false;
+    switch (packet[1] & 0x3fu) {
+        case 0x07: case 0x0f: case 0x10: case 0x16: case 0x2a: case 0x2c: case 0x2e: case 0x31: return true;
+        default: return false;
+    }
+}
+
+bool& drawnSinceSeal() {
+    static thread_local bool drawn = false;
+    return drawn;
 }
 
 }
@@ -457,6 +472,7 @@ void Driver::execute(const Submission& submission) {
         } else if (drawPacket) {
             landPendingWaits(submission.queue);
             packetCounters.CountDraw();
+            drawnSinceSeal() = true;
             bool drawn = false;
             timed(&WorkerProfile::drawMs, [&] {
                 static const bool traceDraws = std::getenv("APS5_TRACE_DRAWS") != nullptr;
@@ -507,6 +523,16 @@ void Driver::execute(const Submission& submission) {
             Pm4::Execute(packet, queue);
         } else if (sampleDump && !wroteOnGpu) {
             dumpSampleCounters(Pm4::SampleDumpAddress(packet));
+        } else if (submission.queue == 0 && sealsWriteOnly(packet, opcode)) {
+            if (std::exchange(drawnSinceSeal(), false)) {
+                const auto seal = [this] {
+                    GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Flush);
+                    std::lock_guard gpuLock(GuestMemory::GpuMutex());
+                    if (const auto localDevice = device.Load()) localDevice->SealPassWriteOnly();
+                };
+                if (pipelined && DrawPipeline::Queue0().Busy()) DrawPipeline::Queue0().Enqueue(seal, {});
+                else seal();
+            }
         } else if (opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
             if (!wroteOnGpu) {
                 if (Pm4::IndirectRegisterOpcode(opcode)) {

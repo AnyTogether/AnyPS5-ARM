@@ -46,6 +46,7 @@ extern "C" int APS5_VABI sceSystemServiceDisableMediaPlay(void);
 extern "C" int APS5_VABI sceSystemServiceReenableMediaPlay(void);
 extern "C" int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri, void* param);
 extern "C" int APS5_VABI sceSystemServiceShowControllerSettings(void);
+extern "C" int APS5_VABI sceSystemServiceShowDisplaySafeAreaSettings(void);
 extern "C" int APS5_VABI sceSystemServiceOpenChallengeActivity(void);
 extern "C" int APS5_VABI sceSystemServiceOpenTournamentOccurrence(void);
 extern "C" int APS5_VABI sceSystemServiceGetStatus(SystemServiceStatus* status);
@@ -71,6 +72,7 @@ int main() {
     Require(sceSystemServiceReenableMediaPlay() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceReenableMediaPlay() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceShowControllerSettings() == SYSTEM_SERVICE_OK);
+    Require(sceSystemServiceShowDisplaySafeAreaSettings() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceOpenChallengeActivity() == SYSTEM_SERVICE_OK);
     Require(sceSystemServiceLaunchWebBrowser("http://127.0.0.1:8780/video?v=0", nullptr) == browserUnavailable);
     unsigned char browserParam[64];

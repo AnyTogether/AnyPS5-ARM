@@ -830,6 +830,13 @@ int runLargeFileWrite() {
     std::error_code error;
     std::filesystem::remove_all(directory, error);
     std::filesystem::create_directories(directory, error);
+    struct Cleanup {
+        std::filesystem::path directory;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(directory, error);
+        }
+    } cleanup{directory};
     const auto space = std::filesystem::space(directory, error);
     if (error || space.available < size + (std::uintmax_t{1} << 30u)) {
         std::cout << "skipping: not enough free disk space for a file of more than 2 GiB\n";
@@ -856,6 +863,8 @@ int runLargeFileWrite() {
     }).detach();
     if (result.wait_for(std::chrono::seconds(200)) != std::future_status::ready) {
         std::cerr << "WriteFileAtomically did not return within 200 s for a file of more than 2 GiB\n";
+        std::filesystem::remove_all(directory, error);
+        if (error) std::cerr << "cannot remove the large file test directory: " << error.message() << '\n';
         std::cerr.flush();
         std::_Exit(1);
     }

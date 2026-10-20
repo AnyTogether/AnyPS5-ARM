@@ -63,6 +63,11 @@ int APS5_VABI scePlayerSelectionDialogGetResult(void* result) {
  return 0;
 }
 
+int APS5_VABI scePlayerSelectionDialogParamInitialize(void* param) {
+ if (param == nullptr) return COMMON_DIALOG_ERROR_ARG_NULL;
+ NotImplemented_nid_no_patch(__func__);
+}
+
 int APS5_VABI scePlayerSelectionDialogTerminate(void) {
  if (g_status.exchange(COMMON_DIALOG_STATUS_NONE) == COMMON_DIALOG_STATUS_NONE) return COMMON_DIALOG_ERROR_NOT_INITIALIZED;
  return 0;

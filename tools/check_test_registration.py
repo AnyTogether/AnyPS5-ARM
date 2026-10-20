@@ -11,6 +11,7 @@ LEXICAL = re.compile(r'\\.|"(?:\\.|[^"\\])*"|\[(?P<literal_equals>=*)\[.*?\](?P=
                      r'|(?P<comment>\#\[(?P<comment_equals>=*)\[.*?\](?P=comment_equals)\]|\#[^\n]*)', re.S)
 
 KNOWN_UNRUN = set()
+SCRIPT = re.compile(r"(?:[\w.-]+/)*test_\w+\.py")
 
 
 def built(build):
@@ -125,11 +126,52 @@ def registered(build):
     return names
 
 
+def listed(root):
+    output = subprocess.run(["git", "-c", "core.quotePath=false", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+                             "--exclude-standard"], capture_output=True, check=True).stdout.decode("utf-8", errors="replace")
+    return sorted(set(filter(None, output.split("\0"))))
+
+
+def run_scripts(root, files):
+    run = set()
+    for name in files:
+        if name.endswith("CMakeLists.txt") or name.endswith(".cmake"):
+            content = (Path(root) / name).read_text(encoding="utf-8", errors="replace")
+            for command, arguments in commands(content):
+                if command == "add_test":
+                    run.update(argument.rpartition("}")[2].lstrip("/") for argument in arguments)
+        elif name.startswith(".github/workflows/") and name.endswith((".yml", ".yaml")):
+            for line in (Path(root) / name).read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                line = re.split(r"\s#", line)[0]
+                if "python" in line:
+                    run.update(token[2:] if token.startswith("./") else token for token in SCRIPT.findall(line))
+    return {name for name in run if SCRIPT.fullmatch(name)}
+
+
+def unrun_scripts(root):
+    files = listed(root)
+    run = run_scripts(root, files)
+    scripts = [name for name in files if re.match(r"^test_\w+\.py$", name.rpartition("/")[2])]
+    return scripts, [name for name in scripts if not any(name == path or name.endswith("/" + path) for path in run)]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="fail when a test executable is built that no ctest test runs")
     parser.add_argument("build", type=Path, nargs="?", default=Path("build"), help="configured build directory")
     parser.add_argument("--list", action="store_true", help="print every test executable and whether ctest runs it")
+    parser.add_argument("--scripts", action="store_true", help="instead check that an add_test or a workflow runs every test_*.py of the source tree")
     args = parser.parse_args()
+    if args.scripts:
+        scripts, unrun = unrun_scripts(Path(__file__).resolve().parents[1])
+        for name in unrun:
+            print(f"error: {name} is a test script that no add_test or workflow runs")
+        if unrun:
+            print(f"{len(unrun)} test script(s) would never run: register each with add_test, or run it from a workflow")
+            raise SystemExit(1)
+        print(f"{len(scripts)} test script(s), each run by an add_test or a workflow")
+        raise SystemExit
     try:
         every = sorted(built(args.build))
         run = registered(args.build)

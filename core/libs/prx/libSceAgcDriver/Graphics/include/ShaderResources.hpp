@@ -234,6 +234,7 @@ public:
     // The recorder's hazard tracker inputs (Recorder::NoteAccess): the written elements' guest
     // ranges, the regions read in place, and the storage images with whether each is written.
     const std::vector<std::pair<std::uint64_t, std::uint64_t>>& GpuWrites() const { return guestMemory.Writes(); }
+    const std::vector<std::pair<std::uint64_t, std::uint64_t>>& WriteOnlyRanges() const { return writeOnlyRanges; }
     std::vector<std::pair<std::uint64_t, std::uint64_t>> InPlaceReads() const { return guestMemory.InPlaceReads(); }
     void InPlaceReads(std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) const { guestMemory.InPlaceReads(out); }
     std::vector<std::pair<VkImage, bool>> StorageImages() const;
@@ -355,6 +356,7 @@ private:
         ShaderRecompiler::DescriptorRole role = ShaderRecompiler::DescriptorRole::ShaderData;
         // Guest buffers: whether the shader may store to the range (see addGuestBuffer).
         bool written = true;
+        bool writeOnly = false;
         // Data buffers: the words the buffer holds once the recorded work ran (see RefreshData).
         std::vector<std::uint32_t> dataWords;
         std::uint32_t adjustment = 0;
@@ -594,6 +596,7 @@ private:
     // Guest buffer elements bound read-only: each use of this object skips that many pending-write
     // notes (counted in MarkGpuWrites for the [buffers] line).
     std::size_t readOnlyBuffers = 0;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> writeOnlyRanges;
     bool drawBuild = false;
     std::uint64_t dispatchThreads = 0;
     std::vector<std::shared_ptr<Texture>> textures;
