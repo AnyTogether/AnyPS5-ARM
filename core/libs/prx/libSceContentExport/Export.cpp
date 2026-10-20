@@ -55,6 +55,66 @@ int APS5_VABI sceContentExportFromFileWithThumbnail(void) {
  return 0;
 }
 
+int APS5_VABI sceContentExportAddToFavorites(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportDataProvideFunction(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportFree(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportFrom(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportFromFileForSf(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportFromFileWithContentIdList(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportFromFileWithTitleIdList(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportInit(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportMalloc(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportRemoveFromFavorites(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportRenameContent(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceContentExportValidateContents(void) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
 int APS5_VABI sceContentExportStart(void) {
     std::lock_guard lock(g_sessionMutex);
     if (!g_initialized.load()) throw std::logic_error(std::string(__func__) + ": not initialized");

@@ -94,6 +94,12 @@ class DependencyTests(unittest.TestCase):
                 with self.subTest(body=body):
                     self.assertEqual(pull_requests(body)[1]["depends"], expected)
 
+    def test_empty_colon_declaration_does_not_hide_a_later_one(self):
+        for body in ("- [ ] Depends on: <!-- #PR, or none -->\n\nDepends on: #2, #3",
+                     "Depends on:\n\nDepends on: #2 and #3"):
+            with self.subTest(body=body):
+                self.assertEqual(pull_requests(body)[1]["depends"], {2, 3})
+
     def test_checklist_none_wins_over_prose_with_placeholder_comment(self):
         body = "Depends on #2.\n- [x] Depends on: none <!-- #PR, or none -->"
         self.assertEqual(pull_requests(body)[1]["depends"], set())

@@ -77,6 +77,8 @@ int APS5_VABI scePthreadAttrGetstack(const PthreadAttr* attr, void** stackaddr, 
 int APS5_VABI scePthreadAttrGet(Pthread thread, PthreadAttr* attr) {
     if (!thread || !attr || !*attr)
         return SCE_KERNEL_ERROR_EINVAL;
+    const auto live = LockLiveGuestThread(thread);
+    if (!live) return SCE_KERNEL_ERROR_ESRCH;
     (*attr)->_stacksize = thread->stackSize;
     (*attr)->stackAddress = thread->stackAddress;
     (*attr)->_detachstate = thread->_detached ? DETACH_DETACHED : DETACH_JOINABLE;
@@ -108,9 +110,22 @@ int APS5_VABI scePthreadAttrGetguardsize(const PthreadAttr* attr, size_t* guard_
     return SCE_OK;
 }
 
+int APS5_VABI scePthreadAttrGetinheritsched(const PthreadAttr* attr, int* inheritSched) {
+    if (!attr || !*attr) return SCE_KERNEL_ERROR_EINVAL;
+    if (!inheritSched) throw std::runtime_error(std::string(__func__) + ": null output");
+    *inheritSched = (*attr)->_inheritsched;
+    return SCE_OK;
+}
+
 int APS5_VABI scePthreadAttrGetschedparam(const PthreadAttr* attr, KernelSchedParam* param) {
     if (!attr || !*attr || !param) return SCE_KERNEL_ERROR_EINVAL;
     param->sched_priority = (*attr)->_schedpriority;
+    return SCE_OK;
+}
+
+int APS5_VABI scePthreadAttrGetschedpolicy(const PthreadAttr* attr, int* policy) {
+    if (!attr || !*attr || !policy) return SCE_KERNEL_ERROR_EINVAL;
+    *policy = (*attr)->_schedpolicy;
     return SCE_OK;
 }
 

@@ -314,6 +314,11 @@ void* APS5_VABI sceLibcPafMspaceMalloc_nid_postfix(void* handle, std::size_t siz
     return sceLibcMspaceMalloc_nid_postfix(handle, size);
 }
 
+void* APS5_VABI sceLibcPafMspaceMemalign_nid_postfix(void* handle, std::size_t alignment, std::size_t size, const void* owner) {
+    (void)owner;
+    return sceLibcMspaceMemalign_nid_postfix(handle, alignment, size);
+}
+
 void APS5_VABI sceLibcPafMspaceFree_nid_postfix(void* handle, void* pointer, const void* owner) {
     (void)owner;
     sceLibcMspaceFree_nid_postfix(handle, pointer);

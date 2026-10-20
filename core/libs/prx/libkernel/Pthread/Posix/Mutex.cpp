@@ -111,6 +111,13 @@ int APS5_VABI pthread_mutexattr_setprotocol_nid_postfix(PthreadMutexattr* attr, 
     return 0;
 }
 
+int APS5_VABI pthread_mutexattr_getprotocol_nid_postfix(const PthreadMutexattr* attr, int* protocol) {
+    if (!attr || !*attr) return PosixThread::GUEST_EINVAL;
+    if (!protocol) throw std::runtime_error("pthread_mutexattr_getprotocol: null protocol");
+    *protocol = (*attr)->protocol;
+    return 0;
+}
+
 int APS5_VABI pthread_mutexattr_setprioceiling_nid_postfix(PthreadMutexattr* attr, int prioceiling) {
     if (!attr || !*attr) return PosixThread::GUEST_EINVAL;
     if ((*attr)->protocol != POSIX_PRIO_PROTECT) return POSIX_EINVAL;

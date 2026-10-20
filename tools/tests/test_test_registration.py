@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,43 @@ import check_test_registration
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_literal_prefixes_cannot_expose_commands_inside_arguments(self):
+        prefixes = (r"\#", r"\(", '"prefix" ', '"" ', '"line\nprefix" ', "[[prefix]] ",
+                    "[=[prefix]=] ", "[===[line\nprefix]===] ")
+        for prefix in prefixes:
+            with self.subTest(prefix=prefix):
+                content = (f"set(example\n{prefix}add_test(ghost /build/tests/missing_tests)\n)\n"
+                           'add_test("real" "/build/tests/real_tests")\n')
+                self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_commands_inside_literals_do_not_register_tests(self):
+        for opening, closing in (('"', '"'), ("[[", "]]"), ("[=[", "]=]"), ("[===[", "]===]")):
+            with self.subTest(opening=opening):
+                content = (f"set(example {opening}\nadd_test(ghost /build/tests/missing_tests)\n{closing})\n"
+                           'add_test("real" "/build/tests/real_tests")\n')
+                self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_properties_inside_literals_do_not_disable_a_real_test(self):
+        for opening, closing in (('"', '"'), ("[[", "]]"), ("[=[", "]=]"), ("[===[", "]===]")):
+            with self.subTest(opening=opening):
+                content = ('add_test("real" "/build/tests/real_tests")\n'
+                           f"set(example {opening}\nset_tests_properties(real PROPERTIES DISABLED TRUE)\n{closing})\n")
+                self.assertEqual(self.registered(content), {"real_tests"})
+
+    def test_subdirectories_inside_literals_are_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            ignored = build / "ignored"
+            ignored.mkdir()
+            (ignored / "CTestTestfile.cmake").write_text(
+                'add_test("ghost" "/build/tests/missing_tests")\n', encoding="utf-8")
+            for opening, closing in (('"', '"'), ("[[", "]]"), ("[=[", "]=]"), ("[===[", "]===]")):
+                with self.subTest(opening=opening):
+                    content = (f"set(example {opening}\nsubdirs(ignored)\n{closing})\n"
+                               'add_test("real" "/build/tests/real_tests")\n')
+                    (build / "CTestTestfile.cmake").write_text(content, encoding="utf-8")
+                    self.assertEqual(check_test_registration.registered(build), {"real_tests"})
+
     def test_disabled_property_is_local_to_each_configuration(self):
         for configurations in (("OFF", "TRUE"), ("TRUE", "OFF"), ("TRUE", "TRUE")):
             with self.subTest(configurations=configurations):
@@ -235,6 +273,26 @@ class RegistrationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unsupported Ninja build-file encoding"):
                     check_test_registration.built(build)
                 run.assert_called_once()
+
+    def run_tool(self, build):
+        return subprocess.run([sys.executable, "-I", str(Path(check_test_registration.__file__)), str(build)],
+                              capture_output=True, text=True, timeout=30)
+
+    def test_missing_build_directory_is_reported_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_tool(Path(directory) / "no build")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("error:", result.stderr)
+        self.assertIn("CMakeCache.txt", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_unsupported_generator_is_reported_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n", encoding="utf-8")
+            result = self.run_tool(directory)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a Ninja generator", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

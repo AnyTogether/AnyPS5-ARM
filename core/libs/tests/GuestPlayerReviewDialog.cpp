@@ -57,5 +57,11 @@ int main() {
     Require(scePlayerReviewDialogTerminate() == 0);
     Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
     Require(scePlayerReviewDialogInitialize() == 0);
+    Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
+    Require(scePlayerReviewDialogClose() == 0);
+    Require(scePlayerReviewDialogGetStatus() == COMMON_DIALOG_STATUS_FINISHED);
+    result[0] = -1;
+    Require(scePlayerReviewDialogGetResult(result) == 0);
+    Require(result[0] == COMMON_DIALOG_RESULT_USER_CANCELED);
     Require(scePlayerReviewDialogTerminate() == 0);
 }

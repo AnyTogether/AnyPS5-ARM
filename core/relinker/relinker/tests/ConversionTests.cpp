@@ -5,6 +5,7 @@
 #include <io/BufferUtils.hpp>
 #include <io/NativePath.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
+#include <elfpatcher/windows/WindowsRelocationBuilder.hpp>
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -232,6 +233,19 @@ void cancellation() {
     }
 }
 
+void baseRelocations() {
+    Elfpatcher::Windows::WindowsRelocationBuilder builder;
+    const auto relocs = builder.BuildBaseRelocations({0x10000, 0x10000, 0x10008});
+    require(relocs.size() == 12, "Base relocation duplicates were not deduplicated");
+    require(Io::ReadU32(relocs, 0) == 0x10000, "Wrong base relocation page RVA");
+    require(Io::ReadU32(relocs, 4) == 12, "Wrong base relocation block size");
+    require(Io::ReadU16(relocs, 8) == 0xa000, "Wrong first relocation entry");
+    require(Io::ReadU16(relocs, 10) == 0xa008, "Wrong second relocation entry");
+    reject([&] { (void)builder.BuildBaseRelocations({0x10ffc}); });
+    reject([&] { (void)builder.BuildBaseRelocations({0x10ffd}); });
+    reject([&] { (void)builder.BuildBaseRelocations({0x10fff}); });
+}
+
 }
 
 int main() {
@@ -241,6 +255,7 @@ int main() {
         scanning();
         diagnosticContext();
         cancellation();
+        baseRelocations();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

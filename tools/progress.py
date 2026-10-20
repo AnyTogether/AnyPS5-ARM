@@ -165,7 +165,7 @@ def scan_library(path):
     for source in path.rglob("*.cpp"):
         if "tests" in source.relative_to(path).parts:
             continue
-        text = code(source.read_text(errors="ignore"))
+        text = code(source.read_text(encoding="utf-8", errors="ignore"))
         calls = stub_calls(text)
         wrappers = inert_wrappers(text)
         for match in DEFINITION.finditer(text):
@@ -186,7 +186,7 @@ def scan_library(path):
     if not (done or todo):
         cmake = path / "CMakeLists.txt"
         texts = [(CMAKE_SHARED, cmake.read_text(encoding="utf-8", errors="ignore"))] if cmake.is_file() else []
-        texts += [(SOURCE_SHARED, source.read_text(errors="ignore")) for source in sorted(path.glob("*.cpp"))]
+        texts += [(SOURCE_SHARED, source.read_text(encoding="utf-8", errors="ignore")) for source in sorted(path.glob("*.cpp"))]
         owners = [m[1] for pattern, content in texts for m in pattern.finditer(content)]
         owners = [o for o in owners if o != path.name and (path.parent / o).is_dir()]
         if owners:
@@ -473,7 +473,13 @@ def main(argv=None):
         if args.compare:
             if args.module or args.json:
                 parser.error("--compare does not combine with --module or --json")
-            base, head = (json.loads(path.read_text(encoding="utf-8")) for path in args.compare)
+            snapshots = []
+            for path in args.compare:
+                try:
+                    snapshots.append(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError) as error:
+                    parser.error(f"{path}: {error}")
+            base, head = snapshots
             print(report(base, head), end="")
             return 0
         if not args.output and not (args.module or args.json):

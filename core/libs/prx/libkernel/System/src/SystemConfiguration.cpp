@@ -1,14 +1,19 @@
+#include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/System/include/HostCpu.hpp"
+#include "SceTypes.hpp"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -19,12 +24,18 @@
 extern "C" int* APS5_VABI __error_nid_postfix();
 extern "C" int APS5_VABI getpid_nid_postfix();
 extern "C" std::uint64_t APS5_VABI sceKernelGetTscFrequency(void);
+struct GuestRlimit {
+    std::int64_t rlim_cur;
+    std::int64_t rlim_max;
+};
+extern "C" int APS5_VABI getrlimit_nid_postfix(int resource, GuestRlimit* limit);
 
 struct SceKernelSystemSwVersion {
     std::uint64_t size;
     char versionString[0x1C];
     std::uint32_t version;
 };
+extern "C" int APS5_VABI sceKernelVirtualQuery(const void* addr, int flags, VirtualQueryInfo* info, uint64_t info_size);
 
 namespace {
 
@@ -65,7 +76,73 @@ const SystemString* FindSystemString(const int* name) {
 }
 
 bool IsLeafMib(const int* name) {
-    return (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5 || name[1] == 7)) || (name[0] == 1 && name[1] == 37);
+    return (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5 || name[1] == 7)) || (name[0] == 1 && (name[1] == 37 || name[1] == 50));
+}
+
+bool IsMeasuredAbsentMib(const int* name, std::uint32_t nameLength) {
+    static constexpr struct {
+        int mib[3];
+        std::uint32_t length;
+    } absent[] = {
+        {{1, 2147482816, 2147482814}, 3},
+        {{1, 2147483151}, 2},
+        {{1, 2147483182, 2147483181}, 3},
+        {{1, 2147482838, 2147482834}, 3},
+    };
+    for (const auto& entry : absent) {
+        if (nameLength == entry.length && std::memcmp(name, entry.mib, entry.length * sizeof(int)) == 0) return true;
+    }
+    return false;
+}
+constexpr std::int32_t VmEntryDefaultType = 1;
+
+struct GuestVmEntry {
+    std::int32_t structSize;
+    std::int32_t type;
+    std::uint64_t start;
+    std::uint64_t end;
+    std::uint64_t offset;
+    std::uint64_t vnodeFileId;
+    std::uint32_t vnodeFsid;
+    std::int32_t flags;
+    std::int32_t resident;
+    std::int32_t privateResident;
+    std::int32_t protection;
+    std::int32_t referenceCount;
+    std::int32_t shadowCount;
+    std::int32_t vnodeType;
+    std::uint64_t vnodeSize;
+    std::uint32_t vnodeDevice;
+    std::uint16_t vnodeMode;
+    std::uint16_t status;
+    std::int32_t spare[12];
+    char path[8];
+};
+static_assert(offsetof(GuestVmEntry, start) == 8 && offsetof(GuestVmEntry, protection) == 56 && offsetof(GuestVmEntry, path) == 136 && sizeof(GuestVmEntry) == 144);
+
+std::vector<GuestVmEntry> GuestVmEntries() {
+    std::vector<GuestVmEntry> entries;
+#ifdef __APPLE__
+    // macOS maps guest memory with host mmap outside the arena: the entries are the registered allocations.
+    std::vector<std::pair<std::uintptr_t, std::uintptr_t>> used;
+    for (const auto& range : GuestAllocations::GuestAllocationsAcquireAll_nid_postfix()) used.emplace_back(range->address, range->address + range->bytes);
+    std::sort(used.begin(), used.end());
+    for (const auto& [start, end] : used) {
+#else
+    std::uintptr_t start = 0;
+    std::uintptr_t end = 0;
+    for (std::uintptr_t cursor = 0; GuestArena::GuestArenaNextUsed_nid_no_patch(cursor, &start, &end); cursor = end) {
+#endif
+        GuestVmEntry entry{};
+        entry.structSize = sizeof(entry);
+        entry.type = VmEntryDefaultType;
+        entry.start = start;
+        entry.end = end;
+        VirtualQueryInfo info{};
+        if (sceKernelVirtualQuery(reinterpret_cast<const void*>(start), 0, &info, sizeof(info)) == 0) entry.protection = info.protection & 7;
+        entries.push_back(entry);
+    }
+    return entries;
 }
 
 }
@@ -76,11 +153,24 @@ std::int64_t APS5_VABI sysconf_nid_postfix(int name) {
     const int saved = *__error_nid_postfix();
     std::int64_t result = -1;
     switch (name) {
+        case 1: // _SC_ARG_MAX
+            result = 262144;
+            break;
         case 3: // _SC_CLK_TCK
             result = 128;
             break;
+        case 5: { // _SC_OPEN_MAX
+            GuestRlimit limit{};
+            if (getrlimit_nid_postfix(8, &limit) == 0) {
+                result = limit.rlim_cur;
+            }
+            break;
+        }
         case 47: // _SC_PAGESIZE
             result = PS5_PAGE_SIZE;
+            break;
+        case 56: // _SC_IOV_MAX
+            result = 1024;
             break;
         case 57: // _SC_NPROCESSORS_CONF
         case 58: // _SC_NPROCESSORS_ONLN
@@ -119,6 +209,11 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
     }
     if (name == nullptr) {
         *__error_nid_postfix() = 14;
+        return -1;
+    }
+    if (IsMeasuredAbsentMib(name, nameLength)) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": writing an unmeasured absent MIB");
+        *__error_nid_postfix() = 2;
         return -1;
     }
     if (nameLength == 2 && name[0] == 6 && name[1] == 7) {
@@ -184,6 +279,22 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         static constexpr char path[] = "/app0/eboot.bin";
         return CopyOut(path, sizeof(path), oldValue, oldLength);
     }
+    if (nameLength >= 3 && name[0] == 1 && name[1] == 14 && name[2] == 32) {
+        if (newValue != nullptr) {
+            *__error_nid_postfix() = 1;
+            return -1;
+        }
+        if (nameLength != 4) {
+            *__error_nid_postfix() = 22;
+            return -1;
+        }
+        if (name[3] != getpid_nid_postfix()) {
+            *__error_nid_postfix() = 3;
+            return -1;
+        }
+        const auto entries = GuestVmEntries();
+        return CopyOut(entries.data(), entries.size() * sizeof(GuestVmEntry), oldValue, oldLength);
+    }
     if (nameLength == 2 && name[0] == 1 && name[1] == 37) {
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
@@ -198,6 +309,15 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         }
         *oldLength = count;
         return 0;
+    }
+    if (nameLength == 2 && name[0] == 1 && name[1] == 50) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": writing kern.rng_pseudo is unverified");
+        std::array<std::uint8_t, 64> bytes{};
+        if (oldValue != nullptr && oldLength != nullptr) {
+            static std::random_device device;
+            for (auto& byte : bytes) byte = static_cast<std::uint8_t>(device());
+        }
+        return CopyOut(bytes.data(), bytes.size(), oldValue, oldLength);
     }
     if (nameLength > 2 && (IsLeafMib(name) || FindSystemString(name) != nullptr)) {
         *__error_nid_postfix() = 20;
@@ -233,11 +353,11 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
             *__error_nid_postfix() = 1;
             return -1;
         }
-        if (oldValue == nullptr || oldLength == nullptr) throw std::runtime_error(std::string(__func__) + ": kern.rng_pseudo without an output buffer");
         static std::random_device device;
-        auto* bytes = static_cast<std::uint8_t*>(oldValue);
-        for (std::size_t i = 0; i < *oldLength; ++i) bytes[i] = static_cast<std::uint8_t>(device());
-        return 0;
+        std::uint8_t block[64]{};
+        if (oldValue != nullptr && oldLength != nullptr)
+            for (auto& byte : block) byte = static_cast<std::uint8_t>(device());
+        return CopyOut(block, sizeof(block), oldValue, oldLength);
     }
     if (std::strcmp(name, "vm.overcommit") == 0) {
         if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": setting vm.overcommit");
@@ -306,6 +426,7 @@ int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_
         {"hw.physmem", {6, 5}, 2},
         {"hw.realmem", {6, 12}, 2},
         {"kern.arandom", {1, 37}, 2},
+        {"kern.rng_pseudo", {1, 50}, 2},
         {"kern.proc.pathname", {1, 14, 12}, 3},
     };
     constexpr std::size_t MaximumPath = 1024;

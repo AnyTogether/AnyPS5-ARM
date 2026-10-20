@@ -299,7 +299,6 @@ bool TranslationContext::dsOrderedCount(const RdnaInstruction& inst) {
     const std::uint32_t flags = (inst.memoryOffset >> 8u) & 0xffu;
     const auto location = "ds_ordered_count at pc " + std::to_string(inst.programCounter);
     if (!inst.gds) throw std::runtime_error(location + " without GDS is not modeled");
-    if ((flags & 0x10u) != 0u) throw std::runtime_error(location + ": ordered swap is not modeled");
     if (((flags >> 6u) & 3u) != 0u) throw std::runtime_error(location + ": counting more than one dword is not modeled");
     MemoryInfo memory = sharedMemoryInfoFromInstruction(inst);
     memory.offset = inst.memoryOffset & 0xffu;
@@ -308,7 +307,8 @@ bool TranslationContext::dsOrderedCount(const RdnaInstruction& inst) {
     IrValue& active = ir.GetExec();
     IrValue& activeLo = ir.GetExecLo();
     IrValue& activeHi = ir.GetExecHi();
-    IrValue& result = ir.Emit(IrOpcode::DataOrderedCount, IrOpcodeType(IrOpcode::DataOrderedCount), {&address, &active, &activeLo, &activeHi, &amount.Value()}, addMemoryInfo(memory, inst.programCounter));
+    const auto opcode = (flags & 0x10u) != 0u ? IrOpcode::DataOrderedSwap : IrOpcode::DataOrderedCount;
+    IrValue& result = ir.Emit(opcode, IrOpcodeType(opcode), {&address, &active, &activeLo, &activeHi, &amount.Value()}, addMemoryInfo(memory, inst.programCounter));
     writeOperand(inst.destination, &result);
     return true;
 }

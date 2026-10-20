@@ -1,7 +1,9 @@
 #include "Optimization/RedundantValueEliminator.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -134,30 +136,37 @@ struct Operand {
     bool operator==(const Operand& other) const = default;
 };
 
+Operand OperandOf(const IrValue* resolved) {
+    if (resolved->Parent() == nullptr && resolved->HasImmediate()) return {nullptr, resolved->Type(), resolved->ImmediateU64()};
+    return {resolved, resolved->Type(), 0u};
+}
+
 struct ValueKey {
     IrOpcode opcode;
     IrType type;
     std::uint64_t flags;
-    std::vector<Operand> operands;
+    std::array<const IrValue*, 4> operands{};
+    std::size_t operandCount = 0;
 
-    bool operator==(const ValueKey& other) const = default;
+    bool operator==(const ValueKey& other) const {
+        if (opcode != other.opcode || type != other.type || flags != other.flags || operandCount != other.operandCount) return false;
+        for (std::size_t index = 0; index < operandCount; ++index) {
+            if (operands[index] != other.operands[index] && OperandOf(operands[index]) != OperandOf(other.operands[index])) return false;
+        }
+        return true;
+    }
 };
 
 struct ValueKeyHash {
     std::size_t operator()(const ValueKey& key) const {
         std::size_t hash = static_cast<std::size_t>(key.opcode) * 0x9e3779b97f4a7c15ull ^ static_cast<std::size_t>(key.type) ^ std::hash<std::uint64_t>{}(key.flags) * 31u;
-        for (const auto& operand : key.operands) {
+        for (const auto* argument : std::span(key.operands).first(key.operandCount)) {
+            const auto operand = OperandOf(argument);
             hash = hash * 1099511628211ull ^ std::hash<const void*>{}(operand.value) ^ std::hash<std::uint64_t>{}(operand.immediate) * 7u ^ static_cast<std::size_t>(operand.type);
         }
         return hash;
     }
 };
-
-Operand OperandOf(const IrValue* argument) {
-    const IrValue* resolved = argument->Resolve();
-    if (resolved->Parent() == nullptr && resolved->HasImmediate()) return {nullptr, resolved->Type(), resolved->ImmediateU64()};
-    return {resolved, resolved->Type(), 0u};
-}
 
 std::vector<IrBlock*> ReversePostOrder(IrBlock& entry) {
     std::vector<IrBlock*> order;
@@ -216,15 +225,13 @@ RedundantValueEliminationStats RedundantValueEliminator::Eliminate(IrProgram& pr
     std::unordered_map<ValueKey, IrValue*, ValueKeyHash> available;
     std::vector<const ValueKey*> added;
     std::unordered_map<const IrValue*, IrValue*> replacements;
-    ValueKey key;
     const auto visit = [&](IrBlock& block) {
         for (auto* inst : block.Instructions()) {
             if (!Recomputable(inst->Opcode()) || inst->HasImmediate() || !inst->HasUses()) continue;
-            key.opcode = inst->Opcode();
-            key.type = inst->Type();
-            key.flags = inst->Flags<std::uint64_t>();
-            key.operands.clear();
-            for (std::size_t index = 0; index < inst->ArgumentCount(); ++index) key.operands.push_back(OperandOf(inst->Argument(index)));
+            ValueKey key{inst->Opcode(), inst->Type(), inst->Flags<std::uint64_t>()};
+            key.operandCount = inst->ArgumentCount();
+            if (key.operandCount > key.operands.size()) continue;
+            for (std::size_t index = 0; index < key.operandCount; ++index) key.operands[index] = inst->Argument(index)->Resolve();
             const auto [found, inserted] = available.try_emplace(key, inst);
             if (inserted) {
                 added.push_back(&found->first);

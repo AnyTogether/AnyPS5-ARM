@@ -162,12 +162,16 @@ def main(argv=None):
                                      "Reports numerical differences, not statistical significance or an automatic pass/fail verdict.")
     parser.add_argument("baseline", type=Path, help="Baseline summary JSONL file")
     parser.add_argument("candidate", type=Path, help="Candidate summary JSONL file")
+    parser.add_argument("--require-matching-context", action="store_true",
+                        help="reject differences in recorded configuration; this does not check the title, scene or CPU")
     parser.add_argument("--baseline-trace", help="Exact trace field to select in the baseline file")
     parser.add_argument("--candidate-trace", help="Exact trace field to select in the candidate file")
     parser.add_argument("--json", action="store_true", help="Write JSON instead of Markdown")
     args = parser.parse_args(argv)
     try:
         report = compare(load_summary(args.baseline, args.baseline_trace), load_summary(args.candidate, args.candidate_trace))
+        if args.require_matching_context and report["configuration_differences"]:
+            raise ValueError("recorded configuration differs: " + ", ".join(report["configuration_differences"]))
         output = json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n" if args.json else markdown(report)
     except (OSError, ValueError, OverflowError) as error:
         parser.exit(2, f"{parser.prog}: {error}\n")

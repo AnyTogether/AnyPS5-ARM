@@ -82,6 +82,7 @@ private:
     };
     struct Slab {
         std::vector<SlabBlock*> available;
+        std::size_t blocks = 0;
         std::size_t emptyBlocks = 0;
     };
     static std::uint64_t SlabKey(std::uint32_t memoryType, std::size_t capacity, bool addressable);
@@ -136,6 +137,9 @@ private:
     PFN_vkFreeMemory freeMemory;
     PFN_vkAllocateMemory allocateMemory;
     PFN_vkMapMemory mapMemory;
+    VkPhysicalDevice physical;
+    VkPhysicalDeviceMemoryProperties memoryProperties;
+    PFN_vkGetPhysicalDeviceMemoryProperties2 memoryProperties2;
     std::mutex mutex;
     // Not `small`/`large`: <rpcndr.h> (via <windows.h>) defines `small` as a macro.
     Tier smallTier;

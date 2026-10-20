@@ -91,6 +91,15 @@ int main() {
         }
     }
 
+    const KernelTimeval invalidBeforePath[2]{{1000000000, -1}, {1000000001, 0}};
+    for (const char* pathless : {static_cast<const char*>(nullptr), ""}) {
+        Require(utimes_nid_postfix(pathless, invalidBeforePath) == -1 && *__error_nid_postfix() == 22, "utimes checks microseconds before the path");
+        Require(lutimes_nid_postfix(pathless, invalidBeforePath) == -1 && *__error_nid_postfix() == 22, "lutimes checks microseconds before the path");
+        Require(sceKernelUtimes_nid_postfix(pathless, invalidBeforePath) == static_cast<int>(0x80020016u), "sceKernelUtimes checks microseconds before the path");
+    }
+    Require(utimes_nid_postfix(nullptr, nullptr) == -1 && *__error_nid_postfix() == 14, "utimes still reports EFAULT for a null path");
+    Require(utimes_nid_postfix("", nullptr) == -1 && *__error_nid_postfix() == 2, "utimes still reports ENOENT for an empty path");
+
 #ifdef _WIN32
     const auto handle = CreateFileW(std::filesystem::path(path).c_str(), FILE_WRITE_ATTRIBUTES | FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);

@@ -1,10 +1,12 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 struct SceKernelSystemSwVersion {
     std::uint64_t size;
     char versionString[0x1C];
@@ -23,7 +25,14 @@ int APS5_VABI sysctlbyname_nid_postfix(const char*, void*, std::size_t*, const v
 int APS5_VABI sysctlnametomib_nid_postfix(const char*, int*, std::size_t*);
 int APS5_VABI sceKernelGetSystemSwVersion_nid_postfix(SceKernelSystemSwVersion*);
 int APS5_VABI getpid_nid_postfix();
+void* APS5_VABI mmap_nid_postfix(void*, std::size_t, int, int, int, std::int64_t);
+int APS5_VABI munmap_nid_postfix(void*, std::size_t);
 std::uint64_t APS5_VABI sceKernelGetTscFrequency(void);
+struct GuestRlimitTest {
+    std::int64_t rlim_cur;
+    std::int64_t rlim_max;
+};
+int APS5_VABI getrlimit_nid_postfix(int resource, GuestRlimitTest* limit);
 extern char** environ_nid_postfix;
 }
 static void Require(bool value) { if (!value) std::abort(); }
@@ -249,7 +258,7 @@ static void CheckSystemStringNames() {
     }
 }
 static void CheckLeafWithTrailingComponent() {
-    const int leaves[][2] = {{6, 3}, {6, 2}, {6, 5}, {6, 7}, {1, 37}};
+    const int leaves[][2] = {{6, 3}, {6, 2}, {6, 5}, {6, 7}, {1, 37}, {1, 50}};
     for (const auto& leaf : leaves) {
         const int mib[] = {leaf[0], leaf[1], 0};
         char buffer[8] = {};
@@ -258,6 +267,49 @@ static void CheckLeafWithTrailingComponent() {
         Require(sysctl_nid_postfix(mib, 3, buffer, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 20);
         Require(sysctl_nid_postfix(mib, 3, buffer, &length, buffer, sizeof(buffer)) == -1 && *__error_nid_postfix() == 20);
         Require(length == sizeof(buffer));
+    }
+}
+static void CheckMeasuredAbsentSysctlMibs() {
+    static constexpr struct {
+        int mib[3];
+        std::uint32_t length;
+    } cases[] = {
+        {{1, 2147482816, 2147482814}, 3},
+        {{1, 2147483151}, 2},
+        {{1, 2147483182, 2147483181}, 3},
+        {{1, 2147482838, 2147482834}, 3},
+    };
+    for (const auto& entry : cases) {
+        unsigned char buffer[64];
+        std::memset(buffer, 0xaa, sizeof(buffer));
+        std::size_t length = sizeof(buffer);
+        *__error_nid_postfix() = 77;
+        Require(sysctl_nid_postfix(entry.mib, entry.length, buffer, &length, nullptr, 0) == -1);
+        Require(*__error_nid_postfix() == 2 && length == sizeof(buffer));
+        for (const auto byte : buffer) Require(byte == 0xaa);
+
+        length = 77;
+        *__error_nid_postfix() = 77;
+        Require(sysctl_nid_postfix(entry.mib, entry.length, nullptr, &length, nullptr, 0) == -1);
+        Require(*__error_nid_postfix() == 2 && length == 77);
+
+        std::memset(buffer, 0xaa, sizeof(buffer));
+        *__error_nid_postfix() = 77;
+        Require(sysctl_nid_postfix(entry.mib, entry.length, buffer, nullptr, nullptr, 0) == -1);
+        Require(*__error_nid_postfix() == 2);
+        for (const auto byte : buffer) Require(byte == 0xaa);
+
+        *__error_nid_postfix() = 77;
+        Require(sysctl_nid_postfix(entry.mib, entry.length, nullptr, nullptr, nullptr, 0) == -1);
+        Require(*__error_nid_postfix() == 2);
+
+        bool threw = false;
+        try {
+            sysctl_nid_postfix(entry.mib, entry.length, buffer, &length, buffer, sizeof(buffer));
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        Require(threw);
     }
 }
 static void CheckSystemSwVersion() {
@@ -284,23 +336,50 @@ static void CheckSystemSwVersion() {
     }
 }
 static void CheckPseudoRandomSysctl() {
+    unsigned char first[128];
+    unsigned char second[128];
+    const auto untouchedFrom = [&first](std::size_t from) {
+        for (std::size_t i = from; i < sizeof(first); ++i)
+            if (first[i] != 0xaa) return false;
+        return true;
+    };
     *__error_nid_postfix() = 13;
-    unsigned char first[64] = {};
-    unsigned char second[64] = {};
-    std::size_t length = sizeof(first);
-    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, nullptr, 0) == 0 && length == sizeof(first));
-    length = sizeof(second);
-    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", second, &length, nullptr, 0) == 0 && length == sizeof(second));
-    Require(std::memcmp(first, second, sizeof(first)) != 0);
+    std::memset(first, 0xaa, sizeof(first));
+    std::memset(second, 0xaa, sizeof(second));
+    std::size_t length = 64;
+    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, nullptr, 0) == 0 && length == 64 && untouchedFrom(64) && !untouchedFrom(0));
+    length = 64;
+    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", second, &length, nullptr, 0) == 0 && length == 64);
+    Require(std::memcmp(first, second, 64) != 0);
     Require(*__error_nid_postfix() == 13);
-    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, first, sizeof(first)) == -1 && *__error_nid_postfix() == 1);
-    bool threw = false;
-    try {
-        sysctlbyname_nid_postfix("kern.rng_pseudo", nullptr, &length, nullptr, 0);
-    } catch (const std::runtime_error&) {
-        threw = true;
+    static constexpr std::size_t larger[] = {65, 128};
+    for (std::size_t asked : larger) {
+        std::memset(first, 0xaa, sizeof(first));
+        length = asked;
+        Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, nullptr, 0) == 0 && length == 64 && untouchedFrom(64) && !untouchedFrom(0));
     }
-    Require(threw);
+    Require(*__error_nid_postfix() == 13);
+    static constexpr std::size_t smaller[] = {0, 1, 63};
+    for (std::size_t asked : smaller) {
+        std::memset(first, 0xaa, sizeof(first));
+        length = asked;
+        *__error_nid_postfix() = 13;
+        Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+        Require(length == asked && untouchedFrom(asked));
+        if (asked == 63) Require(!untouchedFrom(0));
+    }
+    static constexpr std::size_t presets[] = {0, 1, 64, 100, 4096};
+    for (std::size_t preset : presets) {
+        length = preset;
+        *__error_nid_postfix() = 13;
+        Require(sysctlbyname_nid_postfix("kern.rng_pseudo", nullptr, &length, nullptr, 0) == 0 && length == 64 && *__error_nid_postfix() == 13);
+    }
+    std::memset(first, 0xaa, sizeof(first));
+    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, nullptr, nullptr, 0) == -1 && *__error_nid_postfix() == 12 && untouchedFrom(0));
+    *__error_nid_postfix() = 13;
+    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", nullptr, nullptr, nullptr, 0) == 0 && *__error_nid_postfix() == 13);
+    length = 64;
+    Require(sysctlbyname_nid_postfix("kern.rng_pseudo", first, &length, first, 64) == -1 && *__error_nid_postfix() == 1);
 }
 static void CheckOvercommitSysctl() {
     *__error_nid_postfix() = 13;
@@ -373,6 +452,107 @@ static void CheckArandomSysctl() {
     Require(sysctl_nid_postfix(mib, 2, first, nullptr, nullptr, 0) == 0);
     Require(*__error_nid_postfix() == 13);
 }
+struct VmRange {
+    std::uint64_t start;
+    std::uint64_t end;
+    std::int32_t protection;
+};
+static std::vector<VmRange> ReadVmmap(const int* mib) {
+    std::size_t length = 0;
+    Require(sysctl_nid_postfix(mib, 4, nullptr, &length, nullptr, 0) == 0 && length != 0 && length % 8 == 0);
+    std::vector<unsigned char> buffer(length * 4 / 3);
+    length = buffer.size();
+    Require(sysctl_nid_postfix(mib, 4, buffer.data(), &length, nullptr, 0) == 0 && length != 0 && length <= buffer.size());
+    std::vector<VmRange> ranges;
+    for (std::size_t at = 0; at < length;) {
+        std::int32_t size = 0;
+        std::memcpy(&size, buffer.data() + at, sizeof(size));
+        Require(size > 136 && size % 8 == 0 && at + static_cast<std::size_t>(size) <= length);
+        Require(std::memchr(buffer.data() + at + 136, 0, static_cast<std::size_t>(size) - 136) != nullptr);
+        VmRange range{};
+        std::memcpy(&range.start, buffer.data() + at + 8, sizeof(range.start));
+        std::memcpy(&range.end, buffer.data() + at + 16, sizeof(range.end));
+        std::memcpy(&range.protection, buffer.data() + at + 56, sizeof(range.protection));
+        Require(range.start < range.end && (ranges.empty() || ranges.back().end <= range.start));
+        ranges.push_back(range);
+        at += static_cast<std::size_t>(size);
+    }
+    return ranges;
+}
+static void CheckVmmapSysctl() {
+    const int self = getpid_nid_postfix();
+    const int mib[] = {1, 14, 32, self};
+    constexpr std::size_t Bytes = 0x10000;
+    // Another mapping keeps the list non-empty once the checked one is gone (macOS lists only guest mappings).
+    void* anchor = mmap_nid_postfix(nullptr, Bytes, 3, 0x1002, -1, 0);
+    Require(anchor != reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1)));
+    *__error_nid_postfix() = 13;
+    void* mapped = mmap_nid_postfix(nullptr, Bytes, 3, 0x1002, -1, 0);
+    Require(mapped != reinterpret_cast<void*>(static_cast<std::uintptr_t>(-1)));
+    const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(mapped));
+    auto ranges = ReadVmmap(mib);
+    const auto covering = std::find_if(ranges.begin(), ranges.end(), [&](const VmRange& range) { return range.start <= address && address + Bytes <= range.end; });
+    Require(covering != ranges.end() && (covering->protection & 3) == 3);
+    Require(munmap_nid_postfix(mapped, Bytes) == 0);
+    ranges = ReadVmmap(mib);
+    Require(std::none_of(ranges.begin(), ranges.end(), [&](const VmRange& range) { return range.start < address + Bytes && address < range.end; }));
+    Require(*__error_nid_postfix() == 13);
+
+    unsigned char truncated[32];
+    std::memset(truncated, 0xaa, sizeof(truncated));
+    std::size_t length = 16;
+    Require(sysctl_nid_postfix(mib, 4, truncated, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    Require(length == 16 && truncated[16] == 0xaa);
+    length = sizeof(truncated);
+    Require(sysctl_nid_postfix(mib, 4, truncated, &length, truncated, sizeof(truncated)) == -1 && *__error_nid_postfix() == 1);
+    const int foreign[] = {1, 14, 32, self + 1000};
+    Require(sysctl_nid_postfix(foreign, 4, nullptr, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 3);
+    const int current[] = {1, 14, 32, -1};
+    Require(sysctl_nid_postfix(current, 4, nullptr, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 3);
+    Require(sysctl_nid_postfix(mib, 3, nullptr, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 22);
+    const int tooLong[] = {1, 14, 32, self, 0};
+    Require(sysctl_nid_postfix(tooLong, 5, nullptr, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 22);
+    Require(munmap_nid_postfix(anchor, Bytes) == 0);
+}
+static void CheckPseudoRandomMibSysctl() {
+    const int mib[] = {1, 50};
+    *__error_nid_postfix() = 13;
+    std::size_t length = 7;
+    Require(sysctl_nid_postfix(mib, 2, nullptr, &length, nullptr, 0) == 0 && length == 64);
+    Require(*__error_nid_postfix() == 13);
+    Require(sysctl_nid_postfix(mib, 2, nullptr, nullptr, nullptr, 0) == 0);
+    unsigned char bytes[80];
+    std::memset(bytes, 0xaa, sizeof(bytes));
+    length = 64;
+    Require(sysctl_nid_postfix(mib, 2, bytes, &length, nullptr, 0) == 0 && length == 64);
+    bool changed = false;
+    for (std::size_t i = 0; i < 64; ++i) changed = changed || bytes[i] != 0xaa;
+    Require(changed && bytes[64] == 0xaa && bytes[79] == 0xaa);
+    unsigned char other[64] = {};
+    length = sizeof(other);
+    Require(sysctl_nid_postfix(mib, 2, other, &length, nullptr, 0) == 0 && length == sizeof(other));
+    Require(std::memcmp(bytes, other, sizeof(other)) != 0);
+
+    unsigned char shortBuffer[64];
+    std::memset(shortBuffer, 0xaa, sizeof(shortBuffer));
+    length = 63;
+    Require(sysctl_nid_postfix(mib, 2, shortBuffer, &length, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    bool shortChanged = false;
+    for (std::size_t i = 0; i < 63; ++i) shortChanged = shortChanged || shortBuffer[i] != 0xaa;
+    Require(length == 63 && shortChanged && shortBuffer[63] == 0xaa);
+    std::memset(shortBuffer, 0xaa, sizeof(shortBuffer));
+    Require(sysctl_nid_postfix(mib, 2, shortBuffer, nullptr, nullptr, 0) == -1 && *__error_nid_postfix() == 12);
+    for (unsigned char byte : shortBuffer) Require(byte == 0xaa);
+    int value = 0;
+    length = sizeof(value);
+    bool threw = false;
+    try {
+        sysctl_nid_postfix(mib, 2, &value, &length, &value, sizeof(value));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw);
+}
 static void CheckNameToMib() {
     struct Expected {
         const char* name;
@@ -386,6 +566,7 @@ static void CheckNameToMib() {
         {"hw.physmem", {6, 5}, 2},
         {"hw.realmem", {6, 12}, 2},
         {"kern.arandom", {1, 37}, 2},
+        {"kern.rng_pseudo", {1, 50}, 2},
         {"kern.proc.pathname", {1, 14, 12}, 3},
     };
     *__error_nid_postfix() = 13;
@@ -428,6 +609,17 @@ static void CheckNameToMib() {
     size = 0;
     Require(sysctlnametomib_nid_postfix("hw.ncpu", truncated, &size) == -1 && *__error_nid_postfix() == 12);
     Require(size == 0 && truncated[0] == 6);
+
+    int rngMib[3] = {0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a};
+    size = 3;
+    Require(sysctlnametomib_nid_postfix("kern.rng_pseudo", rngMib, &size) == 0 && size == 2);
+    Require(rngMib[0] == 1 && rngMib[1] == 50 && rngMib[2] == 0x5a5a5a5a);
+    size = 2;
+    Require(sysctl_nid_postfix(rngMib, static_cast<std::uint32_t>(size), nullptr, &length, nullptr, 0) == 0 && length == 64);
+    rngMib[0] = rngMib[1] = rngMib[2] = 0x5a5a5a5a;
+    size = 1;
+    Require(sysctlnametomib_nid_postfix("kern.rng_pseudo", rngMib, &size) == -1 && *__error_nid_postfix() == 12);
+    Require(size == 1 && rngMib[0] == 1 && rngMib[1] == 0x5a5a5a5a);
 
     size = 4;
     Require(sysctlnametomib_nid_postfix("", mib, &size) == -1 && *__error_nid_postfix() == 2);
@@ -480,15 +672,23 @@ int main() {
     CheckSystemStringSysctl();
     CheckSystemStringNames();
     CheckLeafWithTrailingComponent();
+    CheckMeasuredAbsentSysctlMibs();
     CheckSystemSwVersion();
     CheckPseudoRandomSysctl();
     CheckSdkVersionSysctl();
     CheckOvercommitSysctl();
     CheckArandomSysctl();
+    CheckVmmapSysctl();
+    CheckPseudoRandomMibSysctl();
     CheckNameToMib();
     *__error_nid_postfix() = 13;
+    Require(sysconf_nid_postfix(1) == 262144);
     Require(sysconf_nid_postfix(3) == 128);
+    GuestRlimitTest nofileLimit{};
+    Require(getrlimit_nid_postfix(8, &nofileLimit) == 0);
+    Require(sysconf_nid_postfix(5) == nofileLimit.rlim_cur);
     Require(sysconf_nid_postfix(47) == 0x4000);
+    Require(sysconf_nid_postfix(56) == 1024);
     Require(getpagesize_nid_postfix() == sysconf_nid_postfix(47));
     Require(sysconf_nid_postfix(57) > 0);
     Require(sysconf_nid_postfix(58) > 0);

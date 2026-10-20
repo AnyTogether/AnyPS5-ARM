@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <cstddef>
@@ -34,10 +33,22 @@ struct UriParts {
     uint16_t port = 0;
 };
 
+bool isAsciiAlpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool isAsciiDigit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+char toAsciiLower(char c) {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c;
+}
+
 bool equalsIgnoreCase(std::string_view left, std::string_view right) {
     if (left.size() != right.size()) return false;
     for (size_t i = 0; i < left.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(left[i])) != std::tolower(static_cast<unsigned char>(right[i]))) return false;
+        if (toAsciiLower(left[i]) != toAsciiLower(right[i])) return false;
     }
     return true;
 }
@@ -49,7 +60,7 @@ uint16_t defaultPort(std::string_view scheme) {
 }
 
 bool isHostCharacter(char c) {
-    return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.' || c == '_';
+    return isAsciiAlpha(c) || isAsciiDigit(c) || c == '-' || c == '.' || c == '_';
 }
 
 std::string removeDotSegments(std::string_view input) {
@@ -76,9 +87,9 @@ std::string removeDotSegments(std::string_view input) {
 
 size_t schemeLength(std::string_view uri) {
     size_t schemeEnd = 0;
-    if (!uri.empty() && std::isalpha(static_cast<unsigned char>(uri[0]))) {
+    if (!uri.empty() && isAsciiAlpha(uri[0])) {
         schemeEnd = 1;
-        while (schemeEnd < uri.size() && (std::isalnum(static_cast<unsigned char>(uri[schemeEnd])) || uri[schemeEnd] == '+'
+        while (schemeEnd < uri.size() && (isAsciiAlpha(uri[schemeEnd]) || isAsciiDigit(uri[schemeEnd]) || uri[schemeEnd] == '+'
             || uri[schemeEnd] == '-' || uri[schemeEnd] == '.')) ++schemeEnd;
     }
     return schemeEnd > 0 && schemeEnd < uri.size() && uri[schemeEnd] == ':' ? schemeEnd : 0;
@@ -133,7 +144,7 @@ int parseUri(std::string_view uri, UriParts& parts) {
     if (port.size() > 5) return ERROR_INVALID_URL;
     uint32_t portValue = 0;
     for (const char c : port) {
-        if (!std::isdigit(static_cast<unsigned char>(c))) return ERROR_INVALID_URL;
+        if (!isAsciiDigit(c)) return ERROR_INVALID_URL;
         portValue = portValue * 10 + static_cast<uint32_t>(c - '0');
     }
     if (portValue > 0xFFFF) return ERROR_INVALID_URL;
@@ -313,6 +324,40 @@ int APS5_VABI sceHttpUriParse(SceHttpUriElement* out, const char* src_url, void*
     out->query = strings[5];
     out->fragment = strings[6];
     out->port = parts.port;
+    return 0;
+}
+
+int APS5_VABI sceHttpUriCopy(SceHttpUriElement* out, const SceHttpUriElement* src, void* pool, size_t prepare, size_t* require) {
+    if (!src) return ERROR_INVALID_URL;
+    const bool write = out && pool;
+    if (!write && !require) return ERROR_INVALID_VALUE;
+
+    const char* const fields[] = {src->scheme, src->hostname, src->path, src->username, src->password};
+    SceHttpUriElement copy{};
+    char** const slots[] = {&copy.scheme, &copy.hostname, &copy.path, &copy.username, &copy.password};
+    if (write) std::memset(pool, 0, prepare);
+    size_t used = 0;
+    for (size_t i = 0; i < 5; ++i) {
+        const size_t length = fields[i] ? std::strlen(fields[i]) : 0;
+        const size_t needed = length + 1;
+        if (write) {
+            if (needed > prepare - used) {
+                *out = {};
+                std::memset(pool, 0, prepare);
+                return ERROR_OUT_OF_MEMORY;
+            }
+            char* next = static_cast<char*>(pool) + used;
+            if (length != 0) std::memcpy(next, fields[i], length);
+            next[length] = '\0';
+            *slots[i] = next;
+        }
+        used += needed;
+    }
+    if (write) {
+        copy.port = src->port;
+        *out = copy;
+    }
+    if (require) *require = used;
     return 0;
 }
 

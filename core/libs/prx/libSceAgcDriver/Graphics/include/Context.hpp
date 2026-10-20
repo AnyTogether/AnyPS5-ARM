@@ -96,6 +96,11 @@ struct DescriptorRejected : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
+struct BdaUnalignedAccess : std::runtime_error {
+    BdaUnalignedAccess(const std::string& message, std::uint32_t instruction) : std::runtime_error(message), instruction(instruction) {}
+    std::uint32_t instruction;
+};
+
 // Device entry points resolved once per device (VulkanDevice's State fills it after setup): the
 // loader's vkGetDeviceProcAddr is a name lookup under its global mutex per call, paid at every
 // record site otherwise. Null members (tests, APS5_NO_PROC_TABLE=1) resolve per call (Resolved).
@@ -179,6 +184,7 @@ struct Context {
     bool depthClamp = false;
     // Nonzero when VK_EXT_external_memory_host is enabled: the required host pointer alignment.
     VkDeviceSize hostImportAlignment = 0;
+    bool drawInputsInPlace = true;
     bool dmaBufImport = false;
     bool sparseBinding = false;
     std::uint32_t queueFamily = 0;
@@ -211,6 +217,7 @@ struct Context {
     bool dualSrcBlend = false;
     bool samplerFilterMinmax = false;
     bool nonSeamlessCubeMap = false;
+    VkSampleCountFlags mergedCoverageSampleCounts = 0;
     bool conservativeRasterization = false;
     bool meshWave32 = false;
     bool pushDescriptor = false;
@@ -229,9 +236,12 @@ struct Context {
     bool runtimeDescriptorArray = false;
     bool partiallyBound = false;
     bool variableDescriptorCount = false;
+    bool sampledImageUpdateAfterBind = false;
     std::uint32_t imageTableCapacity = 0;
     std::uint32_t samplerTableCapacity = 0;
     bool individuallyFreeDescriptorSets = false;
+    bool imageTableUpdateAfterBind = false;
+    bool samplerTableUpdateAfterBind = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool storageImageMultisample = false;
@@ -354,6 +364,8 @@ inline void EndRenderPass(const Context& context, VkCommandBuffer commands) {
 std::uint32_t ImageTableCapacity(const Context& context);
 std::uint32_t StorageTableCapacity(const Context& context);
 std::uint32_t SamplerTableCapacity(const Context& context);
+bool ImageTableUpdateAfterBind(const Context& context);
+bool SamplerTableUpdateAfterBind(const Context& context);
 
 }
 

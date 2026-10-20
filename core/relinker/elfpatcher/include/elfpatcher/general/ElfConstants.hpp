@@ -1,6 +1,7 @@
 #ifndef ELFPATCHER_DOMAIN_ELFCONSTANTS_HPP
 #define ELFPATCHER_DOMAIN_ELFCONSTANTS_HPP
 
+#include <cstddef>
 #include <cstdint>
 
 namespace Elfpatcher {

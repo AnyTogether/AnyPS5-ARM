@@ -110,6 +110,26 @@ def main():
                                     capture_output=True, text=True, timeout=20)
             assert result.returncode == 2 and "RELATIVE relocation has a nonzero symbol index" in result.stderr, (name, result.stderr)
             assert not output.exists()
+        overflow_image = image_with_relocations([(0xfffffffffffffff9, 8, 0x210)], False, False)
+        overflow_source = work / "invalid-relocation-overflow.elf"
+        overflow_source.write_bytes(overflow_image)
+        overflow_output = work / "invalid-relocation-overflow.exe"
+        overflow_result = subprocess.run([str(relinker), "--skip-sce-module", "--windows",
+                                          str(overflow_source), str(overflow_output)],
+                                         capture_output=True, text=True, timeout=20)
+        assert overflow_result.returncode == 2 and "Relocation target address overflow" in overflow_result.stderr, overflow_result.stderr
+        assert not overflow_output.exists()
+        page_image = image_with_relocations([(0xffc, 8, 0x210)], False, False)
+        page_image.extend(bytes(0x1000))
+        struct.pack_into("<QQ", page_image, 64 + 32, len(page_image), len(page_image))
+        page_source = work / "invalid-base-relocation-page-crossing.elf"
+        page_source.write_bytes(page_image)
+        page_output = work / "invalid-base-relocation-page-crossing.exe"
+        page_result = subprocess.run([str(relinker), "--skip-sce-module", "--windows",
+                                      str(page_source), str(page_output)],
+                                     capture_output=True, text=True, timeout=20)
+        assert page_result.returncode == 2 and "Base relocation target crosses a page boundary" in page_result.stderr, page_result.stderr
+        assert not page_output.exists()
     print("No-op executable relocation tests passed")
 
 

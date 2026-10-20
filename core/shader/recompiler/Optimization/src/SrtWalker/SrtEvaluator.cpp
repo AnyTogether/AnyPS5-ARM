@@ -84,7 +84,7 @@ bool BasicEvaluator<TNode>::EvaluateWide(TNode value, std::uint64_t& result) {
         return false;
     }
     const TNode& inst = value;
-    if (_masked && IsRuntimeSelect(inst.Opcode()) && inst.ArgumentCount() == 3 && inst.Argument(0) == _activeMask) {
+    if (_masked && IsRuntimeSelect(inst.Opcode()) && inst.ArgumentCount() == 3 && ActiveMaskImplies(_activeMask, inst.Argument(0))) {
         return EvaluateWide(inst.Argument(1), result);
     }
     if (inst.Id() < _dense.Size()) {
@@ -273,6 +273,9 @@ std::optional<std::size_t> evaluatedArguments(IrOpcode opcode) {
         case IrOpcode::FPTrunc32:
         case IrOpcode::FPIsNan32:
         case IrOpcode::BitwiseNot32:
+        case IrOpcode::BitCount32:
+        case IrOpcode::FindILsb32:
+        case IrOpcode::FindUMsb32:
         case IrOpcode::LogicalNot: return 1u;
         case IrOpcode::CompositeConstructU64:
         case IrOpcode::IAdd32:
@@ -368,7 +371,7 @@ template<typename TNode>
 bool BasicEvaluator<TNode>::MayEvaluate(const IrResourcePlan& program, IrValue* value, const IrValue* activeMask, std::unordered_set<const IrValue*>& firstLanes) {
     std::unordered_map<const IrValue*, bool> known;
     const auto takesActiveArm = [activeMask](const IrValue* current) {
-        return activeMask != nullptr && IsRuntimeSelect(current->Opcode()) && current->ArgumentCount() == 3 && current->Argument(0)->Resolve() == activeMask;
+        return activeMask != nullptr && IsRuntimeSelect(current->Opcode()) && current->ArgumentCount() == 3 && ActiveMaskImplies(activeMask, current->Argument(0));
     };
     const auto requirements = [&program, &takesActiveArm](IrValue* current) {
         std::vector<IrValue*> required;
@@ -623,6 +626,26 @@ bool BasicEvaluator<TNode>::EvaluateInst(const TNode& inst, std::uint64_t& resul
         case IrOpcode::BitwiseNot32:
             if (Arg(inst, 0, a)) {
                 result = ~static_cast<std::uint32_t>(a);
+                return true;
+            }
+            return false;
+        case IrOpcode::BitCount32:
+            if (Arg(inst, 0, a)) {
+                result = static_cast<std::uint32_t>(std::popcount(static_cast<std::uint32_t>(a)));
+                return true;
+            }
+            return false;
+        case IrOpcode::FindILsb32:
+            if (Arg(inst, 0, a)) {
+                const auto val = static_cast<std::uint32_t>(a);
+                result = val == 0u ? 0xffffffffu : static_cast<std::uint32_t>(std::countr_zero(val));
+                return true;
+            }
+            return false;
+        case IrOpcode::FindUMsb32:
+            if (Arg(inst, 0, a)) {
+                const auto val = static_cast<std::uint32_t>(a);
+                result = val == 0u ? 0xffffffffu : static_cast<std::uint32_t>(31u - std::countl_zero(val));
                 return true;
             }
             return false;

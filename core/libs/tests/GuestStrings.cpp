@@ -1,22 +1,28 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <climits>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 
 extern "C" {
+void APS5_VABI bcopy_nid_postfix(const void*, void*, std::size_t);
 char* APS5_VABI basename_nid_postfix(const char*);
 char* APS5_VABI __inet_ntoa_nid_postfix(unsigned int);
 char* APS5_VABI dirname_nid_postfix(const char*);
 int* APS5_VABI __error_nid_postfix();
+long long APS5_VABI strtonum_nid_postfix(const char*, long long, long long, const char**);
 int APS5_VABI strcasecmp_nid_postfix(const char*, const char*);
 int APS5_VABI strncasecmp_nid_postfix(const char*, const char*, std::size_t);
 std::size_t APS5_VABI strnlen_nid_postfix(const char*, std::size_t);
 std::size_t APS5_VABI strnlen_s_nid_postfix(const char*, std::size_t);
 char* APS5_VABI strncat_nid_postfix(char*, const char*, std::size_t);
 char* APS5_VABI strpbrk_nid_postfix(const char*, const char*);
+const char* APS5_VABI strchr_nid_postfix(const char*, int);
+char* APS5_VABI strrchr_nid_postfix(const char*, int);
 std::size_t APS5_VABI strcspn_nid_postfix(const char*, const char*);
 std::size_t APS5_VABI strlcat_nid_postfix(char*, const char*, std::size_t);
 char* APS5_VABI stpcpy_nid_postfix(char*, const char*);
@@ -25,6 +31,7 @@ char* APS5_VABI strtok_nid_postfix(char*, const char*);
 char* APS5_VABI strsep_nid_postfix(char**, const char*);
 char* APS5_VABI strcasestr_nid_postfix(const char*, const char*);
 int APS5_VABI strcpy_s_nid_postfix(char*, std::size_t, const char*);
+int APS5_VABI strncpy_s_nid_postfix(char*, std::size_t, const char*, std::size_t);
 int APS5_VABI strcat_s_nid_postfix(char*, std::size_t, const char*);
 int APS5_VABI strncat_s_nid_postfix(char*, std::size_t, const char*, std::size_t);
 int APS5_VABI memcpy_s_nid_postfix(void*, std::size_t, const void*, std::size_t);
@@ -135,6 +142,33 @@ static void CheckBoundsCheckedFunctions() {
     Require(snprintf_s_nid_postfix(formatted, sizeof(formatted), "%d-%s", 42, "x") == 4 && std::strcmp(formatted, "42-x") == 0);
 }
 
+static void CheckSecureStringSizeLimits() {
+    constexpr std::size_t RsizeMax = SIZE_MAX >> 1;
+    const std::array<char, 8> original = {'!', 'a', 'b', '\0', 'x', 'y', 'z', '!'};
+    for (const auto size : {RsizeMax + 1, SIZE_MAX}) {
+        for (const char* source : {"cd", "", static_cast<const char*>(nullptr)}) {
+            for (const auto copy : {strcpy_s_nid_postfix, strcat_s_nid_postfix}) {
+                auto bytes = original;
+                Require(copy(bytes.data() + 1, size, source) != 0);
+                Require(bytes == original);
+            }
+            for (const auto copy : {strncpy_s_nid_postfix, strncat_s_nid_postfix}) {
+                for (const auto count : {std::size_t{0}, std::size_t{1}, std::size_t{3}}) {
+                    auto bytes = original;
+                    Require(copy(bytes.data() + 1, size, source, count) != 0);
+                    Require(bytes == original);
+                }
+            }
+        }
+    }
+    auto bytes = original;
+    Require(strcpy_s_nid_postfix(bytes.data() + 1, RsizeMax, "cd") == 0);
+    Require(bytes[0] == '!' && std::strcmp(bytes.data() + 1, "cd") == 0 && bytes[4] == 'x');
+    bytes = original;
+    Require(strcat_s_nid_postfix(bytes.data() + 1, RsizeMax, "cd") == 0);
+    Require(bytes[0] == '!' && std::strcmp(bytes.data() + 1, "abcd") == 0 && bytes[6] == 'z');
+}
+
 static void CheckCaseInsensitiveComparison() {
     Require(strcasecmp_nid_postfix("", "") == 0 && strcasecmp_nid_postfix("AbC", "aBc") == 0);
     Require(strcasecmp_nid_postfix("A", "b") == 'a' - 'b' && strcasecmp_nid_postfix("b", "A") == 'b' - 'a');
@@ -212,8 +246,88 @@ static bool CheckDirnameLengths() {
     return passed;
 }
 
+static void CheckBcopy() {
+    constexpr std::array<unsigned char, 12> original = {0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187};
+    for (std::size_t source = 0; source < original.size(); ++source) {
+        for (std::size_t destination = 0; destination < original.size(); ++destination) {
+            for (std::size_t count = 0; count <= original.size() - std::max(source, destination); ++count) {
+                auto actual = original;
+                auto expected = original;
+                for (std::size_t i = 0; i < count; ++i) expected[destination + i] = original[source + i];
+                bcopy_nid_postfix(actual.data() + source, actual.data() + destination, count);
+                Require(actual == expected);
+            }
+        }
+    }
+    auto destination = original;
+    destination.fill(0xff);
+    bcopy_nid_postfix(original.data(), destination.data(), original.size());
+    Require(destination == original);
+    bcopy_nid_postfix(nullptr, nullptr, 0);
+}
+
+static void CheckStrtonum() {
+    struct Valid {
+        const char* text;
+        long long value;
+    };
+    for (const auto& test : {Valid{"0", 0}, Valid{"-0", 0}, Valid{"  +42", 42}, Valid{"010", 10},
+             Valid{"9223372036854775807", LLONG_MAX}, Valid{"-9223372036854775808", LLONG_MIN}}) {
+        const char* error = "unchanged";
+        *__error_nid_postfix() = 13;
+        Require(strtonum_nid_postfix(test.text, LLONG_MIN, LLONG_MAX, &error) == test.value);
+        Require(error == nullptr && *__error_nid_postfix() == 13);
+    }
+    for (const auto& test : {Valid{"-5", -5}, Valid{"5", 5}, Valid{"0", 0}}) {
+        const char* error = "unchanged";
+        Require(strtonum_nid_postfix(test.text, -5, 5, &error) == test.value && error == nullptr);
+        Require(strtonum_nid_postfix(test.text, test.value, test.value, &error) == test.value && error == nullptr);
+    }
+    const auto fails = [](const char* text, long long minimum, long long maximum, const char* expected, int number) {
+        const char* error = nullptr;
+        *__error_nid_postfix() = 13;
+        Require(strtonum_nid_postfix(text, minimum, maximum, &error) == 0);
+        Require(error != nullptr && std::strcmp(error, expected) == 0 && *__error_nid_postfix() == number);
+        *__error_nid_postfix() = 13;
+        Require(strtonum_nid_postfix(text, minimum, maximum, nullptr) == 0 && *__error_nid_postfix() == number);
+    };
+    for (const char* text : {"", " ", "+", "-", "--1", "0x10", "0b10", "1x", "42 ", "1\n",
+             "9223372036854775808x", "-9223372036854775809x"})
+        fails(text, LLONG_MIN, LLONG_MAX, "invalid", 22);
+    fails("0", 1, -1, "invalid", 22);
+    fails(nullptr, 1, -1, "invalid", 22);
+    fails("9223372036854775808", 1, -1, "invalid", 22);
+    fails("-6", -5, 5, "too small", 34);
+    fails("6", -5, 5, "too large", 34);
+    fails("0", 1, 5, "too small", 34);
+    fails("0", -5, -1, "too large", 34);
+    fails("-9223372036854775809", LLONG_MIN, LLONG_MAX, "too small", 34);
+    fails("9223372036854775808", LLONG_MIN, LLONG_MAX, "too large", 34);
+    fails("-9999999999999999999999999999999999", LLONG_MIN, LLONG_MAX, "too small", 34);
+    fails("9999999999999999999999999999999999", LLONG_MIN, LLONG_MAX, "too large", 34);
+    *__error_nid_postfix() = 34;
+    Require(strtonum_nid_postfix("42", 0, 100, nullptr) == 42 && *__error_nid_postfix() == 34);
+}
+
+static void CheckCharacterConversionInSearches() {
+    const char bytes[] = "a\xe9" "b\xe9" "c";
+    Require(strchr_nid_postfix(bytes, 0xe9) == bytes + 1);
+    Require(strchr_nid_postfix(bytes, 0x1e9) == bytes + 1);
+    Require(strchr_nid_postfix(bytes, -23) == bytes + 1);
+    Require(strrchr_nid_postfix(bytes, 0xe9) == bytes + 3);
+    Require(strrchr_nid_postfix(bytes, 0x1e9) == bytes + 3);
+    Require(strrchr_nid_postfix(bytes, -23) == bytes + 3);
+    const char path[] = "a/b/c";
+    Require(strrchr_nid_postfix(path, 0x12f) == path + 3);
+    Require(strrchr_nid_postfix(path, 0) == path + 5);
+    Require(strrchr_nid_postfix(path, 'z') == nullptr);
+}
+
 int main() {
+    CheckStrtonum();
+    CheckBcopy();
     if (!CheckDirnameLengths()) return 1;
+    CheckCharacterConversionInSearches();
     CheckBoundsCheckedFunctions();
     CheckCaseInsensitiveComparison();
     CheckSscanfS();
@@ -400,5 +514,6 @@ int main() {
     const char highBytes[] = {static_cast<char>(0xff), 'A', 0};
     Require(strcasestr_nid_postfix(highBytes, "a") == highBytes + 1);
     CheckSecureCopySizeLimits();
+    CheckSecureStringSizeLimits();
     return CheckMemcpyOverlap() ? 0 : 1;
 }

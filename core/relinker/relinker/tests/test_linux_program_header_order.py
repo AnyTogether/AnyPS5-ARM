@@ -8,6 +8,9 @@ import subprocess
 import sys
 import tempfile
 
+from signal_run import run_without_core_dump
+from test_guest_intel_trampolines import main_fixture
+from test_guest_module_directories import module_with_symbol
 from test_linux_load_alignment import fixture as single_load_fixture
 
 PT_LOAD = 1
@@ -15,6 +18,7 @@ PT_DYNAMIC = 2
 PT_INTERP = 3
 PT_PHDR = 6
 PT_OS_PROCPARAM = 0x61000001
+PT_GNU_STACK = 0x6474E551
 PT_SCE_VERSION = 0x6FFFFF01
 PAGE = 0x1000
 
@@ -75,7 +79,7 @@ def run_expecting_trap(name, output):
     if not (sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64")):
         return
     output.chmod(0o755)
-    executed = subprocess.run([str(output)], capture_output=True, timeout=20)
+    executed = run_without_core_dump([str(output)], capture_output=True, timeout=20)
     assert executed.returncode == -signal.SIGTRAP, (name, executed.returncode, executed.stderr)
 
 
@@ -105,13 +109,28 @@ def main():
         unordered = convert("unordered-loads", multi_load_fixture([DATA, PROCPARAM, TEXT, RODATA]))
         headers = check_order("unordered-loads", unordered.read_bytes())
         assert [h[3] for h in headers if h[0] == PT_LOAD][:3] == [TEXT[3], RODATA[3], DATA[3]], headers
-        assert kinds_between_loads(headers) == [PT_OS_PROCPARAM], headers
+        assert kinds_between_loads(headers) == [PT_OS_PROCPARAM, PT_GNU_STACK], headers
         run_expecting_trap("unordered-loads", unordered)
 
         tailed = convert("unaligned-tail", multi_load_fixture([TEXT, RODATA, PROCPARAM, TAIL], 0x9400))
         headers = check_order("unaligned-tail", tailed.read_bytes())
         check_extra_block_page("unaligned-tail", headers)
         run_expecting_trap("unaligned-tail", tailed)
+
+        guest = work / "guest"
+        (guest / "sce_module").mkdir(parents=True)
+        module = module_with_symbol(True)
+        module[64:176] = module[120:176] + module[64:120]
+        assert [h[3] for h in program_headers(module) if h[0] == PT_LOAD] == [0x2000, 0x1000]
+        (guest / "sce_module" / "provider.prx").write_bytes(module)
+        (guest / "input.elf").write_bytes(main_fixture())
+        result = subprocess.run([str(relinker), str(guest / "input.elf"), str(guest / "output.elf")],
+                                capture_output=True, text=True, timeout=20)
+        assert result.returncode == 0, ("guest-module", result.stdout, result.stderr)
+        outputs = list(guest.rglob("provider.prx.guest.prx"))
+        assert len(outputs) == 1, outputs
+        addresses = [h[3] for h in program_headers(outputs[0].read_bytes()) if h[0] == PT_LOAD]
+        assert addresses[:2] == [0x1000, 0x2000] and addresses == sorted(addresses), [hex(a) for a in addresses]
     print("Linux program header order test passed")
 
 

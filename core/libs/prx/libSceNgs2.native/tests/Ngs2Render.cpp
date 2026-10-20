@@ -297,6 +297,35 @@ static void TestPitchAndRepeat() {
     Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
 }
 
+static void TestSetupClearsCallback() {
+    const auto system = CreateSystem();
+    const auto master = Mastering(system, 1);
+    const std::vector<std::int16_t> pcm{1000, 2000, 3000, 4000};
+    const auto sampler = Sampler(system, pcm, 0);
+    Control(sampler, SCE_NGS2_VOICE_PARAM_CALLBACK, Ngs2VoiceCallbackParam{{}, OnBlock, 7, SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END, 0});
+    Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP, Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1, 48000, 0, 0, 0}});
+    const Ngs2WaveformBlock oneShot{0, pcm.size() * sizeof(std::int16_t), 0, 0, static_cast<std::uint32_t>(pcm.size()), 0, 0};
+    Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 1, &oneShot});
+    Patch(sampler, master);
+    Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+
+    callbackFlags.clear();
+    auto out = RenderI16(system);
+    for (std::uint32_t i = 0; i < Grain; i++) Require(out[i] == (i < pcm.size() ? pcm[i] : 0));
+    Require(callbackFlags.empty() && Flags(sampler) == 0);
+
+    Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP, Ngs2SamplerVoiceSetupParam{{}, {SCE_NGS2_WAVEFORM_TYPE_PCM_I16L, 1, 48000, 0, 0, 0}});
+    Patch(sampler, master);
+    Control(sampler, SCE_NGS2_VOICE_PARAM_CALLBACK, Ngs2VoiceCallbackParam{{}, OnBlock, 7, SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END, 0});
+    const Ngs2WaveformBlock stream{0, pcm.size() * sizeof(std::int16_t), 0, 0, static_cast<std::uint32_t>(pcm.size()), 0, 0x55};
+    Control(sampler, SCE_NGS2_SAMPLER_VOICE_PARAM_ADD_WAVEFORM_BLOCKS, Ngs2SamplerVoiceWaveformBlocksParam{{}, pcm.data(), 0, 1, &stream});
+    Event(sampler, SCE_NGS2_VOICE_EVENT_PLAY);
+    out = RenderI16(system);
+    for (std::uint32_t i = 0; i < Grain; i++) Require(out[i] == (i < pcm.size() ? pcm[i] : 0));
+    Require(callbackFlags.size() == 1 && callbackFlags[0] == SCE_NGS2_VOICE_CALLBACK_FLAG_BLOCK_END);
+    Require(sceNgs2SystemDestroy(system, nullptr) == SCE_NGS2_OK);
+}
+
 struct PcmResetCallback {
     std::vector<std::int16_t> pcm;
     std::uint32_t flag;
@@ -1135,6 +1164,7 @@ int main() {
     TestPcmCallbackReset();
     TestPcmCallbackRefill();
     TestPcmCallbackSetup();
+    TestSetupClearsCallback();
     TestMasteringGain();
     TestMatrixLevelClamp();
     TestStereoIntoSurround();

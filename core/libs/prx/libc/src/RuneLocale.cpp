@@ -154,4 +154,34 @@ int APS5_VABI wctob_nid_postfix(std::uint32_t c) {
     return c < 256 ? static_cast<int>(c) : -1;
 }
 
+std::uint32_t APS5_VABI _Towctrans_nid_postfix(std::uint32_t c, std::uint64_t desc);
+const short* APS5_VABI _Getptolower_nid_postfix();
+const short* APS5_VABI _Getptoupper_nid_postfix();
+
+std::uint64_t APS5_VABI wctrans_nid_postfix(const char* property) {
+    if (std::strcmp(property, "tolower") == 0) return 1;
+    if (std::strcmp(property, "toupper") == 0) return 2;
+    return 0;
+}
+
+std::uint32_t APS5_VABI towctrans_nid_postfix(std::uint32_t c, std::uint64_t desc) {
+    return desc == 1 || desc == 2 ? _Towctrans_nid_postfix(c, desc) : c;
+}
+
+std::uint32_t APS5_VABI _Towlower_nid_postfix(std::uint32_t c, const void*) {
+    return _Towctrans_nid_postfix(c, 1);
+}
+
+std::uint32_t APS5_VABI _Towupper_nid_postfix(std::uint32_t c, const void*) {
+    return _Towctrans_nid_postfix(c, 2);
+}
+
+int APS5_VABI _Tolower_nid_postfix(int c, const void*) {
+    return static_cast<unsigned>(c) <= 0x7f ? _Getptolower_nid_postfix()[c] : c;
+}
+
+int APS5_VABI _Toupper_nid_postfix(int c, const void*) {
+    return static_cast<unsigned>(c) <= 0x7f ? _Getptoupper_nid_postfix()[c] : c;
+}
+
 }

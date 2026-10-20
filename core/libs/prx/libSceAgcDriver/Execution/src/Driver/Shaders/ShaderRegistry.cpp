@@ -2,6 +2,7 @@
 #include "ControlFlow/GraphBuilder.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
@@ -72,6 +73,11 @@ std::shared_ptr<const ShaderRecompiler::SourceHandle> PrepareShaderWithDiagnosti
 }
 
 std::shared_ptr<const ShaderSnapshot> ReadRawShader(std::uint64_t address) {
+    const auto drain = [](std::uint64_t first, std::size_t bytes) {
+        if (!DrawPipeline::Active()) return;
+        auto& pipeline = DrawPipeline::Queue0();
+        if (pipeline.Busy() && pipeline.Overlaps(first, bytes)) pipeline.Drain(DrawPipeline::DrainReason::Capture);
+    };
     GuestMemory::CheckRange(reinterpret_cast<const void*>(address), sizeof(std::uint32_t), 256);
     static std::mutex cacheMutex;
     static std::list<std::shared_ptr<const ShaderSnapshot>> cache;
@@ -84,6 +90,7 @@ std::shared_ptr<const ShaderSnapshot> ReadRawShader(std::uint64_t address) {
     }
     if (cached) {
         const auto code = std::as_bytes(std::span(cached->code));
+        drain(address, code.size());
         GuestMemory::FlushGpuWrites(address, code.size());
         if (GuestMemory::CompareMapped(address, code) == GuestMemory::Compare::Equal) {
             std::lock_guard lock(cacheMutex);
@@ -104,6 +111,7 @@ std::shared_ptr<const ShaderSnapshot> ReadRawShader(std::uint64_t address) {
     while (snapshot.code.size() < available) {
         const auto previous = snapshot.code.size();
         snapshot.code.resize(std::min(available, std::max<std::size_t>(64, previous * 2)));
+        drain(address + previous * sizeof(std::uint32_t), (snapshot.code.size() - previous) * sizeof(std::uint32_t));
         GuestMemory::Read(address + previous * sizeof(std::uint32_t),
             std::as_writable_bytes(std::span(snapshot.code).subspan(previous)), alignof(std::uint32_t));
         try {
@@ -413,6 +421,36 @@ static bool RelocatedRegisters(const ShaderSnapshot& snapshot, Shader used, cons
     return std::memcmp(static_cast<const void*>(bound), snapshot.header.data() + (address - snapshot.headerAddress), bytes) == 0;
 }
 
+// A title can relocate a registered header, and the arrays it points at, into memory of its own and resolve the ABI
+// with that copy. Every array the copy refers to must still hold the registered bytes: the registered header then
+// decodes to the values the copy describes.
+static bool ReferredBytesMatch(const ShaderSnapshot& snapshot, const void* pointer, const void* registeredPointer, std::size_t bytes) {
+    if (bytes == 0 || pointer == registeredPointer) return true;
+    if (pointer == nullptr || registeredPointer == nullptr) return false;
+    const auto address = reinterpret_cast<std::uintptr_t>(registeredPointer);
+    if (address < snapshot.headerAddress) return false;
+    const auto offset = address - snapshot.headerAddress;
+    if (offset > snapshot.header.size() || snapshot.header.size() - offset < bytes) return false;
+    if (!GuestMemory::Accessible(pointer, bytes)) return false;
+    return std::memcmp(static_cast<const void*>(pointer), snapshot.header.data() + offset, bytes) == 0;
+}
+
+static bool RelocatedCopy(const ShaderSnapshot& snapshot, Shader used, const Shader& registered) {
+    Shader masked = used;
+    masked.user_data = registered.user_data;
+    masked.cx_registers = registered.cx_registers;
+    masked.sh_registers = registered.sh_registers;
+    masked.specials = registered.specials;
+    masked.input_semantics = registered.input_semantics;
+    masked.output_semantics = registered.output_semantics;
+    if (std::memcmp(&masked, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) != 0) return false;
+    return ReferredBytesMatch(snapshot, used.sh_registers, registered.sh_registers, used.num_sh_registers * sizeof(ShaderRegister))
+        && ReferredBytesMatch(snapshot, used.cx_registers, registered.cx_registers, used.num_cx_registers * sizeof(ShaderRegister))
+        && ReferredBytesMatch(snapshot, used.specials, registered.specials, sizeof(ShaderSpecialRegs))
+        && ReferredBytesMatch(snapshot, used.input_semantics, registered.input_semantics, used.num_input_semantics * sizeof(ShaderSemantic))
+        && ReferredBytesMatch(snapshot, used.output_semantics, registered.output_semantics, used.num_output_semantics * sizeof(ShaderSemantic));
+}
+
 bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     if (snapshot.headerAddress == reinterpret_cast<std::uintptr_t>(shader)) return true;
     if (snapshot.header.size() < sizeof(Shader)) return false;
@@ -422,7 +460,7 @@ bool SameHeader(const ShaderSnapshot& snapshot, const Shader* shader) {
     std::memcpy(&used, static_cast<const void*>(shader), sizeof(Shader));
     std::memcpy(&registered, snapshot.header.data(), sizeof(Shader));
     used.user_data = registered.user_data;
-    return std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) == 0 || RelocatedRegisters(snapshot, used, registered) || FusedHullHeader(snapshot, used, registered);
+    return std::memcmp(&used, &registered, offsetof(Shader, num_sh_registers) + sizeof(Shader::num_sh_registers)) == 0 || RelocatedRegisters(snapshot, used, registered) || RelocatedCopy(snapshot, used, registered) || FusedHullHeader(snapshot, used, registered);
 }
 
 std::size_t ShaderRegistry::chunkFor(std::uint64_t address) const {
@@ -1361,7 +1399,7 @@ std::vector<PreparedGraphicsStage> PrepareGraphicsStages(const DrawDecode& decod
     std::vector<PreparedGraphicsStage> prepared;
     std::uint32_t pushOffset = 0;
     const bool fixedSlots = target.fixedPushSlots;
-    const auto capacity = decoded.state.stages.mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : decoded.state.stages.tessellation ? ShaderRecompiler::TessellationLevelPushOffsetBytes : Graphics::PipelinePushSlotBytes;
+    const auto capacity = decoded.state.stages.mesh ? ShaderRecompiler::MeshDrawPushOffsetBytes : decoded.state.stages.tessellation ? ShaderRecompiler::TessellationLevelPushOffsetBytes : decoded.state.depthRemap.mode != 0u ? ShaderRecompiler::DepthRemapPushOffsetBytes : Graphics::PipelinePushSlotBytes;
     for (std::size_t index = 0; index < decoded.programs.size(); ++index) {
         if (decoded.roles[index] == ShaderRecompiler::ProgramRole::GeometryBack) continue;
         const auto& program = decoded.programs[index];

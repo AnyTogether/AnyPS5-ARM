@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 
+from signal_run import run_without_core_dump
 from test_linux_load_alignment import PT_LOAD, PT_SCE_VERSION, fixture, loads
 
 ENTRY = 0x10
@@ -69,7 +70,7 @@ def main():
             for executable in (output, relocated):
                 executable.chmod(0o755)
                 for arguments, expected in ((["Z"], -signal.SIGTRAP), (["Z", "extra"], -signal.SIGILL)):
-                    executed = subprocess.run([str(executable), *arguments], capture_output=True, timeout=20)
+                    executed = run_without_core_dump([str(executable), *arguments], capture_output=True, timeout=20)
                     assert executed.returncode == expected, (executable.name, arguments, executed.returncode)
         for address, error in ((0x7FF00000, None), (0x80000000, "Entry stub call exceeds rel32 range")):
             source.write_bytes(far_load_fixture(address))

@@ -25,6 +25,10 @@ static std::size_t m = environmentCount("APS5_PM4_RING", 16, MaximumCapacity, "A
 static int n = GetEnvironmentVariableW(L"ANYPS5_LOADEXEC_ARGV_SKIP", skip, 2);
 static const auto* o = addWideString(u"ANYPS5_LOADEXEC_PARENT");
 static unsigned long p = reconfigured("APS5_NOT_A_READ", 1);
+static bool q = _wgetenv(L"APS5_WIDE_PRESENT") != nullptr;
+static int r = _wtoi(_wgetenv(L"APS5_WIDE_INT"));
+static const wchar_t* s = _wgetenv(L"ANYPS5_WIDE_CONFIG");
+static const char* t = std::getenv("NOT_AN_ENV");
 """
 
 
@@ -46,7 +50,8 @@ class EnvReferenceTests(unittest.TestCase):
              "APS5_WORKER_AFFINITY_MASK", "ANYPS5_GPU", "APS5_THREAD_NICE",
              "APS5_CRASH_INDIRECT_MEMORY", "APS5_PIPELINE_JOURNAL_MAX_MIB",
              "APS5_PIPELINE_STORE_ENTRIES", "APS5_PIPELINE_JOURNAL_THREADS", "APS5_PM4_RING",
-             "ANYPS5_LOADEXEC_ARGV_SKIP", "ANYPS5_LOADEXEC_PARENT"})
+             "ANYPS5_LOADEXEC_ARGV_SKIP", "ANYPS5_LOADEXEC_PARENT",
+             "ANYPS5_WIDE_CONFIG", "APS5_WIDE_PRESENT", "APS5_WIDE_INT"})
         self.assertEqual(found["APS5_PROFILE_DRAW"][0][1], 1)
         self.assertEqual(found["APS5_THREAD_NICE"][0][2:], ("integer", "-10"))
         self.assertEqual(found["APS5_HOST_IMPORT_MIB"][0][2:], ("integer", "6144"))
@@ -56,6 +61,9 @@ class EnvReferenceTests(unittest.TestCase):
         self.assertEqual(found["APS5_PM4_RING"][0][2:], ("integer", "16"))
         self.assertEqual(found["ANYPS5_LOADEXEC_ARGV_SKIP"][0][2:], ("string", ""))
         self.assertEqual(found["ANYPS5_LOADEXEC_PARENT"][0][2:], ("string", ""))
+        self.assertEqual(found["ANYPS5_WIDE_CONFIG"][0][2:], ("string", ""))
+        self.assertEqual(found["APS5_WIDE_PRESENT"][0][2:], ("presence", ""))
+        self.assertEqual(found["APS5_WIDE_INT"][0][2:], ("integer", ""))
 
     def test_the_default_prefixes_cover_both(self):
         root = self.fixture()

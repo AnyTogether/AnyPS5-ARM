@@ -1,4 +1,5 @@
 #include "prx/libScePad/include/PadState.hpp"
+#include "prx/libScePad/include/PadAudioHapticQueue.hpp"
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/InputCommandFile.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
@@ -14,8 +15,15 @@
 namespace {
     std::mutex stateMutex;
     PadInputState state;
+    std::uint32_t pressedSinceRead = 0;
+    std::uint8_t pressedAnalogL2 = 0;
+    std::uint8_t pressedAnalogR2 = 0;
+    std::uint64_t pressedAt = 0;
+    constexpr std::uint64_t kLatchExpiry = 100000;
     PadOutputState output;
     std::chrono::steady_clock::time_point audioHapticEnd;
+    std::array<std::uint8_t, 2> audioHapticRumble{};
+    PadAudioHapticQueue legacyHaptics;
     std::uint64_t timestamp = 0;
 
     struct QueuedInput {
@@ -39,6 +47,17 @@ namespace {
     std::uint8_t nextTouchId = 0;
     bool prevTouchActive[2] = {false, false};
     std::uint8_t touchIds[2] = {0, 0};
+
+    bool RefreshAudioHaptics() {
+        if (std::chrono::steady_clock::now() >= audioHapticEnd) audioHapticRumble = {};
+        const auto legacy = legacyHaptics.Read(sceKernelGetProcessTime());
+        const auto large = std::max(audioHapticRumble[0], legacy[0]);
+        const auto small = std::max(audioHapticRumble[1], legacy[1]);
+        if (output.audioVibrationLarge == large && output.audioVibrationSmall == small) return false;
+        output.audioVibrationLarge = large;
+        output.audioVibrationSmall = small;
+        return true;
+    }
 
     void normalize(Quat& q) {
         const float n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
@@ -126,6 +145,7 @@ void Pad::Initialize() {
         timestamp = sceKernelGetProcessTime();
         lastFuseTime = timestamp;
         queue.clear();
+        pressedSinceRead = 0;
     }
     initialized = true;
 }
@@ -233,7 +253,14 @@ PadData Pad::ReadState() {
     if (!initialized) throw std::runtime_error("Pad: read before initialization");
     const std::uint64_t now = sceKernelGetProcessTime();
     const auto injected = InjectedInput(now);
-    return BuildData(state, timestamp, now, injected);
+    PadData data = BuildData(state, timestamp, now, injected);
+    if (pressedSinceRead != 0 && now - pressedAt <= kLatchExpiry) {
+        data.buttons |= pressedSinceRead;
+        if (pressedSinceRead & 0x100u) data.analog_buttons_l2 = std::max(data.analog_buttons_l2, pressedAnalogL2);
+        if (pressedSinceRead & 0x200u) data.analog_buttons_r2 = std::max(data.analog_buttons_r2, pressedAnalogR2);
+    }
+    pressedSinceRead = 0;
+    return data;
 }
 
 int Pad::Read(PadData* data, int num) {
@@ -241,6 +268,7 @@ int Pad::Read(PadData* data, int num) {
     std::lock_guard lock(stateMutex);
     if (failure) std::rethrow_exception(failure);
     if (!initialized) throw std::runtime_error("Pad: read before initialization");
+    pressedSinceRead = 0;
     const std::uint64_t now = sceKernelGetProcessTime();
     const auto injected = InjectedInput(now);
     if (queue.empty()) {
@@ -381,8 +409,16 @@ extern "C" void PadPublishInput_nid_postfix(const PadInputState& input) {
         state.touchLeft == input.touchLeft && state.touchRight == input.touchRight &&
         state.hasMotion == input.hasMotion && state.accel == input.accel && state.gyro == input.gyro &&
         state.touch == input.touch && state.deviceKind == input.deviceKind) return;
-    state = input;
+    const std::uint32_t pressed = input.buttons & ~state.buttons;
     timestamp = sceKernelGetProcessTime();
+    if (pressed != 0) {
+        if (pressedSinceRead != 0 && timestamp - pressedAt > kLatchExpiry) pressedSinceRead = 0;
+        pressedSinceRead |= pressed;
+        pressedAt = timestamp;
+        if (pressed & 0x100u) pressedAnalogL2 = input.analogButtonsL2;
+        if (pressed & 0x200u) pressedAnalogR2 = input.analogButtonsR2;
+    }
+    state = input;
     if (queue.size() == kQueueCapacity) queue.pop_front();
     queue.push_back({input, timestamp});
 }
@@ -395,10 +431,7 @@ extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
 
 extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out) {
     std::lock_guard lock(stateMutex);
-    if ((output.audioVibrationLarge || output.audioVibrationSmall) && std::chrono::steady_clock::now() >= audioHapticEnd) {
-        output.audioVibrationLarge = output.audioVibrationSmall = 0;
-        ++output.sequence;
-    }
+    if (RefreshAudioHaptics()) ++output.sequence;
     if (seenSequence == nullptr || out == nullptr || *seenSequence == output.sequence) return false;
     *seenSequence = output.sequence;
     *out = output;
@@ -409,9 +442,22 @@ extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8
     std::lock_guard lock(stateMutex);
     if (large == 0 && small == 0) return;
     const auto now = std::chrono::steady_clock::now();
-    if (now >= audioHapticEnd) output.audioVibrationLarge = output.audioVibrationSmall = 0;
-    output.audioVibrationLarge = std::max(output.audioVibrationLarge, large);
-    output.audioVibrationSmall = std::max(output.audioVibrationSmall, small);
+    if (now >= audioHapticEnd) audioHapticRumble = {};
+    audioHapticRumble[0] = std::max(audioHapticRumble[0], large);
+    audioHapticRumble[1] = std::max(audioHapticRumble[1], small);
     audioHapticEnd = now + std::chrono::milliseconds(80);
+    static_cast<void>(RefreshAudioHaptics());
     ++output.sequence;
+}
+
+extern "C" void PadQueueLegacyAudioHaptics_nid_postfix(int source, std::uint64_t begin, std::uint64_t end, std::uint8_t large, std::uint8_t small) {
+    std::lock_guard lock(stateMutex);
+    legacyHaptics.Queue(source, begin, end, large, small);
+    if (RefreshAudioHaptics()) ++output.sequence;
+}
+
+extern "C" void PadClearLegacyAudioHaptics_nid_postfix(int source) {
+    std::lock_guard lock(stateMutex);
+    legacyHaptics.Clear(source);
+    if (RefreshAudioHaptics()) ++output.sequence;
 }

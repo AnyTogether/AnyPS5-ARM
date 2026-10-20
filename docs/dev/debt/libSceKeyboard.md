@@ -3,3 +3,8 @@
 ### Functional
 
 - [sceKeyboardGetKey2Char](../../../core/libs/prx/libSceKeyboard/src/keyboard_impl.cpp) (libSceKeyboard) translates the 101-key (US) arrangement and the alphanumeric layer of the 106-key (Japanese) one, which follows the JIS layout of the HID usages: the Yen (0x89) and Ro (0x87) keys return `\` (0x5C) unshifted, as JIS X 0201 places the yen sign there; whether the console returns U+00A5 instead is unverified. With the Kana LED (bit 4, the HID position) set the 106-key arrangement throws, as the kana the console returns are unknown. Ctrl and Alt do not change the character.
+
+### Unknown function info
+
+- [sceDbgKeyboardClose, sceDbgKeyboardGetKey2Char, sceDbgKeyboardInit, sceDbgKeyboardOpen, sceDbgKeyboardRead, sceDbgKeyboardReadState](../../../core/libs/prx/libSceKeyboard/Export.cpp) (libSceKeyboard) - names and NIDs are present in the [PS5 3.20 export inventory](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libSceKeyboard.c), but no credible prototypes were found. They are declared without parameters solely to resolve known imports; this is not an ABI claim.
+- [sceKeyboardConnectPort, sceKeyboardDebugGetDeviceId, sceKeyboardDeviceOpen, sceKeyboardDisconnectAll, sceKeyboardDisconnectDevice, sceKeyboardDisconnectPort, sceKeyboardGetConnection, sceKeyboardGetDeviceInfo, sceKeyboardGetHandle, sceKeyboardMbusInit, sceKeyboardPadEmulateClose, sceKeyboardPadEmulateOpen, sceKeyboardSetProcessFocus, sceKeyboardSetProcessPrivilege](../../../core/libs/prx/libSceKeyboard/Export.cpp) (libSceKeyboard) - throwing stubs declared without parameters from the firmware export database (aerolib.csv); their guest signatures are unverified on hardware

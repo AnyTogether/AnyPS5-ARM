@@ -168,6 +168,18 @@ class NidArgumentTests(unittest.TestCase):
         row, = json.loads(output.getvalue())["rows"]
         self.assertEqual((row["nid"], row["status"]), ("AAAAAAAAAA+", "unknown"))
 
+    def test_nid_with_library_module_suffix_matches_the_bare_nid(self):
+        results = []
+        for nid in ("ZjtRqSMJwdw", "ZjtRqSMJwdw#C#D"):
+            output = io.StringIO()
+            with patch.object(nid_names, "load_db", return_value={"ZjtRqSMJwdw": "sinh"}), \
+                    patch.object(nid_names, "collect_real_names", return_value=set()), \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(nid_names.main(["--nid=" + nid, "--json"]), 0)
+            results.append(json.loads(output.getvalue())["rows"])
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[1][0]["nid"], "ZjtRqSMJwdw")
+
     def normalize(self, arguments):
         return nid_names.nid_arguments(arguments, self.options)
 
@@ -197,6 +209,29 @@ class NidArgumentTests(unittest.TestCase):
             self.assertEqual(nid_names.main(), 0)
         rows = json.loads(printed.call_args.args[0])["rows"]
         self.assertEqual({row["nid"]: row["suggestion"] for row in rows}, database)
+
+    def test_symbol_files_and_stdin_compute_nids_without_a_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            names = Path(directory) / "symbols.txt"
+            symbols = ["sceExample", "-leading-dash", "  literal spaces  ", "unicode_Ω", "sceExample"]
+            names.write_bytes(("\ufeff" + "\r\n".join(symbols) + "\r\n\r\n").encode("utf-8"))
+            for source in (str(names), "-"):
+                with self.subTest(source=source), patch("sys.stdin", io.StringIO(names.read_text(encoding="utf-8-sig"))), \
+                        patch.object(nid_names, "load_db", side_effect=AssertionError("database used")), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(nid_names.main(["--name", "first", "--from-file", source, "--json"]), 0)
+                rows = json.loads(output.getvalue())["symbols"]
+                self.assertEqual(rows, [{"name": name, "nid": nid_names.compute_nid(name)} for name in ["first", *symbols]])
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exited:
+                nid_names.main(["--from-file", str(names), "--nid"])
+            self.assertEqual(exited.exception.code, 2)
+            with patch.object(nid_names, "load_db", side_effect=AssertionError("database used")), \
+                    contextlib.redirect_stdout(io.StringIO()) as output, \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exited:
+                nid_names.main(["--from-file", str(names.parent / "missing"), "--json"])
+            self.assertEqual(exited.exception.code, 2)
+            self.assertEqual(output.getvalue(), "")
+
 
 
 class SourceCollectionTests(unittest.TestCase):

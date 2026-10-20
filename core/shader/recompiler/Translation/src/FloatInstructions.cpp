@@ -124,7 +124,8 @@ bool TranslationContext::float16Unary(const RdnaInstruction& inst, IrOpcode opco
     const RdnaOperand& operand = sourceAt(inst, 0u);
     const IrF32 argument = flushF16InputValue(readF16AsF32(operand));
     const auto [result, invalid] = unaryFloatSpecials(opcode, argument, IrF32(ir.Emit(opcode, IrType::F32, {&argument.Value()})));
-    IrU32 bits = packHalf2x16(applyF16ResultModifiers(inst.destination, clampF16Overflow(result, {&argument.Value()})), IrF32(ir.ConstantF32(0.0f)));
+    const IrF16 rounded(ir.Emit(IrOpcode::ConvertF16F32, IrType::F16, {&applyF16ResultModifiers(inst.destination, clampF16Overflow(result, {&argument.Value()})).Value()}));
+    IrU32 bits(ir.Emit(IrOpcode::ConvertU32U16, IrType::U32, {&ir.Emit(IrOpcode::BitCastU16F16, IrType::U16, {&rounded.Value()})}));
     if (opcode == IrOpcode::FPFract32) {
         bits = IrU32(ir.Select(ir.IEqual(bits.Value(), ir.Constant(0x3c00u)), ir.Constant(0x3bffu), bits.Value()));
     }
@@ -281,7 +282,7 @@ bool TranslationContext::float16Ternary(const RdnaInstruction& inst, IrOpcode op
     if (opcode == IrOpcode::FPFma32 && !mix) {
         IrF32 result = fmaF16RoundedToOdd(IrF32(*args[0]), IrF32(*args[1]), IrF32(*args[2]));
         if (measured && (floatMode->floatMode & 0x80u) == 0u) result = flushTinyF16Value(result, 0x387ff000u);
-        writeF16(inst.destination, result, {args[0], args[1], args[2]});
+        writeF16(inst.destination, result, {args[0], args[1], args[2]}, &invalidOperationF32({args[0], args[1], args[2]}, invalidProductF32(args[0], args[1])));
         return true;
     }
     if (mix) {
@@ -642,6 +643,12 @@ bool TranslationContext::floatTernary(const RdnaInstruction& inst, IrOpcode opco
     if (opcode == IrOpcode::FPFma32) result = &flushTinyProduct(args[0], args[1], result, args[2]).Value();
     const bool f32Sources = !mix || !(sourceAt(inst, 0u).opSelHi || sourceAt(inst, 1u).opSelHi || (!accumulator && sourceAt(inst, 2u).opSelHi));
     if (opcode == IrOpcode::FPFma32 && f32Sources) result = nanResultF32({args[0], args[1], args[2]}, result, &invalidProductF32(args[0], args[1]));
+    if (opcode == IrOpcode::FPFma32 && !f32Sources) {
+        IrValue& bits = ir.BitCastU32(*result);
+        IrValue& nan = ir.UGreaterThan(ir.BitwiseAnd(bits, ir.Constant(0x7fffffffu)), ir.Constant(0x7f800000u));
+        IrValue& invalid = invalidOperationF32({args[0], args[1], args[2]}, invalidProductF32(args[0], args[1]));
+        result = &ir.BitCastF32(ir.Select(ir.LogicalAnd(nan, invalid), ir.Constant(0xffc00000u), bits));
+    }
     writeOperand(inst.destination, result);
     return true;
 }

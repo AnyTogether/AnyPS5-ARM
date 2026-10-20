@@ -102,11 +102,27 @@ private:
     }
 
     static void appendMesh(std::vector<std::uint64_t>& key, const RecompileRequest& request) {
+        if (request.shader.stage == ShaderStage::Fragment) {
+            append(key, request.graphics && request.graphics->mesh);
+            return;
+        }
         if (request.shader.stage != ShaderStage::Mesh) return;
         const auto* mesh = request.graphics && request.graphics->mesh ? &*request.graphics->mesh : nullptr;
         append(key, mesh != nullptr);
         if (mesh == nullptr) return;
         for (const auto value : {mesh->inputPrimitive, mesh->primitivesPerGroup, mesh->verticesPerGroup, mesh->maxVertices, mesh->maxPrimitives, mesh->threadsPerGroup, mesh->ldsSizeDwords, mesh->provokingVertex, mesh->esgsItemSize, mesh->outputPrimitiveSize}) append(key, value);
+        const auto& barycentrics = request.graphics->meshBarycentrics;
+        append(key, barycentrics.has_value());
+        if (!barycentrics.has_value()) return;
+        append(key, barycentrics->emulation.active);
+        append(key, barycentrics->emulation.smooth);
+        append(key, barycentrics->emulation.linear);
+        append(key, barycentrics->parameters.size());
+        for (const auto& parameter : barycentrics->parameters) {
+            append(key, parameter.location);
+            append(key, parameter.sourceLocation);
+            append(key, parameter.perVertex);
+        }
     }
 
     static void appendTessellation(std::vector<std::uint64_t>& key, const RecompileRequest& request) {
@@ -192,6 +208,7 @@ private:
         append(key, value.orderedPixelShader);
         append(key, value.alphaToCoverage);
         append(key, value.stencilRefExportEnable);
+        append(key, value.stencilOperationValueExport);
         append(key, value.ditheredAlphaToCoverage);
         append(key, value.quadPixelMask);
         append(key, value.quadSampleMask);
@@ -213,6 +230,7 @@ private:
         append(key, value.fetchBufferReg);
         append(key, value.fetchEmbedded);
         append(key, value.paClVsOutCntl);
+        append(key, value.depthRemapMode);
         if (value.resourcesNum > value.resources.size()) throw std::runtime_error("Shader cache: invalid vertex resource count");
         append(key, value.resourcesNum);
         for (std::uint32_t i = 0; i < value.resourcesNum; ++i) {
@@ -265,12 +283,14 @@ private:
         append(key, value.relaxedFloat);
         append(key, value.float64DenormPreserve);
         append(key, value.meshAsCompute);
+        append(key, value.depthRangeRemap);
         append(key, value.registrationModules);
         append(key, value.registrationWordLimit);
         append(key, value.vertexSubgroups);
         append(key, value.float16DenormPreserve);
         append(key, value.spannedWaves);
         append(key, value.robustBufferAccess2);
+        append(key, value.float32FlushToZero);
     }
 };
 

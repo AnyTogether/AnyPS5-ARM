@@ -3,9 +3,9 @@ import os
 import struct
 import subprocess
 import sys
-import tempfile
 
 from test_windows_import_modules import consumer, dynamic, executable, provider
+from guest_import_fixtures import fixture_directory
 from test_guest_module_directories import needed_libraries
 
 
@@ -37,7 +37,7 @@ def sce_strings(image):
 
 def main():
     relinker = Path(sys.argv[1]).resolve()
-    with tempfile.TemporaryDirectory(prefix='anyps5-module-identity-') as directory:
+    with fixture_directory('anyps5-module-identity-') as directory:
         work = Path(directory)
 
         def convert(label, windows, request, module_name='libGuest', providers=None, guest_request=None, symbol='shared#A#B', module_directory='sce_module', extra=None):

@@ -148,8 +148,11 @@ int APS5_VABI sceUserServiceGetUserNumber(int user_id, int32_t* number) {
  return USER_SERVICE_OK;
 }
 
-int APS5_VABI sceUserServiceInitialize(const void* params) {
- (void)params;
+static bool ValidThreadPriority(int priority) {
+ return priority >= USER_SERVICE_THREAD_PRIORITY_MIN && priority <= USER_SERVICE_THREAD_PRIORITY_MAX;
+}
+
+static int MarkInitialized() {
  if (initialized.exchange(true)) {
   return USER_SERVICE_ERROR_ALREADY_INITIALIZED;
  }
@@ -157,11 +160,22 @@ int APS5_VABI sceUserServiceInitialize(const void* params) {
  return USER_SERVICE_OK;
 }
 
-int APS5_VABI sceUserServiceInitialize2(void) {
- if (!initialized.exchange(true)) {
-  loginReported.store(false);
+int APS5_VABI sceUserServiceInitialize(const void* params) {
+ if (params != nullptr) {
+  int priority = 0;
+  std::memcpy(&priority, params, sizeof(priority));
+  if (!ValidThreadPriority(priority)) {
+   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+  }
  }
- return USER_SERVICE_OK;
+ return MarkInitialized();
+}
+
+int APS5_VABI sceUserServiceInitialize2(int priority) {
+ if (!ValidThreadPriority(priority)) {
+  return USER_SERVICE_ERROR_INVALID_ARGUMENT;
+ }
+ return MarkInitialized();
 }
 
 int APS5_VABI sceUserServiceTerminate(void) {

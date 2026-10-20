@@ -3,12 +3,14 @@
 #include "prx/libc/include/General.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <stdexcept>
 #include <string>
 
 #ifdef _WIN32
 #include "prx/libkernel/File/include/WindowsFileTime.hpp"
 #include "prx/libkernel/File/include/WindowsSymbolicLink.hpp"
+#include "prx/libc/include/WindowsDescriptor.hpp"
 #include <io.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -33,7 +35,10 @@ static std::uint32_t FoldFileIndex(const BY_HANDLE_FILE_INFORMATION& identity) {
     return folded == 0 ? 1 : folded;
 }
 static int DoStat(const std::filesystem::path& p, NativeStat* st) {
-    if (_wstat64(p.c_str(), st) != 0) return -1;
+    if (_wstat64(p.c_str(), st) != 0) {
+        if (_doserrno == ERROR_CANT_RESOLVE_FILENAME) File::WindowsFileTime::Failure(_doserrno);
+        return -1;
+    }
     const auto handle = CreateFileW(p.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
@@ -42,6 +47,10 @@ static int DoStat(const std::filesystem::path& p, NativeStat* st) {
     return result;
 }
 static int DoFstat(int fd, NativeStat* st) {
+    if (WindowsDescriptorHandle_nid_no_patch(fd) == INVALID_HANDLE_VALUE) {
+        errno = EBADF;
+        return -1;
+    }
     if (_fstat64(fd, st) != 0) return -1;
     return ReadHandleInfo(reinterpret_cast<HANDLE>(::_get_osfhandle(fd)), st);
 }
@@ -148,11 +157,16 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
 namespace File {
 
 void FillFileStat(const std::filesystem::path& nativePath, FileStat* sb) {
-    NativeStat st{};
-    if (DoStat(nativePath, &st) != 0) {
+    if (!TryFillFileStat(nativePath, sb)) {
         throw std::runtime_error(std::string("FillFileStat: stat failed for ") + nativePath.string());
     }
+}
+
+bool TryFillFileStat(const std::filesystem::path& nativePath, FileStat* sb) {
+    NativeStat st{};
+    if (DoStat(nativePath, &st) != 0) return false;
     CopyNativeStat(st, sb);
+    return true;
 }
 
 void FillFileStat(int nativeDescriptor, FileStat* sb) {

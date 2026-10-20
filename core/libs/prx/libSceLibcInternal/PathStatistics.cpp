@@ -11,7 +11,7 @@
 #include <unistd.h>
 #endif
 #ifdef __APPLE__
-#include "prx/libSceLibcInternal/include/LibcStatvfs.hpp"
+#include "prx/libSceLibcInternal/include/Statvfs.hpp"
 #include <cstring>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -44,7 +44,32 @@ int HostError(int error) {
     }
 }
 
-#ifndef __APPLE__
+#ifdef __APPLE__
+int PathVolume(const std::filesystem::path& path, bool directory, LibcStatvfs* output) {
+    struct statvfs host{};
+    if (::statvfs(path.c_str(), &host) != 0) return Fail(HostError(errno));
+    if (directory) {
+        struct stat file{};
+        if (::stat(path.c_str(), &file) != 0) return Fail(HostError(errno));
+        if (!S_ISDIR(file.st_mode)) return Fail(20);
+    }
+    if (output == nullptr) return Fail(14);
+    KernelStatfs volume{};
+    if (host.f_flag & ST_RDONLY) volume.f_flags |= 0x1;
+    if (host.f_flag & ST_NOSUID) volume.f_flags |= 0x8;
+    volume.f_bsize = host.f_frsize != 0 ? host.f_frsize : host.f_bsize;
+    volume.f_iosize = host.f_bsize;
+    volume.f_blocks = host.f_blocks;
+    volume.f_bfree = host.f_bfree;
+    volume.f_bavail = static_cast<std::int64_t>(host.f_bavail);
+    volume.f_files = host.f_files;
+    volume.f_ffree = static_cast<std::int64_t>(host.f_favail);
+    volume.f_namemax = static_cast<std::uint32_t>(host.f_namemax);
+    const LibcStatvfs result = StatvfsFromStatfs(volume);
+    std::memcpy(output, &result, sizeof(result));
+    return 0;
+}
+#else
 struct Descriptor {
     int value;
     ~Descriptor() {
@@ -115,7 +140,7 @@ int OpenMetadata(const std::filesystem::path& path, bool directory) {
 }
 
 extern "C" int APS5_VABI statvfs_nid_postfix(const char* path, LibcStatvfs* output) {
-    if (path == nullptr) return Fail(14);
+    if (path == nullptr || output == nullptr) return Fail(14);
     if (*path == '\0') return Fail(2);
     const int saved = errno;
     const auto last = std::string_view(path).back();
@@ -123,24 +148,7 @@ extern "C" int APS5_VABI statvfs_nid_postfix(const char* path, LibcStatvfs* outp
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
 #ifdef __APPLE__
-    // macOS has no O_PATH: a file without read permission, a socket, or a FIFO without a writer cannot be
-    // opened only to name its volume, so the volume is queried by path. The fields match fstatvfs.
-    struct stat file {};
-    if (::stat(native.c_str(), &file) != 0) return Fail(HostError(errno));
-    if (directory && !S_ISDIR(file.st_mode)) return Fail(20);
-    struct statvfs host {};
-    if (::statvfs(native.c_str(), &host) != 0) return Fail(HostError(errno));
-    if (output == nullptr) return Fail(14);
-    const LibcStatvfs result{
-        static_cast<std::uint64_t>(host.f_bavail), static_cast<std::uint64_t>(host.f_bfree),
-        static_cast<std::uint64_t>(host.f_blocks), static_cast<std::uint64_t>(host.f_favail),
-        static_cast<std::uint64_t>(host.f_favail), static_cast<std::uint64_t>(host.f_files),
-        static_cast<std::uint64_t>(host.f_bsize),
-        std::uint64_t{(host.f_flag & ST_RDONLY) ? 1u : 0u} | std::uint64_t{(host.f_flag & ST_NOSUID) ? 2u : 0u},
-        static_cast<std::uint64_t>(host.f_frsize != 0 ? host.f_frsize : host.f_bsize), 0,
-        static_cast<std::uint64_t>(host.f_namemax)
-    };
-    std::memcpy(output, &result, sizeof(result));
+    if (PathVolume(native, directory, output) != 0) return -1;
     errno = saved;
     return 0;
 #else

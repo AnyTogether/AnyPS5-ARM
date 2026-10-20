@@ -723,6 +723,27 @@ std::uint32_t formattedGpuCall(SpirvValueEmitContext& context, const IrValue& in
     return value;
 }
 
+struct CoherentPair {
+    MemoryResourceAccess wide;
+    std::uint32_t index;
+    std::uint32_t usable;
+};
+
+std::optional<CoherentPair> coherentPair(SpirvValueEmitContext& context, const IrValue& instruction, const RuntimeDescriptor& resource, std::uint32_t components) {
+    auto& state = context.state;
+    const auto& memory = context.Memory(instruction);
+    if (components != 2u || !memory.coherent || memory.gpuDescriptor || memory.dataBits != 32u || state.storageBufferU64Variable == 0u) return std::nullopt;
+    const auto low = address(context, instruction, resource, 0u, 4u);
+    const auto high = address(context, instruction, resource, 4u, 4u);
+    const auto wide = directAccess(context, instruction, true);
+    const auto byte = EmitAddU32(state, low.guest, wide.byteOffset);
+    const auto index = Binary(state, spv::OpShiftRightLogical, TypeU32(state), byte, ConstantU32(state, 3u));
+    const auto aligned = both(state, equal(state, baseMisalignment(context, instruction), ConstantU32(state, 0u)), equal(state, EmitAndConstant(state, byte, 7u), ConstantU32(state, 0u)));
+    const auto adjacent = equal(state, high.guest, EmitAddU32(state, low.guest, ConstantU32(state, 4u)));
+    const auto inBounds = both(state, both(state, low.inBounds, high.inBounds), EmitMemoryElementInBounds(state, wide, index));
+    return CoherentPair{wide, index, both(state, both(state, aligned, adjacent), inBounds)};
+}
+
 }
 
 std::uint32_t EmitRuntimeBufferLoad(SpirvValueEmitContext& context, const IrValue& instruction, std::uint32_t components) {
@@ -742,15 +763,10 @@ std::uint32_t EmitRuntimeBufferLoad(SpirvValueEmitContext& context, const IrValu
             }
             return composite(state, components, values);
         };
-        if (components != 2u || !memory.coherent || memory.gpuDescriptor || state.storageBufferU64Variable == 0u) return readComponents();
-        const auto runtime = address(context, instruction, resource, 0u, 8u);
-        const auto wide = directAccess(context, instruction, true);
-        const auto byte = EmitAddU32(state, runtime.guest, wide.byteOffset);
-        const auto index = Binary(state, spv::OpShiftRightLogical, TypeU32(state), byte, ConstantU32(state, 3u));
-        const auto aligned = both(state, equal(state, baseMisalignment(context, instruction), ConstantU32(state, 0u)), equal(state, EmitAndConstant(state, byte, 7u), ConstantU32(state, 0u)));
-        const auto inBounds = both(state, runtime.inBounds, EmitMemoryElementInBounds(state, wide, index));
-        return EmitValueIfElse(state, both(state, aligned, inBounds), type, [&] {
-            const auto pointer = EmitStorageBufferElementPointer(state, wide, index, TypeStorageBufferU64ElementPointer(state));
+        const auto pair = coherentPair(context, instruction, resource, components);
+        if (!pair) return readComponents();
+        return EmitValueIfElse(state, pair->usable, type, [&] {
+            const auto pointer = EmitStorageBufferElementPointer(state, pair->wide, pair->index, TypeStorageBufferU64ElementPointer(state));
             const auto value = state.module.AllocateId();
             state.module.AddFunction(spv::OpAtomicLoad, TypeScalarU64(state), value, pointer, ConstantU32(state, spv::ScopeDevice), ConstantU32(state, spv::MemorySemanticsMaskNone));
             const auto high = Binary(state, spv::OpShiftRightLogical, TypeScalarU64(state), value, BdaConstant(state, 32u));
@@ -769,10 +785,25 @@ void EmitRuntimeBufferStore(SpirvValueEmitContext& context, const IrValue& instr
             return;
         }
         const auto values = storeValues(state, storeData(context, instruction), components);
-        for (std::uint32_t component = 0; component < components; ++component) {
-            const auto access = address(context, instruction, resource, component * 4u, memory.dataBits / 8u);
-            EmitIfCondition(state, access.inBounds, [&] { writeBuffer(context, instruction, access.guest, values[component], memory.dataBits); });
+        const auto writeComponents = [&] {
+            for (std::uint32_t component = 0; component < components; ++component) {
+                const auto access = address(context, instruction, resource, component * 4u, memory.dataBits / 8u);
+                EmitIfCondition(state, access.inBounds, [&] { writeBuffer(context, instruction, access.guest, values[component], memory.dataBits); });
+            }
+        };
+        const auto pair = coherentPair(context, instruction, resource, components);
+        if (!pair) {
+            writeComponents();
+            return;
         }
+        EmitIfCondition(state, pair->usable, [&] {
+            const auto u64 = TypeScalarU64(state);
+            const auto high = Binary(state, spv::OpShiftLeftLogical, u64, Unary(state, spv::OpUConvert, u64, values[1]), BdaConstant(state, 32u));
+            const auto value = Binary(state, spv::OpBitwiseOr, u64, Unary(state, spv::OpUConvert, u64, values[0]), high);
+            const auto pointer = EmitStorageBufferElementPointer(state, pair->wide, pair->index, TypeStorageBufferU64ElementPointer(state));
+            state.module.AddFunction(spv::OpAtomicStore, pointer, ConstantU32(state, spv::ScopeDevice), ConstantU32(state, spv::MemorySemanticsMaskNone), value);
+        });
+        EmitIfCondition(state, Unary(state, spv::OpLogicalNot, TypeBool(state), pair->usable), writeComponents);
     });
 }
 

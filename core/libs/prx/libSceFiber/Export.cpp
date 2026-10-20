@@ -565,5 +565,24 @@ int32_t APS5_VABI sceFiberStopContextSizeCheck(void) {
     return g_contextSizeCheck.compare_exchange_strong(expected, false) ? SCE_OK : SCE_FIBER_ERROR_STATE;
 }
 
+int APS5_VABI _sceFiberAttachContextAndRun(FiberObject* fiber, void* addr_context, uint64_t size_context,
+                                          uint64_t arg_on_run, uint64_t* arg_on_return) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
+int APS5_VABI _sceFiberAttachContextAndSwitch(FiberObject* fiber, void* addr_context, uint64_t size_context,
+                                              uint64_t arg_on_run, uint64_t* arg_on_run_out) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _sceFiberInitializeWithInternalOptionImpl(FiberObject* fiber, const char* name, GuestFiberEntry entry,
+                                                        uint64_t arg_on_initialize, void* addr_context,
+                                                        uint64_t size_context, const FiberOptParam* opt_param,
+                                                        uint32_t flags, uint32_t build_version) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+}

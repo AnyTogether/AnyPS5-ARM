@@ -474,6 +474,7 @@ constexpr std::array<OpcodeMeta, static_cast<std::size_t>(IrOpcode::Count)> Meta
     makeMeta("DataAppend", U32, U32, U1, U32, U32),
     makeMeta("DataConsume", U32, U32, U1, U32, U32),
     makeMeta("DataOrderedCount", U32, U32, U1, U32, U32, U32),
+    makeMeta("DataOrderedSwap", U32, U32, U1, U32, U32, U32),
     makeMeta("SwizzleU32", U32, U32, U32, U1),
     makeMeta("ImageQueryDimensions", U32x4, ImageResource, ImageAddress, U1),
     makeMeta("ImageQueryLod", U32x4, ImageResource, SamplerResource, ImageAddress, U1),
@@ -698,6 +699,7 @@ SharedAccess SharedAccessOf(IrOpcode opcode) {
             return SharedAccess::Atomic;
         case IrOpcode::DataAppend:
         case IrOpcode::DataOrderedCount:
+        case IrOpcode::DataOrderedSwap:
             return SharedAccess::Append;
         case IrOpcode::DataConsume:
             return SharedAccess::Consume;

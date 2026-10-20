@@ -109,6 +109,14 @@ Amd64OnlyMatch _inPlace(const Entry& entry, const std::size_t length, std::vecto
     return Amd64OnlyMatch{entry.Name, length, Amd64OnlyLowering::InPlace, std::move(replacement), {}, 0};
 }
 
+void _emitRdpru(StubBodyBuilder& body) {
+    body.Raw(std::span<const std::uint8_t>(kLeaRspBelowRedZone.Bytes, kLeaRspBelowRedZone.Size));
+    body.Raw(std::span<const std::uint8_t>(kRdpruTrampolineBytes, sizeof(kRdpruTrampolineBytes)));
+    body.Raw(std::span<const std::uint8_t>(kLeaRspRestore.Bytes, kLeaRspRestore.Size));
+}
+
+constexpr std::uint8_t kMcommitStc = 0xF9;
+
 void _emitScalarCompare(StubBodyBuilder& body, const DecodedInstruction& instr, const ScalarCompareOperands& operands) {
     const std::span<const std::uint8_t> bytes(instr.Data, instr.Length);
     if (operands.RipDisplacementOffset)
@@ -184,6 +192,8 @@ private:
     [[nodiscard]] Amd64OnlyMatch _matchSha256(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] Amd64OnlyMatch _matchSha1(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] Amd64OnlyMatch _matchClzero(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
+    [[nodiscard]] Amd64OnlyMatch _matchRdpru(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
+    [[nodiscard]] Amd64OnlyMatch _matchMcommit(const DecodedInstruction& instr) const;
     [[nodiscard]] std::optional<Amd64OnlyMatch> _matchRosetta(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] const char* _emitOutOfLine(StubBodyBuilder& body, const DecodedInstruction& instr) const;
 };
@@ -224,6 +234,18 @@ Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchSha1(const DecodedInstruction&
 Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchClzero(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const {
     const auto operands = DecodeClzero(instr.Data, instr.Length);
     return _trampoline(kClzero.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _clzeroLowering.EmitOutOfLine(body, operands); }));
+}
+
+Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchRdpru(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const {
+    if (!_validWait(instr))
+        return _unsupported(kRdpru, instr.Length);
+    return _trampoline(kRdpru.Name, instr.Length, _outOfLine(instr.Length, trailing, [](StubBodyBuilder& body) { _emitRdpru(body); }));
+}
+
+Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchMcommit(const DecodedInstruction& instr) const {
+    if (!_validWait(instr))
+        return _unsupported(kMcommit, instr.Length);
+    return _inPlace(kMcommit, instr.Length, {kMcommitStc});
 }
 
 std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::_matchRosetta(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const {
@@ -277,6 +299,18 @@ const char* Amd64OnlyInstructionMatcher::_emitOutOfLine(StubBodyBuilder& body, c
     if (const auto reciprocal = DecodeReciprocal(instr.Data, instr.Length)) {
         _reciprocalLowering.EmitOutOfLine(body, *reciprocal);
         return _reciprocalEntry(*reciprocal).Name;
+    }
+    if (instr.IsRdpru()) {
+        if (!_validWait(instr))
+            return nullptr;
+        _emitRdpru(body);
+        return kRdpru.Name;
+    }
+    if (instr.IsMcommit()) {
+        if (!_validWait(instr))
+            return nullptr;
+        body.Raw(std::span<const std::uint8_t>(&kMcommitStc, 1));
+        return kMcommit.Name;
     }
     if (_target == Amd64OnlyTarget::Rosetta && instr.IsRdpid()) {
         body.Raw(_rdpidReplacement(instr));
@@ -376,10 +410,10 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::Match(
         return _unsupported(kClzero, length);
 
     if (instr.IsRdpru())
-        return _unsupported(kRdpru, length);
+        return _matchRdpru(instr, trailing);
 
     if (instr.IsMcommit())
-        return _unsupported(kMcommit, length);
+        return _matchMcommit(instr);
 
     return _matchRosetta(instr, trailing);
 }

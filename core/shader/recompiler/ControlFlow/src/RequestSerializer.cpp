@@ -354,6 +354,7 @@ void writePixelInfo(Writer& writer, const ShaderPixelStageInfo& info) {
     writer.WriteBool(info.iteratesSamples);
     writer.WriteU8(static_cast<std::uint8_t>(info.positionLocation));
     for (const std::uint8_t location : info.sampleLocations) writer.WriteU8(location);
+    writer.WriteBool(info.stencilOperationValueExport);
 }
 
 ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
@@ -421,6 +422,7 @@ ShaderPixelStageInfo readPixelInfo(Reader& reader, std::uint32_t version) {
         info.positionLocation = readPixelPositionLocation(reader);
         for (std::uint8_t& location : info.sampleLocations) location = reader.ReadU8();
     }
+    if (version >= 37u) info.stencilOperationValueExport = reader.ReadBool();
     if (version < 5u) {
         const auto input = [](PixelInput value, bool present) { return present ? PixelInputBit(value) : 0u; };
         info.inputAddr = input(PixelInput::PerspectiveSample, info.hasPerspectiveCenterVgpr && inputAddrOrCenterVgpr == 2u) | input(PixelInput::PerspectiveCenter, info.hasPerspectiveCenterVgpr) |
@@ -747,6 +749,19 @@ void writeGraphicsCompileContext(Writer& writer, const GraphicsCompileContext& g
     writer.WriteU32(graphics.draw.indexCount);
     writer.WriteU32(graphics.draw.indexElementBytes);
     writer.WriteU32(graphics.draw.instanceCount);
+    writer.WriteBool(graphics.meshBarycentrics.has_value());
+    if (graphics.meshBarycentrics.has_value()) {
+        const auto& barycentrics = *graphics.meshBarycentrics;
+        writer.WriteBool(barycentrics.emulation.active);
+        writer.WriteBool(barycentrics.emulation.smooth);
+        writer.WriteBool(barycentrics.emulation.linear);
+        writer.WriteU64(barycentrics.parameters.size());
+        for (const auto& parameter : barycentrics.parameters) {
+            writer.WriteU32(parameter.location);
+            writer.WriteU32(parameter.sourceLocation);
+            writer.WriteBool(parameter.perVertex);
+        }
+    }
 }
 
 GraphicsCompileContext readGraphicsCompileContext(Reader& reader, DeserializedGraphicsCompileContext& storage, std::uint32_t version) {
@@ -785,6 +800,22 @@ GraphicsCompileContext readGraphicsCompileContext(Reader& reader, DeserializedGr
     storage.draw.indexElementBytes = reader.ReadU32();
     storage.draw.instanceCount = reader.ReadU32();
     graphics.draw = storage.draw;
+    if (version >= 38u && reader.ReadBool()) {
+        MeshBarycentricLayout barycentrics;
+        barycentrics.emulation.active = reader.ReadBool();
+        barycentrics.emulation.smooth = reader.ReadBool();
+        barycentrics.emulation.linear = reader.ReadBool();
+        const auto count = reader.ReadU64();
+        reader.Require(count, 9u);
+        for (std::uint64_t i = 0; i < count; i++) {
+            FragmentParameter parameter{};
+            parameter.location = reader.ReadU32();
+            parameter.sourceLocation = reader.ReadU32();
+            parameter.perVertex = reader.ReadBool();
+            barycentrics.parameters.push_back(parameter);
+        }
+        graphics.meshBarycentrics = std::move(barycentrics);
+    }
     return graphics;
 }
 
@@ -794,7 +825,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(35u);
+    writer.WriteU32(39u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -820,6 +851,11 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     writer.WriteBool(request.target.float16DenormPreserve);
     writer.WriteU32Span(request.context.linkedCallFallbacks);
     writer.WriteBool(request.target.spannedWaves);
+    writer.WriteBool(request.target.depthRangeRemap);
+    if (request.context.vertex.has_value()) {
+        writer.WriteU32(request.context.vertex->depthRemapMode);
+    }
+    writer.WriteBool(request.target.float32FlushToZero);
     writer.WriteU32(request.target.subgroupStages);
     writer.WriteBool(request.target.meshAsCompute);
     return base64Encode(buffer);
@@ -830,7 +866,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 35u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 39u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -867,8 +903,21 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.request.context.linkedCallFallbacks = result.linkedCallFallbacks;
     }
     if (version >= 32u) result.request.target.spannedWaves = reader.ReadBool();
-    // The fork's fields: version 33 (upstream skipped it) and 35 on, after upstream's 34.
-    if (version == 33u || version >= 35u) {
+    // The fork's fields: version 33 (upstream skipped it), then 39 on, after upstream's 38. The
+    // fork's version 35 requests (its fields right after the spanned-waves flag) are not read.
+    if (version == 33u) {
+        result.request.target.subgroupStages = reader.ReadU32();
+        result.request.target.meshAsCompute = reader.ReadBool();
+    }
+    if (version >= 35u) {
+        result.request.target.depthRangeRemap = reader.ReadBool();
+        if (result.vertex.has_value()) {
+            result.vertex->depthRemapMode = reader.ReadU32();
+            result.request.context.vertex = result.vertex;
+        }
+    }
+    if (version >= 36u) result.request.target.float32FlushToZero = reader.ReadBool();
+    if (version >= 39u) {
         result.request.target.subgroupStages = reader.ReadU32();
         result.request.target.meshAsCompute = reader.ReadBool();
     }

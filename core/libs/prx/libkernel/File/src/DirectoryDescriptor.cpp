@@ -120,15 +120,20 @@ void DuplicateDirectoryDescriptor(int from, int to) {
 std::optional<std::int64_t> SeekDirectoryDescriptor(int fd, std::int64_t offset, int whence) {
     constexpr int SeekSet = 0;
     constexpr int SeekCurrent = 1;
+    constexpr int SeekEnd = 2;
     if (g_directoryCount == 0) return std::nullopt;
     const auto found = Find(fd);
     if (!found) return std::nullopt;
     auto& state = *found;
     std::lock_guard lock(state.mutex);
-    if (whence != SeekSet && whence != SeekCurrent) NotImplemented_nid_no_patch("lseek from the end of a directory descriptor");
-    const auto cursor = static_cast<std::int64_t>(state.cursor);
+    if (whence != SeekSet && whence != SeekCurrent && whence != SeekEnd) {
+        errno = EINVAL;
+        return std::int64_t{-1};
+    }
+    if (whence == SeekEnd) Load(state, fd);
+    const auto cursor = static_cast<std::int64_t>(whence == SeekEnd ? state.entries.size() : state.cursor);
     if (whence == SeekCurrent && offset == 0) return cursor;
-    if (whence == SeekCurrent && offset > std::numeric_limits<std::int64_t>::max() - cursor) {
+    if ((whence == SeekCurrent || whence == SeekEnd) && offset > std::numeric_limits<std::int64_t>::max() - cursor) {
         errno = EOVERFLOW;
         return std::int64_t{-1};
     }
@@ -235,4 +240,14 @@ extern "C" const char* GetDirectoryDescriptorPath_nid_no_patch(int fd, int* erro
     path.assign(reinterpret_cast<const char*>(utf8Path.data()), utf8Path.size());
     *error = 0;
     return path.c_str();
+}
+
+extern "C" std::uint64_t GetDirectoryDescriptorPosition_nid_no_patch(int fd) {
+#ifdef _WIN32
+    const auto position = File::SeekDirectoryDescriptor(fd, 0, 1);
+    return position && *position > 0 ? static_cast<std::uint64_t>(*position) : 0;
+#else
+    (void)fd;
+    return 0;
+#endif
 }

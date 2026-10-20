@@ -1,6 +1,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/BufferPool.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "AllocationFailure.hpp"
+#include "SlabReturn.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -175,6 +176,17 @@ VKAPI_ATTR void VKAPI_CALL mockMemoryProperties2(VkPhysicalDevice, VkPhysicalDev
     auto* reported = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
     reported->heapBudget[0] = reportedBudget;
     reported->heapUsage[0] = reportedUsage;
+}
+
+std::uint64_t diagnosticBudgetQueries = 0;
+
+VKAPI_ATTR void VKAPI_CALL mockDiagnosticMemoryProperties2(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties2* properties) {
+    ++diagnosticBudgetQueries;
+    auto* reported = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
+    reported->heapUsage[0] = 1500 * MiB;
+    reported->heapBudget[0] = 2000 * MiB;
+    reported->heapUsage[1] = 2500 * MiB;
+    reported->heapBudget[1] = 3000 * MiB;
 }
 
 Context budgetContext() {
@@ -776,6 +788,48 @@ void ImageCacheReclaim() {
     Expect(mock.liveBytes == 0, "a texture allocation leaked memory");
 }
 
+void AllocationFailureReportsHeapBudgets() {
+    mock = MockDevice{};
+    diagnosticBudgetQueries = 0;
+    std::string failure;
+    std::uint64_t allocationPathBudgetQueries = 0;
+    {
+        auto context = mockContext();
+        context.physical = reinterpret_cast<VkPhysicalDevice>(std::uintptr_t{1});
+        context.memoryProperties2 = mockDiagnosticMemoryProperties2;
+        context.memory.memoryHeapCount = 2;
+        context.bufferPool = std::make_shared<BufferPool>(context);
+        const auto beforeAllocation = diagnosticBudgetQueries;
+        mock.results = {VK_ERROR_DEVICE_LOST};
+        try {
+            DeviceBuffer buffer(context, 4 * MiB, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        } catch (const std::exception& error) {
+            failure = error.what();
+        }
+        allocationPathBudgetQueries = diagnosticBudgetQueries - beforeAllocation;
+    }
+    Expect(failure.find("heap 0 1500/2000 MiB") != std::string::npos, "allocation failure omitted the first heap's memory budget");
+    Expect(failure.find("heap 1 2500/3000 MiB") != std::string::npos, "allocation failure omitted a later heap's memory budget");
+    Expect(allocationPathBudgetQueries == 2, "allocation failure did not query the memory budget for both type selection and its diagnostic");
+
+    mock = MockDevice{};
+    diagnosticBudgetQueries = 0;
+    failure.clear();
+    {
+        auto context = mockContext();
+        context.physical = reinterpret_cast<VkPhysicalDevice>(std::uintptr_t{1});
+        context.memory.memoryHeapCount = 2;
+        mock.results = {VK_ERROR_DEVICE_LOST};
+        try {
+            DeviceBuffer buffer(context, 4 * MiB, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        } catch (const std::exception& error) {
+            failure = error.what();
+        }
+    }
+    Expect(failure.find("heap 0") == std::string::npos && failure.find("heap 1") == std::string::npos, "allocation failure emitted heap data when VK_EXT_memory_budget was unavailable");
+    Expect(diagnosticBudgetQueries == 0, "missing-extension fallback attempted a memory budget query");
+}
+
 void SuccessfulAllocationKeepsPool() {
     mock = MockDevice{};
     {
@@ -847,6 +901,16 @@ int main(int argc, char** argv) {
             SmallDeviceRetention();
             return failures == 0 ? 0 : 1;
         }
+        if (argc == 2) {
+            const bool host = std::strcmp(argv[1], "--slab-return-host") == 0;
+            Expect(host || std::strcmp(argv[1], "--slab-return-device") == 0, "unknown slab return test mode");
+            AgcDriver::Tests::SlabReturnWithoutAllocation(mockContext(), host ? 1u : 0u);
+            Expect(mock.liveBytes == 0, "slab return test leaked memory");
+            return failures == 0 ? 0 : 1;
+        }
+        AgcDriver::Tests::SlabReturnWithoutAllocation(mockContext(), 0);
+        AgcDriver::Tests::SlabReturnWithoutAllocation(mockContext(), 1);
+        Expect(mock.liveBytes == 0, "slab return test leaked memory");
         SizeClassesAndDirections();
         LargerClass();
         KeptUntilFence();
@@ -868,6 +932,7 @@ int main(int argc, char** argv) {
         ReclaimSlabs();
         AllocationFailure(VK_ERROR_DEVICE_LOST, VK_ERROR_DEVICE_LOST, true);
         AllocationFailure(VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_DEVICE_LOST, true);
+        AllocationFailureReportsHeapBudgets();
         SuccessfulAllocationKeepsPool();
         PartialSlabDoesNotRetry();
         CacheReclaimRecovery();

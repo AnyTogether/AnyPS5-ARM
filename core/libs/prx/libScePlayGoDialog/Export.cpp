@@ -20,6 +20,7 @@ constexpr std::int32_t ERROR_NOT_INITIALIZED = static_cast<std::int32_t>(0x80ED0
 constexpr std::int32_t ERROR_ALREADY_INITIALIZED = static_cast<std::int32_t>(0x80ED0002);
 constexpr std::int32_t ERROR_PARAM_INVALID = static_cast<std::int32_t>(0x80ED0003);
 constexpr std::int32_t ERROR_INVALID_STATE = static_cast<std::int32_t>(0x80ED0005);
+constexpr std::int32_t COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<std::int32_t>(0x80B80005u);
 
 std::atomic<int> g_status{STATUS_NONE};
 
@@ -67,6 +68,7 @@ int APS5_VABI scePlayGoDialogUpdateStatus(void) {
 int APS5_VABI scePlayGoDialogGetResult(void* result) {
     if (g_status.load() == STATUS_NONE) return ERROR_NOT_INITIALIZED;
     if (!result) return ERROR_PARAM_INVALID;
+    if (g_status.load() != STATUS_FINISHED) return COMMON_DIALOG_ERROR_NOT_FINISHED;
     auto* r = static_cast<PlayGoDialogResult*>(result);
     std::memset(r, 0, sizeof(*r));
     r->result = RESULT_OK;

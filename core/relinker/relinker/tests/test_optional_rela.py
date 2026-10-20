@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 
+from signal_run import run_without_core_dump
 from test_dynamic_segment import fixture as base_fixture
 from test_linux_dynamic_strings import dynamic_strings, file_offset
 from test_linux_load_alignment import loads
@@ -108,7 +109,7 @@ def main():
                         assert run.returncode == 42, (case.name, run.returncode, run.stderr)
                     if target == "linux" and plt and sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
                         output.chmod(0o755)
-                        run = subprocess.run([str(output)], capture_output=True, timeout=20)
+                        run = run_without_core_dump([str(output)], capture_output=True, timeout=20)
                         assert run.returncode == -signal.SIGTRAP, (case.name, run.returncode, run.stderr)
 
             invalid = (("missing-address", ((8, 24), (9, 24)), (), "DT_RELA"),

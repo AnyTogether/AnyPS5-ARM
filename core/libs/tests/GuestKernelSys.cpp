@@ -1,4 +1,5 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include "SceTypes.hpp"
 #include <array>
@@ -19,7 +20,7 @@
 #define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
 #endif
 #endif
-#ifdef __linux__
+#ifndef _WIN32
 #include <cerrno>
 #include <unistd.h>
 #endif
@@ -97,6 +98,19 @@ bool SymlinkTargetThrows(const char* target, const std::string& created) {
     return false;
 }
 
+bool RemoveSymlink(const std::string& link) {
+#ifdef _WIN32
+    // std::filesystem::remove follows the link, reports a dangling one as
+    // missing and clears the error, so remove the reparse point itself. A
+    // directory reparse point, such as the one the "..." target creates, is
+    // refused by DeleteFileW and needs RemoveDirectoryW instead.
+    const auto wide = std::filesystem::path(link).wstring();
+    return DeleteFileW(wide.c_str()) != FALSE || RemoveDirectoryW(wide.c_str()) != FALSE;
+#else
+    return std::filesystem::remove(link);
+#endif
+}
+
 void CheckSymlinkTargetRestrictions(const std::filesystem::path& root) {
     const auto created = (root / "rejected").string();
     for (const auto& target : {std::string(".."), std::string("../x"), std::string("a/../b"), std::string("a/../../x"), std::string("/abs")})
@@ -119,7 +133,7 @@ void CheckSymlinkTargetRestrictions(const std::filesystem::path& root) {
         Require(symlink_nid_postfix("a..b", dots.c_str()) == 0 && links(dots, "a..b"));
         const auto ellipsis = (root / "accepted-ellipsis").string();
         Require(symlink_nid_postfix("...", ellipsis.c_str()) == 0 && links(ellipsis, "..."));
-        Require(std::filesystem::remove(nested) && std::filesystem::remove(dots) && std::filesystem::remove(ellipsis));
+        Require(RemoveSymlink(nested) && RemoveSymlink(dots) && RemoveSymlink(ellipsis));
     } else {
         Require(link == -1 && Error() == 1);
         std::fprintf(stderr, "symbolic links unavailable: the symlink target success cases not tested\n");
@@ -344,7 +358,7 @@ int main() {
     char directoryPath[1024];
     Require(getcwd_nid_postfix(directoryPath, sizeof(directoryPath)) == directoryPath);
     Require(std::strcmp(directoryPath, ("/" + root.filename().string()).c_str()) == 0);
-#ifdef __linux__
+#ifndef _WIN32
     Require(chdir_nid_postfix("/") == 0);
     const auto originalPermissions = std::filesystem::status(root).permissions();
     std::filesystem::permissions(root, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
@@ -465,6 +479,12 @@ int main() {
     Require(sceKernelClose(made) == 0);
     Require(openat_nid_postfix(base, "made.bin", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL, 0644) == -1 && Error() == 17);
     Require(openat_nid_postfix(base, "missing.bin", SCE_KERNEL_O_RDONLY) == -1 && Error() == 2);
+    Require(openat_nid_postfix(base, "file.txt", SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, "absent.bin", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL | SCE_KERNEL_O_DIRECTORY, 0644) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, nullptr, SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(base, "", SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
+    Require(openat_nid_postfix(9999, "", SCE_KERNEL_O_WRONLY | SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL | SCE_KERNEL_O_DIRECTORY, 0644) == -1 && Error() == 22);
+    Require(openat_nid_postfix(-100, nullptr, SCE_KERNEL_O_ACCMODE) == -1 && Error() == 22);
     const auto guestFile = "/" + root.filename().string() + "/file.txt";
     const int absolute = openat_nid_postfix(-1, guestFile.c_str(), SCE_KERNEL_O_RDONLY);
     Require(absolute >= 0 && sceKernelClose(absolute) == 0);
@@ -645,6 +665,6 @@ int main() {
         Require(!std::filesystem::exists(std::filesystem::symlink_status(throughLink)));
     }
 #endif
-    std::filesystem::remove_all(root);
+    RemoveTree(root);
     return 0;
 }

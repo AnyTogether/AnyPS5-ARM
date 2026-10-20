@@ -51,6 +51,9 @@ int main() {
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, &availableKb) == 0);
     Require(availableKb == 0);
     Require(sceAppContentDownloadDataGetAvailableSpaceKb(&download, nullptr) == ErrorParameter);
+    Require(sceAppContentDownloadDataGetAvailableSpaceKb(nullptr, &availableKb) == ErrorParameter);
+    AppContentMountPoint invalidMount{};
+    Require(sceAppContentDownloadDataGetAvailableSpaceKb(&invalidMount, &availableKb) == ErrorNotMounted);
     const auto downloadData = ResolvePath_nid_no_patch("/download0");
     Require(sceAppContentDownloadDataFormat(&download) == 0);
     Require(std::filesystem::is_directory(downloadData) && std::filesystem::is_empty(downloadData));
@@ -58,6 +61,7 @@ int main() {
     { std::ofstream file(downloadData / "cache" / "old.bin"); file << "downloaded"; }
     { std::ofstream file(downloadData / "index.dat"); file << "downloaded"; }
     Require(sceAppContentDownloadDataFormat(nullptr) == ErrorParameter);
+    Require(sceAppContentDownloadDataFormat(&invalidMount) == ErrorNotMounted);
     Require(std::filesystem::exists(downloadData / "index.dat"));
     Require(sceAppContentDownloadDataFormat(&download) == 0);
     Require(std::filesystem::is_directory(downloadData) && std::filesystem::is_empty(downloadData));

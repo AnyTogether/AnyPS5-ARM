@@ -34,6 +34,26 @@ int APS5_VABI sceContentDeleteById(std::int64_t contentId) {
     throw std::logic_error(std::string(__func__) + ": content id " + std::to_string(contentId) + " is not in the host content library, which is empty, and the console's error for it is unknown");
 }
 
+int APS5_VABI sceContentDeleteByIdListForSf(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentDeleteGlobalMstat(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentDeleteMemoryInitialize(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceContentDeleteMemoryTerminate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceContentDeleteTerminate(void) {
     bool expected = true;
     if (!g_initialized.compare_exchange_strong(expected, false)) throw std::logic_error(std::string(__func__) + ": not initialized");

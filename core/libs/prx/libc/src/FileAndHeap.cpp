@@ -9,6 +9,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <cerrno>
 #include <cstring>
@@ -22,6 +23,7 @@
 #include "prx/libc/include/WindowsDescriptor.hpp"
 #endif
 
+#include "prx/libc/include/SonyCrt.hpp"
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/General.hpp"
@@ -29,6 +31,7 @@
 #include "prx/libc/include/HostErrno.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/HostEntropy.hpp"
 
 #ifdef __linux__
 #include <stdio_ext.h>
@@ -149,6 +152,7 @@ static bool IsPipeStream(std::FILE* native) {
 #endif
 
 using GuestCompare = int (APS5_VABI *)(const void*, const void*);
+using GuestContextCompare = int (APS5_VABI *)(const void*, const void*, void*);
 
 static void SwapElements(unsigned char* left, unsigned char* right, size_t size) {
     for (size_t index = 0; index < size; ++index) std::swap(left[index], right[index]);
@@ -158,19 +162,22 @@ static void SwapRanges(unsigned char* left, unsigned char* right, size_t bytes) 
     if (bytes > 0) SwapElements(left, right, bytes);
 }
 
-static unsigned char* MedianOfThree(unsigned char* a, unsigned char* b, unsigned char* c, GuestCompare compare) {
+template <typename Compare>
+static unsigned char* MedianOfThree(unsigned char* a, unsigned char* b, unsigned char* c, Compare compare) {
     return compare(a, b) < 0
         ? (compare(b, c) < 0 ? b : (compare(a, c) < 0 ? c : a))
         : (compare(b, c) > 0 ? b : (compare(a, c) < 0 ? a : c));
 }
 
-static void InsertionSort(unsigned char* base, size_t count, size_t size, GuestCompare compare) {
+template <typename Compare>
+static void InsertionSort(unsigned char* base, size_t count, size_t size, Compare compare) {
     for (unsigned char* next = base + size; next < base + count * size; next += size)
         for (unsigned char* element = next; element > base && compare(element - size, element) > 0; element -= size)
             SwapElements(element, element - size, size);
 }
 
-static void SortElements(unsigned char* base, size_t count, size_t size, GuestCompare compare) {
+template <typename Compare>
+static void SortElements(unsigned char* base, size_t count, size_t size, Compare compare) {
     for (;;) {
         if (count < 7) {
             InsertionSort(base, count, size, compare);
@@ -294,6 +301,12 @@ FileStream* APS5_VABI fdopen_nid_postfix(int descriptor, const char* mode) {
     } catch (const std::bad_alloc&) { errno = 12; return nullptr; }
 }
 
+static int OpenFailure(const std::filesystem::path& path, bool writes, int hostError) {
+    const int error = GuestErrnoFromHost_nid_no_patch(hostError);
+    std::error_code status;
+    return writes && error == 13 && std::filesystem::is_directory(path, status) ? 21 : error;
+}
+
 FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode, FileStream* stream) {
     if (!stream || !mode) { errno = 22; return nullptr; }
     if (!filename) { errno = 45; return nullptr; } // Mode-only reopening is not supported.
@@ -324,7 +337,8 @@ FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode
             if (!path.empty() && parsed->writes) RecordWrittenPath_nid_no_patch(path);
             return stream;
         }
-        const int error = GuestErrnoFromHost_nid_no_patch(errno);
+        int error = OpenFailure(path, parsed->writes, errno);
+        if (error == 2) error = NotFoundError_nid_no_patch(path);
         if (stream->IsDynamic()) delete stream;
         errno = error;
         return nullptr;
@@ -339,11 +353,25 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
         errno = EINVAL;
         return nullptr;
     }
+    if (const std::string_view path(filename); path == "/dev/random" || path == "/dev/urandom") {
+        if (parsed->writes) throw std::runtime_error(std::string(__func__) + ": writing to " + filename + " is not implemented");
+#ifdef _WIN32
+        std::unique_ptr<std::FILE, int (*)(std::FILE*)> device(std::fopen("NUL", "rb"), std::fclose);
+#else
+        std::unique_ptr<std::FILE, int (*)(std::FILE*)> device(std::fopen("/dev/null", "rb"), std::fclose);
+#endif
+        if (!device) return nullptr;
+        auto stream = std::make_unique<FileStream>(device.get(), true);
+        device.release();
+        stream->MarkRandomDevice();
+        return stream.release();
+    }
     std::filesystem::path fpath;
     if (const int error = ResolvePathError_nid_no_patch(filename, fpath)) { errno = error; return nullptr; }
     std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(OpenNative(fpath, parsed->native), std::fclose);
     if (!handle) {
-        errno = GuestErrnoFromHost_nid_no_patch(errno);
+        errno = OpenFailure(fpath, parsed->writes, errno);
+        if (errno == 2) errno = NotFoundError_nid_no_patch(fpath);
         return nullptr;
     }
     // APS5_LOG_OUT("success: \"%s\"", abs_path.c_str());
@@ -369,7 +397,7 @@ int APS5_VABI fclose_nid_postfix(FileStream* stream) {
         errno = 9;
         return -1;
     }
-    GetNativeStream(stream);
+    GetStreamHandle(stream);
     std::unique_ptr<FileStream> owner(stream->IsDynamic() ? stream : nullptr);
     return stream->Close();
 }
@@ -401,7 +429,7 @@ FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const 
 
 size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, FileStream* stream) {
     if (stream && !stream->IsOpen()) { errno = 9; return 0; }
-    auto* handle = GetNativeStream(stream);
+    auto* handle = GetStreamHandle(stream);
     if (size == 0 || count == 0) return 0;
     if (!buffer) throw std::runtime_error("fread: null buffer");
     if (count > std::numeric_limits<std::size_t>::max() / size) throw std::overflow_error("fread: buffer size overflow");
@@ -409,6 +437,11 @@ size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, File
     if (bytes > std::numeric_limits<std::uintptr_t>::max() - reinterpret_cast<std::uintptr_t>(buffer)) throw std::overflow_error("fread: buffer address overflow");
     const GuestArena::HostWrite destination(buffer, bytes);
     if (!destination.Open()) throw std::runtime_error("fread: buffer is not writable");
+    if (stream->IsRandomDevice()) {
+        HostEntropy_nid_no_patch(buffer, bytes);
+        stream->SyncStatus();
+        return count;
+    }
     const auto result = std::fread(buffer, size, count, handle);
     stream->SyncStatus();
     return result;
@@ -494,7 +527,8 @@ int APS5_VABI fputs_nid_postfix(const char* str, FileStream* stream) {
 
 int APS5_VABI fflush_nid_postfix(FileStream* stream) {
     if (stream && !stream->IsOpen()) { errno = 9; return -1; }
-    std::FILE* native = stream ? GetNativeStream(stream) : nullptr;
+    std::FILE* native = stream ? GetStreamHandle(stream) : nullptr;
+    if (stream && stream->IsRandomDevice()) return 0;
 #ifdef __linux__
     if (native && !__fwriting(native)) return 0;
 #elif defined(__APPLE__)
@@ -632,6 +666,22 @@ void APS5_VABI qsort_nid_postfix(void* base, size_t count, size_t size, int (APS
     if (count == 1) return;
 
     SortElements(static_cast<unsigned char*>(base), count, size, compare);
+}
+
+int APS5_VABI qsort_s_nid_postfix(void* base, size_t count, size_t size, GuestContextCompare compare, void* context) {
+    constexpr size_t RsizeMax = std::numeric_limits<size_t>::max() >> 1;
+    const char* const violation = count > RsizeMax ? "qsort_s : n > RSIZE_MAX"
+        : size > RsizeMax ? "qsort_s : es > RSIZE_MAX"
+        : count != 0 && !base ? "qsort_s : a == NULL"
+        : count != 0 && !compare ? "qsort_s : cmp == NULL"
+        : nullptr;
+    if (violation) {
+        SonyInvokeConstraintHandler(violation, nullptr, 22);
+        return 22;
+    }
+    if (count > 1 && size != 0)
+        SortElements(static_cast<unsigned char*>(base), count, size, [compare, context](const void* left, const void* right) { return compare(left, right, context); });
+    return 0;
 }
 
 }

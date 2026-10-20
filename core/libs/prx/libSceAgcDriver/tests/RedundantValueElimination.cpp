@@ -256,6 +256,34 @@ int main() {
         return b.eliminate() == 0u && AllUsed({&plain, &flagged, &otherType, &floatImmediate});
     });
 
+    passed &= run("four-operand expressions retain distinct trailing immediates across a large block", [] {
+        Builder b;
+        auto& source = b.unknown();
+        std::vector<IrValue*> reads;
+        std::vector<IrValue*> duplicates;
+        std::vector<IrValue*> different;
+        for (std::uint32_t index = 0; index < 256u; ++index) {
+            const auto composite = [&](std::uint32_t last) -> IrValue& {
+                return b.emit(IrOpcode::CompositeConstructU32x4, IrType::U32x4, {&source, &b.constant(index), &b.constant(7u), &b.constant(last)});
+            };
+            auto& first = composite(0u);
+            auto& second = composite(0u);
+            auto& changed = composite(1u);
+            auto& firstRead = b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&first, &b.constant(3u)});
+            auto& secondRead = b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&second, &b.constant(3u)});
+            auto& changedRead = b.emit(IrOpcode::CompositeExtractU32x4, IrType::U32, {&changed, &b.constant(3u)});
+            for (auto* read : {&firstRead, &secondRead, &changedRead}) b.keep(*read);
+            reads.push_back(&firstRead);
+            duplicates.push_back(&second);
+            duplicates.push_back(&secondRead);
+            different.push_back(&changedRead);
+        }
+        if (b.eliminate() != 512u || !AllUsed(different)) return false;
+        for (const auto* duplicate : duplicates) if (duplicate->HasUses()) return false;
+        for (const auto* read : reads) if (read->UseCount() != 2u) return false;
+        return true;
+    });
+
     passed &= run("float immediates compare by bits: +0 and -0 and two NaN payloads stay apart, one NaN merges", [] {
         Builder b;
         auto& x = b.emit(IrOpcode::BitCastF32U32, IrType::F32, {&b.unknown()});

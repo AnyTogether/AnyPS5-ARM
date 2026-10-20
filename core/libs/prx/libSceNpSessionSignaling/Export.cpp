@@ -108,4 +108,39 @@ int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress2() {
     return 0;
 }
 
+int APS5_VABI sceNpSessionSignalingCreateJoinActivate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingGetConnectionFromNetAddress() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingGetCustomProperty() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingGetGroupFromPeerAddress() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingInitializeWithPort() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingJoinActivate() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpSessionSignalingSetCustomProperty() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

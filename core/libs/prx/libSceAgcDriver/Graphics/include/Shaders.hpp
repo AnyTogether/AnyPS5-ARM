@@ -82,7 +82,7 @@ inline VkShaderStageFlags PushConstantStages(std::span<const CompiledShader> sha
     VkShaderStageFlags result = 0;
     for (const auto& shader : shaders) {
         Require(shader.program != nullptr, "missing compiled shader");
-        if (!shader.program->pushConstants.empty() || shader.stage == ShaderRecompiler::ShaderStage::Mesh || shader.stage == ShaderRecompiler::ShaderStage::TessellationControl) result |= VulkanStage(shader);
+        if (!shader.program->pushConstants.empty() || shader.program->readsDepthRemapPush || shader.stage == ShaderRecompiler::ShaderStage::Mesh || shader.stage == ShaderRecompiler::ShaderStage::TessellationControl) result |= VulkanStage(shader);
     }
     return result;
 }

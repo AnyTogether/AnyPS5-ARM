@@ -28,6 +28,8 @@ int main() {
     type = 0xFFFFFFFFu;
     Require(sceConvertKeycodeGetImeKeyboardType(1, &type) == 0);
     Require(type == 0);
+
+    Require(sceConvertKeycodeGetCharacter(0x04, 0, 0, nullptr) == invalidAddress);
     for (std::uint32_t state : {0u, 0x4000000u}) {
         char16_t character[3] = {u'?', 0, 0};
         Require(sceConvertKeycodeGetCharacter(0x04, state, 0, character) == 0);

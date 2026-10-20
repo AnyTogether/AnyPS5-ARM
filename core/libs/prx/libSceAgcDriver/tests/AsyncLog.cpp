@@ -24,6 +24,9 @@
 #else
 #include <sys/resource.h>
 #endif
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 namespace {
 
@@ -248,6 +251,9 @@ constexpr int ChildLines = 50;
 #else
     const rlimit noCore{0, 0};
     setrlimit(RLIMIT_CORE, &noCore);
+#endif
+#ifdef __linux__
+    prctl(PR_SET_DUMPABLE, 0);
 #endif
     std::thread([] {
         std::this_thread::sleep_for(8s);

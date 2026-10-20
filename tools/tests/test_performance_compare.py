@@ -201,6 +201,32 @@ class PerformanceCompareTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["baseline"], self.baseline)
 
+    def test_matching_context_can_be_required_without_a_timing_verdict(self):
+        self.write(self.before, self.baseline)
+        self.candidate["frame_ms"]["max"] = 100.0
+        self.write(self.after, self.candidate)
+        result = self.run_cli("--require-matching-context", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["metrics_ms"]["frame_ms.max"]["change"], 60.0)
+        for field in ("gpu", "driver", "os", "resolution"):
+            with self.subTest(field=field):
+                candidate = copy.deepcopy(self.candidate)
+                candidate[field] += " changed"
+                self.write(self.after, candidate)
+                result = self.run_cli("--require-matching-context")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(field, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(self.run_cli().returncode, 0)
+        for key, value in (("window", dict(self.candidate["window"], first_present=900)),
+                           ("env", {"APS5_TRACE_FRAMES": "900:4"})):
+            with self.subTest(key=key):
+                candidate = copy.deepcopy(self.candidate)
+                candidate[key] = value
+                self.write(self.after, candidate)
+                self.assertEqual(self.run_cli("--require-matching-context").returncode, 2)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,11 +103,17 @@ if __name__ == "__main__":
                 parser.error("--fetch needs a remote-tracking base such as upstream/main")
             git(args.repo, "fetch", "--quiet", remote, branch)
 
-        if args.fetch and args.base:
-            fetch(args.base)
+        if args.fetch:
+            if args.base:
+                fetch(args.base)
+            else:
+                remotes = set(lines(args.repo, "remote"))
+                for candidate in BASES:
+                    remote, _, branch = candidate.partition("/")
+                    if branch and remote in remotes:
+                        fetch(candidate)
+                        break
         base = resolve_base(args.repo, args.base)
-        if args.fetch and not args.base:
-            fetch(base)
         data = report(args.repo, base, args.head)
     except RuntimeError as error:
         parser.error(str(error))

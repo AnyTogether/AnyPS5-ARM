@@ -8,7 +8,9 @@
 #include <string>
 
 extern "C" {
+int APS5_VABI sceNpGetAccountCountryA(int user_id, void* country_code);
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id);
+int APS5_VABI sceNpGetOnlineId(int user_id, NpOnlineId* online_id);
 int APS5_VABI sceNpGetUserIdByAccountId(std::uint64_t account_id, int* user_id);
 int APS5_VABI sceNpSetContentRestriction(const NpContentRestriction* restriction);
 void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
@@ -215,6 +217,20 @@ int main() {
     Require(sceNpGetNpId(0x10000, &npId) == SignedOut, "sceNpGetNpId must report the user as signed out");
     Require(std::memcmp(&npId, &untouched, sizeof(npId)) == 0, "sceNpGetNpId must leave the NpId untouched");
     Require(sceNpGetNpId(0x10000, nullptr) == InvalidArgument, "sceNpGetNpId must reject a null NpId");
+    char countryCode[4]{};
+    std::memset(countryCode, 0x5a, sizeof(countryCode));
+    char untouchedCountryCode[4]{};
+    std::memset(untouchedCountryCode, 0x5a, sizeof(untouchedCountryCode));
+    Require(sceNpGetAccountCountryA(0x10000, countryCode) == SignedOut, "sceNpGetAccountCountryA must report the user as signed out");
+    Require(std::memcmp(countryCode, untouchedCountryCode, sizeof(countryCode)) == 0, "sceNpGetAccountCountryA must leave the country code untouched");
+    Require(sceNpGetAccountCountryA(0x10000, nullptr) == InvalidArgument, "sceNpGetAccountCountryA must reject a null country code");
+    NpOnlineId onlineId{};
+    std::memset(&onlineId, 0x5a, sizeof(onlineId));
+    NpOnlineId untouchedOnlineId{};
+    std::memset(&untouchedOnlineId, 0x5a, sizeof(untouchedOnlineId));
+    Require(sceNpGetOnlineId(0x10000, &onlineId) == SignedOut, "sceNpGetOnlineId must report the user as signed out");
+    Require(std::memcmp(&onlineId, &untouchedOnlineId, sizeof(onlineId)) == 0, "sceNpGetOnlineId must leave the online id untouched");
+    Require(sceNpGetOnlineId(0x10000, nullptr) == InvalidArgument, "sceNpGetOnlineId must reject a null online id");
     int userId = 0x5a5a;
     Require(sceNpGetUserIdByAccountId(0, &userId) == InvalidArgument, "sceNpGetUserIdByAccountId must reject account id 0");
     Require(sceNpGetUserIdByAccountId(0x1234, nullptr) == InvalidArgument, "sceNpGetUserIdByAccountId must reject a null output");

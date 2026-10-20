@@ -12,7 +12,7 @@ ctest --test-dir build-relinker --output-on-failure
 
 Python must be found during CMake configuration for Python tests to be registered. List registered tests with `ctest --test-dir build-relinker -N` and look for `input_magic`, a Python-backed relinker test. If automatic discovery fails, add `-DPython3_EXECUTABLE="C:/path/to/python.exe"` to the configure command, using the path to your Python interpreter, then list the tests again.
 
-This mode builds the conversion tool and its tests on Linux, Windows and macOS, including Apple Silicon. macOS uses AppleClang from the Xcode command-line tools; Windows uses the MinGW-w64 toolchain below. The executable is `build-relinker/core/relinker/relinker` (`relinker.exe` on Windows with Ninja).
+This mode builds the conversion tool and its tests on Linux, Windows and macOS, including Apple Silicon. macOS uses AppleClang from the Xcode command-line tools. Windows uses MinGW-w64 GCC with C++20 support and accepts distributions with static or shared runtimes; the WinLibs requirement below applies to the full build. The executable is `build-relinker/core/relinker/relinker` (`relinker.exe` on Windows with Ninja).
 
 The output is x86-64: Linux ELF by default, Windows PE with `--windows` or Mach-O with `--macos` ([usage](../user/USAGE.md#input-and-conversion)). Converted games need system libraries built for the target OS and a compatible x86-64 host. This mode does not build those libraries, and releases ship them for Linux and Windows only. Tests inspect all three output formats; execution checks run only on their compatible hosts.
 
@@ -35,6 +35,14 @@ git submodule update --init --recursive
 - Bitdefender Advanced Threat Defense hooks Windows calls that `sceKernelRaiseException` makes while its target thread is suspended. When the target is suspended inside ntdll's exception dispatch while it holds an ntdll lock, the hook waits for that lock and `guest_raise_exception` hangs until its timeout. A scanning exception for the build directory does not prevent it; add `guest_raise_exception_tests.exe` to the Advanced Threat Defense exceptions.
 - FFmpeg binaries are downloaded during configuration unless `FFMPEG_PREBUILT_DIR` is set. With the WinLibs CMake, the download fails with status 60 (`SSL peer certificate or SSH remote key was not OK`) unless `SSL_CERT_FILE` names a CA bundle, for example `C:\Program Files\Git\ucrt64\etc\ssl\certs\ca-bundle.crt` from Git for Windows 2.56 and later (`mingw64` instead of `ucrt64` before 2.56), as in CI.
 
+## Web converter releases
+
+The Release workflow builds the web converter and the Linux and Windows libraries from the same commit. It tests the converter and publishes its frontend and WASM files as `web-<tag>.zip`, with the tag and commit recorded in `web-release.json`.
+
+Pages downloads the converter and both library archives from one release selected through GitHub's latest-release API. `release.json` records the same tag and commit. Missing, corrupt or mismatched assets fail the Pages job before deployment. Releases made before the web asset was added need a new release; Pages does not combine them with a converter built from `main`.
+
+Changes to the converter or its frontend reach Pages through a release. Progress reports still come from `main`. For local development, build `relinker_web` with Emscripten and run `python3 tools/test_web.py --build build-wasm`. To stage a complete published release without compiling, run `python3 tools/build_web.py --build build-wasm --release`; `--libraries` is an alias for this mode.
+
 ## Commands
 
 ```sh
@@ -51,6 +59,35 @@ files from `build/core/libs/libs`; running a title after a library change withou
 therefore tests the previous binaries and can show no effect at all.
 
 [Relinker usage and runtime layout](../user/USAGE.md).
+
+## Windows setup and troubleshooting
+
+The full build also requires Python 3 for glslang and Git for Windows with Bash for libusb's version-header generation. A minimal Git installation without Bash is insufficient for the full build.
+
+In PowerShell, prepend the supported WinLibs toolchain and Git for Windows to the current session's `PATH`. Adjust the paths for the installed locations; a Portable Git installation can be used in place of `C:\Program Files\Git`.
+
+```powershell
+$env:PATH = "C:\tools\winlibs\mingw64\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\usr\bin;$env:PATH"
+```
+
+If configuration reports `Could NOT find Python3` or selects an unusable interpreter, pass the absolute path to a working Python 3 executable:
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DPython3_EXECUTABLE="C:/path/to/python.exe"
+```
+
+If `gen-describe.ps1` fails while generating libusb's `version_describe.h`, check the Bash path printed in the build output. A WindowsApps or System32 `bash.exe` can launch WSL and fail with `WSL_E_DEFAULT_DISTRO_NOT_FOUND` when no distribution is installed. Install Git for Windows with Bash, or use Portable Git, and put its `cmd` and `usr\bin` directories on `PATH` before retrying the build. Use Bash and `cygpath.exe` from the same Git installation.
+
+After `cmake --build build --target libs --parallel` succeeds, copy the toolchain's runtime DLLs beside the patched libraries:
+
+```powershell
+$toolchainBin = "C:\tools\winlibs\mingw64\bin"
+foreach ($runtimeName in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
+    Copy-Item -LiteralPath (Join-Path $toolchainBin $runtimeName) -Destination "build/core/libs/libs"
+}
+```
+
+When preparing a title's `libs/` directory, copy these DLLs with the patched `.prx` files. The Windows runtime loader does not search `PATH` for these dependencies; missing DLLs can cause error 126 even when the `.prx` is present. See [runtime layout](../user/USAGE.md#runtime-layout).
 
 ## CMake flags
 
@@ -83,6 +120,16 @@ Build configuration parameters:
 SDL and FreeType settings forced by the root `CMakeLists.txt` cannot be overridden with `-D`.
 
 With `ANYPS5_USE_SYSTEM_DEPS=ON` those libraries come from the system (on Debian and Ubuntu: `libsdl2-dev`, `libfreetype-dev`, `libvulkan-dev`, `spirv-headers`, `glslang-dev`, `glslang-tools` and `spirv-tools`). A missing package, Vulkan-Headers older than 1.4.310 (the agc driver uses `VK_KHR_maintenance8`), or an SDL2 without the HIDAPI joystick driver (sdl2-compat over SDL3, or a build with HIDAPI disabled, which breaks the pad and disk-audio tests), fails the configure with an error and never falls back to the submodule. The forced SDL and FreeType settings from the root `CMakeLists.txt` do not apply with the flag ON: the system SDL2 comes with whatever its distribution enabled. The prx libraries are shared objects, so SDL2 is linked from the system as a shared library; the default build keeps its own static SDL2. `ffmpeg-core`, `libjpeg-turbo`, `stb`, `VulkanMemoryAllocator` and `LibAtrac9` always stay bundled and still need `git submodule update --init`.
+
+## Quick syntax checks
+
+After configuring a build directory, use `tools/check_compile.py` to check the given source files. The tool reads their compile commands from `compile_commands.json` or Ninja, preserving compilation options while dropping object and dependency output options. It handles `-MF`, `-MT`, `-MQ` and `-MJ` with separate or attached values so that unused output options do not cause false failures under `-Werror`.
+
+```sh
+python3 tools/check_compile.py --build build-relinker core/relinker/main.cpp
+```
+
+Real compile errors still fail. Syntax checks do not replace a full build and test run.
 
 ## Write watch tests
 
@@ -155,7 +202,7 @@ Set `APS5_TRACE_EVENTS=<count>` to change the queue-worker and presenter buffers
 
 Inside the window the queue workers and the presenter record every `PerformanceTimer` scope and stage as a complete event named after its frame timing key: `Driver.WorkerWait`, `Driver.Packet`, `Driver.Packet.draw`, `Graphics.Draw`, `Driver.Present`, `Driver.Present.inflight_wait`, `Vulkan.Retire` and so on. A slice shorter than 20 us is only counted: its time is in the thread's counter `<thread> folded` (milliseconds per present) and in the summary. A thread writes a present's counter sample at its first slice after the next present, so the last present of the window has no sample; its time is still in the summary. By default, each queue worker and presenter allocates a buffer for 262,144 events when it starts; a full buffer stops that thread's recording, sets `trace_dropped` and puts an instant event `trace buffer full` on the thread's track at the start of the first lost slice (slices are appended when their outer scope ends, so that can precede the last recorded slice by up to one outer-scope length), with the number of lost slices in `args.events_lost`. When the window closes, the presenter formats the trace once and a `ProfileOutput` writer thread writes `aps5-trace-<commit>-<pid>.json.gz` (Chrome trace-event JSON, opened by ui.perfetto.dev or chrome://tracing) and appends one line to `aps5-summary.jsonl`, both in `APS5_TRACE_DIR` or the working directory. A window that is still open when the title exits writes nothing.
 
-The summary line has `commit` and `dirty` of the build, `env` (every `APS5_*` variable; a value containing `/` or `\` is written as `<path>`), `gpu`, `driver`, `os`, `resolution` (the video output's), `window`, `presents`, `frame_ms` (p50, p90, p99 and max of the intervals between presents), `gpu_busy_ms_per_present` (the batch timestamps behind `[present]`), `worker_busy_pct` (share of the window each queue worker spends in `Driver.Packet`, `Driver.Suspend`, `Driver.EndSubmission`, `Driver.Rewind` and `Driver.Completion`), `top_phases_ms_per_frame` (the eight largest scopes and stages, without `Driver.WorkerWait`), `trace_dropped`, `trace_dropped_threads` and `trace`. `trace_dropped` is `true` when any thread lost a slice, any thread's totals table (512 scope and stage entries) was full, or the `gpu` track was full. `trace_dropped_threads` is present only then and has one entry per such thread name (threads that share a name, such as the shader prepare threads, share one entry: `events_lost` is summed, `events_full_after_s` is the earliest, `totals_full` is true if any is): `events_full_after_s` (seconds from the first present of the window to the start of the first lost slice; absent for `gpu` and, in every summary line (windowed `APS5_TRACE_FRAMES`/`APS5_TRACE_SECONDS` and `APS5_TRACE_SUMMARY_EVERY`), whenever the first lost slice starts outside the line's span of presents, including a slice whose scope began before the window opened or one lost after the window's last present), `events_lost` (slices not recorded; absent when 0; in `APS5_TRACE_SUMMARY_EVERY` lines it counts the thread buffer's losses since it started, not only those of the line's span) and `totals_full` (`true` when the thread's totals table overflowed, which makes the summary numbers incomplete; a thread with `events_lost` only has complete totals). A trace holds timings, scope names, counts and thread names; no guest memory, paths or strings of the title.
+The summary line has `commit` and `dirty` of the build, `env` (every `APS5_*` variable; a value containing `/` or `\` is written as `<path>`), `gpu`, `driver`, `os`, `cpu` (the CPU brand string), `cpu_threads` and `memory_mib` (physical memory) of the host (all three absent on a host that is not x86 or reports no brand string), `title_id`, `title` and `content_version` from `app0/sce_sys/param.json` (only when the title has one; `content_version` is empty when the file has no `contentVersion`, or one that is not a string of at most 15 characters), `resolution` (the video output's), `window`, `presents`, `frame_ms` (p50, p90, p99 and max of the intervals between presents), `gpu_busy_ms_per_present` (the batch timestamps behind `[present]`), `worker_busy_pct` (share of the window each queue worker spends in `Driver.Packet`, `Driver.Suspend`, `Driver.EndSubmission`, `Driver.Rewind` and `Driver.Completion`), `top_phases_ms_per_frame` (the eight largest scopes and stages, without `Driver.WorkerWait`), `trace_dropped`, `trace_dropped_threads` and `trace`. `trace_dropped` is `true` when any thread lost a slice, any thread's totals table (512 scope and stage entries) was full, or the `gpu` track was full. `trace_dropped_threads` is present only then and has one entry per such thread name (threads that share a name, such as the shader prepare threads, share one entry: `events_lost` is summed, `events_full_after_s` is the earliest, `totals_full` is true if any is): `events_full_after_s` (seconds from the first present of the window to the start of the first lost slice; absent for `gpu` and, in every summary line (windowed `APS5_TRACE_FRAMES`/`APS5_TRACE_SECONDS` and `APS5_TRACE_SUMMARY_EVERY`), whenever the first lost slice starts outside the line's span of presents, including a slice whose scope began before the window opened or one lost after the window's last present), `events_lost` (slices not recorded; absent when 0; in `APS5_TRACE_SUMMARY_EVERY` lines it counts the thread buffer's losses since it started, not only those of the line's span) and `totals_full` (`true` when the thread's totals table overflowed, which makes the summary numbers incomplete; a thread with `events_lost` only has complete totals). A trace holds timings, scope names, counts and thread names; no guest memory, paths or strings of the title.
 
 The shader preparation threads are traced as well, `shader prepare`, with a buffer for 32,768 events each. A wait for the GPU mutex on a traced thread is a `GpuMutex.wait.<site>` slice (`dispatch`, `draw`, `present`, `flush` and so on, as on the `[lock]` line).
 
@@ -170,6 +217,8 @@ Set `APS5_TRACE_DRAW_PROGRAMS=1` (any value) to print one `[draw-programs]` line
 Set `APS5_TRACE_SUMMARY_EVERY=<seconds>` (a whole number above 0; a malformed value fails the first present) to profile a long session in the background without a trace. The first present opens the first interval. Every `<seconds>` seconds, at the first present at least that long after the interval opened, the presenter appends one line to `aps5-summary.jsonl` in `APS5_TRACE_DIR` or the working directory and opens the next interval at that same present, so the intervals follow each other without a gap and their `frame_ms` cover every interval between presents. The line has the fields of the window summary line for that interval only, plus `interval_start_s` and `interval_end_s` (seconds since the first present). Its `window` is `{"spec":"summary_every <seconds>","first_present":<present the interval opened at>,"ms":<span of the interval's presents>}` and its `trace` is the empty string. No event buffer is allocated: each thread keeps only the per-scope totals it already folds (a few kilobytes), and the presenter subtracts the totals of the previous interval. An interval that is still open when the title exits writes nothing.
 
 The switch combines with `APS5_TRACE_FRAMES` or `APS5_TRACE_SECONDS`. The intervals run for the whole session and the window records its full trace on top: the event buffers are allocated and filled only while the window is open, the window's own summary line (with `trace` set and no `interval_*` fields) holds only the time inside the window, and the interval lines continue unchanged around it. Without a window switch no buffer is allocated at all. The two switches do not share a clock origin: `interval_*` is relative to the first present, as the window's `APS5_TRACE_SECONDS` start is.
+
+Set `APS5_TRACE_BENCH=1` together with `APS5_TRACE_SUMMARY_EVERY` to also keep every interval's frame times for a benchmark report. At each interval the presenter hands the kept intervals to a writer thread, which formats and compresses the file and rewrites `aps5-bench-<commit>-<pid>.json.gz` in `APS5_TRACE_DIR` or the working directory: one JSON object with `format` (`aps5-bench/1`), the identity fields of the summary line (`commit`, `dirty`, `env`, `gpu`, `driver`, `os`, `cpu`, `cpu_threads`, `memory_mib` and, with `param.json`, `title_id`, `title` and `content_version`), `intervals_dropped` and `intervals`. Each interval has `start_s`, `end_s`, `first_present`, `resolution`, `gpu_busy_ms` (the interval's total) and `frame_us`, the whole microseconds between consecutive presents. The file keeps the last 240 intervals; `intervals_dropped` counts older ones it no longer holds. Any other value, or the switch without `APS5_TRACE_SUMMARY_EVERY`, fails the first present. The file is written to `<name>.tmp` and then moved over the previous one, so a crash or kill during a rewrite leaves the last complete report. Only the newest report waits for the writer: one handed over while an older one is still pending replaces it. The frame times cost 4 bytes per present in memory.
 
 `python tools/trace_digest.py aps5-summary.jsonl` prints the interval lines of such a file as one row per interval (frame p50, p90, p99, max, GPU busy per present, the busiest queue worker and the largest phase) and a text sparkline of the frame p99 and of the GPU busy time; lines of window captures in the file are skipped, and a change of commit, environment, GPU, driver or OS between intervals is reported. `--json` prints the rows as JSON.
 

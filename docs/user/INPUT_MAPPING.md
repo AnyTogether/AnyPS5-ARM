@@ -16,7 +16,7 @@ While a title has a mouse open (`sceMouseOpen`) and the window is focused, AnyPS
 
 Game-controller bindings are enabled automatically and are not affected by keyboard or mouse overrides in this file.
 
-Supported actions are `Cross`, `Circle`, `Triangle`, `Square`, `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Options`, `Up`, `Right`, `Down`, `Left`, `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown`, `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown`, `TouchLeft`, `TouchRight`, `StickModifier`, `Shake`, `ToggleMouse`, `ToggleFullscreen` (F11), and `TogglePerformanceOverlay` (F10, the [performance overlay](USAGE.md#performance-overlay)). `ToggleFullscreen` and `TogglePerformanceOverlay` accept only keyboard keys.
+Supported actions are `Cross`, `Circle`, `Triangle`, `Square`, `L1`, `R1`, `L2`, `R2`, `L3`, `R3`, `Options`, `Up`, `Right`, `Down`, `Left`, `LeftStickLeft`, `LeftStickRight`, `LeftStickUp`, `LeftStickDown`, `RightStickLeft`, `RightStickRight`, `RightStickUp`, `RightStickDown`, `TouchLeft`, `TouchRight`, `StickModifier`, `Shake`, `ToggleMouse`, `ToggleFullscreen` (F11), `TogglePerformanceOverlay` (F10, the [performance overlay](USAGE.md#performance-overlay)), and `Screenshot` (F12, saves the next displayed frame as described in [screenshots](USAGE.md#screenshots)). `ToggleFullscreen`, `TogglePerformanceOverlay` and `Screenshot` accept only keyboard keys.
 
 ### Default bindings
 
@@ -42,6 +42,7 @@ Without an `anyps5-input.ini`, or for actions the file does not mention, these b
 | `Shake` | X (reports a swinging acceleration and angular velocity while held) |
 | `ToggleMouse` | Middle mouse button, F7 |
 | `ToggleFullscreen` | F11 |
+| `Screenshot` | F12 |
 
 For example, this changes Cross to F or Space, moves the left stick to IJKL, uses the mouse buttons for Square and R2, and keeps all other built-in bindings:
 

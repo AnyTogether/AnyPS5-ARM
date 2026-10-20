@@ -175,4 +175,29 @@ int APS5_VABI sceImeDialogTerm(void) {
     return 0;
 }
 
+int APS5_VABI sceImeDialogForTestFunction() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDialogForceClose() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDialogGetCurrentStarState(int64_t state) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDialogInitInternal(Param* param, ExtendedParam* extended) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDialogSetPanelPosition(int32_t posx, int32_t posy) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

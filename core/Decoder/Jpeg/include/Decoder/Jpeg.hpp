@@ -35,6 +35,10 @@ std::optional<Header> ParseHeader(std::span<const std::uint8_t> jpeg);
 
 std::optional<Image> Decode(std::span<const std::uint8_t> jpeg);
 
+std::uint32_t ScaledDimension(std::uint32_t dimension, std::uint32_t denominator);
+
+std::optional<Image> DecodeScaled(std::span<const std::uint8_t> jpeg, std::uint32_t denominator);
+
 }  // namespace Decoder::Jpeg
 
 #endif  // DECODER_JPEG_HPP

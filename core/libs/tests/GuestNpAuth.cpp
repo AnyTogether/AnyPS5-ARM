@@ -8,7 +8,10 @@ int APS5_VABI sceNpAuthAbortRequest(int req_id);
 int APS5_VABI sceNpAuthCreateAsyncRequest(const void* param);
 int APS5_VABI sceNpAuthCreateRequest(void);
 int APS5_VABI sceNpAuthDeleteRequest(int req_id);
+int APS5_VABI sceNpAuthGetAuthorizationCode(int req_id, const void* param, void* auth_code);
 int APS5_VABI sceNpAuthGetAuthorizationCodeV3(int req_id, const void* param, void* auth_code, int* issuer_id);
+int APS5_VABI sceNpAuthGetAuthorizedAppCode();
+int APS5_VABI sceNpAuthGetIdToken(int req_id, const void* param, void* id_token);
 int APS5_VABI sceNpAuthGetIdTokenV3(int req_id, const void* param, void* id_token);
 int APS5_VABI sceNpAuthPollAsync(int req_id, int* result);
 int APS5_VABI sceNpAuthSetTimeout(int req_id, int resolve_retry, uint32_t resolve_timeout, uint32_t connect_timeout, uint32_t send_timeout, uint32_t receive_timeout);
@@ -52,14 +55,24 @@ int main() {
     int waitUnprocessed = 0;
     Require(sceNpAuthWaitAsync(asyncReq, &waitUnprocessed) == invalidId);
 
+    Require(sceNpAuthGetAuthorizedAppCode() == signedOut);
+
+    Require(sceNpAuthGetIdToken(syncReq, nullptr, token) == invalidArgument);
+    Require(sceNpAuthGetIdToken(syncReq, param, nullptr) == invalidArgument);
+    Require(sceNpAuthGetIdToken(syncReq, nullptr, nullptr) == invalidArgument);
     Require(sceNpAuthGetIdTokenV3(syncReq, nullptr, token) == invalidArgument);
     Require(sceNpAuthGetIdTokenV3(syncReq, param, nullptr) == invalidArgument);
     Require(sceNpAuthGetIdTokenV3(syncReq, nullptr, nullptr) == invalidArgument);
-    Require(sceNpAuthGetIdTokenV3(syncReq, param, token) == signedOut);
+    Require(sceNpAuthGetIdToken(syncReq, param, token) == signedOut);
+    Require(sceNpAuthGetIdToken(syncReq, param, token) == invalidArgument);
     Require(sceNpAuthGetIdTokenV3(syncReq, param, token) == invalidArgument);
+
+    Require(sceNpAuthGetAuthorizationCode(syncReq2, nullptr, authCode) == invalidArgument);
+    Require(sceNpAuthGetAuthorizationCode(syncReq2, param, nullptr) == invalidArgument);
     Require(sceNpAuthGetAuthorizationCodeV3(syncReq, nullptr, authCode, &issuerId) == invalidArgument);
     Require(sceNpAuthGetAuthorizationCodeV3(syncReq, param, nullptr, &issuerId) == invalidArgument);
-    Require(sceNpAuthGetAuthorizationCodeV3(syncReq2, param, authCode, &issuerId) == signedOut);
+    Require(sceNpAuthGetAuthorizationCode(syncReq2, param, authCode) == signedOut);
+    Require(sceNpAuthGetAuthorizationCode(syncReq2, param, authCode) == invalidArgument);
     Require(sceNpAuthGetAuthorizationCodeV3(syncReq2, param, authCode, &issuerId) == invalidArgument);
 
     Require(sceNpAuthGetIdTokenV3(asyncReq, param, token) == 0);
@@ -82,7 +95,9 @@ int main() {
     Require(asyncWait2 == signedOut);
 
     constexpr int unknownReq = 999999;
+    Require(sceNpAuthGetIdToken(unknownReq, param, token) == requestNotFound);
     Require(sceNpAuthGetIdTokenV3(unknownReq, param, token) == requestNotFound);
+    Require(sceNpAuthGetAuthorizationCode(unknownReq, param, authCode) == requestNotFound);
     Require(sceNpAuthGetAuthorizationCodeV3(unknownReq, param, authCode, &issuerId) == requestNotFound);
     int pollResult = 0;
     Require(sceNpAuthPollAsync(unknownReq, &pollResult) == requestNotFound);

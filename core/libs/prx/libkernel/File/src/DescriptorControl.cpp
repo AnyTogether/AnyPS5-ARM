@@ -93,6 +93,8 @@ constexpr std::uint32_t KeepOnExecRequest = 0x20006602;
 constexpr std::uint32_t NonblockingRequest = 0x8004667e;
 constexpr std::uint32_t ReadableRequest = 0x4004667f;
 constexpr std::uint32_t RequestIn = 0x80000000u;
+constexpr std::uint32_t RequestOut = 0x40000000u;
+constexpr std::uint32_t RequestVoid = 0x20000000u;
 constexpr std::uint32_t TerminalGroup = 't';
 
 struct GuestLock {
@@ -107,7 +109,7 @@ static_assert(sizeof(GuestLock) == 32);
 static_assert(offsetof(GuestLock, type) == 20);
 constexpr std::size_t OldGuestLockSize = 24;
 
-enum class Kind { File, Directory, Pipe, Device, RandomDevice, ArchivedFile };
+enum class Kind { File, Directory, Pipe, Socket, Device, RandomDevice, ArchivedFile };
 
 struct Entry {
     bool closeOnExec = false;
@@ -127,6 +129,7 @@ const char* KindName(Kind kind) {
         case Kind::File: return "file";
         case Kind::Directory: return "directory";
         case Kind::Pipe: return "pipe";
+        case Kind::Socket: return "socket";
         case Kind::Device: return "character device";
         case Kind::RandomDevice: return "random device";
         case Kind::ArchivedFile: return "file read from app0.zar";
@@ -268,7 +271,8 @@ std::optional<Kind> Classify(int fd, const char* function) {
     if (S_ISDIR(status.st_mode)) return Kind::Directory;
     if (S_ISFIFO(status.st_mode)) return Kind::Pipe;
     if (S_ISCHR(status.st_mode)) return Kind::Device;
-    throw std::runtime_error(std::string(function) + ": descriptor " + std::to_string(fd) + " is neither a file, a directory, a pipe nor a character device");
+    if (S_ISSOCK(status.st_mode)) return Kind::Socket;
+    throw std::runtime_error(std::string(function) + ": descriptor " + std::to_string(fd) + " is neither a file, a directory, a pipe, a socket nor a character device");
 }
 
 int HostStatus(int fd, const char* function) {
@@ -345,7 +349,7 @@ int ChangeStatus(int fd, Kind kind, int mask, int value, const char* function) {
     auto& status = *Materialize(fd).status;
     const int next = (status & ~mask) | (value & mask);
     const int changed = status ^ next;
-    if ((changed & Asynchronous) && (kind == Kind::Pipe || kind == Kind::Device)) Unsupported(function, "O_ASYNC", kind, fd);
+    if ((changed & Asynchronous) && (kind == Kind::Pipe || kind == Kind::Socket || kind == Kind::Device)) Unsupported(function, "O_ASYNC", kind, fd);
     if ((changed & Synchronous) && kind == Kind::File) Unsupported(function, "changing O_FSYNC", kind, fd);
     ApplyHostStatus(fd, kind, changed, next, function);
     status = next;
@@ -371,7 +375,7 @@ int RecordLock(int fd, int command, std::intptr_t argument) {
     GuestLock lock{};
     std::memcpy(&lock, pointer, size);
     const auto kind = Classify(fd, "fcntl");
-    if (!kind || *kind == Kind::Pipe) return Fail(GuestEbadf);
+    if (!kind || *kind == Kind::Pipe || *kind == Kind::Socket) return Fail(GuestEbadf);
     if (*kind != Kind::File && *kind != Kind::Directory) Unsupported("fcntl", "a record lock", *kind, fd);
 #ifdef _WIN32
     return ProcessRecordLock(fd, *kind, current, lock, pointer, size);
@@ -411,7 +415,7 @@ int RecordLock(int fd, int command, std::intptr_t argument) {
 
 int ReadAheadControl(int fd, int command, std::intptr_t argument) {
     const auto kind = Classify(fd, "fcntl");
-    if (!kind || *kind == Kind::Pipe) return Fail(GuestEbadf);
+    if (!kind || *kind == Kind::Pipe || *kind == Kind::Socket) return Fail(GuestEbadf);
     if (*kind != Kind::File && *kind != Kind::ArchivedFile) return Fail(GuestEnotty);
     std::lock_guard lock(g_mutex);
     auto& status = *Materialize(fd).status;
@@ -508,7 +512,16 @@ int Fcntl(int fd, int command, std::intptr_t argument) {
     }
 }
 
+bool IoctlRequestMalformed(std::uint64_t request) {
+    const auto command = static_cast<std::uint32_t>(request);
+    const std::uint32_t length = (command >> 16) & 0x1fff;
+    if ((command & (RequestIn | RequestOut | RequestVoid)) == 0) return true;
+    if ((command & RequestOut) && length == 0) return true;
+    return (command & RequestVoid) && length != 0 && length != sizeof(int);
+}
+
 int Ioctl(int fd, std::uint64_t request, void* argument) {
+    if (IoctlRequestMalformed(request)) return Fail(GuestEnotty);
     const auto command = static_cast<std::uint32_t>(request);
     const std::uint32_t length = (command >> 16) & 0x1fff;
     if ((command & RequestIn) && length != 0 && argument == nullptr) return Fail(GuestEfault);
@@ -524,7 +537,7 @@ int Ioctl(int fd, std::uint64_t request, void* argument) {
     }
     if (command == ReadableRequest) {
         if (*kind == Kind::RandomDevice) return Fail(GuestEnotty);
-        if (*kind != Kind::File && *kind != Kind::Pipe && *kind != Kind::ArchivedFile) Unsupported("ioctl", "FIONREAD", *kind, fd);
+        if (*kind != Kind::File && *kind != Kind::Pipe && *kind != Kind::Socket && *kind != Kind::ArchivedFile) Unsupported("ioctl", "FIONREAD", *kind, fd);
         const auto archived = File::ArchivedFileRemaining(fd);
         const int available = archived ? static_cast<int>(std::min<std::int64_t>(*archived, std::numeric_limits<int>::max())) : Readable(fd, *kind, "ioctl");
         if (argument == nullptr) return Fail(GuestEfault);

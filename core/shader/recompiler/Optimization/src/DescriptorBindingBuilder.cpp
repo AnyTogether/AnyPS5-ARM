@@ -364,7 +364,7 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
     std::vector<std::uint32_t> samplerIntegerModes(info.samplers.size(), 0u);
     std::vector<std::uint32_t> samplerFloatModes(info.samplers.size(), 0u);
     std::vector<std::uint32_t> directSamplerModes(info.samplers.size(), 0u);
-    const auto samplerMode = [](const ImageResource& image) { return !image.constantSwizzle && (image.numericClass == IrTextureNumericClass::Sint || image.conversionFormat != IrBufferFormat::Invalid || image.depthBits) ? 2u : 1u; };
+    const auto samplerMode = [](const ImageResource& image) { return !image.constantSwizzle && (image.numericClass == IrTextureNumericClass::Uint || image.numericClass == IrTextureNumericClass::Sint || image.conversionFormat != IrBufferFormat::Invalid || image.depthBits) ? 2u : 1u; };
     const auto pairSampler = [&](std::uint32_t sampler, const ImageResource& image) {
         const auto mode = samplerMode(image);
         samplerModes.at(sampler) |= mode;
@@ -408,7 +408,7 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 previous = resource;
                 {
                     const auto word = snapshot.images.at(resource).dwords[3];
-                    active = DescriptorBindingForImage(mode) == logical.kind && mode.packedFormat != IrBufferFormat::Fmask8_S2_F1 && !mode.constantSwizzle && (image.mipMode != ImageMipMode::DynamicStorage || mip <= ((word >> 16u) & 0xfu) - ((word >> 12u) & 0xfu));
+                    active = DescriptorBindingForImage(mode) == logical.kind && !mode.constantSwizzle && (image.mipMode != ImageMipMode::DynamicStorage || mip <= ((word >> 16u) & 0xfu) - ((word >> 12u) & 0xfu));
                 }
             } else if (samplerHeap) {
                 active = (samplerModes.at(resource) & (1u << (element & 1u))) != 0u;

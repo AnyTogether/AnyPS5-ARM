@@ -93,5 +93,15 @@ int main() {
     Require(sceWebBrowserDialogTerminate() == 0);
     Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
 
+    Require(sceWebBrowserDialogInitialize() == 0);
+    Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_INITIALIZED);
+    Require(sceWebBrowserDialogClose() == 0);
+    Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_FINISHED);
+    result = 0x5a5a5a5a;
+    Require(sceWebBrowserDialogGetResult(&result) == 0);
+    Require(result == COMMON_DIALOG_RESULT_USER_CANCELED);
+    Require(sceWebBrowserDialogTerminate() == 0);
+    Require(sceWebBrowserDialogGetStatus() == COMMON_DIALOG_STATUS_NONE);
+
     return 0;
 }

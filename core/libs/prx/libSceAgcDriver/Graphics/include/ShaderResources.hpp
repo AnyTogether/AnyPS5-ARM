@@ -42,6 +42,7 @@ struct TextureCacheUse {
     std::uint64_t storageBytes = 0;
 };
 TextureCacheUse TextureCacheUsage();
+void OverrideCacheBudgetForTest(std::uint64_t bytes);
 std::uint64_t SampledTextureCacheBudget(const Context& context);
 std::shared_ptr<Texture> CachedSampledTexture(const Context& context, std::span<const std::uint32_t> words, VkImageViewType multisampleViewType = VK_IMAGE_VIEW_TYPE_2D);
 bool SampledTexturesShareEntry(std::span<const std::uint32_t> first, std::span<const std::uint32_t> second);
@@ -72,7 +73,7 @@ struct TableDescriptors {
     std::uint32_t binding = 0;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> runs;
     std::vector<VkDescriptorImageInfo> images;
-    std::shared_ptr<const std::vector<std::shared_ptr<Texture>>> textures;
+    std::shared_ptr<const std::vector<std::weak_ptr<Texture>>> textures;
 };
 
 class DescriptorCache {
@@ -127,7 +128,7 @@ private:
     std::vector<Pool> pools;
     std::vector<Pool> updateAfterBindPools;
     std::vector<VkDescriptorPool> dedicated;
-    std::unordered_map<VkDescriptorSetLayout, std::vector<SetAllocation>> recycled;
+    std::map<std::pair<VkDescriptorSetLayout, std::uint32_t>, std::vector<SetAllocation>> recycled;
     std::vector<SetAllocation> kept;
     Stats stats;
 };
@@ -234,8 +235,10 @@ public:
     // ranges, the regions read in place, and the storage images with whether each is written.
     const std::vector<std::pair<std::uint64_t, std::uint64_t>>& GpuWrites() const { return guestMemory.Writes(); }
     std::vector<std::pair<std::uint64_t, std::uint64_t>> InPlaceReads() const { return guestMemory.InPlaceReads(); }
+    void InPlaceReads(std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) const { guestMemory.InPlaceReads(out); }
     std::vector<std::pair<VkImage, bool>> StorageImages() const;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> DeviceReads() const { return guestMemory.DeviceReads(); }
+    void DeviceReads(std::vector<std::pair<std::uint64_t, std::uint64_t>>& out) const { guestMemory.DeviceReads(out); }
     bool ReadsImage(const StorageTexture* image) const;
     bool HasCachedStorageImages() const;
     bool HoldsReleasedTexture() const;
@@ -257,6 +260,7 @@ public:
     // (their count and size remain): a compute template then serves dispatches whose constants
     // differ, and the hit refreshes its data buffers with the dispatch's words (RefreshData).
     static std::vector<std::uint32_t> ContentKey(const CompiledShader& shader, bool dataWords = true, bool movableBuffers = false);
+    static void AppendContentKey(const CompiledShader& shader, bool dataWords, bool movableBuffers, std::vector<std::uint32_t>& key);
     static bool DiffContentKeys(std::span<const std::uint32_t> previous, std::span<const std::uint32_t> key, bool draw, ContentKeyDiff& diff);
     // Records the shader's ShaderData and FlattenedSrt words into this object's data buffers
     // (vkCmdUpdateBuffer, a transfer write the caller's pre-dispatch barrier makes visible; a
@@ -272,6 +276,7 @@ public:
     static bool NeverReusable(std::span<const CompiledShader> shaders);
     static std::uint64_t DepthGuardRefusals();
     const std::vector<std::shared_ptr<Texture>>& SampledTextures() const { return textures; }
+    static std::size_t LookupLogCapacity();
     bool ChecksFaults() const { return bda != nullptr; }
     void CheckFaults() const;
     // `shaders` are the stages the object was built from, in build order (a recorded draw's vertex
@@ -339,6 +344,7 @@ private:
         std::uint32_t format = 0;
         int tileMode = 0;
         std::uint64_t dccAddress = 0;
+        bool imageTable = false;
     };
     std::vector<DescribedRange> describedRanges;
     struct Allocation {
@@ -566,7 +572,7 @@ private:
         std::vector<std::pair<std::uint32_t, std::uint32_t>> runs;
     };
     std::array<TableWrites, 2> tableWrites;
-    std::shared_ptr<const TableDescriptors> keptTable(std::size_t set, std::shared_ptr<const std::vector<std::shared_ptr<Texture>>>& held) noexcept;
+    std::shared_ptr<const TableDescriptors> keptTable(std::size_t set, std::shared_ptr<const std::vector<std::weak_ptr<Texture>>>& held) noexcept;
     std::uint32_t setOf(const Binding& binding) const;
     std::vector<Allocation> allocations;
     std::vector<VkDescriptorBufferInfo> descriptorBuffers;

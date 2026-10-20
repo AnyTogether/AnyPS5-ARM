@@ -20,6 +20,14 @@
 #include <string_view>
 
 namespace AgcDriver::Graphics {
+
+void NormalizeUnusedViewportDepth(State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) {
+    if (state.depth || pixel.posZ) return;
+    if (!std::isfinite(state.viewport.minDepth) || !std::isfinite(state.viewport.maxDepth)) return;
+    state.viewport.minDepth = std::clamp(state.viewport.minDepth, 0.0f, 1.0f);
+    state.viewport.maxDepth = std::clamp(state.viewport.maxDepth, 0.0f, 1.0f);
+}
+
 namespace {
 
 std::uint32_t read(const Registers& registers, std::uint32_t offset, RegisterBank bank = RegisterBank::Context) {
@@ -42,6 +50,12 @@ Registers::const_iterator find(const Registers& registers, std::uint32_t offset,
 float readFloat(const Registers& registers, std::uint32_t offset) {
     const auto value = std::bit_cast<float>(read(registers, offset));
     if (!std::isfinite(value)) Require(false, "non-finite register at DWORD " + std::to_string(offset));
+    return value;
+}
+
+float readDepthBound(const Registers& registers, std::uint32_t offset) {
+    const auto value = std::bit_cast<float>(read(registers, offset));
+    if (std::isnan(value)) Require(false, "NaN depth bound at DWORD " + std::to_string(offset));
     return value;
 }
 
@@ -139,6 +153,7 @@ std::uint32_t inactiveVertexPointSize(const QueueState& queue) {
         case 7:
         case 17:
         case 21:
+        case 19:
             return 1u << 16u;
         default:
             return 0;
@@ -176,6 +191,8 @@ bool ditheredAlphaLocationsSupported(const Registers& cx) {
 constexpr std::uint32_t ScanModeMask = ~0x22u;
 constexpr std::uint32_t ScanControlMask = ~0x76033fffu;
 constexpr std::uint32_t PixelShaderIteratesSamples = 0x10000u;
+constexpr std::uint32_t PixelSampleCoverageInput = 0x4000u;
+constexpr std::uint32_t PixelSampleRateInputs = 0x2011u;
 constexpr std::uint32_t ScreenOffsetMask = ~0x01ff01ffu;
 // Bits 26/27 (ZCLIP_NEAR/FAR_DISABLE) become depth clamping; bit 19 selects the [0, 1] clip space.
 constexpr std::uint32_t ClipControlMask = ~(0x80000u | 0x01000000u | 0x0c000000u);
@@ -187,10 +204,11 @@ bool zFormatSupported(std::uint32_t format) {
 std::uint32_t shaderControlMask(std::uint32_t zFormat) {
     constexpr std::uint32_t zExportEnable = 0x1u;
     constexpr std::uint32_t stencilTestValExportEnable = 0x2u;
+    constexpr std::uint32_t stencilOpValExportEnable = 0x4u;
     constexpr std::uint32_t maskExportEnable = 0x100u;
     auto mask = ShaderControlMask;
     if (zFormat != 0u && zFormatSupported(zFormat)) mask &= ~zExportEnable;
-    if (zFormat == 2u || zFormat == 9u) mask &= ~stencilTestValExportEnable;
+    if (zFormat == 2u || zFormat == 9u) mask &= ~(stencilTestValExportEnable | stencilOpValExportEnable);
     if (zFormat == 9u) mask &= ~maskExportEnable;
     return mask;
 }
@@ -223,7 +241,7 @@ bool depthPlanesAbsent(const Registers& cx) {
     return z != cx.end() && stencil != cx.end() && (z->second & 3u) == 0 && (stencil->second & 1u) == 0;
 }
 
-VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint32_t refMask, bool readOnly, bool testValExport) {
+VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint32_t refMask, bool readOnly, bool testValExport, bool opValExport, bool opValReference) {
     VkStencilOpState face{};
     face.compareOp = static_cast<VkCompareOp>(compare);
     face.compareMask = (refMask >> 8u) & 0xffu;
@@ -234,7 +252,11 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
     auto fixed = compare == 0 || compare == 7 ? 0u : face.compareMask;
     const auto convert = [&](std::uint32_t op) {
         if (face.writeMask == 0) return VK_STENCIL_OP_KEEP;
-        char detail[96];
+        char detail[112];
+        if (opValExport && ((op == 4 && !opValReference) || op == 5 || op == 6 || op == 8 || op == 9)) {
+            std::snprintf(detail, sizeof(detail), "AGC graphics: stencil operation %u with a pixel shader that exports the stencil operation value is unsupported", op);
+            throw std::runtime_error(detail);
+        }
         switch (op) {
             case 0: return VK_STENCIL_OP_KEEP;
             case 1: return VK_STENCIL_OP_ZERO;
@@ -243,6 +265,10 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
             case 4: {
                 if (testValExport) {
                     if (op != 3) throw std::runtime_error("AGC graphics: stencil replacement by a value other than the test value is unsupported with a pixel shader that exports the stencil test value");
+                    return VK_STENCIL_OP_REPLACE;
+                }
+                if (opValReference) {
+                    if (op != 4) throw std::runtime_error("AGC graphics: stencil replacement by a value other than the operation value is unsupported with a pixel shader that exports the stencil operation value");
                     return VK_STENCIL_OP_REPLACE;
                 }
                 const auto value = op == 2 ? 0xffu : op == 3 ? test : opValue;
@@ -273,10 +299,12 @@ VkStencilOpState stencilFace(std::uint32_t compare, std::uint32_t ops, std::uint
     face.passOp = convert((ops >> 4u) & 0xfu);
     face.depthFailOp = convert((ops >> 8u) & 0xfu);
     face.reference = reference;
+    Require(!opValReference || compare == 0 || compare == 7 || face.compareMask == 0, "a stencil compare against the test value is unsupported with a pixel shader that exports the stencil operation value");
     return face;
 }
 
-void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValExport, State& result) {
+void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValExport, bool opValExport, State& result) {
+    const bool opValReference = opValExport && StencilOperationValueReplaces(cx);
     zero(cx, 0x000, 0x0000101cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
     const bool depthClear = (read(cx, 0x000) & 1u) != 0;
     const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
@@ -306,7 +334,8 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     depth.lastSlice = (view >> 13u) & 0x7ffu;
     depth.address = zFormat != 0 ? base(0x012, 0x01a) : 0;
     depth.stencilAddress = stencil ? base(0x013, 0x01b) : 0;
-    Require(zFormat == 0 || depthReadOnly || base(0x014, 0x01c) == depth.address, "depth read and written at different addresses is unsupported");
+    const bool depthWritten = zFormat != 0 && !depthReadOnly && (depthClear || (depthControl & 6u) == 6u || (read(cx, 0x000) & 0x60u) != 0);
+    Require(!depthWritten || base(0x014, 0x01c) == depth.address, "depth read and written at different addresses is unsupported");
     Require(!stencil || stencilReadOnly || base(0x015, 0x01d) == depth.stencilAddress, "stencil read and written at different addresses is unsupported");
     if (depth.samples != 1u) {
         depth.pipeBankXor = static_cast<std::uint32_t>(depth.address & 65535u);
@@ -338,8 +367,8 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     result.depthBoundsTest = (depthControl & 8u) != 0;
     if (result.depthBoundsTest) {
         Require(zFormat != 0, "depth bounds without a depth plane");
-        result.minDepthBounds = readFloat(cx, 0x008);
-        result.maxDepthBounds = readFloat(cx, 0x009);
+        result.minDepthBounds = readDepthBound(cx, 0x008);
+        result.maxDepthBounds = readDepthBound(cx, 0x009);
     }
     if (depthClear) {
         result.depthTest = true;
@@ -362,8 +391,8 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
         result.stencilBack = clear;
     } else if (result.stencilTest) {
         const auto ops = read(cx, 0x10b);
-        result.stencilFront = stencilFace((depthControl >> 8u) & 7u, ops, read(cx, 0x10c), stencilReadOnly, testValExport);
-        result.stencilBack = (depthControl & 0x80u) != 0 ? stencilFace((depthControl >> 20u) & 7u, ops >> 12u, read(cx, 0x10d), stencilReadOnly, testValExport) : result.stencilFront;
+        result.stencilFront = stencilFace((depthControl >> 8u) & 7u, ops, read(cx, 0x10c), stencilReadOnly, testValExport, opValExport, opValReference);
+        result.stencilBack = (depthControl & 0x80u) != 0 ? stencilFace((depthControl >> 20u) & 7u, ops >> 12u, read(cx, 0x10d), stencilReadOnly, testValExport, opValExport, opValReference) : result.stencilFront;
     }
 }
 
@@ -441,7 +470,7 @@ std::string singleSampleMsaaRejection(const QueueState& queue) {
     }
     if (const auto alphaToMask = word(cx, 0x2dc); alphaToMask && (*alphaToMask & 1u) != 0 && !(*alphaToMask == AlphaToCoverageDithered && alphaToCoverageDisabled(cx))) return zeroMessage(0x2dc, *alphaToMask, "MSAA_ENABLE on a single-sample target with alpha-to-coverage");
     if (const auto conservative = word(cx, 0x313); conservative && (*conservative & ~0x001f6000u) != 0) return zeroMessage(0x313, *conservative, "MSAA_ENABLE on a single-sample target with conservative rasterization");
-    return nonTriangleRejection(queue, "MSAA_ENABLE on a single-sample target for primitives other than triangles");
+    return nonTriangleRejection(queue, "MSAA_ENABLE on a single-sample target for primitives other than triangles and rectangles", true);
 }
 
 std::string singleSampleDepthScanRejection(const QueueState& queue) {
@@ -460,6 +489,21 @@ std::string singleSampleDepthScanRejection(const QueueState& queue) {
 constexpr std::uint32_t CoveredCentroidIsCenter = 1u << 29u;
 constexpr std::uint32_t SampleZeroRefusedInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage);
 constexpr std::uint32_t CentroidInputs = ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::PerspectiveCentroid) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::LinearCentroid);
+
+bool overrasterized(const Registers& cx, std::uint32_t samples) {
+    const auto eqaa = find(cx, 0x201);
+    const auto mode = find(cx, 0x292);
+    return samples > 1u && eqaa != cx.end() && mode != cx.end() && (mode->second & 1u) != 0 && ((eqaa->second >> 24u) & 7u) == static_cast<std::uint32_t>(std::countr_zero(samples));
+}
+
+bool sampleCoverageSupported(const QueueState& queue, std::uint32_t samples, bool perSampleShading) {
+    if (samples == 1u || PixelProgramSkipped(queue)) return true;
+    const auto ena = find(queue.context, 0x1b3);
+    const auto addr = find(queue.context, 0x1b4);
+    if (ena == queue.context.end() || addr == queue.context.end()) return true;
+    const auto inputs = ena->second & addr->second;
+    return (inputs & PixelSampleCoverageInput) == 0u || (!perSampleShading && (inputs & PixelSampleRateInputs) == 0u);
+}
 
 bool coveredCentroidSupported(const QueueState& queue) {
     const auto config = find(queue.context, 0x2f8);
@@ -1061,6 +1105,32 @@ ReversedBlend TranslateReversedBlend(std::uint32_t blendControl, std::uint8_t co
     return {blend, routing->code};
 }
 
+void ApplyDepthRemap(const Context& context, State& state) {
+    const auto& viewport = state.viewport;
+    const bool inRange = viewport.minDepth >= 0 && viewport.minDepth <= 1 && viewport.maxDepth >= 0 && viewport.maxDepth <= 1;
+    if (context.depthRangeUnrestricted || inRange) return;
+    Require(state.stages.path == ShaderPath::Vertex && !state.stages.mesh && !state.stages.tessellation, "viewport depth outside [0, 1] is remapped on the vertex path only");
+    Require(context.depthClamp, "viewport depth outside [0, 1] needs depth clamping to stand in for the console's clamp");
+    const float clampMin = std::clamp(state.depthClampMin, 0.0f, 1.0f);
+    const float clampMax = std::clamp(state.depthClampMax, 0.0f, 1.0f);
+    const bool floatDepth = state.depth.has_value() && (state.depth->format == VK_FORMAT_D32_SFLOAT || state.depth->format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+    if ((clampMin != state.depthClampMin || clampMax != state.depthClampMax) && floatDepth && (state.depthWrite || state.depthTest)) {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            std::fprintf(stderr, "[gpu] viewport depth clamp bounds [%g, %g] on a float depth target are clipped to [0, 1]: the device has no VK_EXT_depth_range_unrestricted\n", state.depthClampMin, state.depthClampMax);
+        }
+    }
+    const float range = clampMax - clampMin;
+    const float scale = range > 0.0f ? state.depthScale / range : state.depthScale;
+    const float offset = range > 0.0f ? (state.depthOffset - clampMin) / range : state.depthOffset;
+    state.depthRemap = {state.negativeOneToOne ? 2u : 1u, scale, offset};
+    state.viewport.minDepth = clampMin;
+    state.viewport.maxDepth = clampMax;
+    state.negativeOneToOne = false;
+    state.depthClamp = true;
+}
+
 State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     if (auto reason = DepthMaintenanceRejection(queue); !reason.empty()) throw std::runtime_error(reason);
     const auto& cx = queue.context;
@@ -1086,10 +1156,15 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
             result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
             break;
         case 6: result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
+        case 19:
+            Require(result.stages.path == ShaderPath::Vertex, "quad-list requires vertex routing");
+            result.quadList = true;
+            result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            break;
         default: throw std::runtime_error("AGC graphics: unsupported primitive type " + std::to_string(primitive));
     }
     APS5_LOG_OUT_DEBUG("Topology=%u", static_cast<unsigned>(result.topology));
-    result.primitiveRestart = read(queue.userConfig, 0x24b, RegisterBank::UserConfig) != 0 && !result.rectList && result.topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+    result.primitiveRestart = read(queue.userConfig, 0x24b, RegisterBank::UserConfig) != 0 && !result.rectList && !result.quadList && result.topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
     zero(cx, 0x207, ~(LayerExports | ClipCullExports | inactiveVertexPointSize(queue)), "layer, viewport or auxiliary vertex exports");
     Require(std::popcount(read(cx, 0x207) & 0xffffu) <= 8, "more than eight clip and cull distances are unsupported");
     result.paClVsOutCntl = read(cx, 0x207);
@@ -1102,7 +1177,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         const bool clear = renderControl != cx.end() && (renderControl->second & 3u) != 0;
         const auto tests = planeTests(cx, depthControl);
         if ((clear || tests != 0) && depthSurfaceBound(cx)) {
-            decodeDepth(cx, depthControl, (read(cx, 0x203) & 2u) != 0 && !PixelProgramSkipped(queue), result);
+            decodeDepth(cx, depthControl, (read(cx, 0x203) & 2u) != 0 && !PixelProgramSkipped(queue), (read(cx, 0x203) & 4u) != 0 && !PixelProgramSkipped(queue), result);
         } else if (depthPassThrough(depthControl) || ((depthControl & 0xbu) != 0 && (tests == 0 || depthPlanesAbsent(cx)))) {
             static bool reported = false;
             if (!reported) {
@@ -1157,6 +1232,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     zero(cx, 0x293, ScanControlMask, "primitive discard or out-of-order rasterization");
     result.perSampleShading = result.samples > 1 && (read(cx, 0x293) & PixelShaderIteratesSamples) != 0;
+    Require(sampleCoverageSupported(queue, result.samples, result.perSampleShading), "SAMPLE_COVERAGE in a multisampled pixel shader that runs per sample, or reads sample-rate or ancillary inputs, is unsupported (the input holds the whole pixel's coverage, gl_SampleMaskIn only the invocation's samples)");
     if (depthKeepsSampleZero && result.samples > 1) {
         Require(rasterizesSampleZeroOnly(cx, result), "the depth target's sample count differs from the rasterizer's");
         rasterizeSampleZero(result);
@@ -1241,8 +1317,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
             result.customSampleLocations = true;
             result.sampleLocations.fill(0);
         }
-        if (color.samples == 1 && result.colors.empty() && !result.depth && rasterizesSampleZeroOnly(cx, result)) rasterizeSampleZero(result);
-        Require(color.samples == result.samples, "a color target's sample count differs from the rasterizer's");
+        const bool merged = color.samples == 1u && !result.depth && !result.perSampleShading && (result.colors.empty() || result.mergedCoverage) && overrasterized(cx, result.samples);
+        if (!merged && color.samples == 1 && result.colors.empty() && !result.depth && rasterizesSampleZeroOnly(cx, result)) rasterizeSampleZero(result);
+        Require((color.samples == result.samples && !result.mergedCoverage) || merged, "a color target's sample count differs from the rasterizer's");
+        result.mergedCoverage = merged;
         APS5_LOG_OUT_DEBUG("Color %u address=0x%llx extent=%ux%u bytes=%llu VkFormat=%u", slot, static_cast<unsigned long long>(color.address), color.extent.width, color.extent.height, static_cast<unsigned long long>(color.bytes), static_cast<unsigned>(color.format));
         if (result.colors.empty()) {
             result.renderExtent = color.extent;
@@ -1265,9 +1343,8 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     } else {
         const auto screenBottomRight = read(cx, 0xd);
         APS5_LOG_OUT_DEBUG("No color target, screen BR register=0x%x", screenBottomRight);
-        result.renderExtent = {screenBottomRight & 0xffffu, screenBottomRight >> 16u};
+        result.renderExtent = {std::max(screenBottomRight & 0xffffu, 1u), std::max(screenBottomRight >> 16u, 1u)};
         APS5_LOG_OUT_DEBUG("Render extent from screen=%ux%u", result.renderExtent.width, result.renderExtent.height);
-        Require(result.renderExtent.width != 0 && result.renderExtent.height != 0, "empty framebuffer extent for a draw without color writes");
     }
     result.quadSampleMask = decodeQuadSampleMask(cx, result.samples);
     result.pixelEarlyZ = !PixelProgramSkipped(queue) && PixelEarlyZ(read(cx, 0x203));
@@ -1295,6 +1372,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         throw std::runtime_error(message.str());
     }
     Require(readFloat(cx, 0xb4) <= readFloat(cx, 0xb5), "inverted viewport depth clamp bounds");
+    result.depthScale = zs;
+    result.depthOffset = zo;
+    result.depthClampMin = readFloat(cx, 0xb4);
+    result.depthClampMax = readFloat(cx, 0xb5);
     result.viewport = collapsed ? VkViewport{xo, yo, 1, 1, minDepth, maxDepth} : VkViewport{xo - xs, yo - ys, 2 * xs, 2 * ys, minDepth, maxDepth};
     if (const auto renderControl = find(cx, 0x000); result.depth && renderControl != cx.end() && (renderControl->second & 1u) != 0) {
         result.viewport.minDepth = result.depth->clearDepth;
@@ -1583,7 +1664,13 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     }
     if (!volume && lastSlice != slice) {
         const auto exports = find(cx, 0x207);
-        Require(exports == cx.end() || (exports->second & (1u << 18u)) == 0, "layered draws into a color view of several array slices are unsupported");
+        if (exports != cx.end() && (exports->second & (1u << 18u)) != 0) {
+            if (color.arrayLastSlice == 0) {
+                color.arrayLastSlice = lastSlice;
+                color.arraySlice = slice;
+            }
+            color.layers = lastSlice + 1u - slice;
+        }
     }
     color.extent = {((attrib2 >> 14u) & 0x3fffu) + 1u, (attrib2 & 0x3fffu) + 1u};
     color.elementBytes = decoded.elementBytes;
@@ -1725,7 +1812,9 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
         std::snprintf(text, sizeof(text), "CB metadata pass with depth or stencil work (DB_DEPTH_CONTROL 0x%08x, DB_RENDER_CONTROL 0x%08x, DB_Z_INFO 0x%08x, DB_STENCIL_INFO 0x%08x)", value(0x200), value(0x0), value(0x010), value(0x011));
         throw std::runtime_error(text);
     }
-    const auto samples = resolve && rasterizerSamples ? decodeSamples(cx) : 1u;
+    const auto modeControl = find(cx, 0x292);
+    const bool multisampleRaster = modeControl != cx.end() && (modeControl->second & 1u) != 0;
+    const auto samples = resolve && rasterizerSamples && multisampleRaster ? decodeSamples(cx) : 1u;
     if (!resolve) zero(cx, 0x2f8, ~0u, "multisampling or coverage conversion");
     zero(cx, 0x80, ~0u, "window offset");
     const auto viewportControl = read(cx, 0x206);
@@ -1910,6 +1999,22 @@ bool SplitsAlternateAlpha(const State& state) {
         if (blend.srcColorBlendFactor != blend.srcAlphaBlendFactor || blend.dstColorBlendFactor != blend.dstAlphaBlendFactor || blend.colorBlendOp != blend.alphaBlendOp) return true;
     }
     return false;
+}
+
+bool StencilOperationValueReplaces(const Registers& context) {
+    const auto value = [&](std::uint32_t offset) {
+        const auto found = find(context, offset);
+        return found == context.end() ? 0u : found->second;
+    };
+    if ((value(0x203) & 6u) != 4u) return false;
+    const auto depthControl = value(0x200);
+    if ((depthControl & 1u) == 0 || (value(0x011) & 1u) == 0 || (value(0x002) & 0x02000000u) != 0 || (value(0x000) & 2u) != 0) return false;
+    const auto replaces = [](std::uint32_t ops, std::uint32_t refMask) {
+        if (((refMask >> 16u) & 0xffu) == 0) return false;
+        return (ops & 0xfu) == 4u || ((ops >> 4u) & 0xfu) == 4u || ((ops >> 8u) & 0xfu) == 4u;
+    };
+    const auto ops = value(0x10b);
+    return replaces(ops, value(0x10c)) || ((depthControl & 0x80u) != 0 && replaces(ops >> 12u, value(0x10d)));
 }
 
 bool StencilReferenceUnused(const State& state) {

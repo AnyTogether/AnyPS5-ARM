@@ -30,6 +30,8 @@ bool Contains(const std::string& text, const std::string& part) { return text.fi
 }
 
 int main() {
+    Require(LogicErrorMessage([] { sceContentDeleteTerminate(); }) == "sceContentDeleteTerminate: not initialized");
+    Require(LogicErrorMessage([] { sceContentDeleteInitialize(nullptr); }) == "invalid argument");
     Require(LogicErrorMessage([] { sceContentDeleteById(1); }) == "sceContentDeleteById: not initialized");
     Require(LogicErrorMessage([] { sceContentDeleteByPath("/user/av_contents/photo/a.png"); }) == "sceContentDeleteByPath: not initialized");
     Require(LogicErrorMessage([] { sceContentDeleteByPath(nullptr); }) == "invalid argument");
@@ -37,6 +39,7 @@ int main() {
     ContentDeleteInitParam param{};
     param.heap_size = 0x10000;
     Require(sceContentDeleteInitialize(&param) == 0);
+    Require(LogicErrorMessage([&] { sceContentDeleteInitialize(&param); }) == "sceContentDeleteInitialize: already initialized");
 
     Require(LogicErrorMessage([] { sceContentDeleteByPath(nullptr); }) == "invalid argument");
     Require(Contains(LogicErrorMessage([] { sceContentDeleteByPath("/user/av_contents/photo/a.png"); }), "sceContentDeleteByPath: /user/av_contents/photo/a.png is not in the host content library"));
@@ -44,6 +47,7 @@ int main() {
     Require(Contains(LogicErrorMessage([] { sceContentDeleteById(-1); }), "sceContentDeleteById: content id -1 is not in the host content library"));
 
     Require(sceContentDeleteTerminate() == 0);
+    Require(LogicErrorMessage([] { sceContentDeleteTerminate(); }) == "sceContentDeleteTerminate: not initialized");
     Require(LogicErrorMessage([] { sceContentDeleteById(1); }) == "sceContentDeleteById: not initialized");
     return 0;
 }

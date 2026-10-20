@@ -14,6 +14,7 @@ int APS5_VABI sceSaveDataMount3(const SaveDataMount3*, SaveDataMountResult*);
 int APS5_VABI sceSaveDataUmount2(std::uint32_t, const SaveDataMountPoint*);
 int APS5_VABI sceSaveDataGetMountInfo(const SaveDataMountPoint*, SaveDataMountInfo*);
 int APS5_VABI sceSaveDataGetParam(const SaveDataMountPoint*, std::uint32_t, void*, std::size_t, std::size_t*);
+int APS5_VABI sceSaveDataSetParam(const SaveDataMountPoint*, std::uint32_t, const void*, std::size_t);
 }
 
 namespace {
@@ -46,6 +47,9 @@ void CheckUnmountedCalls() {
     Check(sceSaveDataGetParam(nullptr, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null point is PARAMETER");
     Check(sceSaveDataGetParam(&point, 1, nullptr, sizeof(buf), &gotSize) == SaveDataErrorParameter, "getParam null buf is PARAMETER");
     Check(sceSaveDataGetParam(&point, 1, buf, sizeof(buf), &gotSize) == SaveDataErrorNotMounted, "getParam unmounted point is NOT_MOUNTED");
+    Check(sceSaveDataSetParam(nullptr, 1, buf, sizeof(buf)) == SaveDataErrorParameter, "setParam null point is PARAMETER");
+    Check(sceSaveDataSetParam(&point, 1, nullptr, sizeof(buf)) == SaveDataErrorParameter, "setParam null buf is PARAMETER");
+    Check(sceSaveDataSetParam(&point, 1, buf, sizeof(buf)) == SaveDataErrorNotMounted, "setParam unmounted point is NOT_MOUNTED");
 }
 
 void CheckMountInfoAndParam(const SaveDataMountPoint* point) {
@@ -55,6 +59,8 @@ void CheckMountInfoAndParam(const SaveDataMountPoint* point) {
     std::size_t gotSize = 0;
     SaveDataMountPoint unmounted{};
     std::memcpy(unmounted.data, "unmounted", sizeof("unmounted"));
+    const char newTitle[] = "Mounted Title";
+    char readTitle[128]{};
     Check(sceSaveDataGetMountInfo(nullptr, &info) == SaveDataErrorParameter, "getMountInfo null point is PARAMETER");
     Check(sceSaveDataGetMountInfo(point, nullptr) == SaveDataErrorParameter, "getMountInfo null info is PARAMETER");
     Check(sceSaveDataGetMountInfo(&unmounted, &info) == SaveDataErrorNotMounted, "getMountInfo unmounted point is NOT_MOUNTED");
@@ -66,6 +72,15 @@ void CheckMountInfoAndParam(const SaveDataMountPoint* point) {
     Check(sceSaveDataGetParam(point, 1, buf, sizeof(buf), &gotSize) == 0, "getParam on mounted save succeeds");
     Check(gotSize == sizeof(buf), "getParam reports expected size");
     Check(sceSaveDataGetParam(point, 1, buf, sizeof(buf), nullptr) == 0, "getParam with null got_size on mounted save succeeds");
+    Check(sceSaveDataSetParam(nullptr, 1, newTitle, sizeof(newTitle)) == SaveDataErrorParameter, "setParam null point is PARAMETER");
+    Check(sceSaveDataSetParam(point, 1, nullptr, sizeof(newTitle)) == SaveDataErrorParameter, "setParam null buf is PARAMETER");
+    Check(sceSaveDataSetParam(point, 999, newTitle, sizeof(newTitle)) == SaveDataErrorParameter, "setParam invalid type is PARAMETER");
+    Check(sceSaveDataSetParam(point, 1, newTitle, 0) == SaveDataErrorParameter, "setParam zero size is PARAMETER");
+    Check(sceSaveDataSetParam(point, 4, smallBuf, 1) == SaveDataErrorParameter, "setParam short user param is PARAMETER");
+    Check(sceSaveDataSetParam(&unmounted, 1, newTitle, sizeof(newTitle)) == SaveDataErrorNotMounted, "setParam unmounted point is NOT_MOUNTED");
+    Check(sceSaveDataSetParam(point, 1, newTitle, sizeof(newTitle)) == 0, "setParam on mounted save succeeds");
+    Check(sceSaveDataGetParam(point, 1, readTitle, sizeof(readTitle), &gotSize) == 0, "getParam reads back set title");
+    Check(std::strcmp(readTitle, newTitle) == 0, "readTitle matches newTitle");
 }
 
 void MountAndCheck(const char* name, std::uint32_t mode, std::uint32_t expectedStatus, const std::string& what) {
@@ -100,7 +115,55 @@ void CheckFailedMountKeepsResult() {
     mount.mount_mode = MountReadWrite;
     Check(sceSaveDataMount3(&mount, &result) == SaveDataErrorNotFound, "open of a missing save is NOT_FOUND");
     Check(std::memcmp(&result, &mounted, sizeof(result)) == 0, "a NOT_FOUND mount leaves the result as it was");
+    MountAndCheck("new-create", MountReadWrite | MountCreate, 1u, "CREATE while another save is mounted");
+    MountAndCheck("new-create2", MountReadWrite | MountCreate2, 1u, "CREATE2 while another save is mounted");
+    Check(std::filesystem::remove(std::filesystem::path("_sd") / "held"), "the mounted backing directory is removed");
+    mount.dir_name = &held;
+    Check(sceSaveDataMount3(&mount, &result) == SaveDataErrorBusy, "the same name remains BUSY after its backing directory disappears");
+    Check(std::memcmp(&result, &mounted, sizeof(result)) == 0, "a missing backing directory leaves the BUSY result unchanged");
+    MountAndCheck("made", MountReadWrite, 0u, "open of another save while a mounted backing directory is missing");
     Check(sceSaveDataUmount2(0, &result.mount_point) == 0, "the kept mount point unmounts the save");
+}
+
+void CheckEquivalentMounts() {
+    SceSaveDataDirName original{};
+    std::memcpy(original.data, "identity", sizeof("identity"));
+    SaveDataMount3 mount{};
+    mount.dir_name = &original;
+    mount.mount_mode = MountReadWrite | MountCreate2;
+    SaveDataMountResult first{};
+    Check(sceSaveDataMount3(&mount, &first) == 0, "original save mounts");
+
+    const auto originalPath = std::filesystem::path("_sd") / "identity";
+    std::error_code error;
+    const auto casePath = std::filesystem::path("_sd") / "IDENTITY";
+    const bool caseAlias = std::filesystem::exists(casePath) && std::filesystem::equivalent(originalPath, casePath, error);
+    Check(!error || error == std::errc::no_such_file_or_directory, "case-alias identity check succeeds");
+    std::filesystem::create_directory_symlink("identity", std::filesystem::path("_sd") / "linked", error);
+    const bool symlinkAlias = !error;
+    Check(caseAlias || symlinkAlias, "a host alias is available to check mount identity");
+
+    const auto checkAlias = [&](const char* name) {
+        SceSaveDataDirName alias{};
+        std::memcpy(alias.data, name, std::strlen(name) + 1);
+        mount.dir_name = &alias;
+        mount.mount_mode = MountReadWrite;
+        SaveDataMountResult result;
+        std::memset(&result, 0xCD, sizeof(result));
+        const SaveDataMountResult before = result;
+        Check(sceSaveDataMount3(&mount, &result) == SaveDataErrorBusy, std::string(name) + " cannot mount the same directory twice");
+        Check(std::memcmp(&result, &before, sizeof(result)) == 0, std::string(name) + " leaves the result unchanged");
+    };
+    if (caseAlias) checkAlias("IDENTITY");
+    if (symlinkAlias) checkAlias("linked");
+
+    Check(sceSaveDataUmount2(0, &first.mount_point) == 0, "original save unmounts");
+    if (caseAlias) MountAndCheck("IDENTITY", MountReadWrite, 0u, "case alias after unmount");
+    if (symlinkAlias) {
+        MountAndCheck("linked", MountReadWrite, 0u, "symlink alias after unmount");
+        std::filesystem::remove(std::filesystem::path("_sd") / "linked", error);
+        Check(!error, "symlink alias is removed");
+    }
 }
 
 std::set<std::filesystem::path> Tree() {
@@ -151,6 +214,7 @@ int main() {
     MountAndCheck("made", MountReadWrite | MountCreate, 1u, "CREATE of a missing save");
     MountAndCheck("made", MountReadWrite, 0u, "open of an existing save");
     CheckFailedMountKeepsResult();
+    CheckEquivalentMounts();
     CheckInvalidNamesAreRejected();
     std::filesystem::current_path(previous);
     std::error_code error;

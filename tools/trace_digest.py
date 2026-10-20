@@ -72,7 +72,7 @@ class Trace:
 
 def load_trace(path):
     opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8") as handle:
+    with opener(path, "rt", encoding="utf-8-sig") as handle:
         return Trace(json.load(handle))
 
 
@@ -80,7 +80,7 @@ def load_summary(path, trace_path):
     candidate = Path(path) if path else Path(trace_path).with_name("aps5-summary.jsonl")
     if not candidate.exists():
         return None
-    lines = [json.loads(line) for line in candidate.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [json.loads(line) for line in candidate.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     name = Path(trace_path).name
     alternate = name[:-3] if name.endswith(".gz") else name + ".gz"
     for filename in (name, alternate):
@@ -92,7 +92,7 @@ def load_summary(path, trace_path):
 
 def load_stacks(path):
     stacks = []
-    for number, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), 1):
         if line.startswith("#") or not line.strip():
             continue
         frames, _, count = line.rpartition(" ")
@@ -143,8 +143,8 @@ def digest(trace, summary=None, stacks=None, worst=5, top=10):
                         leaders[name] += overlap
                 if is_wait(name) and not nested:
                     waited += overlap
-            if is_wait(name) and not nested:
-                waits.append((dur, name, trace.name(tid), ts))
+            if is_wait(name) and not nested and (overlap > 0 or not frames):
+                waits.append((overlap, name, trace.name(tid), max(ts, frames[0][1]) if frames else ts))
         threads.append({"thread": trace.name(tid), "busy_ms_per_frame": (traced - waited) / 1000.0 / count,
                         "wait_ms_per_frame": waited / 1000.0 / count,
                         "untraced_ms_per_frame": max(span_us - traced, 0.0) / 1000.0 / count,
@@ -264,7 +264,7 @@ def markdown(result):
 
 
 def load_intervals(path):
-    lines = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [json.loads(line) for line in Path(path).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     return [line for line in lines if "interval_start_s" in line]
 
 
@@ -280,15 +280,16 @@ def digest_intervals(lines):
     for line in lines:
         workers = line.get("worker_busy_pct", {})
         busiest = max(workers.items(), key=lambda entry: entry[1]) if workers else None
-        phases = list(line.get("top_phases_ms_per_frame", {}).items())
+        phases = line.get("top_phases_ms_per_frame", {})
+        largest = max(phases.items(), key=lambda entry: entry[1]) if phases else None
         rows.append({"start_s": line["interval_start_s"], "end_s": line["interval_end_s"], "presents": line["presents"],
                      "frame_ms": line["frame_ms"], "gpu_busy_ms_per_present": line["gpu_busy_ms_per_present"],
                      "busiest_worker": {"thread": busiest[0], "pct": busiest[1]} if busiest else None,
-                     "top_phase": {"name": phases[0][0], "ms_per_frame": phases[0][1]} if phases else None,
+                     "top_phase": {"name": largest[0], "ms_per_frame": largest[1]} if largest else None,
                      "trace_dropped": line.get("trace_dropped", False)})
     first = lines[0] if lines else {}
     keys = ("commit", "dirty", "env", "gpu", "driver", "os", "resolution")
-    changed = [index for index, line in enumerate(lines) if any(line.get(key) != first.get(key) for key in keys)]
+    changed = [index for index in range(1, len(lines)) if any(lines[index].get(key) != lines[index - 1].get(key) for key in keys)]
     return {"intervals": rows, "identity": {key: first.get(key) for key in keys}, "identity_changed_at": changed}
 
 
@@ -348,8 +349,9 @@ def main(arguments=None):
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     try:
         sys.exit(main())
     except (EOFError, OSError, ValueError, zlib.error) as error:

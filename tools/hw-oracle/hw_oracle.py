@@ -166,7 +166,11 @@ def main():
     parser.add_argument("--extra", type=Path, help="bytes appended after the rows")
     parser.add_argument("--outs", type=int, choices=range(1, 17), default=16, metavar="N", help="print v10..v(10+N-1)")
     parser.add_argument("--json", action="store_true", help="emit inputs, results and run settings as JSON; target is the assembly target, not a GPU model or driver")
+    parser.add_argument("--validate-only", action="store_true",
+                        help="check input rows and report dispatch dimensions without assembling or executing the kernel")
     args = parser.parse_args()
+    if args.lds not in range(MAX_LDS + 1):
+        parser.error(f"lds must be an integer from 0 to {MAX_LDS}")
     try:
         rows = validated_rows(tuple(parse_word(v) for v in line.split())
                               for line in args.rows.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -177,6 +181,18 @@ def main():
     except (OSError, ValueError) as error:
         parser.error(str(error))
     modes = {name: getattr(args, name) for name in ("ieee", "denorm32", "denorm16", "dx10_clamp", "round32", "round16", "fp16_overflow")}
+    if args.validate_only:
+        wave = 64 if args.wave64 else 32
+        padded = (len(rows) + wave - 1) // wave * wave
+        dispatch = ROWS_PER_DISPATCH // 2 if args.wave64 else ROWS_PER_DISPATCH
+        report = {"validation_only": True, "rows": len(rows), "padded_rows": padded,
+                  "dispatches": (padded + dispatch - 1) // dispatch, "wave_size": wave,
+                  "floating_point_modes": modes, "lds_bytes": args.lds,
+                  "memory": "coarse" if args.coarse else "fine", "extra_bytes": len(extra)}
+        print(json.dumps(report, indent=2) if args.json else
+              f"Validated {len(rows)} input rows, {padded} padded rows, {report['dispatches']} dispatches. "
+              "Assembly and GPU execution were not checked.")
+        return 0
     results = run(body, rows, extra, args.wave64, args.coarse, **modes, lds=args.lds)
     if args.json:
         report = {

@@ -10,6 +10,9 @@
 
 namespace Elfpatcher::MacOs {
 
+inline constexpr std::uint64_t ExportKindAbsolute = 2;
+inline constexpr std::uint64_t ExportWeakDefinition = 4;
+
 // A flat-namespace bind of a pointer slot to a symbol (Mach-O spelling, with the leading underscore).
 struct MacOsBind {
     std::string Symbol;
@@ -20,7 +23,8 @@ struct MacOsBind {
 
 struct MacOsExport {
     std::string Symbol;
-    std::uint32_t Rva;
+    std::uint64_t Value;
+    std::uint64_t Flags = 0;
 };
 
 // A TLS variable another image reaches with general-dynamic access. The slot receives the defining
@@ -37,6 +41,7 @@ struct MacOsTlsImport {
 struct MacOsTlsExport {
     std::string Symbol;
     std::uint64_t Offset;
+    std::uint64_t Flags = 0;
 };
 
 // A guest image laid out by WindowsLoadImage (ImageBase + RVA, relocations already written) and what

@@ -13,6 +13,8 @@
 #include "prx/libSceAgcDriver/Eq/include/Event.hpp"
 #include <array>
 #include <chrono>
+#include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <mutex>
@@ -56,15 +58,25 @@ bool keepsDrawPipeline(std::span<const std::uint32_t> packet, std::uint32_t head
         case 0x63: case 0x64: case 0x9f:
             return packet.size() >= 5 && !DrawPipeline::Queue0().Overlaps(packet[1] | (static_cast<std::uint64_t>(packet[2]) << 32u), static_cast<std::size_t>(packet[4]) * 8);
         case 0x50: {
-            if (!pipelineDma() || packet.size() < 7) return false;
+            if (packet.size() < 7) return false;
             const auto destination = Pm4::DmaDestination(packet);
-            if (destination == Pm4::DmaSelectGds || destination == Pm4::DmaDestinationNowhere) return true;
+            if (destination == Pm4::DmaDestinationNowhere) return true;
+            if (!pipelineDma()) return false;
+            if (destination == Pm4::DmaSelectGds) return true;
             const auto bytes = Pm4::DmaBytes(packet);
             if (bytes == 0) return true;
             const auto source = Pm4::DmaSource(packet);
             if ((source == 0 || source == 3) && DrawPipeline::Queue0().Overlaps(packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u), bytes)) return false;
             const auto address = packet[4] | (static_cast<std::uint64_t>(packet[5]) << 32u);
             return !DrawPipeline::Queue0().Overlaps(address, bytes);
+        }
+        case 0x3c: case 0x93: {
+            if (packet.size() < 5) return false;
+            const std::uint64_t awaited = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
+            const auto bytes = Pm4::WaitAwaitedBytes(packet);
+            if (DrawPipeline::Queue0().Overlaps(awaited, bytes)) return false;
+            GuestMemory::CheckRange(reinterpret_cast<const void*>(awaited), bytes, bytes);
+            return Pm4::WaitSatisfiedUnchecked(packet);
         }
         case 0x10: {
             const auto operation = (header >> 2u) & 0x3fu;
@@ -227,16 +239,26 @@ void Driver::execute(const Submission& submission) {
         PerformanceContext timingContext(submission.queue == 0 ? pendingFrameTiming.get() : FrameTiming::Async());
         PerformanceTimer timing("Driver.Packet");
         const bool predicated = Pm4::Predicated(header) && queue.predication.operation != 0;
-        if (pipelined && !predicated && header != FlipPacketHeader && header != RenderingWaitPacketHeader && (enqueueLabelPacket(packet, opcode, submission.queue) || enqueueSampleDump(packet, submission.queue) || enqueueDmaPacket(packet, opcode, submission.queue, queue))) {
+        if (pipelined && !predicated && header != FlipPacketHeader && header != RenderingWaitPacketHeader && !submission.flips.contains(cursor) && (enqueueLabelPacket(packet, opcode, submission.queue) || enqueueSampleDump(packet, submission.queue) || enqueueDmaPacket(packet, opcode, submission.queue, queue))) {
             traceLabel(packet, submission.queue);
             recent.Record(cursor);
             cursor = nextCursor;
             continue;
         }
         if (pipelined && !predicated && (opcode == 0x3c || opcode == 0x93) && header != RenderingWaitPacketHeader && orderedWaits && DrawPipeline::Queue0().Busy()) {
-            const std::uint64_t awaited = packet[2] | (static_cast<std::uint64_t>(packet[3]) << 32u);
-            if (const auto value = DrawPipeline::Queue0().PendingLabel(awaited, Pm4::WaitAwaitedBytes(packet)); value.has_value() && Pm4::WaitComparesValue(packet, *value)) {
+            const auto awaitedBytes = Pm4::WaitAwaitedBytes(packet);
+            const std::uint64_t awaited = (packet[2] & (awaitedBytes == 8 ? ~7u : ~3u)) | (static_cast<std::uint64_t>(packet[3]) << 32u);
+            const auto value = DrawPipeline::Queue0().PendingLabel(awaited, awaitedBytes);
+            if (value.has_value() && Pm4::WaitComparesValue(packet, *value)) {
                 ++waitOutcomes().fromRecorderSameQueue;
+                gateOpened() = true;
+                recent.Record(cursor);
+                cursor = nextCursor;
+                continue;
+            }
+            if (!DrawPipeline::Queue0().Overlaps(awaited, awaitedBytes) && Pm4::WaitSatisfiedUnchecked(packet)) {
+                bumpEpoch(&EpochBumps::waits);
+                ++waitOutcomes().atEntry;
                 gateOpened() = true;
                 recent.Record(cursor);
                 cursor = nextCursor;
@@ -382,14 +404,15 @@ void Driver::execute(const Submission& submission) {
 
             timing.Mark("flip_flush");
             timing.FinishPacket(submission.serial, cursor, 0xffffu, count);
-            auto frame = APS5_ENABLE_TIMING_LOG ? std::move(pendingFrameTiming) : std::make_shared<FrameTiming>(++frameSerial);
+            const bool queueTiming = APS5_ENABLE_TIMING_LOG && submission.queue == 0;
+            auto frame = queueTiming ? std::move(pendingFrameTiming) : std::make_shared<FrameTiming>(++frameSerial);
             require(frame != nullptr, "flip has no frame timing");
             const auto now = FrameTiming::Clock::now();
-            if (!APS5_ENABLE_TIMING_LOG) frame->IncludeSubmission(submission.serial, now, now, now, true);
-            frame->SetFlip(submission.serial, cursor, APS5_ENABLE_TIMING_LOG ? submission.receivedAt : now, now);
-            if (APS5_ENABLE_TIMING_LOG) frame->CollectBackground();
+            if (!queueTiming) frame->IncludeSubmission(submission.serial, now, now, now, true);
+            frame->SetFlip(submission.serial, cursor, queueTiming ? submission.receivedAt : now, now);
+            if (queueTiming) frame->CollectBackground();
             frame->NoteFlipBatches(batchesAtFlip, unsignaledAtFlip);
-            CaptureTrace::Log("flip frame=%llu submission=%llu offset=%zu batch=%llu unsignaled=%llu", static_cast<unsigned long long>(frameSerial), static_cast<unsigned long long>(submission.serial), cursor, static_cast<unsigned long long>(batchesAtFlip), static_cast<unsigned long long>(unsignaledAtFlip));
+            CaptureTrace::Log("flip frame=%llu submission=%llu offset=%zu batch=%llu unsignaled=%llu", static_cast<unsigned long long>(frameSerial.load()), static_cast<unsigned long long>(submission.serial), cursor, static_cast<unsigned long long>(batchesAtFlip), static_cast<unsigned long long>(unsignaledAtFlip));
             flipHold.Release();
             submission.flips.at(cursor)->GpuReady(frame);
         } else if (opcode == 0x15 || opcode == 0x16) {
@@ -486,8 +509,31 @@ void Driver::execute(const Submission& submission) {
             dumpSampleCounters(Pm4::SampleDumpAddress(packet));
         } else if (opcode != 0x42 && opcode != 0x46 && opcode != 0x58) {
             if (!wroteOnGpu) {
-                if (Pm4::IndirectRegisterOpcode(opcode)) Pm4::ExecuteIndirectRegisters(packet, submission.registerLists.at(cursor), queue);
-                else Pm4::Execute(packet, queue);
+                if (Pm4::IndirectRegisterOpcode(opcode)) {
+                    const auto& listed = submission.registerLists.at(cursor);
+                    if (Pm4::IndirectRegistersValid(listed)) {
+                        Pm4::ExecuteIndirectRegisters(packet, listed, queue);
+                    } else {
+                        landPendingWaits(submission.queue);
+                        recordQueuedLabelsBeforeRead(submission.queue);
+                        const auto current = Pm4::ReadIndirectRegisters(packet);
+                        static const bool skipInvalid = std::getenv("APS5_SKIP_INVALID_INDIRECT_REGISTERS") != nullptr;
+                        static std::atomic<bool> reported{false};
+                        if (!reported.exchange(true)) {
+                            std::uint32_t invalid = 0;
+                            for (std::size_t i = 0; i < listed.size(); i += 2) {
+                                if (!Pm4::IndirectRegistersValid(std::span(&listed[i], 1))) {
+                                    invalid = listed[i];
+                                    break;
+                                }
+                            }
+                            std::fprintf(stderr, "[gpu] queue 0x%x %s at DWORD %zu: register list entry with offset dword 0x%08x read again where the packet executes%s\n", submission.queue, Pm4::Name(packet[0]).c_str(), cursor, invalid, skipInvalid ? "; invalid entries are skipped (APS5_SKIP_INVALID_INDIRECT_REGISTERS)" : "");
+                        }
+                        Pm4::ExecuteIndirectRegisters(packet, current, queue, skipInvalid);
+                    }
+                } else {
+                    Pm4::Execute(packet, queue);
+                }
                 if (opcode == 0x49 || opcode == 0x37) {
                     if (const auto label = Pm4::DecodeLabelWrite(packet)) noteLabelStore(label->address, label->Bytes(), ++eventSerial, submission.queue);
                 }

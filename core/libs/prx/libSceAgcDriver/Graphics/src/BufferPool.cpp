@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 
 namespace AgcDriver::Graphics {
@@ -37,7 +38,7 @@ constexpr VkBufferUsageFlags deviceUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | 
 
 }
 
-BufferPool::BufferPool(const Context& context) : device(context.device), unmap(context.Function<PFN_vkUnmapMemory>("vkUnmapMemory")), destroyBuffer(context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")), freeMemory(context.Function<PFN_vkFreeMemory>("vkFreeMemory")), allocateMemory(context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")), mapMemory(context.Function<PFN_vkMapMemory>("vkMapMemory")), maxSlots(std::max<std::size_t>(1, std::min<std::size_t>(MaxSlots(), context.limits.maxMemoryAllocationCount / 6u))), cacheReclaim(context.cacheReclaim) {
+BufferPool::BufferPool(const Context& context) : maxSlots(std::max<std::size_t>(1, std::min<std::size_t>(MaxSlots(), context.limits.maxMemoryAllocationCount / 6u))), cacheReclaim(context.cacheReclaim), device(context.device), unmap(context.Function<PFN_vkUnmapMemory>("vkUnmapMemory")), destroyBuffer(context.Function<PFN_vkDestroyBuffer>("vkDestroyBuffer")), freeMemory(context.Function<PFN_vkFreeMemory>("vkFreeMemory")), allocateMemory(context.Function<PFN_vkAllocateMemory>("vkAllocateMemory")), mapMemory(context.Function<PFN_vkMapMemory>("vkMapMemory")), physical(context.physical), memoryProperties(context.memory), memoryProperties2(context.memoryProperties2) {
     smallTier.budget = smallBudget;
     largeTier.budget = budget;
     deviceTier.budget = deviceBudget(context);
@@ -96,8 +97,20 @@ VkDeviceMemory BufferPool::AllocateMemory(const VkMemoryAllocateInfo& allocation
         if (attempts > 1) std::fprintf(stderr, "[bufferpool] %s recovered: allocation=%llu reclaimed=%llu released=%llu initialResult=%d attempts=%u\n", operation, static_cast<unsigned long long>(allocation.allocationSize), static_cast<unsigned long long>(reclaimed), static_cast<unsigned long long>(released), static_cast<int>(initialResult), attempts);
         return memory;
     }
-    char details[512];
+    char details[1536];
     std::snprintf(details, sizeof(details), "%s: allocation=%llu memoryType=%u reclaimed=%llu released=%llu initialResult=%d attempts=%u", operation, static_cast<unsigned long long>(allocation.allocationSize), allocation.memoryTypeIndex, static_cast<unsigned long long>(reclaimed), static_cast<unsigned long long>(released), static_cast<int>(initialResult), attempts);
+    if (memoryProperties2 != nullptr && physical != VK_NULL_HANDLE) {
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+        VkPhysicalDeviceMemoryProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2, &budget};
+        memoryProperties2(physical, &properties);
+        auto used = std::strlen(details);
+        for (std::uint32_t heap = 0; heap < memoryProperties.memoryHeapCount && heap < VK_MAX_MEMORY_HEAPS; ++heap) {
+            const auto remaining = sizeof(details) - used;
+            const auto appended = std::snprintf(details + used, remaining, "; heap %u %llu/%llu MiB", heap, static_cast<unsigned long long>(budget.heapUsage[heap] >> 20u), static_cast<unsigned long long>(budget.heapBudget[heap] >> 20u));
+            if (appended < 0 || static_cast<std::size_t>(appended) >= remaining) break;
+            used += static_cast<std::size_t>(appended);
+        }
+    }
     Check(result, details);
     return VK_NULL_HANDLE;
 }
@@ -161,11 +174,12 @@ SlabSlot BufferPool::TakeSlot(const Context& context, std::uint32_t memoryType, 
     for (std::uint32_t index = slots; index-- != 0;) block->free.push_back(index);
     std::lock_guard lock(slabMutex);
     auto& slab = slabs[key];
-    if (slab.available.size() == slab.available.capacity()) slab.available.reserve(std::max<std::size_t>(1, slab.available.capacity() * 2));
+    if (slab.blocks == slab.available.capacity()) slab.available.reserve(std::max<std::size_t>(1, slab.available.capacity() * 2));
     auto& inserted = *block;
     const auto owner = slabBlocks.try_emplace(inserted.memory).first;
     owner->second.reset(block.release());
     slab.available.push_back(&inserted);
+    ++slab.blocks;
     ++slab.emptyBlocks;
     return takeFrom(*slab.available.back(), slab);
 }
@@ -191,6 +205,7 @@ VkDeviceSize BufferPool::PutSlot(VkDeviceMemory memory, VkDeviceSize offset) noe
             return 0;
         }
         slab.available.erase(std::find(slab.available.begin(), slab.available.end(), &block));
+        --slab.blocks;
         released = std::move(found->second);
         slabBlocks.erase(found);
     }
@@ -351,6 +366,7 @@ VkDeviceSize BufferPool::trim() {
             if (found == slabBlocks.end()) break;
             auto& slab = slabs.at(found->second->slab);
             slab.available.erase(std::find(slab.available.begin(), slab.available.end(), found->second.get()));
+            --slab.blocks;
             --slab.emptyBlocks;
             released = std::move(found->second);
             slabBlocks.erase(found);

@@ -238,6 +238,7 @@ private:
         case u'u': return Integer(directive, 10, false);
         case u'x':
         case u'X': return Integer(directive, 16, false);
+        case u'p': return Pointer(directive);
         case u'a': case u'A': case u'e': case u'E':
         case u'f': case u'F': case u'g': case u'G': return Float(directive);
         case u's':
@@ -265,7 +266,10 @@ private:
     }
 
     Outcome Integer(const Directive& directive, int base, bool isSigned) {
-        const std::size_t size = IntegerSize(directive.length);
+        return Integer(directive, base, isSigned, IntegerSize(directive.length));
+    }
+
+    Outcome Integer(const Directive& directive, int base, bool isSigned, std::size_t size) {
         void* target = nullptr;
         if (!directive.suppress && (target = args.Next<void*>()) == nullptr) return Outcome::Violation;
         SkipSpace();
@@ -280,6 +284,11 @@ private:
         }
         converted = true;
         return Outcome::Done;
+    }
+
+    Outcome Pointer(const Directive& directive) {
+        if (!directive.length.empty()) Fail("invalid pointer length modifier " + directive.length);
+        return Integer(directive, 16, false, sizeof(void*));
     }
 
     Outcome Float(const Directive& directive) {
@@ -416,6 +425,16 @@ int APS5_VABI swscanf_s_nid_postfix(const char16_t* buffer, const char16_t* form
         APS5_VA_END();
         throw;
     }
+}
+
+int APS5_VABI vswscanf_nid_postfix(const char16_t* buffer, const char16_t* format, VaList* args) {
+    if (buffer == nullptr || format == nullptr) return EOF;
+    return WideScanner("vswscanf", false, buffer, format, args).Run();
+}
+
+int APS5_VABI vswscanf_s_nid_postfix(const char16_t* buffer, const char16_t* format, VaList* args) {
+    if (buffer == nullptr || format == nullptr) return EOF;
+    return WideScanner("vswscanf_s", true, buffer, format, args).Run();
 }
 
 }

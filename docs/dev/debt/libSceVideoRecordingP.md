@@ -1,0 +1,14 @@
+# libSceVideoRecordingP technical debt
+
+### Unknown function info
+
+- [_sceVideoRecordingQueryParam_nid_postfix](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - declared with `void(void* param)` signature following [SharpProspero](https://github.com/SvenGDK/SharpProspero/blob/5dfdb4b0b166e83dc9ae275001afb695f12c7174/src/SharpProspero/Interop/VideoRecording.cs#L22); unimplemented and throws `NotImplemented_nid_no_patch`
+- [sceVideoRecordingCloseByHandle, sceVideoRecordingGetInfoByHandle](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - inferred handle-based recording control signatures taking an integer recording handle; unimplemented and throw `NotImplemented_nid_no_patch`
+- [sceVideoRecordingCopyBGRAtoNV12](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - inferred pixel buffer conversion signature `(void* dst, const void* src, uint32_t width, uint32_t height)`; unimplemented and throws `NotImplemented_nid_no_patch`
+- [sceVideoRecordingGetSupportInfo, sceVideoRecordingGetVideoOutMode](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - query signatures taking an output pointer; exact structure layouts and return values are unverified and throw `NotImplemented_nid_no_patch`
+- [sceVideoRecordingInit, sceVideoRecordingTerm](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - parameterless initialization and termination stubs; unimplemented and throw `NotImplemented_nid_no_patch`
+- [sceVideoRecordingInitialize](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - initialization stub taking an optional parameter structure pointer; unverified and throws `NotImplemented_nid_no_patch`
+- [sceVideoRecordingOpen2](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - extended recording open signature; parameters inferred from `sceVideoRecordingOpen` and [fpPS4](https://github.com/red-prig/fpPS4); unimplemented and throws `NotImplemented_nid_no_patch`
+- [sceVideoRecordingQueryHddSize2, sceVideoRecordingQueryMemSize2](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - memory and disk size query signatures taking parameter pointer; unverified and throw `NotImplemented_nid_no_patch`
+- [sceVideoRecordingRestModeProcessGetStatus, sceVideoRecordingRestModeProcessStart](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - rest mode recording interfaces; unverified and throw `NotImplemented_nid_no_patch`
+- [sceVideoRecordingSendCommand](../../../core/libs/prx/libSceVideoRecordingP/Export.cpp) (libSceVideoRecordingP) - command dispatch signature taking integer command ID and parameter pointer; unverified and throws `NotImplemented_nid_no_patch`

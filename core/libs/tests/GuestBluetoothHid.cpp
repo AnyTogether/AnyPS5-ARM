@@ -12,6 +12,11 @@ std::int32_t APS5_VABI sceBluetoothHidUnregisterCallback();
 std::int32_t APS5_VABI sceBluetoothHidRegisterDevice(std::uint16_t vendorId, std::uint16_t productId);
 std::int32_t APS5_VABI sceBluetoothHidUnregisterDevice(std::uint16_t vendorId, std::uint16_t productId);
 int APS5_VABI sceBluetoothHidGetInputReport();
+int APS5_VABI sceBluetoothHidDebugGetVersion();
+int APS5_VABI sceBluetoothHidGetDeviceInfo();
+int APS5_VABI sceBluetoothHidDisconnectDevice();
+int APS5_VABI sceBluetoothHidGetFeatureReport();
+int APS5_VABI sceBluetoothHidSetFeatureReport();
 }
 
 namespace {
@@ -51,6 +56,41 @@ int main() {
         threw = true;
     }
     Require(threw, "an input report without a device did not throw");
+    threw = false;
+    try {
+        sceBluetoothHidDebugGetVersion();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "debug get version did not throw");
+    threw = false;
+    try {
+        sceBluetoothHidGetDeviceInfo();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "get device info did not throw");
+    threw = false;
+    try {
+        sceBluetoothHidDisconnectDevice();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "disconnect device did not throw");
+    threw = false;
+    try {
+        sceBluetoothHidGetFeatureReport();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "get feature report did not throw");
+    threw = false;
+    try {
+        sceBluetoothHidSetFeatureReport();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    Require(threw, "set feature report did not throw");
     Require(sceBluetoothHidUnregisterDevice(0x44f, 0x1000) == 0, "device unregistration failed");
     Require(sceBluetoothHidUnregisterCallback() == 0, "callback unregistration failed");
     std::puts("BluetoothHid tests passed");

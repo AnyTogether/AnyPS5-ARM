@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import re
 import shutil
@@ -9,10 +10,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+WEB_FILES = ("index.html", "app.css", "app.mjs", "archive.mjs", "batch.mjs", "output-directory.mjs", "worker.mjs",
+             "native/relinker_wasm.mjs", "native/relinker_wasm.wasm")
 
 
 def windows_runtime(build):
-    for line in (build / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+    for line in (build / "CMakeCache.txt").read_text(encoding="utf-8-sig").splitlines():
         if line.startswith("CMAKE_CXX_COMPILER:"):
             compiler = line.partition("=")[2]
             if compiler and not compiler.endswith("-NOTFOUND"):
@@ -24,7 +27,7 @@ def tracy_runtime(platform, build):
     cache = build / "CMakeCache.txt"
     if not cache.is_file():
         return []
-    lines = cache.read_text(encoding="utf-8").splitlines()
+    lines = cache.read_text(encoding="utf-8-sig").splitlines()
     enabled = next((line.partition("=")[2].upper() for line in lines if line.startswith("APS5_ENABLE_TRACY:")), "OFF")
     if enabled in ("", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND") or enabled.endswith("-NOTFOUND"):
         return []
@@ -95,22 +98,54 @@ def collect_docs(source, output):
         shutil.copy2(document, output / document.name)
 
 
+def package_web(build, output, version, revision):
+    if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version) or version.endswith("."):
+        raise ValueError(f"Invalid release tag for asset filenames: {version}")
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Web release revision must be a full commit SHA")
+    source = build / "web"
+    for name in WEB_FILES:
+        file = source / name
+        if not file.is_file() or file.stat().st_size == 0:
+            raise RuntimeError(f"Missing or empty web release file: {file}")
+    name = f"web-{version}.zip"
+    destination = output / name
+    if destination.exists() and not destination.is_file():
+        raise RuntimeError(f"Release destination is not a file: {destination}")
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".release-", dir=output) as temporary:
+        asset = Path(temporary) / name
+        with zipfile.ZipFile(asset, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for file in WEB_FILES:
+                archive.write(source / file, arcname=file)
+            archive.writestr("web-release.json", json.dumps({"tag": version, "revision": revision}) + "\n")
+        asset.replace(destination)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--platform", choices=("linux", "windows"))
+    parser.add_argument("--platform", choices=("linux", "windows", "web"))
     parser.add_argument("--build", type=Path)
     parser.add_argument("--version")
+    parser.add_argument("--revision")
     parser.add_argument("--docs", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     if args.docs is not None:
-        if args.platform is not None or args.build is not None or args.version is not None:
-            parser.error("--docs cannot be combined with --platform, --build or --version")
+        if args.platform is not None or args.build is not None or args.version is not None or args.revision is not None:
+            parser.error("--docs cannot be combined with --platform, --build, --version or --revision")
         collect_docs(args.docs, args.output)
     else:
         if args.platform is None or args.build is None or args.version is None:
             parser.error("--platform, --build and --version are required when --docs is not specified")
-        package(args.platform, args.build, args.output, args.version)
+        if args.platform == "web":
+            if args.revision is None:
+                parser.error("--revision is required for --platform web")
+            package_web(args.build, args.output, args.version, args.revision)
+        else:
+            if args.revision is not None:
+                parser.error("--revision requires --platform web")
+            package(args.platform, args.build, args.output, args.version)
 
 
 if __name__ == "__main__":

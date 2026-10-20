@@ -15,6 +15,14 @@
 #include <utility>
 #include <vector>
 #endif
+#if defined(__linux__) && defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 35))
+#define LIBC_UNWIND_FIND_OBJECT 1
+#include <dlfcn.h>
+#include <map>
+#include <mutex>
+#include <tuple>
+#include <utility>
+#endif
 #ifdef __APPLE__
 #include <dlfcn.h>
 #include <mach-o/getsect.h>
@@ -92,6 +100,9 @@ const std::uintptr_t* UnwindCursorSlots_nid_no_patch() {
 
 extern "C" _Unwind_Reason_Code __gxx_personality_v0(int, _Unwind_Action, std::uint64_t, _Unwind_Exception*, _Unwind_Context*);
 extern "C" _Unwind_Reason_Code __gcc_personality_v0(int, _Unwind_Action, std::uint64_t, _Unwind_Exception*, _Unwind_Context*);
+#ifdef _WIN32
+extern "C" void _Unwind_DeleteException(_Unwind_Exception*);
+#endif
 
 namespace LibcUnwind {
 _Unwind_Reason_Code CallPersonality(Word personality, _Unwind_Action actions, _Unwind_Exception* exception, _Unwind_Context* context) {
@@ -110,6 +121,8 @@ _Unwind_Reason_Code CallPersonality(Word personality, _Unwind_Action actions, _U
     return (actions & _UA_SEARCH_PHASE) ? _URC_FATAL_PHASE1_ERROR : _URC_FATAL_PHASE2_ERROR;
 }
 #if defined(__linux__) || defined(__APPLE__)
+void SearchHeader(const Byte* header, Lookup& query);
+
 int FindFrame(dl_phdr_info* info, std::size_t, void* argument) {
     auto& query = *static_cast<Lookup*>(argument);
     const Byte* header = nullptr;
@@ -123,10 +136,15 @@ int FindFrame(dl_phdr_info* info, std::size_t, void* argument) {
         if (ph.p_type == PT_LOAD && (ph.p_flags & PF_W)) query.data = start;
     }
     if (!contains || !header || header[0] != 1) return 0;
+    SearchHeader(header, query);
+    return 1;
+}
+
+void SearchHeader(const Byte* header, Lookup& query) {
     const Byte* p = header + 4;
     Encoded(p, header[1], Word(header));
     Word count = Encoded(p, header[2]);
-    if (header[3] == 255) return 1;
+    if (header[3] == 255) return;
     unsigned width = EncodingSize(header[3]);
     const Byte* table = p;
     Word lo = 0, hi = count;
@@ -140,8 +158,39 @@ int FindFrame(dl_phdr_info* info, std::size_t, void* argument) {
         p = table + (lo - 1) * width * 2 + width;
         query.fde = reinterpret_cast<const Byte*>(Encoded(p, header[3], Word(header)));
     }
-    return 1;
 }
+
+#ifdef LIBC_UNWIND_FIND_OBJECT
+bool FindFrameFast(Lookup& query) {
+    dl_find_object object {};
+    if (_dl_find_object(reinterpret_cast<void*>(query.pc), &object) != 0 || object.dlfo_eh_frame == nullptr) return false;
+    const auto* header = static_cast<const Byte*>(object.dlfo_eh_frame);
+    if (header[0] != 1) return false;
+    static std::mutex mutex;
+    static std::map<std::tuple<const Byte*, const void*, const void*>, std::pair<Word, Word>> bases;
+    const std::tuple key {header, static_cast<const void*>(object.dlfo_map_start), static_cast<const void*>(object.dlfo_map_end)};
+    {
+        std::lock_guard lock(mutex);
+        auto found = bases.find(key);
+        if (found != bases.end()) {
+            query.text = found->second.first;
+            query.data = found->second.second;
+            SearchHeader(header, query);
+            return true;
+        }
+    }
+    Lookup probe {query.pc};
+    dl_iterate_phdr(FindFrame, &probe);
+    {
+        std::lock_guard lock(mutex);
+        const auto found = bases.emplace(key, std::pair {probe.text, probe.data}).first;
+        query.text = found->second.first;
+        query.data = found->second.second;
+    }
+    SearchHeader(header, query);
+    return true;
+}
+#endif
 
 #endif
 
@@ -238,7 +287,10 @@ bool VirtualUnwind(const _Unwind_Context& context, _Unwind_Context& caller) {
 bool DecodeFrame(_Unwind_Context& context, Frame& frame) {
     Lookup query {context.registers[16] - !context.signalFrame};
 #if defined(__linux__) || defined(__APPLE__)
-    dl_iterate_phdr(FindFrame, &query);
+#ifdef LIBC_UNWIND_FIND_OBJECT
+    if (!FindFrameFast(query))
+#endif
+        dl_iterate_phdr(FindFrame, &query);
 #ifdef __APPLE__
     if (!query.fde) {
         Dl_info image {};
@@ -520,6 +572,12 @@ _Unwind_Reason_Code APS5_VABI _Unwind_Resume_or_Rethrow_nid_postfix(_Unwind_Exce
 }
 
 void APS5_VABI _Unwind_DeleteException_nid_postfix(_Unwind_Exception* exception) {
+#ifdef _WIN32
+    if (exception && LibcException::Gnu(exception->exception_class)) {
+        _Unwind_DeleteException(exception);
+        return;
+    }
+#endif
     if (exception && exception->exception_cleanup) exception->exception_cleanup(_URC_FOREIGN_EXCEPTION_CAUGHT, exception);
 }
 

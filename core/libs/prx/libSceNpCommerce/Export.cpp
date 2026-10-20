@@ -84,4 +84,9 @@ int APS5_VABI sceNpCommerceDialogOpen2(void) {
  return 0;
 }
 
+int APS5_VABI sceNpCommerceDialogInitializeInternal() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

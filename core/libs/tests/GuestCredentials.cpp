@@ -8,13 +8,16 @@ extern "C" {
 int APS5_VABI seteuid_nid_postfix(std::uint32_t);
 int APS5_VABI setegid_nid_postfix(std::uint32_t);
 int APS5_VABI setuid_nid_postfix(std::uint32_t);
+int APS5_VABI setgid_nid_postfix(std::uint32_t);
 int APS5_VABI setreuid_nid_postfix(std::uint32_t, std::uint32_t);
 int APS5_VABI setregid_nid_postfix(std::uint32_t, std::uint32_t);
 int APS5_VABI setgroups_nid_postfix(int, const std::uint32_t*);
 int APS5_VABI getgroups_nid_postfix(int, std::uint32_t*);
 int APS5_VABI getuid_nid_postfix(void);
 int APS5_VABI geteuid_nid_postfix(void);
+int APS5_VABI getgid_nid_postfix(void);
 int APS5_VABI getegid_nid_postfix(void);
+int APS5_VABI issetugid_nid_postfix(void);
 int* APS5_VABI __error_nid_postfix();
 }
 
@@ -60,7 +63,11 @@ int main() {
     Require(Throws(setegid_nid_postfix, Unchanged));
 
     Require(setuid_nid_postfix(0) == 0);
+    Require(setgid_nid_postfix(0) == 0);
+    Require(Throws(setgid_nid_postfix, 1000));
+    Require(Throws(setgid_nid_postfix, Unchanged));
     Require(getuid_nid_postfix() == 0 && geteuid_nid_postfix() == 0);
+    Require(getgid_nid_postfix() == 0 && getegid_nid_postfix() == 0 && issetugid_nid_postfix() == 0);
     Require(setreuid_nid_postfix(Unchanged, Unchanged) == 0);
     Require(setreuid_nid_postfix(0, Unchanged) == 0);
     Require(setreuid_nid_postfix(Unchanged, 0) == 0);

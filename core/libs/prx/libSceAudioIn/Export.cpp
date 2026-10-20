@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <stdexcept>
 
 namespace {
 
@@ -193,6 +194,18 @@ int32_t APS5_VABI sceAudioInIsPadEmbeddedMic(int32_t handle) {
  (void)handle;
  NotImplemented_nid_no_patch(__func__);
  return 0;
+}
+
+int32_t APS5_VABI sceAudioInGetGain(int32_t handle, float* gain) {
+    if (!gain) throw std::runtime_error("sceAudioInGetGain: null gain");
+    *gain = 1.0f;
+    std::lock_guard lock(g_mutex);
+    return find(handle) ? 0 : AUDIO_IN_ERROR_INVALID_HANDLE;
+}
+
+int32_t APS5_VABI sceAudioInGetRerouteCount(int32_t handle) {
+    std::lock_guard lock(g_mutex);
+    return find(handle) ? 0 : AUDIO_IN_ERROR_INVALID_HANDLE;
 }
 
 }

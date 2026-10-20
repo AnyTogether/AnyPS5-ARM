@@ -6,6 +6,7 @@
 namespace ShaderRecompiler {
 
 IrValue::IrValue(IrOpcode opcode, IrType type, std::uint32_t id) : opcode(opcode), type(type), id(id), hasImmediate(false), parent(nullptr) {
+    arguments.reserve(IrOpcodeOperandCount(opcode));
 }
 
 std::uint32_t IrValue::Id() const {

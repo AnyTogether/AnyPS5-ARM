@@ -34,6 +34,8 @@ int APS5_VABI sceFontSetScriptLanguage(FontHandle, int, int);
 int APS5_VABI sceFontGetScriptLanguage(FontHandle, int, int*);
 int APS5_VABI sceFontSetTypographicDesign(FontHandle, int, int);
 int APS5_VABI sceFontGetTypographicDesign(FontHandle, int, int*);
+int APS5_VABI sceFontDefineAttribute(FontHandle, int, int*);
+int APS5_VABI sceFontGetAttribute(FontHandle, int, int*);
 int APS5_VABI sceFontSetResolutionDpi(FontHandle, std::uint32_t, std::uint32_t);
 int APS5_VABI sceFontGetResolutionDpi(FontHandle, std::uint32_t*, std::uint32_t*);
 int APS5_VABI sceFontSetScalePixel(FontHandle, float, float);
@@ -47,7 +49,8 @@ int APS5_VABI sceFontGetCharGlyphCode(FontHandle, std::uint32_t, std::uint32_t*)
 int APS5_VABI sceFontGetFontResolution(FontHandle, std::uint32_t*, float*);
 int APS5_VABI sceFontGetRenderScaledKerning(FontHandle, std::uint32_t, std::uint32_t, FontKerning*);
 int APS5_VABI sceFontGenerateCharGlyph(FontHandle, std::uint32_t, const FontGenerateGlyphDetail*, FontGlyph*);
-int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph, std::uint32_t, std::uint64_t);
+int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph, int, int*);
+int APS5_VABI sceFontGlyphGetAttribute(FontGlyph, int, int*);
 int APS5_VABI sceFontDeleteGlyph(const FontMemory*, FontGlyph*);
 int APS5_VABI sceFontTextSourceInit(FontTextSource*, const void*, std::uint32_t, FontTextParseFunction, void*);
 int APS5_VABI sceFontCreateString(const FontMemory*, FontTextSource*, const FontCreateStringDetail*, FontString*);
@@ -275,6 +278,10 @@ int main() {
     Require(sceFontGetTypographicDesign(font, 1, &setting) == SCE_FONT_OK && setting == 2);
     Require(sceFontGetTypographicDesign(font, 5, &setting) == SCE_FONT_OK && setting == 0);
     Require(sceFontGetTypographicDesign(nullptr, 1, &setting) == SCE_FONT_ERROR_INVALID_FONT_HANDLE);
+    // The font attributes are checked per category in GuestFontObjects.
+    FontHandle otherFont = nullptr;
+    Require(sceFontOpenFontMemory(library, fontData.data(), static_cast<std::uint32_t>(fontData.size()), nullptr, &otherFont) == SCE_FONT_OK && otherFont != nullptr);
+    Require(sceFontCloseFont(otherFont) == SCE_FONT_OK);
     std::uint32_t hDpi = 1;
     std::uint32_t vDpi = 1;
     Require(sceFontGetResolutionDpi(font, &hDpi, &vDpi) == SCE_FONT_OK && hDpi == 72 && vDpi == 72);
@@ -337,10 +344,14 @@ int main() {
     Require(sceFontSetScalePixel(font, 100.0f, 100.0f) == SCE_FONT_OK);
     FontGlyph glyph = nullptr;
     Require(sceFontGenerateCharGlyph(font, 'A', nullptr, &glyph) == SCE_FONT_OK && glyph != nullptr);
-    Require(sceFontGlyphDefineAttribute(glyph, 0x11, 0) == SCE_FONT_OK);
-    Require(sceFontGlyphDefineAttribute(nullptr, 0x11, 0) == SCE_FONT_ERROR_INVALID_GLYPH);
+    // The glyph attributes are checked per category in GuestFontObjects.
+    int glyphAttribute = -1;
     FontGlyphOpaque notAGlyph{};
-    Require(sceFontGlyphDefineAttribute(&notAGlyph, 0x11, 0) == SCE_FONT_ERROR_INVALID_GLYPH);
+    Require(sceFontGlyphDefineAttribute(&notAGlyph, 0x11, &glyphAttribute) == SCE_FONT_ERROR_INVALID_GLYPH);
+    Require(sceFontGlyphGetAttribute(&notAGlyph, 0x11, &glyphAttribute) == SCE_FONT_ERROR_INVALID_GLYPH);
+    FontGlyph otherGlyph = nullptr;
+    Require(sceFontGenerateCharGlyph(font, 'V', nullptr, &otherGlyph) == SCE_FONT_OK && otherGlyph != nullptr);
+    Require(sceFontDeleteGlyph(&memory, &otherGlyph) == SCE_FONT_OK && otherGlyph == nullptr);
     Require(sceFontDeleteGlyph(&memory, &glyph) == SCE_FONT_OK && glyph == nullptr);
     FontKerning kerning{1.0f, 1.0f, 1.0f, 1.0f};
     Require(sceFontGetKerning(font, 'A', 'V', &kerning) == SCE_FONT_OK && KerningIs(kerning, -20.0f));

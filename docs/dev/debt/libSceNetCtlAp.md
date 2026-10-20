@@ -1,0 +1,12 @@
+# libSceNetCtlAp technical debt
+
+### Functional
+
+- [libSceNetCtlAp](../../../core/libs/prx/libSceNetCtlAp/Export.cpp) (libSceNetCtlAp) - the access point never starts: a title starts it through [libSceNetCtlApDialog](libSceNetCtlApDialog.md), which always reports the user as having cancelled. `sceNetCtlApGetState` reports Stopped (0), `sceNetCtlApGetInfo`, `sceNetCtlApGetConnectInfo` and `sceNetCtlApStop` return `NOT_STARTED` (`0x8041298F`) without writing, and no callback ever fires. Signatures, states, structure sizes (152 and 184 bytes), the 8-callback limit and error codes come from [SharpProspero](https://github.com/SvenGDK/SharpProspero/blob/5dfdb4b0b166e83dc9ae275001afb695f12c7174/src/SharpProspero/Interop/Net/NetCtlAp.cs)
+
+### Unknown function info
+
+- [sceNetCtlApInit, sceNetCtlApTerm](../../../core/libs/prx/libSceNetCtlAp/Export.cpp) (libSceNetCtlAp) - every other call returns `NOT_INITIALIZED` (`0x80412994`) before `sceNetCtlApInit` and after `sceNetCtlApTerm`, which also drops the registered callbacks. A second `sceNetCtlApInit` throws, as no error for it is documented
+- [sceNetCtlApGetInfo, sceNetCtlApGetConnectInfo, sceNetCtlApStop](../../../core/libs/prx/libSceNetCtlAp/Export.cpp) (libSceNetCtlAp) - checks run in this order, which is not verified: a null structure returns `INVALID_ADDR` (`0x80412991`), a size field other than 152 or 184 `INVALID_SIZE` (`0x80412998`), then `NOT_STARTED`. The option string is not read, since the accepted strings (`INVALID_OPT_STR`, `0x80412901`) are unknown. Whether `sceNetCtlApStop` of a stopped access point returns `NOT_STARTED` or 0 is unverified
+- [sceNetCtlApClearEvent, sceNetCtlApGetResult](../../../core/libs/prx/libSceNetCtlAp/Export.cpp) (libSceNetCtlAp) - event types 1 to 4 are accepted and others return `INVALID_TYPE` (`0x80412990`), checked before the null `errorCode` (`INVALID_ADDR`). With no event ever delivered, `sceNetCtlApGetResult` writes 0; what the console writes before the first event is unverified
+- [sceNetCtlApRegisterCallback, sceNetCtlApUnregisterCallback](../../../core/libs/prx/libSceNetCtlAp/Export.cpp) (libSceNetCtlAp) - a null function or id pointer returns `INVALID_ADDR`, a ninth registration `CALLBACK_MAX` (`0x80412995`), an id outside 0 to 7 `INVALID_ID` (`0x80412996`) and an unregistered id `ID_NOT_FOUND` (`0x80412997`). Ids are the lowest free slot, as in libSceNetCtl; the console's id assignment is unverified

@@ -89,7 +89,7 @@ std::uint32_t TableStorageImagePointer(SpirvEmitterState& state, DescriptorBindi
 }
 
 bool TableModeEmitted(const ImageResource& mode) {
-    return RdnaImageDimensionInfoFor(mode.dimension).multisampled == 0u && mode.packedFormat != IrBufferFormat::Fmask8_S2_F1;
+    return RdnaImageDimensionInfoFor(mode.dimension).multisampled == 0u;
 }
 
 bool TablePointSampled(const ImageResource& image) {

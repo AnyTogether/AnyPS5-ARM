@@ -3,6 +3,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/File.hpp"
+#include "prx/libkernel/File/include/HostStreams.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -102,8 +103,14 @@ void KernelEqueuePrivate::WaitForDescriptors(std::unique_lock<std::mutex>& lock,
     constexpr std::uint64_t RepollNanos = 1000000;
     std::vector<GuestSockets::Interest> interests;
     bool repoll = false;
+    std::vector<std::shared_ptr<void>> held;
     for (const auto& e : m_events) {
         if (!e.enabled || e.filter.pollFunc == nullptr) continue;
+        if (e.filter.waitDescriptor >= 0) {
+            interests.push_back({e.filter.waitDescriptor, false});
+            held.push_back(e.filter.owner);
+            continue;
+        }
         const int descriptor = static_cast<int>(e.event.ident);
         if (!GuestSockets::IsOpen(descriptor) || reinterpret_cast<std::uintptr_t>(e.filter.data) > 1) {
             repoll = true;
@@ -640,6 +647,7 @@ namespace {
 constexpr std::uint16_t FileTypeMask = 0170000;
 constexpr std::uint16_t RegularFile = 0100000;
 constexpr std::uint16_t Directory = 0040000;
+constexpr std::uint16_t Fifo = 0010000;
 constexpr int SeekCurrent = 1;
 
 std::size_t LowWatermark(const KernelEqueueEvent* e) {
@@ -684,9 +692,19 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
     if (!socket && !DescriptorIsOpen_nid_no_patch(fd)) {
         return SCE_KERNEL_ERROR_EBADF;
     }
+    // The read end of a guest pipe polls like a socket (GuestSockets::Ready reads its state); a pipe's
+    // write space is not tracked.
+    std::int64_t available = 0;
+    bool eof = false;
+    const bool pipe = !socket && filter == EVFILT_READ && !File::IsHostStream(fd) && GuestSockets::PipeReadState(fd, &available, &eof);
+    if (!socket && filter == EVFILT_WRITE) {
+        FileStat stat{};
+        if (sceKernelFstat(fd, &stat) == 0 && (stat.st_mode & FileTypeMask) == Fifo) NotImplemented_nid_no_patch("sceKernelAddWriteEvent: pipe or FIFO descriptor");
+    }
     auto event = EqueueDescriptorEvent(fd, filter, EV_ADD, udata);
-    event.filter.data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(size));
-    event.filter.pollFunc = socket ? PollSocket : PollFile;
+    // A pipe ignores the low watermark.
+    event.filter.data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(pipe ? 1u : size));
+    event.filter.pollFunc = socket || pipe ? PollSocket : PollFile;
     return EqueueAddEvent_nid_postfix(eq, event);
 }
 

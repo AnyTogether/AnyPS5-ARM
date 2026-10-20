@@ -7,6 +7,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <psapi.h>
 #else
 #include <sys/mman.h>
 #include <unistd.h>
@@ -34,6 +35,72 @@ constexpr wchar_t HostHoleMode[] = L"--host-hole";
 void Require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+#ifdef _WIN32
+bool CheckMetadataCommit() {
+    std::uintptr_t arena = 0;
+    std::size_t bytes = 0;
+    GuestArena::GuestArenaRange_nid_postfix(&arena, &bytes);
+    if (bytes == 0 || !GuestArena::GuestArenaWriteWatched_nid_postfix()) return false;
+    PROCESS_MEMORY_COUNTERS_EX before{};
+    PROCESS_MEMORY_COUNTERS_EX after{};
+    Require(K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&before), sizeof(before)), "cannot measure private commit before tracking");
+    Require(WriteWatched(), "the arena is not write watched");
+    Require(K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&after), sizeof(after)), "cannot measure private commit after tracking");
+    const auto committed = after.PrivateUsage > before.PrivateUsage ? after.PrivateUsage - before.PrivateUsage : 0;
+    std::cout << "write-tracker initialization: " << committed / 1024 << " KiB private commit for " << (bytes >> 30u) << " GiB guest arena\n";
+    Require(committed < (64u << 20u), "write tracking committed dense generation tables for untouched guest ranges");
+    const auto generation = TrackerGeneration();
+    for (std::uint64_t offset = 0; offset + Block <= bytes; offset += std::uint64_t{1} << 32u) {
+        Require(NewestStamp(arena + offset, Block) == 0 && UnchangedSince(arena + offset, Block, generation), "an untouched leaf has a write stamp");
+    }
+    PROCESS_MEMORY_COUNTERS_EX queried{};
+    Require(K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&queried), sizeof(queried)), "cannot measure private commit after empty-range queries");
+    Require(queried.PrivateUsage < after.PrivateUsage + (4u << 20u), "queries allocated untouched tracking leaves");
+    return true;
+}
+
+void CheckSparseLeafBoundaries() {
+    constexpr std::uintptr_t LeafBytes = std::uintptr_t{1} << 32;
+    std::uintptr_t arena = 0;
+    std::size_t arenaBytes = 0;
+    GuestArena::GuestArenaRange_nid_postfix(&arena, &arenaBytes);
+    const auto boundary = arena + (arenaBytes / (2 * LeafBytes)) * LeafBytes;
+    constexpr std::size_t bytes = 4 * Block;
+    void* memory = GuestArena::GuestArenaAllocateAtOrAbove_nid_postfix(boundary - Block, bytes, Block);
+    struct Release {
+        void* memory;
+        ~Release() {
+            GuestArena::GuestArenaReset_nid_postfix(memory, bytes);
+            GuestArena::GuestArenaRelease_nid_postfix(memory, bytes);
+        }
+    } release{memory};
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    Require(base == boundary - Block, "the sparse tracking fixture did not straddle its 4 GiB leaf boundary");
+    GuestArena::GuestArenaCommit_nid_postfix(memory, bytes, PAGE_READWRITE, bytes);
+    std::memset(memory, 0x11, bytes);
+    BumpCollectEpoch();
+    const auto collected = CollectWrites(base, bytes);
+    Require(collected != 0, "the cross-leaf range was not collected");
+    MarkWritten(boundary, 4);
+    Require(UnchangedSince(base, Block, collected) && !UnchangedSince(base, bytes, collected), "a driver store across a leaf boundary did not stamp exactly its block");
+    Require(UnchangedSinceCollected(boundary, Block, collected), "the cross-leaf driver store became a CPU store");
+    static_cast<volatile std::uint8_t*>(memory)[0] = 0x22;
+    CollectWritesUncached(base, bytes);
+    Require(!UnchangedSinceCollected(base, Block, collected), "a CPU store before the leaf boundary was missed");
+    Require(UnchangedSinceCollected(boundary, 3 * Block, collected), "the CPU store stamped the other leaf");
+    Unwatch(base, bytes);
+    const auto hint = UntrackedHint(base, bytes);
+    Require(hint != 0, "the cross-leaf untracked range has no hint");
+    static_cast<volatile std::uint8_t*>(memory)[0] = 0x33;
+    static_cast<volatile std::uint8_t*>(memory)[3 * Block] = 0x44;
+    BumpCollectEpoch();
+    const auto changed = UntrackedHint(base, bytes);
+    Require(changed > hint, "cross-leaf CPU stores did not change their untracked hint");
+    Require(UntrackedHint(base, Block) == changed && UntrackedHint(base + 3 * Block, Block) == changed, "a cross-leaf hint store was missed");
+    Require(UntrackedHint(boundary, 2 * Block) == hint, "hint stores changed untouched blocks in the other leaf");
+}
+#endif
 
 void* AllocateWatched(std::size_t bytes, bool crossLeaf = false) {
 #ifdef _WIN32
@@ -731,6 +798,39 @@ void CheckHostHole() {
     }) && imported, "an import into an arena host hole did not run");
     Require(!Watched(hole, bytes), "an import made an arena host hole watched");
 }
+
+std::uint64_t failedCollectBegin = 0;
+std::uint64_t failedCollectEnd = 0;
+std::uint64_t unwatchHookBegin = 0;
+std::uint64_t unwatchHookEnd = 0;
+
+void RecordUnwatch(std::uint64_t address, std::size_t bytes) {
+    unwatchHookBegin = address;
+    unwatchHookEnd = address + bytes;
+}
+
+bool FailFreshCollect(std::uintptr_t address, std::size_t bytes, void (*)(void*, std::uintptr_t, std::uintptr_t), void*) {
+    failedCollectBegin = address;
+    failedCollectEnd = address + bytes;
+    return false;
+}
+
+void CheckFailedCollectUnwatch() {
+    void* memory = AllocateWatched(3 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    std::memset(memory, 0x11, 3 * Block);
+    Require(Watched(base + Block, Block), "the probe block was not watched");
+    SetFreshCollectHook(&FailFreshCollect);
+    SetUnwatchHook(&RecordUnwatch);
+    const auto stored = MarkWritten(base + Block + 0x8000, 4);
+    SetFreshCollectHook(nullptr);
+    SetUnwatchHook(nullptr);
+    Require(stored == 0, "a failed fresh collect produced trusted stamps");
+    Require(!Watched(base + Block, Block), "a failed collect left its block watched");
+    Require(Watched(base, Block) && Watched(base + 2 * Block, Block), "a failed collect unwatched unrelated blocks");
+    Require(failedCollectBegin == base + Block && failedCollectEnd == base + 2 * Block, "the failed fresh collect did not cover its block");
+    Require(unwatchHookBegin <= base + Block && unwatchHookEnd >= base + 2 * Block, "a failed collect did not run the unwatch hook over its block");
+}
 #endif
 
 void CheckVersionRanges() {
@@ -942,6 +1042,37 @@ void CheckImportWindowZeroPages() {
     Require(changed[2] == BlockWritten && WrittenSince(base + 2 * Block, Block, synced), "a store of new bytes to a zero page within an import window was missed");
     Require(changed[3] == BlockUnchanged && UnchangedSince(base + 3 * Block, Block, synced), "a page after the zero pages of an import window was compared with other bytes");
     Require(changed[4] == BlockWritten && WrittenSince(base + 4 * Block, Block, synced), "a store of new bytes after the zero pages of an import window was missed");
+}
+
+void CheckImportWindowOverUnwatchedBlock() {
+    void* memory = AllocateWatched(4 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    auto* bytes = static_cast<volatile std::uint8_t*>(memory);
+    std::memset(memory, 0x11, 4 * Block);
+    Unwatch(base + Block, Block);
+    const auto synced = CollectWritesUncached(base + 2 * Block, 2 * Block);
+    const auto syncedFirst = CollectWritesUncached(base, Block);
+    Require(synced != 0 && syncedFirst != 0, "the watched blocks around the unwatched one are not collected");
+    bytes[0x500] = 0x44;
+    Require(ImportWatched(base, 4 * Block, [&] {
+        bytes[0x100] = 0x11;
+        bytes[2 * Block + 0x100] = 0x11;
+        bytes[3 * Block + 0x2000] = 0x22;
+        return true;
+    }), "the import over an unwatched block failed");
+    Require(!Watched(base + Block, Block), "an import window made an unwatched block watched");
+    Require(Watched(base, Block) && Watched(base + 2 * Block, 2 * Block), "an import window over an unwatched block took the watched blocks out of the write watch");
+    const std::array<std::uint64_t, 2> generations{synced, synced};
+    std::array<std::uint8_t, 2> changed{};
+    std::array<std::uint8_t, 2> cpu{};
+    Require(ChangedBlocks(base + 2 * Block, 2 * Block, generations, changed, cpu), "the watched blocks after an unwatched block are not tracked");
+    Require(changed[0] == BlockUnchanged && UnchangedSince(base + 2 * Block, Block, synced), "a page an import window over an unwatched block resolved without changing its bytes reads as written");
+    Require(changed[1] == BlockWritten && WrittenSince(base + 3 * Block, Block, synced), "a store of new bytes within an import window over an unwatched block was missed");
+    Require(WrittenSince(base, Block, syncedFirst), "a store before an import window over an unwatched block was missed");
+    const auto after = CollectWritesUncached(base, Block);
+    bytes[0x100] = 0x33;
+    static_cast<void>(CollectWritesUncached(base, Block));
+    Require(after != 0 && !UnchangedSince(base, Block, after), "a store after an import window over an unwatched block was missed");
 }
 
 void ProtectPage(std::uint64_t address, bool readable) {
@@ -1186,6 +1317,11 @@ void CheckAdoptLatestEpoch() {
 
 int main() {
     try {
+#ifdef _WIN32
+        if (std::wstring_view(GetCommandLineW()).ends_with(L"--metadata-commit")) {
+            return CheckMetadataCommit() ? 0 : 77;
+        }
+#endif
         if (!WriteWatched()) {
             std::cout << "no write watching: skipped\n";
             return 77;
@@ -1209,17 +1345,20 @@ int main() {
 #endif
         CheckCoarseRuns();
 #ifdef _WIN32
+        CheckSparseLeafBoundaries();
         CheckDeferredSharedImports();
         CheckPrivateMappingReuse();
         CheckRewatch();
         CheckUntrackedHint();
         CheckHostHoleInChild();
+        CheckFailedCollectUnwatch();
 #endif
         CheckVersionRanges();
         CheckCollectBoundaries();
         CheckImportWindow();
         CheckImportWindowZeroPages();
         CheckImportWindowOtherThread();
+        CheckImportWindowOverUnwatchedBlock();
         CheckStoreAcrossImports();
         CheckUnwatchedImport();
         CheckCommittedRanges();

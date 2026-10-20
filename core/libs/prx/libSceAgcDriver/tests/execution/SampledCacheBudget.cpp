@@ -17,7 +17,9 @@
 #endif
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -26,8 +28,11 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -47,6 +52,67 @@ constexpr std::size_t RegistrationGapBytes = 65536;
 constexpr std::size_t AllocationBytes = BlockBytes + RegistrationGapBytes;
 constexpr std::uint64_t Budget = 1ull << 20u;
 constexpr std::uint64_t Ceiling = Budget + Budget / 4u;
+
+std::optional<std::size_t> selectDevice(std::span<const VkPhysicalDeviceProperties> devices, std::string_view request) {
+    const auto rankDeviceType = [](VkPhysicalDeviceType type) {
+        switch (type) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return 3;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return 2;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return 1;
+            default: return 0;
+        }
+    };
+    std::optional<std::size_t> selected;
+    int selectedRank = -1;
+    for (std::size_t index = 0; index < devices.size(); ++index) {
+        const auto& candidate = devices[index];
+        if (candidate.apiVersion < VK_API_VERSION_1_1) continue;
+        const std::string_view name(candidate.deviceName);
+        if (!request.empty() && std::search(name.begin(), name.end(), request.begin(), request.end(), [](char left, char right) {
+            return std::tolower(static_cast<unsigned char>(left)) == std::tolower(static_cast<unsigned char>(right));
+        }) == name.end()) continue;
+        const int rank = request.empty() ? rankDeviceType(candidate.deviceType) : 4;
+        if (rank <= selectedRank) continue;
+        selected = index;
+        selectedRank = rank;
+    }
+    return selected;
+}
+
+void deviceSelectionTests() {
+    const auto properties = [](const char* name, VkPhysicalDeviceType type) {
+        VkPhysicalDeviceProperties result{};
+        result.apiVersion = VK_API_VERSION_1_1;
+        result.deviceType = type;
+        std::memcpy(result.deviceName, name, std::strlen(name) + 1u);
+        return result;
+    };
+    std::array devices{
+        properties("AMD Radeon Graphics", VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU),
+        properties("NVIDIA GeForce RTX 5080", VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU),
+        properties("Virtual GPU", VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU),
+        properties("CPU", VK_PHYSICAL_DEVICE_TYPE_CPU),
+    };
+    Require(!selectDevice({}, {}).has_value(), "an empty device list selected a device");
+    Require(selectDevice(devices, {}) == 1u, "default selection did not prefer the discrete GPU");
+    Require(selectDevice(devices, "AMD") == 0u, "the AMD request did not select the integrated GPU");
+    Require(selectDevice(devices, "NVIDIA") == 1u, "the NVIDIA request did not select the discrete GPU");
+    Require(selectDevice(devices, "aMd rAdEoN") == 0u, "a requested integrated GPU lost to an unrelated discrete GPU");
+    Require(selectDevice(devices, "rtx 5080") == 1u, "a partial GPU name did not match without regard to case");
+    Require(selectDevice(devices, "Virtual") == 2u, "a requested virtual GPU was not selected");
+    Require(selectDevice(devices, "cpu") == 3u, "a requested CPU device was not selected");
+    Require(!selectDevice(devices, "missing").has_value(), "an unmatched request selected another GPU");
+    Require(!selectDevice(devices, "NVIDIA GeForce RTX 5080 with a longer name").has_value(), "a request longer than the device name matched");
+    Require(selectDevice(std::span(devices).subspan(2), {}) == 0u, "default selection did not prefer the virtual GPU to the CPU");
+    devices[1].apiVersion = VK_API_VERSION_1_0;
+    Require(selectDevice(devices, {}) == 0u, "default selection did not prefer the integrated GPU to the virtual GPU");
+    Require(!selectDevice(devices, "NVIDIA").has_value(), "a requested device without Vulkan 1.1 was selected");
+    devices[1] = devices[0];
+    Require(selectDevice(devices, {}) == 0u && selectDevice(devices, "AMD") == 0u, "equally ranked matches did not retain enumeration order");
+    for (auto& device : devices) device.apiVersion = VK_API_VERSION_1_0;
+    Require(!selectDevice(devices, {}).has_value(), "a list without Vulkan 1.1 selected a device");
+    std::puts("sampled-cache device selection CPU tests passed");
+}
 
 class Device {
 public:
@@ -71,7 +137,13 @@ public:
             Require(count != 0, "no Vulkan device");
             std::vector<VkPhysicalDevice> devices(count);
             Check(enumerate(instance, &count, devices.data()), "vkEnumeratePhysicalDevices");
-            context.physical = devices.front();
+            const auto physicalProperties = function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties");
+            std::vector<VkPhysicalDeviceProperties> deviceProperties(devices.size());
+            for (std::size_t index = 0; index < devices.size(); ++index) physicalProperties(devices[index], &deviceProperties[index]);
+            const char* requestedName = std::getenv("ANYPS5_GPU");
+            const auto selectedIndex = selectDevice(deviceProperties, requestedName != nullptr ? requestedName : "");
+            Require(selectedIndex.has_value(), requestedName != nullptr && *requestedName != '\0' ? std::string("no Vulkan 1.1 device matching ANYPS5_GPU=\"") + requestedName + "\"" : "no Vulkan 1.1 device");
+            context.physical = devices[*selectedIndex];
             const auto extensions = function<PFN_vkEnumerateDeviceExtensionProperties>("vkEnumerateDeviceExtensionProperties");
             Check(extensions(context.physical, nullptr, &count, nullptr), "vkEnumerateDeviceExtensionProperties");
             std::vector<VkExtensionProperties> available(count);
@@ -122,6 +194,7 @@ public:
             function<PFN_vkGetPhysicalDeviceMemoryProperties>("vkGetPhysicalDeviceMemoryProperties")(context.physical, &context.memory);
             VkPhysicalDeviceProperties properties{};
             function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties")(context.physical, &properties);
+            std::printf("sampled-cache fixture Vulkan device: %s vendor=0x%04x device=0x%04x\n", properties.deviceName, properties.vendorID, properties.deviceID);
             context.limits = properties.limits;
             context.bufferDeviceAddress = true;
             context.formatProperties = function<PFN_vkGetPhysicalDeviceFormatProperties>("vkGetPhysicalDeviceFormatProperties");
@@ -140,6 +213,14 @@ public:
 
     ~Device() { release(); }
     const Context& GetContext() const { return context; }
+
+    void VerifySelection() const {
+        VkPhysicalDeviceProperties properties{};
+        function<PFN_vkGetPhysicalDeviceProperties>("vkGetPhysicalDeviceProperties")(context.physical, &properties);
+        const char* request = std::getenv("ANYPS5_GPU");
+        Require(selectDevice(std::span(&properties, 1), request != nullptr ? request : "").has_value(), "the sampled-cache fixture physical device does not match ANYPS5_GPU");
+        std::puts("sampled-cache fixture physical device selection verified");
+    }
 
 private:
     template<typename TFunction>
@@ -563,10 +644,10 @@ void frameTests(const Context& context) {
         hits += again == made[surface].lock();
     }
     Require(hits == capacity, "the next frame over the same " + std::to_string(frame) + " textures found " + std::to_string(hits) + " of them cached, not the " + std::to_string(capacity) + " the cache kept");
-    auto admitted = Sampled(context, block.Surface(frame - 1u));
-    Require(Sampled(context, block.Surface(frame - 1u)) == admitted, "a texture used a second time in the frame was not cached");
-    Require(TextureCacheUsage().sampledEntries == capacity && TextureCacheUsage().sampledBytes <= Budget, "the texture admitted on its second use left the cache over its budget");
-    admitted.reset();
+    auto refused = Sampled(context, block.Surface(frame - 1u));
+    Require(Sampled(context, block.Surface(frame - 1u)) != refused, "a texture used a second time in the frame was cached in place of one of the frame's textures");
+    Require(TextureCacheUsage().sampledEntries == capacity && TextureCacheUsage().sampledBytes <= Budget, "the texture used a second time left the cache over its budget");
+    refused.reset();
     Recorder::CountPresent();
     std::vector<std::weak_ptr<Texture>> moved(frame);
     for (std::size_t surface = 0; surface < frame; ++surface) moved[surface] = Sampled(context, block.Surface(frame + surface));
@@ -576,6 +657,71 @@ void frameTests(const Context& context) {
     for (std::size_t surface = 0; surface < frame; ++surface) moved[surface] = Sampled(context, block.Surface(frame + surface));
     for (std::size_t surface = 0; surface < capacity; ++surface) Require(!moved[surface].expired(), "surface " + std::to_string(frame + surface) + " of a second frame over other textures did not replace the textures last used two frames before");
     Require(TextureCacheUsage().sampledEntries == capacity, "a second frame over other textures left " + std::to_string(TextureCacheUsage().sampledEntries) + " entries cached");
+}
+
+void scanTests(const Context& context) {
+    Block block(context);
+    ClearCachedTextures(context.device);
+    Recorder::CountPresent();
+    const auto bytes = Sampled(context, block.Surface(0))->AllocationBytes();
+    const auto capacity = static_cast<std::size_t>(Budget / bytes);
+    const auto working = 2u * capacity;
+    Require(capacity >= 2u && working <= Surfaces && TextureCacheUsage().sampledEntries == 1u, "a snapshot of the 256 KiB surface holds " + std::to_string(bytes) + " bytes, which the test's 1 MiB budget does not fit as planned");
+    constexpr std::size_t Presents = 6;
+    constexpr std::size_t Uses = 2;
+    std::vector<std::weak_ptr<Texture>> last(working);
+    std::size_t hits = 0;
+    std::size_t lookups = 0;
+    for (std::size_t present = 0; present < Presents; ++present) {
+        Recorder::CountPresent();
+        for (std::size_t surface = 0; surface < working; ++surface) {
+            for (std::size_t use = 0; use < Uses; ++use) {
+                const auto texture = Sampled(context, block.Surface(surface));
+                if (present != 0u) {
+                    hits += texture == last[surface].lock();
+                    ++lookups;
+                }
+                last[surface] = texture;
+            }
+        }
+    }
+    Require(TextureCacheUsage().sampledBytes <= Budget, "the sampled texture cache holds more than its budget after a scan");
+    const auto wanted = (Presents - 1u) * Uses * capacity / 2u;
+    Require(hits >= wanted, "a cyclic scan using each of " + std::to_string(working) + " textures twice in a row, twice the " + std::to_string(capacity) + " the budget holds, found " + std::to_string(hits) + " of " + std::to_string(lookups) + " lookups cached, fewer than " + std::to_string(wanted));
+}
+
+void shrinkTests(const Context& context) {
+    Block block(context);
+    ClearCachedTextures(context.device);
+    Recorder::CountPresent();
+    OverrideCacheBudgetForTest(2u * Budget);
+    const auto bytes = Sampled(context, block.Surface(0))->AllocationBytes();
+    const auto capacity = static_cast<std::size_t>((2u * Budget) / bytes);
+    Require(capacity >= 4u && capacity + 1u <= Surfaces, "a snapshot of the 256 KiB surface holds " + std::to_string(bytes) + " bytes, which the test's 2 MiB budget does not fit as planned");
+    for (std::size_t surface = 1; surface < capacity; ++surface) Sampled(context, block.Surface(surface));
+    Require(TextureCacheUsage().sampledEntries == capacity, "the 2 MiB budget did not keep " + std::to_string(capacity) + " snapshots");
+    Recorder::CountPresent();
+    OverrideCacheBudgetForTest(Budget);
+    for (std::size_t surface = 0; surface < capacity; ++surface) Sampled(context, block.Surface(surface));
+    Sampled(context, block.Surface(capacity));
+    Require(TextureCacheUsage().sampledBytes <= Ceiling, "after the budget fell to 1 MiB, one insert left " + std::to_string(TextureCacheUsage().sampledBytes) + " bytes cached with every entry in use this frame, past a quarter over the budget");
+    OverrideCacheBudgetForTest(0);
+}
+
+void secondUseTests(const Context& context) {
+    Block block(context);
+    ClearCachedTextures(context.device);
+    Recorder::CountPresent();
+    const auto bytes = Sampled(context, block.Surface(0))->AllocationBytes();
+    const auto capacity = static_cast<std::size_t>(Budget / bytes);
+    Require(capacity >= 2u && capacity < Surfaces && TextureCacheUsage().sampledEntries == 1u, "a snapshot of the 256 KiB surface holds " + std::to_string(bytes) + " bytes, which the test's 1 MiB budget does not fit as planned");
+    for (std::size_t surface = 1; surface < capacity; ++surface) Sampled(context, block.Surface(surface));
+    Recorder::CountPresent();
+    auto first = Sampled(context, block.Surface(capacity));
+    Require(TextureCacheUsage().sampledEntries == capacity && first.use_count() == 1, "the first use in a frame of a texture the cache does not hold was cached in place of one the last frame used");
+    const auto second = Sampled(context, block.Surface(capacity));
+    Require(Sampled(context, block.Surface(capacity)) == second, "a texture used a second time in a frame whose least recently used entry is from the last frame was not cached");
+    Require(TextureCacheUsage().sampledEntries == capacity && TextureCacheUsage().sampledBytes <= Budget, "the texture admitted on its second use left the cache over its budget");
 }
 
 void earlyMissTests(const Context& context) {
@@ -718,6 +864,10 @@ int main(int argc, char** argv) {
     try {
         const bool memory = argc > 1 && std::string(argv[1]) == "memory";
         const std::string mode = argc > 1 ? argv[1] : "";
+        if (mode == "device-selection-cpu") {
+            deviceSelectionTests();
+            return 0;
+        }
         const bool resources = mode == "resource-admission" || mode == "resource-oversized" || mode == "resource-clear";
         const bool disableStorageImageMultisample = mode == "without-storage-image-multisample";
 #ifdef _WIN32
@@ -729,9 +879,14 @@ int main(int argc, char** argv) {
         try {
             device = std::make_unique<Device>(!disableStorageImageMultisample);
         } catch (const std::exception& error) {
-            if (std::getenv("ANYPS5_REQUIRE_VULKAN") != nullptr) throw;
+            const char* requestedName = std::getenv("ANYPS5_GPU");
+            if (std::getenv("ANYPS5_REQUIRE_VULKAN") != nullptr || (requestedName != nullptr && *requestedName != '\0')) throw;
             std::printf("skipped, no usable Vulkan device: %s\n", error.what());
             return VulkanTestSkipped;
+        }
+        if (mode == "device-selection") {
+            device->VerifySelection();
+            return 0;
         }
         auto context = device->GetContext();
         if (disableStorageImageMultisample) {
@@ -774,7 +929,10 @@ int main(int argc, char** argv) {
             rescanTests(context);
             viewEvictionTests(context);
             viewTests(context);
+            scanTests(context);
             frameTests(context);
+            shrinkTests(context);
+            secondUseTests(context);
             earlyMissTests(context);
             collidingKeyTests(context);
             ClearCachedTextures(context.device);

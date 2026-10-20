@@ -52,6 +52,17 @@ bool IsRuntimeSelect(IrOpcode opcode) {
     return opcode == IrOpcode::SelectU1 || opcode == IrOpcode::SelectU32 || opcode == IrOpcode::SelectF32;
 }
 
+bool ActiveMaskImplies(const IrValue* mask, const IrValue* condition) {
+    if (mask == nullptr || condition == nullptr) return false;
+    mask = mask->Resolve();
+    condition = condition->Resolve();
+    if (mask == condition) return true;
+    if (mask->Opcode() == IrOpcode::LogicalAnd && mask->ArgumentCount() == 2) {
+        return ActiveMaskImplies(mask->Argument(0), condition) || ActiveMaskImplies(mask->Argument(1), condition);
+    }
+    return false;
+}
+
 bool IsRuntimeUniformOp(IrOpcode opcode) {
     switch (opcode) {
         case IrOpcode::BitCastU32F32:
@@ -85,6 +96,9 @@ bool IsRuntimeUniformOp(IrOpcode opcode) {
         case IrOpcode::BitwiseOr32:
         case IrOpcode::BitwiseXor32:
         case IrOpcode::BitwiseNot32:
+        case IrOpcode::BitCount32:
+        case IrOpcode::FindILsb32:
+        case IrOpcode::FindUMsb32:
         case IrOpcode::SelectU1:
         case IrOpcode::SelectU32:
         case IrOpcode::SelectF32:

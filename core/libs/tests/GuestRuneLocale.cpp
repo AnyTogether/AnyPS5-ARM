@@ -1,4 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +40,12 @@ int APS5_VABI iswctype_nid_postfix(std::uint32_t, std::uint64_t);
 std::uint64_t APS5_VABI wctype_nid_postfix(const char*);
 std::uint32_t APS5_VABI towlower_nid_postfix(std::uint32_t);
 std::uint32_t APS5_VABI towupper_nid_postfix(std::uint32_t);
+std::uint64_t APS5_VABI wctrans_nid_postfix(const char*);
+std::uint32_t APS5_VABI towctrans_nid_postfix(std::uint32_t, std::uint64_t);
+std::uint32_t APS5_VABI _Towlower_nid_postfix(std::uint32_t, const void*);
+std::uint32_t APS5_VABI _Towupper_nid_postfix(std::uint32_t, const void*);
+int APS5_VABI _Tolower_nid_postfix(int, const void*);
+int APS5_VABI _Toupper_nid_postfix(int, const void*);
 std::uint32_t APS5_VABI btowc_nid_postfix(int);
 int APS5_VABI wctob_nid_postfix(std::uint32_t);
 }
@@ -125,5 +133,19 @@ int main() {
     Require(btowc_nid_postfix('A') == 'A' && btowc_nid_postfix(0xe9) == 0xe9 && btowc_nid_postfix(-23) == 0xe9);
     Require(wctob_nid_postfix('A') == 'A' && wctob_nid_postfix(0xe9) == 0xe9 && wctob_nid_postfix(0) == 0);
     Require(wctob_nid_postfix(0x100) == -1 && wctob_nid_postfix(0x20ac) == -1 && wctob_nid_postfix(0xffffffff) == -1);
+    Require(wctrans_nid_postfix("tolower") == 1 && wctrans_nid_postfix("toupper") == 2);
+    Require(wctrans_nid_postfix("") == 0 && wctrans_nid_postfix("TOLOWER") == 0 && wctrans_nid_postfix("tolowe") == 0);
+    for (std::int64_t c = -300; c < 70000; ++c) {
+        const auto wide = static_cast<std::uint32_t>(c);
+        const bool ascii = c >= 0 && c < 128;
+        const auto lower = ascii ? static_cast<std::uint32_t>(std::tolower(static_cast<int>(c))) : wide;
+        const auto upper = ascii ? static_cast<std::uint32_t>(std::toupper(static_cast<int>(c))) : wide;
+        Require(towctrans_nid_postfix(wide, 1) == lower && towctrans_nid_postfix(wide, 2) == upper);
+        Require(_Towlower_nid_postfix(wide, nullptr) == lower && _Towupper_nid_postfix(wide, nullptr) == upper);
+        Require(_Tolower_nid_postfix(static_cast<int>(c), nullptr) == static_cast<int>(lower));
+        Require(_Toupper_nid_postfix(static_cast<int>(c), nullptr) == static_cast<int>(upper));
+    }
+    errno = 0;
+    Require(towctrans_nid_postfix('A', 0) == 'A' && towctrans_nid_postfix('a', 3) == 'a' && errno == 0);
     return 0;
 }

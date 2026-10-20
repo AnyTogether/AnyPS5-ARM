@@ -387,5 +387,19 @@ class ProgressTests(unittest.TestCase):
             self.assertIn("--compare does not combine with --module or --json", stderr.getvalue())
 
 
+    def test_compare_names_a_snapshot_it_cannot_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            good = Path(directory) / "good.json"
+            good.write_text("{}", encoding="utf-8")
+            broken = Path(directory) / "broken snapshot.json"
+            broken.write_text("not json", encoding="utf-8")
+            for name, path in (("invalid", broken), ("missing", Path(directory) / "missing snapshot.json")):
+                with self.subTest(name):
+                    stderr = io.StringIO()
+                    with patch("sys.stderr", stderr), self.assertRaises(SystemExit) as raised:
+                        progress.main(["--compare", str(good), str(path)])
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn(str(path), stderr.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

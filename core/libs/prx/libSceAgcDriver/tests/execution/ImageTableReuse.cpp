@@ -45,11 +45,7 @@ constexpr std::uint32_t Type2D = 9;
 constexpr std::size_t TexturesOffset = 65536;
 constexpr std::size_t BlockBytes = TexturesOffset + 2 * 65536;
 constexpr std::size_t UnimportableBytes = BlockBytes - 256;
-#ifdef _WIN32
-constexpr std::uint64_t CpuWriteResolutions = 2;
-#else
 constexpr std::uint64_t CpuWriteResolutions = 1;
-#endif
 
 alignas(256) std::array<std::uint32_t, Records> Keys{};
 alignas(256) std::array<std::uint32_t, Lanes * 4> Output{};
@@ -334,6 +330,20 @@ void RunTests(AgcDriver::VulkanDevice& device, const GuestBlock& block, const Gu
     Require(Dispatch(device, result, 15) == Row(block.Texels(15)), "image table reuse: the table after a dispatch wrote an entry sampled the wrong entry");
 
     RunImageStore(device, stores);
+
+    AgcDriver::Graphics::ReleaseTextureCaches(~std::uint64_t{0});
+    Require(AgcDriver::Graphics::SampledTextureMemory() == 0u, "image table reuse: " + std::to_string(AgcDriver::Graphics::SampledTextureMemory()) + " bytes of sampled textures outlived a full release of the texture caches after the kept-table steps");
+
+    AgcDriver::GuestMemory::BumpCollectEpoch();
+    Require(Dispatch(device, result, 29) == Row(block.Texels(29)), "image table reuse: the table before its textures were destroyed sampled the wrong entry");
+    before = AgcDriver::Graphics::ImageTableReuses();
+    Require(Dispatch(device, result, 29) == Row(block.Texels(29)), "image table reuse: the table built again before its textures were destroyed sampled the wrong entry");
+    ExpectWrites(before, 1, 0, "a kept table built again before its textures were destroyed");
+    AgcDriver::Graphics::ReleaseTextureCaches(~std::uint64_t{0});
+    Require(AgcDriver::Graphics::SampledTextureMemory() == 0u, "image table reuse: " + std::to_string(AgcDriver::Graphics::SampledTextureMemory()) + " bytes of sampled textures outlived a full release of the texture caches after a table's set was kept");
+    before = AgcDriver::Graphics::ImageTableReuses();
+    Require(Dispatch(device, result, 29) == Row(block.Texels(29)), "image table reuse: a kept table whose textures were destroyed sampled the wrong entry");
+    ExpectWrites(before, 0, 1, "a kept table whose textures were destroyed");
 }
 
 }

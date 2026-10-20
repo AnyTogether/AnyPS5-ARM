@@ -272,6 +272,13 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             const auto found = findGuest(name);
             if (found != guestNames.end() && found->second != index) dependencies[index].insert(found->second);
         }
+        std::set<std::size_t> referencedSymbols;
+        for (const auto* table : {&images[index].Dynamic.RelaData, &images[index].Dynamic.RelaPltData}) {
+            for (std::size_t offset = 0; offset < table->size(); offset += 24) {
+                const auto info = Io::ReadU64(*table, offset + 8);
+                if ((info & 0xffffffffu) != 0) referencedSymbols.insert(info >> 32);
+            }
+        }
         for (std::size_t symbolIndex = 0; symbolIndex < images[index].Symbols.size(); ++symbolIndex) {
             const auto& symbol = images[index].Symbols[symbolIndex];
             if (symbol.Section != 0 || symbol.Name.empty()) continue;
@@ -294,7 +301,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             }
             if (provider != nullptr) {
                 if ((symbol.Info & 15) != 0 && (symbol.Info & 15) != provider->Type) throw Domain::RelinkerException("Guest import/export type mismatch: " + symbol.Name);
-                if (provider->Provider != index) dependencies[index].insert(provider->Provider);
+                if (provider->Provider != index && referencedSymbols.contains(symbolIndex)) dependencies[index].insert(provider->Provider);
             } else if (windows && (symbol.Info & 15) == 6) throw Domain::RelinkerException("Windows guest TLS import requires a guest TLS export: " + symbol.Name);
             if (provider == nullptr && macos && found != exports.end() && found->second.size() == 1 && found->second.front().Provider != index)
                 guestWins.emplace_back(index, found->second.front().Provider);
@@ -420,7 +427,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             if (sceImage)
                 if (const auto end = FindSceCodeEnd(code, header.MappedAddress, unwindFunctions, image.Got, image.Dynamic.RelaPltData.size()))
                     code.resize(*end - header.MappedAddress);
-            for (const auto offset : syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, code.size(), Io::Utf8Path(image.SourcePath))) {
+            const auto unwindRanges = SceUnwindRanges(code, header.MappedAddress, unwindFunctions);
+            for (const auto offset : syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, code.size(), Io::Utf8Path(image.SourcePath), unwindRanges)) {
                 if (offset > code.size() || code.size() - offset < 2u)
                     throw Domain::RelinkerException("Syscall trap patch exceeds guest executable segment", header.MappedAddress + offset);
                 if (!image.PatchedRanges.empty()) {

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -164,11 +165,15 @@ struct PthreadPrivate {
 bool GuestThreadStack(std::uintptr_t address, std::uintptr_t* start, std::uintptr_t* end);
 bool GuestThreadStackHostRangeOverlaps(std::uintptr_t start, std::uintptr_t end);
 void NoteGuestStackProtection(std::uintptr_t start, std::size_t bytes, bool readWrite);
+#ifdef _WIN32
+bool ReplaceGuestThreadStack(std::uintptr_t start, std::size_t bytes, bool readWrite, const std::function<bool()>& replace);
+#endif
 int GuestThreadCpuClockId(const PthreadPrivate* thread);
 bool GuestThreadCpuNanos(int cpuClockThread, std::uint64_t* nanos);
 void SetLiveGuestThreadsAffinity(KernelCpumask mask);
 KernelCpumask LiveGuestThreadsAffinity();
 bool GuestThreadIsLive(const PthreadPrivate* thread);
+std::unique_lock<std::mutex> LockLiveGuestThread(const PthreadPrivate* thread);
 bool LiveGuestThreadExists(std::int64_t tid);
 bool GetLiveGuestThreadAffinity_nid_no_patch(std::int64_t tid, KernelCpumask& mask);
 bool SetLiveGuestThreadAffinity_nid_no_patch(std::int64_t tid, KernelCpumask mask);

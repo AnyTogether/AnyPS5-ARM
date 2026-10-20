@@ -1,5 +1,6 @@
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Screenshot.hpp"
 #include <mutex>
 
 namespace AgcDriver {
@@ -83,6 +84,10 @@ extern "C" void AgcDriverShutdown_nid_postfix() {
     AgcDriver::Shutdown();
 }
 
+extern "C" void AgcDriverRequestScreenshot_nid_postfix() {
+    AgcDriver::Screenshot::Request();
+}
+
 extern "C" void AgcDriverRegisterShader_nid_postfix(const Shader* shader) try {
     AgcDriver::RegisterShader(shader);
 } catch (const ProcessShutdown&) {
@@ -97,6 +102,12 @@ extern "C" void AgcDriverSuspendPoint_nid_postfix() try {
 
 extern "C" std::uint32_t AgcDriverReserveEopFlip_nid_postfix(const AgcDriver::FlipInfo& info) {
     return AgcDriver::DriverDetail::Driver::Get().ReserveEopFlip(info);
+}
+
+extern "C" void AgcDriverSubmitFlip_nid_postfix(const AgcDriver::FlipInfo& info) try {
+    AgcDriver::DriverDetail::Driver::Get().SubmitFlip(info);
+} catch (const ProcessShutdown&) {
+    LibcAwaitExit_nid_postfix();
 }
 
 extern "C" std::uint64_t AgcDriverDispatchesAdoptedAhead_nid_postfix() {

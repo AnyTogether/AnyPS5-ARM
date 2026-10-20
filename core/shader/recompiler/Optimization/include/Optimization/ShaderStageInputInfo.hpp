@@ -69,6 +69,10 @@ struct ShaderStageRuntime {
     }
 };
 
+struct ShaderDepthRemap {
+    std::uint32_t mode = 0;
+};
+
 struct ShaderClipSpaceTransform {
     float scale[2] = {};
     float offset[2] = {};
@@ -137,6 +141,7 @@ struct ShaderVertexInputInfo {
     std::uint32_t hostSubgroupSize = 64;
     std::uint32_t paClVsOutCntl = 0;
     ShaderClipSpaceTransform clipSpace;
+    ShaderDepthRemap depthRemap;
     ShaderMeshInputInfo mesh;
     ShaderTessellationInputInfo tess;
     bool fetchExternal = false;
@@ -176,6 +181,7 @@ struct ShaderPixelInputInfo {
     bool psDepthExportEnable = false;
     bool psSampleMaskExportEnable = false;
     bool psStencilRefExportEnable = false;
+    bool psStencilOperationValueExport = false;
     bool psSampleShading = false;
     bool psEarlyZ = false;
     bool psExecuteOnNoop = false;

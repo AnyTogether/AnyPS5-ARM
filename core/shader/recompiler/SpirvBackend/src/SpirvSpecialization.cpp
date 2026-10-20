@@ -5,15 +5,67 @@
 #include <algorithm>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace ShaderRecompiler {
 namespace {
 
-using Instruction = std::vector<std::uint32_t>;
+class WordArena {
+public:
+    explicit WordArena(std::size_t words) : next(std::max<std::size_t>(words, 1024u)) {}
+
+    std::uint32_t* Allocate(std::size_t count) {
+        if (count > available) {
+            const auto size = std::max(count, next);
+            chunks.push_back(std::make_unique<std::uint32_t[]>(size));
+            cursor = chunks.back().get();
+            available = size;
+            next = size * 2u;
+        }
+        auto* words = cursor;
+        cursor += count;
+        available -= count;
+        return words;
+    }
+
+private:
+    std::vector<std::unique_ptr<std::uint32_t[]>> chunks;
+    std::uint32_t* cursor = nullptr;
+    std::size_t available = 0;
+    std::size_t next;
+};
+
+template<typename T>
+struct ArenaAllocator {
+    using value_type = T;
+
+    ArenaAllocator() = default;
+    explicit ArenaAllocator(WordArena* arena) : arena(arena) {}
+    template<typename U>
+    ArenaAllocator(const ArenaAllocator<U>& other) : arena(other.arena) {}
+
+    T* allocate(std::size_t count) {
+        static_assert(std::is_same_v<T, std::uint32_t>);
+        return arena != nullptr ? arena->Allocate(count) : std::allocator<T>{}.allocate(count);
+    }
+
+    void deallocate(T* words, std::size_t count) {
+        if (arena == nullptr) std::allocator<T>{}.deallocate(words, count);
+    }
+
+    friend bool operator==(const ArenaAllocator& left, const ArenaAllocator& right) {
+        return left.arena == right.arena;
+    }
+
+    WordArena* arena = nullptr;
+};
+
+using Instruction = std::vector<std::uint32_t, ArenaAllocator<std::uint32_t>>;
 
 spv::Op Opcode(const Instruction& instruction) {
     return instruction.empty() ? spv::OpNop : static_cast<spv::Op>(instruction[0] & 0xffffu);
@@ -518,7 +570,7 @@ private:
 
 class Specialization {
 public:
-    explicit Specialization(std::span<const std::uint32_t> words) {
+    explicit Specialization(std::span<const std::uint32_t> words) : arena(words.size()) {
         if (words.size() < 5u || words[0] != spv::MagicNumber) throw std::runtime_error("invalid prepared SPIR-V header");
         header.assign(words.begin(), words.begin() + 5);
         bound = header[3];
@@ -531,7 +583,7 @@ public:
         for (std::size_t cursor = 5; cursor < words.size();) {
             const auto count = words[cursor] >> 16u;
             if (count == 0u || count > words.size() - cursor) throw std::runtime_error("truncated prepared SPIR-V instruction");
-            instructions.emplace_back(words.begin() + cursor, words.begin() + cursor + count);
+            instructions.emplace_back(words.begin() + cursor, words.begin() + cursor + count, ArenaAllocator<std::uint32_t>(&arena));
             const auto& instruction = instructions.back();
             const auto op = Opcode(instruction);
             bool hasResult = false;
@@ -1037,6 +1089,7 @@ private:
     }
 
     std::vector<std::uint32_t> header;
+    WordArena arena;
     std::vector<Instruction> instructions;
     std::vector<Instruction> constants;
     std::uint32_t bound = 0;

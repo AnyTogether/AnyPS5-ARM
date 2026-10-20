@@ -5,6 +5,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -567,7 +568,7 @@ std::optional<std::set<std::uint32_t>> Values(const IrProgram& program, const Ir
         if (value->Opcode() == IrOpcode::CompositeConstructU32x4 && *component < value->ArgumentCount()) return finish(child(value->Argument(*component)));
         return finish(std::nullopt);
     }
-    if (value->HasImmediate() && value->Type() == IrType::U32) return finish(std::set<std::uint32_t>{value->ImmediateU32() & 0xffu});
+    if (value->HasImmediate() && value->Type() == IrType::U32) return finish(std::set<std::uint32_t>{value->ImmediateU32()});
     if (value->Opcode() == IrOpcode::CompositeExtractU32x4 && value->ArgumentCount() == 2u && value->Argument(1)->Resolve()->HasImmediate()) return finish(child(value->Argument(0), value->Argument(1)->Resolve()->ImmediateU32()));
     if (value->Opcode() == IrOpcode::SelectU32 || value->Opcode() == IrOpcode::Select) {
         if (value->ArgumentCount() != 3u) return finish(std::nullopt);
@@ -593,6 +594,10 @@ std::optional<std::set<std::uint32_t>> Values(const IrProgram& program, const Ir
 }
 
 std::vector<std::uint32_t> StencilReferenceValues(const IrProgram& program) {
+    return StencilReferenceValues(program, 0u);
+}
+
+std::vector<std::uint32_t> StencilReferenceValues(const IrProgram& program, std::uint32_t shift) {
     std::set<std::uint32_t> result;
     for (const auto& block : program.Blocks()) {
         for (const auto* instruction : block->Instructions()) {
@@ -601,9 +606,12 @@ std::vector<std::uint32_t> StencilReferenceValues(const IrProgram& program) {
             if (info.kind != ExportTargetKind::MrtZ || (info.en & 2u) == 0u) continue;
             std::set<const IrValue*> visiting;
             const auto values = Values(program, instruction->Argument(0), visiting, 0u, 1u, instruction->Argument(1));
-            if (!values) return {};
-            result.insert(values->begin(), values->end());
-            if (result.size() > 16u) return {};
+            if (!values) {
+                std::vector<std::uint32_t> all(256u);
+                std::iota(all.begin(), all.end(), 0u);
+                return all;
+            }
+            for (const auto value : *values) result.insert((value >> shift) & 0xffu);
         }
     }
     return {result.begin(), result.end()};

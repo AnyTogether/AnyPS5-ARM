@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 extern "C" {
 int APS5_VABI scePlayGoInitialize(const PlayGoInitParams*);
@@ -56,7 +57,15 @@ static int CheckScenarioWithoutChunkTable(const char* root) {
     const PlayGoToDo todo[2] = {{0, 3, 0}, {0xFFFF, 3, 0}};
     Require(scePlayGoSetToDoList(handle, todo, 2) == 0);
     std::uint32_t chunkCount = 0;
-    Require(scePlayGoGetChunkId(handle, nullptr, 0, &chunkCount) == 0 && chunkCount == 1);
+    Require(scePlayGoGetChunkId(handle, nullptr, 0, &chunkCount) == 0 && chunkCount == 1000);
+    std::vector<std::uint16_t> ids(chunkCount + 1, 0xFFFF);
+    Require(scePlayGoGetChunkId(handle, ids.data(), static_cast<std::uint32_t>(ids.size()), &chunkCount) == 0 && chunkCount == 1000);
+    for (std::uint32_t index = 0; index < chunkCount; ++index) Require(ids[index] == index);
+    std::vector<std::int8_t> listedLoci(chunkCount, 0);
+    Require(scePlayGoGetLocus(handle, ids.data(), chunkCount, listedLoci.data()) == 0);
+    for (const auto locus : listedLoci) Require(locus == 3);
+    std::uint16_t firstTwo[2] = {0xFFFF, 0xFFFF};
+    Require(scePlayGoGetChunkId(handle, firstTwo, 2, &chunkCount) == 0 && chunkCount == 2 && firstTwo[0] == 0 && firstTwo[1] == 1);
     Require(scePlayGoClose(handle) == 0);
     return 0;
 }

@@ -3,9 +3,30 @@
 #include <cstdint>
 #include <cstring>
 #include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <string_view>
 
 extern "C" {
+
+long long APS5_VABI strtonum_nid_postfix(const char* text, long long minimum, long long maximum, const char** error) {
+    const int savedError = errno;
+    const auto fail = [error](const char* message, int number) -> long long {
+        if (error) *error = message;
+        errno = number;
+        return 0;
+    };
+    if (minimum > maximum) return fail("invalid", 22);
+    errno = 0;
+    char* end = nullptr;
+    const long long value = std::strtoll(text, &end, 10);
+    if (errno == EINVAL || end == text || *end != '\0') return fail("invalid", 22);
+    if ((value == LLONG_MIN && errno == ERANGE) || value < minimum) return fail("too small", 34);
+    if ((value == LLONG_MAX && errno == ERANGE) || value > maximum) return fail("too large", 34);
+    if (error) *error = nullptr;
+    errno = savedError;
+    return value;
+}
 
 char* APS5_VABI basename_nid_postfix(const char* path) {
     thread_local char buffer[1024];

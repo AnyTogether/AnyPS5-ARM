@@ -16,11 +16,7 @@
 #include <netpacket/packet.h>
 #endif
 #ifdef __APPLE__
-#include <net/route.h>
-#include <sys/socket.h>
 #include <sys/sysctl.h>
-#include <cerrno>
-#include <vector>
 #endif
 #endif
 #include <cstdint>
@@ -51,6 +47,12 @@ static constexpr int NET_CTL_INFO_DEVICE = 1;
 static constexpr int NET_CTL_INFO_ETHER_ADDR = 2;
 static constexpr int NET_CTL_INFO_MTU = 3;
 static constexpr int NET_CTL_INFO_LINK = 4;
+static constexpr int NET_CTL_INFO_BSSID = 5;
+static constexpr int NET_CTL_INFO_SSID = 6;
+static constexpr int NET_CTL_INFO_WIFI_SECURITY = 7;
+static constexpr int NET_CTL_INFO_RSSI_DBM = 8;
+static constexpr int NET_CTL_INFO_RSSI_PERCENTAGE = 9;
+static constexpr int NET_CTL_INFO_CHANNEL = 10;
 static constexpr int NET_CTL_INFO_IP_CONFIG = 11;
 static constexpr int NET_CTL_INFO_DHCP_HOSTNAME = 12;
 static constexpr int NET_CTL_INFO_PPPOE_AUTH_NAME = 13;
@@ -188,54 +190,52 @@ struct HostDefaultRoute {
 };
 
 #ifdef __APPLE__
-static const sockaddr* RouteAddress(const rt_msghdr* message, int attribute, const char* end) {
-    if (!(message->rtm_addrs & attribute)) return nullptr;
-    const char* cursor = reinterpret_cast<const char*>(message + 1);
-    for (int bit = 1; bit < attribute; bit <<= 1) {
-        if (!(message->rtm_addrs & bit)) continue;
-        if (cursor + sizeof(sockaddr) > end) return nullptr;
-        const auto* address = reinterpret_cast<const sockaddr*>(cursor);
-        const std::size_t length = address->sa_len == 0 ? sizeof(std::uint32_t) : (address->sa_len + sizeof(std::uint32_t) - 1) & ~(sizeof(std::uint32_t) - 1);
-        cursor += length;
+struct NetCtlDefaultRoute {
+    char name[IF_NAMESIZE];
+    in_addr gateway;
+    std::uint32_t metric;
+};
+
+extern "C" std::size_t NetCtlDefaultRoutes_nid_no_patch(const char* table, std::size_t size, NetCtlDefaultRoute* routes, std::size_t capacity) {
+    std::size_t count = 0;
+    for (std::size_t offset = 0; offset + sizeof(rt_msghdr) <= size;) {
+        const auto* header = reinterpret_cast<const rt_msghdr*>(table + offset);
+        if (header->rtm_msglen < sizeof(rt_msghdr) || header->rtm_msglen > size - offset) break;
+        const sockaddr* addresses[RTAX_MAX] = {};
+        const std::size_t end = offset + header->rtm_msglen;
+        std::size_t field = offset + sizeof(rt_msghdr);
+        for (int index = 0; index < RTAX_MAX && field + sizeof(sockaddr) <= end; ++index) {
+            if (!(header->rtm_addrs & (1 << index))) continue;
+            const auto* address = reinterpret_cast<const sockaddr*>(table + field);
+            addresses[index] = address;
+            field += address->sa_len ? (address->sa_len + sizeof(std::uint32_t) - 1) & ~(sizeof(std::uint32_t) - 1) : sizeof(std::uint32_t);
+        }
+        offset = end;
+        const auto* destination = addresses[RTAX_DST];
+        const auto* gateway = addresses[RTAX_GATEWAY];
+        if (!destination || destination->sa_family != AF_INET || !gateway || gateway->sa_family != AF_INET) continue;
+        if (reinterpret_cast<const sockaddr_in*>(destination)->sin_addr.s_addr != 0) continue;
+        if (!(header->rtm_flags & RTF_UP) || (header->rtm_flags & (RTF_REJECT | RTF_HOST))) continue;
+        NetCtlDefaultRoute route{};
+        if (!if_indextoname(header->rtm_index, route.name)) continue;
+        route.gateway = reinterpret_cast<const sockaddr_in*>(gateway)->sin_addr;
+        route.metric = (header->rtm_flags & RTF_IFSCOPE) ? 1 : 0;
+        if (count < capacity) routes[count] = route;
+        ++count;
     }
-    if (cursor + sizeof(sockaddr) > end) return nullptr;
-    return reinterpret_cast<const sockaddr*>(cursor);
+    return count;
 }
 
 static std::vector<HostDefaultRoute> HostDefaultRoutes() {
-    int request[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_GATEWAY};
-    std::vector<char> table;
-    for (;;) {
-        std::size_t size = 0;
-        if (::sysctl(request, 6, nullptr, &size, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetInfo: the host routing table size is unavailable, errno=" + std::to_string(errno));
-        table.resize(size);
-        if (::sysctl(request, 6, table.data(), &size, nullptr, 0) == 0) {
-            table.resize(size);
-            break;
-        }
-        if (errno != ENOMEM) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable, errno=" + std::to_string(errno));
-    }
+    int name[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_GATEWAY};
+    std::size_t size = 0;
+    if (sysctl(name, 6, nullptr, &size, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable");
+    std::vector<char> table(size);
+    if (sysctl(name, 6, table.data(), &size, nullptr, 0) != 0) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is unavailable");
+    std::vector<NetCtlDefaultRoute> found(NetCtlDefaultRoutes_nid_no_patch(table.data(), size, nullptr, 0));
+    found.resize(NetCtlDefaultRoutes_nid_no_patch(table.data(), size, found.data(), found.size()));
     std::vector<HostDefaultRoute> routes;
-    for (std::size_t offset = 0; offset < table.size();) {
-        const auto* message = reinterpret_cast<const rt_msghdr*>(table.data() + offset);
-        if (message->rtm_msglen == 0 || offset + message->rtm_msglen > table.size()) throw std::runtime_error("sceNetCtlGetInfo: the host routing table is malformed");
-        const char* end = table.data() + offset + message->rtm_msglen;
-        offset += message->rtm_msglen;
-        if (message->rtm_type != RTM_GET || !(message->rtm_flags & RTF_UP) || (message->rtm_flags & RTF_REJECT) || !(message->rtm_flags & RTF_GATEWAY)) continue;
-        const auto* destination = RouteAddress(message, RTA_DST, end);
-        const auto* gateway = RouteAddress(message, RTA_GATEWAY, end);
-        const auto* netmask = RouteAddress(message, RTA_NETMASK, end);
-        if (!destination || destination->sa_family != AF_INET || !gateway || gateway->sa_family != AF_INET) continue;
-        if (reinterpret_cast<const sockaddr_in*>(destination)->sin_addr.s_addr != 0) continue;
-        if (netmask && netmask->sa_len >= offsetof(sockaddr_in, sin_addr) + sizeof(in_addr) && reinterpret_cast<const sockaddr_in*>(netmask)->sin_addr.s_addr != 0) continue;
-        char name[IF_NAMESIZE] = {};
-        if (!if_indextoname(message->rtm_index, name)) continue;
-        HostDefaultRoute route;
-        route.name = name;
-        route.gateway = reinterpret_cast<const sockaddr_in*>(gateway)->sin_addr;
-        route.metric = message->rtm_rmx.rmx_hopcount;
-        routes.push_back(route);
-    }
+    for (const auto& entry : found) routes.push_back({entry.name, entry.gateway, entry.metric});
     return routes;
 }
 #else
@@ -467,12 +467,23 @@ int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
         case NET_CTL_INFO_PRIMARY_DNS: WriteInfoAddress(info, host.dns.size() > 0 ? host.dns[0] : in_addr{}); break;
         case NET_CTL_INFO_SECONDARY_DNS: WriteInfoAddress(info, host.dns.size() > 1 ? host.dns[1] : in_addr{}); break;
         case NET_CTL_INFO_HTTP_PROXY_CONFIG: WriteInfoWord(info, NET_CTL_HTTP_PROXY_OFF); break;
-        case NET_CTL_INFO_HTTP_PROXY_PORT: WriteInfoWord(info, 0); break;
+        case NET_CTL_INFO_BSSID:
+        case NET_CTL_INFO_SSID:
         case NET_CTL_INFO_DHCP_HOSTNAME:
         case NET_CTL_INFO_PPPOE_AUTH_NAME:
         case NET_CTL_INFO_HTTP_PROXY_SERVER: std::memset(info->opaque, 0, sizeof(info->opaque)); break;
+        case NET_CTL_INFO_WIFI_SECURITY:
+        case NET_CTL_INFO_RSSI_DBM:
+        case NET_CTL_INFO_RSSI_PERCENTAGE:
+        case NET_CTL_INFO_CHANNEL:
+        case NET_CTL_INFO_HTTP_PROXY_PORT: WriteInfoWord(info, 0); break;
         default: throw std::runtime_error("sceNetCtlGetInfo: info code " + std::to_string(code) + " is not implemented");
     }
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetInfoV6() {
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -524,6 +535,361 @@ int APS5_VABI sceNetCtlUnregisterCallback(int cid) {
 
 int APS5_VABI sceNetCtlUnregisterCallbackV6(int cid) {
     return UnregisterCallback(g_callbacksV6, cid);
+}
+
+int APS5_VABI sceNetCtlRegisterCallbackForNpToolkit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlRegisterCallbackIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlRegisterCallbackForLibIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlUnregisterCallbackForNpToolkit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlUnregisterCallbackIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlUnregisterCallbackForLibIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlCheckCallbackForNpToolkit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlCheckCallbackForLibIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlClearEventIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlClearEventForNpToolkit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlClearEventForLibIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetResultIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetStateIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetState2IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetEtherLinkMode(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetWifiType(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlConnectIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlConnectWithRetryIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlConnectConfIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlDisconnectIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlScanIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetScanInfoBssidIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetScanInfoByBssidIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetScanInfoForSsidScanIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetScanInfoBssidForSsidListScanIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetScanInfoForSsidListScanIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlSetErrorNotificationEnabledIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlRegisterCallbackV6IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlUnregisterCallbackV6IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetResultV6(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetResultV6IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetStateV6IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetInfoV6IpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetNatInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlSetStunWithPaddingFlagIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlUnsetStunWithPaddingFlagIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlIsBandwidthManagementEnabledIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlDisableBandwidthManagementIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlEnableBandwidthManagementIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetBandwidthInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetNetEvConfigInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetConnectionElapsedTimeIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpCheckCallback(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpClearEvent(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpRegisterCallback(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpUnregisterCallback(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpGetResult(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpGetState(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpGetInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpStart(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpStart(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApAppStartWithRetryPid(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApAppStartWithRetry(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpStartWithRetry(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpStartConf(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRpStop(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApCpStop(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApAppInitWpaKey(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApAppInitWpaKeyForQa(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlApRestart(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweCheckCallbackIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweClearEventIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweRegisterCallbackIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweUnregisterCallbackIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweGetInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweStartInternetConnectionTestIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweFinishInternetConnectionTestIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweStartInternetConnectionTestBandwidthTestIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetBweSetInternetConnectionTestResultIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNetCtlGetWifiInfoIpcInt(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 }

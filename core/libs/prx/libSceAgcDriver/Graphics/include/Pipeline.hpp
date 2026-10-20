@@ -97,6 +97,7 @@ private:
     VkImageLayout attachmentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     std::vector<std::uint32_t> colorSlots;
     bool sampleLocationsEnabled = false;
+    VkExtent2D sampleLocationGrid{1, 1};
     std::vector<CachedFramebuffer> framebuffers;
 };
 
@@ -151,7 +152,7 @@ bool ShadersWriteMemory(std::span<const CompiledShader> shaders);
 bool DeclaresEarlyFragmentTests(const ShaderRecompiler::RecompileResult& program);
 void ValidateSampleMask(const Context& context, const State& state, std::span<const CompiledShader> shaders);
 // Returns the color attachment locations the pixel shader writes.
-std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders, const State& state, const VkPhysicalDeviceSubgroupProperties& subgroup, bool fragmentShaderBarycentric, bool descriptorIndexing = false, bool imageInt64Atomics = false, bool geometryShader = false, bool sampleRateShading = false, bool bufferInt64Atomics = false, bool shaderClipDistance = false, bool shaderCullDistance = false, bool viewportIndexLayer = false, bool runtimeDescriptorArray = false, bool demoteToHelperInvocation = false, bool shaderTerminateInvocation = false);
+std::set<std::uint32_t> ValidateShaders(std::span<const CompiledShader> shaders, const State& state, const VkPhysicalDeviceSubgroupProperties& subgroup, bool fragmentShaderBarycentric, bool descriptorIndexing = false, bool imageInt64Atomics = false, bool geometryShader = false, bool sampleRateShading = false, bool bufferInt64Atomics = false, bool shaderClipDistance = false, bool shaderCullDistance = false, bool viewportIndexLayer = false, bool runtimeDescriptorArray = false, bool demoteToHelperInvocation = false, bool shaderTerminateInvocation = false, bool meshShader = true);
 
 }
 

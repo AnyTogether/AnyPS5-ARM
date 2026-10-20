@@ -128,6 +128,41 @@ class TraceDigestTests(unittest.TestCase):
         return trace_digest.digest(trace_digest.load_trace(self.trace), trace_digest.load_summary(None, self.trace),
                                    trace_digest.load_stacks(self.stacks), worst=2, top=3)
 
+    def json_output(self, trace, *arguments):
+        result = subprocess.run([sys.executable, trace_digest.__file__, str(trace), "--json", *arguments],
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_utf8_bom_plain_and_compressed_traces_preserve_the_digest(self):
+        events = [dict(event, args={"name": "worker \u03a9"}) if event["name"] == "thread_name" and event["tid"] == 1
+                  else event for event in EVENTS]
+        text = json.dumps({"traceEvents": events}, ensure_ascii=False)
+        self.trace.write_bytes(gzip.compress(text.encode("utf-8")))
+        expected = self.json_output(self.trace)
+        for trace in (self.trace, self.trace.with_suffix("")):
+            for encoding in ("utf-8", "utf-8-sig"):
+                with self.subTest(trace=trace.name, encoding=encoding):
+                    data = text.encode(encoding)
+                    trace.write_bytes(gzip.compress(data) if trace.suffix == ".gz" else data)
+                    self.assertEqual(self.json_output(trace), expected)
+
+    def test_utf8_bom_summary_preserves_the_digest(self):
+        expected = self.json_output(self.trace)
+        summary = self.trace.with_name("aps5-summary.jsonl")
+        summary.write_text(summary.read_text(encoding="utf-8"), encoding="utf-8-sig")
+        self.assertEqual(self.json_output(self.trace), expected)
+
+    def test_utf8_bom_stacks_preserve_comments_and_frame_names(self):
+        for text in (STACKS, "root;module\u03a9+0x1 2\n"):
+            with self.subTest(comments=text.startswith("#")):
+                self.stacks.write_text(text, encoding="utf-8")
+                expected = self.json_output(self.trace, "--stacks", str(self.stacks))
+                expected_stacks = trace_digest.load_stacks(self.stacks)
+                self.stacks.write_text(text, encoding="utf-8-sig")
+                self.assertEqual(self.json_output(self.trace, "--stacks", str(self.stacks)), expected)
+                self.assertEqual(trace_digest.load_stacks(self.stacks), expected_stacks)
+
     def test_summary_is_the_line_of_this_trace(self):
         self.assertEqual(self.result()["summary"]["trace"], "aps5-trace-abc-7.json.gz")
 
@@ -279,6 +314,63 @@ class TraceDigestTests(unittest.TestCase):
         self.assertEqual((waits[0]["name"], waits[0]["thread"], waits[0]["present"]), ("Driver.Present.inflight_wait", "presenter", 601))
         self.assertAlmostEqual(waits[0]["ms"], 14.5)
         self.assertEqual(waits[1]["name"], "Driver.WorkerWait")
+
+    def test_longest_waits_omit_slices_outside_capture_in_cli(self):
+        events = [EVENTS[1], *EVENTS[-3:],
+                  complete(1, "Inside.wait", 1000, 2000),
+                  complete(3, "Before.wait", -100000, 90000),
+                  complete(4, "After.wait", 40000, 90000),
+                  complete(5, "EndsAtStart.wait", -1000, 1000),
+                  complete(6, "StartsAtEnd.wait", 40000, 1000)]
+        plain = self.trace.with_suffix("")
+        plain.write_text(json.dumps({"traceEvents": events}), encoding="utf-8")
+        self.trace.write_bytes(gzip.compress(plain.read_bytes()))
+        for path in (self.trace, plain):
+            for output in ([], ["--json"]):
+                with self.subTest(path=path.name, output=output):
+                    result = subprocess.run([sys.executable, trace_digest.__file__, str(path), "--top", "1", *output],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual((result.returncode, result.stderr), (0, ""))
+                    if output:
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report["longest_waits"], [
+                            {"name": "Inside.wait", "thread": "queue worker 0x0", "ms": 2.0, "at_ms": 1.0, "present": 600}])
+                    else:
+                        self.assertIn("- Inside.wait (queue worker 0x0) 2.0 ms at 1 ms, present 600", result.stdout)
+                        for name in ("Before.wait", "After.wait", "EndsAtStart.wait", "StartsAtEnd.wait"):
+                            self.assertNotIn(name, result.stdout)
+
+    def test_longest_waits_rank_only_the_overlap_with_capture(self):
+        events = [dict(EVENTS[-3], ts=10000), dict(EVENTS[-2], ts=30000),
+                  complete(1, "Leading.wait", -100000, 111000),
+                  complete(2, "Inside.wait", 12000, 4000),
+                  complete(3, "Trailing.wait", 28000, 90000),
+                  complete(4, "Spanning.wait", -100000, 230000),
+                  complete(4, "Nested.wait", 11000, 1000)]
+        report = trace_digest.digest(trace_digest.Trace(events), top=4)
+        self.assertEqual(report["longest_waits"], [
+            {"name": "Spanning.wait", "thread": "tid 4", "ms": 20.0, "at_ms": 10.0, "present": 600},
+            {"name": "Inside.wait", "thread": "tid 2", "ms": 4.0, "at_ms": 12.0, "present": 600},
+            {"name": "Trailing.wait", "thread": "tid 3", "ms": 2.0, "at_ms": 28.0, "present": 600},
+            {"name": "Leading.wait", "thread": "tid 1", "ms": 1.0, "at_ms": 10.0, "present": 600}])
+        threads = {thread["thread"]: thread for thread in report["threads"]}
+        for wait in report["longest_waits"]:
+            self.assertEqual(wait["ms"], threads[wait["thread"]]["wait_ms_per_frame"])
+
+    def test_longest_waits_clip_to_summary_end(self):
+        trace = trace_digest.Trace([EVENTS[-3],
+                                    complete(1, "Trailing.wait", 8000, 20000),
+                                    complete(2, "Inside.wait", 1000, 3000)])
+        report = trace_digest.digest(trace, {"window": {"ms": 10.0}}, top=1)
+        self.assertEqual(report["longest_waits"], [
+            {"name": "Inside.wait", "thread": "tid 2", "ms": 3.0, "at_ms": 1.0, "present": 600}])
+
+    def test_longest_waits_without_frames_keep_the_full_slices(self):
+        for duration in (0, 3000):
+            with self.subTest(duration=duration):
+                trace = trace_digest.Trace([complete(1, "Worker.wait", -1000, duration)])
+                self.assertEqual(trace_digest.digest(trace)["longest_waits"], [
+                    {"name": "Worker.wait", "thread": "tid 1", "ms": duration / 1000.0, "at_ms": -1.0, "present": None}])
 
     def test_wait_subscope_without_parent_is_not_busy(self):
         events = [EVENTS[1], complete(1, "Driver.WorkerWait.dequeue_order", 0, 4000),
@@ -484,6 +576,14 @@ class IntervalDigestTests(unittest.TestCase):
     def test_window_lines_are_skipped(self):
         self.assertEqual(len(trace_digest.load_intervals(self.path)), 4)
 
+    def test_utf8_bom_intervals_preserve_the_command_line_digest(self):
+        expected = trace_digest.digest_intervals(trace_digest.load_intervals(self.path))
+        self.path.write_text(self.path.read_text(encoding="utf-8"), encoding="utf-8-sig")
+        result = subprocess.run([sys.executable, trace_digest.__file__, str(self.path), "--json"],
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), expected)
+
     def test_rows(self):
         result = trace_digest.digest_intervals(trace_digest.load_intervals(self.path))
         first, second, third, _ = result["intervals"]
@@ -495,10 +595,36 @@ class IntervalDigestTests(unittest.TestCase):
         self.assertIsNone(third["top_phase"])
         self.assertEqual(result["identity_changed_at"], [3])
 
+    def test_identity_changes_are_reported_where_they_happen(self):
+        lines = [interval_line(30.0 * index, 30.0 * (index + 1), 20.0, 5.0, commit=commit)
+                 for index, commit in enumerate(("a", "a", "b", "b", "a"))]
+        result = trace_digest.digest_intervals(lines)
+        self.assertEqual(result["identity_changed_at"], [2, 4])
+        self.assertIn("commit, environment, GPU, driver or OS changed at interval 3, 5", trace_digest.markdown_intervals(result).splitlines())
+
     def test_sparkline_scales_to_the_largest_value(self):
         self.assertEqual(trace_digest.sparkline([0.0, 5.0, 10.0]), ".+@")
         self.assertEqual(trace_digest.sparkline([0.0, 0.0]), "..")
         self.assertEqual(trace_digest.sparkline([]), "")
+
+    def test_largest_phase_does_not_depend_on_json_key_order(self):
+        phases = [("Driver.Completion", 1.0), ("Driver.Packet", 7.0), ("Driver.Present", 2.0)]
+        for offset in range(len(phases)):
+            for sort_keys in (False, True):
+                with self.subTest(offset=offset, sort_keys=sort_keys):
+                    line = interval_line(0.0, 30.0, 20.0, 5.0,
+                                         top_phases_ms_per_frame=dict(phases[offset:] + phases[:offset]))
+                    self.path.write_text(json.dumps(line, sort_keys=sort_keys) + "\n", encoding="utf-8")
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(trace_digest.main([str(self.path), "--json"]), 0)
+                    result = json.loads(output.getvalue())
+                    self.assertEqual(result["intervals"][0]["top_phase"],
+                                     {"name": "Driver.Packet", "ms_per_frame": 7.0})
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(trace_digest.main([str(self.path)]), 0)
+                    self.assertIn("| Driver.Packet 7.0 |", output.getvalue())
 
     def test_command_line_table_and_json(self):
         output = io.StringIO()
@@ -544,6 +670,29 @@ class IntervalDigestTests(unittest.TestCase):
                 self.assertTrue(all(line.count("|") == 11 for line in rows), rows)
                 cells = [cell.strip() for cell in rows[2].split("|")[1:-1]]
                 self.assertEqual(cells, ["1", "0-30", "1800", "16.6", "18.0", "20.0", "25.0", "5.0", "50 %", escaped + " 7.5"])
+
+    def test_bom_encoded_stacks_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stacks_file = Path(directory) / "stacks.txt"
+            stacks_file.write_bytes(b"\xef\xbb\xbf# samples=1 depth=1 truncated=0\nmodule.prx+0x10 1\n")
+            loaded = trace_digest.load_stacks(stacks_file)
+            self.assertEqual(loaded, [(["module.prx+0x10"], 1)])
+
+    def test_bom_encoded_intervals_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            intervals_file = Path(directory) / "intervals.jsonl"
+            intervals_file.write_bytes(b"\xef\xbb\xbf" + json.dumps({"interval_start_s": 0.0, "interval_end_s": 10.0, "presents": 600}).encode("utf-8") + b"\n")
+            loaded = trace_digest.load_intervals(intervals_file)
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["interval_start_s"], 0.0)
+
+    def test_bom_encoded_summary_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary_file = Path(directory) / "aps5-summary.jsonl"
+            summary_file.write_bytes(b"\xef\xbb\xbf" + json.dumps(SUMMARY).encode("utf-8") + b"\n")
+            loaded = trace_digest.load_summary(str(summary_file), SUMMARY["trace"])
+            self.assertEqual(loaded["commit"], SUMMARY["commit"])
+
 
 if __name__ == "__main__":
     unittest.main()

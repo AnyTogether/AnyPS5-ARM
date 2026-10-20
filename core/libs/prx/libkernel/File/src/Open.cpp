@@ -28,6 +28,7 @@
 #include <io.h>
 #include <sys/stat.h>
 #include <windows.h>
+#include "prx/libkernel/File/include/WindowsSymbolicLink.hpp"
 static int NativeOpen(const std::filesystem::path& p, int nativeFlags, std::uint16_t mode) {
     const int access = nativeFlags & (_O_RDONLY | _O_WRONLY | _O_RDWR);
     const DWORD desired = access == _O_RDONLY ? GENERIC_READ : access == _O_WRONLY ? GENERIC_WRITE : GENERIC_READ | GENERIC_WRITE;
@@ -112,6 +113,13 @@ static std::filesystem::path NativeMetadataPath(const std::filesystem::path& pat
     return native.starts_with(L"\\\\") ? std::filesystem::path(L"\\\\?\\UNC\\" + native.substr(2))
                                             : std::filesystem::path(L"\\\\?\\" + native);
 }
+static bool NativeSymbolicLinkLoop(const std::filesystem::path& path) {
+    const auto handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_CANT_RESOLVE_FILENAME;
+    CloseHandle(handle);
+    return false;
+}
 static int MapFlags(int sceFlags) {
     int f = 0;
     const int acc = sceFlags & SCE_KERNEL_O_ACCMODE;
@@ -170,9 +178,15 @@ extern "C" int APS5_VABI fcntl_nid_postfix(int descriptor, int command, ...);
 static constexpr int GuestSetFlags = 4;
 
 static int SceErrorFromErrno(int error) {
-    constexpr int GuestEio = 5;
-    const int guest = error > 0 && error <= 34 ? error : GuestEio;
+    const int guest = error > 0 && error <= 34 ? error : FilesystemError(std::error_code(error, std::generic_category()));
     return static_cast<int>(0x80020000u | static_cast<unsigned>(guest));
+}
+
+static int SceStatErrorFromErrno(int error) {
+#ifdef ELOOP
+    if (error == ELOOP) return SCE_KERNEL_ERROR_ELOOP;
+#endif
+    return SceErrorFromErrno(error);
 }
 
 static int SceIoErrorFromErrno(int error) {
@@ -208,6 +222,13 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
         constexpr int GuestEmlink = 31;
         std::error_code error;
         if (std::filesystem::is_symlink(native, error)) return SceErrorFromErrno(GuestEmlink);
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(native.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+            std::string junctionTarget;
+            if (File::WindowsSymbolicLink::ReadJunction(native, junctionTarget, "open")) return SceErrorFromErrno(GuestEmlink);
+        }
+#endif
     }
     int fd = NativeOpen(native, MapFlags(flags), mode);
 #ifdef _WIN32
@@ -234,7 +255,7 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
     }
 #endif
     if (fd < 0) {
-        return SceErrorFromErrno(errno);
+        return SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno);
     }
     if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY || (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_TRUNC)))
         RecordWrittenPath_nid_no_patch(native);
@@ -245,6 +266,7 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
 extern "C" {
 
 int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
+    if (File::InvalidOpenFlags(flags)) return SCE_KERNEL_ERROR_EINVAL;
     if (path != nullptr && *path == '\0') return SCE_KERNEL_ERROR_ENOENT;
     APS5_LOG_OUT("path=%s flags=0x%X nativeFlags=0x%X mode=0%o", path, flags, MapFlags(flags), mode);
     if (path != nullptr && File::IsRandomDevicePath(path)) {
@@ -270,6 +292,7 @@ int APS5_VABI sceKernelOpen(const char* path, int flags, std::uint16_t mode) {
 }
 
 int OpenInDirectory_nid_no_patch(int directory, const char* path, int flags, std::uint16_t mode) {
+    if (File::InvalidOpenFlags(flags)) return SCE_KERNEL_ERROR_EINVAL;
     int error = 0;
     const char* base = GetDirectoryDescriptorPath_nid_no_patch(directory, &error);
     if (base == nullptr) return SceErrorFromErrno(error);
@@ -372,13 +395,17 @@ int APS5_VABI sceKernelStat(const char* path, FileStat* sb) {
 #endif
     const auto status = std::filesystem::status(metadataPath, error);
     if (error == std::errc::not_a_directory) return SceErrorFromErrno(GuestEnotdir);
+    if (error == std::errc::filename_too_long || error == std::errc::too_many_symbolic_link_levels) return SceKernelError(FilesystemError(error));
     if (!std::filesystem::exists(status)) {
-        return SceErrorFromErrno(2);
+#ifdef _WIN32
+        if (NativeSymbolicLinkLoop(metadataPath)) return SCE_KERNEL_ERROR_ELOOP;
+#endif
+        return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
     }
     const std::string_view guestPath(path);
     if (!guestPath.empty() && guestPath.back() == '/' && !std::filesystem::is_directory(status)) return SceErrorFromErrno(GuestEnotdir);
     if (sb == nullptr) return SceErrorFromErrno(GuestEfault);
-    File::FillFileStat(metadataPath, sb);
+    if (!File::TryFillFileStat(metadataPath, sb)) return SceStatErrorFromErrno(errno);
     return 0;
 }
 
@@ -391,7 +418,7 @@ int APS5_VABI sceKernelUnlink(const char* path) {
     std::error_code error;
     if (std::filesystem::is_directory(std::filesystem::symlink_status(native, error))) return SceErrorFromErrno(GuestEperm);
     if (NativeUnlink(native) != 0) {
-        return SceErrorFromErrno(errno);
+        return SceErrorFromErrno(errno == ENOENT ? NotFoundError_nid_no_patch(native) : errno);
     }
     RecordWrittenPath_nid_no_patch(native);
     return 0;

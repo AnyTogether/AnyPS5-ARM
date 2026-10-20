@@ -245,12 +245,18 @@ struct EntryRange {
     std::string Reason;
 };
 
-std::uint64_t HeaderTableEnd(const ElfHeader& header) {
-    const std::uint64_t table = header.ProgramHeaderOffset + static_cast<std::uint64_t>(header.ProgramHeaderCount) * header.ProgramHeaderEntrySize;
-    return std::max<std::uint64_t>(64, table);
+bool TouchesHeaderArea(const ElfHeader& header, const std::uint64_t offset, const std::uint64_t length) {
+    const auto overlaps = [offset, length](const std::uint64_t start, const std::uint64_t size) {
+        return offset < start + size && start < offset + length;
+    };
+    if (overlaps(0, Elfpatcher::kElfHeaderSize)) return true;
+    if (header.ProgramHeaderCount == 0 || header.ProgramHeaderEntrySize == 0) return false;
+    const std::uint64_t tableSize = static_cast<std::uint64_t>(header.ProgramHeaderCount) * header.ProgramHeaderEntrySize;
+    if (tableSize > std::numeric_limits<std::uint64_t>::max() - header.ProgramHeaderOffset) return true;
+    return overlaps(header.ProgramHeaderOffset, tableSize);
 }
 
-EntryRange ResolveEntry(const std::vector<ProgramHeader>& segments, const std::uint64_t fileSize, const std::uint64_t headerEnd, const PatchEntry& entry) {
+EntryRange ResolveEntry(const std::vector<ProgramHeader>& segments, const std::uint64_t fileSize, const ElfHeader& header, const PatchEntry& entry) {
     const std::uint64_t length = entry.Expected.size();
     for (const auto& segment : segments) {
         if (segment.Type != Elfpatcher::PT_LOAD) continue;
@@ -259,7 +265,7 @@ EntryRange ResolveEntry(const std::vector<ProgramHeader>& segments, const std::u
         if (delta >= segment.FileSize || length > segment.FileSize - delta) continue;
         if (segment.Offset > fileSize || segment.FileSize > fileSize - segment.Offset) return {std::nullopt, "PT_LOAD file mapping is out of bounds"};
         const PatchedRange range{segment.Offset + delta, length, entry.VirtualAddress};
-        if (range.Offset < headerEnd) return {std::nullopt, "range overlaps the ELF header or program header table"};
+        if (TouchesHeaderArea(header, range.Offset, length)) return {std::nullopt, "range overlaps the ELF header or program header table"};
         return {range, {}};
     }
     return {std::nullopt, "range is not inside the file bytes of one PT_LOAD"};
@@ -267,9 +273,9 @@ EntryRange ResolveEntry(const std::vector<ProgramHeader>& segments, const std::u
 
 std::vector<EntryRange> ResolveEach(const ElfReader& reader, const std::vector<PatchEntry>& entries) {
     const auto segments = reader.ReadProgramHeaders();
-    const auto headerEnd = HeaderTableEnd(reader.ReadHeader());
+    const auto header = reader.ReadHeader();
     std::vector<EntryRange> resolved;
-    for (const auto& entry : entries) resolved.push_back(ResolveEntry(segments, reader.GetFileSize(), headerEnd, entry));
+    for (const auto& entry : entries) resolved.push_back(ResolveEntry(segments, reader.GetFileSize(), header, entry));
     return resolved;
 }
 

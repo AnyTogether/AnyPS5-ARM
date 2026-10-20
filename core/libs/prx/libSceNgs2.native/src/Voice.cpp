@@ -69,6 +69,9 @@ void Ngs2Voice::ResetSetup() {
     userFxHandler = nullptr;
     userFxData = {};
     userFxFlags = 0;
+    callback = nullptr;
+    callbackData = 0;
+    callbackFlags = 0;
 }
 
 const std::uint8_t* Ngs2StreamEnd(const Ngs2Voice& voice, const Ngs2Block& block) {

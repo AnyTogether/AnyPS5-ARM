@@ -373,6 +373,14 @@ int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t handle, OutputInfo* output
     }
 }
 
+int APS5_VABI sceVdecswGetPictureInfo(const OutputInfo* output, void* first, void* second) {
+    (void)output;
+    (void)first;
+    (void)second;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo* output, AvcPictureInfo* first, AvcPictureInfo* second) {
     if (output == nullptr || first == nullptr || first->thisSize < sizeof(std::uint64_t)) throw std::runtime_error("Vdecsw: invalid argument pointer");
     if (output->pictureCount > 1) throw std::runtime_error("Vdecsw: second field picture info is not implemented");
@@ -395,6 +403,13 @@ int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo* output, AvcPictureInf
 }
 
 int APS5_VABI sceVdecswGetHevcPictureInfo(const OutputInfo* output, void* picture) {
+    (void)output;
+    (void)picture;
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceVdecswGetVp9PictureInfo(const OutputInfo* output, void* picture) {
     (void)output;
     (void)picture;
     NotImplemented_nid_no_patch(__func__);

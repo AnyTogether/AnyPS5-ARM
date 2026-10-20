@@ -357,7 +357,7 @@ int APS5_VABI fchdir_nid_postfix(int fd) {
     int error = 0;
     const char* path = GetDirectoryDescriptorPath_nid_no_patch(fd, &error);
     if (path == nullptr) return static_cast<int>(Fail(error));
-#ifdef __linux__
+#ifndef _WIN32
     if (::faccessat(fd, ".", X_OK, AT_EACCESS) != 0) return static_cast<int>(Fail(errno));
 #endif
     error = SetWorkingDirectory_nid_no_patch(path);
@@ -444,6 +444,7 @@ int APS5_VABI openat_nid_postfix(int fd, const char* path, int flags, ...) {
         va_end(arguments);
 #endif
     }
+    if (File::InvalidOpenFlags(flags)) return static_cast<int>(Fail(GuestEinval));
     if (path == nullptr) return static_cast<int>(Fail(GuestEfault));
     if (*path == '\0') return static_cast<int>(Fail(GuestEnoent));
     if (fd == GuestAtFdcwd || *path == '/') return open_nid_postfix(path, flags, mode);

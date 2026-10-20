@@ -110,12 +110,6 @@ static void CheckDontWait() {
     char buffer[16]{};
     Iovec vector{buffer, sizeof(buffer)};
     Msghdr message{nullptr, 0, &vector, 1, nullptr, 0, 0};
-#ifdef _WIN32
-    Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 45);
-    Require(recvfrom_nid_postfix(receiver, buffer, sizeof(buffer), 0x80, nullptr, nullptr) == -1 && *__error_nid_postfix() == 45);
-    Require(recvmsg_nid_postfix(receiver, &message, 0x80) == -1 && *__error_nid_postfix() == 45);
-    Require(sendto_nid_postfix(sender, "x", 1, 0x80, address.data(), address.size()) == -1 && *__error_nid_postfix() == 45);
-#else
     const auto start = std::chrono::steady_clock::now();
     Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 35);
     Require(recvfrom_nid_postfix(receiver, buffer, sizeof(buffer), 0x80, nullptr, nullptr) == -1 && *__error_nid_postfix() == 35);
@@ -134,7 +128,6 @@ static void CheckDontWait() {
     std::memset(buffer, 0, sizeof(buffer));
     Require(recvmsg_nid_postfix(receiver, &message, 0) == sizeof(datagram) && std::strcmp(buffer, datagram) == 0);
     Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x80) == -1 && *__error_nid_postfix() == 35);
-#endif
     Require(recv_nid_postfix(receiver, buffer, sizeof(buffer), 0x1) == -1 && *__error_nid_postfix() == 45);
     Require(close_nid_postfix(receiver) == 0 && close_nid_postfix(sender) == 0);
 }

@@ -191,6 +191,40 @@ class InputRowsTests(unittest.TestCase):
                 hw_oracle.main()
             self.assertEqual(run.call_args.args[1], [(1, 8, 0xffffffff, 2)])
 
+    def test_validation_only_reports_dispatch_shape_without_running_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            body, rows, extra = (Path(directory) / name for name in ("body.s", "rows.txt", "extra.bin"))
+            body.write_text("v_mov_b32 v10, v4", encoding="utf-8")
+            extra.write_bytes(b"abc")
+            options = [part for name, value in MODES.items() for part in ["--" + name.replace("_", "-"), str(value)]]
+            for count in (1, 33, 513, 1025):
+                rows.write_text("1 2 3 4\n" * count, encoding="utf-8")
+                for wave64 in (False, True):
+                    argv = ["hw_oracle.py", str(body), str(rows), *options, "--validate-only", "--json", "--extra", str(extra)]
+                    if wave64:
+                        argv.append("--wave64")
+                    with self.subTest(count=count, wave64=wave64), patch("sys.argv", argv), \
+                            patch.object(hw_oracle, "run", side_effect=AssertionError("GPU run")), \
+                            patch.object(hw_oracle, "target", side_effect=AssertionError("target lookup")), \
+                            contextlib.redirect_stdout(io.StringIO()) as output:
+                        self.assertEqual(hw_oracle.main(), 0)
+                    report = json.loads(output.getvalue())
+                    wave = 64 if wave64 else 32
+                    padded = (count + wave - 1) // wave * wave
+                    dispatch = 512 if wave64 else 1024
+                    self.assertTrue(report["validation_only"])
+                    self.assertEqual((report["rows"], report["padded_rows"], report["dispatches"]),
+                                     (count, padded, (padded + dispatch - 1) // dispatch))
+                    self.assertEqual(report["extra_bytes"], 3)
+                    self.assertEqual(report["floating_point_modes"], MODES)
+                    self.assertNotIn("assembly_target", report)
+            for lds in (-1, 65537):
+                with self.subTest(lds=lds), patch("sys.argv", [*argv, "--lds", str(lds)]), \
+                        contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exited:
+                    hw_oracle.main()
+                self.assertEqual(exited.exception.code, 2)
+
+
 
 class JsonReportTests(unittest.TestCase):
     def setUp(self):
@@ -368,13 +402,13 @@ class TargetOverrideTests(unittest.TestCase):
                 encoding="utf-8")
             binary = root / ("oracle.cmd" if os.name == "nt" else "oracle")
             if os.name == "nt":
-                binary.write_text(f'@"{sys.executable}" "{runner}" %*\n', encoding="utf-8")
+                binary.write_text('@"%HW_ORACLE_TEST_PYTHON%" "%~dp0probe.py" %*\n', encoding="ascii")
             else:
                 binary.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(runner))} "$@"\n',
                                   encoding="utf-8")
                 binary.chmod(0o755)
             with patch.object(hw_oracle, "oracle", return_value=binary), \
-                    patch.dict(os.environ, {"HW_ORACLE_TARGET": ""}):
+                    patch.dict(os.environ, {"HW_ORACLE_TARGET": "", "HW_ORACLE_TEST_PYTHON": sys.executable}):
                 os.environ["ROCR_VISIBLE_DEVICES"] = "0"
                 self.assertEqual(hw_oracle.detected_target(binary, "1"), "gfx1100")
                 for visible, expected in (("0", "gfx1030"), ("0", "gfx1030"),

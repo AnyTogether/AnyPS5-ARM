@@ -115,6 +115,7 @@ struct State {
     std::vector<VkPipelineColorBlendAttachmentState> blends;
     bool hasColorTarget;
     bool rectList = false;
+    bool quadList = false;
     bool dualSourceBlend = false;
     std::uint32_t reversedBlend = 0;
     VkExtent2D renderExtent;
@@ -125,9 +126,20 @@ struct State {
     VkViewport viewport;
     bool negativeOneToOne;
     bool depthClamp = false;
+    float depthScale = 1;
+    float depthOffset = 0;
+    float depthClampMin = 0;
+    float depthClampMax = 1;
+    struct DepthRemap {
+        std::uint32_t mode = 0;
+        float scale = 1;
+        float offset = 0;
+        bool operator==(const DepthRemap&) const = default;
+    } depthRemap;
     bool alphaToCoverage = false;
     bool ditheredAlphaToCoverage = false;
     bool perSampleShading = false;
+    bool mergedCoverage = false;
     VkConservativeRasterizationModeEXT conservativeRasterization = VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT;
     VkRect2D scissor;
     VkCullModeFlags cullMode;
@@ -150,6 +162,8 @@ inline constexpr std::uint32_t PositionExportLayoutBits = 0xffffu | (1u << 21u) 
 
 ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup = false);
 State DecodeState(const QueueState& queue, bool vertexWorkgroup = false);
+void ApplyDepthRemap(const Context& context, State& state);
+void NormalizeUnusedViewportDepth(State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel);
 std::array<VkSampleLocationEXT, 32> SampleLocations(const State& state);
 std::array<std::uint8_t, 32> PixelSampleLocations(const State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel);
 VkExtent2D SampleLocationGrid(const State& state);
@@ -256,6 +270,7 @@ inline constexpr std::array<DrawKeyRange, 50> DrawKeyRegisters{{
     {RegisterBank::UserConfig, 0x242, 1}, {RegisterBank::UserConfig, 0x24b, 1}, {RegisterBank::UserConfig, 0x25b, 1},
 }};
 bool SplitsAlternateAlpha(const State& state);
+bool StencilOperationValueReplaces(const Registers& context);
 bool StencilReferenceUnused(const State& state);
 // Whether DrawKeyRegisters holds the read.
 bool DrawKeyCovers(RegisterRead read);

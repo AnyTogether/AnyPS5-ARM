@@ -226,6 +226,57 @@ void testDeferredBuffer() {
     LibcRunShutdown_nid_postfix();
 }
 
+void testCpuFlipOrder() {
+    const bool inOrder = std::getenv("APS5_CPU_FLIP_IN_ORDER") != nullptr;
+    const int handle = sceVideoOutOpen(255, 0, 0, nullptr);
+    auto cfg = VideoOutDriver::Get().GetConfig(handle);
+    std::vector<std::byte> allocation(65536 + 65535);
+    const auto storage = alignedBuffer(allocation);
+    VideoOutBuffers buffer{storage.data(), nullptr, {nullptr, nullptr}};
+    VideoOutBufferAttribute2 attribute{};
+    sceVideoOutSetBufferAttribute2(&attribute, 0x8000000000000000ull, 0, 64, 64, 0, 0, 0);
+    check(sceVideoOutRegisterBuffers2(handle, 0, 0, &buffer, 1, &attribute, 0, nullptr) == 0, "buffer registration failed");
+    const auto flipsWithin = [&](int count, std::chrono::milliseconds limit) {
+        std::unique_lock lock(cfg->mutex);
+        const bool done = cfg->vblankCond.wait_for(lock, limit, [&] { return cfg->failure || cfg->flipStatus.count == count; });
+        if (cfg->failure) std::rethrow_exception(cfg->failure);
+        return done;
+    };
+    const auto shownArgument = [&] {
+        std::lock_guard lock(cfg->mutex);
+        return cfg->flipStatus.flipArg;
+    };
+    auto first = std::make_shared<Gate>();
+    AgcDriverRegisterVideoOutput_nid_postfix(7, first);
+    std::array<uint32_t, 6> firstHeld{0xc004105c, 7, 0xfffffffeu, 1, 0, 0};
+    Packet firstPacket{firstHeld.data(), 6, 0, {}};
+    check(sceAgcDriverSubmitDcb(&firstPacket) == 0, "the first gated submission was not accepted");
+    std::thread flipThread([&] { check(sceVideoOutSubmitFlip(handle, 0, 1, 5) == 0, "the flip thread's flip was not accepted"); });
+    flipThread.join();
+    const bool ahead = flipsWithin(1, std::chrono::milliseconds(inOrder ? 1000 : 8000));
+    if (inOrder) check(!ahead, "with APS5_CPU_FLIP_IN_ORDER a flip completed while a queue-0 submission ahead of it was held");
+    else check(ahead, "a flip from a thread that never submitted queue-0 work waited for a held queue-0 submission");
+    first->Release();
+    check(flipsWithin(1, std::chrono::seconds(30)), "the flip thread's flip did not complete");
+    check(shownArgument() == 5, "the flip thread's flip presented the wrong request");
+    auto second = std::make_shared<Gate>();
+    AgcDriverRegisterVideoOutput_nid_postfix(8, second);
+    std::array<uint32_t, 6> secondHeld{0xc004105c, 8, 0xfffffffeu, 1, 0, 0};
+    Packet secondPacket{secondHeld.data(), 6, 0, {}};
+    check(sceAgcDriverSubmitDcb(&secondPacket) == 0, "the second gated submission was not accepted");
+    check(sceVideoOutSubmitFlip(handle, 0, 1, 6) == 0, "the submitting thread's flip was not accepted");
+    check(!flipsWithin(2, std::chrono::milliseconds(1000)), "a flip from the thread that submitted queue-0 work completed ahead of that work");
+    second->Release();
+    check(flipsWithin(2, std::chrono::seconds(30)), "the submitting thread's flip did not complete");
+    check(shownArgument() == 6, "the submitting thread's flip presented the wrong request");
+    AgcDriverWaitIdle_nid_postfix();
+    sceVideoOutUnregisterBuffers(handle, 0);
+    sceVideoOutClose(handle);
+    AgcDriverUnregisterVideoOutput_nid_postfix(7, first);
+    AgcDriverUnregisterVideoOutput_nid_postfix(8, second);
+    LibcRunShutdown_nid_postfix();
+}
+
 void testUnregisteredBuffer() {
     const int handle = sceVideoOutOpen(255, 0, 0, nullptr);
     auto cfg = VideoOutDriver::Get().GetConfig(handle);
@@ -876,6 +927,8 @@ void testEop(bool overlay) {
     const std::uint64_t bits = static_cast<std::uint64_t>(argument);
     std::vector<std::uint32_t> completion{0xc0027900u, 0x342u, 0xc7010107u, static_cast<std::uint32_t>(bus), 0xc0043700u, 0x06010000u, 0xc343u, 0u, static_cast<std::uint32_t>(bits), static_cast<std::uint32_t>(bits >> 32u)};
     completion.push_back(0x80004900u);
+    const std::array<std::uint32_t, 8> nop{0xc0061000u, 0x02000000u, 0u, 0u, 0u, 0u, token, 0u};
+    completion.insert(completion.end(), nop.begin(), nop.end());
     completion.insert(completion.end(), release.begin(), release.end());
     submit(completion);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -980,6 +1033,7 @@ int runTests(int argc, char** argv) {
         else if (argc == 2 && std::string(argv[1]) == "deferred") testDeferredBuffer();
         else if (argc == 2 && std::string(argv[1]) == "unregistered") testUnregisteredBuffer();
         else if (argc == 2 && std::string(argv[1]) == "ps4") testPs4Buffers();
+        else if (argc == 2 && std::string(argv[1]) == "cpuflip") testCpuFlipOrder();
         else testLifetime(argc == 2 && std::string(argv[1]) == "reopen");
         std::puts("VideoOut flip tests passed");
         return 0;

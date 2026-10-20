@@ -157,7 +157,11 @@ std::atomic<int> guestNice{0};
 constexpr int guestNiceMin = -20;
 constexpr int guestNiceMax = 20;
 constexpr int guestRlimitData = 2;
+constexpr int guestRlimitStack = 3;
 constexpr int guestRlimitCore = 4;
+constexpr int guestRlimitRss = 5;
+constexpr int guestRlimitMemlock = 6;
+constexpr int guestRlimitNproc = 7;
 constexpr int guestRlimitNofile = 8;
 constexpr int guestRlimitSbsize = 9;
 constexpr int guestRlimitVmem = 10;
@@ -167,6 +171,8 @@ constexpr int guestRlimitKqueues = 13;
 constexpr int guestRlimitUmtxp = 14;
 constexpr int guestRlimitCount = 15;
 constexpr std::int64_t guestRlimitInfinity = std::numeric_limits<std::int64_t>::max();
+constexpr std::int64_t guestStackLimit = 0x200000;
+constexpr std::int64_t guestProcessLimit = 1604;
 
 #ifdef _WIN32
 std::int64_t hostMemoryLimit() {
@@ -372,6 +378,8 @@ int APS5_VABI setrlimit_nid_postfix(int resource, const GuestResourceLimit* limi
             return 0;
         }
     }
+    if (resource == guestRlimitNproc)
+        throw std::runtime_error("setrlimit: RLIMIT_NPROC is not stored");
     if (requested.rlim_cur != current.rlim_cur || requested.rlim_max != current.rlim_max)
         throw std::runtime_error("setrlimit: changing the limit of resource " + std::to_string(resource) + " is not supported");
     return 0;
@@ -494,11 +502,19 @@ int APS5_VABI sched_get_priority_min_nid_postfix(int policy) {
 }
 
 int APS5_VABI sysarch(int operation, void* parameters) {
+    constexpr int i386GetFsBase = 7;
+    constexpr int i386GetGsBase = 9;
     constexpr int getFsBase = 128;
     constexpr int getGsBase = 130;
     constexpr int setGsBase = 131;
     constexpr std::uint64_t userAddressEnd = 0x0000800000000000ull;
-    if (operation != getFsBase && operation != getGsBase && operation != setGsBase)
+    constexpr std::array<int, 14> definedOperations{0, 1, 3, 4, 7, 8, 9, 10, 11, 128, 129, 130, 131, 132};
+    if (std::find(definedOperations.begin(), definedOperations.end(), operation) == definedOperations.end()) {
+        *__error_nid_postfix() = guestInvalid;
+        return -1;
+    }
+    const bool i386 = operation == i386GetFsBase || operation == i386GetGsBase;
+    if (!i386 && operation != getFsBase && operation != getGsBase && operation != setGsBase)
         NotImplemented_nid_no_patch(("sysarch: operation " + std::to_string(operation)).c_str());
 #if defined(__linux__) && defined(__x86_64__)
     if (parameters == nullptr) {
@@ -515,8 +531,14 @@ int APS5_VABI sysarch(int operation, void* parameters) {
         if (::syscall(SYS_arch_prctl, ARCH_SET_GS, base) != 0) throw std::system_error(errno, std::generic_category(), "sysarch: setting the GS base");
         return 0;
     }
-    if (::syscall(SYS_arch_prctl, operation == getFsBase ? ARCH_GET_FS : ARCH_GET_GS, &base) != 0)
+    const bool fs = operation == getFsBase || operation == i386GetFsBase;
+    if (::syscall(SYS_arch_prctl, fs ? ARCH_GET_FS : ARCH_GET_GS, &base) != 0)
         throw std::system_error(errno, std::generic_category(), "sysarch: reading a segment base");
+    if (i386) {
+        const auto low = static_cast<std::uint32_t>(base);
+        std::memcpy(parameters, &low, sizeof(low));
+        return 0;
+    }
     std::memcpy(parameters, &base, sizeof(base));
     return 0;
 #else
@@ -667,9 +689,19 @@ int APS5_VABI getrlimit_nid_postfix(int resource, GuestResourceLimit* limit) {
         *limit = *guestOpenFileLimit;
         return 0;
     }
+    case guestRlimitStack:
+        limit->rlim_cur = guestStackLimit;
+        limit->rlim_max = guestStackLimit;
+        return 0;
+    case guestRlimitNproc:
+        limit->rlim_cur = guestProcessLimit;
+        limit->rlim_max = guestProcessLimit;
+        return 0;
     case guestRlimitCpu:
     case guestRlimitFsize:
     case guestRlimitCore:
+    case guestRlimitRss:
+    case guestRlimitMemlock:
     case guestRlimitSbsize:
     case guestRlimitVmem:
     case guestRlimitNpts:
@@ -752,6 +784,12 @@ int APS5_VABI setegid_nid_postfix(std::uint32_t egid) {
 int APS5_VABI setuid_nid_postfix(std::uint32_t uid) {
     if (uid != 0)
         throw std::runtime_error("setuid: unsupported user id " + std::to_string(uid));
+    return 0;
+}
+
+int APS5_VABI setgid_nid_postfix(std::uint32_t gid) {
+    if (gid != 0)
+        throw std::runtime_error("setgid: unsupported group id " + std::to_string(gid));
     return 0;
 }
 

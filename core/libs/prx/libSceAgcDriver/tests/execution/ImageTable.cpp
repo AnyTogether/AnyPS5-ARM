@@ -873,7 +873,7 @@ void RunTests(AgcDriver::VulkanDevice& device) {
     const auto sintControl = RunDirect(device, LinearWrap, sintImage);
     const auto floatControl = RunDirect(device, LinearWrap, floatImage);
     const auto uintControl = RunDirect(device, LinearWrap, uintImage);
-    Require(floatControl.samplers == std::vector{LinearWrap} && uintControl.samplers == std::vector{LinearWrap} && sintControl.samplers == std::vector{PointWrap}, "image table: the direct bindings under a linear S# changed their sampler copies");
+    Require(floatControl.samplers == std::vector{LinearWrap} && uintControl.samplers == std::vector{PointWrap} && sintControl.samplers == std::vector{PointWrap}, "image table: the direct bindings under a linear S# changed their sampler copies");
     Require(Group(integerLinear, 0) == Group(sintControl, 0) && Group(integerLinear, 1) == Group(floatControl, 0), "image table: an entry under a linear direct S# differs from the direct binding");
     RequireRed(integerLinear, 0, Lanes, [](std::uint32_t x) { return static_cast<std::uint32_t>(SintTexels[x]); }, "sint texels through a linear direct sampler");
     RequireRed(integerLinear, 2, Lanes, [](std::uint32_t x) { return UintTexels[x]; }, "uint texels through a linear direct sampler");

@@ -31,6 +31,7 @@
 #include <unistd.h>
 #endif
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 
@@ -246,6 +247,20 @@ std::vector<std::string> WithTrailingSeparator(std::vector<std::string> names, b
 }
 std::filesystem::path Resolve(WorkingDirectory& state, const char* path, bool module = false, bool archived = false) {
     std::string text(path);
+    constexpr std::size_t MaxPath = 1024;
+    constexpr std::size_t MaxName = 255;
+    if (text.size() >= MaxPath) throw std::filesystem::filesystem_error("Guest path is too long", std::make_error_code(std::errc::filename_too_long));
+    std::size_t name = 0;
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        name = text[index] == '/' || text[index] == '\\' ? 0 : name + 1;
+        if (name <= MaxName) continue;
+        const std::size_t end = index + 1 - name;
+        std::error_code status;
+        if (end == 0 || std::filesystem::is_directory(Resolve(state, text.substr(0, end).c_str()), status)) {
+            throw std::filesystem::filesystem_error("Guest path name is too long", std::make_error_code(std::errc::filename_too_long));
+        }
+        break;
+    }
     for (auto& character : text) if (character == '\\') character = '/';
 #ifdef _WIN32
     // Preserve the existing ability to pass explicit native drive paths.
@@ -415,8 +430,60 @@ extern "C" int HostStandardError_nid_no_patch() {
     return g_hostStandardError.load();
 }
 
+namespace {
+std::mutex g_hostStandardOutputMutex;
+std::atomic<int> g_hostStandardOutput{-1};
+}
+
+extern "C" int KeepHostStandardOutput_nid_no_patch() {
+    const std::lock_guard lock(g_hostStandardOutputMutex);
+    if (const int kept = g_hostStandardOutput.load(); kept >= 0) return kept;
+    const int kept = ::fcntl(1, F_DUPFD_CLOEXEC, 3);
+    if (kept < 0) {
+        if (errno == EBADF) return -1;
+        throw std::system_error(errno, std::generic_category(), "Keeping the host standard output");
+    }
+    std::FILE* const stream = ::fdopen(kept, "w");
+    if (stream == nullptr) {
+        const int error = errno;
+        ::close(kept);
+        throw std::system_error(error, std::generic_category(), "Keeping the host standard output");
+    }
+    std::setvbuf(stream, nullptr, _IONBF, 0);
+    std::fflush(stdout);
+    stdout = stream;
+    g_hostStandardOutput.store(kept);
+    return kept;
+}
+
 extern "C" int DuplicateHostDescriptor_nid_no_patch(int descriptor) {
     return ::fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
+}
+#endif
+
+#ifdef _WIN32
+namespace {
+std::atomic<std::FILE*> g_hostStandardOutputFile{nullptr};
+std::atomic<std::FILE*> g_hostStandardErrorFile{nullptr};
+}
+
+extern "C" bool AdoptHostStandardStream_nid_no_patch(int standard, int saved) {
+    std::fflush(__acrt_iob_func(standard));
+    std::FILE* stream = ::_fdopen(saved, "w");
+    if (stream == nullptr) return false;
+    std::setvbuf(stream, nullptr, _IONBF, 0);
+    (standard == 1 ? g_hostStandardOutputFile : g_hostStandardErrorFile).store(stream, std::memory_order_release);
+    return true;
+}
+
+extern "C" std::FILE* HostStandardOutputFile_nid_no_patch() {
+    if (std::FILE* kept = g_hostStandardOutputFile.load(std::memory_order_acquire)) return kept;
+    return __acrt_iob_func(1);
+}
+
+extern "C" std::FILE* HostStandardErrorFile_nid_no_patch() {
+    if (std::FILE* kept = g_hostStandardErrorFile.load(std::memory_order_acquire)) return kept;
+    return __acrt_iob_func(2);
 }
 #endif
 
@@ -566,7 +633,7 @@ extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {
     auto& state = Directories();
     std::lock_guard lock(state.mutex);
     try {
-        return SetWorkingDirectory(state, std::filesystem::u8path(resolved));
+        return SetWorkingDirectory(state, std::filesystem::path(reinterpret_cast<const char8_t*>(resolved)));
     } catch (const std::bad_alloc&) {
         return 12;
     } catch (const std::filesystem::filesystem_error& error) {
@@ -592,7 +659,7 @@ extern "C" int APS5_VABI chdir_nid_postfix(const char* path) {
         const auto resolved = Resolve(state, path, false, true);
         AppArchiveRefuseOnly_nid_no_patch(resolved, path, "changing the working directory to");
         const int error = SetWorkingDirectory(state, resolved);
-        if (error) { errno = error; return -1; }
+        if (error) { errno = error == 2 ? NotFoundError_nid_no_patch(resolved) : error; return -1; }
         return 0;
     } catch (const std::bad_alloc&) { errno = 12; return -1; }
       catch (const std::filesystem::filesystem_error& error) { errno = DirectoryFailure(error.code()); return -1; }

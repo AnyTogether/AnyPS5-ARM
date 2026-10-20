@@ -1155,8 +1155,8 @@ struct ImeKeycode {
     std::uint64_t timestamp;
 };
 
-using ImeTextFilter = std::int32_t (*)(char16_t* out_text, std::uint32_t* out_text_length, const char16_t* source_text, std::uint32_t source_text_length);
-using ImeExtKeyboardFilter = int (*)(const ImeKeycode* source_keycode, std::uint16_t* out_keycode, std::uint32_t* out_status, void* reserved);
+using ImeTextFilter = std::int32_t (APS5_VABI *)(char16_t* out_text, std::uint32_t* out_text_length, const char16_t* source_text, std::uint32_t source_text_length);
+using ImeExtKeyboardFilter = int (APS5_VABI *)(const ImeKeycode* source_keycode, std::uint16_t* out_keycode, std::uint32_t* out_status, void* reserved);
 
 struct ImeExtendedParam {
     std::uint32_t option;
@@ -1437,6 +1437,11 @@ constexpr std::uint32_t NP_GAME_INTENT_TYPE_MAX_SIZE = 64;
 struct NpGameIntentData {
     std::uint8_t data[NP_GAME_INTENT_DATA_MAX_SIZE];
     std::uint8_t padding[7];
+};
+
+struct NpGameIntentInitParam {
+    std::size_t size;
+    std::uint8_t reserved[32];
 };
 
 struct NpGameIntentInfo {
@@ -1935,6 +1940,13 @@ struct SystemGestureTouchRecognizerInformation {
 };
 
 struct SystemGestureTouchEvent { std::uint8_t reserve[168]; };
+
+struct SystemGestureTouchPadData {
+    std::int32_t pad_handle;
+    std::int32_t report_number;
+    const PadData* pad_data_buffer;
+    std::uint8_t reserve[8];
+};
 
 struct UserServiceLoginUserIdList { int user_id[4]; };
 

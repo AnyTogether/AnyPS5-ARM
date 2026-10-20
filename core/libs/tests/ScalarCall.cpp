@@ -292,6 +292,83 @@ static void CheckTableCalls() {
     });
 }
 
+enum class HoistedShape { InLoop, Hoisted, SecondWriterOnArm, LoadOnArmOnly, WriterAfterCall, WriterAfterLoop, CallOnArm, ConstantPointer, SkipsNullTarget, LongBranchWriter };
+
+static std::vector<std::uint32_t> HoistedTableCaller(HoistedShape shape) {
+    std::vector<std::uint32_t> code;
+    const auto descriptorLoad = [&] { code.insert(code.end(), {0xf4081800u, 0xfa000010u, 0xbf8cc07fu}); };
+    if (shape == HoistedShape::ConstantPointer) code.insert(code.end(), {0xbeea03ffu, 0xe0040000u, 0xbeeb038fu, 0xf4081835u, 0xfa000000u, 0xbf8cc07fu});
+    else if (shape != HoistedShape::InLoop && shape != HoistedShape::LoadOnArmOnly) descriptorLoad();
+    code.push_back(0xbf068002u);
+    code.push_back(shape == HoistedShape::LoadOnArmOnly ? 0xbf850003u : 0xbf850001u);
+    if (shape == HoistedShape::LoadOnArmOnly) descriptorLoad();
+    else code.push_back(shape == HoistedShape::SecondWriterOnArm ? 0xbee00380u : shape == HoistedShape::CallOnArm ? 0xbb1e0000u : shape == HoistedShape::LongBranchWriter ? 0xbf820000u : 0x7e020280u);
+    const auto arm = code.size() - 1u;
+    code.push_back(0xbee5037eu);
+    const auto loop = code.size();
+    code.push_back(0xbee4037eu);
+    if (shape == HoistedShape::InLoop) descriptorLoad();
+    code.insert(code.end(), {0x7ed40500u, 0x7da4006au, 0x8f6a846au, 0xf4280430u, 0xd4000000u, 0xbf8cc07fu, 0xbe8e0310u, 0xbe8f0311u, 0xbe900312u, 0xbe910313u});
+    if (shape == HoistedShape::SkipsNullTarget) code.insert(code.end(), {0xbf130e80u, 0xbf840001u});
+    code.push_back(0xbe8e210eu);
+    if (shape == HoistedShape::WriterAfterCall) code.push_back(0xbee10301u);
+    code.push_back(0x897e7e64u);
+    code.push_back(0xbf890000u | ((static_cast<std::uint32_t>(loop) - static_cast<std::uint32_t>(code.size()) - 1u) & 0xffffu));
+    code.push_back(0xbefe0365u);
+    if (shape == HoistedShape::WriterAfterLoop) code.push_back(0xbee00380u);
+    code.push_back(0xbf810000u);
+    if (shape == HoistedShape::CallOnArm) {
+        code[arm] |= static_cast<std::uint32_t>(code.size() - arm - 1u);
+        code.insert(code.end(), {0xbe80201eu, 0xbf9f0000u});
+    }
+    if (shape == HoistedShape::LongBranchWriter) {
+        code[arm] |= static_cast<std::uint32_t>(code.size() - arm - 1u);
+        const auto getpc = code.size() + 3u;
+        code.insert(code.end(), {0xf4081800u, 0xfa000020u, 0xbf8cc07fu, 0xbe841f00u, 0x8084ff04u, static_cast<std::uint32_t>((getpc - arm) * 4u), 0xbe802004u, 0xbf9f0000u});
+    }
+    return code;
+}
+
+static void CheckHoistedTableCalls() {
+    const std::vector<std::uint32_t> callee{0x4a0202c0u, 0xbe80200eu};
+    const std::vector<std::vector<TableCallee>> callees{{{0x1122334455ull, callee}}};
+    for (const auto shape : {HoistedShape::InLoop, HoistedShape::Hoisted, HoistedShape::SecondWriterOnArm, HoistedShape::LoadOnArmOnly, HoistedShape::WriterAfterCall, HoistedShape::WriterAfterLoop, HoistedShape::CallOnArm,
+             HoistedShape::ConstantPointer, HoistedShape::SkipsNullTarget, HoistedShape::LongBranchWriter}) {
+        const bool linkable = shape == HoistedShape::InLoop || shape == HoistedShape::Hoisted || shape == HoistedShape::WriterAfterLoop || shape == HoistedShape::ConstantPointer ||
+                              shape == HoistedShape::SkipsNullTarget;
+        for (const std::uint32_t waveSize : {32u, 64u}) {
+            const auto code = HoistedTableCaller(shape);
+            const auto program = RdnaInstructionDecoder{}.Decode(code);
+            SwappcInfo swappc{false, 0u, 16u, waveSize};
+            const auto calls = FindTableCalls(program, swappc);
+            if (!linkable) {
+                Require(calls.empty());
+                ExpectThrow("not statically resolvable", [&] { static_cast<void>(BuildCode(code, swappc)); });
+                continue;
+            }
+            const bool constant = shape == HoistedShape::ConstantPointer;
+            Require(calls.size() == 1u && calls[0].userDataRegister == 0u && calls[0].descriptorOffset == (constant ? 0u : 0x10u) && calls[0].entryOffset == 0u && calls[0].entryStride == 16u);
+            Require(calls[0].constantPointer == (constant ? std::optional<std::uint64_t>(0xfe0040000ull) : std::nullopt));
+            const auto linked = LinkCalls(program, {}, {}, calls, callees);
+            swappc.linkedCallFallbacks = linked.fallbacks;
+            static_cast<void>(TranslateCode(linked.code, swappc));
+        }
+    }
+    const std::vector<std::uint32_t> calledEntry{
+        0xf4081800u, 0xfa000000u, 0xbf8cc07fu, 0xbb1e0001u, 0xbf810000u, 0xbf840003u, 0xf4081800u, 0xfa000010u,
+        0xbf8cc07fu, 0xf4280430u, 0xfa000000u, 0xbf8cc07fu, 0xbe8e0310u, 0xbe8f0311u, 0xbe8e210eu, 0xbe80201eu, 0xbf9f0000u};
+    Require(FindTableCalls(RdnaInstructionDecoder{}.Decode(calledEntry), SwappcInfo{false, 0u, 16u}).empty());
+    const std::vector<std::uint32_t> fallsIntoEntry{
+        0xbf840002u, 0xbb1e0003u, 0xbf810000u, 0xf4081800u, 0xfa000010u, 0xbf8cc07fu, 0xf4280430u, 0xfa000000u,
+        0xbf8cc07fu, 0xbe8e0310u, 0xbe8f0311u, 0xbe8e210eu, 0xbe80201eu, 0xbf9f0000u};
+    Require(FindTableCalls(RdnaInstructionDecoder{}.Decode(fallsIntoEntry), SwappcInfo{false, 0u, 16u}).empty());
+    const std::vector<std::uint32_t> callBetween{
+        0xf4081800u, 0xfa000010u, 0xbf8cc07fu, 0xbb1e0007u, 0xf4280430u, 0xfa000000u, 0xbf8cc07fu, 0xbe8e0310u,
+        0xbe8f0311u, 0xbe8e210eu, 0xbf810000u, 0xbe80201eu, 0xbf9f0000u};
+    const auto between = FindTableCalls(RdnaInstructionDecoder{}.Decode(callBetween), SwappcInfo{false, 0u, 16u});
+    Require(between.size() == 1u && between[0].descriptorOffset == 0x10u);
+}
+
 static void CheckRejections() {
     ExpectThrow("invalid instruction boundary", [] {
         Build({Call(0u, 8u, 16u), Sopp(4u, 1u)});
@@ -392,6 +469,7 @@ int main(int argc, char** argv) {
             CheckRejections();
             CheckUserDataCalls();
             CheckTableCalls();
+            CheckHoistedTableCalls();
             CheckGuards("");
         } else {
             Require(argc == 2);

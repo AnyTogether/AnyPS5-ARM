@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 
+from signal_run import run_without_core_dump
 from test_linux_load_alignment import PT_SCE_VERSION
 
 PT_NULL = 0
@@ -144,10 +145,10 @@ def main():
 
         if sys.platform.startswith("linux") and platform.machine() in ("x86_64", "AMD64"):
             fixed_path.chmod(0o755)
-            executed = subprocess.run([str(fixed_path)], capture_output=True, timeout=20)
+            executed = run_without_core_dump([str(fixed_path)], capture_output=True, timeout=20)
             assert executed.returncode == -signal.SIGTRAP, ("the image did not run at the base with its relocation applied", executed.returncode)
             relocated_fixed_path.chmod(0o755)
-            executed = subprocess.run([str(relocated_fixed_path)], capture_output=True, timeout=20)
+            executed = run_without_core_dump([str(relocated_fixed_path)], capture_output=True, timeout=20)
             assert executed.returncode == -signal.SIGTRAP, ("the relocated-table image did not run at the base with its relocation applied", executed.returncode)
 
         for name, image, base, error in (

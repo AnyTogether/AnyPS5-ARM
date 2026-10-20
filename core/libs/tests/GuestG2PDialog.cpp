@@ -59,4 +59,13 @@ int main() {
     Require(sceG2PDialogTerminate() == 0);
     Require(sceG2PDialogTerminate() == kErrNotInitialized);
     Require(sceG2PDialogGetStatus() == kStatusNone);
+
+    Require(sceG2PDialogInitialize() == 0);
+    Require(sceG2PDialogGetStatus() == kStatusInitialized);
+    Require(sceG2PDialogClose() == 0);
+    Require(sceG2PDialogGetStatus() == kStatusFinished);
+    result[0] = -1;
+    Require(sceG2PDialogGetResult(result) == 0);
+    Require(result[0] == kResultUserCanceled);
+    Require(sceG2PDialogTerminate() == 0);
 }

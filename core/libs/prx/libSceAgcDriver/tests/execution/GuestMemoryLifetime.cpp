@@ -167,8 +167,10 @@ void CheckLockedMutation(AgcDriver::VulkanDevice& device) {
 }
 
 void CheckCopy(AgcDriver::VulkanDevice& device) {
-    auto* source = Map();
-    auto* destination = Map();
+    auto* span = static_cast<std::uint8_t*>(Map(3 * BlockBytes));
+    Require(munmap_nid_postfix(span + BlockBytes, BlockBytes) == 0, "guest copy gap unmap failed");
+    void* source = span;
+    void* destination = span + 2 * BlockBytes;
     {
         std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
         Fill(device, source);

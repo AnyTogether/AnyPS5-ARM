@@ -9,6 +9,7 @@ enum class FcntlArgument { None, Int, Pointer };
 
 FcntlArgument FcntlArgumentOf(int command);
 int Fcntl(int fd, int command, std::intptr_t argument);
+bool IoctlRequestMalformed(std::uint64_t request);
 int Ioctl(int fd, std::uint64_t request, void* argument);
 int DuplicateFrom(int fd, int start);
 void RememberDescriptor(int fd, int openFlags);

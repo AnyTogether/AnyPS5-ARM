@@ -125,7 +125,7 @@ int APS5_VABI sceNpGetAccountAge(int req_id, int user_id, uint8_t* age) {
 
 int APS5_VABI sceNpGetAccountCountryA(int user_id, void* country_code) {
     (void)user_id;
-    (void)country_code;
+    if (!country_code) return SCE_NP_ERROR_INVALID_ARGUMENT;
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 
@@ -150,7 +150,7 @@ int APS5_VABI sceNpGetNpReachabilityState(int user_id, uint32_t* state) {
 
 int APS5_VABI sceNpGetOnlineId(int user_id, NpOnlineId* online_id) {
     (void)user_id;
-    (void)online_id;
+    if (!online_id) return SCE_NP_ERROR_INVALID_ARGUMENT;
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 

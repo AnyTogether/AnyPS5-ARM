@@ -81,7 +81,7 @@ NativeModules ReadModules(const std::filesystem::path& inputPath, const std::fil
     std::map<std::size_t, std::string> sonames;
     const auto soname = [&](std::size_t index) -> const std::string& {
         const auto [found, inserted] = sonames.try_emplace(index);
-        if (inserted) found->second = GuestImageReader().Read(result.Modules[index].Path, result.Modules[index].Bytes).Soname;
+        if (inserted) found->second = GuestImageReader().Read(result.Modules[index].Path, result.Modules[index].Bytes, true).Soname;
         return found->second;
     };
     std::vector<bool> copies(result.Modules.size());

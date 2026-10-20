@@ -93,6 +93,7 @@ struct ImageResource {
     bool cubeFaceCompatible = true;
     bool flatVolumeCompatible = true;
     bool singleMipPlaneBiasCompatible = false;
+    bool volumeArraySampleCompatible = false;
     bool flatLineCompatible = true;
     bool flatVolumeLineCompatible = true;
     bool foldTexelOffsetsOnly = false;

@@ -68,4 +68,65 @@ int APS5_VABI sceRazorCpuSync(void) {
  return 0;
 }
 
+void APS5_VABI sceRazorCpuDisableFiberUserMarkers(void) {
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuInitDataTags(void* buffer, size_t size) {
+ (void)buffer;
+ (void)size;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuShutdownDataTags(void) {
+ NotImplemented_nid_no_patch(__func__);
+}
+
+size_t APS5_VABI sceRazorCpuGetDataTagStorageSize(uint32_t tagCount) {
+ (void)tagCount;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuTagArray(const char* label, uint32_t category, void* array, size_t bufferSize, size_t elementSize) {
+ (void)label;
+ (void)category;
+ (void)array;
+ (void)bufferSize;
+ (void)elementSize;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuTagBuffer(const char* label, uint32_t category, void* buffer, size_t bufferSize) {
+ (void)label;
+ (void)category;
+ (void)buffer;
+ (void)bufferSize;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuResizeTaggedBuffer(uint32_t category, void* buffer, size_t newBufferSize) {
+ (void)category;
+ (void)buffer;
+ (void)newBufferSize;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuUnTagBuffer(uint32_t category, void* buffer) {
+ (void)category;
+ (void)buffer;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuBeginLogicalFileAccess(const char* filename, uint64_t tag, uint64_t size, uint8_t operation) {
+ (void)filename;
+ (void)tag;
+ (void)size;
+ (void)operation;
+ NotImplemented_nid_no_patch(__func__);
+}
+
+int APS5_VABI sceRazorCpuEndLogicalFileAccess(void) {
+ NotImplemented_nid_no_patch(__func__);
+}
+
 }

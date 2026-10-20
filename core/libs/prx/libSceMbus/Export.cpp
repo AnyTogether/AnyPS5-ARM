@@ -34,4 +34,8 @@ std::int32_t APS5_VABI sceDeviceServiceQueryDeviceInfo_(std::int32_t deviceClass
     return 0;
 }
 
+std::int32_t APS5_VABI sceDeviceServiceGetGeneration(void) {
+    NotImplemented_nid_no_patch(__func__);
+}
+
 }

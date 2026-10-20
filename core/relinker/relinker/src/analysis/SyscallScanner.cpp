@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 
 #include <memory>
 #include <optional>
@@ -173,24 +174,27 @@ class SyscallScanner : public ISyscallScanner {
 public:
     SyscallScanner(Domain::IProgress& progress, const bool trapSdkStubs) : progress(progress), trapSdkStubs(trapSdkStubs) {}
 
-    std::vector<std::size_t> ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>& codeSection, FileByteOffset codeSectionOffset, FileByteOffset codeSectionSize, std::string_view input) override;
+    std::vector<std::size_t> ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>& codeSection, FileByteOffset codeSectionOffset, FileByteOffset codeSectionSize, std::string_view input, const std::vector<CodeRange>& unwindRanges) override;
 
 private:
     Domain::IProgress& progress;
     bool trapSdkStubs;
 };
 
-std::vector<std::size_t> SyscallScanner::ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>& codeSection, const FileByteOffset codeSectionOffset, const FileByteOffset codeSectionSize, std::string_view input) {
+std::vector<std::size_t> SyscallScanner::ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>& codeSection, const FileByteOffset codeSectionOffset, const FileByteOffset codeSectionSize, std::string_view input, const std::vector<CodeRange>& unwindRanges) {
     if (codeSectionSize > codeSection.size()) throw RelinkerException("Code section exceeds the input buffer", codeSectionOffset);
+    if (codeSectionSize > std::numeric_limits<FileByteOffset>::max() - codeSectionOffset) throw RelinkerException("Code section offset overflow", codeSectionOffset);
     const auto limit = static_cast<std::size_t>(codeSectionSize);
 
     const std::string source(input);
-    const auto scanner = Codegen::MakeInstructionScanner([&](auto completed, auto total) { progress.Report({Domain::ProgressStage::Decode, source, completed, total}); });
+    const auto scanner = Codegen::MakeInstructionScanner([&](auto completed, auto total) { progress.Report({Domain::ProgressStage::Decode, source, completed, total}); }, unwindRanges);
     RecentInstructions recent;
     std::vector<std::size_t> trapped;
     scanner->VisitCodeSection(codeSection, codeSectionOffset, codeSectionSize, [&](const Codegen::InstructionMatch& match) {
         recent.Push(match);
+        if (match.Offset < codeSectionOffset) throw RelinkerException("Instruction match precedes code section offset", match.Offset);
         const std::size_t start = static_cast<std::size_t>(match.Offset - codeSectionOffset);
+        if (start > codeSection.size() || match.Length > codeSection.size() - start) throw RelinkerException("Instruction match exceeds code section", match.Offset);
         const auto opcodeOffset = Codegen::DecodedInstruction{codeSection.data() + start, match.Length}.OpcodeOffset();
         const std::size_t opcode = start + opcodeOffset;
         const std::size_t spanLimit = std::min(limit, start + static_cast<std::size_t>(match.Length));
@@ -228,7 +232,7 @@ std::unique_ptr<ISyscallScanner> MakeSyscallScanner(Domain::IProgress& progress,
 
 class NullSyscallScanner : public ISyscallScanner {
 public:
-    std::vector<std::size_t> ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>&, FileByteOffset, FileByteOffset, std::string_view) override { return {}; }
+    std::vector<std::size_t> ScanCodeSectionForSyscalls(const std::vector<std::uint8_t>&, FileByteOffset, FileByteOffset, std::string_view, const std::vector<CodeRange>&) override { return {}; }
 };
 
 std::unique_ptr<ISyscallScanner> MakeNullSyscallScanner() {

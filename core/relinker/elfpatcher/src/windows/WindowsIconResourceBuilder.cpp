@@ -74,6 +74,12 @@ void validatePng(const std::vector<std::uint8_t>& bytes, const std::filesystem::
 }
 
 PeDirectory WindowsIconResourceBuilder::Build(const std::vector<std::uint8_t>& png, const std::filesystem::path& iconPath, std::vector<PeSection>& sections, const std::uint32_t nextRva) const {
+    if (nextRva < LoadRva || nextRva % SectionAlignment != 0)
+        throw Domain::RelinkerException("Invalid Windows resource section RVA", nextRva);
+    if (std::any_of(sections.begin(), sections.end(), [](const auto& section) { return section.Name == ".rsrc"; }))
+        throw Domain::RelinkerException("Duplicate Windows resource section");
+    if (!sections.empty() && nextRva < AlignRva(static_cast<std::uint64_t>(sections.back().Rva) + sections.back().Data.size()))
+        throw Domain::RelinkerException("Windows resource section overlaps preceding section", nextRva);
     if (png.size() > 0x7fffffffu - 184) throw Domain::RelinkerException("Invalid Windows icon size");
     validatePng(png, iconPath);
     std::vector<std::uint8_t> data(184 + png.size());

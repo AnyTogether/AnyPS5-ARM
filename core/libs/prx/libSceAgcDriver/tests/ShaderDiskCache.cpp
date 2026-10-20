@@ -41,6 +41,9 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#include "prx/libc/include/General.hpp"
 #endif
 
 namespace {
@@ -58,6 +61,40 @@ void setEnvironment(const char* name, const std::string& value) {
     setenv(name, value.c_str(), 1);
 #endif
 }
+
+#ifdef _WIN32
+void verifyHostStandardError() {
+    const auto directory = std::filesystem::temp_directory_path() / ("aps5-shader-host-stderr-" + std::to_string(std::random_device{}()));
+    setEnvironment("ANYPS5_NO_SHADER_CACHE", "0");
+    setEnvironment("ANYPS5_SHADER_CACHE_DIR", directory.string());
+    int capture[2], guest[2];
+    require(::_pipe(capture, 65536, _O_BINARY) == 0, "cannot create host capture");
+    require(::_pipe(guest, 65536, _O_BINARY) == 0, "cannot create guest capture");
+    const int original = ::_dup(2);
+    require(original >= 0 && ::_dup2(capture[1], 2) == 0, "cannot capture initial stderr");
+    const int saved = ::_dup(2);
+    require(saved >= 0 && AdoptHostStandardStream_nid_no_patch(2, saved), "cannot preserve host stderr");
+    require(::_dup2(guest[1], 2) == 0, "cannot redirect guest stderr");
+    require(ShaderDiskCache::Enabled(), "shader disk cache was disabled");
+    ShaderDiskCache::Shutdown();
+    std::fflush(stderr);
+    std::fflush(HostStandardErrorFile_nid_no_patch());
+    require(::_dup2(original, 2) == 0, "cannot restore stderr");
+    ::_close(original);
+    DWORD hostBytes = 0, guestBytes = 0;
+    require(::PeekNamedPipe(reinterpret_cast<HANDLE>(::_get_osfhandle(capture[0])), nullptr, 0, nullptr, &hostBytes, nullptr) != 0, "cannot inspect host capture");
+    require(::PeekNamedPipe(reinterpret_cast<HANDLE>(::_get_osfhandle(guest[0])), nullptr, 0, nullptr, &guestBytes, nullptr) != 0, "cannot inspect guest capture");
+    std::string host(hostBytes, '\0');
+    if (hostBytes != 0) require(::_read(capture[0], host.data(), hostBytes) == static_cast<int>(hostBytes), "cannot read host capture");
+    ::_close(capture[0]);
+    ::_close(capture[1]);
+    ::_close(guest[0]);
+    ::_close(guest[1]);
+    std::filesystem::remove_all(directory);
+    require(guestBytes == 0, "shader cache diagnostic entered the guest stderr pipe");
+    require(host.find("[shader-disk-cache]") != std::string::npos, "shader cache diagnostic did not reach host stderr");
+}
+#endif
 
 void removeCacheDirectory(const std::filesystem::path& directory) {
     std::error_code error;
@@ -125,6 +162,7 @@ void requireSameResult(const RecompileResult& left, const RecompileResult& right
     const std::string prefix = std::string(what) + ": ";
     require(sameBindings(left.bindings, right.bindings), prefix + "bindings differ");
     require(left.pushConstants == right.pushConstants, prefix + "push constants differ");
+    require(left.readsDepthRemapPush == right.readsDepthRemapPush, prefix + "depth remap push reads differ");
     require(left.specialization == right.specialization, prefix + "specialization constants differ");
     require(left.workgroupMemoryDwords == right.workgroupMemoryDwords, prefix + "workgroup memory stride differs");
     require(left.poisonedSrtReads == right.poisonedSrtReads, prefix + "poisoned SRT read counts differ");
@@ -143,6 +181,7 @@ void requireSameResult(const RecompileResult& left, const RecompileResult& right
         require(a.location == b.location && a.components == b.components && a.resource.fields == b.resource.fields && a.fetchIndex == b.fetchIndex && a.formatComponents == b.formatComponents, prefix + "vertex attribute differs");
     }
     require(left.barycentricEmulation.active == right.barycentricEmulation.active && left.barycentricEmulation.smooth == right.barycentricEmulation.smooth && left.barycentricEmulation.linear == right.barycentricEmulation.linear, prefix + "barycentric emulation differs");
+    require(left.meshBarycentrics == right.meshBarycentrics, prefix + "mesh barycentric layout differs");
 }
 
 void requireSameVariant(const CompiledVariant& left, const CompiledVariant& right, const char* what) {
@@ -196,6 +235,7 @@ RecompileResult sampleResult() {
     result.bindings[1].role = DescriptorRole::GuestBuffers;
     result.bindings[1].imageShape.reset();
     result.pushConstants = {std::byte{1}, std::byte{0xff}, std::byte{0}, std::byte{0x80}, std::byte{7}};
+    result.readsDepthRemapPush = true;
     result.bdaAbiVersion = 3;
     result.memoryOffsetDword = 7;
     result.hostSubgroupSize = 32;
@@ -222,6 +262,7 @@ RecompileResult sampleResult() {
     result.poisonedSrtReads = 3;
     result.shaderDataUserWords = {2u, 0xffffffffu, 9u};
     result.barycentricEmulation = {true, false, true};
+    result.meshBarycentrics = MeshBarycentricLayout{{true, true, false}, {FragmentParameter{0, 2, false, true}, FragmentParameter{3, 3, false, false}}};
     result.variantId = 99;
     result.imageTablePoison = {{{1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u}, 8u, 2u, 6u}, {{9u, 0u, 0u, 0u, 0u, 0u, 0u, 0u}, 4u, 0xffffffffu, 19u}};
     result.imageTableRanges = {{0x1000u, 0x200u}, {0x5000000000ull, 48u}};
@@ -276,6 +317,7 @@ CompiledVariant sampleVariant() {
     image.cubeFaceCompatible = false;
     image.flatVolumeCompatible = false;
     image.singleMipPlaneBiasCompatible = true;
+    image.volumeArraySampleCompatible = true;
     image.flatLineCompatible = false;
     image.flatVolumeLineCompatible = false;
     image.foldTexelOffsetsOnly = true;
@@ -608,6 +650,18 @@ void verifyArtifactStorageIsolation() {
     require(ShaderDiskCache::EncodeEntry(key, variant) != before, "the stored artifact ignores vertex input metadata");
 }
 
+void verifyMeshBarycentricRequestSerialization() {
+    for (const auto& layout : {std::optional<MeshBarycentricLayout>{}, std::optional<MeshBarycentricLayout>{MeshBarycentricLayout{{true, true, true}, {FragmentParameter{0, 2, false, true}, FragmentParameter{4, 4, false, false}}}}}) {
+        SampleRequest sample;
+        sample.request.shader.stage = ShaderStage::Mesh;
+        sample.request.context.compute.reset();
+        sample.request.graphics = GraphicsCompileContext{0, {}, MeshConfiguration{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u}, std::nullopt, {}, layout};
+        const auto text = RequestSerializer{}.Serialize(sample.request);
+        const auto restored = RequestSerializer{}.Deserialize(text);
+        require(restored.request.graphics.has_value() && restored.request.graphics->meshBarycentrics == layout, "a captured mesh request lost its barycentric layout");
+    }
+}
+
 void verifyKeySensitivity() {
     SampleRequest base;
     const auto key = base.Key();
@@ -675,6 +729,40 @@ void verifyKeySensitivity() {
         const auto changed = withMode(mode);
         require(changed.first != astro.first && changed.second != astro.second, std::string("the key ignores ") + what);
     }
+
+    const auto meshKeys = [&](const std::optional<MeshBarycentricLayout>& layout) {
+        SampleRequest sample;
+        sample.request.shader.stage = ShaderStage::Mesh;
+        sample.request.context.compute.reset();
+        sample.request.graphics = GraphicsCompileContext{0, {}, MeshConfiguration{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u}, std::nullopt, {}, layout};
+        return std::pair{sample.Key(), RecompileCacheKey::ContextHash(sample.request)};
+    };
+    const std::vector<std::pair<const char*, std::optional<MeshBarycentricLayout>>> meshLayouts{
+        {"no mesh barycentric layout", std::nullopt},
+        {"smooth mesh barycentrics", MeshBarycentricLayout{{true, true, false}, {}}},
+        {"linear mesh barycentrics", MeshBarycentricLayout{{true, false, true}, {}}},
+        {"smooth and linear mesh barycentrics", MeshBarycentricLayout{{true, true, true}, {}}},
+        {"a per-vertex mesh parameter", MeshBarycentricLayout{{true, true, false}, {FragmentParameter{0, 0, false, true}}}},
+        {"another per-vertex mesh parameter source", MeshBarycentricLayout{{true, true, false}, {FragmentParameter{0, 1, false, true}}}},
+        {"a flat mesh parameter", MeshBarycentricLayout{{true, true, false}, {FragmentParameter{0, 0, false, false}}}},
+    };
+    for (std::size_t i = 0; i < meshLayouts.size(); ++i) {
+        require(meshKeys(meshLayouts[i].second) == meshKeys(meshLayouts[i].second), std::string("the key of ") + meshLayouts[i].first + " is not deterministic");
+        for (std::size_t j = i + 1; j < meshLayouts.size(); ++j) {
+            const auto left = meshKeys(meshLayouts[i].second);
+            const auto right = meshKeys(meshLayouts[j].second);
+            require(left.first != right.first && left.second != right.second, std::string("the mesh key confuses ") + meshLayouts[i].first + " with " + meshLayouts[j].first);
+        }
+    }
+
+    const auto pixelKeys = [&](bool meshPath) {
+        SampleRequest sample;
+        sample.request.shader.stage = ShaderStage::Fragment;
+        sample.request.context.compute.reset();
+        sample.request.graphics = GraphicsCompileContext{0, {}, meshPath ? std::optional(MeshConfiguration{4u, 4u, 12u, 12u, 4u, 64u, 1024u, 0u, 4u}) : std::nullopt, std::nullopt, {}, std::nullopt};
+        return std::pair{sample.Key(), RecompileCacheKey::ContextHash(sample.request)};
+    };
+    require(pixelKeys(true).first != pixelKeys(false).first && pixelKeys(true).second != pixelKeys(false).second, "a pixel shader on the mesh path shares a key with the vertex path");
 
     SampleRequest moved;
     moved.userData[0] ^= 0x10000u;
@@ -921,6 +1009,62 @@ void verifyPersist() {
     require(!error, "cannot remove the replaced cache entry");
     requireSameArtifact(variant.artifact, persisted->artifact, "a persisted entry whose file was replaced and removed");
 }
+
+#ifdef _WIN32
+void verifyLongHostPaths() {
+    using namespace ShaderRecompiler::ShaderDiskCache;
+    auto directory = std::filesystem::temp_directory_path() / ("aps5-cache-long-" + std::to_string(std::random_device{}()));
+    require(directory.native().size() < 224, "temporary path is too long for the cache control");
+    directory /= std::wstring(224 - directory.native().size(), L'd');
+    const auto extended = [](const auto& path) { return std::filesystem::path(L"\\\\?\\" + path.native()); };
+    std::filesystem::create_directories(extended(directory));
+    setEnvironment("ANYPS5_NO_SHADER_CACHE", "0");
+    setEnvironment("ANYPS5_SHADER_CACHE_DIR", directory.string());
+    std::vector<std::filesystem::path> files;
+    std::filesystem::path entries;
+    struct Cleanup {
+        const std::filesystem::path& directory;
+        const std::vector<std::filesystem::path>& files;
+        const std::filesystem::path& entries;
+        ~Cleanup() {
+            ShaderRecompiler::ShaderDiskCache::Shutdown();
+            std::error_code error;
+            for (const auto& file : files) std::filesystem::remove(std::filesystem::path(L"\\\\?\\" + file.native()), error);
+            if (!entries.empty()) std::filesystem::remove(std::filesystem::path(L"\\\\?\\" + entries.native()), error);
+            std::filesystem::remove(std::filesystem::path(L"\\\\?\\" + directory.native()), error);
+        }
+    } cleanup{directory, files, entries};
+    SampleRequest sample;
+    const auto key = sample.Key();
+    const auto variant = sampleVariant();
+    entries = ShaderDiskCache::EntryDirectory();
+    files.push_back(entries / EntryName(key));
+    files.push_back(entries / "last-used");
+    require(files.front().native().size() >= MAX_PATH, "the cache persistence control did not cross MAX_PATH");
+    const auto persisted = ShaderDiskCache::Persist(key, variant);
+    std::vector<std::byte> published;
+    require(ReadWholeFile(files.front(), published) && published == EncodeEntry(key, variant),
+            "the long-path cache entry was not correctly published before mapping");
+    require(persisted != nullptr, "a long-path cache entry was not persisted and mapped");
+    MEMORY_BASIC_INFORMATION region{};
+    require(VirtualQuery(persisted->artifact.spirv.data(), &region, sizeof(region)) == sizeof(region) && region.Type == MEM_MAPPED,
+            "long-path persisted SPIR-V is not mapped");
+    requireSameVariant(variant, *persisted, "long-path persist round trip");
+    CompiledVariant loaded;
+    require(ShaderDiskCache::Load(key, loaded), "a long-path persisted cache entry did not load");
+    requireSameVariant(variant, loaded, "long-path load round trip");
+    const auto packPath = directory / (std::wstring(75, L'p') + L".pack");
+    files.push_back(packPath);
+    require(WriteFileAtomically(packPath, packBytes({{key, EncodeEntry(key, variant)}})), "cannot publish the long-path cache pack");
+    CachePack pack(packPath);
+    require(pack.Valid(), "a long-path cache pack was rejected: " + pack.Error());
+    PackLoadTimings timings;
+    CompiledVariant decoded;
+    require(pack.Load(key, decoded, timings) == LoadStatus::Loaded, "a long-path cache pack entry did not load");
+    requireSameVariant(variant, decoded, "long-path cache pack round trip");
+    std::cout << "long-path shader cache persistence and pack tests passed\n";
+}
+#endif
 
 struct ComputeRequest {
     std::vector<std::uint32_t> code{0xe0700000u, 0x80000000u, 0xbf810000u};
@@ -2270,6 +2414,16 @@ int main(int argc, char** argv) {
             std::cout << "artifact codec tests passed\n";
             return 0;
         }
+#ifdef _WIN32
+        if (argc == 2 && std::string_view(argv[1]) == "--host-stderr") {
+            verifyHostStandardError();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--long-host-paths") {
+            verifyLongHostPaths();
+            return 0;
+        }
+#endif
         if (argc == 2 && std::string_view(argv[1]) == "--large-file") return runLargeFileWrite();
         if (argc == 2 && std::string_view(argv[1]) == "--load") return runLoadingProcess();
         if (argc == 2 && std::string_view(argv[1]) == "--load-prebuilt") return runPrebuiltLoadingProcess();
@@ -2286,6 +2440,7 @@ int main(int argc, char** argv) {
         verifyPrebuiltPack(directory / "packs");
         verifyArtifactStorageIsolation();
         verifyKeySensitivity();
+        verifyMeshBarycentricRequestSerialization();
         verifyFloatModeSerialization();
         verifyPlanRoundTrip();
         verifyPlanKey();

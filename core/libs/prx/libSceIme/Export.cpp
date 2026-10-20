@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceIme/include/ImeInput.hpp"
@@ -59,9 +60,17 @@ constexpr uint32_t CaretMoveRight = 2;
 
 struct Session {
     Param param{};
+    ImeExtKeyboardFilter extKeyboardFilter = nullptr;
     std::u16string text;
     std::uint32_t caret = 0;
     std::deque<ImeEvent> events;
+    std::deque<ImeHostInput> hostInputs;
+    std::uint64_t id = 0;
+    std::uint64_t revision = 0;
+};
+
+struct DeferredFilter {
+    std::u16string oldText;
 };
 
 std::mutex g_keyboardMutex;
@@ -69,6 +78,7 @@ std::set<int32_t> g_openKeyboards;
 std::mutex g_imeMutex;
 std::optional<Session> g_session;
 std::atomic<ImeHostTextSink> g_textSink{nullptr};
+std::uint64_t g_nextSessionId = 0;
 
 void PanelSize(const Param& param, uint32_t* width, uint32_t* height) {
     const uint32_t scale = (param.option & OptionUseOver2K) != 0 ? 2 : 1;
@@ -157,7 +167,68 @@ void QueueCaretSteps(Session& session, uint32_t direction, std::size_t steps) {
     }
 }
 
-void Insert(Session& session, std::u16string units) {
+struct EditDelta {
+    std::uint32_t index = 0;
+    std::int32_t length = 0;
+};
+
+EditDelta ComputeEditDelta(const std::u16string& before, const std::u16string& after) {
+    std::size_t prefix = 0;
+    while (prefix < before.size() && prefix < after.size() && before[prefix] == after[prefix]) ++prefix;
+    std::size_t beforeTail = before.size();
+    std::size_t afterTail = after.size();
+    while (beforeTail > prefix && afterTail > prefix && before[beforeTail - 1] == after[afterTail - 1]) {
+        --beforeTail;
+        --afterTail;
+    }
+    return {static_cast<std::uint32_t>(prefix),
+            static_cast<std::int32_t>(afterTail - prefix) - static_cast<std::int32_t>(beforeTail - prefix)};
+}
+
+void NormalizeCaret(Session& session) {
+    if (session.caret > session.text.size()) session.caret = static_cast<std::uint32_t>(session.text.size());
+    if (session.caret > 0 && session.caret < session.text.size() &&
+        IsHighSurrogate(session.text[session.caret - 1]) && IsLowSurrogate(session.text[session.caret])) {
+        ++session.caret;
+    }
+}
+
+bool RunTextFilter(ImeTextFilter filter, const std::u16string& text, std::uint32_t maxLength, bool multiline,
+                   std::u16string* filtered) {
+    std::vector<char16_t> buffer(maxLength + 1, u'\0');
+    std::uint32_t length = maxLength;
+    if (filter(buffer.data(), &length, text.c_str(), static_cast<std::uint32_t>(text.size())) != 0) {
+        return false;
+    }
+    if (length > maxLength || !ValidText(buffer.data(), length, multiline)) {
+        return false;
+    }
+    filtered->assign(buffer.data(), buffer.data() + length);
+    return true;
+}
+
+void CommitFilteredEdit(Session& session, const std::u16string* filtered, const std::u16string& oldText) {
+    if (filtered) {
+        session.text = *filtered;
+        NormalizeCaret(session);
+    }
+    if (session.text == oldText) return;
+    SyncBuffers(session);
+    const EditDelta edit = ComputeEditDelta(oldText, session.text);
+    QueueText(session, EventUpdateText, edit.index, edit.length);
+}
+
+std::optional<DeferredFilter> CommitEdit(Session& session, const std::u16string& oldText, std::uint32_t plainIndex,
+                                         std::int32_t plainDelta) {
+    if (session.param.filter) {
+        return DeferredFilter{oldText};
+    }
+    SyncBuffers(session);
+    QueueText(session, EventUpdateText, plainIndex, plainDelta);
+    return std::nullopt;
+}
+
+std::optional<DeferredFilter> Insert(Session& session, std::u16string units) {
     const bool multiline = (session.param.option & OptionMultiline) != 0;
     std::u16string accepted;
     for (const char16_t unit : units) {
@@ -167,12 +238,12 @@ void Insert(Session& session, std::u16string units) {
     const std::size_t room = session.param.max_text_length - session.text.size();
     std::size_t count = std::min(accepted.size(), room);
     if (count > 0 && count < accepted.size() && IsHighSurrogate(accepted[count - 1])) --count;
-    if (count == 0) return;
+    if (count == 0) return std::nullopt;
     const uint32_t index = session.caret;
+    const std::u16string oldText = session.text;
     session.text.insert(index, accepted, 0, count);
     session.caret += static_cast<uint32_t>(count);
-    SyncBuffers(session);
-    QueueText(session, EventUpdateText, index, static_cast<int32_t>(count));
+    return CommitEdit(session, oldText, index, static_cast<int32_t>(count));
 }
 
 std::size_t UnitsBefore(const Session& session) {
@@ -187,65 +258,61 @@ std::size_t UnitsAfter(const Session& session) {
     return caret + 1 < session.text.size() && IsHighSurrogate(session.text[caret]) && IsLowSurrogate(session.text[caret + 1]) ? 2 : 1;
 }
 
-void Apply(Session& session, const ImeHostInput& input) {
+std::optional<DeferredFilter> Apply(Session& session, const ImeHostInput& input) {
     switch (input.kind) {
         case ImeHostInputKind::Text: {
             std::size_t size = 0;
             while (size < sizeof(input.text) && input.text[size] != '\0') ++size;
-            Insert(session, DecodeUtf8(input.text, size));
-            return;
+            return Insert(session, DecodeUtf8(input.text, size));
         }
         case ImeHostInputKind::Backspace: {
             const std::size_t units = UnitsBefore(session);
-            if (units == 0) return;
+            if (units == 0) return std::nullopt;
+            const std::u16string oldText = session.text;
             session.caret -= static_cast<uint32_t>(units);
             session.text.erase(session.caret, units);
-            SyncBuffers(session);
-            QueueText(session, EventUpdateText, session.caret, -static_cast<int32_t>(units));
-            return;
+            return CommitEdit(session, oldText, session.caret, -static_cast<int32_t>(units));
         }
         case ImeHostInputKind::Delete: {
             const std::size_t units = UnitsAfter(session);
-            if (units == 0) return;
+            if (units == 0) return std::nullopt;
+            const std::u16string oldText = session.text;
             session.text.erase(session.caret, units);
-            SyncBuffers(session);
-            QueueText(session, EventUpdateText, session.caret, -static_cast<int32_t>(units));
-            return;
+            return CommitEdit(session, oldText, session.caret, -static_cast<int32_t>(units));
         }
         case ImeHostInputKind::Left: {
             const std::size_t units = UnitsBefore(session);
             session.caret -= static_cast<uint32_t>(units);
             QueueCaretSteps(session, CaretMoveLeft, units);
-            return;
+            return std::nullopt;
         }
         case ImeHostInputKind::Right: {
             const std::size_t units = UnitsAfter(session);
             session.caret += static_cast<uint32_t>(units);
             QueueCaretSteps(session, CaretMoveRight, units);
-            return;
+            return std::nullopt;
         }
         case ImeHostInputKind::Home: {
             const std::size_t units = session.caret;
             session.caret = 0;
             QueueCaretSteps(session, CaretMoveLeft, units);
-            return;
+            return std::nullopt;
         }
         case ImeHostInputKind::End: {
             const std::size_t units = session.text.size() - session.caret;
             session.caret = static_cast<uint32_t>(session.text.size());
             QueueCaretSteps(session, CaretMoveRight, units);
-            return;
+            return std::nullopt;
         }
         case ImeHostInputKind::Enter:
             if ((session.param.option & OptionMultiline) != 0) {
-                Insert(session, u"\n");
-            } else {
-                QueueText(session, EventPressEnter, session.caret, 0);
+                return Insert(session, u"\n");
             }
-            return;
+            QueueText(session, EventPressEnter, session.caret, 0);
+            return std::nullopt;
         case ImeHostInputKind::Escape:
             QueueText(session, EventPressClose, session.caret, 0);
-            return;
+            return std::nullopt;
     }
     throw std::invalid_argument("IME host input: unknown input kind");
 }
@@ -289,7 +356,7 @@ void ImePublishInput_nid_postfix(const ImeHostInput& input) {
     {
         std::lock_guard lock(g_imeMutex);
         if (g_session) {
-            Apply(*g_session, input);
+            g_session->hostInputs.push_back(input);
             return;
         }
     }
@@ -317,10 +384,10 @@ int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* ex
     std::lock_guard lock(g_imeMutex);
     if (g_session) return ErrorBusy;
     if (const int error = ValidateOpen(param, extended)) return error;
-    if (param->filter) NotImplemented_nid_no_patch("sceImeOpen: text filter");
-    if (extended && extended->ext_keyboard_filter) NotImplemented_nid_no_patch("sceImeOpen: external keyboard filter");
     Session session;
+    session.id = ++g_nextSessionId;
     session.param = *param;
+    session.extKeyboardFilter = extended ? extended->ext_keyboard_filter : nullptr;
     session.text.assign(param->input_text_buffer, TextLength(param->input_text_buffer, param->max_text_length));
     session.caret = static_cast<uint32_t>(session.text.size());
     SyncBuffers(session);
@@ -412,6 +479,13 @@ int APS5_VABI sceImeSetCaret(const Caret* caret) {
     if (!caret) return ErrorInvalidAddress;
     if (caret->index > g_session->text.size()) return ErrorInvalidParam;
     g_session->caret = caret->index;
+    ++g_session->revision;
+    return 0;
+}
+
+int APS5_VABI sceImeSetConsecutiveClauseConversionEnabled(bool enabled) {
+    (void)enabled;
+    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -423,6 +497,7 @@ int APS5_VABI sceImeSetText(const char16_t* text, uint32_t length) {
     const std::size_t count = TextLength(text, std::min(length, session.param.max_text_length));
     if (!ValidText(text, count, (session.param.option & OptionMultiline) != 0)) return ErrorInvalidText;
     session.text.assign(text, count);
+    ++session.revision;
     if (session.caret > session.text.size()) session.caret = static_cast<uint32_t>(session.text.size());
     SyncBuffers(session);
     return 0;
@@ -441,15 +516,272 @@ int APS5_VABI sceImeUpdate(EventHandler handler) {
     for (;;) {
         ImeEvent event{};
         void* arg = nullptr;
+        bool deliver = false;
+        bool runFilter = false;
+        ImeTextFilter filter = nullptr;
+        std::u16string filterText;
+        std::u16string filterOldText;
+        std::uint32_t filterMaxLength = 0;
+        bool filterMultiline = false;
+        std::uint64_t sessionId = 0;
+        std::uint64_t sessionRevision = 0;
         {
             std::lock_guard lock(g_imeMutex);
-            if (!g_session || g_session->param.handler != handler || g_session->events.empty()) return 0;
-            event = g_session->events.front();
-            g_session->events.pop_front();
-            arg = g_session->param.arg;
+            if (!g_session || g_session->param.handler != handler) return 0;
+            if (!g_session->hostInputs.empty()) {
+                const ImeHostInput input = g_session->hostInputs.front();
+                g_session->hostInputs.pop_front();
+                if (const std::optional<DeferredFilter> deferred = Apply(*g_session, input)) {
+                    runFilter = true;
+                    filter = g_session->param.filter;
+                    filterText = g_session->text;
+                    filterOldText = deferred->oldText;
+                    filterMaxLength = g_session->param.max_text_length;
+                    filterMultiline = (g_session->param.option & OptionMultiline) != 0;
+                    sessionId = g_session->id;
+                    sessionRevision = g_session->revision;
+                }
+            } else if (!g_session->events.empty()) {
+                event = g_session->events.front();
+                g_session->events.pop_front();
+                arg = g_session->param.arg;
+                deliver = true;
+            } else {
+                return 0;
+            }
         }
+        if (runFilter) {
+            std::u16string filtered;
+            const bool accepted = RunTextFilter(filter, filterText, filterMaxLength, filterMultiline, &filtered);
+            std::lock_guard lock(g_imeMutex);
+            if (g_session && g_session->id == sessionId) {
+                if (g_session->revision == sessionRevision) {
+                    CommitFilteredEdit(*g_session, accepted ? &filtered : nullptr, filterOldText);
+                } else if (g_session->text == filterText) {
+                    g_session->text = filterOldText;
+                    NormalizeCaret(*g_session);
+                }
+            }
+            continue;
+        }
+        if (!deliver) continue;
         handler(arg, &event);
     }
+}
+
+int APS5_VABI sceImeVshOpen(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeKeyboardUpdate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshUpdate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshUpdateContext(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshClearPreedit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifySetText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetCaretGeometry(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshConfirmPreedit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetCaretIndexInPreedit(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetPreeditGeometry(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetSelectGeometry(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshClose(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshGetPanelPositionAndForm(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeSetCandidateIndex(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeConfirmCandidate(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDisableController(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeSetVoiceDictationEnabled(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeSetEditEventWithRemotePlayEnabled(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeForTestFunction(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshInformConfirmdString2(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetSelectionText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeCheckUpdateTextInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeCheckRemoteEventParam(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeKeyboardOpenInternal(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetParam(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshUpdateContext2(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSendTextInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshInformConfirmdString(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifyCurrentTextInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifyCurrentTextInfoForReconvertText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifyDeleteText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifyUpdateCaretText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshCheckAutoReConvertingPreeditText(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshSetPanelPosition(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeVshNotifyPreeditMetaInfo(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeConfigSet(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeConfigGet(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicGetWords(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicAddWord(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicDeleteWord(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicReplaceWord(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicDeleteLearnDics(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceImeDicDeleteUserDics(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 }

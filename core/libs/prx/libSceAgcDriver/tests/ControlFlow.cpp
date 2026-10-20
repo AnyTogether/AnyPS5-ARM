@@ -471,6 +471,31 @@ void verifyLongBranch(const std::string& name, std::span<const std::uint32_t> co
     require(source != graph.blocks.end() && source->terminator.kind == TerminatorKind::Branch && graph.FindBlock(source->terminator.trueBlock).startProgramCounter == target, name + ": the jump does not branch to " + std::to_string(target));
 }
 
+void verifyScheduledJumpTable() {
+    const std::vector<std::uint32_t> code{
+        0x83888208u, 0x7e020280u, 0x8f088308u, 0x7e040280u, 0xbe8c1f00u, 0x800cff0cu, 0x00000048u,
+        0x820d800du, 0xf4040386u, 0x10000000u, 0xbf8cc07fu, 0xbe901f00u, 0x80100e10u, 0x82110f11u,
+        0xbe802010u, 0x7e020281u, 0xbf820003u, 0x7e020282u, 0xbf820001u, 0x7e020283u, 0xe0700000u,
+        0x80000100u, 0xbf810000u, 0x0000000cu, 0u, 0x00000014u, 0u, 0x0000001cu, 0u,
+    };
+    verifyJumpTable("scheduled two-dword table", code, 0x20u, {0xcu, 0x14u, 0x1cu}, {0x3cu, 0x44u, 0x4cu});
+    static_cast<void>(recompile("scheduled two-dword table", code, 32u));
+    static_cast<void>(recompile("scheduled two-dword table", code, 64u));
+    auto vcc = patched(code, 0, {0x83ea826au});
+    vcc = patched(std::move(vcc), 2, {0x8f6a836au});
+    vcc = patched(std::move(vcc), 9, {0xd4000000u});
+    verifyJumpTable("scheduled two-dword table through vcc", vcc, 0x20u, {0xcu, 0x14u, 0x1cu}, {0x3cu, 0x44u, 0x4cu});
+    static_cast<void>(recompile("scheduled two-dword table through vcc", vcc, 32u));
+    static_cast<void>(recompile("scheduled two-dword table through vcc", vcc, 64u));
+    const std::vector<std::vector<std::uint32_t>> refused{
+        patched(code, 1, {0xbe880380u}),
+        patched(code, 3, {0xbe880380u}),
+        patched(code, 1, {0xbf820001u}),
+        patched(code, 3, {0xbf850000u}),
+    };
+    for (const auto& rejected : refused) require(refusal(rejected).find("unsupported dynamic s_setpc_b64") != std::string::npos, "a rewritten or conditional two-dword table index was accepted");
+}
+
 void verifyNullSwappc() {
     const std::array<std::uint32_t, 2> jump{0xbefd210cu, 0xbf810000u};
     const auto swappc = RdnaInstructionDecoder{}.Decode(jump).instructions.front();
@@ -1369,6 +1394,7 @@ done:
     }
     try {
         verifyNullSwappc();
+        verifyScheduledJumpTable();
         VerifyUserDataTail();
         VerifyConstantHighTail();
         verifyLargeLoopExitFallback();

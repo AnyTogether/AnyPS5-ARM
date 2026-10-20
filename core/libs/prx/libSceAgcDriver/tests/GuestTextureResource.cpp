@@ -117,6 +117,43 @@ void RunGuestTextureResourceTests() {
     Require(result.tileMode == TextureTileMode::kLinear, "decoded tile mode changed");
     Require(result.dimension == TextureDimension::k2D, "decoded dimension changed");
     Require(result.format == 56, "decoded format changed");
+    Fields fmask = base;
+    fmask.format = 166u;
+    fmask.tileModeRaw = 24u;
+    fmask.dstSelY = fmask.dstSelZ = fmask.dstSelW = 0u;
+    const auto fmaskResource = DecodeTextureResource(pack(fmask));
+    Require(fmaskResource.format == 20u && fmaskResource.dimension == TextureDimension::k2D && fmaskResource.tileMode == TextureTileMode::kZ64KBX, "uncompressed 32-bit FMASK did not use an integer Z surface");
+    Fields fmaskArray = fmask;
+    fmaskArray.typeRaw = 13u;
+    fmaskArray.depth = 2u;
+    fmaskArray.baseArray = 1u;
+    const auto fmaskArrayResource = DecodeTextureResource(pack(fmaskArray));
+    Require(fmaskArrayResource.format == 20u && fmaskArrayResource.baseArray == 1u && fmaskArrayResource.depthOrLastArray == 2u, "FMASK normalization changed the array view");
+    for (std::uint32_t format = 156u; format <= 168u; ++format) {
+        if (format == 166u) continue;
+        auto unsupported = fmask;
+        unsupported.format = format;
+        rejectFields(unsupported, "FMASK format is not implemented");
+    }
+    for (const auto field : {&Fields::metaCompress, &Fields::writeCompress}) {
+        auto compressed = fmask;
+        compressed.*field = true;
+        rejectFields(compressed, "FMASK CMASK compression is not implemented");
+    }
+    for (const auto selector : {5u, 6u, 7u}) {
+        auto unsupported = fmask;
+        unsupported.dstSelX = selector;
+        rejectFields(unsupported, "FMASK destination channel selector is not implemented");
+    }
+    auto unsupportedFmask = fmask;
+    unsupportedFmask.tileModeRaw = 0u;
+    rejectFields(unsupportedFmask, "FMASK reads require a single-mip");
+    unsupportedFmask = fmask;
+    unsupportedFmask.lastLevel = unsupportedFmask.maxMip = 1u;
+    rejectFields(unsupportedFmask, "FMASK reads require a single-mip");
+    unsupportedFmask = fmask;
+    unsupportedFmask.typeRaw = 10u;
+    rejectFields(unsupportedFmask, "FMASK reads require a single-mip");
     Require(result.dstSelX == 4 && result.dstSelY == 5 && result.dstSelZ == 6 && result.dstSelW == 7, "decoded destination selectors changed");
 
     Fields wide = base;
@@ -253,9 +290,14 @@ void RunGuestTextureResourceTests() {
     Fields cubeBadArray = cube;
     cubeBadArray.baseArray = 6;
     rejectFields(cubeBadArray, "base array past its last array slice");
-    Fields cubeNotMultiple = cube;
-    cubeNotMultiple.depth = 4;
-    rejectFields(cubeNotMultiple, "multiple of 6");
+    Fields cubeExtraSlice = cube;
+    cubeExtraSlice.depth = 6;
+    result = DecodeTextureResource(pack(cubeExtraSlice));
+    Require(result.baseArray == 0 && result.depthOrLastArray == 6, "a cube descriptor with a slice past its last whole cube lost a slice");
+    Require(DescribeSurface(result).imageLayers == 7, "a cube allocation with a slice past its last whole cube omitted it");
+    Fields cubePartial = cube;
+    cubePartial.depth = 4;
+    rejectFields(cubePartial, "fewer than 6 array slices");
 
     Fields multisampled = base;
     multisampled.typeRaw = 14;
@@ -643,4 +685,21 @@ void RunGuestTextureResourceTests() {
     Fields cornered = base;
     cornered.cornerSample = true;
     Require(!SampledTexturesShareEntry(pack(base), pack(cornered)), "T#s differing in a field next to the feedback fields must not share a sampled texture entry");
+
+    Fields arrayFields = base;
+    arrayFields.typeRaw = 13;
+    arrayFields.depth = 1536;
+    arrayFields.baseArray = 3;
+    const auto arrayWords = pack(arrayFields);
+    std::array<std::uint32_t, 8> narrowed{};
+    Require(FirstLayerDescriptor(arrayWords, narrowed), "a 2D array T# naming more than its base slice must narrow to that slice");
+    const auto slice = DecodeTextureResource(narrowed);
+    const auto whole = DecodeTextureResource(arrayWords);
+    Require(slice.dimension == TextureDimension::k2DArray && slice.baseArray == 3 && slice.depthOrLastArray == 3, "a narrowed 2D array T# must name its base slice alone");
+    Require(slice.baseAddress == whole.baseAddress && slice.width == whole.width && slice.format == whole.format && slice.mipCount == whole.mipCount && slice.tileMode == whole.tileMode, "narrowing a 2D array T# must keep every other field");
+    Require(!SampledTexturesShareEntry(arrayWords, narrowed), "a narrowed 2D array T# must not share the whole array's sampled texture entry");
+    Fields single = arrayFields;
+    single.depth = 3;
+    Require(!FirstLayerDescriptor(pack(single), narrowed), "a 2D array T# of its base slice alone needs no narrowing");
+    Require(!FirstLayerDescriptor(baseWords, narrowed), "a 2D T# needs no narrowing");
 }

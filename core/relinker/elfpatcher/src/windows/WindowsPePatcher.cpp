@@ -18,7 +18,7 @@ namespace {
 
 void writeGotStub(std::vector<PeSection>& sections, const std::uint32_t targetRva, const std::uint32_t stubRva, const std::uint64_t imageBase) {
     for (auto& section : sections) {
-        if (section.Data.size() < 8 || targetRva < section.Rva || targetRva - section.Rva > section.Data.size() - 8)
+        if (!section.Writable(targetRva, 8))
             continue;
         Io::WriteU64(section.Data, targetRva - section.Rva, imageBase + stubRva);
         return;
@@ -84,6 +84,7 @@ std::vector<std::uint8_t> WindowsPePatcher::Patch(std::vector<std::uint8_t> sour
         for (const auto& import : module.Imports) {
             relocations.Imports.push_back({import.Name, import.TargetRva, import.Addend, static_cast<std::int32_t>(index), import.RelocationType, import.Library});
             relocations.Imports.back().Function = import.Function;
+            relocations.Imports.back().Weak = import.Weak;
         }
     }
     libraries.insert(libraries.begin(), guestPaths.begin(), guestPaths.end());

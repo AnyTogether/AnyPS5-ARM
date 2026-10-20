@@ -447,13 +447,14 @@ def built_libraries(directories):
 
 
 def built_host_dependencies(directories):
-    """Map each built .prx basename to the sorted .prx names it imports itself.
+    """Map each built .prx to its imported .prx names and identify PE importers.
 
     The loader resolves these host-to-host dependencies with LoadLibrary, so a
     name with no file in --libs or --modules fails even when every game import
     is implemented. System DLLs resolve through the OS and are not reported.
     """
     direct = {}
+    windows = set()
     images = {}
     for directory in directories:
         for file in directory_files(directory, "*.prx"):
@@ -466,18 +467,29 @@ def built_host_dependencies(directories):
                 continue
             images[file.name] = (file, digest)
             direct[file.name] = sorted({name for name in read_host_imports(file, data) if name.lower().endswith(".prx")})
-    return direct
+            if data[:2] == b"MZ":
+                windows.add(file.name)
+    return direct, windows
 
 
-def audit_host_dependencies(direct, libraries, modules):
+def audit_host_dependencies(direct, libraries, modules, windows=()):
     """Walk host imports transitively; list each missing library with its chain."""
     available = set(libraries) | set(modules)
+    folded = defaultdict(set)
+    for name in available:
+        folded[name.lower()].add(name)
     missing = []
     for root in sorted(direct):
         expanded = set()
         stack = [(name, [root, name]) for name in reversed(direct[root])]
         while stack:
             name, chain = stack.pop()
+            if chain[-2] in windows:
+                matches = folded.get(name.lower(), ())
+                if len(matches) > 1:
+                    raise AuditError(f"ambiguous Windows host library {name}: {', '.join(sorted(matches))}")
+                name = next(iter(matches), name)
+                chain[-1] = name
             if name not in available:
                 missing.append({"importer": root, "chain": chain})
             elif name in direct and name not in expanded and name not in chain[1:-1]:
@@ -493,10 +505,11 @@ def module_files(directory):
     for file in directory_files(directory, "*"):
         with file.open("rb") as handle:
             magic = handle.read(4)
-        if magic == b"\x7fELF":
+        if magic == b"\x7fELF" or (magic.startswith(b"MZ") and file.name.endswith(".guest.prx")):
             yield file
         elif (file.suffix.lower() in (".prx", ".sprx", ".suprx", ".debug_prx", ".elf")
-              or magic.startswith(b"MZ") or magic in (b"\x4f\x15\x3d\x1d", b"\x54\x14\xf5\xee")):
+              or magic.startswith(b"MZ")
+              or magic in (b"\x4f\x15\x3d\x1d", b"\x54\x14\xf5\xee")):
             raise AuditError(f"{file}: expected ELF module (first bytes {magic!r})")
 
 
@@ -514,11 +527,15 @@ def read_modules(directories):
                     raise AuditError(f"ambiguous guest module {file.name}: {previous} and {file} have different contents")
                 continue
             images[file.name] = (file, digest)
-            own = elf_imports(file, data)
-            symbols, needed = own
-            imports[file.name] = (sorted(symbols), sorted(needed))
-            for name in elf_exports(file, data):
-                exports[name].add(file.name)
+            if data.startswith(b"MZ"):
+                imports[file.name] = ([], [])
+                names = pe_exports(file, data)
+            else:
+                symbols, needed = elf_imports(file, data)
+                imports[file.name] = (sorted(symbols), sorted(needed))
+                names = elf_exports(file, data)
+            for name in names:
+                exports[name.split(MODULE_SUFFIX, 1)[0]].add(file.name)
     return imports, {name: sorted(files) for name, files in exports.items()}
 
 
@@ -600,6 +617,30 @@ def check_conservation(references, records):
         raise AuditError(f"conservation failed: {references} references in, {classified} classified, unknown classes {unknown}")
 
 
+MODULE_FILE_SUFFIXES = (".debug_prx", ".suprx", ".sprx", ".prx")
+
+
+def module_stem(name, fold):
+    for suffix in MODULE_FILE_SUFFIXES:
+        if len(name) > len(suffix) and name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    return name.lower() if fold else name
+
+
+class ModuleNames(set):
+    """Title module names, matched like the relinker: by the name without its .prx, .sprx, .suprx or .debug_prx suffix, and
+    ignoring case for Windows output."""
+
+    def __init__(self, names=(), fold=False):
+        super().__init__(names)
+        self.fold = fold
+        self.stems = {module_stem(name, fold) for name in self}
+
+    def __contains__(self, library):
+        return isinstance(library, str) and module_stem(library, self.fold) in self.stems
+
+
 def classify(nid, library, providers, stubs, modules):
     if library and library in modules:
         return "module"
@@ -623,13 +664,13 @@ def audit(imports, exports, stubs, libraries, modules, module_imports=None, modu
     for record in records.values():
         nid, library = record["nid"], record["library"]
         providers = exports.get(nid, [])
-        if library is None:
+        if not library:
             providers = sorted(set(providers) | set((module_exports or {}).get(nid, [])))
         resolved_nid = nid
         if not providers:
             resolved_nid = nid_names.compute_nid(nid)
             providers = exports.get(resolved_nid, [])
-            if library is None:
+            if not library:
                 providers = sorted(set(providers) | set((module_exports or {}).get(resolved_nid, [])))
         kind = classify(resolved_nid, library, providers, stubs, modules)
         record["class"] = kind
@@ -793,12 +834,13 @@ def main(argv=None):
         imports = [entry for _, entries in registries for entry in entries]
         needed = sorted({library for path in dependency_registries for library in read_needed_registry(path)})
         exports, libraries = built_libraries(args.libs)
-        host_dependencies = built_host_dependencies(args.libs)
+        host_dependencies, windows = built_host_dependencies(args.libs)
         module_imports, module_exports = read_modules(args.modules)
         modules = set(module_imports)
         modules |= {name.removesuffix(".guest.prx") for name in modules if name.endswith(".guest.prx")}
+        modules = ModuleNames(modules, fold=bool(windows))
         records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules, module_imports, module_exports, needed_libraries=needed)
-        missing_hosts = audit_host_dependencies(host_dependencies, libraries, modules)
+        missing_hosts = audit_host_dependencies(host_dependencies, libraries, modules, windows)
         if args.names:
             attach_names(records, load_names(args.names))
         summary = summarize(records, sum(record["references"] for record in records), missing, missing_hosts)
@@ -822,6 +864,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     raise SystemExit(main())

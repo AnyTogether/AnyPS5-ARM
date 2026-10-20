@@ -3,6 +3,7 @@
 
 #include "SpirvBackend/SpirvEmitterState.hpp"
 #include "Optimization/BindingAllocator.hpp"
+#include <array>
 #include <string>
 
 namespace ShaderRecompiler {
@@ -12,6 +13,7 @@ IrShaderStage StageOf(const SpirvEmitterState& state);
 const ShaderVertexInputInfo& VertexInfo(const SpirvEmitterState& state);
 const ShaderPixelInputInfo& PixelInfo(const SpirvEmitterState& state);
 const ShaderWorkgroupInputInfo* ShaderWorkgroupInput(const SpirvEmitterState& state);
+std::array<std::uint32_t, 3> WorkgroupLocalSize(const SpirvEmitterState& state, const ShaderWorkgroupInputInfo& workgroup);
 const RdnaImageDimensionInfo& RdnaImageDimensionInfoFor(RdnaImageDimension dimension);
 std::uint32_t TypeVoid(SpirvEmitterState& state);
 std::uint32_t TypeBool(SpirvEmitterState& state);
@@ -274,7 +276,7 @@ std::uint32_t AtomicUpdateTyped(SpirvEmitterState& state, std::uint32_t pointer,
     EmitLabel(state, cont);
     state.module.AddFunction(spv::OpBranch, header);
     EmitLabel(state, merge);
-    state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, scope), ConstantU32(state, spv::MemorySemanticsAcquireReleaseMask | memory));
+    if (kind != ResourceKind::Lds || !state.insideLdsLock) state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, scope), ConstantU32(state, spv::MemorySemanticsAcquireReleaseMask | memory));
     return observed;
 }
 

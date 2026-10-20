@@ -7,6 +7,10 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#include <unistd.h>
+#endif
 #endif
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketOptions.hpp"
@@ -33,6 +37,7 @@ constexpr int GuestType = 0x1008;
 constexpr int GuestNonBlocking = 0x1200;
 constexpr int GuestTcpNoDelay = 1;
 constexpr int GuestTcpNoDelayFlag = 4;
+constexpr int GuestIpv6Only = 27;
 
 constexpr int ErrorInvalid = 22;
 constexpr int ErrorDomain = 33;
@@ -159,6 +164,20 @@ int SetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int op
     return ErrorNoProtocolOption;
 }
 
+bool NativeListening(std::uintptr_t native, bool& listening) {
+#ifdef __APPLE__
+    socket_fdinfo info{};
+    if (proc_pidfdinfo(getpid(), static_cast<int>(native), PROC_PIDFDSOCKETINFO, &info, sizeof(info)) != static_cast<int>(sizeof(info))) return false;
+    listening = (info.psi.soi_options & SO_ACCEPTCONN) != 0;
+#else
+    int accepting = 0;
+    socklen_t size = sizeof(accepting);
+    if (::getsockopt(static_cast<NativeHandle>(native), SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<NativeOptionOutput>(&accepting), &size)) return false;
+    listening = accepting != 0;
+#endif
+    return true;
+}
+
 int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int type, int option, void* value, std::uint32_t* length) {
     const auto handle = static_cast<NativeHandle>(native);
     if (option == GuestLinger) {
@@ -179,10 +198,9 @@ int GetSocketLevelOption(std::uintptr_t native, SocketOptionState& state, int ty
         if (::getsockopt(handle, SOL_SOCKET, nativeOption, reinterpret_cast<NativeOptionOutput>(&enabled), &size)) return HostError();
         number = enabled != 0 ? option : 0;
     } else if (option == GuestAcceptConnection) {
-        int listening = 0;
-        socklen_t size = sizeof(listening);
-        if (::getsockopt(handle, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<NativeOptionOutput>(&listening), &size)) return HostError();
-        number = listening != 0 ? GuestAcceptConnection : 0;
+        bool listening = false;
+        if (!NativeListening(native, listening)) return HostError();
+        number = listening ? GuestAcceptConnection : 0;
     } else if (option == GuestType) {
         number = type;
     } else if (option == GuestNoSigpipe) {
@@ -226,6 +244,28 @@ int GetTcpLevelOption(std::uintptr_t native, bool tcp, int option, void* value, 
     socklen_t size = sizeof(enabled);
     if (::getsockopt(static_cast<NativeHandle>(native), IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<NativeOptionOutput>(&enabled), &size)) return HostError();
     const int number = enabled != 0 ? GuestTcpNoDelayFlag : 0;
+    return Copy(value, length, &number, sizeof(number));
+}
+
+int SetIpv6LevelOption(std::uintptr_t native, bool ipv6, int option, const void* value, std::uint32_t length) {
+    if (!ipv6) return ErrorInvalid;
+    if (option != GuestIpv6Only) return ErrorNoProtocolOption;
+    if (length != sizeof(int)) return ErrorInvalid;
+    if (!value) return ErrorInvalid;
+    int number;
+    std::memcpy(&number, value, sizeof(number));
+    const int enabled = number != 0 ? 1 : 0;
+    if (::setsockopt(static_cast<NativeHandle>(native), IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<NativeOptionValue>(&enabled), sizeof(enabled))) return HostError();
+    return 0;
+}
+
+int GetIpv6LevelOption(std::uintptr_t native, bool ipv6, int option, void* value, std::uint32_t* length) {
+    if (!ipv6) return ErrorInvalid;
+    if (option != GuestIpv6Only) return ErrorNoProtocolOption;
+    int enabled = 0;
+    socklen_t size = sizeof(enabled);
+    if (::getsockopt(static_cast<NativeHandle>(native), IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<NativeOptionOutput>(&enabled), &size)) return HostError();
+    const int number = enabled != 0 ? 1 : 0;
     return Copy(value, length, &number, sizeof(number));
 }
 

@@ -152,6 +152,29 @@ class CheckSkipsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("all expected", result.stdout)
 
+    def test_no_usable_vulkan_device_is_expected_in_both_jobs(self):
+        reason = "no usable Vulkan device: ErrorInitializationFailed"
+        with tempfile.TemporaryDirectory() as directory:
+            junit = Path(directory) / "junit.xml"
+            junit.write_text(f'<testsuite><testcase name="shader_f64_fma"><skipped/><system-out>skipped, {reason}</system-out></testcase></testsuite>', encoding="utf-8")
+            for job in ("linux", "windows"):
+                with self.subTest(job=job):
+                    result = subprocess.run(
+                        [sys.executable, "-I", str(TOOL), str(junit), "--job", job],
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("all expected", result.stdout)
+
+    def test_device_feature_limitation_stays_unexpected_on_windows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            junit = Path(directory) / "junit.xml"
+            junit.write_text('<testsuite><testcase name="shader_subgroup"><skipped/><system-out>skipped, the device lacks shaderSubgroupClock</system-out></testcase></testsuite>', encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "-I", str(TOOL), str(junit), "--job", "windows"],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("error: shader_subgroup skipped", result.stdout)
+
     def test_list_reports_skipped_reasons_including_indented_lines(self):
         xml = (
             '<testsuite>'

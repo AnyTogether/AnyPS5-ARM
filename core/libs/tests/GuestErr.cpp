@@ -172,7 +172,7 @@ int main() {
         Require(capture.Take() == "prog: 7-x: " + denied + "\n", "vwarnc uses its code");
         CallVariant(Variant::Warnc, 0, 13, nullptr);
         Require(capture.Take() == "prog: " + denied + "\n", "vwarnc without format");
-        CallVariant(Variant::Warnx, 0, 0, "%d %d %d %d %d %d %d %d %.2f %s %ld", 1, 2, 3, 4, 5, 6, 7, 8, 2.5, "s", 123456789L);
+        CallVariant(Variant::Warnx, 0, 0, "%d %d %d %d %d %d %d %d %.2f %s %ld", 1, 2, 3, 4, 5, 6, 7, 8, 2.5, "s", 123456789LL);
         Require(capture.Take() == "prog: 1 2 3 4 5 6 7 8 2.50 s 123456789\n", "vwarnx stack and floating arguments");
         CallVariant(Variant::WarnxSkipping, 0, 0, "after %d", 1, 2);
         Require(capture.Take() == "prog: after 2\n", "vwarnx continues an advanced list");

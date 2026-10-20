@@ -394,6 +394,16 @@ int APS5_VABI sceSystemServiceOpenTournamentOccurrence(void) {
  return SCE_KERNEL_ERROR_EOPNOTSUPP;
 }
 
+int APS5_VABI sceSystemServiceAddLocalProcessForPsmKit(const char*, const char* const*, const void*) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
+int APS5_VABI sceSystemServiceKillLocalProcessForPsmKit(int) {
+ NotImplemented_nid_no_patch(__func__);
+ return 0;
+}
+
 int APS5_VABI sceSystemServiceReenableMusicPlayer(void) {
  return SYSTEM_SERVICE_OK;
 }

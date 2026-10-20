@@ -58,5 +58,14 @@ int main() {
     Require(sceNpAuthAuthorizedAppDialogTerminate() == 0);
     Require(sceNpAuthAuthorizedAppDialogTerminate() == kErrNotInitialized);
     Require(sceNpAuthAuthorizedAppDialogGetStatus() == kStatusNone);
+
+    Require(sceNpAuthAuthorizedAppDialogInitialize() == 0);
+    Require(sceNpAuthAuthorizedAppDialogGetStatus() == kStatusInitialized);
+    Require(sceNpAuthAuthorizedAppDialogClose() == 0);
+    Require(sceNpAuthAuthorizedAppDialogGetStatus() == kStatusFinished);
+    result[0] = -1;
+    Require(sceNpAuthAuthorizedAppDialogGetResult(result) == 0);
+    Require(result[0] == kResultUserCanceled);
+    Require(sceNpAuthAuthorizedAppDialogTerminate() == 0);
     return 0;
 }

@@ -20,11 +20,9 @@
 
 extern "C" GuestTm* APS5_VABI localtime_s_nid_postfix(const std::int64_t* timer, GuestTm* result);
 
-namespace {
+using SonyConstraintHandler = void (APS5_VABI *)(const char* message, void* pointer, int error);
 
-using SonyConstraintHandler = void (*)(const char* message, void* pointer, int error);
-
-inline void SonyDefaultConstraintHandler(const char* message, void* pointer, int error) {
+inline void APS5_VABI SonyDefaultConstraintHandler(const char* message, void* pointer, int error) {
     (void)message;
     (void)pointer;
     (void)error;
@@ -39,6 +37,22 @@ inline std::mutex& SonyConstraintMutex() {
 inline SonyConstraintHandler& SonyConstraintHandlerSlot() {
     static SonyConstraintHandler handler = SonyDefaultConstraintHandler;
     return handler;
+}
+
+namespace {
+
+template<typename TInteger>
+inline TInteger ParseInteger(const char* text, char** end, int base, TInteger (*parse)(const char*, char**, int)) {
+#ifdef __APPLE__
+    const int saved = errno;
+    char* parsedEnd = nullptr;
+    const TInteger value = parse(text, &parsedEnd, base);
+    if (parsedEnd == text && errno == EINVAL && (base == 0 || (base >= 2 && base <= 36))) errno = saved;
+    if (end != nullptr) *end = parsedEnd;
+    return value;
+#else
+    return parse(text, end, base);
+#endif
 }
 
 inline void SonyInvokeConstraintHandler(const char* message, void* pointer, int error) {
@@ -74,21 +88,39 @@ inline int SonyFormatAsctime(char* buffer, std::size_t size, const GuestTm& time
     static const char* const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char* const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
     if (!buffer || size < 26) return EINVAL;
-    if (time.tm_wday < 0 || time.tm_wday > 6 || time.tm_mon < 0 || time.tm_mon > 11) return EINVAL;
+    const int year = 1900 + time.tm_year;
+    if (time.tm_wday < 0 || time.tm_wday > 6 || time.tm_mon < 0 || time.tm_mon > 11 ||
+        time.tm_mday < 1 || time.tm_mday > 31 || time.tm_hour < 0 || time.tm_hour > 23 ||
+        time.tm_min < 0 || time.tm_min > 59 || time.tm_sec < 0 || time.tm_sec > 60 ||
+        year < 0 || year > 9999) {
+        buffer[0] = '\0';
+        return EINVAL;
+    }
     std::snprintf(buffer, size, "%.3s %.3s %2d %.2d:%.2d:%.2d %4d\n", days[time.tm_wday], months[time.tm_mon],
-        time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec, 1900 + time.tm_year);
+        time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec, year);
     return 0;
 }
 
 inline int SonyCtimeS(char* buffer, std::size_t size, const std::int64_t* time) {
-    if (!buffer || size < 26 || !time) return EINVAL;
+    if (!buffer || size < 26) return EINVAL;
+    if (!time) {
+        buffer[0] = '\0';
+        return EINVAL;
+    }
     GuestTm parts{};
-    if (!localtime_s_nid_postfix(time, &parts)) return EINVAL;
+    if (!localtime_s_nid_postfix(time, &parts)) {
+        buffer[0] = '\0';
+        return EINVAL;
+    }
     return SonyFormatAsctime(buffer, size, parts);
 }
 
 inline int SonyAsctimeS(char* buffer, std::size_t size, const GuestTm* time) {
-    if (!buffer || size < 26 || !time) return EINVAL;
+    if (!buffer || size < 26) return EINVAL;
+    if (!time) {
+        buffer[0] = '\0';
+        return EINVAL;
+    }
     return SonyFormatAsctime(buffer, size, *time);
 }
 

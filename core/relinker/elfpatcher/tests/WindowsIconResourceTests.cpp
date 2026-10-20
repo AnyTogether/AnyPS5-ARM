@@ -123,14 +123,54 @@ void run() {
     auto truncated = Png;
     truncated.resize(40);
     std::vector<Elfpatcher::Windows::PeSection> badSections;
+    bool caughtTruncated = false;
     try {
         builder.Build(truncated, badPath, badSections, nextRva);
     } catch (const Domain::RelinkerException& e) {
         require(std::string(e.what()).find(badPath.string()) != std::string::npos, std::string("Failure does not name the icon: ") + e.what());
         require(badSections.empty(), "Section added despite the failure");
-        return;
+        caughtTruncated = true;
     }
-    throw std::runtime_error("Build succeeded for a malformed icon");
+    require(caughtTruncated, "Build succeeded for a malformed icon");
+
+    for (const auto badRva : {0u, 0x8000u, 0x10001u, 0x10800u}) {
+        std::vector<Elfpatcher::Windows::PeSection> invalidRvaSections;
+        bool caught = false;
+        try {
+            builder.Build(Png, iconPath, invalidRvaSections, badRva);
+        } catch (const Domain::RelinkerException& error) {
+            caught = true;
+            require(std::string(error.what()).find("Invalid Windows resource section RVA") != std::string::npos, "Unexpected error for bad RVA");
+            require(invalidRvaSections.empty(), "Section added on bad RVA");
+        }
+        require(caught, "Build succeeded for invalid resource section RVA");
+    }
+
+    std::vector<Elfpatcher::Windows::PeSection> duplicateSections{
+        {".rsrc", 0x10000, Elfpatcher::Windows::SectionRead | 0x40u, std::vector<std::uint8_t>(0x1000, 0)}
+    };
+    bool caughtDuplicate = false;
+    try {
+        builder.Build(Png, iconPath, duplicateSections, 0x20000);
+    } catch (const Domain::RelinkerException& error) {
+        caughtDuplicate = true;
+        require(std::string(error.what()).find("Duplicate Windows resource section") != std::string::npos, "Unexpected error for duplicate resource section");
+        require(duplicateSections.size() == 1, "Section added on duplicate resource section");
+    }
+    require(caughtDuplicate, "Build succeeded with duplicate resource section");
+
+    std::vector<Elfpatcher::Windows::PeSection> overlappingSections{
+        {".text", 0x10000, Elfpatcher::Windows::SectionRead | 0x20u, std::vector<std::uint8_t>(0x50000, 0)}
+    };
+    bool caughtOverlap = false;
+    try {
+        builder.Build(Png, iconPath, overlappingSections, 0x50000);
+    } catch (const Domain::RelinkerException& error) {
+        caughtOverlap = true;
+        require(std::string(error.what()).find("Windows resource section overlaps preceding section") != std::string::npos, "Unexpected error for overlapping section");
+        require(overlappingSections.size() == 1, "Section added on overlapping section");
+    }
+    require(caughtOverlap, "Build succeeded with overlapping resource section");
 }
 
 }

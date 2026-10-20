@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 
+from guest_import_fixtures import fixture_directory
 from test_windows_import_modules import dynamic, executable, provider
 
 
@@ -33,7 +33,7 @@ def relink(relinker, source, output, *options):
 
 def main():
     relinker = Path(sys.argv[1]).resolve()
-    with tempfile.TemporaryDirectory(prefix='anyps5-trace-imports-') as directory:
+    with fixture_directory('anyps5-trace-imports-') as directory:
         work = Path(directory)
         build = work / 'providers'
         (build / 'prx').mkdir(parents=True)

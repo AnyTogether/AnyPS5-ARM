@@ -12,8 +12,9 @@ import performance_compare
 
 UNBLOCKS = re.compile(r'Unblocks:[ \t]*([^\r\n]*(?:\r?\n[ \t]*[-*][ \t]+(?!\[[ xX]\])[^\r\n]*)*)')
 TITLE_ID = re.compile(r"(?<![A-Za-z0-9])[A-Z]{4}\d{5}(?!\d)")
+NONE = re.compile(r"[-*_ \t\r\n]*none\b", re.I)
 PERF = re.compile(r"perf(\(|!?:)")
-FENCE = re.compile(r"```[^\r\n]*\r?\n(.*?)```", re.S)
+FENCE = re.compile(r"(?:```|~~~)[^\r\n]*\r?\n(.*?)(?:```|~~~)", re.S)
 MARKER = "<!-- pr-labels-perf -->"
 UNBLOCKS_LABEL = "unblocks title"
 PERF_LABEL = "perf"
@@ -39,7 +40,7 @@ def strip_comments(body):
 
 def title_ids(body):
     match = UNBLOCKS.search(strip_comments(body))
-    return set(TITLE_ID.findall(match.group(1))) if match else set()
+    return set(TITLE_ID.findall(match.group(1))) if match and not NONE.match(match.group(1)) else set()
 
 
 def is_perf(title):

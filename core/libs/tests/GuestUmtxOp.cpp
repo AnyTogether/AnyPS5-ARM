@@ -281,11 +281,14 @@ static void RejectsBadObjectsAndOperations() {
     Require(FailsWith(Umtx(&value, UMTX_OP_MAX, 0), GUEST_EINVAL));
     Require(FailsWith(Umtx(&value, -1, 0), GUEST_EINVAL));
 
+    for (const std::uint64_t owner : {std::uint64_t{0}, std::uint64_t{123456}, (std::uint64_t{1} << 63) | 123456}) {
+        std::uint64_t word = owner;
+        Require(FailsWith(Umtx(&word, 1, 123456), GUEST_EOPNOTSUPP));
+        Require(FailsWith(Umtx(&word, 0, 123456), GUEST_EOPNOTSUPP));
+        Require(word == owner);
+    }
+
     bool threw = false;
-    try { Umtx(&value, 1, 0); }
-    catch (const std::runtime_error&) { threw = true; }
-    Require(threw);
-    threw = false;
     try { Umtx(&value, UMTX_OP_MUTEX_LOCK, 0); }
     catch (const std::runtime_error&) { threw = true; }
     Require(threw);

@@ -22,6 +22,8 @@ int APS5_VABI sceKernelMapDirectMemory(void**, std::size_t, int, int, std::int64
 int APS5_VABI sceKernelMunmap(void*, std::size_t);
 int APS5_VABI sceKernelMprotect(const void*, std::size_t, int);
 int APS5_VABI sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
+void* APS5_VABI fopen_nid_postfix(const char*, const char*);
+int APS5_VABI fclose_nid_postfix(void*);
 }
 
 namespace {
@@ -157,6 +159,28 @@ void TestErrors(const Fixture& fixture) {
     for (const auto byte : data) Require(byte == 0xA5, "missing-file APR read modified the destination");
 }
 
+void TestStreams(const Fixture& fixture) {
+    constexpr int StreamCount = 600;
+    std::vector<void*> streams;
+    for (int index = 0; index < StreamCount; ++index) {
+        void* stream = fopen_nid_postfix(("apr_stream_" + std::to_string(index) + ".tmp").c_str(), "w");
+        if (stream == nullptr) break;
+        streams.push_back(stream);
+    }
+    const bool held = streams.size() == StreamCount;
+    std::vector<std::uint8_t> storage(131200, 0xCC);
+    std::string error;
+    try {
+        CheckRead(fixture, storage.data() + 17, 65537, 0);
+    } catch (const std::runtime_error& failure) {
+        error = failure.what();
+    }
+    for (void* stream : streams) fclose_nid_postfix(stream);
+    for (int index = 0; index < StreamCount; ++index) std::filesystem::remove("apr_stream_" + std::to_string(index) + ".tmp");
+    Require(error.empty(), ("APR read failed while " + std::to_string(streams.size()) + " guest streams were open: " + error).c_str());
+    Require(held, "cannot hold 600 guest fopen streams");
+}
+
 #ifdef _WIN32
 std::uintptr_t faultBegin = 0;
 std::size_t faultBytes = 0;
@@ -223,6 +247,8 @@ int main(int argc, char** argv) {
             TestEof(fixture);
         } else if (mode == "errors") {
             TestErrors(fixture);
+        } else if (mode == "streams") {
+            TestStreams(fixture);
 #ifdef _WIN32
         } else if (mode == "fault") {
             const FaultBuffer storage;

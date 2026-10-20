@@ -1,3 +1,4 @@
+#include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include <atomic>
@@ -58,7 +59,7 @@ int main() {
             state = 2;
         });
         while (state.load() == 0) std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::microseconds(300));
+        PreciseSleepUs(300);
         const int closed = sceKernelClose(descriptor);
         reader.join();
         Require(!threw.load());

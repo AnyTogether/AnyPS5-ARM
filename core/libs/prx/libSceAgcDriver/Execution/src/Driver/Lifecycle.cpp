@@ -57,9 +57,9 @@ void PrintFailure(std::exception_ptr error) {
     std::fflush(stderr);
 }
 
-constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull;
+constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull + GuestArena::GuestAddressOffset;
 constexpr std::size_t DriverMemoryBytes = 2u << 20u;
-constexpr std::uint64_t FsTableAddress = 0xfe0040000ull;
+constexpr std::uint64_t FsTableAddress = DriverMemoryAddress + 0x40000ull;
 constexpr std::uint64_t FsTableSlotBytes = 16u;
 constexpr std::uint64_t FsTableSlots = 6u;
 constexpr std::uint64_t FsRoutineRecords = 8u;
@@ -191,6 +191,7 @@ void Driver::stop() {
     CloseRegistrationPreparation();
     Graphics::StopPipelineLibraryWorker();
     std::lock_guard gpuLock(GuestMemory::GpuMutex());
+    Graphics::ReportHostImports();
     device.Reset();
     replacedDevices.clear();
     Graphics::FlushPipelineJournal();
@@ -301,6 +302,10 @@ bool& Driver::onWorkerThread() {
 }
 
 namespace AgcDriver {
+
+void FlushAsyncLog_nid_no_patch() {
+    AsyncLog::Get().Flush();
+}
 
 std::unique_lock<std::mutex> HoldAsyncLog() {
     return AsyncLog::Get().Hold();

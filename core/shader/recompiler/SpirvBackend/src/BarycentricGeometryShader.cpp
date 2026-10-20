@@ -20,41 +20,14 @@ void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error("Barycentric geometry SPIR-V: " + message);
 }
 
-struct PerVertexParameter {
-    std::uint32_t sourceLocation;
-    std::uint32_t location;
-};
-
-struct EmulatedInterface {
-    std::vector<std::uint32_t> passed;
-    std::vector<bool> passedFlat;
-    std::vector<PerVertexParameter> perVertex;
-    BarycentricEmulationLayout layout;
-    std::uint32_t barycentrics = 0;
-    std::uint32_t sources = 0;
-};
+using PerVertexParameter = EmulatedPerVertexParameter;
 
 EmulatedInterface CollectEmulatedInterface(const RecompileResult& vertex, const RecompileResult& fragment) {
     require(fragment.barycentricEmulation.active, "the fragment shader does not emulate barycentrics");
-    const auto exported = [&](std::uint32_t location) { return std::find(vertex.parameterExports.begin(), vertex.parameterExports.end(), location) != vertex.parameterExports.end(); };
-    EmulatedInterface emulated;
-    emulated.layout = LayoutBarycentricEmulation(fragment.fragmentParameters, fragment.barycentricEmulation);
     for (const auto& parameter : fragment.fragmentParameters) {
-        require(exported(parameter.sourceLocation), "fragment parameter " + std::to_string(parameter.location) + " is not exported by the vertex shader");
-        if (!parameter.perVertex) {
-            emulated.passed.push_back(parameter.sourceLocation);
-            emulated.passedFlat.push_back(parameter.flat);
-            continue;
-        }
-        const auto relocated = std::find_if(emulated.layout.perVertexLocations.begin(), emulated.layout.perVertexLocations.end(), [&](const auto& entry) { return entry.first == parameter.location; });
-        require(relocated != emulated.layout.perVertexLocations.end(), "per-vertex parameter " + std::to_string(parameter.location) + " has no emulated location");
-        emulated.perVertex.push_back({parameter.sourceLocation, relocated->second});
+        require(std::find(vertex.parameterExports.begin(), vertex.parameterExports.end(), parameter.sourceLocation) != vertex.parameterExports.end(), "fragment parameter " + std::to_string(parameter.location) + " is not exported by the vertex shader");
     }
-    emulated.barycentrics = (emulated.layout.smoothLocation != BarycentricEmulationLayout::NoLocation ? 1u : 0u) + (emulated.layout.linearLocation != BarycentricEmulationLayout::NoLocation ? 1u : 0u);
-    std::set<std::uint32_t> sources(emulated.passed.begin(), emulated.passed.end());
-    for (const auto& parameter : emulated.perVertex) sources.insert(parameter.sourceLocation);
-    emulated.sources = static_cast<std::uint32_t>(sources.size());
-    return emulated;
+    return DescribeEmulatedInterface(fragment.fragmentParameters, fragment.barycentricEmulation);
 }
 
 class BarycentricGeometryEmitter {
@@ -378,7 +351,7 @@ private:
 
 }
 
-BarycentricEmulationLayout LayoutBarycentricEmulation(std::span<const FragmentParameter> parameters, const BarycentricEmulation& emulation) {
+BarycentricEmulationLayout LayoutBarycentricEmulation(std::span<const FragmentParameter> parameters, const BarycentricEmulation& emulation, bool meshPositions) {
     BarycentricEmulationLayout layout;
     if (!emulation.active) return layout;
     std::array<bool, ParameterLocations> used {};
@@ -396,10 +369,31 @@ BarycentricEmulationLayout LayoutBarycentricEmulation(std::span<const FragmentPa
     };
     if (emulation.smooth) layout.smoothLocation = take(1u);
     if (emulation.linear) layout.linearLocation = take(1u);
+    if (meshPositions) layout.positionsLocation = take(3u);
     for (const auto& parameter : parameters) {
         if (parameter.perVertex) layout.perVertexLocations.emplace_back(parameter.location, take(3u));
     }
     return layout;
+}
+
+EmulatedInterface DescribeEmulatedInterface(std::span<const FragmentParameter> parameters, const BarycentricEmulation& emulation, bool meshPositions) {
+    EmulatedInterface emulated;
+    emulated.layout = LayoutBarycentricEmulation(parameters, emulation, meshPositions);
+    for (const auto& parameter : parameters) {
+        if (!parameter.perVertex) {
+            emulated.passed.push_back(parameter.sourceLocation);
+            emulated.passedFlat.push_back(parameter.flat);
+            continue;
+        }
+        const auto relocated = std::find_if(emulated.layout.perVertexLocations.begin(), emulated.layout.perVertexLocations.end(), [&](const auto& entry) { return entry.first == parameter.location; });
+        require(relocated != emulated.layout.perVertexLocations.end(), "per-vertex parameter " + std::to_string(parameter.location) + " has no emulated location");
+        emulated.perVertex.push_back({parameter.sourceLocation, relocated->second});
+    }
+    emulated.barycentrics = (emulated.layout.smoothLocation != BarycentricEmulationLayout::NoLocation ? 1u : 0u) + (emulated.layout.linearLocation != BarycentricEmulationLayout::NoLocation ? 1u : 0u);
+    std::set<std::uint32_t> sources(emulated.passed.begin(), emulated.passed.end());
+    for (const auto& parameter : emulated.perVertex) sources.insert(parameter.sourceLocation);
+    emulated.sources = static_cast<std::uint32_t>(sources.size());
+    return emulated;
 }
 
 RecompileResult BuildBarycentricGeometryShader(const RecompileResult& vertex, const RecompileResult& fragment, const SpirvTarget& target, const std::optional<GeometryStageLimits>& limits) {

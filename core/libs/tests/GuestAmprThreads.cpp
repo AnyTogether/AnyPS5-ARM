@@ -1,6 +1,7 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/exceptions/Runtime.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -195,6 +196,23 @@ static void TestThreadSleep() {
     const GuestXtime negative{borrowed.sec + 1, borrowed.nsec - NanosPerSecond};
     Require(_Thrd_sleep_nid_postfix(&negative, nullptr) == 0);
     Require(RealtimeNanos() >= borrowed.sec * NanosPerSecond + borrowed.nsec);
+
+#ifdef _WIN32
+    for (const auto duration : {100000LL, 2000000LL}) {
+        std::array<std::chrono::nanoseconds, 31> samples{};
+        for (auto& sample : samples) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto shortTarget = XtimeAfter(duration);
+            Require(_Thrd_sleep_nid_postfix(&shortTarget, nullptr) == ThrdSuccess);
+            sample = std::chrono::steady_clock::now() - start;
+            Require(RealtimeNanos() >= shortTarget.sec * NanosPerSecond + shortTarget.nsec);
+        }
+        std::sort(samples.begin(), samples.end());
+        const auto median = samples[samples.size() / 2];
+        std::fprintf(stderr, "_Thrd_sleep(%lld ns) median: %lld ns\n", duration, static_cast<long long>(median.count()));
+        Require(median < std::chrono::milliseconds(12));
+    }
+#endif
 
     bool rejected = false;
     try {

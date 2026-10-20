@@ -4,6 +4,19 @@
 #include <set>
 #include <stdexcept>
 
+extern "C" int APS5_VABI sceContentExportAddToFavorites(void);
+extern "C" int APS5_VABI sceContentExportDataProvideFunction(void);
+extern "C" int APS5_VABI sceContentExportFree(void);
+extern "C" int APS5_VABI sceContentExportFrom(void);
+extern "C" int APS5_VABI sceContentExportFromFileForSf(void);
+extern "C" int APS5_VABI sceContentExportFromFileWithContentIdList(void);
+extern "C" int APS5_VABI sceContentExportFromFileWithTitleIdList(void);
+extern "C" int APS5_VABI sceContentExportInit(void);
+extern "C" int APS5_VABI sceContentExportMalloc(void);
+extern "C" int APS5_VABI sceContentExportRemoveFromFavorites(void);
+extern "C" int APS5_VABI sceContentExportRenameContent(void);
+extern "C" int APS5_VABI sceContentExportValidateContents(void);
+
 extern "C" int APS5_VABI sceContentExportInit2(const ContentExportInitParam2* init_param);
 extern "C" int APS5_VABI sceContentExportTerm(void);
 extern "C" int APS5_VABI sceContentExportStart(void);
@@ -85,4 +98,17 @@ int main() {
     Require(sceContentExportTerm() == 0);
     Require(Throws([] { sceContentExportStart(); }));
     Require(Throws([&] { sceContentExportFinish(reopened); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportAddToFavorites(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportDataProvideFunction(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFree(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFrom(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromFileForSf(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromFileWithContentIdList(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportFromFileWithTitleIdList(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportInit(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportMalloc(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportRemoveFromFavorites(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportRenameContent(); }));
+    Require(Throws<std::runtime_error>([] { sceContentExportValidateContents(); }));
 }
+

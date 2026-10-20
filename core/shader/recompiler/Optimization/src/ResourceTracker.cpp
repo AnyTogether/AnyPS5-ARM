@@ -83,6 +83,10 @@ std::uint32_t possibleU32Bits(const IrValue* value) {
             const IrValue* shift = value->Argument(1)->Resolve();
             return shift->HasImmediate() && shift->Type() == IrType::U32 ? possibleU32Bits(value->Argument(0)) << (shift->ImmediateU32() & 31u) : std::numeric_limits<std::uint32_t>::max();
         }
+        case IrOpcode::ReadFirstLane:
+            return value->ArgumentCount() >= 1u ? possibleU32Bits(value->Argument(0)) : std::numeric_limits<std::uint32_t>::max();
+        case IrOpcode::SelectU32:
+            return value->ArgumentCount() == 3u ? (possibleU32Bits(value->Argument(1)) | possibleU32Bits(value->Argument(2))) : std::numeric_limits<std::uint32_t>::max();
         default:
             return std::numeric_limits<std::uint32_t>::max();
     }
@@ -1774,6 +1778,7 @@ private:
         }
         ImageResource image = key;
         image.singleMipPlaneBiasCompatible = m_program.Resources().stage == IrShaderStage::Pixel;
+        image.volumeArraySampleCompatible = true;
         image.firstUsePc = pc;
         Merge(image, memory, op, pc);
         m_info.images.push_back(image);
@@ -1800,7 +1805,9 @@ private:
         image.constantSwizzleCompatible = image.constantSwizzleCompatible && (op == IrOpcode::ImageSampleRaw || op == IrOpcode::ImageGatherRaw);
         const bool cubeFaceLoad = op == IrOpcode::ImageRead && !memory.imageHasMip && memory.imageSampleFlags == 0u;
         const bool cubeFaceSample = op == IrOpcode::ImageSampleRaw && (memory.imageSampleFlags == 0u || memory.imageSampleFlags == RdnaImageSampleFlagLevelZero || memory.imageSampleFlags == RdnaImageSampleFlagLod);
-        image.cubeFaceCompatible = image.cubeFaceCompatible && (cubeFaceLoad || cubeFaceSample) && !memory.imagePacked && memory.imageByElements == 0u;
+        const bool cubeFaceStore = op == IrOpcode::ImageWrite && !memory.imageHasMip;
+        image.cubeFaceCompatible = image.cubeFaceCompatible && (cubeFaceLoad || cubeFaceSample || cubeFaceStore) && !memory.imagePacked && memory.imageByElements == 0u;
+        image.volumeArraySampleCompatible = image.volumeArraySampleCompatible && cubeFaceSample && !memory.imageR128 && !memory.imagePacked && memory.imageByElements == 0u;
         const bool flatVolumeLoad = op == IrOpcode::ImageRead && memory.imageSampleFlags == 0u;
         const bool flatVolumeSample = op == IrOpcode::ImageSampleRaw && memory.imageSampleFlags == RdnaImageSampleFlagLevelZero;
         const bool flatVolumeQuery = op == IrOpcode::ImageQueryDimensions;

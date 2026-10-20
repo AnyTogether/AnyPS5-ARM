@@ -5,11 +5,13 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Memory/DrawWriteRanges.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Memory/BufferCopy.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Memory/DwordPatternFill.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Synchronization/DeferredLabels.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Pm4.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/Recorder.hpp"
 #include "Optimization/ResourceProgram.hpp"
 #include <algorithm>
 #include <cstdlib>
@@ -102,11 +104,10 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         resolved = ahead.packet;
         packet = resolved;
         indirectArguments = ahead.indirectArguments;
-    } else if (indirectArguments != 0 && matchesFillKernel(std::span(snapshot.code).subspan(codeOffset), userData, compute)) {
-
-        recordQueuedLabelsBeforeRead(submission.queue);
+    } else if (indirectArguments != 0 && !resolving && matchesFillKernel(std::span(snapshot.code).subspan(codeOffset), userData, compute)) {
+        indirectSource().path = IndirectFillKernel;
         const auto readStart = std::chrono::steady_clock::now();
-        resolved = Pm4::ReadDispatchArguments(indirectArguments, packet[4]);
+        resolved = readDispatchArguments(submission.queue, indirectArguments, packet[4]);
         countIndirect(IndirectFillKernel, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readStart).count());
         packet = resolved;
         indirectArguments = 0;
@@ -358,7 +359,13 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             totalMs += elapsed;
             if (profile && elapsed > 200) std::fprintf(stderr, "[gpu] compute shader 0x%llx recompile took %.0f ms (%zu SPIR-V words, %zu captured regions, total %.1f s)\n", static_cast<unsigned long long>(address), elapsed, compiledResult->spirv.size(), captured.size(), totalMs / 1000);
         } catch (const std::exception& error) {
-            const auto dump = dumpShaders ? dumpRequest(address, request) : std::string{};
+            std::string dump;
+            if (dumpShaders) {
+                const auto regions = shaderMemory->Regions();
+                auto failed = request;
+                failed.context.memory = regions;
+                dump = dumpRequest(address, failed, "_failed");
+            }
 
             std::string reason = error.what();
             if (const auto newline = reason.find('\n'); newline != std::string::npos) reason.resize(newline);
@@ -383,8 +390,8 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         parked.keepVariant = keepVariant;
         parked.attachVariant = attachVariant;
         parked.shaderMemory = shaderMemory;
-        parked.captured = captured;
-        parked.liveWords = liveWords;
+        parked.captured = std::move(captured);
+        parked.liveWords = std::move(liveWords);
         parked.capture = capture;
         parked.dataHit = dataHit;
         parked.cached = cached;
@@ -424,7 +431,7 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
                 words += text;
             }
         }
-        std::fprintf(stderr, "[dispatch-io] shader 0x%llx%s\n", static_cast<unsigned long long>(address), words.c_str());
+        std::fprintf(stderr, "[dispatch-io] queue=0x%x submission=%llu shader 0x%llx%s\n", submission.queue, static_cast<unsigned long long>(submission.serial), static_cast<unsigned long long>(address), words.c_str());
     }
 
     const auto rethrow = [&](const std::exception& error) {
@@ -435,7 +442,7 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         }
         char where[64];
         std::snprintf(where, sizeof(where), "compute shader 0x%llx: ", static_cast<unsigned long long>(address));
-        throw std::runtime_error(where + std::string(error.what()));
+        throw std::runtime_error(where + std::string(error.what()) + describeIndirectSource());
     };
     phaseTiming.Phase(PhaseSnapshots);
 
@@ -444,7 +451,7 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
         const auto epoch = DrawPipeline::EpochToken().load(std::memory_order_relaxed);
         const auto queueId = submission.queue;
         itemCommits.fetch_add(1, std::memory_order_relaxed);
-        DrawPipeline::Queue0().Enqueue([this, localDevice = std::move(localDevice), result = compiledResult, snapshots = std::move(snapshots), groups, address, queueId, recipe, keepVariant, dataHit, epoch] {
+        DrawPipeline::Queue0().Enqueue([this, localDevice = std::move(localDevice), result = compiledResult, snapshots = std::move(snapshots), liveWords = std::move(liveWords), groups, address, queueId, recipe, keepVariant, dataHit, epoch] {
             DrawPipeline::FollowEpoch(epoch);
             GuestMemory::SetCurrentPacket(0x15, queueId);
             const auto& compiledCommit = *result;
@@ -507,6 +514,8 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
     auto* const attachTo = stampValidate() ? nullptr : keepVariant != nullptr ? keepVariant.get() : attachVariant.get();
     bool writersNoted = false;
     const bool noteWrites = writeEvidenceEnabled() || traceCapSync();
+    const auto keysFill = indirectArguments == 0 && !partialLastGroup ? MatchSgprPatternFill(packet, std::span(snapshot.code).subspan(codeOffset), userData, compute) : std::nullopt;
+    const auto filledKeys = keysFill ? KeysFillMemo(keysFill->pattern, false, true) : std::nullopt;
 
     std::optional<Graphics::DepthPlaneClear> depthPlaneClear;
     if (indirectArguments == 0 && !partialLastGroup) {
@@ -558,6 +567,8 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             writersNoted = true;
         }
         phaseTiming.Phase(PhaseNoteWriters);
+        auto* const keysRecorder = filledKeys ? Graphics::Recorder::Active() : nullptr;
+        const auto keysNoteBefore = keysRecorder != nullptr ? keysRecorder->LastWriteNote(keysFill->base, keysFill->bytes) : 0;
         try {
             if (recipeHit != nullptr) {
                 VulkanDevice::IndirectOutcome outcome{0, 0};
@@ -577,6 +588,10 @@ void Driver::dispatch(QueueState& queue, std::span<const std::uint32_t> packet, 
             }
         } catch (const std::exception& error) {
             if (rethrow(error)) return;
+        }
+        if (keysRecorder != nullptr && keysRecorder == Graphics::Recorder::Active()) {
+            const auto note = keysRecorder->LastWriteNote(keysFill->base, keysFill->bytes);
+            if (note != 0 && note != keysNoteBefore) Graphics::NoteKeysFillOnGpu(keysFill->base, keysFill->bytes, *filledKeys);
         }
         if (builtRecipe != nullptr) {
             if (dataHit) {

@@ -262,6 +262,8 @@ void DefineModule(SpirvEmitterState& state) {
         if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityInt64Atomics)) == state.supportedCapabilities.end()) {
             FailEmit("64-bit buffer atomics need shaderBufferInt64Atomics");
         }
+    }
+    if (state.requirements.bufferU64View) {
         state.module.EmitCapability(spv::CapabilityInt64);
         state.module.EmitCapability(spv::CapabilityInt64Atomics);
     }
@@ -343,8 +345,15 @@ void DefineModule(SpirvEmitterState& state) {
     state.module.EmitCapability(spv::CapabilitySignedZeroInfNanPreserve);
     state.module.EmitExtension("SPV_KHR_float_controls");
     state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeSignedZeroInfNanPreserve, 32u);
-    if (state.requirements.float64) {
-        if (std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityFloat64)) == state.supportedCapabilities.end()) {
+    if (state.float32FlushToZero) {
+        state.module.EmitCapability(spv::CapabilityDenormFlushToZero);
+        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDenormFlushToZero, 32u);
+    }
+    const bool deviceFloat64 = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityFloat64)) != state.supportedCapabilities.end();
+    state.integerInterpolation = state.requirements.float64Interpolation && !deviceFloat64;
+    if (state.integerInterpolation) state.module.EmitCapability(spv::CapabilityInt64);
+    if (state.requirements.float64 || (state.requirements.float64Interpolation && deviceFloat64)) {
+        if (!deviceFloat64) {
             throw std::runtime_error("64-bit float instructions need the Float64 capability, which the device lacks");
         }
         state.module.EmitCapability(spv::CapabilityFloat64);
@@ -355,21 +364,8 @@ void DefineModule(SpirvEmitterState& state) {
         }
     }
     if (const auto* workgroup = ShaderWorkgroupInput(state)) {
-        const std::uint32_t derivativeDefault = state.requirements.computeDerivatives ? 2u : 1u;
-        std::uint32_t localX = workgroup->threadsNum[0] != 0u ? workgroup->threadsNum[0] : derivativeDefault;
-        std::uint32_t localY = workgroup->threadsNum[1] != 0u ? workgroup->threadsNum[1] : derivativeDefault;
-        std::uint32_t localZ = workgroup->threadsNum[2] != 0u ? workgroup->threadsNum[2] : 1u;
-        if (state.spannedWave) {
-            localX = 64u;
-            localY = 1u;
-            localZ = 1u;
-        }
-        if (state.laneCount == 2) {
-            localX = ((localX * localY * localZ + 63u) / 64u) * 32u;
-            localY = 1u;
-            localZ = 1u;
-        }
-        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeLocalSize, localX, localY, localZ);
+        const auto local = WorkgroupLocalSize(state, *workgroup);
+        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeLocalSize, local[0], local[1], local[2]);
     }
     if (StageOf(state) == IrShaderStage::Pixel) {
         const auto& pixel = PixelInfo(state);

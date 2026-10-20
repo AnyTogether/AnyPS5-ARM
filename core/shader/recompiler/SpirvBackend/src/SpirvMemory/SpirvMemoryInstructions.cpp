@@ -917,7 +917,7 @@ std::uint32_t Atomic32(SpirvValueEmitContext& ctx, const IrValue& inst, const Me
             const auto old = EmitAtomicOperation(ctx, inst, pointer, scope);
             if (lds) {
                 const std::uint32_t semantics = spv::MemorySemanticsAcquireReleaseMask | LdsMemorySemantics(state);
-                state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, scope), ConstantU32(state, semantics));
+                if (!state.insideLdsLock) state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, scope), ConstantU32(state, semantics));
             } else {
                 EmitDeviceAtomicMemoryBarrier(state);
             }
@@ -1036,7 +1036,7 @@ std::uint32_t SharedAtomicUpdate(SpirvValueEmitContext& ctx, const IrValue& inst
         if (InFunctionStorage(state, mem.kind)) return UpdateFunctionElement(state, pointer, next);
         const auto old = AtomicUpdate(state, pointer, mem.kind, next);
         const std::uint32_t semantics = spv::MemorySemanticsAcquireReleaseMask | LdsMemorySemantics(state);
-        state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, spv::ScopeWorkgroup), ConstantU32(state, semantics));
+        if (!state.insideLdsLock) state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, spv::ScopeWorkgroup), ConstantU32(state, semantics));
         return old;
     });
 }
@@ -1302,7 +1302,7 @@ std::uint32_t AddressAtomic(SpirvValueEmitContext& ctx, const IrValue& inst) {
     });
 }
 
-std::uint32_t AppendConsume(SpirvValueEmitContext& ctx, const IrValue& inst, bool append, bool ordered = false) {
+std::uint32_t AppendConsume(SpirvValueEmitContext& ctx, const IrValue& inst, bool append, bool ordered = false, bool swap = false) {
     auto& state = ctx.state;
     if (ctx.half == 1u) {
         if (ctx.otherHalf == nullptr) {
@@ -1343,10 +1343,10 @@ std::uint32_t AppendConsume(SpirvValueEmitContext& ctx, const IrValue& inst, boo
     const auto condition = AndCondition(state, isFirst, AndCondition(state, lanesActive, bounds));
     const auto atomic = EmitValueOrZeroIfCondition(state, condition, [&]() {
         if (InFunctionStorage(state, mem.kind)) {
-            return UpdateFunctionElement(state, EmitMemoryElementPointer(state, access, index), [&](std::uint32_t old) { return Binary(state, append ? spv::OpIAdd : spv::OpISub, TypeU32(state), old, count); });
+            return UpdateFunctionElement(state, EmitMemoryElementPointer(state, access, index), [&](std::uint32_t old) { return swap ? amount : Binary(state, append ? spv::OpIAdd : spv::OpISub, TypeU32(state), old, count); });
         }
         const auto value = state.module.AllocateId();
-        state.module.AddFunction(append ? spv::OpAtomicIAdd : spv::OpAtomicISub, TypeU32(state), value, EmitMemoryElementPointer(state, access, index), ConstantU32(state, gds ? spv::ScopeDevice : spv::ScopeWorkgroup), ConstantU32(state, spv::MemorySemanticsMaskNone), amount);
+        state.module.AddFunction(swap ? spv::OpAtomicExchange : append ? spv::OpAtomicIAdd : spv::OpAtomicISub, TypeU32(state), value, EmitMemoryElementPointer(state, access, index), ConstantU32(state, gds ? spv::ScopeDevice : spv::ScopeWorkgroup), ConstantU32(state, spv::MemorySemanticsMaskNone), amount);
         return value;
     });
     return EmitLaneShuffle(state, TypeU32(state), atomic, EmitHostSubgroupLane(state, sourceLane));
@@ -1391,8 +1391,11 @@ std::uint32_t LockedLdsUpdate(SpirvEmitterState& state, std::uint32_t type, std:
     state.module.AddFunction(spv::OpSelectionMerge, attemptMerge, spv::SelectionControlMaskNone);
     state.module.AddFunction(spv::OpBranchConditional, acquired, critical, attemptMerge);
     EmitLabel(state, critical);
+    state.insideLdsLock = true;
     const auto old = update();
-    state.module.AddFunction(spv::OpAtomicStore, lock, ConstantU32(state, spv::ScopeWorkgroup), ConstantU32(state, spv::MemorySemanticsReleaseMask | LdsMemorySemantics(state)), ConstantU32(state, 0u));
+    state.insideLdsLock = false;
+    const auto released = state.module.AllocateId();
+    state.module.AddFunction(spv::OpAtomicExchange, TypeU32(state), released, lock, ConstantU32(state, spv::ScopeWorkgroup), ConstantU32(state, spv::MemorySemanticsReleaseMask | LdsMemorySemantics(state)), ConstantU32(state, 0u));
     const auto criticalExit = state.currentLabel;
     state.module.AddFunction(spv::OpBranch, attemptMerge);
     EmitLabel(state, attemptMerge);
@@ -1897,6 +1900,10 @@ std::uint32_t EmitDataConsume(SpirvValueEmitContext& ctx, const IrValue& inst) {
 
 std::uint32_t EmitDataOrderedCount(SpirvValueEmitContext& ctx, const IrValue& inst) {
     return AppendConsume(ctx, inst, true, true);
+}
+
+std::uint32_t EmitDataOrderedSwap(SpirvValueEmitContext& ctx, const IrValue& inst) {
+    return AppendConsume(ctx, inst, true, true, true);
 }
 
 

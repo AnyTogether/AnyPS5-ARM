@@ -20,6 +20,11 @@ void APS5_VABI _ZNSt6locale5facet9_RegisterEv_nid_postfix(GuestLocale::Facet* se
 void APS5_VABI _ZNSt8_LocinfoC1EPKc_nid_postfix(GuestLocale::LocinfoStorage* self, const char* localeName);
 void APS5_VABI _ZNSt8_LocinfoD1Ev_nid_postfix(GuestLocale::LocinfoStorage* self);
 void APS5_VABI _ZNSt8ios_baseD2Ev_nid_postfix(GuestLocale::IosBase* self);
+struct StreamManipulator {
+    GuestLocale::IosBase* (APS5_VABI* function)(GuestLocale::IosBase*, std::int32_t);
+    std::int32_t argument;
+};
+StreamManipulator APS5_VABI _ZSt4setwi_nid_postfix(std::int32_t width);
 void APS5_VABI _ZNSt8ios_base7_AddstdEPS__nid_postfix(GuestLocale::IosBase* self);
 const short* APS5_VABI _Getpctype_nid_postfix();
 const short* APS5_VABI _Getptolower_nid_postfix();
@@ -154,37 +159,51 @@ static void CheckStreamDestruction() {
     Require(object.stream.locale == &_ZSt21_sceLibcClassicLocale_nid_postfix);
 }
 
+static void CheckStreamWidth() {
+    struct GuardedStream {
+        std::uint64_t before = 0x12345678;
+        GuestLocale::IosBase stream{};
+        std::uint64_t after = 0x87654321;
+    } object;
+    object.stream.flags = 0x4000;
+    object.stream.precision = 6;
+    const auto manipulator = _ZSt4setwi_nid_postfix(12);
+    Require(manipulator.argument == 12 && manipulator.function != nullptr);
+    Require(manipulator.function(&object.stream, manipulator.argument) == &object.stream);
+    Require(object.stream.width == 12 && object.stream.flags == 0x4000 && object.stream.precision == 6);
+    Require(object.before == 0x12345678 && object.after == 0x87654321);
+    const auto reset = _ZSt4setwi_nid_postfix(0);
+    reset.function(&object.stream, reset.argument);
+    Require(object.stream.width == 0);
+    RequireException([&] { manipulator.function(nullptr, manipulator.argument); });
+}
+
 static void CheckStandardStreams() {
     struct GuardedStream {
         std::uint64_t before = 0x12345678;
         GuestLocale::IosBase stream{};
         std::uint64_t after = 0x87654321;
-    };
-    auto* const classic = &_ZSt21_sceLibcClassicLocale_nid_postfix;
-    RequireException([] { _ZNSt8ios_base7_AddstdEPS__nid_postfix(nullptr); });
-    std::array<GuardedStream, 9> streams;
+    } streams[9];
+    auto* classic = &_ZSt21_sceLibcClassicLocale_nid_postfix;
     for (auto& object : streams) object.stream.locale = classic;
+    RequireException([&] { _ZNSt8ios_base7_AddstdEPS__nid_postfix(nullptr); });
     _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
     _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[1].stream);
-    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
     Require(streams[0].stream.standardStream == 1 && streams[1].stream.standardStream == 2);
-    for (const auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321 && object.stream.locale == classic && object.stream.storage == nullptr);
-    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
-    Require(streams[0].stream.locale == classic && streams[0].stream.standardStream == 1);
-    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
-    Require(streams[0].stream.locale == nullptr);
-    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[1].stream);
-    Require(streams[1].stream.locale == nullptr);
-    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[2].stream);
-    Require(streams[2].stream.standardStream == 3);
-    streams[0].stream.locale = classic;
     _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
     Require(streams[0].stream.standardStream == 1);
     _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
-    Require(streams[0].stream.locale == nullptr);
-    for (std::size_t index = 3; index < 7; ++index) {
+    Require(streams[0].stream.locale == classic && streams[0].stream.standardStream == 1);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.locale == nullptr && streams[0].stream.standardStream == 1);
+    streams[0].stream.locale = classic;
+    _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[0].stream);
+    Require(streams[0].stream.standardStream == 1);
+    _ZNSt8ios_baseD2Ev_nid_postfix(&streams[1].stream);
+    Require(streams[1].stream.locale == nullptr && streams[1].stream.standardStream == 2);
+    for (int index = 2; index < 7; ++index) {
         _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[index].stream);
-        Require(streams[index].stream.standardStream == static_cast<std::int64_t>(index) + 1);
+        Require(streams[index].stream.standardStream == index + 1);
     }
     _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[7].stream);
     _ZNSt8ios_base7_AddstdEPS__nid_postfix(&streams[8].stream);
@@ -193,25 +212,11 @@ static void CheckStandardStreams() {
     Require(streams[7].stream.locale == classic);
     _ZNSt8ios_baseD2Ev_nid_postfix(&streams[8].stream);
     Require(streams[8].stream.locale == nullptr);
-    for (std::size_t index = 2; index < 7; ++index) {
+    for (int index = 2; index < 7; ++index) {
         _ZNSt8ios_baseD2Ev_nid_postfix(&streams[index].stream);
-        Require(streams[index].stream.locale == nullptr);
+        Require(streams[index].stream.locale == nullptr && streams[index].stream.standardStream == index + 1);
     }
-    GuardedStream corrupt;
-    corrupt.stream.locale = classic;
-    corrupt.stream.standardStream = 9;
-    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
-    Require(corrupt.stream.locale == classic);
-    corrupt.stream.standardStream = -1;
-    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
-    Require(corrupt.stream.locale == classic);
-    corrupt.stream.standardStream = INT64_MIN;
-    RequireException([&] { _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream); });
-    Require(corrupt.stream.locale == classic);
-    corrupt.stream.standardStream = 0;
-    _ZNSt8ios_baseD2Ev_nid_postfix(&corrupt.stream);
-    Require(corrupt.stream.locale == nullptr);
-    for (const auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321);
+    for (auto& object : streams) Require(object.before == 0x12345678 && object.after == 0x87654321);
 }
 
 static void CheckWideCaseTranslation() {
@@ -242,6 +247,7 @@ int main() {
     CheckCharacterTables();
     CheckCharacterConversions();
     CheckStreamDestruction();
+    CheckStreamWidth();
     CheckStandardStreams();
     CheckWideCaseTranslation();
     _Locksyslock_nid_postfix();

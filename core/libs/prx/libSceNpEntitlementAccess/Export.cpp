@@ -191,4 +191,24 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfoList() {
     return SCE_NP_ERROR_SIGNED_OUT;
 }
 
+int APS5_VABI sceNpEntitlementAccessGetAddcontEntitlementInfoIndividual() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpEntitlementAccessPollConsumableEntitlementInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpEntitlementAccessRequestConsumableEntitlementInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceNpEntitlementAccessRequestConsumeEntitlement() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 }

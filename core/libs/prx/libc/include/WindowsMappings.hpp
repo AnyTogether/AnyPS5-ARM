@@ -76,7 +76,8 @@ public:
         reset(reinterpret_cast<std::uintptr_t>(address), bytes);
     }
 
-    void Map(void* address, std::size_t bytes, HANDLE section, std::uint64_t offset, DWORD protection, bool watched = false, bool resident = false) {
+    void Map(void* address, std::size_t bytes, HANDLE section, std::uint64_t offset, DWORD protection, bool watched = false, bool resident = false, DWORD viewProtection = PAGE_EXECUTE_READWRITE, std::size_t sectionBytes = SIZE_MAX) {
+        if (sectionBytes < bytes && (resident || sectionBytes == 0 || bytes - sectionBytes >= pageBytes)) throw std::runtime_error("shared guest mapping extends a whole page past its section");
         std::lock_guard lock(mutex);
         collectableRanges.clear();
         auto cursor = reinterpret_cast<std::uintptr_t>(address);
@@ -134,11 +135,12 @@ public:
             for (const auto alias : aliases) {
                 if (views.at(alias).resident) demote(alias);
             }
+            const auto viewBytes = std::min(pageBytes, sectionBytes - done);
             split(base, pageBytes);
-            mapShared(base, section, offset + done, protection);
+            mapShared(base, section, offset + done, protection, viewProtection, viewBytes);
             slot->stored = true;
             shared->aliases.push_back(base);
-            views.emplace(base, View{shared, protection, {}, 0, owned, offset + done, 0, 0, false, slot});
+            views.emplace(base, View{shared, protection, {}, 0, owned, offset + done, 0, 0, false, slot, hostPages(viewBytes)});
             remember(freshRanges, base, base + pageBytes);
             invalidate(*shared);
             done += pageBytes;
@@ -163,7 +165,7 @@ public:
             for (const auto alias : page.aliases) {
                 auto& view = views.at(alias);
                 if (view.armed == 0) continue;
-                protectSubpages(alias, view.armed, view.protection, "pin shared guest page writable");
+                protectSubpages(alias, view.armed, view.protection, "pin shared guest page writable", view.viewBytes);
                 view.armed = 0;
             }
             invalidate(page);
@@ -191,7 +193,7 @@ public:
         }
         const auto written = subpagesOf(base, address, address + 1);
         invalidate(*view.page, written);
-        protectSubpages(base, written, view.protection, "resume shared memory write");
+        protectSubpages(base, written, view.protection, "resume shared memory write", view.viewBytes);
         view.armed &= static_cast<std::uint8_t>(~written);
         return true;
     }
@@ -233,7 +235,7 @@ public:
             invalidate(*view.page, written);
             const auto opened = static_cast<std::uint8_t>(view.armed & written);
             if (opened == 0) continue;
-            protectSubpages(it->first, opened, view.protection, "open shared memory to a host write");
+            protectSubpages(it->first, opened, view.protection, "open shared memory to a host write", view.viewBytes);
             view.armed &= static_cast<std::uint8_t>(~opened);
         }
         return true;
@@ -279,6 +281,7 @@ public:
         for (std::size_t done = 0; done < bytes; done += pageBytes) {
             const auto page = views.find(address + done);
             if (page == views.end()) throw refuse("the range is not a run of shared views");
+            if (page->second.viewBytes != pageBytes) throw refuse("a page extends past the end of its file");
             if (page->second.offset != offset + done || (page->second.section != section && !sameSection(page->second.section->handle, section->handle))) contiguous = false;
         }
         if (!contiguous) return mapAliasRuns(address, bytes);
@@ -423,7 +426,7 @@ public:
                             continue;
                         }
                         const DWORD protection = other.protection == PAGE_EXECUTE_READWRITE ? PAGE_EXECUTE_READ : PAGE_READONLY;
-                        protectSubpages(alias, arming, protection, "arm shared memory write tracking");
+                        protectSubpages(alias, arming, protection, "arm shared memory write tracking", other.viewBytes);
                         other.armed |= arming;
                     }
                     const auto tracked = static_cast<std::uint8_t>(settled & ~untracked);
@@ -534,6 +537,7 @@ private:
         std::uint8_t collected = 0;
         bool resident = false;
         std::shared_ptr<Physical> slot;
+        std::size_t viewBytes = pageBytes;
     };
     struct Run {
         std::uintptr_t end;
@@ -606,12 +610,22 @@ private:
         if (!allocate(GetCurrentProcess(), reinterpret_cast<void*>(base), bytes, flags, PAGE_READWRITE, nullptr, 0)) fail("replace guest placeholder with resident direct memory");
     }
 
-    void mapShared(std::uintptr_t base, HANDLE section, std::uint64_t offset, DWORD protection) {
+    static std::size_t hostPages(std::size_t bytes) {
+        return (bytes + subpageBytes - 1) & ~(subpageBytes - 1);
+    }
+
+    void mapShared(std::uintptr_t base, HANDLE section, std::uint64_t offset, DWORD protection, DWORD viewProtection = PAGE_EXECUTE_READWRITE, std::size_t sectionBytes = pageBytes) {
         void* page = reinterpret_cast<void*>(base);
-        if (!map(section, GetCurrentProcess(), page, offset, pageBytes, MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0)) fail("map shared guest page");
-        if (query(base).State == MEM_RESERVE && !VirtualAlloc(page, pageBytes, MEM_COMMIT, PAGE_EXECUTE_READWRITE)) fail("commit shared guest page");
+        const auto viewBytes = hostPages(sectionBytes);
+        if (viewBytes != pageBytes) split(base, viewBytes);
+        if (!map(section, GetCurrentProcess(), page, offset, sectionBytes, MEM_REPLACE_PLACEHOLDER, viewProtection, nullptr, 0)) fail("map shared guest page");
+        if (query(base).State == MEM_RESERVE && !VirtualAlloc(page, viewBytes, MEM_COMMIT, PAGE_EXECUTE_READWRITE)) fail("commit shared guest page");
         DWORD previous;
-        if (!VirtualProtect(page, pageBytes, protection, &previous)) fail("protect shared guest page");
+        if (!VirtualProtect(page, viewBytes, protection, &previous)) fail("protect shared guest page");
+        if (viewBytes == pageBytes) return;
+        void* zeros = reinterpret_cast<void*>(base + viewBytes);
+        if (!allocate(GetCurrentProcess(), zeros, pageBytes - viewBytes, MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0)) fail("replace guest placeholder past the end of a file with zero pages");
+        if (!VirtualProtect(zeros, pageBytes - viewBytes, protection, &previous)) fail("protect guest pages past the end of a file");
     }
 
     static bool blank(std::uintptr_t page) {
@@ -733,14 +747,14 @@ private:
         return static_cast<std::uint8_t>(((1u << (last + 1)) - 1) & ~((1u << first) - 1));
     }
 
-    static void protectSubpages(std::uintptr_t base, std::uint8_t mask, DWORD protection, const char* operation) {
+    static void protectSubpages(std::uintptr_t base, std::uint8_t mask, DWORD protection, const char* operation, std::size_t viewBytes = pageBytes) {
         for (std::size_t sub = 0; sub < subpages;) {
             if ((mask & (1u << sub)) == 0) {
                 ++sub;
                 continue;
             }
-            auto stop = sub;
-            while (stop < subpages && (mask & (1u << stop)) != 0) ++stop;
+            auto stop = sub + 1;
+            while (stop < subpages && (mask & (1u << stop)) != 0 && stop * subpageBytes != viewBytes) ++stop;
             DWORD previous;
             if (!VirtualProtect(reinterpret_cast<void*>(base + sub * subpageBytes), (stop - sub) * subpageBytes, protection, &previous)) fail(operation);
             sub = stop;

@@ -64,6 +64,7 @@ ConvertedExecutable Convert(const Cli::Args& args, const std::string& inputPath,
     options.WindowsFixedBase = mainExecutable ? args.windowsFixedBase : std::nullopt;
     options.WindowsDiagnostics = args.windowsDiagnostics && mainExecutable;
     options.LinuxFixedBase = args.linuxFixedBase;
+    options.MacosFixedBase = args.macosFixedBase;
     options.ExcludedModules = args.excludedSceModules;
     options.Patches = patches;
     options.TargetName = targetName;
@@ -73,8 +74,6 @@ ConvertedExecutable Convert(const Cli::Args& args, const std::string& inputPath,
     auto converted = Relinker::Conversion(progress).Convert(std::move(input), options);
     return {inputPath, absPath, std::move(converted.Analysis), std::move(converted.Modules), std::move(converted.Executable), std::move(converted.WindowsDiagnostics), std::move(converted.AppliedPatches)};
 }
-
-#ifdef _WIN32
 
 class OutputIdentityDirectory {
 public:
@@ -118,8 +117,6 @@ private:
     std::filesystem::path directory;
 };
 
-#endif
-
 bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::path& second) {
     if (std::filesystem::equivalent(first, second)) return true;
 #ifdef _WIN32
@@ -148,12 +145,11 @@ bool SameOutputDestination(const std::filesystem::path& first, const std::filesy
     if (firstPath == secondPath) return true;
     if (std::filesystem::exists(first) && std::filesystem::exists(second)) return SameOutputFile(first, second);
 #ifdef _WIN32
-    auto firstName = Io::Utf8Path(firstPath.filename());
-    auto secondName = Io::Utf8Path(secondPath.filename());
-    for (auto* name : {&firstName, &secondName})
-        for (auto& character : *name)
-            if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
-    if (firstName == secondName && std::filesystem::exists(firstPath.parent_path()) &&
+    const auto firstName = firstPath.filename().native();
+    const auto secondName = secondPath.filename().native();
+    const auto comparison = CompareStringOrdinal(firstName.c_str(), -1, secondName.c_str(), -1, TRUE);
+    if (comparison == 0) throw Domain::RelinkerException("Cannot compare output filenames");
+    if (comparison == CSTR_EQUAL && std::filesystem::exists(firstPath.parent_path()) &&
         std::filesystem::exists(secondPath.parent_path()) && std::filesystem::equivalent(firstPath.parent_path(), secondPath.parent_path())) {
         OutputIdentityDirectory probe(firstPath.parent_path());
         auto alternateName = Io::Utf8Path(probe.GetDirectory().filename());
@@ -161,6 +157,18 @@ bool SameOutputDestination(const std::filesystem::path& first, const std::filesy
             if (character >= 'a' && character <= 'z') character = static_cast<char>(character - ('a' - 'A'));
         const auto alternate = firstPath.parent_path() / Io::NativePath(alternateName);
         const bool same = std::filesystem::exists(alternate) && std::filesystem::equivalent(probe.GetDirectory(), alternate);
+        probe.Remove();
+        return same;
+    }
+#else
+    if (std::filesystem::exists(firstPath.parent_path()) && std::filesystem::exists(secondPath.parent_path()) &&
+        std::filesystem::equivalent(firstPath.parent_path(), secondPath.parent_path())) {
+        OutputIdentityDirectory probe(firstPath.parent_path());
+        const auto name = probe.GetDirectory() / firstPath.filename();
+        const auto alternate = probe.GetDirectory() / secondPath.filename();
+        std::filesystem::create_directory(name);
+        const bool same = std::filesystem::exists(alternate) && std::filesystem::equivalent(name, alternate);
+        std::filesystem::remove(name);
         probe.Remove();
         return same;
     }

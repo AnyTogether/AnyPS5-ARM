@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -18,6 +19,8 @@
 #include "prx/libc/include/GuestTime.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
 
+extern "C" char* tzname_nid_postfix[2];
+
 namespace {
 
 constexpr const char* WEEKDAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -27,16 +30,38 @@ constexpr std::int64_t SECONDS_PER_DAY = 86400;
 constexpr std::int64_t DAYS_FROM_MARCH_TO_YEAR_END = 306;
 #if defined(_WIN32) || defined(__APPLE__)
 constexpr std::int64_t CALENDAR_CYCLE_YEARS = 400;
-#endif
-#ifdef _WIN32
 constexpr std::int64_t CALENDAR_CYCLE_SECONDS = 146097 * SECONDS_PER_DAY;
+#ifdef _WIN32
+constexpr int HOST_ORDINARY_FIRST_YEAR = 70;
+constexpr int HOST_ORDINARY_LAST_YEAR = 1100;
+constexpr std::int64_t HOST_FIRST_SECOND = 0;
 constexpr std::int64_t HOST_LAST_SECOND = 32535215999;
+#else
+constexpr int HOST_ORDINARY_FIRST_YEAR = 0;
+constexpr int HOST_ORDINARY_LAST_YEAR = std::numeric_limits<int>::max();
+constexpr std::int64_t HOST_FIRST_SECOND = -2208988800;
+constexpr std::int64_t HOST_LAST_SECOND = std::numeric_limits<std::int64_t>::max();
 #endif
-#if defined(_WIN32) || defined(__APPLE__)
 
 std::int64_t calendarCycles(std::int64_t value, std::int64_t cycle) {
     return value >= 0 ? value / cycle : -((-(value + 1)) / cycle + 1);
 }
+
+#ifdef __APPLE__
+bool timeOfLocalSeconds(std::int64_t local, std::int64_t& time) {
+    if (local < std::numeric_limits<std::int64_t>::min() + SECONDS_PER_DAY) return false;
+    time = local;
+    for (int step = 0; step < 4; ++step) {
+        const std::time_t probe = static_cast<std::time_t>(time);
+        std::tm fields{};
+        if (localtime_r(&probe, &fields) == nullptr) return false;
+        const std::int64_t next = local - fields.tm_gmtoff;
+        if (next == time) return true;
+        time = next;
+    }
+    return true;
+}
+#endif
 
 std::int64_t utcSeconds(const std::tm& time) {
     const std::int64_t years = calendarCycles(time.tm_mon, 12);
@@ -48,31 +73,6 @@ std::int64_t utcSeconds(const std::tm& time) {
     const std::int64_t dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
     const std::int64_t days = era * 146097 + dayOfEra - 719468 + time.tm_mday - 1;
     return days * SECONDS_PER_DAY + std::int64_t{time.tm_hour} * 3600 + std::int64_t{time.tm_min} * 60 + time.tm_sec;
-}
-#endif
-
-#ifdef __APPLE__
-// Finds the time whose local offset turns it into the requested local fields. Time zone data has no daylight saving
-// time before 1900, the only range this serves, so the offset alone decides the answer and tm_isdst does not. Fields
-// that name no local time (skipped by an offset change) resolve with one of the two offsets around the change.
-bool invertLocalTime(const std::tm& requested, std::time_t& result) {
-    const std::int64_t local = utcSeconds(requested);
-    long offset = 0;
-    for (int attempt = 0; attempt < 8; ++attempt) {
-        const std::time_t candidate = static_cast<std::time_t>(local - offset);
-        std::tm converted{};
-        if (localtime_r(&candidate, &converted) == nullptr) return false;
-        if (converted.tm_gmtoff == offset) {
-            result = candidate;
-            return true;
-        }
-        offset = converted.tm_gmtoff;
-    }
-    const std::time_t candidate = static_cast<std::time_t>(local - offset);
-    std::tm converted{};
-    if (localtime_r(&candidate, &converted) == nullptr) return false;
-    result = candidate;
-    return true;
 }
 #endif
 
@@ -159,6 +159,80 @@ const bool timeZoneFixed = [] {
 #endif
 
 extern "C" int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr);
+
+namespace {
+
+bool setHostZone(const char* zone) {
+#ifdef _WIN32
+    return _putenv_s("TZ", zone == nullptr ? "" : zone) == 0;
+#else
+    return zone == nullptr ? ::unsetenv("TZ") == 0 : ::setenv("TZ", zone, 1) == 0;
+#endif
+}
+
+const char* hostZoneFor(const char* guest) {
+#ifdef _WIN32
+    return guest != nullptr && guest[0] == 0 ? "UTC0" : guest;
+#else
+    return guest == nullptr ? ":/etc/localtime" : guest;
+#endif
+}
+
+std::recursive_mutex& zoneMutex() {
+    static std::recursive_mutex mutex;
+    return mutex;
+}
+
+char** HostZoneNames();
+
+void applyGuestZone() {
+    static bool initialized = false;
+    static bool present = false;
+    static std::string current;
+    if (!initialized) {
+        const char* host = std::getenv("TZ");
+        present = host != nullptr;
+        if (present) current = host;
+        initialized = true;
+    }
+    std::string guest;
+    const bool guestPresent = CopyGuestEnvironment_nid_no_patch("TZ", guest);
+    if (guestPresent == present && (!guestPresent || current == guest)) return;
+    if (!setHostZone(hostZoneFor(guestPresent ? guest.c_str() : nullptr))) throw std::runtime_error("tzset: the host rejected the guest TZ");
+    present = guestPresent;
+    current = guest;
+#ifdef _WIN32
+    _tzset();
+#else
+    ::tzset();
+#endif
+    char** names = HostZoneNames();
+    tzname_nid_postfix[0] = names[0];
+    tzname_nid_postfix[1] = names[1];
+}
+
+int& zoneDepth() {
+    static thread_local int depth = 0;
+    return depth;
+}
+
+class ZoneScope {
+public:
+    ZoneScope() : lock(zoneMutex()) {
+        if (zoneDepth() == 0) applyGuestZone();
+        ++zoneDepth();
+    }
+
+    ~ZoneScope() { --zoneDepth(); }
+
+    ZoneScope(const ZoneScope&) = delete;
+    ZoneScope& operator=(const ZoneScope&) = delete;
+
+private:
+    std::lock_guard<std::recursive_mutex> lock;
+};
+
+}  // namespace
 
 namespace {
 
@@ -455,6 +529,7 @@ std::size_t APS5_VABI mbsrtowcs_nid_postfix(std::uint16_t* destination, const ch
 int APS5_VABI ___mb_cur_max_nid_postfix();
 
 void APS5_VABI tzset_nid_postfix(void) {
+    const ZoneScope zone;
     char** names = HostZoneNames();
     tzname_nid_postfix[0] = names[0];
     tzname_nid_postfix[1] = names[1];
@@ -508,11 +583,13 @@ GuestTm* APS5_VABI localtime_nid_postfix(const int64_t* timer) {
 
 GuestTm* APS5_VABI localtime_s_nid_postfix(const int64_t* timer, GuestTm* result) {
     if (timer == nullptr || result == nullptr) return nullptr;
+    const ZoneScope zone;
     std::tm host{};
     const int callerError = errno;
 #ifdef _WIN32
     const std::int64_t cycles = *timer >= 0 && *timer <= HOST_LAST_SECOND ? 0 : calendarCycles(*timer, CALENDAR_CYCLE_SECONDS);
-    const std::time_t t = static_cast<std::time_t>(*timer - cycles * CALENDAR_CYCLE_SECONDS);
+    const std::int64_t offset = *timer % CALENDAR_CYCLE_SECONDS;
+    const std::time_t t = static_cast<std::time_t>(cycles == 0 ? *timer : offset < 0 ? offset + CALENDAR_CYCLE_SECONDS : offset);
     if (localtime_s(&host, &t) != 0) {
         errno = callerError;
         return nullptr;
@@ -557,15 +634,27 @@ GuestTm* APS5_VABI gmtime_nid_postfix(const int64_t* timer) {
 }
 
 int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
+    const ZoneScope zone;
     std::tm host = toHostTm(*timeptr);
     host.tm_wday = -1;
     int64_t moved = 0;
-#ifdef _WIN32
-    const bool ordinary = host.tm_year > 70 && host.tm_year < 1100 && host.tm_mon >= 0 && host.tm_mon < 12 && host.tm_mday >= 1 && host.tm_mday <= 31
-        && host.tm_hour >= 0 && host.tm_hour < 24 && host.tm_min >= 0 && host.tm_min < 60 && host.tm_sec >= 0 && host.tm_sec <= 60;
-    const std::int64_t approximate = ordinary ? SECONDS_PER_DAY : utcSeconds(host);
-    if (approximate < SECONDS_PER_DAY || approximate > HOST_LAST_SECOND - SECONDS_PER_DAY) {
-        moved = calendarCycles(approximate - SECONDS_PER_DAY, CALENDAR_CYCLE_SECONDS) * CALENDAR_CYCLE_SECONDS;
+#if defined(_WIN32) || defined(__APPLE__)
+    const bool ordinary = host.tm_year > HOST_ORDINARY_FIRST_YEAR && host.tm_year < HOST_ORDINARY_LAST_YEAR && host.tm_mon >= 0 && host.tm_mon < 12
+        && host.tm_mday >= 1 && host.tm_mday <= 31 && host.tm_hour >= 0 && host.tm_hour < 24 && host.tm_min >= 0 && host.tm_min < 60
+        && host.tm_sec >= 0 && host.tm_sec <= 60;
+    constexpr std::int64_t firstOrdinary = HOST_FIRST_SECOND + SECONDS_PER_DAY;
+    const std::int64_t approximate = ordinary ? firstOrdinary : utcSeconds(host);
+#ifdef __APPLE__
+    if (approximate < firstOrdinary) {
+        std::int64_t time = 0;
+        GuestTm normalized{};
+        if (!timeOfLocalSeconds(approximate, time) || localtime_s_nid_postfix(&time, &normalized) == nullptr) return -1;
+        *timeptr = normalized;
+        return time;
+    }
+#endif
+    if (approximate < firstOrdinary || approximate > HOST_LAST_SECOND - SECONDS_PER_DAY) {
+        moved = calendarCycles(approximate - firstOrdinary, CALENDAR_CYCLE_SECONDS) * CALENDAR_CYCLE_SECONDS;
         GuestTm window{};
         if (!utcCalendarFields(approximate - moved, window)) return -1;
         window.tm_isdst = host.tm_isdst;
@@ -573,18 +662,7 @@ int64_t APS5_VABI libc_mktime_nid_postfix(GuestTm* timeptr) {
         host.tm_wday = -1;
     }
 #endif
-#ifdef __APPLE__
-    const std::tm requested = host;
-    const int savedErrno = errno;
-#endif
-    std::time_t t = std::mktime(&host);
-#ifdef __APPLE__
-    // macOS mktime rejects local times before 1900 although localtime_r converts them, so invert localtime_r there.
-    if (t == static_cast<std::time_t>(-1) && host.tm_wday == -1) {
-        errno = savedErrno;
-        if (!invertLocalTime(requested, t)) return -1;
-    }
-#endif
+    const std::time_t t = std::mktime(&host);
     if (t == static_cast<std::time_t>(-1) && host.tm_wday == -1) return -1;
     const int64_t time = static_cast<int64_t>(t) + moved;
     GuestTm normalized{};
@@ -598,6 +676,7 @@ int64_t APS5_VABI mktime_nid_postfix(GuestTm* timeptr) {
 }
 
 size_t APS5_VABI libc_strftime_nid_postfix(char* str, size_t count, const char* format, const GuestTm* timeptr) {
+    const ZoneScope zone;
     tzset_nid_postfix();
     return formatGuestTime(str, count, format, *timeptr);
 }
