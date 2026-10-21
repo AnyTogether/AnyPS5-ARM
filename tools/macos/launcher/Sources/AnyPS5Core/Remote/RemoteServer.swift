@@ -20,6 +20,8 @@ public struct PairingRequest: Identifiable, Sendable {
 /// One phone is connected at a time. Everything runs on one private queue.
 public final class RemoteServer: @unchecked Sendable {
     public static let serviceType = "_anyps5-remote._tcp"
+    /// The control port the launcher tries first; the phone's manual address field assumes it.
+    public static let preferredPort: UInt16 = 47700
 
     public struct Events: Sendable {
         public var pairing: @Sendable (PairingRequest) -> Void
