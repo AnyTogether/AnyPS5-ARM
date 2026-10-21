@@ -51,7 +51,19 @@ Several games can be queued. When the launcher's toolkit is newer than the one a
 
 ![The start screen while a game opens](docs/screenshots/launcher-starting.jpg)
 
-**Play** shows a start screen with the game's icon and a timer until the game's first window appears. The first start of a title takes longest, because Rosetta translates it and its shaders compile; later starts use the caches. Esc stops the game before it shows. Once the window is up the launcher hands it the front, and it can hide itself while you play (Settings → Behaviour). If the game closes before its window appears, the launcher says so, and **⋯ → Open Log** shows why.
+**Play** shows a start screen with the game's icon and a timer until the game's first window appears. The first start of a title takes longest, because Rosetta translates it and its shaders compile; later starts use the caches. Esc stops the game before it shows. Once the window is up the launcher hands it the front, and it can hide itself while you play (Settings → Behaviour).
+
+### When a game stops
+
+When a game ends on an error, the launcher reads why from that start's log and from the crash report macOS leaves, and says it in plain words, on the home screen and in the log:
+
+- a **missing module** (unlocking again may fix it);
+- a **system function the engine does not support yet**, by name;
+- the **GPU stopping** or **running out of memory**;
+- any other **engine error**, with its message;
+- a **crash**, such as `EXC_BAD_ACCESS (SIGSEGV)`.
+
+**⋯ → Make a Report** (or the button in the log) saves a text file to attach on Discord or GitHub: the Mac model and chip, macOS, the launcher and toolkit versions, the game, its settings, the reason and the log of its last start.
 
 ### Game settings
 
@@ -64,9 +76,10 @@ Each game keeps its own settings, applied at every start:
 - **Vertical sync.**
 - **Controls** (below).
 - **Trophies** (below).
+- **Advanced** (below).
 - **Performance overlay**, off or in any corner of the window.
 - **Game language**: the launcher's, or any of the console's languages.
-- **Unlock Again**, **Show in Finder**, **Open Log**, **Clear Shader Cache** and **Remove Installation**.
+- **Unlock Again**, **Show in Finder**, **Open Log**, **Make a Report**, **Clear Shader Cache** and **Remove Installation**.
 
 <br clear="right">
 
@@ -86,8 +99,32 @@ The keyboard and mouse layout of each game. Pick a pad button or stick direction
 | D-pad | Arrow keys (also the mouse wheel for up and down) |
 | Right stick | T F G H |
 | Options / touchpad | Esc / Backspace (left) and Tab (right) |
+| Slow movement | none: give it a key to walk with the keyboard |
 
 The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls/<game>.ini` at each start and passes it to the game ([format](docs/user/INPUT_MAPPING.md)).
+
+### Advanced settings
+
+![The advanced settings of a game](docs/screenshots/launcher-advanced.jpg)
+
+**⋯ → Advanced** holds the finer settings of each game, each with a line on what it does:
+
+- **Controller sticks:** a deadzone for each stick, which stops a drifting stick.
+- **Mouse as the camera** (middle mouse button or F7 captures the mouse and drives the right stick):
+  - sensitivity;
+  - vertical speed;
+  - the response curve;
+  - the minimum tilt, so slow movement is not lost in the game's own deadzone;
+  - the maximum speed;
+  - smoothing;
+  - how soon the camera stops after the mouse does.
+- **Keyboard:**
+  - how far the sticks tilt while **Slow Movement** is held;
+  - how long a key takes to tilt a stick fully;
+  - how long a key takes to press L2 or R2 fully, for racing games.
+- **Graphics:** the shader cache, on or off.
+- **Sharing:** **Export Settings** saves the game's keys and every setting as one file, and **Import Settings** applies a file someone shared. Post a setup that works for a game, or take one from a friend.
+- **Reset Advanced Settings** brings back the engine's defaults.
 
 ### Trophies
 
@@ -95,7 +132,13 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 
 <sub>The progress in this screenshot is sample data.</sub>
 
-Trophies a game unlocks while you play are kept and listed as on the console:
+When a game earns a trophy while you play, a card drops in at the top of the screen, over the game and in full screen too, with the trophy's icon, name and grade and a sound. It never takes the keyboard or the mouse from the game.
+
+![A trophy card over the game](docs/screenshots/launcher-trophy-banner.jpg)
+
+<sub>The card as the launcher draws it, over a Silksong screenshot.</sub>
+
+Every trophy is kept and listed as on the console:
 
 - The **percentage**, weighted by grade as on the PS5, and the count of **platinum, gold, silver and bronze** trophies earned.
 - Every trophy with its **icon, name, description, grade** and the **day and time you earned it**. Trophies you have not earned yet are greyed out.
@@ -116,6 +159,7 @@ The **library** button shows every game as a grid. **Settings** hold:
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
 - **Behaviour:** the profile name, interface sounds, hiding the launcher while a game runs, and installing Rosetta if it is missing.
+- **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
 - **About:** the app and toolkit versions.
 
 ### Getting around
