@@ -25,11 +25,14 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var overlay = Overlay.off
     /// The console language number (ANYPS5_LANGUAGE), nil to follow the launcher's language.
     public var language: Int?
+    /// Keys moved from the launcher's layout (Controls), by pad action. Optional so settings saved
+    /// before it existed still decode.
+    public var controls: [String: [String]]?
 
     public init() {}
 
-    /// The environment a game starts with.
-    public func environment(launcherLanguage: Int) -> [String: String] {
+    /// The environment a game starts with; `inputFile` is the anyps5-input.ini written for it.
+    public func environment(launcherLanguage: Int, inputFile: URL? = nil) -> [String: String] {
         var environment: [String: String] = [
             "ANYPS5_FULLSCREEN": fullscreen ? "1" : "0",
             "ANYPS5_WINDOW_SIZE": String(min(100, max(30, windowSize))),
@@ -41,7 +44,14 @@ public struct GameSettings: Codable, Equatable, Sendable {
             environment["ANYPS5_OVERLAY_POS"] = position
         }
         if let resolution { environment["APS5_RESOLUTION"] = resolution }
+        if let inputFile { environment["ANYPS5_INPUT_CONFIG"] = inputFile.path }
         return environment
+    }
+
+    /// Writes the game's keyboard and mouse layout to `file` for ANYPS5_INPUT_CONFIG.
+    public func writeInputFile(to file: URL) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(Controls.file(controls ?? [:]).utf8).write(to: file, options: .atomic)
     }
 }
 

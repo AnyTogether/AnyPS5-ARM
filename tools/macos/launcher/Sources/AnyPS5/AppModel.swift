@@ -58,6 +58,7 @@ enum Overlay: Equatable {
     case library
     case log
     case confirmUninstall
+    case controls
 }
 
 struct Toast: Identifiable, Equatable {
@@ -85,6 +86,8 @@ final class AppModel: ObservableObject {
     @Published var panelCategory = 0
     @Published var panelRow = 0
     @Published var panelInRows = false
+    /// The pad action waiting for a key in the controls panel.
+    @Published var capturing: PadAction?
     @Published var libraryIndex = 0
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]
@@ -235,6 +238,50 @@ final class AppModel: ObservableObject {
         preferences.games[game.id] = value
     }
 
+    /// Where a game's keyboard and mouse layout is written before it starts.
+    static func inputFile(for game: Game) -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AnyPS5/Controls/\(game.id).ini")
+    }
+
+    // MARK: Controls
+
+    func startCapture(_ action: PadAction) {
+        capturing = action
+        Sounds.shared.play(.select)
+        Input.shared.capture = { [weak self] event in
+            guard let self else { return false }
+            if event.type == .keyDown && event.keyCode == 53 {
+                self.endCapture()
+                Sounds.shared.play(.back)
+                return true
+            }
+            guard let name = Controls.keyName(forKeyCode: event.keyCode) else { return true }
+            if event.type == .flagsChanged && !Input.pressesModifier(event) { return true }
+            self.assign("KEY:\(name)", to: action)
+            return true
+        }
+    }
+
+    func endCapture() {
+        capturing = nil
+        Input.shared.capture = nil
+    }
+
+    private func assign(_ key: String, to action: PadAction) {
+        guard let game = selectedGame else { return endCapture() }
+        update(game) { settings in
+            let changes = Controls.assign(key, to: action, settings.controls ?? [:])
+            settings.controls = changes.isEmpty ? nil : changes
+        }
+        endCapture()
+        Sounds.shared.play(.move)
+    }
+
+    func resetControls(_ game: Game) {
+        update(game) { $0.controls = nil }
+    }
+
     func resolutionChoices(for game: Game) -> [String] {
         guard let toolkit, let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
         return patches.resolution?.choices ?? []
@@ -330,7 +377,11 @@ final class AppModel: ObservableObject {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = false
-        configuration.environment = settings(for: game).environment(launcherLanguage: preferences.language.consoleLanguage)
+        let settings = settings(for: game)
+        let inputFile = AppModel.inputFile(for: game)
+        // Without the file the game keeps the engine's built-in keys.
+        let written = (try? settings.writeInputFile(to: inputFile)) != nil
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -451,12 +502,15 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls
+        // The controls panel opens on its first key, below the hint.
+        if next == .controls { panelRow = 1 }
         withAnimation(Motion.overlay) { overlay = next }
         Sounds.shared.play(.select)
     }
 
     func closeOverlay() {
+        endCapture()
         withAnimation(Motion.overlay) { overlay = nil }
         Sounds.shared.play(.back)
     }

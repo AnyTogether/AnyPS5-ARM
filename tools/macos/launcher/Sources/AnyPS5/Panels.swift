@@ -12,6 +12,8 @@ struct PanelRow: Identifiable {
         case action(destructive: Bool, run: () -> Void)
         case info(String)
         case text(String, set: (String) -> Void)
+        /// A pad action's keys and mouse buttons (ini sources); choosing it waits for a key.
+        case keys([String], capturing: Bool, capture: () -> Void)
     }
 
     let id: String
@@ -38,6 +40,7 @@ extension AppModel {
         switch overlay {
         case .settings: return settingsCategories()
         case .gameSettings: return selectedGame.map { [PanelCategory(id: "game", title: $0.name, symbol: "gamecontroller", rows: gameRows($0))] } ?? []
+        case .controls: return selectedGame.map { [PanelCategory(id: "controls", title: $0.name, symbol: "keyboard", rows: controlRows($0))] } ?? []
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -144,6 +147,7 @@ extension AppModel {
             }))
         }
         rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync) { [weak self] value in self?.update(game) { $0.vsync = value } }))
+        rows.append(PanelRow(id: "controls", title: T.text(.controls), symbol: "keyboard", kind: .action(destructive: false) { [weak self] in self?.open(.controls) }))
         let overlays = GameSettings.Overlay.allCases
         let overlayNames = [T.text(.overlayOff), T.text(.overlayTopLeft), T.text(.overlayTopRight), T.text(.overlayBottomLeft), T.text(.overlayBottomRight)]
         rows.append(PanelRow(id: "overlay", title: T.text(.overlay), symbol: "speedometer", kind: .choice(options: overlayNames, selected: overlays.firstIndex(of: settings.overlay) ?? 0) { [weak self] index in
@@ -167,6 +171,26 @@ extension AppModel {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
         }
         return rows
+    }
+
+    private func controlRows(_ game: Game) -> [PanelRow] {
+        let changes = settings(for: game).controls ?? [:]
+        var rows = [PanelRow(id: "hint", title: T.text(.controlsHint), kind: .info(""))]
+        for action in PadAction.allCases {
+            rows.append(PanelRow(id: action.rawValue, title: action.title, symbol: action.symbol, kind: .keys(Controls.sources(action, changes), capturing: capturing == action) { [weak self] in
+                self?.startCapture(action)
+            }))
+        }
+        rows.append(PanelRow(id: "reset", title: T.text(.resetControls), symbol: "arrow.counterclockwise", kind: .action(destructive: false) { [weak self] in self?.resetControls(game) }))
+        return rows
+    }
+
+    func backToGameSettings() {
+        endCapture()
+        Sounds.shared.play(.back)
+        withAnimation(Motion.overlay) { overlay = .gameSettings }
+        panelRow = panelCategories().first?.rows.firstIndex { $0.id == "controls" } ?? 0
+        panelInRows = true
     }
 
     func pickGamesFolder() {
@@ -296,6 +320,8 @@ extension AppModel {
         case .action(_, let run):
             Sounds.shared.play(.select)
             run()
+        case .keys(_, _, let capture):
+            capture()
         case .info, .text:
             break
         }
@@ -481,6 +507,8 @@ struct RowView: View {
             Image(systemName: "chevron.right").font(.system(size: 14 * scale, weight: .semibold)).opacity(0.6)
         case .info(let value):
             Text(value).font(.display(15 * scale, .medium)).opacity(0.7).textSelection(.enabled)
+        case .keys(let sources, let capturing, _):
+            KeyCaps(sources: sources, capturing: capturing, focused: focused)
         case .text(let value, let set):
             TextField("", text: $text)
                 .textFieldStyle(.plain)
@@ -520,5 +548,110 @@ struct Switch: View {
         .animation(Motion.focus, value: on)
         .contentShape(Rectangle())
         .onTapGesture(perform: toggle)
+    }
+}
+
+/// A pad action's keys drawn as keycaps, or the prompt while one is awaited.
+struct KeyCaps: View {
+    let sources: [String]
+    let capturing: Bool
+    let focused: Bool
+    @Environment(\.scale) private var scale
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 6 * scale) {
+            if capturing {
+                Text(T.text(.pressKey)).font(.display(15 * scale, .semibold))
+                    .opacity(pulse ? 0.45 : 1)
+                    .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever()) { pulse = true } }
+            } else if sources.allSatisfy({ $0 == Controls.unbound }) {
+                Text(T.text(.noKey)).font(.display(15 * scale, .medium)).opacity(0.5)
+            } else {
+                ForEach(sources.filter { $0 != Controls.unbound }, id: \.self) { source in
+                    Text(KeyCaps.name(source))
+                        .font(.display(13.5 * scale, .semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 9 * scale)
+                        .frame(minWidth: 30 * scale, minHeight: 28 * scale)
+                        .background(RoundedRectangle(cornerRadius: 7 * scale, style: .continuous).fill((focused ? Color.black : Color.white).opacity(source.hasPrefix("KEY:") ? 0.12 : 0.06)))
+                        .overlay(RoundedRectangle(cornerRadius: 7 * scale, style: .continuous).strokeBorder((focused ? Color.black : Color.white).opacity(0.18), lineWidth: 1))
+                }
+            }
+        }
+    }
+
+    /// How a source reads in the launcher's language: Shift rather than Left Shift, arrows as arrows.
+    static func name(_ source: String) -> String {
+        let parts = source.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return source }
+        switch (parts[0], parts[1]) {
+        case ("MOUSE", "Left"): return T.text(.mouseLeft)
+        case ("MOUSE", "Right"): return T.text(.mouseRight)
+        case ("MOUSE", "Middle"): return T.text(.mouseMiddle)
+        case ("MOUSE", "X1"): return T.text(.mouseBack)
+        case ("MOUSE", "X2"): return T.text(.mouseForward)
+        case ("WHEEL", "Up"): return T.text(.wheelUp)
+        case ("WHEEL", "Down"): return T.text(.wheelDown)
+        case ("KEY", "Space"): return T.text(.keySpace)
+        case ("KEY", "Return"): return T.text(.keyEnter)
+        case ("KEY", "Escape"): return "Esc"
+        case ("KEY", "Backspace"): return "⌫"
+        case ("KEY", "Up"): return "↑"
+        case ("KEY", "Down"): return "↓"
+        case ("KEY", "Left"): return "←"
+        case ("KEY", "Right"): return "→"
+        case ("KEY", "Left Shift"), ("KEY", "Right Shift"): return "Shift"
+        case ("KEY", "Left Ctrl"), ("KEY", "Right Ctrl"): return "Ctrl"
+        case ("KEY", "Left Alt"), ("KEY", "Right Alt"): return "Option"
+        case ("KEY", "Left GUI"), ("KEY", "Right GUI"): return "Cmd"
+        case ("KEY", let key): return key
+        default: return parts[1]
+        }
+    }
+}
+
+extension PadAction {
+    var title: String {
+        switch self {
+        case .cross: return "✕  Cross"
+        case .circle: return "○  Circle"
+        case .square: return "□  Square"
+        case .triangle: return "△  Triangle"
+        case .l1: return "L1"
+        case .r1: return "R1"
+        case .l2: return "L2"
+        case .r2: return "R2"
+        case .l3: return "L3"
+        case .r3: return "R3"
+        case .options: return "Options"
+        case .touchLeft: return T.text(.touchpadLeft)
+        case .touchRight: return T.text(.touchpadRight)
+        case .up: return "\(T.text(.dpad)) · \(T.text(.directionUp))"
+        case .down: return "\(T.text(.dpad)) · \(T.text(.directionDown))"
+        case .left: return "\(T.text(.dpad)) · \(T.text(.directionLeft))"
+        case .right: return "\(T.text(.dpad)) · \(T.text(.directionRight))"
+        case .leftStickUp: return "\(T.text(.leftStick)) · \(T.text(.directionUp))"
+        case .leftStickDown: return "\(T.text(.leftStick)) · \(T.text(.directionDown))"
+        case .leftStickLeft: return "\(T.text(.leftStick)) · \(T.text(.directionLeft))"
+        case .leftStickRight: return "\(T.text(.leftStick)) · \(T.text(.directionRight))"
+        case .rightStickUp: return "\(T.text(.rightStick)) · \(T.text(.directionUp))"
+        case .rightStickDown: return "\(T.text(.rightStick)) · \(T.text(.directionDown))"
+        case .rightStickLeft: return "\(T.text(.rightStick)) · \(T.text(.directionLeft))"
+        case .rightStickRight: return "\(T.text(.rightStick)) · \(T.text(.directionRight))"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .cross, .circle, .square, .triangle: return "circle.grid.cross"
+        case .l1, .r1, .l2, .r2: return "l.rectangle.roundedbottom"
+        case .l3, .r3: return "l.joystick.press.down"
+        case .options: return "line.3.horizontal"
+        case .touchLeft, .touchRight: return "hand.point.up.left"
+        case .up, .down, .left, .right: return "dpad"
+        case .leftStickUp, .leftStickDown, .leftStickLeft, .leftStickRight: return "l.joystick"
+        case .rightStickUp, .rightStickDown, .rightStickLeft, .rightStickRight: return "r.joystick"
+        }
     }
 }

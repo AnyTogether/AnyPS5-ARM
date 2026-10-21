@@ -506,6 +506,12 @@ extension AppModel {
         switch overlay {
         case .settings, .gameSettings, .confirmUninstall:
             return panelCommand(command)
+        case .controls:
+            if command == .back || command == .options {
+                backToGameSettings()
+                return true
+            }
+            return panelCommand(command)
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true

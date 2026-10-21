@@ -76,7 +76,22 @@ With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/r
 
 **Unlocking.** A game that has not been converted yet shows a lock. **Unlock** opens its `eboot.bin` and modules even when they are still SELF containers, relinks them for macOS and makes the game app, with a PS5-style progress bar. The game files are APFS clones of the dump, so an unlocked game takes no extra space. A dump that is still encrypted is reported instead of converted.
 
-**Playing.** **Play** starts the game. **⋯** (or `O` / △) opens its settings: output resolution (for titles with a resolution patch, such as Stray), window or full screen, window size, vertical sync, the performance overlay, the game's language, and Show in Finder, the log, clearing the shader cache, unlocking again or removing the installation.
+**Playing.** **Play** starts the game. **⋯** (or `O` / △) opens its settings: output resolution (for titles with a resolution patch, such as Stray), window or full screen, window size, vertical sync, the performance overlay, the game's language, **Controls**, and Show in Finder, the log, clearing the shader cache, unlocking again or removing the installation.
+
+**Controls.** The keyboard and mouse layout for each game. Pick a pad button or stick direction, then press the key you want for it; Esc cancels. A key you give to one button leaves the button that had it, and mouse buttons stay where they were. The default layout:
+
+| Pad | Keys |
+|-----|------|
+| Left stick | W A S D |
+| ✕ / □ / ○ / △ | K (also Space, Return) / J (also left click) / L / I |
+| L1 / R1 | Q / E |
+| L2 / R2 | U (also mouse button 4) / O (also right click) |
+| L3 / R3 | Shift / Ctrl |
+| D-pad | Arrow keys |
+| Right stick | T F G H |
+| Options / touchpad | Esc / Backspace and Tab |
+
+The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls/<game>.ini` at each start and passes it to the game as `ANYPS5_INPUT_CONFIG` ([format](INPUT_MAPPING.md)). A connected game controller keeps its own buttons.
 
 **Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name.
 

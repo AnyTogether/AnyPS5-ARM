@@ -57,6 +57,9 @@ enum T {
         case themeCosmic, themeAurora, themeSunset, hintMove, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
+        case controls, controlsHint, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
+        case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
+        case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
     }
 
     static let turkish: [Key: String] = [
@@ -180,6 +183,29 @@ enum T {
         .close: "Kapat",
         .quit: "Çık",
         .confirm: "Onayla",
+        .controls: "Tuş Atamaları",
+        .controlsHint: "Bir satır seç, sonra atamak istediğin tuşa bas. Esc vazgeçer. Kumanda bağlıysa kendi tuşlarıyla çalışır.",
+        .pressKey: "Bir tuşa bas…",
+        .resetControls: "Varsayılan Tuşlara Dön",
+        .noKey: "Yok",
+        .dpad: "Yön Tuşu",
+        .leftStick: "Sol Çubuk",
+        .rightStick: "Sağ Çubuk",
+        .touchpadLeft: "Dokunmatik Yüzey (Sol)",
+        .touchpadRight: "Dokunmatik Yüzey (Sağ)",
+        .directionUp: "Yukarı",
+        .directionDown: "Aşağı",
+        .directionLeft: "Sol",
+        .directionRight: "Sağ",
+        .keySpace: "Boşluk",
+        .keyEnter: "Enter",
+        .mouseLeft: "Sol Tık",
+        .mouseRight: "Sağ Tık",
+        .mouseMiddle: "Orta Tık",
+        .mouseBack: "Fare 4",
+        .mouseForward: "Fare 5",
+        .wheelUp: "Tekerlek ↑",
+        .wheelDown: "Tekerlek ↓",
         .unreadableDump: "Bu dump şifreli ya da bozuk, açılamaz.",
     ]
 
@@ -304,6 +330,29 @@ enum T {
         .close: "Close",
         .quit: "Quit",
         .confirm: "Confirm",
+        .controls: "Controls",
+        .controlsHint: "Pick a row, then press the key you want for it. Esc cancels. A connected controller keeps its own buttons.",
+        .pressKey: "Press a key…",
+        .resetControls: "Reset to Default Keys",
+        .noKey: "None",
+        .dpad: "D-pad",
+        .leftStick: "Left Stick",
+        .rightStick: "Right Stick",
+        .touchpadLeft: "Touchpad (Left)",
+        .touchpadRight: "Touchpad (Right)",
+        .directionUp: "Up",
+        .directionDown: "Down",
+        .directionLeft: "Left",
+        .directionRight: "Right",
+        .keySpace: "Space",
+        .keyEnter: "Return",
+        .mouseLeft: "Left Click",
+        .mouseRight: "Right Click",
+        .mouseMiddle: "Middle Click",
+        .mouseBack: "Mouse 4",
+        .mouseForward: "Mouse 5",
+        .wheelUp: "Wheel ↑",
+        .wheelDown: "Wheel ↓",
         .unreadableDump: "This dump is encrypted or damaged and cannot be opened.",
     ]
 }

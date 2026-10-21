@@ -13,6 +13,8 @@ final class Input {
     var handler: ((Command) -> Bool)?
     /// Scroll wheel turns as left and right moves, where the screen wants them.
     var scrollHandler: ((Command) -> Bool)?
+    /// Takes every key while a binding waits for one (the controls panel); returns whether it used it.
+    var capture: ((NSEvent) -> Bool)?
     private var monitor: Any?
     private var wheelMonitor: Any?
     private var accumulated: CGFloat = 0
@@ -21,8 +23,10 @@ final class Input {
 
     func start() {
         guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let command = Input.command(for: event), !Input.belongsToPanel(event) else { return event }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            guard let self, !Input.belongsToPanel(event) else { return event }
+            if let capture = self.capture { return capture(event) ? nil : event }
+            guard event.type == .keyDown, let command = Input.command(for: event) else { return event }
             // Text fields keep their keys.
             if let responder = event.window?.firstResponder as? NSTextView, responder.isEditable { return event }
             return self.handler?(command) == true ? nil : event
@@ -43,6 +47,20 @@ final class Input {
         }
         GCController.controllers().forEach(attach)
         GCController.startWirelessControllerDiscovery {}
+    }
+
+    /// Whether a flagsChanged event is a modifier key going down rather than up.
+    static func pressesModifier(_ event: NSEvent) -> Bool {
+        let flag: NSEvent.ModifierFlags
+        switch event.keyCode {
+        case 56, 60: flag = .shift
+        case 58, 61: flag = .option
+        case 59, 62: flag = .control
+        case 54, 55: flag = .command
+        case 57: flag = .capsLock
+        default: return false
+        }
+        return event.modifierFlags.contains(flag)
     }
 
     /// Open and save panels and alerts keep their own keys.
