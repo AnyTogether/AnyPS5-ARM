@@ -61,6 +61,7 @@ enum T {
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
+        case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -187,6 +188,16 @@ enum T {
         .confirm: "Onayla",
         .controls: "Tuş Atamaları",
         .trophies: "Kupalar",
+        .phonePairingTitle: "Bu telefon bağlansın mı?",
+        .phonePairingText: "Telefonda da aynı kod görünüyor.",
+        .phoneAllow: "İzin Ver",
+        .phoneDeny: "Reddet",
+        .phoneConnected: "%@ bağlandı",
+        .phones: "Telefonlar",
+        .phonesNone: "Henüz yok",
+        .phoneRemove: "Kaldır",
+        .phoneOpenLauncher: "%@ bağlanmak istiyor: izin vermek için launcher'ı aç.",
+        .phoneServerFailed: "Telefon bağlantısı açılamadı",
         .advanced: "Gelişmiş",
         .advancedDetail: "Çubuklar, fare, klavye, önbellek, paylaşım",
         .advancedTitle: "Gelişmiş Ayarlar",
@@ -402,6 +413,16 @@ enum T {
         .confirm: "Confirm",
         .controls: "Controls",
         .trophies: "Trophies",
+        .phonePairingTitle: "Connect this phone?",
+        .phonePairingText: "The phone shows the same code.",
+        .phoneAllow: "Allow",
+        .phoneDeny: "Deny",
+        .phoneConnected: "%@ connected",
+        .phones: "Phones",
+        .phonesNone: "None yet",
+        .phoneRemove: "Remove",
+        .phoneOpenLauncher: "%@ wants to connect: open the launcher to allow it.",
+        .phoneServerFailed: "The phone connection could not start",
         .advanced: "Advanced",
         .advancedDetail: "Sticks, mouse, keyboard, cache, sharing",
         .advancedTitle: "Advanced Settings",

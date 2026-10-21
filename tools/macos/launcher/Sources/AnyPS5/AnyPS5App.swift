@@ -74,6 +74,10 @@ struct RootView: View {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
                 }
+                if let request = model.pairing {
+                    PairingCard(request: request)
+                        .transition(.opacity.combined(with: .scale(scale: 1.03)))
+                }
                 VStack(spacing: 10 * scale) {
                     if model.translocated { MoveBanner() }
                     if let toast = model.toast { ToastView(toast: toast).transition(.move(edge: .top).combined(with: .opacity)) }

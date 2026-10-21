@@ -111,6 +111,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var trophies: [String: TrophySet] = [:]
     /// Why each game stopped the last time it was started, when it stopped on an error.
     @Published private(set) var diagnoses: [String: Diagnosis] = [:]
+    /// A phone asking to be allowed, shown over everything until the user answers.
+    @Published var pairing: PairingRequest?
+    /// The connected phone and its last reported latency.
+    @Published private(set) var phone: (name: String, latency: Double?)?
+    /// The phones allowed so far, for the settings.
+    @Published private(set) var phones: [PairedDevice] = []
     @Published var toast: Toast?
     @Published var active = true
     @Published private(set) var rosettaMissing = false
@@ -124,6 +130,8 @@ final class AppModel: ObservableObject {
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
     private var starts: [String: Date] = [:]
+    private var remote: RemoteServer?
+    private let pairedDevices = PairedDevices()
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
@@ -152,6 +160,7 @@ final class AppModel: ObservableObject {
             await MainActor.run { self.rosettaMissing = missing }
         }
         if self.preferences.onboarded && persists { rescan() }
+        if persists { startRemote() }
     }
 
     /// Fills the library at once (offscreen previews).
@@ -427,6 +436,7 @@ final class AppModel: ObservableObject {
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+            .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
@@ -524,6 +534,52 @@ final class AppModel: ObservableObject {
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    // MARK: Phone
+
+    /// Starts the phone server; a launcher that cannot open it still works without phones.
+    private func startRemote() {
+        phones = pairedDevices.all
+        let events = RemoteServer.Events(
+            pairing: { request in Task { @MainActor in self.askToPair(request) } },
+            connected: { name in Task { @MainActor in
+                withAnimation(Motion.overlay) { self.phone = (name, nil) }
+                self.phones = self.pairedDevices.all
+                self.show(T.format(.phoneConnected, name), symbol: "iphone.gen3")
+            } },
+            disconnected: { Task { @MainActor in withAnimation(Motion.overlay) { self.phone = nil } } },
+            latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } })
+        let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events)
+        do {
+            try server.start()
+            remote = server
+        } catch {
+            show(T.text(.phoneServerFailed), symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
+    private func askToPair(_ request: PairingRequest) {
+        withAnimation(Motion.overlay) { pairing = request }
+        Sounds.shared.play(.select)
+        // A game in front keeps its focus: the phone asks through a card over it instead.
+        if !NSApp.isActive { TrophyBanner.shared.notice(T.text(.phonePairingTitle), detail: T.format(.phoneOpenLauncher, request.deviceName), symbol: "iphone.gen3", sounds: preferences.sounds) }
+    }
+
+    func answerPairing(_ allow: Bool) {
+        guard let request = pairing else { return }
+        remote?.respond(to: request.id, allow: allow)
+        Sounds.shared.play(allow ? .select : .back)
+        withAnimation(Motion.overlay) { pairing = nil }
+    }
+
+    func removePhone(_ id: String) {
+        pairedDevices.remove(id: id)
+        phones = pairedDevices.all
+    }
+
+    func previewPairing(_ request: PairingRequest) { pairing = request }
+
+    func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
 
     // MARK: Trophy notifications
 

@@ -7,6 +7,12 @@ public struct PairingRequest: Identifiable, Sendable {
     public let id: UUID
     public let deviceName: String
     public let code: String
+
+    public init(id: UUID, deviceName: String, code: String) {
+        self.id = id
+        self.deviceName = deviceName
+        self.code = code
+    }
 }
 
 /// The launcher's side of the phone controller: it advertises itself on the local network,
