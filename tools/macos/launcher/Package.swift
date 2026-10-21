@@ -11,5 +11,7 @@ let package = Package(
         .executableTarget(name: "AnyPS5", dependencies: ["AnyPS5Core"], path: "Sources/AnyPS5"),
         // The same pipeline from the command line, for scripted checks.
         .executableTarget(name: "anyps5-tool", dependencies: ["AnyPS5Core"], path: "Sources/anyps5-tool"),
+        // Unit tests of the core, run with `swift test`.
+        .testTarget(name: "AnyPS5CoreTests", dependencies: ["AnyPS5Core"], path: "Tests/AnyPS5CoreTests"),
     ]
 )
