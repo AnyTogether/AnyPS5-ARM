@@ -126,6 +126,7 @@ final class AppModel: ObservableObject {
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
+            if let pid, Self.isAlive(pid) { return }
             MainActor.assumeIsolated { self?.applicationEnded(pid) }
         }
         Task.detached {
@@ -353,6 +354,8 @@ final class AppModel: ObservableObject {
 
     /// The process starts long before the game draws anything (Rosetta translates it and the
     /// shaders compile first), so the splash stays up until the game's first window shows.
+    /// macOS does not let an app that shows its window that late take the front by itself, so
+    /// the launcher hands it over; a window left behind the launcher gets no frames presented.
     private func watchForWindow(of app: NSRunningApplication) {
         startWatch?.cancel()
         let pid = app.processIdentifier
@@ -366,6 +369,8 @@ final class AppModel: ObservableObject {
                 applicationEnded(pid)
                 return
             }
+            NSApp.yieldActivation(to: app)
+            app.activate()
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { NSApp.hide(nil) }
         }
@@ -382,7 +387,7 @@ final class AppModel: ObservableObject {
         if !Self.isAlive(pid) { applicationEnded(pid) }
     }
 
-    private static func isAlive(_ pid: pid_t) -> Bool {
+    nonisolated private static func isAlive(_ pid: pid_t) -> Bool {
         kill(pid, 0) == 0 || errno != ESRCH
     }
 

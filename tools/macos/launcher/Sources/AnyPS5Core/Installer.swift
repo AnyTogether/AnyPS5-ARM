@@ -187,7 +187,7 @@ public final class Installer: @unchecked Sendable {
             try GamePatches.write(resolution: resolution.default, offsets: offsets, to: eboot)
             let choices = "resolution_default=\(resolution.default)\nresolution_choices='\(resolution.choices.joined(separator: " "))'\nresolution_width=\(offsets.width)\nresolution_height=\(offsets.height)\n"
             try choices.write(to: resources.appendingPathComponent("resolution.txt"), atomically: true, encoding: .utf8)
-            script += Installer.resolutionChoice.replacingOccurrences(of: "@TITLE_ID@", with: game.titleID)
+            script += Installer.resolutionChoice
         }
         script += "exec \"$here/eboot\" \"$@\" >> \"$HOME/Library/Logs/AnyPS5/\(game.titleID).log\" 2>&1\n"
         let launcher = macOS.appendingPathComponent("launch")
@@ -398,18 +398,8 @@ public final class Installer: @unchecked Sendable {
     resolution_file="$here/../Resources/resolution.txt"
     if [ -f "$resolution_file" ]; then
         . "$resolution_file"
-        saved="$HOME/Library/Application Support/AnyPS5/@TITLE_ID@.resolution"
-        choice="${APS5_RESOLUTION:-}"
-        if [ -z "$choice" ]; then
-            preset="$(cat "$saved" 2>/dev/null)"
-            case " $resolution_choices " in *" $preset "*) ;; *) preset="$resolution_default" ;; esac
-            list=""
-            for item in $resolution_choices; do list="$list${list:+, }\"$item\""; done
-            choice="$(osascript -e "choose from list {$list} with title \"AnyPS5\" with prompt \"Output resolution\" default items {\"$preset\"} OK button name \"Start\"")" || exit 0
-            [ "$choice" = false ] && exit 0
-            mkdir -p "$(dirname "$saved")"
-            printf '%s\n' "$choice" > "$saved"
-        fi
+        choice="${APS5_RESOLUTION:-$resolution_default}"
+        case " $resolution_choices " in *" $choice "*) ;; *) choice="$resolution_default" ;; esac
         width="${choice%%x*}"
         height="${choice#*x}"
         case "$width$height" in *[!0-9]*|"") echo "AnyPS5: not a WIDTHxHEIGHT resolution: $choice" >&2; exit 1 ;; esac
