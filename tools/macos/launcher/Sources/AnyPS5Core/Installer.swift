@@ -141,7 +141,8 @@ public final class Installer: @unchecked Sendable {
         progress(.relink, 0)
         let relinked = work.appendingPathComponent("out")
         let estimate = RelinkProgress()
-        try runTool(toolkit.relinker, ["--macos", "--to-rosetta", "--module-dir", ".", "eboot.bin", relinked.appendingPathComponent("eboot").path], in: source) { segment in
+        let moduleDirectories = Installer.moduleDirectories(modules).flatMap { ["--module-dir", $0] }
+        try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + moduleDirectories + ["eboot.bin", relinked.appendingPathComponent("eboot").path], in: source) { segment in
             if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
         }
         guard fileManager.fileExists(atPath: relinked.appendingPathComponent("eboot").path) else { throw InstallError("relinker wrote no executable") }
@@ -159,6 +160,7 @@ public final class Installer: @unchecked Sendable {
         try cloneTree(game.folder, into: app0) { fraction in self.progress(.copy, fraction) }
         let guestModules = relinked.appendingPathComponent("app0")
         if fileManager.fileExists(atPath: guestModules.path) { try cloneTree(guestModules, into: app0) { _ in } }
+        try linkGuestModuleLibraries(in: app0)
 
         // 4. The executable with its patches, the libraries, MoltenVK and the launch script.
         try checkCancelled()
@@ -237,6 +239,40 @@ public final class Installer: @unchecked Sendable {
             found.append(URL(fileURLWithPath: relative))
         }
         return found.sorted { $0.relativePath < $1.relativePath }
+    }
+
+    /// The folders besides sce_module whose modules the relinker converts too (Unity's
+    /// Media/Modules and Media/Plugins, prx next to eboot.bin). fakelib holds a dump tool's
+    /// stand-ins for system libraries, which AnyPS5 implements itself.
+    static func moduleDirectories(_ modules: [URL]) -> [String] {
+        var directories = ["."]
+        for module in modules where module.pathExtension.lowercased() == "prx" {
+            let directory = module.deletingLastPathComponent().relativePath
+            let first = directory.split(separator: "/").first.map(String.init) ?? "."
+            guard !["sce_module", "sce_modules", "prx", "fakelib"].contains(first.lowercased()), !directories.contains(directory) else { continue }
+            directories.append(directory)
+        }
+        return directories
+    }
+
+    /// A guest module outside sce_module finds the prx libraries through
+    /// @loader_path/<up to app0's parent>/libs. Loaded through Contents/MacOS/app0 that is
+    /// MacOS/libs already; loaded through the real Resources/game/app0 it needs these two links.
+    func linkGuestModuleLibraries(in app0: URL) throws {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(at: app0, includingPropertiesForKeys: nil) else { return }
+        let base = app0.standardizedFileURL.path
+        var outside = false
+        for case let file as URL in enumerator where file.lastPathComponent.hasSuffix(".guest.prx") {
+            let relative = String(file.standardizedFileURL.path.dropFirst(base.count + 1))
+            if !relative.hasPrefix("sce_module/") && relative.contains("/") { outside = true; break }
+        }
+        guard outside else { return }
+        for (folder, target) in [(app0, "../../../MacOS/libs"), (app0.deletingLastPathComponent(), "../../MacOS/libs")] {
+            let link = folder.appendingPathComponent("libs")
+            guard (try? fileManager.destinationOfSymbolicLink(atPath: link.path)) == nil, !fileManager.fileExists(atPath: link.path) else { continue }
+            try fileManager.createSymbolicLink(atPath: link.path, withDestinationPath: target)
+        }
     }
 
     /// An ELF as it is, a re-signed one from its .esbak, a SELF container unwrapped.
