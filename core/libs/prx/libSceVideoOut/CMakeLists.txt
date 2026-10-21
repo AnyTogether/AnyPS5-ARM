@@ -11,6 +11,7 @@ add_library(libSceVideoOut SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/src/KeyboardInput.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ImeTextInput.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/InputMapping.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/RemotePad.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/KeyboardMouse.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostHdrProbe.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../libkernel/Time/TimedWait.cpp
@@ -145,6 +146,11 @@ if(BUILD_TESTING)
     set_target_properties(pad_input_mapping_tests PROPERTIES CXX_EXTENSIONS OFF)
     configure_windows_unwind(pad_input_mapping_tests)
     add_test(NAME pad_input_mapping COMMAND pad_input_mapping_tests)
+    add_test_executable(remote_pad_tests tests/RemotePad.cpp src/RemotePad.cpp)
+    target_include_directories(remote_pad_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    set_target_properties(remote_pad_tests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME remote_pad COMMAND remote_pad_tests)
+    set_tests_properties(remote_pad PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(pad_input_mapping PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
