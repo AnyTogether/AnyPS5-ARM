@@ -109,6 +109,7 @@ final class AppModel: ObservableObject {
     private var lastScan = Date.distantPast
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
+    private var exitWatch: DispatchSourceProcess?
 
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
@@ -340,6 +341,7 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
                 } else {
                     withAnimation(Motion.overlay) { self.starting = nil }
@@ -356,13 +358,32 @@ final class AppModel: ObservableObject {
         let pid = app.processIdentifier
         startWatch = Task {
             let deadline = Date().addingTimeInterval(240)
-            while !Task.isCancelled, Date() < deadline, !Self.hasWindow(pid) {
+            while !Task.isCancelled, Date() < deadline, Self.isAlive(pid), !Self.hasWindow(pid) {
                 try? await Task.sleep(for: .milliseconds(400))
             }
             guard !Task.isCancelled else { return }
+            guard Self.isAlive(pid) else {
+                applicationEnded(pid)
+                return
+            }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { NSApp.hide(nil) }
         }
+    }
+
+    /// A game that dies before it opens a window never checks in with the window server, so
+    /// NSWorkspace sends no termination notice for it: the process itself is watched.
+    private func watchForExit(of pid: pid_t) {
+        exitWatch?.cancel()
+        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.applicationEnded(pid) } }
+        source.resume()
+        exitWatch = source
+        if !Self.isAlive(pid) { applicationEnded(pid) }
+    }
+
+    private static func isAlive(_ pid: pid_t) -> Bool {
+        kill(pid, 0) == 0 || errno != ESRCH
     }
 
     private static func hasWindow(_ pid: pid_t) -> Bool {
@@ -386,6 +407,8 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        exitWatch?.cancel()
+        exitWatch = nil
         if starting != nil {
             startWatch?.cancel()
             withAnimation(Motion.overlay) { starting = nil }
