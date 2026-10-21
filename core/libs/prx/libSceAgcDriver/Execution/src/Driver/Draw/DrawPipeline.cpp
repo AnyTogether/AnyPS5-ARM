@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Execution/include/ThreadPriority.hpp"
 #include "prx/libSceAgcDriver/Execution/include/HandoffSpin.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
+#include "prx/libSceAgcDriver/Execution/include/WorkerSampler.hpp"
 #include <algorithm>
 #ifdef __APPLE__
 #include <pthread.h>
@@ -169,6 +170,7 @@ void DrawPipeline::run() {
     traceQos("raised");
 #endif
     PerformanceTrace::BindThread("draw committer");
+    StartCommitterSampler();
     for (;;) {
         Commit* commit = nullptr;
         SpinUntil(HandoffSpinWindow(), [&] { return outstanding.load(std::memory_order_acquire) != 0; });

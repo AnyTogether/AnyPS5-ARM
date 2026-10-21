@@ -758,7 +758,9 @@ void EmitStructuredBlock(SpirvValueEmitContext& ctx, StructuredFunctionState& fu
             } else if (access != SharedAccess::None) {
                 const bool writes = access != SharedAccess::Read;
                 if (ldsWritten || (writes && ldsRead)) {
-                    state.module.AddFunction(spv::OpControlBarrier, ConstantU32(state, state.waveLdsScope), ConstantU32(state, spv::ScopeWorkgroup), ConstantU32(state, spv::MemorySemanticsAcquireReleaseMask | LdsMemorySemantics(state)));
+                    const auto semantics = ConstantU32(state, spv::MemorySemanticsAcquireReleaseMask | LdsMemorySemantics(state));
+                    if (state.waveLdsMemoryBarriers && state.waveLdsScope == spv::ScopeSubgroup) state.module.AddFunction(spv::OpMemoryBarrier, ConstantU32(state, spv::ScopeSubgroup), semantics);
+                    else state.module.AddFunction(spv::OpControlBarrier, ConstantU32(state, state.waveLdsScope), ConstantU32(state, spv::ScopeWorkgroup), semantics);
                     ldsWritten = false;
                     ldsRead = false;
                 }

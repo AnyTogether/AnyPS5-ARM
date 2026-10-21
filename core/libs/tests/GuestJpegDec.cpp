@@ -8,6 +8,7 @@
 #include <cstring>
 #include <optional>
 #include <stdexcept>
+#include <algorithm>
 #include <vector>
 
 static_assert(sizeof(JpegDecCreateParam) == 0xC);
@@ -140,6 +141,20 @@ int main() {
     JpegDecDecodeParam unknownScale = decodeParam;
     unknownScale.down_scale = 3;
     Require(ThrowsRuntimeError([&] { sceJpegDecDecode(handle, &unknownScale, &info); }));
+    std::vector<std::uint8_t> invalidAlphaImage(7 * 5 * 4, 0xCC);
+    JpegDecDecodeParam invalidAlpha = DecodeParam(jpeg, invalidAlphaImage, 7 * 4);
+    invalidAlpha.alpha_value = 0x100;
+    Require(sceJpegDecDecode(handle, &invalidAlpha, &info) == invalidParam);
+    Require(std::all_of(invalidAlphaImage.begin(), invalidAlphaImage.end(), [](std::uint8_t byte) { return byte == 0xCC; }));
+    invalidAlpha.alpha_value = 0xFFFF;
+    Require(sceJpegDecDecode(handle, &invalidAlpha, &info) == invalidParam);
+    Require(std::all_of(invalidAlphaImage.begin(), invalidAlphaImage.end(), [](std::uint8_t byte) { return byte == 0xCC; }));
+    std::vector<std::uint8_t> misalignedImage(7 * 5 * 4 + 1, 0xCC);
+    JpegDecDecodeParam misaligned = DecodeParam(jpeg, misalignedImage, 7 * 4);
+    misaligned.image_mem_addr = misalignedImage.data() + 1;
+    misaligned.image_mem_size = static_cast<std::uint32_t>(misalignedImage.size() - 1);
+    Require(sceJpegDecDecode(handle, &misaligned, &info) == invalidAddr);
+    Require(std::all_of(misalignedImage.begin(), misalignedImage.end(), [](std::uint8_t byte) { return byte == 0xCC; }));
     JpegDecDecodeParam otherMode = decodeParam;
     otherMode.decode_mode = 1;
     Require(ThrowsRuntimeError([&] { sceJpegDecDecode(handle, &otherMode, &info); }));

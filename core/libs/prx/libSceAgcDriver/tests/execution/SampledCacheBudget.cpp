@@ -9,6 +9,8 @@
 #include "prx/libSceAgcDriver/Graphics/include/TextureCache.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/PlaceholderImages.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
 #include "VulkanTestDevice.hpp"
 #include <SDL_loadso.h>
 #ifdef _WIN32
@@ -16,6 +18,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <sys/mman.h>
 #endif
 #include <algorithm>
 #include <array>
@@ -275,6 +279,53 @@ private:
     void* memory = nullptr;
 };
 
+class WatchedSurface {
+public:
+    explicit WatchedSurface(const Context& context) : context(context) {
+#ifdef _WIN32
+        memory = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(SurfaceBytes, 65536));
+        if (memory != nullptr) GuestArena::GuestArenaCommit_nid_postfix(memory, SurfaceBytes, PAGE_READWRITE, SurfaceBytes);
+#else
+        constexpr std::uintptr_t alignment = 65536;
+        void* mapped = mmap(nullptr, SurfaceBytes + alignment, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (mapped != MAP_FAILED) {
+            const auto begin = reinterpret_cast<std::uintptr_t>(mapped);
+            const auto aligned = (begin + alignment - 1) & ~(alignment - 1);
+            if (aligned != begin) munmap(mapped, aligned - begin);
+            if (aligned + SurfaceBytes != begin + SurfaceBytes + alignment) munmap(reinterpret_cast<void*>(aligned + SurfaceBytes), begin + alignment - aligned);
+            memory = reinterpret_cast<std::uint8_t*>(aligned);
+            GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(memory, SurfaceBytes);
+        }
+#endif
+        Require(memory != nullptr, "cannot allocate the watched surface");
+        Require(AgcDriver::GuestMemory::Watched(Address(), SurfaceBytes), "the watched surface is not write-watched");
+        std::memset(memory, 0x5a, SurfaceBytes);
+        GuestAllocations::Mutation().Add(memory, SurfaceBytes, true, true, true);
+        AgcDriver::GuestMemory::CollectWritesUncached(Address(), SurfaceBytes);
+    }
+
+    ~WatchedSurface() {
+        ClearCachedTextures(context.device);
+        GuestAllocations::Mutation().Remove(memory);
+#ifdef _WIN32
+        GuestArena::GuestArenaReset_nid_postfix(memory, SurfaceBytes);
+        GuestArena::GuestArenaRelease_nid_postfix(memory, SurfaceBytes);
+#else
+        munmap(memory, SurfaceBytes);
+        GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(memory, SurfaceBytes);
+#endif
+    }
+
+    WatchedSurface(const WatchedSurface&) = delete;
+    WatchedSurface& operator=(const WatchedSurface&) = delete;
+
+    std::uint64_t Address() const { return reinterpret_cast<std::uint64_t>(memory); }
+
+private:
+    const Context& context;
+    std::uint8_t* memory = nullptr;
+};
+
 std::array<std::uint32_t, 8> Descriptor(std::uint64_t address, std::uint32_t side = Side) {
     return {
         static_cast<std::uint32_t>(address >> 8u),
@@ -478,6 +529,103 @@ void viewTests(const Context& context) {
     Require(!heldView.expired() && !heldStorage.expired(), "eviction destroyed an active caller's view or image");
     again.reset();
     Require(heldView.expired() && heldStorage.expired(), "the evicted image outlived its last caller without a sampled lookup");
+}
+
+ShaderRecompiler::RecompileResult SampledProgram(std::uint64_t address) {
+    ShaderRecompiler::DescriptorBinding binding{};
+    binding.kind = ShaderRecompiler::DescriptorKind::SampledImage;
+    binding.role = ShaderRecompiler::DescriptorRole::GuestImages;
+    binding.descriptorSet = 0;
+    binding.binding = ShaderRecompiler::RuntimeAbi::FirstImageBinding + PlaceholderDimensionsPerClass + 2u;
+    binding.count = 1;
+    binding.imageShape = ShaderRecompiler::DescriptorImageShape::Image2D;
+    binding.imageWritten.assign(1, false);
+    binding.imageSamplers.assign(1, 0u);
+    const auto words = Descriptor(address);
+    binding.guestDescriptor.assign(words.begin(), words.end());
+    ShaderRecompiler::RecompileResult program;
+    program.bindings.push_back(std::move(binding));
+    return program;
+}
+
+void replacedEntryTests(Context context) {
+    PlaceholderImages placeholders(context);
+    context.placeholderImages = &placeholders;
+    TextureCache textures(context);
+    context.textureCache = &textures;
+    WatchedSurface surface(context);
+    ClearCachedTextures(context.device);
+    const auto program = SampledProgram(surface.Address());
+    const CompiledShader shader{ShaderRecompiler::ShaderStage::Compute, &program, 0};
+    auto first = std::make_shared<ShaderResources>(context, shader);
+    Require(first->Reusable(), "the sampled snapshot's descriptor set is not eligible for resource caching");
+    Require(first->SampledTextures().size() == 1, "the sampled descriptor set binds no texture");
+    const auto bound = first->SampledTextures().front();
+    Require(!bound->ViewsStorageImage(), "the replaced-entry fixture is not a snapshot");
+    Require(Sampled(context, surface.Address()) == bound, "the descriptor set does not bind the cache's texture");
+    ShaderResources::ProofReport report{};
+    Require(first->Revalidate(shader), "a template over an unchanged, still cached texture did not prove current");
+    Require(first->Revalidate(shader, &report), "a template over an unchanged, still cached texture did not prove current twice");
+    Require(report.path == ShaderResources::ProofPath::Fast, "the fixture's template did not take the fast proof");
+    Require(first->SampledTextures().front() == bound, "the proof changed the bound texture");
+    ClearCachedTextures(context.device);
+    Require(TextureCacheUsage().sampledEntries == 0, "clearing the sampled cache left entries");
+    Require(!first->Revalidate(shader, &report), "a template binding a texture whose cache entry left still proved current");
+    const auto replacement = Sampled(context, surface.Address());
+    Require(replacement != bound, "the lookup after the clear handed back the old texture");
+    Require(!first->Revalidate(shader), "a template binding the replaced texture proved current against the new entry");
+    auto rebuilt = std::make_shared<ShaderResources>(context, shader);
+    Require(rebuilt->SampledTextures().front() == replacement, "the rebuilt descriptor set does not bind the cache's new texture");
+    Require(rebuilt->Revalidate(shader), "the rebuilt template did not prove current over its cached texture");
+    first.reset();
+    rebuilt.reset();
+    ClearCachedTextures(context.device);
+    std::puts("template over a replaced sampled cache entry passed");
+}
+
+bool lookupChangedTests(Context context) {
+    PlaceholderImages placeholders(context);
+    context.placeholderImages = &placeholders;
+    TextureCache textures(context);
+    context.textureCache = &textures;
+    if (context.hostImportAlignment == 0) {
+        Require(std::getenv("ANYPS5_REQUIRE_VULKAN") == nullptr, "the lookup-changed test requires host imports");
+        std::puts("skipped, host imports are unavailable");
+        return false;
+    }
+    WatchedSurface surface(context);
+    ClearCachedTextures(context.device);
+    const auto program = SampledProgram(surface.Address());
+    const CompiledShader shader{ShaderRecompiler::ShaderStage::Compute, &program, 0};
+    auto first = std::make_shared<ShaderResources>(context, shader);
+    Require(first->Reusable() && first->SampledTextures().size() == 1, "the lookup-changed template is not reusable");
+    const auto bound = first->SampledTextures().front();
+    Require(!bound->ViewsStorageImage(), "the lookup-changed fixture is not a snapshot before the import");
+    ShaderResources::ProofReport report{};
+    Require(first->Revalidate(shader), "the lookup-changed template did not prove current");
+    Require(first->Revalidate(shader, &report) && report.path == ShaderResources::ProofPath::Fast, "the lookup-changed template did not take the fast proof");
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    Require(first->Revalidate(shader, &report), "the audit refused an unchanged template");
+    Require(report.path == ShaderResources::ProofPath::Full, "a proof past the audit interval did not take the full walk");
+    Require(first->SampledTextures().front() == bound, "the audit changed the bound texture");
+    Require(first->Revalidate(shader, &report) && report.path == ShaderResources::ProofPath::Fast, "the proof right after an audit did not take the fast proof");
+    if (HostImportFor(context, surface.Address(), SurfaceBytes) == nullptr) {
+        Require(std::getenv("ANYPS5_REQUIRE_VULKAN") == nullptr, "the host import of the watched surface was refused");
+        std::puts("skipped, host imports are unavailable");
+        return false;
+    }
+    Require(!bound->Released(), "the snapshot left the cache without a lookup");
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    Require(!first->Revalidate(shader, &report), "a template binding a snapshot of a surface its lookup now views through a storage image still proved current past the audit interval");
+    const auto view = Sampled(context, surface.Address());
+    Require(view != bound && view->ViewsStorageImage(), "the lookup of the imported surface does not view its storage image");
+    auto rebuilt = std::make_shared<ShaderResources>(context, shader);
+    Require(rebuilt->SampledTextures().front() == view, "the rebuilt template does not bind the storage view");
+    first.reset();
+    rebuilt.reset();
+    ClearCachedTextures(context.device);
+    std::puts("template over a changed sampled lookup passed");
+    return true;
 }
 
 void reportedBudgetTests(const Context& context) {
@@ -872,8 +1020,10 @@ int main(int argc, char** argv) {
         const bool disableStorageImageMultisample = mode == "without-storage-image-multisample";
 #ifdef _WIN32
         if (!memory) _putenv_s("APS5_TEXTURE_CACHE_MIB", "1");
+        if (std::getenv("APS5_TEMPLATE_AUDIT_MS") == nullptr) _putenv_s("APS5_TEMPLATE_AUDIT_MS", "250");
 #else
         if (!memory) setenv("APS5_TEXTURE_CACHE_MIB", "1", 1);
+        setenv("APS5_TEMPLATE_AUDIT_MS", "250", 0);
 #endif
         std::unique_ptr<Device> device;
         try {
@@ -910,6 +1060,18 @@ int main(int argc, char** argv) {
             std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
             if (!resourceCacheTests(context, mode)) return VulkanTestSkipped;
             std::puts("resource cache tests passed");
+            return 0;
+        }
+        if (mode == "resource-replaced") {
+            std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+            replacedEntryTests(context);
+            std::puts("resource cache replaced entry tests passed");
+            return 0;
+        }
+        if (mode == "resource-lookup-changed") {
+            std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+            if (!lookupChangedTests(context)) return VulkanTestSkipped;
+            std::puts("resource cache lookup-changed tests passed");
             return 0;
         }
         if (memory) {

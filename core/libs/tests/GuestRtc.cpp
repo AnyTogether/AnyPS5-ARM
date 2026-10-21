@@ -271,7 +271,14 @@ int main() {
         Require(std::memcmp(text, original, sizeof(text)) == 0);
     }
     Require(sceRtcFormatRFC3339(nullptr, &tick, 1440) == invalidPointer);
-    Require(sceRtcFormatRFC3339(text, nullptr, 1440) == invalidPointer);
+    Require(sceRtcFormatRFC3339(text, nullptr, 1440) == invalidValue);
+    {
+        RtcTick before{}, after{}, parsed{};
+        Require(sceRtcGetCurrentTick(&before) == 0);
+        Require(sceRtcFormatRFC3339(text, nullptr, 0) == 0);
+        Require(sceRtcGetCurrentTick(&after) == 0);
+        Require(sceRtcParseRFC3339(&parsed, text) == 0 && parsed.tick + 10000 > before.tick && parsed.tick <= after.tick);
+    }
     Require(sceRtcParseRFC3339(&tick, "2024-02-29T14:04:56.789+01:30") == 0 && tick.tick == leapDayTick);
     Require(sceRtcParseRFC3339(&tick, "2024-02-29t12:34:56.789z") == 0 && tick.tick == leapDayTick);
     Require(sceRtcParseRFC3339(&tick, "1970-01-01T00:00:00Z") == 0 && tick.tick == unixEpochTick);
@@ -366,6 +373,11 @@ int main() {
         {"Thu, 01 Mar 2024 12:34:56 nzdt", 0, march, 780},
         {"Thu, 01 Mar 2024 12:34:56 KST", 0, march, 540},
         {"Thu, 01 Mar 2024 12:34:56 HST", 0, march, 420},
+        {"Thu, 01 Mar 2024 12:34:56 DNT", 0, march, 60},
+        {"Thu, 01 Mar 2024 12:34:56 NFT", 0, march, -150},
+        {"Thu, 01 Mar 2024 12:34:56 NOR", 0, march, 60},
+        {"Thu, 01 Mar 2024 12:34:56 SET", 0, march, 60},
+        {"Thu, 01 Mar 2024 12:34:56 SETX", 0, march, 60},
         {"Thu, 01 Mar 2024 12:34:56 Jt", 0, march, 450},
         {"Thu, 01 Mar 2024 12:34:56 ut", 0, march, -420},
         {"Thu, 01 Mar 2024 12:34:56 xT", 0, march, 0},
@@ -757,7 +769,15 @@ int main() {
         Require(std::memcmp(rfc2822, original, sizeof(rfc2822)) == 0);
     }
     Require(sceRtcFormatRFC2822(nullptr, &tick, 0) == invalidPointer);
-    Require(sceRtcFormatRFC2822(rfc2822, nullptr, 0) == invalidPointer);
+    {
+        RtcTick before{}, after{}, parsed{};
+        Require(sceRtcGetCurrentTick(&before) == 0);
+        Require(sceRtcFormatRFC2822(rfc2822, nullptr, 60) == 0);
+        Require(sceRtcGetCurrentTick(&after) == 0);
+        Require(std::strlen(rfc2822) == 31 && std::strcmp(rfc2822 + 26, "+0100") == 0);
+        Require(sceRtcParseDateTime(&parsed, rfc2822) == 0 && parsed.tick + 1000000 > before.tick && parsed.tick <= after.tick);
+        Require(sceRtcFormatRFC2822(rfc2822, nullptr, 1440) == invalidValue);
+    }
 
     SetTimeZone("XXX-5:30");
     Require(sceRtcFormatRFC2822LocalTime(rfc2822, &tick) == 0 && std::strcmp(rfc2822, "Thu, 29 Feb 2024 18:04:56 +0530") == 0);
@@ -769,9 +789,16 @@ int main() {
     Require(sceRtcFormatRFC2822LocalTime(rfc2822, &tick) == 0 && std::strcmp(rfc2822, "Thu, 29 Feb 2024 12:34:56 +0000") == 0);
     Require(sceRtcFormatRFC3339LocalTime(text, &tick) == 0 && std::strcmp(text, "2024-02-29T12:34:56.78Z") == 0);
     Require(sceRtcFormatRFC2822LocalTime(nullptr, &tick) == invalidPointer);
-    Require(sceRtcFormatRFC2822LocalTime(rfc2822, nullptr) == invalidPointer);
     Require(sceRtcFormatRFC3339LocalTime(nullptr, &tick) == invalidPointer);
-    Require(sceRtcFormatRFC3339LocalTime(text, nullptr) == invalidPointer);
+    {
+        RtcTick before{}, after{}, parsed{};
+        Require(sceRtcGetCurrentTick(&before) == 0);
+        Require(sceRtcFormatRFC2822LocalTime(rfc2822, nullptr) == 0);
+        Require(sceRtcFormatRFC3339LocalTime(text, nullptr) == 0);
+        Require(sceRtcGetCurrentTick(&after) == 0);
+        Require(sceRtcParseDateTime(&parsed, rfc2822) == 0 && parsed.tick + 1000000 > before.tick && parsed.tick <= after.tick);
+        Require(sceRtcParseRFC3339(&parsed, text) == 0 && parsed.tick + 10000 > before.tick && parsed.tick <= after.tick);
+    }
     for (const char* zone : {"UTC0", "XXX-5:30", "XXX+3"}) {
         SetTimeZone(zone);
         for (std::uint64_t invalidTick : {maxTick + 1, std::uint64_t{1} << 63u, std::numeric_limits<std::uint64_t>::max()}) {

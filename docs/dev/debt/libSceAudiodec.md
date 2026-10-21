@@ -8,4 +8,4 @@
 ### Functional
 
 - [sceAudiodecDecode](../../../core/libs/prx/libSceAudiodec/src/Codecs.cpp) (libSceAudiodec) - an ADTS stream with channel configuration 0 (layout in a program config element) is still parsed by FFmpeg, so `ui_enable_heaac` 0 does not remove its SBR and a mono one with Parametric Stereo comes out as stereo.
-- [libSceAudiodec](../../../core/libs/prx/libSceAudiodec/Export.cpp) throws for the 24-bit PCM word size (`iBwPcm` 0): its sample layout is unknown. ATRAC9 decoding is covered only by configuration and error tests, as no ATRAC9 encoder is available for a fixture.
+- [libSceAudiodec](../../../core/libs/prx/libSceAudiodec/Export.cpp) accepts only 16-bit PCM, and float PCM for ATRAC9 and M4AAC, as `sceAudiodecCreateDecoder` did in a payload process on a PS5 (firmware 13.60), which returned `ERROR_INVALID_WORD_LENGTH` for `iBwPcm` 0, 3 and -1 with each codec and for float with MP3; other word sizes are assumed to fail the same way. ATRAC9 decoding is covered only by configuration and error tests, as no ATRAC9 encoder is available for a fixture.

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -67,6 +68,22 @@ int SetAttribute(std::map<std::int32_t, Endpoint>& endpoints, std::int32_t id, s
         endpoint->second[attribute].assign(bytes, bytes + size);
     } else {
         endpoint->second[attribute].clear();
+    }
+    return 0;
+}
+
+int GetAttribute(std::map<std::int32_t, Endpoint>& endpoints, std::int32_t id, std::int32_t attribute, void* value, std::int32_t size) {
+    const auto endpoint = endpoints.find(id);
+    if (endpoint == endpoints.end() || !value || size <= 0) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+    const auto attr = endpoint->second.find(attribute);
+    if (attr != endpoint->second.end() && !attr->second.empty()) {
+        const auto toCopy = std::min(static_cast<std::size_t>(size), attr->second.size());
+        std::memcpy(value, attr->second.data(), toCopy);
+        if (static_cast<std::size_t>(size) > toCopy) {
+            std::memset(static_cast<std::uint8_t*>(value) + toCopy, 0, static_cast<std::size_t>(size) - toCopy);
+        }
+    } else {
+        std::memset(value, 0, static_cast<std::size_t>(size));
     }
     return 0;
 }
@@ -147,31 +164,23 @@ int APS5_VABI sceVoiceQoSSetRemoteEndpointAttribute(int32_t remoteId, int32_t at
     return Locked([&](QoS& qos) { return SetAttribute(qos.remotes, remoteId, attributeId, value, size); });
 }
 
-int APS5_VABI sceVoiceQoSReadPacket(int32_t connectionId, void* data, uint32_t* size) {
+int APS5_VABI sceVoiceQoSReadPacket(int32_t connectionId, void* buffer, uint32_t* size) {
     return Locked([&](QoS& qos) {
-        if (!data || !size || !qos.connections.contains(connectionId)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        if (!buffer || !size || !qos.connections.contains(connectionId)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
         *size = 0;
         return 0;
     });
 }
 
-int APS5_VABI sceVoiceQoSWritePacket(int32_t connectionId, const void* data, uint32_t* size) {
+int APS5_VABI sceVoiceQoSWritePacket(int32_t connectionId, const void* buffer, uint32_t* size) {
     return Locked([&](QoS& qos) {
-        if (!data || !size || !qos.connections.contains(connectionId)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
+        if (!buffer || !size || !qos.connections.contains(connectionId)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
         return 0;
     });
 }
 
-// Reports a value the title set; the defaults of attributes never set are unknown, so those fail.
 int APS5_VABI sceVoiceQoSGetLocalEndpointAttribute(int32_t localId, int32_t attributeId, void* value, int32_t size) {
-    return Locked([&](QoS& qos) {
-        const auto endpoint = qos.locals.find(localId);
-        if (endpoint == qos.locals.end() || !value || size <= 0) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
-        const auto attribute = endpoint->second.find(attributeId);
-        if (attribute == endpoint->second.end() || attribute->second.size() != static_cast<std::size_t>(size)) return SCE_VOICE_ERROR_LIBVOICEQOS_ARGUMENT_INVALID;
-        std::memcpy(value, attribute->second.data(), attribute->second.size());
-        return 0;
-    });
+    return Locked([&](QoS& qos) { return GetAttribute(qos.locals, localId, attributeId, value, size); });
 }
 
 int APS5_VABI sceVoiceQoSGetRemoteEndpointAttribute(int32_t remoteId, int32_t attributeId, const void* value, int32_t size) {

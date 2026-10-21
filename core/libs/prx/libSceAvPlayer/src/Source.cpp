@@ -137,9 +137,14 @@ private:
 class Clock {
 public:
     double Now() const {
+        if (overrideTime >= 0.0) return overrideTime;
         if (!running || paused) return base;
         const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - wall;
         return std::max(0.0, base + elapsed.count() * speed / NormalSpeed);
+    }
+
+    void SetOverrideForTest(double milliseconds) {
+        overrideTime = milliseconds;
     }
 
     void Rebase(double milliseconds) {
@@ -176,6 +181,7 @@ private:
     std::int32_t speed = NormalSpeed;
     bool running = false;
     bool paused = false;
+    double overrideTime = -1.0;
 };
 
 enum class PacketKind { Data, Flush, Drain, End, Reopen };
@@ -432,6 +438,11 @@ public:
         condition.notify_all();
     }
 
+    void SetClockTimeForTest(double milliseconds) override {
+        std::lock_guard lock(mutex);
+        presentationClock.SetOverrideForTest(milliseconds);
+    }
+
     bool GetVideoData(AvPlayerFrameInfoEx& info) override {
         bool taken = false;
         {
@@ -516,7 +527,8 @@ private:
         }
         if (synced || audioDriving) {
             const auto now = presentationClock.Now();
-            if (synced && static_cast<double>(front.info.timestamp) > now) return false;
+            const double syncTolerance = static_cast<double>(frameDuration()) * 0.75;
+            if (synced && static_cast<double>(front.info.timestamp) > now + syncTolerance) return false;
             while (frames.size() > 1 && frames[1].epoch == frames.front().epoch && static_cast<double>(frames[1].info.timestamp) <= now) recycleFront(video);
         }
         present(video, info);

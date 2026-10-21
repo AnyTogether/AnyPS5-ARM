@@ -214,6 +214,15 @@ def main():
                 run = subprocess.run([str(output)], capture_output=True, text=True, timeout=30)
                 assert run.returncode == 42, (run.returncode, run.stdout, run.stderr)
 
+            case = work / f"{windows}-root-input-link"
+            case.mkdir()
+            (case / "root.prx").write_bytes(module_with_symbol(True))
+            (case / "input.elf").write_bytes(main_fixture())
+            os.link(case / "input.elf", case / "input-link.exe")
+            result, output = convert(case, windows, ["--module-dir", "."])
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            assert list((case / "app0").rglob("*.guest.prx")) == [case / "app0" / "root.prx.guest.prx"], list(case.rglob("*.guest.prx"))
+
             case = work / f"{windows}-root-needed"
             case.mkdir()
             (case / "needed.prx").write_bytes(module_with_symbol(True))

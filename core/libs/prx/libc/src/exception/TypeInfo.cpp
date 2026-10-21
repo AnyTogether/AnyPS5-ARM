@@ -61,6 +61,21 @@ struct TypeInfoVtable {
 static_assert(offsetof(TypeInfoVtable, destroy) == 2 * sizeof(void*));
 static_assert(sizeof(TypeInfoVtable) == 11 * sizeof(void*));
 
+// __pbase_type_info follows the type_info virtuals with __pointer_catch, not the class ones.
+struct PointerTypeInfoVtable {
+    std::ptrdiff_t offset;
+    const std::type_info* type;
+    decltype(&DestroyTypeInfo) destroy = DestroyTypeInfo;
+    decltype(&DeleteTypeInfo) deleteObject = DeleteTypeInfo;
+    decltype(&IsPointerTypeInfo) isPointer = IsPointerTypeInfoTrue;
+    decltype(&IsPointerTypeInfo) isFunction = IsPointerTypeInfo;
+    decltype(&CatchTypeInfo) catchType = CatchTypeInfo;
+    decltype(&UpcastTypeInfo) upcast = UpcastTypeInfo;
+    decltype(&CatchTypeInfo) pointerCatch = CatchTypeInfo;
+};
+
+static_assert(offsetof(PointerTypeInfoVtable, pointerCatch) == 8 * sizeof(void*));
+
 }
 
 extern "C" {
@@ -72,13 +87,7 @@ bool LibcTypeInfoCatch_nid_no_patch(const std::type_info* self, const std::type_
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv117__class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__class_type_info)};
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv120__si_class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__si_class_type_info)};
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv121__vmi_class_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__vmi_class_type_info)};
-LibcException::TypeInfoVtable _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix {
-    0,
-    &typeid(__cxxabiv1::__pointer_type_info),
-    LibcException::DestroyTypeInfo,
-    LibcException::DeleteTypeInfo,
-    LibcException::IsPointerTypeInfoTrue
-};
+LibcException::PointerTypeInfoVtable _ZTVN10__cxxabiv119__pointer_type_infoE_nid_postfix {0, &typeid(__cxxabiv1::__pointer_type_info)};
 LibcException::TypeInfoVtable _ZTVN10__cxxabiv120__function_type_infoE_nid_postfix {
     0,
     &typeid(__cxxabiv1::__function_type_info),

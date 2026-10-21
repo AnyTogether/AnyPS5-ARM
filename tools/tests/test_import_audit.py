@@ -739,6 +739,22 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual(data["missing_libraries"], {"libSceMissing.prx": 1})
         self.assertIn("libSceMissing.prx", out)
 
+    def test_missing_library_is_located_next_to_the_registry(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(exporting())
+        (work.modules / "main.prx").write_bytes(build_elf([], ["libSceMissing.prx", "libSceGone.prx"]))
+        registry = work.root / "game.json"
+        write_registry(registry, [])
+        elsewhere = work.root / "in" / "Media Modules"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "libSceMissing.prx").write_bytes(exporting("DDDDDDDDDDD"))
+        code, out, err = work.run(registry)
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn(f"libSceMissing.prx is in {elsewhere.resolve()}: pass that directory with --modules", out)
+        self.assertNotIn("libSceGone.prx is in", out)
+        code, out, err = work.run(registry, "--modules", str(elsewhere))
+        self.assertNotIn("libSceMissing.prx is in", out)
+
     def test_conflicting_module_files_preserve_or_leave_no_json_report(self):
         work = self.work
         first, second = work.modules, work.root / "other-modules"
@@ -1954,6 +1970,26 @@ class ImportAuditTests(unittest.TestCase):
             code, out, err = work.run(registry)
         self.assertEqual((code, out), (2, ""))
         self.assertIn(f"FAIL: Permission denied: {library}", err)
+
+    def test_strict_stubs_fails_only_for_referenced_throwing_providers(self):
+        name = "sceExamplePending"
+        nid = nid_names.compute_nid(name)
+        registry = self.work.root / "game.json"
+        output = self.work.root / "audit.json"
+        (self.work.libs / "libSceExample.prx").write_bytes(exporting(nid))
+        write_source(self.work.source, "libSceExample", STUB_SOURCE.format(name=name))
+        for weak in (False, True):
+            with self.subTest(weak=weak):
+                write_registry(registry, [(nid, "libSceExample.prx", weak)])
+                self.assertEqual(self.work.run(registry)[0], 0)
+                code, out, err = self.work.run(registry, "--strict-stubs", "--json", str(output))
+                self.assertEqual((code, err), (1, ""))
+                self.assertIn("stub", out)
+                self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["unique_by_class"]["stub"], 1)
+        write_source(self.work.source, "libSceExample", DONE_SOURCE.format(name=name)
+                     + STUB_SOURCE.format(name="sceUnreferencedPending"))
+        self.assertEqual(self.work.run(registry, "--strict-stubs")[0], 0)
+
 
 
 class StrictProviderTests(unittest.TestCase):

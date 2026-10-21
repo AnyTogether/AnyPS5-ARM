@@ -273,10 +273,10 @@ struct TlsScan {
     std::vector<GsTrap> GsTraps;
 };
 
-TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domain::ProgramHeader>& headers, const Windows::WindowsLoadImage& image) {
+TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domain::ProgramHeader>& headers, const Windows::WindowsLoadImage& image, const std::function<void(std::string_view)>& message) {
     TlsScan scan;
     const Codegen::X64InstructionDecoder decoder;
-    const auto instructions = Relinker::CodeInstructionCollector().Collect(source, headers);
+    const auto instructions = Relinker::CodeInstructionCollector().Collect(source, headers, {}, nullptr, message);
     for (const auto& header : headers) {
         if (header.Type == 7) {
             if (scan.Tls != nullptr) throw Domain::RelinkerException("Multiple ELF TLS segments");
@@ -297,7 +297,8 @@ TlsScan ScanTls(const std::vector<std::uint8_t>& source, const std::vector<Domai
             }
             if (info.SegmentPrefix == 0 || (insidePrevious && info.SegmentPrefix != 0x64)) continue;
             if (info.SegmentPrefix == 0x65) {
-                scan.GsTraps.push_back({rva, info.Length});
+                if (info.HasMemoryOperand)
+                    scan.GsTraps.push_back({rva, info.Length});
                 continue;
             }
             const auto position = info.OpcodeOffset;
@@ -436,7 +437,7 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
     auto& image = *input.Image;
     const auto& headers = *input.Headers;
     const auto imageBase = image.GetImageBase();
-    const auto tls = ScanTls(*input.Source, headers, image);
+    const auto tls = ScanTls(*input.Source, headers, image, input.Message);
     const bool hasTls = tls.Tls != nullptr && (tls.Tls->MemorySize != 0 || !tls.Accesses.empty());
     if (!hasTls && !tls.Accesses.empty()) throw Domain::RelinkerException("Guest TLS access without a non-empty PT_TLS");
     if (!hasTls && !input.TlsModuleSlots.empty()) throw Domain::RelinkerException("Guest TLS module relocation without a non-empty PT_TLS");

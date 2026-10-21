@@ -56,6 +56,28 @@ extern "C" int APS5_VABI sceSystemServiceSetNoticeScreenSkipFlag(void);
 extern "C" int APS5_VABI sceSystemServiceDisableNoticeScreenSkipFlagAutoSet(void);
 extern "C" int APS5_VABI sceSystemServiceHideSplashScreen(void);
 extern "C" int APS5_VABI sceSystemServiceReceiveEvent(SystemServiceEvent* event);
+extern "C" void APS5_VABI sceSystemServiceInitializePlayerDialogParam(SystemServicePlayerDialogParam* param);
+
+namespace {
+
+void TestPlayerDialogParam() {
+    alignas(8) unsigned char buffer[0x100];
+    std::memset(buffer, 0xab, sizeof(buffer));
+    sceSystemServiceInitializePlayerDialogParam(reinterpret_cast<SystemServicePlayerDialogParam*>(buffer));
+    unsigned char expected[0x40] = {0x40};
+    std::memset(expected + 0xc, 0xff, 4);
+    Require(std::memcmp(buffer, expected, sizeof(expected)) == 0);
+    for (std::size_t i = sizeof(expected); i < sizeof(buffer); ++i) Require(buffer[i] == 0xab);
+    bool threw = false;
+    try {
+        sceSystemServiceInitializePlayerDialogParam(nullptr);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    Require(threw);
+}
+
+}
 
 int main() {
     Require(sceSystemServicePowerTick() == SYSTEM_SERVICE_OK);
@@ -81,7 +103,7 @@ int main() {
     for (unsigned char byte : browserParam) Require(byte == 0x5a);
     Require(sceSystemServiceLaunchWebBrowser("", nullptr) == browserUnavailable);
     Require(sceSystemServiceLaunchWebBrowser(nullptr, nullptr) == browserUnavailable);
-    Require(sceSystemServiceOpenTournamentOccurrence() == browserUnavailable);
+    Require(sceSystemServiceOpenTournamentOccurrence() == SYSTEM_SERVICE_OK);
     Require(LaunchAppThrows("PPSA99109", nullptr, nullptr));
     Require(LaunchAppThrows(nullptr, nullptr, nullptr));
     const char* launchArguments[] = {"--backup", nullptr};
@@ -104,27 +126,27 @@ int main() {
     Require(luminance.max_tone_map_luminance == 100.0f);
     Require(luminance.min_tone_map_luminance == 0.0f);
 
-    char name[SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH];
+    char name[SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH * 2];
+    const auto untouched = [&name] {
+        for (const char byte : name) {
+            if (byte != 'x') return false;
+        }
+        return true;
+    };
     std::memset(name, 'x', sizeof(name));
-    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, nullptr, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, 0) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_LANG, nullptr, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    for (int paramId : {SYSTEM_SERVICE_PARAM_ID_LANG, SYSTEM_SERVICE_PARAM_ID_DATE_FORMAT, SYSTEM_SERVICE_PARAM_ID_TIME_FORMAT,
-                        SYSTEM_SERVICE_PARAM_ID_TIME_ZONE, SYSTEM_SERVICE_PARAM_ID_SUMMERTIME, SYSTEM_SERVICE_PARAM_ID_GAME_PARENTAL_LEVEL,
-                        SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN, 0, 8, -1}) {
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, nullptr, SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    for (std::size_t size = 0; size < SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH; ++size) {
+        Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, size) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    }
+    for (const int paramId : {-1, 0, 1, 5, 7, 40, 100, 1000, 0x7fffffff}) {
         Require(sceSystemServiceParamGetString(paramId, name, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
-        Require(sceSystemServiceParamGetString(paramId, name, 4) == SYSTEM_SERVICE_ERROR_PARAMETER);
     }
-    for (std::size_t bufSize = 1; bufSize < 4; ++bufSize) {
-        Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, bufSize) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    }
-    for (char byte : name) Require(byte == 'x');
-    for (std::size_t bufSize : {std::size_t{4}, std::size_t{64}, sizeof(name)}) {
-        std::memset(name, 'x', sizeof(name));
-        Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, bufSize) == SYSTEM_SERVICE_OK);
-        Require(std::strcmp(name, "PS5") == 0);
-        for (std::size_t index = 4; index < sizeof(name); ++index) Require(name[index] == 'x');
-    }
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_LANG, name, sizeof(name)) == SYSTEM_SERVICE_ERROR_PARAMETER);
+    Require(untouched());
+    Require(sceSystemServiceParamGetString(SYSTEM_SERVICE_PARAM_ID_SYSTEM_NAME, name, SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH + 3) == SYSTEM_SERVICE_OK);
+    Require(std::strcmp(name, "PS5") == 0);
+    for (std::size_t index = 4; index < SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH + 3; ++index) Require(name[index] == '\0');
+    for (std::size_t index = SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH + 3; index < sizeof(name); ++index) Require(name[index] == 'x');
 
     Require(sceSystemServiceGetStatus(nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
     SystemServiceStatus status;
@@ -148,4 +170,5 @@ int main() {
     SystemServiceEvent event;
     event.event_type = 7;
     Require(sceSystemServiceReceiveEvent(&event) == SYSTEM_SERVICE_ERROR_NO_EVENT);
+    TestPlayerDialogParam();
 }

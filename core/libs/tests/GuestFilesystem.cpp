@@ -238,6 +238,16 @@ static void TestParentTraversal() {
     checkInvalid("/parent-test-mount/present.txt/..", 20);
     FileStat status{};
     Require(sceKernelStat("/parent-test-mount/existing/../present.txt", &status) == 0 && status.st_size == 9);
+    for (const char* name : {"/parent-test-mount/present.txt/.", "/parent-test-mount/present.txt/./"}) {
+        Require(stat_nid_postfix(name, &status) == -1 && *__error_nid_postfix() == 20);
+        Require(sceKernelStat(name, &status) == static_cast<int>(0x80020014u));
+        Require(access_nid_postfix(name, 0) == -1 && *__error_nid_postfix() == 20);
+        Require(open_nid_postfix(name, 0, 0) == -1 && *__error_nid_postfix() == 20);
+        Require(mkdir_nid_postfix(name, 0755) == -1 && *__error_nid_postfix() == 20);
+    }
+    Require(stat_nid_postfix("/parent-test-mount/missing/.", &status) == -1 && *__error_nid_postfix() == 2);
+    Require(stat_nid_postfix("/parent-test-mount/existing/.", &status) == 0 && (status.st_mode & 0170000) == 0040000);
+    Require(access_nid_postfix("/parent-test-mount/existing/./", 0) == 0);
 #ifndef _WIN32
     for (const char* name : {"slash-unlink", "slash-remove", "slash-rename", "slash-open", "slash-kernel"}) std::ofstream(root / name) << "kept";
     Require(unlink_nid_postfix("/parent-test-mount/slash-unlink/") == -1 && *__error_nid_postfix() == 20);
@@ -322,6 +332,42 @@ static void TestRelinkedModuleNameCase() {
 }
 
 #ifdef _WIN32
+static void TestCaseSensitiveHostDirectory() {
+    const auto root = std::filesystem::temp_directory_path() / ("anyps5-sensitive-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Require(std::filesystem::create_directory(root));
+    const auto handle = CreateFileW(root.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    Require(handle != INVALID_HANDLE_VALUE);
+    struct { ULONG flags; } information{FILE_CS_FLAG_CASE_SENSITIVE_DIR};
+    constexpr auto caseSensitiveInfo = static_cast<FILE_INFO_BY_HANDLE_CLASS>(23);
+    const bool enabled = SetFileInformationByHandle(handle, caseSensitiveInfo, &information, sizeof(information));
+    const auto error = GetLastError();
+    CloseHandle(handle);
+    if (!enabled && (error == ERROR_NOT_SUPPORTED || error == ERROR_INVALID_PARAMETER || error == ERROR_ACCESS_DENIED)) {
+        std::printf("case-sensitive host directory unavailable: %lu\n", error);
+        std::filesystem::remove(root);
+        return;
+    }
+    Require(enabled);
+    { std::ofstream file(root / "File.txt"); file << "payload"; }
+    Require(std::filesystem::create_directory(root / "Sub"));
+    Require(std::filesystem::create_directory(root / "Both"));
+    Require(std::filesystem::create_directory(root / "both"));
+    { std::ofstream file(root / "libCase.prx.guest.prx"); file << "module"; }
+    const auto host = root.string();
+    AddPathAlias_nid_no_patch("/sensitive-host", host.c_str());
+    Require(ResolvePath_nid_no_patch("/sensitive-host/file.txt") == root / "File.txt");
+    Require(ResolvePath_nid_no_patch("/sensitive-host/sub") == root / "Sub");
+    Require(ResolvePathOrRelinkedModule_nid_no_patch("/sensitive-host/libcase.prx") == root / "libCase.prx.guest.prx");
+    bool ambiguous = false;
+    try { ResolvePath_nid_no_patch("/sensitive-host/BOTH/file.txt"); }
+    catch (const std::runtime_error& failure) { ambiguous = std::strstr(failure.what(), "Ambiguous case-insensitive guest path") != nullptr; }
+    Require(ambiguous);
+    RemovePathAlias_nid_no_patch("/sensitive-host");
+    std::filesystem::remove_all(root);
+}
+
 static std::filesystem::path ExtendedPath(const std::filesystem::path& path) {
     const auto& native = path.native();
     if (native.starts_with(L"\\\\?\\") || native.starts_with(L"\\\\.\\")) return path;
@@ -412,6 +458,7 @@ int main() {
     TestRelinkedModuleNames();
     TestRelinkedModuleNameCase();
 #ifdef _WIN32
+    TestCaseSensitiveHostDirectory();
     TestLongHostPathStat();
 #endif
 #ifdef __linux__
@@ -954,6 +1001,9 @@ int main() {
         const auto statLoop = root / "stat-loop";
         Require(CreateSymbolicLinkW(statLoop.c_str(), L"stat-loop", SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
         Require(sceKernelStat(statLoop.generic_string().c_str(), &status) == static_cast<int>(0x8002003eu));
+        Require(sceKernelOpen(statLoop.generic_string().c_str(), 0, 0) == static_cast<int>(0x8002003eu));
+        Require(open_nid_postfix(statLoop.string().c_str(), 0, 0) == -1 && *__error_nid_postfix() == 62);
+        Require(fopen_nid_postfix(statLoop.string().c_str(), "r") == nullptr && *__error_nid_postfix() == 62);
         const auto checkRelativeLink = [](const std::filesystem::path& link, std::int64_t targetLength) {
             FileStat own{};
             return lstat_nid_postfix(link.string().c_str(), &own) == 0 && (own.st_mode & 0170000) == 0120000 &&
@@ -972,6 +1022,8 @@ int main() {
         Require(lstat_nid_postfix(absoluteLink.string().c_str(), &absoluteStatus) == 0);
         Require((absoluteStatus.st_mode & 0170000) == 0120000 && absoluteStatus.st_size > 0 && absoluteStatus.st_nlink == 1);
         Require(stat_nid_postfix(absoluteLink.string().c_str(), &followed) == 0 && followed.st_ino == status.st_ino);
+        Require(sceKernelOpen((statLoop.generic_string() + "/inside").c_str(), 0, 0) == static_cast<int>(0x8002003eu));
+        Require(open_nid_postfix((statLoop.string() + "\\inside").c_str(), 0, 0) == -1 && *__error_nid_postfix() == 62);
         Require(std::filesystem::remove(fileLink) && std::filesystem::remove(directoryLink) && DeleteFileW(danglingLink.c_str()) != 0 &&
             DeleteFileW(statLoop.c_str()) != 0 &&
             std::filesystem::remove(absoluteLink) && std::filesystem::remove(targetDirectory));
@@ -1034,6 +1086,9 @@ int main() {
     Require(flock_nid_postfix(other, 2 | 4) == 0);
     Require(flock_nid_postfix(other, 8) == 0);
     Require(flock_nid_postfix(locked, 2 | 4) == 0);
+    Require(lseek_nid_postfix(-1, 0, 7) == -1 && *__error_nid_postfix() == 9);
+    Require(lseek_nid_postfix(0x7fffffff, 0, -1) == -1 && *__error_nid_postfix() == 9);
+    Require(lseek_nid_postfix(locked, 0, 7) == -1 && *__error_nid_postfix() == 22);
     Require(flock_nid_postfix(-1, 2 | 4) == -1 && *__error_nid_postfix() == 9);
     Require(flock_nid_postfix(0x7fffffff, 1) == -1 && *__error_nid_postfix() == 9);
     int flockPipe[2] = {-1, -1};

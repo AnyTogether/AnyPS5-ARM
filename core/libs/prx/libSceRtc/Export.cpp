@@ -274,8 +274,8 @@ bool parseZoneName(const char* cursor, std::int64_t& offsetMinutes) {
         {"CAST", 570}, {"CADT", 630}, {"SAST", 570}, {"SADT", 630}, {"WST", 480}, {"WDT", 540},
         {"GMT", 0}, {"WET", 0}, {"BST", 60}, {"WAT", -60}, {"AST", -240}, {"ADT", -180}, {"EST", -300}, {"EDT", -240},
         {"CST", -360}, {"CDT", -300}, {"MST", -420}, {"MDT", -360}, {"PST", -480}, {"PDT", -420}, {"YST", -540}, {"YDT", -480},
-        {"HDT", -540}, {"CAT", -600}, {"AHST", -600}, {"NST", -150}, {"NDT", -90}, {"IDLW", -720}, {"CET", 60}, {"MET", 60},
-        {"MEWT", 60}, {"MEST", 120}, {"CEST", 120}, {"SST", 120}, {"FWT", 120}, {"FST", 60}, {"EET", 120}, {"IST", 120},
+        {"HDT", -540}, {"CAT", -600}, {"AHST", -600}, {"NST", -150}, {"NFT", -150}, {"NDT", -90}, {"IDLW", -720}, {"CET", 60}, {"MET", 60},
+        {"DNT", 60}, {"NOR", 60}, {"SET", 60}, {"MEWT", 60}, {"MEST", 120}, {"CEST", 120}, {"SST", 120}, {"FWT", 120}, {"FST", 60}, {"EET", 120}, {"IST", 120},
         {"WAST", 420}, {"WADT", 480}, {"CCT", 480}, {"AWST", 480}, {"JST", 540}, {"KST", 540}, {"ACST", 570}, {"EAST", 600},
         {"GST", 600}, {"AEST", 600}, {"NZT", 720}, {"NZST", 720}, {"NZDT", 780}, {"IDLE", 720}, {"JT", 450},
     };
@@ -574,7 +574,12 @@ int APS5_VABI sceRtcSetMicrosecond(RtcDateTime* time, int microsecond) {
 }
 
 int APS5_VABI sceRtcFormatRFC3339(char* date_time, const RtcTick* utc, int time_zone_minutes) {
-    if (!date_time || !utc) return SCE_RTC_ERROR_INVALID_POINTER;
+    if (!date_time) return SCE_RTC_ERROR_INVALID_POINTER;
+    RtcTick now{};
+    if (!utc) {
+        now.tick = currentTick();
+        utc = &now;
+    }
     if (time_zone_minutes < -1439 || time_zone_minutes > 1439) return SCE_RTC_ERROR_INVALID_VALUE;
     RtcTick local{};
     if (const int result = addTicks(&local, utc, time_zone_minutes, TICKS_PER_MINUTE); result != 0) return result;
@@ -590,13 +595,23 @@ int APS5_VABI sceRtcFormatRFC3339(char* date_time, const RtcTick* utc, int time_
 }
 
 int APS5_VABI sceRtcFormatRFC3339LocalTime(char* date_time, const RtcTick* utc) {
-    if (!date_time || !utc) return SCE_RTC_ERROR_INVALID_POINTER;
+    if (!date_time) return SCE_RTC_ERROR_INVALID_POINTER;
+    RtcTick now{};
+    if (!utc) {
+        now.tick = currentTick();
+        utc = &now;
+    }
     if (utc->tick > MAX_TICK) return SCE_RTC_ERROR_INVALID_VALUE;
     return sceRtcFormatRFC3339(date_time, utc, localOffsetMinutes(*utc));
 }
 
 int APS5_VABI sceRtcFormatRFC2822(char* date_time, const RtcTick* utc, int time_zone_minutes) {
-    if (!date_time || !utc) return SCE_RTC_ERROR_INVALID_POINTER;
+    if (!date_time) return SCE_RTC_ERROR_INVALID_POINTER;
+    RtcTick now{};
+    if (!utc) {
+        now.tick = currentTick();
+        utc = &now;
+    }
     if (time_zone_minutes < -1439 || time_zone_minutes > 1439) return SCE_RTC_ERROR_INVALID_VALUE;
     RtcTick local{};
     if (const int result = addTicks(&local, utc, time_zone_minutes, TICKS_PER_MINUTE); result != 0) return result;
@@ -608,7 +623,12 @@ int APS5_VABI sceRtcFormatRFC2822(char* date_time, const RtcTick* utc, int time_
 }
 
 int APS5_VABI sceRtcFormatRFC2822LocalTime(char* date_time, const RtcTick* utc) {
-    if (!date_time || !utc) return SCE_RTC_ERROR_INVALID_POINTER;
+    if (!date_time) return SCE_RTC_ERROR_INVALID_POINTER;
+    RtcTick now{};
+    if (!utc) {
+        now.tick = currentTick();
+        utc = &now;
+    }
     if (utc->tick > MAX_TICK) return SCE_RTC_ERROR_INVALID_VALUE;
     return sceRtcFormatRFC2822(date_time, utc, localOffsetMinutes(*utc));
 }

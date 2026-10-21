@@ -708,8 +708,13 @@ bool readsScalarDword(const RdnaInstruction& instruction, std::uint32_t reg, std
     return overlaps(instruction.source0, source0Count) || overlaps(instruction.source1, source1Count) || overlaps(instruction.source2, source2Count) || overlaps(instruction.source3, source3Count);
 }
 
+struct LinkEscape {
+    std::uint32_t waveSize = 0;
+    std::string reason;
+};
+
 template <typename TError>
-void requireReturnAddressesStayInCalls(const RdnaProgram& program, const std::vector<SwappcCall>& calls, const std::vector<std::uint32_t>& unlinked, std::uint32_t waveSize, const TError& escapeError) {
+LinkEscape requireReturnAddressesStayInCalls(const RdnaProgram& program, const std::vector<SwappcCall>& calls, const std::vector<std::uint32_t>& unlinked, std::uint32_t knownWaveSize, const TError& escapeError) {
     std::set<std::uint32_t> links;
     for (const auto& call : calls) {
         if (!call.fetch) links.insert(call.linkRegister);
@@ -738,45 +743,58 @@ void requireReturnAddressesStayInCalls(const RdnaProgram& program, const std::ve
         std::erase_if(next, [&](std::uint32_t successor) { return successor >= size; });
         return next;
     };
-    for (const auto link : links) {
-        const auto writesLink = [&](std::uint32_t index) {
-            const SwappcCall* call = findCallAt(calls, index);
-            return (call != nullptr && call->linkRegister == link) || (std::ranges::find(unlinked, index) != unlinked.end() && scalarIndex(program.instructions[index].destination) == link);
-        };
-        std::vector<std::uint8_t> holds(size, 0u);
-        std::vector<std::uint32_t> work;
-        for (std::uint32_t index = 0; index < size; ++index) {
-            if (writesLink(index)) work.push_back(index);
-        }
-        const auto after = [&](std::uint32_t index) -> std::uint8_t {
-            if (writesLink(index)) return 3u;
-            std::uint8_t value = holds[index];
-            if (overwritesScalar(program.instructions[index], link, waveSize)) value &= 2u;
-            if (overwritesScalar(program.instructions[index], link + 1u, waveSize)) value &= 1u;
-            return value;
-        };
-        while (!work.empty()) {
-            const auto index = work.back();
-            work.pop_back();
-            const auto value = after(index);
-            for (const auto successor : successors(index)) {
-                if ((holds[successor] | value) == holds[successor]) continue;
-                holds[successor] |= value;
-                work.push_back(successor);
+    const auto escapeAt = [&](std::uint32_t waveSize) -> std::optional<std::invalid_argument> {
+        for (const auto link : links) {
+            const auto writesLink = [&](std::uint32_t index) {
+                const SwappcCall* call = findCallAt(calls, index);
+                return (call != nullptr && call->linkRegister == link) || (std::ranges::find(unlinked, index) != unlinked.end() && scalarIndex(program.instructions[index].destination) == link);
+            };
+            std::vector<std::uint8_t> holds(size, 0u);
+            std::vector<std::uint32_t> work;
+            for (std::uint32_t index = 0; index < size; ++index) {
+                if (writesLink(index)) work.push_back(index);
+            }
+            const auto after = [&](std::uint32_t index) -> std::uint8_t {
+                if (writesLink(index)) return 3u;
+                std::uint8_t value = holds[index];
+                if (overwritesScalar(program.instructions[index], link, waveSize)) value &= 2u;
+                if (overwritesScalar(program.instructions[index], link + 1u, waveSize)) value &= 1u;
+                return value;
+            };
+            while (!work.empty()) {
+                const auto index = work.back();
+                work.pop_back();
+                const auto value = after(index);
+                for (const auto successor : successors(index)) {
+                    if ((holds[successor] | value) == holds[successor]) continue;
+                    holds[successor] |= value;
+                    work.push_back(successor);
+                }
+            }
+            for (std::uint32_t index = 0; index < size; ++index) {
+                const auto& instruction = program.instructions[index];
+                if (holds[index] == 0u || writesLink(index) || instruction.family == RdnaInstructionFamily::SOPC || findReturnAt(calls, index) != nullptr) continue;
+                const bool inside = std::ranges::any_of(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link && index >= call.targetIndex && index <= call.returnIndex; });
+                if (inside || !(((holds[index] & 1u) != 0u && readsScalarDword(instruction, link, waveSize)) || ((holds[index] & 2u) != 0u && readsScalarDword(instruction, link + 1u, waveSize)))) continue;
+                const auto owner = std::ranges::find_if(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link; });
+                return escapeError(*owner, instruction);
             }
         }
-        for (std::uint32_t index = 0; index < size; ++index) {
-            const auto& instruction = program.instructions[index];
-            if (holds[index] == 0u || writesLink(index) || instruction.family == RdnaInstructionFamily::SOPC || findReturnAt(calls, index) != nullptr) continue;
-            const bool inside = std::ranges::any_of(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link && index >= call.targetIndex && index <= call.returnIndex; });
-            if (inside || !(((holds[index] & 1u) != 0u && readsScalarDword(instruction, link, waveSize)) || ((holds[index] & 2u) != 0u && readsScalarDword(instruction, link + 1u, waveSize)))) continue;
-            const auto owner = std::ranges::find_if(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link; });
-            throw escapeError(*owner, instruction);
-        }
+        return std::nullopt;
+    };
+    if (knownWaveSize != 0u) {
+        if (const auto escape = escapeAt(knownWaveSize)) throw *escape;
+        return {};
     }
+    const auto narrow = escapeAt(32u);
+    const auto wide = escapeAt(64u);
+    if (narrow && wide) throw *narrow;
+    if (narrow) return {32u, narrow->what()};
+    if (wide) return {64u, wide->what()};
+    return {};
 }
 
-std::vector<SwappcCall> analyzeSwappcCalls(const RdnaProgram& program, const SwappcInfo* swappc, std::vector<std::uint32_t>& unlinked) {
+std::vector<SwappcCall> analyzeSwappcCalls(const RdnaProgram& program, const SwappcInfo* swappc, std::vector<std::uint32_t>& unlinked, LinkEscape& linkEscape) {
     std::vector<SwappcCall> calls;
     for (std::uint32_t index = 0; index < program.instructions.size(); ++index) {
         const auto& instruction = program.instructions[index];
@@ -919,7 +937,7 @@ std::vector<SwappcCall> analyzeSwappcCalls(const RdnaProgram& program, const Swa
         }
     }
 
-    requireReturnAddressesStayInCalls(program, calls, unlinked, swappc != nullptr ? swappc->waveSize : 0u, escapeError);
+    linkEscape = requireReturnAddressesStayInCalls(program, calls, unlinked, swappc != nullptr ? swappc->waveSize : 0u, escapeError);
 
     for (std::size_t first = 0; first < calls.size(); ++first) {
         if (!calls[first].fetch && calls[first].callIndex >= calls[first].targetIndex && calls[first].callIndex <= calls[first].returnIndex) {
@@ -1611,9 +1629,12 @@ LinkedCalls LinkCalls(const RdnaProgram& program, std::span<const UserDataCall> 
 
 ControlFlowGraph GraphBuilder::Build(const RdnaProgram& program, const SwappcInfo* swappc) const {
     std::vector<std::uint32_t> unlinked;
-    const std::vector<SwappcCall> calls = analyzeSwappcCalls(program, swappc, unlinked);
+    LinkEscape linkEscape;
+    const std::vector<SwappcCall> calls = analyzeSwappcCalls(program, swappc, unlinked, linkEscape);
     ControlFlowGraph graph;
     for (const auto index : unlinked) graph.unlinkedCallProgramCounters.push_back(program.instructions[index].programCounter);
+    graph.linkEscapeWaveSize = linkEscape.waveSize;
+    graph.linkEscapeReason = std::move(linkEscape.reason);
     graph.blocks = splitIntoBlocks(program, calls);
     linkBlocks(graph.blocks, program, calls);
     for (const auto& call : calls) {

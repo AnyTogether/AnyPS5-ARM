@@ -160,6 +160,7 @@ int main() {
     std::uint32_t used = 0;
     std::uint32_t produced = 0;
     char sheet[1024] = {};
+    Require(sceCesUcsProfileInitEucJpCp51932(nullptr) == nullptr);
     void* eucJp = sceCesUcsProfileInitEucJpCp51932(sheet);
     Require(eucJp != nullptr);
     char eucContext[256] = {};
@@ -172,6 +173,8 @@ int main() {
     Require(sceCesUtf8StrToMbcsStr(eucContext, reinterpret_cast<const std::uint8_t*>("\xF0\x9F\x98\x80"), 4, &used, mbcs, sizeof(mbcs), &produced) == unassignedCode);
 
     std::uint8_t back[16] = {};
+    Require(sceCesMbcsStrToUtf8Str(nullptr, mbcs, 6, &used, back, sizeof(back), &produced) == invalidParameter);
+    Require(sceCesMbcsStrToUtf8Str(eucContext, mbcs, 6, &used, nullptr, sizeof(back), &produced) == invalidDstBuffer);
     Require(sceCesMbcsStrToUtf8Str(eucContext, mbcs, 6, &used, back, sizeof(back), &produced) == 0);
     Require(used == 6 && produced == 7 && std::memcmp(back, eucSource, 7) == 0);
     Require(sceCesMbcsStrGetUtf8Len(eucContext, mbcs, 6, &used, &produced) == 0 && produced == 7);

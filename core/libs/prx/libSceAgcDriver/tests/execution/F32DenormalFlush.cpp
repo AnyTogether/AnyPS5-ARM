@@ -505,13 +505,15 @@ int main() {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
         const auto capabilities = device->Target().supportedCapabilities;
-        const bool hardware = std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDenormFlushToZero)) != capabilities.end();
+        const bool declared = std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDenormFlushToZero)) != capabilities.end();
+        const bool native = !declared && device->Target().float32FlushToZero;
+        const bool hardware = declared || native;
         if (hardware) {
             bool softwareDeclares = true;
             bool hardwareDeclares = false;
             const auto software = CompiledWords(*device, false, softwareDeclares);
             const auto hardwareWords = CompiledWords(*device, true, hardwareDeclares);
-            Require(!softwareDeclares && hardwareDeclares, "f32 denormal flush: only the hardware-flush module declares DenormFlushToZero 32");
+            Require(!softwareDeclares && hardwareDeclares == declared, declared ? "f32 denormal flush: only the hardware-flush module declares DenormFlushToZero 32" : "f32 denormal flush: a module flushed natively declares DenormFlushToZero 32 without the device capability");
             Require(hardwareWords < software, "f32 denormal flush: the hardware-flush module is " + std::to_string(hardwareWords) + " words, the emulated one " + std::to_string(software));
         }
         for (const bool flush : {false, true}) {

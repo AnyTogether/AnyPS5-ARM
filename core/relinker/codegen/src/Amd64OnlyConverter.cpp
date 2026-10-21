@@ -396,6 +396,8 @@ void Amd64OnlyConverter::_convertSegment(
                     for (auto next = item.Index + 1; siteLength < Amd64OnlySubstitutionTable::kJmpRel32.Size; ++next) {
                         if (next >= matches.size() || matches[next].Offset != match.Offset + siteLength)
                             throw CodegenException("AMD-only instruction too short for a jump and not followed by an instruction", fileOffset);
+                        if (claimed.contains(next))
+                            throw CodegenException("AMD-only instruction too short for a jump is followed by an instruction another stub already moved", ph.Offset + matches[next].Offset);
                         const auto& following = matches[next];
                         const std::span<const std::uint8_t> bytes(seg.data() + following.Offset, following.Length);
                         const auto info = decoder.DecodeInstruction(bytes.data(), bytes.size());

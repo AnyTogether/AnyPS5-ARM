@@ -401,6 +401,7 @@ int APS5_VABI sceFontOpenFontInstance(FontHandle fontHandle, FontHandle setupFon
         targetState.scaleH = sourceState->scaleH;
         targetState.attributes = sourceState->attributes;
         if (sourceState->faceData && !sourceState->faceData->empty()) LoadStateFace(targetState, sourceState->faceData, subFontIndex);
+        for (const FallbackFace& fallback : sourceState->fallbacks) AddStateFallbackFace(targetState, fallback.data, fallback.subFontIndex);
     }
     if (pFontHandle) *pFontHandle = target;
     return SCE_FONT_OK;
@@ -442,8 +443,13 @@ int APS5_VABI sceFontOpenFontSet(FontLibrary library, std::uint32_t fontSetType,
         if (openRc == SCE_FONT_ERROR_FS_OPEN_FAILED || openRc == SCE_FONT_ERROR_NO_SUPPORT_FORMAT) return SCE_FONT_ERROR_FONT_OPEN_FAILED;
         if (openRc != SCE_FONT_OK) return openRc;
         GetNativeFont(*pFontHandle)->open_info.fontset_flags = fontSetType;
+        const std::vector<SystemFontFile> fallbackFiles = FindSystemFontFallbackFiles(fontSetType);
+        for (const SystemFontFile& fallback : fallbackFiles) APS5_LOG_OUT("fontSetType=0x%08X fallback=%s", fontSetType, fallback.path.string().c_str());
         FontState& state = ResetState(*pFontHandle);
         if (auto bytes = SystemFontBytes(file->path)) LoadStateFace(state, std::move(bytes), file->subFontIndex);
+        for (const SystemFontFile& fallback : fallbackFiles) {
+            if (auto bytes = SystemFontBytes(fallback.path)) AddStateFallbackFace(state, std::move(bytes), fallback.subFontIndex);
+        }
         return SCE_FONT_OK;
     }
     ReleaseLibraryLock(lib, libraryLock);

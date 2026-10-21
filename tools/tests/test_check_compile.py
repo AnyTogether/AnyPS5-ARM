@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,35 @@ TOOL = Path(__file__).resolve().parents[1] / "check_compile.py"
 
 
 class CheckCompileTests(unittest.TestCase):
+    def test_unexpanded_response_files_cannot_rewrite_build_outputs(self):
+        compiler = shutil.which("clang")
+        if compiler is None:
+            self.skipTest("Clang is required to check compilation-fragment side effects")
+        source = self.source("unit.c")
+        outputs = [self.build / name for name in ("unit.o", "unit.d", "fragment.json")]
+        response = self.build / "unit flags.rsp"
+        response.write_text(" ".join('"' + argument + '"' for argument in
+                                    ("-c", source.as_posix(), "-MMD", "-MF", outputs[1].as_posix(),
+                                     "-MJ", outputs[2].as_posix(), "-o", outputs[0].as_posix())), encoding="utf-8")
+        arguments = [compiler, "@" + str(response)]
+        original = subprocess.run(arguments, cwd=self.build, capture_output=True, text=True)
+        self.assertEqual(original.returncode, 0, original.stderr)
+        preserved = {path: path.read_bytes() for path in [source, response, *outputs]}
+        for field in ("arguments", "command"):
+            for jobs in ("1", "2"):
+                with self.subTest(field=field, jobs=jobs):
+                    command = (subprocess.list2cmdline(arguments) if os.name == "nt" else
+                               " ".join(shlex.quote(argument) for argument in arguments))
+                    self.manifest([{"directory": str(self.build), "file": str(source),
+                                    field: arguments if field == "arguments" else command}])
+                    result = self.tool("--jobs", jobs, "unit.c")
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn("unexpanded response file", result.stderr)
+                    self.assertIn(str(response), result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    for path, content in preserved.items():
+                        self.assertEqual(path.read_bytes(), content)
+
     def test_dependency_options_do_not_make_syntax_checks_fail_or_rewrite_outputs(self):
         compiler = shutil.which("clang")
         if compiler is None:
@@ -314,6 +344,37 @@ class CheckCompileTests(unittest.TestCase):
                                 cwd=repo, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("1 translation units compile", result.stdout)
+
+    def test_a_generated_translation_unit_outside_the_checkout_is_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory).resolve() / "generated unit.cpp"
+            source.write_text("int x;\n", encoding="utf-8")
+            seen = self.root / "arguments.json"
+            script = self.compiler(
+                "import json\nimport sys\nfrom pathlib import Path\n"
+                "Path(sys.argv[1]).write_text(json.dumps(sys.argv[3:]))\n"
+                "if sys.argv[2] == '1': sys.stderr.write('external source: error: no\\n')\n"
+                "sys.exit(int(sys.argv[2]))\n")
+            for relative in (False, True):
+                for status in (0, 1):
+                    with self.subTest(relative=relative, status=status):
+                        self.manifest([{
+                            "directory": str(self.build),
+                            "file": os.path.relpath(source, self.build) if relative else str(source),
+                            "arguments": [sys.executable, str(script), str(seen), str(status),
+                                          "-c", "-o", "generated.o", str(source)],
+                        }])
+                        path = os.path.relpath(source, self.root) if relative else str(source)
+                        result = self.tool(path)
+                        self.assertNotIn("no compile command", result.stderr)
+                        self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                        self.assertEqual(json.loads(seen.read_text(encoding="utf-8")),
+                                         ["-fsyntax-only", str(source)])
+                        if status:
+                            self.assertIn("external source: error: no", result.stderr)
+                            self.assertIn("1 of 1 translation units did not compile", result.stderr)
+                        else:
+                            self.assertIn("1 translation units compile", result.stdout)
 
     def test_a_changed_file_with_a_non_ascii_name_is_checked(self):
         self.failing("caf\u00e9.cpp")

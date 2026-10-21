@@ -69,7 +69,7 @@ static void CheckStoul() {
     CheckStoul(u"017", 0, 15, 3, 0, "octal with base 0");
     CheckStoul(u"z", 36, 35, 1, 0, "base 36");
     CheckStoul(u"0b1", 0, 0, 1, 0, "no binary prefix");
-    CheckStoul(u"0xg", 16, 0, 1, 0, "prefix without digits");
+    CheckStoul(u"0xg", 16, 0, 0, 0, "prefix without digits");
     CheckStoul(u"12é3", 10, 12, 2, 0, "stops at a non-ASCII unit");
     CheckStoul(u"　5", 10, 0, 0, 0, "non-ASCII space is not skipped");
     CheckStoul(u"", 10, 0, 0, 0, "empty string");

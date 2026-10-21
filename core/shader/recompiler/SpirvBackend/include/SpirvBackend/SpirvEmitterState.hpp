@@ -117,6 +117,7 @@ struct SpirvEmitterState {
     bool float16DenormPreserve = false;
     bool robustBufferAccess2 = false;
     bool float32FlushToZero = false;
+    bool float32DenormPreserve = false;
     bool meshBarycentricPixel = false;
     bool meshBarycentricVertex = false;
     std::uint32_t barycentricSmoothLocation = 0xffffffffu;
@@ -131,6 +132,7 @@ struct SpirvEmitterState {
     std::uint32_t meshFlatPositions = 0;
     std::uint32_t pixelFlatPositions = 0;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> solvedBarycentrics;
+    bool waveLdsMemoryBarriers = false;
     std::unordered_set<const IrValue*> sharedLaneValues;
     std::uint32_t laneHalf = 0;
     std::uint32_t spirvVersion = 0x00010300u;
@@ -228,6 +230,7 @@ struct SpirvEmitterState {
     std::uint32_t quadPixelUncovered = 0;
     std::uint32_t sampleMaskInputVariable = 0;
     std::uint32_t quadSampleCoverage = 0;
+    std::uint32_t sampleOrderWord = 0;
     std::uint32_t subgroupLocalInvocationIdVariable = 0;
     std::uint32_t subgroupIdVariable = 0;
     std::uint32_t perVertexVariable = 0;

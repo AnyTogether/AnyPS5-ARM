@@ -11,6 +11,8 @@
 
 extern "C" {
 int APS5_VABI sceAudioOut2Initialize();
+int APS5_VABI sceAudioOut2LoInit();
+int APS5_VABI sceAudioOut2LoTerminate();
 int APS5_VABI sceAudioOut2Set3DLatency(int, std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringInit(std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringTerm();
@@ -39,6 +41,16 @@ static std::string RuntimeErrorMessage(TFunction function) {
 
 static bool NamesFunction(const std::string& message, const char* function) {
     return message.rfind(function, 0) == 0 && message.find("not implemented") == std::string::npos;
+}
+
+template<typename TFunction>
+static bool ThrowsRuntimeError(TFunction function) {
+    try {
+        function();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
 }
 
 namespace {
@@ -124,6 +136,12 @@ void TestEnableChat() {
     Require(sceAudioOut2EnableChat() == 0, "enabling chat after disabling it must be accepted");
 }
 
+void TestLowLatencyService() {
+    Require(sceAudioOut2LoInit() == 0, "starting the low-latency service must be accepted");
+    Require(sceAudioOut2LoInit() == 0, "starting the low-latency service again must be accepted");
+    Require(ThrowsRuntimeError([] { sceAudioOut2LoTerminate(); }), "stopping the low-latency service must throw");
+}
+
 }
 
 int main() {
@@ -135,5 +153,6 @@ int main() {
     TestMasteringGetState();
     TestSetSystemDebugState();
     TestEnableChat();
+    TestLowLatencyService();
     return 0;
 }

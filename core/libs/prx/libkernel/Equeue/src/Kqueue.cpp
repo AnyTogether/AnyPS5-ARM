@@ -134,9 +134,6 @@ std::int64_t DescriptorLowWater(const KernelEvent& change) {
     if (change.data < 1) {
         NotImplemented_nid_no_patch("kevent: NOTE_LOWAT below 1 on a socket");
     }
-    if (change.filter == EVFILT_WRITE && change.data > 1) {
-        NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on EVFILT_WRITE");
-    }
     if (change.data > 1 && GuestSockets::Type(static_cast<int>(change.ident)) != 1) {
         NotImplemented_nid_no_patch("kevent: NOTE_LOWAT above 1 on a socket that is not a stream");
     }

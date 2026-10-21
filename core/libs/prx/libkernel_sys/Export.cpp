@@ -139,6 +139,15 @@ std::int64_t CopyLinkTarget(const std::string& target, char* buffer, std::size_t
     return static_cast<std::int64_t>(count);
 }
 
+bool HasNonDirectoryPrefix(const std::filesystem::path& native) {
+    std::error_code error;
+    for (auto prefix = native.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
+        const auto status = std::filesystem::status(prefix, error);
+        if (std::filesystem::exists(status)) return !std::filesystem::is_directory(status);
+    }
+    return false;
+}
+
 std::int64_t ReadNativeLink(const std::filesystem::path& native, char* buffer, std::size_t size) {
 #ifdef _WIN32
     const DWORD attributes = GetFileAttributesW(native.wstring().c_str());
@@ -153,8 +162,10 @@ std::int64_t ReadNativeLink(const std::filesystem::path& native, char* buffer, s
 #endif
     std::error_code error;
     const auto status = std::filesystem::symlink_status(native, error);
-    if (error) return Fail(GuestError(error));
-    if (status.type() == std::filesystem::file_type::not_found) return Fail(GuestEnoent);
+    if (error)
+        return Fail(error == std::errc::no_such_file_or_directory && HasNonDirectoryPrefix(native) ? GuestEnotdir : GuestError(error));
+    if (status.type() == std::filesystem::file_type::not_found)
+        return Fail(HasNonDirectoryPrefix(native) ? GuestEnotdir : GuestEnoent);
     if (!std::filesystem::is_symlink(status)) return Fail(GuestEinval);
     const auto target = std::filesystem::read_symlink(native, error).generic_string();
     if (error) return Fail(GuestError(error));
@@ -172,15 +183,6 @@ bool HasLongComponent(std::string_view path) {
             return std::filesystem::is_directory(prefix, error);
         }
         start = end + 1;
-    }
-    return false;
-}
-
-bool HasNonDirectoryPrefix(const std::filesystem::path& native) {
-    std::error_code error;
-    for (auto prefix = native.parent_path(); prefix.has_relative_path(); prefix = prefix.parent_path()) {
-        const auto status = std::filesystem::status(prefix, error);
-        if (std::filesystem::exists(status)) return !std::filesystem::is_directory(status);
     }
     return false;
 }
@@ -273,18 +275,18 @@ int APS5_VABI fstatfs_nid_postfix(int d, void* buf) {
 }
 
 std::int64_t APS5_VABI readlink_nid_postfix(const char* path, char* buffer, std::size_t size) {
+    if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     if (path == nullptr) return Fail(GuestEfault);
     if (*path == '\0') return Fail(GuestEnoent);
-    if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return Fail(error);
     return ReadNativeLink(native, buffer, size);
 }
 
 std::int64_t APS5_VABI readlinkat_nid_postfix(int fd, const char* path, char* buffer, std::size_t size) {
+    if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     if (path == nullptr) return Fail(GuestEfault);
     if (*path == '\0') return Fail(GuestEnoent);
-    if (size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) return Fail(GuestEinval);
     if (fd == GuestAtFdcwd || *path == '/') return readlink_nid_postfix(path, buffer, size);
     int error = 0;
     const char* base = GetDirectoryDescriptorPath_nid_no_patch(fd, &error);

@@ -111,6 +111,15 @@ void SecondaryShutdown() { AppendMarker("secondary shutdown"); }
 void APS5_VABI RemainingHandler(void*) { AppendMarker("remaining handler"); }
 void APS5_VABI ExitingHandler(void*) { exit_nid_postfix(7); }
 void GuestExitShutdown() { AppendMarker("shutdown"); }
+void DelayedExitDrain() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    AppendMarker("drain");
+}
+void ExitFlushAfterDrain() { AppendMarker("flush"); }
+void ThrowingExitDrain() { throw std::runtime_error("exit drain test failure"); }
+void BlockedExitDrain() {
+    for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
+}
 void APS5_VABI CheckShutdownStillRunning(void*) {
     if (LibcShutdownToken_nid_postfix().stop_requested()) std::_Exit(8);
     AppendMarker("guest finalizer");
@@ -196,9 +205,40 @@ int DriveRelaunch() {
     std::puts("Guest relaunch completed");
     return 0;
 }
+
+int DriveExitDrain() {
+    const auto self = OwnExecutable();
+    const auto marker = std::filesystem::temp_directory_path() / ("anyps5-exit-drain-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt");
+    SetVariable(RelaunchMarker, marker.string().c_str());
+    Require(RunChild(self, "--exit-drain") == 7);
+    std::ifstream file(marker);
+    const std::string text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    file.close();
+    std::filesystem::remove(marker);
+    Require(text == "drain\nflush\n");
+    Require(RunChild(self, "--exit-drain-throws") == 7);
+    const auto started = std::chrono::steady_clock::now();
+    Require(RunChild(self, "--exit-drain-blocked") == 7);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    Require(elapsed >= std::chrono::seconds(8) && elapsed < std::chrono::seconds(12));
+    std::puts("Host exit drain completed before immediate termination and stayed bounded");
+    return 0;
+}
 }
 int main(int argc, char** argv) {
     const int firstArgument = argc > 0 && std::strncmp(argv[0], "--", 2) == 0 ? 0 : 1;
+    if (argc > firstArgument && std::strcmp(argv[firstArgument], "--exit-drain-driver") == 0) return DriveExitDrain();
+    if (argc > firstArgument && std::strncmp(argv[firstArgument], "--exit-drain", 12) == 0) {
+        LibcRegisterShutdown_nid_postfix(UnexpectedCleanup);
+        Require(std::atexit(UnexpectedCleanup) == 0);
+        if (std::strcmp(argv[firstArgument], "--exit-drain-throws") == 0) LibcSetExitDrain_nid_no_patch(ThrowingExitDrain);
+        else if (std::strcmp(argv[firstArgument], "--exit-drain-blocked") == 0) LibcSetExitDrain_nid_no_patch(BlockedExitDrain);
+        else {
+            LibcSetExitDrain_nid_no_patch(DelayedExitDrain);
+            LibcSetEndFlush_nid_no_patch(ExitFlushAfterDrain);
+        }
+        _Exit_nid_postfix(7);
+    }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--requested-exit-driver") == 0) {
         Require(RunChild(OwnExecutable(), "--requested-exit") == 0);
         return 0;

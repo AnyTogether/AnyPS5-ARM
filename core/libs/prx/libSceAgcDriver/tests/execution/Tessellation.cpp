@@ -118,6 +118,14 @@ alignas(256) constexpr std::array<std::uint32_t, 30> DomainCode{
     0x7e2802f2, 0xf80008cf, 0x14131110, 0xf800020f, 0x14131214, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 37> DomainComputedPoint{
+    0xf8000941, 0x00000000, 0x34020e84, 0x16020283, 0xe0341000, 0x04030a01, 0xbf8c3f70, 0x7c0214ff,
+    0x7f7fffff, 0xd5010002, 0x01a90280, 0xd7460002, 0x04050902, 0xe0341010, 0x04030c02, 0xe0341020,
+    0x04030e02, 0xbf8c3f70, 0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02, 0x10221705,
+    0x3e221b06, 0x3e221f02, 0xd5510012, 0x040a0d05, 0x102424ff, 0x40400000, 0x7e260280, 0x7e2802f2,
+    0xf80008cf, 0x14131110, 0xf800020f, 0x14131214, 0xbf810000,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 31> DomainLoweredInterior{
     0xf8000941, 0x00000000, 0x34020e84, 0x16020283, 0xe0341000, 0x04030a01, 0xe0341010, 0x04030c01,
     0xe0341020, 0x04030e01, 0xbf8c3f70, 0x08040af2, 0x08040d02, 0x10201505, 0x3e201906, 0x3e201d02,
@@ -590,12 +598,12 @@ std::uint32_t CoveredPixels(std::uint32_t patch, bool interior) {
     return count;
 }
 
-void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program, const PatchDraw& patches = Triangles, std::span<const std::uint32_t> local = LocalCode) {
+void RequirePatches(AgcDriver::VulkanDevice& device, const ShaderRecompiler::SpirvTarget& target, std::span<const std::uint32_t> hull, const std::string& program, const PatchDraw& patches = Triangles, std::span<const std::uint32_t> local = LocalCode, std::span<const std::uint32_t> domain = DomainCode) {
     std::uint32_t cursor = 0;
     const Stages stages{
         Compile(target, ShaderStage::Local, local, cursor, patches),
         Compile(target, ShaderStage::TessellationControl, hull, cursor, patches),
-        Compile(target, ShaderStage::TessellationEvaluation, DomainCode, cursor, patches),
+        Compile(target, ShaderStage::TessellationEvaluation, domain, cursor, patches),
         Compile(target, ShaderStage::Fragment, PixelCode, cursor, patches),
     };
     const auto center = Row(-0.5f + 1.0f / 3.0f);
@@ -985,6 +993,7 @@ int main() {
         RequirePatches(*device, target, HullRestoredExecSaved, "hull program saving its restored exec");
         RequirePatches(*device, target, HullNextInput, "hull program reading the next of 4 input control points of 24 bytes", NextInputTriangles, LocalCodeStride24);
         RequirePatches(*device, target, HullDynamicIndex, "hull program reading a control point at a computed index");
+        RequirePatches(*device, target, HullCode, "domain program reading control points at a computed index", Triangles, LocalCode, DomainComputedPoint);
         RequirePatches(*device, target, HullAndSaveexec, "hull program narrowing exec with s_and_saveexec_b64");
         RequirePatches(*device, target, HullSaveexecLoop, "hull program restoring exec through loop phis");
         RequirePatches(*device, target, HullDescendingRecords, "hull program with descending patch records in 128-patch groups", {{3u, 3u, 1u, 2u, 2u, 128u}, Indices});

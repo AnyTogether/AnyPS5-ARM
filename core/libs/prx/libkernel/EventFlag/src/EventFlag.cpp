@@ -18,6 +18,7 @@
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
+static constexpr int SCE_KERNEL_ERROR_ENOENT = 0x80020002;
 static constexpr int SCE_KERNEL_ERROR_ESRCH = 0x80020003;
 static constexpr int SCE_KERNEL_ERROR_ENOMEM = 0x8002000C;
 static constexpr int SCE_KERNEL_ERROR_EACCES = 0x8002000D;
@@ -144,6 +145,18 @@ int APS5_VABI sceKernelCreateEventFlag(KernelEventFlag* ef, const char* name, ui
     *ef = flag.get();
     if (TraceSync()) std::fprintf(stderr, "[evf] create %p '%s' attr=0x%x init=0x%llx\n", static_cast<void*>(flag.get()), name, attr, static_cast<unsigned long long>(init_pattern));
     return SCE_OK;
+}
+
+int APS5_VABI sceKernelOpenEventFlag(KernelEventFlag* ef, const char* name) {
+    if (!ef || !name) return SCE_KERNEL_ERROR_EINVAL;
+    std::shared_lock lock(eventFlagRegistryMutex);
+    for (const auto& [handle, flag] : eventFlagRegistry) {
+        std::lock_guard flagLock(flag->_mutex);
+        if (flag->_deleted || flag->_name != name) continue;
+        *ef = handle;
+        return SCE_OK;
+    }
+    return SCE_KERNEL_ERROR_ENOENT;
 }
 
 int APS5_VABI sceKernelDeleteEventFlag(KernelEventFlag ef) {

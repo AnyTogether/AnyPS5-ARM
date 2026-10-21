@@ -276,7 +276,33 @@ static void CheckWcsftime() {
     Require(WcsftimeThrows(buffer, u"%Y", nullptr), "wcsftime null time");
 }
 
+static void CheckAlternateOctalZero() {
+    struct Case { const char16_t* format; const char16_t* expected; unsigned value; };
+    for (const auto& test : {
+        Case{u"%#.0o", u"0", 0}, Case{u"%#.o", u"0", 0}, Case{u"%#.00o", u"0", 0},
+        Case{u"[%#5.0o]", u"[    0]", 0}, Case{u"[%-#5.0o]", u"[0    ]", 0},
+        Case{u"[%#05.0o]", u"[    0]", 0}, Case{u"%.0o", u"", 0}, Case{u"%#.0x", u"", 0},
+        Case{u"%#.0o", u"01", 1}, Case{u"%#.1o", u"0", 0}, Case{u"%#.3o", u"000", 0},
+        Case{u"%#.0hho", u"0", 256}, Case{u"%#.0ho", u"0", 65536}
+    }) {
+        char16_t buffer[32];
+        const auto expected = std::u16string(test.expected);
+        Require(swprintf_nid_postfix(buffer, 32, test.format, test.value) == static_cast<int>(expected.size()) && buffer == expected, "swprintf alternate octal zero");
+        Require(Format(buffer, 32, test.format, test.value) == static_cast<int>(expected.size()) && buffer == expected, "vswprintf alternate octal zero");
+        Require(snwprintf_s_nid_postfix(buffer, 32, test.format, test.value) == static_cast<int>(expected.size()) && buffer == expected, "snwprintf_s alternate octal zero");
+    }
+    char16_t buffer[16];
+    Require(swprintf_nid_postfix(buffer, 16, u"%#.*o", 0, 0u) == 1 && buffer == std::u16string(u"0"), "octal zero dynamic precision");
+    Require(swprintf_nid_postfix(buffer, 16, u"%#.*o", -1, 0u) == 1 && buffer == std::u16string(u"0"), "octal zero omitted precision");
+    Require(swprintf_nid_postfix(buffer, 16, u"%2$#.*1$o", 0, 0u) == 1 && buffer == std::u16string(u"0"), "octal zero positional precision");
+    Require(swprintf_nid_postfix(buffer, 16, u"%#.0llo", 0ull) == 1 && buffer == std::u16string(u"0"), "octal zero long long");
+    buffer[0] = u'x';
+    buffer[1] = u'y';
+    Require(snwprintf_s_nid_postfix(buffer, 1, u"%#.0o", 0u) == 1 && buffer[0] == 0 && buffer[1] == u'y', "octal zero bounded output");
+}
+
 int main() {
+    CheckAlternateOctalZero();
     CheckBounded();
     CheckPositional();
     CheckPointer();

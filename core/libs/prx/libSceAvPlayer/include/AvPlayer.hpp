@@ -79,11 +79,14 @@ public:
     virtual bool GetAudioData(AvPlayerFrameInfo& info) = 0;
     virtual std::uint64_t CurrentTime() = 0;
     virtual bool Finished() = 0;
+    virtual void SetClockTimeForTest(double milliseconds) = 0;
 };
 
 std::unique_ptr<ISource> OpenSource(const SourceSettings& settings, const std::string& path, ISourceEvents& events);
 
 std::uint32_t DetectSourceType(std::string_view path);
+
+void SetAvPlayerClockForTest_nid_no_patch(AvPlayerInternal* h, double milliseconds);
 
 class Player final : public AvPlayerInternal, private ISourceEvents {
 public:
@@ -113,6 +116,7 @@ public:
     bool GetAudioData(AvPlayerFrameInfo& info);
     bool IsActive();
     std::uint64_t CurrentTime();
+    void SetClockTimeForTest(double milliseconds);
 
 private:
     enum class State { Initial, Ready, Play, Pause, Stop, EndOfFile, Error };

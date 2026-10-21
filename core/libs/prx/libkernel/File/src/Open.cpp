@@ -232,6 +232,7 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
     int fd = NativeOpen(native, MapFlags(flags), mode);
 #ifdef _WIN32
     if (fd < 0 && (errno != ENOENT || !native.has_filename())) {
+        const int openError = errno;
         auto directory = native;
         while (!directory.has_filename() && directory.has_relative_path()) directory = directory.parent_path();
         std::error_code error;
@@ -239,6 +240,8 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
             if ((flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) == (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) errno = EEXIST;
             else if ((flags & SCE_KERNEL_O_ACCMODE) != SCE_KERNEL_O_RDONLY || (flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_TRUNC))) errno = EISDIR;
             else fd = File::OpenDirectoryDescriptor(directory);
+        } else {
+            errno = openError;
         }
     }
 #endif
@@ -251,6 +254,13 @@ static int OpenNative(const std::filesystem::path& native, int flags, std::uint1
             fd = -1;
             errno = EISDIR;
         }
+    }
+#endif
+#ifdef _WIN32
+    if (fd < 0 && (errno == ENOENT || errno == ENOTDIR)) {
+        std::error_code metadataError;
+        const auto metadataPath = NativeMetadataPath(native, metadataError);
+        if (!metadataError && NativeSymbolicLinkLoop(metadataPath)) return SCE_KERNEL_ERROR_ELOOP;
     }
 #endif
     if (fd < 0) {

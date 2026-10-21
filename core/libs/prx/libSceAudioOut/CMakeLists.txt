@@ -3,6 +3,7 @@ add_library(libSceAudioOut SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOutSdl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOutShutdown.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2Context.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2Low.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2PadMix.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2Port.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AudioOut2SpeakerArray.cpp

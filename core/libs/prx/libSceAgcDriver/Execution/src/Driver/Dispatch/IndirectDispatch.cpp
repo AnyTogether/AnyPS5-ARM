@@ -48,7 +48,8 @@ void Driver::countIndirect(int path, double readMs) {
 int Driver::indirectArgumentsPath(std::span<const std::uint32_t> packet, std::uint64_t arguments) {
     static const bool gpuIndirect = std::getenv("APS5_NO_GPU_INDIRECT") == nullptr;
     if (!gpuIndirect) return IndirectDisabled;
-    if ((packet.back() & 0x20u) != 0) return IndirectThreadDimensions;
+    static const bool gpuThreadDimensions = std::getenv("APS5_NO_GPU_THREAD_DIMENSIONS") == nullptr;
+    if ((packet.back() & 0x20u) != 0 && !gpuThreadDimensions) return IndirectThreadDimensions;
     if (arguments % 4 != 0) return IndirectMisaligned;
     return IndirectGpu;
 }

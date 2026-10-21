@@ -80,6 +80,31 @@ const ShaderWorkgroupInputInfo* ShaderWorkgroupInputFor(const SpirvEmitterState&
     }
 }
 
+namespace {
+
+std::uint32_t GuestSampleIndex(SpirvEmitterState& state, std::uint32_t hostIndex) {
+    if (state.sampleOrderWord == 0u) return hostIndex;
+    const auto shift = EmitBinaryU32(state, spv::OpShiftLeftLogical, EmitBinaryU32(state, spv::OpBitwiseAnd, hostIndex, ConstantU32(state, 7u)), ConstantU32(state, 2u));
+    return EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, state.sampleOrderWord, shift), ConstantU32(state, 7u));
+}
+
+std::uint32_t ReorderedSampleBits(SpirvEmitterState& state, std::uint32_t bits, bool toHost) {
+    auto reordered = EmitBinaryU32(state, spv::OpBitwiseAnd, bits, ConstantU32(state, ~0xffu));
+    for (std::uint32_t sample = 0; sample < 8u; ++sample) {
+        const auto guest = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, state.sampleOrderWord, ConstantU32(state, sample * 4u)), ConstantU32(state, 7u));
+        if (toHost) {
+            const auto bit = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, bits, guest), ConstantU32(state, 1u));
+            reordered = EmitBinaryU32(state, spv::OpBitwiseOr, reordered, EmitBinaryU32(state, spv::OpShiftLeftLogical, bit, ConstantU32(state, sample)));
+        } else {
+            const auto bit = EmitBinaryU32(state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, bits, ConstantU32(state, sample)), ConstantU32(state, 1u));
+            reordered = EmitBinaryU32(state, spv::OpBitwiseOr, reordered, EmitBinaryU32(state, spv::OpShiftLeftLogical, bit, guest));
+        }
+    }
+    return reordered;
+}
+
+}
+
 std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std::uint32_t component);
 
 std::uint32_t EmitQuadPixel(SpirvEmitterState& state) {
@@ -204,7 +229,7 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
         const auto bits = state.module.AllocateId();
         state.module.AddFunction(spv::OpLoad, TypeI32(state), value, variable);
         state.module.AddFunction(spv::OpBitcast, TypeU32(state), bits, value);
-        return bits;
+        return kind == StageInputKind::SampleId ? GuestSampleIndex(state, bits) : bits;
     }
     if (kind == StageInputKind::SampleMask) {
         const auto pointer = state.module.AllocateId();
@@ -418,6 +443,7 @@ bool AlphaToCoverage(const SpirvEmitterState& state) {
 
 void StoreCoverage(SpirvEmitterState& state, std::uint32_t mask) {
     if (state.quadSampleCoverage != 0u) mask = Binary(state, spv::OpBitwiseAnd, TypeI32(state), mask, state.quadSampleCoverage);
+    if (state.sampleOrderWord != 0u) mask = Unary(state, spv::OpBitcast, TypeI32(state), ReorderedSampleBits(state, Unary(state, spv::OpBitcast, TypeU32(state), mask), true));
     const auto pointer = state.module.AllocateId();
     state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassOutput, TypeI32(state)), pointer, state.sampleMaskVariable, ConstantU32(state, 0u));
     state.module.AddFunction(spv::OpStore, pointer, mask);
@@ -796,9 +822,10 @@ std::uint32_t TessellationPointer(SpirvValueEmitContext& ctx, const IrValue& ins
     const auto stride = local ? state.program.Metadata().tessellationLocalStride : kind == TessellationAttribute::ControlShared ? state.program.Metadata().tessellationSharedStride : state.program.Metadata().tessellationControlStride;
     const auto type = TypePointer(state, storage, TypeU32(state));
     const auto inPatch = [&](std::uint32_t vertex) {
-        if (kind != TessellationAttribute::ControlInput) return vertex;
+        if (kind != TessellationAttribute::ControlInput && kind != TessellationAttribute::EvaluationInput) return vertex;
+        const auto& tess = state.inputInfo.vertex->tess;
         const auto clamped = state.module.AllocateId();
-        state.module.AddFunction(spv::OpExtInst, TypeU32(state), clamped, GlslStd450(state), GLSLstd450UMin, vertex, ConstantU32(state, state.inputInfo.vertex->tess.inputControlPoints - 1u));
+        state.module.AddFunction(spv::OpExtInst, TypeU32(state), clamped, GlslStd450(state), GLSLstd450UMin, vertex, ConstantU32(state, (kind == TessellationAttribute::ControlInput ? tess.inputControlPoints : tess.outputControlPoints) - 1u));
         return clamped;
     };
     const bool sharedRead = kind == TessellationAttribute::ControlShared && inst.Opcode() == IrOpcode::GetTessellationAttribute;
@@ -1622,6 +1649,18 @@ void EmitProgram(SpirvEmitterState& state) {
     if (state.pixelValidMaskVariable != 0u) {
         state.module.AddFunction(spv::OpStore, state.pixelValidMaskVariable, ConstantU32(state, 1u));
     }
+    if (state.program.Resources().stage == IrShaderStage::Pixel && state.inputInfo.pixel != nullptr && state.inputInfo.pixel->ReordersSamples()) {
+        const auto& order = state.inputInfo.pixel->sampleOrder;
+        const auto parity = [&](std::uint32_t component) {
+            const auto value = Unary(state, spv::OpBitcast, TypeF32(state), EmitBuiltinU32(state, StageInputKind::FragCoord, component));
+            return EmitBinaryU32(state, spv::OpBitwiseAnd, Unary(state, spv::OpConvertFToU, TypeU32(state), value), ConstantU32(state, 1u));
+        };
+        const auto quad = EmitBinaryU32(state, spv::OpBitwiseOr, parity(0u), EmitBinaryU32(state, spv::OpShiftLeftLogical, parity(1u), ConstantU32(state, 1u)));
+        const auto word = [&](std::size_t pixel) { return ConstantU32(state, order[pixel] == 0u ? 0x76543210u : order[pixel]); };
+        auto selected = word(3u);
+        for (std::uint32_t pixel = 3u; pixel-- > 0u;) selected = Select(state, TypeU32(state), EmitCompareU32Constant(state, spv::OpIEqual, quad, pixel), word(pixel), selected);
+        state.sampleOrderWord = selected;
+    }
     if (AlphaToCoverage(state)) StoreCoverage(state, ConstantI32(state, -1));
     EmitBdaAnchors(state);
     if (OrderedPixelShader(state)) {
@@ -1643,7 +1682,9 @@ void EmitProgram(SpirvEmitterState& state) {
             state.module.AddFunction(spv::OpAccessChain, TypePointer(state, spv::StorageClassInput, TypeI32(state)), pointer, state.sampleMaskInputVariable, ConstantU32(state, 0u));
             const auto rasterized = state.module.AllocateId();
             state.module.AddFunction(spv::OpLoad, TypeI32(state), rasterized, pointer);
-            bit = EmitBinaryU32(state, spv::OpBitwiseAnd, Unary(state, spv::OpBitcast, TypeU32(state), rasterized), covered);
+            auto guestRasterized = Unary(state, spv::OpBitcast, TypeU32(state), rasterized);
+            if (state.sampleOrderWord != 0u) guestRasterized = ReorderedSampleBits(state, guestRasterized, false);
+            bit = EmitBinaryU32(state, spv::OpBitwiseAnd, guestRasterized, covered);
             state.quadSampleCoverage = Unary(state, spv::OpBitcast, TypeI32(state), covered);
         }
         const auto mask = static_cast<std::uint32_t>(pixel.quadPixelMask);

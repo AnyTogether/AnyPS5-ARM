@@ -390,6 +390,12 @@ void testClip(std::uint32_t codec, std::uint32_t profile, const std::vector<std:
             check(vp9.profile == 0 && vp9.bitDepth == 8 && vp9.colorSpace == 0 && vp9.colorRange == 0 && vp9.numFrames == 1 && vp9.intraOnly == 0, "VP9 coded header metadata differs");
             check(vp9.frameWidth == Width && vp9.frameHeight == Height && vp9.renderWidth == Width && vp9.renderHeight == Height, "VP9 picture dimensions differ");
             check(vp9.keyFrameFlag == (pictures == 0 ? 1u : 0u), "VP9 key frame flag differs");
+            struct Guarded { Vp9PictureInfo info{sizeof(Vp9PictureInfo)}; std::uint64_t guard = 0x123456789abcdef0ull; } generic;
+            check(sceVideodec2GetPictureInfo_nid_postfix(&output, reinterpret_cast<AvcPictureInfo*>(&generic.info), nullptr) == 0, "generic VP9 picture info failed");
+            const auto& same = generic.info;
+            check(same.thisSize == sizeof(Vp9PictureInfo) && same.isValid && same.ptsData == vp9.ptsData && same.dtsData == vp9.dtsData && same.attachedData == vp9.attachedData && same.profile == vp9.profile && same.level == vp9.level &&
+                same.keyFrameFlag == vp9.keyFrameFlag && same.intraOnly == vp9.intraOnly && same.bitDepth == vp9.bitDepth && same.colorRange == vp9.colorRange && same.colorSpace == vp9.colorSpace && same.numFrames == vp9.numFrames &&
+                same.frameWidth == vp9.frameWidth && same.frameHeight == vp9.frameHeight && same.renderWidth == vp9.renderWidth && same.renderHeight == vp9.renderHeight && generic.guard == 0x123456789abcdef0ull, "generic picture info differs from the VP9 layout");
         } else checkThrows([&] { sceVideodec2GetVp9PictureInfo_nid_postfix(&output, &vp9); });
         check(hashNv12(buffer.data(), output.framePitch, output.frameHeight) == hashes[pictures], "picture " + std::to_string(pictures) + " differs from the reference");
         ++pictures;

@@ -477,6 +477,16 @@ int APS5_VABI sceKernelUuidCreate(std::uint32_t* uuid) {
     return 0;
 }
 
+int APS5_VABI sceKernelCreateUuidV4(std::uint8_t* uuid) {
+    if (!uuid) return sceInvalidArgument;
+    std::array<std::uint8_t, 16> value;
+    HostEntropy_nid_no_patch(value.data(), value.size());
+    value[6] = static_cast<std::uint8_t>((value[6] & 0x0fu) | 0x40u);
+    value[8] = static_cast<std::uint8_t>((value[8] & 0x3fu) | 0x80u);
+    std::memcpy(uuid, value.data(), value.size());
+    return 0;
+}
+
 void APS5_VABI sceKernelSync(void) {
     SyncWrittenPaths_nid_no_patch();
 }

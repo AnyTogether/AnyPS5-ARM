@@ -9,6 +9,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "prx/libSceNgs2.native/include/Ngs2Types.hpp"
@@ -158,12 +159,15 @@ struct Ngs2Rack {
     std::uint32_t maxGrainSamples = 0;
     std::uint32_t maxChannelWorks = 0;
     std::uint32_t maxInputs = 0;
+    std::uintptr_t userData = 0;
     Ngs2ContextBufferInfo bufferInfo{};
     Ngs2BufferAllocator allocator{};
     std::vector<Ngs2Voice> voices;
     std::vector<Ngs2CustomUserFx2ModuleOption> userFx;
     std::vector<std::vector<std::uint8_t>> userFxCommon;
     std::vector<std::uint32_t> customModuleIds;
+    std::thread::id lockOwner{};
+    std::uint32_t lockDepth = 0;
 };
 
 struct Ngs2System {
@@ -172,6 +176,7 @@ struct Ngs2System {
     Ngs2BufferAllocator allocator{};
     std::uint32_t uid = 0;
     std::int64_t renderCount = 0;
+    std::uint32_t renderDepth = 0;
     std::uintptr_t userData = 0;
     std::vector<Ngs2Rack*> racks;
 };
@@ -179,6 +184,32 @@ struct Ngs2System {
 std::string Ngs2Hex(std::uint32_t value);
 const std::uint8_t* Ngs2StreamEnd(const Ngs2Voice& voice, const Ngs2Block& block);
 std::recursive_mutex& Ngs2Mutex();
+
+class Ngs2Lock {
+public:
+    Ngs2Lock();
+    ~Ngs2Lock();
+    Ngs2Lock(const Ngs2Lock&) = delete;
+    Ngs2Lock& operator=(const Ngs2Lock&) = delete;
+};
+
+class Ngs2Unlocked {
+public:
+    Ngs2Unlocked();
+    ~Ngs2Unlocked();
+    Ngs2Unlocked(const Ngs2Unlocked&) = delete;
+    Ngs2Unlocked& operator=(const Ngs2Unlocked&) = delete;
+
+private:
+    std::uint32_t depth;
+};
+
+bool Ngs2ExclusiveElsewhere();
+bool Ngs2RenderingHere(const Ngs2System& system);
+void Ngs2EnterExclusive();
+void Ngs2LeaveExclusive(std::uint32_t depth = 1);
+void Ngs2WaitOnce();
+void Ngs2NotifyWaiters();
 Ngs2System* Ngs2FindSystem(Ngs2Handle handle);
 
 template <typename TParam>

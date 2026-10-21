@@ -13,6 +13,7 @@ int APS5_VABI sceImeDialogGetStatus(void);
 int APS5_VABI sceImeDialogGetResult(Result*);
 int APS5_VABI sceImeDialogAbort(void);
 int APS5_VABI sceImeDialogTerm(void);
+int APS5_VABI sceImeDialogForceClose(void);
 }
 
 namespace {
@@ -25,6 +26,7 @@ constexpr std::uint32_t EndStatusUserCanceled = 1;
 constexpr std::uint32_t EndStatusAborted = 2;
 constexpr int ErrorBusy = static_cast<int>(0x80bc0001u);
 constexpr int ErrorNotOpened = static_cast<int>(0x80bc0002u);
+constexpr int ErrorNotInUse = static_cast<int>(0x80bc0107u);
 constexpr int ErrorInvalidMaxTextLength = static_cast<int>(0x80bc0016u);
 constexpr int ErrorInvalidInputTextBuffer = static_cast<int>(0x80bc0017u);
 constexpr int ErrorInvalidAddress = static_cast<int>(0x80bc0031u);
@@ -144,6 +146,35 @@ int main() {
     Type("ignored");
     Press(SDL_SCANCODE_RETURN);
     Require(std::u16string(buffer) == u"keep");
+    Close();
+
+    Require(sceImeDialogForceClose() == ErrorNotInUse);
+    Open(param);
+    Type("zz");
+    Require(sceImeDialogForceClose() == 0);
+    Require(sceImeDialogGetStatus() == StatusNone);
+    Require(!ImeCapturesKeyboard_nid_postfix());
+    Type("ignored");
+    Press(SDL_SCANCODE_RETURN);
+    Require(std::u16string(buffer) == u"keep");
+    Result closed{};
+    Require(sceImeDialogGetResult(&closed) == ErrorNotOpened);
+    Require(sceImeDialogTerm() == ErrorNotOpened);
+    Require(sceImeDialogForceClose() == ErrorNotInUse);
+
+    Open(param);
+    Type("!");
+    Press(SDL_SCANCODE_RETURN);
+    Require(sceImeDialogGetStatus() == StatusFinished);
+    Require(sceImeDialogForceClose() == 0);
+    Require(sceImeDialogGetStatus() == StatusNone);
+    Require(std::u16string(buffer) == u"keep!");
+
+    Open(param);
+    Require(sceImeDialogAbort() == 0);
+    Require(sceImeDialogForceClose() == 0);
+    Require(sceImeDialogGetStatus() == StatusNone);
+    Open(param);
     Close();
 
     Require(sceImeDialogInit(nullptr, nullptr) == ErrorInvalidAddress);

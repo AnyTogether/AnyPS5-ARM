@@ -535,6 +535,7 @@ bool SrtTape::Run(const IrResourcePlan& plan, const SrtRuntime& runtime, std::ve
 
     struct Scratch {
         std::vector<std::uint8_t> active;
+        std::vector<std::uint8_t> activeFlat;
         std::vector<std::uint8_t> visited;
         std::vector<std::uint32_t> pending;
         std::vector<DescriptorValue> evaluated;
@@ -545,6 +546,8 @@ bool SrtTape::Run(const IrResourcePlan& plan, const SrtRuntime& runtime, std::ve
     auto& active = scratch.active;
     const auto imageBase = plan.descriptorSources.size();
     active.assign(imageBase + plan.info.images.size(), 1u);
+    auto& activeFlat = scratch.activeFlat;
+    activeFlat.assign(plan.srtReads.size(), 1u);
     if (!plan.controlFlow.empty()) {
         for (const auto& block : plan.controlFlow) {
             for (const auto source : block.sources) {
@@ -554,6 +557,10 @@ bool SrtTape::Run(const IrResourcePlan& plan, const SrtRuntime& runtime, std::ve
             for (const auto image : block.images) {
                 if (image >= plan.info.images.size()) return refuse();
                 active[imageBase + image] = 0u;
+            }
+            for (const auto slot : block.flatSlots) {
+                if (slot >= activeFlat.size()) return refuse();
+                activeFlat[slot] = 0u;
             }
         }
         auto& visited = scratch.visited;
@@ -569,6 +576,7 @@ bool SrtTape::Run(const IrResourcePlan& plan, const SrtRuntime& runtime, std::ve
             const auto& block = plan.controlFlow[index];
             for (const auto source : block.sources) active[source] = 1u;
             for (const auto image : block.images) active[imageBase + image] = 1u;
+            for (const auto slot : block.flatSlots) activeFlat[slot] = 1u;
             std::uint64_t condition = 0;
             const bool cleanEvaluable = block.condition != nullptr && runtime.readSpecializationMemory != nullptr && conditionRoots[index] != NoNode && evaluate(frame, conditionRoots[index], condition);
             if (frame.nullRoot) return refuse();
@@ -601,6 +609,8 @@ bool SrtTape::Run(const IrResourcePlan& plan, const SrtRuntime& runtime, std::ve
     flattened.assign(plan.srtReads.size(), 0u);
     for (std::size_t slot = 0; slot < plan.srtReads.size(); ++slot) {
         const auto& read = plan.srtReads[slot];
+        if (read.flatOffset >= activeFlat.size()) return refuse();
+        if (activeFlat[read.flatOffset] == 0u) continue;
         const bool pure = trace != nullptr && read.flatOffset < plan.pureFlatSlots.size() && plan.pureFlatSlots[read.flatOffset] != 0u;
         if (pure) {
             trace->leaf = read.value->Resolve();

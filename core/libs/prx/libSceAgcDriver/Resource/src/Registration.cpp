@@ -150,4 +150,16 @@ int APS5_VABI sceAgcDriverFindResourcesPublic(const void* callback, void* user_d
     return SCE_AGC_ERROR_RESOURCE_REGISTRATION_UNAVAILABLE;
 }
 
+int APS5_VABI sceAgcDriverRegisterOwnerForSystem() {
+    return SCE_AGC_ERROR_RESOURCE_REGISTRATION_UNAVAILABLE;
+}
+
+int APS5_VABI sceAgcDriverInitResourceRegistrationInterface() {
+    return SCE_AGC_ERROR_RESOURCE_REGISTRATION_UNAVAILABLE;
+}
+
+int APS5_VABI sceAgcDriverSetResourceRegistrationInfo() {
+    return 0;
+}
+
 }

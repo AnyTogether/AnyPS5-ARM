@@ -68,6 +68,16 @@ constexpr SystemString SystemStrings[] = {
     {{6, 1}, "hw.machine", "amd64"},
 };
 
+struct SystemInteger {
+    int mib[2];
+    const char* name;
+    std::int32_t value;
+};
+
+constexpr SystemInteger SystemIntegers[] = {
+    {{1, 24}, "kern.osreldate", 1104001},
+};
+
 const SystemString* FindSystemString(const int* name) {
     for (const auto& entry : SystemStrings) {
         if (name[0] == entry.mib[0] && name[1] == entry.mib[1]) return &entry;
@@ -75,8 +85,15 @@ const SystemString* FindSystemString(const int* name) {
     return nullptr;
 }
 
+const SystemInteger* FindSystemInteger(const int* name) {
+    for (const auto& entry : SystemIntegers) {
+        if (name[0] == entry.mib[0] && name[1] == entry.mib[1]) return &entry;
+    }
+    return nullptr;
+}
+
 bool IsLeafMib(const int* name) {
-    return (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5 || name[1] == 7)) || (name[0] == 1 && (name[1] == 37 || name[1] == 50));
+    return FindSystemInteger(name) != nullptr || (name[0] == 6 && (name[1] == 2 || name[1] == 3 || name[1] == 5 || name[1] == 7)) || (name[0] == 1 && (name[1] == 37 || name[1] == 50));
 }
 
 bool IsMeasuredAbsentMib(const int* name, std::uint32_t nameLength) {
@@ -143,6 +160,30 @@ std::vector<GuestVmEntry> GuestVmEntries() {
         entries.push_back(entry);
     }
     return entries;
+}
+
+bool IsUnansweredMib(const int* name, std::uint32_t nameLength) {
+    if (nameLength != 2) return false;
+    return (name[0] == 1 && (name[1] == 6 || name[1] == 7 || name[1] == 12 || name[1] == 27 || name[1] == 32)) || (name[0] == 6 && (name[1] == 4 || name[1] == 11));
+}
+
+bool IsUnansweredName(const char* name) {
+    static constexpr const char* unanswered[] = {
+        "hw.byteorder",
+        "hw.cacheline_size",
+        "hw.machine_arch",
+        "hw.usermem",
+        "kern.clockrate",
+        "kern.maxfiles",
+        "kern.maxfilesperproc",
+        "kern.maxproc",
+        "kern.ps_strings",
+        "kern.sched.name",
+        "kern.smp.maxcpus",
+        "kern.stackprot",
+        "kern.timecounter.hardware",
+    };
+    return std::any_of(std::begin(unanswered), std::end(unanswered), [name](const char* entry) { return std::strcmp(name, entry) == 0; });
 }
 
 }
@@ -216,6 +257,11 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
         *__error_nid_postfix() = 2;
         return -1;
     }
+    if (IsUnansweredMib(name, nameLength)) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": writing MIB " + std::to_string(name[0]) + "." + std::to_string(name[1]));
+        *__error_nid_postfix() = 2;
+        return -1;
+    }
     if (nameLength == 2 && name[0] == 6 && name[1] == 7) {
         if (newValue != nullptr) {
             *__error_nid_postfix() = 1;
@@ -260,6 +306,13 @@ int APS5_VABI sysctl_nid_postfix(const int* name, std::uint32_t nameLength, void
                 return -1;
             }
             return CopyOut(entry->value, std::strlen(entry->value) + 1, oldValue, oldLength);
+        }
+        if (const auto* entry = FindSystemInteger(name)) {
+            if (newValue != nullptr) {
+                *__error_nid_postfix() = 1;
+                return -1;
+            }
+            return CopyOut(&entry->value, sizeof(entry->value), oldValue, oldLength);
         }
     }
     if (nameLength >= 3 && name[0] == 1 && name[1] == 14 && name[2] == 12) {
@@ -339,6 +392,14 @@ int APS5_VABI sysctlbyname_nid_postfix(const char* name, void* oldValue, std::si
     }
     for (const auto& entry : SystemStrings) {
         if (std::strcmp(name, entry.name) == 0) return sysctl_nid_postfix(entry.mib, 2, oldValue, oldLength, newValue, newLength);
+    }
+    for (const auto& entry : SystemIntegers) {
+        if (std::strcmp(name, entry.name) == 0) return sysctl_nid_postfix(entry.mib, 2, oldValue, oldLength, newValue, newLength);
+    }
+    if (IsUnansweredName(name)) {
+        if (newValue != nullptr) throw std::runtime_error(std::string(__func__) + ": writing " + name);
+        *__error_nid_postfix() = 2;
+        return -1;
     }
     if (std::strcmp(name, "kern.proc.pathname") == 0) {
         static constexpr int mib[] = {1, 14, 12};
@@ -420,14 +481,21 @@ int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_
         std::size_t length;
     };
     static constexpr KnownName known[] = {
+        {"hw.byteorder", {6, 4}, 2},
+        {"hw.machine_arch", {6, 11}, 2},
         {"hw.model", {6, 2}, 2},
         {"hw.ncpu", {6, 3}, 2},
         {"hw.pagesize", {6, 7}, 2},
         {"hw.physmem", {6, 5}, 2},
         {"hw.realmem", {6, 12}, 2},
         {"kern.arandom", {1, 37}, 2},
-        {"kern.rng_pseudo", {1, 50}, 2},
+        {"kern.clockrate", {1, 12}, 2},
+        {"kern.maxfiles", {1, 7}, 2},
+        {"kern.maxfilesperproc", {1, 27}, 2},
+        {"kern.maxproc", {1, 6}, 2},
         {"kern.proc.pathname", {1, 14, 12}, 3},
+        {"kern.ps_strings", {1, 32}, 2},
+        {"kern.rng_pseudo", {1, 50}, 2},
     };
     constexpr std::size_t MaximumPath = 1024;
     if (name == nullptr || size == nullptr) throw std::invalid_argument(std::string(__func__) + ": null name or size");
@@ -436,7 +504,7 @@ int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_
         *__error_nid_postfix() = 63;
         return -1;
     }
-    if (nameLength == 0 || std::strcmp(name, "machdep.cacheline_size") == 0) {
+    if (nameLength == 0 || std::strcmp(name, "hw.cacheline_size") == 0 || std::strcmp(name, "hw.usermem") == 0 || std::strcmp(name, "machdep.cacheline_size") == 0) {
         *__error_nid_postfix() = 2;
         return -1;
     }
@@ -450,6 +518,9 @@ int APS5_VABI sysctlnametomib_nid_postfix(const char* name, int* mib, std::size_
         if (std::strcmp(name, entry.name) == 0) return copyMib(entry.mib, entry.length);
     }
     for (const auto& entry : SystemStrings) {
+        if (std::strcmp(name, entry.name) == 0) return copyMib(entry.mib, 2);
+    }
+    for (const auto& entry : SystemIntegers) {
         if (std::strcmp(name, entry.name) == 0) return copyMib(entry.mib, 2);
     }
     throw std::runtime_error(std::string(__func__) + ": unsupported name " + name);

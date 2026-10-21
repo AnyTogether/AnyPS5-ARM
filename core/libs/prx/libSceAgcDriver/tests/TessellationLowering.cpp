@@ -102,11 +102,12 @@ struct Outcome {
 };
 
 const ShaderTessellationInputInfo Tessellation{.inputControlPoints = InputControlPoints, .outputControlPoints = InputControlPoints, .patchesPerGroup = 1u};
+const ShaderTessellationInputInfo GroupedTessellation{.inputControlPoints = InputControlPoints, .outputControlPoints = InputControlPoints, .patchesPerGroup = 1u, .primitiveGroupSize = 1u};
 
-Outcome Lower(IrProgram& program) {
+Outcome Lower(IrProgram& program, const ShaderTessellationInputInfo& tessellation = Tessellation) {
     Outcome outcome;
     try {
-        TessellationLowering{}.Lower(program, Tessellation);
+        TessellationLowering{}.Lower(program, tessellation);
     } catch (const std::exception& error) {
         outcome.reason = error.what();
         return outcome;
@@ -191,6 +192,18 @@ int main() {
         auto& address = hull.inPatch(hull.select(2u, LocalStride, offset));
         hull.read(address);
         return RefusedBecause(hull.program, "not a whole number of control points");
+    });
+
+    passed &= run("a hull read at a computed control-point index stays in its patch when the relative patch is also data", [] {
+        Hull hull;
+        auto& address = hull.inPatch(hull.computed(2u, LocalStride));
+        hull.read(address);
+        static_cast<void>(hull.builder.Emit(IrOpcode::ReferenceU32, IrType::Void, {&hull.relativePatch()}));
+        const Outcome outcome = Lower(hull.program, GroupedTessellation);
+        if (!outcome.lowered) std::fprintf(stderr, "refused: %s\n", outcome.reason.c_str());
+        if (!outcome.lowered || outcome.emitted->Opcode() != IrOpcode::ISub32 || outcome.emitted->Argument(0)->Resolve() != address.Resolve()) return false;
+        const IrValue* patch = outcome.emitted->Argument(1)->Resolve();
+        return patch->Opcode() == IrOpcode::IMul32 && patch->Argument(1)->Resolve()->ImmediateU32() == PatchStride;
     });
 
     return passed ? 0 : 1;

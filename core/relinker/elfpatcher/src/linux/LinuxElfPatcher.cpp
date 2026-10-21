@@ -7,9 +7,11 @@
 #include <io/BufferUtils.hpp>
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace Elfpatcher::Linux {
@@ -143,6 +145,75 @@ void SeparateSharedLoadPages(std::vector<std::uint8_t>& buf, std::vector<Domain:
     }
 }
 
+struct TracedImport {
+    std::uint64_t Slot;
+    std::string Name;
+    std::string Library;
+};
+
+std::string ReadDynamicString(const std::vector<std::uint8_t>& strings, const std::uint32_t offset) {
+    if (offset >= strings.size())
+        throw Domain::RelinkerException("Import symbol name lies outside the dynamic string table");
+    std::string value;
+    for (std::size_t index = offset; index < strings.size() && strings[index] != 0; ++index)
+        value.push_back(static_cast<char>(strings[index]));
+    return value;
+}
+
+std::vector<TracedImport> TracedImports(const Domain::SysVDynamicSection& dynSection) {
+    std::vector<TracedImport> imports;
+    const auto collect = [&](const std::vector<std::uint8_t>& table) {
+        RequireWholeEntries(table, kRelaEntrySize, "Relocation table");
+        for (std::size_t entry = 0; entry < table.size(); entry += kRelaEntrySize) {
+            const auto info = Io::ReadU64(table, entry + 8);
+            const auto type = static_cast<std::uint32_t>(info);
+            const auto symbol = info >> 32;
+            const auto target = Io::ReadU64(table, entry);
+            if ((type != R_X86_64_GLOB_DAT && type != R_X86_64_JUMP_SLOT) || symbol == 0 || Io::ReadU64(table, entry + 16) != 0)
+                continue;
+            if (type == R_X86_64_GLOB_DAT && !dynSection.FunctionImports.contains(target))
+                continue;
+            if (symbol >= dynSection.DynSymData.size() / kSymEntrySize)
+                throw Domain::RelinkerException("Invalid import symbol index", target);
+            const auto symbolOffset = static_cast<std::size_t>(symbol * kSymEntrySize);
+            if (Io::ReadU16(dynSection.DynSymData, symbolOffset + 6) != SHN_UNDEF || dynSection.DynSymData[symbolOffset + 4] >> 4 == STB_WEAK)
+                continue;
+            auto name = ReadDynamicString(dynSection.DynStrData, Io::ReadU32(dynSection.DynSymData, symbolOffset));
+            if (name.empty())
+                continue;
+            const auto library = dynSection.ImportModules.find(target);
+            imports.push_back({target, std::move(name), library == dynSection.ImportModules.end() ? std::string{} : library->second});
+        }
+    };
+    collect(dynSection.RelaData);
+    collect(dynSection.RelaPltData);
+    return imports;
+}
+
+std::vector<std::uint8_t> TracePrologue(const std::uint64_t vaddr, const std::uint64_t table, const std::uint64_t tableEnd, const std::uint64_t function) {
+    std::vector<std::uint8_t> code = {0x52, 0x53, 0x41, 0x54, 0x48, 0x83, 0xec, 0x08};
+    const auto rip = [&](std::initializer_list<std::uint8_t> opcode, const std::uint64_t target) {
+        code.insert(code.end(), opcode);
+        const auto displacement = static_cast<std::int64_t>(target) - static_cast<std::int64_t>(vaddr + code.size() + 4);
+        if (displacement < std::numeric_limits<std::int32_t>::min() || displacement > std::numeric_limits<std::int32_t>::max())
+            throw Domain::RelinkerException("Import trace table exceeds rel32 range");
+        Io::AppendU32(code, static_cast<std::uint32_t>(displacement));
+    };
+    rip({0x48, 0x8d, 0x1d}, table);
+    rip({0x4c, 0x8d, 0x25}, tableEnd);
+    const auto loop = code.size();
+    code.insert(code.end(), {0x4c, 0x39, 0xe3, 0x73, 0x00});
+    const auto exit = code.size();
+    code.insert(code.end(), {0x48, 0x8b, 0x03, 0x48, 0x8b, 0x3c, 0x03, 0x48, 0x8b, 0x73, 0x08, 0x48, 0x01, 0xde, 0x48, 0x8b, 0x53, 0x10, 0x48, 0x01, 0xda});
+    rip({0xff, 0x15}, function);
+    code.insert(code.end(), {0x48, 0x8b, 0x3b, 0x48, 0x01, 0xdf, 0x48, 0x81, 0xe7, 0x00, 0xf0, 0xff, 0xff, 0xbe, 0x00, 0x10, 0x00, 0x00, 0xba, 0x07, 0x00, 0x00, 0x00, 0x50, 0xb8, 0x0a, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x58});
+    code.insert(code.end(), {0x48, 0x8b, 0x0b, 0x48, 0x89, 0x04, 0x0b, 0x48, 0x83, 0xc3, 0x18, 0xeb});
+    code.push_back(static_cast<std::uint8_t>(static_cast<std::int8_t>(static_cast<std::int64_t>(loop) - static_cast<std::int64_t>(code.size() + 1))));
+    code[exit - 1] = static_cast<std::uint8_t>(code.size() - exit);
+    code.insert(code.end(), {0x48, 0x83, 0xc4, 0x08, 0x41, 0x5c, 0x5b, 0x5a});
+    return code;
+}
+
 void RebaseProgramHeaders(std::vector<std::uint8_t>& buf, const std::uint64_t tableOffset, const std::uint16_t entrySize, const std::uint16_t count, const std::uint64_t base) {
     for (std::uint16_t index = 0; index < count; ++index) {
         const auto header = static_cast<std::size_t>(tableOffset + static_cast<std::uint64_t>(index) * entrySize);
@@ -170,13 +241,15 @@ LinuxElfPatcher::LinuxElfPatcher(
     std::shared_ptr<IProgramHeaderLayoutBuilder> programHeaderLayoutBuilder,
     std::shared_ptr<ISectionHeaderTableBuilder> sectionHeaderTableBuilder,
     std::shared_ptr<Io::IByteWriter> byteWriter,
-    std::optional<std::uint64_t> fixedBase
+    std::optional<std::uint64_t> fixedBase,
+    bool traceImports
 )
     : _entryStubBuilder(std::move(entryStubBuilder))
     , _programHeaderLayoutBuilder(std::move(programHeaderLayoutBuilder))
     , _sectionHeaderTableBuilder(std::move(sectionHeaderTableBuilder))
     , _byteWriter(std::move(byteWriter))
     , _fixedBase(fixedBase)
+    , _traceImports(traceImports)
 {
 }
 
@@ -235,8 +308,13 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
         throw Domain::RelinkerException("Linux target does not support --windows-diagnostics");
     if (_fixedBase && lazyBinding)
         throw Domain::RelinkerException("A fixed Linux base requires eager binding; --lazy-binding is incompatible");
+    if (_traceImports && lazyBinding)
+        throw Domain::RelinkerException("--trace-imports conflicts with --lazy-binding");
+    if (_traceImports && std::find(dynSection.NeededLibraries.begin(), dynSection.NeededLibraries.end(), "libc.prx") == dynSection.NeededLibraries.end())
+        throw Domain::RelinkerException("--trace-imports requires libc.prx among the libraries");
     if (_fixedBase)
         RequireOnlyDependencies(dynSection.DynamicSegmentData);
+    const auto traced = _traceImports ? TracedImports(dynSection) : std::vector<TracedImport>{};
     const std::uint64_t base = _fixedBase.value_or(0);
     const auto address = [this, base](const std::uint64_t vaddr) {
         return _fixedBase ? Rebased(base, vaddr, "Address") : vaddr;
@@ -273,17 +351,32 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     for (char c : runPath)
         buf.push_back(static_cast<std::uint8_t>(c));
     buf.push_back(0);
+    const std::uint64_t traceSymbolStrOff = static_cast<std::uint64_t>(buf.size()) - dynStrOff;
+    if (_traceImports) {
+        for (char c : std::string_view("TraceImport_nid_no_patch"))
+            buf.push_back(static_cast<std::uint8_t>(c));
+        buf.push_back(0);
+    }
     const std::uint64_t dynStrSize = static_cast<std::uint64_t>(buf.size()) - dynStrOff;
     alignBuf(buf, kDynStrAlignment);
 
     const auto dynSymOff = static_cast<std::uint64_t>(buf.size());
-    const auto symbols = table(dynSection.DynSymData, false);
+    auto symbols = table(dynSection.DynSymData, false);
+    const auto traceSymbol = symbols.size() / kSymEntrySize;
+    if (_traceImports) {
+        Io::AppendU32(symbols, static_cast<std::uint32_t>(traceSymbolStrOff));
+        symbols.push_back(static_cast<std::uint8_t>((STB_GLOBAL << 4) | STT_FUNC));
+        symbols.push_back(0);
+        Io::AppendU16(symbols, SHN_UNDEF);
+        Io::AppendU64(symbols, 0);
+        Io::AppendU64(symbols, 0);
+    }
     for (std::uint8_t b : symbols)
         buf.push_back(b);
     alignBuf(buf, kDynSymAlignment);
 
     const auto hashOff = static_cast<std::uint64_t>(buf.size());
-    const auto symbolCount = static_cast<std::uint32_t>(dynSection.DynSymData.size() / kSymEntrySize);
+    const auto symbolCount = static_cast<std::uint32_t>(symbols.size() / kSymEntrySize);
     Io::AppendU32(buf, 1);
     Io::AppendU32(buf, symbolCount);
     Io::AppendU32(buf, symbolCount > 1 ? 1 : 0);
@@ -292,7 +385,13 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     alignBuf(buf, kDynSymAlignment);
 
     const auto relaOff = static_cast<std::uint64_t>(buf.size());
-    const auto relocations = table(dynSection.RelaData, true);
+    auto relocations = table(dynSection.RelaData, true);
+    const auto traceRelocation = relocations.size();
+    if (_traceImports) {
+        Io::AppendU64(relocations, 0);
+        Io::AppendU64(relocations, (static_cast<std::uint64_t>(traceSymbol) << 32) | R_X86_64_GLOB_DAT);
+        Io::AppendU64(relocations, 0);
+    }
     for (std::uint8_t b : relocations)
         buf.push_back(b);
     alignBuf(buf, kRelaAlignment);
@@ -321,9 +420,9 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     _appendDynEntry(dynSegBuf, DT_SYMENT, kSymEntrySize);
     _appendDynEntry(dynSegBuf, DT_HASH, address(vaddrOfExtraBlockOffset(hashOff)));
     _appendDynEntry(dynSegBuf, DT_DEBUG, 0);
-    if (!dynSection.RelaData.empty()) {
+    if (!relocations.empty()) {
         _appendDynEntry(dynSegBuf, DT_RELA, address(vaddrOfExtraBlockOffset(relaOff)));
-        _appendDynEntry(dynSegBuf, DT_RELASZ, dynSection.RelaData.size());
+        _appendDynEntry(dynSegBuf, DT_RELASZ, relocations.size());
         _appendDynEntry(dynSegBuf, DT_RELAENT, kRelaEntrySize);
     }
     if (!dynSection.RelaPltData.empty()) {
@@ -341,12 +440,52 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     for (std::uint8_t b : dynSegBuf)
         buf.push_back(b);
 
+    std::uint64_t traceFunctionVaddr = 0;
+    std::uint64_t traceTableVaddr = 0;
+    std::uint64_t traceTableEndVaddr = 0;
+    std::vector<std::size_t> traceEntries;
+    if (_traceImports) {
+        alignBuf(buf, 8);
+        const auto functionOff = static_cast<std::uint64_t>(buf.size());
+        traceFunctionVaddr = vaddrOfExtraBlockOffset(functionOff);
+        Io::AppendU64(buf, 0);
+        Io::WriteU64(buf, static_cast<std::size_t>(relaOff + traceRelocation), address(traceFunctionVaddr));
+        traceTableVaddr = vaddrOfExtraBlockOffset(buf.size());
+        for (std::size_t index = 0; index < traced.size(); ++index) {
+            traceEntries.push_back(buf.size());
+            buf.resize(buf.size() + 24);
+        }
+        traceTableEndVaddr = vaddrOfExtraBlockOffset(buf.size());
+        std::map<std::string, std::uint64_t> strings;
+        const auto addString = [&](const std::string& value) {
+            if (const auto existing = strings.find(value); existing != strings.end()) return existing->second;
+            const auto vaddr = vaddrOfExtraBlockOffset(buf.size());
+            for (char c : value)
+                buf.push_back(static_cast<std::uint8_t>(c));
+            buf.push_back(0);
+            strings.emplace(value, vaddr);
+            return vaddr;
+        };
+        for (std::size_t index = 0; index < traced.size(); ++index) {
+            const auto entryVaddr = vaddrOfExtraBlockOffset(traceEntries[index]);
+            const auto relative = [entryVaddr](const std::uint64_t vaddr) { return vaddr - entryVaddr; };
+            Io::WriteU64(buf, traceEntries[index], relative(traced[index].Slot));
+            Io::WriteU64(buf, traceEntries[index] + 8, relative(addString(traced[index].Name)));
+            Io::WriteU64(buf, traceEntries[index] + 16, relative(addString(traced[index].Library)));
+        }
+    }
+
     const std::uint64_t realEntryVaddr = *reinterpret_cast<const std::uint64_t*>(buf.data() + kEhdrEntryOffset);
     const auto stubOff = static_cast<std::uint64_t>(buf.size());
     const auto stubVaddr = vaddrOfExtraBlockOffset(stubOff);
-    const auto stubBytes = _entryStubBuilder->BuildEntryStub(address(stubVaddr), address(realEntryVaddr));
-    for (std::uint8_t b : stubBytes)
+    if (_traceImports) {
+        for (std::uint8_t b : TracePrologue(stubVaddr, traceTableVaddr, traceTableEndVaddr, traceFunctionVaddr))
+            buf.push_back(b);
+    }
+    const auto entryStubVaddr = vaddrOfExtraBlockOffset(buf.size());
+    for (std::uint8_t b : _entryStubBuilder->BuildEntryStub(address(entryStubVaddr), address(realEntryVaddr)))
         buf.push_back(b);
+    const auto stubSize = static_cast<std::uint64_t>(buf.size()) - stubOff;
     _byteWriter->WriteU64(buf, kEhdrEntryOffset, address(stubVaddr));
 
     for (const auto& site : trampolines)
@@ -395,11 +534,11 @@ std::vector<std::uint8_t> LinuxElfPatcher::Patch(
     sectionRequest.DynStrOffset = dynStrOff;
     sectionRequest.DynStrSize = dynStrSize;
     sectionRequest.DynSymOffset = dynSymOff;
-    sectionRequest.DynSymSize = dynSection.DynSymData.size();
+    sectionRequest.DynSymSize = symbols.size();
     sectionRequest.DynamicSegmentOffset = dynSegOff;
     sectionRequest.DynamicSegmentSize = dynSegBuf.size();
     sectionRequest.StubOffset = stubOff;
-    sectionRequest.StubSize = stubBytes.size();
+    sectionRequest.StubSize = stubSize;
 
     _sectionHeaderTableBuilder->WriteTable(buf, sectionRequest);
 

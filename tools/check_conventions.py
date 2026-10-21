@@ -206,8 +206,7 @@ class Check:
     def duplicates(self, exports):
         if not exports:
             return
-        pattern = r"(^|[^[:alnum:]_])APS5_VABI[[:space:]]+(" + "|".join(exports) + r")[[:space:]]*\("
-        result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nE", "--full-name", pattern, self.head, "--", ":(top)core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
+        result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nF", "--full-name", "-f", "-", self.head, "--", ":(top)core/libs/prx"], input="\n".join(exports) + "\n", capture_output=True, encoding="utf-8", errors="replace")
         hits = [line.split(":", 3)[1:] for line in filter(None, result.stdout.split("\n"))]
         self.read(path for path, _, _ in hits)
         sources = {}
@@ -407,7 +406,7 @@ def fenced_lines(text):
 
 def links(path, text):
     result = []
-    text = INLINE.sub("", FENCE.sub("", text))
+    text = INLINE.sub("code", FENCE.sub("", text))
     for target in LINK.findall(text):
         if re.match(r"[A-Za-z][A-Za-z0-9+.-]*:|//|#", target):
             continue

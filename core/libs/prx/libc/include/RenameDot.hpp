@@ -19,8 +19,10 @@ inline int RenameDotError_nid_no_patch(const char* path) {
     std::filesystem::path resolved;
     if (const int error = ResolvePathError_nid_no_patch(parent.c_str(), resolved)) return error;
     std::error_code status;
-    if (!std::filesystem::exists(resolved, status)) return 2;
-    return std::filesystem::is_directory(resolved, status) ? 22 : 20;
+    const auto type = std::filesystem::status(resolved, status).type();
+    if (type == std::filesystem::file_type::not_found) return status == std::errc::not_a_directory ? 20 : 2;
+    if (status) return FilesystemError(status);
+    return type == std::filesystem::file_type::directory ? 22 : 20;
 }
 
 #endif

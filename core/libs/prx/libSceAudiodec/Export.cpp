@@ -66,9 +66,9 @@ std::int32_t wordSizeOf(const void* param) {
     return static_cast<const AudiodecParamMp3*>(param)->i_bw_pcm;
 }
 
-std::int32_t validateWordSize(std::int32_t wordSize) {
-    if (wordSize == Audiodec::WORD_SIZE_16BIT || wordSize == Audiodec::WORD_SIZE_FLOAT) return 0;
-    if (wordSize == 0) NotImplemented_nid_no_patch("libSceAudiodec 24-bit PCM output");
+std::int32_t validateWordSize(std::int32_t wordSize, std::uint32_t codecType) {
+    if (wordSize == Audiodec::WORD_SIZE_16BIT) return 0;
+    if (wordSize == Audiodec::WORD_SIZE_FLOAT && codecType != TYPE_MP3) return 0;
     return ERROR_INVALID_WORD_LENGTH;
 }
 
@@ -92,7 +92,7 @@ std::int32_t validateCtrl(const AudiodecCtrl* ctrl, std::uint32_t codecType) {
             if (infoSize != sizeof(AudiodecM4aacInfo)) return ERROR_INVALID_BSI_INFO_SIZE;
             break;
     }
-    return validateWordSize(wordSizeOf(ctrl->pParam));
+    return validateWordSize(wordSizeOf(ctrl->pParam), codecType);
 }
 
 std::int32_t validateBuffers(const AudiodecCtrl* ctrl) {

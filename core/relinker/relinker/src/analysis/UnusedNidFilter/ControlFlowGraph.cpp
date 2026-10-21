@@ -1,6 +1,7 @@
 #include <relinker/analysis/UnusedNidFilter/IControlFlowGraph.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/CodegenException.hpp>
+#include <algorithm>
 #include <unordered_map>
 #include <queue>
 #include <cstring>
@@ -47,6 +48,12 @@ void buildGraph(std::span<const std::uint8_t> text, VirtualAddress textVaddr, Vi
         if (va < textVaddr || va - textVaddr >= text.size()) return;
         if (!visited.insert(va).second) return;
         worklist.push(va);
+    };
+
+    auto zeroPaddingFollows = [&](VirtualAddress va) {
+        const auto offset = static_cast<std::size_t>(va - textVaddr);
+        const auto aligned = (offset + 15) & ~std::size_t{15};
+        return aligned != offset && aligned <= text.size() && std::all_of(text.begin() + offset, text.begin() + aligned, [](std::uint8_t value) { return value == 0; });
     };
 
     auto takeAddress = [&](VirtualAddress va) {
@@ -140,8 +147,10 @@ void buildGraph(std::span<const std::uint8_t> text, VirtualAddress textVaddr, Vi
                     } else if (info.HasBranchTarget) {
                         enqueue(nextVaddr + static_cast<VirtualAddress>(info.BranchDisp));
                     }
+                    fallThrough = !zeroPaddingFollows(nextVaddr);
                     break;
                 case IndirectCall:
+                    fallThrough = !zeroPaddingFollows(nextVaddr);
                     break;
                 case Return:
                 case IndirectJump:

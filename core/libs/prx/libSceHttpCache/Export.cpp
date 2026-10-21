@@ -96,7 +96,6 @@ int APS5_VABI sceHttpCacheSystemInit() {
 }
 
 int APS5_VABI sceHttpCacheSystemSendStatistics() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
@@ -106,11 +105,36 @@ int APS5_VABI sceHttpCacheSystemShutdown() {
 }
 
 int APS5_VABI sceHttpCacheSystemTerm() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceHttpCacheTerm() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+
+int APS5_VABI sceHttpCacheClearAllUserTags() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHttpCacheClearCacheInfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHttpCacheDebugSetUrl() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHttpCacheRegisterCacheInfoUrl() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceHttpCacheRemoveTag() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

@@ -554,6 +554,36 @@ class TraceDigestTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("summary file not found", error.getvalue())
 
+    def test_thread_filter_keeps_frame_bounds_and_capture_summary(self):
+        command = [sys.executable, trace_digest.__file__, str(self.trace)]
+        result = subprocess.run([*command, "--thread", "queue worker 0x0", "--json"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["frames"], 3)
+        self.assertEqual(report["summary"], SUMMARY)
+        self.assertEqual(report["thread_filter"], ["queue worker 0x0"])
+        self.assertEqual([thread["thread"] for thread in report["threads"]], ["queue worker 0x0"])
+        self.assertTrue(all("Present" not in entry["name"] for entry in report["top_slices_ms_per_frame"]))
+        self.assertTrue(all(wait["thread"] == "queue worker 0x0" for wait in report["longest_waits"]))
+        result = subprocess.run([*command, "--thread", "presenter", "--thread", "queue worker 0x0", "--json"],
+                                capture_output=True, text=True)
+        unfiltered = trace_digest.digest(trace_digest.load_trace(self.trace), SUMMARY)
+        report = json.loads(result.stdout)
+        del report["thread_filter"]
+        self.assertEqual(report, unfiltered)
+        result = subprocess.run([*command, "--thread", "presenter"], capture_output=True, text=True)
+        self.assertIn("Thread filter:", result.stdout)
+        self.assertIn("capture-wide", result.stdout)
+        result = subprocess.run([*command, "--thread", "misspelled"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown thread", result.stderr)
+        self.assertEqual(result.stdout, "")
+        result = subprocess.run([sys.executable, trace_digest.__file__, str(self.trace.with_suffix(".jsonl")),
+                                 "--thread", "presenter"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("event trace", result.stderr)
+
+
 
 def interval_line(start, end, p99, gpu_ms, **changes):
     line = dict(SUMMARY, window={"spec": "summary_every 30", "first_present": 0, "ms": (end - start) * 1000.0}, interval_start_s=start, interval_end_s=end,

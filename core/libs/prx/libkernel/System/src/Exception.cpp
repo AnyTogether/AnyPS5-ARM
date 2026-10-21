@@ -196,6 +196,7 @@ void CallHandler(GuestExceptionHandler handler, int signum, GuestUcontext& ucont
 constexpr std::size_t RedZone = 128;
 constexpr std::size_t HomeArea = 32;
 constexpr auto RetryLimit = std::chrono::seconds(1);
+constexpr auto HostCodeLimit = std::chrono::milliseconds(50);
 constexpr std::size_t VectorBytes = 16 * 32;
 
 struct Delivery {
@@ -380,6 +381,17 @@ bool BlockedInWait(DWORD64 rip) {
     return std::any_of(waits.begin(), waits.end(), [rip](DWORD64 stub) { return rip - stub < 0x20; });
 }
 
+DWORD64 NtdllBase() {
+    static const auto ntdll = reinterpret_cast<DWORD64>(GetModuleHandleW(L"ntdll.dll"));
+    return ntdll;
+}
+
+bool InSystemCall(DWORD64 rip, DWORD64 base) {
+    if (base == 0 || base != NtdllBase() || rip < base + 2) return false;
+    const auto* code = reinterpret_cast<const unsigned char*>(rip - 2);
+    return code[0] == 0x0f && code[1] == 0x05;
+}
+
 CodeKind RunningCode(DWORD64 rip, DWORD64& base) {
     base = ImageBase(rip);
     auto kind = CachedKind(base);
@@ -397,12 +409,15 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
     const auto native = static_cast<HANDLE>(thread->nativeHandle);
     auto queued = std::make_unique<Delivery>(Delivery{handler, signum, {}, {}, 0});
     alignas(16) Delivery delivery{handler, signum, {}, {}, SaveVectors ? 1u : 0u};
-    const auto retryDeadline = std::chrono::steady_clock::now() + RetryLimit;
+    const auto start = std::chrono::steady_clock::now();
+    const auto retryDeadline = start + RetryLimit;
+    auto hostDeadline = start + HostCodeLimit;
     static_cast<void>(RestoringContext(0));
     static_cast<void>(InWinpthread(0));
     static_cast<void>(BlockedInWait(0));
     static_cast<void>(ExecutableBase());
     static_cast<void>(Images());
+    static_cast<void>(NtdllBase());
     for (;;) {
         if (SuspendThread(native) == static_cast<DWORD>(-1)) {
             if (Exited(native)) return false;
@@ -427,7 +442,9 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
         const bool restoring = RestoringContext(delivery.context.Rip) || InWinpthread(delivery.context.Rip);
         DWORD64 image = 0;
         const auto running = restoring ? CodeKind::Guest : RunningCode(delivery.context.Rip, image);
-        if (!restoring && (running == CodeKind::Guest || (running == CodeKind::Host && std::chrono::steady_clock::now() >= retryDeadline))) break;
+        const auto now = std::chrono::steady_clock::now();
+        if (running == CodeKind::Host && InSystemCall(delivery.context.Rip, image) && now < retryDeadline) hostDeadline = std::max(hostDeadline, std::min(retryDeadline, now + HostCodeLimit));
+        if (!restoring && (running == CodeKind::Guest || (running == CodeKind::Host && now >= hostDeadline))) break;
         ResumeThread(native);
         if (running == CodeKind::Unknown) {
             static_cast<void>(ClassifyImage(image));

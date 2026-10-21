@@ -521,9 +521,13 @@ char** HostZoneNames() {
 extern "C" {
 
 char* tzname_nid_postfix[2] = {HostZoneNames()[0], HostZoneNames()[1]};
+int64_t timezone_nid_postfix = 0;
+int daylight_nid_postfix = 0;
 
 GuestTm* APS5_VABI localtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
 GuestTm* APS5_VABI gmtime_s_nid_postfix(const int64_t* timer, GuestTm* result);
+int64_t APS5_VABI libc_time_nid_postfix(int64_t* timer);
+double APS5_VABI libc_difftime_nid_postfix(int64_t time1, int64_t time0);
 std::size_t APS5_VABI wcsrtombs_nid_postfix(char* destination, const std::uint16_t** source, std::size_t capacity, void* state);
 std::size_t APS5_VABI mbsrtowcs_nid_postfix(std::uint16_t* destination, const char** source, std::size_t capacity, void* state);
 int APS5_VABI ___mb_cur_max_nid_postfix();
@@ -533,6 +537,13 @@ void APS5_VABI tzset_nid_postfix(void) {
     char** names = HostZoneNames();
     tzname_nid_postfix[0] = names[0];
     tzname_nid_postfix[1] = names[1];
+    const int64_t now = libc_time_nid_postfix(nullptr);
+    GuestTm universal{};
+    GuestTm local{};
+    gmtime_s_nid_postfix(&now, &universal);
+    localtime_s_nid_postfix(&now, &local);
+    daylight_nid_postfix = local.tm_isdst >= 0 ? 1 : 0;
+    timezone_nid_postfix = static_cast<int64_t>(libc_difftime_nid_postfix(libc_mktime_nid_postfix(&universal), libc_mktime_nid_postfix(&local)));
 }
 
 int64_t APS5_VABI libc_time_nid_postfix(int64_t* timer) {

@@ -210,8 +210,7 @@ int APS5_VABI sceHmdInternalSetVirtualDisplayDepth(void) {
 }
 
 int APS5_VABI sceHmdGetDistortionWorkMemoryAlign(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 0x400;
 }
 
 int APS5_VABI sceHmdReprojectionStartMultilayer(void) {
@@ -280,8 +279,7 @@ int APS5_VABI sceHmdInternalGetHmuPowerStatusForDebug(void) {
 }
 
 int APS5_VABI sceHmdGetDistortionWorkMemorySize(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 0x20000;
 }
 
 int APS5_VABI sceHmdReprojectionSetDisplayBuffers(void) {
@@ -310,8 +308,7 @@ int APS5_VABI sceHmdInternalGetPuBuildNumber(void) {
 }
 
 int APS5_VABI sceHmdDistortionGetCompoundEyeCorrectionCommand(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return static_cast<int>(0x81110009);
 }
 
 int APS5_VABI sceHmdInternalSetS3dPassMode(void) {

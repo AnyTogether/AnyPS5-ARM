@@ -3,7 +3,9 @@
 
 #include <elfpatcher/general/IElfPatcher.hpp>
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <string_view>
 
 namespace Elfpatcher::MacOs {
 
@@ -12,7 +14,7 @@ namespace Elfpatcher::MacOs {
 // flat-namespace binds to their NID names and RELATIVE relocations are rebases.
 class MacOsMachOPatcher final : public IElfPatcher {
 public:
-    explicit MacOsMachOPatcher(std::optional<std::uint64_t> fixedBase = std::nullopt);
+    explicit MacOsMachOPatcher(std::optional<std::uint64_t> fixedBase = std::nullopt, std::function<void(std::string_view)> message = {});
 
     std::vector<std::uint8_t> Patch(
         std::vector<std::uint8_t> sourceElf,
@@ -27,6 +29,7 @@ public:
 
 private:
     std::optional<std::uint64_t> fixedBase;
+    std::function<void(std::string_view)> message;
 };
 
 }

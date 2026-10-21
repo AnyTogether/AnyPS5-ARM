@@ -6,6 +6,7 @@
 #include <domain/Types.hpp>
 #include <io/FileReader.hpp>
 #include <io/NativePath.hpp>
+#include <io/FileIdentity.hpp>
 #include <elfpatcher/linux/LinuxDesktopEntryWriter.hpp>
 #include <io/FileWriter.hpp>
 #include <relinker/output/CallRegistryWriter.hpp>
@@ -104,11 +105,9 @@ public:
         }
     }
 
-    std::filesystem::path GetPath() const { return directory / "file"; }
     const std::filesystem::path& GetDirectory() const { return directory; }
 
     void Remove() {
-        std::filesystem::remove(GetPath());
         std::filesystem::remove(directory);
         directory.clear();
     }
@@ -118,25 +117,7 @@ private:
 };
 
 bool SameOutputFile(const std::filesystem::path& first, const std::filesystem::path& second) {
-    if (std::filesystem::equivalent(first, second)) return true;
-#ifdef _WIN32
-    if (std::filesystem::status(first).permissions() != std::filesystem::status(second).permissions() &&
-        std::filesystem::hard_link_count(first) > 1 && std::filesystem::hard_link_count(second) > 1) {
-        for (const auto& path : {first, second}) {
-            if ((std::filesystem::status(path).permissions() & std::filesystem::perms::owner_write) == std::filesystem::perms::none)
-                throw Domain::RelinkerException("Cannot compare read-only output identities: " + Io::Utf8Path(path));
-        }
-        OutputIdentityDirectory firstDirectory(first.parent_path());
-        OutputIdentityDirectory secondDirectory(second.parent_path());
-        std::filesystem::create_hard_link(first, firstDirectory.GetPath());
-        std::filesystem::create_hard_link(second, secondDirectory.GetPath());
-        const bool same = std::filesystem::equivalent(firstDirectory.GetPath(), secondDirectory.GetPath());
-        secondDirectory.Remove();
-        firstDirectory.Remove();
-        return same;
-    }
-#endif
-    return false;
+    return Io::SameFile(first, second);
 }
 
 bool SameOutputDestination(const std::filesystem::path& first, const std::filesystem::path& second) {
@@ -305,10 +286,10 @@ int Run(const int argc, char* argv[]) {
             const auto relative = ExecutableRelative(executable);
             const auto input = ResolveExtraExecutable(moduleRoot, moduleDirectories, relative, executable);
             const auto output = Relinker::GamePatch::OutputExecutablePath(Io::NativePath(absPath), executable);
-            if (std::filesystem::equivalent(Io::NativePath(args.inputPath), input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
+            if (Io::SameFile(Io::NativePath(args.inputPath), input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
             if (output.lexically_normal() == Io::NativePath(absPath).lexically_normal()) throw Domain::RelinkerException("Executable outputs collide: " + Io::Utf8Path(output));
             for (const auto& extra : extraExecutables) {
-                if (std::filesystem::equivalent(extra.Input, input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
+                if (Io::SameFile(extra.Input, input)) throw Domain::RelinkerException("Executable is converted twice: " + executable);
                 if (extra.Output.lexically_normal() == output.lexically_normal()) throw Domain::RelinkerException("Executable outputs collide: " + Io::Utf8Path(output));
             }
             extraExecutables.push_back({executable, relative, input, output});

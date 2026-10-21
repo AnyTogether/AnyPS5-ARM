@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <stdexcept>
 #include <cstdint>
 #include <cstdio>
@@ -289,17 +290,50 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
     Require(sscanf_nid_postfix("  ", "%*d%d", &scanned) == EOF);
     Require(sscanf_nid_postfix("", "%d", &scanned) == EOF);
 #else
-    char16_t wide[4] = {u'!', u'!', u'!', u'!'};
-    const auto rejects = [&](const char* format) {
-        try { sscanf_nid_postfix("ab cd", format, wide); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
-        return false;
-    };
-    Require(rejects("%ls") && rejects("%*s %3lc") && rejects("%l[a-z]") && rejects("%S") && rejects("%2$C") && rejects("%'ls"));
-    const auto secureRejects = [&](const char* format) {
-        try { ScanListS("ab cd", format, wide, 4u); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
-        return false;
-    };
-    Require(secureRejects("%ls") && secureRejects("%lc"));
+    {
+        char16_t first[8] = {};
+        char16_t letter = u'!';
+        Require(sscanf_nid_postfix("ab cd", "%ls %lc", first, &letter) == 2);
+        Require(std::u16string(first) == u"ab" && letter == u'c');
+        Require(sscanf_nid_postfix("  xy z", "%S %C", first, &letter) == 2 && std::u16string(first) == u"xy" && letter == u'z');
+        char16_t three[5] = {u'!', u'!', u'!', u'!', u'!'};
+        Require(sscanf_nid_postfix("abcdef", "%3lc", three) == 1);
+        Require(three[0] == u'a' && three[1] == u'b' && three[2] == u'c' && three[3] == u'!');
+        Require(sscanf_nid_postfix("abcz", "%l[a-c]", first) == 1 && std::u16string(first) == u"abc");
+        Require(sscanf_nid_postfix("ab cd", "%l[^ ]", first) == 1 && std::u16string(first) == u"ab");
+        Require(sscanf_nid_postfix("]x", "%l[]x]", first) == 1 && std::u16string(first) == u"]x");
+        char16_t second[8] = {};
+        Require(sscanf_nid_postfix("\xc5\xbelu\xc5\xa5 k\xc5\xaf\xc5\x88", "%ls %ls", first, second) == 2);
+        Require(std::u16string(first) == u"\u017elu\u0165" && std::u16string(second) == u"k\u016f\u0148");
+        int number = 0;
+        Require(sscanf_nid_postfix("\xc5\xbelu\xc5\xa5 7", "%2ls%*ls %d", first, &number) == 2);
+        Require(std::u16string(first) == u"\u017el" && number == 7);
+        char narrowWord[8] = {};
+        Require(sscanf_nid_postfix("12 ab cd", "%d %ls %7s", &number, first, narrowWord) == 3);
+        Require(number == 12 && std::u16string(first) == u"ab" && std::strcmp(narrowWord, "cd") == 0);
+        int consumed = -1;
+        Require(sscanf_nid_postfix("ab cd", "%ls%n", first, &consumed) == 1 && consumed == 2);
+        Require(sscanf_nid_postfix("", "%ls", first) == EOF && sscanf_nid_postfix("   ", "%ls", first) == EOF);
+        Require(sscanf_nid_postfix("xyz", "%l[a-c]", first) == 0);
+        Require(sscanf_nid_postfix("1 xyz", "%d %l[a-c]", &number, first) == 1);
+        Require(ScanList("hi there", "%ls %lc", first, &letter) == 2 && std::u16string(first) == u"hi" && letter == u't');
+        char16_t fits[6] = {};
+        Require(ScanListS("hello world", "%ls", fits, 6u) == 1 && std::u16string(fits) == u"hello");
+        char16_t small[5] = {u'!', u'!', u'!', u'!', u'!'};
+        Require(ScanListS("hello", "%ls", small, 5u) == 0 && small[0] == 0);
+        Require(ScanListS("hello", "%4ls", small, 5u) == 1 && std::u16string(small) == u"hell");
+        Require(ScanListS("xy", "%lc", &letter, 1u) == 1 && letter == u'x');
+        small[0] = u'!';
+        Require(ScanListS("xyz", "%3lc", small, 2u) == 0 && small[0] == 0);
+        Require(ScanListS("ab cd", "%*ls %l[a-z]", fits, 6u) == 1 && std::u16string(fits) == u"cd");
+        char16_t untouched[4] = {u'!', u'!', u'!', u'!'};
+        const auto rejects = [&](const char* input, const char* format) {
+            try { sscanf_nid_postfix(input, format, untouched); } catch (const std::runtime_error&) { return untouched[0] == u'!'; }
+            return false;
+        };
+        Require(rejects("\xff", "%ls") && rejects("a b", "%2$ls") && rejects("\xc5\xbe", "%l[\xc5\xbe]"));
+        Require(rejects("\xf0\x9f\x98\x80", "%ls"));
+    }
     char narrow[8] = {};
     Require(sscanf_nid_postfix("ab%", "%7[^%ls]", narrow) == 1 && std::strcmp(narrow, "ab") == 0);
 #endif

@@ -115,9 +115,15 @@ def publish_release(output):
     checksum = hashlib.sha256(data).hexdigest()
     if asset.get("digest") and asset["digest"] != "sha256:" + checksum:
         raise ValueError("Web release archive checksum mismatch")
+    if output.is_symlink() or (output.exists() and not output.is_dir()):
+        raise ValueError(f"Release output is not a directory: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".web-release-", dir=output.parent) as temporary:
-        staging = Path(temporary)
+    temporary = Path(tempfile.mkdtemp(prefix=".web-release-", dir=output.parent))
+    staging = temporary / "site"
+    previous = temporary / "previous"
+    published = False
+    try:
+        staging.mkdir()
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             files = archive.infolist()
             expected = {*WEB_FILES, "web-release.json"}
@@ -139,7 +145,21 @@ def publish_release(output):
         manifest["revision"] = metadata["revision"]
         (staging / "release.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         (staging / ".nojekyll").touch()
-        shutil.copytree(staging, output, dirs_exist_ok=True)
+        if output.exists():
+            output.rename(previous)
+        try:
+            staging.rename(output)
+        except OSError:
+            if previous.exists():
+                try:
+                    previous.rename(output)
+                except OSError as error:
+                    raise RuntimeError(f"Could not restore release output. Previous site is preserved at {previous}") from error
+            raise
+        published = True
+    finally:
+        if published or not previous.exists():
+            shutil.rmtree(temporary)
     print(f"Published web converter and libraries from {tag} ({metadata['revision']})")
 
 

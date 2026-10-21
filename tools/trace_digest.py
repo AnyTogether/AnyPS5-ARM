@@ -59,6 +59,17 @@ class Trace:
                 entry[4] = any(is_wait(parent[2]) for parent in stack)
                 stack.append(entry)
 
+    def select_threads(self, names):
+        available = self.threads.keys() | self.slices.keys() | self.folded.keys()
+        unknown = set(names) - {self.name(tid) for tid in available}
+        if unknown:
+            raise ValueError("unknown thread: " + ", ".join(sorted(unknown)))
+        selected = {tid for tid in available if self.name(tid) in names}
+        self.threads = {tid: name for tid, name in self.threads.items() if tid in selected}
+        self.slices = {tid: slices for tid, slices in self.slices.items() if tid in selected}
+        self.folded = {tid: value for tid, value in self.folded.items() if tid in selected}
+        self.batched = [entry for entry in self.batched if entry[0] in selected]
+
     def name(self, tid):
         return self.threads.get(tid, f"tid {tid}")
 
@@ -209,6 +220,9 @@ def table_cell(value):
 
 def markdown(result):
     lines = []
+    if result.get("thread_filter"):
+        lines += ["Thread filter: " + ", ".join(table_cell(name) for name in result["thread_filter"])
+                  + ". Frame bounds, summary and stack samples remain capture-wide.", ""]
     summary = result["summary"]
     if summary:
         frame = summary["frame_ms"]
@@ -328,12 +342,16 @@ def main(arguments=None):
     parser.add_argument("trace", help="aps5-trace-*.json.gz (or .json), or a .jsonl summary file with APS5_TRACE_SUMMARY_EVERY lines")
     parser.add_argument("--summary", help="file with the summary line (default: aps5-summary.jsonl next to the trace)")
     parser.add_argument("--stacks", help="collapsed-stack file of APS5_SAMPLE_WORKER (<file stem>.collapsed.txt)")
+    parser.add_argument("--thread", action="append", default=[], metavar="NAME",
+                        help="include event tracks with this exact thread name; repeat to select several tracks")
     parser.add_argument("--frames", type=nonnegative_integer, default=5, help="slowest frames to list (default 5)")
     parser.add_argument("--top", type=nonnegative_integer, default=10, help="entries per list (default 10)")
     parser.add_argument("--json", action="store_true", help="print the digest as JSON")
     options = parser.parse_args(arguments)
     if options.summary and not Path(options.summary).is_file():
         parser.error(f"summary file not found: {options.summary}")
+    if options.thread and options.trace.endswith(".jsonl"):
+        parser.error("--thread requires an event trace, not interval summaries")
     if options.trace.endswith(".jsonl"):
         result = digest_intervals(load_intervals(options.trace))
         sys.stdout.write(json.dumps(result, indent=1) + "\n" if options.json else markdown_intervals(result))
@@ -342,8 +360,13 @@ def main(arguments=None):
         stacks = load_stacks(options.stacks) if options.stacks else None
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    result = digest(load_trace(options.trace), load_summary(options.summary, options.trace),
+    trace = load_trace(options.trace)
+    if options.thread:
+        trace.select_threads(options.thread)
+    result = digest(trace, load_summary(options.summary, options.trace),
                     stacks, options.frames, options.top)
+    if options.thread:
+        result["thread_filter"] = sorted(set(options.thread))
     sys.stdout.write(json.dumps(result, indent=1) + "\n" if options.json else markdown(result))
     return 0
 

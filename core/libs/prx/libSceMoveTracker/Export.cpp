@@ -41,8 +41,7 @@ int APS5_VABI sceMoveTrackerGetState() {
 }
 
 int APS5_VABI sceMoveTrackerGetVersion() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 2;
 }
 
 int APS5_VABI sceMoveTrackerGetWorkingMemorySize() {
@@ -86,7 +85,6 @@ int APS5_VABI sceMoveTrackerRecordStart() {
 }
 
 int APS5_VABI sceMoveTrackerRecordStop() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

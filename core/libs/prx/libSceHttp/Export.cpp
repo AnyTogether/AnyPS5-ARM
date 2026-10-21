@@ -481,35 +481,42 @@ int APS5_VABI sceHttpParseResponseHeader(const char* header, std::size_t headerL
     }
     if (!found) return notFound;
 
-    while (start < headerLen && isSpace(input[start])) {
-        if (input[start++] == '\n') break;
-    }
-    std::size_t end = headerLen;
-    std::size_t consumed = headerLen;
-    std::size_t scan = start;
-    while (scan < headerLen) {
-        const auto newline = input.find('\n', scan);
-        if (newline == std::string_view::npos) break;
-        const auto next = newline + 1;
-        if (next < headerLen && (input[next] == ' ' || input[next] == '\t')) {
-            scan = next;
-            continue;
-        }
-        end = newline > start && input[newline - 1] == '\r' ? newline - 1 : newline;
-        consumed = next;
-        break;
-    }
-    if (end == start) {
+    const auto continues = [&input, headerLen](std::size_t next) { return next < headerLen && (input[next] == ' ' || input[next] == '\t'); };
+    const auto empty = [fieldValue, valueLen] {
         *fieldValue = nullptr;
         *valueLen = 0;
         return 0;
+    };
+    while (start < headerLen) {
+        const std::size_t lineFeed = input[start] == '\r' && start + 1 < headerLen && input[start + 1] == '\n' ? start + 1 : start;
+        if (input[lineFeed] == '\n') {
+            if (!continues(lineFeed + 1)) return empty();
+            start = lineFeed + 1;
+        } else if (isSpace(input[start])) {
+            ++start;
+        } else {
+            break;
+        }
     }
-    if (consumed > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-        throw std::out_of_range("sceHttpParseResponseHeader: consumed byte count exceeds int");
+    if (start == headerLen) return empty();
+    std::size_t end = headerLen;
+    std::size_t scan = start;
+    while (scan < headerLen) {
+        const auto newline = input.find('\n', scan);
+        if (newline == std::string_view::npos || newline + 1 == headerLen) break;
+        if (continues(newline + 1)) {
+            scan = newline + 1;
+            continue;
+        }
+        end = newline > start && input[newline - 1] == '\r' ? newline - 1 : newline;
+        break;
+    }
+    if (end > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::out_of_range("sceHttpParseResponseHeader: value end exceeds int");
     }
     *fieldValue = header + start;
     *valueLen = end - start;
-    return static_cast<int>(consumed);
+    return static_cast<int>(end);
 }
 
 int APS5_VABI sceHttpCreateRequest2(int conn_id, const char* method, const char* path, uint64_t content_length) {
@@ -621,12 +628,10 @@ int APS5_VABI sceHttpAuthCacheExport(void) {
 }
 
 int APS5_VABI sceHttpDbgEnableProfile(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceHttpDbgSetPrintf(void) {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

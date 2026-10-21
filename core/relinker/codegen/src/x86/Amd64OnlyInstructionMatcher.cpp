@@ -21,6 +21,7 @@
 #include <codegen/x86/X64OpcodeConstants.hpp>
 #include <codegen/CodegenException.hpp>
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -196,6 +197,7 @@ private:
     [[nodiscard]] Amd64OnlyMatch _matchMcommit(const DecodedInstruction& instr) const;
     [[nodiscard]] std::optional<Amd64OnlyMatch> _matchRosetta(const DecodedInstruction& instr, std::span<const std::uint8_t> trailing) const;
     [[nodiscard]] const char* _emitOutOfLine(StubBodyBuilder& body, const DecodedInstruction& instr) const;
+    [[nodiscard]] const char* _emitInPlace(StubBodyBuilder& body, const DecodedInstruction& instr) const;
 };
 
 Amd64OnlyMatch Amd64OnlyInstructionMatcher::_matchMovnts(const DecodedInstruction& instr, const Entry& entry) const {
@@ -339,6 +341,33 @@ const char* Amd64OnlyInstructionMatcher::_emitOutOfLine(StubBodyBuilder& body, c
     return nullptr;
 }
 
+const char* Amd64OnlyInstructionMatcher::_emitInPlace(StubBodyBuilder& body, const DecodedInstruction& instr) const {
+    if (const auto inPlace = Match(instr.Data, instr.Length); inPlace && inPlace->Lowering == Amd64OnlyLowering::InPlace) {
+        for (const auto* entry : {&kMovntss, &kMovntsd, &kMonitorx, &kMwaitx, &kRdseed, &kClwb}) {
+            if (inPlace->InstructionName != entry->Name)
+                continue;
+            const X64InstructionDecoder decoder;
+            const std::span<const std::uint8_t> replacement(inPlace->ReplacementBytes);
+            for (std::size_t offset = 0; offset < replacement.size();) {
+                const auto info = decoder.DecodeInstruction(replacement.data() + offset, replacement.size() - offset);
+                if (info.Length == 0 || info.Length > replacement.size() - offset)
+                    throw CodegenException("In-place replacement does not split into whole instructions");
+                const auto part = replacement.subspan(offset, info.Length);
+                if (info.HasRipRelativeDisp) {
+                    std::int32_t displacement = 0;
+                    std::memcpy(&displacement, part.data() + info.RipRelativeDispOffset, sizeof(displacement));
+                    body.RipRelative(part, info.RipRelativeDispOffset, static_cast<std::int64_t>(offset + info.Length) + displacement);
+                } else {
+                    body.Raw(part);
+                }
+                offset += info.Length;
+            }
+            return entry->Name;
+        }
+    }
+    return nullptr;
+}
+
 void Amd64OnlyInstructionMatcher::EmitOutOfLine(StubBodyBuilder& body, const std::span<const std::uint8_t> instruction) const {
     if (_emitOutOfLine(body, DecodedInstruction{instruction.data(), instruction.size()}) == nullptr)
         throw CodegenException("AMD-only instruction has no out-of-line lowering");
@@ -355,7 +384,9 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::MatchSequence(
     const char* name = nullptr;
     for (const auto& instruction : instructions) {
         const DecodedInstruction instr{instruction.data(), instruction.size()};
-        const auto emitted = _emitOutOfLine(body, instr);
+        auto emitted = _emitOutOfLine(body, instr);
+        if (emitted == nullptr && name != nullptr)
+            emitted = _emitInPlace(body, instr);
         if (emitted == nullptr)
             return std::nullopt;
         if (name == nullptr)

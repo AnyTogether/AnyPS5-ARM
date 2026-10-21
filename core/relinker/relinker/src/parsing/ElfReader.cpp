@@ -175,6 +175,8 @@ std::vector<ProgramHeader> ElfReader::ReadProgramHeaders() const {
         if (tls.FileSize > tls.MemorySize || (tls.Alignment > 1 && !std::has_single_bit(tls.Alignment)))
             throw RelinkerException("Invalid or unsupported ELF TLS layout", tls.Offset);
         if (tls.FileSize == 0) continue;
+        if (!_rangeFits(tls.Offset, tls.FileSize, _fileBuffer.size()))
+            throw RelinkerException("PT_TLS initialization image is outside the file", tls.Offset);
         const bool covered = std::any_of(headers.begin(), headers.end(), [&](const ProgramHeader& load) {
             return load.Type == PT_LOAD && tls.MappedAddress >= load.MappedAddress && tls.MappedAddress - load.MappedAddress <= load.MemorySize
                 && tls.FileSize <= load.MemorySize - (tls.MappedAddress - load.MappedAddress);

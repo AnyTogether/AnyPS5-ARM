@@ -270,13 +270,13 @@ void verifyRequest(const char* path) {
     std::printf("%s: structured with %zu added blocks, %zu cloned instructions, %zu route variables\n", path, result.addedBlocks, result.clonedInstructions, result.routeVariables);
 }
 
-std::size_t recompile(const std::string& name, std::span<const std::uint32_t> code, std::uint32_t subgroupSize) {
+std::size_t recompile(const std::string& name, std::span<const std::uint32_t> code, std::uint32_t subgroupSize, std::uint32_t waveSize = 64u) {
     const std::array<std::uint32_t, 4> userData{0x10000000u, 0x00100000u, 0x40u, 0x00027facu};
     const std::array<std::uint32_t, 2> capabilities{1u, 61u};
     const std::array<std::string_view, 1> extensions{"SPV_KHR_storage_buffer_storage_class"};
     RecompileRequest request{};
     request.shader = {ShaderStage::Compute, 0x20000u, code, 0, {}};
-    request.context.waveSize = 64;
+    request.context.waveSize = waveSize;
     request.context.userDataBaseRegister = 0;
     request.context.userData = userData;
     request.context.compute = ShaderComputeStageInfo{{64u, 1u, 1u}, 0u, {false, false, false}, false, 1u};
@@ -294,6 +294,26 @@ std::size_t recompile(const std::string& name, std::span<const std::uint32_t> co
     const auto result = Recompile(request);
     require(!result.spirv.empty(), name + ": no SPIR-V for a " + std::to_string(subgroupSize) + "-lane subgroup");
     return result.spirv.size();
+}
+
+void verifyCallLinkOverwrittenByWave64Compare() {
+    const std::vector<std::uint32_t> code{0xbb080007u, 0xd4060008u, 0x0001e500u, 0xd5010001u, 0x0021e880u, 0xe0700000u, 0x80010100u, 0xbf810000u, 0xbe802008u, 0xbf9f0000u};
+    static_cast<void>(recompile("a wave64 compare that overwrites a call's link pair before a v_cndmask reads it", code, 64u));
+}
+
+void verifyCallLinkMaskReadByScalarInstruction() {
+    const std::array<std::uint32_t, 3> readers{0xbe8a2408u, 0xbe8a0408u, 0xbe8a0309u};
+    for (const auto reader : readers) {
+        const std::vector<std::uint32_t> code{0xbb080007u, 0xd4060008u, 0x0001e500u, reader, 0xbf800000u, 0xe0700000u, 0x80010100u, 0xbf810000u, 0xbe802008u, 0xbf9f0000u};
+        static_cast<void>(recompile("a wave64 scalar read of a compare mask in a call's link pair", code, 64u));
+        bool refused = false;
+        try {
+            static_cast<void>(recompile("a wave32 scalar read of a call's return address", code, 32u, 32u));
+        } catch (const std::exception& error) {
+            refused = std::string_view(error.what()).find("escapes the constant-offset call/return model") != std::string_view::npos;
+        }
+        require(refused, "a wave32 program reading a call's return address high half was not refused");
+    }
 }
 
 void verifyLargeLoopExitFallback() {
@@ -1397,6 +1417,8 @@ done:
         verifyScheduledJumpTable();
         VerifyUserDataTail();
         VerifyConstantHighTail();
+        verifyCallLinkOverwrittenByWave64Compare();
+        verifyCallLinkMaskReadByScalarInstruction();
         verifyLargeLoopExitFallback();
         verifyNestedExitForwarders();
         verifyIrreducibleLoopEntry();

@@ -1,4 +1,6 @@
+import contextlib
 import copy
+import io
 import json
 import os
 import stat
@@ -10,6 +12,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pad_input
 import pad_timeline
 
 
@@ -131,6 +134,26 @@ class TimelineTests(unittest.TestCase):
             os.link(timeline, linked)
             self.assertEqual(self.run_cli(timeline, linked).returncode, 2)
             self.assertEqual(timeline.read_text(encoding="utf-8"), original)
+
+    def test_sequence_advances_past_existing_command_after_clock_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            timeline, output = root / "sequence.json", root / "command"
+            timeline.write_text(json.dumps(self.document), encoding="utf-8")
+            with mock.patch.object(sys, "argv", ["pad_timeline.py", str(timeline), str(output)]), \
+                    mock.patch.object(pad_input.time, "monotonic_ns", return_value=1000), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                output.write_text("2000 16384 300\n", encoding="utf-8")
+                pad_timeline.main()
+                self.assertTrue(output.read_text(encoding="utf-8").startswith("APS5_PAD_TIMELINE 1 2001 2\n"))
+                pad_timeline.main()
+                self.assertTrue(output.read_text(encoding="utf-8").startswith("APS5_PAD_TIMELINE 1 2002 2\n"))
+                exhausted = f"{2**64 - 1} 16384 300\n"
+                output.write_text(exhausted, encoding="utf-8")
+                with self.assertRaises(SystemExit) as error:
+                    pad_timeline.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertEqual(output.read_text(encoding="utf-8"), exhausted)
 
 
 if __name__ == "__main__":

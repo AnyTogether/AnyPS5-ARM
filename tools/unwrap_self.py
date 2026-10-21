@@ -95,12 +95,6 @@ def read_records(data):
     return records
 
 
-def align_up(value, alignment):
-    if alignment <= 1:
-        return value
-    return (value + alignment - 1) // alignment * alignment
-
-
 def parse_elf(data):
     inner = data.find(b"\x7fELF")
     if inner < 0:
@@ -108,6 +102,8 @@ def parse_elf(data):
     if inner + 0x40 > len(data):
         raise Refused("inner ELF header is truncated")
     header = bytearray(data[inner:inner + 0x40])
+    if header[4] != 2 or header[5] != 1:
+        raise Refused("inner ELF is not 64-bit little-endian")
     program_offset = struct.unpack_from("<Q", header, 0x20)[0]
     entry_size = struct.unpack_from("<H", header, 0x36)[0]
     count = struct.unpack_from("<H", header, 0x38)[0]
@@ -200,6 +196,9 @@ def place_segments(data, headers, records):
             if header["size"] and (offset > host["size"] or header["size"] > host["size"] - offset):
                 raise Refused("segment %d does not fit the file-backed range of PT_LOAD %d"
                               % (header["index"], host["index"]))
+            if host["size"] == 0 or offset > host["size"]:
+                header["source"] = 0
+                continue
             header["host"] = host
             header["source"] = host["source"] + offset
             if tail is None or header["offset"] > tail[0]:
@@ -250,10 +249,13 @@ def unwrap(path, output, verbose=False):
     check_decrypted(data, headers)
 
     regions = []
+    load_regions = {}
     for header in headers:
         if header["type"] == PT_LOAD and header["size"]:
-            regions.append({"old": header["source"], "size": header["size"],
-                            "vaddr": header["vaddr"], "align": header["align"]})
+            region = {"old": header["source"], "size": header["size"],
+                      "vaddr": header["vaddr"], "align": header["align"]}
+            regions.append(region)
+            load_regions[header["index"]] = region
 
     def region_for(offset, size):
         for region in regions:
@@ -273,9 +275,7 @@ def unwrap(path, output, verbose=False):
     cursor = max(FIRST_REGION, program_offset + len(headers) * 56)
     for region in regions:
         alignment = region["align"] if region["align"] and (region["align"] & (region["align"] - 1)) == 0 else 1
-        placed = align_up(cursor, alignment)
-        if region["vaddr"] % alignment != placed % alignment:
-            placed += (region["vaddr"] % alignment - placed % alignment) % alignment
+        placed = cursor + (region["vaddr"] - cursor) % alignment
         region["new"] = placed
         cursor = placed + region["size"]
 
@@ -295,7 +295,10 @@ def unwrap(path, output, verbose=False):
         if header["size"] == 0 and (header["type"] == PT_LOAD or header["source"] == 0):
             header["new"] = header["vaddr"] % max(header["align"], 1) if header["type"] == PT_LOAD else 0
             continue
-        region = region_for(header["source"], header["size"])
+        host = header if header["type"] == PT_LOAD else header["host"]
+        region = load_regions.get(host["index"]) if host is not None else None
+        if region is None:
+            region = region_for(header["source"], header["size"])
         header["new"] = header["source"] if region is None else region["new"] + (header["source"] - region["old"])
         if header["new"] + header["size"] > len(result):
             raise Refused("segment %d escaped the output" % header["index"])

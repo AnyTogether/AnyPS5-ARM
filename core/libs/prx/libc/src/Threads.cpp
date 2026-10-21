@@ -385,5 +385,124 @@ int APS5_VABI _Cnd_signal_nid_postfix(void** handle) {
     return SignalCondition_nid_no_patch(handle);
 }
 
+struct GuestPad {
+    unsigned (APS5_VABI* const* vtable)(GuestPad*);
+    void* condition;
+    void* mutex;
+    bool started;
+};
+
+static_assert(offsetof(GuestPad, condition) == 0x8 && offsetof(GuestPad, mutex) == 0x10 && offsetof(GuestPad, started) == 0x18 && sizeof(GuestPad) == 0x20);
+
+[[noreturn]] void ThrowCppError_nid_no_patch(int code);
+
+static void RequireThrd(int result, const char* what) {
+    switch (result) {
+    case threadSuccess:
+        return;
+    case threadNomem:
+    case threadTimedout:
+        ThrowCppError_nid_no_patch(6);
+    case threadBusy:
+        ThrowCppError_nid_no_patch(0);
+    case threadError:
+        ThrowCppError_nid_no_patch(1);
+    }
+    throw std::runtime_error(std::string(what) + " failed with " + std::to_string(result));
+}
+
+static std::atomic<PthreadCreateFn_nid_no_patch> registeredPthreadCreate{nullptr};
+static std::atomic<PthreadJoinFn_nid_no_patch> registeredPthreadJoin{nullptr};
+static std::atomic<PthreadDetachFn_nid_no_patch> registeredPthreadDetach{nullptr};
+static std::atomic<PthreadThreadIdFn_nid_no_patch> registeredPthreadThreadId{nullptr};
+
+void RegisterPthreadCreate_nid_no_patch(PthreadCreateFn_nid_no_patch fn) {
+    registeredPthreadCreate.store(fn, std::memory_order_release);
+}
+
+void RegisterPthreadJoin_nid_no_patch(PthreadJoinFn_nid_no_patch fn) {
+    registeredPthreadJoin.store(fn, std::memory_order_release);
+}
+
+void RegisterPthreadDetach_nid_no_patch(PthreadDetachFn_nid_no_patch fn) {
+    registeredPthreadDetach.store(fn, std::memory_order_release);
+}
+
+void RegisterPthreadThreadId_nid_no_patch(PthreadThreadIdFn_nid_no_patch fn) {
+    registeredPthreadThreadId.store(fn, std::memory_order_release);
+}
+
+static void* APS5_VABI PadEntry_nid_no_patch(void* argument) {
+    auto* pad = static_cast<GuestPad*>(argument);
+    const auto go = pad->vtable[0];
+    return reinterpret_cast<void*>(static_cast<std::uintptr_t>(go(pad)));
+}
+
+void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Cnd_init_nid_postfix(&pad->condition), "_Pad::_Pad: _Cnd_init");
+    const int created = _Mtx_init_nid_postfix(&pad->mutex, 1);
+    if (created != threadSuccess) {
+        _Cnd_destroy_nid_postfix(&pad->condition);
+        RequireThrd(created, "_Pad::_Pad: _Mtx_init");
+    }
+    pad->started = false;
+    const int locked = _Mtx_lock_nid_postfix(&pad->mutex);
+    if (locked != threadSuccess) {
+        _Mtx_destroy_nid_postfix(&pad->mutex);
+        _Cnd_destroy_nid_postfix(&pad->condition);
+        RequireThrd(locked, "_Pad::_Pad: _Mtx_lock");
+    }
+}
+
+void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Mtx_unlock_nid_postfix(&pad->mutex), "_Pad::~_Pad: _Mtx_unlock");
+    _Mtx_destroy_nid_postfix(&pad->mutex);
+    _Cnd_destroy_nid_postfix(&pad->condition);
+}
+
+void APS5_VABI _ZNSt4_Pad8_ReleaseEv_nid_postfix(GuestPad* pad) {
+    if (!pad) APS5_INVALID_ARG_EX;
+    RequireThrd(_Mtx_lock_nid_postfix(&pad->mutex), "_Pad::_Release: _Mtx_lock");
+    pad->started = true;
+    RequireThrd(_Cnd_signal_nid_postfix(&pad->condition), "_Pad::_Release: _Cnd_signal");
+    RequireThrd(_Mtx_unlock_nid_postfix(&pad->mutex), "_Pad::_Release: _Mtx_unlock");
+}
+
+void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(GuestPad* pad, void** thread) {
+    if (!pad || !thread) APS5_INVALID_ARG_EX;
+    const auto create = registeredPthreadCreate.load(std::memory_order_acquire);
+    if (!create) throw std::runtime_error("_Pad::_Launch: pthread_create is not registered");
+    const int created = create(thread, nullptr, PadEntry_nid_no_patch, pad);
+    if (created != 0) ThrowCppError_nid_no_patch(6);
+    while (!pad->started) RequireThrd(_Cnd_wait_nid_postfix(&pad->condition, &pad->mutex), "_Pad::_Launch: _Cnd_wait");
+}
+
+int APS5_VABI _Thrd_join_nid_postfix(void* thread, int* code) {
+    const auto join = registeredPthreadJoin.load(std::memory_order_acquire);
+    if (!join) throw std::runtime_error("_Thrd_join: pthread_join is not registered");
+    void* result = nullptr;
+    if (join(thread, &result) != 0) return threadError;
+    if (code) *code = static_cast<int>(reinterpret_cast<std::intptr_t>(result));
+    return threadSuccess;
+}
+
+int APS5_VABI _Thrd_detach_nid_postfix(void* thread) {
+    const auto detach = registeredPthreadDetach.load(std::memory_order_acquire);
+    if (!detach) throw std::runtime_error("_Thrd_detach: pthread_detach is not registered");
+    return detach(thread) == 0 ? threadSuccess : threadError;
+}
+
+int APS5_VABI _Thrd_id_nid_postfix(void) {
+    const auto threadId = registeredPthreadThreadId.load(std::memory_order_acquire);
+    if (!threadId) throw std::runtime_error("_Thrd_id: scePthreadGetthreadid is not registered");
+    return threadId();
+}
+
+[[noreturn]] void APS5_VABI _ZSt16_Throw_Cpp_errori_nid_postfix(int code) {
+    ThrowCppError_nid_no_patch(code);
+}
+
 }
 

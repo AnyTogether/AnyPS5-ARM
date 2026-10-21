@@ -40,6 +40,7 @@ constexpr int ErrorInvalidMode = static_cast<int>(0x80bc0024u);
 constexpr int ErrorInvalidParam = static_cast<int>(0x80bc0030u);
 constexpr int ErrorInvalidAddress = static_cast<int>(0x80bc0031u);
 constexpr int ErrorInvalidReserved = static_cast<int>(0x80bc0032u);
+constexpr int ErrorInternal = static_cast<int>(0x80bc00ffu);
 constexpr uint32_t ValidKeyboardModes = 0x0000007f;
 constexpr uint32_t TypeNumber = 4;
 constexpr uint32_t ValidOptions = 0x00007bff;
@@ -671,8 +672,7 @@ int APS5_VABI sceImeSetEditEventWithRemotePlayEnabled(void) {
 }
 
 int APS5_VABI sceImeForTestFunction(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return ErrorInternal;
 }
 
 int APS5_VABI sceImeVshInformConfirmdString2(void) {
@@ -791,6 +791,15 @@ int APS5_VABI sceImeDicDeleteLearnDics(void) {
 }
 
 int APS5_VABI sceImeDicDeleteUserDics(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+int APS5_VABI FinalizeImeModule_nid_postfix(void) {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI InitializeImeModule_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

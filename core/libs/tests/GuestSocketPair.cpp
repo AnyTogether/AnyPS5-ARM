@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 
 struct PollDescriptor {
     int descriptor;
@@ -48,6 +49,16 @@ int* APS5_VABI __error_nid_postfix();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
+
+template<typename TFunction>
+static bool ThrowsRuntimeError(TFunction function) {
+    try {
+        function();
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
 
 constexpr int Unix = 1;
 constexpr int Stream = 1;
@@ -251,7 +262,9 @@ int main(int argc, char** argv) {
     Require(Exchange(pair[1], pair[0], "back"));
     Require(close_nid_postfix(pair[0]) == 0 && close_nid_postfix(pair[1]) == 0);
 
-#if !defined(_WIN32) && !defined(__APPLE__) // macOS AF_UNIX has no SOCK_SEQPACKET (EPROTONOSUPPORT)
+#ifdef __APPLE__
+    Require(ThrowsRuntimeError([&] { socketpair_nid_postfix(Unix, SequencedPacket, 0, pair); }));
+#elif !defined(_WIN32)
     Require(socketpair_nid_postfix(Unix, SequencedPacket, 0, pair) == 0);
     Require(send_nid_postfix(pair[0], "a", 1, 0) == 1);
     Require(send_nid_postfix(pair[0], "bb", 2, 0) == 2);

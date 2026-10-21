@@ -8,6 +8,8 @@
 #include "prx/libc/include/General.hpp"
 #include "JisX0208.hpp"
 #include "JisX0212.hpp"
+#include "Cp949.hpp"
+#include "Cp950.hpp"
 
 namespace {
 
@@ -152,7 +154,119 @@ const void* contextProfile(const void* context) {
     return profile;
 }
 
+constexpr uint8_t EUC_KR_TAG[8] = {'E', 'U', 'C', 'K', 'R', '9', '4', '9'};
+constexpr uint8_t UHC_TAG[8] = {'U', 'H', 'C', 'C', 'P', '9', '4', '9'};
+constexpr uint8_t BIG5_TAG[8] = {'B', 'I', 'G', '5', 'C', '9', '5', '0'};
+constexpr uint16_t BIG5_LAST_CELL[6] = {0x2550, 0x255E, 0x2561, 0x256A, 0x5341, 0x5345};
+
+bool isEucKr(const void* profile) {
+    return profile != nullptr && std::memcmp(profile, EUC_KR_TAG, sizeof(EUC_KR_TAG)) == 0;
+}
+
+bool isUhc(const void* profile) {
+    return profile != nullptr && std::memcmp(profile, UHC_TAG, sizeof(UHC_TAG)) == 0;
+}
+
+bool isBig5(const void* profile) {
+    return profile != nullptr && std::memcmp(profile, BIG5_TAG, sizeof(BIG5_TAG)) == 0;
+}
+
+bool isMbcs(const void* profile) {
+    return isEucJp(profile) || isSjis(profile) || isSbc(profile) || isEucKr(profile) || isUhc(profile) || isBig5(profile);
+}
+
+int decodeCp949(bool unified, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& length, uint32_t& code) {
+    const uint8_t lead = mbcs[0];
+    if (lead < 0x80) {
+        length = 1;
+        code = lead;
+        return 0;
+    }
+    if (lead < (unified ? 0x81 : 0xA1) || lead == 0xFF) return CES_ERROR_INVALID_ENCODE;
+    if (mbcsMax < 2) return CES_ERROR_SRC_BUFFER_END;
+    const uint8_t trail = mbcs[1];
+    const bool extended = unified && ((trail >= 0x41 && trail <= 0x5A) || (trail >= 0x61 && trail <= 0x7A) || (trail >= 0x81 && trail <= 0xA0));
+    if (!extended && (trail < 0xA1 || trail == 0xFF)) return CES_ERROR_INVALID_ENCODE;
+    length = 2;
+    code = Cp949::TO_UCS2[(lead - 0x81) * 190 + (trail - 0x41)];
+    return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
+}
+
+int decodeCp950(const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& length, uint32_t& code) {
+    const uint8_t lead = mbcs[0];
+    if (lead < 0x80) {
+        length = 1;
+        code = lead;
+        return 0;
+    }
+    if (lead == 0x80 || lead == 0xFF) return CES_ERROR_INVALID_ENCODE;
+    if (mbcsMax < 2) return CES_ERROR_SRC_BUFFER_END;
+    const uint8_t trail = mbcs[1];
+    if (trail < 0x40 || (trail > 0x7E && trail < 0xA1) || trail == 0xFF) return CES_ERROR_INVALID_ENCODE;
+    if (lead < 0xA1 || lead > 0xF9) return CES_ERROR_UNASSIGNED_CODE;
+    length = 2;
+    code = Cp950::TO_UCS2[(lead - 0xA1) * 157 + (trail < 0xA1 ? trail - 0x40 : trail - 0xA1 + 63)];
+    return code != 0 ? 0 : CES_ERROR_UNASSIGNED_CODE;
+}
+
+struct DbcsCell {
+    uint16_t code;
+    uint16_t bytes;
+};
+
+bool byCode(const DbcsCell& left, const DbcsCell& right) {
+    return left.code < right.code;
+}
+
+const std::vector<DbcsCell>& cp949Reverse() {
+    static const auto reverse = [] {
+        std::vector<DbcsCell> entries;
+        for (uint32_t cell = 0; cell < 126 * 190; ++cell) {
+            if (Cp949::TO_UCS2[cell] != 0) entries.push_back({Cp949::TO_UCS2[cell], static_cast<uint16_t>((0x81 + cell / 190) << 8 | (0x41 + cell % 190))});
+        }
+        std::sort(entries.begin(), entries.end(), byCode);
+        return entries;
+    }();
+    return reverse;
+}
+
+const std::vector<DbcsCell>& cp950Reverse() {
+    static const auto reverse = [] {
+        std::vector<DbcsCell> entries;
+        for (uint32_t cell = 0; cell < 89 * 157; ++cell) {
+            const uint32_t column = cell % 157;
+            const uint32_t trail = column < 63 ? 0x40 + column : 0xA1 + column - 63;
+            if (Cp950::TO_UCS2[cell] != 0) entries.push_back({Cp950::TO_UCS2[cell], static_cast<uint16_t>((0xA1 + cell / 157) << 8 | trail)});
+        }
+        std::stable_sort(entries.begin(), entries.end(), byCode);
+        std::vector<DbcsCell> unique;
+        for (const DbcsCell& entry : entries) {
+            if (unique.empty() || unique.back().code != entry.code) unique.push_back(entry);
+            else if (std::find(std::begin(BIG5_LAST_CELL), std::end(BIG5_LAST_CELL), entry.code) != std::end(BIG5_LAST_CELL)) unique.back() = entry;
+        }
+        return unique;
+    }();
+    return reverse;
+}
+
+int encodeDbcs(const std::vector<DbcsCell>& reverse, bool euc, uint32_t code, uint8_t* mbcs, uint32_t& length) {
+    if (code < 0x80) {
+        length = 1;
+        mbcs[0] = static_cast<uint8_t>(code);
+        return 0;
+    }
+    const auto found = std::lower_bound(reverse.begin(), reverse.end(), code, [](const DbcsCell& entry, uint32_t value) { return entry.code < value; });
+    if (found == reverse.end() || found->code != code) return CES_ERROR_UNASSIGNED_CODE;
+    if (euc && ((found->bytes >> 8) < 0xA1 || (found->bytes & 0xFF) < 0xA1)) return CES_ERROR_UNASSIGNED_CODE;
+    length = 2;
+    mbcs[0] = static_cast<uint8_t>(found->bytes >> 8);
+    mbcs[1] = static_cast<uint8_t>(found->bytes & 0xFF);
+    return 0;
+}
+
 int decodeMbcs(const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t& length, uint32_t& code) {
+    if (isEucKr(profile) || isUhc(profile)) return decodeCp949(isUhc(profile), mbcs, mbcsMax, length, code);
+    if (isBig5(profile)) return decodeCp950(mbcs, mbcsMax, length, code);
     const uint8_t lead = mbcs[0];
     if (isSbc(profile)) {
         length = 1;
@@ -262,6 +376,8 @@ const std::vector<JisCell>& jisReverse() {
 }
 
 int encodeMbcs(const void* profile, uint32_t code, uint8_t* mbcs, uint32_t& length) {
+    if (isEucKr(profile) || isUhc(profile)) return encodeDbcs(cp949Reverse(), isEucKr(profile), code, mbcs, length);
+    if (isBig5(profile)) return encodeDbcs(cp950Reverse(), false, code, mbcs, length);
     if (isSbc(profile)) {
         length = 1;
         return unicodeToSbc(static_cast<const uint8_t*>(profile), code, mbcs[0]) ? 0 : CES_ERROR_UNASSIGNED_CODE;
@@ -336,7 +452,7 @@ template<typename Source, typename Decode>
 int toMbcs(const void* context, const Source* source, uint32_t sourceMax, uint32_t* sourceLen, uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, Decode decode) {
     if (!context) return CES_ERROR_INVALID_PARAMETER;
     const void* profile = contextProfile(context);
-    if (!isEucJp(profile) && !isSjis(profile) && !isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!isMbcs(profile)) return CES_ERROR_INVALID_PARAMETER;
     if (!source) return CES_ERROR_INVALID_SRC_BUFFER;
     uint32_t read = 0;
     uint32_t written = 0;
@@ -363,7 +479,7 @@ template<typename Target, typename Encode>
 int fromMbcs(const void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, Target* target, uint32_t targetMax, uint32_t* targetLen, Encode encode) {
     if (!context) return CES_ERROR_INVALID_PARAMETER;
     const void* profile = contextProfile(context);
-    if (!isEucJp(profile) && !isSjis(profile) && !isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!isMbcs(profile)) return CES_ERROR_INVALID_PARAMETER;
     if (!mbcs) return CES_ERROR_INVALID_SRC_BUFFER;
     uint32_t read = 0;
     uint32_t written = 0;
@@ -382,6 +498,23 @@ int fromMbcs(const void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_
     }
     if (mbcsLen) *mbcsLen = read;
     if (targetLen) *targetLen = written;
+    return 0;
+}
+
+int mbcsToUtf8(bool accepted, const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint8_t* utf8, uint32_t utf8Max, uint32_t* utf8Len) {
+    if (!accepted) return CES_ERROR_INVALID_PARAMETER;
+    if (!mbcs) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (mbcsMax == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!utf8) return CES_ERROR_INVALID_DST_BUFFER;
+    uint32_t consumed = 0;
+    uint32_t code = 0;
+    if (const int result = decodeMbcs(profile, mbcs, mbcsMax, consumed, code); result != 0) return result;
+    uint8_t encoded[3];
+    const uint32_t produced = encodeUtf8(code, encoded);
+    if (utf8Max < produced) return CES_ERROR_DST_BUFFER_END;
+    std::memcpy(utf8, encoded, produced);
+    if (mbcsLen) *mbcsLen = consumed;
+    if (utf8Len) *utf8Len = produced;
     return 0;
 }
 
@@ -416,6 +549,24 @@ int APS5_VABI sceCesMbcsUcsContextInit(void* context, const void* profile) {
 void* APS5_VABI sceCesUcsProfileInitEucJpCp51932(void* sheet) {
     if (!sheet) return nullptr;
     std::memcpy(sheet, EUC_JP_TAG, sizeof(EUC_JP_TAG));
+    return sheet;
+}
+
+void* APS5_VABI sceCesUcsProfileInitEucKr(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, EUC_KR_TAG, sizeof(EUC_KR_TAG));
+    return sheet;
+}
+
+void* APS5_VABI sceCesUcsProfileInitUhc(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, UHC_TAG, sizeof(UHC_TAG));
+    return sheet;
+}
+
+void* APS5_VABI sceCesUcsProfileInitBig5Cp950(void* sheet) {
+    if (!sheet) return nullptr;
+    std::memcpy(sheet, BIG5_TAG, sizeof(BIG5_TAG));
     return sheet;
 }
 
@@ -512,36 +663,15 @@ int APS5_VABI sceCesEucJpToUtf8(const void* profile, const uint8_t* eucBuffer, u
 }
 
 int APS5_VABI sceCesEucKrToUtf8(void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)eucBuffer;
-    (void)eucMax;
-    (void)eucLength;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+    return mbcsToUtf8(isEucKr(profile), profile, eucBuffer, eucMax, eucLength, utf8Buffer, utf8Max, utf8Length);
 }
 
 int APS5_VABI sceCesBig5ToUtf8(void* profile, uint8_t* big5Buffer, uint32_t big5Max, uint32_t* big5Length, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)big5Buffer;
-    (void)big5Max;
-    (void)big5Length;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+    return mbcsToUtf8(isBig5(profile), profile, big5Buffer, big5Max, big5Length, utf8Buffer, utf8Max, utf8Length);
 }
 
 int APS5_VABI sceCesUhcToUtf8(void* profile, uint8_t* uhcBuffer, uint32_t uhcMax, uint32_t* uhcLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
-    (void)profile;
-    (void)uhcBuffer;
-    (void)uhcMax;
-    (void)uhcLength;
-    (void)utf8Buffer;
-    (void)utf8Max;
-    (void)utf8Length;
-    NotImplemented_nid_no_patch(__func__);
+    return mbcsToUtf8(isUhc(profile), profile, uhcBuffer, uhcMax, uhcLength, utf8Buffer, utf8Max, utf8Length);
 }
 
 }

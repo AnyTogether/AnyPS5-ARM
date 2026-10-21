@@ -205,7 +205,7 @@ def main():
             try:
                 result = subprocess.run([str(relinker), *command], cwd=case,
                                         capture_output=True, text=True, timeout=20)
-                assert result.returncode == 2 and "Cannot compare read-only output identities" in result.stderr, (
+                assert result.returncode == 2 and "Output paths collide" in result.stderr, (
                     result.stdout, result.stderr)
                 assert output.read_bytes() == b"previous output"
                 assert paths["module"].read_bytes() == b"previous output"

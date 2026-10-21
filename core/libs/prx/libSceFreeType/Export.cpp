@@ -111,4 +111,33 @@ int APS5_VABI FT_Render_Glyph_nid_postfix(GuestGlyphSlotRec* slot, std::int32_t 
     return error;
 }
 
+int APS5_VABI FT_Select_Charmap_nid_postfix(GuestFaceRec* face, std::int32_t encoding) {
+    GuestFace* owner = FaceOf(face);
+    const FT_Error error = FT_Select_Charmap(owner ? owner->host : nullptr, static_cast<FT_Encoding>(encoding));
+    if (error == 0) owner->rec.charmap = owner->charmapPointers.at(FT_Get_Charmap_Index(owner->host->charmap));
+    return error;
+}
+
+int APS5_VABI FT_Set_Charmap_nid_postfix(GuestFaceRec* face, GuestCharMapRec* charmap) {
+    GuestFace* owner = FaceOf(face);
+    if (!owner || !charmap || owner->charmapPointers.empty()) return FT_Set_Charmap(owner ? owner->host : nullptr, nullptr);
+    for (std::size_t index = 0; index < owner->charmapPointers.size(); ++index) {
+        if (owner->charmapPointers[index] != charmap) continue;
+        const FT_Error error = FT_Set_Charmap(owner->host, owner->host->charmaps[index]);
+        if (error == 0) owner->rec.charmap = charmap;
+        return error;
+    }
+    return FT_Err_Invalid_Argument;
+}
+
+std::uint64_t APS5_VABI FT_Get_First_Char_nid_postfix(GuestFaceRec* face, std::uint32_t* glyphIndex) {
+    const GuestFace* owner = FaceOf(face);
+    return FT_Get_First_Char(owner ? owner->host : nullptr, glyphIndex);
+}
+
+std::uint64_t APS5_VABI FT_Get_Next_Char_nid_postfix(GuestFaceRec* face, std::uint64_t charcode, std::uint32_t* glyphIndex) {
+    const GuestFace* owner = FaceOf(face);
+    return FT_Get_Next_Char(owner ? owner->host : nullptr, static_cast<FT_ULong>(static_cast<std::uint32_t>(charcode)), glyphIndex);
+}
+
 }

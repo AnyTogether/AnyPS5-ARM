@@ -366,23 +366,36 @@ inline std::optional<std::uint32_t> ClampDrawIndices(std::span<std::byte> indice
     return highest;
 }
 
+template <typename TIndex>
+std::optional<std::uint32_t> HighestDrawIndexOf(std::span<const std::byte> indices, bool skipRestart) {
+    constexpr auto restartIndex = std::numeric_limits<TIndex>::max();
+    const auto count = indices.size() / sizeof(TIndex);
+    const auto* data = indices.data();
+    TIndex highest = 0;
+    if (!skipRestart) {
+        for (std::size_t i = 0; i < count; ++i) {
+            TIndex index;
+            std::memcpy(&index, data + i * sizeof(TIndex), sizeof(TIndex));
+            highest = std::max(highest, index);
+        }
+        if (count == 0) return std::nullopt;
+        return highest;
+    }
+    TIndex kept = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        TIndex index;
+        std::memcpy(&index, data + i * sizeof(TIndex), sizeof(TIndex));
+        const TIndex valid = index == restartIndex ? TIndex{0} : TIndex(~TIndex{0});
+        highest = std::max(highest, static_cast<TIndex>(index & valid));
+        kept |= valid;
+    }
+    if (kept == 0) return std::nullopt;
+    return highest;
+}
+
 inline std::optional<std::uint32_t> HighestDrawIndex(std::span<const std::byte> indices, std::uint32_t indexSize, bool skipRestart) {
     Require(indexSize == 2 || indexSize == 4, "unsupported index size");
-    const auto restartIndex = indexSize == 2 ? 0xffffu : 0xffffffffu;
-    std::optional<std::uint32_t> highest;
-    for (std::size_t offset = 0; offset + indexSize <= indices.size(); offset += indexSize) {
-        std::uint32_t index = 0;
-        if (indexSize == 2) {
-            std::uint16_t value = 0;
-            std::memcpy(&value, indices.data() + offset, sizeof(value));
-            index = value;
-        } else {
-            std::memcpy(&index, indices.data() + offset, sizeof(index));
-        }
-        if (skipRestart && index == restartIndex) continue;
-        highest = std::max(highest.value_or(0u), index);
-    }
-    return highest;
+    return indexSize == 2 ? HighestDrawIndexOf<std::uint16_t>(indices, skipRestart) : HighestDrawIndexOf<std::uint32_t>(indices, skipRestart);
 }
 
 inline std::vector<std::uint32_t> MeshRestartTable(std::span<const std::byte> indices, std::uint32_t indexSize) {

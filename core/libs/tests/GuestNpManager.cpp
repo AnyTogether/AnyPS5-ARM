@@ -33,6 +33,7 @@ int APS5_VABI sceNpUnregisterStateCallback(void);
 int APS5_VABI sceNpRegisterStateCallbackA(void* callback, void* userdata);
 int APS5_VABI sceNpUnregisterStateCallbackA(int callbackId);
 int APS5_VABI sceNpRegisterNpReachabilityStateCallback(void* callback, void* userdata);
+void APS5_VABI sceNpRegisterGamePresenceCallback(void* callback, void* userdata);
 int APS5_VABI sceNpUnregisterNpReachabilityStateCallback(void);
 }
 
@@ -78,6 +79,10 @@ bool SignedOutOnce(const StateCall& call, void* userdata) {
         call.npId == nullptr && call.userdata == userdata;
 }
 
+void APS5_VABI AbortingGamePresenceCallback(const void*, const void*, void*) {
+    std::abort();
+}
+
 void APS5_VABI AbortingReachabilityCallback(int, std::uint32_t, void*) {
     std::fprintf(stderr, "NpManager: the reachability callback was called\n");
     std::abort();
@@ -113,6 +118,8 @@ void CheckStateCallbacksA() {
     Require(stateCallsA[0].calls == 0, "registering calls the state callback");
     Require(sceNpRegisterNpReachabilityStateCallback(reinterpret_cast<void*>(&AbortingReachabilityCallback), nullptr) == 0,
         "registering the reachability callback");
+    sceNpRegisterGamePresenceCallback(nullptr, nullptr);
+    sceNpRegisterGamePresenceCallback(reinterpret_cast<void*>(&AbortingGamePresenceCallback), &userdata[0]);
     Require(sceNpCheckCallback() == 0, "sceNpCheckCallback failed");
     Require(SignedOutOnce(stateCallsA[0], &userdata[0]), "sceNpCheckCallback must deliver SIGNED_OUT once");
     Require(sceNpUnregisterNpReachabilityStateCallback() == 0, "unregistering the reachability callback");
@@ -240,10 +247,6 @@ int main() {
     Require(sceNpSetContentRestriction(&restriction) == 0, "content restriction accepted");
     Require(sceNpSetContentRestriction(nullptr) == InvalidArgument, "null content restriction");
     sceNpRegisterGamePresenceCallback(&restriction, nullptr);
-    bool threw = false;
-    try { sceNpRegisterGamePresenceCallback(nullptr, nullptr); }
-    catch (const std::invalid_argument&) { threw = true; }
-    Require(threw, "null presence callback accepted");
     unsigned char buffer[0x11]{};
     try {
         sceNpUnknown_8weiQyIdI3A(0x10000, buffer);

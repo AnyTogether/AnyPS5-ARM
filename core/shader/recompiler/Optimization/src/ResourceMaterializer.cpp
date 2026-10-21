@@ -192,6 +192,13 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
         return rejectImage(invalidImageReason(descriptor), "image descriptor is invalid");
     }
     decoded.dimension = descriptorDimension(descriptor, base.dimension);
+    if (base.depthCompare) {
+        if (decoded.dimension == RdnaImageDimension::Dim1D) {
+            decoded.dimension = RdnaImageDimension::Dim2D;
+        } else if (decoded.dimension == RdnaImageDimension::Dim1DArray) {
+            decoded.dimension = RdnaImageDimension::Dim2DArray;
+        }
+    }
     decoded.cube = descriptorIsCube(descriptor);
     const auto format = rawImageFormat(descriptor);
     if (base.atomic64 && format != IrBufferFormat::Format32_32UInt && format != IrBufferFormat::Format32_32SInt && format != IrBufferFormat::Format32_32Float) {
@@ -1904,7 +1911,7 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
             plain.dimension = image.dimension == RdnaImageDimension::Dim1DArray ? RdnaImageDimension::Dim1D : image.dimension == RdnaImageDimension::Dim2DArray ? RdnaImageDimension::Dim2D : RdnaImageDimension::Dim2DMsaa;
             modes.push_back(plain);
         }
-        if (image.dimension == RdnaImageDimension::Dim2DArray) {
+        if (image.dimension == RdnaImageDimension::Dim2DArray && !image.remappedDepth1D) {
             mode.cube = true;
             modes.push_back(mode);
         }
@@ -1960,7 +1967,7 @@ std::vector<ImageResource> ResourceMaterializer::RuntimeImageModes(const ImageRe
         mode.packedFormat = IrBufferFormat::Invalid;
         mode.shaderSwizzle = ShaderImageIdentitySwizzle;
         modes.push_back(mode);
-        if (image.dimension == RdnaImageDimension::Dim2DArray) {
+        if (image.dimension == RdnaImageDimension::Dim2DArray && !image.remappedDepth1D) {
             auto plain = mode;
             plain.dimension = RdnaImageDimension::Dim2D;
             modes.push_back(plain);

@@ -3,6 +3,7 @@
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include "VulkanTestDevice.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -124,6 +125,44 @@ Outcome WindowsFollowTheirRange() {
     return Outcome::Passed;
 }
 
+Outcome ResidentMappingsImportAfterCollection() {
+#ifdef _WIN32
+    constexpr std::size_t bytes = MiB;
+    auto* data = static_cast<std::uint8_t*>(GuestArena::GuestArenaAllocate_nid_postfix(bytes, 0x200000));
+    Require(data != nullptr, "cannot allocate resident import address");
+    const auto section = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE | SEC_RESERVE, 0, bytes, nullptr);
+    Require(section != nullptr, "cannot reserve resident import backing");
+    GuestArena::GuestArenaMapDirect_nid_postfix(data, bytes, section, 0, PAGE_READWRITE);
+    std::memset(data, 0x37, bytes);
+    GuestAllocations::Mutation().Add(data, bytes, true, true, true);
+    const auto address = reinterpret_cast<std::uint64_t>(data);
+    Require(AgcDriver::GuestMemory::CollectWritesUncached(address, bytes) != 0, "resident import memory is not watched");
+    {
+        auto device = OpenVulkanTestDevice();
+        Require(device != nullptr, "resident import test lost its Vulkan device");
+        const auto context = Probe(*device);
+        for (unsigned int pass = 0; pass < 2; ++pass) {
+            Require(AgcDriver::GuestMemory::CollectWritesUncached(address, bytes) != 0, "resident import collection failed");
+            Require(Fill(*device, address), "resident memory could not be filled after collecting its writes");
+            std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+            Require(Graphics::HostImportCovers(context, address, ProbeBytes), "resident import did not cover its data");
+            Graphics::ClearHostImports(device->Device());
+        }
+        Require(Fill(*device, address), "resident memory could not be filled after collecting its writes");
+        std::uint32_t first = 0;
+        std::memcpy(&first, data, sizeof(first));
+        Require(first == 0x11111111u && data[ProbeBytes] == 0x37 && data[bytes - 1] == 0x37, "resident import lost the GPU fill or neighboring bytes");
+        Graphics::ClearHostImports(device->Device());
+    }
+    GuestAllocations::Mutation().Remove(data);
+    GuestArena::GuestArenaReset_nid_postfix(data, bytes);
+    GuestArena::GuestArenaRelease_nid_postfix(data, bytes);
+    GuestArena::GuestArenaForgetSection_nid_postfix(section);
+    CloseHandle(section);
+#endif
+    return Outcome::Passed;
+}
+
 }
 
 int main() {
@@ -136,6 +175,7 @@ int main() {
         }
         const auto windows = WindowsFollowTheirRange();
         Require(windows == Outcome::Passed, "host import windows: the device stopped importing guest memory between two scenarios");
+        Require(ResidentMappingsImportAfterCollection() == Outcome::Passed, "resident import test failed");
         std::puts("host import windows tests passed");
         return 0;
     } catch (const std::exception& error) {

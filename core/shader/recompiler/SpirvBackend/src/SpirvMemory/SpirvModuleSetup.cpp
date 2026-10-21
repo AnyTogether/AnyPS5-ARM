@@ -345,9 +345,12 @@ void DefineModule(SpirvEmitterState& state) {
     state.module.EmitCapability(spv::CapabilitySignedZeroInfNanPreserve);
     state.module.EmitExtension("SPV_KHR_float_controls");
     state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeSignedZeroInfNanPreserve, 32u);
-    if (state.float32FlushToZero) {
+    if (state.float32FlushToZero && std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDenormFlushToZero)) != state.supportedCapabilities.end()) {
         state.module.EmitCapability(spv::CapabilityDenormFlushToZero);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDenormFlushToZero, 32u);
+    } else if (state.float32DenormPreserve && !state.float32FlushToZero) {
+        state.module.EmitCapability(spv::CapabilityDenormPreserve);
+        state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeDenormPreserve, 32u);
     }
     const bool deviceFloat64 = std::find(state.supportedCapabilities.begin(), state.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityFloat64)) != state.supportedCapabilities.end();
     state.integerInterpolation = state.requirements.float64Interpolation && !deviceFloat64;

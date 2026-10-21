@@ -37,7 +37,9 @@ int APS5_VABI sceNetCtlGetInfo(int, NetCtlInfo*);
 int APS5_VABI sceNetCtlGetNatInfo(NetCtlNatInfo*);
 int APS5_VABI sceNetCtlGetState(int*);
 int APS5_VABI sceNetCtlGetStateV6(int*);
+int APS5_VABI sceNetCtlGetInfoV6(int, void*);
 int APS5_VABI sceNetCtlGetResult(int, int*);
+int APS5_VABI sceNetCtlGetResultV6(int, int*);
 #ifdef __APPLE__
 std::size_t NetCtlDefaultRoutes_nid_no_patch(const char*, std::size_t, NetCtlDefaultRoute*, std::size_t);
 #endif
@@ -270,10 +272,27 @@ int main() {
     Require(sceNetCtlGetResult(0, nullptr) == kErrInvalidAddr);
     int errorCode = -1;
     Require(sceNetCtlGetResult(0, &errorCode) == 0 && errorCode == 0);
+    Require(sceNetCtlGetResultV6(kEventIpObtained, nullptr) == kErrInvalidAddr);
+    for (const int eventType : {kEventDisconnected, 2, kEventIpObtained}) {
+        int errorCodeV6 = -1;
+        Require(sceNetCtlGetResultV6(eventType, &errorCodeV6) == 0 && errorCodeV6 == 0);
+    }
+    for (const int eventType : {0, 4, -1}) {
+        int errorCodeV6 = -1;
+        bool threw = false;
+        try { sceNetCtlGetResultV6(eventType, &errorCodeV6); } catch (const std::runtime_error&) { threw = true; }
+        Require(threw && errorCodeV6 == -1);
+    }
     NetCtlInfo info{};
     Require(sceNetCtlGetInfo(0, &info) == kErrInvalidCode);
     Require(sceNetCtlGetInfo(22, &info) == kErrInvalidCode);
     Require(sceNetCtlGetInfo(14, nullptr) == kErrInvalidAddr);
+
+    std::uint8_t infoV6[256] = {};
+    Require(sceNetCtlGetInfoV6(0, infoV6) == kErrInvalidCode);
+    Require(sceNetCtlGetInfoV6(6, infoV6) == kErrInvalidCode);
+    Require(sceNetCtlGetInfoV6(1, nullptr) == kErrInvalidAddr);
+    if (stateV6 != kStateIpObtained) Require(sceNetCtlGetInfoV6(1, infoV6) == kErrNotConnected);
 
     const int result = sceNetCtlGetInfo(14, &info);
     if (result == kErrNotConnected) {

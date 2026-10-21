@@ -368,7 +368,9 @@ int OpenHostWatch(int descriptor, std::uint32_t notes, HostWatch& host) {
         throw std::runtime_error("EVFILT_VNODE: reading the watched file failed, error=" + std::to_string(error));
     }
     try {
-        host.parent = WatchParent(host.last.path);
+        if (!IsDeleted(host.last)) {
+            host.parent = WatchParent(host.last.path);
+        }
         if (host.directory) {
             host.entries = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_FILE_NAME, "entries");
             host.subdirectories = WatchContents(host.last.path, FILE_NOTIFY_CHANGE_DIR_NAME, "subdirectories");

@@ -233,10 +233,30 @@ float FreeBsdAcosf(float x) {
 #endif
 
 template<typename T>
+bool NanWithoutException(T value) {
+    if constexpr (sizeof(T) == sizeof(std::uint32_t)) {
+        std::uint32_t bits;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return (bits & UINT32_C(0x7fffffff)) > UINT32_C(0x7f800000);
+    } else if constexpr (sizeof(T) == sizeof(std::uint64_t)) {
+        std::uint64_t bits;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return (bits & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x7ff0000000000000);
+    } else {
+        static_assert(std::numeric_limits<T>::digits == 64);
+        std::uint64_t significand;
+        std::uint16_t signAndExponent;
+        std::memcpy(&significand, &value, sizeof(significand));
+        std::memcpy(&signAndExponent, reinterpret_cast<const unsigned char*>(&value) + sizeof(significand), sizeof(signAndExponent));
+        return (signAndExponent & 0x7fff) == 0x7fff && (significand & UINT64_C(0x7fffffffffffffff)) != 0;
+    }
+}
+
+template<typename T>
 T GuestFmin(T x, T y) {
-    if (std::isnan(x))
+    if (NanWithoutException(x))
         return y;
-    if (std::isnan(y))
+    if (NanWithoutException(y))
         return x;
     if (std::signbit(x) != std::signbit(y))
         return std::signbit(x) ? x : y;
@@ -245,9 +265,9 @@ T GuestFmin(T x, T y) {
 
 template<typename T>
 T GuestFmax(T x, T y) {
-    if (std::isnan(x))
+    if (NanWithoutException(x))
         return y;
-    if (std::isnan(y))
+    if (NanWithoutException(y))
         return x;
     if (std::signbit(x) != std::signbit(y))
         return std::signbit(x) ? y : x;
@@ -257,6 +277,38 @@ T GuestFmax(T x, T y) {
 float GuestBesselSecondKindZero() {
     std::feraiseexcept(FE_DIVBYZERO);
     return -std::numeric_limits<float>::infinity();
+}
+
+float ScaledHyperbolic(float x, float y, bool sine) {
+    const auto xBits = std::bit_cast<std::uint32_t>(x);
+    const auto xMagnitude = xBits & 0x7fffffffu;
+    const auto yMagnitude = std::bit_cast<std::uint32_t>(y) & 0x7fffffffu;
+    constexpr std::uint32_t infinity = 0x7f800000u;
+    if (xMagnitude > infinity) return x;
+    if (yMagnitude > infinity) return y;
+    if ((xMagnitude == infinity && yMagnitude == 0) || (sine && xMagnitude == 0 && yMagnitude == infinity)) {
+        errno = EDOM;
+        std::feraiseexcept(FE_INVALID);
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+    if (xMagnitude == infinity) return sine ? x * y : std::copysign(std::numeric_limits<float>::infinity(), y);
+    if (xMagnitude == 0 || yMagnitude == 0 || yMagnitude == infinity) return sine ? x * y : y;
+    constexpr double limit = 2.0 * std::numeric_limits<float>::max_exponent;
+    const float magnitude = std::bit_cast<float>(xMagnitude);
+    const double argument = magnitude < limit ? static_cast<double>(magnitude) : limit;
+    const double value = static_cast<double>(y) * (sine ? std::sinh(argument) : std::cosh(argument));
+    const bool exponential = magnitude >= (sine ? 7.7f : 8.675f);
+    float result;
+    if (exponential && std::fabs(value) >= 0x1p128) {
+        result = std::copysign(std::numeric_limits<float>::infinity(), y);
+    } else {
+        result = static_cast<float>(value);
+    }
+    if (exponential && std::isinf(result)) {
+        errno = ERANGE;
+        std::feraiseexcept(FE_OVERFLOW | FE_INEXACT);
+    }
+    return sine && (xBits & 0x80000000u) != 0 ? -result : result;
 }
 
 }
@@ -336,6 +388,7 @@ double APS5_VABI scalbn_nid_postfix(double x, int exponent) { return std::scalbn
 float APS5_VABI scalbnf_nid_postfix(float x, int exponent) { return std::scalbn(x, exponent); }
 long double APS5_VABI scalbnl_nid_postfix(long double x, int exponent) { return std::scalbn(x, exponent); }
 float APS5_VABI significandf_nid_postfix(float x) { return x == 0.0f || !std::isfinite(x) ? x : std::scalbn(x, -std::ilogb(x)); }
+double APS5_VABI significand_nid_postfix(double x) { return x == 0.0 || !std::isfinite(x) ? x : std::scalbn(x, -std::ilogb(x)); }
 double APS5_VABI frexp_nid_postfix(double x, int* exponent) { return std::frexp(x, exponent); }
 float APS5_VABI frexpf_nid_postfix(float x, int* exponent) { return std::frexp(x, exponent); }
 // Guest long is 64-bit, including on Windows where native long is 32-bit.
@@ -635,8 +688,8 @@ int APS5_VABI ilogbf_nid_postfix(float x) { return ilogb_nid_postfix(static_cast
 double APS5_VABI remainder_nid_postfix(double x, double y) { return std::remainder(x, y); }
 double APS5_VABI remquo_nid_postfix(double x, double y, int* quo) { return std::remquo(x, y, quo); }
 float APS5_VABI remquof_nid_postfix(float x, float y, int* quo) { return std::remquo(x, y, quo); }
-float APS5_VABI _FSinh_nid_postfix(float x, float y) { return y * std::sinh(x); }
-float APS5_VABI _FCosh_nid_postfix(float x, float y) { return y * std::cosh(x); }
+float APS5_VABI _FSinh_nid_postfix(float x, float y) { return ScaledHyperbolic(x, y, true); }
+float APS5_VABI _FCosh_nid_postfix(float x, float y) { return ScaledHyperbolic(x, y, false); }
 
 struct alignas(16) LibcFloatConstant { std::uint32_t bits[4]; };
 LibcFloatConstant _FInf_nid_postfix {{0x7f800000u, 0, 0, 0}};
@@ -692,6 +745,26 @@ int APS5_VABI __isfinitel_nid_postfix(long double x) {
     std::memcpy(&exponent, reinterpret_cast<const std::uint8_t*>(&x) + 8, sizeof(exponent));
     return (exponent & 0x7fffu) != 0x7fffu;
 }
+
+struct DinkumwareFloatCharacteristics {
+    int digits;
+    int mantissaDigits;
+    int maxExponent10;
+    int maxExponent;
+    int minExponent10;
+    int minExponent;
+    alignas(16) std::uint16_t epsilon[8];
+    alignas(16) std::uint16_t max[8];
+    alignas(16) std::uint16_t min[8];
+};
+static_assert(sizeof(DinkumwareFloatCharacteristics) == 80 && offsetof(DinkumwareFloatCharacteristics, epsilon) == 32);
+
+DinkumwareFloatCharacteristics _Flt_nid_postfix {6, 24, 38, 128, -37, -125,
+    {0, 0x3400}, {0xffff, 0x7f7f}, {0, 0x0080}};
+DinkumwareFloatCharacteristics _Dbl_nid_postfix {15, 53, 308, 1024, -307, -1021,
+    {0, 0, 0, 0x3cb0}, {0xffff, 0xffff, 0xffff, 0x7fef}, {0, 0, 0, 0x0010}};
+DinkumwareFloatCharacteristics _Ldbl_nid_postfix {18, 64, 4932, 16384, -4931, -16381,
+    {0, 0, 0, 0x8000, 0x3fc0}, {0xffff, 0xffff, 0xffff, 0xffff, 0x7ffe}, {0, 0, 0, 0x8000, 0x0001}};
 
 static std::mutex g_randLock;
 static std::uint32_t g_randState = 1;
@@ -759,4 +832,14 @@ union SonyDconst {
 
 static_assert(std::endian::native == std::endian::little);
 SonyDconst _Inf_nid_postfix {{0, 0, 0, 0x7ff0, 0, 0, 0, 0}};
+SonyDconst _Denorm_nid_postfix {{1, 0, 0, 0, 0, 0, 0, 0}};
+SonyDconst _Hugeval_nid_postfix {{0, 0, 0, 0x7ff0, 0, 0, 0, 0}};
+SonyDconst _Nan_nid_postfix {{0, 0, 0, 0x7ff8, 0, 0, 0, 0}};
+SonyDconst _Snan_nid_postfix {{1, 0, 0, 0x7ff0, 0, 0, 0, 0}};
+LibcFloatConstant _FDenorm_nid_postfix {{0x00000001u, 0, 0, 0}};
+LibcFloatConstant _FSnan_nid_postfix {{0x7f800001u, 0, 0, 0}};
+SonyDconst _LDenorm_nid_postfix {{1, 0, 0, 0, 0, 0, 0, 0}};
+SonyDconst _LInf_nid_postfix {{0, 0, 0, 0x8000, 0x7fff, 0, 0, 0}};
+SonyDconst _LNan_nid_postfix {{0, 0, 0, 0xc000, 0x7fff, 0, 0, 0}};
+SonyDconst _LSnan_nid_postfix {{1, 0, 0, 0x8000, 0x7fff, 0, 0, 0}};
 }

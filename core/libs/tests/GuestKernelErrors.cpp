@@ -34,6 +34,7 @@ int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex);
 int APS5_VABI scePthreadMutexTrylock(PthreadMutex* mutex);
 int APS5_VABI sceKernelCreateEventFlag(KernelEventFlag* ef, const char* name, std::uint32_t attr, std::uint64_t init_pattern, const void* param);
 int APS5_VABI sceKernelDeleteEventFlag(KernelEventFlag ef);
+int APS5_VABI sceKernelOpenEventFlag(KernelEventFlag* ef, const char* name);
 int APS5_VABI sceKernelSetEventFlag(KernelEventFlag ef, std::uint64_t bit_pattern);
 int APS5_VABI sceKernelClearEventFlag(KernelEventFlag ef, std::uint64_t bit_pattern);
 int APS5_VABI sceKernelCancelEventFlag(KernelEventFlag ef, std::uint64_t set_pattern, int* num_wait_threads);
@@ -203,6 +204,19 @@ int main() {
     Require(sceKernelPollEventFlag(nullptr, 1, EVF_WAITMODE_OR, nullptr) == SCE_KERNEL_ERROR_ESRCH);
     Require(sceKernelWaitEventFlag(nullptr, 1, EVF_WAITMODE_OR, nullptr, nullptr) == SCE_KERNEL_ERROR_ESRCH);
     Require(sceKernelCancelEventFlag(nullptr, 0, nullptr) == SCE_KERNEL_ERROR_ESRCH);
+
+    KernelEventFlag opened = nullptr;
+    Require(sceKernelOpenEventFlag(nullptr, "test") == SCE_KERNEL_ERROR_EINVAL);
+    Require(sceKernelOpenEventFlag(&opened, nullptr) == SCE_KERNEL_ERROR_EINVAL);
+    Require(sceKernelOpenEventFlag(&opened, "SceShellCoreUtilAppFocus") == SCE_KERNEL_ERROR_ENOENT && opened == nullptr);
+    Require(sceKernelCreateEventFlag(&ef, "test_open", EVF_ATTR_MULTI, 0x05, nullptr) == SCE_OK);
+    Require(sceKernelOpenEventFlag(&opened, "test_open") == SCE_OK && opened == ef);
+    Require(sceKernelSetEventFlag(opened, 0x08) == SCE_OK);
+    std::uint64_t openedPattern = 0;
+    Require(sceKernelPollEventFlag(ef, 0x08, EVF_WAITMODE_OR, &openedPattern) == SCE_OK && openedPattern == 0x0d);
+    Require(sceKernelDeleteEventFlag(ef) == SCE_OK);
+    opened = nullptr;
+    Require(sceKernelOpenEventFlag(&opened, "test_open") == SCE_KERNEL_ERROR_ENOENT && opened == nullptr);
 
     Require(sceKernelCreateEventFlag(&ef, "flag", EVF_ATTR_MULTI, 0x15, nullptr) == SCE_OK);
     std::uint64_t pattern = 0;

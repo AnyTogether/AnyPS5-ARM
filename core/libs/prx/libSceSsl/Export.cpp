@@ -356,7 +356,10 @@ struct Session {
         const auto chunk = static_cast<int>(std::min<std::size_t>(length, INT_MAX));
         for (;;) {
 #ifdef _WIN32
-            const auto sent = ::send(static_cast<SOCKET>(session.socket), reinterpret_cast<const char*>(buffer), chunk, 0);
+            auto* owner = static_cast<KernelSocketPoll::NativeOwner*>(session.socketOwner.get());
+            const auto sent = owner && owner->transfer
+                ? owner->transfer(owner, true, const_cast<unsigned char*>(buffer), chunk)
+                : ::send(static_cast<SOCKET>(session.socket), reinterpret_cast<const char*>(buffer), chunk, 0);
 #else
             const auto sent = ::send(static_cast<int>(session.socket), buffer, static_cast<std::size_t>(chunk), MSG_NOSIGNAL);
 #endif
@@ -375,7 +378,10 @@ struct Session {
         const auto chunk = static_cast<int>(std::min<std::size_t>(length, INT_MAX));
         for (;;) {
 #ifdef _WIN32
-            const auto received = ::recv(static_cast<SOCKET>(session.socket), reinterpret_cast<char*>(buffer), chunk, 0);
+            auto* owner = static_cast<KernelSocketPoll::NativeOwner*>(session.socketOwner.get());
+            const auto received = owner && owner->transfer
+                ? owner->transfer(owner, false, buffer, chunk)
+                : ::recv(static_cast<SOCKET>(session.socket), reinterpret_cast<char*>(buffer), chunk, 0);
 #else
             const auto received = ::recv(static_cast<int>(session.socket), buffer, static_cast<std::size_t>(chunk), 0);
 #endif

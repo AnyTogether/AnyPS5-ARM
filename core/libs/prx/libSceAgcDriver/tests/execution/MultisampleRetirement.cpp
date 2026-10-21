@@ -407,6 +407,51 @@ public:
         AwaitImages(0, "sampled MSAA targets were not fully released");
     }
 
+    void OrderRemap() {
+        const auto locations = context.sampleLocationSampleCounts;
+        const auto grid = context.sampleLocationGridSampleCounts;
+        context.sampleLocationSampleCounts |= VK_SAMPLE_COUNT_4_BIT;
+        context.sampleLocationGridSampleCounts &= ~static_cast<VkSampleCountFlags>(VK_SAMPLE_COUNT_4_BIT);
+        GuestBlock block;
+        const auto target = Target(block);
+        if (!MayReorderSamples(context, target.samples) || SampleOrderStorageFormat(context, target.format, target.elementBytes, target.samples) == VK_FORMAT_UNDEFINED) {
+            context.sampleLocationSampleCounts = locations;
+            context.sampleLocationGridSampleCounts = grid;
+            std::puts("the device has no multisampled storage view for the sample-order target; its retirement case is skipped");
+            return;
+        }
+        SampleOrderTarget order;
+        VkImage oldImage = VK_NULL_HANDLE;
+        Image old{};
+        {
+            std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+            order = MultisampleTargetOrderTarget(context, target);
+            old = ImageFor(MultisampleTargetView(context, target), &oldImage);
+            Require(order.image == oldImage, "the sample-order target does not name its target's image");
+        }
+        Sync();
+        block.Unmap();
+        block.Map();
+        {
+            std::lock_guard lock(AgcDriver::GuestMemory::GpuMutex());
+            const auto replacement = ImageFor(MultisampleTargetView(context, target));
+            CheckPendingImages();
+            Require(replacement.generation != old.generation, "a remapped reordered MSAA target reused its retired owner");
+            Require(Alive(oldImage, old), "a held sample-order target lost its image when its MSAA target retired");
+            context.recorder->Keep(order.keep);
+            order = {};
+            Require(Alive(oldImage, old), "recorded sample-order work lost its image when its MSAA target retired");
+        }
+        Sync();
+        AwaitImages(1, "a retired sample-order target survives its last batch");
+        Require(!Alive(oldImage, old), "a retired reordered MSAA parent survives its last batch");
+        block.Unmap();
+        Clear();
+        context.sampleLocationSampleCounts = locations;
+        context.sampleLocationGridSampleCounts = grid;
+        AwaitImages(0, "reordered MSAA targets were not fully released");
+    }
+
     void StorageRemap() {
         GuestBlock block;
         const auto target = Target(block);
@@ -487,7 +532,8 @@ int main() {
         run.RecordedRemap();
         run.SampledRemap();
         run.StorageRemap();
-        std::puts("retired MSAA allocations stay bounded, recorded clears and storage promotions retain their images, and sampled aliases release their parents after the last batch");
+        run.OrderRemap();
+        std::puts("retired MSAA allocations stay bounded, recorded clears and storage promotions retain their images, sampled aliases release their parents after the last batch, and sample-order targets keep their retired images until their batch completes");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

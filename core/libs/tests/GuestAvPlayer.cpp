@@ -22,6 +22,7 @@
 #include <vector>
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libSceAvPlayer/include/AvPlayer.hpp"
 
 extern "C" {
 AvPlayerInternal* APS5_VABI sceAvPlayerInit(AvPlayerInitData*);
@@ -1581,6 +1582,29 @@ void TestCloseFromEventCallback(std::int32_t event) {
     Check(allocations.blocks.empty(), "callback close leaked media allocations");
 }
 
+void TestVideoSyncTolerance() {
+    Events events;
+    AvPlayerInitData init = InitData(&events);
+    auto* player = sceAvPlayerInit(&init);
+    Check(player != nullptr, "sync tolerance init failed");
+    Check(sceAvPlayerAddSource(player, "/app0/avplayer.mp4") == 0, "sync tolerance source failed");
+    Check(WaitFor([&] { return events.Seen(EventReady); }), "sync tolerance ready missing");
+    Check(sceAvPlayerEnableStream(player, VideoStream) == 0, "sync tolerance video failed");
+    Check(sceAvPlayerStart(player) == 0, "sync tolerance start failed");
+    Check(WaitFor([&] { return events.Seen(EventPlay); }), "sync tolerance play missing");
+    AvPlayerFrameInfoEx frame{};
+    Check(WaitFor([&] { return sceAvPlayerGetVideoDataEx(player, &frame) != 0; }), "sync tolerance first frame missing");
+    Check(FrameIndex(frame.timestamp) == 0, "first frame not index 0");
+    AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, 5.0);
+    Check(!sceAvPlayerGetVideoDataEx(player, &frame), "frame beyond sync tolerance delivered prematurely");
+    AvPlayer::SetAvPlayerClockForTest_nid_no_patch(player, 10.0);
+    Check(sceAvPlayerGetVideoDataEx(player, &frame), "frame within sync tolerance was not delivered");
+    Check(FrameIndex(frame.timestamp) == 1, "unexpected second frame index");
+    Check(sceAvPlayerClose(player) == 0, "sync tolerance close failed");
+    std::lock_guard lock(allocations.mutex);
+    Check(allocations.blocks.empty(), "sync tolerance allocations leaked");
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -1619,6 +1643,7 @@ int main(int argc, char** argv) {
         TestNoSyncVideoCanLeadAudioClock();
         TestLoopWarningWaitsForPlayback();
         TestEofStopLatency();
+        TestVideoSyncTolerance();
         std::puts("AvPlayer tests passed");
         return 0;
     } catch (const std::exception& error) {

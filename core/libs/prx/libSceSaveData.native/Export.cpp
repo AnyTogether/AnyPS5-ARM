@@ -995,47 +995,38 @@ int APS5_VABI sceSaveDataPrepareForTransferring() {
 }
 
 int APS5_VABI sceSaveDataCheckIpmiIfSize() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebug() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugCheckBackupData() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugCleanMount() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugCompiledSdkVersion() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugCreateSaveDataRoot() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugProspero() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugRemoveSaveDataRoot() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceSaveDataDebugTarget() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

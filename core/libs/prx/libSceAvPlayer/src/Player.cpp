@@ -386,4 +386,9 @@ std::uint64_t Player::CurrentTime() {
     return source ? source->CurrentTime() : 0;
 }
 
+void Player::SetClockTimeForTest(double milliseconds) {
+    std::lock_guard lock(mutex);
+    if (source) source->SetClockTimeForTest(milliseconds);
+}
+
 }

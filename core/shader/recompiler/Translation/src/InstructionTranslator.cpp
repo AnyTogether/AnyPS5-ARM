@@ -455,6 +455,9 @@ void emitEntryPrologue(IrProgram& program, IrBlock& entryBlock, const TranslateO
 
 IrProgram InstructionTranslator::Translate(const RdnaProgram& decoded, const ControlFlowGraph& cfg, const TranslateOptions& options) const {
     validateTranslateOptions(options);
+    if (cfg.linkEscapeWaveSize == options.waveSize) {
+        throw std::invalid_argument(cfg.linkEscapeReason);
+    }
     if (cfg.blocks.empty()) {
         throw std::runtime_error("cannot translate an empty control flow graph");
     }

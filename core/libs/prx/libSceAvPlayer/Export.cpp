@@ -192,4 +192,12 @@ int APS5_VABI sceAvPlayerStreamCount(AvPlayerInternal* h) {
 }
 
 }
+
+namespace AvPlayer {
+
+void SetAvPlayerClockForTest_nid_no_patch(AvPlayerInternal* h, double milliseconds) {
+    if (h) ToPlayer(h)->SetClockTimeForTest(milliseconds);
+}
+
+}
 #pragma GCC visibility pop

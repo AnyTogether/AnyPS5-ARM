@@ -63,6 +63,17 @@ def main():
                 assert result.returncode == 2 and message in result.stderr, (options, result.stderr)
                 assert not output.exists(), options
 
+            for linked, options in (("eboot.exe", ["--executable", "picker/eboot.exe"]),
+                                    ("picker.exe", ["--executable", "picker/picker.bin", "--executable", "picker/picker.exe"])):
+                case = work / f"{windows}-hardlink-{linked}"
+                (case / "picker").mkdir(parents=True)
+                target = case / ("eboot.bin" if linked == "eboot.exe" else "picker/picker.bin")
+                target.write_bytes(main_fixture())
+                os.link(target, case / "picker" / linked)
+                result, output = convert(case, windows, options)
+                assert result.returncode == 2 and "converted twice" in result.stderr, (linked, result.stdout, result.stderr)
+                assert not output.exists(), linked
+
             for index, (directory, executable) in enumerate((("Picker", "picker/picker.bin"), ("picker", "PICKER/picker.bin"), ("linked", "picker/picker.bin"))):
                 case = work / f"{windows}-identity-{index}"
                 case.mkdir()

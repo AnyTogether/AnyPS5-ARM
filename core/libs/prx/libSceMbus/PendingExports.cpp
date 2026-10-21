@@ -8,8 +8,7 @@ int APS5_VABI sceMbusAcquireControl() {
 }
 
 int APS5_VABI sceMbusAcquireControlList() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return static_cast<int>(0x809B00FF);
 }
 
 int APS5_VABI sceMbusAcquireControlWithState() {
@@ -558,7 +557,6 @@ int APS5_VABI sceMbusStopAudioOutSharePlay() {
 }
 
 int APS5_VABI sceMbusTerm() {
-    NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 

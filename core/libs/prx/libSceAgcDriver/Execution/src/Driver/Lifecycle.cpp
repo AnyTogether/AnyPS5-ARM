@@ -208,6 +208,10 @@ Driver::Driver() {
     InstallAsyncLog_nid_no_patch();
     static const bool driverMemory = (MapDriverMemory(), true);
     static_cast<void>(driverMemory);
+    LibcSetExitDrain_nid_no_patch([] {
+        const auto current = Driver::Get().device.Load();
+        if (current) current->SavePipelineCache();
+    });
     static_cast<void>(GuestMemory::TrackerGeneration());
     ShaderMemory::SetWaitedMsProvider(&Graphics::Recorder::ThreadWaitedMs);
     try {

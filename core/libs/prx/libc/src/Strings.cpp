@@ -185,7 +185,9 @@ TFloat ParseFloat(const char* text, char** end, TFloat (*parse)(const char*, cha
         return value;
     }
     char* parsedEnd = nullptr;
+    const int saved = errno;
     const TFloat value = parse(text, &parsedEnd);
+    if (errno == ERANGE && value != 0 && (value < 0 ? -value : value) < std::numeric_limits<TFloat>::min()) errno = saved;
     if (end != nullptr) *end = parsedEnd;
     return parsedEnd == text ? TFloat{0} : value;
 }
@@ -233,6 +235,32 @@ void* APS5_VABI memrchr_nid_postfix(const void* s, int c, size_t n) {
     return nullptr;
 }
 
+void* APS5_VABI memccpy_nid_postfix(void* dest, const void* src, int c, size_t n) {
+    auto* d = static_cast<unsigned char*>(dest);
+    const auto* s = static_cast<const unsigned char*>(src);
+    const auto target = static_cast<unsigned char>(c);
+    for (size_t i = 0; i < n; ++i) {
+        d[i] = s[i];
+        if (s[i] == target) return d + i + 1;
+    }
+    return nullptr;
+}
+
+void* APS5_VABI memmem_nid_postfix(const void* haystack, size_t haystacklen, const void* needle, size_t needlelen) {
+    if (needlelen == 0) return const_cast<void*>(haystack);
+    if (haystacklen < needlelen) return nullptr;
+    const auto* h = static_cast<const unsigned char*>(haystack);
+    const auto* n = static_cast<const unsigned char*>(needle);
+    const unsigned char first = n[0];
+    const size_t limit = haystacklen - needlelen;
+    for (size_t i = 0; i <= limit; ++i) {
+        if (h[i] == first && std::memcmp(h + i, n, needlelen) == 0) {
+            return const_cast<unsigned char*>(h + i);
+        }
+    }
+    return nullptr;
+}
+
 int APS5_VABI strcmp_nid_postfix(const char* s1, const char* s2) {
     return std::strcmp(s1, s2);
 }
@@ -259,6 +287,10 @@ char* APS5_VABI strcat_nid_postfix(char* dest, const char* src) {
 
 const char* APS5_VABI strchr_nid_postfix(const char* s, int c) {
     return std::strchr(s, c);
+}
+
+char* APS5_VABI index_nid_postfix(const char* s, int c) {
+    return const_cast<char*>(strchr_nid_postfix(s, c));
 }
 
 char* APS5_VABI strrchr_nid_postfix(const char* s, int c) {
@@ -289,6 +321,7 @@ size_t APS5_VABI strlcpy_nid_postfix(char* dest, const char* src, size_t size) {
 
 bool StopAtPrefixLetter_nid_no_patch(const char* str, char** endptr, int base) {
     if (base != 0 && base != 2 && base != 16) return false;
+    const char* const start = str;
     while (*str == ' ' || (*str >= '\t' && *str <= '\r')) ++str;
     if (*str == '+' || *str == '-') ++str;
     if (str[0] != '0' || str[1] == '\0') return false;
@@ -297,38 +330,35 @@ bool StopAtPrefixLetter_nid_no_patch(const char* str, char** endptr, int base) {
     const bool hexDigit = (next >= '0' && next <= '9') || (next >= 'a' && next <= 'f') || (next >= 'A' && next <= 'F');
     const bool bareHex = base != 2 && (str[1] == 'x' || str[1] == 'X') && !hexDigit;
     if (!binary && !bareHex) return false;
-    if (endptr) *endptr = const_cast<char*>(str + 1);
+    if (endptr) *endptr = const_cast<char*>(binary ? str + 1 : start);
+    return true;
+}
+
+bool RejectIntegerBase_nid_no_patch(const char* str, char** endptr, int base, bool setError) {
+    if (base == 0 || (base >= 2 && base <= 36)) return false;
+    if (endptr) *endptr = const_cast<char*>(str);
+    if (setError) errno = EINVAL;
     return true;
 }
 
 std::int64_t APS5_VABI strtol_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    if (RejectIntegerBase_nid_no_patch(str, endptr, base, true) || StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ParseInteger<long long>(str, endptr, base, std::strtoll);
 }
 
 std::uint64_t APS5_VABI strtoul_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    if (RejectIntegerBase_nid_no_patch(str, endptr, base, true) || StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ParseInteger<unsigned long long>(str, endptr, base, std::strtoull);
 }
 
 long long APS5_VABI strtoll_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    if (RejectIntegerBase_nid_no_patch(str, endptr, base, true) || StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ParseInteger<long long>(str, endptr, base, std::strtoll);
 }
 
 unsigned long long APS5_VABI strtoull_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    if (RejectIntegerBase_nid_no_patch(str, endptr, base, true) || StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ParseInteger<unsigned long long>(str, endptr, base, std::strtoull);
-}
-
-std::intmax_t APS5_VABI strtoimax_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
-    return ParseInteger<std::intmax_t>(str, endptr, base, std::strtoimax);
-}
-
-std::uintmax_t APS5_VABI strtoumax_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
-    return ParseInteger<std::uintmax_t>(str, endptr, base, std::strtoumax);
 }
 
 unsigned long long APS5_VABI strtouq_nid_postfix(const char* str, char** endptr, int base) {
@@ -349,15 +379,15 @@ long double APS5_VABI strtold_nid_postfix(const char* str, char** endptr) {
 }
 
 int APS5_VABI atoi_nid_postfix(const char* str) {
-    return static_cast<int>(strtol_nid_postfix(str, nullptr, 10));
+    return static_cast<int>(strtoull_nid_postfix(str, nullptr, 10));
 }
 
 std::int64_t APS5_VABI atol_nid_postfix(const char* str) {
-    return ParseInteger<long long>(str, nullptr, 10, std::strtoll);
+    return static_cast<std::int64_t>(strtoull_nid_postfix(str, nullptr, 10));
 }
 
 long long APS5_VABI atoll_nid_postfix(const char* str) {
-    return ParseInteger<long long>(str, nullptr, 10, std::strtoll);
+    return static_cast<long long>(strtoull_nid_postfix(str, nullptr, 10));
 }
 
 std::div_t APS5_VABI div_nid_postfix(int numerator, int denominator) {
@@ -531,7 +561,7 @@ char* APS5_VABI strnstr_nid_postfix(const char* haystack, const char* needle, si
 }
 
 unsigned long long APS5_VABI _Stoull_nid_postfix(const char* str, char** endptr, int base) {
-    if (StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
+    if (RejectIntegerBase_nid_no_patch(str, endptr, base, false) || StopAtPrefixLetter_nid_no_patch(str, endptr, base)) return 0;
     return ParseInteger<unsigned long long>(str, endptr, base, std::strtoull);
 }
 
@@ -661,20 +691,40 @@ long double APS5_VABI wcstold_nid_postfix(const char16_t* str, char16_t** endptr
     return ParseAsciiPrefix(str, endptr, [](const char* text, char** end) { return ParseFloat<long double>(text, end, std::strtold); });
 }
 
-long long APS5_VABI wcstol_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
-    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0LL : ParseInteger<long long>(text, end, base, std::strtoll); });
-}
-
-long long APS5_VABI wcstoll_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
-    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0LL : ParseInteger<long long>(text, end, base, std::strtoll); });
-}
-
 unsigned long long APS5_VABI wcstoul_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
-    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0ULL : ParseInteger<unsigned long long>(text, end, base, std::strtoull); });
+    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return RejectIntegerBase_nid_no_patch(text, end, base, false) || StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0ULL : ParseInteger<unsigned long long>(text, end, base, std::strtoull); });
 }
 
 unsigned long long APS5_VABI wcstoull_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
-    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0ULL : ParseInteger<unsigned long long>(text, end, base, std::strtoull); });
+    return ParseAsciiPrefix(str, endptr, [base](const char* text, char** end) { return RejectIntegerBase_nid_no_patch(text, end, base, false) || StopAtPrefixLetter_nid_no_patch(text, end, base) ? 0ULL : ParseInteger<unsigned long long>(text, end, base, std::strtoull); });
+}
+
+long long APS5_VABI wcstoll_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
+    const char16_t* digits = str;
+    while (*digits == u' ' || (*digits >= u'\t' && *digits <= u'\r')) ++digits;
+    const bool negative = *digits == u'-';
+    if (*digits == u'+' || *digits == u'-') ++digits;
+    const int saved = errno;
+    errno = 0;
+    char16_t* stop = nullptr;
+    const unsigned long long magnitude = wcstoull_nid_postfix(digits, &stop, base);
+    const bool overflowed = errno == ERANGE;
+    errno = saved;
+    if (stop == digits) {
+        if (endptr) *endptr = const_cast<char16_t*>(str);
+        return 0;
+    }
+    if (endptr) *endptr = stop;
+    const unsigned long long limit = negative ? 0x8000000000000000ULL : 0x7fffffffffffffffULL;
+    if (overflowed || magnitude > limit) {
+        errno = ERANGE;
+        return negative ? std::numeric_limits<long long>::min() : std::numeric_limits<long long>::max();
+    }
+    return static_cast<long long>(negative ? 0 - magnitude : magnitude);
+}
+
+long long APS5_VABI wcstol_nid_postfix(const char16_t* str, char16_t** endptr, int base) {
+    return wcstoll_nid_postfix(str, endptr, base);
 }
 
 long long APS5_VABI wcstoimax_nid_postfix(const char16_t* str, char16_t** endptr, int base) {

@@ -56,13 +56,7 @@ int main() {
         threw = true;
     }
     Require(threw, "an input report without a device did not throw");
-    threw = false;
-    try {
-        sceBluetoothHidDebugGetVersion();
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw, "debug get version did not throw");
+    Require(sceBluetoothHidDebugGetVersion() == 0x1e, "debug get version did not return the firmware version");
     threw = false;
     try {
         sceBluetoothHidGetDeviceInfo();

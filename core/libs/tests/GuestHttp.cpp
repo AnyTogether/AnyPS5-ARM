@@ -204,24 +204,30 @@ int main() {
 
     constexpr const char* unescapeCases[][2] = {
         {"", ""}, {"plain+text", "plain+text"}, {"a%20b%2F~%c3%a9", "a b/~\xC3\xA9"},
-        {"%41%4a%4F%ff", "AJO\xFF"}, {"%2520", "%20"},
-        {"%", "%"}, {"%1", "%1"}, {"%1g%gg%+1%-1", "%1g%gg%+1%-1"}
+        {"%41%4a%4F%ff", "AJO\xFF"}, {"%2520", "%20"}
     };
     for (const auto& row : unescapeCases) {
         const std::size_t size = std::strlen(row[1]) + 1;
         Require(sceHttpUriUnescape(nullptr, &required, 0, row[0]) == 0 && required == size);
         std::memset(escaped, 'Z', sizeof(escaped));
-        Require(sceHttpUriUnescape(escaped, &required, size - 1, row[0]) == outOfMemory && required == size);
-        for (char c : escaped) Require(c == 'Z');
+        required = 77;
+        Require(sceHttpUriUnescape(escaped, &required, size - 1, row[0]) == outOfMemory && required == 77);
+        Require(std::string_view(escaped, size - 1) == row[1] && escaped[size - 1] == 'Z');
         Require(sceHttpUriUnescape(escaped, nullptr, size, row[0]) == 0);
         Require(Equal(escaped, row[1]) && escaped[size] == 'Z');
+    }
+    for (const char* malformed : {"%", "%1", "%1g", "%gg", "%+1", "%-1", "% 1", "abc%", "%%41", "%4%41"}) {
+        std::memset(escaped, 'Z', sizeof(escaped));
+        required = 77;
+        Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), malformed) == invalidUrl && required == 77 && escaped[0] == 'Z');
+        Require(sceHttpUriUnescape(nullptr, &required, 0, malformed) == invalidUrl && required == 77);
     }
     Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), "a%00b") == 0);
     Require(required == 4 && std::memcmp(escaped, "a\0b", 4) == 0);
     std::strcpy(escaped, "%41%2f%2520");
     Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), escaped) == 0);
     Require(Equal(escaped, "A/%20") && required == 6);
-    Require(sceHttpUriUnescape(nullptr, nullptr, 0, "valid") == 0);
+    Require(sceHttpUriUnescape(nullptr, nullptr, 0, "valid") == invalidValue);
     required = 123;
     Require(sceHttpUriUnescape(escaped, &required, sizeof(escaped), nullptr) == invalidValue);
     Require(required == 123 && Equal(escaped, "A/%20"));
@@ -473,9 +479,14 @@ int main() {
     Require(sceHttpUriSweepPath(sweptPath, "/a/b/../c", 6) == 0 && Equal(sweptPath, "/a/b/"));
     Require(sceHttpUriSweepPath(sweptPath, "/ab/c", 3) == 0 && Equal(sweptPath, "/a"));
     Require(sceHttpUriSweepPath(sweptPath, "/a/./b", 5) == 0 && Equal(sweptPath, "/a/."));
-    Require(sceHttpUriSweepPath(sweptPath, "/a/b/../c", 8) == 0 && Equal(sweptPath, "/a/b/.."));
-    char sweptByte[2] = {'x', 'x'};
-    Require(sceHttpUriSweepPath(sweptByte, "/", 1) == 0 && sweptByte[0] == '\0' && sweptByte[1] == 'x');
+    Require(sceHttpUriSweepPath(sweptPath, "/a/b/../c", 8) == 0 && Equal(sweptPath, "/a/"));
+    Require(sceHttpUriSweepPath(sweptPath, "/a/b/../c", 5) == 0 && Equal(sweptPath, "/a/b"));
+    Require(sweep("/a/b/..", "/a/b/.."));
+    Require(sweep("/a/b/./.", "/a/b/."));
+    char sweptByte[3] = {'x', 'x', 'x'};
+    Require(sceHttpUriSweepPath(sweptByte, "/a", 1) == 0 && sweptByte[0] == '/' && sweptByte[1] == '\0' && sweptByte[2] == 'x');
+    sweptByte[0] = 'x';
+    Require(sceHttpUriSweepPath(sweptByte, "", 1) == 0 && sweptByte[0] == '\0');
 
     {
         SceHttpUriElement source{};

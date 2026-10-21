@@ -61,6 +61,10 @@ class PadInputTests(unittest.TestCase):
         self.assertEqual(command[1:], [64, 300])
         self.assertEqual(self.queue(1001, "cross"), [command[0] + 1, 16384, 300])
 
+    def test_timeline_command_is_advanced_after_clock_reset(self):
+        self.path.write_text("APS5_PAD_TIMELINE 1 2000 1\n0 100 16384\n", encoding="utf-8")
+        self.assertEqual(self.queue(1000, "down"), [2001, 64, 300])
+
     def test_equal_clock_still_produces_new_pulses(self):
         first = self.queue(1000, "cross")
         second = self.queue(1000, "down")
@@ -95,7 +99,9 @@ class PadInputTests(unittest.TestCase):
                      "18446744073709551616 16384 300\n", "2000 1 300\n", "2000 16384 0\n",
                      "2000 16384 5001\n", "2000 16384 300 0 256 128 128\n",
                      "2000 16384 300 extra\n", "2_000 16384 300\n", "-2000 16384 300\n",
-                     "0 16384 300\n", " " * 128 + "2000 16384 300\n"]:
+                     "0 16384 300\n", " " * 128 + "2000 16384 300\n",
+                     "APS5_PAD_TIMELINE 2 2000 1\n", "APS5_PAD_TIMELINE 1 0 1\n", "APS5_PAD_TIMELINE 1 2000 0\n",
+                     "APS5_PAD_TIMELINE 1 2000 4097\n", "APS5_PAD_TIMELINE 1 2000\n"]:
             with self.subTest(text=text):
                 self.path.write_text(text, encoding="utf-8")
                 self.assertEqual(self.queue(1000, "down"), [1000, 64, 300])

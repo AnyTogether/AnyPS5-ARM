@@ -37,9 +37,14 @@ def main():
     cache, seed = Path(args.cache), Path(args.seed)
     if cache.resolve() == seed.resolve() or (cache.exists() and seed.exists() and cache.samefile(seed)):
         parser.error("seed output would overwrite the input cache")
-    found = {name: entry for name, entry in checks(cache).items()
+    try:
+        results = checks(cache)
+    except (OSError, UnicodeDecodeError) as error:
+        parser.error(f"{cache}: {error}")
+    found = {name: entry for name, entry in results.items()
              if (not args.include or any(fnmatch.fnmatchcase(name, pattern) for pattern in args.include))
              and not any(fnmatch.fnmatchcase(name, pattern) for pattern in args.exclude)}
+    seed.parent.mkdir(parents=True, exist_ok=True)
     seed.write_text("".join(f"set({quote(name)} {quote(value)} CACHE INTERNAL {quote(doc)})\n"
                            for name, (value, doc) in sorted(found.items())), encoding="utf-8")
     print(f"{len(found)} check results")

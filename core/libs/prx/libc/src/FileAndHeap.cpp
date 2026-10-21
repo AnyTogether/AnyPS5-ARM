@@ -323,7 +323,7 @@ FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode
                 return nullptr;
             }
         }
-        if (stream->Reopen(path, parsed->native.c_str())) {
+        if (stream->Reopen(path, parsed->native.c_str(), OpenNative)) {
 #ifdef _WIN32
             if (parsed->append && !AppendOnlyDescriptor(_fileno(stream->GetHandle()))) {
                 const int error = errno;
@@ -442,6 +442,7 @@ size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, File
         stream->SyncStatus();
         return count;
     }
+    if (!stream->SwitchToReading()) return 0;
     const auto result = std::fread(buffer, size, count, handle);
     stream->SyncStatus();
     return result;

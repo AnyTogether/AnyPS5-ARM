@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -301,6 +302,13 @@ int APS5_VABI wcsrtombs_s_nid_postfix(
     destination[written] = '\0';
     *result = written;
     return 0;
+}
+
+int APS5_VABI wcstombs_s_nid_postfix(
+    std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t* source, std::size_t limit
+) {
+    std::array<std::uint64_t, 16> state{};
+    return wcsrtombs_s_nid_postfix(result, destination, capacity, &source, limit, state.data());
 }
 
 std::size_t APS5_VABI mbsrtowcs_nid_postfix(std::uint16_t* destination, const char** source, std::size_t capacity, void*) {

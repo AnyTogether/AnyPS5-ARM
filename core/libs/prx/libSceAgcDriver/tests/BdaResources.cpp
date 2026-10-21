@@ -761,6 +761,8 @@ public:
     ImportAllocationProbe& operator=(const ImportAllocationProbe&) = delete;
 
     std::vector<ObservedHostImport> calls;
+    VkResult failure = VK_SUCCESS;
+    std::function<void()> onImport;
 
 private:
     static PFN_vkVoidFunction VKAPI_CALL Resolve(VkDevice device, const char* name) {
@@ -774,6 +776,11 @@ private:
             if (next->sType != VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT) continue;
             const auto* imported = reinterpret_cast<const VkImportMemoryHostPointerInfoEXT*>(next);
             active->calls.push_back({imported->pHostPointer, info->allocationSize});
+            if (active->onImport) {
+                auto callback = std::move(active->onImport);
+                callback();
+            }
+            if (active->failure != VK_SUCCESS) return active->failure;
         }
         const auto allocate = reinterpret_cast<PFN_vkAllocateMemory>(active->original(device, "vkAllocateMemory"));
         Require(allocate != nullptr, "import allocation probe has no original allocator");
@@ -799,6 +806,44 @@ public:
 private:
     std::array<std::byte, 64> storage{};
 };
+
+void importMappedFailureGenerationTests(const Context& context) {
+    ClearHostImports(context.device);
+    WindowedRange range(context, WindowedRange::piece, 1);
+    ImportAllocationProbe probe(range.importing);
+    probe.failure = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    GuestAllocations::Mapped mapped;
+    const auto collect = [&] {
+        mapped.clear();
+        const auto lease = GuestAllocations::GuestAllocationsAcquire_nid_postfix();
+        for (const auto& owner : lease) if (owner->address == range.First()) mapped.push_back(owner);
+        Require(mapped.size() == 1u, "the map failure fixture lost its registered range");
+    };
+    collect();
+    std::unique_ptr<UnrelatedImportProbeRange> unrelated;
+    probe.onImport = [&] { unrelated = std::make_unique<UnrelatedImportProbeRange>(); };
+    const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
+    {
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        Require(ImportMappedRanges(range.importing, mapped, generation, true), "the first failed map import was deferred");
+        Require(probe.calls.size() == 1u && unrelated != nullptr, "the map failure fixture did not mutate an unrelated range during allocation");
+        Require(GuestAllocations::GuestAllocationsGeneration_nid_postfix() != generation, "the concurrent unrelated mapping did not advance the registry");
+        Require(ImportMappedRanges(range.importing, mapped, GuestAllocations::GuestAllocationsGeneration_nid_postfix(), true), "the repeated failed map import was deferred");
+        Require(probe.calls.size() == 1u, "an unrelated mapping during a failed import discarded its owner failure memo");
+    }
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Remove(reinterpret_cast<void*>(range.First()));
+        mutation.Add(reinterpret_cast<void*>(range.First()), range.bytes, true, false, true);
+    }
+    collect();
+    {
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        Require(ImportMappedRanges(range.importing, mapped, GuestAllocations::GuestAllocationsGeneration_nid_postfix(), true), "the replacement owner map import was deferred");
+        Require(probe.calls.size() == 2u, "a replacement owner did not retry its predecessor's failed import");
+    }
+    ClearHostImports(context.device);
+}
 
 void importStaleProbeTests(const Context& context, const BdaTestAccess& access) {
     for (const auto scenario : {0u, 1u, 2u}) {
@@ -3362,6 +3407,7 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     importCoverageHintBudgetTests(context, access);
     failedImportJoinProbeBudgetTests(context, access);
     importWholeRangeOverWindowTests(context);
+    importMappedFailureGenerationTests(context);
     importStaleProbeTests(context, access);
     importRefusedWholeRangeTests(context);
     importNeighbouringEdgesTests(context);

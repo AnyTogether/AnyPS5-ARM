@@ -50,8 +50,7 @@ int APS5_VABI sceBluetoothHidSetOutputReport() {
 }
 
 int APS5_VABI sceBluetoothHidDebugGetVersion() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return 0x1e;
 }
 
 int APS5_VABI sceBluetoothHidDisconnectDevice() {

@@ -206,10 +206,10 @@ static void RunLayout(const char* self, const char* mode, std::initializer_list<
     Require(status == 0);
 }
 
-static std::string ChunkTableFile() {
+static std::string ChunkTableFile(const char* magic = "plgx", char chunks = 3) {
     std::string header(0x100, '\0');
-    header.replace(0, 4, "plgx");
-    header[0x0A] = 3;
+    header.replace(0, 4, magic);
+    header[0x0A] = chunks;
     return header;
 }
 
@@ -231,10 +231,12 @@ int main(int argc, char** argv) {
     RunLayout(argv[0], "--no-file-absent", {});
     RunLayout(argv[0], "--no-file-unknown-answer", {});
     RunLayout(argv[0], "--package-chunk-table", {{"playgo-chunk.dat", ChunkTableFile()}});
+    RunLayout(argv[0], "--package-chunk-table", {{"playgo-chunk.dat", ChunkTableFile("plgo")}});
     RunLayout(argv[0], "--scenario-with-chunk-table", {{"playgo-chunk.dat", ChunkTableFile()}, {"playgo-scenario.json", "{}"}});
     RunLayout(argv[0], "--scenario-only", {{"playgo-scenario.json", "{}"}});
     RunLayout(argv[0], "--ficm-only", {{"playgo-ficm.dat", "x"}});
     RunLayout(argv[0], "--hash-table-only", {{"playgo-hash-table.dat", "x"}});
     RunLayout(argv[0], "--invalid-chunk-table", {{"playgo-chunk.dat", "not a chunk table"}});
+    RunLayout(argv[0], "--invalid-chunk-table", {{"playgo-chunk.dat", ChunkTableFile("plgo", 0)}});
     return 0;
 }

@@ -19,4 +19,5 @@
 
 ### Functional
 
+- [sceAvPlayerGetVideoData / sceAvPlayerGetVideoDataEx](../../../core/libs/prx/libSceAvPlayer/src/Source.cpp) (libSceAvPlayer) - delivers a video frame up to 0.75 × frame duration ahead of its timestamp in default sync mode to accommodate presentation loops that poll slightly before the refresh boundary; the console's exact presentation tolerance is unverified.
 - [sceAvPlayerGetVideoData](../../../core/libs/prx/libSceAvPlayer/src/Source.cpp) (libSceAvPlayer) in sync mode `SCE_AVPLAYER_AV_SYNC_MODE_NONE` skips queued frames that the audio clock has already passed while the title pulls audio, so a title that requests video slower than the film's frame rate keeps the picture with the sound. Whether the console hands out every frame in this mode is unknown. PPSA12544 requests 7-19 frames per second for a 30 fps cinematic

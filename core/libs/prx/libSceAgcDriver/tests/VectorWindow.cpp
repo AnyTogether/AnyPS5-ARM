@@ -3,6 +3,7 @@
 #include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "Translation/InstructionTranslator.hpp"
 #include <spirv/unified1/spirv.hpp>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +22,7 @@ using namespace ShaderRecompiler;
 constexpr std::uint32_t MoveM0Two = 0xbefc0382u;
 constexpr std::uint32_t MoveM0GroupX = 0xbefc0304u;
 constexpr std::uint32_t MoveV4One = 0x7e0802f2u;
+constexpr std::uint32_t MoveV4Two = 0x7e0802f4u;
 constexpr std::uint32_t MoveV5Two = 0x7e0a02f4u;
 constexpr std::uint32_t MoveV6Four = 0x7e0c02f6u;
 constexpr std::uint32_t MovrelsV1V4 = 0x7e028704u;
@@ -115,6 +117,24 @@ Shape Scan(std::span<const std::uint32_t> words) {
         cursor += count;
     }
     return shape;
+}
+
+std::size_t WindowStores(std::span<const std::uint32_t> words) {
+    std::vector<std::uint32_t> functionPointers;
+    std::vector<std::uint32_t> pointers;
+    std::size_t stores = 0;
+    const auto contains = [](const std::vector<std::uint32_t>& ids, std::uint32_t id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    for (std::size_t cursor = 5; cursor < words.size();) {
+        const auto count = words[cursor] >> spv::WordCountShift;
+        const auto op = static_cast<spv::Op>(words[cursor] & spv::OpCodeMask);
+        Require(count != 0 && cursor + count <= words.size(), "truncated SPIR-V instruction");
+        if (op == spv::OpTypePointer && words[cursor + 2] == spv::StorageClassFunction) functionPointers.push_back(words[cursor + 1]);
+        if (op == spv::OpVariable && words[cursor + 3] == spv::StorageClassFunction && contains(functionPointers, words[cursor + 1])) pointers.push_back(words[cursor + 2]);
+        if (op == spv::OpAccessChain && contains(pointers, words[cursor + 3])) pointers.push_back(words[cursor + 2]);
+        if (op == spv::OpStore && contains(pointers, words[cursor + 1])) ++stores;
+        cursor += count;
+    }
+    return stores;
 }
 
 IrProgram TranslateStage(ShaderStageKind stage, std::uint32_t waveSize, std::uint32_t base = 0u, std::uint32_t fetchStart = 0u, std::uint32_t fetchCount = 0u) {
@@ -291,6 +311,15 @@ int main(int argc, char** argv) {
         const std::array<std::uint32_t, 16> userData{};
         const auto shape = Scan(RecompileProgram(code, userData));
         return shape.functionArrays == 1;
+    });
+
+    passed &= run("a window register written twice before a relative read keeps only its last window store", [] {
+        const std::array<std::uint32_t, 9> overwritten{MoveM0GroupX, MoveV4One, MoveV4Two, MoveV5Two, MoveV6Four, MovrelsV1V4, 0xe0700000u, 0x80000100u, EndProgram};
+        const std::array<std::uint32_t, 8> once{MoveM0GroupX, MoveV4Two, MoveV5Two, MoveV6Four, MovrelsV1V4, 0xe0700000u, 0x80000100u, EndProgram};
+        const auto twice = WindowStores(RecompileProgram(overwritten));
+        const auto single = WindowStores(RecompileProgram(once));
+        if (twice != single || single < 3u) std::fprintf(stderr, "  window stores: written twice %zu, written once %zu\n", twice, single);
+        return twice == single && single >= 3u;
     });
 
     if (passed) std::puts("Vector window shape and SSA control tests passed");

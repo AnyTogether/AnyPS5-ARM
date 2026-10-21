@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "prx/libc/include/General.hpp"
@@ -42,6 +43,88 @@ std::string Ngs2Hex(std::uint32_t value) {
 std::recursive_mutex& Ngs2Mutex() {
     static auto* const mutex = new std::recursive_mutex();
     return *mutex;
+}
+
+static std::uint32_t& LockDepth() {
+    thread_local std::uint32_t depth = 0;
+    return depth;
+}
+
+static std::condition_variable_any& Ngs2Waiters() {
+    static auto* const waiters = new std::condition_variable_any();
+    return *waiters;
+}
+
+Ngs2Lock::Ngs2Lock() {
+    Ngs2Mutex().lock();
+    ++LockDepth();
+}
+
+Ngs2Lock::~Ngs2Lock() {
+    --LockDepth();
+    Ngs2Mutex().unlock();
+}
+
+Ngs2Unlocked::Ngs2Unlocked() : depth(std::exchange(LockDepth(), 0u)) {
+    for (std::uint32_t i = 0; i < depth; ++i) Ngs2Mutex().unlock();
+}
+
+Ngs2Unlocked::~Ngs2Unlocked() {
+    for (std::uint32_t i = 0; i < depth; ++i) Ngs2Mutex().lock();
+    LockDepth() = depth;
+}
+
+struct HeldNgs2Lock {
+    std::uint32_t depth = 0;
+
+    void unlock() {
+        depth = std::exchange(LockDepth(), 0u);
+        for (std::uint32_t i = 0; i < depth; ++i) Ngs2Mutex().unlock();
+    }
+
+    void lock() {
+        for (std::uint32_t i = 0; i < depth; ++i) Ngs2Mutex().lock();
+        LockDepth() = depth;
+    }
+};
+
+struct ExclusiveState {
+    std::thread::id owner;
+    std::uint32_t depth = 0;
+};
+
+static ExclusiveState& Exclusive() {
+    static ExclusiveState state;
+    return state;
+}
+
+bool Ngs2RenderingHere(const Ngs2System& system) {
+    return system.renderDepth != 0;
+}
+
+bool Ngs2ExclusiveElsewhere() {
+    return Exclusive().depth != 0 && Exclusive().owner != std::this_thread::get_id();
+}
+
+void Ngs2EnterExclusive() {
+    Exclusive().owner = std::this_thread::get_id();
+    ++Exclusive().depth;
+}
+
+void Ngs2LeaveExclusive(std::uint32_t depth) {
+    Exclusive().depth -= depth;
+    if (Exclusive().depth != 0) return;
+    Exclusive().owner = {};
+    Ngs2NotifyWaiters();
+}
+
+void Ngs2WaitOnce() {
+    HeldNgs2Lock held;
+    Ngs2Waiters().wait(held);
+}
+
+void Ngs2NotifyWaiters() {
+    Ngs2Waiters().notify_all();
 }
 
 struct SystemLockState {
@@ -173,7 +256,7 @@ int APS5_VABI sceNgs2SystemCreate(const Ngs2SystemOption* option, const Ngs2Cont
     if (handle == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     const auto checked = CheckedSystemOption(option);
     if (buffer_info == nullptr) APS5_INVALID_ARG_EX;
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     return CreateSystem(checked, *buffer_info, {}, handle);
 }
 
@@ -181,15 +264,20 @@ int APS5_VABI sceNgs2SystemCreateWithAllocator(const Ngs2SystemOption* option, c
     if (handle == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     const auto checked = CheckedSystemOption(option);
     const auto bufferInfo = Allocate(allocator, sizeof(Ngs2System));
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     return CreateSystem(checked, bufferInfo, *allocator, handle);
 }
 
 int APS5_VABI sceNgs2SystemDestroy(uintptr_t system_handle, Ngs2ContextBufferInfo* buffer_info) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     if (buffer_info != nullptr) *buffer_info = {};
     auto* system = Ngs2FindSystem(system_handle);
+    while (system != nullptr && Ngs2ExclusiveElsewhere()) {
+        Ngs2WaitOnce();
+        system = Ngs2FindSystem(system_handle);
+    }
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
+    if (Ngs2RenderingHere(*system)) throw std::runtime_error("NGS2: destroying a system from its own render (a voice callback) is not implemented");
     while (!system->racks.empty()) {
         const int result = Ngs2DestroyRack(*system->racks.back(), nullptr);
         if (result != SCE_NGS2_OK) return result;
@@ -209,7 +297,7 @@ int APS5_VABI sceNgs2SystemDestroy(uintptr_t system_handle, Ngs2ContextBufferInf
 int APS5_VABI sceNgs2SystemGetInfo(uintptr_t system_handle, Ngs2SystemInfo* info, size_t info_size) {
     if (info == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     if (info_size != sizeof(Ngs2SystemInfo)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     const auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     *info = {};
@@ -228,7 +316,7 @@ int APS5_VABI sceNgs2SystemGetInfo(uintptr_t system_handle, Ngs2SystemInfo* info
 }
 
 int APS5_VABI sceNgs2SystemSetGrainSamples(uintptr_t system_handle, uint32_t num_samples) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     if (num_samples == 0 || num_samples > system->option.max_grain_samples) APS5_INVALID_ARG_EX;
@@ -237,7 +325,7 @@ int APS5_VABI sceNgs2SystemSetGrainSamples(uintptr_t system_handle, uint32_t num
 }
 
 int APS5_VABI sceNgs2SystemSetSampleRate(uintptr_t system_handle, uint32_t sample_rate) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     if (sample_rate == 0) APS5_INVALID_ARG_EX;
@@ -255,7 +343,7 @@ int APS5_VABI sceNgs2SystemSetSampleRate(uintptr_t system_handle, uint32_t sampl
 }
 
 int APS5_VABI sceNgs2SystemSetUserData(uintptr_t system_handle, uintptr_t user_data) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     system->userData = user_data;
@@ -263,7 +351,7 @@ int APS5_VABI sceNgs2SystemSetUserData(uintptr_t system_handle, uintptr_t user_d
 }
 
 int APS5_VABI sceNgs2SystemGetUserData(uintptr_t system_handle, uintptr_t* user_data) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     const auto* system = Ngs2FindSystem(system_handle);
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     if (user_data == nullptr) APS5_INVALID_ARG_EX;
@@ -295,8 +383,12 @@ int APS5_VABI sceNgs2SystemUnlock(uintptr_t system_handle) {
 }
 
 int APS5_VABI sceNgs2SystemRender(uintptr_t system_handle, const Ngs2RenderBufferInfo* buffer_info, uint32_t num_buffer_info) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto* system = Ngs2FindSystem(system_handle);
+    while (system != nullptr && Ngs2ExclusiveElsewhere()) {
+        Ngs2WaitOnce();
+        system = Ngs2FindSystem(system_handle);
+    }
     if (system == nullptr) return SCE_NGS2_ERROR_INVALID_SYSTEM_HANDLE;
     if (buffer_info == nullptr || num_buffer_info == 0) APS5_INVALID_ARG_EX;
     SystemLockState* state = nullptr;
@@ -312,13 +404,19 @@ int APS5_VABI sceNgs2SystemRender(uintptr_t system_handle, const Ngs2RenderBuffe
         found.depth++;
         state = &found;
     }
+    Ngs2EnterExclusive();
+    system->renderDepth++;
     struct Release {
         SystemLockState* state;
+        Ngs2System* system;
         ~Release() {
+            system->renderDepth--;
+            Ngs2LeaveExclusive();
+            Ngs2NotifyWaiters();
             std::lock_guard locks(SystemLockMutex());
             ReleaseSystemLock(*state);
         }
-    } release{state};
+    } release{state, system};
     Ngs2RenderSystem(*system, buffer_info, num_buffer_info);
     return SCE_NGS2_OK;
 }
@@ -332,7 +430,7 @@ int APS5_VABI sceNgs2SystemResetOption(Ngs2SystemOption* option) {
 int APS5_VABI sceNgs2ReportRegisterHandler(uint32_t report_type, Ngs2ReportHandler handler, uintptr_t user_data, Ngs2Handle* out_handle) {
     if (out_handle == nullptr) return SCE_NGS2_ERROR_INVALID_OUT_ADDRESS;
     if (handler == nullptr) APS5_INVALID_ARG_EX;
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto* registration = new Ngs2ReportRegistration{report_type, handler, user_data};
     ReportRegistrations().push_back(registration);
     *out_handle = reinterpret_cast<Ngs2Handle>(registration);
@@ -340,7 +438,7 @@ int APS5_VABI sceNgs2ReportRegisterHandler(uint32_t report_type, Ngs2ReportHandl
 }
 
 int APS5_VABI sceNgs2ReportUnregisterHandler(Ngs2Handle report_handle) {
-    std::lock_guard lock(Ngs2Mutex());
+    const Ngs2Lock lock;
     auto& registrations = ReportRegistrations();
     const auto found = std::find(registrations.begin(), registrations.end(), reinterpret_cast<Ngs2ReportRegistration*>(report_handle));
     if (found == registrations.end()) throw std::runtime_error("NGS2: unregistering a report handler that is not registered");

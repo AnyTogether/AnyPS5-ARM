@@ -2,6 +2,8 @@
 
 ### Unknown function info
 
+- [FT_Select_Charmap, FT_Set_Charmap, FT_Get_First_Char and FT_Get_Next_Char](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - console signatures and errors are unverified; the LP64 guest adapter follows the bundled [FreeType 2.13.3](https://github.com/freetype/freetype/blob/42608f77f20749dd6ddc9e0536788eaad70ea4b5/src/base/ftobjs.c). Character iteration uses the low 32 bits of the input code, as that version does internally, and updates the guest's selected charmap pointer without refreshing unrelated glyph or outline data. Guest charmap fields are treated as read-only copies of the native records.
+
 - [FT_Init_FreeType, FT_New_Face, FT_Set_Pixel_Sizes, FT_Get_Char_Index, FT_Load_Glyph, FT_Render_Glyph](../../../core/libs/prx/libSceFreeType/Export.cpp) (libSceFreeType) - the PS4 library is taken to be FreeType 2 built for LP64: the face, size, charmap, glyph slot, bitmap and outline layouts follow the public headers of the bundled FreeType 2.13.3 with a 64-bit `long`, which matches the offsets the OpenOrbis samples read (`face->glyph` at 0x98, `slot->advance` at 0x80, `slot->bitmap` at 0x98, `slot->bitmap_left` at 0xc0). Which FreeType version and options the console library is built with is unknown, so the behaviour and error codes are those of FreeType 2.13.3. The OpenOrbis font, keyboard, threading, system and SDL2 samples import these six functions
 
 ### Functional

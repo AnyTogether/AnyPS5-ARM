@@ -709,7 +709,15 @@ int APS5_VABI sceVideodec2GetPictureInfo_nid_postfix(const OutputInfo* output, A
         if (owner() != handle) continue;
         const auto found = decoder->pictures.find(output->frameBuffer);
         if (found == decoder->pictures.end()) throw std::runtime_error("Videodec2: owned picture is missing");
-        if (decoder->codec != CodecAvc) throw std::runtime_error("Videodec2: picture info is only implemented for H.264");
+        if (decoder->codec == CodecVp9) {
+            auto* info = reinterpret_cast<Vp9PictureInfo*>(first);
+            if (!Fits(info, sizeof(Vp9PictureInfo))) throw std::runtime_error("Videodec2: VP9 picture structure is too small");
+            const auto size = info->thisSize;
+            *info = found->second.vp9;
+            info->thisSize = size;
+            return 0;
+        }
+        if (decoder->codec != CodecAvc) throw std::runtime_error("Videodec2: picture info is only implemented for H.264 and VP9");
         const auto& picture = found->second;
         first->isValid = true;
         first->ptsData = picture.pts;

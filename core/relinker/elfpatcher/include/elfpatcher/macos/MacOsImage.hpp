@@ -5,7 +5,9 @@
 #include <codegen/CodegenTypes.hpp>
 #include <domain/Types.hpp>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Elfpatcher::MacOs {
@@ -71,6 +73,7 @@ struct MacOsImageInput {
     std::vector<MacOsTlsExport> TlsExports;
     // --to-intel: AMD-only instructions that jump to an out-of-line stub (in __AMDSTUB).
     const std::vector<Codegen::TrampolineSite>* Trampolines = nullptr;
+    std::function<void(std::string_view)> Message;
 };
 
 // The size of the static TLS block the thread pointer follows (variant II), shared by the TLS stubs,

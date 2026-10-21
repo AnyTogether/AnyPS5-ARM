@@ -38,7 +38,6 @@ int APS5_VABI sceUltSemaphoreDestroy(void*);
 int APS5_VABI sceUltQueueDestroy(void*);
 int APS5_VABI sceUltQueueDataResourcePoolDestroy(void*);
 int APS5_VABI sceUltConditionVariableDestroy(void*);
-int APS5_VABI sceUltReaderWriterLockDestroy();
 int APS5_VABI sceUltGetConditionVariableInfo();
 }
 
@@ -111,13 +110,6 @@ static void Validation() {
     CHECK(sceUltFinalize() == Ok);
     CHECK(sceUltUlthreadRuntimeGetWorkAreaSize(1, 1) == 256u + 16u * 1024u);
     CHECK(sceUltConditionVariableDestroy(nullptr) == -2139029503);
-    bool threwRwl = false;
-    try {
-        sceUltReaderWriterLockDestroy();
-    } catch (const std::runtime_error&) {
-        threwRwl = true;
-    }
-    CHECK(threwRwl);
     bool threwInfo = false;
     try {
         sceUltGetConditionVariableInfo();

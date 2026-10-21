@@ -392,6 +392,16 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceMove>")
     endif()
 
+    add_test_executable(guest_np_party_tests tests/GuestNpParty.cpp)
+    target_include_directories(guest_np_party_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_np_party_tests PRIVATE libSceNpParty libc)
+    configure_windows_unwind(guest_np_party_tests)
+    add_test(NAME guest_np_party COMMAND guest_np_party_tests)
+    if(WIN32)
+        set_tests_properties(guest_np_party PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpParty>")
+    endif()
+
     add_test_executable(guest_offline_imports_tests tests/GuestOfflineImports.cpp)
     target_include_directories(guest_offline_imports_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(guest_offline_imports_tests PRIVATE libSceHttp libSceNpEntitlementAccess libSceRudp libc)
@@ -722,5 +732,15 @@ if(BUILD_TESTING)
     if(WIN32)
         set_tests_properties(guest_np_game_intent PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpGameIntent>")
+    endif()
+
+    add_test_executable(guest_vorbis_dec_tests tests/GuestVorbisDec.cpp)
+    target_include_directories(guest_vorbis_dec_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_vorbis_dec_tests PRIVATE libSceVorbisDec libc)
+    configure_windows_unwind(guest_vorbis_dec_tests)
+    add_test(NAME guest_vorbis_dec COMMAND guest_vorbis_dec_tests)
+    if(WIN32)
+        set_tests_properties(guest_vorbis_dec PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceVorbisDec>")
     endif()
 endif()

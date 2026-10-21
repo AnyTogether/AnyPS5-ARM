@@ -84,14 +84,73 @@ struct NameMatch {
     std::string name;
     std::optional<std::filesystem::path> path;
     bool ambiguous = false;
+    bool stem = false;
 };
 
+std::string_view NameStem(std::string_view name) {
+    const auto dot = name.rfind('.');
+    return dot == std::string_view::npos || dot == 0 ? name : name.substr(0, dot);
+}
+
+bool SameRelinkedStem(std::string_view filename, std::string_view name) {
+    constexpr std::string_view suffix = ".guest.prx";
+    if (filename.size() <= suffix.size() || !SameName(filename.substr(filename.size() - suffix.size()), suffix)) return false;
+    return SameName(NameStem(filename.substr(0, filename.size() - suffix.size())), NameStem(name));
+}
+
+#ifdef _WIN32
+bool CaseInsensitiveDirectoryWindows(const std::filesystem::path& directory) {
+    const auto handle = CreateFileW(directory.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    const std::unique_ptr<void, decltype(&CloseHandle)> owner(handle, &CloseHandle);
+    struct { ULONG flags; } information{};
+    constexpr auto caseSensitiveInfo = static_cast<FILE_INFO_BY_HANDLE_CLASS>(23);
+    return GetFileInformationByHandleEx(handle, caseSensitiveInfo, &information, sizeof(information)) &&
+        (information.flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR) == 0;
+}
+
+std::error_code MatchNamesWindows(const std::filesystem::path& directory, std::span<NameMatch> names) {
+    for (auto& name : names) {
+        const auto pattern = directory / name.name;
+        WIN32_FIND_DATAW data{};
+        const auto handle = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const auto error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES) continue;
+            return {static_cast<int>(error), std::system_category()};
+        }
+        const std::unique_ptr<void, decltype(&FindClose)> owner(handle, &FindClose);
+        do {
+            const auto filename = std::filesystem::path(data.cFileName);
+            if (!SameName(filename.string(), name.name)) continue;
+            name.ambiguous = name.ambiguous || name.path.has_value();
+            name.path = directory / filename;
+        } while (FindNextFileW(handle, &data));
+        const auto error = GetLastError();
+        if (error != ERROR_NO_MORE_FILES) return {static_cast<int>(error), std::system_category()};
+    }
+    return {};
+}
+#endif
+
 std::error_code MatchNames(const std::filesystem::path& directory, std::span<NameMatch> names) {
+#ifdef _WIN32
+    bool stem = false;
+    for (const auto& name : names) stem = stem || name.stem;
+    if (!stem && CaseInsensitiveDirectoryWindows(directory)) return MatchNamesWindows(directory, names);
+#endif
     std::error_code error;
     std::filesystem::directory_iterator entry(directory, error), end;
     for (; !error && entry != end; entry.increment(error)) {
         const auto filename = entry->path().filename().string();
         for (auto& name : names) {
+            if (name.stem) {
+                std::error_code status;
+                if (!SameRelinkedStem(filename, name.name) || !entry->is_regular_file(status) || status) continue;
+                if (!name.path || filename.size() < name.path->filename().string().size()) name.path = entry->path();
+                continue;
+            }
             if (!SameName(filename, name.name)) continue;
             name.ambiguous = name.ambiguous || name.path.has_value();
             name.path = entry->path();
@@ -142,8 +201,26 @@ std::filesystem::path Child(std::filesystem::path parent, const std::string& nam
 std::filesystem::path ResolveHostPath(std::filesystem::path root, const std::vector<std::string>& relative, bool module = false) {
     const auto direct = Child(root, JoinNames(relative));
     std::error_code error;
+    auto first = relative.begin();
+#ifdef _WIN32
+    const auto attributes = GetFileAttributesW(direct.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0) return direct;
+    const auto failure = GetLastError();
+    const bool missing = attributes == INVALID_FILE_ATTRIBUTES && (failure == ERROR_FILE_NOT_FOUND || failure == ERROR_PATH_NOT_FOUND);
+    if (!missing && std::filesystem::exists(direct, error)) return direct;
+    for (auto last = relative.end(); last != relative.begin();) {
+        const auto parent = Child(root, JoinNames(std::vector<std::string>(relative.begin(), std::prev(last))));
+        const auto parentAttributes = GetFileAttributesW(parent.c_str());
+        const bool present = parentAttributes != INVALID_FILE_ATTRIBUTES && (parentAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+        if (!present && !std::filesystem::exists(parent, error)) { --last; continue; }
+        root = parent;
+        first = std::prev(last);
+        break;
+    }
+#else
     if (std::filesystem::exists(direct, error)) return direct;
-    for (auto part = relative.begin(); part != relative.end(); ++part) {
+#endif
+    for (auto part = first; part != relative.end(); ++part) {
         const auto candidate = Child(root, *part);
         const auto status = std::filesystem::symlink_status(candidate, error);
         if (std::filesystem::exists(status) || (error && error != std::errc::no_such_file_or_directory)) {
@@ -269,10 +346,12 @@ std::filesystem::path Resolve(WorkingDirectory& state, const char* path, bool mo
     if (text.empty() || text.front() != '/') text = state.current.lexically_relative(state.root).generic_string() + "/" + text;
     std::vector<std::string> names;
     bool trailing = true;
+    bool endsWithDot = false;
     const auto parts = SplitNames(text);
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const auto& name = parts[i];
         if (name.empty() && i + 1 != parts.size()) continue;
+        if (!name.empty()) endsWithDot = name == ".";
         if (name == ".." && !names.empty()) {
             if (!(archived && AppArchiveHasDirectory_nid_no_patch(HostPath(state, names)))) RequireHostDirectory(state, WithTrailingSeparator(names, trailing));
             names.pop_back();
@@ -280,6 +359,7 @@ std::filesystem::path Resolve(WorkingDirectory& state, const char* path, bool mo
         trailing = name.empty() || name == "." || name == "..";
         if (!trailing) names.push_back(name);
     }
+    if (endsWithDot && !names.empty() && !(archived && AppArchiveHasDirectory_nid_no_patch(HostPath(state, names)))) RequireHostDirectory(state, names);
     return HostPath(state, WithTrailingSeparator(std::move(names), trailing), module);
 }
 #ifdef _WIN32
@@ -623,9 +703,10 @@ extern "C" std::filesystem::path RelinkedModulePath_nid_no_patch(const std::file
     const auto relinked = RelinkedModuleName(path);
     std::error_code error;
     if (std::filesystem::is_regular_file(relinked, error)) return relinked;
-    NameMatch names[] = {{relinked.filename().string()}};
+    NameMatch names[] = {{relinked.filename().string()}, {path.filename().string(), std::nullopt, false, true}};
     MatchNames(relinked.parent_path().empty() ? "." : relinked.parent_path(), names);
-    return MatchedModuleOrPath(path, relinked, names[0]);
+    if (names[0].ambiguous || names[0].path) return MatchedModuleOrPath(path, relinked, names[0]);
+    return names[1].path ? *names[1].path : path;
 }
 
 extern "C" int SetWorkingDirectory_nid_no_patch(const char* resolved) {
@@ -715,6 +796,8 @@ extern "C" int WindowsOpenError_nid_no_patch(unsigned long error) {
         return ENOMEM;
     case ERROR_DISK_FULL:
         return ENOSPC;
+    case ERROR_CANT_RESOLVE_FILENAME:
+        return ELOOP;
     default:
         return EINVAL;
     }

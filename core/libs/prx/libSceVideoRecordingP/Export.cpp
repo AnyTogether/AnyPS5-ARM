@@ -82,7 +82,6 @@ int APS5_VABI sceVideoRecordingGetVideoOutMode(void* mode) {
 }
 
 int APS5_VABI sceVideoRecordingInit(void) {
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
@@ -143,7 +142,6 @@ int APS5_VABI sceVideoRecordingRestModeProcessStart(void* param) {
 int APS5_VABI sceVideoRecordingSendCommand(int cmd, const void* param) {
  (void)cmd;
  (void)param;
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 
@@ -164,7 +162,6 @@ int APS5_VABI sceVideoRecordingStop(void) {
 }
 
 int APS5_VABI sceVideoRecordingTerm(void) {
- NotImplemented_nid_no_patch(__func__);
  return 0;
 }
 

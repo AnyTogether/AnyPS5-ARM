@@ -35,6 +35,10 @@ alignas(256) constexpr std::array<std::uint32_t, 6> VertexValuePixelCode{
     0xc80a0000, 0xc80e0001, 0xc8120002, 0xf800180f, 0x04040302, 0xbf810000,
 };
 
+alignas(256) constexpr std::array<std::uint32_t, 4> FlatBarycentricPixelCode{
+    0xc8120002, 0xf800180f, 0x04040100, 0xbf810000,
+};
+
 alignas(256) constexpr std::array<std::uint32_t, 5> InterpolatedPixelCode{
     0xc8080000, 0xc8090001, 0xf800180f, 0x02020202, 0xbf810000,
 };
@@ -63,7 +67,7 @@ enum class Emulation {
     Tessellation,
 };
 
-ShaderRecompiler::RecompileResult Draw(AgcDriver::VulkanDevice& device, Emulation emulation, std::span<const std::uint32_t> pixelCode, std::uint32_t inputs, VkCullModeFlags cullMode = VK_CULL_MODE_NONE) {
+ShaderRecompiler::RecompileResult Draw(AgcDriver::VulkanDevice& device, Emulation emulation, std::span<const std::uint32_t> pixelCode, std::uint32_t inputs, VkCullModeFlags cullMode = VK_CULL_MODE_NONE, bool flat = false, VkProvokingVertexModeEXT provoking = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT) {
     Pixels.fill(Unwritten);
     auto target = device.Target();
     target.fragmentShaderBarycentricEnabled = false;
@@ -85,6 +89,7 @@ ShaderRecompiler::RecompileResult Draw(AgcDriver::VulkanDevice& device, Emulatio
 
     ShaderRecompiler::ShaderPixelStageInfo pixel{};
     pixel.interpolatorCount = 1;
+    if (flat) pixel.interpolatorSettings[0] = 0x400u;
     pixel.inputAddr = inputs;
     pixel.hasPerspectiveCenterVgpr = (inputs & PixelInputBit(PixelInput::PerspectiveCenter)) != 0u;
     pixel.noPerspective = (inputs & PixelInputBit(PixelInput::LinearCenter)) != 0u;
@@ -108,7 +113,7 @@ ShaderRecompiler::RecompileResult Draw(AgcDriver::VulkanDevice& device, Emulatio
         geometry = ShaderRecompiler::BuildBarycentricGeometryShader(vertexResult, pixelResult, target, device.GeometryLimits());
         shaders.push_back({ShaderStage::Geometry, &geometry, 0});
     } else if (pixelResult.barycentricEmulation.active) {
-        patches = ShaderRecompiler::BuildBarycentricTessellationShaders(vertexResult, pixelResult, target, device.MaxFragmentInputComponents());
+        patches = ShaderRecompiler::BuildBarycentricTessellationShaders(vertexResult, pixelResult, target, device.MaxFragmentInputComponents(), provoking == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT ? 2u : 0u);
         shaders.push_back({ShaderStage::TessellationControl, &patches.control, 0});
         shaders.push_back({ShaderStage::TessellationEvaluation, &patches.evaluation, 0});
     }
@@ -125,6 +130,7 @@ ShaderRecompiler::RecompileResult Draw(AgcDriver::VulkanDevice& device, Emulatio
     state.negativeOneToOne = false;
     state.scissor = {{0, 0}, {Width, Height}};
     state.cullMode = cullMode;
+    state.provokingVertexMode = provoking;
     state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
@@ -242,6 +248,26 @@ void CheckInterpolated() {
     Require(checked > 200u, "v_interp_p1/p2: too few interior pixels were checked");
 }
 
+void CheckFlat(const std::string& what, std::size_t provoking) {
+    const auto positions = ClipPositions();
+    std::uint32_t checked = 0;
+    for (std::uint32_t y = 0; y < Height; ++y) {
+        for (std::uint32_t x = 0; x < Width; ++x) {
+            const auto expected = BarycentricsUnsnapped(x, y);
+            if (!expected.inside) continue;
+            const auto snapped = BarycentricsSnapped(x, y);
+            for (std::uint32_t channel = 0; channel < 2; ++channel) {
+                Require(MatchesEither(Pixel(x, y, channel), expected.perspective[1u + channel], snapped.perspective[1u + channel]), what + ": pixel (" + std::to_string(x) + ", " + std::to_string(y) + ") weight " + std::to_string(channel) + " is " + std::to_string(Pixel(x, y, channel)));
+            }
+            for (std::uint32_t channel = 2; channel < 4; ++channel) {
+                Require(Pixel(x, y, channel) == positions[provoking][0], what + ": pixel (" + std::to_string(x) + ", " + std::to_string(y) + ") flat channel " + std::to_string(channel) + " is " + std::to_string(Pixel(x, y, channel)) + ", expected vertex " + std::to_string(provoking) + "'s " + std::to_string(positions[provoking][0]));
+            }
+            ++checked;
+        }
+    }
+    Require(checked > 200u, what + ": too few interior pixels were checked");
+}
+
 bool Drawn() {
     return std::any_of(Pixels.begin(), Pixels.end(), [](float value) { return value != Unwritten; });
 }
@@ -273,7 +299,14 @@ void RunEmulation(AgcDriver::VulkanDevice& device, Emulation emulation) {
     Require(!result.barycentricEmulation.active, "plain v_interp_p1/p2 needed a generated stage");
     CheckInterpolated();
     CheckWinding(device, emulation, name);
-    std::printf("barycentric emulation through the %s passed: %u perspective and %u linear I/J pixels, raw vertex values, host interpolation and face culling\n", name.c_str(), smooth, noPerspective);
+    result = Draw(device, emulation, FlatBarycentricPixelCode, perspective, VK_CULL_MODE_NONE, true);
+    Require(result.barycentricEmulation.active && std::any_of(result.fragmentParameters.begin(), result.fragmentParameters.end(), [](const auto& parameter) { return parameter.flat && !parameter.perVertex; }), "a flat P0 read beside raw I/J did not pass a flat parameter through the emulation");
+    CheckFlat(name + " flat input, first provoking vertex", 0u);
+    if (emulation == Emulation::Tessellation) {
+        Draw(device, emulation, FlatBarycentricPixelCode, perspective, VK_CULL_MODE_NONE, true, VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT);
+        CheckFlat(name + " flat input, last provoking vertex", 2u);
+    }
+    std::printf("barycentric emulation through the %s passed: %u perspective and %u linear I/J pixels, raw vertex values, host interpolation, face culling and flat inputs\n", name.c_str(), smooth, noPerspective);
 }
 
 }

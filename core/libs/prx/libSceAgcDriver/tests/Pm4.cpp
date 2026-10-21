@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawRegisterKey.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Queues/SubmissionRing.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VideoOutput.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Dcb.hpp"
 #include "prx/libSceAgcDriver/Submit/include/Acb.hpp"
@@ -1631,6 +1632,53 @@ void testStallWatchdogRewind() {
     check(std::any_of(lines.begin(), lines.end(), [](const std::string& line) { return line.find("+0x0000 REWIND 00000000") != std::string::npos; }), "the stall dump does not decode the stalled REWIND");
 }
 
+void testRewindTailTrace() {
+    using AgcDriver::DriverDetail::DrawPipeline;
+    if (DrawPipeline::Depth() == 0) throw std::runtime_error("the REWIND trace test needs the pipelined draw path");
+    check(AgcDriver::PerformanceTrace::Configured(), "the REWIND trace test runs without a trace window");
+    const char* directory = std::getenv("APS5_TRACE_DIR");
+    check(directory != nullptr, "the REWIND trace test has no APS5_TRACE_DIR");
+    const auto summaryPath = std::filesystem::path(directory) / "aps5-summary.jsonl";
+    std::filesystem::remove(summaryPath);
+    alignas(8) static std::uint32_t started = 0;
+    static auto warm = joinPackets({writeWord(started, 1)});
+    submitWords(warm);
+    AgcDriverWaitIdle_nid_postfix();
+    check(std::atomic_ref<std::uint32_t>(started).load() == 1, "the queue worker did not start");
+    constexpr std::size_t Tails = 12;
+    alignas(8) static std::array<std::uint32_t, Tails> gates{};
+    alignas(8) static std::uint32_t done = 0;
+    static std::vector<std::uint32_t> words;
+    words.clear();
+    for (std::size_t index = 0; index < Tails; ++index) {
+        const auto rewind = makePacket(0x59, {0x80000000u});
+        const auto wait = makePacket(0x3c, {0x13, low(&gates[index]), high(&gates[index]), 1, 0xffffffffu, 0x19});
+        words.insert(words.end(), rewind.begin(), rewind.end());
+        words.insert(words.end(), wait.begin(), wait.end());
+    }
+    const auto last = writeWord(done, 1);
+    words.insert(words.end(), last.begin(), last.end());
+    AgcDriver::PerformanceTrace::Present(1, 1, nullptr);
+    submitWords(words);
+    for (auto& gate : gates) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        std::atomic_ref<std::uint32_t>(gate).store(1);
+    }
+    AgcDriverWaitIdle_nid_postfix();
+    check(std::atomic_ref<std::uint32_t>(done).load() == 1, "the last REWIND tail did not run");
+    AgcDriver::PerformanceTrace::Present(1, 1, nullptr);
+    AgcDriver::PerformanceTrace::StopOutput();
+    std::ifstream summary(summaryPath);
+    std::string line;
+    check(static_cast<bool>(std::getline(summary, line)), "the trace window wrote no summary line");
+    const std::string_view key = "\"worker_busy_pct\":{\"queue worker 0x0\":";
+    const auto at = line.find(key);
+    check(at != std::string::npos, "the summary line has no busy share for queue worker 0x0");
+    const double busy = std::strtod(line.c_str() + at + key.size(), nullptr);
+    std::printf("queue worker 0x0 busy over %zu released REWIND tails: %.1f%%\n", Tails, busy);
+    check(busy <= 150.0, "the queue worker's busy share counts nested REWIND tails more than once");
+}
+
 struct RenderingGateState {
     std::mutex mutex;
     std::condition_variable changed;
@@ -1858,7 +1906,7 @@ int main(int argc, char** argv) {
         const std::pair<const char*, void (*)()> ringModes[]{
             {"ring", testSubmissionRing}, {"ring-empty", testEmptySubmissionRing}, {"ring-disabled", testDisabledSubmissionRing},
             {"ring-invalid", testInvalidSubmissionRing}, {"ring-report", testSubmissionRingFailureReport}, {"stall-watchdog", testStallWatchdog},
-            {"stall-watchdog-invalid", testInvalidStallWatchdog}, {"stall-watchdog-rewind", testStallWatchdogRewind}, {"stall-watchdog-order", testStallWatchdogOrder}};
+            {"stall-watchdog-invalid", testInvalidStallWatchdog}, {"stall-watchdog-rewind", testStallWatchdogRewind}, {"stall-watchdog-order", testStallWatchdogOrder}, {"rewind-trace", testRewindTailTrace}};
         if (argc == 2 && std::string(argv[1]) == "ring-report-heap") {
 #ifdef _WIN32
             testSubmissionRingFailureReportHeap();

@@ -5,6 +5,7 @@
 
 extern "C" int APS5_VABI wcsrtombs_s_nid_postfix(
     std::size_t*, char*, std::size_t, const std::uint16_t**, std::size_t, void*);
+extern "C" int APS5_VABI wcstombs_s_nid_postfix(std::size_t*, char*, std::size_t, const std::uint16_t*, std::size_t);
 static void Require(bool value) { if (!value) std::abort(); }
 
 constexpr auto Failed = static_cast<std::size_t>(-1);
@@ -75,4 +76,22 @@ int main() {
     result = 7;
     Require(wcsrtombs_s_nid_postfix(&result, out, 4, &source, 4, nullptr) == 22 && result == Failed && out[0] == '\0');
     Require(source == text && std::memcmp(out, "\0xxx", 4) == 0);
+
+    char narrow[8];
+    std::memset(narrow, 'x', sizeof(narrow));
+    Require(wcstombs_s_nid_postfix(&result, narrow, sizeof(narrow), text, sizeof(narrow)) == 0 && result == 3);
+    Require(std::memcmp(narrow, "abc\0x", 5) == 0);
+    std::memset(narrow, 'x', sizeof(narrow));
+    Require(wcstombs_s_nid_postfix(&result, narrow, sizeof(narrow), text, 2) == 0 && result == 2);
+    Require(std::memcmp(narrow, "ab\0x", 4) == 0);
+    Require(wcstombs_s_nid_postfix(&result, nullptr, 0, text, 0) == 0 && result == 3);
+    std::memset(narrow, 'x', sizeof(narrow));
+    Require(wcstombs_s_nid_postfix(&result, narrow, 3, text, 3) == 34 && result == Failed && narrow[0] == '\0');
+    Require(wcstombs_s_nid_postfix(&result, nullptr, 4, text, 4) == 22 && result == Failed);
+    std::memset(narrow, 'x', sizeof(narrow));
+    Require(wcstombs_s_nid_postfix(&result, narrow, sizeof(narrow), nullptr, sizeof(narrow)) == 22);
+    Require(result == Failed && narrow[0] == '\0');
+    std::memset(narrow, 'x', sizeof(narrow));
+    Require(wcstombs_s_nid_postfix(&result, narrow, sizeof(narrow), wide, sizeof(narrow)) == 86 && result == Failed);
+    Require(std::memcmp(narrow, "a\0xx", 4) == 0);
 }

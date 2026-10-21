@@ -63,7 +63,7 @@ int APS5_VABI _Thrd_join_nid_postfix(Pthread thread, int* code);
 int APS5_VABI _Thrd_sleep_nid_postfix(const GuestXtime* target, GuestXtime* remaining);
 void APS5_VABI _Lock_shared_ptr_spin_lock_nid_postfix(void);
 void APS5_VABI _Unlock_shared_ptr_spin_lock_nid_postfix(void);
-int APS5_VABI wcstombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t* source, std::size_t limit);
+int APS5_VABI sceAmprWcstombsS(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t* source, std::size_t limit);
 int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, PthreadEntry entry, void* arg, const char* name);
 int APS5_VABI pthread_detach_nid_postfix(Pthread thread);
 int APS5_VABI clock_gettime_nid_postfix(int clockId, KernelTimespec* tp);
@@ -241,42 +241,42 @@ static void TestWcstombs() {
     char buffer[8];
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, sizeof(buffer), text, sizeof(buffer)) == 0);
+    Require(sceAmprWcstombsS(&result, buffer, sizeof(buffer), text, sizeof(buffer)) == 0);
     Require(result == 3 && std::strcmp(buffer, "abc") == 0);
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, sizeof(buffer), text, 2) == 0);
+    Require(sceAmprWcstombsS(&result, buffer, sizeof(buffer), text, 2) == 0);
     Require(result == 2 && std::strcmp(buffer, "ab") == 0);
 
     result = 0;
-    Require(wcstombs_s_nid_postfix(&result, nullptr, 0, text, 0) == 0);
+    Require(sceAmprWcstombsS(&result, nullptr, 0, text, 0) == 0);
     Require(result == 3);
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, 3, text, 3) == GuestErange);
+    Require(sceAmprWcstombsS(&result, buffer, 3, text, 3) == GuestErange);
     Require(result == Failed && buffer[0] == '\0');
 
     result = 0;
-    Require(wcstombs_s_nid_postfix(&result, nullptr, 4, text, 4) == GuestEinval);
+    Require(sceAmprWcstombsS(&result, nullptr, 4, text, 4) == GuestEinval);
     Require(result == Failed);
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, sizeof(buffer), nullptr, sizeof(buffer)) == GuestEinval);
+    Require(sceAmprWcstombsS(&result, buffer, sizeof(buffer), nullptr, sizeof(buffer)) == GuestEinval);
     Require(result == Failed && buffer[0] == '\0');
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(nullptr, buffer, sizeof(buffer), text, sizeof(buffer)) == GuestEinval);
+    Require(sceAmprWcstombsS(nullptr, buffer, sizeof(buffer), text, sizeof(buffer)) == GuestEinval);
     Require(buffer[0] == '\0');
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, 0, text, 4) == GuestEinval);
+    Require(sceAmprWcstombsS(&result, buffer, 0, text, 4) == GuestEinval);
     Require(result == Failed && buffer[0] == 'x');
 
     std::memset(buffer, 'x', sizeof(buffer));
-    Require(wcstombs_s_nid_postfix(&result, buffer, sizeof(buffer), wide, sizeof(buffer)) == GuestEilseq);
+    Require(sceAmprWcstombsS(&result, buffer, sizeof(buffer), wide, sizeof(buffer)) == GuestEilseq);
     Require(result == Failed && buffer[0] == 'a' && buffer[1] == '\0');
 
-    Require(wcstombs_s_nid_postfix(&result, nullptr, 0, wide, 0) == GuestEilseq);
+    Require(sceAmprWcstombsS(&result, nullptr, 0, wide, 0) == GuestEilseq);
     Require(result == Failed);
 }
 
@@ -302,7 +302,13 @@ static void TestTypeInfoVtables() {
     Require(!reinterpret_cast<TypeInfoQuery>(function[4])(nullptr) && reinterpret_cast<TypeInfoQuery>(function[5])(nullptr));
     int value = 7;
     void* object = &value;
-    Require(!reinterpret_cast<TypeInfoUpcast>(pointer[7])(nullptr, nullptr, &object) && object == &value);
+    bool upcastRejected = false;
+    try {
+        reinterpret_cast<TypeInfoUpcast>(pointer[7])(nullptr, nullptr, &object);
+    } catch (const std::invalid_argument&) {
+        upcastRejected = true;
+    }
+    Require(upcastRejected && object == &value);
 
     const GuestPbaseTypeInfo intPointer{pointer + 2, "Pi", 0, &typeid(int)};
     const GuestPbaseTypeInfo constIntPointer{pointer + 2, "PKi", 1, &typeid(int)};

@@ -42,6 +42,18 @@ int main() {
         Require(character[0] == u'\\');
         Require(sceConvertKeycodeGetCharacter(0x32, state, 0, character) == 0);
         Require(character[0] == 0);
+        Require(sceConvertKeycodeGetCharacter(0x27, state, 0, character) == 0);
+        Require(character[0] == u'0');
+        Require(sceConvertKeycodeGetCharacter(0x2C, state, 0, character) == 0);
+        Require(character[0] == u' ');
+        Require(sceConvertKeycodeGetCharacter(0x2D, state, 0, character) == 0);
+        Require(character[0] == u'-');
+        Require(sceConvertKeycodeGetCharacter(0x54, state, 0, character) == 0);
+        Require(character[0] == u'/');
+        Require(sceConvertKeycodeGetCharacter(0x59, state, 0, character) == 0);
+        Require(character[0] == u'1');
+        Require(sceConvertKeycodeGetCharacter(0x63, state, 0, character) == 0);
+        Require(character[0] == u'.');
     }
     return 0;
 }

@@ -153,12 +153,13 @@ std::optional<std::int64_t> SeekDirectoryDescriptor(int fd, std::int64_t offset,
     return target;
 }
 
-int ReadDirectoryDescriptor(int fd, char* buf, int nbytes) {
+int ReadDirectoryDescriptor(int fd, char* buf, int nbytes, std::int64_t* base) {
     const auto found = Find(fd);
     if (!found) return SCE_KERNEL_ERROR_ENOTDIR;
     auto& state = *found;
     std::lock_guard lock(state.mutex);
     Load(state, fd);
+    if (base != nullptr) *base = static_cast<std::int64_t>(state.cursor);
     std::size_t used = 0;
     while (state.cursor < state.entries.size()) {
         const auto& [name, type] = state.entries[state.cursor];

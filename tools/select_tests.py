@@ -166,7 +166,7 @@ def dump(build, out):
     print(f"{len(tests)} tests, {len(closures)} test executables, {len(deps)} objects with header deps")
 
 
-def select(graph, changed):
+def select(graph, changed, reasons=None):
     full = [f for f in changed if FULL.search(f)]
     if full:
         return None, full
@@ -180,15 +180,28 @@ def select(graph, changed):
         if (test["target"] is None or files & set(test["registered"]) or files & scope
                 or any(f.startswith(dirs) for f in scope | set(test["registered"]))):
             picked.add(name)
+            if reasons is not None:
+                reasons[name] = (["no build executable"] if test["target"] is None else [])
+                reasons[name] += ["input: " + path for path in sorted(files & scope)]
+                reasons[name] += ["registration: " + path for path in sorted(files & set(test["registered"]))]
+                reasons[name] += ["directory: " + directory for directory in dirs
+                                  if any(path.startswith(directory) for path in scope | set(test["registered"]))]
     setups = collections.defaultdict(set)
     for name, test in tests.items():
         for fixture in test["sets"]:
             setups[fixture].add(name)
     todo = list(picked)
     while todo:
-        test = tests[todo.pop()]
+        name = todo.pop()
+        test = tests[name]
         for extra in set(test["depends"]).union(*(setups[f] for f in test["requires"])):
-            if extra in tests and extra not in picked:
+            if extra not in tests:
+                continue
+            if reasons is not None:
+                fixture = set(test["requires"]) & set(tests[extra]["sets"])
+                kind = "fixture setup for: " if fixture else "dependency of: "
+                reasons.setdefault(extra, []).append(kind + name)
+            if extra not in picked:
                 picked.add(extra)
                 todo.append(extra)
     return picked, []
@@ -222,6 +235,9 @@ def main():
     s.add_argument("build")
     s.add_argument("graph")
     s.add_argument("changed", help="file with one changed path per line")
+    e = sub.add_parser("explain", help="explain saved-graph selections without a configured build; CTest may add fixtures")
+    e.add_argument("graph", type=Path)
+    e.add_argument("changed", type=Path, help="file with one changed path per line")
     c = sub.add_parser("ctest", help="run ctest on a tree, limited to the selected tests if select wrote any")
     c.add_argument("build")
     c.add_argument("arguments", nargs=argparse.REMAINDER, help="ctest arguments")
@@ -230,7 +246,22 @@ def main():
         selected = Path(args.build, "select.tests")
         extra = ["-I", selected.read_text(encoding="utf-8").strip()] if selected.exists() else []
         return subprocess.run(["ctest", "--test-dir", args.build, *args.arguments, *extra]).returncode
-    build = Build(args.build)
+    if args.command == "explain":
+        try:
+            graph = json.loads(args.graph.read_text(encoding="utf-8"))
+            changed = [line.strip() for line in args.changed.read_text(encoding="utf-8").splitlines() if line.strip()]
+            reasons = {}
+            picked, full = select(graph, changed, reasons)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps({"tests": sorted(picked) if picked is not None else None,
+                          "full_run_paths": full, "reasons": {name: sorted(set(why)) for name, why in reasons.items()}},
+                         indent=2, sort_keys=True))
+        return 0
+    try:
+        build = Build(args.build)
+    except (OSError, KeyError) as error:
+        parser.error(f"{args.build}: not a configured CMake build directory ({error})")
     if args.command == "dump":
         dump(build, args.graph)
         return 0
@@ -240,7 +271,7 @@ def main():
         print("full run: no test graph")
         return 0
     graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
-    changed = [line.strip() for line in Path(args.changed).read_text(encoding="utf-8").splitlines() if line.strip()]
+    changed = [line.strip() for line in Path(args.changed).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     picked, full = select(graph, changed)
     if picked is None:
         print(f"full run: {', '.join(full[:5])}")

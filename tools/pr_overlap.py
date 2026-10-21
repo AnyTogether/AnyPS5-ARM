@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 
 PARENT = 'if .parent then "\\(.parent.owner.login)/\\(.parent.name)" else .nameWithOwner end'
 EXPORT = re.compile(r"^\+.*\bAPS5_VABI\s+(\w+)\s*\(")
+NID_DISAMBIG = re.compile(r"_nid_disambig[0-9]+$")
 DEPENDS = re.compile(r'Depends on:[ \t]*((?:#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*|none\b)?(?:\r?\n[ \t]*[-*][ \t]*#\d+\b[^\r\n]*)*)')
 PLAIN_DEPENDS = re.compile(r'Depends on[ \t]+(#\d+\b(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+)#\d+\b)*)')
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))?", re.M)
@@ -110,7 +111,8 @@ def exports(diff):
             text += nxt[1:]
         semi, brace = text.find(";"), text.find("{")
         if semi < 0 or 0 <= brace < semi:
-            found.add(m.group(1))
+            name = m.group(1).removesuffix("_nid_postfix")
+            found.add(NID_DISAMBIG.sub("", name))
     return found
 
 

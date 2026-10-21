@@ -58,6 +58,10 @@ public:
     void ContinueBackFaces(VkCommandBuffer commands, const State& state) const;
     bool SplitsSecondChannel() const { return secondChannel != VK_NULL_HANDLE; }
     void ContinueSecondChannel(VkCommandBuffer commands) const;
+    const SampleOrder& HostSampleOrder() const { return sampleOrder; }
+    bool ReordersSamples() const { return Graphics::ReordersSamples(sampleOrder); }
+    bool SampleLocationsEnabled() const { return sampleLocationsEnabled; }
+    VkExtent2D HostSampleLocationGrid() const { return sampleLocationGrid; }
     void PushConstants(VkCommandBuffer commands, VkShaderStageFlags stages, std::span<const std::byte, PipelinePushConstantBytes> bytes) const;
     bool EmulatesMesh() const { return computePipeline != VK_NULL_HANDLE; }
     void DispatchMesh(VkCommandBuffer commands, std::uint32_t groups, std::uint32_t instances) const;
@@ -98,6 +102,7 @@ private:
     std::vector<std::uint32_t> colorSlots;
     bool sampleLocationsEnabled = false;
     VkExtent2D sampleLocationGrid{1, 1};
+    SampleOrder sampleOrder{};
     std::vector<CachedFramebuffer> framebuffers;
 };
 

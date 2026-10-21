@@ -226,7 +226,7 @@ public:
         return finish();
     }
 
-    std::vector<std::uint32_t> EmitEvaluation(const std::vector<std::uint32_t>& sources, const std::vector<std::uint32_t>& passed, const std::vector<bool>& passedFlat, const std::vector<PerVertexParameter>& perVertex, const BarycentricEmulationLayout& layout) {
+    std::vector<std::uint32_t> EmitEvaluation(const std::vector<std::uint32_t>& sources, const std::vector<std::uint32_t>& passed, const std::vector<bool>& passedFlat, const std::vector<PerVertexParameter>& perVertex, const BarycentricEmulationLayout& layout, std::uint32_t provokingVertex) {
         begin();
         addDomain();
         const auto tessCoord = addInterface(spv::StorageClassInput, vec3FloatType);
@@ -272,7 +272,7 @@ public:
 
         store(result(spv::OpAccessChain, ptrOutputVec4, glOut, constant(intType, 0u)), load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, glIn, index, constant(intType, 0u))));
         if (clipDistances != 0u) store(result(spv::OpAccessChain, ptrEvaluationOutputClip, glOut, constant(intType, 1u)), load(clipArrayType, result(spv::OpAccessChain, ptrEvaluationInputClip, glIn, index, constant(intType, 1u))));
-        for (std::size_t i = 0; i < passed.size(); ++i) store(passedOutputs[i], load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, inputs[passed[i]], passedFlat[i] ? constant(intType, 0u) : index)));
+        for (std::size_t i = 0; i < passed.size(); ++i) store(passedOutputs[i], load(vec4FloatType, result(spv::OpAccessChain, ptrInputVec4, inputs[passed[i]], passedFlat[i] ? constant(intType, provokingVertex) : index)));
         if (smooth != 0u) store(smooth, weights);
         if (linear != 0u) store(linear, weights);
         for (std::size_t i = 0; i < perVertex.size(); ++i) {
@@ -417,8 +417,9 @@ RecompileResult BuildBarycentricGeometryShader(const RecompileResult& vertex, co
     return result;
 }
 
-BarycentricTessellationShaders BuildBarycentricTessellationShaders(const RecompileResult& vertex, const RecompileResult& fragment, const SpirvTarget& target, std::uint32_t maxFragmentInputComponents) {
+BarycentricTessellationShaders BuildBarycentricTessellationShaders(const RecompileResult& vertex, const RecompileResult& fragment, const SpirvTarget& target, std::uint32_t maxFragmentInputComponents, std::uint32_t provokingVertex) {
     require(fragment.barycentricEmulation.active, "the fragment shader does not emulate barycentrics");
+    require(provokingVertex == 0u || provokingVertex == 2u, "the provoking vertex must be the first or the last of the triangle");
     require(target.tessellation.has_value(), "tessellation shaders are unavailable");
     require(target.spirvVersion >= 0x00010300u && target.spirvVersion <= 0x00010500u, "unsupported SPIR-V target version");
     require(std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), spv::CapabilityTessellation) != target.supportedCapabilities.end(), "tessellation capability is unavailable");
@@ -437,7 +438,7 @@ BarycentricTessellationShaders BuildBarycentricTessellationShaders(const Recompi
     const std::vector<std::uint32_t> sources(sourceSet.begin(), sourceSet.end());
     BarycentricTessellationShaders shaders;
     shaders.control.spirv = BarycentricTessellationEmitter(target.spirvVersion, clipDistances).EmitControl(sources);
-    shaders.evaluation.spirv = BarycentricTessellationEmitter(target.spirvVersion, clipDistances).EmitEvaluation(sources, emulated.passed, emulated.passedFlat, emulated.perVertex, emulated.layout);
+    shaders.evaluation.spirv = BarycentricTessellationEmitter(target.spirvVersion, clipDistances).EmitEvaluation(sources, emulated.passed, emulated.passedFlat, emulated.perVertex, emulated.layout, provokingVertex);
 #if ANYPS5_ENABLE_SPIRV_TOOLS
     shaders.control.spirv = ValidateAndOptimizeSpirv(shaders.control.spirv, target.vulkanVersion, target.spirvVersion);
     shaders.evaluation.spirv = ValidateAndOptimizeSpirv(shaders.evaluation.spirv, target.vulkanVersion, target.spirvVersion);

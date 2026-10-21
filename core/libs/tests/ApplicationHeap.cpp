@@ -238,6 +238,18 @@ int main(int argc, char** argv) {
         require(frees == 3 && initializes == 1);
         return 0;
     }
+    if (argc > 1 && std::strcmp(argv[1], "sdk-default") == 0) {
+        require(argc == 3);
+        void* sdk = dlopen(argv[2], RTLD_NOW | RTLD_GLOBAL);
+        require(sdk != nullptr && initializes == 1);
+        std::memset(replacement.data() + 0x10, 0, replacement.size() - 0x10);
+        ApplicationHeapInitialize_nid_no_patch(process.data());
+        void* pointer = ApplicationHeapAllocate_nid_no_patch(24);
+        require(pointer != nullptr && pointer != storage.data() && lastSize == 0);
+        ApplicationHeapFree_nid_no_patch(pointer);
+        require(frees == 0 && dlclose(sdk) == 0 && finalizes == 1);
+        return 0;
+    }
 #endif
     if (argc > 1 && std::strcmp(argv[1], "lazy") == 0) {
 #ifdef __APPLE__

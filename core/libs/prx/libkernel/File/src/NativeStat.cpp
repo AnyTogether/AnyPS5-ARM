@@ -30,10 +30,6 @@ static int ReadHandleInfo(HANDLE handle, NativeStat* st) {
     st->hasIdentity = GetFileInformationByHandle(handle, &st->identity) != 0;
     return 0;
 }
-static std::uint32_t FoldFileIndex(const BY_HANDLE_FILE_INFORMATION& identity) {
-    const std::uint32_t folded = identity.nFileIndexLow ^ (identity.nFileIndexHigh * 0x9E3779B1u);
-    return folded == 0 ? 1 : folded;
-}
 static int DoStat(const std::filesystem::path& p, NativeStat* st) {
     if (_wstat64(p.c_str(), st) != 0) {
         if (_doserrno == ERROR_CANT_RESOLVE_FILENAME) File::WindowsFileTime::Failure(_doserrno);
@@ -115,7 +111,7 @@ static void CopyNativeStat(const NativeStat& st, FileStat* sb) {
     }
     if (st.hasIdentity) {
         sb->st_dev = st.identity.dwVolumeSerialNumber;
-        sb->st_ino = FoldFileIndex(st.identity);
+        sb->st_ino = WindowsFileNumber_nid_no_patch(st.identity);
         sb->st_nlink = static_cast<std::uint16_t>(std::min<DWORD>(st.identity.nNumberOfLinks, 0xffff));
     }
 #else

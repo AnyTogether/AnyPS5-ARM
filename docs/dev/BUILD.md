@@ -192,7 +192,9 @@ On a device that supports `VK_EXT_device_fault`, the first `VK_ERROR_DEVICE_LOST
 
 Set `APS5_SAMPLE_WORKER=<file>` to sample queue worker 0 every millisecond (in practice every timer tick). Every 20 s and at exit it writes `<file>`, one `module offset self inclusive` line per sampled address, and `<file stem>.collapsed.txt`, the worker's whole stacks in the collapsed format that speedscope.app and flamegraph.pl read: one `frame;...;frame count` line per distinct stack, root first, each frame as `module+0xRVA`. A walk that ends before the thread's root starts with `[truncated]`. The `#` lines give the samples, the walk depth (64 frames), the truncated walks, the mean and longest time the worker was suspended, and the size and PE timestamp of each module, to check the binary a file is symbolized against. A frame with `.pdata` is stepped by `RtlVirtualUnwind`; any other frame by its DWARF record in `.ehfram`, the unwind data the libraries are built with. Those steps read only inside the worker's stack, and a module is indexed after the worker resumes, the first time a walk meets it.
 
-`APS5_SAMPLE_THREADS=<file>` samples every thread of the process every 2 ms and writes the 40 hottest addresses of each busy thread to `<file>`, 12 frames deep and through `.pdata` only. Both samplers exist only on Windows; the addresses are symbolized offline, for example with `nm` on the `.prx`.
+`APS5_SAMPLE_COMMITTER=<file>` samples queue 0's draw committer the same way and writes the same two files. The committer records the draws the worker hands over (`APS5_PIPELINED_DRAWS`), so when the worker's stacks wait in `DrawPipeline::Enqueue`, its stacks show what bounds the frame. It starts with the first pipelined draw; with `APS5_PIPELINED_DRAWS=0` nothing is sampled.
+
+`APS5_SAMPLE_THREADS=<file>` samples every thread of the process every 2 ms and writes the 40 hottest addresses of each busy thread to `<file>`, 12 frames deep and through `.pdata` only. The samplers exist only on Windows; the addresses are symbolized offline, for example with `nm` on the `.prx`.
 
 ## Performance trace
 

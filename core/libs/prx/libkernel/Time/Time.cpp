@@ -1,5 +1,6 @@
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include "prx/libkernel/Time/include/SleepWake.hpp"
 #include "prx/libkernel/Pthread/include/Cancel.hpp"
 
 #include "prx/libc/include/General.hpp"
@@ -195,12 +196,13 @@ std::uint64_t APS5_VABI sceKernelGetProcessTime() {
 }
 
 std::uint64_t APS5_VABI sceKernelGetProcessTimeCounter() {
-    const std::uint64_t start = GetStartNanos();
-    return GetMonotonicNanos() - start;
+    const std::uint64_t nanos = GetMonotonicNanos() - GetStartNanos();
+    const std::uint64_t frequency = sceKernelGetTscFrequency();
+    return nanos / 1000000000ULL * frequency + nanos % 1000000000ULL * frequency / 1000000000ULL;
 }
 
 std::uint64_t APS5_VABI sceKernelGetProcessTimeCounterFrequency() {
-    return 1000000000ULL;
+    return sceKernelGetTscFrequency();
 }
 
 static std::string DescribeCallSite(const void* caller) {
@@ -293,7 +295,7 @@ void KernelTraceWait_nid_postfix(const char* kind, const void* caller, std::uint
 
 static void CancellableSleep(std::uint64_t nanos) {
     ThreadCancel::Check();
-    TimedWait::SleepNanos(nanos);
+    SleepWake::Sleep(nanos);
     ThreadCancel::Check();
 }
 

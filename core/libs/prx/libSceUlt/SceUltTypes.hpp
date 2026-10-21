@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <list>
 #include <mutex>
@@ -19,6 +20,18 @@ constexpr int ULT_ERROR_INVALID = -2139029500;
 constexpr int ULT_ERROR_STATE = -2139029498;
 constexpr int ULT_ERROR_BUSY = -2139029497;
 constexpr int ULT_ERROR_AGAIN = -2139029496;
+
+struct UltOptParam {
+    std::uint8_t bytes[128];
+};
+
+inline int InitializeOptParam(UltOptParam* optParam) {
+    if (optParam == nullptr) {
+        return ULT_ERROR_NULL;
+    }
+    std::memset(optParam, 0, sizeof(*optParam));
+    return ULT_OK;
+}
 
 struct UltMutexState {
     std::mutex _mutex;
@@ -93,6 +106,7 @@ struct UltRuntimeState {
 struct UltUlthreadState {
     UltUlthreadEntry _entry = nullptr;
     std::uint64_t _arg = 0;
+    void* _object = nullptr;
     Pthread _thread = nullptr;
     void* _runtime = nullptr;
     std::atomic<bool> _exited{false};

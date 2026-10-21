@@ -99,20 +99,25 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     std::set<std::string> outputNames;
     for (const auto& path : paths) {
         auto image = std::move(discovered.at(path));
-        if (image.OutputName.find_first_of("$\r\n") != std::string::npos) throw Domain::RelinkerException("Unsupported guest filename: " + image.OutputName);
+        const auto fail = [&](const std::string& message) {
+            Domain::RelinkerException error(message);
+            error.InputPath = Io::Utf8Path(path);
+            throw error;
+        };
+        if (image.OutputName.find_first_of("$\r\n") != std::string::npos) fail("Unsupported guest filename: " + image.OutputName);
         std::string folded = image.OutputName;
         if (windows) {
             for (auto& value : folded) {
-                if (static_cast<unsigned char>(value) >= 128 || value == ':' || value == '$') throw Domain::RelinkerException("Unsupported Windows guest filename: " + image.OutputName);
+                if (static_cast<unsigned char>(value) >= 128 || value == ':' || value == '$') fail("Unsupported Windows guest filename: " + image.OutputName);
                 if (value >= 'A' && value <= 'Z') value = static_cast<char>(value + ('a' - 'A'));
             }
         }
-        if (!outputNames.insert(folded).second) throw Domain::RelinkerException("Conflicting guest output filename: " + image.OutputName);
+        if (!outputNames.insert(folded).second) fail("Conflicting guest output filename: " + image.OutputName);
         for (const auto& symbol : image.Symbols) {
             if (symbol.Section == 0 || symbol.Section == AbsoluteSection || (symbol.Info >> 4) == 0 || symbol.Visibility == 1 || symbol.Visibility == 2) continue;
             auto& providers = exports[symbol.Name];
             const bool repeated = !providers.empty() && providers.back().Provider == images.size();
-            if (!windows && repeated) throw Domain::RelinkerException("Duplicate guest export after stripping #: " + symbol.Name + " in " + Io::Utf8Path(path) + " and " + Io::Utf8Path(images[providers.front().Provider].SourcePath));
+            if (!windows && repeated) fail("Duplicate guest export after stripping #: " + symbol.Name + " in " + Io::Utf8Path(path) + " and " + Io::Utf8Path(images[providers.front().Provider].SourcePath));
             if (!repeated) providers.push_back({images.size(), static_cast<std::uint8_t>(symbol.Info & 15)});
             if (!windows && providers.size() > 1)
                 for (const auto& provider : providers) sharedExports[symbol.Name].insert(provider.Provider);
@@ -388,7 +393,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             addHost(dependency, windows || !deferred(index));
             if (findGuest(dependency) == guestNames.end()) hosts.push_back(dependency);
         }
-        if (!windows && !macos && images[index].Init != 0) {
+        if (!windows && !macos && images[index].HasInit) {
             if (std::find(hosts.begin(), hosts.end(), "libkernel.prx") == hosts.end()) hosts.push_back("libkernel.prx");
             if (!deferred(index) && uniqueHosts.insert("libkernel.prx").second) hostLibraries.push_back("libkernel.prx");
         }
@@ -427,7 +432,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
             if (sceImage)
                 if (const auto end = FindSceCodeEnd(code, header.MappedAddress, unwindFunctions, image.Got, image.Dynamic.RelaPltData.size()))
                     code.resize(*end - header.MappedAddress);
-            const auto unwindRanges = SceUnwindRanges(code, header.MappedAddress, unwindFunctions);
+            const auto unwindRanges = sceImage ? SceUnwindRanges(code, header.MappedAddress, unwindFunctions) : std::vector<CodeRange>{};
             for (const auto offset : syscallScanner.ScanCodeSectionForSyscalls(code, header.MappedAddress, code.size(), Io::Utf8Path(image.SourcePath), unwindRanges)) {
                 if (offset > code.size() || code.size() - offset < 2u)
                     throw Domain::RelinkerException("Syscall trap patch exceeds guest executable segment", header.MappedAddress + offset);
@@ -449,7 +454,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         runtime.Names = {Io::Utf8Path(image.SourcePath.filename()), image.Soname};
         runtime.DeferInitialization = deferred(index);
         std::vector<std::uint8_t> output;
-        if (windows) output = Elfpatcher::GuestModuleWriter().WriteWindows(image, runtime);
+        const auto message = [&](std::string_view text) { progress.Message(text); };
+        if (windows) output = Elfpatcher::GuestModuleWriter().WriteWindows(image, runtime, message);
         else {
             std::string guestRunPath = runPath;
             const auto relativeRoot = outputDirectory.lexically_relative(destination.lexically_normal()).generic_string();
@@ -465,7 +471,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
                 needed.push_back("$ORIGIN/" + dependencyPath.lexically_relative(image.SourcePath.parent_path()).generic_string());
             }
             needed.insert(needed.end(), moduleHostLibraries[index].begin(), moduleHostLibraries[index].end());
-            output = macos ? Elfpatcher::GuestModuleWriter().WriteMacOs(image, needed, guestRunPath) : Elfpatcher::GuestModuleWriter().WriteLinux(image, needed, guestRunPath);
+            output = macos ? Elfpatcher::GuestModuleWriter().WriteMacOs(image, needed, guestRunPath, message) : Elfpatcher::GuestModuleWriter().WriteLinux(image, needed, guestRunPath);
         }
         if (windows) {
             for (const auto& [name, provider] : guestNames) {

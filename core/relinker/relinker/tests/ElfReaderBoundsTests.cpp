@@ -148,6 +148,29 @@ int main() {
             const auto headers = Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
             Require(headers.size() == 2 && headers[0].Type == 1 && headers[1].Type == 7 && headers[1].MappedAddress == 0x1008);
         }},
+        {"TLS image ending at end of file", [] {
+            auto bytes = TlsFixture(0x1008, 8, 16, 8);
+            Write<std::uint64_t>(bytes, 0x2a0, 0x2f8);
+            const auto headers = Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
+            Require(headers.size() == 2 && headers[1].Offset + headers[1].FileSize == 0x300);
+        }},
+        {"empty TLS image beyond end of file", [] {
+            constexpr std::uint64_t offsets[] = {0x300, 0x301, std::numeric_limits<std::uint64_t>::max()};
+            for (const std::uint64_t offset : offsets) {
+                auto bytes = TlsFixture(0x9000, 0, 16, 16);
+                Write(bytes, 0x2a0, offset);
+                const auto headers = Relinker::ElfReader(std::move(bytes)).ReadProgramHeaders();
+                Require(headers.size() == 2 && headers[1].Offset == offset && headers[1].FileSize == 0);
+            }
+        }},
+        {"TLS file range past end of file", [] {
+            constexpr std::uint64_t offsets[] = {0x2f9, 0x300, 0x301, std::numeric_limits<std::uint64_t>::max() - 3, std::numeric_limits<std::uint64_t>::max()};
+            for (const std::uint64_t offset : offsets) {
+                auto bytes = TlsFixture(0x1008, 8, 16, 1);
+                Write(bytes, 0x2a0, offset);
+                RejectProgramHeaders(std::move(bytes));
+            }
+        }},
         {"TLS image outside load memory", [] {
             constexpr std::uint64_t addresses[] = {0x0ff8, 0x103c, 0x2000, std::numeric_limits<std::uint64_t>::max() - 3};
             for (const std::uint64_t address : addresses) {

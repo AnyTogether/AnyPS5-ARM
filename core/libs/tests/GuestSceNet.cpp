@@ -35,6 +35,8 @@ int APS5_VABI sceNetInit_nid_postfix(void);
 int APS5_VABI sceNetShowNetstatWithMemory(int);
 int APS5_VABI sceNetShowNetstat(void);
 int APS5_VABI sceNetShowIfconfig(void);
+int APS5_VABI sceNetShowRoute(void);
+int APS5_VABI sceNetShowRoute6(void);
 int APS5_VABI sceNetSocket(const char*, int, int, int);
 int APS5_VABI sceNetBind_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI sceNetListen(int, int);
@@ -73,7 +75,9 @@ int APS5_VABI sceNetResolverDestroy(int);
 int APS5_VABI sceNetShowNetstat(void);
 int APS5_VABI sceNetResolverGetError(int, int*);
 int APS5_VABI sceNetClearDnsCache(int);
+int APS5_VABI sceNetGetDnsInfo(std::uint32_t*, int);
 int APS5_VABI sceNetCtlGetState(int*);
+int APS5_VABI sceNetCtlGetInfo(int, NetCtlInfo*);
 int APS5_VABI sceNetCtlGetIfStat(NetCtlIfStat*);
 int APS5_VABI sceNetCtlRegisterCallback(NetCtlCallback, void*, int*);
 int APS5_VABI sceNetCtlUnregisterCallback(int);
@@ -146,6 +150,10 @@ static void APS5_VABI IgnoreNetCtlEvent(int, void*) {}
 
 static bool Failed(std::int64_t result, int error) {
     return result == static_cast<int>(0x80410100u | static_cast<unsigned>(error)) && *sceNetErrnoLoc() == error;
+}
+
+static void CheckSocketHostErrors() {
+    Require(Failed(sceNetSocket(nullptr, 2, 1, 17), 43));
 }
 
 static void CheckStreamSender(int family) {
@@ -236,6 +244,8 @@ static std::string CaptureNetstat(int pool) {
 static void CheckNetstat() {
     Require(sceNetShowNetstat() == 0);
     Require(sceNetShowIfconfig() == 0);
+    Require(sceNetShowRoute() == 0);
+    Require(sceNetShowRoute6() == 0);
     Require(Failed(sceNetShowNetstatWithMemory(-1), 9));
     const int pool = sceNetPoolCreate("netstat", 4096, 0);
     Require(pool > 0);
@@ -1434,6 +1444,7 @@ int main() {
     }
     Require(sceNetInit_nid_postfix() == 0);
     CheckEpollWritable();
+    CheckSocketHostErrors();
     CheckPoolStats();
     CheckIfName();
     CheckRandom();
@@ -1885,6 +1896,34 @@ int main() {
             missing = true;
         }
         Require(missing);
+    }
+    {
+        std::array<std::uint32_t, 3> dns{};
+        dns.fill(0xA5A5A5A5u);
+        const int count = sceNetGetDnsInfo(dns.data(), 0);
+        Require(count >= 0 && count <= 2 && dns[2] == 0xA5A5A5A5u);
+        Require(count == 0 || state == 3);
+        for (int index = count; index < 2; ++index) Require(dns[index] == 0);
+        for (int index = 0; index < 2; ++index) {
+            NetCtlInfo info{};
+            const int result = sceNetCtlGetInfo(17 + index, &info);
+            if (result != 0) {
+                Require(result == static_cast<int>(0x80412108) && count == 0);
+                continue;
+            }
+            const auto* bytes = reinterpret_cast<const std::uint8_t*>(&dns[index]);
+            char text[16] = {};
+            std::snprintf(text, sizeof(text), "%u.%u.%u.%u", static_cast<unsigned>(bytes[0]), static_cast<unsigned>(bytes[1]), static_cast<unsigned>(bytes[2]), static_cast<unsigned>(bytes[3]));
+            Require(std::strcmp(text, reinterpret_cast<const char*>(info.opaque)) == 0);
+        }
+        for (const int flags : {0x1, -1}) {
+            bool threw = false;
+            try { sceNetGetDnsInfo(dns.data(), flags); } catch (const std::runtime_error&) { threw = true; }
+            Require(threw);
+        }
+        bool threw = false;
+        try { sceNetGetDnsInfo(nullptr, 0); } catch (const std::runtime_error&) { threw = true; }
+        Require(threw);
     }
     NetCtlIfStat first{};
     first.device = 7;

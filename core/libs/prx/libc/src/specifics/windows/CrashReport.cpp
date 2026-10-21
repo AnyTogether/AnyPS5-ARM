@@ -481,6 +481,16 @@ void ReportCallTrace() {
         Report("    #%llu thread %llu %s %s from %s\n", static_cast<unsigned long long>(entries[index].sequence),
             static_cast<unsigned long long>(entries[index].thread), entries[index].library, entries[index].name, line);
     }
+    static CallTraceEntry own[32];
+    const std::uint64_t thread = GetCurrentThreadId();
+    const std::size_t owned = CopyThreadCallTrace_nid_no_patch(thread, own, std::size(own));
+    if (owned != 0) {
+        Report("  last traced calls of thread %llu:\n", static_cast<unsigned long long>(thread));
+        for (std::size_t index = 0; index < owned; ++index) {
+            DescribeAddress(own[index].returnAddress, line, sizeof(line));
+            Report("    #%llu %s %s from %s\n", static_cast<unsigned long long>(own[index].sequence), own[index].library, own[index].name, line);
+        }
+    }
     static CallTraceCount counts[32];
     std::uint64_t total = 0;
     const std::size_t counted = CopyCallCounts_nid_no_patch(counts, std::size(counts), &total);

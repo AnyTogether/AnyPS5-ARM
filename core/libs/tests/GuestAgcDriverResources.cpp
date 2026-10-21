@@ -37,6 +37,9 @@ int APS5_VABI sceAgcDriverGetSubmitValidationConfig(void*);
 int APS5_VABI sceAgcDriverRequestCaptureStart(const char*);
 int APS5_VABI sceAgcDriverRequestCaptureStop(void);
 int APS5_VABI sceAgcDriverTriggerCapture(void);
+int APS5_VABI sceAgcDriverRegisterOwnerForSystem();
+int APS5_VABI sceAgcDriverInitResourceRegistrationInterface();
+int APS5_VABI sceAgcDriverSetResourceRegistrationInfo();
 }
 
 static constexpr int Unavailable = static_cast<int>(0x8A6C9018);
@@ -119,4 +122,7 @@ int main() {
     Require(!sceAgcDriverIsCaptureInProgress());
     Require(!sceAgcDriverIsTraceInProgress());
     Require(!sceAgcDriverIsSubmitValidationEnabled());
+    Require(sceAgcDriverRegisterOwnerForSystem() == Unavailable);
+    Require(sceAgcDriverInitResourceRegistrationInterface() == Unavailable);
+    Require(sceAgcDriverSetResourceRegistrationInfo() == 0);
 }

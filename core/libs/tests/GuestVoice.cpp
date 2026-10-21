@@ -21,6 +21,8 @@ int APS5_VABI sceVoiceReadFromOPort(std::uint32_t, void*, std::uint32_t*);
 int APS5_VABI sceVoiceResetPort(std::uint32_t);
 int APS5_VABI sceVoicePausePort(std::uint32_t);
 int APS5_VABI sceVoiceResumePort(std::uint32_t);
+int APS5_VABI sceVoicePausePortAll(void);
+int APS5_VABI sceVoiceResumePortAll(void);
 int APS5_VABI sceVoiceGetResourceInfo(VoiceResourceInfo*);
 int APS5_VABI sceVoiceEnableChat(void);
 int APS5_VABI sceVoiceDisableChat(void);
@@ -58,6 +60,8 @@ void TestNotInitialized() {
     VoicePortInfo sentinel = info;
     Require(sceVoiceGetPortInfo(0, &info) == NotInitialized);
     Require(std::memcmp(&info, &sentinel, sizeof(info)) == 0);
+    Require(sceVoicePausePortAll() == NotInitialized);
+    Require(sceVoiceResumePortAll() == NotInitialized);
 }
 
 std::uint32_t CreatePort(std::int32_t type, float volume) {
@@ -113,6 +117,12 @@ int main() {
     Require(paused.port_type == before.port_type && paused.state == before.state && paused.frame_size == before.frame_size);
     Require(sceVoiceResumePort(input) == 0);
     Require(sceVoiceResumePort(output) == 0);
+    Require(sceVoicePausePortAll() == 0);
+    Require(sceVoicePausePortAll() == 0);
+    Require(sceVoiceGetPortInfo(input, &paused) == 0);
+    Require(paused.port_type == before.port_type && paused.state == before.state && paused.frame_size == before.frame_size);
+    Require(sceVoiceResumePortAll() == 0);
+    Require(sceVoiceResumePortAll() == 0);
     RequireThrows([&] { sceVoicePausePort(output + 1); });
     RequireThrows([&] { sceVoiceResumePort(output + 1); });
 
