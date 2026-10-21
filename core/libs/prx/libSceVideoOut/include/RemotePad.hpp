@@ -24,6 +24,7 @@ constexpr auto Silence = std::chrono::milliseconds(500);
 struct Input {
     std::uint32_t sequence = 0;
     std::uint64_t sentMicros = 0;
+    std::uint32_t waitMicros = 0;
     PadInputState state{};
 };
 
@@ -32,6 +33,7 @@ std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOu
 std::array<std::uint8_t, HelloSize> EncodeHello();
 bool IsNewer(std::uint32_t sequence, std::uint32_t than);
 PadInputState Merge(const PadInputState& controller, const PadInputState& remote);
+PadInputState Current(const std::optional<Input>& last, std::chrono::steady_clock::time_point seen, std::chrono::steady_clock::time_point now);
 
 class Channel {
 public:

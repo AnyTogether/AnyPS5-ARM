@@ -233,6 +233,30 @@ void olderSequenceIsIgnored() {
     require(!channel.Poll(now), "an older input is ignored");
 }
 
+void answerTellsHowLongTheInputWaited() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    launcher.send(fullPacket(3), channel.Port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    const auto input = channel.Poll(std::chrono::steady_clock::now());
+    require(input && input->waitMicros >= 25000 && input->waitMicros < 1000000, "the time the input waited in the socket is measured");
+    channel.Answer(*input, PadOutputState{});
+    const auto output = launcher.receive();
+    require(output && get<std::uint32_t>(output->data(), 12) == input->waitMicros, "the answer carries the wait");
+}
+
+void remoteReleasedAfterSilence() {
+    const auto seen = std::chrono::steady_clock::now();
+    RemotePad::Input input;
+    input.state.buttons = 0x4000;
+    input.state.sticks[0] = 255;
+    require(RemotePad::Current(input, seen, seen + std::chrono::milliseconds(499)).buttons == 0x4000u, "a recent input holds");
+    const auto released = RemotePad::Current(input, seen, seen + std::chrono::milliseconds(500));
+    require(released.buttons == 0 && released.sticks == PadInputState{}.sticks, "half a second of silence releases everything");
+    const auto none = RemotePad::Current(std::nullopt, seen, seen);
+    require(none.buttons == 0 && none.sticks == PadInputState{}.sticks, "no input is released");
+}
+
 void environment() {
     ::unsetenv("ANYPS5_REMOTE_PAD");
     require(RemotePad::OpenFromEnvironment() == nullptr, "no channel without ANYPS5_REMOTE_PAD");
@@ -263,6 +287,8 @@ int main() try {
     loopbackChannel();
     greetsUntilTheFirstInput();
     olderSequenceIsIgnored();
+    answerTellsHowLongTheInputWaited();
+    remoteReleasedAfterSilence();
     environment();
     std::cout << "remote pad tests passed\n";
     return 0;

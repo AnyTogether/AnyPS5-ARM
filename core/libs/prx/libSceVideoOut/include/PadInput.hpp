@@ -6,7 +6,10 @@
 #include "prx/libScePad/include/KeyboardMouse.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
+#include "prx/libSceVideoOut/include/RemotePad.hpp"
 #include <chrono>
+#include <memory>
+#include <optional>
 #include "prx/libSceVideoOut/include/Telemetry.hpp"
 
 class DisplayWindow;
@@ -29,6 +32,7 @@ private:
     PadInputState sampleController() const;
     void applyOutput();
     void enableSensors();
+    void updateRemote();
 
     Pad::KeyboardMouse keyboardMouse;
     SDL_GameController* controller = nullptr;
@@ -40,6 +44,10 @@ private:
     std::chrono::steady_clock::time_point nextRumbleRefresh{};
     LightBarPacer lightBar;
     TriggerEffectCache triggerEffect;
+    std::unique_ptr<RemotePad::Channel> remote;
+    std::optional<RemotePad::Input> remoteLast;
+    std::chrono::steady_clock::time_point remoteSeen{};
+    PadInputState remoteState{};
 };
 
 #endif

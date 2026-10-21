@@ -1,4 +1,5 @@
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <charconv>
@@ -11,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 namespace RemotePad {
@@ -83,6 +85,7 @@ std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOu
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(OutputSize));
     write<std::uint32_t>(bytes.data(), 8, last.sequence);
+    write<std::uint32_t>(bytes.data(), 12, last.waitMicros);
     write<std::uint64_t>(bytes.data(), 16, last.sentMicros);
     bytes[24] = std::max(output.vibrationLarge, output.audioVibrationLarge);
     bytes[25] = std::max(output.vibrationSmall, output.audioVibrationSmall);
@@ -127,6 +130,11 @@ PadInputState Merge(const PadInputState& controller, const PadInputState& remote
     return merged;
 }
 
+PadInputState Current(const std::optional<Input>& last, std::chrono::steady_clock::time_point seen, std::chrono::steady_clock::time_point now) {
+    if (!last || now - seen >= Silence) return PadInputState{};
+    return last->state;
+}
+
 Channel::Channel(std::uint16_t launcherPort) : launcherPort(launcherPort) {
     socket = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (socket < 0) throw std::runtime_error(std::string("remote pad: cannot open a socket: ") + std::strerror(errno));
@@ -134,7 +142,9 @@ Channel::Channel(std::uint16_t launcherPort) : launcherPort(launcherPort) {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     socklen_t length = sizeof(address);
-    if (::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
+    const int stamped = 1;
+    if (::setsockopt(socket, SOL_SOCKET, SO_TIMESTAMP, &stamped, sizeof(stamped)) != 0 ||
+        ::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
         ::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &length) != 0 ||
         ::fcntl(socket, F_SETFL, ::fcntl(socket, F_GETFL) | O_NONBLOCK) != 0) {
         const auto error = std::string(std::strerror(errno));
@@ -151,11 +161,27 @@ Channel::~Channel() {
 std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
     std::optional<Input> result;
     std::array<std::uint8_t, InputSize + 1> buffer{};
+    alignas(cmsghdr) std::array<std::uint8_t, CMSG_SPACE(sizeof(timeval))> control{};
     while (true) {
-        const auto got = ::recv(socket, buffer.data(), buffer.size(), 0);
+        iovec vector{buffer.data(), buffer.size()};
+        msghdr message{};
+        message.msg_iov = &vector;
+        message.msg_iovlen = 1;
+        message.msg_control = control.data();
+        message.msg_controllen = static_cast<socklen_t>(control.size());
+        const auto got = ::recvmsg(socket, &message, 0);
         if (got < 0) break;
         auto input = DecodeInput(std::span<const std::uint8_t>(buffer.data(), static_cast<std::size_t>(got)));
         if (!input || (newest && !IsNewer(input->sequence, *newest))) continue;
+        for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header)) {
+            if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_TIMESTAMP) continue;
+            timeval arrived{};
+            std::memcpy(&arrived, CMSG_DATA(header), sizeof(arrived));
+            timeval current{};
+            ::gettimeofday(&current, nullptr);
+            const auto waited = (static_cast<std::int64_t>(current.tv_sec) - arrived.tv_sec) * 1000000 + (static_cast<std::int64_t>(current.tv_usec) - arrived.tv_usec);
+            input->waitMicros = static_cast<std::uint32_t>(std::clamp<std::int64_t>(waited, 0, 0xFFFFFFFF));
+        }
         newest = input->sequence;
         result = input;
     }

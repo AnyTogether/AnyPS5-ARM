@@ -85,7 +85,7 @@ std::uint32_t ScriptedButtons() {
 PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 }
 
-PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
+PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)), remote(RemotePad::OpenFromEnvironment()) {
     openFirstAvailableController();
 }
 
@@ -149,6 +149,7 @@ void PadInput::applyOutput() {
         outputState = fetched;
         outputPending = true;
         if (motionChanged) enableSensors();
+        if (remote && remoteLast) remote->Answer(*remoteLast, outputState);
     }
     if (controller == nullptr) return;
     const auto now = std::chrono::steady_clock::now();
@@ -306,9 +307,28 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     if (event.type != SDL_MOUSEMOTION) publish(window.FrameNumber());
 }
 
+void PadInput::updateRemote() {
+    if (!remote) return;
+    const auto now = std::chrono::steady_clock::now();
+    remote->Greet(now);
+    if (auto input = remote->Poll(now)) {
+        remoteLast = std::move(input);
+        remoteSeen = now;
+        remote->Answer(*remoteLast, outputState);
+    }
+    remoteState = RemotePad::Current(remoteLast, remoteSeen, now);
+}
+
 void PadInput::Update(const DisplayWindow& window) {
     if (controller != nullptr) SDL_GameControllerUpdate();
     applyOutput();
+    const auto remoteBefore = remoteState;
+    updateRemote();
+    if (remoteState.buttons != remoteBefore.buttons || remoteState.sticks != remoteBefore.sticks ||
+        remoteState.analogButtonsL2 != remoteBefore.analogButtonsL2 || remoteState.analogButtonsR2 != remoteBefore.analogButtonsR2 ||
+        remoteState.touch != remoteBefore.touch || remoteState.hasMotion) {
+        publish(window.FrameNumber());
+    }
     static std::uint32_t scripted = 0;
     if (const auto buttons = ScriptedButtons(); buttons != scripted) {
         scripted = buttons;
@@ -326,7 +346,7 @@ void PadInput::Update(const DisplayWindow& window) {
 }
 
 void PadInput::publish(std::uint64_t frame) {
-    auto state = keyboardMouse.Compose(controllerState);
+    auto state = keyboardMouse.Compose(RemotePad::Merge(controllerState, remoteState));
     state.buttons |= ScriptedButtons();
     PadPublishInput_nid_postfix(state);
     if (auto* telemetry = VideoOutTelemetry::Instance(); telemetry != nullptr) VideoOutTelemetry::EmitPadIfChanged(*telemetry, telemetryFilter, frame, state);
