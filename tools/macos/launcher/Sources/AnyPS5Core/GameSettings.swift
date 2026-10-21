@@ -28,11 +28,16 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// Keys moved from the launcher's layout (Controls), by pad action. Optional so settings saved
     /// before it existed still decode.
     public var controls: [String: [String]]?
+    /// Stick, mouse and keyboard stick settings, nil for the engine's defaults.
+    public var tuning: InputTuning?
+    /// False turns off the shader and pipeline caches (ANYPS5_NO_SHADER_CACHE).
+    public var shaderCache: Bool?
 
     public init() {}
 
-    /// The environment a game starts with; `inputFile` is the anyps5-input.ini written for it.
-    public func environment(launcherLanguage: Int, inputFile: URL? = nil) -> [String: String] {
+    /// The environment a game starts with; `inputFile` is the anyps5-input.ini written for it,
+    /// `screenshots` and `fonts` the launcher's folders for F12 screenshots and system fonts.
+    public func environment(launcherLanguage: Int, inputFile: URL? = nil, screenshots: URL? = nil, fonts: URL? = nil) -> [String: String] {
         var environment: [String: String] = [
             "ANYPS5_FULLSCREEN": fullscreen ? "1" : "0",
             "ANYPS5_WINDOW_SIZE": String(min(100, max(30, windowSize))),
@@ -45,13 +50,16 @@ public struct GameSettings: Codable, Equatable, Sendable {
         }
         if let resolution { environment["APS5_RESOLUTION"] = resolution }
         if let inputFile { environment["ANYPS5_INPUT_CONFIG"] = inputFile.path }
+        if let screenshots { environment["ANYPS5_SCREENSHOTS"] = screenshots.path }
+        if let fonts { environment["ANYPS5_SYSTEM_FONTS"] = fonts.path }
+        if shaderCache == false { environment["ANYPS5_NO_SHADER_CACHE"] = "1" }
         return environment
     }
 
     /// Writes the game's keyboard and mouse layout to `file` for ANYPS5_INPUT_CONFIG.
     public func writeInputFile(to file: URL) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(Controls.file(controls ?? [:]).utf8).write(to: file, options: .atomic)
+        try Data(Controls.file(controls ?? [:], tuning: tuning ?? InputTuning()).utf8).write(to: file, options: .atomic)
     }
 }
 

@@ -1,6 +1,7 @@
 import AnyPS5Core
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// What the user chose, kept in UserDefaults.
 struct Preferences: Codable, Equatable {
@@ -18,6 +19,10 @@ struct Preferences: Codable, Equatable {
     var hideWhilePlaying = false
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
+    /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
+    var screenshotsFolder: String?
+    /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
+    var fontsFolder: String?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -60,6 +65,7 @@ enum Overlay: Equatable {
     case confirmUninstall
     case controls
     case trophies
+    case advanced
 }
 
 struct Toast: Identifiable, Equatable {
@@ -103,6 +109,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var sizes: [String: Int64] = [:]
     @Published private(set) var installedRecords: [String: InstallRecord] = [:]
     @Published private(set) var trophies: [String: TrophySet] = [:]
+    /// Why each game stopped the last time it was started, when it stopped on an error.
+    @Published private(set) var diagnoses: [String: Diagnosis] = [:]
     @Published var toast: Toast?
     @Published var active = true
     @Published private(set) var rosettaMissing = false
@@ -115,6 +123,7 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
+    private var starts: [String: Date] = [:]
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
@@ -415,7 +424,10 @@ final class AppModel: ObservableObject {
         let inputFile = AppModel.inputFile(for: game)
         // Without the file the game keeps the engine's built-in keys.
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil)
+        let screenshots = screenshotsFolder
+        try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+        markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -427,6 +439,7 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.watchTrophies(game)
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
                 } else {
@@ -457,7 +470,7 @@ final class AppModel: ObservableObject {
             NSApp.yieldActivation(to: app)
             app.activate()
             withAnimation(Motion.overlay) { starting = nil }
-            if preferences.hideWhilePlaying { NSApp.hide(nil) }
+            if preferences.hideWhilePlaying { hideWindows() }
         }
     }
 
@@ -498,15 +511,207 @@ final class AppModel: ObservableObject {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
         loadTrophies(running.game, again: true)
+        diagnose(running.game)
+        trophyWatch?.cancel()
+        trophyWatch = nil
         exitWatch?.cancel()
         exitWatch = nil
         if starting != nil {
             startWatch?.cancel()
             withAnimation(Motion.overlay) { starting = nil }
-            show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
+            startedWithoutWindow = true
         }
-        NSApp.unhide(nil)
+        showWindows()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: Trophy notifications
+
+    private var trophyWatch: Task<Void, Never>?
+    private var hiddenWindows: [NSWindow] = []
+
+    /// Checks the game's trophy records every second while it runs and shows each new one at the
+    /// top of the screen, over the game.
+    private func watchTrophies(_ game: Game) {
+        trophyWatch?.cancel()
+        guard let root else { return }
+        let bundle = Installer.bundle(for: game, root: root)
+        let languages = trophyLanguages(game)
+        trophyWatch = Task.detached(priority: .utility) {
+            var known = Trophies.earned(bundle: bundle)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                let now = Trophies.earned(bundle: bundle)
+                let fresh = now.subtracting(known)
+                known = now
+                guard !fresh.isEmpty, let set = Trophies.load(game, bundle: bundle, languages: languages) else { continue }
+                let earned = set.trophies.filter { fresh.contains($0.id) }
+                await MainActor.run {
+                    self.trophies[game.id] = set
+                    for trophy in earned { TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds) }
+                }
+            }
+        }
+    }
+
+    /// The launcher's windows step aside while a game runs. The app itself stays unhidden: a
+    /// hidden app's windows, the trophy banner among them, never show.
+    private func hideWindows() {
+        hiddenWindows = NSApp.windows.filter { $0.isVisible && !($0 is NSPanel) }
+        for window in hiddenWindows { window.orderOut(nil) }
+    }
+
+    private func showWindows() {
+        for window in hiddenWindows { window.makeKeyAndOrderFront(nil) }
+        hiddenWindows = []
+    }
+
+    // MARK: Diagnosis
+
+    /// Set when the game that just ended never showed a window, so the toast says it did not start.
+    private var startedWithoutWindow = false
+
+    nonisolated static func logFile(for game: Game) -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/\(game.titleID).log")
+    }
+
+    /// The log line the diagnosis reads from, so only this start's output counts.
+    private func markStart(of game: Game) {
+        diagnoses[game.id] = nil
+        starts[game.id] = Date()
+        let file = AppModel.logFile(for: game)
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\n"
+        if let handle = try? FileHandle(forWritingTo: file) {
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: file)
+        }
+    }
+
+    /// The log of the game's last start, read from the end of its log file.
+    nonisolated static func lastSession(of game: Game) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: logFile(for: game)) else { return "" }
+        defer { try? handle.close() }
+        let end = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: end > 4_000_000 ? end - 4_000_000 : 0)
+        return Diagnosis.lastSession(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
+    }
+
+    private func diagnose(_ game: Game) {
+        let start = starts[game.id] ?? Date().addingTimeInterval(-600)
+        let withoutWindow = startedWithoutWindow
+        startedWithoutWindow = false
+        Task.detached(priority: .userInitiated) {
+            // macOS writes the crash report a moment after the process is gone.
+            try? await Task.sleep(for: .seconds(1.5))
+            let report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
+            let found = Diagnosis.read(session: AppModel.lastSession(of: game), crashReport: report)
+            await MainActor.run {
+                self.diagnoses[game.id] = found
+                if let found {
+                    self.show(game.name + ": " + found.summary, symbol: "exclamationmark.triangle.fill")
+                } else if withoutWindow {
+                    self.show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
+                }
+            }
+        }
+    }
+
+    /// Writes a report for a bug report or a Discord message and shows it in Finder.
+    func makeReport(_ game: Game) {
+        let settings = settings(for: game)
+        let diagnosis = diagnoses[game.id]?.summary
+        let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let toolkitVersion = toolkit?.version ?? "none"
+        let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
+        Task.detached(priority: .userInitiated) {
+            let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
+            let text = DiagnosticReport.text(game: game, settings: settings, launcherVersion: launcher, toolkitVersion: toolkitVersion,
+                                             diagnosis: diagnosis, session: AppModel.lastSession(of: game), crashReport: crash)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd-HHmmss"
+            let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/Reports")
+            let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).txt")
+            let written = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+                && (try? Data(text.utf8).write(to: file)) != nil
+            await MainActor.run {
+                if written {
+                    NSWorkspace.shared.activateFileViewerSelecting([file])
+                    self.show(T.text(.reportSaved), symbol: "doc.badge.checkmark")
+                } else {
+                    self.show(T.text(.reportFailed), symbol: "exclamationmark.triangle.fill")
+                }
+            }
+        }
+    }
+
+    // MARK: Sharing settings
+
+    func exportSettings(_ game: Game) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "\(game.name) - AnyPS5.json".replacingOccurrences(of: "/", with: "-")
+        panel.prompt = T.text(.exportSettings)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try SharedSettings(game: game, settings: settings(for: game)).data().write(to: url, options: .atomic)
+            show(T.text(.settingsExported), symbol: "square.and.arrow.up")
+        } catch {
+            show(T.text(.settingsFileFailed), symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
+    func importSettings(_ game: Game) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.prompt = T.text(.importSettings)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url), let shared = try? SharedSettings.read(data) else {
+            show(T.text(.settingsFileFailed), symbol: "exclamationmark.triangle.fill")
+            return
+        }
+        var imported = shared.settings
+        // A resolution only applies to the title whose patch offers it.
+        if let resolution = imported.resolution, !resolutionChoices(for: game).contains(resolution) { imported.resolution = nil }
+        update(game) { $0 = imported }
+        show(shared.titleID == game.titleID ? T.text(.settingsImported) : T.format(.settingsImportedOther, shared.game), symbol: "square.and.arrow.down")
+    }
+
+    // MARK: Folders
+
+    var screenshotsFolder: URL {
+        preferences.screenshotsFolder.map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/AnyPS5")
+    }
+
+    var fontsFolder: URL? { preferences.fontsFolder.map { URL(fileURLWithPath: $0) } }
+
+    private func chooseDirectory(start: URL?) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = T.text(.pickFolder)
+        panel.directoryURL = start
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    func chooseScreenshotsFolder() {
+        if let url = chooseDirectory(start: screenshotsFolder) { preferences.screenshotsFolder = url.path }
+    }
+
+    func chooseFontsFolder() {
+        if let url = chooseDirectory(start: fontsFolder) { preferences.fontsFolder = url.path }
+    }
+
+    func showScreenshots() {
+        try? FileManager.default.createDirectory(at: screenshotsFolder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(screenshotsFolder)
     }
 
     // MARK: Files
@@ -541,6 +746,8 @@ final class AppModel: ObservableObject {
         // The controls panel opens on its first key, below the hint.
         if next == .controls { panelRow = 1 }
         if next == .trophies { trophyIndex = 0 }
+        if next == .advanced { panelRow = 1 }
+        panelInRows = panelInRows || next == .advanced
         withAnimation(Motion.overlay) { overlay = next }
         Sounds.shared.play(.select)
     }

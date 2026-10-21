@@ -82,6 +82,18 @@ public enum Trophies {
         return trophies.isEmpty ? nil : TrophySet(title: title, icon: setIcon, trophies: trophies)
     }
 
+    /// Every trophy the engine recorded as earned in the installed game, by trophy id
+    /// (`<service label>/<number>`, as TrophySet.Trophy.id), cheap enough to read every second.
+    public static func earned(bundle: URL) -> Set<String> {
+        let records = bundle.appendingPathComponent("Contents/Resources/game/_trophy")
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: records.path) else { return [] }
+        var labels = Set<Int>()
+        for name in names where name.hasSuffix(recordSuffix) && !name.hasSuffix(statsSuffix) {
+            if let label = name.dropLast(recordSuffix.count).split(separator: "_").last.flatMap({ Int($0) }) { labels.insert(label) }
+        }
+        return Set(labels.flatMap { label in unlocked(in: records, label: label).keys.map { "\(label)/\($0)" } })
+    }
+
     /// The trophy package's files: a big-endian table of names, offsets and sizes.
     static func readUcp(_ data: Data) -> [String: Data]? {
         let bytes = [UInt8](data)

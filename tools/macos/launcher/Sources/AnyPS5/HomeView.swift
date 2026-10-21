@@ -323,6 +323,13 @@ struct HeroInfo: View {
                         .foregroundStyle(Color(red: 1, green: 0.7, blue: 0.65))
                         .lineLimit(2)
                         .frame(maxWidth: 520 * scale, alignment: .leading)
+                } else if let diagnosis = model.diagnoses[game.id] {
+                    Label(diagnosis.summary, systemImage: "exclamationmark.triangle.fill")
+                        .font(.display(14 * scale))
+                        .foregroundStyle(Color(red: 1, green: 0.78, blue: 0.5))
+                        .lineLimit(2)
+                        .frame(maxWidth: 520 * scale, alignment: .leading)
+                        .transition(.opacity)
                 }
             }
             .animation(Motion.layout, value: state)
@@ -465,10 +472,21 @@ struct LogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18 * scale) {
-            HStack {
+            HStack(spacing: 14 * scale) {
                 Text(T.text(.logTitle) + (model.selectedGame.map { " · " + $0.name } ?? "")).font(.display(30 * scale, .light)).foregroundStyle(.white)
                 Spacer()
+                if let game = model.selectedGame {
+                    ConsoleButton(title: T.text(.makeReport), symbol: "stethoscope", focused: false) { model.makeReport(game) }
+                }
                 ConsoleButton(title: T.text(.close), symbol: "xmark", focused: true) { model.closeOverlay() }
+            }
+            if let diagnosis = model.selectedGame.flatMap({ model.diagnoses[$0.id] }) {
+                Label(diagnosis.summary, systemImage: "exclamationmark.triangle.fill")
+                    .font(.display(16 * scale, .medium))
+                    .foregroundStyle(Color(red: 1, green: 0.78, blue: 0.5))
+                    .padding(16 * scale)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glass(14 * scale, opacity: 0.5)
             }
             ScrollView {
                 Text(model.logText)
@@ -518,7 +536,7 @@ extension AppModel {
         switch overlay {
         case .settings, .gameSettings, .confirmUninstall:
             return panelCommand(command)
-        case .controls:
+        case .controls, .advanced:
             if command == .back || command == .options {
                 backToGameSettings()
                 return true

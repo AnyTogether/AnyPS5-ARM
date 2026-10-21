@@ -8,6 +8,71 @@ public enum PadAction: String, CaseIterable, Codable, Sendable {
     case up = "Up", down = "Down", left = "Left", right = "Right"
     case leftStickUp = "LeftStickUp", leftStickDown = "LeftStickDown", leftStickLeft = "LeftStickLeft", leftStickRight = "LeftStickRight"
     case rightStickUp = "RightStickUp", rightStickDown = "RightStickDown", rightStickLeft = "RightStickLeft", rightStickRight = "RightStickRight"
+    /// Held, the keyboard sticks tilt only by the tuning's stick modifier scale, for walking.
+    case stickModifier = "StickModifier"
+}
+
+/// The input file's settings for the controller sticks, the mouse as the right stick and the
+/// keyboard sticks, in the steps the launcher shows them: whole percentages, tenths and
+/// milliseconds. The defaults are the engine's, and only changed ones are written.
+public struct InputTuning: Codable, Equatable, Sendable {
+    public var leftDeadzone = 0
+    public var rightDeadzone = 0
+    public var mouseSensitivity = 10
+    public var mouseVerticalScale = 10
+    public var mouseCurve = 10
+    public var mouseDeadzoneOffset = 20
+    public var mouseMaxSpeed = 10
+    public var mouseSmoothingMs = 10
+    public var mouseDecayMs = 30
+    public var stickModifierScale = 50
+    public var keyboardRampMs = 0
+    public var triggerRampMs = 0
+
+    public init() {}
+
+    /// Settings saved by an older launcher miss the newer fields, which keep their defaults.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = InputTuning()
+        func read(_ key: CodingKeys, _ fallback: Int) throws -> Int { try values.decodeIfPresent(Int.self, forKey: key) ?? fallback }
+        leftDeadzone = try read(.leftDeadzone, defaults.leftDeadzone)
+        rightDeadzone = try read(.rightDeadzone, defaults.rightDeadzone)
+        mouseSensitivity = try read(.mouseSensitivity, defaults.mouseSensitivity)
+        mouseVerticalScale = try read(.mouseVerticalScale, defaults.mouseVerticalScale)
+        mouseCurve = try read(.mouseCurve, defaults.mouseCurve)
+        mouseDeadzoneOffset = try read(.mouseDeadzoneOffset, defaults.mouseDeadzoneOffset)
+        mouseMaxSpeed = try read(.mouseMaxSpeed, defaults.mouseMaxSpeed)
+        mouseSmoothingMs = try read(.mouseSmoothingMs, defaults.mouseSmoothingMs)
+        mouseDecayMs = try read(.mouseDecayMs, defaults.mouseDecayMs)
+        stickModifierScale = try read(.stickModifierScale, defaults.stickModifierScale)
+        keyboardRampMs = try read(.keyboardRampMs, defaults.keyboardRampMs)
+        triggerRampMs = try read(.triggerRampMs, defaults.triggerRampMs)
+    }
+
+    /// `Setting = Value` lines for the settings that differ from the engine's defaults, clamped
+    /// to the ranges the engine accepts.
+    public var lines: [String] {
+        let defaults = InputTuning()
+        func clamp(_ value: Int, _ range: ClosedRange<Int>) -> Int { min(range.upperBound, max(range.lowerBound, value)) }
+        func tenths(_ value: Int) -> String { String(Double(value) / 10) }
+        func hundredths(_ value: Int) -> String { String(Double(value) / 100) }
+        let settings: [(String, Int, Int, (Int) -> String)] = [
+            ("LeftStickDeadzone", clamp(leftDeadzone, 0...90), defaults.leftDeadzone, String.init),
+            ("RightStickDeadzone", clamp(rightDeadzone, 0...90), defaults.rightDeadzone, String.init),
+            ("MouseSensitivity", clamp(mouseSensitivity, 1...100), defaults.mouseSensitivity, tenths),
+            ("MouseVerticalScale", clamp(mouseVerticalScale, 1...100), defaults.mouseVerticalScale, tenths),
+            ("MouseCurve", clamp(mouseCurve, 2...50), defaults.mouseCurve, tenths),
+            ("MouseDeadzoneOffset", clamp(mouseDeadzoneOffset, 0...90), defaults.mouseDeadzoneOffset, hundredths),
+            ("MouseMaxSpeed", clamp(mouseMaxSpeed, 1...100), defaults.mouseMaxSpeed, tenths),
+            ("MouseSmoothingMs", clamp(mouseSmoothingMs, 0...500), defaults.mouseSmoothingMs, String.init),
+            ("MouseDecayMs", clamp(mouseDecayMs, 1...1000), defaults.mouseDecayMs, String.init),
+            ("StickModifierScale", clamp(stickModifierScale, 5...100), defaults.stickModifierScale, hundredths),
+            ("KeyboardRampMs", clamp(keyboardRampMs, 0...2000), defaults.keyboardRampMs, String.init),
+            ("TriggerRampMs", clamp(triggerRampMs, 0...2000), defaults.triggerRampMs, String.init),
+        ]
+        return settings.filter { $0.1 != $0.2 }.map { "\($0.0) = \($0.3($0.1))" }
+    }
 }
 
 /// The keyboard and mouse layout a game starts with: the launcher's own layout, with the keys the user
@@ -64,13 +129,14 @@ public enum Controls {
         return result.filter { change in PadAction(rawValue: change.key).flatMap { layout[$0] } != change.value }
     }
 
-    /// anyps5-input.ini text for the changes.
-    public static func file(_ changes: [String: [String]]) -> String {
+    /// anyps5-input.ini text for the changes and the tuning.
+    public static func file(_ changes: [String: [String]], tuning: InputTuning = InputTuning()) -> String {
         var lines = ["# Written by AnyPS5.app at each start; change the keys in the game's settings there."]
         for action in PadAction.allCases {
             let current = sources(action, changes)
             for source in current.isEmpty ? [unbound] : current { lines.append("\(action.rawValue) = \(source)") }
         }
+        lines += tuning.lines
         return lines.joined(separator: "\n") + "\n"
     }
 

@@ -103,9 +103,9 @@ struct RootView: View {
             SettingsPanel().transition(.opacity)
         case .library:
             LibraryGrid().transition(.opacity.combined(with: .scale(scale: 1.03)))
-        case .gameSettings, .confirmUninstall, .controls:
+        case .gameSettings, .confirmUninstall, .controls, .advanced:
             if let game = model.selectedGame {
-                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: model.overlay == .confirmUninstall ? T.text(.uninstallConfirm) : T.text(model.overlay == .controls ? .controls : .gameSettings))
+                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: model.overlay == .confirmUninstall ? T.text(.uninstallConfirm) : T.text(model.overlay == .controls ? .controls : model.overlay == .advanced ? .advancedTitle : .gameSettings))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         case .log:

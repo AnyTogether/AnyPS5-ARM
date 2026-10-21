@@ -8,7 +8,7 @@ struct PanelRow: Identifiable {
     enum Kind {
         case choice(options: [String], selected: Int, set: (Int) -> Void)
         case toggle(Bool, set: (Bool) -> Void)
-        case stepper(value: Int, range: ClosedRange<Int>, step: Int, unit: String, set: (Int) -> Void)
+        case stepper(value: Int, range: ClosedRange<Int>, step: Int, format: (Int) -> String, set: (Int) -> Void)
         case action(destructive: Bool, run: () -> Void)
         case info(String)
         case text(String, set: (String) -> Void)
@@ -41,6 +41,7 @@ extension AppModel {
         case .settings: return settingsCategories()
         case .gameSettings: return selectedGame.map { [PanelCategory(id: "game", title: $0.name, symbol: "gamecontroller", rows: gameRows($0))] } ?? []
         case .controls: return selectedGame.map { [PanelCategory(id: "controls", title: $0.name, symbol: "keyboard", rows: controlRows($0))] } ?? []
+        case .advanced: return selectedGame.map { [PanelCategory(id: "advanced", title: $0.name, symbol: "slider.horizontal.below.rectangle", rows: advancedRows($0))] } ?? []
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -119,11 +120,22 @@ extension AppModel {
         }
         about.append(PanelRow(id: "quit", title: T.text(.quit), symbol: "power", kind: .action(destructive: true) { NSApp.terminate(nil) }))
 
+        var advanced: [PanelRow] = [
+            PanelRow(id: "screenshots", title: T.text(.screenshotsFolder), detail: screenshotsFolder.abbreviatedPath, symbol: "camera", kind: .action(destructive: false) { [weak self] in self?.chooseScreenshotsFolder() }),
+            PanelRow(id: "showScreenshots", title: T.text(.showScreenshots), symbol: "photo.on.rectangle.angled", kind: .action(destructive: false) { [weak self] in self?.showScreenshots() }),
+            PanelRow(id: "fonts", title: T.text(.fontsFolder), detail: fontsFolder?.abbreviatedPath ?? T.text(.fontsNone), symbol: "textformat", kind: .action(destructive: false) { [weak self] in self?.chooseFontsFolder() }),
+        ]
+        if preferences.fontsFolder != nil {
+            advanced.append(PanelRow(id: "fontsReset", title: T.text(.fontsReset), symbol: "xmark.circle", kind: .action(destructive: false) { [weak self] in self?.preferences.fontsFolder = nil }))
+        }
+        advanced.append(PanelRow(id: "fontsHint", title: T.text(.fontsHint), kind: .info("")))
+
         return [
             PanelCategory(id: "appearance", title: T.text(.appearance), symbol: "paintbrush", rows: appearance),
             PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
+            PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
     }
@@ -142,7 +154,7 @@ extension AppModel {
             self?.update(game) { $0.fullscreen = index == 1 }
         }))
         if !settings.fullscreen {
-            rows.append(PanelRow(id: "size", title: T.text(.windowSize), symbol: "arrow.up.left.and.arrow.down.right", kind: .stepper(value: settings.windowSize, range: 40...100, step: 5, unit: "%") { [weak self] value in
+            rows.append(PanelRow(id: "size", title: T.text(.windowSize), symbol: "arrow.up.left.and.arrow.down.right", kind: .stepper(value: settings.windowSize, range: 40...100, step: 5, format: { "\($0)%" }) { [weak self] value in
                 self?.update(game) { $0.windowSize = value }
             }))
         }
@@ -151,6 +163,7 @@ extension AppModel {
         if let set = trophies[game.id] {
             rows.append(PanelRow(id: "trophies", title: T.text(.trophies), detail: "\(set.unlockedCount)/\(set.trophies.count) · \(set.percent)%", symbol: "trophy", kind: .action(destructive: false) { [weak self] in self?.open(.trophies) }))
         }
+        rows.append(PanelRow(id: "advanced", title: T.text(.advanced), detail: T.text(.advancedDetail), symbol: "slider.horizontal.below.rectangle", kind: .action(destructive: false) { [weak self] in self?.open(.advanced) }))
         let overlays = GameSettings.Overlay.allCases
         let overlayNames = [T.text(.overlayOff), T.text(.overlayTopLeft), T.text(.overlayTopRight), T.text(.overlayBottomLeft), T.text(.overlayBottomRight)]
         rows.append(PanelRow(id: "overlay", title: T.text(.overlay), symbol: "speedometer", kind: .choice(options: overlayNames, selected: overlays.firstIndex(of: settings.overlay) ?? 0) { [weak self] index in
@@ -169,6 +182,7 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
+        rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
@@ -188,11 +202,63 @@ extension AppModel {
         return rows
     }
 
+    /// The game's sticks, mouse and keyboard sticks, its shader cache, and sharing its settings.
+    private func advancedRows(_ game: Game) -> [PanelRow] {
+        let settings = settings(for: game)
+        let tuning = settings.tuning ?? InputTuning()
+        func tune(_ id: String, _ title: T.Key, _ detail: T.Key, _ symbol: String, _ value: Int, _ range: ClosedRange<Int>, _ step: Int,
+                  _ format: @escaping (Int) -> String, _ set: @escaping (inout InputTuning, Int) -> Void) -> PanelRow {
+            PanelRow(id: id, title: T.text(title), detail: T.text(detail), symbol: symbol, kind: .stepper(value: value, range: range, step: step, format: format) { [weak self] value in
+                self?.update(game) { settings in
+                    var changed = settings.tuning ?? InputTuning()
+                    set(&changed, value)
+                    settings.tuning = changed == InputTuning() ? nil : changed
+                }
+            })
+        }
+        let percent: (Int) -> String = { "\($0)%" }
+        let times: (Int) -> String = { String(format: "%.1f×", Double($0) / 10) }
+        let tenths: (Int) -> String = { String(format: "%.1f", Double($0) / 10) }
+        let milliseconds: (Int) -> String = { $0 == 0 ? T.text(.off) : "\($0) ms" }
+        return [
+            PanelRow(id: "sticksSection", title: T.text(.sectionSticks), kind: .info("")),
+            tune("leftDeadzone", .leftDeadzone, .deadzoneDetail, "l.joystick", tuning.leftDeadzone, 0...90, 2, percent) { $0.leftDeadzone = $1 },
+            tune("rightDeadzone", .rightDeadzone, .deadzoneDetail, "r.joystick", tuning.rightDeadzone, 0...90, 2, percent) { $0.rightDeadzone = $1 },
+            PanelRow(id: "mouseSection", title: T.text(.sectionMouse), kind: .info("")),
+            tune("sensitivity", .mouseSensitivity, .mouseSensitivityDetail, "computermouse", tuning.mouseSensitivity, 1...100, 1, times) { $0.mouseSensitivity = $1 },
+            tune("vertical", .mouseVertical, .mouseVerticalDetail, "arrow.up.and.down", tuning.mouseVerticalScale, 1...100, 1, times) { $0.mouseVerticalScale = $1 },
+            tune("curve", .mouseCurve, .mouseCurveDetail, "chart.line.uptrend.xyaxis", tuning.mouseCurve, 2...50, 1, tenths) { $0.mouseCurve = $1 },
+            tune("offset", .mouseMinimum, .mouseMinimumDetail, "scope", tuning.mouseDeadzoneOffset, 0...90, 2, percent) { $0.mouseDeadzoneOffset = $1 },
+            tune("maxSpeed", .mouseMaxSpeed, .mouseMaxSpeedDetail, "speedometer", tuning.mouseMaxSpeed, 1...100, 1, times) { $0.mouseMaxSpeed = $1 },
+            tune("smoothing", .mouseSmoothing, .mouseSmoothingDetail, "waveform.path", tuning.mouseSmoothingMs, 0...500, 5, milliseconds) { $0.mouseSmoothingMs = $1 },
+            tune("decay", .mouseDecay, .mouseDecayDetail, "timer", tuning.mouseDecayMs, 5...1000, 5, { "\($0) ms" }) { $0.mouseDecayMs = $1 },
+            PanelRow(id: "keyboardSection", title: T.text(.sectionKeyboard), kind: .info("")),
+            tune("modifier", .stickModifierScale, .stickModifierScaleDetail, "tortoise", tuning.stickModifierScale, 5...100, 5, percent) { $0.stickModifierScale = $1 },
+            tune("keyboardRamp", .keyboardRamp, .keyboardRampDetail, "keyboard", tuning.keyboardRampMs, 0...2000, 50, milliseconds) { $0.keyboardRampMs = $1 },
+            tune("triggerRamp", .triggerRamp, .triggerRampDetail, "l2.rectangle.roundedtop", tuning.triggerRampMs, 0...2000, 50, milliseconds) { $0.triggerRampMs = $1 },
+            PanelRow(id: "graphicsSection", title: T.text(.sectionGraphics), kind: .info("")),
+            PanelRow(id: "shaderCache", title: T.text(.shaderCache), detail: T.text(.shaderCacheDetail), symbol: "square.stack.3d.up", kind: .toggle(settings.shaderCache ?? true) { [weak self] value in
+                self?.update(game) { $0.shaderCache = value ? nil : false }
+            }),
+            PanelRow(id: "shareSection", title: T.text(.sectionShare), kind: .info("")),
+            PanelRow(id: "export", title: T.text(.exportSettings), detail: T.text(.exportSettingsDetail), symbol: "square.and.arrow.up", kind: .action(destructive: false) { [weak self] in self?.exportSettings(game) }),
+            PanelRow(id: "import", title: T.text(.importSettings), detail: T.text(.importSettingsDetail), symbol: "square.and.arrow.down", kind: .action(destructive: false) { [weak self] in self?.importSettings(game) }),
+            PanelRow(id: "resetAdvanced", title: T.text(.resetAdvanced), symbol: "arrow.counterclockwise", kind: .action(destructive: false) { [weak self] in
+                self?.update(game) { settings in
+                    settings.tuning = nil
+                    settings.shaderCache = nil
+                }
+            }),
+        ]
+    }
+
+    /// From the controls or the advanced page back to the game's settings, on the row that opened it.
     func backToGameSettings() {
+        let opener = overlay == .advanced ? "advanced" : "controls"
         endCapture()
         Sounds.shared.play(.back)
         withAnimation(Motion.overlay) { overlay = .gameSettings }
-        panelRow = panelCategories().first?.rows.firstIndex { $0.id == "controls" } ?? 0
+        panelRow = panelCategories().first?.rows.firstIndex { $0.id == opener } ?? 0
         panelInRows = true
     }
 
@@ -501,11 +567,11 @@ struct RowView: View {
             }
         case .toggle(let value, let set):
             Switch(on: value, accent: model.accent, focused: focused) { set(!value); Sounds.shared.play(.move) }
-        case .stepper(let value, let range, _, let unit, let set):
+        case .stepper(let value, let range, let step, let format, let set):
             HStack(spacing: 12 * scale) {
-                chevron("minus", enabled: value > range.lowerBound) { set(value - 5) }
-                Text("\(value)\(unit)").font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 60 * scale)
-                chevron("plus", enabled: value < range.upperBound) { set(value + 5) }
+                chevron("minus", enabled: value > range.lowerBound) { set(max(range.lowerBound, value - step)) }
+                Text(format(value)).font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 70 * scale)
+                chevron("plus", enabled: value < range.upperBound) { set(min(range.upperBound, value + step)) }
             }
         case .action:
             Image(systemName: "chevron.right").font(.system(size: 14 * scale, weight: .semibold)).opacity(0.6)
@@ -615,6 +681,25 @@ struct KeyCaps: View {
     }
 }
 
+extension URL {
+    /// The path with the home folder written as ~.
+    var abbreviatedPath: String { (path as NSString).abbreviatingWithTildeInPath }
+}
+
+extension Diagnosis {
+    /// One sentence in the launcher's language.
+    var summary: String {
+        switch self {
+        case .missingModule(let name): return T.format(.diagnosisMissingModule, name)
+        case .unsupported(let function): return T.format(.diagnosisUnsupported, function)
+        case .gpuLost: return T.text(.diagnosisGpuLost)
+        case .outOfMemory: return T.text(.diagnosisOutOfMemory)
+        case .engineError(let message): return T.format(.diagnosisEngineError, message)
+        case .crashed(let exception): return T.format(.diagnosisCrashed, exception)
+        }
+    }
+}
+
 extension PadAction {
     var title: String {
         switch self {
@@ -643,6 +728,7 @@ extension PadAction {
         case .rightStickDown: return "\(T.text(.rightStick)) · \(T.text(.directionDown))"
         case .rightStickLeft: return "\(T.text(.rightStick)) · \(T.text(.directionLeft))"
         case .rightStickRight: return "\(T.text(.rightStick)) · \(T.text(.directionRight))"
+        case .stickModifier: return T.text(.stickModifier)
         }
     }
 
@@ -656,6 +742,7 @@ extension PadAction {
         case .up, .down, .left, .right: return "dpad"
         case .leftStickUp, .leftStickDown, .leftStickLeft, .leftStickRight: return "l.joystick"
         case .rightStickUp, .rightStickDown, .rightStickLeft, .rightStickRight: return "r.joystick"
+        case .stickModifier: return "tortoise"
         }
     }
 }
