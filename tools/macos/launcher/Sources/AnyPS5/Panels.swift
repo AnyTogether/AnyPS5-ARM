@@ -416,7 +416,8 @@ struct RowList: View {
 
     var body: some View {
         if previewRender {
-            content.frame(maxHeight: .infinity, alignment: .top)
+            // An overlay takes no size of its own, so a long list cannot stretch the screen.
+            Color.clear.overlay(alignment: .top) { content }.clipped()
         } else {
             scrolling
         }

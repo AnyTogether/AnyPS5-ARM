@@ -20,7 +20,8 @@ enum PreviewRenderer {
         preferences.gamesFolder = root.path
         preferences.sounds = false
         preferences.profileName = "Utku"
-        preferences.language = .turkish
+        // ANYPS5_PREVIEW_LANGUAGE=en draws the screens in English.
+        preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .turkish
 
         for theme in Theme.allCases {
             stills[theme] = BackgroundView.still(theme: theme, width: 660, height: 372, time: 200)
@@ -48,6 +49,9 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("home-trophies.png")) { model in model.focus = .actions(1) }
         render(preferences, found, root, still, output.appendingPathComponent("trophies.png")) { model in model.overlay = .trophies; model.trophyIndex = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("settings.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 0 }
+        for category in 1..<5 {
+            render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
+        }
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
         var fresh = preferences
         fresh.onboarded = false
@@ -62,7 +66,9 @@ enum PreviewRenderer {
     static func render(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ file: URL, configure: (AppModel) -> Void = { _ in }) {
         let model = AppModel(preferences: preferences)
         model.preview(games: games, root: root)
-        model.selected = min(1, max(0, games.count - 1))
+        // ANYPS5_PREVIEW_SELECT=<title ID> picks the game the screens show.
+        let pick = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_SELECT"].flatMap { id in games.firstIndex { $0.titleID == id } }
+        model.selected = pick ?? min(1, max(0, games.count - 1))
         configure(model)
         let view = RootView()
             .environmentObject(model)

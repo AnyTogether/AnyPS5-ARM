@@ -15,7 +15,7 @@ struct TrophyList: View {
         VStack(alignment: .leading, spacing: 28 * scale) {
             header
             if previewRender {
-                rows.frame(maxHeight: .infinity, alignment: .top).clipped()
+                Color.clear.overlay(alignment: .top) { rows }.clipped()
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) { rows }
