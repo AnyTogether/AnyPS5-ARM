@@ -93,6 +93,8 @@ With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/r
 
 The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls/<game>.ini` at each start and passes it to the game as `ANYPS5_INPUT_CONFIG` ([format](INPUT_MAPPING.md)). A connected game controller keeps its own buttons.
 
+**Trophies.** A game with a trophy list shows a 🏆 button beside **Play** with how many you have earned. It opens the list as the console shows it: the percentage, the count per grade (platinum, gold, silver, bronze), and every trophy with its icon, description and the day you earned it; hidden ones stay hidden until then, and trophies that count something (such as *Acquire all Tools*) show how far you are. The list and texts come from the game's own `sce_sys/trophy2` package, in the game's language when it has it; the engine records each unlock in the installed game's `_trophy` folder. Unlocking a game again keeps its saves and trophies.
+
 **Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name.
 
 The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
@@ -296,7 +298,9 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 **Kilidi açmak.** Henüz dönüştürülmemiş oyunlarda kilit işareti olur. **Kilidi Aç**, `eboot.bin` ve modüller hâlâ SELF kabı olsa bile açar, macOS için relink eder ve oyun uygulamasını hazırlar; ilerleme PS5'teki gibi bir çubukla görünür. Oyun dosyaları dump'ın APFS klonlarıdır, kilidi açılan oyun ek yer kaplamaz. Hâlâ şifreli bir dump dönüştürülmez, bildirilir.
 
-**Oynamak.** **Oyna** oyunu başlatır. **⋯** (ya da `O` / △) oyunun ayarlarını açar: çıkış çözünürlüğü (Stray gibi çözünürlük yaması olan oyunlarda), pencere ya da tam ekran, pencere boyutu, dikey senkronizasyon, performans göstergesi, oyun dili; ayrıca Finder'da göster, günlük, shader önbelleğini temizleme, kilidi yeniden açma ya da kurulumu kaldırma.
+**Oynamak.** **Oyna** oyunu başlatır. **⋯** (ya da `O` / △) oyunun ayarlarını açar: çıkış çözünürlüğü (Stray gibi çözünürlük yaması olan oyunlarda), pencere ya da tam ekran, pencere boyutu, dikey senkronizasyon, performans göstergesi, oyun dili, **Tuş Atamaları**, **Kupalar**; ayrıca Finder'da göster, günlük, shader önbelleğini temizleme, kilidi yeniden açma ya da kurulumu kaldırma.
+
+**Kupalar.** Kupa listesi olan oyunlarda **Oyna**'nın yanında kaç kupa kazandığını gösteren bir 🏆 düğmesi çıkar. Liste konsoldaki gibi açılır: yüzde, derece başına sayı (platin, altın, gümüş, bronz) ve her kupanın ikonu, açıklaması, kazandığın gün. Gizli kupalar kazanılana kadar gizli kalır, bir şey sayan kupalar (*Tüm aletleri edin* gibi) ne kadar kaldığını gösterir. Liste ve metinler oyunun kendi `sce_sys/trophy2` paketinden, varsa oyunun dilinde gelir; motor her kazanılan kupayı kurulu oyunun `_trophy` klasörüne kaydeder. Kilidi yeniden açmak kayıtları ve kupaları korur.
 
 **Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir.
 

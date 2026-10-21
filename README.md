@@ -30,6 +30,7 @@ One line installs it into Applications (and Rosetta 2 if it is missing). A downl
   - vertical sync, the performance overlay and the game's language;
   - **controls:** keyboard and mouse keys for every pad button and stick, set by pressing the key. The default is WASD for the left stick and J/K/L/I for □/✕/○/△;
   - Show in Finder, the log, clearing the shader cache, unlocking again, removing the installation.
+- **Trophies:** every game's trophy list from its own package, with icons, grades, progress and the day each one was earned, as on the console. Unlocking a game again keeps its saves and trophies.
 - **Personal:**
   - the theme, the accent color, and the background (the theme animation, your own picture or a looping video);
   - the selected game's artwork drifting behind the home screen;

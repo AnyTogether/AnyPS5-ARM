@@ -217,10 +217,28 @@ public final class Installer: @unchecked Sendable {
         // 5. Nothing in the bundle keeps the download's quarantine flag, then it takes the old one's place.
         progress(.finish, 0)
         try? runTool(URL(fileURLWithPath: "/usr/bin/xattr"), ["-dr", "com.apple.quarantine", partial.path], quiet: true)
-        if fileManager.fileExists(atPath: bundle.path) { try fileManager.removeItem(at: bundle) }
+        if fileManager.fileExists(atPath: bundle.path) {
+            try Installer.carryOver(from: bundle, to: partial)
+            try fileManager.removeItem(at: bundle)
+        }
         try fileManager.moveItem(at: partial, to: bundle)
         progress(.finish, 1)
         return bundle
+    }
+
+    /// What the game wrote beside app0 in the old bundle (saves in _sd, trophies in _trophy, its
+    /// data and download folders) moves into the new one, so unlocking again keeps the progress.
+    static func carryOver(from old: URL, to new: URL) throws {
+        let fileManager = FileManager.default
+        let source = old.appendingPathComponent("Contents/Resources/game")
+        let target = new.appendingPathComponent("Contents/Resources/game")
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: source.path) else { return }
+        for name in entries where !fileManager.fileExists(atPath: target.appendingPathComponent(name).path) {
+            let item = source.appendingPathComponent(name)
+            // A link (game/libs) belongs to the bundle that made it.
+            if (try? item.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { continue }
+            try fileManager.moveItem(at: item, to: target.appendingPathComponent(name))
+        }
     }
 
     /// Every .prx and .sprx of the dump outside sce_sys, relative to its folder.

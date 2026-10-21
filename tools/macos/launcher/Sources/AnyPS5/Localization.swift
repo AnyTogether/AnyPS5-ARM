@@ -60,6 +60,7 @@ enum T {
         case controls, controlsHint, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
+        case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
     }
 
     static let turkish: [Key: String] = [
@@ -184,6 +185,14 @@ enum T {
         .quit: "Çık",
         .confirm: "Onayla",
         .controls: "Tuş Atamaları",
+        .trophies: "Kupalar",
+        .trophyHidden: "Gizli Kupa",
+        .trophyHiddenDetail: "Kazandığında ne olduğu görünür.",
+        .trophyLocked: "Kazanılmadı",
+        .gradePlatinum: "Platin",
+        .gradeGold: "Altın",
+        .gradeSilver: "Gümüş",
+        .gradeBronze: "Bronz",
         .controlsHint: "Bir satır seç, sonra atamak istediğin tuşa bas. Esc vazgeçer. Kumanda bağlıysa kendi tuşlarıyla çalışır.",
         .pressKey: "Bir tuşa bas…",
         .resetControls: "Varsayılan Tuşlara Dön",
@@ -331,6 +340,14 @@ enum T {
         .quit: "Quit",
         .confirm: "Confirm",
         .controls: "Controls",
+        .trophies: "Trophies",
+        .trophyHidden: "Hidden Trophy",
+        .trophyHiddenDetail: "Shows what it is once you earn it.",
+        .trophyLocked: "Not earned",
+        .gradePlatinum: "Platinum",
+        .gradeGold: "Gold",
+        .gradeSilver: "Silver",
+        .gradeBronze: "Bronze",
         .controlsHint: "Pick a row, then press the key you want for it. Esc cancels. A connected controller keeps its own buttons.",
         .pressKey: "Press a key…",
         .resetControls: "Reset to Default Keys",

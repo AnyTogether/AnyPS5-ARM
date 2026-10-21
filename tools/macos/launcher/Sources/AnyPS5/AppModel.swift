@@ -59,6 +59,7 @@ enum Overlay: Equatable {
     case log
     case confirmUninstall
     case controls
+    case trophies
 }
 
 struct Toast: Identifiable, Equatable {
@@ -89,6 +90,8 @@ final class AppModel: ObservableObject {
     /// The pad action waiting for a key in the controls panel.
     @Published var capturing: PadAction?
     @Published var libraryIndex = 0
+    /// The focused row of the trophy list.
+    @Published var trophyIndex = 0
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]
     @Published private(set) var progress: [String: (Installer.Step, Double)] = [:]
@@ -99,6 +102,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var starting: Game?
     @Published private(set) var sizes: [String: Int64] = [:]
     @Published private(set) var installedRecords: [String: InstallRecord] = [:]
+    @Published private(set) var trophies: [String: TrophySet] = [:]
     @Published var toast: Toast?
     @Published var active = true
     @Published private(set) var rosettaMissing = false
@@ -110,6 +114,7 @@ final class AppModel: ObservableObject {
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
+    private var trophiesRead: Set<String> = []
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
@@ -122,6 +127,7 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.active = true
                 if let self, Date().timeIntervalSince(self.lastScan) > 3 { self.rescan() }
+                if let self, let game = self.selectedGame { self.loadTrophies(game, again: true) }
             }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -143,7 +149,11 @@ final class AppModel: ObservableObject {
     func preview(games: [Game], root: URL) {
         self.games = games
         installedRecords = Dictionary(uniqueKeysWithValues: games.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
-        for game in games { sizes[game.id] = GameLibrary.size(of: game.folder) }
+        for game in games {
+            sizes[game.id] = GameLibrary.size(of: game.folder)
+            trophies[game.id] = Trophies.load(game, bundle: Installer.bundle(for: game, root: root), languages: trophyLanguages(game))
+            trophiesRead.insert(game.id)
+        }
     }
 
     func previewProgress(_ game: Game, step: Installer.Step, fraction: Double) {
@@ -209,7 +219,9 @@ final class AppModel: ObservableObject {
     }
 
     func measureSelected() {
-        guard let game = selectedGame, sizes[game.id] == nil else { return }
+        guard let game = selectedGame else { return }
+        loadTrophies(game)
+        guard sizes[game.id] == nil else { return }
         sizes[game.id] = -1
         Task.detached(priority: .utility) {
             let size = GameLibrary.size(of: game.folder)
@@ -228,14 +240,36 @@ final class AppModel: ObservableObject {
         return .locked
     }
 
+    // MARK: Trophies
+
+    /// Reads the game's trophies once, or `again` after it may have unlocked some.
+    func loadTrophies(_ game: Game, again: Bool = false) {
+        guard let root, again || !trophiesRead.contains(game.id) else { return }
+        trophiesRead.insert(game.id)
+        let bundle = Installer.bundle(for: game, root: root)
+        let languages = trophyLanguages(game)
+        Task.detached(priority: .utility) {
+            let set = Trophies.load(game, bundle: bundle, languages: languages)
+            await MainActor.run { self.trophies[game.id] = set }
+        }
+    }
+
+    /// The trophy texts follow the language the game runs in.
+    private func trophyLanguages(_ game: Game) -> [String] {
+        let number = settings(for: game).language ?? preferences.language.consoleLanguage
+        return ConsoleLanguage.tag(number).map { [$0] } ?? []
+    }
+
     func settings(for game: Game) -> GameSettings {
         preferences.games[game.id] ?? GameSettings()
     }
 
     func update(_ game: Game, _ change: (inout GameSettings) -> Void) {
         var value = settings(for: game)
+        let language = value.language
         change(&value)
         preferences.games[game.id] = value
+        if value.language != language { loadTrophies(game, again: true) }
     }
 
     /// Where a game's keyboard and mouse layout is written before it starts.
@@ -463,6 +497,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        loadTrophies(running.game, again: true)
         exitWatch?.cancel()
         exitWatch = nil
         if starting != nil {
@@ -505,6 +540,7 @@ final class AppModel: ObservableObject {
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls
         // The controls panel opens on its first key, below the hint.
         if next == .controls { panelRow = 1 }
+        if next == .trophies { trophyIndex = 0 }
         withAnimation(Motion.overlay) { overlay = next }
         Sounds.shared.play(.select)
     }

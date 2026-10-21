@@ -289,8 +289,15 @@ struct HeroInfo: View {
                     model.focus = .actions(0)
                     model.primaryAction(game)
                 }
-                ConsoleButton(title: "", symbol: "ellipsis", focused: model.focus == .actions(1) && model.overlay == nil) {
-                    model.focus = .actions(1)
+                if let set = model.trophies[game.id] {
+                    ConsoleButton(title: "\(set.unlockedCount)/\(set.trophies.count)", symbol: "trophy.fill", focused: model.focus == .actions(1) && model.overlay == nil) {
+                        model.focus = .actions(1)
+                        model.open(.trophies)
+                    }
+                }
+                let settingsIndex = model.actionCount - 1
+                ConsoleButton(title: "", symbol: "ellipsis", focused: model.focus == .actions(settingsIndex) && model.overlay == nil) {
+                    model.focus = .actions(settingsIndex)
                     model.open(.gameSettings)
                 }
                 if case .installing(let step, let fraction) = state {
@@ -488,6 +495,11 @@ extension AppModel {
         measureSelected()
     }
 
+    /// Play, the trophies when the game has any, and the settings.
+    var actionCount: Int {
+        selectedGame.flatMap { trophies[$0.id] } != nil ? 3 : 2
+    }
+
     func pickFromLibrary() {
         guard games.indices.contains(libraryIndex) else { return }
         selected = libraryIndex
@@ -514,6 +526,14 @@ extension AppModel {
             return panelCommand(command)
         case .log:
             if command == .back || command == .select { closeOverlay() }
+            return true
+        case .trophies:
+            switch command {
+            case .up: moveTrophy(-1)
+            case .down: moveTrophy(1)
+            case .back, .options: closeOverlay()
+            default: break
+            }
             return true
         case .library:
             switch command {
@@ -543,9 +563,10 @@ extension AppModel {
         case (.top, .down), (.top, .back): moveFocus(.tiles)
         case (.top(let index), .select): open(index == 0 ? .library : .settings)
         case (.actions(let index), .left): moveFocus(.actions(max(0, index - 1)))
-        case (.actions(let index), .right): moveFocus(.actions(min(1, index + 1)))
+        case (.actions(let index), .right): moveFocus(.actions(min(actionCount - 1, index + 1)))
         case (.actions, .up), (.actions, .back): moveFocus(.tiles)
         case (.actions(0), .select): primaryAction(game)
+        case (.actions(1), .select) where actionCount == 3: open(.trophies)
         case (.actions, .select): open(.gameSettings)
         case (_, .options): open(.gameSettings)
         default: break

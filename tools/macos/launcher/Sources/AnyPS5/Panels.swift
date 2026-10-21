@@ -148,6 +148,9 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync) { [weak self] value in self?.update(game) { $0.vsync = value } }))
         rows.append(PanelRow(id: "controls", title: T.text(.controls), symbol: "keyboard", kind: .action(destructive: false) { [weak self] in self?.open(.controls) }))
+        if let set = trophies[game.id] {
+            rows.append(PanelRow(id: "trophies", title: T.text(.trophies), detail: "\(set.unlockedCount)/\(set.trophies.count) · \(set.percent)%", symbol: "trophy", kind: .action(destructive: false) { [weak self] in self?.open(.trophies) }))
+        }
         let overlays = GameSettings.Overlay.allCases
         let overlayNames = [T.text(.overlayOff), T.text(.overlayTopLeft), T.text(.overlayTopRight), T.text(.overlayBottomLeft), T.text(.overlayBottomRight)]
         rows.append(PanelRow(id: "overlay", title: T.text(.overlay), symbol: "speedometer", kind: .choice(options: overlayNames, selected: overlays.firstIndex(of: settings.overlay) ?? 0) { [weak self] index in

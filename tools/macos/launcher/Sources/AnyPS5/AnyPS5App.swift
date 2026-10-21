@@ -110,6 +110,10 @@ struct RootView: View {
             }
         case .log:
             LogView().transition(.opacity)
+        case .trophies:
+            if let game = model.selectedGame, let set = model.trophies[game.id] {
+                TrophyList(game: game, set: set).transition(.opacity.combined(with: .scale(scale: 1.03)))
+            }
         case nil:
             EmptyView()
         }

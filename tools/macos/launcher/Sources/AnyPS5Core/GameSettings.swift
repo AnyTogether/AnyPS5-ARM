@@ -63,4 +63,11 @@ public enum ConsoleLanguage {
         (7, "Português"), (8, "Русский"), (16, "Polski"), (6, "Nederlands"), (0, "日本語"), (9, "한국어"),
         (11, "简体中文"), (10, "繁體中文"), (21, "العربية"),
     ]
+
+    /// The locale tag of a console language number, as the engine's trophy library maps them.
+    public static func tag(_ number: Int) -> String? {
+        let tags = ["ja-JP", "en-US", "fr-FR", "es-ES", "de-DE", "it-IT", "nl-NL", "pt-PT", "ru-RU", "ko-KR", "zh-Hant",
+                    "zh-Hans", "fi-FI", "sv-SE", "da-DK", "no-NO", "pl-PL", "pt-BR", "en-GB", "tr-TR", "es-419", "ar-AE"]
+        return tags.indices.contains(number) ? tags[number] : nil
+    }
 }
