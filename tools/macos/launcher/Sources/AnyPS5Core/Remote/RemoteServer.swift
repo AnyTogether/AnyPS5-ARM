@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Network
 
@@ -210,14 +211,126 @@ public final class RemoteServer: @unchecked Sendable {
 
     // MARK: Pad relay
 
-    /// The UDP port the phone sends its pad to; set once the relay runs.
-    var relayPort: UInt16? { nil }
+    private var phoneSocket: Int32 = -1
+    private var bridgeSocket: Int32 = -1
+    private var sources: [DispatchSourceRead] = []
+    private var phoneAddress: sockaddr_storage?
+    private var gameAddress: sockaddr_storage?
 
-    func startRelay() throws {}
+    /// The UDP port the phone sends its pad to, on every interface.
+    public var udpPort: UInt16? { queue.sync { relayPort } }
 
-    func stopRelay() {}
+    /// The loopback UDP port the running game talks to.
+    public var bridgePort: UInt16? { queue.sync { bridgeSocket >= 0 ? RemoteServer.port(of: bridgeSocket) : nil } }
 
-    func phoneEnded() {}
+    /// What a game is started with so that it reads the phone (ANYPS5_REMOTE_PAD).
+    public var bridgeEnvironment: [String: String] {
+        guard let bridgePort else { return [:] }
+        return ["ANYPS5_REMOTE_PAD": "127.0.0.1:\(bridgePort)"]
+    }
+
+    var relayPort: UInt16? { phoneSocket >= 0 ? RemoteServer.port(of: phoneSocket) : nil }
+
+    func startRelay() throws {
+        let phone = Darwin.socket(AF_INET6, SOCK_DGRAM, 0)
+        var dual: Int32 = 0
+        setsockopt(phone, IPPROTO_IPV6, IPV6_V6ONLY, &dual, socklen_t(MemoryLayout<Int32>.size))
+        var any = sockaddr_in6()
+        any.sin6_family = sa_family_t(AF_INET6)
+        any.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        any.sin6_addr = in6addr_any
+        let bridge = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
+        var loopback = sockaddr_in()
+        loopback.sin_family = sa_family_t(AF_INET)
+        loopback.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        loopback.sin_addr.s_addr = inet_addr("127.0.0.1")
+        guard phone >= 0, bridge >= 0, RemoteServer.bind(phone, &any), RemoteServer.bind(bridge, &loopback) else {
+            if phone >= 0 { close(phone) }
+            if bridge >= 0 { close(bridge) }
+            throw InstallError("the phone pad sockets could not be opened")
+        }
+        for socket in [phone, bridge] { _ = fcntl(socket, F_SETFL, fcntl(socket, F_GETFL) | O_NONBLOCK) }
+        queue.sync {
+            phoneSocket = phone
+            bridgeSocket = bridge
+            sources = [watch(phone) { [weak self] in self?.fromPhone() }, watch(bridge) { [weak self] in self?.fromGame() }]
+        }
+    }
+
+    func stopRelay() {
+        for source in sources { source.cancel() }
+        sources = []
+        phoneSocket = -1
+        bridgeSocket = -1
+        phoneAddress = nil
+        gameAddress = nil
+    }
+
+    func phoneEnded() {
+        phoneAddress = nil
+    }
+
+    private func watch(_ socket: Int32, _ handler: @escaping () -> Void) -> DispatchSourceRead {
+        let source = DispatchSource.makeReadSource(fileDescriptor: socket, queue: queue)
+        source.setEventHandler(handler: handler)
+        source.setCancelHandler { close(socket) }
+        source.resume()
+        return source
+    }
+
+    /// Pad packets from the welcomed phone go to the game; anything else is dropped.
+    private func fromPhone() {
+        while let (data, source) = RemoteServer.receive(phoneSocket) {
+            guard let session = current?.session, RemotePacket.inputSession(data) == session else { continue }
+            phoneAddress = source
+            if var game = gameAddress { RemoteServer.send(data, from: bridgeSocket, to: &game) }
+        }
+    }
+
+    /// A hello names the game to send to; its answers go back to the phone.
+    private func fromGame() {
+        while let (data, source) = RemoteServer.receive(bridgeSocket) {
+            if RemotePacket.isHello(data) {
+                gameAddress = source
+            } else if RemotePacket.isOutput(data), let game = gameAddress, RemoteServer.same(source, game), var phone = phoneAddress {
+                RemoteServer.send(data, from: phoneSocket, to: &phone)
+            }
+        }
+    }
+
+    private static func bind<Address>(_ socket: Int32, _ address: inout Address) -> Bool {
+        withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(socket, $0, socklen_t(MemoryLayout<Address>.size)) == 0 } }
+    }
+
+    private static func port(of socket: Int32) -> UInt16? {
+        var address = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        guard withUnsafeMutablePointer(to: &address, { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socket, $0, &length) } }) == 0 else { return nil }
+        return withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt16(bigEndian: $0.pointee.sin_port) }
+        }
+    }
+
+    private static func receive(_ socket: Int32) -> (Data, sockaddr_storage)? {
+        var buffer = [UInt8](repeating: 0, count: 512)
+        var address = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let got = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { recvfrom(socket, &buffer, buffer.count, 0, $0, &length) } }
+        return got < 0 ? nil : (Data(buffer.prefix(got)), address)
+    }
+
+    private static func send(_ data: Data, from socket: Int32, to address: inout sockaddr_storage) {
+        let length = socklen_t(address.ss_len)
+        _ = data.withUnsafeBytes { bytes in
+            withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(socket, bytes.baseAddress, data.count, 0, $0, length) } }
+        }
+    }
+
+    private static func same(_ left: sockaddr_storage, _ right: sockaddr_storage) -> Bool {
+        var left = left
+        var right = right
+        return left.ss_len == right.ss_len && memcmp(&left, &right, Int(left.ss_len)) == 0
+    }
 }
 
 /// A value shared with a callback on another thread.
