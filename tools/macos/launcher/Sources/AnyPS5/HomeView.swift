@@ -231,6 +231,8 @@ struct GameTile: View {
             .background(Color.black.opacity(0.3))
         case .queued:
             ZStack { Color.black.opacity(0.42); Image(systemName: "clock").font(.system(size: size * 0.18)).foregroundStyle(.white.opacity(0.85)) }
+        case .starting:
+            ZStack { Color.black.opacity(0.42); ProgressView().controlSize(.small).tint(.white) }
         case .running:
             ZStack(alignment: .topTrailing) {
                 Color.clear
@@ -256,6 +258,7 @@ struct StateLabel: View {
             case .installing(let step, _): return ("arrow.down.circle.fill", step.title, model.accent)
             case .failed: return ("exclamationmark.triangle.fill", T.text(.failed), Color(red: 1, green: 0.6, blue: 0.55))
             case .installed(let outdated): return (outdated ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill", outdated ? T.text(.updateAvailable) : T.text(.ready), outdated ? Color(red: 1, green: 0.82, blue: 0.4) : .white.opacity(0.75))
+            case .starting: return ("hourglass", T.text(.starting), model.accent)
             case .running: return ("play.circle.fill", T.text(.running), model.accent)
             }
         }()
@@ -338,6 +341,7 @@ struct HeroInfo: View {
         case .locked, .unreadable: return T.text(.unlock)
         case .failed: return T.text(.retry)
         case .installing, .queued: return T.text(.cancel)
+        case .starting: return T.text(.starting)
         case .running: return T.text(.running)
         }
     }
@@ -348,6 +352,7 @@ struct HeroInfo: View {
         case .locked, .unreadable: return "lock.open.fill"
         case .failed: return "arrow.clockwise"
         case .installing, .queued: return "xmark"
+        case .starting: return "hourglass"
         case .running: return "play.circle"
         }
     }
@@ -494,6 +499,10 @@ extension AppModel {
     /// Home screen and library navigation; panels go through panelCommand.
     func handle(_ command: Command) -> Bool {
         guard preferences.onboarded else { return onboardingCommand(command) }
+        if starting != nil {
+            if command == .back { cancelStart() }
+            return true
+        }
         switch overlay {
         case .settings, .gameSettings, .confirmUninstall:
             return panelCommand(command)

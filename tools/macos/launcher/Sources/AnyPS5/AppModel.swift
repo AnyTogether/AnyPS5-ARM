@@ -42,6 +42,7 @@ enum GameState: Equatable {
     case installing(step: Installer.Step, fraction: Double)
     case failed(String)
     case installed(outdated: Bool)
+    case starting
     case running
 }
 
@@ -91,6 +92,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var queue: [String] = []
     @Published private(set) var failures: [String: String] = [:]
     @Published private(set) var running: (game: Game, app: NSRunningApplication)?
+    /// The game from the press of Play until its first window shows.
+    @Published private(set) var starting: Game?
     @Published private(set) var sizes: [String: Int64] = [:]
     @Published private(set) var installedRecords: [String: InstallRecord] = [:]
     @Published var toast: Toast?
@@ -105,6 +108,7 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var toastTask: Task<Void, Never>?
+    private var startWatch: Task<Void, Never>?
 
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
@@ -139,6 +143,10 @@ final class AppModel: ObservableObject {
 
     func previewProgress(_ game: Game, step: Installer.Step, fraction: Double) {
         progress[game.id] = (step, fraction)
+    }
+
+    func previewStarting(_ game: Game) {
+        starting = game
     }
 
     private func apply() {
@@ -205,6 +213,7 @@ final class AppModel: ObservableObject {
     }
 
     func state(of game: Game) -> GameState {
+        if starting?.id == game.id { return .starting }
         if running?.game.id == game.id { return .running }
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
@@ -308,12 +317,13 @@ final class AppModel: ObservableObject {
         case .locked, .failed: unlock(game)
         case .installing, .queued: cancelUnlock(game)
         case .running: running?.app.activate()
+        case .starting: break
         case .unreadable: show(T.text(.unreadableDump), symbol: "xmark.octagon")
         }
     }
 
     func play(_ game: Game) {
-        guard let root else { return }
+        guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
@@ -321,21 +331,66 @@ final class AppModel: ObservableObject {
         configuration.environment = settings(for: game).environment(launcherLanguage: preferences.language.consoleLanguage)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
+        withAnimation(Motion.overlay) { starting = game }
         NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { app, error in
             Task { @MainActor in
+                guard self.starting?.id == game.id else {
+                    app?.forceTerminate()
+                    return
+                }
                 if let app {
                     self.running = (game, app)
-                    if self.preferences.hideWhilePlaying { NSApp.hide(nil) }
+                    self.watchForWindow(of: app)
                 } else {
+                    withAnimation(Motion.overlay) { self.starting = nil }
                     self.show(T.text(.startFailed) + (error.map { ": " + $0.localizedDescription } ?? ""), symbol: "exclamationmark.triangle.fill")
                 }
             }
         }
     }
 
+    /// The process starts long before the game draws anything (Rosetta translates it and the
+    /// shaders compile first), so the splash stays up until the game's first window shows.
+    private func watchForWindow(of app: NSRunningApplication) {
+        startWatch?.cancel()
+        let pid = app.processIdentifier
+        startWatch = Task {
+            let deadline = Date().addingTimeInterval(240)
+            while !Task.isCancelled, Date() < deadline, !Self.hasWindow(pid) {
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+            guard !Task.isCancelled else { return }
+            withAnimation(Motion.overlay) { starting = nil }
+            if preferences.hideWhilePlaying { NSApp.hide(nil) }
+        }
+    }
+
+    private static func hasWindow(_ pid: pid_t) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] else { return false }
+        return windows.contains { window in
+            guard (window[kCGWindowOwnerPID] as? pid_t) == pid, (window[kCGWindowLayer] as? Int) == 0,
+                  let bounds = window[kCGWindowBounds] as? [String: CGFloat] else { return false }
+            return (bounds["Width"] ?? 0) > 200 && (bounds["Height"] ?? 0) > 150
+        }
+    }
+
+    /// Esc on the splash: the game is stopped before it ever shows.
+    func cancelStart() {
+        guard starting != nil else { return }
+        startWatch?.cancel()
+        Sounds.shared.play(.back)
+        withAnimation(Motion.overlay) { starting = nil }
+        running?.app.forceTerminate()
+    }
+
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        if starting != nil {
+            startWatch?.cancel()
+            withAnimation(Motion.overlay) { starting = nil }
+            show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
+        }
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

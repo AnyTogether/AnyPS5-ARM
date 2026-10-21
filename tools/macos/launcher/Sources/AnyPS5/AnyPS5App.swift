@@ -1,3 +1,4 @@
+import AnyPS5Core
 import AppKit
 import SwiftUI
 
@@ -69,6 +70,10 @@ struct RootView: View {
                         .transition(.opacity)
                 }
                 overlays
+                if let game = model.starting {
+                    LaunchSplash(game: game)
+                        .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                }
                 VStack(spacing: 10 * scale) {
                     if model.translocated { MoveBanner() }
                     if let toast = model.toast { ToastView(toast: toast).transition(.move(edge: .top).combined(with: .opacity)) }
@@ -107,6 +112,71 @@ struct RootView: View {
             LogView().transition(.opacity)
         case nil:
             EmptyView()
+        }
+    }
+}
+
+/// Shown from the press of Play until the game's window appears, like the console's start screen.
+struct LaunchSplash: View {
+    let game: Game
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @State private var since = Date()
+    @State private var breathe = false
+
+    var body: some View {
+        let size = 200 * scale
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.55))
+            VStack(spacing: 26 * scale) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: size * 0.12, style: .continuous).fill(Color.white.opacity(0.08))
+                    if let icon = game.icon {
+                        ArtworkImage(url: icon, maxPixels: 400)
+                    } else {
+                        Image(systemName: "gamecontroller.fill").font(.system(size: size * 0.32)).foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.12, style: .continuous))
+                .shadow(color: model.accent.opacity(breathe ? 0.55 : 0.2), radius: breathe ? 40 * scale : 18 * scale)
+                .scaleEffect(breathe ? 1.015 : 0.985)
+                Text(game.name)
+                    .font(.display(34 * scale, .light))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                VStack(spacing: 14 * scale) {
+                    HStack {
+                        Text(T.text(.starting)).font(.display(16 * scale, .medium))
+                        Spacer()
+                        TimelineView(.periodic(from: since, by: 1)) { context in
+                            let seconds = max(0, Int(context.date.timeIntervalSince(since)))
+                            Text(String(format: "%d:%02d", seconds / 60, seconds % 60)).font(.display(16 * scale, .semibold)).monospacedDigit()
+                        }
+                    }
+                    .foregroundStyle(.white.opacity(0.88))
+                    IndeterminateLine(color: model.accent)
+                    Text(T.text(.startingText))
+                        .font(.display(14 * scale))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: 380 * scale)
+            }
+            VStack {
+                Spacer()
+                Hint(keys: "esc / ○", label: T.text(.cancel))
+                    .padding(.bottom, 40 * scale)
+            }
+        }
+        .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onAppear {
+            since = Date()
+            guard !model.preferences.reducedMotion else { return }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { breathe = true }
         }
     }
 }

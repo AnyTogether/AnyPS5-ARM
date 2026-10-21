@@ -43,7 +43,7 @@ enum T {
         case welcome, welcomeSubtitle, chooseLanguage, chooseTheme, chooseThemeSubtitle, chooseFolder, chooseFolderSubtitle
         case pickFolder, changeFolder, gamesFound, noGamesFound, continueAction, back, start, skip
         case games, library, settings, play, unlock, unlocking, cancel, queued, update, retry, options
-        case locked, ready, updateAvailable, failed, running
+        case locked, ready, updateAvailable, failed, starting, startingText, running
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
@@ -90,6 +90,8 @@ enum T {
         .ready: "Oynamaya hazır",
         .updateAvailable: "Yeni sürümle yeniden kurulabilir",
         .failed: "Kilit açılamadı",
+        .starting: "Başlatılıyor…",
+        .startingText: "Oyun açılıyor, lütfen bekle. İlk açılış, oyun Mac için hazırlanırken birkaç dakika sürebilir.",
         .running: "Oynanıyor",
         .stepUnwrap: "Oyun dosyaları açılıyor",
         .stepRelink: "Mac için çevriliyor",
@@ -212,6 +214,8 @@ enum T {
         .ready: "Ready to play",
         .updateAvailable: "Can be installed again with the new version",
         .failed: "Could not unlock",
+        .starting: "Starting…",
+        .startingText: "The game is opening, please wait. The first start can take a few minutes while the game gets ready for the Mac.",
         .running: "Playing",
         .stepUnwrap: "Opening the game files",
         .stepRelink: "Converting for Mac",

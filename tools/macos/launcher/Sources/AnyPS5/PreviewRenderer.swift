@@ -39,6 +39,9 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("home-unlocking.png")) { model in
             if let game = model.selectedGame { model.previewProgress(game, step: .copy, fraction: 0.4) }
         }
+        render(preferences, found, root, still, output.appendingPathComponent("starting.png")) { model in
+            if let game = model.selectedGame { model.previewStarting(game) }
+        }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("settings.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 0 }
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
