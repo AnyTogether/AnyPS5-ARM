@@ -8,7 +8,7 @@ Measured on a MacBook Pro M3 Pro, macOS 26.6.2, Vulkan SDK 1.4.363.0. The game's
 
 | Game | ID | Engine | Status | FPS |
 |---|---|---|---|---|
-| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Playable:** new game through the opening cinematic into Moss Grotto; a 4.5-minute session ended normally. In-game FPS is still low. Needs the manual Unity module steps ([page](../games/silksong.md)) | menus 100–120, in game ~25–50 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Playable:** new game through the opening into Moss Grotto at a steady 120 FPS. AnyPS5.app unlocks it in one click ([page](../games/silksong.md)) | 120, menus and in game |
 | Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Playable:** main menu and levels 1-1 to 1-3 played through, six minutes without a crash. A startup abort on masked stores is fixed (b8dce7fb9). Manual Unity module steps ([page](../games/pvz.md)) | menu ~120, in game 60–120 (120 Hz display) |
 | DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | In game (E1M1 and later maps) ([page](../games/doom.md)) | 35 (the game's own cap) |
 | Dreaming Sarah | PPSA02929 | Construct 2 | In game, playable | 60 |
@@ -46,7 +46,7 @@ Not verified: Linux with Intel GPUs.
 
 | Oyun | Kimlik | Motor | Durum | FPS |
 |---|---|---|---|---|
-| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Oynanabilir:** yeni oyun, açılış sinemasından Moss Grotto'ya; 4,5 dakikalık oturum normal kapandı. Oyun içi FPS hâlâ düşük. Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/silksong.md)) | menüler 100–120, oyun içi ~25–50 |
+| Hollow Knight: Silksong | PPSA12544 | Unity (IL2CPP) | **Oynanabilir:** yeni oyun, açılıştan Moss Grotto'ya sabit 120 FPS. AnyPS5.app tek tıkla kilidini açıyor ([sayfa](../games/tr/silksong.md)) | 120, menüler ve oyun içi |
 | Plants vs. Zombies: Replanted | PPSA29802 | Unity (IL2CPP) | **Oynanabilir:** ana menü ve 1-1–1-3 bölümleri oynandı, altı dakika boyunca çökme yok. Maskeli yazma kaynaklı açılış çökmesi düzeltildi (b8dce7fb9). Elle Unity modül adımları gerekiyor ([sayfa](../games/tr/pvz.md)) | menü ~120, oyun içi 60–120 (120 Hz ekran) |
 | DOOM Shareware (homebrew) | PPSA99666 | lowbit/ps5-doom | Oyun içi (E1M1 ve sonrası) ([sayfa](../games/tr/doom.md)) | 35 (oyunun kendi sınırı) |
 | Dreaming Sarah | PPSA02929 | Construct 2 | Oyun içi, oynanabilir | 60 |

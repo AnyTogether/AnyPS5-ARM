@@ -4,20 +4,18 @@
 
 `PPSA12544` · Unity (IL2CPP)
 
-**Durum:** 🟢 Oynanabilir · Yeni oyun, Moss Grotto'ya kadar · **FPS:** menüler 100–120 · oyun içi ~25–50
+**Durum:** 🟢 Oynanabilir · Yeni oyun, Moss Grotto'ya kadar · **FPS:** 120, menüler ve oyun içi
 
-Yeni oyun profil ekranından ve açılış sinemasından Moss Grotto'ya kadar oynanıyor, duraklatma menüsünden çıkılabiliyor; görüntü kusursuz. 12 Ekim'deki 4,5 dakikalık oturum çökmeden, normal şekilde kapatıldı. Oyun içi FPS hâlâ düşük (Moss Grotto'da ~26).
+AnyPS5.app'te tek tıkla kilidi açıldı ve oradan başlatıldı. Yeni oyun başlık ekranından açılışa ve Moss Grotto'ya kadar, envanter dahil, 1920×1080'de sabit 120 FPS ile oynanıyor (kare başına ortalama 8,3–8,4 ms). 12 Ekim'de oyun içi ~25–50 FPS'ti; o günden beri alınan upstream güncellemeleri bunu yükseltti.
 
-![Oyun içi: Hornet ilk bölgede, HUD ve "Bind" ipucu görünüyor](../img/silksong-ingame.jpg)
-*Oyun içi: Hornet ilk bölgede, HUD ve "Bind" ipucu görünüyor*
-
-![Profil seçme ekranı (Select Profile)](../img/silksong-profiles.jpg)
-*Profil seçme ekranı (Select Profile)*
+![Oyun içi: Hornet Moss Grotto'da, 119 FPS](../img/silksong-120-moss.jpg)
+*Oyun içi: Hornet Moss Grotto'da, 119 FPS, kare başına ortalama 8,4 ms*
 
 | | |
 |---|---|
-| <img src="../img/silksong-intro.jpg" width="420"><br>*Açılış sineması* | <img src="../img/silksong-moss.jpg" width="420"><br>*Moss Grotto, açılış jeneriğiyle* |
-| <img src="../img/silksong-enemy.jpg" width="420"><br>*Hornet bir düşmanla karşılaşıyor, 28 FPS* | <img src="../img/silksong-grotto.jpg" width="420"><br>*Moss Grotto'nun derinleri* |
+| <img src="../img/silksong-120-title.jpg" width="420"><br>*Başlık ekranı, 119 FPS* | <img src="../img/silksong-120-pharloom.jpg" width="420"><br>*1. Perde: Pharloom* |
+| <img src="../img/silksong-120-cave.jpg" width="420"><br>*Moss Grotto'nun derinleri, 118 FPS* | <img src="../img/silksong-120-climb.jpg" width="420"><br>*Tırmanış, 120 FPS* |
+| <img src="../img/silksong-120-inventory.jpg" width="420"><br>*Envanter (Hunter's Cloak), 120 FPS* | |
 
 ## Adım adım
 
@@ -28,8 +26,9 @@ Yeni oyun profil ekranından ve açılış sinemasından Moss Grotto'ya kadar oy
 | ✅ | **"PSN eski sürüm" hatası çözüldü** | Eklentilere başlangıç argümanları artık iletiliyor: fablevoid'in macOS relinker düzeltmesi (1b865fc3e), upstream üzerinden geldi. |
 | ✅ | **Eklenti bağımlılıkları** | Media/Plugins altındaki eklentilerin libc ve libSceNpCppWebApi bağımlılıkları bulunur hâle getirildi. |
 | ✅ | **Rosetta + AVX çökmesi giderildi** | Sayfa sınırını aşan hizasız 256-bit yazmalar ikiye bölünüyor (upstream #4194). Exe'de 55.017 yazma bölündü. |
-| 🔧 | **Ara sıra kapanma** | Daha önce beş dakikalık iki denemeden biri 293. saniyede segfault verdi; çökme raporu yok. 12 Ekim'deki 4,5 dakikalık oturumda çökme olmadı. İnceleniyor. |
-| 🔧 | **Performans** | Menüler 100–120 FPS ama oyun içi ~25–50 FPS (Moss Grotto'da ~26). Sırada, Quake II'deki gibi Rosetta write-watch hataları ve GPU senkronizasyonu var. |
+| ✅ | **Performans** | 21 Ekim'de menülerde ve oyun içinde 120 FPS (kare başına ortalama 8,3–8,4 ms); 12 Ekim'de oyun içi ~25–50'ydi. |
+| ✅ | **Tek tıkla kilit açma** | AnyPS5.app, Unity'nin Media/Modules ve Media/Plugins modüllerini kendisi relink ediyor (15c0b29e0); aşağıdaki elle adımlara artık gerek yok. |
+| 🔧 | **Ara sıra kapanma** | Daha önce beş dakikalık iki denemeden biri 293. saniyede segfault verdi; çökme raporu yok. 12 ve 21 Ekim'deki oturumlarda çökme olmadı. İnceleniyor. |
 
 ✅ tamamlandı · 🔧 şu an · ⏭️ sırada
 
@@ -44,15 +43,9 @@ Yeni oyun profil ekranından ve açılış sinemasından Moss Grotto'ya kadar oy
 | Bölünen 256-bit yazma | `55.017 (exe)` |
 | Test donanımı | `MacBook Pro M3 Pro, macOS 26.6.2` |
 
-## Bugün nasıl dönüştürülür (Unity, elle)
+## Nasıl dönüştürülür
 
-AnyPS5.app bu adımları henüz yapmıyor; şimdilik elle:
-
-1. `eboot.bin`, `sce_module/*.prx`, `Media/Modules/*.prx` ve `Media/Plugins/*.prx` dosyalarını SELF'ten ELF'e çevir.
-2. `Media/Modules` içindekileri (`Il2cppUserAssemblies.prx`, `PS5Util.prx`) `sce_module` ile birlikte koyup exe'yi `relinker --macos --to-rosetta` ile relink et.
-3. `Media/Plugins` eklentilerini exe'ye bağlamadan ayrı bir relink ile `.guest.prx` olarak üret ve orijinallerinin yanına koy; Unity onları çalışma anında başlangıç argümanlarıyla yükler.
-4. Paketledikten sonra `Media/Modules/*.guest.prx` dosyalarını `sce_module` kopyalarına symlink yap (oyun aynı modülü `Il2CppUserAssemblies` adıyla da açar), eklentilerin `libc`/`libSceNpCppWebApi` bağımlılıkları için `Media/Plugins` altına symlink ekle, `app0/libs` → `../../../MacOS/libs` bağla.
-
+Dump klasörünü AnyPS5.app'te aç ve **Kilidi Aç**'a bas: `eboot.bin`'i ve `Media/Modules` ile `Media/Plugins` dahil bütün modülleri dönüştürüp macOS için relink ediyor ve uygulamayı hazırlıyor (M3 Pro'da yaklaşık 30 saniye). Elle yaparken relinker'a `sce_module`'ün yanında `--module-dir Media/Modules --module-dir Media/Plugins` gerekiyor.
 
 ## Bağlantılar
 

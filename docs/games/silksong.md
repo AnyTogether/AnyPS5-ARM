@@ -4,20 +4,18 @@
 
 `PPSA12544` · Unity (IL2CPP)
 
-**Status:** 🟢 Playable · New game through Moss Grotto · **FPS:** menus 100–120 · in game ~25–50
+**Status:** 🟢 Playable · New game through Moss Grotto · **FPS:** 120, menus and in game
 
-A new game plays from the profile screen and the opening cinematic into Moss Grotto, and back out through the pause menu, with correct drawing. A 4.5-minute session on 12 October ended normally, without a crash. In-game FPS is still low (about 26 in Moss Grotto).
+Unlocked in one click in AnyPS5.app and started from it. A new game plays from the title screen through the opening into Moss Grotto, the inventory included, at a steady 120 FPS (8.3–8.4 ms a frame on average) at 1920×1080. That was ~25–50 FPS on 12 October; the upstream merges since then brought it up.
 
-![In game: Hornet in the first area, with the HUD and the "Bind" hint](img/silksong-ingame.jpg)
-*In game: Hornet in the first area, with the HUD and the "Bind" hint*
-
-![Profile selection screen (Select Profile)](img/silksong-profiles.jpg)
-*Profile selection screen (Select Profile)*
+![In game: Hornet in Moss Grotto at 119 FPS](img/silksong-120-moss.jpg)
+*In game: Hornet in Moss Grotto, 119 FPS, 8.4 ms a frame on average*
 
 | | |
 |---|---|
-| <img src="img/silksong-intro.jpg" width="420"><br>*The opening cinematic* | <img src="img/silksong-moss.jpg" width="420"><br>*Moss Grotto, with the opening credits* |
-| <img src="img/silksong-enemy.jpg" width="420"><br>*Hornet meets an enemy, 28 FPS* | <img src="img/silksong-grotto.jpg" width="420"><br>*Further into Moss Grotto* |
+| <img src="img/silksong-120-title.jpg" width="420"><br>*Title screen, 119 FPS* | <img src="img/silksong-120-pharloom.jpg" width="420"><br>*Act 1: Pharloom* |
+| <img src="img/silksong-120-cave.jpg" width="420"><br>*Further into Moss Grotto, 118 FPS* | <img src="img/silksong-120-climb.jpg" width="420"><br>*Climbing, 120 FPS* |
+| <img src="img/silksong-120-inventory.jpg" width="420"><br>*The inventory (Hunter's Cloak), 120 FPS* | |
 
 ## Step by step
 
@@ -28,8 +26,9 @@ A new game plays from the profile screen and the opening cinematic into Moss Gro
 | ✅ | **"PSN old version" error fixed** | The plugins now receive their start arguments: fablevoid's macOS relinker fix (1b865fc3e), which came through upstream. |
 | ✅ | **Plugin dependencies** | The libc and libSceNpCppWebApi dependencies of the plugins under Media/Plugins are now found. |
 | ✅ | **Rosetta + AVX crash fixed** | Unaligned 256-bit stores that cross a page boundary are split in two (upstream #4194). 55,017 stores were split in the executable. |
-| 🔧 | **Occasional crash** | Earlier, one of two five-minute runs segfaulted at second 293, with no crash report. The 4.5-minute session on 12 October did not crash. Under investigation. |
-| 🔧 | **Performance** | Menus run at 100–120 FPS, but in game it is ~25–50 FPS (about 26 in Moss Grotto). Next: Rosetta write-watch faults, as with Quake II, and GPU synchronization. |
+| ✅ | **Performance** | 120 FPS in menus and in game on 21 October (8.3–8.4 ms a frame on average), up from ~25–50 in game on 12 October. |
+| ✅ | **One-click unlock** | AnyPS5.app relinks Unity's Media/Modules and Media/Plugins itself (15c0b29e0), so the manual steps below are no longer needed. |
+| 🔧 | **Occasional crash** | Earlier, one of two five-minute runs segfaulted at second 293, with no crash report. The sessions on 12 and 21 October did not crash. Under investigation. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 
@@ -44,17 +43,9 @@ A new game plays from the profile screen and the opening cinematic into Moss Gro
 | Split 256-bit stores | `55,017 (executable)` |
 | Test hardware | `MacBook Pro M3 Pro, macOS 26.6.2` |
 
-## Converting it today (Unity, by hand)
+## Converting it
 
-AnyPS5.app does not do these steps yet, so for now they are manual:
-
-1. Convert `eboot.bin`, `sce_module/*.prx`, `Media/Modules/*.prx` and `Media/Plugins/*.prx` from SELF to ELF.
-2. Put the `Media/Modules` modules (`Il2cppUserAssemblies.prx`, `PS5Util.prx`) next to `sce_module` and relink the executable with `relinker --macos --to-rosetta`.
-3. Relink the `Media/Plugins` plugins separately, without linking them into the executable, as `.guest.prx` files next to the originals. Unity loads them at run time with their start arguments.
-4. After packaging:
-   - symlink `Media/Modules/*.guest.prx` to the `sce_module` copies (the game also opens the same module as `Il2CppUserAssemblies`);
-   - add symlinks under `Media/Plugins` for the plugins' `libc` and `libSceNpCppWebApi` dependencies;
-   - link `app0/libs` → `../../../MacOS/libs`.
+Open the dump's folder in AnyPS5.app and press **Unlock**: it converts `eboot.bin` and every module, `Media/Modules` and `Media/Plugins` included, relinks them for macOS and makes the app (about 30 seconds on an M3 Pro). By hand, the relinker needs `--module-dir Media/Modules --module-dir Media/Plugins` besides `sce_module`.
 
 ## Links
 
