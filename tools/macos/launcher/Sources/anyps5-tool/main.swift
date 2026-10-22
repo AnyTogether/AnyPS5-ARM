@@ -4,14 +4,15 @@ import Foundation
 // anyps5-tool unwrap <self> <elf>
 // anyps5-tool scan <games folder>
 // anyps5-tool install <game folder> <games folder>    (ANYPS5_TOOLKIT names the toolkit)
-// anyps5-tool remote [--allow-all] [--devices <file>] [--port <control port>] [--games <folder> [--language en|tr]]
-//   (the phone server, until killed; with --games it shows that library and plays games only pretend)
+// anyps5-tool remote [--allow-all] [--devices <file>] [--port <control port>] [--games <folder> [--language en|tr]] [--hidden]
+//   (the phone server, until killed; with --games it shows that library and plays games only pretend;
+//   --hidden leaves it out of Bonjour, so only a phone given its address finds it)
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
     exit(2)
 }
 
-let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]]"
+let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]] [--hidden]"
 
 /// Prints a line at once, so a script reading the output sees it while the server runs.
 func say(_ line: String) {
@@ -57,6 +58,7 @@ case "remote":
     var port: UInt16 = 0
     var library: [Game] = []
     var language = "en"
+    var hidden = false
     var rest = arguments.dropFirst()
     while let option = rest.popFirst() {
         switch option {
@@ -70,6 +72,7 @@ case "remote":
         case "--games":
             guard let path = rest.popFirst() else { fail(usage) }
             library = GameLibrary.scan(URL(fileURLWithPath: path))
+        case "--hidden": hidden = true
         case "--language":
             guard let value = rest.popFirst() else { fail(usage) }
             language = value
@@ -122,7 +125,7 @@ case "remote":
             }
             tell()
         })
-    let running = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: PairedDevices(file: file), events: events, controlPort: port)
+    let running = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: PairedDevices(file: file), events: events, advertise: !hidden, controlPort: port)
     server.value = running
     do {
         try running.start()
