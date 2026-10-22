@@ -20,8 +20,8 @@ enum PreviewRenderer {
         preferences.gamesFolder = root.path
         preferences.sounds = false
         preferences.profileName = "Utku"
-        // ANYPS5_PREVIEW_LANGUAGE=en draws the screens in English.
-        preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .turkish
+        // ANYPS5_PREVIEW_LANGUAGE=tr draws the screens in Turkish.
+        preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .english
 
         for theme in Theme.allCases {
             stills[theme] = BackgroundView.still(theme: theme, width: 660, height: 372, time: 200)
