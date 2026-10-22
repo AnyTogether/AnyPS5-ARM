@@ -20,8 +20,8 @@ enum PreviewRenderer {
         preferences.gamesFolder = root.path
         preferences.sounds = false
         preferences.profileName = "Utku"
-        // ANYPS5_PREVIEW_LANGUAGE=en draws the screens in English.
-        preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .turkish
+        // ANYPS5_PREVIEW_LANGUAGE=tr draws the screens in Turkish.
+        preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .english
 
         for theme in Theme.allCases {
             stills[theme] = BackgroundView.still(theme: theme, width: 660, height: 372, time: 200)
@@ -46,6 +46,8 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("game-settings.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("controls.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
+        render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
+        render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }
         render(preferences, found, root, still, output.appendingPathComponent("advanced.png")) { model in model.overlay = .advanced; model.panelInRows = true; model.panelRow = 4 }
         render(preferences, found, root, still, output.appendingPathComponent("update-choice.png")) { model in model.overlay = .updateChoice; model.panelInRows = true; model.panelRow = 0 }
         render(preferences, found, root, still, output.appendingPathComponent("home-trophies.png")) { model in model.focus = .actions(1) }

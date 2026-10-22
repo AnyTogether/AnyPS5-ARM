@@ -106,6 +106,10 @@ struct TopBar: View {
             Spacer()
             iconButton("square.grid.3x3.fill", index: 0) { model.open(.library) }
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
+            if let phone = model.phone {
+                PhoneIndicator(name: phone.name, latency: phone.latency)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             HStack(spacing: 10 * scale) {
                 ZStack {
                     Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -528,6 +532,11 @@ extension AppModel {
 
     /// Home screen and library navigation; panels go through panelCommand.
     func handle(_ command: Command) -> Bool {
+        if pairing != nil {
+            if command == .select { answerPairing(true) }
+            if command == .back { answerPairing(false) }
+            return true
+        }
         guard preferences.onboarded else { return onboardingCommand(command) }
         if starting != nil {
             if command == .back { cancelStart() }

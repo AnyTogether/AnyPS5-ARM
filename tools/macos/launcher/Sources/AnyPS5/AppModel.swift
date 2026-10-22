@@ -1,5 +1,6 @@
 import AnyPS5Core
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,7 +9,7 @@ struct Preferences: Codable, Equatable {
     enum Backdrop: String, Codable { case theme, image, video }
 
     var onboarded = false
-    var language = Language.system
+    var language = Language.english
     var theme = Theme.cosmic
     var accent: AccentColor?
     var backdrop = Backdrop.theme
@@ -115,6 +116,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var trophies: [String: TrophySet] = [:]
     /// Why each game stopped the last time it was started, when it stopped on an error.
     @Published private(set) var diagnoses: [String: Diagnosis] = [:]
+    /// A phone asking to be allowed, shown over everything until the user answers.
+    @Published var pairing: PairingRequest?
+    /// The connected phone and its last reported latency.
+    @Published private(set) var phone: (name: String, latency: Double?)?
+    /// The phones allowed so far, for the settings.
+    @Published private(set) var phones: [PairedDevice] = []
     @Published var toast: Toast?
     @Published var active = true
     @Published private(set) var rosettaMissing = false
@@ -129,6 +136,13 @@ final class AppModel: ObservableObject {
     private var trophiesRead: Set<String> = []
     private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
+    private var remote: RemoteServer?
+    private let pairedDevices = PairedDevices()
+    /// The library the phone was told last, and what keeps it told.
+    private var phoneLibrary: RemoteMessage?
+    private var librarySink: AnyCancellable?
+    /// The game the phone asked for while another one was still playing.
+    private var launchAfterExit: String?
     /// The game to start as soon as its update finishes.
     private var playAfterUnlock: String?
     private var toastTask: Task<Void, Never>?
@@ -160,6 +174,7 @@ final class AppModel: ObservableObject {
         }
         if self.preferences.onboarded && persists { rescan() }
         if persists {
+            startRemote()
             let discord = self.discord
             DiscordGames.load { games in discord.use(games) }
         }
@@ -450,6 +465,7 @@ final class AppModel: ObservableObject {
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+            .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
@@ -550,9 +566,142 @@ final class AppModel: ObservableObject {
         }
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
+        if let next = launchAfterExit, let game = games.first(where: { $0.id == next }) {
+            launchAfterExit = nil
+            selected = games.firstIndex(of: game) ?? selected
+            primaryAction(game)
+        }
     }
 
+    // MARK: Phone
+
+    /// Starts the phone server; a launcher that cannot open it still works without phones.
+    private func startRemote() {
+        phones = pairedDevices.all
+        let events = RemoteServer.Events(
+            pairing: { request in Task { @MainActor in self.askToPair(request) } },
+            connected: { name in Task { @MainActor in
+                withAnimation(Motion.overlay) { self.phone = (name, nil) }
+                self.phones = self.pairedDevices.all
+                self.show(T.format(.phoneConnected, name), symbol: "iphone.gen3")
+                self.phoneLibrary = nil
+                self.tellPhone()
+            } },
+            disconnected: { Task { @MainActor in withAnimation(Motion.overlay) { self.phone = nil } } },
+            latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } },
+            request: { message in Task { @MainActor in self.phoneAsked(message) } })
+        // Whatever the launcher shows changes the library the phone shows.
+        librarySink = objectWillChange.debounce(for: .milliseconds(150), scheduler: RunLoop.main).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.tellPhone() }
+        }
+        // A fixed port lets a phone on a network without Bonjour connect by address alone.
+        for (port, bridge) in [(RemoteServer.preferredPort, RemoteServer.preferredBridgePort), (0, 0)] {
+            let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port, bridgePort: bridge)
+            if (try? server.start()) != nil {
+                remote = server
+                return
+            }
+        }
+        show(T.text(.phoneServerFailed), symbol: "exclamationmark.triangle.fill")
+    }
+
+    private func askToPair(_ request: PairingRequest) {
+        withAnimation(Motion.overlay) { pairing = request }
+        Sounds.shared.play(.select)
+        // A game in front keeps its focus: the phone asks through a card over it instead.
+        if !NSApp.isActive { TrophyBanner.shared.notice(T.text(.phonePairingTitle), detail: T.format(.phoneOpenLauncher, request.deviceName), symbol: "iphone.gen3", sounds: preferences.sounds) }
+    }
+
+    func answerPairing(_ allow: Bool) {
+        guard let request = pairing else { return }
+        remote?.respond(to: request.id, allow: allow)
+        Sounds.shared.play(allow ? .select : .back)
+        withAnimation(Motion.overlay) { pairing = nil }
+    }
+
+    func removePhone(_ id: String) {
+        pairedDevices.remove(id: id)
+        phones = pairedDevices.all
+    }
+
+    func previewPairing(_ request: PairingRequest) { pairing = request }
+
+    func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
+
     func discordOff() { discord.clear() }
+
+    /// The library as the phone shows it, sent when it differs from what the phone has.
+    private func tellPhone() {
+        guard let remote, phone != nil else { return }
+        let library = RemoteMessage.library(games: games.map(remoteGame), selected: selectedGame?.id, running: (running?.game ?? starting)?.id,
+                                            language: preferences.language.rawValue)
+        guard library != phoneLibrary else { return }
+        phoneLibrary = library
+        remote.publish(library)
+    }
+
+    private func remoteGame(_ game: Game) -> RemoteGame {
+        let state: RemoteGame.State
+        switch self.state(of: game) {
+        case .unreadable: state = .unavailable
+        case .locked, .failed: state = .locked
+        case .queued, .installing: state = .installing
+        case .installed(let outdated): state = outdated ? .update : .installed
+        case .starting: state = .starting
+        case .running: state = .running
+        }
+        let set = trophies[game.id]
+        return RemoteGame(id: game.id, name: game.name, state: state, trophies: set.map { "\($0.unlockedCount)/\($0.trophies.count)" },
+                          art: RemoteArt.tag(icon: game.icon, background: game.background))
+    }
+
+    /// The phone in launcher mode: it moves around the launcher, picks, starts and stops games.
+    private func phoneAsked(_ message: RemoteMessage) {
+        switch message {
+        case .wantArt(let id):
+            guard let game = games.first(where: { $0.id == id }), let remote else { return }
+            Task.detached(priority: .utility) {
+                remote.publish(.art(id: id, icon: RemoteArt.jpeg(game.icon, longestSide: RemoteArt.iconSide),
+                                    background: RemoteArt.jpeg(game.background, longestSide: RemoteArt.backgroundSide)))
+            }
+        case .command(let name):
+            let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options]
+            guard let command = commands[name] else { return }
+            bringLauncherFront()
+            _ = Input.shared.handler?(command)
+        case .select(let id):
+            guard let index = games.firstIndex(where: { $0.id == id }), index != selected else { return }
+            Sounds.shared.play(.move)
+            withAnimation(Motion.overlay) { selected = index }
+        case .launch(let id):
+            guard let index = games.firstIndex(where: { $0.id == id }) else { return }
+            if let running, running.game.id != id {
+                // One game at a time: the one playing stops, then the new one starts.
+                launchAfterExit = id
+                running.app.forceTerminate()
+                return
+            }
+            withAnimation(Motion.overlay) { selected = index }
+            if let running {
+                NSApp.yieldActivation(to: running.app)
+                running.app.activate()
+            } else {
+                primaryAction(games[index])
+            }
+        case .close:
+            if starting != nil { cancelStart() } else { running?.app.forceTerminate() }
+        case .home:
+            bringLauncherFront()
+        default:
+            break
+        }
+    }
+
+    private func bringLauncherFront() {
+        guard !NSApp.isActive else { return }
+        showWindows()
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     // MARK: Trophy notifications
 

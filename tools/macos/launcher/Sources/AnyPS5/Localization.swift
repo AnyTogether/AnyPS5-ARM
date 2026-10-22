@@ -20,15 +20,11 @@ enum Language: String, Codable, CaseIterable, Identifiable {
         case .english: return 1
         }
     }
-
-    static var system: Language {
-        Locale.preferredLanguages.first?.hasPrefix("tr") == true ? .turkish : .english
-    }
 }
 
 /// Every user-facing text, in both languages. `T.text(.key)` reads the current language.
 enum T {
-    nonisolated(unsafe) static var language: Language = .system
+    nonisolated(unsafe) static var language: Language = .english
 
     static func text(_ key: Key) -> String {
         let table = language == .turkish ? turkish : english
@@ -61,6 +57,7 @@ enum T {
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
+        case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
         case discordPresence, discordPresenceDetail
@@ -190,6 +187,16 @@ enum T {
         .confirm: "Onayla",
         .controls: "Tuş Atamaları",
         .trophies: "Kupalar",
+        .phonePairingTitle: "Bu telefon bağlansın mı?",
+        .phonePairingText: "Telefonda da aynı kod görünüyor.",
+        .phoneAllow: "İzin Ver",
+        .phoneDeny: "Reddet",
+        .phoneConnected: "%@ bağlandı",
+        .phones: "Telefonlar",
+        .phonesNone: "Henüz yok",
+        .phoneRemove: "Kaldır",
+        .phoneOpenLauncher: "%@ bağlanmak istiyor: izin vermek için launcher'ı aç.",
+        .phoneServerFailed: "Telefon bağlantısı açılamadı",
         .madeBy: "Geliştiren",
         .builtOn: "AnyPS5 üzerine kurulu",
         .updateChoiceText: "Bu oyun için güncelleme var",
@@ -414,6 +421,16 @@ enum T {
         .confirm: "Confirm",
         .controls: "Controls",
         .trophies: "Trophies",
+        .phonePairingTitle: "Connect this phone?",
+        .phonePairingText: "The phone shows the same code.",
+        .phoneAllow: "Allow",
+        .phoneDeny: "Deny",
+        .phoneConnected: "%@ connected",
+        .phones: "Phones",
+        .phonesNone: "None yet",
+        .phoneRemove: "Remove",
+        .phoneOpenLauncher: "%@ wants to connect: open the launcher to allow it.",
+        .phoneServerFailed: "The phone connection could not start",
         .madeBy: "Made by",
         .builtOn: "Built on AnyPS5",
         .updateChoiceText: "An update is ready for this game",
