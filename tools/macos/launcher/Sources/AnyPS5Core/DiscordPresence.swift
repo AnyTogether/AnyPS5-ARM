@@ -21,6 +21,63 @@ public enum DiscordFrame {
     }
 }
 
+/// The games Discord knows (its public applications/detectable list), by name: a game found in
+/// it is shown on Discord as itself, with its own name and icon.
+public struct DiscordGames: Sendable {
+    public static let source = URL(string: "https://discord.com/api/v9/applications/detectable")!
+    static let maxAge: TimeInterval = 7 * 24 * 3600
+
+    private let ids: [String: String]
+
+    public init() { ids = [:] }
+
+    /// From the list as Discord serves it, or as the launcher caches it: objects with an id, a
+    /// name and aliases.
+    public init(json: Data) {
+        var ids: [String: String] = [:]
+        for entry in (try? JSONSerialization.jsonObject(with: json)) as? [[String: Any]] ?? [] {
+            guard let id = entry["id"] as? String, let name = entry["name"] as? String else { continue }
+            for key in [name] + (entry["aliases"] as? [String] ?? []) {
+                let normal = DiscordGames.normalized(key)
+                if !normal.isEmpty, ids[normal] == nil { ids[normal] = id }
+            }
+        }
+        self.ids = ids
+    }
+
+    public func applicationID(for game: String) -> String? { ids[DiscordGames.normalized(game)] }
+
+    /// Lowercase letters and digits only, so "Plants vs. Zombies™: Replanted" finds "Plants vs.
+    /// Zombies: Replanted".
+    static func normalized(_ name: String) -> String {
+        let folded = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US"))
+        return folded.split { !($0.isLetter || $0.isNumber) }.joined(separator: " ")
+    }
+
+    public static var cacheFile: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/discord-games.json")
+    }
+
+    /// The cached list at once, then a fresh one from Discord when the cache is a week old or
+    /// missing. Without a network the cache, or an empty list, stays.
+    public static func load(cache: URL = cacheFile, update: @escaping @Sendable (DiscordGames) -> Void) {
+        let cached = try? Data(contentsOf: cache)
+        if let cached { update(DiscordGames(json: cached)) }
+        let age = (try? cache.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) } ?? .infinity
+        guard cached == nil || age > maxAge else { return }
+        URLSession.shared.dataTask(with: source) { data, response, _ in
+            guard let data, (response as? HTTPURLResponse)?.statusCode == 200,
+                  let entries = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]], !entries.isEmpty else { return }
+            let slim = entries.map { ["id": $0["id"] ?? "", "name": $0["name"] ?? "", "aliases": $0["aliases"] ?? []] }
+            if let compact = try? JSONSerialization.data(withJSONObject: slim) {
+                try? FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? compact.write(to: cache, options: .atomic)
+                update(DiscordGames(json: compact))
+            }
+        }.resume()
+    }
+}
+
 /// "Playing <game>" on the user's Discord profile, through the Discord app's local socket
 /// (discord-ipc-N in the temporary folder). Without Discord, or without an application ID,
 /// nothing happens; a Discord started later is found on the next game.
@@ -32,30 +89,43 @@ public final class DiscordPresence: @unchecked Sendable {
     private let directory: URL
     private let queue = DispatchQueue(label: "org.anyps5.discord")
     private var socket: Int32 = -1
+    /// The application the open socket shook hands as.
+    private var connectedID: String?
+    private var games: DiscordGames
 
-    public init(applicationID: String, directory: URL = URL(fileURLWithPath: NSTemporaryDirectory())) {
+    public init(applicationID: String, directory: URL = URL(fileURLWithPath: NSTemporaryDirectory()), games: DiscordGames = DiscordGames()) {
         self.applicationID = applicationID
         self.directory = directory
+        self.games = games
+    }
+
+    public func use(_ games: DiscordGames) {
+        queue.async { [self] in self.games = games }
     }
 
     deinit { if socket >= 0 { Darwin.close(socket) } }
 
-    /// Shows the game, with the time it has been played since `since`. No image is named, so
-    /// Discord shows the AnyPS5 application's own icon.
+    /// Shows the game, with the time it has been played since `since`. A game Discord knows shows
+    /// as itself, with AnyPS5 under it; any other shows under AnyPS5. No image is named, so Discord
+    /// shows the application's own icon.
     public func playing(_ game: String, since: Date) {
-        let activity: [String: Any] = [
-            "details": game,
-            "state": "AnyPS5 · Mac",
-            "timestamps": ["start": Int(since.timeIntervalSince1970)],
-            "type": 0,
-        ]
-        queue.async { [self] in setActivity(activity) }
+        queue.async { [self] in
+            let known = games.applicationID(for: game)
+            var activity: [String: Any] = ["timestamps": ["start": Int(since.timeIntervalSince1970)], "type": 0]
+            if known != nil {
+                activity["details"] = "AnyPS5 Launcher · Mac"
+            } else {
+                activity["details"] = game
+                activity["state"] = "AnyPS5 · Mac"
+            }
+            setActivity(activity, as: known ?? applicationID)
+        }
     }
 
     public func clear() {
         queue.async { [self] in
-            guard socket >= 0 else { return }
-            setActivity(NSNull())
+            guard socket >= 0, let connectedID else { return }
+            setActivity(NSNull(), as: connectedID)
         }
     }
 
@@ -66,8 +136,13 @@ public final class DiscordPresence: @unchecked Sendable {
         }
     }
 
-    private func setActivity(_ activity: Any) {
-        guard !applicationID.isEmpty else { return }
+    private func setActivity(_ activity: Any, as application: String) {
+        guard !applicationID.isEmpty, !application.isEmpty else { return }
+        // Discord ties a socket to the application it shook hands as: another one needs its own.
+        if socket >= 0, connectedID != application {
+            Darwin.close(socket)
+            socket = -1
+        }
         let command: [String: Any] = [
             "cmd": "SET_ACTIVITY",
             "args": ["pid": Int(ProcessInfo.processInfo.processIdentifier), "activity": activity],
@@ -76,7 +151,7 @@ public final class DiscordPresence: @unchecked Sendable {
         guard let json = try? JSONSerialization.data(withJSONObject: command) else { return }
         // A Discord that restarted closed the old socket: connect once more and send again.
         for _ in 0..<2 {
-            guard connected() else { return }
+            guard connected(as: application) else { return }
             if write(op: 1, json: json), read() != nil { return }
             Darwin.close(socket)
             socket = -1
@@ -84,7 +159,7 @@ public final class DiscordPresence: @unchecked Sendable {
     }
 
     /// Connects and shakes hands with the first Discord socket that answers.
-    private func connected() -> Bool {
+    private func connected(as application: String) -> Bool {
         if socket >= 0 { return true }
         for index in 0..<10 {
             let path = directory.appendingPathComponent("discord-ipc-\(index)").path
@@ -111,8 +186,11 @@ public final class DiscordPresence: @unchecked Sendable {
                 continue
             }
             socket = candidate
-            let handshake = try? JSONSerialization.data(withJSONObject: ["v": 1, "client_id": applicationID])
-            if let handshake, write(op: 0, json: handshake), let ready = read(), ready.op == 1 { return true }
+            let handshake = try? JSONSerialization.data(withJSONObject: ["v": 1, "client_id": application])
+            if let handshake, write(op: 0, json: handshake), let ready = read(), ready.op == 1 {
+                connectedID = application
+                return true
+            }
             Darwin.close(candidate)
             socket = -1
         }

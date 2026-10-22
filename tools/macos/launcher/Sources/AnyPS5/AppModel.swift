@@ -155,6 +155,10 @@ final class AppModel: ObservableObject {
             await MainActor.run { self.rosettaMissing = missing }
         }
         if self.preferences.onboarded && persists { rescan() }
+        if persists {
+            let discord = self.discord
+            DiscordGames.load { games in discord.use(games) }
+        }
     }
 
     /// Fills the library at once (offscreen previews).

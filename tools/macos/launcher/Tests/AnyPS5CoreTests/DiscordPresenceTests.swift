@@ -32,8 +32,14 @@ final class FakeDiscord: @unchecked Sendable {
     var frames: [(UInt32, [String: Any])] { lock.withLock { received } }
 
     private func serve() {
-        let client = accept(listener, nil, nil)
-        guard client >= 0 else { return }
+        while true {
+            let client = accept(listener, nil, nil)
+            guard client >= 0 else { return }
+            talk(client)
+        }
+    }
+
+    private func talk(_ client: Int32) {
         while true {
             var header = [UInt8](repeating: 0, count: 8)
             guard recv(client, &header, 8, MSG_WAITALL) == 8 else { break }
@@ -102,6 +108,52 @@ final class DiscordPresenceTests: XCTestCase {
         XCTAssertEqual(discord.frames[2].1["cmd"] as? String, "SET_ACTIVITY")
         XCTAssertTrue(arguments?["activity"] is NSNull)
         XCTAssertEqual(discord.frames.filter { $0.0 == 0 }.count, 1, "one handshake per connection")
+        presence.close()
+    }
+
+    static let catalog = DiscordGames(json: Data(#"[{"id":"1413176957381771337","name":"Hollow Knight: Silksong","aliases":[]},{"id":"1431009382950506536","name":"Plants vs. Zombies: Replanted","aliases":["PvZ Replanted"]}]"#.utf8))
+
+    func testGamesMatchByNameWithoutMarks() {
+        XCTAssertEqual(Self.catalog.applicationID(for: "Hollow Knight: Silksong"), "1413176957381771337")
+        XCTAssertEqual(Self.catalog.applicationID(for: "Plants vs. Zombies™: Replanted"), "1431009382950506536")
+        XCTAssertEqual(Self.catalog.applicationID(for: "pvz replanted"), "1431009382950506536")
+        XCTAssertNil(Self.catalog.applicationID(for: "Dreaming Sarah"))
+        XCTAssertNil(DiscordGames(json: Data("not json".utf8)).applicationID(for: "Hollow Knight: Silksong"))
+    }
+
+    func testAKnownGameShowsAsItself() throws {
+        let discord = try FakeDiscord()
+        let presence = DiscordPresence(applicationID: "1234", directory: discord.directory, games: Self.catalog)
+        presence.playing("Hollow Knight: Silksong", since: Date())
+        XCTAssertTrue(discord.waitFor(2))
+        XCTAssertEqual(discord.frames[0].1["client_id"] as? String, "1413176957381771337")
+        let activity = (discord.frames[1].1["args"] as? [String: Any])?["activity"] as? [String: Any]
+        XCTAssertEqual(activity?["details"] as? String, "AnyPS5 Launcher · Mac")
+        XCTAssertNil(activity?["state"])
+        presence.close()
+    }
+
+    func testAnUnknownGameShowsUnderAnyPS5() throws {
+        let discord = try FakeDiscord()
+        let presence = DiscordPresence(applicationID: "1234", directory: discord.directory, games: Self.catalog)
+        presence.playing("Dreaming Sarah", since: Date())
+        XCTAssertTrue(discord.waitFor(2))
+        XCTAssertEqual(discord.frames[0].1["client_id"] as? String, "1234")
+        let activity = (discord.frames[1].1["args"] as? [String: Any])?["activity"] as? [String: Any]
+        XCTAssertEqual(activity?["details"] as? String, "Dreaming Sarah")
+        XCTAssertEqual(activity?["state"] as? String, "AnyPS5 · Mac")
+        presence.close()
+    }
+
+    func testAnotherGameConnectsAgainAsThatGame() throws {
+        let discord = try FakeDiscord()
+        let presence = DiscordPresence(applicationID: "1234", directory: discord.directory, games: Self.catalog)
+        presence.playing("Dreaming Sarah", since: Date())
+        presence.clear()
+        presence.playing("Hollow Knight: Silksong", since: Date())
+        XCTAssertTrue(discord.waitFor(5))
+        let handshakes = discord.frames.filter { $0.0 == 0 }.map { $0.1["client_id"] as? String }
+        XCTAssertEqual(handshakes, ["1234", "1413176957381771337"])
         presence.close()
     }
 
