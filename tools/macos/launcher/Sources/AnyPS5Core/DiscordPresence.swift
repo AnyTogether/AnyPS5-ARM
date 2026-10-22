@@ -26,7 +26,7 @@ public enum DiscordFrame {
 /// nothing happens; a Discord started later is found on the next game.
 public final class DiscordPresence: @unchecked Sendable {
     /// The AnyPS5 application in the Discord Developer Portal; empty turns the presence off.
-    public static let anyps5ApplicationID = ""
+    public static let anyps5ApplicationID = "1562749843724566549"
 
     private let applicationID: String
     private let directory: URL
