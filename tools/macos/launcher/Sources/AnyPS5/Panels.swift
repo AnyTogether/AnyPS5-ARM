@@ -51,6 +51,18 @@ extension AppModel {
                 }),
                 PanelRow(id: "cancel", title: T.text(.cancel), kind: .action(destructive: false) { [weak self] in self?.closeOverlay() }),
             ])]
+        case .updateChoice:
+            guard let game = selectedGame else { return [] }
+            return [PanelCategory(id: "update", title: T.text(.updateAvailable), symbol: "arrow.triangle.2.circlepath", rows: [
+                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: T.text(.updateAndPlayDetail), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
+                    self?.closeOverlay()
+                    self?.updateAndPlay(game)
+                }),
+                PanelRow(id: "play", title: T.text(.playNow), detail: T.text(.playNowDetail), symbol: "play.fill", kind: .action(destructive: false) { [weak self] in
+                    self?.closeOverlay()
+                    self?.play(game)
+                }),
+            ])]
         default: return []
         }
     }
@@ -118,6 +130,13 @@ extension AppModel {
             PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
             PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
+            PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
+            PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(URL(string: "https://github.com/utkuhalis/AnyPS5-ARM")!)
+            }),
+            PanelRow(id: "upstream", title: T.text(.builtOn), detail: "github.com/boykopovar/AnyPS5", symbol: "heart", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(URL(string: "https://github.com/boykopovar/AnyPS5")!)
+            }),
         ]
         if translocated {
             about.append(PanelRow(id: "move", title: T.text(.moveToApplications), symbol: "arrow.down.app", kind: .action(destructive: false) { _ = AppLocation.moveToApplications() }))

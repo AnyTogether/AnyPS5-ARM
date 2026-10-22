@@ -65,6 +65,8 @@ enum Overlay: Equatable {
     case library
     case log
     case confirmUninstall
+    /// Play on a game an older toolkit made: update it first, or play it as it is.
+    case updateChoice
     case controls
     case trophies
     case advanced
@@ -127,6 +129,8 @@ final class AppModel: ObservableObject {
     private var trophiesRead: Set<String> = []
     private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
+    /// The game to start as soon as its update finishes.
+    private var playAfterUnlock: String?
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
@@ -378,6 +382,10 @@ final class AppModel: ObservableObject {
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
+                    if self.playAfterUnlock == id {
+                        self.playAfterUnlock = nil
+                        self.play(game)
+                    }
                 case .failure(let error) where error is CancellationError:
                     break
                 case .failure(let error):
@@ -389,7 +397,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The update the Play prompt offers: unlock the game again, then start it.
+    func updateAndPlay(_ game: Game) {
+        playAfterUnlock = game.id
+        unlock(game)
+    }
+
     func cancelUnlock(_ game: Game) {
+        if playAfterUnlock == game.id { playAfterUnlock = nil }
         if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); return }
         if progress[game.id] != nil { installer?.cancel() }
         Sounds.shared.play(.back)
@@ -398,6 +413,7 @@ final class AppModel: ObservableObject {
     func uninstall(_ game: Game) {
         guard let root else { return }
         try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
+        try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
         installedRecords[game.id] = nil
         show(T.text(.uninstallDone), symbol: "trash")
     }
@@ -412,7 +428,7 @@ final class AppModel: ObservableObject {
 
     func primaryAction(_ game: Game) {
         switch state(of: game) {
-        case .installed: play(game)
+        case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
         case .locked, .failed: unlock(game)
         case .installing, .queued: cancelUnlock(game)
         case .running: running?.app.activate()
@@ -755,7 +771,7 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
         // The controls panel opens on its first key, below the hint.
         if next == .controls { panelRow = 1 }
         if next == .trophies { trophyIndex = 0 }

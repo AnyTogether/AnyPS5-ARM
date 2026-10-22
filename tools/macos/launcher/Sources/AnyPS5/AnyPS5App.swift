@@ -97,15 +97,25 @@ struct RootView: View {
         }
     }
 
+    private var subtitleKey: T.Key {
+        switch model.overlay {
+        case .confirmUninstall: return .uninstallConfirm
+        case .controls: return .controls
+        case .advanced: return .advancedTitle
+        case .updateChoice: return .updateChoiceText
+        default: return .gameSettings
+        }
+    }
+
     @ViewBuilder private var overlays: some View {
         switch model.overlay {
         case .settings:
             SettingsPanel().transition(.opacity)
         case .library:
             LibraryGrid().transition(.opacity.combined(with: .scale(scale: 1.03)))
-        case .gameSettings, .confirmUninstall, .controls, .advanced:
+        case .gameSettings, .confirmUninstall, .controls, .advanced, .updateChoice:
             if let game = model.selectedGame {
-                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: model.overlay == .confirmUninstall ? T.text(.uninstallConfirm) : T.text(model.overlay == .controls ? .controls : model.overlay == .advanced ? .advancedTitle : .gameSettings))
+                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         case .log:
