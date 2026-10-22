@@ -13,6 +13,8 @@ static_assert(sizeof(std::uint32_t) == 4 && sizeof(std::uint64_t) == 8 && sizeof
 constexpr std::int32_t NOT_INITIALIZED = static_cast<std::int32_t>(0x81120032);
 constexpr std::int32_t ALREADY_INITIALIZED = static_cast<std::int32_t>(0x81120033);
 constexpr std::int32_t NO_SPACE = static_cast<std::int32_t>(0x8112001C);
+constexpr std::int32_t INVALID_ARGUMENT = static_cast<std::int32_t>(0x81120016);
+constexpr std::int32_t NOT_FOUND = static_cast<std::int32_t>(0x81120002);
 constexpr std::int32_t FATAL = static_cast<std::int32_t>(0x811200FF);
 
 struct Result {
@@ -34,7 +36,8 @@ extern "C" {
 std::int32_t APS5_VABI sceZlibInitialize(const void* buffer, std::uint64_t length) {
     std::lock_guard lock(serviceMutex);
     if (initialized) return ALREADY_INITIALIZED;
-    if ((buffer == nullptr) != (length == 0)) throw std::runtime_error("sceZlibInitialize: invalid work buffer");
+    if ((buffer == nullptr) != (length == 0)) return INVALID_ARGUMENT;
+    if (buffer) throw std::runtime_error("sceZlibInitialize: work memory registration is not implemented");
     initialized = true;
     return 0;
 }
@@ -42,20 +45,18 @@ std::int32_t APS5_VABI sceZlibInitialize(const void* buffer, std::uint64_t lengt
 std::int32_t APS5_VABI sceZlibFinalize() {
     std::lock_guard lock(serviceMutex);
     if (!initialized) return NOT_INITIALIZED;
-    if (result && !result->retrieved) throw std::runtime_error("sceZlibFinalize: outstanding result semantics unknown");
     result.reset();
     initialized = false;
     return 0;
 }
 
-std::int32_t APS5_VABI sceZlibInflate(const void* source, std::uint32_t sourceLength,
-                                     void* destination, std::uint32_t destinationLength,
-                                     std::uint64_t* requestId) {
+std::int32_t APS5_VABI sceZlibInflate(const void* source, std::uint32_t sourceLength, void* destination, std::uint32_t destinationLength, std::uint64_t* requestId) {
     std::lock_guard lock(serviceMutex);
     if (!initialized) return NOT_INITIALIZED;
     if (!source || !sourceLength || !destination || !requestId || !destinationLength ||
-        destinationLength > 65536 || reinterpret_cast<std::uintptr_t>(destination) % 2048 != 0)
-        throw std::runtime_error("sceZlibInflate: invalid buffer or size");
+        destinationLength > 65536 || destinationLength % 2048 != 0) return INVALID_ARGUMENT;
+    if (reinterpret_cast<std::uintptr_t>(destination) % 2048 != 0)
+        throw std::runtime_error("sceZlibInflate: unaligned destination driver behavior is not implemented");
     if (result && !result->retrieved) throw std::runtime_error("sceZlibInflate: multiple outstanding requests unsupported");
     if (nextId == std::numeric_limits<std::uint64_t>::max()) throw std::runtime_error("sceZlibInflate: request IDs exhausted");
     z_stream stream{};
@@ -78,18 +79,18 @@ std::int32_t APS5_VABI sceZlibInflate(const void* source, std::uint32_t sourceLe
 std::int32_t APS5_VABI sceZlibWaitForDone(std::uint64_t* requestId, std::uint32_t* timeout) {
     std::lock_guard lock(serviceMutex);
     if (!initialized) return NOT_INITIALIZED;
+    if (!requestId) return INVALID_ARGUMENT;
     if (timeout) throw std::runtime_error("sceZlibWaitForDone: timeout semantics unknown");
-    if (!requestId || !result || result->retrieved) throw std::runtime_error("sceZlibWaitForDone: no outstanding request");
+    if (!result || result->retrieved) throw std::runtime_error("sceZlibWaitForDone: no outstanding request");
     *requestId = result->id;
     return 0;
 }
 
-std::int32_t APS5_VABI sceZlibGetResult(std::uint64_t requestId, std::uint32_t* destinationLength,
-                                       std::int32_t* status) {
+std::int32_t APS5_VABI sceZlibGetResult(std::uint64_t requestId, std::uint32_t* destinationLength, std::int32_t* status) {
     std::lock_guard lock(serviceMutex);
     if (!initialized) return NOT_INITIALIZED;
-    if (!destinationLength || !status || !result || result->id != requestId)
-        throw std::runtime_error("sceZlibGetResult: invalid request or output");
+    if (!destinationLength || !status) return INVALID_ARGUMENT;
+    if (!result || result->id != requestId) return NOT_FOUND;
     if (result->retrieved) throw std::runtime_error("sceZlibGetResult: repeated retrieval semantics unknown");
     *destinationLength = result->produced;
     *status = result->status;

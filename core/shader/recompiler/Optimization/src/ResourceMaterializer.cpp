@@ -4,6 +4,7 @@
 #include "Optimization/ShaderStageInputInfo.hpp"
 #include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include "RdnaDecoder/RdnaImageOpDecoder.hpp"
+#include "RdnaDecoder/RdnaInstructionDecoder.hpp"
 #include "SpirvBackend/SpirvBufferFormat.hpp"
 #include "ThreadOwned.hpp"
 #include "ImageTableAbi.hpp"
@@ -118,6 +119,15 @@ RdnaImageDimension descriptorDimension(const DescriptorValue& descriptor, RdnaIm
     }
 }
 
+std::uint32_t imageCoordinates(RdnaImageDimension dimension) {
+    switch (dimension) {
+        case RdnaImageDimension::Dim1D: return 1u;
+        case RdnaImageDimension::Dim1DArray: case RdnaImageDimension::Dim2D: return 2u;
+        case RdnaImageDimension::Dim2DMsaaArray: return 4u;
+        default: return 3u;
+    }
+}
+
 bool validImageDescriptor(const DescriptorValue& descriptor, bool r128) {
     const auto type = rawImageType(descriptor);
     const auto format = rawImageFormat(descriptor);
@@ -198,6 +208,9 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
         } else if (decoded.dimension == RdnaImageDimension::Dim1DArray) {
             decoded.dimension = RdnaImageDimension::Dim2DArray;
         }
+    }
+    if (GcnGuestShaders() && imageCoordinates(decoded.dimension) != imageCoordinates(base.dimension)) {
+        throw std::runtime_error("GCN image instruction on a descriptor of type " + std::to_string(static_cast<std::uint32_t>(rawImageType(descriptor))) + " needs a different address count than its inferred dimension; not implemented");
     }
     decoded.cube = descriptorIsCube(descriptor);
     const auto format = rawImageFormat(descriptor);
@@ -281,7 +294,9 @@ ImageDecode inspectImageDescriptor(const DescriptorValue& descriptor, const Imag
             decoded.conversionFormat = format;
         }
     } else if (decoded.numericClass == IrTextureNumericClass::Unsupported || (base.depthCompare && decoded.numericClass != IrTextureNumericClass::Float)) {
-        return rejectImage(PoisonReason::NumericClass, "sampled image descriptor uses an unsupported format");
+        char words[96];
+        std::snprintf(words, sizeof(words), " (T# %08x %08x %08x %08x %08x %08x %08x %08x)", descriptor.dwords[0], descriptor.dwords[1], descriptor.dwords[2], descriptor.dwords[3], descriptor.dwords[4], descriptor.dwords[5], descriptor.dwords[6], descriptor.dwords[7]);
+        return rejectImage(PoisonReason::NumericClass, std::string("sampled image descriptor uses an unsupported format") + words);
     }
     return result;
 }
@@ -1285,6 +1300,12 @@ void materializeSnapshot(const IrResourcePlan& plan, const SrtRuntime& runtime, 
         throw std::runtime_error("materialization sources are missing buffer descriptors");
     }
     snapshot.buffers.assign(values.begin(), values.begin() + plan.info.buffers.size());
+    if (GcnGuestShaders()) {
+        for (auto& buffer : snapshot.buffers) {
+            buffer.dwords[1] &= GcnBufferWord1Mask;
+            buffer.dwords[3] = GcnBufferWord3(buffer.dwords[1], buffer.dwords[3]);
+        }
+    }
     cursor += plan.info.buffers.size();
 
     snapshot.images.resize(plan.info.images.size());
@@ -1304,6 +1325,10 @@ void materializeSnapshot(const IrResourcePlan& plan, const SrtRuntime& runtime, 
         cursor++;
         if (descriptor.dwordCount != 8u) {
             throw std::runtime_error("image descriptor has an invalid width");
+        }
+        if (GcnGuestShaders()) {
+            const auto words = GcnImageWords(std::span<const std::uint32_t, 8>(descriptor.dwords.data(), 8u));
+            std::copy(words.begin(), words.end(), descriptor.dwords.begin());
         }
         const auto activity = plan.descriptorSources.size() + i;
         if (activity < activeSources.size() && activeSources[activity] == 0u) {
@@ -1354,24 +1379,9 @@ void materializeForcedDegamma(const IrResourcePlan& plan, ResourceSnapshot& snap
 }
 
 std::uint32_t colorCompareReference(IrBufferFormat format) {
-    switch (format) {
-    case IrBufferFormat::Format16_16UNorm:
-    case IrBufferFormat::Format11_11_10UNorm: case IrBufferFormat::Format10_11_11UNorm: case IrBufferFormat::Format2_10_10_10UNorm:
-    case IrBufferFormat::Format10_10_10_2UNorm: case IrBufferFormat::Format16_16_16_16UNorm:
-        return EmulatedCompare::ReferenceUnorm;
-    case IrBufferFormat::Format8UNorm: case IrBufferFormat::Format8_8UNorm: case IrBufferFormat::Format8_8_8_8UNorm:
-    case IrBufferFormat::Format8Srgb: case IrBufferFormat::Format8_8Srgb: case IrBufferFormat::Format8_8_8_8Srgb:
-        return EmulatedCompare::ReferenceZero;
-    case IrBufferFormat::Format8SNorm: case IrBufferFormat::Format16SNorm: case IrBufferFormat::Format8_8SNorm: case IrBufferFormat::Format16_16SNorm:
-    case IrBufferFormat::Format11_11_10SNorm: case IrBufferFormat::Format10_11_11SNorm: case IrBufferFormat::Format2_10_10_10SNorm:
-    case IrBufferFormat::Format10_10_10_2SNorm: case IrBufferFormat::Format8_8_8_8SNorm: case IrBufferFormat::Format16_16_16_16SNorm:
-        return EmulatedCompare::ReferenceSnorm;
-    case IrBufferFormat::Format16Float: case IrBufferFormat::Format16_16Float: case IrBufferFormat::Format11_11_10Float:
-    case IrBufferFormat::Format10_11_11Float: case IrBufferFormat::Format32_32Float: case IrBufferFormat::Format16_16_16_16Float:
-        return EmulatedCompare::ReferenceFloat;
-    default:
-        throw std::runtime_error("comparison sampling of a color texture is implemented only for float, unorm and snorm formats (format " + std::to_string(static_cast<std::uint32_t>(format)) + ")");
-    }
+    const auto value = static_cast<std::uint32_t>(format);
+    if (((value >= 1u && value <= 77u) || (value >= 128u && value <= 130u)) && SampledTextureNumericClass(format) == IrTextureNumericClass::Float && format != IrBufferFormat::Format11_11_10UNorm && format != IrBufferFormat::Format10_11_11Float) return EmulatedCompare::ReferenceZero;
+    throw std::runtime_error("comparison sampling of a color texture is implemented only for floating-point, UNORM and SNORM formats (format " + std::to_string(value) + ")");
 }
 
 bool convertedSampleCompatible(const ImageResource& image) {

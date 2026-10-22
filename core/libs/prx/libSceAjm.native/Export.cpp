@@ -12,6 +12,37 @@ static void AjmStub(const char* name) {
     NotImplemented_nid_no_patch(name);
 }
 
+struct WVorbisHeaderPacketParameter {
+    std::size_t size;
+    std::int32_t channels;
+    std::uint32_t sampleRate;
+    std::int32_t bytesPerSecond;
+    std::int32_t shortBlockExponent;
+    std::int32_t longBlockExponent;
+    std::uint32_t reserved;
+    const void* setupPacket;
+    std::size_t setupPacketSize;
+    void* output;
+    std::size_t outputCapacity;
+    std::size_t outputSize;
+};
+
+struct WVorbisSetupPacketParameter {
+    std::size_t size;
+    std::int32_t channels;
+    std::uint32_t reserved;
+    const void* input;
+    std::size_t inputSize;
+    void* output;
+    std::size_t outputCapacity;
+    std::size_t outputSize;
+};
+
+static_assert(sizeof(WVorbisHeaderPacketParameter) == 72);
+static_assert(offsetof(WVorbisHeaderPacketParameter, setupPacket) == 32);
+static_assert(sizeof(WVorbisSetupPacketParameter) == 56);
+static_assert(offsetof(WVorbisSetupPacketParameter, input) == 16);
+
 extern "C" {
 
 int APS5_VABI sceAjmBatchJobEncode(AjmBatchInfo* info, uint32_t instance, const void* pcm_input, size_t pcm_input_size, void* bitstream_output, size_t bitstream_output_size, void* result) {
@@ -32,12 +63,12 @@ const char* APS5_VABI sceAjmStrError(int error) {
  return nullptr;
 }
 
-int APS5_VABI sceAjmDecWVorbisCreateHeaderPacket(void) {
+int APS5_VABI sceAjmDecWVorbisCreateHeaderPacket(WVorbisHeaderPacketParameter* parameter) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAjmDecWVorbisCreateSetupPacket(void) {
+int APS5_VABI sceAjmDecWVorbisCreateSetupPacket(WVorbisSetupPacketParameter* parameter) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

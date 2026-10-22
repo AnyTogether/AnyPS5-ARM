@@ -20,6 +20,7 @@ PT_TLS = 7
 DTPMOD64, DTPOFF64, TPOFF64, TPOFF32 = 16, 17, 18, 23
 TLS_MEMSZ, TLS_ALIGN = 0x24, 16
 TLS_BLOCK = 0x30
+DEFAULT_BASE = 0x400000
 STRINGS = b"\0Tls\0Data\0ImportedTls\0"
 TLS_NAME, DATA_NAME, IMPORT_NAME = 1, 5, 10
 
@@ -107,8 +108,9 @@ def main():
         elf = output.read_bytes()
         relocations = dynamic_relocations(elf)
         tls = sorted(relocation for relocation in relocations if relocation[1] in (DTPMOD64, DTPOFF64, TPOFF64))
-        assert tls == [(0x1000, TPOFF64, "", 0, 4), (0x1008, DTPOFF64, "", 0, 8), (0x1010, TPOFF64, "", 0, 0x12),
-                       (0x1018, DTPMOD64, "", 0, 0), (0x1020, TPOFF64, "ImportedTls", 6, 0)], relocations
+        assert tls == [(DEFAULT_BASE + 0x1000, TPOFF64, "", 0, 4), (DEFAULT_BASE + 0x1008, DTPOFF64, "", 0, 8),
+                       (DEFAULT_BASE + 0x1010, TPOFF64, "", 0, 0x12), (DEFAULT_BASE + 0x1018, DTPMOD64, "", 0, 0),
+                       (DEFAULT_BASE + 0x1020, TPOFF64, "ImportedTls", 6, 0)], relocations
         assert any(struct.unpack_from("<I", elf, 64 + index * 56)[0] == PT_TLS
                    for index in range(struct.unpack_from("<H", elf, 0x38)[0])), "PT_TLS must be kept"
 

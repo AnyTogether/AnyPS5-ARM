@@ -484,10 +484,9 @@ int APS5_VABI sceKernelConfiguredFlexibleMemorySize(size_t* size) {
  return 0;
 }
 
-int APS5_VABI sceKernelInternalMemoryGetAvailableSize(size_t* size) {
- if (!size) return SCE_KERNEL_ERROR_EINVAL;
- *size = 0;
- return 0;
+int APS5_VABI sceKernelInternalMemoryGetAvailableSize(std::size_t* size) {
+ if (!size) return -1;
+ throw std::logic_error("sceKernelInternalMemoryGetAvailableSize: internal pool statistics are not implemented");
 }
 
 int APS5_VABI sceKernelSetVirtualRangeName(const void* addr, uint64_t len, const char* name) {

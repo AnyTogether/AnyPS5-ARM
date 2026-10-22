@@ -682,6 +682,17 @@ if(BUILD_TESTING)
             set_tests_properties(guest_call_trace_abort_race PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION
                 "last traced system library calls[^~]*#102 thread [0-9]+ libTraced.prx Integers from[^~]*most called traced imports \\(102 calls in total\\):[^~]* 101 libTraced.prx Integers[^~]* 1 libOther.prx Blocks")
         endif()
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test_executable(guest_call_trace_fixed_base_tests ${LIBS_INCLUDE_DIR}/tests/GuestCallTrace.cpp)
+            target_include_directories(guest_call_trace_fixed_base_tests PRIVATE ${LIBS_INCLUDE_DIR})
+            target_link_libraries(guest_call_trace_fixed_base_tests PRIVATE libc)
+            set_target_properties(guest_call_trace_fixed_base_tests PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+            target_compile_options(guest_call_trace_fixed_base_tests PRIVATE -fno-pie)
+            target_link_options(guest_call_trace_fixed_base_tests PRIVATE -no-pie -fuse-ld=bfd)
+            add_test(NAME guest_call_trace_fixed_base_abort COMMAND guest_call_trace_fixed_base_tests abort)
+            set_tests_properties(guest_call_trace_fixed_base_abort PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION
+                "#1 thread [0-9]+ libTraced.prx Integers from 0x00000000004[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f] guest_call_trace_fixed_base_tests\\+0x[0-9a-f]?[0-9a-f]?[0-9a-f]?[0-9a-f]?[0-9a-f][^0-9a-f]")
+        endif()
     endif()
     add_test_executable(guest_syslog_tests ${LIBS_INCLUDE_DIR}/tests/GuestSyslog.cpp)
     target_include_directories(guest_syslog_tests PRIVATE ${LIBS_INCLUDE_DIR})
@@ -1045,7 +1056,7 @@ if(MINGW)
         target_include_directories(guest_message_destructor_abi_tests PRIVATE ${LIBS_INCLUDE_DIR})
         target_link_libraries(guest_message_destructor_abi_tests PRIVATE libc)
         configure_windows_unwind(guest_message_destructor_abi_tests)
-        foreach(mode IN ITEMS control decoy zero release regex-decoy regex-zero
+        foreach(mode IN ITEMS control hybrid decoy zero release regex-decoy regex-zero
                 runtime-decoy runtime-zero doraise-decoy doraise-zero
                 unshared-decoy unshared-zero regex-unshared-decoy regex-unshared-zero)
             add_test(NAME guest_message_destructor_${mode} COMMAND guest_message_destructor_abi_tests ${mode})

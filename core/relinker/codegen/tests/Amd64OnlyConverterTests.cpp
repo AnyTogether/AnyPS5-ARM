@@ -1811,7 +1811,13 @@ void sha1Execution() {
                 else
                     require(run.Xmm[reg][0] == xmmIn[reg][0] && run.Xmm[reg][1] == xmmIn[reg][1], "SHA-1 stub clobbered an xmm register");
             }
-            require(run.Rax == rax && run.Rcx == 0x1122334455667788ull && (run.Flags & 0x8D5) == (0x8D7 & 0x8D5), "SHA-1 stub changed a general register or RFLAGS");
+            if (run.Rax != rax || run.Rcx != 0x1122334455667788ull || (run.Flags & 0x8D5) != (0x8D7 & 0x8D5)) {
+                std::cerr << "SHA-1 sample=" << sample << " site=" << std::hex;
+                for (const auto byte : site)
+                    std::cerr << static_cast<unsigned>(byte) << ' ';
+                std::cerr << "rax=" << run.Rax << " expected=" << rax << " rcx=" << run.Rcx << " flags=" << run.Flags << std::dec << '\n';
+                throw std::runtime_error("SHA-1 stub changed a general register or RFLAGS");
+            }
         }
     }
 }

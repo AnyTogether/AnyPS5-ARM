@@ -69,11 +69,14 @@ constexpr int errorMasteringInvalidApiParam = static_cast<int>(0x80268201);
 constexpr int errorMasteringInvalidStatesId = static_cast<int>(0x80268204);
 
 void TestSet3DLatency() {
-    Require(sceAudioOut2Set3DLatency(systemUser, 0) == 0, "output 0 for the system user must be accepted");
+    Require(sceAudioOut2Set3DLatency(systemUser, 0) == errorInvalidParam, "output 0 for selector 255 must be refused");
+    for (std::uint32_t output = 0; output <= 2; ++output) {
+        Require(sceAudioOut2Set3DLatency(0, output) == 0, "selector 0 must accept each supported output");
+    }
     Require(sceAudioOut2Set3DLatency(systemUser, 1) == 0, "output 1 for the system user must be accepted");
     Require(sceAudioOut2Set3DLatency(systemUser, 2) == 0, "output 2 for the system user must be accepted");
     Require(sceAudioOut2Set3DLatency(systemUser, 2) == 0, "output 2 must be accepted again");
-    Require(sceAudioOut2Set3DLatency(user, 1) == 0, "output 1 for another user must be accepted");
+    Require(sceAudioOut2Set3DLatency(user, 1) == errorInvalidParam, "a user id is not a valid latency selector");
     Require(sceAudioOut2Set3DLatency(systemUser, 3) == errorInvalidParam, "output 3 must be refused");
     Require(sceAudioOut2Set3DLatency(systemUser, 0xFFFFFFFFu) == errorInvalidParam, "a large output must be refused");
 }

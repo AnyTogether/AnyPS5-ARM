@@ -5,8 +5,8 @@ import platform
 import struct
 import subprocess
 import sys
-import tempfile
 
+from guest_import_fixtures import fixture_directory
 from test_optional_plt import fixture
 
 
@@ -538,7 +538,7 @@ def main():
     parser.add_argument("group", nargs="?", default="all", choices=("all",) + groups)
     args = parser.parse_args()
     relinker = args.relinker.resolve()
-    with tempfile.TemporaryDirectory(prefix=f"anyps5-tls-{args.group}-") as directory:
+    with fixture_directory(prefix=f"anyps5-tls-{args.group}-") as directory:
         work = Path(directory)
 
         def convert(name, image, error=None, tls_address=0x1240, displacement=0, error_offset=None):

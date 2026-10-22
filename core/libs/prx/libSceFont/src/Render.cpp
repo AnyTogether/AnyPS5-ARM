@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
-#include <mutex>
 #include <new>
 
 #include <ft2build.h>
@@ -96,17 +95,12 @@ void LoadKerning(const FontState& state, float scaleW, float scaleH, std::uint32
     kerning->offsetX = static_cast<float>(delta.x) / 64.0f;
 }
 
-std::mutex& GlyphAttributeMutex() {
-    static std::mutex mutex;
-    return mutex;
-}
-
 enum class GlyphPlacement { Attribute, Horizontal, Vertical };
 
 // A glyph object renders from the face of the font that generated it, at the frame's scale when the
 // frame sets one and otherwise at the scale it was generated with. The directional calls take (x, y)
 // as the pen position, as the font-handle ones do; the plain call takes the top-left corner of the
-// glyph's em box and follows the glyph's writing attribute.
+// glyph's em box.
 int RenderGlyphObject(FontGlyph glyph, const FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result, GlyphPlacement placement) {
     const auto fail = [&](int rc) {
         ClearRenderOutputs(metrics, result);
@@ -131,10 +125,6 @@ int RenderGlyphObject(FontGlyph glyph, const FontStyleFrame* styleFrame, FontRen
         if (rc != SCE_FONT_OK) return fail(rc);
     }
     if (!(scaleW > 0.0f) || !(scaleH > 0.0f)) return fail(SCE_FONT_ERROR_INVALID_PARAMETER);
-    if (placement == GlyphPlacement::Attribute) {
-        std::lock_guard lock(GlyphAttributeMutex());
-        placement = AttributeSlot(generated->attributes, ATTRIBUTE_WRITING_HORIZONTAL) == ATTRIBUTE_WRITING_VERTICAL ? GlyphPlacement::Vertical : GlyphPlacement::Attribute;
-    }
     if (placement == GlyphPlacement::Attribute) {
         const float ratio = glyph->base_scale > 0.0f ? scaleH / glyph->base_scale : 1.0f;
         x += static_cast<float>(glyph->origin_x) * ratio;
@@ -487,15 +477,18 @@ int APS5_VABI sceFontDeleteGlyph(const FontMemory* memory, FontGlyph* pGlyph) {
     return SCE_FONT_OK;
 }
 
-int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph glyph, int attribute, int* oldAttribute) {
-    if (oldAttribute) *oldAttribute = ATTRIBUTE_NONE;
-    auto* generated = TryGetGeneratedGlyph(glyph);
-    if (!generated) return SCE_FONT_ERROR_INVALID_GLYPH;
-    if (!ValidAttribute(attribute)) return SCE_FONT_ERROR_INVALID_PARAMETER;
-    std::lock_guard lock(GlyphAttributeMutex());
-    std::uint8_t& slot = AttributeSlot(generated->attributes, attribute);
-    if (oldAttribute) *oldAttribute = slot;
-    slot = static_cast<std::uint8_t>(attribute);
+int APS5_VABI sceFontGlyphDefineAttribute(FontGlyph glyph, std::int32_t attribute, std::int32_t* previousAttribute) {
+    if (!glyph || glyph->magic != GLYPH_MAGIC) {
+        if (previousAttribute) *previousAttribute = 0;
+        return SCE_FONT_ERROR_INVALID_GLYPH;
+    }
+    if (attribute != 0x10 && attribute != 0x11) {
+        if (previousAttribute) *previousAttribute = 0;
+        return SCE_FONT_ERROR_INVALID_PARAMETER;
+    }
+    const std::int32_t previous = (glyph->flags & 2) ? 0x11 : 0x10;
+    glyph->flags = static_cast<std::uint16_t>((glyph->flags & ~2u) | ((attribute - 0x10) << 1));
+    if (previousAttribute) *previousAttribute = previous;
     return SCE_FONT_OK;
 }
 
@@ -504,9 +497,8 @@ int APS5_VABI sceFontGlyphGetAttribute(FontGlyph glyph, int attribute, int* nowA
     *nowAttribute = ATTRIBUTE_NONE;
     auto* generated = TryGetGeneratedGlyph(glyph);
     if (!generated) return SCE_FONT_ERROR_INVALID_GLYPH;
-    if (!ValidAttribute(attribute)) return SCE_FONT_ERROR_INVALID_PARAMETER;
-    std::lock_guard lock(GlyphAttributeMutex());
-    *nowAttribute = AttributeSlot(generated->attributes, attribute);
+    if (attribute != 0x10 && attribute != 0x11) return SCE_FONT_ERROR_INVALID_PARAMETER;
+    *nowAttribute = (glyph->flags & 2) ? 0x11 : 0x10;
     return SCE_FONT_OK;
 }
 

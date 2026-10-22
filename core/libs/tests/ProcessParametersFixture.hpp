@@ -13,6 +13,8 @@
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #endif
 
 namespace ProcessParametersFixture {
@@ -20,6 +22,16 @@ namespace {
 
 #ifdef _WIN32
 [[gnu::section(".proctst"), gnu::used]] alignas(4) std::uint32_t metadata[2]{};
+#elif defined(__APPLE__)
+struct ImageMetadata {
+    std::uint64_t version;
+    std::uint64_t loadBias;
+    std::uint64_t runtime[9];
+    std::uint64_t headerCount;
+    Elf64_Phdr headers[2];
+};
+static_assert(offsetof(ImageMetadata, headerCount) == 0x58 && offsetof(ImageMetadata, headers) == 0x60);
+[[gnu::section("__APS5DATA,__meta"), gnu::used]] alignas(8) ImageMetadata metadata{};
 #endif
 
 bool Install(std::byte* process, std::size_t size) {
@@ -80,6 +92,14 @@ bool Install(std::byte* process, std::size_t size) {
         return 1;
     }, &request);
     return request.installed;
+#elif defined(__APPLE__)
+    const auto address = reinterpret_cast<std::uintptr_t>(process);
+    metadata.loadBias = 0;
+    metadata.headers[0] = Elf64_Phdr{PT_LOAD, PF_R | PF_W, 0, address, address, size, size, 1};
+    metadata.headers[1] = Elf64_Phdr{0x61000001, PF_R, 0, address, address, size, size, 8};
+    metadata.headerCount = 2;
+    metadata.version = 2;
+    return true;
 #else
     return false;
 #endif

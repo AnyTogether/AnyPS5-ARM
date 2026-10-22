@@ -58,7 +58,6 @@ int APS5_VABI sceFontFtSupportWinFonts(FontLibrary);
 int APS5_VABI sceFontFtSupportPcf(FontLibrary);
 int APS5_VABI sceFontFtSupportBdf(FontLibrary);
 int APS5_VABI sceFontFtSupportSystemFonts(FontLibrary);
-int APS5_VABI sceFontFtSupportFontFormats(FontLibrary);
 }
 
 static void Check(bool value, int line) {
@@ -162,7 +161,7 @@ static std::int32_t APS5_VABI ParseText(FontTextSource* source, void** order, Fo
 static void TestFtSupport(FontLibrary library) {
     for (auto support : {sceFontFtSupportTrueType, sceFontFtSupportTrueTypeGx, sceFontFtSupportOpenType, sceFontFtSupportOpenTypeOtf,
                          sceFontFtSupportOpenTypeTtf, sceFontFtSupportType1, sceFontFtSupportType42, sceFontFtSupportCid, sceFontFtSupportPfr,
-                         sceFontFtSupportWinFonts, sceFontFtSupportPcf, sceFontFtSupportBdf, sceFontFtSupportSystemFonts, sceFontFtSupportFontFormats}) {
+                         sceFontFtSupportWinFonts, sceFontFtSupportPcf, sceFontFtSupportBdf, sceFontFtSupportSystemFonts}) {
         Require(support(library) == SCE_FONT_OK);
         Require(support(nullptr) == SCE_FONT_ERROR_INVALID_LIBRARY);
         FontHandleOpaque notALibrary{};

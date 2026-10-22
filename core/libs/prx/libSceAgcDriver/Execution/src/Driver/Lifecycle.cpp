@@ -71,6 +71,8 @@ constexpr std::uint32_t ScalarSetpcB64LinkS14 = 0xbe80200eu;
 constexpr std::uint32_t ScalarEndProgram = 0xbf810000u;
 constexpr std::uint64_t FsTableDword3 = 0x5204u;
 
+std::atomic<bool> driverMemoryMapped{false};
+
 void MapDriverMemory() {
     void* mapped;
 #ifdef _WIN32
@@ -104,6 +106,7 @@ void MapDriverMemory() {
     slot[1] = FsTableDword3 << 32u | FsRoutineRecords;
     GuestAllocations::Mutation mutation;
     mutation.Add(mapped, DriverMemoryBytes, true, true, true);
+    driverMemoryMapped.store(true, std::memory_order_release);
 }
 
 bool StackHoldsImport() {
@@ -213,6 +216,7 @@ Driver::Driver() {
         if (current) current->SavePipelineCache();
     });
     static_cast<void>(GuestMemory::TrackerGeneration());
+    static_cast<void>(GuestMemory::GpuMutex());
     ShaderMemory::SetWaitedMsProvider(&Graphics::Recorder::ThreadWaitedMs);
     try {
         LibcRegisterShutdown_nid_postfix([] { Driver::Get().Shutdown(); });
@@ -249,13 +253,17 @@ Driver::Driver() {
 
 void Driver::WaitIdle() {
     require(!onWorkerThread(), "worker cannot wait for itself");
-    std::unique_lock lock(mutex);
-    const auto target = accepted;
-    ++idleWaiters;
-    changed.wait(lock, [&] { return failure != nullptr || stopping || completed >= target; });
-    --idleWaiters;
-    rethrowFailure();
-    checkStopping();
+    {
+        std::unique_lock lock(mutex);
+        const auto target = accepted;
+        ++idleWaiters;
+        changed.wait(lock, [&] { return failure != nullptr || stopping || completed >= target; });
+        --idleWaiters;
+        rethrowFailure();
+        checkStopping();
+    }
+    std::lock_guard gpuLock(GuestMemory::GpuMutex());
+    if (const auto localDevice = device.Load()) localDevice->WaitIdle();
 }
 
 void Driver::CheckFailure() {
@@ -315,4 +323,11 @@ std::unique_lock<std::mutex> HoldAsyncLog() {
     return AsyncLog::Get().Hold();
 }
 
+}
+
+extern "C" void* AgcDriverStaticTable_nid_postfix() {
+    static_cast<void>(AgcDriver::DriverDetail::Driver::Get());
+    if (!AgcDriver::DriverDetail::driverMemoryMapped.load(std::memory_order_acquire))
+        throw std::runtime_error("the AGC static table at 0xfe0040000 is not mapped: this host cannot map the AGC driver memory at its fixed address");
+    return reinterpret_cast<void*>(AgcDriver::DriverDetail::FsTableAddress);
 }

@@ -342,9 +342,13 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     const auto isRuntime = [&](const std::size_t index) {
         return std::find(runtimeDirectories.begin(), runtimeDirectories.end(), images[index].SourcePath.parent_path().lexically_normal()) != runtimeDirectories.end();
     };
+    const auto standardDirectory = [&](const std::size_t index) {
+        const auto directory = images[index].SourcePath.parent_path().lexically_normal();
+        return directory == (root / "sce_module").lexically_normal() || directory == (root / "sce_modules").lexically_normal() || directory == (root / "prx").lexically_normal();
+    };
     for (const auto& name : neededNames) {
         const auto found = findGuest(name);
-        if (found != guestNames.end()) require(found->second);
+        if (found != guestNames.end() && (!windows || standardDirectory(found->second))) require(found->second);
     }
     for (const auto provider : executableProviders) require(provider);
     for (std::size_t index = 0; index < images.size(); ++index) {

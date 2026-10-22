@@ -470,6 +470,8 @@ void Validate(std::span<const std::uint32_t> packet, std::uint32_t queue) {
         case 0x49: {
             size(8);
             const auto dataSelect = packet[2] >> 29u;
+            require(dataSelect != 4, "RELEASE_MEM of the 64-bit system counter (DATA_SEL 4) is not implemented");
+            require(dataSelect <= 5, "reserved RELEASE_MEM DATA_SEL");
             require(dataSelect <= 3, "GDS RELEASE_MEM data is not implemented");
             require(dataSelect == 0 || address(packet[3], packet[4]) == 0 || (packet[3] & (dataSelect == 1 ? 3u : 7u)) == 0, "misaligned RELEASE_MEM destination");
             break;

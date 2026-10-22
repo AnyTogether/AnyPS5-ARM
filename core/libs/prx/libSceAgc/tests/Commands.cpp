@@ -28,8 +28,10 @@ extern "C" int APS5_VABI sceAgcInit_0090(std::uint32_t* state, std::uint32_t ver
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbDrawIndexAuto(CommandBuffer* buf, std::uint32_t indexCount, std::uint64_t modifier);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbDrawIndexIndirect(CommandBuffer* buf, std::uint32_t dataOffsetInBytes, std::uint64_t modifier);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbDrawIndexIndirectMulti(CommandBuffer* buf, std::uint32_t dataOffsetInBytes, std::uint32_t countIndirect, std::uint32_t maxCountOrCount, const volatile void* countAddress, std::uint32_t strideInBytes, std::uint64_t modifier);
-extern "C" int APS5_VABI sceAgcWaitRegMemPatchReference(std::uint32_t* cmd, std::uint64_t reference);
-extern "C" int APS5_VABI sceAgcWaitRegMemPatchMask(std::uint32_t* cmd, std::uint64_t mask);
+extern "C" int APS5_VABI sceAgcWaitRegMemPatchAddress(std::uint32_t* cmd, const volatile void* address);
+extern "C" int APS5_VABI sceAgcWaitRegMemPatchCompareFunction(std::uint32_t* cmd, std::uint8_t compareFunction);
+extern "C" int APS5_VABI sceAgcWaitRegMemPatchReference(std::uint32_t* cmd, std::uint32_t reference);
+extern "C" int APS5_VABI sceAgcWaitRegMemPatchMask(std::uint32_t* cmd, std::uint32_t mask);
 extern "C" int APS5_VABI sceAgcGetDataPacketPayloadAddress_0090(std::uint32_t** addr, std::uint32_t* cmd, int type);
 extern "C" std::uint32_t* APS5_VABI sceAgcCbSetShRegisterRangeDirect(CommandBuffer* buf, std::uint32_t offset, const std::uint32_t* values, std::uint32_t numValues);
 extern "C" std::uint32_t* APS5_VABI sceAgcDcbContextStateOp_0100(CommandBuffer* buf, std::uint32_t operation);
@@ -590,18 +592,28 @@ void testMemory() {
     check(packet[8] == 0x55667788u && packet[9] == 0x11223344u && packet[12] == 2u, "wait reference or poll interval mismatch");
     sceAgcWaitRegMemPatchReference(packet, 7);
     check(packet[8] == 7 && packet[9] == 0x11223344u, "reference patch changed the high word");
-    const auto before = storage.words;
-    expectFailure([&] { sceAgcWaitRegMemPatchReference(packet, 0x100000000ull); });
-    check(storage.words == before, "invalid memory operation modified packet memory");
     auto* truncated = Agc::Command::WriteWait(&storage.buffer, 0, 3, 0, 0, &value, 0x100000000ull, 0xffffffff00000001ull, 32, __func__);
     check(truncated[8] == 0u && truncated[9] == 1u, "32-bit wait did not keep the low halves of the reference and mask");
     sceAgcWaitRegMemPatchMask(packet, 0x0f0f0f0fu);
     check(packet[10] == 0x0f0f0f0fu && packet[11] == 0xffffffffu && packet[8] == 7, "64-bit mask patch changed the wrong word");
     sceAgcWaitRegMemPatchMask(truncated, 0xff00u);
     check(truncated[9] == 0xff00u && truncated[8] == 0u && truncated[10] == 2u, "32-bit mask patch changed the wrong word");
+    for (auto* waitPacket : {packet, truncated}) {
+        const auto lowMask = waitPacket == packet ? 7u : 3u;
+        waitPacket[6] |= lowMask;
+        waitPacket[7] = 0xa5fc0000u;
+        const auto tag = waitPacket[2] & 0xffff0000u;
+        const std::uintptr_t address = 0x1236abcd12345679ull;
+        check(sceAgcWaitRegMemPatchAddress(waitPacket, reinterpret_cast<const volatile void*>(address)) == 0, "wait address patch failed");
+        check(waitPacket[2] == (tag | 0xabcdu) && waitPacket[3] == 0x12345679u, "wait wrapper address patch mismatch");
+        check(waitPacket[6] == ((0x12345679u & ~lowMask) | lowMask) && waitPacket[7] == 0xa5feabcdu, "wait address patch did not preserve control bits");
+        for (std::uint32_t comparison = 0; comparison <= 255; ++comparison) {
+            const auto control = waitPacket[5] & ~7u;
+            check(sceAgcWaitRegMemPatchCompareFunction(waitPacket, static_cast<std::uint8_t>(comparison)) == 0, "wait comparison patch failed");
+            check(waitPacket[5] == (control | (comparison & 7u)), "wait comparison patch changed control bits");
+        }
+    }
     const auto beforeMask = storage.words;
-    expectFailure([&] { sceAgcWaitRegMemPatchMask(packet, 0x100000000ull); });
-    expectFailure([&] { sceAgcWaitRegMemPatchMask(truncated, 0x100000000ull); });
     expectFailure([&] { sceAgcWaitRegMemPatchMask(packet + 4, 1); });
     check(storage.words == beforeMask, "invalid mask patch modified packet memory");
 }

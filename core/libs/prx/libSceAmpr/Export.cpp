@@ -99,7 +99,6 @@ static int AppendNop(Apr::CommandBufferObject* buffer, std::uint32_t dwords, con
     if (bytes > RemainingCommandBytes(*buffer)) return SCE_KERNEL_ERROR_EBUSY;
     const Apr::CommandHeader header{Apr::Opcode::Nop, static_cast<std::uint32_t>(bytes)};
     std::uint8_t* destination = buffer->base + buffer->offset;
-    std::memset(destination, 0, bytes);
     std::memcpy(destination, &header, sizeof(header));
     if (data) std::memcpy(destination + sizeof(header), data, std::uint64_t{dwords} * 4u);
     buffer->offset += static_cast<std::uint32_t>(bytes);
@@ -435,7 +434,6 @@ int APS5_VABI sceAmprCommandBufferNop(Apr::CommandBufferObject* buffer, std::uin
 
 int APS5_VABI sceAmprCommandBufferNopWithData(Apr::CommandBufferObject* buffer, std::uint32_t dwords, const std::uint32_t* data) {
     if (dwords > 15u) return SCE_KERNEL_ERROR_EINVAL;
-    if (dwords != 0u && !data) throw std::invalid_argument("sceAmprCommandBufferNopWithData: null data");
     return AppendNop(buffer, dwords, data);
 }
 

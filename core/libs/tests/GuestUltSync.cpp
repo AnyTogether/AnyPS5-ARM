@@ -12,7 +12,7 @@
 extern "C" {
 int APS5_VABI sceUltInitialize();
 int APS5_VABI sceUltFinalize();
-int APS5_VABI _sceUltMutexCreate(void*, const char*, void*, const void*, std::uint32_t);
+int APS5_VABI sceUltMutexCreate(void*, const char*, void*, const UltMutexOptParam*, std::uint32_t);
 int APS5_VABI sceUltMutexLock(void*);
 int APS5_VABI sceUltMutexTryLock(void*);
 int APS5_VABI sceUltMutexUnlock(void*);
@@ -22,7 +22,7 @@ int APS5_VABI sceUltQueueOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltQueueDataResourcePoolOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltWaitingQueueResourcePoolOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltUlthreadOptParamInitialize(void*, std::uint32_t);
-int APS5_VABI _sceUltWaitingQueueResourcePoolCreate(void*, const char*, std::uint32_t, std::uint32_t, void*, const void*, std::uint32_t);
+int APS5_VABI _sceUltWaitingQueueResourcePoolCreate(void*, const char*, std::uint32_t, std::uint32_t, void*, const void*);
 int APS5_VABI sceUltWaitingQueueResourcePoolDestroy(void*);
 int APS5_VABI sceUltReaderWriterLockOptParamInitialize(void*, std::uint32_t);
 int APS5_VABI sceUltReaderWriterLockCreate(void*, const char*, void*, const void*, std::uint32_t);
@@ -49,6 +49,8 @@ namespace {
 constexpr int Ok = 0;
 constexpr int Null = -2139029503;
 constexpr int Invalid = -2139029500;
+constexpr int Permission = -2139029499;
+constexpr int Again = -2139029496;
 constexpr int State = -2139029498;
 constexpr int Busy = -2139029497;
 
@@ -68,7 +70,9 @@ void MutexTryLock() {
     Object mutex{};
     CHECK(sceUltMutexTryLock(nullptr) == Null);
     CHECK(sceUltMutexTryLock(&mutex) == State);
-    CHECK(_sceUltMutexCreate(&mutex, "trylock", nullptr, nullptr, 0) == Ok);
+    UltMutexOptParam options{};
+    options.attribute = 1;
+    CHECK(sceUltMutexCreate(&mutex, "trylock", nullptr, &options, 0) == Ok);
     CHECK(sceUltMutexTryLock(&mutex) == Ok);
     CHECK(sceUltMutexTryLock(&mutex) == Ok);
     std::atomic<int> other{0};
@@ -78,14 +82,14 @@ void MutexTryLock() {
     std::thread([&] { other = sceUltMutexTryLock(&mutex); }).join();
     CHECK(other == Busy);
     CHECK(sceUltMutexUnlock(&mutex) == Ok);
-    CHECK(sceUltMutexUnlock(&mutex) == State);
+    CHECK(sceUltMutexUnlock(&mutex) == Permission);
     std::thread([&] {
         other = sceUltMutexTryLock(&mutex);
         if (other == Ok) other = sceUltMutexUnlock(&mutex);
     }).join();
     CHECK(other == Ok);
     CHECK(sceUltMutexLock(&mutex) == Ok);
-    CHECK(sceUltMutexDestroy(&mutex) == Busy);
+    CHECK(sceUltMutexDestroy(&mutex) == State);
     CHECK(sceUltMutexUnlock(&mutex) == Ok);
     CHECK(sceUltMutexDestroy(&mutex) == Ok);
     CHECK(sceUltMutexTryLock(&mutex) == State);
@@ -210,7 +214,7 @@ void ReaderWriterPool() {
     Object pool{};
     Object rwlock{};
     std::uint8_t workArea[2048];
-    CHECK(_sceUltWaitingQueueResourcePoolCreate(&pool, "pool", 2, 2, workArea, nullptr, 0) == Ok);
+    CHECK(_sceUltWaitingQueueResourcePoolCreate(&pool, "pool", 2, 2, workArea, nullptr) == Ok);
     CHECK(sceUltReaderWriterLockCreate(&rwlock, "pooled", &pool, nullptr, 0) == Ok);
     CHECK(sceUltReaderWriterLockLockWrite(&rwlock) == Ok);
     std::atomic<bool> started{false};
@@ -289,10 +293,10 @@ void Ulthreads() {
     gSelf = nullptr;
     CHECK(sceUltUlthreadCreate(&second, "tryjoin", ExitingEntry, 7, context, sizeof(context), &runtime, nullptr, 0) == Ok);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    int joined = Busy;
-    while (joined == Busy && std::chrono::steady_clock::now() < deadline) {
+    int joined = Again;
+    while (joined == Again && std::chrono::steady_clock::now() < deadline) {
         joined = sceUltUlthreadTryJoin(&second, &status);
-        if (joined == Busy) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (joined == Again) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     CHECK(joined == Ok && status == 7 && gSelf.load() == &second);
     CHECK(sceUltUlthreadRuntimeDestroy(&runtime) == Ok);

@@ -3,12 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
-static constexpr std::array<std::string_view, 6> Names{"control", "commands", "state", "port", "query", "flags"};
+static constexpr std::array<std::string_view, 7> Names{"control", "commands", "state", "port", "query", "flags", "owner"};
 static constexpr int InvalidVoice = static_cast<int>(0x804A8203u);
 static constexpr int NullList = static_cast<int>(0x804A8360u);
 
@@ -28,6 +29,7 @@ static void Invalid(std::string_view api, uintptr_t handle) {
     else if (api == "port") result = sceNgs2VoiceGetPortInfo(handle, 0, reinterpret_cast<Ngs2VoicePortInfo*>(output.data()), sizeof(Ngs2VoicePortInfo));
     else if (api == "query") result = sceNgs2VoiceQueryInfo(handle, SCE_NGS2_VOICE_INFO_CHANNELS, output.data(), sizeof(Ngs2VoiceChannelsInfo));
     else if (api == "flags") result = sceNgs2VoiceGetStateFlags(handle, reinterpret_cast<std::uint32_t*>(output.data()));
+    else if (api == "owner") result = sceNgs2VoiceGetOwner(handle, reinterpret_cast<uintptr_t*>(output.data()), reinterpret_cast<std::uint32_t*>(output.data() + 16));
     else throw std::runtime_error("unknown voice API test selection");
     Status(result, InvalidVoice, std::string(api) + " returned the wrong invalid-voice error");
     Require(std::all_of(output.begin(), output.end(), [](auto byte) { return byte == 0xa5; }));
@@ -40,6 +42,7 @@ int main(int argc, char** argv) {
         for (auto name : Names) if (selected(name)) { Invalid(name, 0); Invalid(name, 0x1234); }
         Status(sceNgs2VoiceControl(0x1234, nullptr), NullList, "Control parameter-list precedence differs from PS5");
         Status(sceNgs2VoiceGetState(0x1234, nullptr, 0), InvalidVoice, "GetState checked output before the voice");
+        Status(sceNgs2VoiceGetOwner(0x1234, nullptr, nullptr), InvalidVoice, "GetOwner checked output before the voice");
         const auto system = CreateSystem();
         const auto rack = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
         const auto voice = Voice(rack);
@@ -50,6 +53,24 @@ int main(int argc, char** argv) {
         Status(sceNgs2VoiceGetState(voice, nullptr, sizeof(Ngs2VoiceState)), SCE_NGS2_ERROR_INVALID_OUT_ADDRESS, "GetState rejected its minimum-size boundary before null output");
         Status(sceNgs2VoiceGetState(voice, nullptr, sizeof(Ngs2SamplerVoiceState)), SCE_NGS2_ERROR_INVALID_OUT_ADDRESS, "GetState lost null-output validation");
         Status(sceNgs2VoiceGetStateFlags(voice, nullptr), SCE_NGS2_ERROR_INVALID_OUT_ADDRESS, "GetStateFlags lost null-output validation");
+        uintptr_t owner = 0x5a5a;
+        std::uint32_t index = 0x5a5a;
+        Status(sceNgs2VoiceGetOwner(voice, nullptr, &index), SCE_NGS2_ERROR_INVALID_OUT_ADDRESS, "GetOwner lost null-rack validation");
+        Status(sceNgs2VoiceGetOwner(voice, &owner, nullptr), SCE_NGS2_ERROR_INVALID_OUT_ADDRESS, "GetOwner lost null-index validation");
+        Require(owner == 0x5a5a && index == 0x5a5a);
+        const auto other = CreateRack(system, SCE_NGS2_RACK_ID_SAMPLER);
+        for (const auto owned : {rack, other}) {
+            Ngs2RackInfo info{};
+            Status(sceNgs2RackGetInfo(owned, &info, sizeof(info)), SCE_NGS2_OK, "rack info lookup failed");
+            Require(info.max_voices > 1);
+            for (std::uint32_t voiceId = 0; voiceId < info.max_voices; voiceId++) {
+                uintptr_t handle = 0;
+                Status(sceNgs2RackGetVoiceHandle(owned, voiceId, &handle), SCE_NGS2_OK, "voice handle lookup failed");
+                Status(sceNgs2VoiceGetOwner(handle, &owner, &index), SCE_NGS2_OK, "valid owner lookup failed");
+                Require(owner == owned && index == voiceId);
+            }
+        }
+        Require(sceNgs2RackDestroy(other, nullptr) == SCE_NGS2_OK);
         std::uint32_t flags = 0;
         Status(sceNgs2VoiceGetStateFlags(voice, &flags), SCE_NGS2_OK, "valid state-flags lookup failed");
         Ngs2SamplerVoiceState state{};

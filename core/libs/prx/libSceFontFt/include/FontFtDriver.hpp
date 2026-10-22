@@ -12,9 +12,7 @@ namespace FontFt {
 
 const Font::SysDriver* DriverTable();
 const Font::RendererSelection* RendererTable();
-// Checks that the library was created from the FreeType driver and that its FreeType instance has
-// every listed module (FreeType module names: "truetype", "cff", "type1"...).
-int SupportModules(void* library, std::initializer_list<const char*> modules);
+int SupportFormats(FontLibrary library, std::initializer_list<const char*> modules);
 
 }
 

@@ -194,6 +194,7 @@ struct SpirvEmitterState {
     std::uint32_t srgbTableVariable = 0;
     // Private variables, by type, that subgroup results are stored in (EmitConvergentResult).
     std::unordered_map<std::uint32_t, std::uint32_t> subgroupResultVariables;
+    std::uint32_t gcnBufferFormatVariable = 0;
     std::uint32_t gdsVariable = 0;
     std::uint32_t gdsLength = 0;
     std::uint32_t pushConstantVariable = 0;

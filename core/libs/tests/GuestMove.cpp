@@ -85,8 +85,11 @@ void RequireUnknownHandle(std::int32_t handle) {
     Require(sceMoveSetVibration(handle, 0xFF) == kInvalidHandle);
     Require(sceMoveSetLightSphere(handle, 0xFF, 0, 0) == kInvalidHandle);
     Require(sceMoveResetLightSphere(handle) == kInvalidHandle);
-    Require(sceMoveGetDeviceInfo(handle, nullptr) == kInvalidHandle);
-    Require(sceMoveReadStateRecent(handle, -1, nullptr, nullptr) == kInvalidHandle);
+    Require(sceMoveGetDeviceInfo(handle, nullptr) == kInvalidArg);
+    Require(sceMoveGetExtensionPortInfo(handle, nullptr) == kInvalidArg);
+    Require(sceMoveReadStateLatest(handle, nullptr) == kInvalidArg);
+    Require(sceMoveReadStateRecent(handle, -1, buffer.bytes, &count) == kInvalidArg);
+    Require(sceMoveReadStateRecent(handle, 0, buffer.bytes, nullptr) == kInvalidArg);
     Require(buffer.Untouched());
     Require(count == -7);
 }

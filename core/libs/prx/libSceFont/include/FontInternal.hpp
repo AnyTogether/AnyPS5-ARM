@@ -56,7 +56,6 @@ struct FontState {
     float scaleW = 16.0f;
     float scaleH = 16.0f;
     std::map<int, int> scriptLanguages;
-    std::map<int, int> typographicFeatures;
     AttributeSet attributes = DEFAULT_ATTRIBUTES;
 
     FontState() = default;
@@ -77,7 +76,6 @@ struct GeneratedGlyph {
     std::vector<FontGlyphOutlinePoint> outlinePoints;
     std::vector<std::uint8_t> outlineTags;
     std::vector<std::uint16_t> outlineContours;
-    AttributeSet attributes = DEFAULT_ATTRIBUTES;
     bool metricsInitialized = false;
     bool outlineInitialized = false;
 };

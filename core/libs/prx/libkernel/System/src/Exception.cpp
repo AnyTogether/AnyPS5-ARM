@@ -430,7 +430,9 @@ bool RaiseOn(Pthread thread, GuestExceptionHandler handler, int signum) {
         delivery.context.ContextFlags = CONTEXT_FULL | CONTEXT_SEGMENTS;
         if (!GetThreadContext(native, &delivery.context)) {
             ResumeThread(native);
-            throw std::runtime_error("sceKernelRaiseException: cannot read the target thread context");
+            if (std::chrono::steady_clock::now() >= retryDeadline) throw std::runtime_error("sceKernelRaiseException: cannot read the target thread context");
+            SwitchToThread();
+            continue;
         }
         if (thread->waitCount.load(std::memory_order_seq_cst) > 0) {
             const bool accepted = QueueUserAPC(WaitingEntry, native, reinterpret_cast<ULONG_PTR>(queued.get())) != 0;

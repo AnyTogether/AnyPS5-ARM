@@ -23,6 +23,8 @@ struct UcrtStreamState {
     int count;
     long flags;
 };
+extern "C" void LibcRegisterDirectoryStreams_nid_no_patch(int (*open)(const wchar_t* path), void (*forget)(int descriptor));
+extern "C" void ForgetDirectoryStream_nid_no_patch(int descriptor);
 #else
 #include <unistd.h>
 #endif
@@ -66,6 +68,7 @@ class FileStream {
     bool _dynamic;
     bool guestError = false;
     bool randomDevice = false;
+    bool directory = false;
 
 public:
     explicit FileStream(std::FILE* handle, bool dynamic = false) : _handle(handle), _dynamic(dynamic) {
@@ -130,6 +133,14 @@ public:
         return randomDevice;
     }
 
+    void MarkDirectory() {
+        directory = true;
+    }
+
+    bool IsDirectory() const {
+        return directory;
+    }
+
     bool Reopen(const std::filesystem::path& filename, const char* mode,
         [[maybe_unused]] std::FILE* (*open)(const std::filesystem::path&, const std::string&) = nullptr) {
         auto* previous = GetHandle();
@@ -140,6 +151,7 @@ public:
         std::wstring wideMode;
         for (const char character : std::string_view(mode)) wideMode.push_back(static_cast<unsigned char>(character));
         const int replaced = previous ? _fileno(previous) : -1;
+        if (std::exchange(directory, false)) ForgetDirectoryStream_nid_no_patch(replaced);
         auto* const standard = HostStandardHandle_nid_no_patch(replaced);
         GuestFileLockForget_nid_no_patch(replaced);
         if (open && !filename.empty()) {
@@ -260,6 +272,10 @@ public:
 #endif
     }
 
+    void KeepDirectoryReadError(bool failed) {
+        if (failed && directory && (_guest.flags & 0x40) != 0) errno = 21;
+    }
+
     void SetError() {
         guestError = true;
         SyncStatus();
@@ -276,6 +292,7 @@ public:
         GetHandle();
 #ifdef _WIN32
         GuestFileLockForget_nid_no_patch(::_fileno(_handle));
+        if (std::exchange(directory, false)) ForgetDirectoryStream_nid_no_patch(::_fileno(_handle));
 #endif
         const int result = std::fclose(std::exchange(_handle, nullptr));
         _guest.flags = 0;

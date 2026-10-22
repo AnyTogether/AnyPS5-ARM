@@ -1,6 +1,8 @@
 #include <elfpatcher/general/EntryStubBuilder.hpp>
 #include <elfpatcher/windows/WindowsEntryStubBuilder.hpp>
 #include <domain/Types.hpp>
+#include <io/BufferUtils.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -116,6 +118,31 @@ void windowsStubRejectsAnOverlongAllocatorPath() {
     throw std::runtime_error("an allocator path past the startup buffer was accepted");
 }
 
+void windowsKernelVariantImportsSearchCanonicalKernelAfterTheRequestedVariant() {
+    using namespace Elfpatcher::Windows;
+    const auto nativeImports = WindowsImportBuilder().Build(0x1000);
+    const std::vector<std::string> libraries{"libkernel_sys.prx", "libc.prx", "libkernel.prx"};
+    const std::vector<PeImport> imports{{.Name = "getpagesize", .TargetRva = 0x2000, .Addend = 0, .Library = "libkernel_sys.prx"}};
+    const auto stub = WindowsEntryStubBuilder().Build(0x40000, 0x1000, nativeImports, libraries, imports, "$ORIGIN/libs", false, false);
+    const std::vector<std::uint8_t> expected{0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0};
+    require(std::search(stub.Data.Data.begin(), stub.Data.Data.end(), expected.begin(), expected.end()) != stub.Data.Data.end(),
+            "a scoped libkernel_sys import does not search the requested variant before canonical libkernel and libc");
+}
+
+void windowsKernelVariantDependenciesLoadCanonicalKernel() {
+    using namespace Elfpatcher::Windows;
+    for (const auto& variant : {std::string("libkernel_sys.prx"), std::string("libkernel_web.prx")}) {
+        Domain::SysVDynamicSection dynamic;
+        dynamic.DynStrData.insert(dynamic.DynStrData.end(), variant.begin(), variant.end());
+        dynamic.DynStrData.push_back(0);
+        dynamic.DynamicSegmentData.resize(16);
+        Io::WriteU64(dynamic.DynamicSegmentData, 0, 1);
+        Io::WriteU64(dynamic.DynamicSegmentData, 8, 0);
+        require(WindowsImportBuilder().ReadLibraries(dynamic) == std::vector<std::string>{variant, "libkernel.prx", "libc.prx"},
+                variant + ": canonical kernel fallback and its libc provider are not loaded after the requested module");
+    }
+}
+
 }
 
 int main() {
@@ -126,6 +153,8 @@ int main() {
         windowsStubLoadsTheAllocatorOnRequest("C:/Games/Title/libs", u"C:\\Games\\Title\\libs\\", {0x48, 0x8d, 0x0d});
         windowsStubLoadsTheAllocatorOnRequest("$ORIGIN/libs", u"libs\\", {0x48, 0x8d, 0x35});
         windowsStubRejectsAnOverlongAllocatorPath();
+        windowsKernelVariantImportsSearchCanonicalKernelAfterTheRequestedVariant();
+        windowsKernelVariantDependenciesLoadCanonicalKernel();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

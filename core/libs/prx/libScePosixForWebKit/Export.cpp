@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/HostEntropy.hpp"
+#include "prx/libc/include/General.hpp"
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -178,6 +179,103 @@ std::uint32_t APS5_VABI arc4random_nid_postfix() {
     std::uint32_t value;
     arc4random_buf_nid_postfix(&value, sizeof(value));
     return value;
+}
+
+int APS5_VABI __wrap_access() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_clock_gettime() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_fchown() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_getcwd() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_getenv() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_link() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_lstat() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_mmap() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_readlink() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_statvfs() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI __wrap_symlink() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI clock_gettime_np() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI getenv_np() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+APS5_EXPORT("dt8ermYp-Wc", scePosixForWebKit_gethostbyname_r);
+int APS5_VABI scePosixForWebKit_gethostbyname_r() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI mmap_np() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI msetname() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI pthread_setschedparam_np() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI setenv_np() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+APS5_EXPORT("9Vqxt-qBPB4", scePosixForWebKit_sysinfo);
+int APS5_VABI scePosixForWebKit_sysinfo() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 }

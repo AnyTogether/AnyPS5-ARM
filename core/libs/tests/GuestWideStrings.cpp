@@ -217,6 +217,12 @@ int main() {
     require(wcsncat_s_nid_postfix(strBuf, 16, u" world", 6) == 0 && same(strBuf, u"hello world", 12));
     wcsncpy_s_nid_postfix(strBuf, 16, u"foo", 3);
     require(wcsncat_s_nid_postfix(strBuf, 16, u"barbaz", 3) == 0 && same(strBuf, u"foobar", 7));
+    wcsncpy_s_nid_postfix(strBuf, 8, u"abc", 3);
+    require(wcsncat_s_nid_postfix(strBuf, 8, u"1234", 4) == 0 && same(strBuf, u"abc1234", 8));
+    wcsncpy_s_nid_postfix(strBuf, 8, u"abc", 3);
+    require(wcsncat_s_nid_postfix(strBuf, 8, u"12345", 5) == 34 && strBuf[0] == 0);
+    wmemset_nid_postfix(strBuf, u'x', 4);
+    require(wcsncat_s_nid_postfix(strBuf, 4, u"a", 1) == 34 && strBuf[0] == 0);
     wcsncpy_s_nid_postfix(strBuf, 16, u"abc", 3);
     require(wcscat_s_nid_postfix(strBuf, 16, u"def") == 0 && same(strBuf, u"abcdef", 7));
     wcsncpy_s_nid_postfix(strBuf, 8, u"12345", 5);

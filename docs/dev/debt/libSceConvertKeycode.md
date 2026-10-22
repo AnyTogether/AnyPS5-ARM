@@ -1,9 +1,6 @@
 # libSceConvertKeycode technical debt
 
-### Unknown function info
-
-- [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) - the signature `(uint16_t keycode, uint32_t, uint32_t keyboardType, char16_t* character)` is inferred from PPSA12361, which passes a 16-bit keycode, 0, the type from `sceConvertKeycodeGetImeKeyboardType` and a pointer it reads one UTF-16 unit from when the result is 0. The meaning of the second argument is unknown. PPSA02530 (#5726) and PPSA27836 pass `0x4000000` as a constant: PPSA27836 calls it for every keycode from 0 to 0x8F to build a table of key names, upper-cases `a` to `z` itself and skips keycodes that fail or return 0, so that bit is ignored and the unshifted character is returned as for 0. Any other bit throws, and so does a keyboard type other than 0. The returned character for HID usage `0x64` has not been measured on a console; `\` is an unverified US-layout guess based on the Windows VK mapping, which does not establish the console result.
-
 ### Functional
 
-- [sceConvertKeycodeGetCharacter](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) (libSceConvertKeycode) takes the keycode as a USB HID keyboard usage and returns the unshifted character of the US layout for letters, digits, punctuation, space and the keypad. A keycode without a character returns 0 with the character 0; whether the console returns an error instead is not measured.
+- [sceConvertKeycodeGetVirtualKeycode](../../../core/libs/prx/libSceConvertKeycode/Export.cpp) and `sceConvertKeycodeGetCharacter`: layouts 31–39 throw until the guest platform and compiled SDK version are exposed. `GetVirtualKeycode` also throws for version-dependent Y/Z mappings in layouts 2, 3 and 12. Mapping tables and modifier behavior are recovered; no SDK version is guessed.
+- [sceConvertKeycodeGetImeKeyboardType](../../../core/libs/prx/libSceConvertKeycode/Export.cpp): user keyboard language and Japanese/Chinese keyboard variants are not exposed by the current UserService implementation. Valid-user queries throw instead of returning a fabricated keyboard type. The confirmed language/variant mapping and SDK compatibility rules still need integration with those settings.

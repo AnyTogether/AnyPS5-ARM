@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <stdexcept>
+#include <thread>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -264,7 +269,7 @@ int APS5_VABI LibraryCloseFont(FontObj* obj, std::uint32_t flags) {
     return SCE_FONT_OK;
 }
 
-int APS5_VABI LibraryGetFaceScale(FontObj* obj, std::uint16_t* outUnitsPerEm, float* outScale) {
+int APS5_VABI LibraryGetFaceScale(FontObj* obj, std::uint32_t* outUnitsPerEm, float* outScale) {
     if (!obj || !outUnitsPerEm || !outScale) return SCE_FONT_ERROR_FATAL;
     const FT_Face face = FaceOf(obj);
     if (!face) return SCE_FONT_ERROR_FATAL;
@@ -769,14 +774,26 @@ const Font::RendererSelection* FontFt::RendererTable() {
     return &rendererTable;
 }
 
-int FontFt::SupportModules(void* library, std::initializer_list<const char*> modules) {
-    auto* lib = static_cast<FontLibNative*>(library);
-    if (!lib || lib->magic != LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
-    if (!lib->sys_driver || lib->sys_driver->init != &LibraryInit) return SCE_FONT_ERROR_NO_SUPPORT_LIBRARY;
-    const auto* ctx = static_cast<const FtLibraryContext*>(lib->fontset_registry);
-    if (!ctx || !ctx->library) return SCE_FONT_ERROR_INVALID_LIBRARY;
+int FontFt::SupportFormats(FontLibrary library, std::initializer_list<const char*> modules) {
+    auto* native = static_cast<Font::FontLibNative*>(library);
+    if (!native) return SCE_FONT_ERROR_INVALID_LIBRARY;
+    auto lockWord = std::atomic_ref<std::uint32_t>(native->lock_word);
+    std::uint32_t previous = lockWord.load(std::memory_order_acquire);
+    for (;;) {
+        if (native->magic != Font::LIBRARY_MAGIC) return SCE_FONT_ERROR_INVALID_LIBRARY;
+        if ((previous & Font::LOCK_BIT) == 0 && lockWord.compare_exchange_weak(previous, previous | Font::LOCK_BIT, std::memory_order_acq_rel)) break;
+        std::this_thread::sleep_for(std::chrono::microseconds(30));
+        previous = lockWord.load(std::memory_order_acquire);
+    }
+    const auto unlock = [previous](Font::FontLibNative* locked) {
+        std::atomic_ref<std::uint32_t>(locked->lock_word).store(previous, std::memory_order_release);
+    };
+    const std::unique_ptr<Font::FontLibNative, decltype(unlock)> guard(native, unlock);
+    if (native->sys_driver != &driverTable) throw std::runtime_error("FontFt: unsupported library driver");
+    const auto* context = static_cast<const FtLibraryContext*>(native->fontset_registry);
+    if (!context || !context->library) return SCE_FONT_ERROR_INVALID_LIBRARY;
     for (const char* module : modules) {
-        if (!FT_Get_Module(ctx->library, module)) return SCE_FONT_ERROR_NO_SUPPORT_FORMAT;
+        if (!FT_Get_Module(context->library, module)) return SCE_FONT_ERROR_NO_SUPPORT_FORMAT;
     }
     return SCE_FONT_OK;
 }

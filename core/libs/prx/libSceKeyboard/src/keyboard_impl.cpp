@@ -19,8 +19,8 @@ std::uint32_t modifiers = 0;
 std::array<std::uint16_t, KEYBOARD_MAX_KEYCODES> keys{};
 int keyCount = 0;
 
-constexpr char US_NORMAL[] = "1234567890\n\0\b\t -=[]\\\0;'`,./";
-constexpr char US_SHIFTED[] = "!@#$%^&*()\n\0\b\t _+{}|\0:\"~<>?";
+constexpr char US_NORMAL[] = "1234567890\n\0\b\t -=[]\\\\;'`,./";
+constexpr char US_SHIFTED[] = "!@#$%^&*()\n\0\b\t _+{}||:\"~<>?";
 constexpr char JIS_NORMAL[] = "1234567890\n\0\b\t -^@[]];:\0,./";
 constexpr char JIS_SHIFTED[] = "!\"#$%&'()\0\n\0\b\t =~`{}}+*\0<>?";
 constexpr char KEYPAD_DIGITS[] = "1234567890.";
@@ -81,8 +81,9 @@ std::uint16_t character(bool jis, std::uint32_t ledState, std::uint32_t modifier
         const char* table = jis ? (shift ? JIS_SHIFTED : JIS_NORMAL) : (shift ? US_SHIFTED : US_NORMAL);
         return static_cast<unsigned char>(table[keyCode - 0x1e]);
     }
+    if (!jis && keyCode == 0x64) return shift ? '|' : '\\';
     if (jis && keyCode == 0x87) return shift ? '_' : '\\';
-    if (jis && keyCode == 0x89) return shift ? '|' : '\\';
+    if (jis && keyCode == 0x89) return shift ? '|' : 0x00A5;
     switch (keyCode) {
         case 0x54: return '/';
         case 0x55: return '*';

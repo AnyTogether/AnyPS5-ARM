@@ -93,6 +93,7 @@ def git(*args, text=True):
 class Check:
     def __init__(self, base, head):
         self.head = head
+        self.target = base
         self.base = git("merge-base", base, head).strip()
         self.findings = []
         self.added = defaultdict(list)
@@ -206,21 +207,22 @@ class Check:
     def duplicates(self, exports):
         if not exports:
             return
-        result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nF", "--full-name", "-f", "-", self.head, "--", ":(top)core/libs/prx"], input="\n".join(exports) + "\n", capture_output=True, encoding="utf-8", errors="replace")
-        hits = [line.split(":", 3)[1:] for line in filter(None, result.stdout.split("\n"))]
-        self.read(path for path, _, _ in hits)
-        sources = {}
-        for path, number, text in hits:
-            if path not in sources:
-                sources[path] = cpp_text(self.show(path)).split("\n")
-            source = sources[path]
-            match = next((match for match in EXPORT.finditer(source[int(number) - 1]) if match.group(1) in exports), None)
-            if match is None:
+        paths = sorted(path for path in self.objects if path.startswith("core/libs/prx/") and
+                       "tests" not in PurePosixPath(path).parts)
+        self.read(paths)
+        for path in paths:
+            text = self.show(path)
+            if "APS5_VABI" not in text:
                 continue
-            name = match.group(1)
-            own, own_number = exports[name]
-            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(source, int(number) - 1) is not None:
-                self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
+            source = cpp_text(text).split("\n")
+            for number, line in enumerate(source):
+                for match in EXPORT.finditer(line):
+                    name = match.group(1)
+                    if name not in exports:
+                        continue
+                    own, own_number = exports[name]
+                    if library(path) != library(own) and function_body(source, number) is not None:
+                        self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def unknown_nids(self, unknowns, symbols):
         if not unknowns and not symbols:
@@ -361,7 +363,10 @@ class Check:
         reads = set()
         for line in result.stdout.splitlines():
             reads.update(match.group("name") for _, match in env_reference.line_reads(line))
-        documented = set(env_reference.documented_pattern(env_reference.PREFIXES).findall(self.show(doc))) if doc in self.tree else set()
+        pattern = env_reference.documented_pattern(env_reference.PREFIXES)
+        documented = set(pattern.findall(self.show(doc))) if doc in self.tree else set()
+        if git("ls-tree", "--name-only", self.target, "--", doc).strip() == doc:
+            documented |= set(pattern.findall(git("show", f"{self.target}:{doc}"))) - dropped
         for name, (source, line) in sorted(added.items()):
             if name not in documented:
                 self.report("env-reference", source, line, f"{name} is read here but has no row in {doc}")

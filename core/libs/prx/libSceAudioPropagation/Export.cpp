@@ -23,7 +23,8 @@ constexpr std::uint64_t SystemMagic = [] {
 
 struct SystemState {
     std::uint64_t magic;
-    std::uint64_t reserved;
+    std::uint32_t frameSamples;
+    std::uint32_t maxSources;
 };
 
 enum class Kind { Room, Portal, Source, Material, Path };
@@ -116,23 +117,49 @@ void requireNoPropagation(bool none, const char* function) {
 
 extern "C" {
 
-std::int32_t APS5_VABI sceAudioPropagationSystemQueryMemory(const void* options, AudioPropagationSystemMemory* outMemory) {
-    require(options != nullptr, __func__);
-    requireDescriptor(outMemory != nullptr ? &outMemory->desc : nullptr, SystemMemoryId, SystemMemorySize, __func__);
-    outMemory->size_cpu_mem = sizeof(SystemState);
+std::int32_t APS5_VABI sceAudioPropagationSystemQueryMemory(const SystemOptions* options, AudioPropagationSystemMemory* outMemory) {
+    if (!options || !outMemory) return ErrorNullPointer;
+    if (outMemory->desc.id != SystemMemoryId || outMemory->desc.size != SystemMemorySize) return static_cast<std::int32_t>(0x8A700007);
+    outMemory->p_cpu_mem = nullptr;
+    outMemory->size_cpu_mem = 0;
+    outMemory->p_gpu_mem = nullptr;
     outMemory->size_gpu_mem = 0;
+    if (options->desc.id != SystemOptionsId || options->desc.size != SystemOptionsSize) return static_cast<std::int32_t>(0x8A700007);
+    if (options->maxSources == 0 || options->maxSources > 64 || options->maxMaterials == 0 || options->maxMaterials > 64 || options->parameter24 != 6 || options->reflectionOrder == 0 || options->reflectionOrder > 2) return ErrorInvalidArgument;
+    const auto frameSamples = options->frameSamples;
+    if (frameSamples != 256 && frameSamples != 512 && frameSamples != 1024 && frameSamples != 2048 && frameSamples != 4096) return ErrorInvalidArgument;
+    if (!(options->propagationSpeed > 0x1p-23f) || options->propagationSpeed > 1372.0f || !(options->maxPathLength > 0x1p-23f) || options->maxPathLength > 1372.0f || options->flags > 31 || ((options->flags & 1) && frameSamples != 512)) return ErrorInvalidArgument;
+    if (options->flags & 1) throw std::runtime_error(std::string(__func__) + ": GPU memory requirements depend on an unsupported native runtime query");
+    const std::uint64_t sources = options->maxSources;
+    const std::uint64_t paths = sources * (options->reflectionOrder == 1 ? 6 : 36);
+    const float delaySeconds = options->maxPathLength / options->propagationSpeed;
+    const float delaySamples = delaySeconds * 48000.0f;
+    const auto delayCapacity = static_cast<std::uint64_t>(std::ceil(delaySamples));
+    std::uint64_t bytes = sources * 1024 + paths * (32 * (options->reflectionOrder + 2) + 8928);
+    bytes += frameSamples == 256 ? 2048 : 4 * frameSamples;
+    bytes += 4 * delayCapacity * sources;
+    bytes += bytes & 15;
+    bytes += 160 * paths + 12352 + 4208 * options->maxMaterials;
+    if (frameSamples == 256) bytes += sources * ((options->flags & 2) ? 36896 : 16416);
+    if (options->flags & 4) bytes += 2000656;
+    if (options->flags & 8) bytes += 288 * paths;
+    if (options->flags & 16) bytes += 144 * paths;
+    outMemory->size_cpu_mem = bytes + 5368 - ((bytes & 15) ^ 8);
     return 0;
 }
 
-std::int32_t APS5_VABI sceAudioPropagationSystemCreate(const void* options, const AudioPropagationSystemMemory* memory, AudioPropagationHandle* outSystem) {
+std::int32_t APS5_VABI sceAudioPropagationSystemCreate(const SystemOptions* options, const AudioPropagationSystemMemory* memory, AudioPropagationHandle* outSystem) {
     require(options != nullptr && outSystem != nullptr, __func__);
     requireDescriptor(memory != nullptr ? &memory->desc : nullptr, SystemMemoryId, SystemMemorySize, __func__);
+    auto requiredMemory = *memory;
+    const auto result = sceAudioPropagationSystemQueryMemory(options, &requiredMemory);
+    if (result != 0) return result;
     const auto address = reinterpret_cast<std::uintptr_t>(memory->p_cpu_mem);
-    require(address != 0 && address % alignof(SystemState) == 0 && memory->size_cpu_mem >= sizeof(SystemState) && memory->size_gpu_mem == 0, __func__);
+    require(address != 0 && address % alignof(SystemState) == 0 && memory->size_cpu_mem >= requiredMemory.size_cpu_mem && memory->size_gpu_mem == 0, __func__);
     auto& state = registry();
     std::lock_guard lock(state.mutex);
     require(!state.systems.contains(address), __func__);
-    *static_cast<SystemState*>(memory->p_cpu_mem) = SystemState{SystemMagic, 0};
+    *static_cast<SystemState*>(memory->p_cpu_mem) = SystemState{SystemMagic, options->frameSamples, options->maxSources};
     state.systems.insert(address);
     *outSystem = address;
     return 0;
@@ -259,9 +286,11 @@ std::int32_t APS5_VABI sceAudioPropagationSourceGetAudioPathCount(AudioPropagati
 std::int32_t APS5_VABI sceAudioPropagationSourceGetAudioPath(AudioPropagationHandle source, std::uint32_t index, AudioPropagationHandle* outPath) {
     auto& state = registry();
     std::lock_guard lock(state.mutex);
-    requireObject(state, source, Kind::Source, __func__);
-    static_cast<void>(outPath);
-    throw std::invalid_argument(std::string(__func__) + ": index " + std::to_string(index) + " out of range (0 audio paths)");
+    const auto found = state.objects.find(source);
+    if (found == state.objects.end() || found->second.kind != Kind::Source || !liveSystem(state, found->second.system)) return ErrorInvalidHandle;
+    if (!outPath) return ErrorNullPointer;
+    static_cast<void>(index);
+    return ErrorInvalidArgument;
 }
 
 std::int32_t APS5_VABI sceAudioPropagationSourceGetRays(AudioPropagationHandle source, void* rays, std::uint32_t* count) {
@@ -273,15 +302,14 @@ std::int32_t APS5_VABI sceAudioPropagationSourceGetRays(AudioPropagationHandle s
     return 0;
 }
 
-std::int32_t APS5_VABI sceAudioPropagationSourceCalculateAudioPaths(AudioPropagationHandle source, const void* rays, std::uint32_t rayCount, std::uint32_t flags, void* paths, std::uint32_t pathCount) {
+std::int32_t APS5_VABI sceAudioPropagationSourceCalculateAudioPaths(AudioPropagationHandle source, const void* rays, std::uint32_t rayCount, std::uint32_t reflectionOrder, void* paths, std::uint32_t pathCount) {
     auto& state = registry();
     std::lock_guard lock(state.mutex);
-    requireObject(state, source, Kind::Source, __func__);
-    static_cast<void>(rays);
-    static_cast<void>(flags);
-    static_cast<void>(paths);
-    requireNoPropagation(rayCount == 0 && pathCount == 0, __func__);
-    return 0;
+    const auto found = state.objects.find(source);
+    if (found == state.objects.end() || found->second.kind != Kind::Source || !liveSystem(state, found->second.system)) return ErrorInvalidHandle;
+    if (!rays || !paths) return ErrorNullPointer;
+    if (rayCount != 6 || reflectionOrder == 0 || pathCount == 0) return ErrorInvalidArgument;
+    throw std::runtime_error(__func__);
 }
 
 std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPaths(AudioPropagationHandle source, const void* entries, std::uint32_t count) {
@@ -293,7 +321,7 @@ std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPaths(AudioPropagationHa
     return 0;
 }
 
-std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPath(AudioPropagationHandle path, const void* data, float gain) {
+std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPath(AudioPropagationHandle path, const AudioPath* data, float gain) {
     auto& state = registry();
     std::lock_guard lock(state.mutex);
     requireObject(state, path, Kind::Path, __func__);
@@ -301,47 +329,53 @@ std::int32_t APS5_VABI sceAudioPropagationSourceSetAudioPath(AudioPropagationHan
     return 0;
 }
 
-std::int32_t APS5_VABI sceAudioPropagationSourceRender(AudioPropagationHandle system, const RenderInfo* infos, std::uint32_t count) {
+std::int32_t APS5_VABI sceAudioPropagationSourceRender(AudioPropagationHandle system, RenderInfo* infos, std::uint32_t count) {
     require(infos != nullptr && count != 0, __func__);
     auto& state = registry();
     std::lock_guard lock(state.mutex);
     requireSystem(state, system, __func__);
+    const auto& configuration = *reinterpret_cast<const SystemState*>(system);
+    require(count <= configuration.maxSources, __func__);
+    const auto requiredBytes = static_cast<std::size_t>(configuration.frameSamples) * 16 * sizeof(float);
     for (std::uint32_t index = 0; index < count; ++index) {
         const auto& info = infos[index];
         requireDescriptor(&info.desc, RenderInfoId, RenderInfoSize, __func__);
         require(requireObject(state, info.source, Kind::Source, __func__).system == system, __func__);
-        require(info.output != nullptr && info.outputSize != 0, __func__);
+        require(info.output != nullptr && info.outputSize >= requiredBytes, __func__);
         if (info.format != RenderFormat) throw std::runtime_error(std::string(__func__) + ": render format " + std::to_string(info.format) + " is unknown");
+    }
+    for (std::uint32_t index = 0; index < count; ++index) {
+        infos[index].channelCount = 0;
     }
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationPathGetNumPoints() {
+int APS5_VABI sceAudioPropagationPathGetNumPoints(AudioPropagationHandle path, std::uint32_t* count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationReportApi() {
+int APS5_VABI sceAudioPropagationReportApi(std::uint32_t category, AudioPropagationHandle handle, std::int32_t result, std::int32_t operation, const char* function, const char* format, ...) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationResetAttributes() {
+int APS5_VABI sceAudioPropagationResetAttributes(Attribute* attributes, std::uint32_t count) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationSourceQueryInfo() {
+int APS5_VABI sceAudioPropagationSourceQueryInfo(AudioPropagationHandle source, SourceInfo* info) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationSystemLock() {
+int APS5_VABI sceAudioPropagationSystemLock(AudioPropagationHandle system) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationSystemQueryInfo() {
+int APS5_VABI sceAudioPropagationSystemQueryInfo(AudioPropagationHandle system, SystemInfo* info, std::size_t size) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
@@ -396,22 +430,22 @@ int APS5_VABI sceAudioPropagationSystemOptionInit() {
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationReportRegisterHandler() {
+int APS5_VABI sceAudioPropagationReportRegisterHandler(std::uint32_t category, ReportHandler handler, void* userData, ReportRegistration** registration) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationReportUnregisterHandler() {
+int APS5_VABI sceAudioPropagationReportUnregisterHandler(ReportRegistration* registration) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationSystemEnumHandles() {
+int APS5_VABI sceAudioPropagationSystemEnumHandles(AudioPropagationHandle* handles, std::uint32_t capacity) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
-int APS5_VABI sceAudioPropagationSystemUnlock() {
+int APS5_VABI sceAudioPropagationSystemUnlock(AudioPropagationHandle system) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

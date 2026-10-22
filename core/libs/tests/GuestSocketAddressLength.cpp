@@ -56,6 +56,19 @@ void ShortAddressesAreInvalid() {
     Require(close_nid_postfix(stream) == 0 && close_nid_postfix(datagram) == 0 && close_nid_postfix(stream6) == 0, "close failed");
 }
 
+void ArgumentsAreCheckedBeforeTheDescriptor() {
+    const auto address = Loopback();
+    constexpr int ErrorBadDescriptor = 9;
+    Require(Fails(bind_nid_postfix(-1, address.data(), 1), ErrorInvalid), "bind(-1) with a 1-byte address must fail with EINVAL (22) before the descriptor is looked up");
+    Require(Fails(bind_nid_postfix(-1, address.data(), 256), ErrorNameTooLong), "bind(-1) with a 256-byte address must fail with ENAMETOOLONG (63)");
+    Require(Fails(bind_nid_postfix(-1, nullptr, address.size()), ErrorFault), "bind(-1) with a null address must fail with EFAULT (14)");
+    Require(Fails(connect_nid_postfix(-1, address.data(), 1), ErrorInvalid), "connect(-1) with a 1-byte address must fail with EINVAL (22)");
+    Require(Fails(sendto_nid_postfix(-1, "x", 1, 0, address.data(), 1), ErrorInvalid), "sendto(-1) with a 1-byte address must fail with EINVAL (22)");
+    Require(Fails(bind_nid_postfix(-1, address.data(), address.size()), ErrorBadDescriptor), "bind(-1) with a valid address must fail with EBADF (9)");
+    Require(Fails(connect_nid_postfix(-1, address.data(), address.size()), ErrorBadDescriptor), "connect(-1) with a valid address must fail with EBADF (9)");
+    Require(Fails(sendto_nid_postfix(-1, "x", 1, 0, address.data(), address.size()), ErrorBadDescriptor), "sendto(-1) with a valid address must fail with EBADF (9)");
+}
+
 void FullAddressesStillWork() {
     const int stream = socket_nid_postfix(2, Stream, 0);
     Require(stream >= 0, "socket failed");
@@ -68,6 +81,7 @@ void FullAddressesStillWork() {
 
 int main() {
     ShortAddressesAreInvalid();
+    ArgumentsAreCheckedBeforeTheDescriptor();
     FullAddressesStillWork();
     return 0;
 }

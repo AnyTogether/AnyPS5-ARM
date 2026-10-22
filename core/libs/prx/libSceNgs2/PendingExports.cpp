@@ -41,9 +41,5 @@ int APS5_VABI sceNgs2VoiceGetMatrixInfo(std::uintptr_t voiceHandle, std::uint32_
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNgs2VoiceGetOwner(std::uintptr_t voiceHandle, std::uintptr_t* outOwnerRack, std::uint32_t* outVoiceIndex) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 
 }

@@ -243,7 +243,7 @@ void DefineModule(SpirvEmitterState& state) {
         const auto& mesh = VertexInfo(state).mesh;
         state.module.EmitCapability(spv::CapabilityMeshShadingEXT);
         state.module.EmitExtension("SPV_EXT_mesh_shader");
-        state.module.AddExecutionMode(state.mainFunc, mesh.outputPrimitiveSize == 2u ? spv::ExecutionModeOutputLinesEXT : spv::ExecutionModeOutputTrianglesEXT);
+        state.module.AddExecutionMode(state.mainFunc, mesh.outputPrimitiveSize == 1u ? spv::ExecutionModeOutputPoints : mesh.outputPrimitiveSize == 2u ? spv::ExecutionModeOutputLinesEXT : spv::ExecutionModeOutputTrianglesEXT);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputVertices, mesh.maxVertices);
         state.module.AddExecutionMode(state.mainFunc, spv::ExecutionModeOutputPrimitivesEXT, mesh.maxPrimitives);
     }

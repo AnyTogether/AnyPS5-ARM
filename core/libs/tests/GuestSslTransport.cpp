@@ -459,6 +459,10 @@ int main(int argc, char** argv) {
     Require(sceSslWrite(connection, buffer.data(), 1, 1) == ErrorInvalidValue, "unknown write flags were accepted");
     char request[] = "ping";
     Require(sceSslWrite(connection, request, 4, 0) == 4, "write the request");
+    Require(sceSslRead(connection, buffer.data(), buffer.size(), 4) == ErrorInvalidValue, "unknown read flags were accepted");
+    Require(sceSslRead(0, nullptr, 1, -1) == ErrorInvalidValue, "read flags did not precede other validation");
+    Require(sceSslRead(connection, buffer.data(), 2, 3) == 2 && std::memcmp(buffer.data(), "po", 2) == 0, "short peek failed");
+    Require(sceSslRead(connection, buffer.data(), 4, 3) == 4 && std::memcmp(buffer.data(), "pong", 4) == 0, "repeated larger peek consumed bytes");
     Require(sceSslRead(connection, buffer.data(), 2, 1) == 2 && std::memcmp(buffer.data(), "po", 2) == 0, "a partial read did not return the available bytes");
     Require(sceSslRead(connection, buffer.data(), buffer.size(), 0) == 2 && std::memcmp(buffer.data(), "ng", 2) == 0, "a full read did not stop at the end of the stream");
     Require(sceSslRead(connection, buffer.data(), buffer.size(), 1) == 0, "close notify did not end the stream");

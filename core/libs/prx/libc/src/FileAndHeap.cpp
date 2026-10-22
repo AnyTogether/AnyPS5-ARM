@@ -65,6 +65,19 @@ static std::optional<GuestFileMode> ParseFileMode(const char* mode) {
 
 #ifdef _WIN32
 static constexpr DWORD AppendOnlyAccess = FILE_GENERIC_WRITE & ~FILE_WRITE_DATA;
+
+static std::optional<std::wstring> HostOpenName(const std::filesystem::path& path) {
+    auto filename = path.native();
+    if (!filename.starts_with(L"\\\\?\\") && !filename.starts_with(L"\\\\.\\")) {
+        std::error_code pathError;
+        auto absolutePath = std::filesystem::absolute(path, pathError);
+        if (pathError) { errno = pathError.default_error_condition().value(); return std::nullopt; }
+        const auto absolute = absolutePath.lexically_normal().make_preferred().native();
+        if (absolute.size() >= MAX_PATH)
+            filename = absolute.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + absolute.substr(2) : L"\\\\?\\" + absolute;
+    }
+    return filename;
+}
 #endif
 
 static std::FILE* OpenNative(const std::filesystem::path& path, const std::string& nativeMode) {
@@ -76,16 +89,9 @@ static std::FILE* OpenNative(const std::filesystem::path& path, const std::strin
     const DWORD disposition = access == 'r' ? OPEN_EXISTING
         : nativeMode.find('x') != std::string::npos ? CREATE_NEW : access == 'w' ? CREATE_ALWAYS : OPEN_ALWAYS;
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    auto filename = path.native();
-    if (!filename.starts_with(L"\\\\?\\") && !filename.starts_with(L"\\\\.\\")) {
-        std::error_code pathError;
-        auto absolutePath = std::filesystem::absolute(path, pathError);
-        if (pathError) { errno = pathError.default_error_condition().value(); return nullptr; }
-        const auto absolute = absolutePath.lexically_normal().make_preferred().native();
-        if (absolute.size() >= MAX_PATH)
-            filename = absolute.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + absolute.substr(2) : L"\\\\?\\" + absolute;
-    }
-    const auto handle = CreateFileW(filename.c_str(), desired, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &security,
+    const auto filename = HostOpenName(path);
+    if (!filename) return nullptr;
+    const auto handle = CreateFileW(filename->c_str(), desired, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &security,
         disposition, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         errno = WindowsOpenError_nid_no_patch(GetLastError());
@@ -307,6 +313,47 @@ static int OpenFailure(const std::filesystem::path& path, bool writes, int hostE
     return writes && error == 13 && std::filesystem::is_directory(path, status) ? 21 : error;
 }
 
+#ifdef _WIN32
+static int (*g_openDirectoryDescriptor)(const wchar_t*) = nullptr;
+static void (*g_forgetDirectoryDescriptor)(int) = nullptr;
+
+void LibcRegisterDirectoryStreams_nid_no_patch(int (*open)(const wchar_t*), void (*forget)(int)) {
+    g_openDirectoryDescriptor = open;
+    g_forgetDirectoryDescriptor = forget;
+}
+
+void ForgetDirectoryStream_nid_no_patch(int descriptor) {
+    if (!g_forgetDirectoryDescriptor) throw std::runtime_error("ForgetDirectoryStream: libkernel has not registered its directory descriptors");
+    g_forgetDirectoryDescriptor(descriptor);
+}
+
+static FileStream* OpenDirectoryStream(const std::filesystem::path& path) {
+    if (!g_openDirectoryDescriptor) throw std::runtime_error("fopen: libkernel has not registered its directory descriptors");
+    const auto filename = HostOpenName(path);
+    if (!filename) { errno = GuestErrnoFromHost_nid_no_patch(errno); return nullptr; }
+    const auto release = [](void* pointer) { ::operator delete(pointer); };
+    std::unique_ptr<void, decltype(release)> storage(::operator new(sizeof(FileStream)), release);
+    const int descriptor = g_openDirectoryDescriptor(filename->c_str());
+    if (descriptor < 0) {
+        const int error = GuestErrnoFromHost_nid_no_patch(errno);
+        errno = error == 2 ? NotFoundError_nid_no_patch(path) : error;
+        return nullptr;
+    }
+    auto* native = ::_fdopen(descriptor, "rb");
+    if (!native) {
+        const int error = GuestErrnoFromHost_nid_no_patch(errno);
+        ForgetDirectoryStream_nid_no_patch(descriptor);
+        ::_close(descriptor);
+        errno = error;
+        return nullptr;
+    }
+    auto* stream = new (storage.get()) FileStream(native, true);
+    storage.release();
+    stream->MarkDirectory();
+    return stream;
+}
+#endif
+
 FileStream* APS5_VABI freopen_nid_postfix(const char* filename, const char* mode, FileStream* stream) {
     if (!stream || !mode) { errno = 22; return nullptr; }
     if (!filename) { errno = 45; return nullptr; } // Mode-only reopening is not supported.
@@ -370,7 +417,13 @@ FileStream* APS5_VABI fopen_nid_postfix(const char* filename, const char* mode) 
     if (const int error = ResolvePathError_nid_no_patch(filename, fpath)) { errno = error; return nullptr; }
     std::unique_ptr<std::FILE, int (*)(std::FILE*)> handle(OpenNative(fpath, parsed->native), std::fclose);
     if (!handle) {
-        errno = OpenFailure(fpath, parsed->writes, errno);
+        const int hostError = errno;
+#ifdef _WIN32
+        std::error_code status;
+        if (!parsed->writes && GuestErrnoFromHost_nid_no_patch(hostError) == 13 && std::filesystem::is_directory(fpath, status))
+            return OpenDirectoryStream(fpath);
+#endif
+        errno = OpenFailure(fpath, parsed->writes, hostError);
         if (errno == 2) errno = NotFoundError_nid_no_patch(fpath);
         return nullptr;
     }
@@ -445,6 +498,7 @@ size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, File
     if (!stream->SwitchToReading()) return 0;
     const auto result = std::fread(buffer, size, count, handle);
     stream->SyncStatus();
+    stream->KeepDirectoryReadError(result < count);
     return result;
 }
 
@@ -529,7 +583,7 @@ int APS5_VABI fputs_nid_postfix(const char* str, FileStream* stream) {
 int APS5_VABI fflush_nid_postfix(FileStream* stream) {
     if (stream && !stream->IsOpen()) { errno = 9; return -1; }
     std::FILE* native = stream ? GetStreamHandle(stream) : nullptr;
-    if (stream && stream->IsRandomDevice()) return 0;
+    if (stream && (stream->IsRandomDevice() || stream->IsDirectory())) return 0;
 #ifdef __linux__
     if (native && !__fwriting(native)) return 0;
 #elif defined(__APPLE__)
