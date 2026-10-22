@@ -543,7 +543,7 @@ extension AppModel {
             return true
         }
         switch overlay {
-        case .settings, .gameSettings, .confirmUninstall:
+        case .settings, .gameSettings, .confirmUninstall, .updateChoice:
             return panelCommand(command)
         case .controls, .advanced:
             if command == .back || command == .options {

@@ -62,6 +62,9 @@ enum T {
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed
+        case madeBy, builtOn
+        case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
+        case discordPresence, discordPresenceDetail
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -198,6 +201,15 @@ enum T {
         .phoneRemove: "Kaldır",
         .phoneOpenLauncher: "%@ bağlanmak istiyor: izin vermek için launcher'ı aç.",
         .phoneServerFailed: "Telefon bağlantısı açılamadı",
+        .madeBy: "Geliştiren",
+        .builtOn: "AnyPS5 üzerine kurulu",
+        .updateChoiceText: "Bu oyun için güncelleme var",
+        .updateAndPlay: "Güncelle ve Oyna",
+        .updateAndPlayDetail: "AnyPS5'in yeni düzeltmeleri gelir; kayıtların ve kupaların korunur",
+        .playNow: "Şimdi Oyna",
+        .playNowDetail: "Güncellemeyi sonra ⋯ → Kilidi Yeniden Aç ile yapabilirsin",
+        .discordPresence: "Discord'da oynadığın oyunu göster",
+        .discordPresenceDetail: "Discord açıksa profilinde oyunun adı ve süresi görünür",
         .advanced: "Gelişmiş",
         .advancedDetail: "Çubuklar, fare, klavye, önbellek, paylaşım",
         .advancedTitle: "Gelişmiş Ayarlar",
@@ -423,6 +435,15 @@ enum T {
         .phoneRemove: "Remove",
         .phoneOpenLauncher: "%@ wants to connect: open the launcher to allow it.",
         .phoneServerFailed: "The phone connection could not start",
+        .madeBy: "Made by",
+        .builtOn: "Built on AnyPS5",
+        .updateChoiceText: "An update is ready for this game",
+        .updateAndPlay: "Update and Play",
+        .updateAndPlayDetail: "Brings AnyPS5's latest fixes; your saves and trophies stay",
+        .playNow: "Play Now",
+        .playNowDetail: "Update later with ⋯ → Unlock Again",
+        .discordPresence: "Show the game you play on Discord",
+        .discordPresenceDetail: "With Discord open, your profile shows the game and for how long",
         .advanced: "Advanced",
         .advancedDetail: "Sticks, mouse, keyboard, cache, sharing",
         .advancedTitle: "Advanced Settings",

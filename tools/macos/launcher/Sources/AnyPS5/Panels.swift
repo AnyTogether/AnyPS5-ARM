@@ -51,6 +51,18 @@ extension AppModel {
                 }),
                 PanelRow(id: "cancel", title: T.text(.cancel), kind: .action(destructive: false) { [weak self] in self?.closeOverlay() }),
             ])]
+        case .updateChoice:
+            guard let game = selectedGame else { return [] }
+            return [PanelCategory(id: "update", title: T.text(.updateAvailable), symbol: "arrow.triangle.2.circlepath", rows: [
+                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: T.text(.updateAndPlayDetail), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
+                    self?.closeOverlay()
+                    self?.updateAndPlay(game)
+                }),
+                PanelRow(id: "play", title: T.text(.playNow), detail: T.text(.playNowDetail), symbol: "play.fill", kind: .action(destructive: false) { [weak self] in
+                    self?.closeOverlay()
+                    self?.play(game)
+                }),
+            ])]
         default: return []
         }
     }
@@ -102,6 +114,10 @@ extension AppModel {
             PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2", kind: .toggle(preferences.sounds) { [weak self] value in self?.preferences.sounds = value }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
+            PanelRow(id: "discord", title: T.text(.discordPresence), detail: T.text(.discordPresenceDetail), symbol: "person.2.wave.2", kind: .toggle(preferences.discordPresence ?? true) { [weak self] value in
+                self?.preferences.discordPresence = value
+                if !value { self?.discordOff() }
+            }),
         ]
         if rosettaMissing {
             behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstall), detail: T.text(.rosettaMissing), symbol: "cpu", kind: .action(destructive: false) { [weak self] in self?.installRosetta() }))
@@ -114,6 +130,13 @@ extension AppModel {
             PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
             PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
+            PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
+            PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(URL(string: "https://github.com/utkuhalis/AnyPS5-ARM")!)
+            }),
+            PanelRow(id: "upstream", title: T.text(.builtOn), detail: "github.com/boykopovar/AnyPS5", symbol: "heart", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(URL(string: "https://github.com/boykopovar/AnyPS5")!)
+            }),
         ]
         if translocated {
             about.append(PanelRow(id: "move", title: T.text(.moveToApplications), symbol: "arrow.down.app", kind: .action(destructive: false) { _ = AppLocation.moveToApplications() }))

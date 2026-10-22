@@ -17,6 +17,8 @@ struct Preferences: Codable, Equatable {
     var reducedMotion = false
     var sounds = true
     var hideWhilePlaying = false
+    /// The running game on the user's Discord profile; nil means on.
+    var discordPresence: Bool?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
@@ -63,6 +65,8 @@ enum Overlay: Equatable {
     case library
     case log
     case confirmUninstall
+    /// Play on a game an older toolkit made: update it first, or play it as it is.
+    case updateChoice
     case controls
     case trophies
     case advanced
@@ -129,9 +133,12 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
+    private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
     private var remote: RemoteServer?
     private let pairedDevices = PairedDevices()
+    /// The game to start as soon as its update finishes.
+    private var playAfterUnlock: String?
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
@@ -160,7 +167,11 @@ final class AppModel: ObservableObject {
             await MainActor.run { self.rosettaMissing = missing }
         }
         if self.preferences.onboarded && persists { rescan() }
-        if persists { startRemote() }
+        if persists {
+            startRemote()
+            let discord = self.discord
+            DiscordGames.load { games in discord.use(games) }
+        }
     }
 
     /// Fills the library at once (offscreen previews).
@@ -380,6 +391,10 @@ final class AppModel: ObservableObject {
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
+                    if self.playAfterUnlock == id {
+                        self.playAfterUnlock = nil
+                        self.play(game)
+                    }
                 case .failure(let error) where error is CancellationError:
                     break
                 case .failure(let error):
@@ -391,7 +406,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The update the Play prompt offers: unlock the game again, then start it.
+    func updateAndPlay(_ game: Game) {
+        playAfterUnlock = game.id
+        unlock(game)
+    }
+
     func cancelUnlock(_ game: Game) {
+        if playAfterUnlock == game.id { playAfterUnlock = nil }
         if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); return }
         if progress[game.id] != nil { installer?.cancel() }
         Sounds.shared.play(.back)
@@ -400,6 +422,7 @@ final class AppModel: ObservableObject {
     func uninstall(_ game: Game) {
         guard let root else { return }
         try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
+        try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
         installedRecords[game.id] = nil
         show(T.text(.uninstallDone), symbol: "trash")
     }
@@ -414,7 +437,7 @@ final class AppModel: ObservableObject {
 
     func primaryAction(_ game: Game) {
         switch state(of: game) {
-        case .installed: play(game)
+        case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
         case .locked, .failed: unlock(game)
         case .installing, .queued: cancelUnlock(game)
         case .running: running?.app.activate()
@@ -441,6 +464,8 @@ final class AppModel: ObservableObject {
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
+        // A bundle made by an older launcher still carries the marks that make macOS verify it.
+        Installer.clearMarks(bundle)
         NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { app, error in
             Task { @MainActor in
                 guard self.starting?.id == game.id else {
@@ -479,6 +504,7 @@ final class AppModel: ObservableObject {
             }
             NSApp.yieldActivation(to: app)
             app.activate()
+            if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }
@@ -520,6 +546,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        discord.clear()
         loadTrophies(running.game, again: true)
         diagnose(running.game)
         trophyWatch?.cancel()
@@ -582,6 +609,8 @@ final class AppModel: ObservableObject {
     func previewPairing(_ request: PairingRequest) { pairing = request }
 
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
+
+    func discordOff() { discord.clear() }
 
     // MARK: Trophy notifications
 
@@ -800,7 +829,7 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
         // The controls panel opens on its first key, below the hint.
         if next == .controls { panelRow = 1 }
         if next == .trophies { trophyIndex = 0 }

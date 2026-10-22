@@ -79,6 +79,26 @@ public final class Installer: @unchecked Sendable {
         return root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Games").appendingPathComponent(name + ".app")
     }
 
+    /// Where an installed game's files and saves live, outside its bundle.
+    public static func dataFolder(for game: Game, root: URL) -> URL {
+        root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Data")
+            .appendingPathComponent(bundle(for: game, root: root).deletingPathExtension().lastPathComponent)
+    }
+
+    /// Removes the marks macOS leaves on files that came from a download (quarantine) or were
+    /// written by an app that did (provenance) from `url` and everything in it. With them, macOS
+    /// verifies a game's whole bundle before its code first runs, a window that takes minutes
+    /// for a game of several gigabytes.
+    public static func clearMarks(_ url: URL) {
+        let marks = ["com.apple.provenance", "com.apple.quarantine"]
+        func clear(_ path: String) {
+            for mark in marks { removexattr(path, mark, XATTR_NOFOLLOW) }
+        }
+        clear(url.path)
+        guard let enumerator = FileManager.default.enumerator(atPath: url.path) else { return }
+        for case let relative as String in enumerator { clear(url.appendingPathComponent(relative).path) }
+    }
+
     /// The work folders and half-made bundles an interrupted unlock left in the store.
     public static func removeLeftovers(root: URL) {
         let store = root.appendingPathComponent(GameLibrary.storeName)
@@ -214,24 +234,73 @@ public final class Installer: @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date())).write(to: resources.appendingPathComponent("anyps5-install.json"))
 
-        // 5. Nothing in the bundle keeps the download's quarantine flag, then it takes the old one's place.
+        // 5. Nothing in the bundle keeps a download's marks, then it takes the old one's place.
         progress(.finish, 0)
-        try? runTool(URL(fileURLWithPath: "/usr/bin/xattr"), ["-dr", "com.apple.quarantine", partial.path], quiet: true)
-        if fileManager.fileExists(atPath: bundle.path) {
-            try Installer.carryOver(from: bundle, to: partial)
-            try fileManager.removeItem(at: bundle)
-        }
-        try fileManager.moveItem(at: partial, to: bundle)
+        Installer.clearMarks(partial)
+        try Installer.place(partial: partial, bundle: bundle, data: Installer.dataFolder(for: game, root: root))
         progress(.finish, 1)
         return bundle
     }
 
     /// What the game wrote beside app0 in the old bundle (saves in _sd, trophies in _trophy, its
     /// data and download folders) moves into the new one, so unlocking again keeps the progress.
-    static func carryOver(from old: URL, to new: URL) throws {
+    /// Puts a finished bundle in place with its game outside it, in `data`/game, linked back as
+    /// Contents/Resources/game. macOS assesses an unsigned bundle each time it changed before
+    /// its code runs; with the gigabytes and the saves outside, that is a few seconds once
+    /// instead of minutes at every start. What the game wrote beside app0 in the old bundle (or
+    /// in the old data folder) moves into the new one.
+    static func place(partial: URL, bundle: URL, data: URL) throws {
         let fileManager = FileManager.default
-        let source = old.appendingPathComponent("Contents/Resources/game")
-        let target = new.appendingPathComponent("Contents/Resources/game")
+        let staged = partial.appendingPathComponent("Contents/Resources/game")
+        let previous = bundle.appendingPathComponent("Contents/Resources/game")
+        if fileManager.fileExists(atPath: previous.path) { try carryOver(from: previous.resolvingSymlinksInPath(), to: staged) }
+        if fileManager.fileExists(atPath: bundle.path) { try fileManager.removeItem(at: bundle) }
+        let game = data.appendingPathComponent("game")
+        if fileManager.fileExists(atPath: game.path) { try fileManager.removeItem(at: game) }
+        try fileManager.createDirectory(at: data, withIntermediateDirectories: true)
+        try fileManager.moveItem(at: staged, to: game)
+        let resources = bundle.appendingPathComponent("Contents/Resources")
+        try fileManager.createSymbolicLink(atPath: staged.path, withDestinationPath: relativePath(from: resources, to: game))
+        let libraries = bundle.appendingPathComponent("Contents/MacOS/libs")
+        for folder in [game, game.appendingPathComponent("app0")] {
+            let link = folder.appendingPathComponent("libs")
+            guard (try? link.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true else { continue }
+            try fileManager.removeItem(at: link)
+            try fileManager.createSymbolicLink(atPath: link.path, withDestinationPath: relativePath(from: folder, to: libraries))
+        }
+        try fileManager.moveItem(at: partial, to: bundle)
+    }
+
+    /// `target` as a path relative to the folder `base`.
+    static func relativePath(from base: URL, to target: URL) -> String {
+        let from = canonical(base)
+        let to = canonical(target)
+        var shared = 0
+        while shared < min(from.count, to.count), from[shared] == to[shared] { shared += 1 }
+        return (Array(repeating: "..", count: from.count - shared) + to[shared...]).joined(separator: "/")
+    }
+
+    /// The path's components with its existing part's symlinks resolved, so /tmp and
+    /// /private/tmp compare equal; a part not made yet (a bundle before its move) is kept as is.
+    static func canonical(_ url: URL) -> [String] {
+        var existing = url.standardizedFileURL
+        var rest: [String] = []
+        while existing.path != "/", realpath(existing.path, nil) == nil {
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        var resolved = existing.path
+        if let real = realpath(existing.path, nil) {
+            resolved = String(cString: real)
+            free(real)
+        }
+        return URL(fileURLWithPath: resolved).pathComponents + rest
+    }
+
+    /// The game folder's items the game wrote (saves, trophies, data) move from `source` into
+    /// `target` unless the new game has them.
+    static func carryOver(from source: URL, to target: URL) throws {
+        let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(atPath: source.path) else { return }
         for name in entries where !fileManager.fileExists(atPath: target.appendingPathComponent(name).path) {
             let item = source.appendingPathComponent(name)

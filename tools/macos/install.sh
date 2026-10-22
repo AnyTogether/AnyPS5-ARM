@@ -29,6 +29,7 @@ fi
 rm -rf "$target/AnyPS5.app"
 ditto "$app" "$target/AnyPS5.app"
 xattr -dr com.apple.quarantine "$target/AnyPS5.app" 2>/dev/null || true
+xattr -dr com.apple.provenance "$target/AnyPS5.app" 2>/dev/null || true
 
 if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
     echo "AnyPS5: games run through Rosetta; installing it (macOS asks for your password)"
