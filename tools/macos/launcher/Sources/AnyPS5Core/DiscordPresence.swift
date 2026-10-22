@@ -40,13 +40,13 @@ public final class DiscordPresence: @unchecked Sendable {
 
     deinit { if socket >= 0 { Darwin.close(socket) } }
 
-    /// Shows the game, with the time it has been played since `since`.
+    /// Shows the game, with the time it has been played since `since`. No image is named, so
+    /// Discord shows the AnyPS5 application's own icon.
     public func playing(_ game: String, since: Date) {
         let activity: [String: Any] = [
             "details": game,
             "state": "AnyPS5 · Mac",
             "timestamps": ["start": Int(since.timeIntervalSince1970)],
-            "assets": ["large_image": "anyps5", "large_text": "AnyPS5"],
             "type": 0,
         ]
         queue.async { [self] in setActivity(activity) }

@@ -87,7 +87,8 @@ final class DiscordPresenceTests: XCTestCase {
         let activity = arguments?["activity"] as? [String: Any]
         XCTAssertEqual(activity?["details"] as? String, "Hollow Knight: Silksong")
         XCTAssertEqual((activity?["timestamps"] as? [String: Any])?["start"] as? Int, 1_800_000_000)
-        XCTAssertEqual((activity?["assets"] as? [String: Any])?["large_image"] as? String, "anyps5")
+        XCTAssertEqual(activity?["state"] as? String, "AnyPS5 · Mac")
+        XCTAssertNil(activity?["assets"], "Discord shows the application's own icon when no image is named")
         presence.close()
     }
 
