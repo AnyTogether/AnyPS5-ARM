@@ -1,5 +1,27 @@
 import Foundation
 
+/// A game as the phone lists it. `art` changes whenever its icon or background does, so the
+/// phone asks for the pictures again only then.
+public struct RemoteGame: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable {
+        case installed, update, locked, installing, starting, running, unavailable
+    }
+
+    public var id: String
+    public var name: String
+    public var state: State
+    public var trophies: String?
+    public var art: String
+
+    public init(id: String, name: String, state: State, trophies: String?, art: String) {
+        self.id = id
+        self.name = name
+        self.state = state
+        self.trophies = trophies
+        self.art = art
+    }
+}
+
 /// A message on the phone's control channel: one JSON object per WebSocket text frame, told
 /// apart by its `type`.
 public enum RemoteMessage: Codable, Equatable, Sendable {
@@ -12,11 +34,27 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     case rejected(reason: String)
     /// The phone's measured latency, every two seconds.
     case latency(milliseconds: Double)
+    /// The launcher's games as it shows them, with the one selected, the one playing and the
+    /// language, sent again whenever any of it changes.
+    case library(games: [RemoteGame], selected: String?, running: String?, language: String)
+    /// A game's pictures as base64 JPEG, after the phone asked with `wantArt`.
+    case art(id: String, icon: String?, background: String?)
+    case wantArt(id: String)
+    /// A move on the launcher's screen: left, right, up, down, select, back or options.
+    case command(name: String)
+    case select(id: String)
+    /// What Play does for the game; another game playing is stopped first.
+    case launch(id: String)
+    /// Stops the game playing.
+    case close
+    /// The PS button: the launcher comes in front of the game.
+    case home
 
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds
+        case games, selected, running, language, id, icon, background, name
     }
 
     public init(from decoder: Decoder) throws {
@@ -38,6 +76,24 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             self = .rejected(reason: try values.decode(String.self, forKey: .reason))
         case "latency":
             self = .latency(milliseconds: try values.decode(Double.self, forKey: .milliseconds))
+        case "library":
+            self = .library(games: try values.decode([RemoteGame].self, forKey: .games), selected: try values.decodeIfPresent(String.self, forKey: .selected),
+                            running: try values.decodeIfPresent(String.self, forKey: .running), language: try values.decode(String.self, forKey: .language))
+        case "art":
+            self = .art(id: try values.decode(String.self, forKey: .id), icon: try values.decodeIfPresent(String.self, forKey: .icon),
+                        background: try values.decodeIfPresent(String.self, forKey: .background))
+        case "wantArt":
+            self = .wantArt(id: try values.decode(String.self, forKey: .id))
+        case "command":
+            self = .command(name: try values.decode(String.self, forKey: .name))
+        case "select":
+            self = .select(id: try values.decode(String.self, forKey: .id))
+        case "launch":
+            self = .launch(id: try values.decode(String.self, forKey: .id))
+        case "close":
+            self = .close
+        case "home":
+            self = .home
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "unknown message type \(other)")
         }
@@ -67,6 +123,33 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .latency(let milliseconds):
             try values.encode("latency", forKey: .type)
             try values.encode(milliseconds, forKey: .milliseconds)
+        case .library(let games, let selected, let running, let language):
+            try values.encode("library", forKey: .type)
+            try values.encode(games, forKey: .games)
+            try values.encode(selected, forKey: .selected)
+            try values.encode(running, forKey: .running)
+            try values.encode(language, forKey: .language)
+        case .art(let id, let icon, let background):
+            try values.encode("art", forKey: .type)
+            try values.encode(id, forKey: .id)
+            try values.encode(icon, forKey: .icon)
+            try values.encode(background, forKey: .background)
+        case .wantArt(let id):
+            try values.encode("wantArt", forKey: .type)
+            try values.encode(id, forKey: .id)
+        case .command(let name):
+            try values.encode("command", forKey: .type)
+            try values.encode(name, forKey: .name)
+        case .select(let id):
+            try values.encode("select", forKey: .type)
+            try values.encode(id, forKey: .id)
+        case .launch(let id):
+            try values.encode("launch", forKey: .type)
+            try values.encode(id, forKey: .id)
+        case .close:
+            try values.encode("close", forKey: .type)
+        case .home:
+            try values.encode("home", forKey: .type)
         }
     }
 

@@ -24,6 +24,28 @@ final class RemoteProtocolTests: XCTestCase {
         }
     }
 
+    func testLauncherModeMessagesRoundTrip() throws {
+        let game = RemoteGame(id: "/Games/Silksong", name: "Hollow Knight: Silksong", state: .installed, trophies: "3/47", art: "a1")
+        let messages: [RemoteMessage] = [
+            .library(games: [game], selected: game.id, running: nil, language: "en"),
+            .art(id: game.id, icon: "aWNvbg==", background: nil),
+            .command(name: "select"), .select(id: game.id), .launch(id: game.id), .close, .home, .wantArt(id: game.id),
+        ]
+        for message in messages {
+            XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        }
+    }
+
+    func testLibraryAsThePhoneReadsIt() throws {
+        let message = RemoteMessage.library(games: [RemoteGame(id: "x", name: "DOOM", state: .running, trophies: nil, art: "b")], selected: "x", running: "x", language: "tr")
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "library")
+        XCTAssertEqual(json?["language"] as? String, "tr")
+        let games = json?["games"] as? [[String: Any]]
+        XCTAssertEqual(games?.first?["state"] as? String, "running")
+        XCTAssertEqual(games?.first?["name"] as? String, "DOOM")
+    }
+
     func testUnknownTypeFailsToDecode() {
         XCTAssertThrowsError(try JSONDecoder().decode(RemoteMessage.self, from: Data(#"{"type":"bogus"}"#.utf8)))
     }

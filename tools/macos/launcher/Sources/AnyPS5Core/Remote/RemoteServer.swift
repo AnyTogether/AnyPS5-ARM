@@ -31,13 +31,17 @@ public final class RemoteServer: @unchecked Sendable {
         public var connected: @Sendable (String) -> Void
         public var disconnected: @Sendable () -> Void
         public var latency: @Sendable (Double) -> Void
+        /// What the welcomed phone asks the launcher to do (launcher mode).
+        public var request: @Sendable (RemoteMessage) -> Void
 
         public init(pairing: @escaping @Sendable (PairingRequest) -> Void = { _ in }, connected: @escaping @Sendable (String) -> Void = { _ in },
-                    disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in }) {
+                    disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in },
+                    request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }) {
             self.pairing = pairing
             self.connected = connected
             self.disconnected = disconnected
             self.latency = latency
+            self.request = request
         }
     }
 
@@ -207,8 +211,18 @@ public final class RemoteServer: @unchecked Sendable {
             }
         case .latency(let milliseconds):
             if client === current, client.session != nil { events.latency(milliseconds) }
-        case .pairing, .welcome, .rejected:
+        case .wantArt, .command, .select, .launch, .close, .home:
+            if client === current, client.session != nil { events.request(message) }
+        case .pairing, .welcome, .rejected, .library, .art:
             break
+        }
+    }
+
+    /// Sends to the welcomed phone, if one is connected.
+    public func publish(_ message: RemoteMessage) {
+        queue.async { [self] in
+            guard let client = current, client.session != nil else { return }
+            send(message, to: client)
         }
     }
 
