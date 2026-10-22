@@ -438,6 +438,8 @@ final class AppModel: ObservableObject {
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
+        // A bundle made by an older launcher still carries the marks that make macOS verify it.
+        Installer.clearMarks(bundle)
         NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { app, error in
             Task { @MainActor in
                 guard self.starting?.id == game.id else {

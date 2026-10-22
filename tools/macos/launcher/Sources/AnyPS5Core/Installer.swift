@@ -79,6 +79,20 @@ public final class Installer: @unchecked Sendable {
         return root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Games").appendingPathComponent(name + ".app")
     }
 
+    /// Removes the marks macOS leaves on files that came from a download (quarantine) or were
+    /// written by an app that did (provenance) from `url` and everything in it. With them, macOS
+    /// verifies a game's whole bundle before its code first runs, a window that takes minutes
+    /// for a game of several gigabytes.
+    public static func clearMarks(_ url: URL) {
+        let marks = ["com.apple.provenance", "com.apple.quarantine"]
+        func clear(_ path: String) {
+            for mark in marks { removexattr(path, mark, XATTR_NOFOLLOW) }
+        }
+        clear(url.path)
+        guard let enumerator = FileManager.default.enumerator(atPath: url.path) else { return }
+        for case let relative as String in enumerator { clear(url.appendingPathComponent(relative).path) }
+    }
+
     /// The work folders and half-made bundles an interrupted unlock left in the store.
     public static func removeLeftovers(root: URL) {
         let store = root.appendingPathComponent(GameLibrary.storeName)
@@ -214,9 +228,9 @@ public final class Installer: @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date())).write(to: resources.appendingPathComponent("anyps5-install.json"))
 
-        // 5. Nothing in the bundle keeps the download's quarantine flag, then it takes the old one's place.
+        // 5. Nothing in the bundle keeps a download's marks, then it takes the old one's place.
         progress(.finish, 0)
-        try? runTool(URL(fileURLWithPath: "/usr/bin/xattr"), ["-dr", "com.apple.quarantine", partial.path], quiet: true)
+        Installer.clearMarks(partial)
         if fileManager.fileExists(atPath: bundle.path) {
             try Installer.carryOver(from: bundle, to: partial)
             try fileManager.removeItem(at: bundle)
