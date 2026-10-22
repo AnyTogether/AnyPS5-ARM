@@ -1,70 +1,122 @@
-# AnyPS5-ARM
+# AnyPS5-ARM native (arm64)
 
-**Run PS5 games natively on Apple silicon Macs.**
+**English** · [Türkçe](docs/native/tr/README.md)
 
-[Full guide in English and Turkish / Türkçe rehber](docs/user/GUIDE.md)
+**PS5 games on Apple silicon without Rosetta:** AnyPS5's engine with its own x86-64 to arm64 translator.
 
-**Native mode (no Rosetta):** [docs/native](docs/native/README.md) ([Türkçe](docs/native/tr/README.md)), DOOM runs as an arm64 process on this branch.
+This branch holds the native engine alone. The whole project, with the launcher (AnyPS5.app) and the phone app, is on [`main`](https://github.com/utkuhalis/AnyPS5-ARM/tree/main); the engine in its Rosetta mode alone is on [`rosetta`](https://github.com/utkuhalis/AnyPS5-ARM/tree/rosetta).
 
-[**Web converter**](https://boykopovar.github.io/AnyPS5/) - files stay on your device.
+![DOOM E1M1 running as an arm64 process](docs/games/img/doom-native-e1m1.jpg)
+*DOOM (homebrew) in E1M1, 35 FPS, as an arm64 process: no Rosetta anywhere in it.*
 
-![anyps5_collage1](https://github.com/user-attachments/assets/ed2f0b2d-33d3-46d7-ab88-767ca872fc99)
+## What "native" means here
 
-Includes a [relinker](core/relinker) that converts executable to the target system's native format and implementations of [system prx libraries](core/libs/prx) suitable for dynamic linking. No emulation or separate runtime process.
+PS5 games are x86-64 code; Apple silicon runs arm64. Something has to translate.
 
-[**Roadmap**](docs/ROADMAP.md) ([Türkçe](docs/tr/ROADMAP.md)), [**Discord**](https://discord.gg/BHFztBPUe), [Usage](docs/user/USAGE.md), [Build instructions](docs/dev/BUILD.md), [Architecture](docs/dev/ARCHITECTURE.md), [Technical debt of the project](docs/dev/TechnicalDebt.md), [code style conventions](docs/dev/CONVENTIONS.md), [contributing](CONTRIBUTING.md)
-## Games on a Mac
+| | Rosetta mode (`main`, `rosetta`) | Native mode (`native-arm64`) |
+|---|---|---|
+| Game code | stays x86-64; macOS translates it through Rosetta on every launch | translated to arm64 **once**, when the app is built, by AnyPS5's own translator |
+| System libraries (graphics, audio, pad...) | x86-64, also under Rosetta | built for arm64 |
+| The app's binary | `Mach-O 64-bit executable x86_64` | `Mach-O 64-bit executable arm64` |
+| Activity Monitor, "Kind" column | Intel | Apple |
+| Needs Rosetta installed | yes | no |
 
-| Hollow Knight: Silksong | Plants vs. Zombies: Replanted | Dreaming Sarah | AnyPS5 Breakout |
-|---|---|---|---|
-| ![Silksong](docs/games/img/silksong-enemy.jpg) | ![PvZ Replanted](docs/games/img/pvz-ingame.jpg) | ![Dreaming Sarah](docs/games/img/dreaming-sarah.jpg) | ![AnyPS5 Breakout](docs/games/img/breakout.jpg) |
-| in game (first area), work in progress | opening screens at 60 fps, work in progress | 60 fps, playable | 60 fps, test title |
+Graphics go through MoltenVK to Metal in both modes. Rosetta only appears in the native mode's test suite, as a reference to compare the translator's results against; it is never used to play.
 
-**[Game status notebook →](docs/games/README.md)** ([Türkçe](docs/games/tr/README.md)) one page per game with screenshots, the steps behind it and technical details: DOOM (homebrew) plays too, Stray plays its first chapter, at a low frame rate (~12 FPS) for now, and Minecraft gets into a world.
-
-<sub>MacBook Pro M3 Pro, macOS 26.6.2. The Unity titles still need the manual module steps described on their pages; AnyPS5.app does not do them yet.</sub>
+The point is to drop Rosetta's cost and limits. On a light game like DOOM there is nothing to measure yet (it holds its 35 FPS target either way); the gain should show on heavy titles such as Stray.
 
 ## Status
 
-[![libraries](https://boykopovar.github.io/AnyPS5/badge-libraries.svg)](https://boykopovar.github.io/AnyPS5/progress.html) [![shaders](https://boykopovar.github.io/AnyPS5/badge-shaders.svg)](https://boykopovar.github.io/AnyPS5/progress.html)
+| Game | Native status |
+|---|---|
+| **DOOM (homebrew)** `PPSA99666` | 🟢 Launcher (60 FPS), attract demo and E1M1 at 35 FPS |
+| Everything else | 🔴 Not tried yet. Commercial titles need the open items below first. |
 
-[![progress map](https://boykopovar.github.io/AnyPS5/progress.svg)](https://boykopovar.github.io/AnyPS5/progress.html)
+The Rosetta mode's status per game is in the [game notebook](docs/games/README.md).
 
-[Progress history](https://boykopovar.github.io/AnyPS5/history.html)
+## Requirements
 
-<sub>* System libraries: percentage of the functions known to the project so far (declared in [core/libs/prx](core/libs/prx)), not of every PS5 system function. The total grows as more functions are declared.</sub>
+- An Apple silicon Mac (M1 or later), macOS 13 or newer
+- Xcode command line tools, CMake, Ninja
+- Homebrew `llvm` and `capstone` (the translator links them): `brew install llvm capstone cmake ninja`
+- The [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac) for macOS (for `libvulkan` and MoltenVK in the bundle)
+- The game: a decrypted dump (fake-signed SELFs are fine)
 
-Unsupported or unexpected states strictly throw `std::runtime_error`. `what()` is printed to stderr and the process terminates.
+## Build
 
-The [shader recompiler](core/shader/recompiler/Recompiler.cpp) successfully produces SPIR-V (validated via [Spirv-Tools](3rdparty/SPIRV-Tools) when built with `ANYPS5_ENABLE_SPIRV_TOOLS`).
+From the repository root, on the `native-arm64` branch with submodules checked out:
 
-## Compatibility
+```sh
+# 1. The system libraries, for arm64
+cmake -S . -B build-arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+ninja -C build-arm64 all libs
 
-[Tested games and their frame rates](docs/user/COMPATIBILITY.md)
+# 2. The translator (needs Homebrew LLVM and Capstone)
+cmake -S tools/translator -B build-translator -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm
+ninja -C build-translator
+```
 
-Per-game progress (stage reached, open blockers, libraries and GPU coverage) is tracked on the [blocker map](https://alxcbtw.github.io/anyps5-roadmap/), a community project built from public GitHub data ([source](https://github.com/AlxcBTW/anyps5-roadmap)). Test reports go in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
+## Make an app for a game
 
-## The AnyPS5 app
+```sh
+python3 tools/translator/package_native_app.py \
+    --eboot <game>/eboot.bin --game <game> \
+    --libs build-arm64/core/libs/libs \
+    --vulkan ~/VulkanSDK/<version>/macOS \
+    --translator build-translator \
+    "DOOM (native).app"
+```
 
-**AnyPS5.app** turns a game folder into a Mac app in four clicks: no Terminal, no build. [⬇ Download](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+`--game` is the game folder (the one with `sce_sys`), `--eboot` its executable. A decrypted SELF is unwrapped on the way; a plain ELF works too. The tool translates the eboot, links it with the arm64 libraries and writes a normal `.app`.
 
-## About
+Imports that no arm64 library provides are listed at the end; each one is linked to a stub that names it and stops the game if it is ever called.
 
-AnyPS5-ARM is the macOS port of [AnyPS5](https://github.com/boykopovar/AnyPS5). AnyPS5 is not an emulator: its relinker turns a PS5 executable into a native program, and its system libraries are reimplemented as ordinary shared libraries the program links against. On Apple silicon:
+## Run
 
-- **CPU:** the game's x86-64 code runs under **Rosetta 2**. A [native arm64 mode](https://github.com/utkuhalis/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md) without Rosetta is in development on the `native-arm64` branch.
-- **Executable:** the relinker writes a **Mach-O** executable.
-- **Graphics:** the PS5 graphics driver runs on **Vulkan through MoltenVK**, which runs on Metal.
-- **Distribution:** the result is a normal **`.app`** you open from Finder.
+Double-click the app, or start it from a terminal:
 
-[Building from source](docs/user/GUIDE.md#building-from-source) · [macOS port changes](docs/dev/MACOS_PORT.md) · [Input mapping](docs/user/INPUT_MAPPING.md) · [Technical debt](docs/dev/TechnicalDebt.md)
+```sh
+open "DOOM (native).app"
+```
 
-Built on [boykopovar/AnyPS5](https://github.com/boykopovar/AnyPS5) and the community macOS port [mugurc/AnyPS5 `macos-port`](https://github.com/mugurc/AnyPS5/tree/macos-port).
+The output goes to `~/Library/Logs/AnyPS5/<title id>.log`, the shader cache to `~/Library/Caches/org.anyps5.<title id>`.
 
-## Disclaimer
+To confirm there is no Rosetta: `file "DOOM (native).app/Contents/MacOS/eboot"` prints `arm64`, and Activity Monitor shows the process as Apple.
 
-This project is intended for interoperability, research, preservation and compatibility purposes. It does not include, distribute or require copyrighted software, firmware, cryptographic keys or proprietary libraries. Users are responsible for obtaining and using any binaries with this project in accordance with applicable laws and their license terms.
+### Useful switches
 
-## License
+| Variable | Effect |
+|---|---|
+| `APS5_NATIVE_TRACE=1` | logs every host call into game code (thread entries, callbacks) |
+| `APS5_PAD_SCRIPT=6:cross,9:cross,...` | presses pad buttons at given seconds, for scripted runs |
+| `APS5_PRESENT_OCCLUDED=1` | keeps presenting when the window is covered |
 
-GNU General Public License version 2 only.
+The Rosetta mode's variables mostly apply here too ([ENVIRONMENT.md](docs/dev/ENVIRONMENT.md)).
+
+## Tests
+
+```sh
+python3 tools/translator/tests/run_native_fixtures.py build-translator build-arm64/core/libs/libs
+```
+
+- `import`: a hand-made PS5 ELF that calls `puts` and `exit` through its GOT.
+- `lifter-smoke`: integer arithmetic, flags, shifts, division, recursion, indirect calls.
+- `vector-smoke`: SSE/AVX2, FMA and BMI over random inputs, NaNs and out-of-range values, compared with the same C file run as x86-64 under Rosetta. The reference is built without optimization, because Rosetta itself gets some optimized AVX sequences wrong.
+
+## How it works, briefly
+
+1. **Translation:** `aps5-translator` decodes the eboot's x86-64 code with Capstone, lifts each function to LLVM IR over the x86 register state, and LLVM optimizes it and emits arm64. Functions are found from the entry point, symbols, relocations, call targets, code addresses taken with `lea`, and switch jump tables.
+2. **Memory:** guest memory is the host's, so loads and stores stay plain loads and stores at the same addresses.
+3. **Calls into the libraries:** a game call to a system function goes straight to the arm64 library, with the arguments moved from x86 registers to arm64 ones. Variadic functions (`printf`, `sscanf`...) read the game's arguments the x86 way.
+4. **Calls back into the game:** thread entries and callbacks are game addresses that the host calls directly. The game's image is not executable, so the call faults; the runtime catches the fault and runs the translated function instead.
+5. **Per thread:** each thread gets its own x86 register state, stack and TLS block, laid out the way the PS5 expects.
+
+Design details, the hard parts and the plan: [NATIVE_ARM64.md](docs/dev/NATIVE_ARM64.md).
+
+## Known limits
+
+- Game-bundled prx modules (`sce_module`) are not translated yet. DOOM's bundled `libc.prx` is only stubs, so it does not matter there; most commercial titles need it.
+- Not ported yet: `setjmp`/`longjmp`, fibers, guest C++ exception unwinding through translated code, `getcontext`/`setcontext`, 80-bit `long double`. They stop the game with a clear message when reached.
+- x86 memory ordering is stronger than arm64's. The translator does not add barriers yet, so multithreaded code that relies on x86 ordering can misbehave.
+- New NaNs are positive on arm64 and negative on x86; code that looks at a NaN's sign can differ.
+- Audio has not been checked yet.
