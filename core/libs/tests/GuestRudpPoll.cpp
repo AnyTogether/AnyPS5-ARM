@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -18,9 +19,9 @@ int APS5_VABI sceRudpInit_nid_postfix(void*, int);
 int APS5_VABI sceRudpCreateContext(GuestRudpEventHandler, void*, int*);
 int APS5_VABI sceRudpTerminate(int);
 int APS5_VABI sceRudpEnd();
-int APS5_VABI sceRudpPollCreate(std::uint32_t);
+int APS5_VABI sceRudpPollCreate(std::size_t);
 int APS5_VABI sceRudpPollControl(int, int, int, std::uint16_t);
-int APS5_VABI sceRudpPollWait(int, GuestRudpPollEvent*, std::uint32_t, std::uint64_t);
+int APS5_VABI sceRudpPollWait(int, GuestRudpPollEvent*, std::size_t, std::uint64_t);
 int APS5_VABI sceRudpPollDestroy(int);
 }
 

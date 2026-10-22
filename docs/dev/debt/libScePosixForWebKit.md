@@ -3,6 +3,7 @@
 ### Unknown function info
 
 - [gethostbyname](../../../core/libs/prx/libScePosixForWebKit/Resolver.cpp) (libScePosixForWebKit) - numeric IPv4 forms, trailing whitespace and 64-bit accumulation follow FreeBSD 11.4 [inet_aton](https://github.com/freebsd/freebsd-src/blob/releng/11.4/lib/libc/inet/inet_addr.c); clearing the resolver error on numeric success follows [fakeaddr](https://github.com/freebsd/freebsd-src/blob/releng/11.4/lib/libc/net/gethostnamadr.c). Exact PS5 behavior is unverified; hostname lookup still uses the host resolver
+- [__wrap_access, __wrap_clock_gettime, __wrap_fchown, __wrap_getcwd, __wrap_getenv, __wrap_link, __wrap_lstat, __wrap_mmap, __wrap_readlink, __wrap_statvfs, __wrap_symlink, clock_gettime_np, getenv_np, gethostbyname_r (`scePosixForWebKit_gethostbyname_r`), mmap_np, msetname, pthread_setschedparam_np, setenv_np, sysinfo (`scePosixForWebKit_sysinfo`)](../../../core/libs/prx/libScePosixForWebKit/Export.cpp) (libScePosixForWebKit) - names/NIDs appear in the [PS5 3.20 export inventory](https://github.com/DNNDHH/PS5-3.20_Libs/blob/b2a77c09cd71c01f34c790cfbe98c751a13262ad/libScePosixForWebKit.c) and [verified NID name database](https://github.com/zecoxao/sce_symbols/blob/2883963a0a514ba6e77407a08ef4730a65e88254/aerolib.csv); credible prototypes are unknown. These exports use renamed helpers; defining `gethostbyname_r` would interpose on the host function this library calls itself. All are parameterless import stubs, not ABI claims; callers must not use them until signatures are verified.
 
 ### Functional
 

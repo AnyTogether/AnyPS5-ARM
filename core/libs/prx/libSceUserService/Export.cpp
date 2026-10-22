@@ -26,7 +26,7 @@ int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, int32
  return ReportAccessibilitySetting(user_id, chat_transcription, 0);
 }
 
-int APS5_VABI sceUserServiceGetAccessibilityKeyremapEnable() {
+int APS5_VABI sceUserServiceGetAccessibilityKeyremapEnable(std::int32_t userId, std::int32_t* enabled) {
  NotImplemented_nid_no_patch(__func__);
  return 0;
 }
@@ -43,7 +43,7 @@ int APS5_VABI sceUserServiceGetAccessibilityVibration(int user_id, int32_t* vibr
  return ReportAccessibilitySetting(user_id, vibration, 1);
 }
 
-int APS5_VABI sceUserServiceGetAccessibilityZoom() {
+int APS5_VABI sceUserServiceGetAccessibilityZoom(std::int32_t userId, std::int32_t* zoom) {
  NotImplemented_nid_no_patch(__func__);
  return 0;
 }
@@ -160,18 +160,16 @@ static int MarkInitialized() {
  return USER_SERVICE_OK;
 }
 
-int APS5_VABI sceUserServiceInitialize(const void* params) {
+int APS5_VABI sceUserServiceInitialize(const UserServiceInitParam* params) {
  if (params != nullptr) {
-  int priority = 0;
-  std::memcpy(&priority, params, sizeof(priority));
-  if (!ValidThreadPriority(priority)) {
+  if (!ValidThreadPriority(params->priority)) {
    return USER_SERVICE_ERROR_INVALID_ARGUMENT;
   }
  }
  return MarkInitialized();
 }
 
-int APS5_VABI sceUserServiceInitialize2(int priority) {
+int APS5_VABI sceUserServiceInitialize2(std::int32_t priority, KernelCpumask affinityMask) {
  if (!ValidThreadPriority(priority)) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }

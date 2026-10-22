@@ -312,7 +312,11 @@ int APS5_VABI sceSystemServiceParamGetInt(int paramId, int* value) {
   case SYSTEM_SERVICE_PARAM_ID_SUMMERTIME: *value = HostTimeZone().summer ? 1 : 0; break;
   case SYSTEM_SERVICE_PARAM_ID_GAME_PARENTAL_LEVEL: *value = SYSTEM_SERVICE_PARAM_GAME_PARENTAL_OFF; break;
   case SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN: *value = SYSTEM_SERVICE_PARAM_ENTER_BUTTON_CROSS; break;
-  default: *value = 0; break;
+  default:
+   if ((paramId >= 100 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
+    NotImplemented_nid_no_patch("sceSystemServiceParamGetInt: registry-backed parameter");
+   }
+   return SYSTEM_SERVICE_ERROR_PARAMETER;
  }
  return SYSTEM_SERVICE_OK;
 }
@@ -324,6 +328,7 @@ int APS5_VABI sceSystemServiceParamGetString(int paramId, char* buf, size_t bufS
  constexpr char SystemName[] = "PS5";
  std::memset(buf, 0, bufSize);
  std::memcpy(buf, SystemName, sizeof(SystemName));
+ buf[SYSTEM_SERVICE_MAX_SYSTEM_NAME_LENGTH - 1] = '\0';
  return SYSTEM_SERVICE_OK;
 }
 
@@ -367,11 +372,13 @@ int APS5_VABI sceSystemServiceLaunchPlayerDialog(const void* param) {
  return SYSTEM_SERVICE_OK;
 }
 
-// System overlays (browser, tournaments) do not exist on the host.
-int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri, void* param) {
- (void)uri;
- (void)param;
- return SCE_KERNEL_ERROR_EOPNOTSUPP;
+int APS5_VABI sceSystemServiceLaunchWebBrowser(const char* uri) {
+    if (!uri) return static_cast<int>(0x80a10003);
+    std::size_t length = 0;
+    while (length < 6016 && uri[length] != 0) ++length;
+    if (length > 6015) return static_cast<int>(0x80a10007);
+    if (std::strncmp(uri, "http:", 5) != 0 && std::strncmp(uri, "https:", 6) != 0 && std::strncmp(uri, "psno:", 5) != 0) return static_cast<int>(0x80a10008);
+    return SCE_KERNEL_ERROR_EOPNOTSUPP;
 }
 
 int APS5_VABI sceSystemServiceLaunchApp(const char* titleId, const char* const* arguments, const void* param) {
@@ -390,7 +397,20 @@ int APS5_VABI sceSystemServiceOpenChallengeActivity(void) {
  return SYSTEM_SERVICE_OK;
 }
 
-int APS5_VABI sceSystemServiceOpenTournamentOccurrence(void) {
+struct SystemServiceTournamentOccurrenceParam {
+    std::uint64_t size;
+    const char* occurrenceId;
+    std::int32_t userId;
+    std::uint32_t padding;
+    const char* context;
+};
+
+static_assert(sizeof(SystemServiceTournamentOccurrenceParam) == 32);
+static_assert(offsetof(SystemServiceTournamentOccurrenceParam, occurrenceId) == 8);
+static_assert(offsetof(SystemServiceTournamentOccurrenceParam, userId) == 16);
+static_assert(offsetof(SystemServiceTournamentOccurrenceParam, context) == 24);
+
+int APS5_VABI sceSystemServiceOpenTournamentOccurrence(const SystemServiceTournamentOccurrenceParam* param) {
  return SYSTEM_SERVICE_OK;
 }
 
@@ -830,6 +850,14 @@ int APS5_VABI sceCoredumpSequenceHandlerGetCoredumpStatusByAppId(void) {
 
 int APS5_VABI sceCoredumpSequenceHandlerCancelCoredump(void) {
     NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI sceSystemServiceIsBgmPlaying(void) {
+    return 0;
+}
+
+int APS5_VABI sceShellCoreUtilIsBgmPlaying(void) {
     return 0;
 }
 

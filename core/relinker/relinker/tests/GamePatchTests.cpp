@@ -385,7 +385,20 @@ void verify() {
     rejects([&] { VerifyPatches(ParsePatchFile(header("[[patch]]\ntarget = \"main.elf\"\nva = 0x1000\nexpected = \"00\"\nvalue = \"01\"\n")), outputs, {}, true); }, "no main_target");
     auto exec = twoSegmentFixture();
     Io::WriteU16(exec, 16, 2);
-    rejects([&] { VerifyPatches(file, {{"main.elf", exec}}, {}, true); }, "verify the input instead");
+    rejects([&] { VerifyPatches(file, {{"main.elf", exec}}, {}, true); }, "has no linux_base");
+    const auto based = ParsePatchFile(header("main_target = \"main.elf\"\nlinux_base = 0x400000\n[[patch]]\nname = \"one\"\ntarget = \"main.elf\"\nva = 0x1000\nexpected = \"0001\"\nvalue = \"0908\"\n"
+                                             "[[patch]]\ntarget = \"main.elf\"\nva = 0x1100\nexpected = \"ff\"\nvalue = \"01\"\n"));
+    require(based.LinuxBase == 0x400000, "linux_base was not read");
+    auto rebased = patchedBytes;
+    Io::WriteU16(rebased, 16, 2);
+    for (const std::size_t field : {64 + 16, 64 + 24, 120 + 16, 120 + 24}) Io::WriteU64(rebased, field, Io::ReadU64(rebased, field) + 0x400000);
+    output = VerifyPatches(based, {{"main.elf", rebased}}, {}, true);
+    require(output.size() == 2 && output[0].Status == VerifyStatus::Applied && output[1].Status == VerifyStatus::Applied, "fixed-base output applied");
+    require(output[0].VirtualAddress == 0x1000 && output[0].Offset == 0x1000 && output[1].Offset == 0x2000, "fixed-base output reported the rebased address");
+    output = VerifyPatches(based, {{"main.elf", exec}}, {}, true);
+    require(output[0].Status == VerifyStatus::Mismatch && output[0].Detail.find("PT_LOAD") != std::string::npos, "linux_base was not applied");
+    rejects([&] { VerifyPatches(based, outputs, {}, true); }, "has linux_base = 0x400000");
+    rejects([&] { VerifyPatches(ParsePatchFile(header("main_target = \"main.elf\"\nlinux_base = 0x400000\n[[patch]]\ntarget = \"main.elf\"\nva = 0xffffffffffffff00\nexpected = \"00\"\nvalue = \"01\"\n")), {{"main.elf", rebased}}, {}, true); }, "lies outside the address space at linux_base");
     rejects([&] { VerifyPatches(file, {{"main.elf", {'M', 'Z', 0x90, 0}}}, {}, true); }, "verify the input instead");
     rejects([&] { VerifyPatches(file, {{"main.elf", {0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1}}}, {}, true); }, "verify the input instead");
     rejects([&] { VerifyPatches(file, {{"main.elf", {}}}, {}, true); }, "verify the input instead");
@@ -424,10 +437,15 @@ void manifest() {
     require(parsed.Entries[1].Name.empty() && parsed.Entries[1].Target == "sce_module/libc.prx" && parsed.Entries[1].Description.empty(), "second entry");
     require(text.find("name = \"alpha\"") != std::string::npos && text.find("main_target = \"main.elf\"") != std::string::npos, "manifest text");
     require(WriteManifest(AggregateManifest({{plain}, {second}}), "main.elf", "") == text, "manifest is not deterministic");
+    require(text.find("linux_base") == std::string::npos && !parsed.LinuxBase, "a manifest without a base wrote linux_base");
+    const auto based = WriteManifest({plain}, "main.elf", "", 0x400000);
+    require(based.find("main_target = \"main.elf\"\nlinux_base = 0x400000\n") != std::string::npos && ParsePatchFile(based).LinuxBase == 0x400000, "linux_base did not round-trip");
+    rejectsText(header("linux_base = \"0x400000\"\n"), 2, "linux_base must be a non-negative integer");
+    rejectsText(header("linux_base = -1\n"), 2, "linux_base must be a non-negative integer");
 }
 
 void reservedNames() {
-    for (const char* reserved : {"format", "relinker_version", "relinker_commit", "config", "config_sha256", "main_target", "settings", "settings_sha256"})
+    for (const char* reserved : {"format", "relinker_version", "relinker_commit", "config", "config_sha256", "main_target", "linux_base", "settings", "settings_sha256"})
         rejects([&] { ParsePatchFile(namedEntry(reserved)); }, "line 3: name is reserved");
     ParsePatchFile(header("settings = \"a\"\nsettings_sha256 = \"b\"\n"));
 }

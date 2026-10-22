@@ -1,6 +1,7 @@
 #include "SceTypes.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -45,6 +46,28 @@ bool Rejected(const char* value) {
 }
 
 int main() {
+    for (int paramId = -1; paramId <= 1001; ++paramId) {
+        Require(sceSystemServiceParamGetInt(paramId, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
+        if ((paramId >= 1 && paramId <= 5) || paramId == 7 || paramId == 400 || paramId == 1000) continue;
+        int value = -12345;
+        if ((paramId >= 100 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
+            bool threw = false;
+            try {
+                static_cast<void>(sceSystemServiceParamGetInt(paramId, &value));
+            } catch (const std::runtime_error&) {
+                threw = true;
+            }
+            Require(threw);
+        } else {
+            Require(sceSystemServiceParamGetInt(paramId, &value) == SYSTEM_SERVICE_ERROR_PARAMETER);
+        }
+        Require(value == -12345);
+    }
+    for (int paramId : {std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {
+        int value = -12345;
+        Require(sceSystemServiceParamGetInt(paramId, &value) == SYSTEM_SERVICE_ERROR_PARAMETER);
+        Require(value == -12345);
+    }
     SetLanguage(nullptr);
     Require(Language() == SYSTEM_SERVICE_PARAM_LANG_ENGLISH_US);
     SetLanguage("");

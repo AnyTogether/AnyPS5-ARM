@@ -70,8 +70,8 @@ void fillStorage() {
 
 void testUnregistered() {
     std::array<void*, 3> labels{storage.get(), storage.get(), storage.get()};
-    expectFailure([&] { sceAgcGetSemaphoreLabel(0, &labels[1]); });
-    expectFailure([] { sceAgcGetSemaphoreLabel(0, nullptr); });
+    check(sceAgcGetSemaphoreLabel(0, &labels[1]) == static_cast<int>(0x8a6c0049u), "unregistered label error mismatch");
+    check(sceAgcGetSemaphoreLabel(0, nullptr) == static_cast<int>(0x8a6c0049u), "unregistered null label error mismatch");
     check(labels[0] == storage.get() && labels[1] == storage.get() && labels[2] == storage.get(), "a rejected semaphore label changed the output");
 }
 
@@ -80,10 +80,10 @@ void testRegistrationRejections() {
     expectFailure([] { sceAgcSetAmmSemaphoreMemory(nullptr, memoryBytes); });
     expectFailure([] { sceAgcSetAmmSemaphoreMemory(nullptr, 0); });
     expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory(), 0); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory() + 1, memoryBytes); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory() + labelBytes, blockBytes); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory(), blockBytes - 1u); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory(), blockBytes + labelBytes); });
+    check(sceAgcSetAmmSemaphoreMemory(memory() + 1, memoryBytes) == static_cast<int>(0x8a6c0002u), "unaligned semaphore memory error mismatch");
+    check(sceAgcSetAmmSemaphoreMemory(memory() + labelBytes, blockBytes) == static_cast<int>(0x8a6c0002u), "unaligned semaphore memory error mismatch");
+    check(sceAgcSetAmmSemaphoreMemory(memory(), blockBytes - 1u) == static_cast<int>(0x8a6c0002u), "unaligned semaphore memory error mismatch");
+    check(sceAgcSetAmmSemaphoreMemory(memory(), blockBytes + labelBytes) == static_cast<int>(0x8a6c0002u), "unaligned semaphore memory error mismatch");
     expectFailure([] {
         const auto top = std::numeric_limits<std::uintptr_t>::max() & ~static_cast<std::uintptr_t>(blockBytes - 1u);
         sceAgcSetAmmSemaphoreMemory(reinterpret_cast<void*>(top), memoryBytes);
@@ -92,18 +92,8 @@ void testRegistrationRejections() {
     testUnregistered();
 }
 
-void testUnsettledClearing() {
-    for (const std::uint64_t offset : {5u * labelBytes + counterBytes, memoryBytes - 1u}) {
-        memory()[offset] = 0x77u;
-        const auto before = snapshot();
-        expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory(), memoryBytes); });
-        checkUnchanged(before, "a registration with unsettled clearing changed memory");
-        testUnregistered();
-        memory()[offset] = 0;
-    }
-}
-
 void testRegistration() {
+    std::fill(memory(), memory() + memoryBytes, std::uint8_t{0x77});
     const auto before = snapshot();
     check(sceAgcSetAmmSemaphoreMemory(memory(), memoryBytes) == 0, "registering the AMM semaphore memory failed");
     check(std::all_of(memory(), memory() + memoryBytes, [](std::uint8_t byte) { return byte == 0; }), "registration did not clear the semaphore counters");
@@ -123,7 +113,7 @@ void testLabels() {
 void testLabelRejections() {
     for (const std::uint32_t index : {labelCount, labelCount + 1u, std::numeric_limits<std::uint32_t>::max()}) {
         void* label = storage.get();
-        expectFailure([&] { sceAgcGetSemaphoreLabel(index, &label); });
+        check(sceAgcGetSemaphoreLabel(index, &label) == static_cast<int>(0x8a6c000bu), "out-of-range label error mismatch");
         check(label == storage.get(), "a rejected semaphore label changed the output");
     }
     expectFailure([] { sceAgcGetSemaphoreLabel(0, nullptr); });
@@ -132,9 +122,9 @@ void testLabelRejections() {
 void testRepeatedRegistration() {
     std::fill(memory(), memory() + memoryBytes, std::uint8_t{0x3c});
     const auto before = snapshot();
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(memory(), memoryBytes); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(storage.get(), blockBytes); });
-    expectFailure([] { sceAgcSetAmmSemaphoreMemory(nullptr, 0); });
+    check(sceAgcSetAmmSemaphoreMemory(memory(), memoryBytes) == static_cast<int>(0x8a6c0048u), "repeated registration error mismatch");
+    check(sceAgcSetAmmSemaphoreMemory(storage.get(), blockBytes) == static_cast<int>(0x8a6c0048u), "repeated registration error mismatch");
+    check(sceAgcSetAmmSemaphoreMemory(nullptr, 0) == static_cast<int>(0x8a6c0048u), "repeated registration error mismatch");
     checkUnchanged(before, "a repeated registration changed memory");
     void* label = nullptr;
     check(sceAgcGetSemaphoreLabel(labelCount - 1u, &label) == 0 && label == memory() + memoryBytes - labelBytes, "a repeated registration replaced the semaphore memory");
@@ -198,7 +188,6 @@ int main() {
         fillStorage();
         testUnregistered();
         testRegistrationRejections();
-        testUnsettledClearing();
         testRegistration();
         testLabels();
         testMemSemaphore();

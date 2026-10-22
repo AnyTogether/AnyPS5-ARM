@@ -7,6 +7,7 @@
 #include <string_view>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libSceHttp/src/HttpErrors.hpp"
 
 namespace {
@@ -181,31 +182,42 @@ int copyOut(const std::string& value, char* out, size_t* require, size_t prepare
 
 extern "C" {
 
-int APS5_VABI sceHttpUriBuild(char* out, size_t* require, size_t prepare, const SceHttpUriElement* src_element, uint32_t option) {
-    if (!src_element) return ERROR_INVALID_URL;
-    if (!out && !require) return ERROR_INVALID_VALUE;
+int APS5_VABI sceHttpUriBuild(char* out, size_t* requiredSize, size_t capacity, const SceHttpUriElement* element, uint32_t option) {
+    if (!element) return ERROR_INVALID_URL;
+    if (!out && !requiredSize) return ERROR_INVALID_VALUE;
 
-    auto field = [](const char* value) { return value ? std::string_view(value) : std::string_view(); };
-    const std::string_view scheme = field(src_element->scheme);
-    const std::string_view username = option & URI_BUILD_WITH_USERNAME ? field(src_element->username) : std::string_view();
-    const std::string_view password = option & URI_BUILD_WITH_PASSWORD ? field(src_element->password) : std::string_view();
-    const std::string_view hostname = option & URI_BUILD_WITH_HOSTNAME ? field(src_element->hostname) : std::string_view();
+    const auto field = [](const char* value, size_t limit) {
+        size_t length = 0;
+        if (value) while (length < limit && value[length] != '\0') ++length;
+        return value ? std::string_view(value, length) : std::string_view();
+    };
+    const auto scheme = option & (URI_BUILD_WITH_SCHEME | URI_BUILD_WITH_PORT) ? field(element->scheme, 32) : std::string_view();
+    const auto username = option & URI_BUILD_WITH_USERNAME ? field(element->username, 256) : std::string_view();
+    const auto password = option & URI_BUILD_WITH_PASSWORD ? field(element->password, 256) : std::string_view();
+    const auto hostname = option & URI_BUILD_WITH_HOSTNAME ? field(element->hostname, 255) : std::string_view();
 
     std::string uri;
     if (option & URI_BUILD_WITH_SCHEME && !scheme.empty()) uri.append(scheme).push_back(':');
-    if (!src_element->opaque) uri.append("//");
+    if (element->opaque != 1) uri.append("//");
     uri.append(username);
     if (!password.empty()) uri.append(":").append(password);
     if (!username.empty() || !password.empty()) uri.push_back('@');
-    if (hostname.find(':') != std::string_view::npos) uri.append("[").append(hostname).append("]");
-    else uri.append(hostname);
-    if (option & URI_BUILD_WITH_PORT && src_element->port != 0 && src_element->port != defaultPort(scheme)) {
-        uri.append(":").append(std::to_string(src_element->port));
+    uri.append(hostname);
+    if (option & URI_BUILD_WITH_PORT && element->port != 0) {
+        std::uint16_t port = 0;
+        if (scheme.size() >= 5 && equalsIgnoreCase(scheme.substr(0, 5), "https")) port = 443;
+        else if ((scheme.size() >= 4 && equalsIgnoreCase(scheme.substr(0, 4), "http")) || (scheme.size() >= 3 && equalsIgnoreCase(scheme.substr(0, 3), "ttp"))) port = 80;
+        if (element->port != port) uri.append(":").append(std::to_string(element->port));
     }
-    if (option & URI_BUILD_WITH_PATH) uri.append(field(src_element->path));
-    if (option & URI_BUILD_WITH_QUERY) uri.append(field(src_element->query));
-    if (option & URI_BUILD_WITH_FRAGMENT) uri.append(field(src_element->fragment));
-    return copyOut(uri, out, require, prepare);
+    if (option & URI_BUILD_WITH_PATH) uri.append(field(element->path, URI_MAX_LENGTH));
+    if (option & URI_BUILD_WITH_QUERY) uri.append(field(element->query, URI_MAX_LENGTH));
+    if (option & URI_BUILD_WITH_FRAGMENT) uri.append(field(element->fragment, URI_MAX_LENGTH));
+    const size_t size = uri.size() + 1 + ((option & URI_BUILD_WITH_SCHEME) && element->scheme && scheme.empty());
+    if (requiredSize) *requiredSize = size;
+    if (!out) return 0;
+    if (capacity < size) return ERROR_OUT_OF_MEMORY;
+    std::memcpy(out, uri.c_str(), uri.size() + 1);
+    return 0;
 }
 
 int APS5_VABI sceHttpUriEscape(char* out, size_t* require, size_t prepare, const char* in) {
@@ -228,34 +240,56 @@ int APS5_VABI sceHttpUriEscape(char* out, size_t* require, size_t prepare, const
     return copyOut(escaped, out, require, prepare);
 }
 
-int APS5_VABI sceHttpUriUnescape(char* out, size_t* require, size_t prepare, const char* in) {
-    if (!in || (!out && !require)) return ERROR_INVALID_VALUE;
+int APS5_VABI sceHttpUriUnescape(char* out, size_t* requiredSize, size_t capacity, const char* input) {
+    if (!input || (!out && !requiredSize)) return ERROR_INVALID_VALUE;
 
-    const auto hexDigit = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        return -1;
+    const std::string_view source(input);
+    const auto decode = [](const char* digits, unsigned int& value) {
+        const auto result = std::from_chars(digits, digits + 2, value, 16);
+        return result.ec == std::errc{} && result.ptr == digits + 2;
     };
-    const std::string_view input(in);
-    std::string decoded;
-    for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] != '%') {
-            decoded.push_back(input[i]);
-            continue;
+    for (size_t index = 0; index < source.size(); ++index) {
+        if (source[index] != '%') continue;
+        unsigned int value = 0;
+        if (source.size() - index < 3 || !decode(source.data() + index + 1, value)) return ERROR_INVALID_URL;
+        index += 2;
+    }
+
+    if (!source.empty()) {
+        std::uint32_t sdkVersion = 0;
+        const auto* parameters = static_cast<const std::byte*>(ApplicationProcessParameters_nid_no_patch());
+        std::memcpy(&sdkVersion, parameters + 0x10, sizeof(sdkVersion));
+        if (sdkVersion < 0x1000000) {
+            for (size_t index = 0; index < source.size(); ++index) {
+                const char value = source[index];
+                if (value == '%') {
+                    index += 2;
+                    continue;
+                }
+                if (!isAsciiAlpha(value) && !isAsciiDigit(value) && value != '*' && value != '-' && value != '.' && value != '_' && value != '+') return ERROR_INVALID_URL;
+            }
         }
-        if (input.size() - i < 3) return ERROR_INVALID_URL;
-        const int high = hexDigit(input[i + 1]);
-        const int low = hexDigit(input[i + 2]);
-        if (high < 0 || low < 0) return ERROR_INVALID_URL;
-        decoded.push_back(static_cast<char>(high * 16 + low));
-        i += 2;
     }
-    if (out && prepare < decoded.size() + 1) {
-        std::memcpy(out, decoded.data(), std::min(prepare, decoded.size()));
-        return ERROR_OUT_OF_MEMORY;
+
+    size_t written = 0;
+    for (size_t index = 0; index < source.size(); ++index) {
+        if (out && written >= capacity) return ERROR_OUT_OF_MEMORY;
+        char value = source[index];
+        if (value == '%') {
+            unsigned int decoded = 0;
+            decode(source.data() + index + 1, decoded);
+            value = static_cast<char>(decoded);
+            index += 2;
+        }
+        if (out) out[written] = value;
+        ++written;
     }
-    return copyOut(decoded, out, require, prepare);
+    if (out) {
+        if (written >= capacity) return ERROR_OUT_OF_MEMORY;
+        out[written] = '\0';
+    }
+    if (requiredSize) *requiredSize = written + 1;
+    return 0;
 }
 
 int APS5_VABI sceHttpUriMerge(char* merged_url, const char* url, const char* relative_uri, size_t* require, size_t prepare, uint32_t option) {

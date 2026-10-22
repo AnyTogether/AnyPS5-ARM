@@ -34,6 +34,27 @@ int APS5_VABI _Thrd_detach_nid_postfix(void* thread);
 void RegisterPthreadCreate_nid_no_patch(int (APS5_VABI* fn)(void**, const void*, void* (APS5_VABI*)(void*), void*));
 void RegisterPthreadJoin_nid_no_patch(int (APS5_VABI* fn)(void*, void**));
 void RegisterPthreadDetach_nid_no_patch(int (APS5_VABI* fn)(void*));
+
+struct ThreadForwards {
+    int (APS5_VABI* once)(std::int32_t*, void (APS5_VABI*)(void));
+    int (APS5_VABI* keyCreate)(int*, void (APS5_VABI*)(void*));
+    int (APS5_VABI* keyDelete)(int);
+    void* (APS5_VABI* getSpecific)(int);
+    int (APS5_VABI* setSpecific)(int, void*);
+    int (APS5_VABI* equal)(void*, void*);
+    void* (APS5_VABI* self)();
+    void (APS5_VABI* exit)(void*);
+};
+void RegisterThreadForwards_nid_no_patch(const ThreadForwards* forwards);
+void APS5_VABI _Call_once_nid_postfix(std::int32_t* flag, void (APS5_VABI* function)(void));
+int APS5_VABI _Tss_create_nid_postfix(int* key, void (APS5_VABI* destructor)(void*));
+int APS5_VABI _Tss_delete_nid_postfix(int key);
+void* APS5_VABI _Tss_get_nid_postfix(int key);
+int APS5_VABI _Tss_set_nid_postfix(int key, void* value);
+int APS5_VABI _Thrd_equal_nid_postfix(void* first, void* second);
+void* APS5_VABI _Thrd_current_nid_postfix(void);
+int APS5_VABI _Mtx_current_owns_nid_postfix(void** handle);
+void* APS5_VABI scePthreadSelf();
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -299,7 +320,63 @@ static void PadDetach() {
     RegisterPthreadDetach_nid_no_patch(nullptr);
 }
 
+static void KernelKeys() {
+    Require(_Thrd_current_nid_postfix() == scePthreadSelf());
+    int key = -1;
+    Require(_Tss_create_nid_postfix(&key, nullptr) == success && key >= 0);
+    int value = 0;
+    Require(_Tss_get_nid_postfix(key) == nullptr);
+    Require(_Tss_set_nid_postfix(key, &value) == success && _Tss_get_nid_postfix(key) == &value);
+    Require(_Tss_delete_nid_postfix(key) == success);
+}
+
+struct ForwardLog {
+    std::int32_t* flag;
+    void (APS5_VABI* function)(void);
+    int key;
+    void* value;
+    void* first;
+    void* second;
+};
+static ForwardLog forwardLog;
+
+static int APS5_VABI FakeOnce(std::int32_t* flag, void (APS5_VABI* function)(void)) {
+    forwardLog.flag = flag;
+    forwardLog.function = function;
+    return 7;
+}
+static int APS5_VABI FakeKeyCreate(int* key, void (APS5_VABI*)(void*)) { *key = 41; return 0x80020016; }
+static int APS5_VABI FakeKeyDelete(int key) { forwardLog.key = key; return 0x80020002; }
+static void* APS5_VABI FakeGetSpecific(int key) { forwardLog.key = key; return &forwardLog; }
+static int APS5_VABI FakeSetSpecific(int key, void* value) { forwardLog.key = key; forwardLog.value = value; return 0; }
+static int APS5_VABI FakeEqual(void* first, void* second) { forwardLog.first = first; forwardLog.second = second; return 1; }
+static void* APS5_VABI FakeSelf() { return &forwardLog.key; }
+static void APS5_VABI FakeExit(void*) { std::abort(); }
+static void APS5_VABI OnceTarget() {}
+
+static void ForwardedCalls() {
+    static const ThreadForwards fakes{FakeOnce, FakeKeyCreate, FakeKeyDelete, FakeGetSpecific, FakeSetSpecific, FakeEqual, FakeSelf, FakeExit};
+    RegisterThreadForwards_nid_no_patch(&fakes);
+    std::int32_t flag = 0;
+    _Call_once_nid_postfix(&flag, OnceTarget);
+    Require(forwardLog.flag == &flag && forwardLog.function == OnceTarget);
+    int key = 0;
+    Require(_Tss_create_nid_postfix(&key, nullptr) == static_cast<int>(0x80020016) && key == 41);
+    Require(_Tss_delete_nid_postfix(5) == static_cast<int>(0x80020002) && forwardLog.key == 5);
+    Require(_Tss_get_nid_postfix(6) == &forwardLog && forwardLog.key == 6);
+    Require(_Tss_set_nid_postfix(8, &flag) == success && forwardLog.key == 8 && forwardLog.value == &flag);
+    Require(_Thrd_equal_nid_postfix(&flag, &key) == 1 && forwardLog.first == &flag && forwardLog.second == &key);
+    Require(_Thrd_current_nid_postfix() == &forwardLog.key);
+    Require(_Mtx_current_owns_nid_postfix(nullptr) == 1);
+
+    RegisterThreadForwards_nid_no_patch(nullptr);
+    RequireThrows<std::runtime_error>([] { _Thrd_current_nid_postfix(); });
+    RequireThrows<std::runtime_error>([] { _Tss_get_nid_postfix(0); });
+}
+
 int main() {
+    KernelKeys();
+    ForwardedCalls();
     MutexBasics();
     RecursiveMutex();
     MutualExclusion();

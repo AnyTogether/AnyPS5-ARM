@@ -67,6 +67,10 @@ Changes on top of the merged port:
   - case-insensitive APFS in `guest_path_case`
   - the portability loader in `oversized_descriptor_sets`
   - the fixtures' temporary directory, about 720 MiB per run, is now cleaned up
+  - `ProcessParametersFixture` gives a test executable process parameters through its own `__APS5DATA,__meta` section, laid out as the relinker writes it, so `dl_iterate_phdr` lists them as the main image's `PT_SCE_PROCPARAM`
+- The AGC driver creates the GPU mutex before itself. Its destructor at exit locks that mutex, and macOS's `pthread_mutex_lock` fails on a destroyed one.
+- libSceJson2 converts a number that `from_chars` reports out of range with `strtod_l` in the C locale. libc++'s stream extraction fails on every `ERANGE`, so an underflow to a denormal or zero was rejected as an overflow.
+- When the AGC driver memory cannot be mapped at 0xF_E0000000, the libSceAgc static buffer functions throw.
 
 ## Feasibility probes
 

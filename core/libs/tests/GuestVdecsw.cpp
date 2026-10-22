@@ -2,10 +2,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include "prx/libc/include/General.hpp"
+#include "Vp9Fixture.hpp"
 #include "H264Fixture.hpp"
 
 struct ComputeMemoryInfo {
@@ -89,6 +91,28 @@ struct OutputInfo {
     std::uint32_t framePitchInBytes;
 };
 
+struct Vp9PictureInfo {
+    std::uint64_t thisSize;
+    bool isValid;
+    std::uint64_t ptsData;
+    std::uint64_t dtsData;
+    std::uint64_t attachedData;
+    std::uint32_t profile;
+    std::uint32_t level;
+    std::uint32_t keyFrameFlag;
+    std::uint32_t intraOnly;
+    std::uint8_t bitDepth;
+    std::uint8_t colorRange;
+    std::uint32_t colorSpace;
+    std::uint32_t numFrames;
+    std::uint32_t frameWidth;
+    std::uint32_t frameHeight;
+    std::uint32_t renderWidth;
+    std::uint32_t renderHeight;
+};
+
+static_assert(sizeof(Vp9PictureInfo) == 0x58 && offsetof(Vp9PictureInfo, ptsData) == 0x10 && offsetof(Vp9PictureInfo, profile) == 0x28 && offsetof(Vp9PictureInfo, bitDepth) == 0x38 && offsetof(Vp9PictureInfo, colorSpace) == 0x3c && offsetof(Vp9PictureInfo, renderHeight) == 0x50);
+
 struct AvcPictureInfo {
     std::uint64_t thisSize;
     bool isValid;
@@ -124,6 +148,7 @@ int APS5_VABI sceVdecswSyncDecodeInput(std::uint64_t, InputResult*);
 int APS5_VABI sceVdecswSetDecodeOutput(std::uint64_t, const FrameBuffer*);
 int APS5_VABI sceVdecswTrySyncDecodeOutput(std::uint64_t, OutputInfo*);
 int APS5_VABI sceVdecswSyncDecodeOutput(std::uint64_t, OutputInfo*);
+int APS5_VABI sceVdecswGetVp9PictureInfo(const OutputInfo*, Vp9PictureInfo*);
 int APS5_VABI sceVdecswGetAvcPictureInfo(const OutputInfo*, AvcPictureInfo*, AvcPictureInfo*);
 int APS5_VABI sceVdecswGetHevcPictureInfo(const OutputInfo*, void*);
 int APS5_VABI sceVdecswFinalizeDecodeSequence(std::uint64_t);
@@ -133,9 +158,11 @@ int APS5_VABI sceVdecswResetDecoder(std::uint64_t);
 namespace {
 
 using namespace H264Fixture;
+using namespace Vp9Fixture;
 
 constexpr int OutputPending = static_cast<int>(0x81510115u);
 constexpr int InputQueueEmpty = static_cast<int>(0x81510116u);
+constexpr std::uint32_t CodecVp9 = 2382845;
 
 void check(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
@@ -260,6 +287,174 @@ void testSyncWrappers() {
     check(hevcThrows, "GetHevcPictureInfo must still throw");
 }
 
+struct Vp9Session {
+    std::uint64_t queue = 0;
+    std::uint64_t decoder = 0;
+    DecoderMemoryInfo memory{sizeof(DecoderMemoryInfo)};
+
+    Vp9Session() {
+        ComputeMemoryInfo compute{sizeof(ComputeMemoryInfo)};
+        check(sceVdecswQueryComputeMemoryInfo(&compute) == 0 && compute.cpuGpuMemorySize != 0, "compute memory query failed");
+        const ComputeConfigInfo computeConfig{sizeof(ComputeConfigInfo), 3, 3, true};
+        check(sceVdecswAllocateComputeQueue(&computeConfig, &compute, &queue) == 0, "compute queue allocation failed");
+        DecoderConfigInfo config{sizeof(DecoderConfigInfo), 1, CodecVp9, 0, 0, static_cast<std::int32_t>(Width), static_cast<std::int32_t>(Height), 4, 3, queue, 0x3f, 0, true, {}};
+        check(sceVdecswQueryDecoderMemoryInfo(&config, &memory) == 0 && memory.maxFrameBufferSize != 0, "VP9 decoder memory query failed");
+        check(sceVdecswCreateDecoder(&config, &memory, &decoder) == 0, "VP9 decoder creation failed");
+    }
+
+    ~Vp9Session() {
+        sceVdecswDeleteDecoder(decoder);
+        sceVdecswReleaseComputeQueue(queue);
+    }
+};
+
+template <typename TAction>
+bool throws(TAction action) {
+    try {
+        action();
+    } catch (const std::exception&) {
+        return true;
+    }
+    return false;
+}
+
+Vp9PictureInfo sentinelVp9Info(std::uint64_t size = sizeof(Vp9PictureInfo)) {
+    Vp9PictureInfo info;
+    std::memset(&info, 0xcc, sizeof(info));
+    info.thisSize = size;
+    return info;
+}
+
+bool sameBytes(const Vp9PictureInfo& left, const Vp9PictureInfo& right) {
+    return std::memcmp(&left, &right, sizeof(Vp9PictureInfo)) == 0;
+}
+
+void checkVp9Info(const Vp9PictureInfo& info, std::size_t picture) {
+    const std::string name = "VP9 picture " + std::to_string(picture);
+    check(info.thisSize == sizeof(Vp9PictureInfo) && info.isValid, name + " has no picture info");
+    check(info.ptsData == 1000 + picture && info.dtsData == picture && info.attachedData == 0xa0 + picture, name + " timestamps differ");
+    check(info.profile == 0 && info.bitDepth == 8 && info.colorRange == 0 && info.colorSpace == 0 && info.numFrames == 1 && info.intraOnly == 0, name + " coded header fields differ");
+    check(info.keyFrameFlag == (picture == 0 ? 1u : 0u), name + " key frame flag differs");
+    check(info.frameWidth == Width && info.frameHeight == Height && info.renderWidth == Width && info.renderHeight == Height, name + " dimensions differ");
+}
+
+void testVp9PictureInfo() {
+    Vp9Session session;
+    const auto units = ivfFrames();
+    check(units.size() == Vp9Hashes.size(), "unexpected VP9 access unit count");
+    std::array<std::vector<std::uint8_t>, Vp9Hashes.size()> buffers;
+    for (auto& buffer : buffers) buffer.resize(session.memory.maxFrameBufferSize);
+    std::array<OutputInfo, Vp9Hashes.size()> outputs{};
+    std::size_t pictures = 0;
+    bool outputSet = false;
+    bool ended = false;
+    const auto drain = [&] {
+        for (;;) {
+            auto& target = buffers[pictures % buffers.size()];
+            if (!outputSet) {
+                const FrameBuffer frame{sizeof(FrameBuffer), target.data(), target.size()};
+                check(sceVdecswSetDecodeOutput(session.decoder, &frame) == 0, "VP9 output buffer was rejected");
+                outputSet = true;
+            }
+            OutputInfo output{sizeof(OutputInfo)};
+            const auto status = sceVdecswTrySyncDecodeOutput(session.decoder, &output);
+            if (status == OutputPending) return;
+            check(status == 0, "VP9 output sync failed");
+            outputSet = false;
+            if (!output.isValid) {
+                ended = true;
+                return;
+            }
+            check(pictures < Vp9Hashes.size(), "more VP9 pictures than access units");
+            check(output.codecType == CodecVp9 && output.pictureCount == 1 && output.frameWidth == Width && output.frameHeight == Height && output.frameBuffer == target.data(), "unexpected VP9 picture geometry");
+            auto info = sentinelVp9Info();
+            check(sceVdecswGetVp9PictureInfo(&output, &info) == 0, "VP9 picture info query failed");
+            checkVp9Info(info, pictures);
+            check(hashNv12(target.data(), output.framePitch, output.frameHeight) == Vp9Hashes[pictures], "VP9 picture " + std::to_string(pictures) + " differs from the reference");
+            outputs[pictures] = output;
+            ++pictures;
+        }
+    };
+    for (std::size_t unit = 0; unit < units.size(); ++unit) {
+        const InputData input{sizeof(InputData), units[unit].data(), units[unit].size(), 1000 + unit, unit, 0xa0 + unit};
+        check(sceVdecswSetDecodeInput(session.decoder, &input) == 0, "VP9 decode input was rejected");
+        InputResult consumed{sizeof(InputResult)};
+        check(sceVdecswTrySyncDecodeInput(session.decoder, &consumed) == 0 && consumed.decodedAu == units[unit].data(), "a VP9 access unit was not consumed");
+        drain();
+    }
+    check(sceVdecswFinalizeDecodeSequence(session.decoder) == 0, "VP9 finalize failed");
+    while (!ended) drain();
+    check(pictures == Vp9Hashes.size(), "missing VP9 pictures after finalizing the sequence");
+
+    for (std::size_t picture = 0; picture < outputs.size(); ++picture) {
+        auto info = sentinelVp9Info();
+        check(sceVdecswGetVp9PictureInfo(&outputs[picture], &info) == 0, "VP9 picture info of an earlier picture was lost");
+        checkVp9Info(info, picture);
+    }
+
+    const auto unchanged = sentinelVp9Info();
+    auto info = unchanged;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(nullptr, &info); }) && sameBytes(info, unchanged), "a null output info was accepted");
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&outputs[0], nullptr); }), "a null VP9 picture info was accepted");
+    auto tooSmall = sentinelVp9Info(7);
+    const auto tooSmallBefore = tooSmall;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&outputs[0], &tooSmall); }) && sameBytes(tooSmall, tooSmallBefore), "a VP9 picture info smaller than its size field was accepted");
+    auto doubled = outputs[0];
+    doubled.pictureCount = 2;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&doubled, &info); }) && sameBytes(info, unchanged), "an output with two pictures was accepted");
+    auto empty = outputs[0];
+    empty.pictureCount = 0;
+    check(sceVdecswGetVp9PictureInfo(&empty, &info) == 0 && sameBytes(info, unchanged), "an output without a picture wrote a VP9 picture info");
+    std::uint8_t foreign = 0;
+    auto unknown = outputs[0];
+    unknown.frameBuffer = &foreign;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&unknown, &info); }) && sameBytes(info, unchanged), "a frame buffer no decoder returned was accepted");
+    unknown.frameBuffer = nullptr;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&unknown, &info); }) && sameBytes(info, unchanged), "a null frame buffer was accepted");
+
+    const auto head = offsetof(Vp9PictureInfo, profile);
+    auto partial = sentinelVp9Info(head);
+    check(sceVdecswGetVp9PictureInfo(&outputs[2], &partial) == 0, "a VP9 picture info with a short size field was rejected");
+    check(partial.thisSize == head && partial.isValid && partial.ptsData == 1002 && partial.dtsData == 2 && partial.attachedData == 0xa2, "the leading VP9 picture info fields were not written");
+    check(partial.profile == unchanged.profile && partial.frameWidth == unchanged.frameWidth && partial.renderHeight == unchanged.renderHeight, "a VP9 picture info with a short size field was written beyond it");
+
+    struct Oversized {
+        Vp9PictureInfo info;
+        std::uint8_t tail[64];
+    } oversized;
+    std::memset(&oversized, 0xcc, sizeof(oversized));
+    oversized.info.thisSize = sizeof(Oversized);
+    check(sceVdecswGetVp9PictureInfo(&outputs[3], &oversized.info) == 0, "a VP9 picture info with a long size field was rejected");
+    check(oversized.info.thisSize == sizeof(Oversized), "a long VP9 picture info size field was changed");
+    oversized.info.thisSize = sizeof(Vp9PictureInfo);
+    checkVp9Info(oversized.info, 3);
+    for (const auto byte : oversized.tail) check(byte == 0xcc, "a VP9 picture info with a long size field was written beyond the structure");
+
+    AvcPictureInfo avc{sizeof(AvcPictureInfo)};
+    check(throws([&] { sceVdecswGetAvcPictureInfo(&outputs[0], &avc, nullptr); }), "AVC picture info was returned for a VP9 picture");
+
+    check(sceVdecswResetDecoder(session.decoder) == 0, "VP9 reset failed");
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&outputs[0], &info); }) && sameBytes(info, unchanged), "VP9 picture info survived a decoder reset");
+}
+
+void testVp9PictureInfoOfAvcPicture() {
+    Session session;
+    const auto units = accessUnits(false);
+    const InputData input{sizeof(InputData), units[0].data(), units[0].size(), 1000, 0, 0xa0};
+    check(sceVdecswSetDecodeInput(session.decoder, &input) == 0, "decode input was rejected");
+    InputResult result{sizeof(InputResult)};
+    check(sceVdecswSyncDecodeInput(session.decoder, &result) == 0, "the access unit was not consumed");
+    std::vector<std::uint8_t> buffer(session.memory.maxFrameBufferSize);
+    const FrameBuffer frame{sizeof(FrameBuffer), buffer.data(), buffer.size()};
+    check(sceVdecswSetDecodeOutput(session.decoder, &frame) == 0, "output buffer was rejected");
+    check(sceVdecswFinalizeDecodeSequence(session.decoder) == 0, "finalize failed");
+    OutputInfo output{sizeof(OutputInfo)};
+    check(sceVdecswSyncDecodeOutput(session.decoder, &output) == 0 && output.isValid && output.pictureCount == 1, "sync output did not return the finalized picture");
+    const auto unchanged = sentinelVp9Info();
+    auto info = unchanged;
+    check(throws([&] { sceVdecswGetVp9PictureInfo(&output, &info); }) && sameBytes(info, unchanged), "VP9 picture info was returned for an H.264 picture");
+}
+
 }
 
 int main() {
@@ -267,6 +462,8 @@ int main() {
         testDecode();
         testWithoutOutput();
         testSyncWrappers();
+        testVp9PictureInfo();
+        testVp9PictureInfoOfAvcPicture();
         std::puts("Vdecsw tests passed");
         return 0;
     } catch (const std::exception& error) {

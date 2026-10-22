@@ -234,18 +234,11 @@ int main(int argc, char** argv) {
     errno = 0;
     Require(fopen_nid_postfix(argv[1], "rb") == nullptr);
     Require(errno == ENOENT);
-#ifdef _WIN32
-    const std::string directoryMode = "rb";
-    constexpr int directoryError = EACCES;
-#else
-    const std::string directoryMode = "wb";
-    constexpr int directoryError = EISDIR;
-#endif
     const std::string directoryName = std::string(argv[1]) + ".dir";
     Require(std::filesystem::create_directory(directoryName));
     errno = 0;
-    Require(fopen_nid_postfix(directoryName.c_str(), directoryMode.c_str()) == nullptr);
-    Require(errno == directoryError);
+    Require(fopen_nid_postfix(directoryName.c_str(), "wb") == nullptr);
+    Require(errno == EISDIR);
     Require(std::filesystem::remove(directoryName));
     const std::u8string unicodeName = u8"セーブé.tmp";
     const std::string guestName(unicodeName.begin(), unicodeName.end());

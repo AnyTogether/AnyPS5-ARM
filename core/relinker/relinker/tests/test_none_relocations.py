@@ -10,6 +10,13 @@ from test_dynamic_segment import fixture
 from test_linux_dynamic_strings import dynamic_strings, file_offset
 from test_linux_load_alignment import loads
 
+DEFAULT_BASE = 0x400000
+
+
+def rebased(relocation):
+    offset, info, addend = relocation
+    return (offset + DEFAULT_BASE, info, addend + DEFAULT_BASE if info & 0xffffffff == 8 else addend)
+
 
 def image_with_relocations(relocations, sce, imported):
     image = fixture()
@@ -75,7 +82,7 @@ def main():
                             if tags.get(8, 0):
                                 start = file_offset(data, loads(data), tags[7])
                                 actual = [struct.unpack_from("<QQq", data, offset) for offset in range(start, start + tags[8], 24)]
-                            assert actual == [relocation for relocation in relocations if relocation in (imported, relative)]
+                            assert actual == [rebased(relocation) for relocation in relocations if relocation in (imported, relative)]
                         if target == "windows" and os.name == "nt" and not has_import:
                             run = subprocess.run([str(output)], capture_output=True, timeout=20)
                             assert run.returncode == 42, (name, level, run.returncode, run.stderr)
@@ -96,7 +103,7 @@ def main():
                     if target == "linux":
                         tags, _ = dynamic_strings(data)
                         start = file_offset(data, loads(data), tags[7])
-                        assert [struct.unpack_from("<QQq", data, offset) for offset in range(start, start + tags[8], 24)] == [relative]
+                        assert [struct.unpack_from("<QQq", data, offset) for offset in range(start, start + tags[8], 24)] == [rebased(relative)]
                     if target == "windows" and os.name == "nt":
                         run = subprocess.run([str(output)], capture_output=True, timeout=20)
                         assert run.returncode == 42, (sce, level, run.returncode, run.stderr)

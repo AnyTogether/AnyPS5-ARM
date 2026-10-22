@@ -114,6 +114,7 @@ void SetHostImportDeferredSettles(bool enabled);
 // that heap: the other half stays for the buffers, mirrors and textures that share it.
 std::uint64_t HostImportBudget(const VkPhysicalDeviceMemoryProperties& memory, std::uint64_t physicalBytes);
 std::uint64_t HostImportLiveBytes();
+std::uint64_t HostImportBudgetRemaining(const Context& context);
 struct HostImportSettleCounts {
     std::uint64_t submitted = 0;
     std::uint64_t waited = 0;

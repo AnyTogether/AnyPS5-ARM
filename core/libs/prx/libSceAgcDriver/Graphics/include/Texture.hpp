@@ -198,6 +198,10 @@ public:
     // Deferred write-back (APS5_EAGER_WRITEBACK=1 stores at once instead).
     void MarkDirty();
     void MarkWholeWritten();
+    void MarkUnitsWritten(const std::vector<bool>& units);
+    std::vector<VkRect2D> UnitRects(const std::vector<bool>& units) const;
+    bool BlockUnits() const { return blockUnits; }
+    std::uint32_t TrackedUnits() const { return trackedLayers; }
     void MarkSliceDirty(std::uint32_t slice, std::uint32_t count = 1);
     void Flush();
     bool Dirty() const;
@@ -350,6 +354,7 @@ public:
     // validates textures copied from this image.
     std::uint64_t Version() const { return version; }
     std::uint64_t Generation() const { return generation; }
+    std::uint64_t GenerationFor(std::uint64_t address, std::uint64_t bytes) const;
     // The DCC keys the content was uploaded under and the last scan of the surface's keys
     // (ProvedClearKeys): Refresh's own key rule for the fast revalidation. Under
     // GuestMemory::GpuMutex only, as Refresh is; never from a build's stage A.
@@ -364,6 +369,7 @@ public:
     // was still current (nothing uploaded).
     // Keeps the image current with guest memory (see GuestMemory::CollectWrites).
     bool Refresh();
+    bool RefreshLayers(std::uint32_t first, std::uint32_t count);
     static std::uint64_t SinglePassMoves();
     static std::uint64_t SlabRetiles();
     static std::uint64_t RefreshesProved();
@@ -380,9 +386,8 @@ private:
     StorageTexture(const Context& context, TextureDetiler& detiler, const GuestTextureResource& descriptor, std::uint32_t mipLevel);
     // The regions of every array layer, or of the tracked layers `layers` selects.
     std::vector<VkBufferImageCopy> CopyRegions(const std::vector<bool>* layers = nullptr) const;
-    // Uploads the surface, or only the tracked layers `layers` selects (the direct path; the others
-    // upload everything).
     void upload(const std::vector<bool>* layers = nullptr);
+    std::vector<bool> cpuUploadLayers(const std::vector<bool>& units) const;
     void captureGuestBytes(const std::vector<bool>* layers);
     bool originalHolds(std::uint64_t address, std::size_t bytes) const;
     bool compareUntracked(std::uint64_t address, std::size_t bytes, std::span<std::uint8_t> changed, bool memoize = false) const;
@@ -479,7 +484,10 @@ private:
     bool anyLayerPending() const;
     bool storesAtOnce() const;
     bool allPendingSaved() const;
+    bool refresh(std::uint32_t firstLayer, std::uint32_t lastLayer);
+    void noteLayersBehind(std::uint32_t firstLayer, std::uint32_t lastLayer, const std::vector<bool>& outside);
     void refreshGeneration();
+    std::uint64_t collectedLayerGeneration(std::uint32_t layer, std::uint64_t whole, bool uncached = false) const;
     bool refreshProved();
     void takeRefreshProof(bool aliased);
     bool otherPendingOverlaps() const;
@@ -557,7 +565,13 @@ private:
     std::uint64_t sliceLinearBytes = 0;
     SurfaceGeometry geometry;
     std::vector<std::byte> original;
-    mutable std::array<std::uint64_t, 5> comparedGuestBytes{};
+    struct ComparedRange {
+        std::uint64_t address = 0;
+        std::size_t bytes = 0;
+        std::array<std::uint64_t, 5> stamp{};
+    };
+    mutable std::array<ComparedRange, 4> comparedRanges{};
+    mutable std::uint32_t nextComparedRange = 0;
     std::vector<std::byte> generationBaseline;
     // DCC keys the image content was uploaded under: a fast-cleared surface starts as its clear value.
     DccKeys uploadedKeys = DccKeys::Uncompressed;
@@ -583,6 +597,7 @@ private:
     std::uint64_t trackedLayerBytes = 0;
     std::vector<std::uint64_t> layerGeneration;
     std::vector<bool> layerPending;
+    std::vector<bool> layerBehind;
     bool blockUnits = false;
     // Write-back hysteresis (block units, see writeBack): partial stores in the current window of
     // presents, its first present, and the present until which every pending unit is stored.

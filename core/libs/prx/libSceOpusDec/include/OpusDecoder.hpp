@@ -27,7 +27,7 @@ public:
     OpusDecoderLibrary(const char* libraryName, bool celtPacketsOnly) : name(libraryName), celtOnly(celtPacketsOnly) {}
 
     int Initialize(std::uint32_t* context) {
-        if (!context) fail("null context output");
+        if (!context) return error(13);
         std::lock_guard lock(mutex);
         for (const auto& [id, owner] : contexts)
             if (owner == context) fail("context already initialized");
@@ -38,7 +38,7 @@ public:
         return 0;
     }
 
-    int Terminate(std::uint32_t* context) {
+    int Terminate(const std::uint32_t* context) {
         if (!context) fail("null context");
         std::lock_guard lock(mutex);
         if (!contexts.contains(*context)) fail("unknown context");
@@ -49,15 +49,15 @@ public:
     }
 
     int GetSize(int channels) {
-        if (channels != 1 && channels != 2) fail("only mono and stereo are supported");
+        if (channels != 1 && channels != 2) return error(3);
         return 640;
     }
 
-    int CreateEx(std::uint32_t* context, void* state, int sampleRate, int channels) {
-        if (!context || !state) fail("null context or state");
-        GetSize(channels);
-        if (sampleRate != 8000 && sampleRate != 12000 && sampleRate != 16000 && sampleRate != 24000 && sampleRate != 48000)
-            fail("sample rates other than 8000, 12000, 16000, 24000 and 48000 Hz are not supported");
+    int CreateEx(const std::uint32_t* context, void* state, int sampleRate, int channels) {
+        if (!context || !state) return error(0);
+        if (celtOnly && channels != 1 && channels != 2) return error(3);
+        if (sampleRate != 8000 && sampleRate != 12000 && sampleRate != 16000 && sampleRate != 24000 && sampleRate != 48000) return error(2);
+        if (channels != 1 && channels != 2) return error(3);
         std::lock_guard lock(mutex);
         if (!contexts.contains(*context)) fail("unknown context");
         if (decoders.contains(state)) fail("state already owns a decoder");
@@ -84,11 +84,15 @@ public:
     }
 
     int Decode(void* state, const std::uint8_t* data, int bytes, std::int16_t* pcm, int capacity) {
-        if (!data || bytes <= 0 || bytes > std::numeric_limits<int>::max() - AV_INPUT_BUFFER_PADDING_SIZE || !pcm || capacity < 0)
-            fail("invalid packet or PCM buffer; packet loss concealment is not implemented");
+        if (!state) return error(0);
+        if (bytes != 0 && !data) return error(6);
+        if (bytes < 0) return error(7);
+        if (!pcm) return error(8);
+        if (capacity < 0) return error(9);
         std::lock_guard lock(mutex);
         const auto found = decoders.find(state);
-        if (found == decoders.end()) fail("unknown decoder state");
+        if (found == decoders.end()) return error(1);
+        if (bytes == 0 || bytes > std::numeric_limits<int>::max() - AV_INPUT_BUFFER_PADDING_SIZE) fail("packet loss concealment or oversized packet is not implemented");
         auto& decoder = *found->second;
         if (celtOnly && (data[0] >> 3) < 16) fail("SILK and hybrid packets are not implemented");
         const int samples = packetSamples(data, bytes) / (48000 / decoder.sampleRate);
@@ -135,8 +139,9 @@ public:
     }
 
     int Destroy(void* state) {
+        if (!state) return error(0);
         std::lock_guard lock(mutex);
-        if (decoders.erase(state) == 0) fail("unknown decoder state");
+        if (decoders.erase(state) == 0) return error(1);
         return 0;
     }
 
@@ -160,6 +165,10 @@ private:
     std::unordered_map<std::uint32_t, std::uint32_t*> contexts;
     std::unordered_map<void*, std::unique_ptr<Decoder>> decoders;
     std::uint32_t nextContext = 1;
+
+    int error(std::uint32_t offset) const {
+        return static_cast<int>((celtOnly ? 0x81400000u : 0x81740000u) + offset);
+    }
 
     [[noreturn]] void fail(const char* message) const {
         throw std::runtime_error(std::string(name) + ": " + message);

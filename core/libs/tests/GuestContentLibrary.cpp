@@ -27,10 +27,13 @@ static bool Throws(TAction action) {
 }
 
 static void CheckContentDelete() {
-    Require(Throws<std::invalid_argument>([] { sceContentDeleteByPath(nullptr); }));
-    Require(Throws<std::logic_error>([] { sceContentDeleteByPath("/data/a.png"); }));
+    constexpr int NotInitialized = static_cast<int>(0x809D5002u);
+    Require(sceContentDeleteByPath(nullptr) == NotInitialized);
+    Require(sceContentDeleteByPath("/data/a.png") == NotInitialized);
     ContentDeleteInitParam param{};
+    param.heap_size = 0x4000;
     Require(sceContentDeleteInitialize(&param) == 0);
+    Require(Throws<std::invalid_argument>([] { sceContentDeleteByPath(nullptr); }));
     Require(Throws<std::logic_error>([] { sceContentDeleteByPath("/data/a.png"); }));
     Require(sceContentDeleteTerminate() == 0);
 }

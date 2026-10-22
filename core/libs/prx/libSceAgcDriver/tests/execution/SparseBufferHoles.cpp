@@ -325,7 +325,7 @@ void Run(const Context& context, const CopyPipeline& pipeline, bool writable, co
     std::memset(readback.Bytes().data(), 0xcc, BufferBytes);
     VkBuffer primed = VK_NULL_HANDLE;
     {
-        Buffer earlier(context, BufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer earlier(context, BufferBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         primed = earlier.Handle();
         std::memset(earlier.Bytes().data(), 0xa5, BufferBytes);
     }

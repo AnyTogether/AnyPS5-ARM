@@ -2227,6 +2227,95 @@ void importWatchTests() {
 #endif
 }
 
+void sparseImportedHeapTests(const Context& context, const BdaTestAccess& access) {
+#ifndef _WIN32
+    if (!GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix()) {
+        std::cout << "write watch unavailable: sparse imported heaps not tested\n";
+        return;
+    }
+    constexpr std::size_t bytes = 65536;
+    void* raw = mmap(nullptr, 4 * bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    Require(raw != MAP_FAILED, "cannot reserve the sparse imported heap fixture");
+    const auto base = (reinterpret_cast<std::uintptr_t>(raw) + bytes - 1) & ~(bytes - 1);
+    auto* guest = reinterpret_cast<std::uint8_t*>(base);
+    Require(mprotect(guest, bytes, PROT_READ | PROT_WRITE) == 0, "cannot commit the sparse imported heap prefix");
+    std::memset(guest, 0x57, bytes);
+    GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(guest, bytes);
+    auto importing = context;
+    importing.hostImportAlignment = bytes;
+    auto* mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+    GuestAllocations::GuestAllocationsAdd_nid_postfix(mutation, guest, bytes, true, true, true);
+    GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    const auto* imported = HostImportFor(importing, base, bytes);
+    Require(imported != nullptr, "the sparse heap prefix was not imported");
+    const auto before = MirrorCounters();
+    for (unsigned index = 0; index < 3; ++index) {
+        {
+            GuestBufferMemory described(importing);
+            described.AddReadable(base, 2 * bytes);
+            described.Upload(false);
+            std::uint32_t adjustment = 0;
+            const auto view = described.Descriptor(base, 2 * bytes, adjustment);
+            Require(view.buffer == imported->buffer && view.range == bytes && adjustment == 0, "the sparse descriptor did not bind its imported prefix");
+            Require(described.CopiedBytes() == 0 && MirrorCounters().rebuilds == before.rebuilds, "the sparse imported descriptor rebuilt or copied its heap mirror");
+            reject([&] { static_cast<void>(described.Descriptor(base + bytes + 16, 4, adjustment)); }, "starts past its copy");
+            described.WriteBack();
+        }
+        {
+            GuestBufferMemory addressed(importing);
+            addressed.AcquireRegistered();
+            addressed.Upload(true);
+            Require(MirrorCounters().rebuilds == before.rebuilds && MirrorCounters().heapMirrors == before.heapMirrors, "alternating descriptor and address builds rebuilt the imported heap mirror");
+            addressed.WriteBack();
+        }
+    }
+    {
+        auto misaligned = importing;
+        misaligned.limits.minStorageBufferOffsetAlignment = 256;
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        Recorder recorder(misaligned);
+        recorder.Activate();
+        GuestBufferMemory memory(misaligned);
+        memory.AddReadable(base + 16, 2 * bytes - 16);
+        memory.Upload(false);
+        std::uint32_t adjustment = 0;
+        const auto view = memory.Descriptor(base + 16, 2 * bytes - 16, adjustment);
+        Require(view.buffer != imported->buffer, "a misaligned sparse descriptor bound its import in place");
+        Require(view.range != 0 && view.range <= bytes && memory.CopiedBytes() <= bytes && access.bytes(view.buffer)[view.offset + adjustment] == std::byte{0x57}, "a misaligned sparse descriptor does not serve its committed prefix alone");
+        memory.WriteBack();
+    }
+    {
+        GuestBufferMemory written(importing);
+        written.AddWritable(base, 2 * bytes);
+        written.Upload(false);
+        std::uint32_t adjustment = 0;
+        const auto view = written.Descriptor(base, 2 * bytes, adjustment);
+        Require(view.buffer != imported->buffer && view.range == bytes && MirrorCounters().rebuilds == before.rebuilds + 1, "a sparse writable descriptor bound a shortened import");
+        access.bytes(view.buffer)[view.offset] = std::byte{0x68};
+        guest[8] = 0x79;
+        written.WriteBack();
+        Require(guest[0] == 0x68 && guest[8] == 0x79, "the sparse writable fallback lost a GPU store or rolled back a CPU store");
+    }
+    mutation = GuestAllocations::GuestAllocationsBegin_nid_postfix();
+    GuestAllocations::GuestAllocationsRemove_nid_postfix(mutation, guest);
+    GuestAllocations::GuestAllocationsEnd_nid_postfix(mutation);
+    Require(HostImportFor(importing, base, bytes) == nullptr, "the sparse heap import outlived its range");
+    {
+        GuestBufferMemory sweep(importing);
+        sweep.AcquireRegistered();
+        sweep.Upload(true);
+        sweep.WriteBack();
+    }
+    Require(MirrorCounters().heapMirrors == before.heapMirrors, "the sparse imported heap fixture leaked its mirror");
+    GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(guest, bytes);
+    munmap(raw, 4 * bytes);
+    std::cout << "Sparse imported heap tests passed\n";
+#else
+    static_cast<void>(context);
+    static_cast<void>(access);
+#endif
+}
+
 void heapMirrorTests(const Context& context, const BdaTestAccess& access) {
     if (!GuestArena::GuestArenaAvailable_nid_postfix() || !GuestArena::GuestArenaWriteWatched_nid_postfix()) {
         std::cout << "guest arena unavailable or not write-watched: heap mirrors not tested\n";
@@ -2724,7 +2813,7 @@ bool RunSparseBufferHoleTests(const Context& context, const BdaTestAccess& acces
                 std::memset(reservation.data + 2 * unit, 0x72, unit);
                 VkBuffer seeded = VK_NULL_HANDLE;
                 {
-                    Buffer seed(context, copied, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                    Buffer seed(context, copied, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
                     std::fill(seed.Bytes().begin(), seed.Bytes().end(), std::byte{0xa5});
                     seeded = seed.Handle();
                 }
@@ -3439,6 +3528,7 @@ void RunBdaResourceTests(const Context& context, const BdaTestAccess& access) {
     importReportFloorTests(context, access, true);
     importReportFloorTests(context, access, false);
     importReportRefusalMemoryTests(context, access);
+    sparseImportedHeapTests(context, access);
     heapMirrorTests(context, access);
     importedHeapMirrorTests(context, access);
     importWatchTests();

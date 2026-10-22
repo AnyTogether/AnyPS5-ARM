@@ -21,7 +21,6 @@ std::uint32_t* APS5_VABI sceAgcDcbGetLodStats(CommandBuffer* buf, std::uint8_t c
     return Agc::Command::Emit(buf, 0x10u, {bufferSizeInBytes, static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u), control}, __func__);
 }
 
-// Sizes of the console's occlusion query packets; the queries themselves are not exported here.
 std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint32_t queryType) {
     if (queryType == 0) return 16;
     if (static_cast<std::uint8_t>(queryType) == 1) return 288;

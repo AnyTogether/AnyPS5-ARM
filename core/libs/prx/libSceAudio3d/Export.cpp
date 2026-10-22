@@ -199,22 +199,17 @@ int APS5_VABI sceAudio3dPortGetQueueLevel(uint32_t port_id, uint32_t* queue_leve
     return 0;
 }
 
-int APS5_VABI sceAudio3dPortGetAttributesSupported(uint32_t port_id, uint32_t* attributes, uint32_t* num_attributes) {
+int APS5_VABI sceAudio3dPortGetAttributesSupported(uint32_t portId, uint32_t* attributes, uint32_t* numAttributes) {
     std::lock_guard lock(g_mutex);
-    if (num_attributes == nullptr) return AUDIO3D_ERROR_INVALID_PARAMETER;
-    if (!PortIsOpen(port_id)) return AUDIO3D_ERROR_INVALID_PORT;
+    if (!PortIsOpen(portId)) return AUDIO3D_ERROR_INVALID_PORT;
+    if (numAttributes == nullptr) return AUDIO3D_ERROR_INVALID_PARAMETER;
     constexpr std::uint32_t supported[]{
         AUDIO3D_ATTRIBUTE_LATE_REVERB_LEVEL,
         AUDIO3D_ATTRIBUTE_DOWNMIX_SPREAD_RADIUS,
         AUDIO3D_ATTRIBUTE_DOWNMIX_SPREAD_HEIGHT_AWARE,
     };
-    if (attributes == nullptr) {
-        *num_attributes = std::size(supported);
-        return 0;
-    }
-    const std::uint32_t count = std::min<std::uint32_t>(*num_attributes, std::size(supported));
-    std::copy_n(std::begin(supported), count, attributes);
-    *num_attributes = count;
+    *numAttributes = std::size(supported);
+    if (attributes != nullptr) std::copy(std::begin(supported), std::end(supported), attributes);
     return 0;
 }
 

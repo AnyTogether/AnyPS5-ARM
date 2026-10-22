@@ -504,5 +504,54 @@ int APS5_VABI _Thrd_id_nid_postfix(void) {
     ThrowCppError_nid_no_patch(code);
 }
 
+static std::atomic<const ThreadForwards_nid_no_patch*> registeredThreadForwards{nullptr};
+
+void RegisterThreadForwards_nid_no_patch(const ThreadForwards_nid_no_patch* forwards) {
+    registeredThreadForwards.store(forwards, std::memory_order_release);
+}
+
+static const ThreadForwards_nid_no_patch& ThreadForwards(const char* function) {
+    const auto* forwards = registeredThreadForwards.load(std::memory_order_acquire);
+    if (!forwards) throw std::runtime_error(std::string(function) + ": libkernel threads are not registered");
+    return *forwards;
+}
+
+void APS5_VABI _Call_once_nid_postfix(std::int32_t* flag, void (APS5_VABI* function)(void)) {
+    ThreadForwards(__func__).once(flag, function);
+}
+
+int APS5_VABI _Tss_create_nid_postfix(int* key, void (APS5_VABI* destructor)(void*)) {
+    return ThreadForwards(__func__).keyCreate(key, destructor);
+}
+
+int APS5_VABI _Tss_delete_nid_postfix(int key) {
+    return ThreadForwards(__func__).keyDelete(key);
+}
+
+void* APS5_VABI _Tss_get_nid_postfix(int key) {
+    return ThreadForwards(__func__).getSpecific(key);
+}
+
+int APS5_VABI _Tss_set_nid_postfix(int key, void* value) {
+    return ThreadForwards(__func__).setSpecific(key, value);
+}
+
+int APS5_VABI _Thrd_equal_nid_postfix(void* first, void* second) {
+    return ThreadForwards(__func__).equal(first, second);
+}
+
+void* APS5_VABI _Thrd_current_nid_postfix(void) {
+    return ThreadForwards(__func__).self();
+}
+
+[[noreturn]] void APS5_VABI _Thrd_exit_nid_postfix(int code) {
+    ThreadForwards(__func__).exit(reinterpret_cast<void*>(static_cast<std::uintptr_t>(static_cast<unsigned int>(code))));
+    std::abort();
+}
+
+int APS5_VABI _Mtx_current_owns_nid_postfix(void**) {
+    return 1;
+}
+
 }
 

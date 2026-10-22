@@ -278,8 +278,9 @@ int main() {
 
     Require(encodeWith([](JpegEncEncodeParam& p) { p.image_width = 0; }) == invalidParam);
     Require(ThrowsRuntimeError([&] { encodeWith([](JpegEncEncodeParam& p) { p.encode_mode = 1; }); }));
-    Require(ThrowsRuntimeError([&] { encodeWith([](JpegEncEncodeParam& p) { p.restart_interval = -2; }); }));
-    Require(ThrowsRuntimeError([&] { encodeWith([](JpegEncEncodeParam& p) { p.restart_interval = INT32_MIN; }); }));
+    Require(encodeWith([](JpegEncEncodeParam& p) { p.restart_interval = -2; }) == invalidParam);
+    Require(encodeWith([](JpegEncEncodeParam& p) { p.restart_interval = INT32_MIN; }) == invalidParam);
+    Require(encodeWith([](JpegEncEncodeParam& p) { p.encode_mode = 1; p.restart_interval = -2; }) == invalidParam);
 
     constexpr std::uint32_t wideWidth = 48;
     constexpr std::uint32_t wideHeight = 32;

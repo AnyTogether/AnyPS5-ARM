@@ -55,6 +55,8 @@ void checkRuntimeDependencies() {
           {"libc.prx", "libSceLibcInternal.prx"});
     check({"libSceVideoOut.prx", "libkernel.prx", "libSceVideoOut.prx"},
           {"libSceVideoOut.prx", "libkernel.prx", "libc.prx"});
+    check({"libkernel_sys.prx"}, {"libkernel_sys.prx", "libkernel.prx", "libc.prx"});
+    check({"libkernel_web.prx"}, {"libkernel_web.prx", "libkernel.prx", "libc.prx"});
     check({"libSceVideoOut.prx", "libSceVideoOut.prx"}, {"libSceVideoOut.prx"});
 }
 

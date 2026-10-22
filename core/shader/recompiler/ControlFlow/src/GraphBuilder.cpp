@@ -479,7 +479,7 @@ bool isFetchCall(const RdnaProgram& program, std::uint32_t index, const SwappcIn
     const std::uint32_t targetRegister = scalarIndex(instruction.source0);
     const bool userDataPair = swappc != nullptr && targetRegister != NoScalarRegister &&
         targetRegister >= swappc->userDataBaseRegister && targetRegister + 1u < swappc->userDataBaseRegister + swappc->userDataCount &&
-        std::none_of(program.instructions.begin(), program.instructions.end(), [&](const RdnaInstruction& other) {
+        std::none_of(program.instructions.begin(), GcnGuestShaders() ? program.instructions.begin() + index : program.instructions.end(), [&](const RdnaInstruction& other) {
             return writesScalar(other, targetRegister) || writesScalar(other, targetRegister + 1u);
         });
     return swappc != nullptr && swappc->fetchCallAllowed && positional && (userDataPair || outsideProgram);
@@ -715,9 +715,10 @@ struct LinkEscape {
 
 template <typename TError>
 LinkEscape requireReturnAddressesStayInCalls(const RdnaProgram& program, const std::vector<SwappcCall>& calls, const std::vector<std::uint32_t>& unlinked, std::uint32_t knownWaveSize, const TError& escapeError) {
+    const bool gcn = GcnGuestShaders();
     std::set<std::uint32_t> links;
     for (const auto& call : calls) {
-        if (!call.fetch) links.insert(call.linkRegister);
+        if (!call.fetch || gcn) links.insert(call.linkRegister);
     }
     const auto size = static_cast<std::uint32_t>(program.instructions.size());
     const auto successors = [&](std::uint32_t index) {
@@ -776,7 +777,7 @@ LinkEscape requireReturnAddressesStayInCalls(const RdnaProgram& program, const s
                 if (holds[index] == 0u || writesLink(index) || instruction.family == RdnaInstructionFamily::SOPC || findReturnAt(calls, index) != nullptr) continue;
                 const bool inside = std::ranges::any_of(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link && index >= call.targetIndex && index <= call.returnIndex; });
                 if (inside || !(((holds[index] & 1u) != 0u && readsScalarDword(instruction, link, waveSize)) || ((holds[index] & 2u) != 0u && readsScalarDword(instruction, link + 1u, waveSize)))) continue;
-                const auto owner = std::ranges::find_if(calls, [&](const SwappcCall& call) { return !call.fetch && call.linkRegister == link; });
+                const auto owner = std::ranges::find_if(calls, [&](const SwappcCall& call) { return (!call.fetch || gcn) && call.linkRegister == link; });
                 return escapeError(*owner, instruction);
             }
         }
@@ -897,7 +898,7 @@ std::vector<SwappcCall> analyzeSwappcCalls(const RdnaProgram& program, const Swa
                 continue;
             }
             const bool outsideRegion = regionEnd != InvalidControlFlowId && (index < call.targetIndex || index > regionEnd);
-            if (outsideRegion) continue;
+            if (outsideRegion || (call.fetch && GcnGuestShaders())) continue;
             if (touchesLinkRegister(instruction, call.linkRegister)) {
                 throw escapeError(call, instruction);
             }
@@ -1292,7 +1293,8 @@ std::set<std::uint32_t> branchLabels(const RdnaProgram& program) {
 
 bool unchangedUntil(const RdnaProgram& program, std::uint32_t reg, std::uint32_t reader, std::uint32_t waveSize) {
     for (std::uint32_t index = 0; index < program.instructions.size(); ++index) {
-        if (!writesScalar(program.instructions[index], reg, waveSize)) continue;
+        const bool readerWritesAfterReading = index == reader && GcnGuestShaders();
+        if (readerWritesAfterReading || !writesScalar(program.instructions[index], reg, waveSize)) continue;
         if (index <= reader) return false;
         for (std::uint32_t later = index; later < program.instructions.size(); ++later) {
             const auto& instruction = program.instructions[later];
@@ -1402,7 +1404,7 @@ std::vector<UserDataCall> FindUserDataCalls(const RdnaProgram& program, const Sw
         const auto source = scalarIndex(instruction.source0);
         if (link == NoScalarRegister || source == NoScalarRegister || source % 2u != 0u) continue;
         std::uint32_t pair = NoScalarRegister;
-        if (source != link && userData(source) && userData(source + 1u) && unchanged(source, index) && unchanged(source + 1u, index)) {
+        if ((source != link || GcnGuestShaders()) && userData(source) && userData(source + 1u) && unchanged(source, index) && unchanged(source + 1u, index)) {
             pair = source;
         } else {
             std::uint32_t low = 0, high = 0;

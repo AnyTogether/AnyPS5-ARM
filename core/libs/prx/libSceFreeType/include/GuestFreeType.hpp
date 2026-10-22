@@ -1,6 +1,8 @@
 #ifndef CORE_LIBS_PRX_LIBSCEFREETYPE_INCLUDE_GUESTFREETYPE_HPP
 #define CORE_LIBS_PRX_LIBSCEFREETYPE_INCLUDE_GUESTFREETYPE_HPP
 
+#include "prx/libc/include/general/VabiMacros.hpp"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -8,7 +10,7 @@ namespace FreeType {
 
 struct GuestGeneric {
     void* data;
-    void* finalizer;
+    void (APS5_VABI *finalizer)(void*);
 };
 
 struct GuestVector {
@@ -147,6 +149,7 @@ struct GuestFaceRec {
     void* internal;
 };
 
+static_assert(sizeof(GuestGeneric) == 16 && offsetof(GuestGeneric, finalizer) == 8);
 static_assert(sizeof(GuestBitmapSize) == 32 && offsetof(GuestBitmapSize, size) == 8);
 static_assert(sizeof(GuestCharMapRec) == 16 && offsetof(GuestCharMapRec, platform_id) == 12);
 static_assert(sizeof(GuestSizeMetrics) == 56 && offsetof(GuestSizeMetrics, x_scale) == 8);

@@ -53,6 +53,7 @@ constexpr int GuestAdviceCore = 9;
 constexpr int GuestAdviceProtect = 10;
 constexpr int GuestLockCurrent = 0x1;
 constexpr int GuestLockFuture = 0x2;
+constexpr int GuestDefinedProtection = 0x3F7;
 constexpr std::uintptr_t GuestUserAddressEnd = 0x800000000000;
 constexpr int GuestAlignedSuper = 0x1000000;
 constexpr std::size_t SuperpageSize = std::size_t{1} << 21;
@@ -155,7 +156,9 @@ void* APS5_VABI mmap_nid_postfix(void* address, std::size_t length, int protecti
     if (!RoundLength(length, rounded) || (protection & ~7) != 0)
         return failed(GuestInvalid);
     if ((flags & (GuestMapExclusive | GuestMapFixed)) == GuestMapExclusive) return failed(GuestInvalid);
-    const int mappingFlags = flags & ~GuestAlignedSuper;
+    if ((flags & (GuestShared | GuestPrivate)) == (GuestShared | GuestPrivate)) return failed(GuestInvalid);
+    int mappingFlags = flags & ~GuestAlignedSuper;
+    if ((mappingFlags & (GuestShared | GuestPrivate | GuestAnonymous)) == GuestAnonymous) mappingFlags |= GuestPrivate;
     const bool fixedAnonymous = (mappingFlags & ~(GuestMapFixed | GuestMapExclusive)) == (GuestPrivate | GuestAnonymous)
                                 && (mappingFlags & GuestMapFixed) != 0;
     if (mappingFlags == (GuestPrivate | GuestAnonymous) || fixedAnonymous) {
@@ -282,7 +285,7 @@ int APS5_VABI mprotect_nid_postfix(void* address, std::size_t length, int protec
     if (start == 0 || length > std::numeric_limits<std::uintptr_t>::max() - start)
         return failed(GuestInvalid);
     try {
-        if (DoMprotect(address, length, protection) != 0) return failed(GuestInvalid);
+        if (DoMprotect(address, length, protection & GuestDefinedProtection) != 0) return failed(GuestInvalid);
         return 0;
     } catch (const std::bad_alloc&) {
         return failed(GuestNoMemory);
