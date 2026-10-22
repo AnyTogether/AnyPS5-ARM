@@ -37,15 +37,19 @@ public final class RemoteServer: @unchecked Sendable {
         public var latency: @Sendable (Double) -> Void
         /// What the welcomed phone asks the launcher to do (launcher mode).
         public var request: @Sendable (RemoteMessage) -> Void
+        /// A phone that said hello and is not welcomed yet, by name; nil when it gave up or was
+        /// refused before that.
+        public var connecting: @Sendable (String?) -> Void
 
         public init(pairing: @escaping @Sendable (PairingRequest) -> Void = { _ in }, connected: @escaping @Sendable (String) -> Void = { _ in },
                     disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in },
-                    request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }) {
+                    request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }, connecting: @escaping @Sendable (String?) -> Void = { _ in }) {
             self.pairing = pairing
             self.connected = connected
             self.disconnected = disconnected
             self.latency = latency
             self.request = request
+            self.connecting = connecting
         }
     }
 
@@ -210,6 +214,7 @@ public final class RemoteServer: @unchecked Sendable {
             client.deviceID = deviceID
             client.name = deviceName
             current = client
+            events.connecting(deviceName)
             if let key, let device = devices.device(id: deviceID, key: key) {
                 welcome(client, key: device.key)
             } else {
@@ -244,7 +249,10 @@ public final class RemoteServer: @unchecked Sendable {
     }
 
     private func reject(_ client: Client, _ reason: String) {
-        if current === client { current = nil }
+        if current === client {
+            current = nil
+            if client.session == nil { events.connecting(nil) }
+        }
         send(.rejected(reason: reason), to: client) { client.connection.cancel() }
     }
 
@@ -254,7 +262,7 @@ public final class RemoteServer: @unchecked Sendable {
         let welcomed = client.session != nil
         current = nil
         phoneEnded()
-        if welcomed { events.disconnected() }
+        if welcomed { events.disconnected() } else { events.connecting(nil) }
     }
 
     private func send(_ message: RemoteMessage, to client: Client, then: (() -> Void)? = nil) {

@@ -120,6 +120,8 @@ final class AppModel: ObservableObject {
     @Published var pairing: PairingRequest?
     /// The connected phone and its last reported latency.
     @Published private(set) var phone: (name: String, latency: Double?)?
+    /// A phone that said hello and is not connected yet (pairing, or about to be welcomed).
+    @Published private(set) var phoneConnecting: String?
     /// The phones allowed so far, for the settings.
     @Published private(set) var phones: [PairedDevice] = []
     @Published var toast: Toast?
@@ -581,15 +583,26 @@ final class AppModel: ObservableObject {
         let events = RemoteServer.Events(
             pairing: { request in Task { @MainActor in self.askToPair(request) } },
             connected: { name in Task { @MainActor in
-                withAnimation(Motion.overlay) { self.phone = (name, nil) }
+                withAnimation(Motion.overlay) {
+                    self.phone = (name, nil)
+                    self.phoneConnecting = nil
+                }
                 self.phones = self.pairedDevices.all
                 self.show(T.format(.phoneConnected, name), symbol: "iphone.gen3")
+                // A game in front hears of it through a card over it.
+                if !NSApp.isActive {
+                    TrophyBanner.shared.notice(T.format(.phoneConnected, name), detail: T.text(.phoneConnectedDetail), symbol: "iphone.gen3", sounds: self.preferences.sounds)
+                }
                 self.phoneLibrary = nil
                 self.tellPhone()
             } },
             disconnected: { Task { @MainActor in withAnimation(Motion.overlay) { self.phone = nil } } },
             latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } },
-            request: { message in Task { @MainActor in self.phoneAsked(message) } })
+            request: { message in Task { @MainActor in self.phoneAsked(message) } },
+            connecting: { name in Task { @MainActor in
+                guard self.phone == nil || name != nil else { return }
+                withAnimation(Motion.overlay) { self.phoneConnecting = name }
+            } })
         // Whatever the launcher shows changes the library the phone shows.
         librarySink = objectWillChange.debounce(for: .milliseconds(150), scheduler: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.tellPhone() }
@@ -627,6 +640,8 @@ final class AppModel: ObservableObject {
     func previewPairing(_ request: PairingRequest) { pairing = request }
 
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
+
+    func previewPhoneConnecting(_ name: String) { phoneConnecting = name }
 
     func discordOff() { discord.clear() }
 

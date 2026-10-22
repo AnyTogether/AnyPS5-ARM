@@ -41,23 +41,40 @@ struct PairingCard: View {
     }
 }
 
-/// The connected phone in the top bar: a green dot, the phone and its latency.
+/// mController, the phone, in the top bar: an empty ring with no phone, orange while one
+/// connects, green with its latency once it is connected.
 struct PhoneIndicator: View {
-    let name: String
-    let latency: Double?
+    let phone: (name: String, latency: Double?)?
+    let connecting: String?
     @Environment(\.scale) private var scale
+    @State private var pulse = false
+
+    static let green = Color(red: 0.3, green: 0.85, blue: 0.45)
+    static let orange = Color(red: 1, green: 0.62, blue: 0.2)
 
     var body: some View {
+        let color: Color? = phone != nil ? Self.green : connecting != nil ? Self.orange : nil
         HStack(spacing: 8 * scale) {
-            Circle().fill(Color(red: 0.3, green: 0.85, blue: 0.45)).frame(width: 8 * scale, height: 8 * scale)
-                .shadow(color: Color(red: 0.3, green: 0.85, blue: 0.45), radius: 4 * scale)
-            Image(systemName: "iphone.gen3").font(.system(size: 15 * scale, weight: .semibold))
-            if let latency { Text("\(Int(latency.rounded())) ms").font(.display(14 * scale, .semibold)).monospacedDigit() }
+            ZStack {
+                Circle().strokeBorder(.white.opacity(color == nil ? 0.45 : 0), lineWidth: 1.5 * scale)
+                if let color {
+                    Circle().fill(color)
+                        .shadow(color: color, radius: 4 * scale)
+                        .opacity(phone == nil && pulse ? 0.35 : 1)
+                }
+            }
+            .frame(width: 9 * scale, height: 9 * scale)
+            Text("mController").font(.display(14 * scale, .semibold))
+            if let latency = phone?.latency {
+                Text("\(Int(latency.rounded())) ms").font(.display(14 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.6))
+            }
         }
-        .foregroundStyle(.white.opacity(0.9))
+        .foregroundStyle(.white.opacity(color == nil ? 0.55 : 0.9))
         .padding(.horizontal, 14 * scale)
         .frame(height: 36 * scale)
         .background(Capsule().fill(Color.white.opacity(0.1)))
-        .help(name)
+        .animation(.easeInOut(duration: 0.25), value: color)
+        .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true } }
+        .help(phone.map { T.format(.phoneConnected, $0.name) } ?? connecting.map { T.format(.phoneConnecting, $0) } ?? T.text(.phoneNone))
     }
 }

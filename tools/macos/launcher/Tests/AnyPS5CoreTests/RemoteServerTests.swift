@@ -37,6 +37,7 @@ final class EventLog: @unchecked Sendable {
     private(set) var disconnects = 0
     private(set) var latencies: [Double] = []
     private(set) var requests: [RemoteMessage] = []
+    private(set) var connecting: [String?] = []
 
     var events: RemoteServer.Events {
         RemoteServer.Events(
@@ -44,7 +45,8 @@ final class EventLog: @unchecked Sendable {
             connected: { name in self.lock.withLock { self.connected.append(name) } },
             disconnected: { self.lock.withLock { self.disconnects += 1 } },
             latency: { value in self.lock.withLock { self.latencies.append(value) } },
-            request: { message in self.lock.withLock { self.requests.append(message) } })
+            request: { message in self.lock.withLock { self.requests.append(message) } },
+            connecting: { name in self.lock.withLock { self.connecting.append(name) } })
     }
 
     func waitFor(_ condition: @escaping () -> Bool, timeout: TimeInterval = 3) async -> Bool {
@@ -98,6 +100,40 @@ final class RemoteServerTests: XCTestCase {
         server.publish(library)
         let received = try await phone.receive()
         XCTAssertEqual(received, library)
+    }
+
+    func testAPhoneIsConnectingFromItsHelloUntilItIsWelcomed() async throws {
+        let phone = phone()
+        try await phone.hello()
+        _ = try await phone.receive()
+        let asking = await log.waitFor { self.log.connecting == ["Pixel 8"] }
+        XCTAssertTrue(asking)
+        XCTAssertTrue(log.connected.isEmpty)
+        server.respond(to: log.pairings[0].id, allow: true)
+        _ = try await phone.receive()
+        let welcomed = await log.waitFor { self.log.connected == ["Pixel 8"] }
+        XCTAssertTrue(welcomed)
+    }
+
+    func testAPhoneThatGivesUpBeforeItIsWelcomedStopsConnecting() async throws {
+        let phone = phone()
+        try await phone.hello()
+        _ = try await phone.receive()
+        phone.close()
+        let gone = await log.waitFor { self.log.connecting == ["Pixel 8", nil] }
+        XCTAssertTrue(gone)
+        XCTAssertEqual(log.disconnects, 0)
+    }
+
+    func testARefusedPhoneStopsConnecting() async throws {
+        let phone = phone()
+        try await phone.hello()
+        _ = try await phone.receive()
+        let asked = await log.waitFor { !self.log.pairings.isEmpty }
+        XCTAssertTrue(asked)
+        server.respond(to: log.pairings[0].id, allow: false)
+        let gone = await log.waitFor { self.log.connecting == ["Pixel 8", nil] }
+        XCTAssertTrue(gone)
     }
 
     func testAPhoneNotWelcomedIsNotHeard() async throws {

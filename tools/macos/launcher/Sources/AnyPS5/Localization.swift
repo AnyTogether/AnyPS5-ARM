@@ -57,7 +57,7 @@ enum T {
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
-        case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed
+        case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
         case discordPresence, discordPresenceDetail
@@ -192,6 +192,9 @@ enum T {
         .phoneAllow: "İzin Ver",
         .phoneDeny: "Reddet",
         .phoneConnected: "%@ bağlandı",
+        .phoneConnecting: "%@ bağlanıyor…",
+        .phoneNone: "Bağlı telefon yok",
+        .phoneConnectedDetail: "mController hazır: telefonla oynayabilirsin",
         .phones: "Telefonlar",
         .phonesNone: "Henüz yok",
         .phoneRemove: "Kaldır",
@@ -426,6 +429,9 @@ enum T {
         .phoneAllow: "Allow",
         .phoneDeny: "Deny",
         .phoneConnected: "%@ connected",
+        .phoneConnecting: "%@ is connecting…",
+        .phoneNone: "No phone connected",
+        .phoneConnectedDetail: "mController is ready: play with the phone",
         .phones: "Phones",
         .phonesNone: "None yet",
         .phoneRemove: "Remove",
