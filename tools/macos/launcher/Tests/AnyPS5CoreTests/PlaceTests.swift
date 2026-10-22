@@ -41,6 +41,18 @@ final class PlaceTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: store.appendingPathComponent("Games/X-1.partial").path))
     }
 
+    func testLinksStayShortUnderPrivate() throws {
+        // A games folder given as /private/…: the bundle does not exist yet when its link is made.
+        let privateStore = URL(fileURLWithPath: "/private" + store.path)
+        guard FileManager.default.fileExists(atPath: privateStore.path) else { throw XCTSkip("no /private alias here") }
+        let bundle = privateStore.appendingPathComponent("Games/X-1.app")
+        let data = privateStore.appendingPathComponent("Data/X-1")
+        let staged = try partial("X-1")
+        try Installer.place(partial: URL(fileURLWithPath: "/private" + staged.path), bundle: bundle, data: data)
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: bundle.appendingPathComponent("Contents/Resources/game").path), "../../../../Data/X-1/game")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: data.appendingPathComponent("game/libs").path), "../../../Games/X-1.app/Contents/MacOS/libs")
+    }
+
     func testAnOldBundleKeepsItsSavesAndMovesOut() throws {
         let bundle = store.appendingPathComponent("Games/X-1.app")
         let old = try partial("old")

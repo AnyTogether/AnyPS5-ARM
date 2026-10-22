@@ -273,11 +273,28 @@ public final class Installer: @unchecked Sendable {
 
     /// `target` as a path relative to the folder `base`.
     static func relativePath(from base: URL, to target: URL) -> String {
-        let from = base.standardizedFileURL.pathComponents
-        let to = target.standardizedFileURL.pathComponents
+        let from = canonical(base)
+        let to = canonical(target)
         var shared = 0
         while shared < min(from.count, to.count), from[shared] == to[shared] { shared += 1 }
         return (Array(repeating: "..", count: from.count - shared) + to[shared...]).joined(separator: "/")
+    }
+
+    /// The path's components with its existing part's symlinks resolved, so /tmp and
+    /// /private/tmp compare equal; a part not made yet (a bundle before its move) is kept as is.
+    static func canonical(_ url: URL) -> [String] {
+        var existing = url.standardizedFileURL
+        var rest: [String] = []
+        while existing.path != "/", realpath(existing.path, nil) == nil {
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        var resolved = existing.path
+        if let real = realpath(existing.path, nil) {
+            resolved = String(cString: real)
+            free(real)
+        }
+        return URL(fileURLWithPath: resolved).pathComponents + rest
     }
 
     /// The game folder's items the game wrote (saves, trophies, data) move from `source` into
