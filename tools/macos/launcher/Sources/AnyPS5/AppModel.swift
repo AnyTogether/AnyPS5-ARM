@@ -8,7 +8,7 @@ struct Preferences: Codable, Equatable {
     enum Backdrop: String, Codable { case theme, image, video }
 
     var onboarded = false
-    var language = Language.system
+    var language = Language.english
     var theme = Theme.cosmic
     var accent: AccentColor?
     var backdrop = Backdrop.theme

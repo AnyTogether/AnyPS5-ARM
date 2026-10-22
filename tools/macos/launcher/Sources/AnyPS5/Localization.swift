@@ -20,15 +20,11 @@ enum Language: String, Codable, CaseIterable, Identifiable {
         case .english: return 1
         }
     }
-
-    static var system: Language {
-        Locale.preferredLanguages.first?.hasPrefix("tr") == true ? .turkish : .english
-    }
 }
 
 /// Every user-facing text, in both languages. `T.text(.key)` reads the current language.
 enum T {
-    nonisolated(unsafe) static var language: Language = .system
+    nonisolated(unsafe) static var language: Language = .english
 
     static func text(_ key: Key) -> String {
         let table = language == .turkish ? turkish : english
