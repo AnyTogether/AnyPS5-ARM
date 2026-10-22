@@ -36,7 +36,7 @@ T get(const std::uint8_t* bytes, std::size_t offset) {
     return value;
 }
 
-std::vector<std::uint8_t> fullPacket(std::uint32_t sequence) {
+std::vector<std::uint8_t> fullPacket(std::uint32_t sequence, std::uint64_t session = 99) {
     std::vector<std::uint8_t> bytes(80, 0);
     put<std::uint32_t>(bytes, 0, RemotePad::InputMagic);
     put<std::uint16_t>(bytes, 4, RemotePad::Version);
@@ -44,7 +44,7 @@ std::vector<std::uint8_t> fullPacket(std::uint32_t sequence) {
     put<std::uint32_t>(bytes, 8, sequence);
     put<std::uint32_t>(bytes, 12, 1);
     put<std::uint64_t>(bytes, 16, 123456);
-    put<std::uint64_t>(bytes, 24, 99);
+    put<std::uint64_t>(bytes, 24, session);
     put<std::uint32_t>(bytes, 32, 0x4000u | 0x0010u | 0x40000000u);
     bytes[36] = 255;
     bytes[37] = 0;
@@ -205,10 +205,24 @@ void loopbackChannel() {
     channel.Greet(start + std::chrono::milliseconds(200));
     require(!launcher.receive(), "no hello within a second of the last");
     channel.Greet(start + std::chrono::milliseconds(1100));
-    require(!launcher.receive(), "no hello once an input has arrived");
+    require(launcher.receive().has_value(), "the hello goes on after an input, so a restarted launcher finds the game again");
 }
 
-void greetsUntilTheFirstInput() {
+void newSessionStartsANewSequence() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    const auto now = std::chrono::steady_clock::now();
+    launcher.send(fullPacket(50000, 1), channel.Port());
+    require(pollFor(channel, now)->sequence == 50000, "the first session's input arrives");
+    launcher.send(fullPacket(1, 2), channel.Port());
+    const auto restarted = pollFor(channel, now);
+    require(restarted && restarted->sequence == 1, "a phone that starts again under a new session is not ignored");
+    launcher.send(fullPacket(0, 2), channel.Port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    require(!channel.Poll(now), "older inputs of the new session are still ignored");
+}
+
+void greetsEverySecond() {
     Peer launcher;
     RemotePad::Channel channel(launcher.port);
     const auto start = std::chrono::steady_clock::now();
@@ -285,8 +299,9 @@ int main() try {
     mergeTakesTheStrongerInput();
     encodesOutput();
     loopbackChannel();
-    greetsUntilTheFirstInput();
+    greetsEverySecond();
     olderSequenceIsIgnored();
+    newSessionStartsANewSequence();
     answerTellsHowLongTheInputWaited();
     remoteReleasedAfterSilence();
     environment();

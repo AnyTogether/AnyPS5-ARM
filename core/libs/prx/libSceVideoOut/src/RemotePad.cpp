@@ -51,6 +51,7 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     Input input;
     input.sequence = read<std::uint32_t>(bytes, 8);
     input.sentMicros = read<std::uint64_t>(bytes, 16);
+    input.session = read<std::uint64_t>(bytes, 24);
     auto& state = input.state;
     state.buttons = read<std::uint32_t>(bytes, 32) & KnownButtons;
     for (std::size_t axis = 0; axis < 4; ++axis) state.sticks[axis] = bytes[36 + axis];
@@ -172,7 +173,12 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
         const auto got = ::recvmsg(socket, &message, 0);
         if (got < 0) break;
         auto input = DecodeInput(std::span<const std::uint8_t>(buffer.data(), static_cast<std::size_t>(got)));
-        if (!input || (newest && !IsNewer(input->sequence, *newest))) continue;
+        if (!input) continue;
+        if (session != input->session) {
+            session = input->session;
+            newest.reset();
+        }
+        if (newest && !IsNewer(input->sequence, *newest)) continue;
         for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header)) {
             if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_TIMESTAMP) continue;
             timeval arrived{};
@@ -194,7 +200,7 @@ void Channel::Answer(const Input& last, const PadOutputState& output) {
 }
 
 void Channel::Greet(std::chrono::steady_clock::time_point now) {
-    if (newest || (greeted && now - *greeted < std::chrono::seconds(1))) return;
+    if (greeted && now - *greeted < std::chrono::seconds(1)) return;
     greeted = now;
     const auto bytes = EncodeHello();
     send(bytes.data(), bytes.size());

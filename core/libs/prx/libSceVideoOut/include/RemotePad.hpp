@@ -25,6 +25,7 @@ struct Input {
     std::uint32_t sequence = 0;
     std::uint64_t sentMicros = 0;
     std::uint32_t waitMicros = 0;
+    std::uint64_t session = 0;
     PadInputState state{};
 };
 
@@ -54,6 +55,7 @@ private:
     std::uint16_t port = 0;
     std::uint16_t launcherPort = 0;
     std::optional<std::uint32_t> newest;
+    std::optional<std::uint64_t> session;
     std::optional<std::chrono::steady_clock::time_point> greeted;
 };
 
