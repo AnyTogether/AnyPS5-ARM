@@ -134,6 +134,44 @@ final class RemoteServerTests: XCTestCase {
         first.close()
     }
 
+    func testSameDeviceTakesOverAnAbandonedConnection() async throws {
+        let known = devices.add(id: "phone-1", name: "Pixel 8")
+        let gone = phone()
+        try await gone.hello(key: known.key)
+        _ = try await gone.receive()
+        let back = phone()
+        try await back.hello(key: known.key)
+        guard case .welcome = try await back.receive() else { return XCTFail("the returning phone was not welcomed") }
+        do {
+            _ = try await gone.receive()
+            XCTFail("the abandoned connection stayed open")
+        } catch {}
+        XCTAssertEqual(server.connectedDevice, "Pixel 8")
+        back.close()
+    }
+
+    func testRestartsOnTheSamePortRightAway() async throws {
+        let known = devices.add(id: "phone-1", name: "Pixel 8")
+        let port = UInt16.random(in: 50000...59000)
+        let first = RemoteServer(name: "Test Mac", devices: devices, events: log.events, advertise: false, controlPort: port)
+        try first.start()
+        let phone = FakePhone(port: port)
+        try await phone.hello(key: known.key)
+        _ = try await phone.receive()
+        first.stop()
+        let second = RemoteServer(name: "Test Mac", devices: devices, events: log.events, advertise: false, controlPort: port)
+        XCTAssertNoThrow(try second.start())
+        second.stop()
+    }
+
+    func testBridgeUsesTheRequestedPort() throws {
+        let port = UInt16.random(in: 50000...59000)
+        let bridged = RemoteServer(name: "Test Mac", devices: devices, events: log.events, advertise: false, bridgePort: port)
+        try bridged.start()
+        XCTAssertEqual(bridged.bridgePort, port)
+        bridged.stop()
+    }
+
     func testWrongProtocolIsRejected() async throws {
         let phone = phone()
         try await phone.hello(version: 2)

@@ -22,6 +22,9 @@ public final class RemoteServer: @unchecked Sendable {
     public static let serviceType = "_anyps5-remote._tcp"
     /// The control port the launcher tries first; the phone's manual address field assumes it.
     public static let preferredPort: UInt16 = 47700
+    /// The game bridge port the launcher tries first, so a game started before the launcher
+    /// restarted still reaches it.
+    public static let preferredBridgePort: UInt16 = 47701
 
     public struct Events: Sendable {
         public var pairing: @Sendable (PairingRequest) -> Void
@@ -54,13 +57,15 @@ public final class RemoteServer: @unchecked Sendable {
     private let events: Events
     private let advertise: Bool
     private let requestedPort: UInt16
+    private let requestedBridgePort: UInt16
     let queue = DispatchQueue(label: "org.anyps5.remote")
     private var listener: NWListener?
     private var clients: [ObjectIdentifier: Client] = [:]
     /// The welcomed phone, or the one being asked about.
     var current: Client?
 
-    public init(name: String, devices: PairedDevices, events: Events, advertise: Bool = true, controlPort: UInt16 = 0) {
+    public init(name: String, devices: PairedDevices, events: Events, advertise: Bool = true, controlPort: UInt16 = 0, bridgePort: UInt16 = 0) {
+        self.requestedBridgePort = bridgePort
         self.name = name
         self.devices = devices
         self.events = events
@@ -70,7 +75,15 @@ public final class RemoteServer: @unchecked Sendable {
 
     /// Starts listening and returns once the control port is open.
     public func start() throws {
-        let parameters = NWParameters.tcp
+        // Keepalive notices a phone that vanished without closing; reuse lets a launcher that
+        // just quit with a phone connected listen on the same port again.
+        let tcp = NWProtocolTCP.Options()
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 5
+        tcp.keepaliveInterval = 2
+        tcp.keepaliveCount = 3
+        let parameters = NWParameters(tls: nil, tcp: tcp)
+        parameters.allowLocalEndpointReuse = true
         let webSocket = NWProtocolWebSocket.Options()
         webSocket.autoReplyPing = true
         parameters.defaultProtocolStack.applicationProtocols.insert(webSocket, at: 0)
@@ -102,7 +115,11 @@ public final class RemoteServer: @unchecked Sendable {
         try startRelay()
     }
 
+    /// Stops and returns once the control port is free again.
     public func stop() {
+        let cancelled = DispatchSemaphore(value: 0)
+        let stopping: NWListener? = queue.sync { listener }
+        stopping?.stateUpdateHandler = { state in if case .cancelled = state { cancelled.signal() } }
         queue.sync {
             listener?.cancel()
             listener = nil
@@ -111,6 +128,7 @@ public final class RemoteServer: @unchecked Sendable {
             current = nil
             stopRelay()
         }
+        if stopping != nil { _ = cancelled.wait(timeout: .now() + 2) }
     }
 
     public var controlPort: UInt16? { queue.sync { listener?.port?.rawValue } }
@@ -170,7 +188,12 @@ public final class RemoteServer: @unchecked Sendable {
         switch message {
         case .hello(let version, let deviceID, let deviceName, let key):
             guard version == RemoteMessage.protocolVersion else { return reject(client, "protocol") }
-            if let current, current !== client { return reject(client, "busy") }
+            if let current, current !== client {
+                // The same phone back on a new connection: the old one is dead, it takes over.
+                guard current.deviceID == deviceID else { return reject(client, "busy") }
+                self.current = nil
+                current.connection.cancel()
+            }
             client.deviceID = deviceID
             client.name = deviceName
             current = client
@@ -252,6 +275,7 @@ public final class RemoteServer: @unchecked Sendable {
         loopback.sin_family = sa_family_t(AF_INET)
         loopback.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         loopback.sin_addr.s_addr = inet_addr("127.0.0.1")
+        loopback.sin_port = requestedBridgePort.bigEndian
         guard phone >= 0, bridge >= 0, RemoteServer.bind(phone, &any), RemoteServer.bind(bridge, &loopback) else {
             if phone >= 0 { close(phone) }
             if bridge >= 0 { close(bridge) }

@@ -550,8 +550,8 @@ final class AppModel: ObservableObject {
             disconnected: { Task { @MainActor in withAnimation(Motion.overlay) { self.phone = nil } } },
             latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } })
         // A fixed port lets a phone on a network without Bonjour connect by address alone.
-        for port in [RemoteServer.preferredPort, 0] {
-            let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port)
+        for (port, bridge) in [(RemoteServer.preferredPort, RemoteServer.preferredBridgePort), (0, 0)] {
+            let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port, bridgePort: bridge)
             if (try? server.start()) != nil {
                 remote = server
                 return
