@@ -61,6 +61,7 @@ enum T {
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
+        case discordPresence, discordPresenceDetail
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -187,6 +188,8 @@ enum T {
         .confirm: "Onayla",
         .controls: "Tuş Atamaları",
         .trophies: "Kupalar",
+        .discordPresence: "Discord'da oynadığın oyunu göster",
+        .discordPresenceDetail: "Discord açıksa profilinde oyunun adı ve süresi görünür",
         .advanced: "Gelişmiş",
         .advancedDetail: "Çubuklar, fare, klavye, önbellek, paylaşım",
         .advancedTitle: "Gelişmiş Ayarlar",
@@ -402,6 +405,8 @@ enum T {
         .confirm: "Confirm",
         .controls: "Controls",
         .trophies: "Trophies",
+        .discordPresence: "Show the game you play on Discord",
+        .discordPresenceDetail: "With Discord open, your profile shows the game and for how long",
         .advanced: "Advanced",
         .advancedDetail: "Sticks, mouse, keyboard, cache, sharing",
         .advancedTitle: "Advanced Settings",

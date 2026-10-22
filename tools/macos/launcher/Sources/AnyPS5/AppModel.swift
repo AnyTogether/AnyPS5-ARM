@@ -17,6 +17,8 @@ struct Preferences: Codable, Equatable {
     var reducedMotion = false
     var sounds = true
     var hideWhilePlaying = false
+    /// The running game on the user's Discord profile; nil means on.
+    var discordPresence: Bool?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
@@ -123,6 +125,7 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
+    private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
@@ -469,6 +472,7 @@ final class AppModel: ObservableObject {
             }
             NSApp.yieldActivation(to: app)
             app.activate()
+            if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }
@@ -510,6 +514,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        discord.clear()
         loadTrophies(running.game, again: true)
         diagnose(running.game)
         trophyWatch?.cancel()
@@ -524,6 +529,8 @@ final class AppModel: ObservableObject {
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    func discordOff() { discord.clear() }
 
     // MARK: Trophy notifications
 

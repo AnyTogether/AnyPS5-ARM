@@ -102,6 +102,10 @@ extension AppModel {
             PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2", kind: .toggle(preferences.sounds) { [weak self] value in self?.preferences.sounds = value }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
+            PanelRow(id: "discord", title: T.text(.discordPresence), detail: T.text(.discordPresenceDetail), symbol: "person.2.wave.2", kind: .toggle(preferences.discordPresence ?? true) { [weak self] value in
+                self?.preferences.discordPresence = value
+                if !value { self?.discordOff() }
+            }),
         ]
         if rosettaMissing {
             behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstall), detail: T.text(.rosettaMissing), symbol: "cpu", kind: .action(destructive: false) { [weak self] in self?.installRosetta() }))
