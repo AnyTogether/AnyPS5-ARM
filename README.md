@@ -166,6 +166,21 @@ The **library** button shows every game as a grid. **Settings** hold:
 
 The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, or a game controller (D-pad, ✕, ○, △). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
 
+### Your phone as a controller
+
+**AnyPS5 Remote** ([`mobile/`](mobile/README.md), Android and iOS) turns a phone on the same Wi-Fi into a DualSense. It finds the launcher by itself; the first time, the Mac asks once and both show the same code.
+
+- **Launcher on the phone:** the Mac's games with their icons over the selected one's background. Picking a game on the phone picks it on the Mac too; **Play**, **Back to Game** and **Close Game** work from the phone, and the arrows, ✕, ○ and ≡ move around the launcher's own screen.
+- **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad, any of them at once, with the latency shown. It takes over as soon as a game starts.
+- **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
+- The phone uses the launcher's language (English by default, or Turkish).
+
+| Launcher mode | The pad | The Mac with a phone connected |
+|---|---|---|
+| ![The phone in launcher mode](docs/screenshots/phone-launcher.jpg) | ![The phone pad](docs/screenshots/phone-pad.jpg) | ![The launcher with a phone connected](docs/screenshots/launcher-phone.jpg) |
+
+Games unlocked before phone support need **Update and Play** once, so they carry the engine that reads the phone.
+
 ## Games on a Mac
 
 | Hollow Knight: Silksong | Plants vs. Zombies: Replanted | Dreaming Sarah | AnyPS5 Breakout |
@@ -207,6 +222,18 @@ AnyPS5-ARM is the macOS port of [AnyPS5](https://github.com/boykopovar/AnyPS5). 
 [Building from source](docs/user/GUIDE.md#building-from-source) · [macOS port changes](docs/dev/MACOS_PORT.md) · [Input mapping](docs/user/INPUT_MAPPING.md) · [Technical debt](docs/dev/TechnicalDebt.md)
 
 Built on [boykopovar/AnyPS5](https://github.com/boykopovar/AnyPS5) and the community macOS port [mugurc/AnyPS5 `macos-port`](https://github.com/mugurc/AnyPS5/tree/macos-port).
+
+## Branches
+
+Each branch is its own project, with its own README:
+
+| Branch | What it holds |
+|---|---|
+| [`main`](https://github.com/utkuhalis/AnyPS5-ARM/tree/main) | The whole project: the engine, the launcher and the phone app. Releases are made from it. |
+| [`launcher`](https://github.com/utkuhalis/AnyPS5-ARM/tree/launcher) | The launcher (AnyPS5.app) only. |
+| [`mobile-controller`](https://github.com/utkuhalis/AnyPS5-ARM/tree/mobile-controller) | The phone app (AnyPS5 Remote) only. |
+| [`rosetta`](https://github.com/utkuhalis/AnyPS5-ARM/tree/rosetta) | The engine only, the way it runs today: x86-64 code under Rosetta 2. |
+| [`native-arm64`](https://github.com/utkuhalis/AnyPS5-ARM/tree/native-arm64) | The engine running games as native arm64 code, without Rosetta (experimental). |
 
 ## Disclaimer
 
