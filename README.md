@@ -175,9 +175,17 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
 - The phone uses the launcher's language (English by default, or Turkish).
 
-| Launcher mode | The pad | The Mac with a phone connected |
-|---|---|---|
-| ![The phone in launcher mode](docs/screenshots/phone-launcher.jpg) | ![The phone pad](docs/screenshots/phone-pad.jpg) | ![The launcher with a phone connected](docs/screenshots/launcher-phone.jpg) |
+| The launcher, with the phone in the corner | Silksong played on the phone |
+|---|---|
+| ![The launcher with the phone connected](docs/screenshots/phone-live-launcher.jpg) | ![Silksong played with the phone](docs/screenshots/phone-live-silksong.jpg) |
+
+<p align="center"><a href="https://github.com/utkuhalis/AnyPS5-ARM/raw/main/docs/videos/phone-demo.mp4"><b>▶ Video: the launcher and Silksong driven from the phone</b></a> (1:22, the phone's own screen in the corner, in sync)</p>
+
+| Launcher mode | The pad |
+|---|---|
+| ![The phone in launcher mode](docs/screenshots/phone-launcher.jpg) | ![The phone pad](docs/screenshots/phone-pad.jpg) |
+
+[⬇ Download the Android app](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) (APK; on the phone, allow installing from your browser when asked).
 
 Games unlocked before phone support need **Update and Play** once, so they carry the engine that reads the phone.
 
