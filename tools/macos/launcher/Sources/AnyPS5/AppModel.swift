@@ -105,7 +105,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var progress: [String: (Installer.Step, Double)] = [:]
     @Published private(set) var queue: [String] = []
     @Published private(set) var failures: [String: String] = [:]
-    @Published private(set) var running: (game: Game, app: NSRunningApplication)?
+    /// The game playing now, by the process the launcher started.
+    @Published private(set) var running: (game: Game, pid: pid_t)?
     /// The game from the press of Play until its first window shows.
     @Published private(set) var starting: Game?
     @Published private(set) var sizes: [String: Int64] = [:]
@@ -415,7 +416,7 @@ final class AppModel: ObservableObject {
         case .installed: play(game)
         case .locked, .failed: unlock(game)
         case .installing, .queued: cancelUnlock(game)
-        case .running: running?.app.activate()
+        case .running: running.flatMap { NSRunningApplication(processIdentifier: $0.pid) }?.activate()
         case .starting: break
         case .unreadable: show(T.text(.unreadableDump), symbol: "xmark.octagon")
         }
@@ -424,36 +425,26 @@ final class AppModel: ObservableObject {
     func play(_ game: Game) {
         guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        configuration.createsNewApplicationInstance = false
         let settings = settings(for: game)
         let inputFile = AppModel.inputFile(for: game)
         // Without the file the game keeps the engine's built-in keys.
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+        let environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
-        NSWorkspace.shared.openApplication(at: bundle, configuration: configuration) { app, error in
-            Task { @MainActor in
-                guard self.starting?.id == game.id else {
-                    app?.forceTerminate()
-                    return
-                }
-                if let app {
-                    self.running = (game, app)
-                    self.watchTrophies(game)
-                    self.watchForExit(of: app.processIdentifier)
-                    self.watchForWindow(of: app)
-                } else {
-                    withAnimation(Motion.overlay) { self.starting = nil }
-                    self.show(T.text(.startFailed) + (error.map { ": " + $0.localizedDescription } ?? ""), symbol: "exclamationmark.triangle.fill")
-                }
-            }
+        do {
+            let pid = try Installer.launch(bundle: bundle, environment: environment)
+            running = (game, pid)
+            watchTrophies(game)
+            watchForExit(of: pid)
+            watchForWindow(of: pid)
+        } catch {
+            withAnimation(Motion.overlay) { starting = nil }
+            show(T.text(.startFailed) + ": " + error.localizedDescription, symbol: "exclamationmark.triangle.fill")
         }
     }
 
@@ -461,9 +452,8 @@ final class AppModel: ObservableObject {
     /// shaders compile first), so the splash stays up until the game's first window shows.
     /// macOS does not let an app that shows its window that late take the front by itself, so
     /// the launcher hands it over; a window left behind the launcher gets no frames presented.
-    private func watchForWindow(of app: NSRunningApplication) {
+    private func watchForWindow(of pid: pid_t) {
         startWatch?.cancel()
-        let pid = app.processIdentifier
         startWatch = Task {
             let deadline = Date().addingTimeInterval(240)
             while !Task.isCancelled, Date() < deadline, Self.isAlive(pid), !Self.hasWindow(pid) {
@@ -474,8 +464,10 @@ final class AppModel: ObservableObject {
                 applicationEnded(pid)
                 return
             }
-            NSApp.yieldActivation(to: app)
-            app.activate()
+            if let app = NSRunningApplication(processIdentifier: pid) {
+                NSApp.yieldActivation(to: app)
+                app.activate()
+            }
             if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
@@ -512,11 +504,11 @@ final class AppModel: ObservableObject {
         startWatch?.cancel()
         Sounds.shared.play(.back)
         withAnimation(Motion.overlay) { starting = nil }
-        running?.app.forceTerminate()
+        if let pid = running?.pid { kill(pid, SIGKILL) }
     }
 
     private func applicationEnded(_ pid: pid_t?) {
-        guard let running, running.app.processIdentifier == pid else { return }
+        guard let running, running.pid == pid else { return }
         self.running = nil
         discord.clear()
         loadTrophies(running.game, again: true)

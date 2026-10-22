@@ -36,6 +36,17 @@ public struct InstallRecord: Codable, Sendable {
     public let date: Date
 }
 
+final class LockedProcesses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var processes: [ObjectIdentifier: Process] = [:]
+
+    func withLock<T>(_ body: (inout [ObjectIdentifier: Process]) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&processes)
+    }
+}
+
 public struct InstallError: LocalizedError {
     public let message: String
     public init(_ message: String) { self.message = message }
@@ -78,6 +89,35 @@ public final class Installer: @unchecked Sendable {
         let name = game.titleID.filter { $0.isLetter || $0.isNumber } + "-" + String(hash & 0xFF_FFFF, radix: 16)
         return root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Games").appendingPathComponent(name + ".app")
     }
+
+    /// Starts an installed game by running its launch script as the launcher's own child, with
+    /// `environment` over the launcher's. Opening the bundle through LaunchServices instead has
+    /// macOS assess all of it first ("Verifying…"), which reads every file of the game each
+    /// time the bundle changed.
+    public static func launch(bundle: URL, environment: [String: String]) throws -> pid_t {
+        let process = Process()
+        process.executableURL = bundle.appendingPathComponent("Contents/MacOS/launch")
+        var inherited = ProcessInfo.processInfo.environment
+        // LaunchServices names the launcher in these; the game is an app of its own.
+        for key in ["__CFBundleIdentifier", "XPC_SERVICE_NAME", "XPC_FLAGS"] { inherited[key] = nil }
+        process.environment = inherited.merging(environment) { _, game in game }
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let handle = ObjectIdentifier(process)
+        process.terminationHandler = { _ in running.withLock { $0[handle] = nil } }
+        running.withLock { $0[handle] = process }
+        do {
+            try process.run()
+        } catch {
+            running.withLock { $0[handle] = nil }
+            throw error
+        }
+        return process.processIdentifier
+    }
+
+    /// Started games, kept until they end so that Foundation reaps them.
+    private static let running = LockedProcesses()
 
     /// The work folders and half-made bundles an interrupted unlock left in the store.
     public static func removeLeftovers(root: URL) {
