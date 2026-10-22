@@ -153,6 +153,25 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         }
     }
 
+    /// The message's type, as its JSON names it.
+    public var kind: String {
+        switch self {
+        case .hello: return "hello"
+        case .pairing: return "pairing"
+        case .welcome: return "welcome"
+        case .rejected(let reason): return "rejected(\(reason))"
+        case .latency: return "latency"
+        case .library(let games, _, let running, let language): return "library(\(games.count) games, running \(running != nil), \(language))"
+        case .art(_, let icon, let background): return "art(icon \(icon?.count ?? 0), background \(background?.count ?? 0))"
+        case .wantArt: return "wantArt"
+        case .command(let name): return "command(\(name))"
+        case .select: return "select"
+        case .launch: return "launch"
+        case .close: return "close"
+        case .home: return "home"
+        }
+    }
+
     /// The message as the text of one WebSocket frame.
     public var text: String {
         (try? JSONEncoder().encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
