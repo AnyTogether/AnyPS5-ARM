@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../connection/session.dart';
 import '../protocol/messages.dart';
 import '../strings.dart';
+import 'about_sheet.dart';
 
 /// The launcher on the phone: the Mac's games over the selected one's background, the way the
 /// launcher shows them. Picking a game picks it on the Mac too; the arrows, ✕, ○ and ≡ at the
@@ -110,7 +111,20 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (widget.status != null) widget.status!,
+                  Row(
+                    children: [
+                      if (widget.status != null) widget.status!,
+                      const Spacer(),
+                      IconButton(
+                        tooltip: texts.about,
+                        onPressed: () => showAbout(context),
+                        icon: const Icon(
+                          Icons.info_outline_rounded,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 14),
                   SizedBox(
                     height: 92,

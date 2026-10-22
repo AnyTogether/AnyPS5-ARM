@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../strings.dart';
+import '../version.dart';
+import 'about_sheet.dart';
 
 /// The first start: what the app is, and the one button that begins the setup.
 class WelcomeScreen extends StatelessWidget {
@@ -67,6 +69,12 @@ class WelcomeScreen extends StatelessWidget {
                     ),
                   ),
                   child: Text(texts.start),
+                ),
+                const SizedBox(height: 22),
+                TextButton(
+                  onPressed: () => showAbout(context),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white38),
+                  child: Text('${texts.madeBy} $author  ·  ${texts.about}'),
                 ),
               ],
             ),

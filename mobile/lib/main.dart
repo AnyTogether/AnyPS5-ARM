@@ -14,6 +14,7 @@ import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
 import 'ui/welcome_screen.dart';
+import 'version.dart';
 
 /// The control port the launcher listens on when it can; a typed address uses it.
 const launcherPort = 47700;
@@ -21,9 +22,6 @@ const launcherPort = 47700;
 /// A launcher to use instead of searching (host:port), given at build time for checks that must
 /// not reach another launcher on the network.
 const fixedLauncher = String.fromEnvironment('ANYPS5_LAUNCHER');
-
-/// The version in pubspec.yaml, shown faintly in a corner so an old install is easy to spot.
-const appVersion = '1.1.0';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

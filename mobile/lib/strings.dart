@@ -44,6 +44,11 @@ class Strings {
   String get noGames => _text('noGames');
   String get playing => _text('playing');
   String get trophies => _text('trophies');
+  String get about => _text('about');
+  String get aboutText => _text('aboutText');
+  String get madeBy => _text('madeBy');
+  String get sourceCode => _text('sourceCode');
+  String get builtOn => _text('builtOn');
 
   static const _english = {
     'welcomeTitle': 'Your phone is a DualSense',
@@ -78,6 +83,12 @@ class Strings {
     'noGames': 'No games on the Mac yet',
     'playing': 'Playing',
     'trophies': 'Trophies',
+    'about': 'About',
+    'aboutText':
+        'Your phone as a DualSense for the PS5 games AnyPS5 runs on your Mac.',
+    'madeBy': 'Made by',
+    'sourceCode': 'Source code',
+    'builtOn': 'Built on AnyPS5',
   };
 
   static const _turkish = {
@@ -113,6 +124,11 @@ class Strings {
     'noGames': "Mac'te henüz oyun yok",
     'playing': 'Oynanıyor',
     'trophies': 'Kupalar',
+    'about': 'Hakkında',
+    'aboutText': "Mac'te AnyPS5 ile çalışan PS5 oyunları için telefonun DualSense olsun.",
+    'madeBy': 'Geliştiren',
+    'sourceCode': 'Kaynak kodu',
+    'builtOn': 'AnyPS5 üzerine kurulu',
   };
 }
 
