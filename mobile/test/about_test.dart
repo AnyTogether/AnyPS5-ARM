@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('the welcome screen names the author and opens About', (tester) async {
+  testWidgets('the welcome screen names the author and opens About', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1600, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'connection/discovery.dart';
+import 'connection/device_name.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
@@ -32,7 +33,10 @@ Future<void> main() async {
     ]);
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     final preferences = await SharedPreferences.getInstance();
-    runApp(RemoteApp(preferences: preferences));
+    final name = await deviceName(
+      fallback: Platform.isIOS ? 'iPhone' : 'Android',
+    );
+    runApp(RemoteApp(preferences: preferences, deviceName: name));
   } catch (error) {
     // Anything that fails before the first frame is shown, never a black screen.
     runApp(StartupError(error: error));
@@ -64,9 +68,16 @@ class StartupError extends StatelessWidget {
 }
 
 class RemoteApp extends StatefulWidget {
-  const RemoteApp({super.key, required this.preferences});
+  const RemoteApp({
+    super.key,
+    required this.preferences,
+    required this.deviceName,
+  });
 
   final SharedPreferences preferences;
+
+  /// What the Mac calls this phone.
+  final String deviceName;
 
   @override
   State<RemoteApp> createState() => _RemoteAppState();
@@ -77,7 +88,7 @@ class _RemoteAppState extends State<RemoteApp> {
 
   late final Session _session = Session(
     preferences: widget.preferences,
-    deviceName: Platform.isIOS ? 'iPhone' : 'Android',
+    deviceName: widget.deviceName,
   );
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
