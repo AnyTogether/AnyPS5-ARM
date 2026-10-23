@@ -168,14 +168,17 @@ The **library** button shows every game as a grid. **Settings** hold:
 
 ### Getting around
 
-The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, `Q` / `E` (L1 / R1) for the previous or next game, also inside a game's panels, or a game controller (D-pad, ✕, ○, △, L1, R1). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
+The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, `Q` / `E` (L1 / R1) for the previous or next game, also inside a game's panels, or a game controller (D-pad, ✕, ○, △, L1, R1; its PS button brings the launcher in front of the game, and back). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
 
 ### Your phone as a controller
 
 **AnyPS5 Remote** ([`mobile/`](mobile/README.md), Android and iOS) turns a phone on the same Wi-Fi into a DualSense. It finds the launcher by itself; the first time, the Mac asks once and both show the same code.
 
 - **Launcher on the phone:** the Mac's games with their icons over the selected one's background. Picking a game on the phone picks it on the Mac too; **Play**, **Back to Game** and **Close Game** work from the phone, and the arrows, ✕, ○ and ≡ move around the launcher's own screen.
-- **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad, any of them at once, with the latency shown. It takes over as soon as a game starts.
+- **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad (slide to move the touch, tap to click), any of them at once, with the latency shown. It takes over as soon as a game starts.
+- **Up to four players:** four phones, and the Mac's game controllers, are four DualSenses for games with local co-op. Each becomes the next player the first time a button is pressed on it in the game; the launcher shows every connected phone with its player number. A new phone can pair while others are connected.
+- **What the Mac is doing:** while a game is unlocked, updated or started, the phone shows the step, a bar that fills and the time it has taken.
+- **Trophies:** a trophy earned in the game drops in at the top of the phone too, and the phone buzzes.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
 - **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
 - **Motion:** the phone's accelerometer and gyroscope are the DualSense's motion sensors, for games that tilt or aim with them.
