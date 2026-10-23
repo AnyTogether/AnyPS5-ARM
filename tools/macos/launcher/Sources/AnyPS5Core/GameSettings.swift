@@ -32,6 +32,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var tuning: InputTuning?
     /// False turns off the shader and pipeline caches (ANYPS5_NO_SHADER_CACHE).
     public var shaderCache: Bool?
+    /// The phone's pad layout for this game, as the phone sent it (its JSON); nil for the default.
+    public var phoneLayout: String?
 
     public init() {}
 

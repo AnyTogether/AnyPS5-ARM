@@ -746,7 +746,7 @@ final class AppModel: ObservableObject {
         }
         let set = trophies[game.id]
         return RemoteGame(id: game.id, name: game.name, state: state, trophies: set.map { "\($0.unlockedCount)/\($0.trophies.count)" },
-                          art: RemoteArt.tag(icon: game.icon, background: game.background))
+                          art: RemoteArt.tag(icon: game.icon, background: game.background), layout: settings(for: game).phoneLayout)
     }
 
     /// The phone in launcher mode: it moves around the launcher, picks, starts and stops games.
@@ -787,6 +787,9 @@ final class AppModel: ObservableObject {
             if starting != nil { cancelStart() } else { running?.app.forceTerminate() }
         case .home:
             bringLauncherFront()
+        case .saveLayout(let id, let layout):
+            guard let game = games.first(where: { $0.id == id }) else { return }
+            update(game) { $0.phoneLayout = layout }
         default:
             break
         }

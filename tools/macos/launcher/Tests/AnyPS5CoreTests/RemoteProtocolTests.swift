@@ -46,6 +46,29 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(games?.first?["name"] as? String, "DOOM")
     }
 
+    func testAGameCarriesThePhoneLayoutSavedForIt() throws {
+        let layout = #"{"cross":{"x":0.8,"y":0.6,"scale":1.2}}"#
+        let game = RemoteGame(id: "g", name: "DOOM", state: .installed, trophies: nil, art: "a", layout: layout)
+        let message = RemoteMessage.library(games: [game], selected: nil, running: nil, language: "en")
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let older = #"{"type":"library","games":[{"id":"g","name":"DOOM","state":"installed","art":"a"}],"language":"en"}"#
+        guard case .library(let games, _, _, _) = try JSONDecoder().decode(RemoteMessage.self, from: Data(older.utf8)) else { return XCTFail("no library") }
+        XCTAssertNil(games.first?.layout)
+    }
+
+    func testThePhoneSavesALayout() throws {
+        let message = RemoteMessage.saveLayout(id: "g", layout: #"{"r1":{"hidden":true}}"#)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        XCTAssertEqual(RemoteMessage.saveLayout(id: "g", layout: nil), try JSONDecoder().decode(RemoteMessage.self, from: Data(#"{"type":"saveLayout","id":"g"}"#.utf8)))
+    }
+
+    func testGameSettingsKeepAPhoneLayoutAndReadOlderFiles() throws {
+        var settings = GameSettings()
+        settings.phoneLayout = #"{"square":{"opacity":0.5}}"#
+        XCTAssertEqual(try JSONDecoder().decode(GameSettings.self, from: try JSONEncoder().encode(settings)).phoneLayout, settings.phoneLayout)
+        XCTAssertNil(try JSONDecoder().decode(GameSettings.self, from: try JSONEncoder().encode(GameSettings())).phoneLayout)
+    }
+
     func testUnknownTypeFailsToDecode() {
         XCTAssertThrowsError(try JSONDecoder().decode(RemoteMessage.self, from: Data(#"{"type":"bogus"}"#.utf8)))
     }

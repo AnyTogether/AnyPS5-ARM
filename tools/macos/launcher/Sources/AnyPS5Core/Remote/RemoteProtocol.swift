@@ -12,13 +12,16 @@ public struct RemoteGame: Codable, Equatable, Sendable {
     public var state: State
     public var trophies: String?
     public var art: String
+    /// The phone's pad layout saved for this game (the phone's own JSON), nil for the default.
+    public var layout: String?
 
-    public init(id: String, name: String, state: State, trophies: String?, art: String) {
+    public init(id: String, name: String, state: State, trophies: String?, art: String, layout: String? = nil) {
         self.id = id
         self.name = name
         self.state = state
         self.trophies = trophies
         self.art = art
+        self.layout = layout
     }
 }
 
@@ -49,12 +52,14 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     case close
     /// The PS button: the launcher comes in front of the game.
     case home
+    /// The phone's pad layout for a game, kept with the game's settings; nil goes back to the default.
+    case saveLayout(id: String, layout: String?)
 
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds
-        case games, selected, running, language, id, icon, background, name
+        case games, selected, running, language, id, icon, background, name, layout
     }
 
     public init(from decoder: Decoder) throws {
@@ -94,6 +99,8 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             self = .close
         case "home":
             self = .home
+        case "saveLayout":
+            self = .saveLayout(id: try values.decode(String.self, forKey: .id), layout: try values.decodeIfPresent(String.self, forKey: .layout))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "unknown message type \(other)")
         }
@@ -150,6 +157,10 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             try values.encode("close", forKey: .type)
         case .home:
             try values.encode("home", forKey: .type)
+        case .saveLayout(let id, let layout):
+            try values.encode("saveLayout", forKey: .type)
+            try values.encode(id, forKey: .id)
+            try values.encode(layout, forKey: .layout)
         }
     }
 
@@ -169,6 +180,7 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .launch: return "launch"
         case .close: return "close"
         case .home: return "home"
+        case .saveLayout(_, let layout): return "saveLayout(\(layout?.count ?? 0) bytes)"
         }
     }
 

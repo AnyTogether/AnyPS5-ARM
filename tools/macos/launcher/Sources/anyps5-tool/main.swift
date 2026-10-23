@@ -120,10 +120,11 @@ case "remote":
     let shownLanguage = language
     let selected = Locked<String?>(games.first?.id)
     let playing = Locked<String?>(nil)
+    let layouts = Locked<[String: String]>([:])
     @Sendable func tell() {
         let list = games.map { game in
             RemoteGame(id: game.id, name: game.name, state: playing.value == game.id ? .running : .installed, trophies: nil,
-                       art: RemoteArt.tag(icon: game.icon, background: game.background))
+                       art: RemoteArt.tag(icon: game.icon, background: game.background), layout: layouts.value[game.id])
         }
         server.value?.publish(.library(games: list, selected: selected.value, running: playing.value, language: shownLanguage))
     }
@@ -157,6 +158,7 @@ case "remote":
                 selected.value = id
                 playing.value = id
             case .close: playing.value = nil
+            case .saveLayout(let id, let layout): layouts.value[id] = layout
             default: return
             }
             tell()
