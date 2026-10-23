@@ -664,7 +664,8 @@ final class AppModel: ObservableObject {
             pairing: { request in Task { @MainActor in self.askToPair(request) } },
             connected: { name in Task { @MainActor in
                 withAnimation(Motion.overlay) {
-                    self.phone = (name, nil)
+                    // With several phones the first one's name and latency stand for them all.
+                    if self.phone == nil { self.phone = (name, nil) }
                     self.phoneConnecting = nil
                 }
                 self.phones = self.pairedDevices.all
@@ -676,7 +677,9 @@ final class AppModel: ObservableObject {
                 self.phoneLibrary = nil
                 self.tellPhone()
             } },
-            disconnected: { Task { @MainActor in withAnimation(Motion.overlay) { self.phone = nil } } },
+            disconnected: { Task { @MainActor in
+                withAnimation(Motion.overlay) { self.phone = self.remote?.connectedDevice.map { ($0, nil) } }
+            } },
             latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } },
             request: { message in Task { @MainActor in self.phoneAsked(message) } },
             connecting: { name in Task { @MainActor in

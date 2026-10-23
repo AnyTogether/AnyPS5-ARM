@@ -18,7 +18,8 @@ public struct PairingRequest: Identifiable, Sendable {
 
 /// The launcher's side of the phone controller: it advertises itself on the local network,
 /// pairs phones over a WebSocket control channel and tells the phone where to send its pad.
-/// One phone is connected at a time. Everything runs on one private queue.
+/// Up to four phones are connected at a time, one per player, each with its own bridge to the
+/// game; one new phone is asked about at a time. Everything runs on one private queue.
 public final class RemoteServer: @unchecked Sendable {
     /// `log stream --predicate 'subsystem == "org.anyps5.launcher"'` shows what the phone and the
     /// launcher tell each other.
@@ -60,6 +61,10 @@ public final class RemoteServer: @unchecked Sendable {
         var name: String?
         var pending: PairingRequest?
         var session: UInt64?
+        /// Which bridge, and so which of the game's phone channels, carries this phone's pad.
+        var slot: Int?
+        /// Where the phone sends its pad from.
+        var address: sockaddr_storage?
 
         init(connection: NWConnection) { self.connection = connection }
     }
@@ -73,8 +78,11 @@ public final class RemoteServer: @unchecked Sendable {
     let queue = DispatchQueue(label: "org.anyps5.remote")
     private var listener: NWListener?
     private var clients: [ObjectIdentifier: Client] = [:]
-    /// The welcomed phone, or the one being asked about.
-    var current: Client?
+    /// The welcomed phones, by slot.
+    var phones: [Client] = []
+    /// The phone being asked about.
+    var asking: Client?
+    public static let maxPhones = 4
 
     public init(name: String, devices: PairedDevices, events: Events, advertise: Bool = true, controlPort: UInt16 = 0, bridgePort: UInt16 = 0) {
         self.requestedBridgePort = bridgePort
@@ -137,7 +145,8 @@ public final class RemoteServer: @unchecked Sendable {
             listener = nil
             for client in clients.values { client.connection.cancel() }
             clients = [:]
-            current = nil
+            phones = []
+            asking = nil
             stopRelay()
         }
         if stopping != nil { _ = cancelled.wait(timeout: .now() + 2) }
@@ -145,14 +154,19 @@ public final class RemoteServer: @unchecked Sendable {
 
     public var controlPort: UInt16? { queue.sync { listener?.port?.rawValue } }
 
-    public var connectedDevice: String? { queue.sync { current?.session != nil ? current?.name : nil } }
+    /// The first welcomed phone's name.
+    public var connectedDevice: String? { queue.sync { phones.first?.name } }
+
+    /// Every welcomed phone's name, by slot.
+    public var connectedDevices: [String] { queue.sync { phones.compactMap(\.name) } }
 
     /// The user's answer to a pairing request.
     public func respond(to id: UUID, allow: Bool) {
         queue.async { [self] in
-            guard let client = current, let request = client.pending, request.id == id, let deviceID = client.deviceID else { return }
+            guard let client = asking, let request = client.pending, request.id == id, let deviceID = client.deviceID else { return }
             client.pending = nil
             if allow {
+                asking = nil
                 let device = devices.add(id: deviceID, name: request.deviceName)
                 welcome(client, key: device.key)
             } else {
@@ -205,64 +219,72 @@ public final class RemoteServer: @unchecked Sendable {
         switch message {
         case .hello(let version, let deviceID, let deviceName, let key):
             guard version == RemoteMessage.protocolVersion else { return reject(client, "protocol") }
-            if let current, current !== client {
-                // The same phone back on a new connection: the old one is dead, it takes over.
-                guard current.deviceID == deviceID else { return reject(client, "busy") }
-                self.current = nil
-                current.connection.cancel()
+            // The same phone back on a new connection: the old one is dead, it takes over.
+            if let old = (phones + [asking].compactMap { $0 }).first(where: { $0 !== client && $0.deviceID == deviceID }) {
+                phones.removeAll { $0 === old }
+                if asking === old { asking = nil }
+                old.connection.cancel()
             }
             client.deviceID = deviceID
             client.name = deviceName
-            current = client
-            events.connecting(deviceName)
             if let key, let device = devices.device(id: deviceID, key: key) {
+                guard phones.count < RemoteServer.maxPhones else { return reject(client, "busy") }
+                events.connecting(deviceName)
                 welcome(client, key: device.key)
             } else {
+                guard asking == nil, phones.count < RemoteServer.maxPhones else { return reject(client, "busy") }
+                asking = client
+                events.connecting(deviceName)
                 let request = PairingRequest(id: UUID(), deviceName: deviceName, code: String(format: "%04d", Int.random(in: 0...9999)))
                 client.pending = request
                 send(.pairing(code: request.code), to: client)
                 events.pairing(request)
             }
         case .latency(let milliseconds):
-            if client === current, client.session != nil { events.latency(milliseconds) }
+            if client === phones.first { events.latency(milliseconds) }
         case .wantArt, .command, .select, .launch, .close, .home, .saveLayout:
-            if client === current, client.session != nil { events.request(message) }
+            if phones.contains(where: { $0 === client }) { events.request(message) }
         case .pairing, .welcome, .rejected, .library, .art, .trophy:
             break
         }
     }
 
-    /// Sends to the welcomed phone, if one is connected.
+    /// Sends to every welcomed phone.
     public func publish(_ message: RemoteMessage) {
         queue.async { [self] in
-            guard let client = current, client.session != nil else { return }
-            send(message, to: client)
+            for client in phones { send(message, to: client) }
         }
     }
 
     private func welcome(_ client: Client, key: String) {
+        guard let slot = (0..<RemoteServer.maxPhones).first(where: { slot in !phones.contains { $0.slot == slot } }) else { return reject(client, "busy") }
         var session: UInt64 = 0
         while session == 0 { session = UInt64.random(in: UInt64.min...UInt64.max) }
         client.session = session
+        client.slot = slot
+        phones.append(client)
+        phones.sort { ($0.slot ?? 0) < ($1.slot ?? 0) }
         send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key), to: client)
         if let name = client.name { events.connected(name) }
     }
 
     private func reject(_ client: Client, _ reason: String) {
-        if current === client {
-            current = nil
-            if client.session == nil { events.connecting(nil) }
+        if asking === client {
+            asking = nil
+            events.connecting(nil)
         }
         send(.rejected(reason: reason), to: client) { client.connection.cancel() }
     }
 
     private func ended(_ client: Client) {
         clients[ObjectIdentifier(client)] = nil
-        guard current === client else { return }
-        let welcomed = client.session != nil
-        current = nil
-        phoneEnded()
-        if welcomed { events.disconnected() } else { events.connecting(nil) }
+        if asking === client {
+            asking = nil
+            events.connecting(nil)
+        } else if phones.contains(where: { $0 === client }) {
+            phones.removeAll { $0 === client }
+            events.disconnected()
+        }
     }
 
     private func send(_ message: RemoteMessage, to client: Client, then: (() -> Void)? = nil) {
@@ -283,21 +305,28 @@ public final class RemoteServer: @unchecked Sendable {
     // MARK: Pad relay
 
     private var phoneSocket: Int32 = -1
-    private var bridgeSocket: Int32 = -1
+    /// One loopback socket per slot; the game's nth phone channel talks to the nth.
+    private var bridgeSockets: [Int32] = []
     private var sources: [DispatchSourceRead] = []
-    private var phoneAddress: sockaddr_storage?
-    private var gameAddress: sockaddr_storage?
+    private var gameAddresses: [sockaddr_storage?] = []
 
     /// The UDP port the phone sends its pad to, on every interface.
     public var udpPort: UInt16? { queue.sync { relayPort } }
 
-    /// The loopback UDP port the running game talks to.
-    public var bridgePort: UInt16? { queue.sync { bridgeSocket >= 0 ? RemoteServer.port(of: bridgeSocket) : nil } }
+    /// The loopback UDP port the running game talks to for the first phone.
+    public var bridgePort: UInt16? { bridgePorts.first }
 
-    /// What a game is started with so that it reads the phone (ANYPS5_REMOTE_PAD).
+    /// The loopback UDP ports of the game's phone channels, by slot.
+    public var bridgePorts: [UInt16] { queue.sync { bridgeSockets.compactMap { RemoteServer.port(of: $0) } } }
+
+    /// What a game is started with so that it reads the phones (ANYPS5_REMOTE_PAD, then
+    /// ANYPS5_REMOTE_PAD_2 to _4).
     public var bridgeEnvironment: [String: String] {
-        guard let bridgePort else { return [:] }
-        return ["ANYPS5_REMOTE_PAD": "127.0.0.1:\(bridgePort)"]
+        var environment: [String: String] = [:]
+        for (slot, port) in bridgePorts.enumerated() {
+            environment[slot == 0 ? "ANYPS5_REMOTE_PAD" : "ANYPS5_REMOTE_PAD_\(slot + 1)"] = "127.0.0.1:\(port)"
+        }
+        return environment
     }
 
     var relayPort: UInt16? { phoneSocket >= 0 ? RemoteServer.port(of: phoneSocket) : nil }
@@ -310,22 +339,30 @@ public final class RemoteServer: @unchecked Sendable {
         any.sin6_family = sa_family_t(AF_INET6)
         any.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
         any.sin6_addr = in6addr_any
-        let bridge = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
-        var loopback = sockaddr_in()
-        loopback.sin_family = sa_family_t(AF_INET)
-        loopback.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        loopback.sin_addr.s_addr = inet_addr("127.0.0.1")
-        loopback.sin_port = requestedBridgePort.bigEndian
-        guard phone >= 0, bridge >= 0, RemoteServer.bind(phone, &any), RemoteServer.bind(bridge, &loopback) else {
+        var bridges: [Int32] = []
+        var opened = phone >= 0 && RemoteServer.bind(phone, &any)
+        for slot in 0..<RemoteServer.maxPhones where opened {
+            let bridge = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
+            var loopback = sockaddr_in()
+            loopback.sin_family = sa_family_t(AF_INET)
+            loopback.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            loopback.sin_addr.s_addr = inet_addr("127.0.0.1")
+            loopback.sin_port = (slot == 0 ? requestedBridgePort : 0).bigEndian
+            if bridge >= 0 { bridges.append(bridge) }
+            opened = bridge >= 0 && RemoteServer.bind(bridge, &loopback)
+        }
+        guard opened else {
             if phone >= 0 { close(phone) }
-            if bridge >= 0 { close(bridge) }
+            for bridge in bridges { close(bridge) }
             throw InstallError("the phone pad sockets could not be opened")
         }
-        for socket in [phone, bridge] { _ = fcntl(socket, F_SETFL, fcntl(socket, F_GETFL) | O_NONBLOCK) }
+        for socket in [phone] + bridges { _ = fcntl(socket, F_SETFL, fcntl(socket, F_GETFL) | O_NONBLOCK) }
         queue.sync {
             phoneSocket = phone
-            bridgeSocket = bridge
-            sources = [watch(phone) { [weak self] in self?.fromPhone() }, watch(bridge) { [weak self] in self?.fromGame() }]
+            bridgeSockets = bridges
+            gameAddresses = Array(repeating: nil, count: bridges.count)
+            sources = [watch(phone) { [weak self] in self?.fromPhone() }]
+                + bridges.indices.map { slot in watch(bridges[slot]) { [weak self] in self?.fromGame(slot) } }
         }
     }
 
@@ -333,13 +370,8 @@ public final class RemoteServer: @unchecked Sendable {
         for source in sources { source.cancel() }
         sources = []
         phoneSocket = -1
-        bridgeSocket = -1
-        phoneAddress = nil
-        gameAddress = nil
-    }
-
-    func phoneEnded() {
-        phoneAddress = nil
+        bridgeSockets = []
+        gameAddresses = []
     }
 
     private func watch(_ socket: Int32, _ handler: @escaping () -> Void) -> DispatchSourceRead {
@@ -350,21 +382,23 @@ public final class RemoteServer: @unchecked Sendable {
         return source
     }
 
-    /// Pad packets from the welcomed phone go to the game; anything else is dropped.
+    /// Pad packets from a welcomed phone go to the game through its slot's bridge; anything else
+    /// is dropped.
     private func fromPhone() {
         while let (data, source) = RemoteServer.receive(phoneSocket) {
-            guard let session = current?.session, RemotePacket.inputSession(data) == session else { continue }
-            phoneAddress = source
-            if var game = gameAddress { RemoteServer.send(data, from: bridgeSocket, to: &game) }
+            guard let session = RemotePacket.inputSession(data), let client = phones.first(where: { $0.session == session }), let slot = client.slot else { continue }
+            client.address = source
+            if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
         }
     }
 
-    /// A hello names the game to send to; its answers go back to the phone.
-    private func fromGame() {
-        while let (data, source) = RemoteServer.receive(bridgeSocket) {
+    /// A hello names the game to send to on that bridge; its answers go back to the slot's phone.
+    private func fromGame(_ slot: Int) {
+        while let (data, source) = RemoteServer.receive(bridgeSockets[slot]) {
             if RemotePacket.isHello(data) {
-                gameAddress = source
-            } else if RemotePacket.isOutput(data), let game = gameAddress, RemoteServer.same(source, game), var phone = phoneAddress {
+                gameAddresses[slot] = source
+            } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game),
+                      var phone = phones.first(where: { $0.slot == slot })?.address {
                 RemoteServer.send(data, from: phoneSocket, to: &phone)
             }
         }

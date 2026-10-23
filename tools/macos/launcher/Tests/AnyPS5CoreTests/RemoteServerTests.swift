@@ -191,16 +191,60 @@ final class RemoteServerTests: XCTestCase {
         phone.close()
     }
 
-    func testSecondPhoneIsBusy() async throws {
-        let known = devices.add(id: "phone-1", name: "Pixel 8")
-        let first = phone()
-        try await first.hello(key: known.key)
-        _ = try await first.receive()
+    func testASecondPhoneIsAskedWhileTheFirstIsConnected() async throws {
+        let first = try await pairedPhone()
         let second = phone()
         try await second.hello(id: "phone-2", name: "Galaxy")
-        let answer = try await second.receive()
-        XCTAssertEqual(answer, .rejected(reason: "busy"))
+        guard case .pairing = try await second.receive() else { return XCTFail("the second phone was not asked about") }
+        let asked = await log.waitFor { self.log.pairings.count == 1 }
+        XCTAssertTrue(asked)
+        server.respond(to: log.pairings[0].id, allow: true)
+        guard case .welcome = try await second.receive() else { return XCTFail("the second phone was not welcomed") }
+        XCTAssertEqual(server.connectedDevices, ["Pixel 8", "Galaxy"])
+        XCTAssertEqual(server.connectedDevice, "Pixel 8")
+        second.close()
         first.close()
+    }
+
+    func testAnotherNewPhoneWaitsWhileOneIsAskedAbout() async throws {
+        let asked = phone()
+        try await asked.hello(id: "phone-2", name: "Galaxy")
+        _ = try await asked.receive()
+        let other = phone()
+        try await other.hello(id: "phone-3", name: "iPhone")
+        let answer = try await other.receive()
+        XCTAssertEqual(answer, .rejected(reason: "busy"))
+        asked.close()
+    }
+
+    func testAFifthPhoneIsBusy() async throws {
+        var phones: [FakePhone] = []
+        for number in 1...4 {
+            let device = devices.add(id: "phone-\(number)", name: "Phone \(number)")
+            let phone = phone()
+            try await phone.hello(id: device.id, name: device.name, key: device.key)
+            guard case .welcome = try await phone.receive() else { return XCTFail("phone \(number) was not welcomed") }
+            phones.append(phone)
+        }
+        let fifth = devices.add(id: "phone-5", name: "Phone 5")
+        let extra = phone()
+        try await extra.hello(id: fifth.id, name: fifth.name, key: fifth.key)
+        let answer = try await extra.receive()
+        XCTAssertEqual(answer, .rejected(reason: "busy"))
+        for phone in phones { phone.close() }
+    }
+
+    func testAPhoneThatLeavesGivesItsPlaceBack() async throws {
+        let first = try await pairedPhone()
+        let device = devices.add(id: "phone-2", name: "Galaxy")
+        let second = phone()
+        try await second.hello(id: device.id, name: device.name, key: device.key)
+        _ = try await second.receive()
+        first.close()
+        let gone = await log.waitFor { self.log.disconnects == 1 }
+        XCTAssertTrue(gone)
+        XCTAssertEqual(server.connectedDevices, ["Galaxy"])
+        second.close()
     }
 
     func testSameDeviceTakesOverAnAbandonedConnection() async throws {

@@ -42,6 +42,7 @@ final class UDPPeer {
 
 final class RemoteRelayTests: XCTestCase {
     var file: URL!
+    var devices: PairedDevices!
     var server: RemoteServer!
     var phone: FakePhone!
     var session: UInt64 = 0
@@ -52,7 +53,7 @@ final class RemoteRelayTests: XCTestCase {
 
     override func setUp() async throws {
         file = FileManager.default.temporaryDirectory.appendingPathComponent("relay-\(UUID().uuidString).json")
-        let devices = PairedDevices(file: file)
+        devices = PairedDevices(file: file)
         let known = devices.add(id: "phone-1", name: "Pixel 8")
         server = RemoteServer(name: "Test Mac", devices: devices, events: RemoteServer.Events(), advertise: false)
         try server.start()
@@ -130,5 +131,36 @@ final class RemoteRelayTests: XCTestCase {
 
     func testBridgeEnvironment() {
         XCTAssertEqual(server.bridgeEnvironment["ANYPS5_REMOTE_PAD"], "127.0.0.1:\(server.bridgePort!)")
+        XCTAssertEqual(server.bridgePorts.count, 4)
+        XCTAssertEqual(Set(server.bridgePorts).count, 4)
+        XCTAssertEqual(server.bridgePorts.first, server.bridgePort)
+        for (index, port) in server.bridgePorts.enumerated().dropFirst() {
+            XCTAssertEqual(server.bridgeEnvironment["ANYPS5_REMOTE_PAD_\(index + 1)"], "127.0.0.1:\(port)")
+        }
+    }
+
+    /// The second phone's pad goes to the game through the second bridge, and back.
+    func testEachPhoneHasItsOwnBridge() async throws {
+        let known = devices.add(id: "phone-2", name: "Galaxy")
+        let other = FakePhone(port: server.controlPort!)
+        try await other.hello(id: known.id, name: known.name, key: known.key)
+        guard case .welcome(let otherSession, _, _, _) = try await other.receive() else { return XCTFail("no welcome") }
+        let firstGame = UDPPeer()
+        let secondGame = UDPPeer()
+        firstGame.send(Self.hello, to: server.bridgePorts[0])
+        secondGame.send(Self.hello, to: server.bridgePorts[1])
+        Thread.sleep(forTimeInterval: 0.05)
+        let sender = UDPPeer()
+        let input = RemoteProtocolTests.input(session: otherSession)
+        sender.send(input, to: udpPort)
+        XCTAssertEqual(secondGame.receive(), input)
+        XCTAssertNil(firstGame.receive())
+        secondGame.send(Self.output, to: server.bridgePorts[1])
+        XCTAssertEqual(sender.receive(), Self.output)
+        let firstSender = UDPPeer()
+        firstSender.send(RemoteProtocolTests.input(session: session), to: udpPort)
+        XCTAssertNotNil(firstGame.receive())
+        XCTAssertNil(secondGame.receive())
+        other.close()
     }
 }
