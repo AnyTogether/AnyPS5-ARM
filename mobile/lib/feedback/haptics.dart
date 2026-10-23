@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../protocol/packets.dart';
@@ -62,6 +64,23 @@ class HapticsDriver {
   }
 
   void stop() => _send(0, 0);
+
+  /// A trophy: two short, crisp taps.
+  void celebrate() {
+    if (!enabled) return;
+    const tap = Rumble(255, 1);
+    for (final (at, rumble) in [
+      (0, tap),
+      (90, Rumble.off),
+      (180, tap),
+      (270, Rumble.off),
+    ]) {
+      Timer(Duration(milliseconds: at), () {
+        _last = rumble;
+        output.set(rumble);
+      });
+    }
+  }
 
   void _send(int strength, double sharpness) {
     final quantized = strength == 0

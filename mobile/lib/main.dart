@@ -17,6 +17,7 @@ import 'strings.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
+import 'ui/trophy_card.dart';
 import 'ui/welcome_screen.dart';
 import 'version.dart';
 
@@ -240,6 +241,14 @@ class _RemoteAppState extends State<RemoteApp> {
         builder: (context, child) => Stack(
           children: [
             ?child,
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: SafeArea(
+                child: Center(child: TrophyCard(trophy: _session.trophy)),
+              ),
+            ),
             const Positioned(
               right: 10,
               bottom: 6,

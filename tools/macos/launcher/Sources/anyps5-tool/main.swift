@@ -157,6 +157,13 @@ case "remote":
             case .launch(let id):
                 selected.value = id
                 playing.value = id
+                // A pretend trophy soon after, to see the phone's card.
+                if let game = games.first(where: { $0.id == id }) {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+                        server.value?.publish(.trophy(name: "First Steps", detail: "Start \(game.name)", grade: "gold",
+                                                      icon: RemoteArt.jpeg(game.icon, longestSide: 160)))
+                    }
+                }
             case .close: playing.value = nil
             case .saveLayout(let id, let layout): layouts.value[id] = layout
             default: return

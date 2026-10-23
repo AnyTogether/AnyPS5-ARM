@@ -34,6 +34,12 @@ sealed class Message {
           running: json['running'] as String?,
           language: json['language'] as String,
         ),
+        'trophy' => TrophyEarned(
+          name: json['name'] as String,
+          detail: json['detail'] as String? ?? '',
+          grade: json['grade'] as String,
+          icon: json['icon'] as String?,
+        ),
         'art' => Art(
           id: json['id'] as String,
           icon: json['icon'] as String?,
@@ -276,4 +282,32 @@ class SaveLayout extends Message {
   @override
   String toJson() =>
       jsonEncode({'type': 'saveLayout', 'id': id, 'layout': layout});
+}
+
+/// A trophy just earned in the game playing.
+class TrophyEarned extends Message {
+  const TrophyEarned({
+    required this.name,
+    required this.detail,
+    required this.grade,
+    required this.icon,
+  });
+
+  final String name;
+  final String detail;
+
+  /// platinum, gold, silver or bronze.
+  final String grade;
+
+  /// Base64 JPEG.
+  final String? icon;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'trophy',
+    'name': name,
+    'detail': detail,
+    'grade': grade,
+    'icon': icon,
+  });
 }

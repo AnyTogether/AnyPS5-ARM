@@ -56,6 +56,14 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(games.first?.layout)
     }
 
+    func testATrophyIsToldToThePhone() throws {
+        let message = RemoteMessage.trophy(name: "Pharloom's Heart", detail: "Acquire all other trophies", grade: "platinum", icon: "aWNvbg==")
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "trophy")
+        XCTAssertEqual(json?["grade"] as? String, "platinum")
+    }
+
     func testThePhoneSavesALayout() throws {
         let message = RemoteMessage.saveLayout(id: "g", layout: #"{"r1":{"hidden":true}}"#)
         XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)

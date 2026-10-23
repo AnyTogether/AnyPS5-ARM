@@ -730,6 +730,25 @@ final class AppModel: ObservableObject {
 
     func discordOff() { discord.clear() }
 
+    /// A trophy just earned shows on the phone too, with its icon made small.
+    private func tellPhone(_ trophy: TrophySet.Trophy) {
+        guard let remote, phone != nil else { return }
+        let grade: String
+        switch trophy.grade {
+        case .platinum: grade = "platinum"
+        case .gold: grade = "gold"
+        case .silver: grade = "silver"
+        case .bronze: grade = "bronze"
+        }
+        let icon = trophy.icon.flatMap { data -> String? in
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-trophy-\(UUID().uuidString).png")
+            defer { try? FileManager.default.removeItem(at: file) }
+            guard (try? data.write(to: file)) != nil else { return nil }
+            return RemoteArt.jpeg(file, longestSide: 160)
+        }
+        remote.publish(.trophy(name: trophy.name, detail: trophy.detail, grade: grade, icon: icon))
+    }
+
     /// The library as the phone shows it, sent when it differs from what the phone has.
     private func tellPhone() {
         guard let remote, phone != nil else { return }
@@ -844,7 +863,10 @@ final class AppModel: ObservableObject {
                 let earned = set.trophies.filter { fresh.contains($0.id) }
                 await MainActor.run {
                     self.trophies[game.id] = set
-                    for trophy in earned { TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds) }
+                    for trophy in earned {
+                        TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds)
+                        self.tellPhone(trophy)
+                    }
                 }
             }
         }

@@ -463,4 +463,25 @@ void main() {
     await session.close();
     await launcher.stop();
   });
+
+  test('a trophy from the launcher is kept to show', () async {
+    final launcher = FakeLauncher();
+    await launcher.start();
+    final session = Session(preferences: preferences, deviceName: 'Pixel 8');
+    await session.connect(InternetAddress.loopbackIPv4, launcher.port);
+    await waitFor(() => session.status == ConnectionStatus.connected);
+    launcher.tell({
+      'type': 'trophy',
+      'name': 'Bound',
+      'detail': 'Bind your first Silk Skill',
+      'grade': 'bronze',
+      'icon': null,
+    });
+    await waitFor(() => session.trophy.value != null);
+    expect(session.trophy.value!.name, 'Bound');
+    expect(session.trophy.value!.grade, 'bronze');
+    expect(session.trophy.value!.icon, isNull);
+    await session.close();
+    await launcher.stop();
+  });
 }

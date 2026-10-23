@@ -227,7 +227,7 @@ public final class RemoteServer: @unchecked Sendable {
             if client === current, client.session != nil { events.latency(milliseconds) }
         case .wantArt, .command, .select, .launch, .close, .home, .saveLayout:
             if client === current, client.session != nil { events.request(message) }
-        case .pairing, .welcome, .rejected, .library, .art:
+        case .pairing, .welcome, .rejected, .library, .art, .trophy:
             break
         }
     }

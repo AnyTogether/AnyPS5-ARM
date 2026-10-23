@@ -53,6 +53,9 @@ class Session extends ChangeNotifier {
   Library? library;
   final art = <String, GameArt>{};
 
+  /// The trophy earned last, shown for a moment over whatever the phone shows.
+  final trophy = ValueNotifier<TrophyEarned?>(null);
+
   /// Off while the phone shows the launcher: the game gets no pad from it then.
   bool _padActive = true;
 
@@ -171,6 +174,9 @@ class Session extends ChangeNotifier {
           _socket?.add(WantArt(game.id).toJson());
         }
         notifyListeners();
+      case final TrophyEarned earned:
+        trophy.value = earned;
+        haptics?.celebrate();
       case Art(:final id, :final icon, :final background):
         final pictures = art[id];
         if (pictures == null) break;

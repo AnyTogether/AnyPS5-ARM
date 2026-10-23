@@ -18,8 +18,9 @@ Future<void> waitFor(
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (finder.evaluate().isEmpty) {
-    if (DateTime.now().isAfter(deadline))
+    if (DateTime.now().isAfter(deadline)) {
       throw TestFailure('never showed: $finder');
+    }
     await tester.pump(const Duration(milliseconds: 200));
   }
 }
@@ -78,6 +79,10 @@ void main() {
     await waitFor(tester, find.byType(PadScreen));
     await settle(tester);
     await binding.takeScreenshot('6-pad');
+    await waitFor(tester, find.text('First Steps'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await binding.takeScreenshot('6a-trophy');
+    await tester.pump(const Duration(seconds: 5));
     // The layout editor: the cross moves, becomes a toggle, and the layout is saved on the Mac.
     final area = tester.getRect(find.byType(PadScreen));
     await tester.tap(find.byIcon(Icons.lock_outline_rounded));

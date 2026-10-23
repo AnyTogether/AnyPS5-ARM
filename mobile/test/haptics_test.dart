@@ -103,4 +103,22 @@ void main() {
     expect(lightColor(output(light: true)), isNull);
     expect(lightColor(null), isNull);
   });
+
+  test('a trophy is felt as two short taps, then nothing', () async {
+    driver.celebrate();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(out.sent.map((r) => r.strength > 0).toList(), [
+      true,
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  test('turned off, a trophy is not felt', () async {
+    driver.enabled = false;
+    driver.celebrate();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(out.sent, isEmpty);
+  });
 }

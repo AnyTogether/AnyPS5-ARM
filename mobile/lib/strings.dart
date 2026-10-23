@@ -54,6 +54,7 @@ class Strings {
   String get vibration => _text('vibration');
   String get vibrationDetail => _text('vibrationDetail');
   String get motion => _text('motion');
+  String get trophyEarned => _text('trophyEarned');
   String get motionDetail => _text('motionDetail');
   String get editLayout => _text('editLayout');
   String get done => _text('done');
@@ -106,6 +107,7 @@ class Strings {
     'vibration': 'Vibration',
     'vibrationDetail': "The game's rumble and trigger effects on the phone",
     'motion': 'Motion',
+    'trophyEarned': 'Trophy earned',
     'motionDetail':
         "Tilting and turning the phone, as the DualSense's motion sensors",
     'editLayout': 'Edit Layout',
@@ -160,6 +162,7 @@ class Strings {
     'vibration': 'Titreşim',
     'vibrationDetail': 'Oyunun titreşimi ve tetik efektleri telefonda',
     'motion': 'Hareket',
+    'trophyEarned': 'Kupa kazanıldı',
     'motionDetail':
         "Telefonu eğip döndürmek, DualSense'in hareket sensörleri gibi",
     'editLayout': 'Düzeni Düzenle',
