@@ -22,6 +22,8 @@ enum PreviewRenderer {
         preferences.profileName = "Utku"
         // ANYPS5_PREVIEW_LANGUAGE=tr draws the screens in Turkish.
         preferences.language = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_LANGUAGE"].flatMap(Language.init(rawValue:)) ?? .english
+        // ANYPS5_PREVIEW_SCREENSHOTS=<folder> is where the gallery looks.
+        if let shots = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_SCREENSHOTS"] { preferences.screenshotsFolder = shots }
 
         for theme in Theme.allCases {
             stills[theme] = BackgroundView.still(theme: theme, width: 660, height: 372, time: 200)
@@ -66,6 +68,9 @@ enum PreviewRenderer {
             model.panelInRows = true
             model.panelRow = 2
         }
+        render(preferences, found, root, still, output.appendingPathComponent("gallery.png")) { model in model.open(.gallery); model.galleryIndex = 1 }
+        render(preferences, found, root, still, output.appendingPathComponent("gallery-viewer.png")) { model in model.open(.gallery); model.galleryViewing = true }
+        render(preferences, found, root, still, output.appendingPathComponent("game-settings-saves.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 10 }
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
         renderBanner(preferences, found, root, output.appendingPathComponent("trophy-banner.png"))
         var fresh = preferences

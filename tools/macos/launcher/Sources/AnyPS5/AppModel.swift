@@ -76,6 +76,8 @@ enum Overlay: Equatable {
     case controls
     case trophies
     case advanced
+    /// The selected game's F12 screenshots.
+    case gallery
 }
 
 struct Toast: Identifiable, Equatable {
@@ -108,6 +110,10 @@ final class AppModel: ObservableObject {
     @Published var libraryIndex = 0
     /// The focused row of the trophy list.
     @Published var trophyIndex = 0
+    @Published var galleryIndex = 0
+    /// One screenshot over the whole screen, instead of the grid.
+    @Published var galleryViewing = false
+    @Published private(set) var galleryShots: [URL] = []
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]
     @Published private(set) var progress: [String: (Installer.Step, Double)] = [:]
@@ -992,6 +998,59 @@ final class AppModel: ObservableObject {
 
     // MARK: Files
 
+    // MARK: Screenshots and saves
+
+    func screenshots(of game: Game) -> [URL] { Screenshots.list(titleID: game.titleID, in: screenshotsFolder) }
+
+    func loadGallery() {
+        galleryShots = selectedGame.map(screenshots) ?? []
+        galleryIndex = 0
+        galleryViewing = false
+    }
+
+    /// The folder the unlocked game reads and writes, its saves included.
+    func gameFolder(_ game: Game) -> URL? {
+        guard let root else { return nil }
+        return Installer.bundle(for: game, root: root).appendingPathComponent("Contents/Resources/game").resolvingSymlinksInPath()
+    }
+
+    func lastBackup(of game: Game) -> Date? {
+        SaveBackup.backups(in: SaveBackup.folder(for: game)).first.flatMap {
+            (try? FileManager.default.attributesOfItem(atPath: $0.path))?[.modificationDate] as? Date
+        }
+    }
+
+    func backUpSaves(_ game: Game) {
+        guard let folder = gameFolder(game) else { return }
+        do {
+            try SaveBackup.backUp(folder, to: SaveBackup.folder(for: game), date: Date())
+            show(T.text(.savesBackedUp), symbol: "externaldrive.fill.badge.checkmark")
+            objectWillChange.send()
+        } catch {
+            show(T.text(.backupFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
+    /// A backup chosen in a panel takes the saves' place; the game must not be running.
+    func restoreSaves(_ game: Game) {
+        guard running?.game.id != game.id, starting?.id != game.id else { return show(T.text(.closeGameFirst), symbol: "exclamationmark.triangle.fill") }
+        guard let folder = gameFolder(game) else { return }
+        let backups = SaveBackup.folder(for: game)
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.fileExists(atPath: backups.path) ? backups : nil
+        panel.prompt = T.text(.restoreSaves)
+        guard panel.runModal() == .OK, let backup = panel.url else { return }
+        do {
+            try SaveBackup.restore(backup, into: folder, keepingIn: backups, date: Date())
+            loadTrophies(game, again: true)
+            show(T.text(.savesRestored), symbol: "arrow.counterclockwise.circle.fill")
+        } catch {
+            show(T.text(.backupFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
     func showInFinder(_ game: Game) {
         guard let root else { return }
         let bundle = Installer.bundle(for: game, root: root)
@@ -1022,6 +1081,7 @@ final class AppModel: ObservableObject {
         // The controls panel opens on its first key, below the hint.
         if next == .controls { panelRow = 1 }
         if next == .trophies { trophyIndex = 0 }
+        if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced
         withAnimation(Motion.overlay) { overlay = next }

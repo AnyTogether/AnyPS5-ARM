@@ -128,6 +128,10 @@ struct RootView: View {
             if let game = model.selectedGame, let set = model.trophies[game.id] {
                 TrophyList(game: game, set: set).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
+        case .gallery:
+            if let game = model.selectedGame {
+                Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
+            }
         case nil:
             EmptyView()
         }

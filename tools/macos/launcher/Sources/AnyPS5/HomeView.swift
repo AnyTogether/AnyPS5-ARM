@@ -555,6 +555,9 @@ extension AppModel {
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
+        case .gallery:
+            galleryCommand(command)
+            return true
         case .trophies:
             switch command {
             case .up: moveTrophy(-1)
@@ -603,17 +606,49 @@ extension AppModel {
         return true
     }
 
+    private func galleryCommand(_ command: Command) {
+        let count = galleryShots.count
+        func move(_ delta: Int) {
+            let next = min(count - 1, max(0, galleryIndex + delta))
+            guard count > 0, next != galleryIndex else { return }
+            galleryIndex = next
+            Sounds.shared.play(.move)
+        }
+        switch command {
+        case .left: move(-1)
+        case .right: move(1)
+        case .up: if !galleryViewing { move(-Gallery.columns) }
+        case .down: if !galleryViewing { move(Gallery.columns) }
+        case .select:
+            guard count > 0 else { return }
+            Sounds.shared.play(.select)
+            withAnimation(Motion.overlay) { galleryViewing.toggle() }
+        case .back:
+            if galleryViewing {
+                Sounds.shared.play(.back)
+                withAnimation(Motion.overlay) { galleryViewing = false }
+            } else {
+                closeOverlay()
+            }
+        case .options:
+            if galleryShots.indices.contains(galleryIndex) { NSWorkspace.shared.activateFileViewerSelecting([galleryShots[galleryIndex]]) }
+        case .previousGame, .nextGame:
+            break
+        }
+    }
+
     /// L1 and R1 move to the next game and keep the game's panel open on it; panels about the
     /// launcher itself, and a key being bound, keep the game.
     func switchGame(_ delta: Int) {
         guard capturing == nil else { return }
         switch overlay {
-        case nil, .gameSettings, .controls, .advanced, .trophies: break
+        case nil, .gameSettings, .controls, .advanced, .trophies, .gallery: break
         default: return
         }
         let before = selected
         moveSelection(delta)
         guard selected != before else { return }
+        if overlay == .gallery { loadGallery() }
         if overlay == .trophies {
             if let game = selectedGame, trophies[game.id] != nil {
                 trophyIndex = 0

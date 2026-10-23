@@ -235,6 +235,15 @@ extension AppModel {
                 self?.unlock(game)
             }))
         }
+        let shots = screenshots(of: game).count
+        rows.append(PanelRow(id: "gallery", title: T.text(.screenshots), detail: shots == 0 ? T.text(.screenshotsNone) : "\(shots)", symbol: "photo.on.rectangle", kind: .action(destructive: false) { [weak self] in
+            self?.open(.gallery)
+        }))
+        if case .installed = state {
+            let last = lastBackup(of: game).map { T.format(.lastBackup, $0.formatted(date: .abbreviated, time: .shortened)) } ?? T.text(.backUpSavesDetail)
+            rows.append(PanelRow(id: "backup", title: T.text(.backUpSaves), detail: last, symbol: "externaldrive.badge.plus", kind: .action(destructive: false) { [weak self] in self?.backUpSaves(game) }))
+            rows.append(PanelRow(id: "restore", title: T.text(.restoreSaves), detail: T.text(.restoreSavesDetail), symbol: "arrow.counterclockwise", kind: .action(destructive: false) { [weak self] in self?.restoreSaves(game) }))
+        }
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
         rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))

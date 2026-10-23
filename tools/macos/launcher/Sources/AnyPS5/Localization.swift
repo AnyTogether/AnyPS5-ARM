@@ -60,7 +60,7 @@ enum T {
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
-        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, launcherUpdateAvailable, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
+        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, screenshots, screenshotsNone, backUpSaves, backUpSavesDetail, lastBackup, restoreSaves, restoreSavesDetail, savesBackedUp, savesRestored, backupFailed, closeGameFirst, launcherUpdateAvailable, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -149,6 +149,17 @@ enum T {
         .sounds: "Arayüz Sesleri",
         .gameMusic: "Oyun Müziği",
         .checkUpdates: "Güncellemeleri denetle",
+        .screenshots: "Ekran Görüntüleri",
+        .screenshotsNone: "Henüz yok: oyunda F12'ye bas",
+        .backUpSaves: "Kayıtları Yedekle",
+        .backUpSavesDetail: "Kayıtlar ve kupalar, Belgeler → AnyPS5 → Backups klasörüne",
+        .lastBackup: "Son yedek: %@",
+        .restoreSaves: "Kayıtları Geri Yükle…",
+        .restoreSavesDetail: "Oyunun şu anki kayıtları önce yedeklenir",
+        .savesBackedUp: "Kayıtlar yedeklendi",
+        .savesRestored: "Kayıtlar geri yüklendi",
+        .backupFailed: "Yedekleme yapılamadı",
+        .closeGameFirst: "Önce oyunu kapat",
         .checkUpdatesDetail: "Yeni bir AnyPS5 sürümü çıkınca haber verir",
         .launcherUpdateAvailable: "AnyPS5 %@ çıktı: Ayarlar → Hakkında",
         .updateTo: "%@ sürümüne güncelle",
@@ -399,6 +410,17 @@ enum T {
         .sounds: "Interface Sounds",
         .gameMusic: "Game Music",
         .checkUpdates: "Check for updates",
+        .screenshots: "Screenshots",
+        .screenshotsNone: "None yet: press F12 in the game",
+        .backUpSaves: "Back Up Saves",
+        .backUpSavesDetail: "Saves and trophies, into Documents → AnyPS5 → Backups",
+        .lastBackup: "Last backup: %@",
+        .restoreSaves: "Restore Saves…",
+        .restoreSavesDetail: "The game's current saves are backed up first",
+        .savesBackedUp: "Saves backed up",
+        .savesRestored: "Saves restored",
+        .backupFailed: "The backup failed",
+        .closeGameFirst: "Close the game first",
         .checkUpdatesDetail: "Tells you when a new AnyPS5 is out",
         .launcherUpdateAvailable: "AnyPS5 %@ is out: Settings → About",
         .updateTo: "Update to %@",
