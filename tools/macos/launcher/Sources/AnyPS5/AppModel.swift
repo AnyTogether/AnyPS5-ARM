@@ -131,6 +131,9 @@ final class AppModel: ObservableObject {
     @Published var pairing: PairingRequest?
     /// The connected phone and its last reported latency.
     @Published private(set) var phone: (name: String, latency: Double?)?
+    /// The device IDs of the phones connected now, by player.
+    @Published private(set) var connectedPhones: [String] = []
+    var connectedPhoneNames: [String] { connectedPhones.map { id in phones.first { $0.id == id }?.name ?? id } }
     /// A phone that said hello and is not connected yet (pairing, or about to be welcomed).
     @Published private(set) var phoneConnecting: String?
     /// The phones allowed so far, for the settings.
@@ -667,6 +670,7 @@ final class AppModel: ObservableObject {
                     // With several phones the first one's name and latency stand for them all.
                     if self.phone == nil { self.phone = (name, nil) }
                     self.phoneConnecting = nil
+                    self.connectedPhones = self.remote?.connectedDeviceIDs ?? []
                 }
                 self.phones = self.pairedDevices.all
                 self.show(T.format(.phoneConnected, name), symbol: "iphone.gen3")
@@ -678,7 +682,10 @@ final class AppModel: ObservableObject {
                 self.tellPhone()
             } },
             disconnected: { Task { @MainActor in
-                withAnimation(Motion.overlay) { self.phone = self.remote?.connectedDevice.map { ($0, nil) } }
+                withAnimation(Motion.overlay) {
+                    self.phone = self.remote?.connectedDevice.map { ($0, nil) }
+                    self.connectedPhones = self.remote?.connectedDeviceIDs ?? []
+                }
             } },
             latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } },
             request: { message in Task { @MainActor in self.phoneAsked(message) } },

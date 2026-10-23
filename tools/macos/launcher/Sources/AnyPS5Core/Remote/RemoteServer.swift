@@ -160,6 +160,9 @@ public final class RemoteServer: @unchecked Sendable {
     /// Every welcomed phone's name, by slot.
     public var connectedDevices: [String] { queue.sync { phones.compactMap(\.name) } }
 
+    /// Every welcomed phone's device ID, by slot.
+    public var connectedDeviceIDs: [String] { queue.sync { phones.compactMap(\.deviceID) } }
+
     /// The user's answer to a pairing request.
     public func respond(to id: UUID, allow: Bool) {
         queue.async { [self] in

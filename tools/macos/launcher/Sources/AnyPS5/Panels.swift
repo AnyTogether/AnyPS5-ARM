@@ -178,9 +178,12 @@ extension AppModel {
             advanced.append(PanelRow(id: "fontsReset", title: T.text(.fontsReset), symbol: "xmark.circle", kind: .action(destructive: false) { [weak self] in self?.preferences.fontsFolder = nil }))
         }
         advanced.append(PanelRow(id: "fontsHint", title: T.text(.fontsHint), kind: .info("")))
-        advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone) : "")))
+        advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone)
+            : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
-            advanced.append(PanelRow(id: "phone-" + device.id, title: device.name, detail: T.text(.phoneRemove), symbol: "iphone.gen3", kind: .action(destructive: true) { [weak self] in
+            let online = connectedPhones.contains(device.id)
+            advanced.append(PanelRow(id: "phone-" + device.id, title: online ? "\(device.name) · \(T.text(.phoneOnline))" : device.name, detail: T.text(.phoneRemove),
+                                     symbol: online ? "iphone.gen3.radiowaves.left.and.right" : "iphone.gen3", kind: .action(destructive: true) { [weak self] in
                 self?.removePhone(device.id)
             }))
         }
