@@ -4,19 +4,34 @@ import 'package:url_launcher/url_launcher.dart';
 import '../strings.dart';
 import '../version.dart';
 
-/// Who made the app and where its code is, over the screen it was opened from.
-Future<void> showAbout(BuildContext context) => showModalBottomSheet<void>(
+/// Who made the app and where its code is, over the screen it was opened from; with
+/// [vibration], also the switch for the game's rumble on the phone.
+Future<void> showAbout(
+  BuildContext context, {
+  bool? vibration,
+  ValueChanged<bool>? onVibration,
+}) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
   isScrollControlled: true,
   shape: const RoundedRectangleBorder(
     borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
   ),
-  builder: (context) => const _About(),
+  builder: (context) => _About(vibration: vibration, onVibration: onVibration),
 );
 
-class _About extends StatelessWidget {
-  const _About();
+class _About extends StatefulWidget {
+  const _About({this.vibration, this.onVibration});
+
+  final bool? vibration;
+  final ValueChanged<bool>? onVibration;
+
+  @override
+  State<_About> createState() => _AboutState();
+}
+
+class _AboutState extends State<_About> {
+  late bool? _vibration = widget.vibration;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +66,30 @@ class _About extends StatelessWidget {
                     style: const TextStyle(color: Colors.white60, fontSize: 14),
                   ),
                   const SizedBox(height: 14),
+                  if (_vibration != null)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        texts.vibration,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
+                      ),
+                      subtitle: Text(
+                        texts.vibrationDetail,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      value: _vibration!,
+                      onChanged: (value) {
+                        setState(() => _vibration = value);
+                        widget.onVibration?.call(value);
+                      },
+                    ),
                   _Row(label: texts.madeBy, value: author),
                   _Row(
                     label: texts.sourceCode,

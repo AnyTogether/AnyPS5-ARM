@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../feedback/haptics.dart';
 import '../protocol/messages.dart';
 import '../protocol/packets.dart';
 
@@ -53,6 +54,9 @@ class Session extends ChangeNotifier {
 
   /// Off while the phone shows the launcher: the game gets no pad from it then.
   bool _padActive = true;
+
+  /// The game's rumble, light bar and trigger effects felt on the phone.
+  HapticsDriver? haptics;
 
   InternetAddress? _host;
   int? _port;
@@ -222,6 +226,7 @@ class Session extends ChangeNotifier {
 
   /// The game lets go of everything held, then hears nothing from the phone until [resumePad].
   void pausePad() {
+    haptics?.stop();
     if (!_padActive) return;
     _state = PadState();
     _send();
@@ -262,6 +267,14 @@ class Session extends ChangeNotifier {
   /// the game's socket, plus that wait, plus the time from the touch to the send.
   void _answered(Output answer) {
     output = answer;
+    if (_padActive) {
+      haptics?.update(
+        answer,
+        l2Held: _state.l2 > 0 || _state.buttons & PadButton.l2 != 0,
+        r2Held: _state.r2 > 0 || _state.buttons & PadButton.r2 != 0,
+        now: _clock.elapsed,
+      );
+    }
     final now = _clock.elapsedMicroseconds;
     final roundTrip = now - answer.sentMicros;
     if (roundTrip < 0 || roundTrip > 2000000) return;
@@ -294,6 +307,7 @@ class Session extends ChangeNotifier {
   /// A session that ends lets go of everything: a pad held when it dropped is not sent again
   /// when it comes back.
   void _stopPad() {
+    haptics?.stop();
     _sender?.cancel();
     _sender = null;
     _reporter?.cancel();

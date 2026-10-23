@@ -49,6 +49,8 @@ class Strings {
   String get madeBy => _text('madeBy');
   String get sourceCode => _text('sourceCode');
   String get builtOn => _text('builtOn');
+  String get vibration => _text('vibration');
+  String get vibrationDetail => _text('vibrationDetail');
 
   static const _english = {
     'welcomeTitle': 'Your phone is a DualSense',
@@ -89,6 +91,8 @@ class Strings {
     'madeBy': 'Made by',
     'sourceCode': 'Source code',
     'builtOn': 'Built on AnyPS5',
+    'vibration': 'Vibration',
+    'vibrationDetail': "The game's rumble and trigger effects on the phone",
   };
 
   static const _turkish = {
@@ -129,6 +133,8 @@ class Strings {
     'madeBy': 'Geliştiren',
     'sourceCode': 'Kaynak kodu',
     'builtOn': 'AnyPS5 üzerine kurulu',
+    'vibration': 'Titreşim',
+    'vibrationDetail': 'Oyunun titreşimi ve tetik efektleri telefonda',
   };
 }
 

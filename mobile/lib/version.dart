@@ -1,5 +1,5 @@
 /// The version in pubspec.yaml, shown faintly in a corner so an old install is easy to spot.
-const appVersion = '1.2.1';
+const appVersion = '1.3.0';
 
 const author = 'Utku Halis';
 const repository = 'https://github.com/utkuhalis/AnyPS5-ARM';

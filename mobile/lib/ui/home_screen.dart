@@ -117,7 +117,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Spacer(),
                       IconButton(
                         tooltip: texts.about,
-                        onPressed: () => showAbout(context),
+                        onPressed: () => showAbout(
+                          context,
+                          vibration: widget.session.haptics?.enabled ?? true,
+                          onVibration: (value) {
+                            widget.session.haptics
+                              ?..enabled = value
+                              ..stop();
+                            widget.session.preferences.setBool(
+                              'vibration',
+                              value,
+                            );
+                          },
+                        ),
                         icon: const Icon(
                           Icons.info_outline_rounded,
                           color: Colors.white70,

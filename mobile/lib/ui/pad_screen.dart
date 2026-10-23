@@ -12,7 +12,11 @@ class PadScreen extends StatefulWidget {
     this.layout = PadLayout.standard,
     this.status,
     this.onHome,
+    this.glow,
   });
+
+  /// The game's light bar colour, which the pad's background glows with.
+  final Color? glow;
 
   final void Function(PadState state) onState;
 
@@ -66,11 +70,16 @@ class _PadScreenState extends State<PadScreen> {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: CustomPaint(
-                    painter: _PadPainter(
-                      widget.layout,
-                      _state,
-                      _fingers.values.toList(),
+                  child: TweenAnimationBuilder<Color?>(
+                    tween: ColorTween(end: widget.glow ?? _PadPainter.base),
+                    duration: const Duration(milliseconds: 600),
+                    builder: (context, glow, _) => CustomPaint(
+                      painter: _PadPainter(
+                        widget.layout,
+                        _state,
+                        _fingers.values.toList(),
+                        glow,
+                      ),
                     ),
                   ),
                 ),
@@ -176,12 +185,14 @@ class _PadScreenState extends State<PadScreen> {
 }
 
 class _PadPainter extends CustomPainter {
-  _PadPainter(this.layout, this.state, this.fingers);
+  _PadPainter(this.layout, this.state, this.fingers, this.glow);
 
   final PadLayout layout;
+  final Color? glow;
   final PadState state;
   final List<_Finger> fingers;
 
+  static const base = Color(0xFF16181F);
   static const glass = Color(0x1AFFFFFF);
   static const edge = Color(0x24FFFFFF);
 
@@ -190,8 +201,11 @@ class _PadPainter extends CustomPainter {
     canvas.drawRect(
       Offset.zero & size,
       Paint()
-        ..shader = const RadialGradient(
-          colors: [Color(0xFF16181F), Color(0xFF07080B)],
+        ..shader = RadialGradient(
+          colors: [
+            Color.lerp(base, glow ?? base, 0.38)!,
+            const Color(0xFF07080B),
+          ],
           radius: 1.1,
         ).createShader(Offset.zero & size),
     );
@@ -286,5 +300,6 @@ class _PadPainter extends CustomPainter {
   bool shouldRepaint(_PadPainter old) =>
       !identical(old.state, state) ||
       old.fingers.length != fingers.length ||
-      old.layout != layout;
+      old.layout != layout ||
+      old.glow != glow;
 }
