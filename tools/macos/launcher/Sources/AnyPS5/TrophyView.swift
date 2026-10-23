@@ -24,6 +24,8 @@ struct TrophyList: View {
                             withAnimation(Motion.focus) { proxy.scrollTo(set.trophies[index].id, anchor: .center) }
                         }
                 }
+                // Each game's list is its own, so it opens at the top and not where another game's was left.
+                .id(game.id)
             }
         }
         .padding(.horizontal, 80 * scale)

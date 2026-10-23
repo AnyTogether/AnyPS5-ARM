@@ -184,6 +184,7 @@ struct HintBar: View {
     var body: some View {
         HStack(spacing: 22 * scale) {
             Hint(keys: "← → ↑ ↓", label: T.text(.hintMove))
+            Hint(keys: "Q E / L1 R1", label: T.text(.hintGame))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Hint(keys: "esc / ○", label: T.text(.hintBack))
             if options { Hint(keys: "O / △", label: T.text(.hintOptions)) }

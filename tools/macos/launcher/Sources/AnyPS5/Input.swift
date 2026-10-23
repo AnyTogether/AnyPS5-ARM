@@ -3,6 +3,8 @@ import GameController
 
 enum Command {
     case left, right, up, down, select, back, options
+    /// L1 and R1: the game before or after the selected one, from the home screen or a game's panel.
+    case previousGame, nextGame
 }
 
 /// Keyboard and game controller input, as the commands the screens act on. Held directions repeat
@@ -80,6 +82,8 @@ final class Input {
         default:
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "o": return .options
+            case "q": return .previousGame
+            case "e": return .nextGame
             default: return nil
             }
         }
@@ -104,6 +108,12 @@ final class Input {
         }
         pad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
             if pressed { MainActor.assumeIsolated { _ = self?.handler?(.options) } }
+        }
+        pad.leftShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
+            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.previousGame) } }
+        }
+        pad.rightShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
+            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.nextGame) } }
         }
     }
 

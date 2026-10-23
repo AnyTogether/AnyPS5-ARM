@@ -680,7 +680,8 @@ final class AppModel: ObservableObject {
                                     background: RemoteArt.jpeg(game.background, longestSide: RemoteArt.backgroundSide)))
             }
         case .command(let name):
-            let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options]
+            let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options,
+                                               "l1": .previousGame, "r1": .nextGame]
             guard let command = commands[name] else { return }
             bringLauncherFront()
             _ = Input.shared.handler?(command)

@@ -539,6 +539,10 @@ extension AppModel {
             if command == .back { cancelStart() }
             return true
         }
+        if command == .previousGame || command == .nextGame {
+            switchGame(command == .nextGame ? 1 : -1)
+            return true
+        }
         switch overlay {
         case .settings, .gameSettings, .confirmUninstall, .updateChoice:
             return panelCommand(command)
@@ -567,6 +571,7 @@ extension AppModel {
             case .down: moveLibrary(LibraryGrid.columns)
             case .select: pickFromLibrary()
             case .back, .options: closeOverlay()
+            case .previousGame, .nextGame: break
             }
             return true
         case nil:
@@ -596,6 +601,27 @@ extension AppModel {
         default: break
         }
         return true
+    }
+
+    /// L1 and R1 move to the next game and keep the game's panel open on it; panels about the
+    /// launcher itself, and a key being bound, keep the game.
+    func switchGame(_ delta: Int) {
+        guard capturing == nil else { return }
+        switch overlay {
+        case nil, .gameSettings, .controls, .advanced, .trophies: break
+        default: return
+        }
+        let before = selected
+        moveSelection(delta)
+        guard selected != before else { return }
+        if overlay == .trophies {
+            if let game = selectedGame, trophies[game.id] != nil {
+                trophyIndex = 0
+            } else {
+                closeOverlay()
+            }
+        }
+        if focus == .actions(1), actionCount < 3 { focus = .actions(0) }
     }
 
     private func moveFocus(_ next: HomeFocus) {

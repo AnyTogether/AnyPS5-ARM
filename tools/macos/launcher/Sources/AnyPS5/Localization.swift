@@ -50,7 +50,7 @@ enum T {
         case profileName, behaviour, hideWhilePlaying, rosettaMissing, rosettaInstall, rosettaInstalled
         case moveToApplications, moveToApplicationsText, moveNow, later, noToolkit
         case emptyLibraryTitle, emptyLibraryText, scanning, allGames, sortName, playTime
-        case themeCosmic, themeAurora, themeSunset, hintMove, hintSelect, hintBack, hintOptions
+        case themeCosmic, themeAurora, themeSunset, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
         case controls, controlsHint, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -175,6 +175,7 @@ enum T {
         .themeAurora: "Aurora",
         .themeSunset: "Gün Batımı",
         .hintMove: "Gezin",
+        .hintGame: "Oyun",
         .hintSelect: "Seç",
         .hintBack: "Geri",
         .hintOptions: "Seçenekler",
@@ -412,6 +413,7 @@ enum T {
         .themeAurora: "Aurora",
         .themeSunset: "Sunset",
         .hintMove: "Move",
+        .hintGame: "Game",
         .hintSelect: "Select",
         .hintBack: "Back",
         .hintOptions: "Options",
