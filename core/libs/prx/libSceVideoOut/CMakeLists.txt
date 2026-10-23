@@ -16,6 +16,14 @@ add_library(libSceVideoOut SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostHdrProbe.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../libkernel/Time/TimedWait.cpp
 )
+if(APPLE)
+    # Objective-C++ through the C++ compiler, so the project needs no OBJCXX language.
+    target_sources(libSceVideoOut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/StatsOverlay.mm)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/StatsOverlay.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
+    target_link_libraries(libSceVideoOut PRIVATE "-framework AppKit" "-framework IOKit" "-framework CoreFoundation")
+else()
+    target_sources(libSceVideoOut PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/StatsOverlayNone.cpp)
+endif()
 
 target_include_directories(libSceVideoOut PRIVATE
         ${LIBS_INCLUDE_DIR}

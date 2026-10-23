@@ -227,6 +227,13 @@ extension AppModel {
         rows.append(PanelRow(id: "overlay", title: T.text(.overlay), symbol: "speedometer", kind: .choice(options: overlayNames, selected: overlays.firstIndex(of: settings.overlay) ?? 0) { [weak self] index in
             self?.update(game) { $0.overlay = overlays[index] }
         }))
+        if settings.overlay != .off {
+            let styles = GameSettings.OverlayStyle.allCases
+            rows.append(PanelRow(id: "overlayStyle", title: T.text(.overlayStyle), symbol: "textformat.size",
+                                 kind: .choice(options: [T.text(.overlayMinimal), T.text(.overlayDetailed)], selected: styles.firstIndex(of: settings.style) ?? 0) { [weak self] index in
+                self?.update(game) { $0.overlayStyle = styles[index] }
+            }))
+        }
         let languages = ConsoleLanguage.all
         rows.append(PanelRow(id: "language", title: T.text(.gameLanguage), symbol: "character.bubble", kind: .choice(options: [T.text(.followLauncher)] + languages.map(\.name), selected: settings.language.flatMap { number in languages.firstIndex { $0.number == number } }.map { $0 + 1 } ?? 0) { [weak self] index in
             self?.update(game) { $0.language = index == 0 ? nil : languages[index - 1].number }

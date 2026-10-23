@@ -16,6 +16,11 @@ public struct GameSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// How the performance overlay looks: one line of figures, or the panel with its graph.
+    public enum OverlayStyle: String, Codable, CaseIterable, Sendable {
+        case minimal, detailed
+    }
+
     /// A WIDTHxHEIGHT the title's patches can set, nil for the title's default.
     public var resolution: String?
     public var fullscreen = false
@@ -23,6 +28,9 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var windowSize = 75
     public var vsync = true
     public var overlay = Overlay.off
+    /// nil is minimal; optional so settings saved before it existed still decode.
+    public var overlayStyle: OverlayStyle?
+    public var style: OverlayStyle { overlayStyle ?? .minimal }
     /// The console language number (ANYPS5_LANGUAGE), nil to follow the launcher's language.
     public var language: Int?
     /// Keys moved from the launcher's layout (Controls), by pad action. Optional so settings saved
@@ -49,6 +57,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if let position = overlay.position {
             environment["ANYPS5_OVERLAY"] = "1"
             environment["ANYPS5_OVERLAY_POS"] = position
+            environment["ANYPS5_OVERLAY_STYLE"] = style.rawValue
         }
         if let resolution { environment["APS5_RESOLUTION"] = resolution }
         if let inputFile { environment["ANYPS5_INPUT_CONFIG"] = inputFile.path }

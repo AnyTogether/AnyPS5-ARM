@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, gameLanguage, followLauncher
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -124,6 +124,9 @@ enum T {
         .overlayTopRight: "Sağ Üst",
         .overlayBottomLeft: "Sol Alt",
         .overlayBottomRight: "Sağ Alt",
+        .overlayStyle: "Gösterge Stili",
+        .overlayMinimal: "Sade",
+        .overlayDetailed: "Ayrıntılı",
         .gameLanguage: "Oyun Dili",
         .followLauncher: "Launcher ile aynı",
         .reinstall: "Kilidi Yeniden Aç",
@@ -389,6 +392,9 @@ enum T {
         .overlayTopRight: "Top Right",
         .overlayBottomLeft: "Bottom Left",
         .overlayBottomRight: "Bottom Right",
+        .overlayStyle: "Overlay Style",
+        .overlayMinimal: "Minimal",
+        .overlayDetailed: "Detailed",
         .gameLanguage: "Game Language",
         .followLauncher: "Same as the launcher",
         .reinstall: "Unlock Again",

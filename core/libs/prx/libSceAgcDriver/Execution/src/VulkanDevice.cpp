@@ -3461,7 +3461,8 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     if (state->presentSlots[state->presentCursor].inFlight) RetirePresents(state->presentSlots.size() - 1);
     auto& slot = state->presentSlots[state->presentCursor];
     require(!slot.inFlight, "presentation slot is still in flight");
-    const bool overlay = PerformanceOverlay::Visible();
+    // The minimal overlay is the window's to draw, not the frame's.
+    const bool overlay = PerformanceOverlay::Visible() && PerformanceOverlay::Style() == OverlayStyle::Detailed;
     if (display != nullptr && resident == nullptr) {
         static_cast<void>(DisplayBufferSize(*display));
         state->colorTransfer->Upload(display->address, width, height, Graphics::ColorTileMode::RenderTarget, DisplayTexelBytes(display->pixelFormat));
