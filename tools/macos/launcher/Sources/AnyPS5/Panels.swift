@@ -275,6 +275,7 @@ extension AppModel {
             rows.append(PanelRow(id: "restore", title: T.text(.restoreSaves), detail: T.text(.restoreSavesDetail), symbol: "arrow.counterclockwise", kind: .action(destructive: false) { [weak self] in self?.restoreSaves(game) }))
         }
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
+        rows.append(PanelRow(id: "link", title: T.text(.copyLink), detail: DeepLink.game(game.titleID).url.absoluteString, symbol: "link", kind: .action(destructive: false) { [weak self] in self?.copyLink(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
         rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))

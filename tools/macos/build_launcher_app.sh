@@ -71,6 +71,22 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>GCSupportsControllerUserInteraction</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>AnyPS5 finds your phone on this network so it can be used as a controller.</string>
     <key>NSBonjourServices</key><array><string>_anyps5-remote._tcp</string></array>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>AnyPS5 link</string>
+            <key>CFBundleURLSchemes</key><array><string>anyps5</string></array>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>Folder</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>public.folder</string></array>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF

@@ -194,6 +194,12 @@ final class AppModel: ObservableObject {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
         apply()
+        if persists {
+            AppModel.opener = { [weak self] urls in self?.open(urls) }
+            let waiting = AppModel.pending
+            AppModel.pending = []
+            if !waiting.isEmpty { DispatchQueue.main.async { [weak self] in self?.open(waiting) } }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.active = true
@@ -633,6 +639,67 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: Links and folders
+
+    /// What macOS hands the app before the model is there, and where it goes once it is.
+    private static var pending: [URL] = []
+    private static var opener: (([URL]) -> Void)?
+
+    static func received(_ urls: [URL]) {
+        if let opener { opener(urls) } else { pending += urls }
+    }
+
+    private func open(_ urls: [URL]) {
+        guard preferences.onboarded else { return }
+        for url in urls {
+            if url.isFileURL { openFolder(url) } else if let link = DeepLink(url: url) { follow(link) }
+        }
+    }
+
+    private func follow(_ link: DeepLink) {
+        bringLauncherFront()
+        switch link {
+        case .library: open(.library)
+        case .settings: open(.settings)
+        case .game(let id), .play(let id):
+            guard let index = games.firstIndex(where: { $0.titleID == id }) else {
+                return show(T.format(.linkNoGame, id), symbol: "questionmark.folder")
+            }
+            if overlay != nil { closeOverlay() }
+            withAnimation(Motion.focus) { selected = index }
+            if case .play = link { primaryAction(games[index]) }
+        }
+    }
+
+    /// A folder opened with AnyPS5: a game in the library is selected; a game or a folder of
+    /// games elsewhere becomes the games folder, once the user agrees.
+    private func openFolder(_ folder: URL) {
+        bringLauncherFront()
+        if let index = games.firstIndex(where: { $0.folder.standardizedFileURL == folder.standardizedFileURL }) {
+            if overlay != nil { closeOverlay() }
+            withAnimation(Motion.focus) { selected = index }
+            return
+        }
+        let single = GameLibrary.inspect(folder)
+        let root = single != nil ? folder.deletingLastPathComponent() : folder
+        let found = GameLibrary.scan(root)
+        guard !found.isEmpty else { return show(T.text(.folderNoGames), symbol: "questionmark.folder") }
+        let alert = NSAlert()
+        alert.messageText = T.format(.useGamesFolder, root.lastPathComponent)
+        alert.informativeText = T.format(.useGamesFolderDetail, found.count, root.abbreviatedPath)
+        alert.addButton(withTitle: T.text(.useGamesFolderConfirm))
+        alert.addButton(withTitle: T.text(.cancel))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        chooseFolder(root)
+        if let single, let index = games.firstIndex(where: { $0.titleID == single.titleID }) { selected = index }
+    }
+
+    func copyLink(_ game: Game) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(DeepLink.game(game.titleID).url.absoluteString, forType: .string)
+        show(T.text(.linkCopied), symbol: "link")
     }
 
     // MARK: Save sync

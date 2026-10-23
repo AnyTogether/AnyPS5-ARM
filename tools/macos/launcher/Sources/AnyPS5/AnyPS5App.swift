@@ -52,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// anyps5:// links, and folders opened with AnyPS5 from Finder.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated { AppModel.received(urls) }
+    }
 }
 
 struct RootView: View {
