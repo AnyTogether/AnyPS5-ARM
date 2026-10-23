@@ -315,8 +315,9 @@ struct WorkgroupMemory {
 namespace {
 
 // Frame generation wants presents a vertical blank apart (FIFO), so the generated frame shows for
-// one refresh before the game's, and swapchain images it can copy. Returns whether the swapchain is
-// made so.
+// one refresh before the game's, swapchain images it can copy, and three of them: with two
+// presents a frame, two images (what MoltenVK gives a full-screen window by default) leave none
+// free, and every acquire waits up to a second. Returns whether the swapchain is made so.
 bool PrepareFrameGeneration(VkSwapchainCreateInfoKHR& create, const VkSurfaceCapabilitiesKHR& surface) {
     static const bool requested = FrameGenerationRequested(std::getenv("ANYPS5_FRAME_GEN"));
     if (!requested) return false;
@@ -326,7 +327,9 @@ bool PrepareFrameGeneration(VkSwapchainCreateInfoKHR& create, const VkSurfaceCap
         return false;
     }
     if ((surface.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) return false;
+    if (surface.maxImageCount != 0 && surface.maxImageCount < 3) return false;
     create.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    create.minImageCount = std::max(create.minImageCount, 3u);
     return true;
 }
 
@@ -2241,6 +2244,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         check(createFence(state->device, &fence, nullptr, &state->acquireFence), "vkCreateFence");
         state->images.resize(imageCount);
         state->rendered.resize(imageCount, VK_NULL_HANDLE);
+        if (state->frameGeneration && imageCount < 3) {
+            state->frameGeneration = false;
+            std::fprintf(stderr, "[present] frame generation off: the swapchain has %u images, it needs three\n", imageCount);
+        }
         VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         allocation.commandPool = state->pool;
         allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -3066,6 +3073,10 @@ void VulkanDevice::recreateSwapchain(std::uint32_t width, std::uint32_t height, 
     check(getImages(state->device, replacement, &count, state->images.data()), "vkGetSwapchainImagesKHR resize");
     state->images.resize(count);
     state->rendered.assign(count, VK_NULL_HANDLE);
+    if (state->frameGeneration && count < 3) {
+        state->frameGeneration = false;
+        std::fprintf(stderr, "[present] frame generation off: the swapchain has %u images, it needs three\n", count);
+    }
     if (state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) setHdrMetadata();
     APS5_LOG_OUT_DEBUG("Resize complete swapchain=%p extent=%ux%u images=%u", reinterpret_cast<void*>(state->swapchain), state->extent.width, state->extent.height, count);
 }
@@ -3815,7 +3826,9 @@ bool VulkanDevice::AcquireRealImage() {
     check(state->DeviceFunction<PFN_vkResetFences>("vkResetFences")(state->device, 1, &state->realFence), "vkResetFences frame");
     std::uint32_t index = 0;
     // The image the generated frame took is queued; the next one frees at the next vertical blank.
+    const auto waitStart = std::chrono::steady_clock::now();
     const auto acquired = state->DeviceFunction<PFN_vkAcquireNextImageKHR>("vkAcquireNextImageKHR")(state->device, state->swapchain, std::numeric_limits<std::uint64_t>::max(), VK_NULL_HANDLE, state->realFence, &index);
+    const auto acquiredAt = std::chrono::steady_clock::now();
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
         state->extent = {0, 0};
         return false;
@@ -3823,6 +3836,17 @@ bool VulkanDevice::AcquireRealImage() {
     if (acquired == VK_NOT_READY || acquired == VK_TIMEOUT) return false;
     if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "vkAcquireNextImageKHR frame");
     check(state->DeviceFunction<PFN_vkWaitForFences>("vkWaitForFences")(state->device, 1, &state->realFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max()), "vkWaitForFences frame");
+    {
+        static const bool trace = std::getenv("APS5_FG_TRACE") != nullptr;
+        static int traced = 0;
+        const auto now = std::chrono::steady_clock::now();
+        const double acquireMs = std::chrono::duration<double, std::milli>(acquiredAt - waitStart).count();
+        const double fenceMs = std::chrono::duration<double, std::milli>(now - acquiredAt).count();
+        if (trace && traced < 400 && (acquireMs + fenceMs > 25.0 || traced < 40)) {
+            ++traced;
+            std::fprintf(stderr, "[fg] game's frame image %u: acquire %.1f ms, fence %.1f ms, result %d\n", index, acquireMs, fenceMs, static_cast<int>(acquired));
+        }
+    }
     require(index < state->images.size() && index < state->rendered.size(), "acquired frame image index is out of range");
     if (state->rendered[index] == VK_NULL_HANDLE) {
         VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};

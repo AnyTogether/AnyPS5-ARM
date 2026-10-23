@@ -6,6 +6,7 @@
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include <algorithm>
 #include "prx/libSceAgcDriver/Execution/include/TracyZone.hpp"
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -136,7 +137,14 @@ void Driver::Present(const PresentationWindow& window, const DisplayBuffer* buff
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr || std::getenv("APS5_PROFILE_PRESENT") != nullptr;
     std::shared_ptr<VulkanDevice> presenting;
     timing.Mark("validate");
-    followingFrame().Wait();
+    {
+        const auto start = std::chrono::steady_clock::now();
+        followingFrame().Wait();
+        static const bool trace = std::getenv("APS5_FG_TRACE") != nullptr;
+        static int traced = 0;
+        const double waited = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (trace && waited > 25.0 && traced++ < 200) std::fprintf(stderr, "[fg] flip waited %.1f ms for the game's last frame\n", waited);
+    }
     timing.Mark("following_frame_wait");
     try {
         bool submitted = false;
