@@ -190,6 +190,37 @@ std::uint32_t inactiveVertexPointSize(const QueueState& queue) {
     }
 }
 
+bool pointOutput(const QueueState& queue) {
+    const auto stages = find(queue.context, 0x2d5);
+    const auto primitive = find(queue.userConfig, 0x242, RegisterBank::UserConfig);
+    if (stages == queue.context.end()) return false;
+    if ((stages->second & 0x24u) == 0) return primitive != queue.userConfig.end() && primitive->second == 1u;
+    const auto output = find(queue.context, 0x29b);
+    return (stages->second & 0x24u) == 0x20u && output != queue.context.end() && output->second == 0u;
+}
+
+void decodePointSize(const QueueState& queue, State& result) {
+    const auto& cx = queue.context;
+    const auto size = read(cx, 0x280);
+    const auto limits = read(cx, 0x281);
+    const bool fromVertex = (result.paClVsOutCntl & (1u << 16u)) != 0;
+    Require(!fromVertex || (result.paClVsOutCntl & (1u << 21u)) != 0, "USE_VTX_POINT_SIZE without VS_OUT_MISC_VEC_ENA is unsupported");
+    Require(fromVertex || (size & 0xffffu) == size >> 16u, "points whose PA_SU_POINT_SIZE width and height differ are unsupported");
+    Require(fromVertex || (size & 0xffffu) != 0, "points of size 0 (PA_SU_POINT_SIZE 0) are unsupported");
+    Require((limits & 0xffffu) <= limits >> 16u, "PA_SU_POINT_MINMAX with a minimum above its maximum is unsupported");
+    Require(!fromVertex || (limits >> 16u) != 0, "a vertex point size clamped to 0 (PA_SU_POINT_MINMAX maximum 0) is unsupported");
+    result.pointSize = static_cast<float>(size & 0xffffu) / 8.0f;
+    result.pointSizeMin = static_cast<float>(limits & 0xffffu) / 8.0f;
+    result.pointSizeMax = static_cast<float>(limits >> 16u) / 8.0f;
+    const auto interpolation = find(cx, 0x1b5);
+    const auto inputs = find(cx, 0x1b6);
+    if (interpolation == cx.end() || (interpolation->second & 2u) == 0 || inputs == cx.end()) return;
+    for (std::uint32_t input = 0; input < (inputs->second & 0x3fu); ++input) {
+        const auto control = find(cx, 0x191 + input);
+        Require(control == cx.end() || (control->second & 0x820000u) == 0, "point sprite texture coordinates (SPI_PS_INPUT_CNTL PT_SPRITE_TEX) are not implemented");
+    }
+}
+
 constexpr std::uint32_t DepthControlMask = ~0x007007f0u;
 // EXEC_ON_HIER_FAIL / EXEC_ON_NOOP / EXEC_IF_OVERLAPPED (bits 9, 10, 17) only force the pixel shader
 // to run, which it always does here.
@@ -355,7 +386,6 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     const bool opValReference = opValExport && StencilOperationValueReplaces(cx);
     zero(cx, 0x000, 0x0000101cu, "depth copy, resummarize or decompress draws (DB_RENDER_CONTROL)");
     const bool depthClear = (read(cx, 0x000) & 1u) != 0;
-    const bool stencilClear = (read(cx, 0x000) & 2u) != 0;
     const auto view = read(cx, 0x002);
     zero(cx, 0x010, 0x00001000u, "partially resident depth (DB_Z_INFO)");
     const auto viewMip = (view >> 26u) & 0xfu;
@@ -363,6 +393,7 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     zero(cx, 0x011, 0x00001000u, "partially resident stencil (DB_STENCIL_INFO)");
     const auto zFormat = read(cx, 0x010) & 3u;
     const bool stencil = (read(cx, 0x011) & 1u) != 0;
+    const bool stencilClear = stencil && (read(cx, 0x000) & 2u) != 0;
     Require(zFormat != 2, "Z_24 depth is unsupported");
     if (zFormat == 0) depthControl &= ~6u;
     if (!stencil) depthControl &= ~1u;
@@ -372,7 +403,7 @@ void decodeDepth(const Registers& cx, std::uint32_t depthControl, bool testValEx
     };
     const bool depthReadOnly = (view & 0x01000000u) != 0;
     const bool stencilReadOnly = (view & 0x02000000u) != 0;
-    Require(!stencilClear || (stencil && !stencilReadOnly), "stencil clear requires a writable stencil plane");
+    Require(!stencilClear || !stencilReadOnly, "stencil clear requires a writable stencil plane");
     Require(!stencilClear || !testValExport, "stencil clear with a pixel shader that exports the stencil test value is unsupported");
     Require(!depthClear || (zFormat != 0 && !depthReadOnly), "depth clear requires a writable depth plane");
     DepthTarget depth{};
@@ -929,8 +960,8 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
             if (number == unorm) return {VK_FORMAT_R32_UINT, 4, 0xe4u, ShaderRecompiler::ColorExportPacking::Unorm10_11_11};
             return {VK_FORMAT_B10G11R11_UFLOAT_PACK32, 4};
         case 7:
-            if (swap != 2 || number != floating) return fail();
-            return {VK_FORMAT_R32_UINT, 4, 0xc6u, ShaderRecompiler::ColorExportPacking::Float11_11_10};
+            if ((swap != 0 && swap != 2) || number != floating) return fail();
+            return {VK_FORMAT_R32_UINT, 4, static_cast<std::uint8_t>(swap == 2 ? 0xc6u : 0xe4u), ShaderRecompiler::ColorExportPacking::Float11_11_10};
         case 9:
             // COLOR_2_10_10_10 keeps red in the low bits, the Vulkan A2B10G10R10 packing.
             if (number != unorm) return fail();
@@ -1080,6 +1111,15 @@ std::array<std::uint8_t, 32> PixelSampleLocations(const State& state, const Shad
         }
     }
     return locations;
+}
+
+void ApplyPointSize(const State& state, ShaderRecompiler::ShaderVertexStageInfo& vertex) {
+    if (!state.vertexPoints && !(state.stages.mesh.has_value() && state.stages.mesh->outputPrimitiveSize == 1u)) return;
+    vertex.paClVsOutCntl |= state.paClVsOutCntl & (1u << 16u);
+    vertex.pointList = true;
+    vertex.pointSize = state.pointSize;
+    vertex.pointSizeMin = state.pointSizeMin;
+    vertex.pointSizeMax = state.pointSizeMax;
 }
 
 ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
@@ -1256,7 +1296,11 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     const auto primitive = read(queue.userConfig, 0x242, RegisterBank::UserConfig);
     APS5_LOG_OUT_DEBUG("DecodeState primitive=%u path=%u vertexWave=%u", primitive, static_cast<unsigned>(result.stages.path), result.stages.vertexWaveSize);
     switch (primitive) {
-        case 1: Require(result.stages.mesh.has_value(), "point-list vertex rendering requires point-size output support"); result.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+        case 1:
+            Require(result.stages.mesh.has_value() || result.stages.path == ShaderPath::Vertex, "point lists are only drawn through the vertex and geometry paths");
+            result.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+            result.vertexPoints = result.stages.path == ShaderPath::Vertex;
+            break;
         case 2: result.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
         case 3: result.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP; break;
         case 7:
@@ -1281,9 +1325,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     APS5_LOG_OUT_DEBUG("Topology=%u", static_cast<unsigned>(result.topology));
     result.primitiveRestart = read(queue.userConfig, 0x24b, RegisterBank::UserConfig) != 0 && !result.rectList && !result.quadList && result.topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
-    zero(cx, 0x207, ~(LayerExports | ClipCullExports | inactiveVertexPointSize(queue)), "layer, viewport or auxiliary vertex exports");
+    zero(cx, 0x207, ~(LayerExports | ClipCullExports | ((result.vertexPoints || (result.stages.mesh.has_value() && result.stages.mesh->outputPrimitiveSize == 1u)) ? 1u << 16u : inactiveVertexPointSize(queue))), "layer, viewport or auxiliary vertex exports");
     Require(std::popcount(read(cx, 0x207) & 0xffffu) <= 8, "more than eight clip and cull distances are unsupported");
     result.paClVsOutCntl = read(cx, 0x207);
+    if (result.vertexPoints || (result.stages.mesh.has_value() && result.stages.mesh->outputPrimitiveSize == 1u)) decodePointSize(queue, result);
     result.samples = decodeSamples(cx);
     Require(coveredCentroidSupported(queue), "COVERED_CENTROID_IS_CENTER with active or unspecified centroid inputs is not implemented");
     decodeSampleLocations(cx, result);
@@ -1334,8 +1379,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         result.sampleLocationGrid = false;
     }
     if (result.samples > 1 && (read(cx, 0x292) & 1u) == 0) {
-        const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-        Require(filled && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines or alpha-to-coverage");
+        Require(RasterPrimitiveOf(result) != ShaderRecompiler::RasterPrimitive::Point && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points or alpha-to-coverage");
         if (const auto eqaa = find(cx, 0x201); result.depth && eqaa != cx.end() && (eqaa->second & 0x0f0c0000u) != 0) throw std::runtime_error(zeroMessage(0x201, eqaa->second, "a multisampled depth target rasterized without MSAA_ENABLE with Z interpolation or overrasterization (DB_EQAA)"));
         if (const auto control = find(cx, 0x203); result.depth && control != cx.end() && (control->second & 0x100u) != 0) throw std::runtime_error(zeroMessage(0x203, control->second, "a multisampled depth target rasterized without MSAA_ENABLE with a sample-mask export"));
         result.customSampleLocations = true;
@@ -1436,8 +1480,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         }
         const bool merged = color.samples == 1u && !result.depth && !result.perSampleShading && (result.colors.empty() || result.mergedCoverage) && overrasterized(cx, result.samples);
         if (!merged && color.samples == 1 && result.colors.empty() && !result.depth && rasterizesSampleZeroOnly(cx, result)) rasterizeSampleZero(result);
-        Require((color.samples == result.samples && !result.mergedCoverage) || merged, "a color target's sample count differs from the rasterizer's");
+        const bool truncated = color.samples == 1u && result.samples > 1u && result.depth && result.depth->samples == result.samples && (result.colors.empty() || result.truncatedCoverage) && !overrasterized(cx, result.samples);
+        Require((color.samples == result.samples && !result.mergedCoverage && !result.truncatedCoverage) || merged || truncated, "a color target's sample count differs from the rasterizer's");
         result.mergedCoverage = merged;
+        result.truncatedCoverage = truncated;
         APS5_LOG_OUT_DEBUG("Color %u address=0x%llx extent=%ux%u bytes=%llu VkFormat=%u", slot, static_cast<unsigned long long>(color.address), color.extent.width, color.extent.height, static_cast<unsigned long long>(color.bytes), static_cast<unsigned>(color.format));
         if (result.colors.empty()) {
             result.renderExtent = color.extent;
@@ -1877,6 +1923,14 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
             if (color.samples == 1) GuestMemory::CheckRange(reinterpret_cast<const void*>(cmask), totalCmaskBytes, CmaskLayout::Alignment, true);
         }
         color.cmaskFastClear = (info & 0x2000u) != 0;
+        if (const auto fmask = find(cx, 0x321 + stride); color.samples > 1u && fmask != cx.end()) {
+            const auto high = find(cx, 0x3a0 + slot);
+            const auto fmaskHigh = high == cx.end() ? 0u : high->second;
+            Require((fmaskHigh & ~0xffu) == 0u, "invalid FMASK address extension");
+            const auto address = (static_cast<std::uint64_t>(fmaskHigh) << 40u) | (static_cast<std::uint64_t>(fmask->second) << 8u);
+            color.fmaskPipeBankXor = static_cast<std::uint32_t>(address & 0xffffu);
+            color.fmaskAddress = address - color.fmaskPipeBankXor;
+        }
     }
     if ((info & 0x10000000u) != 0) {
         if (maxMip == 0) {
@@ -2044,15 +2098,16 @@ std::string DrawRejection(const QueueState& queue, bool indexed) {
         if (value(queue.userConfig, 0x242, primitive) && (primitive & 0x3fu) != 1 && (primitive & 0x3fu) != 2 && (primitive & 0x3fu) != 3 && (primitive & 0x3fu) != 4 && (primitive & 0x3fu) != 5 && (primitive & 0x3fu) != 6 && (primitive & 0x3fu) != 21) return "AGC graphics: primitive restart is only supported for point, line and triangle topologies";
         if (value(cx, 0x103, resetIndex) && (resetIndex & 0xffffu) != 0xffffu) return "AGC graphics: primitive restart index other than all ones is unsupported";
     }
-    if (auto reason = nonzero(cx, 0x207, ~(LayerExports | ClipCullExports | inactiveVertexPointSize(queue)), "layer, viewport or auxiliary vertex exports"); !reason.empty()) return reason;
+    if (auto reason = nonzero(cx, 0x207, ~(LayerExports | ClipCullExports | (pointOutput(queue) ? 1u << 16u : inactiveVertexPointSize(queue))), "layer, viewport or auxiliary vertex exports"); !reason.empty()) return reason;
     if (value(cx, 0x207, word) && std::popcount(word & 0xffffu) > 8) return require(false, "more than eight clip and cull distances are unsupported");
     if (value(cx, 0x200, word)) {
         const auto renderControl = find(cx, 0x000);
         const bool depthClear = renderControl != cx.end() && (renderControl->second & 1u) != 0;
-        const bool stencilClear = renderControl != cx.end() && (renderControl->second & 2u) != 0;
+        std::uint32_t stencilInfo = 0;
+        const bool stencilClear = renderControl != cx.end() && (renderControl->second & 2u) != 0 && !(value(cx, 0x011, stencilInfo) && (stencilInfo & 1u) == 0);
         if (stencilClear && !depthPlanesAbsent(cx)) {
-            std::uint32_t stencil = 0, view = 0;
-            if ((value(cx, 0x011, stencil) && (stencil & 1u) == 0) || (value(cx, 0x002, view) && (view & 0x02000000u) != 0)) return require(false, "stencil clear requires a writable stencil plane");
+            std::uint32_t view = 0;
+            if (value(cx, 0x002, view) && (view & 0x02000000u) != 0) return require(false, "stencil clear requires a writable stencil plane");
         }
         if (depthClear && !depthPlanesAbsent(cx)) {
             std::uint32_t z = 0, view = 0;

@@ -5,6 +5,8 @@
 #include <stdexcept>
 
 extern "C" {
+int APS5_VABI sceUserServiceGetUserNumber(int user_id, int32_t* number);
+int APS5_VABI sceUserServiceGetPlatformPrivacyWs1(int32_t user_id, int32_t* value);
 int APS5_VABI sceUserServiceGetForegroundUser(int* user_id);
 int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdList* user_id_list);
 int APS5_VABI sceUserServiceGetUserColor(int user_id, int* color);
@@ -28,6 +30,17 @@ void Require(bool value) { if (!value) std::abort(); }
 
 int main() {
     Require(sceUserServiceGetForegroundUser(nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    int32_t userNumber = -1;
+    Require(sceUserServiceGetUserNumber(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserNumber(123, &userNumber) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetUserNumber(USER_SERVICE_INITIAL_USER_ID, &userNumber) == USER_SERVICE_OK);
+    Require(userNumber == 1);
+
+    int32_t privacy = -1;
+    Require(sceUserServiceGetPlatformPrivacyWs1(USER_SERVICE_INITIAL_USER_ID, nullptr) == USER_SERVICE_ERROR_INVALID_ARGUMENT);
+    Require(sceUserServiceGetPlatformPrivacyWs1(USER_SERVICE_INITIAL_USER_ID, &privacy) == USER_SERVICE_OK);
+    Require(privacy == 0);
+
     int foreground = -1;
     Require(sceUserServiceGetForegroundUser(&foreground) == USER_SERVICE_OK);
     Require(foreground == USER_SERVICE_INITIAL_USER_ID);

@@ -1,7 +1,17 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "mbedtls/des.h"
+
+namespace {
+
+constexpr std::size_t DesScheduleBytes = 128;
+
+}
 
 extern "C" {
 
@@ -301,19 +311,28 @@ int APS5_VABI CRYPTO_set_mem_functions_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI DES_ecb_encrypt_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
+void APS5_VABI DES_ecb_encrypt_nid_postfix(const unsigned char* input, unsigned char* output, const unsigned char* schedule, int enc) {
+    if (input == nullptr || output == nullptr || schedule == nullptr) APS5_INVALID_ARG_EX;
+    mbedtls_des_context context;
+    mbedtls_des_init(&context);
+    unsigned char block[MBEDTLS_DES_KEY_SIZE];
+    std::memcpy(block, input, sizeof(block));
+    int status = enc ? mbedtls_des_setkey_enc(&context, schedule) : mbedtls_des_setkey_dec(&context, schedule);
+    if (status == 0) status = mbedtls_des_crypt_ecb(&context, block, output);
+    mbedtls_des_free(&context);
+    if (status != 0) throw std::runtime_error("DES_ecb_encrypt: mbedtls failed");
+}
+
+int APS5_VABI DES_set_key_nid_postfix(const unsigned char* key, unsigned char* schedule) {
+    if (key == nullptr || schedule == nullptr) APS5_INVALID_ARG_EX;
+    std::memset(schedule, 0, DesScheduleBytes);
+    std::memcpy(schedule, key, MBEDTLS_DES_KEY_SIZE);
     return 0;
 }
 
-int APS5_VABI DES_set_key_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI DES_set_odd_parity_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+void APS5_VABI DES_set_odd_parity_nid_postfix(unsigned char* key) {
+    if (key == nullptr) APS5_INVALID_ARG_EX;
+    mbedtls_des_key_set_parity(key);
 }
 
 int APS5_VABI DTLSv1_client_method_nid_postfix(void) {
@@ -846,36 +865,6 @@ int APS5_VABI HMAC_Update_nid_postfix(void) {
     return 0;
 }
 
-int APS5_VABI MD4_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI MD4_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI MD4_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI MD5_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI MD5_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI MD5_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI OBJ_cleanup_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -1112,86 +1101,6 @@ int APS5_VABI RSA_verify_nid_postfix(void) {
 }
 
 int APS5_VABI RSA_verify_PKCS1_PSS_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA1_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA1_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA1_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA224_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA224_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA224_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA256_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA256_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA256_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA256_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA384_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA384_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA384_Update_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA512_Final_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA512_Init_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI SHA512_Update_nid_postfix(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

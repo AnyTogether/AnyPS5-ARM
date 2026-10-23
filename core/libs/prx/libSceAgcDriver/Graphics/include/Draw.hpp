@@ -94,6 +94,8 @@ bool DrawRecipes();
 enum class IndirectDrawPath : std::uint8_t { Gpu, NotFolded, FetchUnknown, NonVertexPath, IndxOffset, DrawIndex, VertexRange, FeatureGap, PendingImage, PendingLabelOrCopy, NotImported, Disabled, IndexRange, Count };
 void CountIndirectDraw(IndirectDrawPath path, double readMs, bool rewritten = false);
 std::array<std::uint64_t, static_cast<std::size_t>(IndirectDrawPath::Count)> IndirectDrawCounts();
+void CountEmptyIndirectDraw(double readMs);
+std::uint64_t EmptyIndirectDrawCount();
 
 struct DrawPassCounts {
     std::uint64_t draws = 0;
@@ -128,6 +130,9 @@ std::shared_ptr<std::vector<std::shared_ptr<ShaderResources>>> DrawCopiedWriters
 
 void RunColorMetadataPass(const Context& context, const ColorMetadataPass& pass);
 void RunDepthCopyPass(const Context& context, const DepthCopyPass& pass);
+std::vector<std::pair<std::uint64_t, std::uint64_t>> PipelinedColorMetadataPassWrites(const ColorMetadataPass& pass);
+bool DrawPipelineEnabled();
+bool CommitTrims();
 
 }
 

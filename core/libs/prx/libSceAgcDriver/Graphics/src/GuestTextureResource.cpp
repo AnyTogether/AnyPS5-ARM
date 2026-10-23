@@ -5,6 +5,8 @@
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include <algorithm>
+#include <array>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -48,6 +50,45 @@ TextureDimension resolveDimension(std::uint32_t raw) {
         case 14: return TextureDimension::k2DMsaa;
         default: throw std::runtime_error("AGC graphics: guest texture descriptor uses an unsupported image type " + std::to_string(raw));
     }
+}
+
+bool ZeroTail(std::span<const std::uint32_t> words) {
+    return words[4] == 0u && words[5] == 0u && words[6] == 0u && words[7] == 0u;
+}
+
+bool SameLevels(const TileMipLayout& a, const TileMipLayout& b) {
+    return a.tiledOffset == b.tiledOffset && a.tiledSize == b.tiledSize && a.width == b.width && a.height == b.height && a.blocksPerRow == b.blocksPerRow && a.pitchBytes == b.pitchBytes && a.tail == b.tail && a.tailX == b.tailX && a.tailY == b.tailY;
+}
+
+std::optional<std::array<std::uint32_t, 8>> R128ResidentLevelWords(std::span<const std::uint32_t> words) {
+    const auto baseLevel = (words[3] >> 12u) & 0xfu;
+    const auto lastLevel = (words[3] >> 16u) & 0xfu;
+    const auto typeRaw = (words[3] >> 28u) & 0xfu;
+    if (baseLevel == 0u || baseLevel > lastLevel || (typeRaw != 8u && typeRaw != 9u)) return std::nullopt;
+    const std::array<std::uint32_t, 8> chainWords{words[0], words[1], words[2], words[3], 0u, lastLevel << 4u, 0u, 0u};
+    const auto width = (((words[1] >> 30u) & 0x3u) | ((words[2] & 0xfffu) << 2u)) + 1u;
+    const auto height = ((words[2] >> 14u) & 0x3fffu) + 1u;
+    const auto minLod = (words[1] >> 8u) & 0xfffu;
+    const auto widthMinus1 = std::max(width >> baseLevel, 1u) - 1u;
+    const auto heightMinus1 = std::max(height >> baseLevel, 1u) - 1u;
+    const auto rebasedMinLod = minLod > baseLevel * 256u ? minLod - baseLevel * 256u : 0u;
+    const auto levels = lastLevel - baseLevel;
+    auto rebased = chainWords;
+    rebased[1] = (words[1] & ~((0xfffu << 8u) | (0x3u << 30u))) | (rebasedMinLod << 8u) | ((widthMinus1 & 0x3u) << 30u);
+    rebased[2] = (words[2] & ~(0xfffu | (0x3fffu << 14u))) | ((widthMinus1 >> 2u) & 0xfffu) | ((heightMinus1 & 0x3fffu) << 14u);
+    rebased[3] = (words[3] & ~(0xffu << 12u)) | (levels << 16u);
+    rebased[5] = levels << 4u;
+    try {
+        const auto chain = DescribeSurface(DecodeTextureResource(chainWords));
+        const auto view = DescribeSurface(DecodeTextureResource(rebased));
+        if (chain.mips.size() != lastLevel + 1u || view.mips.size() != levels + 1u || chain.layers != view.layers) return std::nullopt;
+        for (std::uint32_t level = baseLevel; level <= lastLevel; ++level) {
+            if (!SameLevels(chain.mips[level], view.mips[level - baseLevel])) return std::nullopt;
+        }
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    return rebased;
 }
 
 }
@@ -140,7 +181,8 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     const bool fmask = ShaderRecompiler::IsFmaskTextureFormat(static_cast<ShaderRecompiler::IrBufferFormat>(format));
     if (fmask) {
         Require(format == static_cast<std::uint32_t>(ShaderRecompiler::IrBufferFormat::Fmask32_S8_F8), "guest FMASK format is not implemented");
-        Require(!metaCompress && !writeCompress, "FMASK CMASK compression is not implemented");
+        Require(!writeCompress && (!metaCompress || metaAddr != 0u), "FMASK CMASK compression is not implemented without readable metadata");
+        Require(!metaCompress || metaPipeAligned, "FMASK CMASK metadata must be pipe aligned");
         Require((typeRaw == 9u || typeRaw == 13u) && tileModeRaw == 24u && baseLevel == 0u && lastLevel == 0u && maxMip == 0u, "FMASK reads require a single-mip 2D or 2D-array Z_64KB_X surface");
         for (const auto selector : {dstSelX, dstSelY, dstSelZ, dstSelW}) Require(selector == 0u || selector == 1u || selector == 4u, "FMASK destination channel selector is not implemented");
     }
@@ -229,14 +271,19 @@ GuestTextureResource DecodeTextureResource(std::span<const std::uint32_t> words)
     result.dstSelZ = static_cast<std::uint8_t>(dstSelZ);
     result.dstSelW = static_cast<std::uint8_t>(dstSelW);
     result.bcSwizzle = static_cast<std::uint8_t>(bcSwizzle);
-    result.dccAddress = metaCompress ? metaAddr << 8u : 0u;
+    result.dccAddress = metaCompress && !fmask ? metaAddr << 8u : 0u;
+    result.fmaskCmaskAddress = metaCompress && fmask ? metaAddr << 8u : 0u;
     result.dccAlphaOnMsb = dccAlphaPos;
     result.dccPipeAligned = metaPipeAligned;
     result.iterate256 = iterate256;
     result.minLod = minLod;
     result.samples = samples;
     if (baseLevel > maxMip) {
-        Require(LevelsFitAllocation(result, lastLevel + 1u), "guest texture descriptor starts past the surface's last mip level at levels that would move the surface's own" + describe());
+        const bool fits = LevelsFitAllocation(result, lastLevel + 1u);
+        if (!fits && ZeroTail(words)) {
+            if (const auto resident = R128ResidentLevelWords(words)) return DecodeTextureResource(*resident);
+        }
+        Require(fits, "guest texture descriptor starts past the surface's last mip level at levels that would move the surface's own" + describe());
         result.mipCount = lastLevel + 1u;
     }
     return result;

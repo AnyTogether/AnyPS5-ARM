@@ -469,6 +469,12 @@ int APS5_VABI strncpy_s_nid_postfix(char* dest, size_t destsz, const char* src, 
         dest[0] = '\0';
         return GuestErange;
     }
+    const auto destination = reinterpret_cast<std::uintptr_t>(dest);
+    const auto source = reinterpret_cast<std::uintptr_t>(src);
+    if (destination < source + (length + 1) && source < destination + length + 1) {
+        dest[0] = '\0';
+        return GuestEinval;
+    }
     std::memcpy(dest, src, length);
     dest[length] = '\0';
     return 0;
@@ -495,6 +501,12 @@ int APS5_VABI strncat_s_nid_postfix(char* dest, size_t destsz, const char* src, 
     if (length >= destsz - used) {
         dest[0] = '\0';
         return GuestErange;
+    }
+    const auto destination = reinterpret_cast<std::uintptr_t>(dest);
+    const auto source = reinterpret_cast<std::uintptr_t>(src);
+    if (destination < source + (length + 1) && source < destination + used + length + 1) {
+        dest[0] = '\0';
+        return GuestEinval;
     }
     std::memcpy(dest + used, src, length);
     dest[used + length] = '\0';

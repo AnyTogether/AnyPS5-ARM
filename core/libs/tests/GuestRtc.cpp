@@ -67,6 +67,8 @@ int APS5_VABI sceRtcSetCurrentTick(const RtcTick*);
 int APS5_VABI sceRtcSetCurrentNetworkTick(const RtcTick*);
 int APS5_VABI sceRtcSetCurrentAdNetworkTick(const RtcTick*);
 int APS5_VABI sceRtcSetCurrentDebugNetworkTick(const RtcTick*);
+int APS5_VABI sceRtcInit(void);
+int APS5_VABI sceRtcEnd(void);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -907,4 +909,6 @@ int main() {
         Require(sceRtcGetCurrentDebugNetworkTick(&current) == 0 && current.tick >= debugClock.tick && current.tick < debugClock.tick + 1000000);
         Require(sceRtcGetCurrentRawNetworkTick(&current) == 0 && current.tick > unixEpochTick);
     }
+    Require(sceRtcInit() == 0);
+    Require(sceRtcEnd() == 0);
 }

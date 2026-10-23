@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "JisX0212.hpp"
 #include "Cp949.hpp"
 #include "Cp950.hpp"
+#include "SingleByte.hpp"
 
 namespace {
 
@@ -21,10 +23,10 @@ constexpr int CES_ERROR_UNASSIGNED_CODE = static_cast<int>(0x805C0020);
 constexpr int CES_ERROR_INVALID_DST_BUFFER = static_cast<int>(0x805C0030);
 constexpr int CES_ERROR_DST_BUFFER_END = static_cast<int>(0x805C0031);
 
-constexpr uint8_t PROFILES[3] = {0, 1, 2};
-constexpr const uint8_t* CP1252_PROFILE = &PROFILES[0];
-constexpr const uint8_t* CP1251_PROFILE = &PROFILES[1];
-constexpr const uint8_t* CP1250_PROFILE = &PROFILES[2];
+constexpr uint8_t PROFILES[3 + SingleByte::Count][8] = {{0}, {1}, {2}};
+constexpr const uint8_t* CP1252_PROFILE = PROFILES[0];
+constexpr const uint8_t* CP1251_PROFILE = PROFILES[1];
+constexpr const uint8_t* CP1250_PROFILE = PROFILES[2];
 
 constexpr uint16_t CP1252_HIGH[32] = {
     0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
@@ -59,21 +61,30 @@ constexpr uint16_t CP932_IBM_HEAD[28] = {
     0xFFE2, 0xFFE4, 0xFF07, 0xFF02, 0x3231, 0x2116, 0x2121, 0x2235,
 };
 
-uint32_t sbcToUnicode(const uint8_t* profile, uint8_t sbc) {
-    if (profile == CP1251_PROFILE || profile == CP1250_PROFILE) {
-        const uint16_t* high = profile == CP1251_PROFILE ? CP1251_HIGH : CP1250_HIGH;
-        return sbc >= 0x80 ? high[sbc - 0x80] : sbc;
+const uint8_t* singleByteProfile(SingleByte::Table table) {
+    return PROFILES[3 + table];
+}
+
+const uint16_t* sbcHighTable(const void* profile) {
+    if (profile == CP1251_PROFILE) return CP1251_HIGH;
+    if (profile == CP1250_PROFILE) return CP1250_HIGH;
+    for (std::size_t table = 0; table < SingleByte::Count; ++table) {
+        if (profile == singleByteProfile(static_cast<SingleByte::Table>(table))) return SingleByte::HIGH[table];
     }
+    return nullptr;
+}
+
+uint32_t sbcToUnicode(const uint8_t* profile, uint8_t sbc) {
+    if (const uint16_t* high = sbcHighTable(profile)) return sbc >= 0x80 ? high[sbc - 0x80] : sbc;
     return sbc >= 0x80 && sbc < 0xA0 ? CP1252_HIGH[sbc - 0x80] : sbc;
 }
 
 bool unicodeToSbc(const uint8_t* profile, uint32_t code, uint8_t& sbc) {
-    if (profile == CP1251_PROFILE || profile == CP1250_PROFILE) {
+    if (const uint16_t* high = sbcHighTable(profile)) {
         if (code < 0x80) {
             sbc = static_cast<uint8_t>(code);
             return true;
         }
-        const uint16_t* high = profile == CP1251_PROFILE ? CP1251_HIGH : CP1250_HIGH;
         for (uint32_t i = 0; i < 128; ++i) {
             if (high[i] == code) {
                 sbc = static_cast<uint8_t>(0x80 + i);
@@ -145,7 +156,30 @@ bool isSjis(const void* profile) {
 }
 
 bool isSbc(const void* profile) {
-    return profile == CP1252_PROFILE || profile == CP1251_PROFILE || profile == CP1250_PROFILE;
+    return profile == CP1252_PROFILE || sbcHighTable(profile) != nullptr;
+}
+
+bool sjisToJis(uint8_t lead, uint8_t trail, int& row, int& cell) {
+    if (!((lead >= 0x81 && lead <= 0x9F) || (lead >= 0xE0 && lead <= 0xFC))) return false;
+    if (trail < 0x40 || trail == 0x7F || trail > 0xFC) return false;
+    row = lead <= 0x9F ? (lead - 0x81) * 2 + 1 : (lead - 0xE0) * 2 + 63;
+    if (trail >= 0x9F) {
+        row += 1;
+        cell = trail - 0x9E;
+    } else {
+        cell = trail > 0x7E ? trail - 0x40 : trail - 0x3F;
+    }
+    return true;
+}
+
+void jisToSjis(int row, int cell, uint8_t& lead, uint8_t& trail) {
+    if (row % 2 != 0) {
+        lead = static_cast<uint8_t>(row < 63 ? 0x81 + (row - 1) / 2 : 0xE0 + (row - 63) / 2);
+        trail = static_cast<uint8_t>(cell <= 63 ? cell + 0x3F : cell + 0x40);
+    } else {
+        lead = static_cast<uint8_t>(row < 63 ? 0x81 + (row - 2) / 2 : 0xE0 + (row - 64) / 2);
+        trail = static_cast<uint8_t>(cell + 0x9E);
+    }
 }
 
 const void* contextProfile(const void* context) {
@@ -307,14 +341,9 @@ int decodeMbcs(const void* profile, const uint8_t* mbcs, uint32_t mbcsMax, uint3
                 }
                 return CES_ERROR_UNASSIGNED_CODE;
             }
-            int row = (lead <= 0x9F) ? (lead - 0x81) * 2 + 1 : (lead - 0xE0) * 2 + 63;
+            int row = 0;
             int cell = 0;
-            if (trail >= 0x9F) {
-                row += 1;
-                cell = trail - 0x9E;
-            } else {
-                cell = (trail > 0x7E) ? trail - 0x40 : trail - 0x3F;
-            }
+            sjisToJis(lead, trail, row, cell);
             if (row < 1 || row > 94 || cell < 1 || cell > 94) return CES_ERROR_UNASSIGNED_CODE;
             code = JisX0208::TO_UCS2[(row - 1) * 94 + (cell - 1)];
             if (code == 0) return CES_ERROR_UNASSIGNED_CODE;
@@ -397,15 +426,7 @@ int encodeMbcs(const void* profile, uint32_t code, uint8_t* mbcs, uint32_t& leng
         const auto& reverse = jisReverse();
         const auto found = std::lower_bound(reverse.begin(), reverse.end(), static_cast<uint16_t>(code), [](const JisCell& entry, uint16_t value) { return entry.code < value; });
         if (found == reverse.end() || found->code != code || found->supplementary) return CES_ERROR_UNASSIGNED_CODE;
-        const int row = found->cell / 94 + 1;
-        const int cell = found->cell % 94 + 1;
-        if (row % 2 != 0) {
-            mbcs[0] = static_cast<uint8_t>(row < 63 ? 0x81 + (row - 1) / 2 : 0xE0 + (row - 63) / 2);
-            mbcs[1] = static_cast<uint8_t>(cell <= 63 ? cell + 0x3F : cell + 0x40);
-        } else {
-            mbcs[0] = static_cast<uint8_t>(row < 63 ? 0x81 + (row - 2) / 2 : 0xE0 + (row - 64) / 2);
-            mbcs[1] = static_cast<uint8_t>(cell + 0x9E);
-        }
+        jisToSjis(found->cell / 94 + 1, found->cell % 94 + 1, mbcs[0], mbcs[1]);
         length = 2;
         return 0;
     }
@@ -518,6 +539,195 @@ int mbcsToUtf8(bool accepted, const void* profile, const uint8_t* mbcs, uint32_t
     return 0;
 }
 
+constexpr bool NATIVE_BIG_ENDIAN = std::endian::native == std::endian::big;
+
+template<typename Unit, bool BigEndian>
+uint32_t loadUnit(const Unit* source) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(source);
+    uint32_t code = 0;
+    for (uint32_t i = 0; i < sizeof(Unit); ++i) code |= uint32_t(bytes[i]) << (8 * (BigEndian ? sizeof(Unit) - 1 - i : i));
+    return code;
+}
+
+template<typename Unit, bool BigEndian>
+void storeUnit(Unit* target, uint32_t code) {
+    auto* bytes = reinterpret_cast<uint8_t*>(target);
+    for (uint32_t i = 0; i < sizeof(Unit); ++i) bytes[i] = static_cast<uint8_t>(code >> (8 * (BigEndian ? sizeof(Unit) - 1 - i : i)));
+}
+
+bool isScalar(uint32_t code) {
+    return code <= 0x10FFFF && (code < 0xD800 || code > 0xDFFF);
+}
+
+template<bool BigEndian>
+int decodeUtf16(const uint16_t* utf16, uint32_t utf16max, uint32_t& length, uint32_t& code) {
+    code = loadUnit<uint16_t, BigEndian>(utf16);
+    length = 1;
+    if (code >= 0xDC00 && code <= 0xDFFF) return CES_ERROR_INVALID_ENCODE;
+    if (code >= 0xD800 && code <= 0xDBFF) {
+        if (utf16max < 2) return CES_ERROR_SRC_BUFFER_END;
+        const uint32_t low = loadUnit<uint16_t, BigEndian>(utf16 + 1);
+        if (low < 0xDC00 || low > 0xDFFF) return CES_ERROR_INVALID_ENCODE;
+        code = 0x10000 + ((code - 0xD800) << 10) + low - 0xDC00;
+        length = 2;
+    }
+    return 0;
+}
+
+int decodeJapanese(bool (*matches)(const void*), const void* profile, const uint8_t* source, uint32_t sourceMax, const void* target, uint32_t& length, uint32_t& code) {
+    if (!matches(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!source) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (sourceMax == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!target) return CES_ERROR_INVALID_DST_BUFFER;
+    return decodeMbcs(profile, source, sourceMax, length, code);
+}
+
+int japaneseToUcs2(bool (*matches)(const void*), const void* profile, const uint8_t* source, uint32_t sourceMax, uint32_t* sourceSize, uint16_t* ucs2) {
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decodeJapanese(matches, profile, source, sourceMax, ucs2, length, code); result != 0) return result;
+    *ucs2 = static_cast<uint16_t>(code);
+    if (sourceSize) *sourceSize = length;
+    return 0;
+}
+
+int japaneseToUtf8(bool (*matches)(const void*), const void* profile, const uint8_t* source, uint32_t sourceMax, uint32_t* sourceSize, uint8_t* utf8, uint32_t utf8max, uint32_t* utf8Len) {
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decodeJapanese(matches, profile, source, sourceMax, utf8, length, code); result != 0) return result;
+    uint8_t encoded[3];
+    const uint32_t produced = encodeUtf8(code, encoded);
+    if (utf8max < produced) return CES_ERROR_DST_BUFFER_END;
+    std::memcpy(utf8, encoded, produced);
+    if (sourceSize) *sourceSize = length;
+    if (utf8Len) *utf8Len = produced;
+    return 0;
+}
+
+template<bool BigEndian>
+int japaneseToUtf16(bool (*matches)(const void*), const void* profile, const uint8_t* source, uint32_t sourceMax, uint32_t* sourceSize, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decodeJapanese(matches, profile, source, sourceMax, utf16, length, code); result != 0) return result;
+    if (utf16max < 1) return CES_ERROR_DST_BUFFER_END;
+    storeUnit<uint16_t, BigEndian>(utf16, code);
+    if (sourceSize) *sourceSize = length;
+    if (utf16Len) *utf16Len = 1;
+    return 0;
+}
+
+template<bool BigEndian>
+int japaneseToUtf32(bool (*matches)(const void*), const void* profile, const uint8_t* source, uint32_t sourceMax, uint32_t* sourceSize, uint32_t* utf32) {
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decodeJapanese(matches, profile, source, sourceMax, utf32, length, code); result != 0) return result;
+    storeUnit<uint32_t, BigEndian>(utf32, code);
+    if (sourceSize) *sourceSize = length;
+    return 0;
+}
+
+int encodeJapanese(const void* profile, uint32_t code, uint8_t* target, uint32_t targetMax, uint32_t* targetSize) {
+    uint8_t encoded[3];
+    uint32_t size = 0;
+    if (const int result = encodeMbcs(profile, code, encoded, size); result != 0) return result;
+    if (targetMax < size) return CES_ERROR_DST_BUFFER_END;
+    std::memcpy(target, encoded, size);
+    if (targetSize) *targetSize = size;
+    return 0;
+}
+
+int scalarToJapanese(bool (*matches)(const void*), uint32_t code, const void* profile, uint8_t* target, uint32_t targetMax, uint32_t* targetSize) {
+    if (!matches(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!target) return CES_ERROR_INVALID_DST_BUFFER;
+    if (!isScalar(code)) return CES_ERROR_INVALID_ENCODE;
+    return encodeJapanese(profile, code, target, targetMax, targetSize);
+}
+
+template<bool BigEndian>
+int utf32ToJapanese(bool (*matches)(const void*), const uint32_t* utf32, const void* profile, uint8_t* target, uint32_t targetMax, uint32_t* targetSize) {
+    if (!matches(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!utf32) return CES_ERROR_INVALID_SRC_BUFFER;
+    return scalarToJapanese(matches, loadUnit<uint32_t, BigEndian>(utf32), profile, target, targetMax, targetSize);
+}
+
+template<typename Source, typename Decode>
+int bufferToJapanese(bool (*matches)(const void*), const Source* source, uint32_t sourceMax, uint32_t* sourceLen, const void* profile, uint8_t* target, uint32_t targetMax, uint32_t* targetSize, Decode decode) {
+    if (!matches(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!source) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (sourceMax == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!target) return CES_ERROR_INVALID_DST_BUFFER;
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decode(source, sourceMax, length, code); result != 0) return result;
+    if (const int result = encodeJapanese(profile, code, target, targetMax, targetSize); result != 0) return result;
+    if (sourceLen) *sourceLen = length;
+    return 0;
+}
+
+int decodeUtf32(const uint32_t* utf32, uint32_t, uint32_t& length, uint32_t& code) {
+    length = 1;
+    code = utf32[0];
+    return isScalar(code) ? 0 : CES_ERROR_INVALID_ENCODE;
+}
+
+uint32_t encodeUtf32(uint32_t code, uint32_t* utf32) {
+    utf32[0] = code;
+    return 1;
+}
+
+int sbcToUnit(const uint8_t* profile, uint8_t sbc, const void* target, uint32_t& code) {
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!target) return CES_ERROR_INVALID_DST_BUFFER;
+    code = sbcToUnicode(profile, sbc);
+    return 0;
+}
+
+template<bool BigEndian>
+int sbcToUtf16(const uint8_t* profile, uint8_t sbc, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    uint32_t code = 0;
+    if (const int result = sbcToUnit(profile, sbc, utf16, code); result != 0) return result;
+    if (utf16max < 1) return CES_ERROR_DST_BUFFER_END;
+    storeUnit<uint16_t, BigEndian>(utf16, code);
+    if (utf16Len) *utf16Len = 1;
+    return 0;
+}
+
+template<bool BigEndian>
+int sbcToUtf32(const uint8_t* profile, uint8_t sbc, uint32_t* utf32) {
+    uint32_t code = 0;
+    if (const int result = sbcToUnit(profile, sbc, utf32, code); result != 0) return result;
+    storeUnit<uint32_t, BigEndian>(utf32, code);
+    return 0;
+}
+
+int scalarToSbc(uint32_t code, const uint8_t* profile, uint8_t* sbc) {
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!sbc) return CES_ERROR_INVALID_DST_BUFFER;
+    if (!isScalar(code)) return CES_ERROR_INVALID_ENCODE;
+    return unicodeToSbc(profile, code, *sbc) ? 0 : CES_ERROR_UNASSIGNED_CODE;
+}
+
+template<bool BigEndian>
+int utf16ToSbc(const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, const uint8_t* profile, uint8_t* sbc) {
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!utf16) return CES_ERROR_INVALID_SRC_BUFFER;
+    if (utf16max == 0) return CES_ERROR_SRC_BUFFER_END;
+    if (!sbc) return CES_ERROR_INVALID_DST_BUFFER;
+    uint32_t length = 0;
+    uint32_t code = 0;
+    if (const int result = decodeUtf16<BigEndian>(utf16, utf16max, length, code); result != 0) return result;
+    if (!unicodeToSbc(profile, code, *sbc)) return CES_ERROR_UNASSIGNED_CODE;
+    if (utf16Len) *utf16Len = length;
+    return 0;
+}
+
+template<bool BigEndian>
+int utf32ToSbc(const uint32_t* utf32, const uint8_t* profile, uint8_t* sbc) {
+    if (!isSbc(profile)) return CES_ERROR_INVALID_PARAMETER;
+    if (!utf32) return CES_ERROR_INVALID_SRC_BUFFER;
+    return scalarToSbc(loadUnit<uint32_t, BigEndian>(utf32), profile, sbc);
+}
+
 }
 
 extern "C" {
@@ -532,6 +742,114 @@ const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1251(void) {
 
 const void* APS5_VABI sceCesRefersUcsProfileCp1250(void) {
     return CP1250_PROFILE;
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_1(void) {
+    return singleByteProfile(SingleByte::Iso8859_1);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_2(void) {
+    return singleByteProfile(SingleByte::Iso8859_2);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_4(void) {
+    return singleByteProfile(SingleByte::Iso8859_4);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_5(void) {
+    return singleByteProfile(SingleByte::Iso8859_5);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_9(void) {
+    return singleByteProfile(SingleByte::Iso8859_9);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_10(void) {
+    return singleByteProfile(SingleByte::Iso8859_10);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_13(void) {
+    return singleByteProfile(SingleByte::Iso8859_13);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_14(void) {
+    return singleByteProfile(SingleByte::Iso8859_14);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_15(void) {
+    return singleByteProfile(SingleByte::Iso8859_15);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileIso8859_16(void) {
+    return singleByteProfile(SingleByte::Iso8859_16);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp437(void) {
+    return singleByteProfile(SingleByte::Cp437);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp737(void) {
+    return singleByteProfile(SingleByte::Cp737);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp775(void) {
+    return singleByteProfile(SingleByte::Cp775);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp850(void) {
+    return singleByteProfile(SingleByte::Cp850);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp852(void) {
+    return singleByteProfile(SingleByte::Cp852);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp855(void) {
+    return singleByteProfile(SingleByte::Cp855);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp860(void) {
+    return singleByteProfile(SingleByte::Cp860);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp861(void) {
+    return singleByteProfile(SingleByte::Cp861);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp862(void) {
+    return singleByteProfile(SingleByte::Cp862);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp863(void) {
+    return singleByteProfile(SingleByte::Cp863);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp865(void) {
+    return singleByteProfile(SingleByte::Cp865);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp866(void) {
+    return singleByteProfile(SingleByte::Cp866);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileKoi8R(void) {
+    return singleByteProfile(SingleByte::Koi8R);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileKoi8U(void) {
+    return singleByteProfile(SingleByte::Koi8U);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1254(void) {
+    return singleByteProfile(SingleByte::Cp1254);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1256(void) {
+    return singleByteProfile(SingleByte::Cp1256);
+}
+
+const uint8_t* APS5_VABI sceCesRefersUcsProfileCp1258(void) {
+    return singleByteProfile(SingleByte::Cp1258);
 }
 
 void* APS5_VABI sceCesUcsProfileInitSJis1997Cp932(void* sheet) {
@@ -672,6 +990,241 @@ int APS5_VABI sceCesBig5ToUtf8(void* profile, uint8_t* big5Buffer, uint32_t big5
 
 int APS5_VABI sceCesUhcToUtf8(void* profile, uint8_t* uhcBuffer, uint32_t uhcMax, uint32_t* uhcLength, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
     return mbcsToUtf8(isUhc(profile), profile, uhcBuffer, uhcMax, uhcLength, utf8Buffer, utf8Max, utf8Length);
+}
+
+int APS5_VABI sceCesSJisToUcs2(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint16_t* ucs2) {
+    return japaneseToUcs2(isSjis, profile, sjisBuffer, sjisMax, sjisSize, ucs2);
+}
+
+int APS5_VABI sceCesSJisToUtf8(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length) {
+    return japaneseToUtf8(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf8Buffer, utf8Max, utf8Length);
+}
+
+int APS5_VABI sceCesSJisToUtf16(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<NATIVE_BIG_ENDIAN>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesSJisToUtf16be(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<true>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesSJisToUtf16le(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<false>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesSJisToUtf32(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint32_t* utf32) {
+    return japaneseToUtf32<NATIVE_BIG_ENDIAN>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf32);
+}
+
+int APS5_VABI sceCesSJisToUtf32be(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint32_t* utf32) {
+    return japaneseToUtf32<true>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf32);
+}
+
+int APS5_VABI sceCesSJisToUtf32le(const void* profile, const uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize, uint32_t* utf32) {
+    return japaneseToUtf32<false>(isSjis, profile, sjisBuffer, sjisMax, sjisSize, utf32);
+}
+
+int APS5_VABI sceCesEucJpToUtf16(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<NATIVE_BIG_ENDIAN>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesEucJpToUtf16be(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<true>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesEucJpToUtf16le(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length) {
+    return japaneseToUtf16<false>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf16Buffer, utf16Max, utf16Length);
+}
+
+int APS5_VABI sceCesEucJpToUtf32(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint32_t* utf32) {
+    return japaneseToUtf32<NATIVE_BIG_ENDIAN>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf32);
+}
+
+int APS5_VABI sceCesEucJpToUtf32be(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint32_t* utf32) {
+    return japaneseToUtf32<true>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf32);
+}
+
+int APS5_VABI sceCesEucJpToUtf32le(const void* profile, const uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize, uint32_t* utf32) {
+    return japaneseToUtf32<false>(isEucJp, profile, eucBuffer, eucMax, eucSize, utf32);
+}
+
+int APS5_VABI sceCesUcs2ToSJis(uint16_t ucs2, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return scalarToJapanese(isSjis, ucs2, profile, sjisBuffer, sjisMax, sjisSize);
+}
+
+int APS5_VABI sceCesUtf8ToSJis(const uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return bufferToJapanese(isSjis, utf8Buffer, utf8Max, utf8Length, profile, sjisBuffer, sjisMax, sjisSize, decodeUtf8);
+}
+
+int APS5_VABI sceCesUtf16ToSJis(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return bufferToJapanese(isSjis, utf16Buffer, utf16Max, utf16Length, profile, sjisBuffer, sjisMax, sjisSize, decodeUtf16<NATIVE_BIG_ENDIAN>);
+}
+
+int APS5_VABI sceCesUtf16beToSJis(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return bufferToJapanese(isSjis, utf16Buffer, utf16Max, utf16Length, profile, sjisBuffer, sjisMax, sjisSize, decodeUtf16<true>);
+}
+
+int APS5_VABI sceCesUtf16leToSJis(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return bufferToJapanese(isSjis, utf16Buffer, utf16Max, utf16Length, profile, sjisBuffer, sjisMax, sjisSize, decodeUtf16<false>);
+}
+
+int APS5_VABI sceCesUtf32ToSJis(uint32_t utf32, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return scalarToJapanese(isSjis, utf32, profile, sjisBuffer, sjisMax, sjisSize);
+}
+
+int APS5_VABI sceCesUtf32beToSJis(const uint32_t* utf32, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return utf32ToJapanese<true>(isSjis, utf32, profile, sjisBuffer, sjisMax, sjisSize);
+}
+
+int APS5_VABI sceCesUtf32leToSJis(const uint32_t* utf32, const void* profile, uint8_t* sjisBuffer, uint32_t sjisMax, uint32_t* sjisSize) {
+    return utf32ToJapanese<false>(isSjis, utf32, profile, sjisBuffer, sjisMax, sjisSize);
+}
+
+int APS5_VABI sceCesUcs2ToEucJp(uint16_t ucs2, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return scalarToJapanese(isEucJp, ucs2, profile, eucBuffer, eucMax, eucSize);
+}
+
+int APS5_VABI sceCesUtf8ToEucJp(const uint8_t* utf8Buffer, uint32_t utf8Max, uint32_t* utf8Length, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return bufferToJapanese(isEucJp, utf8Buffer, utf8Max, utf8Length, profile, eucBuffer, eucMax, eucSize, decodeUtf8);
+}
+
+int APS5_VABI sceCesUtf16ToEucJp(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return bufferToJapanese(isEucJp, utf16Buffer, utf16Max, utf16Length, profile, eucBuffer, eucMax, eucSize, decodeUtf16<NATIVE_BIG_ENDIAN>);
+}
+
+int APS5_VABI sceCesUtf16beToEucJp(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return bufferToJapanese(isEucJp, utf16Buffer, utf16Max, utf16Length, profile, eucBuffer, eucMax, eucSize, decodeUtf16<true>);
+}
+
+int APS5_VABI sceCesUtf16leToEucJp(const uint16_t* utf16Buffer, uint32_t utf16Max, uint32_t* utf16Length, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return bufferToJapanese(isEucJp, utf16Buffer, utf16Max, utf16Length, profile, eucBuffer, eucMax, eucSize, decodeUtf16<false>);
+}
+
+int APS5_VABI sceCesUtf32ToEucJp(uint32_t utf32, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return scalarToJapanese(isEucJp, utf32, profile, eucBuffer, eucMax, eucSize);
+}
+
+int APS5_VABI sceCesUtf32beToEucJp(const uint32_t* utf32, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return utf32ToJapanese<true>(isEucJp, utf32, profile, eucBuffer, eucMax, eucSize);
+}
+
+int APS5_VABI sceCesUtf32leToEucJp(const uint32_t* utf32, const void* profile, uint8_t* eucBuffer, uint32_t eucMax, uint32_t* eucSize) {
+    return utf32ToJapanese<false>(isEucJp, utf32, profile, eucBuffer, eucMax, eucSize);
+}
+
+int APS5_VABI sceCesSJisCodeToJisX0208(uint16_t sjisCode, uint8_t* ku, uint8_t* ten) {
+    if (!ku || !ten) return CES_ERROR_INVALID_DST_BUFFER;
+    int row = 0;
+    int cell = 0;
+    if (!sjisToJis(static_cast<uint8_t>(sjisCode >> 8), static_cast<uint8_t>(sjisCode), row, cell) || row > 94) return CES_ERROR_INVALID_ENCODE;
+    *ku = static_cast<uint8_t>(row);
+    *ten = static_cast<uint8_t>(cell);
+    return 0;
+}
+
+int APS5_VABI sceCesJisX0208ToSJisCode(uint8_t ku, uint8_t ten, uint16_t* sjisCode) {
+    if (!sjisCode) return CES_ERROR_INVALID_DST_BUFFER;
+    if (ku < 1 || ku > 94 || ten < 1 || ten > 94) return CES_ERROR_INVALID_ENCODE;
+    uint8_t lead = 0;
+    uint8_t trail = 0;
+    jisToSjis(ku, ten, lead, trail);
+    *sjisCode = static_cast<uint16_t>(lead << 8 | trail);
+    return 0;
+}
+
+int APS5_VABI sceCesSbcToUcs2(const uint8_t* profile, uint8_t sbc, uint16_t* ucs2) {
+    uint32_t code = 0;
+    if (const int result = sbcToUnit(profile, sbc, ucs2, code); result != 0) return result;
+    *ucs2 = static_cast<uint16_t>(code);
+    return 0;
+}
+
+int APS5_VABI sceCesSbcToUtf16(const uint8_t* profile, uint8_t sbc, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    return sbcToUtf16<NATIVE_BIG_ENDIAN>(profile, sbc, utf16, utf16max, utf16Len);
+}
+
+int APS5_VABI sceCesSbcToUtf16be(const uint8_t* profile, uint8_t sbc, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    return sbcToUtf16<true>(profile, sbc, utf16, utf16max, utf16Len);
+}
+
+int APS5_VABI sceCesSbcToUtf16le(const uint8_t* profile, uint8_t sbc, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    return sbcToUtf16<false>(profile, sbc, utf16, utf16max, utf16Len);
+}
+
+int APS5_VABI sceCesSbcToUtf32(const uint8_t* profile, uint8_t sbc, uint32_t* utf32) {
+    return sbcToUtf32<NATIVE_BIG_ENDIAN>(profile, sbc, utf32);
+}
+
+int APS5_VABI sceCesSbcToUtf32be(const uint8_t* profile, uint8_t sbc, uint32_t* utf32) {
+    return sbcToUtf32<true>(profile, sbc, utf32);
+}
+
+int APS5_VABI sceCesSbcToUtf32le(const uint8_t* profile, uint8_t sbc, uint32_t* utf32) {
+    return sbcToUtf32<false>(profile, sbc, utf32);
+}
+
+int APS5_VABI sceCesUcs2ToSbc(uint16_t ucs2, const uint8_t* profile, uint8_t* sbc) {
+    return scalarToSbc(ucs2, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf16ToSbc(const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, const uint8_t* profile, uint8_t* sbc) {
+    return utf16ToSbc<NATIVE_BIG_ENDIAN>(utf16, utf16max, utf16Len, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf16beToSbc(const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, const uint8_t* profile, uint8_t* sbc) {
+    return utf16ToSbc<true>(utf16, utf16max, utf16Len, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf16leToSbc(const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, const uint8_t* profile, uint8_t* sbc) {
+    return utf16ToSbc<false>(utf16, utf16max, utf16Len, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf32ToSbc(uint32_t utf32, const uint8_t* profile, uint8_t* sbc) {
+    return scalarToSbc(utf32, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf32beToSbc(const uint32_t* utf32, const uint8_t* profile, uint8_t* sbc) {
+    return utf32ToSbc<true>(utf32, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf32leToSbc(const uint32_t* utf32, const uint8_t* profile, uint8_t* sbc) {
+    return utf32ToSbc<false>(utf32, profile, sbc);
+}
+
+int APS5_VABI sceCesUtf16StrToMbcsStr(void* context, const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen) {
+    if (!mbcs) return CES_ERROR_INVALID_DST_BUFFER;
+    return toMbcs(context, utf16, utf16max, utf16Len, mbcs, mbcsMax, mbcsLen, decodeUtf16<NATIVE_BIG_ENDIAN>);
+}
+
+int APS5_VABI sceCesUtf16StrGetMbcsLen(void* context, const uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len, uint32_t* mbcsLen) {
+    return toMbcs(context, utf16, utf16max, utf16Len, static_cast<uint8_t*>(nullptr), 0, mbcsLen, decodeUtf16<NATIVE_BIG_ENDIAN>);
+}
+
+int APS5_VABI sceCesMbcsStrToUtf16Str(void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint16_t* utf16, uint32_t utf16max, uint32_t* utf16Len) {
+    if (!utf16) return CES_ERROR_INVALID_DST_BUFFER;
+    return fromMbcs(context, mbcs, mbcsMax, mbcsLen, utf16, utf16max, utf16Len, encodeUcs2);
+}
+
+int APS5_VABI sceCesMbcsStrGetUtf16Len(void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint32_t* utf16Len) {
+    return fromMbcs(context, mbcs, mbcsMax, mbcsLen, static_cast<uint16_t*>(nullptr), 0, utf16Len, encodeUcs2);
+}
+
+int APS5_VABI sceCesUtf32StrToMbcsStr(void* context, const uint32_t* utf32, uint32_t utf32max, uint32_t* utf32Len, uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen) {
+    if (!mbcs) return CES_ERROR_INVALID_DST_BUFFER;
+    return toMbcs(context, utf32, utf32max, utf32Len, mbcs, mbcsMax, mbcsLen, decodeUtf32);
+}
+
+int APS5_VABI sceCesUtf32StrGetMbcsLen(void* context, const uint32_t* utf32, uint32_t utf32max, uint32_t* utf32Len, uint32_t* mbcsLen) {
+    return toMbcs(context, utf32, utf32max, utf32Len, static_cast<uint8_t*>(nullptr), 0, mbcsLen, decodeUtf32);
+}
+
+int APS5_VABI sceCesMbcsStrToUtf32Str(void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint32_t* utf32, uint32_t utf32max, uint32_t* utf32Len) {
+    if (!utf32) return CES_ERROR_INVALID_DST_BUFFER;
+    return fromMbcs(context, mbcs, mbcsMax, mbcsLen, utf32, utf32max, utf32Len, encodeUtf32);
+}
+
+int APS5_VABI sceCesMbcsStrGetUtf32Len(void* context, const uint8_t* mbcs, uint32_t mbcsMax, uint32_t* mbcsLen, uint32_t* utf32Len) {
+    return fromMbcs(context, mbcs, mbcsMax, mbcsLen, static_cast<uint32_t*>(nullptr), 0, utf32Len, encodeUtf32);
 }
 
 }

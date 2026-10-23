@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr int AgcDriverDebugUnavailable = static_cast<int>(0x8a6c1000u);
+constexpr int CAPTURE_UNAVAILABLE = static_cast<int>(0x8A6C1000);
 
 }
 
@@ -28,15 +28,15 @@ bool APS5_VABI sceAgcDriverIsSubmitValidationEnabled(void) {
 // GPU captures need a development kit; a retail driver refuses them with the debug-unavailable error.
 int APS5_VABI sceAgcDriverRequestCaptureStart(const char* path) {
     (void)path;
-    return AgcDriverDebugUnavailable;
+    return CAPTURE_UNAVAILABLE;
 }
 
 int APS5_VABI sceAgcDriverRequestCaptureStop() {
-    return AgcDriverDebugUnavailable;
+    return CAPTURE_UNAVAILABLE;
 }
 
 int APS5_VABI sceAgcDriverTriggerCapture() {
-    return AgcDriverDebugUnavailable;
+    return CAPTURE_UNAVAILABLE;
 }
 
 }

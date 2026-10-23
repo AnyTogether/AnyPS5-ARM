@@ -310,10 +310,9 @@ int APS5_VABI sceSystemServiceParamGetInt(int paramId, int* value) {
   case SYSTEM_SERVICE_PARAM_ID_TIME_FORMAT: *value = SYSTEM_SERVICE_PARAM_TIME_FORMAT_24HOUR; break;
   case SYSTEM_SERVICE_PARAM_ID_TIME_ZONE: *value = HostTimeZone().minutes; break;
   case SYSTEM_SERVICE_PARAM_ID_SUMMERTIME: *value = HostTimeZone().summer ? 1 : 0; break;
-  case SYSTEM_SERVICE_PARAM_ID_GAME_PARENTAL_LEVEL: *value = SYSTEM_SERVICE_PARAM_GAME_PARENTAL_OFF; break;
-  case SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN: *value = SYSTEM_SERVICE_PARAM_ENTER_BUTTON_CROSS; break;
+  case SYSTEM_SERVICE_PARAM_ID_100: *value = 0; break;
   default:
-   if ((paramId >= 100 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
+   if ((paramId >= 101 && paramId <= 111) || (paramId >= 200 && paramId <= 213) || paramId == 300) {
     NotImplemented_nid_no_patch("sceSystemServiceParamGetInt: registry-backed parameter");
    }
    return SYSTEM_SERVICE_ERROR_PARAMETER;

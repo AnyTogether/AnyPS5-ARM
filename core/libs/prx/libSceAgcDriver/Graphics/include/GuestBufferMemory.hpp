@@ -248,6 +248,11 @@ struct MirrorStats {
 };
 MirrorStats MirrorCounters();
 std::uint64_t SnapshotMismatches();
+struct HeapMirrorHold {
+    std::uint64_t mirrors = 0;
+    std::uint64_t bytes = 0;
+};
+HeapMirrorHold HeapMirrorsWithin(std::uint64_t begin, std::uint64_t end);
 void ClearSnapshotCopies(VkDevice device);
 std::vector<std::uint64_t> AddressTableKey(std::span<const std::pair<std::uint64_t, std::uint64_t>> writes, std::span<const ShaderRecompiler::BdaAbi::Range> own);
 void ClearImageMirrors(VkDevice device);
@@ -504,6 +509,7 @@ private:
     std::vector<std::pair<std::uint64_t, std::uint64_t>> writes;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> readsOverBase;
     std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> heapReferences;
+    std::vector<std::pair<std::uint64_t, std::shared_ptr<Buffer>>> heapReadbacks;
     // UploadPrepare ran (regions are frozen); `uploaded` once UploadFinish ran.
     bool prepared = false;
     bool uploaded = false;

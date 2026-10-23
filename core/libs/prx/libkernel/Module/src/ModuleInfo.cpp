@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -24,6 +25,8 @@
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <mach-o/loader.h>
 #else
 #include <dlfcn.h>
 #include <link.h>
@@ -213,9 +216,98 @@ const void* NativeImage(std::uintptr_t address) {
 }
 #endif
 
+#ifdef __APPLE__
+std::vector<Elf64_Phdr> SegmentHeaders(const mach_header_64* header) {
+    std::vector<Elf64_Phdr> headers;
+    const auto* command = reinterpret_cast<const load_command*>(header + 1);
+    for (std::uint32_t index = 0; index < header->ncmds; ++index) {
+        if (command->cmd == LC_SEGMENT_64) {
+            const auto* segment = reinterpret_cast<const segment_command_64*>(command);
+            if (segment->initprot != VM_PROT_NONE && segment->vmsize != 0) {
+                Elf64_Phdr loaded{};
+                loaded.p_type = PT_LOAD;
+                loaded.p_flags = ((segment->initprot & VM_PROT_READ) ? PF_R : 0) | ((segment->initprot & VM_PROT_WRITE) ? PF_W : 0) |
+                                 ((segment->initprot & VM_PROT_EXECUTE) ? PF_X : 0);
+                loaded.p_offset = segment->fileoff;
+                loaded.p_vaddr = segment->vmaddr;
+                loaded.p_filesz = segment->filesize;
+                loaded.p_memsz = segment->vmsize;
+                headers.push_back(loaded);
+            }
+        }
+        command = reinterpret_cast<const load_command*>(reinterpret_cast<const char*>(command) + command->cmdsize);
+    }
+    return headers;
+}
+
+struct RelinkedImage {
+    const void* header;
+    dl_phdr_info info;
+};
+
+int CollectRelinkedImage(dl_phdr_info* image, std::size_t, void* data) {
+    Dl_info symbol{};
+    if (!::dladdr(image->dlpi_phdr, &symbol) || symbol.dli_fbase == nullptr)
+        throw std::runtime_error("module info: no image holds a relinked image's program headers");
+    static_cast<std::vector<RelinkedImage>*>(data)->push_back({symbol.dli_fbase, *image});
+    return 0;
+}
+
+bool HostLibrary(const mach_header_64* header, const char* path) {
+    if (header->magic != MH_MAGIC_64 || header->filetype != MH_DYLIB || path == nullptr) return false;
+    if (!std::string_view(path).ends_with(".prx")) return false;
+    unsigned long size = 0;
+    return getsectiondata(header, "__APS5DATA", "__meta", &size) == nullptr;
+}
+int CallHostLibrary(std::uint32_t index, const mach_header_64* header, int (*callback)(dl_phdr_info*, std::size_t, void*), void* data) {
+    const char* path = _dyld_get_image_name(index);
+    if (!HostLibrary(header, path)) return 0;
+    const auto headers = SegmentHeaders(header);
+    if (headers.size() > std::numeric_limits<std::uint16_t>::max())
+        throw std::runtime_error(std::string("module info: too many segments in ") + path);
+    dl_phdr_info info{};
+    info.dlpi_addr = static_cast<std::uintptr_t>(_dyld_get_image_vmaddr_slide(index));
+    info.dlpi_name = path;
+    info.dlpi_phdr = headers.data();
+    info.dlpi_phnum = static_cast<std::uint16_t>(headers.size());
+    return callback(&info, sizeof(info), data);
+}
+#endif
+
+int IterateModuleImages(int (*callback)(dl_phdr_info*, std::size_t, void*), void* data) {
+#ifdef __APPLE__
+    std::vector<RelinkedImage> relinked;
+    dl_iterate_phdr(CollectRelinkedImage, &relinked);
+    for (std::uint32_t index = 0; index < _dyld_image_count(); ++index) {
+        const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(index));
+        if (header == nullptr) continue;
+        const auto found = std::find_if(relinked.begin(), relinked.end(), [header](const RelinkedImage& image) { return image.header == header; });
+        const int result = found != relinked.end() ? callback(&found->info, sizeof(found->info), data) : CallHostLibrary(index, header, callback, data);
+        if (result != 0) return result;
+    }
+    return 0;
+#else
+    return dl_iterate_phdr(callback, data);
+#endif
+}
+
+int SearchModuleImages(int (*callback)(dl_phdr_info*, std::size_t, void*), void* data) {
+#ifdef __APPLE__
+    if (const int result = dl_iterate_phdr(callback, data); result != 0) return result;
+    for (std::uint32_t index = 0; index < _dyld_image_count(); ++index) {
+        const auto* header = reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(index));
+        if (header == nullptr) continue;
+        if (const int result = CallHostLibrary(index, header, callback, data); result != 0) return result;
+    }
+    return 0;
+#else
+    return dl_iterate_phdr(callback, data);
+#endif
+}
+
 std::vector<GuestImage> GuestImages() {
     std::vector<std::uintptr_t> addresses;
-    dl_iterate_phdr(CollectGuestImage, &addresses);
+    IterateModuleImages(CollectGuestImage, &addresses);
     std::vector<GuestImage> images;
     for (const auto address : addresses) {
 #ifdef __APPLE__
@@ -412,20 +504,22 @@ bool SystemImage(const GuestImage& image) {
 }
 #endif
 
-int FillModuleInfo(KernelModule handle, ModuleInfo* info, bool titleOnly) {
+template<typename TInfo>
+int FillModuleInfo(KernelModule handle, TInfo* info, bool titleOnly) {
     if (!info) return SCE_KERNEL_ERROR_EFAULT;
-    if (info->st_size != sizeof(ModuleInfo)) return SCE_KERNEL_ERROR_EINVAL;
+    if (info->st_size != sizeof(TInfo)) return SCE_KERNEL_ERROR_EINVAL;
     for (const auto& image : GuestImages()) {
         if (ModuleIdForImage_nid_no_patch(image.native) != handle) continue;
         if (titleOnly && SystemImage(image)) return SCE_KERNEL_ERROR_EPERM;
-        ModuleInfo result{};
-        result.st_size = sizeof(ModuleInfo);
+        TInfo result{};
+        result.st_size = sizeof(TInfo);
 #ifdef _WIN32
         if (!Fill(image.address, result)) return SCE_KERNEL_ERROR_ESRCH;
 #else
-        ImageSearch<ModuleInfo> search{image.address, &result, false};
-        dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+        ImageSearch<TInfo> search{image.address, &result, false};
+        SearchModuleImages(FindImage<TInfo>, &search);
         if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
+        if constexpr (std::is_same_v<TInfo, ModuleInfoEx>) result.id = handle;
 #endif
         *info = result;
         return 0;
@@ -458,7 +552,7 @@ int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, M
     const void* native = NativeImage(static_cast<std::uintptr_t>(address));
     if (native == nullptr) return SCE_KERNEL_ERROR_ESRCH;
     ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
-    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
+    SearchModuleImages(FindImage<ModuleInfoEx>, &search);
     if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
     result.id = ModuleIdForImage_nid_no_patch(native);
 #else
@@ -467,7 +561,7 @@ int APS5_VABI sceKernelGetModuleInfoFromAddr(std::uint64_t address, int flags, M
     if (!dladdr1(reinterpret_cast<const void*>(address), &symbol, reinterpret_cast<void**>(&native), RTLD_DL_LINKMAP) || !native)
         return SCE_KERNEL_ERROR_ESRCH;
     ImageSearch<ModuleInfoEx> search{static_cast<std::uintptr_t>(address), &result, false};
-    dl_iterate_phdr(FindImage<ModuleInfoEx>, &search);
+    SearchModuleImages(FindImage<ModuleInfoEx>, &search);
     if (!search.found) return SCE_KERNEL_ERROR_ESRCH;
     result.id = ModuleIdForImage_nid_no_patch(native);
 #endif
@@ -491,6 +585,10 @@ int APS5_VABI sceKernelGetModuleInfo2(KernelModule handle, ModuleInfo* info) {
     return FillModuleInfo(handle, info, true);
 }
 
+int GetModuleInfoExByHandle_nid_no_patch(KernelModule handle, ModuleInfoEx* info) {
+    return FillModuleInfo(handle, info, false);
+}
+
 std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** address, std::size_t* size) {
     if (!address || !size) throw std::invalid_argument("sceKernelGetLibkernelTextLocation: null argument");
     const auto images = GuestImages();
@@ -500,7 +598,7 @@ std::int32_t APS5_VABI sceKernelGetLibkernelTextLocation_nid_postfix(void** addr
     const bool found = Fill(images.front().address, info);
 #else
     ImageSearch<ModuleInfo> search{images.front().address, &info, false};
-    dl_iterate_phdr(FindImage<ModuleInfo>, &search);
+    SearchModuleImages(FindImage<ModuleInfo>, &search);
     const bool found = search.found;
 #endif
     if (!found || info.segment_count == 0)

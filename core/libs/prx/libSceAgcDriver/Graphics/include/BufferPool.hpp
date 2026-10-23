@@ -3,6 +3,7 @@
 
 #include "prx/libSceAgcDriver/Graphics/include/Context.hpp"
 #include <chrono>
+#include "prx/libSceAgcDriver/Execution/include/Mutex.hpp"
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -152,7 +153,7 @@ private:
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties memoryProperties{};
     PFN_vkGetPhysicalDeviceMemoryProperties2 memoryProperties2 = nullptr;
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     // Not `small`/`large`: <rpcndr.h> (via <windows.h>) defines `small` as a macro.
     Tier smallTier;
     Tier largeTier;
@@ -167,7 +168,7 @@ private:
     std::uint64_t imageEvictions = 0;
     std::list<Slot*> imageOrder;
     std::uint64_t clock = 0;
-    std::mutex slabMutex;
+    AgcDriver::Mutex slabMutex;
     std::unordered_map<std::uint64_t, Slab> slabs;
     std::unordered_map<VkDeviceMemory, std::unique_ptr<SlabBlock>> slabBlocks;
     static constexpr VkDeviceSize budget = 512ull * 1024 * 1024;

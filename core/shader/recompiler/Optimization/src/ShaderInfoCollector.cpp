@@ -285,6 +285,8 @@ void CollectPixelInputs(const IrProgram& program, const ShaderPixelInputInfo* pi
     std::array<bool, 32> perVertex {};
     std::array<bool, 32> interpolated {};
     std::array<bool, 32> halfRead {};
+    std::array<bool, 32> readsP10 {};
+    std::array<bool, 32> readsP20 {};
     for (const auto& block : program.Blocks()) {
         for (const IrValue* inst : block->Instructions()) {
             if (inst->Opcode() == IrOpcode::GetAttribute) {
@@ -298,7 +300,9 @@ void CollectPixelInputs(const IrProgram& program, const ShaderPixelInputInfo* pi
                 const auto input = inst->Argument(0)->Resolve()->ImmediateU32();
                 const auto mode = inst->Argument(2)->Resolve()->ImmediateU32();
                 read[input] = true;
-                perVertex[input] = perVertex[input] || mode == 1u || !IsPixelParameterFlat(*pixel, input);
+                readsP10[input] = readsP10[input] || mode == 0u;
+                readsP20[input] = readsP20[input] || mode == 1u;
+                perVertex[input] = perVertex[input] || (readsP10[input] && readsP20[input]) || !IsPixelParameterFlat(*pixel, input);
             } else if (inst->Opcode() == IrOpcode::GetInterpolationParameterF16) {
                 const auto input = inst->Argument(0)->Resolve()->ImmediateU32();
                 const bool high = inst->Argument(3)->Resolve()->ImmediateU32() != 0u;
@@ -419,8 +423,11 @@ void CollectBuiltinInputs(const IrProgram& program, ShaderInfo& info) {
                     AddInput(info, kind, 0, 1, "gl_SampleMaskIn");
                     break;
                 case StageInputKind::BaryCoordSmooth:
+                    AddInput(info, StageInputKind::BaryCoordSmooth, 0, 3, "gl_BaryCoordKHR");
+                    break;
                 case StageInputKind::BaryCoordSmoothCenter:
                 case StageInputKind::BaryCoordSmoothSample:
+                    info.smoothOffsetBarycentrics = true;
                     AddInput(info, StageInputKind::BaryCoordSmooth, 0, 3, "gl_BaryCoordKHR");
                     if (kind == StageInputKind::BaryCoordSmoothSample && program.Metadata().pixelIteratesSamples) AddInput(info, StageInputKind::SampleId, 0, 1, "gl_SampleID");
                     break;
@@ -620,6 +627,7 @@ void ShaderInfoCollector::Collect(IrProgram& program, const ShaderStageInputInfo
     }
     CollectBuiltinInputs(program, next);
     CollectOutputs(program, inputInfo, next);
+    if ((program.Resources().stage == IrShaderStage::Vertex || program.Resources().stage == IrShaderStage::Mesh) && inputInfo.vertex != nullptr && inputInfo.vertex->pointList) AddOutput(next, StageOutputKind::PointSize, 0, 0, "gl_PointSize");
     CollectSamplerUses(program, next);
     program.Info() = std::move(next);
     program.Metadata().shaderInfoComplete = true;

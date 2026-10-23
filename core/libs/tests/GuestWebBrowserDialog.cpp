@@ -24,6 +24,7 @@ constexpr int COMMON_DIALOG_STATUS_FINISHED = 3;
 constexpr int COMMON_DIALOG_RESULT_USER_CANCELED = 1;
 constexpr int COMMON_DIALOG_ERROR_NOT_INITIALIZED = static_cast<int>(0x80B80003u);
 constexpr int COMMON_DIALOG_ERROR_NOT_FINISHED = static_cast<int>(0x80B80005u);
+constexpr int COMMON_DIALOG_ERROR_PARAMETER = static_cast<int>(0x80B8000Au);
 constexpr int COMMON_DIALOG_ERROR_ARG_NULL = static_cast<int>(0x80B8000Du);
 
 void Require(bool value) { if (!value) std::abort(); }
@@ -61,9 +62,9 @@ int main() {
 
     Require(sceWebBrowserDialogInitialize() == 0);
     Require(sceWebBrowserDialogSetCookie(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
-    Require(sceWebBrowserDialogSetCookie(param) == 0);
+    Require(sceWebBrowserDialogSetCookie(param) == COMMON_DIALOG_ERROR_PARAMETER);
     Require(sceWebBrowserDialogResetCookie(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
-    Require(sceWebBrowserDialogResetCookie(param) == 0);
+    Require(sceWebBrowserDialogResetCookie(param) == COMMON_DIALOG_ERROR_PARAMETER);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(nullptr, &allowList) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogOpen(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogOpen(param) == 0);

@@ -1,4 +1,6 @@
 from pathlib import Path
+import contextlib
+import io
 import os
 import shutil
 import subprocess
@@ -341,6 +343,25 @@ class ScriptRegistrationTests(unittest.TestCase):
             "tools/tests/test_d.py": "", "tools/tests/test_e.py": "", "tools/tests/test_f.py": ""}),
             ["tools/tests/test_a.py", "tools/tests/test_b.py", "tools/tests/test_c.py", "tools/tests/test_d.py",
              "tools/tests/test_f.py"])
+
+
+class CheckRegistrationCliTests(unittest.TestCase):
+    def test_cache_with_utf8_bom_is_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text("\ufeffCMAKE_MAKE_PROGRAM:FILEPATH=ninja\nCMAKE_GENERATOR:INTERNAL=Ninja\n", encoding="utf-8")
+            output = "tests/dummy_tests: EXECUTABLE\n"
+            with patch.object(check_test_registration.subprocess, "run", side_effect=lambda command, **kwargs: SimpleNamespace(
+                    stdout="Build file encoding: UTF-8\n" if command[-1] == "wincodepage" else output)):
+                names = check_test_registration.built(build)
+                self.assertEqual(names, {"dummy_tests"})
+
+    def test_main_scripts_with_explicit_argv(self):
+        with patch.object(check_test_registration, "unrun_scripts", return_value=(["test_a.py"], [])):
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = check_test_registration.main(["--scripts"])
+            self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

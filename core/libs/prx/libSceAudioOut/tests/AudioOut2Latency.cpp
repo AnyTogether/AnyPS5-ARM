@@ -11,10 +11,12 @@
 
 extern "C" {
 int APS5_VABI sceAudioOut2Initialize();
+int APS5_VABI sceAudioOut2InitializeEx(std::uint32_t);
 int APS5_VABI sceAudioOut2LoInit();
 int APS5_VABI sceAudioOut2LoTerminate();
 int APS5_VABI sceAudioOut2Set3DLatency(int, std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringInit(std::uint32_t);
+int APS5_VABI sceAudioOut2MasteringInitEx(std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringTerm();
 int APS5_VABI sceAudioOut2MasteringSetParam(const void*, std::uint32_t, std::uint32_t);
 int APS5_VABI sceAudioOut2MasteringGetState(void*, std::uint32_t, std::uint64_t);
@@ -64,7 +66,7 @@ static_assert(sizeof(AudioOut2MasteringStatesV2) == 400);
 constexpr int systemUser = 0xFF;
 constexpr int user = 0x10000000;
 constexpr int errorInvalidParam = static_cast<int>(0x80268001);
-constexpr int errorInvalidArgument = static_cast<int>(0x80260502);
+constexpr int errorInvalidPointer = static_cast<int>(0x8026800C);
 constexpr int errorMasteringInvalidApiParam = static_cast<int>(0x80268201);
 constexpr int errorMasteringInvalidStatesId = static_cast<int>(0x80268204);
 
@@ -85,6 +87,10 @@ void TestMasteringInit() {
     Require(sceAudioOut2MasteringInit(0) == 0, "flags 0 must be accepted");
     Require(NamesFunction(RuntimeErrorMessage([] { sceAudioOut2MasteringInit(1); }), "sceAudioOut2MasteringInit"), "flags 1 must throw a runtime error naming the function");
     Require(NamesFunction(RuntimeErrorMessage([] { sceAudioOut2MasteringInit(0x80000000u); }), "sceAudioOut2MasteringInit"), "an unknown flag must throw a runtime error naming the function");
+    Require(sceAudioOut2MasteringInitEx(0) == 0, "InitEx flags 0 must be accepted");
+    Require(sceAudioOut2MasteringInitEx(0x80000000u) == 0, "InitEx flag bit 31 must be accepted");
+    Require(ThrowsRuntimeError([] { sceAudioOut2MasteringInitEx(1); }), "InitEx flag bit 0 must throw");
+    Require(ThrowsRuntimeError([] { sceAudioOut2MasteringInitEx(0x40000000u); }), "InitEx flag bit 30 must throw");
 }
 
 void TestMasteringTerm() {
@@ -125,10 +131,25 @@ void TestMasteringGetState() {
 }
 
 void TestSetSystemDebugState() {
-    const std::uint64_t param[4] = {1, 0, 0, 0};
-    Require(sceAudioOut2SetSystemDebugState(reinterpret_cast<const void*>(param)) == 0, "a debug state must be accepted");
-    Require(sceAudioOut2SetSystemDebugState(reinterpret_cast<const void*>(param)) == 0, "a debug state must be accepted again");
-    Require(sceAudioOut2SetSystemDebugState(nullptr) == errorInvalidArgument, "a null debug state is refused");
+    std::uint32_t loudness[2] = {1, 0};
+    const auto set = [&loudness](std::uint32_t id, void* data, std::size_t size) {
+        const AudioOut2SystemDebugStateParam param{id, 0, data, size};
+        return sceAudioOut2SetSystemDebugState(&param);
+    };
+    Require(set(1, loudness, 8) == 0, "the loudness debug state must be accepted");
+    Require(set(1, loudness, 8) == 0, "the loudness debug state must be accepted again");
+    Require(set(1, loudness, 0) == errorInvalidParam, "a loudness debug state of size 0 is refused");
+    Require(set(1, loudness, 4) == errorInvalidParam, "a loudness debug state of size 4 is refused");
+    Require(set(1, loudness, 16) == errorInvalidParam, "a loudness debug state of size 16 is refused");
+    Require(set(0, loudness, 8) == errorInvalidParam, "debug state id 0 is refused");
+    Require(set(2, loudness, 8) == errorInvalidParam, "debug state id 2 is refused");
+    Require(set(0x21, loudness, 8) == errorInvalidParam, "debug state id 0x21 is refused");
+    Require(set(0xFFFFFFFFu, loudness, 8) == errorInvalidParam, "a large debug state id is refused");
+    Require(set(0x20, loudness, 8) == errorInvalidParam, "debug state id 0x20 of size 8 is refused");
+    Require(set(0x20, loudness, 0) == errorInvalidParam, "debug state id 0x20 of size 0 is refused");
+    Require(ThrowsRuntimeError([&] { set(0x20, loudness, 4); }), "debug state id 0x20 of size 4 must throw");
+    Require(ThrowsRuntimeError([&] { set(1, nullptr, 8); }), "a loudness debug state without a param must throw");
+    Require(sceAudioOut2SetSystemDebugState(nullptr) == errorInvalidPointer, "a null debug state is refused");
 }
 
 void TestEnableChat() {
@@ -142,7 +163,9 @@ void TestEnableChat() {
 void TestLowLatencyService() {
     Require(sceAudioOut2LoInit() == 0, "starting the low-latency service must be accepted");
     Require(sceAudioOut2LoInit() == 0, "starting the low-latency service again must be accepted");
-    Require(ThrowsRuntimeError([] { sceAudioOut2LoTerminate(); }), "stopping the low-latency service must throw");
+    Require(sceAudioOut2LoTerminate() == 0, "stopping the low-latency service returns 0");
+    Require(sceAudioOut2LoTerminate() == 0, "stopping a stopped low-latency service returns 0");
+    Require(sceAudioOut2InitializeEx(0) == 0 && sceAudioOut2InitializeEx(1) == 0, "the extended initialization succeeds");
 }
 
 }

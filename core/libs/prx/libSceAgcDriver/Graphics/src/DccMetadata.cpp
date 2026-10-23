@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/Resources.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/UnitShadow.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Mutex.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -55,10 +56,6 @@ DccKeys ByteKeys(std::uint8_t key) {
         case 0xff: return DccKeys::Uncompressed;
         default: return DccKeys::Mixed;
     }
-}
-
-bool SingleKeysReadable(const GuestTextureResource& resource) {
-    return KeyBytes % BytesPerElement(resource.format) == 0;
 }
 
 void ExpandSingleBlocks(std::span<std::byte> bytes, std::size_t elementBytes) {
@@ -162,7 +159,7 @@ struct GpuKeyStore {
 };
 
 struct KeyStoreMemo {
-    std::mutex mutex;
+    AgcDriver::Mutex mutex;
     std::vector<GpuKeyStore> entries;
     const Recorder* recorder = nullptr;
 };
@@ -527,7 +524,7 @@ DccKeys textureClearKeys(const GuestTextureResource& resource, std::uint64_t gue
     if (IsConvertedTextureFormat(resource.format) && (keys == DccKeys::Clear0001 || keys == DccKeys::Clear1110)) throw std::runtime_error(std::string("AGC graphics: DCC clear code ") + DccKeysName(keys) + " of converted texture format " + std::to_string(resource.format) + " is not implemented");
     std::byte probe[16]{};
     if (!IsDccClear(keys) || !FillDccClear(ResolveTextureFormat(resource.format), keys, resource.dccAlphaOnMsb, std::span(probe, std::min<std::size_t>(sizeof(probe), BytesPerElement(resource.format))))) {
-        static std::mutex reportedMutex;
+        static AgcDriver::Mutex reportedMutex;
         static std::set<std::pair<std::uint64_t, int>> reported;
         std::lock_guard lock(reportedMutex);
         if (reported.size() < 32 && reported.insert({resource.baseAddress, static_cast<int>(keys)}).second) std::fprintf(stderr, "[gpu] texture 0x%llx (format %u) has %s DCC keys at 0x%llx; its texels are read as stored\n", static_cast<unsigned long long>(resource.baseAddress), resource.format, DccKeysName(keys), static_cast<unsigned long long>(resource.dccAddress));
@@ -776,6 +773,44 @@ void ReadTextureSurface(const GuestTextureResource& resource, DccKeys keys, std:
     if (keys == DccKeys::Uncompressed || keys == DccKeys::ClearSingle) GuestMemory::ReadCommitted(resource.baseAddress, bytes);
     else FillDccClear(ResolveTextureFormat(resource.format), keys, resource.dccAlphaOnMsb, bytes);
     if (keys == DccKeys::ClearSingle) ExpandSingleBlocks(bytes, BytesPerElement(resource.format));
+}
+
+bool SingleKeysReadable(const GuestTextureResource& resource) {
+    return KeyBytes % BytesPerElement(resource.format) == 0;
+}
+
+bool ReadSingleElement(const GuestTextureResource& resource, std::span<std::byte> element) {
+    if (!SingleKeysReadable(resource)) return false;
+    const auto bytes = BytesPerElement(resource.format);
+    if (element.size() < bytes) return false;
+    const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::TextureRead);
+    GuestMemory::ReadCommitted(resource.baseAddress, element.subspan(0, bytes));
+    return true;
+}
+
+bool ProvedSingleUniform(const GuestTextureResource& resource, std::uint64_t guestBytes, std::uint64_t collected, DccSingleProof& proof) {
+    if (!SingleKeysReadable(resource) || guestBytes < KeyBytes) return false;
+    const auto bytes = BytesPerElement(resource.format);
+    if (bytes == 0 || bytes > 16) return false;
+    const auto blocks = static_cast<std::size_t>(guestBytes / KeyBytes);
+    if (proof.generation != 0 && proof.address == resource.baseAddress && proof.bytes == guestBytes && proof.format == resource.format && collected != 0 && GuestMemory::UnchangedSince(resource.baseAddress, static_cast<std::size_t>(guestBytes), proof.generation)) return proof.uniform;
+    std::byte first[16]{};
+    bool uniform = true;
+    std::vector<std::byte> buffer(std::min<std::uint64_t>(guestBytes, std::uint64_t(1) << 20));
+    {
+        const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::TextureRead);
+        GuestMemory::ReadCommitted(resource.baseAddress, std::span(first, bytes));
+        for (std::size_t block = 1; block < blocks && uniform;) {
+            const auto offset = block * KeyBytes;
+            const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), guestBytes - offset));
+            GuestMemory::ReadCommitted(resource.baseAddress + offset, std::span(buffer).first(size));
+            const auto covered = size / KeyBytes;
+            for (std::size_t index = 0; index < covered && uniform; ++index) uniform = std::equal(first, first + bytes, buffer.begin() + index * KeyBytes);
+            block += covered;
+        }
+    }
+    proof = collected != 0 ? DccSingleProof{resource.baseAddress, guestBytes, collected, resource.format, uniform} : DccSingleProof{};
+    return uniform;
 }
 
 namespace {

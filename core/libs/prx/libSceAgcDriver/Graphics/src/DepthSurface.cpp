@@ -10,6 +10,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureDetiler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureTiling.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Mutex.hpp"
 #include "RdnaDecoder/include/RdnaDecoder/RdnaDescriptorFormat.hpp"
 #include <algorithm>
 #include <array>
@@ -58,6 +59,7 @@ struct DepthGuard {
     std::size_t bytes;
     std::shared_ptr<std::atomic<bool>> active;
     std::vector<GuestMemory::UnchangedQuery> live;
+    std::shared_ptr<std::atomic<bool>> hostWritten;
 };
 
 std::shared_mutex& depthGuardMutex() {
@@ -492,6 +494,7 @@ public:
 
     void CopyAspectFrom(const DepthSurface& source, VkImageAspectFlagBits aspect) {
         ForgetClear(aspect);
+        NoteHostWrite();
         auto* recorder = RecorderFor(context);
         std::unique_ptr<CommandBatch> batch;
         if (recorder == nullptr) batch = std::make_unique<CommandBatch>(context);
@@ -541,7 +544,12 @@ public:
         return std::any_of(textures.begin(), textures.end(), [](const auto& entry) { return entry.second.use_count() > 1; });
     }
 
+    void NoteHostWrite() {
+        hostWritten->store(true, std::memory_order_release);
+    }
+
     std::uint64_t written = ++depthWrites;
+    std::shared_ptr<std::atomic<bool>> hostWritten = std::make_shared<std::atomic<bool>>(false);
     bool retired = false;
 
     bool Overlaps(std::uint64_t address, std::uint64_t bytes) const {
@@ -691,6 +699,7 @@ public:
             if (plane.storage.get() == &candidate) {
                 if (stencil || !StoreOverwrite(candidate)) copyPlane(plane, plane.storage, stencil, false);
                 written = ++depthWrites;
+                NoteHostWrite();
                 return true;
             }
             if (std::none_of(plane.replaced.begin(), plane.replaced.end(), [&](const auto& old) { return old.lock().get() == &candidate; })) continue;
@@ -708,6 +717,7 @@ public:
             const auto source = std::const_pointer_cast<StorageTexture>(candidate.shared_from_this());
             copyPlane(plane, source, stencil, false);
             written = ++depthWrites;
+            NoteHostWrite();
             return true;
         }
         return false;
@@ -1891,8 +1901,28 @@ std::uint64_t MultisampledDepthBytes_nid_no_patch(VkExtent2D extent, std::uint32
 void RequireNoResidentDepthRead_nid_no_patch(std::uint64_t address, std::size_t bytes) {
     if (bytes == 0u || !anyDepthGuard().load(std::memory_order_acquire)) return;
     Require(address <= std::numeric_limits<std::uint64_t>::max() - bytes, "native depth read range overflows");
-    std::shared_lock lock(depthGuardMutex());
-    for (const auto& range : depthGuards()) Require(address >= range.address + range.bytes || range.address >= address + bytes, "sample-preserving guest publication of native multisample depth is not implemented");
+    const auto overlaps = [&](const DepthGuard& range) { return address < range.address + range.bytes && range.address < address + bytes; };
+    {
+        std::shared_lock lock(depthGuardMutex());
+        if (std::ranges::none_of(depthGuards(), overlaps)) return;
+    }
+    std::unique_lock lock(depthGuardMutex());
+    for (const auto& range : depthGuards()) {
+        if (overlaps(range)) Require(!range.hostWritten->load(std::memory_order_acquire), "sample-preserving guest publication of native multisample depth is not implemented");
+    }
+    for (const auto& range : depthGuards()) {
+        if (overlaps(range)) range.active->store(false, std::memory_order_release);
+    }
+    std::erase_if(depthGuards(), [](const auto& range) { return !range.active->load(std::memory_order_acquire); });
+    anyDepthGuard().store(!depthGuards().empty(), std::memory_order_release);
+}
+
+void NoteDepthSurfaceWrite(const Context& context, const DepthTarget& target) {
+    if (target.samples == 1u || !anyDepthGuard().load(std::memory_order_acquire)) return;
+    std::lock_guard lock(surfacesMutex());
+    for (const auto& surface : surfaces()) {
+        if (surface->active->load(std::memory_order_acquire) && surface->context.device == context.device && sameSurface(surface->target, target)) surface->NoteHostWrite();
+    }
 }
 
 bool HasResidentDepthGuards_nid_no_patch() {
@@ -1938,7 +1968,7 @@ bool SampleLocationsCompatibleDepth(const Context& context, VkFormat format, std
 
 VkFormat HostDepthFormat(const Context& context, VkFormat format) {
     if (format != VK_FORMAT_D16_UNORM_S8_UINT) return format;
-    static std::mutex mutex;
+    static AgcDriver::Mutex mutex;
     static std::map<VkPhysicalDevice, VkFormat> chosen;
     std::lock_guard lock(mutex);
     if (const auto found = chosen.find(context.physical); found != chosen.end()) return found->second;
@@ -2002,7 +2032,7 @@ VkImageView DepthSurfaceView(const Context& context, const DepthTarget& target, 
         auto& fresh = *surfaces().back();
         if (target.samples != 1u && fresh.sampleable && fresh.sampling.refusal.empty()) {
             std::unique_lock guardLock(depthGuardMutex());
-            for (const auto& range : fresh.sampling.initial) depthGuards().push_back({context.device, range.address, range.bytes, fresh.active, {{range.address, range.bytes, 0u}}});
+            for (const auto& range : fresh.sampling.initial) depthGuards().push_back({context.device, range.address, range.bytes, fresh.active, {{range.address, range.bytes, 0u}}, fresh.hostWritten});
             anyDepthGuard().store(true, std::memory_order_release);
             InstallResidentImageReadGuard_nid_no_patch();
             fresh.samplingActive = true;
@@ -2564,7 +2594,10 @@ bool DepthSurfaceStoreBack(const Context& context, const StorageTexture& storage
         if (std::get<0>(key) != context.device || entry->storage.get() != &storage) continue;
         const auto slices = layeredSlices(context, *entry);
         entry->Copy(slices, false);
-        for (const auto& slice : slices) slice.surface->written = ++depthWrites;
+        for (const auto& slice : slices) {
+            slice.surface->written = ++depthWrites;
+            slice.surface->NoteHostWrite();
+        }
         return true;
     }
     for (const auto& surface : surfaces()) {

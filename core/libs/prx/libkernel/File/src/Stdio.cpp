@@ -57,8 +57,33 @@ static constexpr std::uint64_t KERNEL_MNT_RDONLY = 0x1;
 static constexpr std::uint64_t KERNEL_MNT_NOEXEC = 0x4;
 static constexpr std::uint64_t KERNEL_MNT_NOSUID = 0x8;
 
+#if defined(_WIN32) || defined(__APPLE__)
+struct PositionedLock {
+    std::mutex mutex;
+};
+std::mutex g_positionedTableLock;
+std::unordered_map<int, std::shared_ptr<PositionedLock>> g_positionedLocks;
+std::unique_lock<std::mutex> File::LockPositionedTransfer(int descriptor) {
+    std::shared_ptr<PositionedLock> entry;
+    {
+        std::lock_guard table(g_positionedTableLock);
+        auto& slot = g_positionedLocks[descriptor];
+        if (!slot) slot = std::make_shared<PositionedLock>();
+        entry = slot;
+    }
+    return std::unique_lock<std::mutex>(entry->mutex);
+}
+void File::SharePositionedTransfer(int from, int to) {
+    std::lock_guard table(g_positionedTableLock);
+    auto& source = g_positionedLocks[from];
+    if (!source) source = std::make_shared<PositionedLock>();
+    g_positionedLocks[to] = source;
+}
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
+#include "prx/libkernel/File/include/WindowsSymbolicLink.hpp"
 #include <io.h>
 #include <cstdio>
 #include <fcntl.h>
@@ -172,10 +197,13 @@ static int SetTimes(HANDLE handle, const KernelTimeval* times) {
         errno = EINVAL;
         return -1;
     }
-    return SetFileTime(handle, nullptr, &access, &modified) ? 0 : File::WindowsFileTime::Failure(GetLastError());
+    FILETIME creation{};
+    if (!GetFileTime(handle, &creation, nullptr, nullptr)) return File::WindowsFileTime::Failure(GetLastError());
+    const auto birth = CompareFileTime(&modified, &creation) < 0 ? &modified : nullptr;
+    return SetFileTime(handle, birth, &access, &modified) ? 0 : File::WindowsFileTime::Failure(GetLastError());
 }
 static int NativeUtimes(const std::filesystem::path& path, const KernelTimeval* times, bool followLink = true) {
-    const auto handle = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    const auto handle = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | (followLink ? 0 : FILE_FLAG_OPEN_REPARSE_POINT), nullptr);
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
     const int result = SetTimes(handle, times);
@@ -188,7 +216,7 @@ static int NativeFutimes(int descriptor, const KernelTimeval* times) {
     const auto original = reinterpret_cast<HANDLE>(::_get_osfhandle(descriptor));
     if (original == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
     if (GetFileType(original) != FILE_TYPE_DISK) { errno = EINVAL; return -1; }
-    const auto handle = ReOpenFile(original, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+    const auto handle = ReOpenFile(original, FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
     if (handle == INVALID_HANDLE_VALUE) return File::WindowsFileTime::Failure(GetLastError());
     const int result = SetTimes(handle, times);
     CloseHandle(handle);
@@ -220,27 +248,6 @@ static int NativeSync(int descriptor) {
 static int NativeFlock(int descriptor, int operation) {
     return File::Flock(descriptor, operation);
 }
-struct PositionedLock {
-    std::mutex mutex;
-};
-std::mutex g_positionedTableLock;
-std::unordered_map<int, std::shared_ptr<PositionedLock>> g_positionedLocks;
-std::unique_lock<std::mutex> File::LockPositionedTransfer(int descriptor) {
-    std::shared_ptr<PositionedLock> entry;
-    {
-        std::lock_guard table(g_positionedTableLock);
-        auto& slot = g_positionedLocks[descriptor];
-        if (!slot) slot = std::make_shared<PositionedLock>();
-        entry = slot;
-    }
-    return std::unique_lock<std::mutex>(entry->mutex);
-}
-void File::SharePositionedTransfer(int from, int to) {
-    std::lock_guard table(g_positionedTableLock);
-    auto& source = g_positionedLocks[from];
-    if (!source) source = std::make_shared<PositionedLock>();
-    g_positionedLocks[to] = source;
-}
 static std::int64_t NativePositionedTransfer(int descriptor, void* buf, std::size_t nbytes, std::int64_t offset, bool write) {
     if (nbytes > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) {
         throw std::runtime_error("NativePositioned: nbytes exceeds platform limit");
@@ -263,9 +270,10 @@ static std::int64_t NativePositionedTransfer(int descriptor, void* buf, std::siz
         errno = ESPIPE;
         return -1;
     }
+    const auto at = write && File::Appends(descriptor) ? ~std::uint64_t{} : static_cast<std::uint64_t>(offset);
     OVERLAPPED overlapped{};
-    overlapped.Offset = static_cast<DWORD>(offset);
-    overlapped.OffsetHigh = static_cast<DWORD>(static_cast<std::uint64_t>(offset) >> 32u);
+    overlapped.Offset = static_cast<DWORD>(at);
+    overlapped.OffsetHigh = static_cast<DWORD>(at >> 32u);
     DWORD done = 0;
     const BOOL ok = write ? ::WriteFile(handle, buf, static_cast<DWORD>(nbytes), &done, &overlapped)
                           : ::ReadFile(handle, buf, static_cast<DWORD>(nbytes), &done, &overlapped);
@@ -389,9 +397,35 @@ static int NativeFlock(int descriptor, int operation) {
 static std::int64_t NativePread(int descriptor, void* buf, std::size_t nbytes, std::int64_t offset) {
     return static_cast<std::int64_t>(::pread(descriptor, buf, nbytes, static_cast<off_t>(offset)));
 }
+#ifdef __APPLE__
+std::unique_lock<std::mutex> File::LockAppendOffset(int descriptor) {
+    if (!File::Appends(descriptor)) return {};
+    return File::LockPositionedTransfer(descriptor);
+}
+std::int64_t File::AppendKeepingOffset(int descriptor, const struct iovec* vectors, int count) {
+    if (!File::Appends(descriptor)) return -2;
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode)) return -2;
+    const auto positioned = File::LockPositionedTransfer(descriptor);
+    const off_t offset = ::lseek(descriptor, 0, SEEK_CUR);
+    if (offset < 0) return -1;
+    const auto result = static_cast<std::int64_t>(::writev(descriptor, vectors, count));
+    const int error = errno;
+    if (::lseek(descriptor, offset, SEEK_SET) != offset) {
+        throw std::runtime_error("AppendKeepingOffset: cannot restore the offset of descriptor " + std::to_string(descriptor) + ", errno=" + std::to_string(errno));
+    }
+    errno = error;
+    return result;
+}
+#endif
 static std::int64_t NativePwrite(int descriptor, const void* buf, std::size_t nbytes, std::int64_t offset) {
     const auto result = File::PwriteSharedMemory_nid_no_patch(descriptor, buf, nbytes, offset);
-    return result == -2 ? static_cast<std::int64_t>(::pwrite(descriptor, buf, nbytes, static_cast<off_t>(offset))) : result;
+    if (result != -2) return result;
+#ifdef __APPLE__
+    const struct iovec vector{const_cast<void*>(buf), nbytes};
+    if (const auto appended = File::AppendKeepingOffset(descriptor, &vector, 1); appended != -2) return appended;
+#endif
+    return static_cast<std::int64_t>(::pwrite(descriptor, buf, nbytes, static_cast<off_t>(offset)));
 }
 static_assert(sizeof(KernelIovec) == sizeof(struct iovec));
 static_assert(offsetof(KernelIovec, base) == offsetof(struct iovec, iov_base));
@@ -498,6 +532,14 @@ static std::int64_t PosixResult(std::int64_t result) {
     return result < 0 ? PosixFailure(static_cast<int>(result) & 0xffff) : result;
 }
 
+static int DeviceFilesystem(KernelStatfs* fs) {
+    fs->f_bsize = 512;
+    fs->f_iosize = 512;
+    fs->f_blocks = 2;
+    fs->f_namemax = 255;
+    return 0;
+}
+
 #ifdef _WIN32
 static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
     if (!File::IsDirectoryDescriptor(descriptor)) {
@@ -505,6 +547,7 @@ static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
         if (handle == INVALID_HANDLE_VALUE) return GUEST_EBADF;
         const DWORD type = ::GetFileType(handle);
         if (type == FILE_TYPE_PIPE) return GUEST_EINVAL;
+        if (type == FILE_TYPE_CHAR) return DeviceFilesystem(fs);
         if (type != FILE_TYPE_DISK)
             throw std::runtime_error("_fstatfs: descriptor " + std::to_string(descriptor) + " is not a file on a Windows volume");
     }
@@ -567,6 +610,7 @@ static int NativeFstatfs(int descriptor, KernelStatfs* fs) {
     if (S_ISSOCK(file.st_mode)) return GUEST_EINVAL;
 #endif
     if (NativeIsPipe(descriptor)) return GUEST_EINVAL;
+    if (S_ISCHR(file.st_mode)) return DeviceFilesystem(fs);
     struct statvfs host{};
     if (::fstatvfs(descriptor, &host) != 0) return SceErrorFromErrno(errno) & 0xffff;
     if (host.f_flag & ST_RDONLY) fs->f_flags |= KERNEL_MNT_RDONLY;
@@ -882,6 +926,9 @@ int APS5_VABI flock_nid_postfix(int d, int operation) {
 #endif
     const int type = operation & 8 ? 8 : operation & 2 ? 2 : operation & 1 ? 1 : 0;
     if (type == 0) return PosixFailure(GUEST_EBADF);
+#ifdef _WIN32
+    if (File::IsDirectoryDescriptor(d)) return 0;
+#endif
     if (NativeFlock(d, type | (operation & 4)) != 0) {
 #ifdef _WIN32
         const auto error = ::GetLastError();
@@ -897,7 +944,7 @@ int APS5_VABI flock_nid_postfix(int d, int operation) {
 }
 
 int APS5_VABI _fstatfs_nid_postfix(int d, KernelStatfs* buf) {
-    if (GuestSockets::IsOpen(d)) return PosixFailure(GUEST_EINVAL);
+    if (GuestSockets::IsOpen(d) || IsKqueueDescriptor(d)) return PosixFailure(GUEST_EINVAL);
     if (d < 0) return PosixFailure(GUEST_EBADF);
     File::RefuseArchivedFile(d, "fstatfs");
     KernelStatfs result{};
@@ -963,6 +1010,9 @@ int APS5_VABI mkdir_nid_postfix(const char* path, uint16_t mode) {
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return PosixFailure(error);
     if (NativeMkdir(native, mode) != 0) {
         const int nativeError = errno;
+#ifdef _WIN32
+        if (File::WindowsSymbolicLinkLoop(WithoutTrailingSeparator(native).parent_path())) return PosixFailure(GUEST_ELOOP);
+#endif
         const bool blockedByFile = (nativeError == ENOENT || nativeError == EINVAL) && HasNonDirectoryPrefix(native);
         return PosixResult(SceErrorFromErrno(blockedByFile ? GUEST_ENOTDIR : nativeError));
     }
@@ -1326,6 +1376,9 @@ int APS5_VABI sceKernelMkdir(const char* path, uint16_t mode) {
     if (std::filesystem::exists(native, error)) return SceErrorFromErrno(GUEST_EEXIST);
     if (const int failure = PathLookupFailure(error)) return failure;
     if (!std::filesystem::is_directory(WithoutTrailingSeparator(native).parent_path(), error)) {
+#ifdef _WIN32
+        if (File::WindowsSymbolicLinkLoop(WithoutTrailingSeparator(native).parent_path())) return SceKernelError(GUEST_ELOOP);
+#endif
         return SceErrorFromErrno(HasNonDirectoryPrefix(native) ? GUEST_ENOTDIR : GUEST_ENOENT);
     }
     if (!std::filesystem::create_directory(native, error)) return SceErrorFromErrno(error.value() ? error.value() : GUEST_EIO);
@@ -1437,14 +1490,15 @@ static std::int64_t TransferIovecs(int d, const KernelIovec* guestIov, int iovcn
         return result < 0 ? SceErrorFromErrno(errno) : 0;
     }
     if (!write && offset == nullptr && File::IsDirectoryDescriptor(d)) return SceErrorFromErrno(GUEST_EISDIR);
-    if (write && offset == nullptr && iovcnt > 1 && total <= static_cast<std::size_t>(std::numeric_limits<int>::max()) && File::Appends(d)) {
+    if (write && iovcnt > 1 && total <= static_cast<std::size_t>(std::numeric_limits<int>::max()) && File::Appends(d)) {
         std::vector<char> gathered;
         gathered.reserve(total);
         for (int i = 0; i < iovcnt; ++i) {
             const auto* base = static_cast<const char*>(iov[i].base);
             gathered.insert(gathered.end(), base, base + iov[i].length);
         }
-        const auto result = NativeTransferBuffer(d, gathered.data(), gathered.size(), true);
+        const auto result = offset != nullptr ? NativePositionedTransfer(d, gathered.data(), gathered.size(), *offset, true)
+                                              : NativeTransferBuffer(d, gathered.data(), gathered.size(), true);
         return result < 0 ? SceErrorFromErrno(errno) : result;
     }
     const bool whole = write || offset != nullptr || NativeIsDisk(d);
@@ -1522,6 +1576,9 @@ int64_t APS5_VABI sceKernelReadv(int d, const KernelIovec* guestIov, int iovcnt)
     }
     if (File::IsRandomDevice(d)) return ReadRandomIovecs(d, iov, iovcnt);
     if (const auto archived = File::ReadArchivedIovecs(d, iov, iovcnt, nullptr)) return *archived;
+#ifdef __APPLE__
+    const auto appendOffset = File::LockAppendOffset(d);
+#endif
     const auto result = static_cast<std::int64_t>(::readv(d, NativeIovecs(iov), iovcnt));
     return result < 0 ? SceErrorFromErrno(errno) : result;
 }
@@ -1540,6 +1597,9 @@ int64_t APS5_VABI sceKernelWritev(int d, const KernelIovec* guestIov, int iovcnt
     PrepareWriteIovecs(iov, iovcnt);
     const auto sharedResult = File::WritevSharedMemory_nid_no_patch(d, NativeIovecs(iov), iovcnt);
     if (sharedResult != -2) return sharedResult < 0 ? SceErrorFromErrno(errno) : sharedResult;
+#ifdef __APPLE__
+    const auto appendOffset = File::LockAppendOffset(d);
+#endif
     const auto result = static_cast<std::int64_t>(::writev(d, NativeIovecs(iov), iovcnt));
     return result < 0 ? SceErrorFromErrno(errno) : result;
 }
@@ -1573,6 +1633,11 @@ int64_t APS5_VABI sceKernelPwritev(int d, const KernelIovec* guestIov, int iovcn
     PrepareWriteIovecs(iov, iovcnt);
     const auto sharedResult = File::PwritevSharedMemory_nid_no_patch(d, NativeIovecs(iov), iovcnt, offset);
     if (sharedResult != -2) return sharedResult < 0 ? SceErrorFromErrno(errno) : sharedResult;
+#ifdef __APPLE__
+    if (const auto appended = File::AppendKeepingOffset(d, NativeIovecs(iov), iovcnt); appended != -2) {
+        return appended < 0 ? SceErrorFromErrno(errno) : appended;
+    }
+#endif
     const auto result = static_cast<std::int64_t>(::pwritev(d, NativeIovecs(iov), iovcnt, static_cast<off_t>(offset)));
     return result < 0 ? SceErrorFromErrno(errno) : result;
 }
@@ -1600,16 +1665,19 @@ int APS5_VABI sceKernelRename(const char* from, const char* to) {
 int APS5_VABI sceKernelRmdir(const char* path) {
     if (!path) return SceErrorFromErrno(GUEST_EFAULT);
     if (*path == '\0') return SceErrorFromErrno(GUEST_ENOENT);
+    if (const int dot = RenameDotError_nid_no_patch(path)) return SceKernelError(dot);
     std::filesystem::path native;
     if (const int error = ResolvePathError_nid_no_patch(path, native)) return SceKernelError(error);
     std::error_code error;
     if (std::filesystem::is_symlink(native, error)) return SceErrorFromErrno(GUEST_ENOTDIR);
     if (const int failure = PathLookupFailure(error)) return failure;
     if (!std::filesystem::is_directory(native, error)) {
+#ifdef _WIN32
+        if (File::WindowsSymbolicLinkLoop(WithoutTrailingSeparator(native).parent_path())) return SceKernelError(GUEST_ELOOP);
+#endif
         const bool blockedByFile = HasNonDirectoryPrefix(native) || std::filesystem::exists(WithoutTrailingSeparator(native), error);
         return SceErrorFromErrno(blockedByFile ? GUEST_ENOTDIR : GUEST_ENOENT);
     }
-    if (FinalPathComponentIsDot_nid_no_patch(path)) return SceErrorFromErrno(GUEST_EINVAL);
     if (!std::filesystem::is_empty(native, error)) return SceErrorFromErrno(GUEST_ENOTEMPTY);
     if (!RemoveEmptyDirectory(native)) return SceErrorFromErrno(GUEST_EIO);
     RecordWrittenPath_nid_no_patch(native);
@@ -1660,7 +1728,12 @@ int APS5_VABI sceKernelTruncate_nid_postfix(const char* path, std::int64_t lengt
     if (const int failure = PathLookupFailure(error)) return failure;
     if (!std::filesystem::exists(status)) return SceErrorFromErrno(NotFoundError_nid_no_patch(native));
     if (std::filesystem::is_directory(status)) return SceErrorFromErrno(GUEST_EISDIR);
-    if (const int failure = NativeTruncate(native, length)) return SceErrorFromErrno(failure);
+    if (const int failure = NativeTruncate(native, length)) {
+#ifdef _WIN32
+        if (File::WindowsSymbolicLinkLoop(native)) return SceKernelError(GUEST_ELOOP);
+#endif
+        return SceErrorFromErrno(failure);
+    }
     RecordWrittenPath_nid_no_patch(native);
     return 0;
 }

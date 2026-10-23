@@ -21,10 +21,6 @@ int APS5_VABI sceNgs2FftQuerySize() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNgs2GetWaveformFrameInfo(void* format, std::uint32_t* outFrameSize, std::uint32_t* outNumFrameSamples, std::uint32_t* outUnitsPerFrame, std::uint32_t* outNumDelaySamples) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
 int APS5_VABI sceNgs2ParseWaveformUser(std::uintptr_t handler, std::uintptr_t userData, void* outInfo) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
