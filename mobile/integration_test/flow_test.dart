@@ -6,7 +6,7 @@ import 'dart:io';
 import 'package:anyps5_remote/main.dart' as app;
 import 'package:anyps5_remote/ui/home_screen.dart';
 import 'package:anyps5_remote/ui/pad_screen.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -67,15 +67,31 @@ void main() {
     // The pictures arrive after the library.
     await waitFor(tester, find.byType(Image));
     // Picking a game here picks it on the Mac, and its background follows.
-    await tester.tap(find.byType(Image).at(2));
-    await waitFor(tester, find.textContaining('Silksong'));
-    await waitFor(tester, find.byType(Image).at(6));
+    for (var tile = 0; find.textContaining('Silksong').evaluate().isEmpty; tile++) {
+      await tester.tap(find.byType(Image).at(tile));
+      await settle(tester);
+    }
+    await settle(tester);
     await settle(tester);
     await binding.takeScreenshot('5-launcher');
     await tester.tap(find.text('Play'));
     await waitFor(tester, find.byType(PadScreen));
     await settle(tester);
     await binding.takeScreenshot('6-pad');
+    // The layout editor: the cross moves, becomes a toggle, and the layout is saved on the Mac.
+    final area = tester.getRect(find.byType(PadScreen));
+    await tester.tap(find.byIcon(Icons.lock_outline_rounded));
+    await tester.pump();
+    final cross = Offset(area.left + area.width * 0.86, area.top + area.height * 0.56);
+    final finger = await tester.startGesture(cross);
+    await finger.moveBy(Offset(-area.width * 0.06, -area.height * 0.04));
+    await finger.up();
+    await tester.pump();
+    await tester.tap(find.text('Toggle'));
+    await settle(tester);
+    await binding.takeScreenshot('6b-editor');
+    await tester.tap(find.byIcon(Icons.lock_open_rounded));
+    await settle(tester);
     final pad = tester.getRect(find.byType(PadScreen));
     await tester.tapAt(
       Offset(pad.left + pad.width * 0.50, pad.top + pad.height * 0.86),

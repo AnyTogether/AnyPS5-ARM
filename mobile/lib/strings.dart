@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import 'ui/pad_layout.dart';
+
 /// Every text the app shows, in English (the default) and Turkish. The launcher's language
 /// picks one once connected; before that the last one it picked is used.
 class Strings {
@@ -51,6 +53,14 @@ class Strings {
   String get builtOn => _text('builtOn');
   String get vibration => _text('vibration');
   String get vibrationDetail => _text('vibrationDetail');
+  String get editLayout => _text('editLayout');
+  String get done => _text('done');
+  String get editHint => _text('editHint');
+  String get resetAll => _text('resetAll');
+  String get reset => _text('reset');
+  String get hide => _text('hide');
+  String behavior(ButtonBehavior behavior) =>
+      _text('behavior.${behavior.name}');
 
   static const _english = {
     'welcomeTitle': 'Your phone is a DualSense',
@@ -93,6 +103,15 @@ class Strings {
     'builtOn': 'Built on AnyPS5',
     'vibration': 'Vibration',
     'vibrationDetail': "The game's rumble and trigger effects on the phone",
+    'editLayout': 'Edit Layout',
+    'done': 'Done',
+    'editHint': 'Drag a control to move it, tap it to change it',
+    'resetAll': 'Reset All',
+    'reset': 'Reset',
+    'hide': 'Hide',
+    'behavior.normal': 'Normal',
+    'behavior.toggle': 'Toggle',
+    'behavior.turbo': 'Turbo',
   };
 
   static const _turkish = {
@@ -135,6 +154,15 @@ class Strings {
     'builtOn': 'AnyPS5 üzerine kurulu',
     'vibration': 'Titreşim',
     'vibrationDetail': 'Oyunun titreşimi ve tetik efektleri telefonda',
+    'editLayout': 'Düzeni Düzenle',
+    'done': 'Bitti',
+    'editHint': 'Taşımak için sürükle, değiştirmek için dokun',
+    'resetAll': 'Hepsini Sıfırla',
+    'reset': 'Sıfırla',
+    'hide': 'Gizle',
+    'behavior.normal': 'Normal',
+    'behavior.toggle': 'Kilitle',
+    'behavior.turbo': 'Turbo',
   };
 }
 

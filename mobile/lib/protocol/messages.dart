@@ -137,6 +137,7 @@ class RemoteGame {
     required this.state,
     required this.trophies,
     required this.art,
+    this.layout,
   });
 
   factory RemoteGame.fromJson(Map<String, dynamic> json) => RemoteGame(
@@ -148,6 +149,7 @@ class RemoteGame {
     ),
     trophies: json['trophies'] as String?,
     art: json['art'] as String,
+    layout: json['layout'] as String?,
   );
 
   final String id;
@@ -155,6 +157,9 @@ class RemoteGame {
   final GameState state;
   final String? trophies;
   final String art;
+
+  /// The pad layout saved on the Mac for this game, as LayoutTweaks JSON.
+  final String? layout;
 }
 
 /// The launcher's games, the one selected, the one playing and its language.
@@ -182,6 +187,7 @@ class Library extends Message {
           'state': game.state.name,
           'trophies': game.trophies,
           'art': game.art,
+          'layout': game.layout,
         },
     ],
     'selected': selected,
@@ -258,4 +264,16 @@ class Home extends Message {
 
   @override
   String toJson() => jsonEncode({'type': 'home'});
+}
+
+/// The pad layout for a game, for the Mac to keep with the game's settings; null is the default.
+class SaveLayout extends Message {
+  const SaveLayout(this.id, this.layout);
+
+  final String id;
+  final String? layout;
+
+  @override
+  String toJson() =>
+      jsonEncode({'type': 'saveLayout', 'id': id, 'layout': layout});
 }

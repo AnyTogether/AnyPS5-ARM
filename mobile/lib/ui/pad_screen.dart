@@ -1,31 +1,43 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../layout/layout_tweaks.dart';
 import '../protocol/packets.dart';
+import '../strings.dart';
 import 'pad_layout.dart';
 
 /// The pad: every finger is given to the control it lands on and keeps it until it lifts, so
 /// any number of controls can be held at once. Each change hands [onState] the whole pad.
+/// The lock opens the layout editor, where controls are moved, sized, faded, hidden and given a
+/// behaviour; each change goes to [onTweaks].
 class PadScreen extends StatefulWidget {
   const PadScreen({
     super.key,
     required this.onState,
     this.layout = PadLayout.standard,
+    this.tweaks = LayoutTweaks.none,
+    this.onTweaks,
     this.status,
     this.onHome,
     this.glow,
   });
 
-  /// The game's light bar colour, which the pad's background glows with.
-  final Color? glow;
-
   final void Function(PadState state) onState;
-
-  /// The PS button: the launcher, on the phone and on the Mac.
-  final VoidCallback? onHome;
   final PadLayout layout;
+
+  /// The player's changes to [layout] for this game.
+  final LayoutTweaks tweaks;
+  final ValueChanged<LayoutTweaks>? onTweaks;
 
   /// Drawn at the top: the connection dot and the latency.
   final Widget? status;
+
+  /// The PS button: the launcher, on the phone and on the Mac.
+  final VoidCallback? onHome;
+
+  /// The game's light bar colour, which the pad's background glows with.
+  final Color? glow;
 
   @override
   State<PadScreen> createState() => _PadScreenState();
@@ -40,69 +52,178 @@ class _Finger {
   bool clicked = false;
 }
 
+class _Drag {
+  _Drag(this.id, this.start, this.from);
+
+  final String id;
+  final Offset start;
+  final Offset from;
+}
+
 class _PadScreenState extends State<PadScreen> {
   static const doubleTap = Duration(milliseconds: 300);
+  static const scaleStep = 0.1;
+
   final _fingers = <int, _Finger>{};
   final _released = <String, Duration>{};
+  final _latched = <String>{};
   final _clock = Stopwatch()..start();
   PadState _state = PadState();
+  Timer? _turbo;
+  int _turboTicks = 0;
+  Size _size = Size.zero;
+
+  bool _editing = false;
+  String? _selected;
+  final _drags = <int, _Drag>{};
+  late LayoutTweaks _tweaks = widget.tweaks;
+
+  PadLayout get _layout => _tweaks.apply(widget.layout);
+
+  @override
+  void didUpdateWidget(PadScreen old) {
+    super.didUpdateWidget(old);
+    if (!_editing && widget.tweaks != old.tweaks) _tweaks = widget.tweaks;
+  }
 
   /// A pad that goes away (the connection dropped) lets go of what was held on it.
   @override
   void dispose() {
-    if (_fingers.isNotEmpty) widget.onState(PadState());
+    _turbo?.cancel();
+    if (_fingers.isNotEmpty || _latched.isNotEmpty) widget.onState(PadState());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final layout = _layout;
     return Material(
       type: MaterialType.transparency,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final size = constraints.biggest;
-          return Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (event) => _down(event, size),
-            onPointerMove: (event) => _move(event, size),
-            onPointerUp: (event) => _up(event.pointer, size),
-            onPointerCancel: (event) => _up(event.pointer, size),
-            child: Stack(
-              children: [
-                Positioned.fill(
+          _size = size;
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (event) =>
+                      _editing ? _editDown(event, size) : _down(event, size),
+                  onPointerMove: (event) =>
+                      _editing ? _editMove(event, size) : _move(event, size),
+                  onPointerUp: (event) => _editing
+                      ? _drags.remove(event.pointer)
+                      : _up(event.pointer, size),
+                  onPointerCancel: (event) => _editing
+                      ? _drags.remove(event.pointer)
+                      : _up(event.pointer, size),
                   child: TweenAnimationBuilder<Color?>(
                     tween: ColorTween(end: widget.glow ?? _PadPainter.base),
                     duration: const Duration(milliseconds: 600),
                     builder: (context, glow, _) => CustomPaint(
                       painter: _PadPainter(
-                        widget.layout,
+                        layout,
                         _state,
-                        _fingers.values.toList(),
+                        {
+                          ..._fingers.values.map((finger) => finger.control.id),
+                          ..._latched,
+                        },
                         glow,
+                        editing: _editing,
+                        selected: _selected,
                       ),
                     ),
                   ),
                 ),
-                if (widget.status != null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    top: size.height * 0.20,
-                    child: Center(child: widget.status!),
+              ),
+              if (widget.status != null && !_editing)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: size.height * 0.20,
+                  child: Center(child: widget.status!),
+                ),
+              if (widget.onTweaks != null)
+                Positioned(
+                  left: 6,
+                  bottom: 2,
+                  child: IconButton(
+                    tooltip: _editing ? texts.done : texts.editLayout,
+                    onPressed: _toggleEditing,
+                    icon: Icon(
+                      _editing
+                          ? Icons.lock_open_rounded
+                          : Icons.lock_outline_rounded,
+                      color: _editing ? Colors.white : Colors.white38,
+                    ),
                   ),
-              ],
-            ),
+                ),
+              if (_editing)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  // Out of the way of the control being changed: at the top, or at the bottom
+                  // for the controls along the top edge.
+                  top: _panelBelow(layout) ? null : 8,
+                  bottom: _panelBelow(layout) ? 8 : null,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: size.width - 24),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: _inspector(texts, layout),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           );
         },
       ),
     );
   }
 
+  bool _panelBelow(PadLayout layout) =>
+      _selected != null && layout.control(_selected!).y < 0.3;
+
+  static String _badge(PadControl control) => control.label.isNotEmpty
+      ? control.label
+      : switch (control.id) {
+          'leftStick' => 'L',
+          'rightStick' => 'R',
+          _ => '▭',
+        };
+
+  void _toggleEditing() {
+    setState(() {
+      _editing = !_editing;
+      _selected = null;
+      _drags.clear();
+      _fingers.clear();
+      _latched.clear();
+    });
+    _turbo?.cancel();
+    _publish(_size);
+  }
+
+  // MARK: Playing
+
   void _down(PointerDownEvent event, Size size) {
-    final control = widget.layout.hit(event.localPosition, size);
+    final control = _layout.hit(event.localPosition, size);
     if (control == null) return;
     if (control.id == 'ps') {
       widget.onHome?.call();
+      return;
+    }
+    if (control.behavior == ButtonBehavior.toggle &&
+        control.kind != ControlKind.stick &&
+        control.kind != ControlKind.touchPad) {
+      _latched.contains(control.id)
+          ? _latched.remove(control.id)
+          : _latched.add(control.id);
+      _publish(size);
       return;
     }
     final finger = _Finger(control, event.localPosition)
@@ -135,22 +256,37 @@ class _PadScreenState extends State<PadScreen> {
     _publish(size);
   }
 
-  /// The pad from the fingers on it now.
+  /// Turbo buttons are pressed for two ticks of the turbo timer, then let go for two.
+  bool get _turboOn => (_turboTicks ~/ 2).isEven;
+
+  /// The pad from the fingers on it now, the latched buttons, and the turbo buttons in their
+  /// pressed half.
   void _publish(Size size) {
+    final layout = _layout;
     final state = PadState();
     var touchIndex = 0;
+    var turbo = false;
+    void press(PadControl control) {
+      state.buttons |= control.bit;
+      if (control.id == 'l2') state.l2 = 255;
+      if (control.id == 'r2') state.r2 = 255;
+    }
+
+    for (final id in _latched) {
+      press(layout.control(id));
+    }
     for (final finger in _fingers.values) {
       final control = finger.control;
       switch (control.kind) {
-        case ControlKind.button:
-          state.buttons |= control.bit;
-        case ControlKind.trigger:
-          state.buttons |= control.bit;
-          if (control.id == 'l2') state.l2 = 255;
-          if (control.id == 'r2') state.r2 = 255;
+        case ControlKind.button || ControlKind.trigger:
+          if (control.behavior == ButtonBehavior.turbo) {
+            turbo = true;
+            if (!_turboOn) break;
+          }
+          press(control);
         case ControlKind.stick:
-          final centre = widget.layout.center(control.id, size);
-          final radius = widget.layout.radius(control.id, size);
+          final centre = layout.center(control.id, size);
+          final radius = layout.radius(control.id, size);
           var offset = finger.position - centre;
           if (offset.distance > radius) {
             offset = offset / offset.distance * radius;
@@ -161,7 +297,7 @@ class _PadScreenState extends State<PadScreen> {
           if (finger.clicked) state.buttons |= control.bit;
         case ControlKind.touchPad:
           if (touchIndex > 1) break;
-          final area = widget.layout.rect(control, size);
+          final area = layout.rect(control, size);
           state.buttons |= control.bit;
           state.touch[touchIndex] = TouchPoint(
             active: true,
@@ -176,21 +312,207 @@ class _PadScreenState extends State<PadScreen> {
           touchIndex++;
       }
     }
-    setState(() => _state = state);
+    if (turbo) {
+      _turbo ??= Timer.periodic(const Duration(milliseconds: 25), (_) {
+        _turboTicks++;
+        _publish(_size);
+      });
+    } else {
+      _turbo?.cancel();
+      _turbo = null;
+      _turboTicks = 0;
+    }
+    if (mounted) setState(() => _state = state);
     widget.onState(state.copy());
   }
 
   static int _axis(double fraction) =>
       (128 + fraction * 127.5).floor().clamp(0, 255);
+
+  // MARK: Editing
+
+  void _editDown(PointerDownEvent event, Size size) {
+    final control = _layout.hit(event.localPosition, size, includeHidden: true);
+    if (control == null) return;
+    setState(() => _selected = control.id);
+    _drags[event.pointer] = _Drag(
+      control.id,
+      event.localPosition,
+      Offset(control.x, control.y),
+    );
+  }
+
+  void _editMove(PointerMoveEvent event, Size size) {
+    final drag = _drags[event.pointer];
+    if (drag == null || size.isEmpty) return;
+    final delta = event.localPosition - drag.start;
+    _change(
+      drag.id,
+      (tweak) => tweak.copyWith(
+        x: (drag.from.dx + delta.dx / size.width).clamp(0.03, 0.97),
+        y: (drag.from.dy + delta.dy / size.height).clamp(0.05, 0.95),
+      ),
+    );
+  }
+
+  void _change(String id, ControlTweak Function(ControlTweak) edit) {
+    setState(() => _tweaks = _tweaks.change(id, edit));
+    widget.onTweaks?.call(_tweaks);
+  }
+
+  Widget _inspector(Strings texts, PadLayout layout) {
+    final id = _selected;
+    final control = id == null ? null : layout.control(id);
+    final tweak = id == null ? const ControlTweak() : _tweaks.of(id);
+    Widget pill(String label, bool on, VoidCallback onTap) => GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: on ? Colors.white : const Color(0x22FFFFFF),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: on ? Colors.black : Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+    final pressable =
+        control != null &&
+        (control.kind == ControlKind.button ||
+            control.kind == ControlKind.trigger);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xE6101218),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x33FFFFFF)),
+      ),
+      child: control == null
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  texts.editHint,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(width: 12),
+                pill(texts.resetAll, false, () {
+                  setState(() => _tweaks = LayoutTweaks.none);
+                  widget.onTweaks?.call(_tweaks);
+                }),
+              ],
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  constraints: const BoxConstraints(minWidth: 34),
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(17),
+                    border: Border.all(
+                      color: const Color(0xFF8AB4FF),
+                      width: 2,
+                    ),
+                  ),
+                  child: Text(
+                    _badge(control),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _change(
+                    control.id,
+                    (t) => t.copyWith(
+                      scale: (t.scale - scaleStep).clamp(0.5, 2.0),
+                    ),
+                  ),
+                  icon: const Icon(Icons.remove_rounded, color: Colors.white),
+                ),
+                Text(
+                  '${(tweak.scale * 100).round()}%',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _change(
+                    control.id,
+                    (t) => t.copyWith(
+                      scale: (t.scale + scaleStep).clamp(0.5, 2.0),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_rounded, color: Colors.white),
+                ),
+                SizedBox(
+                  width: 110,
+                  child: Slider(
+                    value: tweak.opacity,
+                    min: 0.2,
+                    onChanged: (value) =>
+                        _change(control.id, (t) => t.copyWith(opacity: value)),
+                  ),
+                ),
+                pill(
+                  texts.hide,
+                  tweak.hidden,
+                  () =>
+                      _change(control.id, (t) => t.copyWith(hidden: !t.hidden)),
+                ),
+                if (pressable) ...[
+                  const SizedBox(width: 6),
+                  for (final behavior in ButtonBehavior.values)
+                    pill(
+                      texts.behavior(behavior),
+                      tweak.behavior == behavior,
+                      () => _change(
+                        control.id,
+                        (t) => t.copyWith(behavior: behavior),
+                      ),
+                    ),
+                ],
+                const SizedBox(width: 6),
+                pill(
+                  texts.reset,
+                  false,
+                  () => _change(control.id, (_) => const ControlTweak()),
+                ),
+              ],
+            ),
+    );
+  }
 }
 
 class _PadPainter extends CustomPainter {
-  _PadPainter(this.layout, this.state, this.fingers, this.glow);
+  _PadPainter(
+    this.layout,
+    this.state,
+    this.pressed,
+    this.glow, {
+    required this.editing,
+    required this.selected,
+  });
 
   final PadLayout layout;
-  final Color? glow;
   final PadState state;
-  final List<_Finger> fingers;
+  final Set<String> pressed;
+  final Color? glow;
+  final bool editing;
+  final String? selected;
 
   static const base = Color(0xFF16181F);
   static const glass = Color(0x1AFFFFFF);
@@ -210,12 +532,14 @@ class _PadPainter extends CustomPainter {
         ).createShader(Offset.zero & size),
     );
     for (final control in layout.controls) {
-      final pressed = fingers.any((finger) => finger.control.id == control.id);
+      if (control.hidden && !editing) continue;
+      final fade = control.hidden ? 0.25 : control.opacity;
+      final down = pressed.contains(control.id);
       switch (control.kind) {
         case ControlKind.button || ControlKind.trigger:
-          _button(canvas, size, control, pressed);
+          _button(canvas, size, control, down, fade);
         case ControlKind.stick:
-          _stick(canvas, size, control);
+          _stick(canvas, size, control, fade);
         case ControlKind.touchPad:
           final area = RRect.fromRectAndRadius(
             layout.rect(control, size),
@@ -224,25 +548,58 @@ class _PadPainter extends CustomPainter {
           canvas.drawRRect(
             area,
             Paint()
-              ..color = pressed
-                  ? const Color(0x33FFFFFF)
-                  : const Color(0x12FFFFFF),
+              ..color = _fade(
+                down ? const Color(0x33FFFFFF) : const Color(0x12FFFFFF),
+                fade,
+              ),
           );
           canvas.drawRRect(
             area,
             Paint()
               ..style = PaintingStyle.stroke
-              ..color = edge,
+              ..color = _fade(edge, fade),
           );
       }
+      if (editing && control.id == selected) _outline(canvas, size, control);
     }
   }
 
-  void _button(Canvas canvas, Size size, PadControl control, bool pressed) {
-    final fill = Paint()..color = pressed ? Colors.white : glass;
+  static Color _fade(Color color, double fade) =>
+      color.withValues(alpha: color.a * fade);
+
+  void _outline(Canvas canvas, Size size, PadControl control) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..color = const Color(0xFF8AB4FF);
+    if (control.isRect) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          layout.rect(control, size).inflate(5),
+          Radius.circular(size.height * 0.03),
+        ),
+        paint,
+      );
+    } else {
+      canvas.drawCircle(
+        Offset(control.x * size.width, control.y * size.height),
+        control.size * size.height + 5,
+        paint,
+      );
+    }
+  }
+
+  void _button(
+    Canvas canvas,
+    Size size,
+    PadControl control,
+    bool down,
+    double fade,
+  ) {
+    final fill = Paint()..color = _fade(down ? Colors.white : glass, fade);
     final stroke = Paint()
       ..style = PaintingStyle.stroke
-      ..color = pressed ? Colors.white : edge;
+      ..color = _fade(down ? Colors.white : edge, fade);
     final centre = Offset(control.x * size.width, control.y * size.height);
     if (control.isRect) {
       final area = RRect.fromRectAndRadius(
@@ -260,8 +617,15 @@ class _PadPainter extends CustomPainter {
       text: TextSpan(
         text: control.label,
         style: TextStyle(
-          color: pressed ? Colors.black : Colors.white.withValues(alpha: 0.9),
-          fontSize: size.height * 0.05,
+          color: _fade(
+            down ? Colors.black : Colors.white.withValues(alpha: 0.9),
+            fade,
+          ),
+          fontSize:
+              size.height *
+              0.05 *
+              (control.isRect ? control.height / 0.07 : control.size / 0.065)
+                  .clamp(0.7, 1.6),
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -270,16 +634,20 @@ class _PadPainter extends CustomPainter {
     text.paint(canvas, centre - Offset(text.width / 2, text.height / 2));
   }
 
-  void _stick(Canvas canvas, Size size, PadControl control) {
+  void _stick(Canvas canvas, Size size, PadControl control, double fade) {
     final centre = Offset(control.x * size.width, control.y * size.height);
     final radius = control.size * size.height;
-    canvas.drawCircle(centre, radius, Paint()..color = const Color(0x10FFFFFF));
+    canvas.drawCircle(
+      centre,
+      radius,
+      Paint()..color = _fade(const Color(0x10FFFFFF), fade),
+    );
     canvas.drawCircle(
       centre,
       radius,
       Paint()
         ..style = PaintingStyle.stroke
-        ..color = edge,
+        ..color = _fade(edge, fade),
     );
     final axis = control.id == 'leftStick' ? 0 : 2;
     final knob =
@@ -292,14 +660,20 @@ class _PadPainter extends CustomPainter {
     canvas.drawCircle(
       knob,
       radius * 0.48,
-      Paint()..color = held ? const Color(0xE6FFFFFF) : const Color(0x33FFFFFF),
+      Paint()
+        ..color = _fade(
+          held ? const Color(0xE6FFFFFF) : const Color(0x33FFFFFF),
+          fade,
+        ),
     );
   }
 
   @override
   bool shouldRepaint(_PadPainter old) =>
       !identical(old.state, state) ||
-      old.fingers.length != fingers.length ||
+      old.pressed.length != pressed.length ||
       old.layout != layout ||
-      old.glow != glow;
+      old.glow != glow ||
+      old.editing != editing ||
+      old.selected != selected;
 }

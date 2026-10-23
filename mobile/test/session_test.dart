@@ -440,4 +440,19 @@ void main() {
     await session.close();
     await launcher.stop();
   });
+
+  test('a layout edit goes to the launcher for the game', () async {
+    final launcher = FakeLauncher();
+    await launcher.start();
+    final session = Session(preferences: preferences, deviceName: 'Pixel 8');
+    await session.connect(InternetAddress.loopbackIPv4, launcher.port);
+    await waitFor(() => session.status == ConnectionStatus.connected);
+    session.send(const SaveLayout('/Games/DOOM', '{"cross":{"hidden":true}}'));
+    session.send(const SaveLayout('/Games/DOOM', null));
+    await waitFor(() => launcher.received.length == 2);
+    expect(launcher.received[0], {'type': 'saveLayout', 'id': '/Games/DOOM', 'layout': '{"cross":{"hidden":true}}'});
+    expect(launcher.received[1], {'type': 'saveLayout', 'id': '/Games/DOOM', 'layout': null});
+    await session.close();
+    await launcher.stop();
+  });
 }

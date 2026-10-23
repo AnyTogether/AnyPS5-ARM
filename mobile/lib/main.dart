@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'connection/discovery.dart';
 import 'connection/device_name.dart';
 import 'feedback/haptics.dart';
+import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
@@ -94,6 +95,7 @@ class _RemoteAppState extends State<RemoteApp> {
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;
+  Timer? _layoutSave;
   bool _manual = false;
   bool _wasConnected = false;
 
@@ -193,6 +195,7 @@ class _RemoteAppState extends State<RemoteApp> {
     _discovery?.cancel();
     _manualTimer?.cancel();
     _readyTimer?.cancel();
+    _layoutSave?.cancel();
     _session.close();
     super.dispose();
   }
@@ -209,6 +212,8 @@ class _RemoteAppState extends State<RemoteApp> {
               onHome: _home,
               status: _status(),
               glow: lightColor(_session.output),
+              tweaks: _runningTweaks(),
+              onTweaks: _saveTweaks,
             )
           : HomeScreen(session: _session, onResume: _resume, status: _status());
     } else {
@@ -237,7 +242,11 @@ class _RemoteAppState extends State<RemoteApp> {
               child: IgnorePointer(
                 child: Text(
                   'v$appVersion',
-                  style: TextStyle(color: Color(0x4DFFFFFF), fontSize: 10),
+                  style: TextStyle(
+                    color: Color(0x4DFFFFFF),
+                    fontSize: 10,
+                    decoration: TextDecoration.none,
+                  ),
                 ),
               ),
             ),
@@ -248,6 +257,26 @@ class _RemoteAppState extends State<RemoteApp> {
           child: KeyedSubtree(key: ValueKey(home.runtimeType), child: home),
         ),
       ),
+    );
+  }
+
+  /// The layout the Mac keeps for the game playing.
+  LayoutTweaks _runningTweaks() {
+    final library = _session.library;
+    final game = library?.games
+        .where((game) => game.id == library.running)
+        .firstOrNull;
+    return LayoutTweaks.fromJson(game?.layout);
+  }
+
+  /// Edits are sent once they settle, so a drag is one save.
+  void _saveTweaks(LayoutTweaks tweaks) {
+    final running = _session.library?.running;
+    if (running == null) return;
+    _layoutSave?.cancel();
+    _layoutSave = Timer(
+      const Duration(milliseconds: 400),
+      () => _session.send(SaveLayout(running, tweaks.toJson())),
     );
   }
 

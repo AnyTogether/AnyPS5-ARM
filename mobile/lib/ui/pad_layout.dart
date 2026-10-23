@@ -4,6 +4,10 @@ import '../protocol/packets.dart';
 
 enum ControlKind { button, trigger, stick, touchPad }
 
+/// How a button acts on its press: held while touched, latched by one tap and let go by the
+/// next, or pressed again and again while touched.
+enum ButtonBehavior { normal, toggle, turbo }
+
 /// One control of the pad: where it sits as a fraction of the screen, and how big it is as a
 /// fraction of the screen's height (a radius, or a width and height for rectangles).
 class PadControl {
@@ -17,6 +21,9 @@ class PadControl {
     this.height = 0,
     this.bit = 0,
     this.label = '',
+    this.opacity = 1,
+    this.hidden = false,
+    this.behavior = ButtonBehavior.normal,
   });
 
   final String id;
@@ -28,8 +35,35 @@ class PadControl {
   final double height;
   final int bit;
   final String label;
+  final double opacity;
+  final bool hidden;
+  final ButtonBehavior behavior;
 
   bool get isRect => width > 0;
+
+  PadControl copyWith({
+    double? x,
+    double? y,
+    double? size,
+    double? width,
+    double? height,
+    double? opacity,
+    bool? hidden,
+    ButtonBehavior? behavior,
+  }) => PadControl(
+    id,
+    kind,
+    x ?? this.x,
+    y ?? this.y,
+    size: size ?? this.size,
+    width: width ?? this.width,
+    height: height ?? this.height,
+    bit: bit,
+    label: label,
+    opacity: opacity ?? this.opacity,
+    hidden: hidden ?? this.hidden,
+    behavior: behavior ?? this.behavior,
+  );
 }
 
 /// The fixed DualSense layout of phase 1, landscape.
@@ -203,8 +237,10 @@ class PadLayout {
 
   /// The control a finger at [point] presses: buttons first, then sticks (which take a finger a
   /// little outside their ring), then the touchpad.
-  PadControl? hit(Offset point, Size size) {
-    for (final control in controls.where(
+  /// Hidden controls are left out unless [includeHidden], for the layout editor.
+  PadControl? hit(Offset point, Size size, {bool includeHidden = false}) {
+    final shown = controls.where((control) => includeHidden || !control.hidden);
+    for (final control in shown.where(
       (control) =>
           control.kind == ControlKind.button ||
           control.kind == ControlKind.trigger,
@@ -217,7 +253,7 @@ class PadLayout {
         return control;
       }
     }
-    for (final control in controls.where(
+    for (final control in shown.where(
       (control) => control.kind == ControlKind.stick,
     )) {
       if ((point - Offset(control.x * size.width, control.y * size.height))
@@ -226,7 +262,7 @@ class PadLayout {
         return control;
       }
     }
-    for (final control in controls.where(
+    for (final control in shown.where(
       (control) => control.kind == ControlKind.touchPad,
     )) {
       if (rect(control, size).contains(point)) return control;
