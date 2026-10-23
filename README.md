@@ -82,7 +82,7 @@ Each game keeps its own settings, applied at every start:
 - **Advanced** (below).
 - **Performance overlay**, off or in any corner of the window: **Minimal**, one line in a small capsule (frames per second, generated frames, frame time, GPU and CPU use, memory), or **Detailed**, the panel with the frame-time graph.
 - **Game language**: the launcher's, or any of the console's languages.
-- **Screenshots:** the game's F12 shots in a grid, and one at a time over the whole screen.
+- **Screenshots:** the game's F12 shots and clips in a grid, and one at a time over the whole screen, a clip playing.
 - **Back Up Saves** and **Restore Saves**: the game's saves and trophies as a zip in Documents → AnyPS5 → Backups; a restore backs up what the game had first.
 - **Unlock Again**, **Show in Finder**, **Open Log**, **Make a Report**, **Clear Shader Cache** and **Remove Installation**.
 
@@ -163,9 +163,11 @@ The **library** button shows every game as a grid. **Settings** hold:
 - **Appearance:** the theme, the accent color, and the background (the theme animation, your own picture or a looping video). Also the selected game's artwork behind the home screen and animations.
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
-- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing.
+- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing. Also:
+  - **Clips:** the launcher keeps the last 15 to 120 seconds of the game playing, picture and sound; **Create** on a DualSense (Share on a DualShock 4), **⌥F12** or Create on the phone saves them as an MP4 beside the screenshots. macOS asks once for the screen recording permission.
+  - **Save Sync:** each game's saves and trophies stay the same on your other Macs through iCloud Drive or any folder you choose (Dropbox, a shared or USB folder). Newer saves from another Mac come down before a game starts, and the Mac's go up when it ends; whatever is replaced is backed up first.
 - **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
-- **About:** the app and toolkit versions, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
+- **About:** the app and toolkit versions, **Check for Updates**, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
 
 ### Getting around
 
@@ -181,6 +183,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **What the Mac is doing:** while a game is unlocked, updated or started, the phone shows the step, a bar that fills and the time it has taken.
 - **Trophies:** a trophy earned in the game drops in at the top of the phone too, and the phone buzzes.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
+- **Create** (◉, left of the touchpad) saves the last seconds of the game as a clip, as on the DualSense.
 - **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
 - **Motion:** the phone's accelerometer and gyroscope are the DualSense's motion sensors, for games that tilt or aim with them.
 - **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
