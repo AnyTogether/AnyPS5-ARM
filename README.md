@@ -18,6 +18,8 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
+**On Windows or Linux?** Use [AnyPS5 Launcher by AlxcBTW](https://github.com/AlxcBTW/anyps5-launcher), a port of this launcher for [AnyPS5](https://github.com/boykopovar/AnyPS5) on those systems.
+
 ### First start
 
 Three steps: the language (Türkçe or English), one of three animated themes (Cosmic, Aurora, Sunset) and the games folder. The folder and its subfolders are scanned, and games you add later show up on their own.
