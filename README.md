@@ -76,10 +76,11 @@ Each game keeps its own settings, applied at every start:
 - **Output resolution**, for titles with a resolution patch (such as Stray).
 - **Window or full screen**, and the window size.
 - **Vertical sync.**
+- **Frame generation** (experimental): a frame made between each two of the game's, from the motion between them, so a 60 fps game shows 120 on a 120 Hz display. It needs vertical sync and turns itself off where it would cost the game frames (a 60 Hz display, or Low Power Mode, which holds the display at 60 Hz).
 - **Controls** (below).
 - **Trophies** (below).
 - **Advanced** (below).
-- **Performance overlay**, off or in any corner of the window.
+- **Performance overlay**, off or in any corner of the window: **Minimal**, one line in a small capsule (frames per second, generated frames, frame time, GPU and CPU use, memory), or **Detailed**, the panel with the frame-time graph.
 - **Game language**: the launcher's, or any of the console's languages.
 - **Screenshots:** the game's F12 shots in a grid, and one at a time over the whole screen.
 - **Back Up Saves** and **Restore Saves**: the game's saves and trophies as a zip in Documents → AnyPS5 → Backups; a restore backs up what the game had first.
