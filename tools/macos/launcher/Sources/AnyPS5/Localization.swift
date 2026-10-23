@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -127,6 +127,10 @@ enum T {
         .overlayStyle: "Gösterge Stili",
         .frameGeneration: "Ara Kare Üretimi",
         .frameGenerationDetail: "Deneysel · her iki karenin arasına bir kare; dikey senkronizasyonu açar",
+        .frameGenerationLowPower: "Düşük Güç Modu açık: ekran 60 Hz'de kalıyor, ara kare çalışmaz",
+        .lowPowerTitle: "Düşük Güç Modu açık",
+        .lowPowerFrameGeneration: "Ekran 60 Hz'de kalıyor, ara kare çalışmaz. Sistem Ayarları → Pil'den kapatabilirsin.",
+        .lowPowerRefresh: "Ekran 60 Hz'de kalıyor, oyun 60 FPS'i geçmez. Sistem Ayarları → Pil'den kapatabilirsin.",
         .overlayMinimal: "Sade",
         .overlayDetailed: "Ayrıntılı",
         .gameLanguage: "Oyun Dili",
@@ -403,6 +407,10 @@ enum T {
         .overlayStyle: "Overlay Style",
         .frameGeneration: "Frame Generation",
         .frameGenerationDetail: "Experimental · a frame between each two; turns on vertical sync",
+        .frameGenerationLowPower: "Low Power Mode is on: the display stays at 60 Hz, so frame generation cannot work",
+        .lowPowerTitle: "Low Power Mode is on",
+        .lowPowerFrameGeneration: "The display stays at 60 Hz, so frame generation cannot work. Turn it off in System Settings → Battery.",
+        .lowPowerRefresh: "The display stays at 60 Hz, so the game stops at 60 fps. Turn it off in System Settings → Battery.",
         .overlayMinimal: "Minimal",
         .overlayDetailed: "Detailed",
         .gameLanguage: "Game Language",

@@ -196,6 +196,10 @@ final class AppModel: ObservableObject {
                 if let self, let game = self.selectedGame { self.loadTrophies(game, again: true) }
             }
         }
+        // The game settings say what Low Power Mode does as soon as it is turned on or off.
+        NotificationCenter.default.addObserver(forName: Notification.Name.NSProcessInfoPowerStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.objectWillChange.send() }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.active = false }
         }
@@ -617,6 +621,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Games told this run that Low Power Mode holds them at 60 Hz, so it is said once a game.
+    private var toldLowPower: Set<String> = []
+
+    /// What Low Power Mode does to this display now, for the game's settings.
+    var lowPowerNotice: PowerNotice? {
+        PowerNotice.kind(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, displayMaximumFPS: NSScreen.main?.maximumFramesPerSecond ?? 60, frameGeneration: true)
+    }
+
+    /// A card over the game that just started when Low Power Mode holds the display at 60 Hz.
+    private func tellLowPower(about game: Game) {
+        guard let kind = PowerNotice.kind(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, displayMaximumFPS: NSScreen.main?.maximumFramesPerSecond ?? 60,
+                                          frameGeneration: settings(for: game).frameGeneration == true),
+              toldLowPower.insert(game.id).inserted else { return }
+        TrophyBanner.shared.notice(T.text(.lowPowerTitle), detail: T.text(kind == .frameGeneration ? .lowPowerFrameGeneration : .lowPowerRefresh), symbol: "battery.25", sounds: preferences.sounds)
+    }
+
     /// The process starts long before the game draws anything (Rosetta translates it and the
     /// shaders compile first), so the splash stays up until the game's first window shows.
     /// macOS does not let an app that shows its window that late take the front by itself, so
@@ -637,6 +657,7 @@ final class AppModel: ObservableObject {
             NSApp.yieldActivation(to: app)
             app.activate()
             if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
+            if let game = running?.game { tellLowPower(about: game) }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }

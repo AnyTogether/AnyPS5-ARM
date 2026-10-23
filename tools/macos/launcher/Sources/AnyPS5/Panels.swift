@@ -220,7 +220,7 @@ extension AppModel {
             }))
         }
         rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync || settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.vsync = value } }))
-        rows.append(PanelRow(id: "frameGeneration", title: T.text(.frameGeneration), detail: T.text(.frameGenerationDetail), symbol: "square.stack.3d.forward.dottedline",
+        rows.append(PanelRow(id: "frameGeneration", title: T.text(.frameGeneration), detail: T.text(lowPowerNotice != nil ? .frameGenerationLowPower : .frameGenerationDetail), symbol: "square.stack.3d.forward.dottedline",
                              kind: .toggle(settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.frameGeneration = value ? true : nil } }))
         rows.append(PanelRow(id: "controls", title: T.text(.controls), symbol: "keyboard", kind: .action(destructive: false) { [weak self] in self?.open(.controls) }))
         if let set = trophies[game.id] {
