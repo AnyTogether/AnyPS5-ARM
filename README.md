@@ -191,6 +191,8 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 
 [⬇ Download the Android app](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) (APK; on the phone, allow installing from your browser when asked).
 
+**On an iPhone** (iOS 15 or newer), install [AnyPS5-Remote.ipa](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
+
 Games unlocked before phone support need **Update and Play** once, so they carry the engine that reads the phone.
 
 ## Games on a Mac

@@ -19,13 +19,18 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 
 It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once.
 
+## Installing
+
+- **Android:** open [AnyPS5-Remote.apk](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) on the phone and allow installing from your browser when asked.
+- **iPhone** (iOS 15 or newer): install [AnyPS5-Remote.ipa](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
+
 ## Building
 
 ```sh
 flutter build apk --release
 ```
 
-The APK is `build/app/outputs/flutter-apk/app-release.apk`. iOS builds from the same code; installing on an iPhone needs an Apple developer account.
+The APK is `build/app/outputs/flutter-apk/app-release.apk`. For the iPhone, `flutter build ios --release --no-codesign` makes an unsigned app; zipped as `Payload/Runner.app` it is the .ipa that AltStore or Sideloadly sign while installing.
 
 ## Testing
 
