@@ -129,6 +129,10 @@ extension AppModel {
                 self?.preferences.discordPresence = value
                 if !value { self?.discordOff() }
             }),
+            PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
+                self?.preferences.checkUpdates = value
+                if value { self?.checkForUpdate() }
+            }),
         ]
         if rosettaMissing {
             behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstall), detail: T.text(.rosettaMissing), symbol: "cpu", kind: .action(destructive: false) { [weak self] in self?.installRosetta() }))
@@ -140,6 +144,17 @@ extension AppModel {
         var about: [PanelRow] = [
             PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
             PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
+        ]
+        if let update = availableUpdate {
+            let detail = updateProgress.map { T.format(.updateDownloading, Int($0 * 100)) } ?? T.text(.updateDetail)
+            about.append(PanelRow(id: "update", title: T.format(.updateTo, update.version), detail: detail, symbol: "arrow.down.circle.fill", kind: .action(destructive: false) { [weak self] in
+                self?.installUpdate()
+            }))
+            about.append(PanelRow(id: "whatsNew", title: T.text(.whatsNew), detail: update.page.absoluteString.replacingOccurrences(of: "https://", with: ""), symbol: "sparkles", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(update.page)
+            }))
+        }
+        about += [
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
             PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
             PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {

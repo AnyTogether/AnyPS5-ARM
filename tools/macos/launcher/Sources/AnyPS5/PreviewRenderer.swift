@@ -59,6 +59,13 @@ enum PreviewRenderer {
         for category in 1..<6 {
             render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
         }
+        render(preferences, found, root, still, output.appendingPathComponent("about-update.png")) { model in
+            model.previewUpdate(Updates.Release(tag: "v0.2.6-arm", version: "0.2.6", page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.6-arm")!, download: nil, size: nil), progress: 0.42)
+            model.overlay = .settings
+            model.panelCategory = 5
+            model.panelInRows = true
+            model.panelRow = 2
+        }
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
         renderBanner(preferences, found, root, output.appendingPathComponent("trophy-banner.png"))
         var fresh = preferences

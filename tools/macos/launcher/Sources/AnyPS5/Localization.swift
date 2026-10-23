@@ -60,7 +60,7 @@ enum T {
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
-        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail
+        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, launcherUpdateAvailable, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -148,6 +148,16 @@ enum T {
         .motionReduced: "Azaltılmış",
         .sounds: "Arayüz Sesleri",
         .gameMusic: "Oyun Müziği",
+        .checkUpdates: "Güncellemeleri denetle",
+        .checkUpdatesDetail: "Yeni bir AnyPS5 sürümü çıkınca haber verir",
+        .launcherUpdateAvailable: "AnyPS5 %@ çıktı: Ayarlar → Hakkında",
+        .updateTo: "%@ sürümüne güncelle",
+        .updateDetail: "İndirir, sonra launcher yeni sürümle yeniden açılır",
+        .updateDownloading: "İndiriliyor… %%%d",
+        .whatsNew: "Neler yeni",
+        .updateFailed: "Güncelleme yapılamadı",
+        .updateCloseGame: "Güncellemek için önce oyunu kapat",
+        .updateNotWritable: "Güncellemek için AnyPS5'i Uygulamalar klasörüne taşı",
         .gameMusicDetail: "Seçili oyunun kendi müziği, varsa",
         .language: "Dil",
         .storage: "Kütüphane",
@@ -388,6 +398,16 @@ enum T {
         .motionReduced: "Reduced",
         .sounds: "Interface Sounds",
         .gameMusic: "Game Music",
+        .checkUpdates: "Check for updates",
+        .checkUpdatesDetail: "Tells you when a new AnyPS5 is out",
+        .launcherUpdateAvailable: "AnyPS5 %@ is out: Settings → About",
+        .updateTo: "Update to %@",
+        .updateDetail: "Downloads it, then the launcher opens again on the new version",
+        .updateDownloading: "Downloading… %d%%",
+        .whatsNew: "What's new",
+        .updateFailed: "The update failed",
+        .updateCloseGame: "Close the game first to update",
+        .updateNotWritable: "Move AnyPS5 to Applications to update it",
         .gameMusicDetail: "The selected game's own theme song, when it has one",
         .language: "Language",
         .storage: "Library",

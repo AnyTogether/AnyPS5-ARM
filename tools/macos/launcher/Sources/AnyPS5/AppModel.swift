@@ -20,6 +20,8 @@ struct Preferences: Codable, Equatable {
     /// Interface sounds and the selected game's theme song, in percent; nil keeps the default.
     var soundVolume: Int?
     var musicVolume: Int?
+    /// nil checks GitHub for a newer launcher, as true does.
+    var checkUpdates: Bool?
     var hideWhilePlaying = false
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
@@ -147,6 +149,10 @@ final class AppModel: ObservableObject {
     private var phoneLibrary: RemoteMessage?
     private var librarySink: AnyCancellable?
     private var musicSink: AnyCancellable?
+    private var updateTimer: Timer?
+    /// A newer launcher on GitHub, and how far its download is once asked for.
+    @Published private(set) var availableUpdate: Updates.Release?
+    @Published private(set) var updateProgress: Double?
     /// The game the phone asked for while another one was still playing.
     private var launchAfterExit: String?
     /// The game to start as soon as its update finishes.
@@ -185,6 +191,14 @@ final class AppModel: ObservableObject {
                 MainActor.assumeIsolated { self?.updateMusic() }
             }
             startRemote()
+            // Once soon after start, then every six hours while the launcher stays open.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(4))
+                self.checkForUpdate()
+            }
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkForUpdate() }
+            }
             let discord = self.discord
             DiscordGames.load { games in discord.use(games) }
         }
@@ -220,6 +234,46 @@ final class AppModel: ObservableObject {
     static let defaultMusicVolume = 50
 
     var musicVolume: Int { preferences.musicVolume ?? AppModel.defaultMusicVolume }
+
+    // MARK: Updates
+
+    static var runningVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
+
+    func checkForUpdate() {
+        guard persists, preferences.checkUpdates ?? true, updateProgress == nil else { return }
+        let current = AppModel.runningVersion
+        Task { @MainActor in
+            guard let release = await Updates.check(current: current) else { return }
+            let first = self.availableUpdate?.tag != release.tag
+            self.availableUpdate = release
+            if first { self.show(T.format(.launcherUpdateAvailable, release.version), symbol: "arrow.down.circle.fill") }
+        }
+    }
+
+    /// Downloads the update, then quits so that it takes this app's place and opens.
+    func installUpdate() {
+        guard let release = availableUpdate, updateProgress == nil else { return }
+        guard running == nil, starting == nil else { return show(T.text(.updateCloseGame), symbol: "exclamationmark.triangle.fill") }
+        let app = Bundle.main.bundleURL
+        guard !AppLocation.isTranslocated, FileManager.default.isWritableFile(atPath: app.deletingLastPathComponent().path) else {
+            return show(T.text(.updateNotWritable), symbol: "exclamationmark.triangle.fill")
+        }
+        updateProgress = 0
+        let identifier = Bundle.main.bundleIdentifier ?? "org.anyps5.launcher"
+        let current = AppModel.runningVersion
+        Task { @MainActor in
+            do {
+                let new = try await Updates.prepare(release, bundleIdentifier: identifier, current: current) { fraction in
+                    Task { @MainActor in self.updateProgress = fraction }
+                }
+                try Updates.replace(app, with: new, pid: ProcessInfo.processInfo.processIdentifier)
+                NSApp.terminate(nil)
+            } catch {
+                self.updateProgress = nil
+                self.show(T.text(.updateFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
 
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
     private func updateMusic() {
@@ -662,6 +716,11 @@ final class AppModel: ObservableObject {
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
 
     func previewPhoneConnecting(_ name: String) { phoneConnecting = name }
+
+    func previewUpdate(_ release: Updates.Release, progress: Double?) {
+        availableUpdate = release
+        updateProgress = progress
+    }
 
     func discordOff() { discord.clear() }
 
