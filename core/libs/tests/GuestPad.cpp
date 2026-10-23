@@ -439,6 +439,57 @@ static void CheckInjectedState(const std::filesystem::path& path) {
     PadPublishInput_nid_postfix(PadInputState{});
 }
 
+// The second user's pad: its own handle, input and output, connected while a device is given to it.
+static void CheckSecondPlayer(int first) {
+    constexpr int second = 0x10000001;
+    constexpr int noHandle = static_cast<int>(0x80920008);
+    PadData data{};
+    Require(scePadReadState(first + 1, &data) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadGetHandle(second, 0, 0) == noHandle);
+    const int handle = scePadOpen_nid_postfix(second, 0, 0, nullptr);
+    Require(handle == first + 1);
+    Require(scePadGetHandle(second, 0, 0) == handle);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(!data.connected && data.connected_count == 0);
+    PadControllerInformation info{};
+    Require(scePadGetControllerInformation(handle, &info) == PAD_OK);
+    Require(!info.connected);
+
+    PadInputState cross;
+    cross.buttons = static_cast<std::uint32_t>(Pad::PadButton::Cross);
+    PadPublishPlayerInput_nid_postfix(1, cross);
+    Require((PadJoinedPlayers_nid_postfix() & 3u) == 3u);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(data.connected && data.connected_count == 1);
+    Require((data.buttons & cross.buttons) != 0);
+    Require(scePadReadState(first, &data) == PAD_OK);
+    Require((data.buttons & cross.buttons) == 0);
+    Require(scePadGetControllerInformation(handle, &info) == PAD_OK);
+    Require(info.connected);
+
+    std::uint32_t firstSeen = 0;
+    std::uint32_t secondSeen = 0;
+    PadOutputState output;
+    static_cast<void>(PadFetchPlayerOutput_nid_postfix(0, &firstSeen, &output));
+    static_cast<void>(PadFetchPlayerOutput_nid_postfix(1, &secondSeen, &output));
+    PadLightBarParam red{255, 0, 0};
+    Require(scePadSetLightBar(handle, &red) == PAD_OK);
+    Require(PadFetchPlayerOutput_nid_postfix(1, &secondSeen, &output));
+    Require(output.lightBarValid && output.lightBar[0] == 255 && output.lightBar[2] == 0);
+    Require(!PadFetchPlayerOutput_nid_postfix(0, &firstSeen, &output));
+
+    PadDisconnectPlayer_nid_postfix(1);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(!data.connected && (data.buttons & cross.buttons) == 0);
+    Require((PadJoinedPlayers_nid_postfix() & 2u) != 0);
+    PadDisconnectPlayer_nid_postfix(0);
+    Require(scePadReadState(first, &data) == PAD_OK && data.connected);
+
+    Require(scePadClose_nid_postfix(handle) == PAD_OK);
+    Require(scePadReadState(handle, &data) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadGetHandle(second, 0, 0) == noHandle);
+}
+
 int main() {
     CheckInputCommands();
     std::uint32_t accessibilityState = 7;
@@ -521,6 +572,7 @@ int main() {
     CheckTrackerDevices(handle);
     CheckAccessibilityControllerState(handle);
     CheckInjectedState(commandPath);
+    CheckSecondPlayer(handle);
     PadLightBarParam lightBar{255, 128, 64};
     Require(scePadSetLightBar(handle, &lightBar) == PAD_OK);
     Require(scePadSetLightBar(handle, nullptr) == PAD_ERROR_INVALID_ARG);

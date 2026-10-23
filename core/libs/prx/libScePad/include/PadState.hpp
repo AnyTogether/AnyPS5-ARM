@@ -53,23 +53,34 @@ struct PadOutputState {
     int vibrationMode = 0;
 };
 
+// The DualSenses of up to four users. Player 0 is the first user's pad; player n belongs to the
+// user logged in (n + 1)th.
+constexpr int kPadPlayers = 4;
+
 namespace Pad {
 void Initialize();
 bool IsInitialized();
-PadData ReadState();
-int Read(PadData* data, int num);
-void SetVibration(std::uint8_t large, std::uint8_t small);
-void SetVibrationMode(int mode);
-void SetLightBar(bool valid, std::uint8_t r, std::uint8_t g, std::uint8_t b);
-void SetTriggerCommand(int trigger, const std::uint8_t* command);
-void ResetOrientation();
-void SetMotionEnabled(bool enabled);
-void SetTiltCorrection(bool enabled);
-void SetAngularVelocityDeadband(bool enabled);
-void SetAngularVelocityBiasCorrection(bool enabled);
+bool IsConnected(int player);
+// The players whose pad has ever been connected, a bit each; player 0 is always in.
+std::uint32_t JoinedPlayers();
+PadData ReadState(int player = 0);
+int Read(PadData* data, int num, int player = 0);
+void SetVibration(std::uint8_t large, std::uint8_t small, int player = 0);
+void SetVibrationMode(int mode, int player = 0);
+void SetLightBar(bool valid, std::uint8_t r, std::uint8_t g, std::uint8_t b, int player = 0);
+void SetTriggerCommand(int trigger, const std::uint8_t* command, int player = 0);
+void ResetOrientation(int player = 0);
+void SetMotionEnabled(bool enabled, int player = 0);
+void SetTiltCorrection(bool enabled, int player = 0);
+void SetAngularVelocityDeadband(bool enabled, int player = 0);
+void SetAngularVelocityBiasCorrection(bool enabled, int player = 0);
 }
 
 extern "C" void PadPublishInput_nid_postfix(const PadInputState& input);
+extern "C" void PadPublishPlayerInput_nid_postfix(int player, const PadInputState& input);
+extern "C" void PadDisconnectPlayer_nid_postfix(int player);
+extern "C" bool PadFetchPlayerOutput_nid_postfix(int player, std::uint32_t* seenSequence, PadOutputState* out);
+extern "C" std::uint32_t PadJoinedPlayers_nid_postfix();
 extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error);
 extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out);
 extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8_t small);
