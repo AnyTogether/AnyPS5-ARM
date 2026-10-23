@@ -801,6 +801,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// PS on a controller: from the game to the launcher, and from the launcher back to the game
+    /// playing.
+    func togglePlaying() {
+        guard let running, starting == nil else { return bringLauncherFront() }
+        if NSApp.isActive {
+            Sounds.shared.play(.select)
+            NSApp.yieldActivation(to: running.app)
+            running.app.activate()
+        } else {
+            bringLauncherFront()
+            Sounds.shared.play(.select)
+        }
+    }
+
     private func bringLauncherFront() {
         guard !NSApp.isActive else { return }
         showWindows()

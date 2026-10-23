@@ -363,7 +363,7 @@ extension AppModel {
             case .down: movePanelCategory(1, count: categories.count)
             case .right, .select: enterRows(rows)
             case .back, .options: closeOverlay()
-            case .left, .previousGame, .nextGame: break
+            case .left, .previousGame, .nextGame, .home: break
             }
             return true
         }
@@ -387,7 +387,7 @@ extension AppModel {
             leaveRows(single)
         case .options:
             closeOverlay()
-        case .previousGame, .nextGame:
+        case .previousGame, .nextGame, .home:
             break
         }
         return true

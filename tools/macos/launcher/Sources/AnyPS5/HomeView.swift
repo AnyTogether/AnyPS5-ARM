@@ -539,6 +539,10 @@ extension AppModel {
             if command == .back { cancelStart() }
             return true
         }
+        if command == .home {
+            togglePlaying()
+            return true
+        }
         if command == .previousGame || command == .nextGame {
             switchGame(command == .nextGame ? 1 : -1)
             return true
@@ -574,7 +578,7 @@ extension AppModel {
             case .down: moveLibrary(LibraryGrid.columns)
             case .select: pickFromLibrary()
             case .back, .options: closeOverlay()
-            case .previousGame, .nextGame: break
+            case .previousGame, .nextGame, .home: break
             }
             return true
         case nil:
@@ -632,7 +636,7 @@ extension AppModel {
             }
         case .options:
             if galleryShots.indices.contains(galleryIndex) { NSWorkspace.shared.activateFileViewerSelecting([galleryShots[galleryIndex]]) }
-        case .previousGame, .nextGame:
+        case .previousGame, .nextGame, .home:
             break
         }
     }

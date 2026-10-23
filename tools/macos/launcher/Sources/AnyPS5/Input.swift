@@ -5,6 +5,8 @@ enum Command {
     case left, right, up, down, select, back, options
     /// L1 and R1: the game before or after the selected one, from the home screen or a game's panel.
     case previousGame, nextGame
+    /// The controller's PS button: the launcher in front of the game, or back to the game.
+    case home
 }
 
 /// Keyboard and game controller input, as the commands the screens act on. Held directions repeat
@@ -47,6 +49,8 @@ final class Input {
             guard let controller = note.object as? GCController else { return }
             MainActor.assumeIsolated { self?.attach(controller) }
         }
+        // The PS button reaches the launcher while a game is in front; nothing else does then.
+        GCController.shouldMonitorBackgroundEvents = true
         GCController.controllers().forEach(attach)
         GCController.startWirelessControllerDiscovery {}
     }
@@ -98,23 +102,32 @@ final class Input {
             MainActor.assumeIsolated { self?.direction(x: abs(x) > 0.55 ? x : 0, y: abs(y) > 0.55 ? y : 0) }
         }
         pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.select) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.select) } }
         }
         pad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.back) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.back) } }
         }
         pad.buttonY.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.options) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.options) } }
         }
         pad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.options) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.options) } }
         }
         pad.leftShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.previousGame) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.previousGame) } }
         }
         pad.rightShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { _ = self?.handler?(.nextGame) } }
+            if pressed { MainActor.assumeIsolated { self?.controller(.nextGame) } }
         }
+        pad.buttonHome?.pressedChangedHandler = { [weak self] _, _, pressed in
+            if pressed { MainActor.assumeIsolated { self?.controller(.home) } }
+        }
+    }
+
+    /// A controller command; while the launcher is behind a game only PS is acted on.
+    private func controller(_ command: Command) {
+        guard NSApp.isActive || command == .home else { return }
+        _ = handler?(command)
     }
 
     private func direction(x: Float, y: Float) {
@@ -122,7 +135,7 @@ final class Input {
         guard command != held else { return }
         held = command
         repeatTimer?.invalidate()
-        guard let command else { return }
+        guard let command, NSApp.isActive else { return }
         _ = handler?(command)
         repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.38, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
