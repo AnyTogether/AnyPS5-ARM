@@ -60,7 +60,7 @@ enum T {
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail, phoneOnline, phonesConnectedCount, phonePlayer, phoneWaiting
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
-        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, screenshots, screenshotsNone, backUpSaves, backUpSavesDetail, lastBackup, restoreSaves, restoreSavesDetail, savesBackedUp, savesRestored, backupFailed, closeGameFirst, launcherUpdateAvailable, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
+        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, screenshots, screenshotsNone, backUpSaves, backUpSavesDetail, lastBackup, restoreSaves, restoreSavesDetail, savesBackedUp, savesRestored, backupFailed, closeGameFirst, launcherUpdateAvailable, launcherUpToDate, updateCheckFailed, checkForUpdatesNow, checkForUpdatesDetail, checkingUpdates, lastChecked, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -167,6 +167,12 @@ enum T {
         .closeGameFirst: "Önce oyunu kapat",
         .checkUpdatesDetail: "Yeni bir AnyPS5 sürümü çıkınca haber verir",
         .launcherUpdateAvailable: "AnyPS5 %@ çıktı: Ayarlar → Hakkında",
+        .launcherUpToDate: "AnyPS5 güncel (%@)",
+        .updateCheckFailed: "Güncellemeler denetlenemedi: GitHub'a ulaşılamadı",
+        .checkForUpdatesNow: "Güncellemeleri Denetle",
+        .checkForUpdatesDetail: "GitHub'da yeni sürüm var mı bak",
+        .checkingUpdates: "Denetleniyor…",
+        .lastChecked: "Son denetim %@",
         .updateTo: "%@ sürümüne güncelle",
         .updateDetail: "İndirir, sonra launcher yeni sürümle yeniden açılır",
         .updateDownloading: "İndiriliyor… %%%d",
@@ -437,6 +443,12 @@ enum T {
         .closeGameFirst: "Close the game first",
         .checkUpdatesDetail: "Tells you when a new AnyPS5 is out",
         .launcherUpdateAvailable: "AnyPS5 %@ is out: Settings → About",
+        .launcherUpToDate: "AnyPS5 is up to date (%@)",
+        .updateCheckFailed: "Could not check for updates: GitHub did not answer",
+        .checkForUpdatesNow: "Check for Updates",
+        .checkForUpdatesDetail: "See whether GitHub has a newer release",
+        .checkingUpdates: "Checking…",
+        .lastChecked: "Last checked %@",
         .updateTo: "Update to %@",
         .updateDetail: "Downloads it, then the launcher opens again on the new version",
         .updateDownloading: "Downloading… %d%%",

@@ -59,11 +59,24 @@ public enum Updates {
 
     /// The latest release, when it is newer than `current`.
     public static func check(current: String, session: URLSession = .shared) async -> Release? {
-        var request = URLRequest(url: latestURL, timeoutInterval: 20)
+        guard case .newer(let release) = await lookup(current: current, session: session) else { return nil }
+        return release
+    }
+
+    /// What a check found: a newer release, none (this one is the latest), or no answer.
+    public enum Lookup: Equatable, Sendable {
+        case newer(Release)
+        case current
+        case failed
+    }
+
+    /// Asks GitHub for the latest release, never a cache, so a release just out is seen at once.
+    public static func lookup(current: String, session: URLSession = .shared) async -> Lookup {
+        var request = URLRequest(url: latestURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              let release = release(from: data), isNewer(release.tag, than: current) else { return nil }
-        return release
+              let release = release(from: data) else { return .failed }
+        return isNewer(release.tag, than: current) ? .newer(release) : .current
     }
 
     /// The async download calls tell no delegate how far they are, so the task's own Progress is

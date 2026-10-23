@@ -190,6 +190,9 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.active = true
                 if let self, Date().timeIntervalSince(self.lastScan) > 3 { self.rescan() }
+                // Coming back to the launcher after a while asks again, so a new release shows
+                // without a restart.
+                if let self, self.lastUpdateCheck.map({ Date().timeIntervalSince($0) > 30 * 60 }) ?? false { self.checkForUpdate() }
                 if let self, let game = self.selectedGame { self.loadTrophies(game, again: true) }
             }
         }
@@ -261,13 +264,39 @@ final class AppModel: ObservableObject {
     static var runningVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
 
     func checkForUpdate() {
-        guard persists, preferences.checkUpdates ?? true, updateProgress == nil else { return }
+        guard persists, preferences.checkUpdates ?? true, updateProgress == nil, !checkingUpdates else { return }
+        lookUpUpdate(told: false)
+    }
+
+    /// Check for Updates in About: at once, whatever the setting, and it says what it found.
+    func checkForUpdatesNow() {
+        guard updateProgress == nil, !checkingUpdates else { return }
+        lookUpUpdate(told: true)
+    }
+
+    /// When the launcher last asked GitHub, and whether it is asking now.
+    @Published private(set) var lastUpdateCheck: Date?
+    @Published private(set) var checkingUpdates = false
+
+    private func lookUpUpdate(told: Bool) {
         let current = AppModel.runningVersion
+        checkingUpdates = true
         Task { @MainActor in
-            guard let release = await Updates.check(current: current) else { return }
-            let first = self.availableUpdate?.tag != release.tag
-            self.availableUpdate = release
-            if first { self.show(T.format(.launcherUpdateAvailable, release.version), symbol: "arrow.down.circle.fill") }
+            let found = await Updates.lookup(current: current)
+            self.checkingUpdates = false
+            switch found {
+            case .newer(let release):
+                self.lastUpdateCheck = Date()
+                let first = self.availableUpdate?.tag != release.tag
+                self.availableUpdate = release
+                if first || told { self.show(T.format(.launcherUpdateAvailable, release.version), symbol: "arrow.down.circle.fill") }
+            case .current:
+                self.lastUpdateCheck = Date()
+                self.availableUpdate = nil
+                if told { self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill") }
+            case .failed:
+                if told { self.show(T.text(.updateCheckFailed), symbol: "exclamationmark.triangle.fill") }
+            }
         }
     }
 

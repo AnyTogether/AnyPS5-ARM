@@ -154,6 +154,9 @@ extension AppModel {
                 NSWorkspace.shared.open(update.page)
             }))
         }
+        let checked = lastUpdateCheck.map { T.format(.lastChecked, $0.formatted(date: .omitted, time: .shortened)) } ?? T.text(.checkForUpdatesDetail)
+        about.append(PanelRow(id: "checkForUpdates", title: T.text(.checkForUpdatesNow), detail: checkingUpdates ? T.text(.checkingUpdates) : checked,
+                              symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.checkForUpdatesNow() }))
         about += [
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
             PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
