@@ -81,6 +81,8 @@ Each game keeps its own settings, applied at every start:
 - **Advanced** (below).
 - **Performance overlay**, off or in any corner of the window.
 - **Game language**: the launcher's, or any of the console's languages.
+- **Screenshots:** the game's F12 shots in a grid, and one at a time over the whole screen.
+- **Back Up Saves** and **Restore Saves**: the game's saves and trophies as a zip in Documents → AnyPS5 → Backups; a restore backs up what the game had first.
 - **Unlock Again**, **Show in Finder**, **Open Log**, **Make a Report**, **Clear Shader Cache** and **Remove Installation**.
 
 <br clear="right">
