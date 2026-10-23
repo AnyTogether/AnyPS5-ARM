@@ -9,6 +9,10 @@ final class Sounds {
     enum Cue { case move, select, back, unlocked }
 
     var enabled = true
+    /// 0 to 1, on top of the sounds' own soft level.
+    var volume: Float = 1 {
+        didSet { engine.mainMixerNode.outputVolume = 0.32 * volume }
+    }
     private let engine = AVAudioEngine()
     private let players: [AVAudioPlayerNode]
     private var next = 0

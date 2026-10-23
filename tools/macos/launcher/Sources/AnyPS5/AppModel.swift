@@ -17,6 +17,9 @@ struct Preferences: Codable, Equatable {
     var gameArtwork = true
     var reducedMotion = false
     var sounds = true
+    /// Interface sounds and the selected game's theme song, in percent; nil keeps the default.
+    var soundVolume: Int?
+    var musicVolume: Int?
     var hideWhilePlaying = false
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
@@ -143,6 +146,7 @@ final class AppModel: ObservableObject {
     /// The library the phone was told last, and what keeps it told.
     private var phoneLibrary: RemoteMessage?
     private var librarySink: AnyCancellable?
+    private var musicSink: AnyCancellable?
     /// The game the phone asked for while another one was still playing.
     private var launchAfterExit: String?
     /// The game to start as soon as its update finishes.
@@ -176,6 +180,10 @@ final class AppModel: ObservableObject {
         }
         if self.preferences.onboarded && persists { rescan() }
         if persists {
+            // The theme song follows whatever the launcher shows.
+            musicSink = objectWillChange.debounce(for: .milliseconds(120), scheduler: RunLoop.main).sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateMusic() }
+            }
             startRemote()
             let discord = self.discord
             DiscordGames.load { games in discord.use(games) }
@@ -205,6 +213,18 @@ final class AppModel: ObservableObject {
         T.language = preferences.language
         Motion.reduced = preferences.reducedMotion
         Sounds.shared.enabled = preferences.sounds
+        Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
+        ThemeMusic.shared.volume = Float(musicVolume) / 100
+    }
+
+    static let defaultMusicVolume = 50
+
+    var musicVolume: Int { preferences.musicVolume ?? AppModel.defaultMusicVolume }
+
+    /// The selected game's song while the launcher is in front and idle, silence otherwise.
+    private func updateMusic() {
+        let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0
+        ThemeMusic.shared.play(quiet ? nil : selectedGame)
     }
 
     var accent: Color { preferences.accentColor }

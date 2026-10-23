@@ -4,6 +4,7 @@ import Foundation
 // anyps5-tool unwrap <self> <elf>
 // anyps5-tool scan <games folder>
 // anyps5-tool install <game folder> <games folder>    (ANYPS5_TOOLKIT names the toolkit)
+// anyps5-tool theme <snd0.at9> <out.wav>   (a game's theme song, decoded)
 // anyps5-tool remote [--allow-all] [--devices <file>] [--port <control port>] [--games <folder> [--language en|tr]] [--hidden]
 //   (the phone server, until killed; with --games it shows that library and plays games only pretend;
 //   --hidden leaves it out of Bonjour, so only a phone given its address finds it)
@@ -12,7 +13,7 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]] [--hidden]"
+let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | theme <snd0.at9> <out.wav> | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]] [--hidden]"
 
 /// Prints a line at once, so a script reading the output sees it while the server runs.
 func say(_ line: String) {
@@ -51,6 +52,23 @@ case "install":
         print("installed \(bundle.path) in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
     } catch {
         fail("FAIL: \(error.localizedDescription)")
+    }
+case "theme":
+    guard arguments.count == 3 else { fail(usage) }
+    do {
+        let song = try ThemeSong.decode(URL(fileURLWithPath: arguments[1]))
+        var wav = Data("RIFF".utf8)
+        func put<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        let pcm = song.samples.map { Int16(max(-1, min(1, $0)) * 32767) }
+        put(UInt32(36 + pcm.count * 2)); wav.append(contentsOf: Array("WAVEfmt ".utf8))
+        put(UInt32(16)); put(UInt16(1)); put(UInt16(song.channels)); put(UInt32(song.sampleRate))
+        put(UInt32(song.sampleRate * song.channels * 2)); put(UInt16(song.channels * 2)); put(UInt16(16))
+        wav.append(contentsOf: Array("data".utf8)); put(UInt32(pcm.count * 2))
+        pcm.withUnsafeBytes { wav.append(contentsOf: $0) }
+        try wav.write(to: URL(fileURLWithPath: arguments[2]))
+        say(String(format: "%.1f s, %d Hz, %d channels, loop %@", Double(song.frames) / Double(song.sampleRate), song.sampleRate, song.channels, song.loop.map { "\($0)" } ?? "whole"))
+    } catch {
+        fail("FAIL: \(error)")
     }
 case "remote":
     var allowAll = false

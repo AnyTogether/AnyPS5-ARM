@@ -60,7 +60,7 @@ enum T {
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
-        case discordPresence, discordPresenceDetail
+        case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail
         case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
     }
 
@@ -147,6 +147,8 @@ enum T {
         .motionFull: "Tam",
         .motionReduced: "Azaltılmış",
         .sounds: "Arayüz Sesleri",
+        .gameMusic: "Oyun Müziği",
+        .gameMusicDetail: "Seçili oyunun kendi müziği, varsa",
         .language: "Dil",
         .storage: "Kütüphane",
         .rescan: "Yeniden Tara",
@@ -385,6 +387,8 @@ enum T {
         .motionFull: "Full",
         .motionReduced: "Reduced",
         .sounds: "Interface Sounds",
+        .gameMusic: "Game Music",
+        .gameMusicDetail: "The selected game's own theme song, when it has one",
         .language: "Language",
         .storage: "Library",
         .rescan: "Scan Again",

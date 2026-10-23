@@ -36,6 +36,9 @@ struct PanelCategory: Identifiable {
 }
 
 extension AppModel {
+    /// A volume in a panel: Off at zero.
+    static func percent(_ value: Int) -> String { value == 0 ? T.text(.off) : "\(value)%" }
+
     func panelCategories() -> [PanelCategory] {
         switch overlay {
         case .settings: return settingsCategories()
@@ -112,7 +115,15 @@ extension AppModel {
 
         var behaviour: [PanelRow] = [
             PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
-            PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2", kind: .toggle(preferences.sounds) { [weak self] value in self?.preferences.sounds = value }),
+            PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
+                     kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
+                         self?.preferences.sounds = value > 0
+                         if value > 0 { self?.preferences.soundVolume = value }
+                     }),
+            PanelRow(id: "music", title: T.text(.gameMusic), detail: T.text(.gameMusicDetail), symbol: "music.note",
+                     kind: .stepper(value: musicVolume, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
+                         self?.preferences.musicVolume = value
+                     }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
             PanelRow(id: "discord", title: T.text(.discordPresence), detail: T.text(.discordPresenceDetail), symbol: "person.2.wave.2", kind: .toggle(preferences.discordPresence ?? true) { [weak self] value in
                 self?.preferences.discordPresence = value
