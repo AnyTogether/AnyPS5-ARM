@@ -75,5 +75,11 @@ cat > "$app/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --deep --sign - "$app"
+# ANYPS5_SIGN_IDENTITY ("Developer ID Application: …") signs it for distribution and, with
+# ANYPS5_NOTARY_PROFILE, has it notarized; without them it is signed ad hoc.
+if [ -n "${ANYPS5_SIGN_IDENTITY:-}" ]; then
+    "$root/tools/macos/sign_launcher_app.sh" "$app" "$ANYPS5_SIGN_IDENTITY" "${ANYPS5_NOTARY_PROFILE:-}"
+else
+    codesign --force --deep --sign - "$app"
+fi
 echo "$app"
