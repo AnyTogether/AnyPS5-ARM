@@ -160,13 +160,13 @@ The **library** button shows every game as a grid. **Settings** hold:
 - **Appearance:** the theme, the accent color, and the background (the theme animation, your own picture or a looping video). Also the selected game's artwork behind the home screen and animations.
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
-- **Behaviour:** the profile name, interface sounds, hiding the launcher while a game runs, and installing Rosetta if it is missing.
+- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing.
 - **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
-- **About:** the app and toolkit versions.
+- **About:** the app and toolkit versions, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
 
 ### Getting around
 
-The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, or a game controller (D-pad, ✕, ○, △). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
+The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, `Q` / `E` (L1 / R1) for the previous or next game, also inside a game's panels, or a game controller (D-pad, ✕, ○, △, L1, R1). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
 
 ### Your phone as a controller
 
@@ -175,6 +175,8 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **Launcher on the phone:** the Mac's games with their icons over the selected one's background. Picking a game on the phone picks it on the Mac too; **Play**, **Back to Game** and **Close Game** work from the phone, and the arrows, ✕, ○ and ≡ move around the launcher's own screen.
 - **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad, any of them at once, with the latency shown. It takes over as soon as a game starts.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
+- **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
+- **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
 - The phone uses the launcher's language (English by default, or Turkish).
 
 | The launcher, with the phone in the corner | Silksong played on the phone |
