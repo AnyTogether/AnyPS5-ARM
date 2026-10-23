@@ -62,6 +62,14 @@ class ConfigureSeedPathTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("HAVE_FEATURE", seed.read_text(encoding="utf-8"))
 
+    def test_unwritable_seed_is_reported_without_a_traceback(self):
+        seed_dir = self.root / "seed_dir"
+        seed_dir.mkdir()
+        result = self.run_seed(seed_dir)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(str(seed_dir), result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_same_path_preserves_cache(self):
         self.assert_rejected(self.cache)
 

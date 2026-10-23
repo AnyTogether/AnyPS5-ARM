@@ -21,14 +21,14 @@ std::uint32_t* APS5_VABI sceAgcDcbGetLodStats(CommandBuffer* buf, std::uint8_t c
     return Agc::Command::Emit(buf, 0x10u, {bufferSizeInBytes, static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u), control}, __func__);
 }
 
-std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::uint32_t queryType) {
-    if (queryType == 0) return 16;
-    if (static_cast<std::uint8_t>(queryType) == 1) return 288;
-    return 0;
+std::uint32_t APS5_VABI sceAgcDcbBeginOcclusionQueryGetSize(std::int32_t queryType) {
+    const auto type = static_cast<std::uint8_t>(queryType);
+    if (type == 1) return 0x120u;
+    return type == 0 ? 0x10u : 0u;
 }
 
 std::uint32_t APS5_VABI sceAgcDcbEndOcclusionQueryGetSize() {
-    return 16;
+    return 0x10u;
 }
 
 }

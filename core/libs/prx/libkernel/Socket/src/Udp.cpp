@@ -137,7 +137,9 @@ int ConnectError() {
 }
 int SendError(int type) {
 #ifdef _WIN32
-    if (type == 2 && WSAGetLastError() == WSAENOTCONN) return 39;
+    const int error = WSAGetLastError();
+    if (type == 2 && error == WSAENOTCONN) return 39;
+    if (type == 1 && (error == WSAECONNABORTED || error == WSAECONNRESET)) return 32;
 #else
     static_cast<void>(type);
 #endif
@@ -349,6 +351,21 @@ bool ZeroPortConnect(const Socket& socket, const void* address, std::uint32_t le
     if (::getpeername(socket.value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0) return false;
     Fail(49);
     return true;
+}
+constexpr std::int64_t NotAnswered = -2;
+std::int64_t ZeroPortSend(const Socket& socket, const sockaddr_storage& destination, std::uint64_t length) {
+    if (socket.type != 2 || socket.family != 2 || destination.ss_family != AF_INET) return NotAnswered;
+    const auto& remote = reinterpret_cast<const sockaddr_in&>(destination);
+    if (remote.sin_port != 0) return NotAnswered;
+    sockaddr_storage peer{};
+    socklen_t peerSize = sizeof(peer);
+    if (::getpeername(socket.value, reinterpret_cast<sockaddr*>(&peer), &peerSize) == 0) return NotAnswered;
+    sockaddr_in local{};
+    socklen_t localSize = sizeof(local);
+    const bool bound = ::getsockname(socket.value, reinterpret_cast<sockaddr*>(&local), &localSize) == 0
+        && local.sin_port != 0 && local.sin_addr.s_addr != htonl(INADDR_ANY);
+    if (bound && remote.sin_addr.s_addr != htonl(INADDR_ANY) && remote.sin_addr.s_addr != htonl(INADDR_BROADCAST)) return static_cast<std::int64_t>(length);
+    return Fail(49);
 }
 int Disconnect(const Socket& socket) {
     sockaddr_storage peer{};
@@ -577,6 +594,16 @@ constexpr short GuestPollWritable = 0x4;
 constexpr short GuestPollVnodeReady = GuestPollReadable | GuestPollWritable;
 constexpr short GuestPollHangUp = 0x10;
 constexpr short GuestPollError = 0x8;
+#ifdef _WIN32
+short ClosedStreamEvents(int descriptor, short revents, short requested) {
+    if ((revents & (POLLHUP | POLLERR)) != POLLHUP) return revents;
+    const auto socket = Find(descriptor);
+    if (!socket || socket->type != 1) return revents;
+    revents = static_cast<short>(revents | (requested & POLLRDNORM));
+    std::lock_guard lock(socket->modeMutex);
+    return socket->sendShut ? revents : static_cast<short>(revents & ~POLLHUP);
+}
+#endif
 [[noreturn]] void ThrowReadEndWritable(int descriptor) {
     throw std::runtime_error("poll: POLLOUT on the read end of pipe descriptor " + std::to_string(descriptor) + " is not supported");
 }
@@ -1483,6 +1510,7 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
         socklen_t size;
         if (!Address(address, addressLength, native, size)) return -1;
         if (native.ss_family != (socket->family == 2 ? AF_INET : AF_INET6)) return Fail(47);
+        if (const auto answered = ZeroPortSend(*socket, native, length); answered != NotAnswered) return answered;
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags),
             reinterpret_cast<sockaddr*>(&native), size));
 #ifdef __APPLE__
@@ -1776,7 +1804,7 @@ int APS5_VABI sendfile_nid_postfix(int file, int descriptor, std::int64_t offset
     };
     if (received < 0) return finish(received == -21 || received == -29 ? 22 : static_cast<int>(-received));
     const auto socket = Lookup(descriptor);
-    if (!socket) return finish(9);
+    if (!socket) return finish(*__error_nid_postfix());
     if (socket->type != 1) return finish(22);
     sockaddr_storage peer{};
     socklen_t size = sizeof(peer);
@@ -1873,6 +1901,9 @@ int APS5_VABI poll_nid_postfix(GuestPollDescriptor* descriptors, std::uint32_t c
     }
     const auto collect = [&](std::size_t i, bool pipe) {
         auto& entry = descriptors[owners[i]];
+#ifdef _WIN32
+        if (!pipe) native[i].revents = ClosedStreamEvents(entry.descriptor, native[i].revents, native[i].events);
+#endif
         for (const auto& flag : RequestFlags)
             if ((entry.events & flag.guest) && (native[i].revents & flag.native))
                 entry.revents = static_cast<short>(entry.revents | flag.guest);

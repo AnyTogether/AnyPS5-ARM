@@ -6,6 +6,7 @@
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -23,6 +25,7 @@
 using namespace FreeType;
 
 extern "C" {
+void APS5_VABI FT_Set_Transform_nid_postfix(GuestFaceRec*, const GuestMatrix*, const GuestVector*);
 int APS5_VABI FT_Init_FreeType_nid_postfix(void**);
 int APS5_VABI FT_Done_FreeType_nid_postfix(void*);
 int APS5_VABI FT_New_Face_nid_postfix(void*, const char*, std::int64_t, GuestFaceRec**);
@@ -33,6 +36,7 @@ std::uint32_t APS5_VABI FT_Get_Char_Index_nid_postfix(GuestFaceRec*, std::uint64
 int APS5_VABI FT_Load_Glyph_nid_postfix(GuestFaceRec*, std::uint32_t, std::int32_t);
 int APS5_VABI FT_Load_Char_nid_postfix(GuestFaceRec*, std::uint64_t, std::int32_t);
 int APS5_VABI FT_Render_Glyph_nid_postfix(GuestGlyphSlotRec*, std::int32_t);
+int APS5_VABI FT_Set_Char_Size_nid_postfix(GuestFaceRec*, std::int64_t, std::int64_t, std::uint32_t, std::uint32_t);
 }
 
 static void Check(bool value, int line) {
@@ -67,6 +71,123 @@ static void FaceMatches(const GuestFaceRec* face, FT_Face host, const void* libr
     Require(face->glyph != nullptr && face->glyph->face == face && face->glyph->library == library && face->size != nullptr && face->size->face == face);
 }
 
+extern "C" int APS5_VABI FT_Outline_Get_Orientation_nid_postfix(GuestOutline*);
+
+static unsigned orientationCases = 0;
+
+static void CheckOrientationCase(std::vector<GuestVector> points, std::vector<std::uint16_t> contours,
+                                 int expected, bool compareNative = true) {
+    ++orientationCases;
+    const auto originalPoints = points;
+    const auto originalContours = contours;
+    std::vector<unsigned char> tags(points.size(), FT_CURVE_TAG_ON);
+    GuestOutline outline{static_cast<std::uint16_t>(contours.size()), static_cast<std::uint16_t>(points.size()),
+                         points.data(), tags.data(), contours.data(), FT_OUTLINE_EVEN_ODD_FILL | FT_OUTLINE_REVERSE_FILL};
+    const auto original = outline;
+    Require(FT_Outline_Get_Orientation_nid_postfix(&outline) == expected);
+    Require(outline.n_points == original.n_points && outline.n_contours == original.n_contours && outline.flags == original.flags);
+    Require(outline.points == original.points && outline.tags == original.tags && outline.contours == original.contours);
+    for (std::size_t index = 0; index < points.size(); ++index) {
+        Require(points[index].x == originalPoints[index].x && points[index].y == originalPoints[index].y);
+        Require(tags[index] == FT_CURVE_TAG_ON);
+    }
+    Require(contours == originalContours);
+    if (compareNative) {
+        std::vector<FT_Vector> nativePoints;
+        for (const auto& point : points) nativePoints.push_back({static_cast<FT_Pos>(point.x), static_cast<FT_Pos>(point.y)});
+        FT_Outline native{outline.n_contours, outline.n_points, nativePoints.data(), tags.data(), contours.data(), outline.flags};
+        Require(FT_Outline_Get_Orientation(&native) == expected);
+    }
+}
+
+static void CheckOutlineOrientation() {
+    Require(FT_Outline_Get_Orientation_nid_postfix(nullptr) == FT_ORIENTATION_TRUETYPE);
+    CheckOrientationCase({}, {}, FT_ORIENTATION_TRUETYPE);
+    CheckOrientationCase({{0, 0}}, {0}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {1, 1}}, {1}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {1, 1}, {2, 2}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {40, 0}, {40, 40}, {0, 40}}, {3}, FT_ORIENTATION_POSTSCRIPT);
+    CheckOrientationCase({{0, 0}, {0, 40}, {40, 40}, {40, 0}}, {3}, FT_ORIENTATION_TRUETYPE);
+    CheckOrientationCase({{0, 0}, {40, 0}, {40, 40}, {0, 40}, {10, 10}, {10, 30}, {30, 30}, {30, 10}},
+                          {3, 7}, FT_ORIENTATION_POSTSCRIPT);
+    CheckOrientationCase({{0, 0}, {40, 0}, {40, 40}, {0, 40}, {0, 0}, {0, 40}, {40, 40}, {40, 0}},
+                          {3, 7}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {40, 0}, {40, 40}, {0, 40}}, {}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{1048577, 0}, {1048578, 1}, {1048577, 2}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{-0x1000000, -0x1000000}, {0x1000000, -0x1000000},
+                           {0x1000000, 0x1000000}, {-0x1000000, 0x1000000}}, {3}, FT_ORIENTATION_POSTSCRIPT);
+    CheckOrientationCase({{-0x1000001, 0}, {0, 100}, {100, 0}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, -0x1000001}, {100, 0}, {0, 100}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {0x1000001, 100}, {100, 0}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{0, 0}, {100, 0x1000001}, {0, 100}}, {2}, FT_ORIENTATION_NONE);
+    CheckOrientationCase({{INT64_MIN, INT64_MIN}, {INT64_MAX, INT64_MAX}, {0, 1}}, {2}, FT_ORIENTATION_NONE, false);
+    std::vector<GuestVector> repeated{{0, 0}, {32767, 0}, {32767, 32767}, {0, 32767},
+                                      {0, 0}, {32767, 0}, {32767, 32767}, {0, 32767}};
+    CheckOrientationCase(repeated, {3, 7}, FT_ORIENTATION_POSTSCRIPT, sizeof(FT_Pos) == 8);
+    if constexpr (sizeof(FT_Pos) == 4) {
+        FT_Vector nativePoints[]{{0, 0}, {32767, 0}, {32767, 32767}, {0, 32767},
+                                  {0, 0}, {32767, 0}, {32767, 32767}, {0, 32767}};
+        unsigned short contours[]{3, 7};
+        FT_Outline native{2, 8, nativePoints, nullptr, contours, 0};
+        Require(FT_Outline_Get_Orientation(&native) == FT_ORIENTATION_TRUETYPE);
+    }
+    std::vector<GuestVector> maximum(65535);
+    const GuestVector square[]{{0, 0}, {32767, 0}, {32767, 32767}, {0, 32767}};
+    for (std::size_t index = 0; index < maximum.size(); ++index) maximum[index] = square[index % 4];
+    CheckOrientationCase(maximum, {65534}, FT_ORIENTATION_POSTSCRIPT, sizeof(FT_Pos) == 8);
+    std::vector<std::uint16_t> singletons(65535);
+    for (std::size_t index = 0; index < singletons.size(); ++index) singletons[index] = static_cast<std::uint16_t>(index);
+    CheckOrientationCase(maximum, singletons, FT_ORIENTATION_NONE);
+    std::mt19937 random(0xF7013);
+    for (unsigned test = 0; test < 512; ++test) {
+        std::vector<GuestVector> points(random() % 10 + 3);
+        for (auto& point : points) point = {static_cast<int>(random() % 1024) - 512, static_cast<int>(random() % 1024) - 512};
+        std::int64_t twiceArea = 0;
+        auto previous = points.back();
+        for (const auto& current : points) {
+            twiceArea += previous.x * current.y - current.x * previous.y;
+            previous = current;
+        }
+        const int expected = twiceArea > 0 ? FT_ORIENTATION_POSTSCRIPT : twiceArea < 0 ? FT_ORIENTATION_TRUETYPE : FT_ORIENTATION_NONE;
+        const std::vector<std::uint16_t> contours{static_cast<std::uint16_t>(points.size() - 1)};
+        CheckOrientationCase(points, contours, expected);
+        for (auto& point : points) { point.x += 1000; point.y -= 2000; }
+        CheckOrientationCase(points, contours, expected);
+        std::reverse(points.begin(), points.end());
+        CheckOrientationCase(points, contours, twiceArea == 0 ? FT_ORIENTATION_NONE : expected == FT_ORIENTATION_POSTSCRIPT ? FT_ORIENTATION_TRUETYPE : FT_ORIENTATION_POSTSCRIPT);
+    }
+    const auto font = SquareGlyphFont('A', 700);
+    void* library = nullptr;
+    GuestFaceRec* face = nullptr;
+    FT_Library nativeLibrary = nullptr;
+    FT_Face native = nullptr;
+    Require(FT_Init_FreeType_nid_postfix(&library) == 0 && FT_Init_FreeType(&nativeLibrary) == 0);
+    Require(FT_New_Memory_Face_nid_postfix(library, font.data(), font.size(), 0, &face) == 0);
+    Require(FT_New_Memory_Face(nativeLibrary, font.data(), static_cast<FT_Long>(font.size()), 0, &native) == 0);
+    Require(FT_Set_Pixel_Sizes_nid_postfix(face, 0, 32) == 0 && FT_Set_Pixel_Sizes(native, 0, 32) == 0);
+    for (const bool reflect : {false, true}) {
+        Require(FT_Load_Char_nid_postfix(face, 'A', FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) == 0);
+        Require(FT_Load_Char(native, 'A', FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) == 0);
+        if (reflect) {
+            for (unsigned index = 0; index < face->glyph->outline.n_points; ++index) {
+                face->glyph->outline.points[index].x = -face->glyph->outline.points[index].x;
+                native->glyph->outline.points[index].x = -native->glyph->outline.points[index].x;
+            }
+        }
+        Require(FT_Outline_Get_Orientation_nid_postfix(&face->glyph->outline) == (reflect ? FT_ORIENTATION_POSTSCRIPT : FT_ORIENTATION_TRUETYPE));
+        Require(FT_Outline_Get_Orientation(&native->glyph->outline) == (reflect ? FT_ORIENTATION_POSTSCRIPT : FT_ORIENTATION_TRUETYPE));
+        Require(FT_Render_Glyph_nid_postfix(face->glyph, FT_RENDER_MODE_NORMAL) == 0 && FT_Render_Glyph(native->glyph, FT_RENDER_MODE_NORMAL) == 0);
+        const auto& actual = face->glyph->bitmap;
+        const auto& expected = native->glyph->bitmap;
+        Require(actual.width > 0 && actual.rows > 0 && actual.width == expected.width && actual.rows == expected.rows && actual.pitch == expected.pitch);
+        Require(actual.pixel_mode == expected.pixel_mode && face->glyph->bitmap_left == native->glyph->bitmap_left && face->glyph->bitmap_top == native->glyph->bitmap_top);
+        Require(std::memcmp(actual.buffer, expected.buffer, static_cast<std::size_t>(actual.rows) * std::abs(actual.pitch)) == 0);
+    }
+    Require(FT_Done_Face_nid_postfix(face) == 0 && FT_Done_Face(native) == 0);
+    Require(FT_Done_FreeType_nid_postfix(library) == 0 && FT_Done_FreeType(nativeLibrary) == 0);
+    std::printf("FreeType outline orientation: %u polygon cases and 2 rendered glyphs passed\n", orientationCases);
+}
+
 static void SlotMatches(const GuestGlyphSlotRec* slot, FT_GlyphSlot host) {
     Require(slot->glyph_index == host->glyph_index && slot->format == static_cast<std::uint32_t>(host->format) && slot->next == nullptr);
     const auto& metrics = host->metrics;
@@ -87,6 +208,15 @@ static void SlotMatches(const GuestGlyphSlotRec* slot, FT_GlyphSlot host) {
     }
     for (unsigned index = 0; index < host->outline.n_contours; ++index) Require(slot->outline.contours[index] == host->outline.contours[index]);
     Require(slot->lsb_delta == host->lsb_delta && slot->rsb_delta == host->rsb_delta && slot->control_len == host->control_len);
+}
+
+static void SizeMatches(const GuestFaceRec* face, FT_Face host) {
+    const auto& actual = face->size->metrics;
+    const auto& expected = host->size->metrics;
+    Require(actual.x_ppem == expected.x_ppem && actual.y_ppem == expected.y_ppem);
+    Require(actual.x_scale == expected.x_scale && actual.y_scale == expected.y_scale);
+    Require(actual.ascender == expected.ascender && actual.descender == expected.descender);
+    Require(actual.height == expected.height && actual.max_advance == expected.max_advance);
 }
 
 struct Finalizers {
@@ -141,6 +271,93 @@ static void SetFinalizers(GuestFaceRec* face, Finalizers& events) {
     face->size->generic = {&events, GuestSizeFinalizer};
 }
 
+static void CheckTransforms(const std::vector<unsigned char>& font) {
+    FT_Library native = nullptr;
+    FT_Face host = nullptr;
+    FT_Face nativeOther = nullptr;
+    void* library = nullptr;
+    GuestFaceRec* face = nullptr;
+    GuestFaceRec* other = nullptr;
+    Require(FT_Init_FreeType(&native) == 0 && FT_Init_FreeType_nid_postfix(&library) == 0);
+    Require(FT_New_Memory_Face(native, font.data(), static_cast<FT_Long>(font.size()), 0, &host) == 0);
+    Require(FT_New_Memory_Face(native, font.data(), static_cast<FT_Long>(font.size()), 0, &nativeOther) == 0);
+    Require(FT_New_Memory_Face_nid_postfix(library, font.data(), font.size(), 0, &face) == 0);
+    Require(FT_New_Memory_Face_nid_postfix(library, font.data(), font.size(), 0, &other) == 0);
+    Require(FT_Set_Pixel_Sizes(host, 0, 100) == 0 && FT_Set_Pixel_Sizes_nid_postfix(face, 0, 100) == 0);
+    Require(FT_Set_Pixel_Sizes(nativeOther, 0, 100) == 0 && FT_Set_Pixel_Sizes_nid_postfix(other, 0, 100) == 0);
+    const std::array matrices{
+        GuestMatrix{65536, 0, 0, 65536}, GuestMatrix{0, -65536, 65536, 0}, GuestMatrix{0, 65536, -65536, 0},
+        GuestMatrix{-65536, 0, 0, 65536}, GuestMatrix{131072, 0, 0, 32768}, GuestMatrix{65536, 16384, -8192, 65536},
+        GuestMatrix{0, 0, 0, 0}
+    };
+    const std::array deltas{GuestVector{0, 0}, GuestVector{64, -128}, GuestVector{31, -63}, GuestVector{-96, 192}};
+    std::size_t comparisons = 0;
+    for (std::size_t m = 0; m <= matrices.size(); ++m) {
+        for (std::size_t d = 0; d <= deltas.size(); ++d) {
+            GuestMatrix input = m < matrices.size() ? matrices[m] : matrices[0];
+            GuestVector delta = d < deltas.size() ? deltas[d] : deltas[0];
+            FT_Matrix matrix{static_cast<FT_Fixed>(input.xx), static_cast<FT_Fixed>(input.xy), static_cast<FT_Fixed>(input.yx), static_cast<FT_Fixed>(input.yy)};
+            FT_Vector translation{static_cast<FT_Pos>(delta.x), static_cast<FT_Pos>(delta.y)};
+            std::array<unsigned char, sizeof(GuestGlyphSlotRec)> savedSlot{};
+            std::array<unsigned char, sizeof(GuestSizeRec)> savedSize{};
+            std::memcpy(savedSlot.data(), face->glyph, savedSlot.size());
+            std::memcpy(savedSize.data(), face->size, savedSize.size());
+            FT_Set_Transform_nid_postfix(face, m < matrices.size() ? &input : nullptr, d < deltas.size() ? &delta : nullptr);
+            FT_Set_Transform(host, m < matrices.size() ? &matrix : nullptr, d < deltas.size() ? &translation : nullptr);
+            Require(std::memcmp(savedSlot.data(), face->glyph, savedSlot.size()) == 0);
+            Require(std::memcmp(savedSize.data(), face->size, savedSize.size()) == 0);
+            Require(input.xx == matrix.xx && input.xy == matrix.xy && input.yx == matrix.yx && input.yy == matrix.yy);
+            Require(delta.x == translation.x && delta.y == translation.y);
+            input = matrices[0];
+            delta = deltas[0];
+            for (const auto flags : std::array<std::int32_t, 3>{FT_LOAD_DEFAULT, FT_LOAD_IGNORE_TRANSFORM, FT_LOAD_RENDER}) {
+                for (const std::uint32_t glyph : {0u, 1u}) {
+                    Require(FT_Load_Glyph_nid_postfix(face, glyph, flags) == FT_Load_Glyph(host, glyph, flags));
+                    SlotMatches(face->glyph, host->glyph);
+                    if (face->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {
+                        Require(FT_Render_Glyph_nid_postfix(face->glyph, FT_RENDER_MODE_NORMAL) == FT_Render_Glyph(host->glyph, FT_RENDER_MODE_NORMAL));
+                        SlotMatches(face->glyph, host->glyph);
+                    }
+                    ++comparisons;
+                }
+            }
+            Require(FT_Load_Glyph_nid_postfix(other, 1, FT_LOAD_DEFAULT) == FT_Load_Glyph(nativeOther, 1, FT_LOAD_DEFAULT));
+            SlotMatches(other->glyph, nativeOther->glyph);
+        }
+    }
+    GuestMatrix rejected{65536, 0, 0, 65536};
+    GuestVector rejectedDelta{};
+    const auto loadUnchanged = [&] {
+        Require(FT_Load_Glyph_nid_postfix(face, 1, FT_LOAD_DEFAULT) == FT_Load_Glyph(host, 1, FT_LOAD_DEFAULT));
+        SlotMatches(face->glyph, host->glyph);
+    };
+    if constexpr (sizeof(FT_Long) < sizeof(std::int64_t)) {
+        for (const auto value : std::array<std::int64_t, 5>{-0x80000001ll, 0x80000000ll, 0x100000000ll,
+                                                          std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max()}) {
+            for (auto member : {&GuestMatrix::xx, &GuestMatrix::xy, &GuestMatrix::yx, &GuestMatrix::yy}) {
+                rejected = matrices[0];
+                rejected.*member = value;
+                Require(ThrowsWith([&] { FT_Set_Transform_nid_postfix(face, &rejected, nullptr); },
+                                   "FT_Set_Transform: a component outside the host FT_Long range is not implemented"));
+                loadUnchanged();
+            }
+            for (auto member : {&GuestVector::x, &GuestVector::y}) {
+                rejectedDelta = {};
+                rejectedDelta.*member = value;
+                Require(ThrowsWith([&] { FT_Set_Transform_nid_postfix(face, &matrices[1], &rejectedDelta); },
+                                   "FT_Set_Transform: a component outside the host FT_Long range is not implemented"));
+                loadUnchanged();
+            }
+        }
+    }
+    rejected.xx = std::numeric_limits<std::int64_t>::max();
+    rejectedDelta.x = std::numeric_limits<std::int64_t>::min();
+    FT_Set_Transform_nid_postfix(nullptr, &rejected, &rejectedDelta);
+    FT_Set_Transform_nid_postfix(nullptr, nullptr, nullptr);
+    Require(FT_Done_FreeType_nid_postfix(library) == 0 && FT_Done_FreeType(native) == 0);
+    std::printf("FT_Set_Transform: %zu native glyph and bitmap comparisons\n", comparisons);
+}
+
 int main() {
     const auto root = std::filesystem::temp_directory_path() / ("anyps5_guest_freetype-" + std::to_string(std::random_device{}()));
     std::filesystem::create_directories(root / "app0");
@@ -151,6 +368,7 @@ int main() {
     }
     const auto previous = std::filesystem::current_path();
     std::filesystem::current_path(root);
+    CheckOutlineOrientation();
 
     FT_Library hostLibrary = nullptr;
     Require(FT_Init_FreeType(&hostLibrary) == 0);
@@ -191,6 +409,8 @@ int main() {
     Require(FT_New_Memory_Face_nid_postfix(library, font.data(), fontSize, -1, &probe) == 0 && probe != nullptr);
     Require(probe->num_faces == nativeProbe->num_faces && probe->face_index == nativeProbe->face_index);
     Require((probe->glyph == nullptr) == (nativeProbe->glyph == nullptr) && (probe->size == nullptr) == (nativeProbe->size == nullptr));
+    Require(FT_Set_Char_Size_nid_postfix(probe, std::numeric_limits<std::int64_t>::max(), 0, 0, 0) ==
+            FT_Set_Char_Size(nativeProbe, 64, 64, 72, 72));
     Finalizers nativeProbeEvents;
     Finalizers guestProbeEvents;
     nativeProbe->generic = {&nativeProbeEvents, NativeFaceFinalizer};
@@ -302,6 +522,64 @@ int main() {
     slot->outline.points = original;
     Require(FT_Render_Glyph_nid_postfix(slot, FT_RENDER_MODE_NORMAL) == 0 && slot->bitmap_left == 10);
 
+    {
+        struct Request {
+            std::int64_t width;
+            std::int64_t height;
+            std::uint32_t horizontal;
+            std::uint32_t vertical;
+        };
+        const std::array requests{
+            Request{0, 0, 0, 0}, Request{0, 12 * 64, 0, 0}, Request{12 * 64, 0, 0, 0},
+            Request{12 * 64, 18 * 64, 96, 144}, Request{12 * 64 + 32, 12 * 64 + 32, 72, 72},
+            Request{1, 63, 72, 72}, Request{-1, -100, 0, 0}, Request{0, -100, 96, 0},
+            Request{12 * 64, 18 * 64, 0, 144}, Request{12 * 64, 18 * 64, 96, 0},
+            Request{65535ll * 64, 64, 72, 72}, Request{65536ll * 64, 64, 72, 72},
+            Request{64, 65536ll * 64, 72, 72},
+            Request{18 * 64, 12 * 64, 72, 72}
+        };
+        std::size_t successes = 0;
+        std::size_t failures = 0;
+        for (const auto& request : requests) {
+            std::array<unsigned char, sizeof(GuestGlyphSlotRec)> previousSlot{};
+            std::memcpy(previousSlot.data(), face->glyph, previousSlot.size());
+            const auto expected = FT_Set_Char_Size(host, static_cast<FT_F26Dot6>(request.width), static_cast<FT_F26Dot6>(request.height),
+                                                   request.horizontal, request.vertical);
+            Require(FT_Set_Char_Size_nid_postfix(face, request.width, request.height, request.horizontal, request.vertical) == expected);
+            Require(std::memcmp(previousSlot.data(), face->glyph, previousSlot.size()) == 0);
+            expected == 0 ? ++successes : ++failures;
+            SizeMatches(face, host);
+            Require(FT_Load_Char_nid_postfix(face, 'A', FT_LOAD_DEFAULT) == FT_Load_Char(host, 'A', FT_LOAD_DEFAULT));
+            SlotMatches(face->glyph, host->glyph);
+        }
+        Require(successes != 0 && failures != 0);
+        for (const auto value : std::array<std::int64_t, 2>{std::numeric_limits<std::int64_t>::min(), -0x80000001ll}) {
+            Require(FT_Set_Char_Size_nid_postfix(face, value, 0, 0, 0) == FT_Set_Char_Size(host, 64, 64, 0, 0));
+            SizeMatches(face, host);
+            Require(FT_Set_Char_Size_nid_postfix(face, 0, value, 0, 0) == 0);
+            SizeMatches(face, host);
+        }
+        for (const auto value : {std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max()}) {
+            Require(FT_Set_Char_Size_nid_postfix(nullptr, value, value, 0, 0) == FT_Err_Invalid_Face_Handle);
+        }
+        if constexpr (sizeof(FT_F26Dot6) < sizeof(std::int64_t)) {
+            for (const auto value : std::array<std::int64_t, 4>{0x7FFFFFFFll, 0x80000000ll, 0x100000040ll, std::numeric_limits<std::int64_t>::max()}) {
+                for (const bool width : {false, true}) {
+                    Require(ThrowsWith([&] { FT_Set_Char_Size_nid_postfix(face, width ? value : 64, width ? 64 : value, 72, 72); },
+                                       "FT_Set_Char_Size: a character size or resolution outside the host arithmetic range is not implemented"));
+                    SizeMatches(face, host);
+                }
+            }
+            Require(ThrowsWith([&] { FT_Set_Char_Size_nid_postfix(face, 64, 64, std::numeric_limits<std::uint32_t>::max(), 72); },
+                               "FT_Set_Char_Size: a character size or resolution outside the host arithmetic range is not implemented"));
+            SizeMatches(face, host);
+        }
+        Require(FT_Set_Char_Size_nid_postfix(memoryFace, 0, 48 * 64, 0, 144) == 0);
+        Require(memoryFace->size->metrics.y_ppem == 96 && face->size->metrics.y_ppem == 1);
+        Require(FT_Set_Pixel_Sizes_nid_postfix(face, 0, 100) == 0 && FT_Set_Pixel_Sizes(host, 0, 100) == 0);
+        std::printf("FT_Set_Char_Size: %zu native request comparisons, %zu successes, %zu errors\n", requests.size(), successes, failures);
+    }
+
     Finalizers nativeDone;
     Finalizers guestDone;
     SetFinalizers(host, nativeDone);
@@ -339,6 +617,7 @@ int main() {
 
     void* empty = nullptr;
     Require(FT_Init_FreeType_nid_postfix(&empty) == 0 && FT_Done_FreeType_nid_postfix(empty) == 0);
+    CheckTransforms(font);
     std::filesystem::current_path(previous);
     std::error_code ignored;
     std::filesystem::remove_all(root, ignored);

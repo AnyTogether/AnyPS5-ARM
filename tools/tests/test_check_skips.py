@@ -1,4 +1,6 @@
 from pathlib import Path
+import contextlib
+import io
 import subprocess
 import sys
 import tempfile
@@ -191,6 +193,15 @@ class CheckSkipsTests(unittest.TestCase):
             self.assertIn("normal: skipped, device limitation", result.stdout)
             self.assertIn("indented: skipped, host imports are unavailable", result.stdout)
             self.assertIn("capitalized: Skipped, no display", result.stdout)
+
+    def test_main_with_explicit_argv(self):
+        xml = '<testsuite><testcase name="normal"><skipped message="the device lacks geometryShader"/></testcase></testsuite>'
+        with tempfile.TemporaryDirectory() as directory:
+            junit = Path(directory) / "junit.xml"
+            junit.write_text(xml, encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = check_skips.main([str(junit), "--job", "linux"])
+            self.assertEqual(code, 0)
 
 
 

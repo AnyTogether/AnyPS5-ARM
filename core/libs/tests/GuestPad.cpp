@@ -38,6 +38,9 @@ int APS5_VABI scePadOutputReport(int);
 int APS5_VABI scePadVrControllerGetDeviceInformation(int, void*);
 int APS5_VABI scePadVrControllerRead(int, void*, int);
 int APS5_VABI scePadGetAccessibilityControllerState(int, std::uint32_t*);
+bool APS5_VABI scePadIsDS4Connected(std::int32_t);
+bool APS5_VABI scePadIsBlasterConnected(std::int32_t);
+bool APS5_VABI scePadIsMoveConnected(std::int32_t);
 int APS5_VABI scePadGetControllerInformation(int, PadControllerInformation*);
 int APS5_VABI scePadGetExtControllerInformation(int, void*);
 int APS5_VABI scePadResetLightBar(int);
@@ -155,6 +158,17 @@ static void CheckAngularVelocityDeadband(int handle) {
     Require(scePadReadState(handle, &data) == PAD_OK);
     Require(data.angular_velocity_x == 0.01f && data.angular_velocity_z == -0.017f);
     PadPublishInput_nid_postfix(PadInputState{});
+}
+
+static void CheckStickDeadZones(int handle) {
+    PadControllerInformation info{};
+    Require(scePadGetControllerInformation(handle, &info) == PAD_OK);
+    Require(info.stickInfo.deadZoneLeft == 13 && info.stickInfo.deadZoneRight == 13);
+    std::array<std::uint8_t, 0x2c> extended{};
+    Require(scePadGetExtControllerInformation(handle, extended.data()) == PAD_OK);
+    PadControllerInformation base{};
+    std::memcpy(&base, extended.data(), sizeof(base));
+    Require(base.stickInfo.deadZoneLeft == 13 && base.stickInfo.deadZoneRight == 13);
 }
 
 static void CheckTouchContact() {
@@ -350,6 +364,14 @@ static void CheckRemoteController(int handle) {
     Require(!remote);
 }
 
+static void CheckTrackerDevices(int handle) {
+    for (const int candidate : {handle, handle + 1}) {
+        Require(!scePadIsDS4Connected(candidate));
+        Require(!scePadIsBlasterConnected(candidate));
+        Require(!scePadIsMoveConnected(candidate));
+    }
+}
+
 static void CheckAccessibilityControllerState(int handle) {
     std::uint32_t state = 7;
     Require(scePadGetAccessibilityControllerState(handle + 1, nullptr) == PAD_ERROR_INVALID_ARG);
@@ -415,6 +437,57 @@ static void CheckInjectedState(const std::filesystem::path& path) {
         Require(lifted.touch_data_touch_num == 0 && lifted.buttons == 0x2000);
     }
     PadPublishInput_nid_postfix(PadInputState{});
+}
+
+// The second user's pad: its own handle, input and output, connected while a device is given to it.
+static void CheckSecondPlayer(int first) {
+    constexpr int second = 0x10000001;
+    constexpr int noHandle = static_cast<int>(0x80920008);
+    PadData data{};
+    Require(scePadReadState(first + 1, &data) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadGetHandle(second, 0, 0) == noHandle);
+    const int handle = scePadOpen_nid_postfix(second, 0, 0, nullptr);
+    Require(handle == first + 1);
+    Require(scePadGetHandle(second, 0, 0) == handle);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(!data.connected && data.connected_count == 0);
+    PadControllerInformation info{};
+    Require(scePadGetControllerInformation(handle, &info) == PAD_OK);
+    Require(!info.connected);
+
+    PadInputState cross;
+    cross.buttons = static_cast<std::uint32_t>(Pad::PadButton::Cross);
+    PadPublishPlayerInput_nid_postfix(1, cross);
+    Require((PadJoinedPlayers_nid_postfix() & 3u) == 3u);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(data.connected && data.connected_count == 1);
+    Require((data.buttons & cross.buttons) != 0);
+    Require(scePadReadState(first, &data) == PAD_OK);
+    Require((data.buttons & cross.buttons) == 0);
+    Require(scePadGetControllerInformation(handle, &info) == PAD_OK);
+    Require(info.connected);
+
+    std::uint32_t firstSeen = 0;
+    std::uint32_t secondSeen = 0;
+    PadOutputState output;
+    static_cast<void>(PadFetchPlayerOutput_nid_postfix(0, &firstSeen, &output));
+    static_cast<void>(PadFetchPlayerOutput_nid_postfix(1, &secondSeen, &output));
+    PadLightBarParam red{255, 0, 0};
+    Require(scePadSetLightBar(handle, &red) == PAD_OK);
+    Require(PadFetchPlayerOutput_nid_postfix(1, &secondSeen, &output));
+    Require(output.lightBarValid && output.lightBar[0] == 255 && output.lightBar[2] == 0);
+    Require(!PadFetchPlayerOutput_nid_postfix(0, &firstSeen, &output));
+
+    PadDisconnectPlayer_nid_postfix(1);
+    Require(scePadReadState(handle, &data) == PAD_OK);
+    Require(!data.connected && (data.buttons & cross.buttons) == 0);
+    Require((PadJoinedPlayers_nid_postfix() & 2u) != 0);
+    PadDisconnectPlayer_nid_postfix(0);
+    Require(scePadReadState(first, &data) == PAD_OK && data.connected);
+
+    Require(scePadClose_nid_postfix(handle) == PAD_OK);
+    Require(scePadReadState(handle, &data) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadGetHandle(second, 0, 0) == noHandle);
 }
 
 int main() {
@@ -487,6 +560,7 @@ int main() {
     CheckTouchContact();
     CheckVirtualTouchContact();
     CheckTouchPadInformation(handle);
+    CheckStickDeadZones(handle);
     CheckPartialTrigger();
     CheckReadQueue(handle);
     CheckTapBetweenReads();
@@ -495,8 +569,10 @@ int main() {
     CheckRemoteController(handle);
     CheckAngularVelocityFilters(handle);
     CheckAbsentDevices(handle);
+    CheckTrackerDevices(handle);
     CheckAccessibilityControllerState(handle);
     CheckInjectedState(commandPath);
+    CheckSecondPlayer(handle);
     PadLightBarParam lightBar{255, 128, 64};
     Require(scePadSetLightBar(handle, &lightBar) == PAD_OK);
     Require(scePadSetLightBar(handle, nullptr) == PAD_ERROR_INVALID_ARG);

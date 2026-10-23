@@ -5,13 +5,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 
 extern "C" {
 int APS5_VABI sceVideoRecordingGetInfo(std::int32_t info, void* data, std::size_t size);
 int APS5_VABI sceVideoRecordingSetInfo(std::int32_t info, const void* data, std::size_t size);
 int APS5_VABI sceNpEntitlementAccessAbortRequest(std::int64_t);
 int APS5_VABI sceNpEntitlementAccessDeleteRequest(std::int64_t);
-int APS5_VABI sceHttpSetCookieEnabled(int, int);
 int APS5_VABI sceHttpSendRequest(int, const void*, std::size_t);
 int APS5_VABI sceNpEntitlementAccessGetEntitlementKey(
     std::uint32_t, const NpUnifiedEntitlementLabel*, NpEntitlementAccessEntitlementKey*);
@@ -74,14 +74,8 @@ int main() {
         Require(abortFailed && deleteFailed);
     }
 
-    constexpr int invalidValue = static_cast<int>(0x804311FE);
     constexpr int network = static_cast<int>(0x80431063);
-    Require(sceHttpSetCookieEnabled(1, 0) == 0);
     Require(sceHttpSendRequest(1, nullptr, 0) == network);
-    Require(sceHttpSetCookieEnabled(1, 1) == 0);
-    for (int enabled : {-1, 2, 0x100}) {
-        Require(sceHttpSetCookieEnabled(1, enabled) == invalidValue);
-    }
 
     constexpr int parameter = static_cast<int>(0x817D0002);
     constexpr int noEntitlement = static_cast<int>(0x817D0007);

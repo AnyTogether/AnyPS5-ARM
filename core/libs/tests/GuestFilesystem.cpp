@@ -2,6 +2,7 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/FileStream.hpp"
+#include "prx/libc/include/RenameDot.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/NativeStat.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
@@ -259,6 +260,29 @@ static void TestParentTraversal() {
     Require(stat_nid_postfix("/parent-test-mount/missing/.", &status) == -1 && *__error_nid_postfix() == 2);
     Require(stat_nid_postfix("/parent-test-mount/existing/.", &status) == 0 && (status.st_mode & 0170000) == 0040000);
     Require(access_nid_postfix("/parent-test-mount/existing/./", 0) == 0);
+    Require(TrimTrailingSeparators_nid_no_patch("/") == "/");
+    Require(TrimTrailingSeparators_nid_no_patch("/mount/dir//") == "/mount/dir");
+    Require(TrimTrailingSeparators_nid_no_patch("dir/") == "dir");
+#ifdef _WIN32
+    Require(TrimTrailingSeparators_nid_no_patch("C:\\") == "C:\\");
+    Require(TrimTrailingSeparators_nid_no_patch("C:/") == "C:/");
+    Require(TrimTrailingSeparators_nid_no_patch("C:\\dir\\") == "C:\\dir");
+    Require(TrimTrailingSeparators_nid_no_patch("C:\\\\") == "C:\\");
+    Require(TrimTrailingSeparators_nid_no_patch("C:\\folder\\\\") == "C:\\folder");
+#endif
+    std::filesystem::create_directory(root / "dot-victim");
+    for (const char* name : {"/parent-test-mount/dot-victim/.", "/parent-test-mount/dot-victim/..", "/parent-test-mount/dot-victim/./", "/parent-test-mount/dot-victim/../"}) {
+        Require(unlink_nid_postfix(name) == -1 && *__error_nid_postfix() == 22);
+        Require(rmdir_nid_postfix(name) == -1 && *__error_nid_postfix() == 22);
+        Require(sceKernelUnlink(name) == static_cast<int>(0x80020016u));
+        Require(sceKernelRmdir(name) == static_cast<int>(0x80020016u));
+    }
+    Require(unlink_nid_postfix("/parent-test-mount/present.txt/.") == -1 && *__error_nid_postfix() == 20);
+    Require(rename_nid_postfix("/parent-test-mount/present.txt/.", "/parent-test-mount/dot-renamed") == -1 && *__error_nid_postfix() == 20);
+    Require(rename_nid_postfix("/parent-test-mount/present.txt/..", "/parent-test-mount/dot-renamed") == -1 && *__error_nid_postfix() == 20);
+    Require(rmdir_nid_postfix("/parent-test-mount/missing/..") == -1 && *__error_nid_postfix() == 2);
+    Require(std::filesystem::is_directory(root / "dot-victim") && std::filesystem::is_regular_file(root / "present.txt"));
+    std::filesystem::remove(root / "dot-victim");
 #ifndef _WIN32
     for (const char* name : {"slash-unlink", "slash-remove", "slash-rename", "slash-open", "slash-kernel"}) std::ofstream(root / name) << "kept";
     Require(unlink_nid_postfix("/parent-test-mount/slash-unlink/") == -1 && *__error_nid_postfix() == 20);
@@ -1062,6 +1086,16 @@ int main() {
         Require(checkRelativeLink(fileLink, 11));
         Require(checkRelativeLink(directoryLink, 16));
         Require(checkRelativeLink(danglingLink, 11));
+        const auto belowStatLoop = statLoop.string() + "\\inside";
+        Require(sceKernelUnlink(belowStatLoop.c_str()) == static_cast<int>(0x8002003eu));
+        Require(unlink_nid_postfix(belowStatLoop.c_str()) == -1 && *__error_nid_postfix() == 62);
+        Require(sceKernelMkdir(belowStatLoop.c_str(), 0700) == static_cast<int>(0x8002003eu));
+        Require(mkdir_nid_postfix(belowStatLoop.c_str(), 0700) == -1 && *__error_nid_postfix() == 62);
+        Require(sceKernelRmdir(belowStatLoop.c_str()) == static_cast<int>(0x8002003eu));
+        Require(rmdir_nid_postfix(belowStatLoop.c_str()) == -1 && *__error_nid_postfix() == 62);
+        Require(sceKernelRmdir(statLoop.string().c_str()) == static_cast<int>(0x80020014u));
+        Require(sceKernelTruncate_nid_postfix(statLoop.string().c_str(), 0) == static_cast<int>(0x8002003eu));
+        Require(truncate_nid_postfix(statLoop.string().c_str(), 0) == -1 && *__error_nid_postfix() == 62);
         FileStat followed{};
         Require(lstat_nid_postfix(fileLink.string().c_str(), &linkStatus) == 0);
         Require(stat_nid_postfix(fileLink.string().c_str(), &followed) == 0 && (followed.st_mode & 0170000) == 0100000);
@@ -1193,6 +1227,14 @@ int main() {
         Require(pread_nid_postfix(locked, nullptr, 1, 0) == -1 && *__error_nid_postfix() == 14);
         Require(close_nid_postfix(transferPipe[0]) == 0 && close_nid_postfix(transferPipe[1]) == 0);
     }
+    Require(lseek_nid_postfix(locked, 4, 0) == 4);
+    Require(lseek_nid_postfix(locked, INT64_MAX, 1) == -1 && *__error_nid_postfix() == 84);
+    Require(lseek_nid_postfix(locked, 0, 1) == 4);
+    Require(lseek_nid_postfix(locked, -1, 0) == -1 && *__error_nid_postfix() == 22);
+    const std::int64_t lockedSize = lseek_nid_postfix(locked, 0, 2);
+    Require(lockedSize >= 0);
+    Require(lseek_nid_postfix(locked, INT64_MAX - lockedSize + 1, 2) == -1 && *__error_nid_postfix() == 84);
+    Require(lseek_nid_postfix(locked, 0, 1) == lockedSize);
     Require(flock_nid_postfix(-1, 2 | 4) == -1 && *__error_nid_postfix() == 9);
     Require(flock_nid_postfix(0x7fffffff, 1) == -1 && *__error_nid_postfix() == 9);
     int flockPipe[2] = {-1, -1};

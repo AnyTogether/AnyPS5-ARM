@@ -1,3 +1,4 @@
+import sys
 import argparse
 import re
 import xml.etree.ElementTree as ET
@@ -40,12 +41,15 @@ def skips(path):
         yield name, "\n".join(output)
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="fail when a test is skipped that the job's device is not expected to skip")
     parser.add_argument("junit", type=Path, help="the file written by ctest --output-junit")
     parser.add_argument("--job", choices=("linux", "windows"), default="linux")
     parser.add_argument("--list", action="store_true", help="print the skipped tests and why the file says they skipped")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         found = sorted(skips(args.junit))
     except (OSError, ET.ParseError, ValueError) as error:
@@ -54,7 +58,7 @@ if __name__ == "__main__":
         for name, output in found:
             reason = next((line.strip() for line in output.splitlines() if line.strip().lower().startswith("skipped")), "")
             print(f"{name}: {reason}")
-        raise SystemExit
+        return 0
     if args.job == "windows":
         unexpected = [name for name, output in found if not name.startswith(WINDOWS_PREFIX) and not NO_DISPLAY.search(output) and not NO_VULKAN_DEVICE.search(output) and not high_refresh_limitation(output)]
         expected = f"any {WINDOWS_PREFIX}* test, which the runner has no Vulkan driver for, or a test that reports no display or Vulkan device or a display without a 120 Hz mode"
@@ -65,5 +69,10 @@ if __name__ == "__main__":
         print(f"error: {name} skipped")
     if unexpected:
         print(f"{len(unexpected)} test(s) skipped for a reason that is not expected: the job lost that coverage and ctest still reports every test as passed")
-        raise SystemExit(1)
+        return 1
     print(f"{len(found)} test(s) skipped, all expected ({expected})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

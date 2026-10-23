@@ -71,6 +71,9 @@ Changes on top of the merged port:
 - The AGC driver creates the GPU mutex before itself. Its destructor at exit locks that mutex, and macOS's `pthread_mutex_lock` fails on a destroyed one.
 - libSceJson2 converts a number that `from_chars` reports out of range with `strtod_l` in the C locale. libc++'s stream extraction fails on every `ERANGE`, so an underflow to a denormal or zero was rejected as an overflow.
 - When the AGC driver memory cannot be mapped at 0xF_E0000000, the libSceAgc static buffer functions throw.
+- A positioned write on an `O_APPEND` regular file (`pwrite`, `pwritev`, AIO writes) appends and leaves the offset unchanged, as on FreeBSD; XNU's `pwrite` writes at the offset. See [libkernel debt](debt/libkernel.md).
+- `sceKernelGetModuleList` and the module info calls also list the `.prx` libraries built from this repository, reporting their Mach-O segments, as Linux lists them through `dl_iterate_phdr`.
+- `dlerror` keeps the whole message. dyld's errors list every path tried and were cut at 512 bytes, before the hint about the relinker's `--module-dir` option.
 
 ## Feasibility probes
 

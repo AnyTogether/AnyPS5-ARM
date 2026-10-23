@@ -3,6 +3,7 @@
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/RandomDevice.hpp"
 #include "prx/libkernel/File/include/ArchivedFile.hpp"
+#include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/FileLock.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
@@ -565,8 +566,10 @@ void ShareDescriptor(int from, int to) {
     std::lock_guard lock(g_mutex);
     auto status = Materialize(from).status;
     g_entries[to] = Entry{false, std::move(status)};
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     File::SharePositionedTransfer(from, to);
+#endif
+#ifdef _WIN32
     GuestFileLockShare_nid_no_patch(from, to);
 #endif
 }
@@ -583,6 +586,16 @@ bool Appends(int fd) {
     return found != g_entries.end() && found->second.status && (*found->second.status & Append) != 0;
 }
 
+bool IsCharacterDevice(int fd) {
+    if (fd < 0) return false;
+#ifdef _WIN32
+    return DescriptorIsOpen_nid_no_patch(fd) && !GuestSockets::IsOpen(fd) && !File::DirectoryDescriptorPath(fd) && ::GetFileType(WindowsDescriptorHandle_nid_no_patch(fd)) == FILE_TYPE_CHAR;
+#else
+    struct stat status{};
+    return ::fstat(fd, &status) == 0 && S_ISCHR(status.st_mode);
+#endif
+}
+
 bool IsVnode(int fd) {
     if (fd < 0 || File::IsRandomDevice(fd)) return false;
     if (File::IsArchivedFile(fd)) return true;
@@ -595,4 +608,8 @@ bool IsVnode(int fd) {
 #endif
 }
 
+}
+
+extern "C" bool DescriptorHasNoVnode_nid_no_patch(int fd) {
+    return !File::IsVnode(fd) && !File::IsCharacterDevice(fd) && !File::IsRandomDevice(fd);
 }

@@ -39,8 +39,21 @@ std::uint8_t stronger(std::uint8_t controller, std::uint8_t remote) {
     return distance(remote) > distance(controller) ? remote : controller;
 }
 
-std::runtime_error badAddress(std::string_view value) {
-    return std::runtime_error("ANYPS5_REMOTE_PAD must be 127.0.0.1:<port from 1 to 65535>, not \"" + std::string(value) + "\"");
+std::runtime_error badAddress(std::string_view name, std::string_view value) {
+    return std::runtime_error(std::string(name) + " must be 127.0.0.1:<port from 1 to 65535>, not \"" + std::string(value) + "\"");
+}
+
+std::unique_ptr<Channel> OpenNamed(const char* name) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr || *raw == '\0') return nullptr;
+    const std::string_view value(raw);
+    constexpr std::string_view host = "127.0.0.1:";
+    if (!value.starts_with(host)) throw badAddress(name, value);
+    const auto digits = value.substr(host.size());
+    unsigned port = 0;
+    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), port);
+    if (error != std::errc{} || end != digits.data() + digits.size() || port == 0 || port > 65535) throw badAddress(name, value);
+    return std::make_unique<Channel>(static_cast<std::uint16_t>(port));
 }
 
 }
@@ -99,11 +112,12 @@ std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOu
     return bytes;
 }
 
-std::array<std::uint8_t, HelloSize> EncodeHello() {
+std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player) {
     std::array<std::uint8_t, HelloSize> bytes{};
     write<std::uint32_t>(bytes.data(), 0, HelloMagic);
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(HelloSize));
+    bytes[8] = player;
     return bytes;
 }
 
@@ -202,8 +216,14 @@ void Channel::Answer(const Input& last, const PadOutputState& output) {
 void Channel::Greet(std::chrono::steady_clock::time_point now) {
     if (greeted && now - *greeted < std::chrono::seconds(1)) return;
     greeted = now;
-    const auto bytes = EncodeHello();
+    const auto bytes = EncodeHello(player);
     send(bytes.data(), bytes.size());
+}
+
+void Channel::SetPlayer(std::uint8_t number) {
+    if (number == player) return;
+    player = number;
+    greeted.reset();
 }
 
 void Channel::send(const std::uint8_t* bytes, std::size_t size) {
@@ -215,16 +235,60 @@ void Channel::send(const std::uint8_t* bytes, std::size_t size) {
 }
 
 std::unique_ptr<Channel> OpenFromEnvironment() {
-    const char* raw = std::getenv("ANYPS5_REMOTE_PAD");
-    if (raw == nullptr || *raw == '\0') return nullptr;
-    const std::string_view value(raw);
-    constexpr std::string_view host = "127.0.0.1:";
-    if (!value.starts_with(host)) throw badAddress(value);
-    const auto digits = value.substr(host.size());
-    unsigned port = 0;
-    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), port);
-    if (error != std::errc{} || end != digits.data() + digits.size() || port == 0 || port > 65535) throw badAddress(value);
-    return std::make_unique<Channel>(static_cast<std::uint16_t>(port));
+    return OpenNamed("ANYPS5_REMOTE_PAD");
+}
+
+std::vector<std::unique_ptr<Channel>> OpenAllFromEnvironment() {
+    std::vector<std::unique_ptr<Channel>> channels;
+    auto first = OpenNamed("ANYPS5_REMOTE_PAD");
+    if (!first) return channels;
+    channels.push_back(std::move(first));
+    for (int player = 2; player <= kPadPlayers; ++player) {
+        const auto name = "ANYPS5_REMOTE_PAD_" + std::to_string(player);
+        auto channel = OpenNamed(name.c_str());
+        if (!channel) break;
+        channels.push_back(std::move(channel));
+    }
+    return channels;
+}
+
+bool Wants(const PadInputState& state) {
+    constexpr int pushed = 48;
+    const bool stick = std::any_of(state.sticks.begin(), state.sticks.end(), [](std::uint8_t axis) { return std::abs(static_cast<int>(axis) - 128) > pushed; });
+    return state.buttons != 0 || state.analogButtonsL2 != 0 || state.analogButtonsR2 != 0 || state.touchLeft || state.touchRight ||
+        state.touch[0].active || state.touch[1].active || stick;
+}
+
+int Seats::Seat(std::uint32_t device, bool wants) {
+    if (const int held = Of(device); held >= 0 || !wants) return held;
+    for (std::size_t player = 0; player < holders.size(); ++player) {
+        if (holders[player]) continue;
+        holders[player] = device;
+        return static_cast<int>(player);
+    }
+    return -1;
+}
+
+int Seats::Leave(std::uint32_t device) {
+    const int held = Of(device);
+    if (held >= 0) holders[static_cast<std::size_t>(held)].reset();
+    return held;
+}
+
+int Seats::Of(std::uint32_t device) const {
+    for (std::size_t player = 0; player < holders.size(); ++player) {
+        if (holders[player] == device) return static_cast<int>(player);
+    }
+    return -1;
+}
+
+bool Seats::Held(int player) const {
+    return player >= 0 && player < kPadPlayers && holders[static_cast<std::size_t>(player)].has_value();
+}
+
+std::array<std::uint8_t, 3> PlayerColor(int player) {
+    static constexpr std::array<std::array<std::uint8_t, 3>, kPadPlayers> colors{{{0, 64, 255}, {255, 24, 32}, {32, 220, 64}, {255, 64, 200}}};
+    return colors[static_cast<std::size_t>(std::clamp(player, 0, kPadPlayers - 1))];
 }
 
 }

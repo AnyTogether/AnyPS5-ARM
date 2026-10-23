@@ -14,45 +14,62 @@
 
 namespace {
     std::mutex stateMutex;
-    PadInputState state;
-    std::uint32_t pressedSinceRead = 0;
-    std::uint8_t pressedAnalogL2 = 0;
-    std::uint8_t pressedAnalogR2 = 0;
-    std::uint64_t pressedAt = 0;
-    constexpr std::uint64_t kLatchExpiry = 100000;
-    PadOutputState output;
     std::chrono::steady_clock::time_point audioHapticEnd;
     std::array<std::uint8_t, 2> audioHapticRumble{};
     PadAudioHapticQueue legacyHaptics;
-    std::uint64_t timestamp = 0;
+    constexpr std::uint64_t kLatchExpiry = 100000;
+    constexpr std::size_t kQueueCapacity = 64;
+    std::exception_ptr failure;
+    bool initialized = false;
 
     struct QueuedInput {
         PadInputState input;
         std::uint64_t timestamp = 0;
     };
-    constexpr std::size_t kQueueCapacity = 64;
-    std::deque<QueuedInput> queue;
-    std::exception_ptr failure;
-    bool initialized = false;
-
     struct Quat { float w = 1.0f, x = 0.0f, y = 0.0f, z = 0.0f; };
-    Quat orientation;
-    std::uint64_t lastFuseTime = 0;
-    float biasIntegral[3] = {0.0f, 0.0f, 0.0f};
-    bool tiltCorrection = true;
-    bool angularVelocityDeadband = false;
+
+    // One DualSense: what it reports and what the game asks of it. Player 0 is the first user's
+    // pad, connected from the start; the others connect when a device is given to them.
+    struct Player {
+        PadInputState state;
+        bool connected = false;
+        std::uint32_t pressedSinceRead = 0;
+        std::uint8_t pressedAnalogL2 = 0;
+        std::uint8_t pressedAnalogR2 = 0;
+        std::uint64_t pressedAt = 0;
+        PadOutputState output;
+        std::uint64_t timestamp = 0;
+        std::deque<QueuedInput> queue;
+        Quat orientation;
+        std::uint64_t lastFuseTime = 0;
+        float biasIntegral[3] = {0.0f, 0.0f, 0.0f};
+        bool tiltCorrection = true;
+        bool angularVelocityDeadband = false;
+        bool angularBiasCorrection = false;
+        std::array<float, 3> gyroBias{0.0f, 0.0f, 0.0f};
+        std::uint8_t nextTouchId = 0;
+        bool prevTouchActive[2] = {false, false};
+        std::uint8_t touchIds[2] = {0, 0};
+    };
+    std::array<Player, kPadPlayers> players = [] {
+        std::array<Player, kPadPlayers> made{};
+        made[0].connected = true;
+        return made;
+    }();
+    std::uint32_t joined = 1;
     constexpr float kAngularVelocityDeadband = 0.017453292f;
-    bool angularBiasCorrection = false;
-    std::array<float, 3> gyroBias{0.0f, 0.0f, 0.0f};
-    std::uint8_t nextTouchId = 0;
-    bool prevTouchActive[2] = {false, false};
-    std::uint8_t touchIds[2] = {0, 0};
+
+    Player& PlayerAt(int player) {
+        if (player < 0 || player >= kPadPlayers) throw std::invalid_argument("Pad: no such player");
+        return players[static_cast<std::size_t>(player)];
+    }
 
     bool RefreshAudioHaptics() {
         if (std::chrono::steady_clock::now() >= audioHapticEnd) audioHapticRumble = {};
         const auto legacy = legacyHaptics.Read(sceKernelGetProcessTime());
         const auto large = std::max(audioHapticRumble[0], legacy[0]);
         const auto small = std::max(audioHapticRumble[1], legacy[1]);
+        auto& output = players[0].output;
         if (output.audioVibrationLarge == large && output.audioVibrationSmall == small) return false;
         output.audioVibrationLarge = large;
         output.audioVibrationSmall = small;
@@ -65,10 +82,12 @@ namespace {
         q.w /= n; q.x /= n; q.y /= n; q.z /= n;
     }
 
-    void fuse(float dt, const std::array<float, 3>& accel, const std::array<float, 3>& gyro) {
+    void fuse(Player& p, float dt, const std::array<float, 3>& accel, const std::array<float, 3>& gyro) {
+        auto& orientation = p.orientation;
+        auto& biasIntegral = p.biasIntegral;
         float gx = gyro[0], gy = gyro[1], gz = gyro[2];
         const float an = std::sqrt(accel[0] * accel[0] + accel[1] * accel[1] + accel[2] * accel[2]);
-        if (tiltCorrection && an > 1.0f) {
+        if (p.tiltCorrection && an > 1.0f) {
             const float ax = accel[0] / an, ay = accel[1] / an, az = accel[2] / an;
             const float vx = 2.0f * (orientation.x * orientation.y + orientation.w * orientation.z);
             const float vy = orientation.w * orientation.w - orientation.x * orientation.x + orientation.y * orientation.y - orientation.z * orientation.z;
@@ -97,8 +116,9 @@ namespace {
     constexpr float kStationaryRadians = 0.05f;
     constexpr float kBiasLearnRate = 0.02f;
 
-    std::array<float, 3> correctAngularVelocityBias(std::array<float, 3> gyro, const std::array<float, 3>& accel) {
-        if (!angularBiasCorrection) return gyro;
+    std::array<float, 3> correctAngularVelocityBias(Player& p, std::array<float, 3> gyro, const std::array<float, 3>& accel) {
+        if (!p.angularBiasCorrection) return gyro;
+        auto& gyroBias = p.gyroBias;
         constexpr float kGravity = 9.80665f;
         const float an = std::sqrt(accel[0] * accel[0] + accel[1] * accel[1] + accel[2] * accel[2]);
         bool stationary = std::fabs(an - kGravity) < 0.5f;
@@ -142,10 +162,12 @@ void Pad::Initialize() {
     std::lock_guard lock(stateMutex);
     if (failure) std::rethrow_exception(failure);
     if (!initialized) {
-        timestamp = sceKernelGetProcessTime();
-        lastFuseTime = timestamp;
-        queue.clear();
-        pressedSinceRead = 0;
+        for (auto& p : players) {
+            p.timestamp = sceKernelGetProcessTime();
+            p.lastFuseTime = p.timestamp;
+            p.queue.clear();
+            p.pressedSinceRead = 0;
+        }
     }
     initialized = true;
 }
@@ -155,8 +177,18 @@ bool Pad::IsInitialized() {
     return initialized;
 }
 
+bool Pad::IsConnected(int player) {
+    std::lock_guard lock(stateMutex);
+    return PlayerAt(player).connected;
+}
+
+std::uint32_t Pad::JoinedPlayers() {
+    std::lock_guard lock(stateMutex);
+    return joined;
+}
+
 namespace {
-PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected) {
+PadData BuildData(Player& p, const PadInputState& state, std::uint64_t changeTime, std::uint64_t now, const Pad::InputCommandFile::Input& injected) {
     PadData data{};
     data.buttons = state.buttons | injected.buttons;
     const auto& sticks = injected.hasSticks ? injected.sticks : state.sticks;
@@ -170,28 +202,28 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     data.analog_buttons_l2 = trigger(state.analogButtonsL2, 0x100);
     data.analog_buttons_r2 = trigger(state.analogButtonsR2, 0x200);
 
-    const bool live = state.hasMotion && output.motionEnabled;
+    const bool live = state.hasMotion && p.output.motionEnabled;
     const std::array<float, 3> rest{0.0f, 9.80665f, 0.0f};
     const std::array<float, 3>& accel = live ? state.accel : rest;
-    std::array<float, 3> gyro = live ? correctAngularVelocityBias(state.gyro, accel) : std::array<float, 3>{0.0f, 0.0f, 0.0f};
-    if (angularVelocityDeadband) {
+    std::array<float, 3> gyro = live ? correctAngularVelocityBias(p, state.gyro, accel) : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+    if (p.angularVelocityDeadband) {
         for (float& axis : gyro) {
             if (axis < kAngularVelocityDeadband && axis > -kAngularVelocityDeadband) axis = 0.0f;
         }
     }
     if (live) {
-        float dt = lastFuseTime != 0 && now > lastFuseTime ? static_cast<float>(now - lastFuseTime) * 1e-6f : 0.0f;
+        float dt = p.lastFuseTime != 0 && now > p.lastFuseTime ? static_cast<float>(now - p.lastFuseTime) * 1e-6f : 0.0f;
         dt = std::min(dt, 0.1f);
-        fuse(dt, accel, gyro);
+        fuse(p, dt, accel, gyro);
     } else {
-        orientation = Quat{};
-        biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+        p.orientation = Quat{};
+        p.biasIntegral[0] = p.biasIntegral[1] = p.biasIntegral[2] = 0.0f;
     }
-    lastFuseTime = now;
-    data.orientation_x = orientation.x;
-    data.orientation_y = orientation.y;
-    data.orientation_z = orientation.z;
-    data.orientation_w = orientation.w;
+    p.lastFuseTime = now;
+    data.orientation_x = p.orientation.x;
+    data.orientation_y = p.orientation.y;
+    data.orientation_z = p.orientation.z;
+    data.orientation_w = p.orientation.w;
     constexpr float kGravity = 9.80665f;
     data.acceleration_x = accel[0] / kGravity;
     data.acceleration_y = accel[1] / kGravity;
@@ -200,20 +232,20 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     data.angular_velocity_y = gyro[1];
     data.angular_velocity_z = gyro[2];
 
-    data.connected = true;
-    data.connected_count = 1;
+    data.connected = p.connected;
+    data.connected_count = p.connected ? 1 : 0;
     data.timestamp = changeTime;
 
     std::uint8_t touchNum = 0;
     for (int i = 0; i < 2; ++i) {
         const PadTouchPoint& tp = state.touch[i];
-        if (!tp.active) { prevTouchActive[i] = false; continue; }
-        if (!prevTouchActive[i]) touchIds[i] = static_cast<std::uint8_t>(nextTouchId++ & 0x7F);
-        prevTouchActive[i] = true;
+        if (!tp.active) { p.prevTouchActive[i] = false; continue; }
+        if (!p.prevTouchActive[i]) p.touchIds[i] = static_cast<std::uint8_t>(p.nextTouchId++ & 0x7F);
+        p.prevTouchActive[i] = true;
         if (touchNum == 0) {
-            data.touch_data_touch0_x = tp.x; data.touch_data_touch0_y = tp.y; data.touch_data_touch0_id = touchIds[i];
+            data.touch_data_touch0_x = tp.x; data.touch_data_touch0_y = tp.y; data.touch_data_touch0_id = p.touchIds[i];
         } else {
-            data.touch_data_touch1_x = tp.x; data.touch_data_touch1_y = tp.y; data.touch_data_touch1_id = touchIds[i];
+            data.touch_data_touch1_x = tp.x; data.touch_data_touch1_y = tp.y; data.touch_data_touch1_id = p.touchIds[i];
         }
         ++touchNum;
     }
@@ -228,7 +260,9 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
     return data;
 }
 
-Pad::InputCommandFile::Input InjectedInput(std::uint64_t now) {
+// APS5_PAD_INPUT_FILE drives the first player's pad only.
+Pad::InputCommandFile::Input InjectedInput(int player, std::uint64_t now) {
+    if (player != 0) return {};
     static Pad::InputCommandFile commands([] {
 #ifdef _WIN32
         const auto* path = _wgetenv(L"APS5_PAD_INPUT_FILE");
@@ -241,66 +275,71 @@ Pad::InputCommandFile::Input InjectedInput(std::uint64_t now) {
     const auto injected = commands.Poll(now);
     if (injected != lastInjected) {
         lastInjected = injected;
-        timestamp = now;
+        players[0].timestamp = now;
     }
     return injected;
 }
 }
 
-PadData Pad::ReadState() {
+PadData Pad::ReadState(int player) {
     std::lock_guard lock(stateMutex);
     if (failure) std::rethrow_exception(failure);
     if (!initialized) throw std::runtime_error("Pad: read before initialization");
+    auto& p = PlayerAt(player);
     const std::uint64_t now = sceKernelGetProcessTime();
-    const auto injected = InjectedInput(now);
-    PadData data = BuildData(state, timestamp, now, injected);
-    if (pressedSinceRead != 0 && now - pressedAt <= kLatchExpiry) {
-        data.buttons |= pressedSinceRead;
-        if (pressedSinceRead & 0x100u) data.analog_buttons_l2 = std::max(data.analog_buttons_l2, pressedAnalogL2);
-        if (pressedSinceRead & 0x200u) data.analog_buttons_r2 = std::max(data.analog_buttons_r2, pressedAnalogR2);
+    const auto injected = InjectedInput(player, now);
+    PadData data = BuildData(p, p.state, p.timestamp, now, injected);
+    if (p.pressedSinceRead != 0 && now - p.pressedAt <= kLatchExpiry) {
+        data.buttons |= p.pressedSinceRead;
+        if (p.pressedSinceRead & 0x100u) data.analog_buttons_l2 = std::max(data.analog_buttons_l2, p.pressedAnalogL2);
+        if (p.pressedSinceRead & 0x200u) data.analog_buttons_r2 = std::max(data.analog_buttons_r2, p.pressedAnalogR2);
     }
-    pressedSinceRead = 0;
+    p.pressedSinceRead = 0;
     return data;
 }
 
-int Pad::Read(PadData* data, int num) {
+int Pad::Read(PadData* data, int num, int player) {
     if (data == nullptr || num <= 0) throw std::invalid_argument("Pad: invalid read buffer");
     std::lock_guard lock(stateMutex);
     if (failure) std::rethrow_exception(failure);
     if (!initialized) throw std::runtime_error("Pad: read before initialization");
-    pressedSinceRead = 0;
+    auto& p = PlayerAt(player);
+    p.pressedSinceRead = 0;
     const std::uint64_t now = sceKernelGetProcessTime();
-    const auto injected = InjectedInput(now);
-    if (queue.empty()) {
-        data[0] = BuildData(state, timestamp, now, injected);
+    const auto injected = InjectedInput(player, now);
+    if (p.queue.empty()) {
+        data[0] = BuildData(p, p.state, p.timestamp, now, injected);
         return 1;
     }
     int count = 0;
-    while (count < num && !queue.empty()) {
-        const QueuedInput& entry = queue.front();
-        data[count++] = BuildData(entry.input, entry.timestamp, now, injected);
-        queue.pop_front();
+    while (count < num && !p.queue.empty()) {
+        const QueuedInput& entry = p.queue.front();
+        data[count++] = BuildData(p, entry.input, entry.timestamp, now, injected);
+        p.queue.pop_front();
     }
     return count;
 }
 
-void Pad::SetVibration(std::uint8_t large, std::uint8_t small) {
+void Pad::SetVibration(std::uint8_t large, std::uint8_t small, int player) {
     std::lock_guard lock(stateMutex);
+    auto& output = PlayerAt(player).output;
     if (output.vibrationLarge == large && output.vibrationSmall == small) return;
     output.vibrationLarge = large;
     output.vibrationSmall = small;
     ++output.sequence;
 }
 
-void Pad::SetVibrationMode(int mode) {
+void Pad::SetVibrationMode(int mode, int player) {
     std::lock_guard lock(stateMutex);
+    auto& output = PlayerAt(player).output;
     if (output.vibrationMode == mode) return;
     output.vibrationMode = mode;
     ++output.sequence;
 }
 
-void Pad::SetLightBar(bool valid, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+void Pad::SetLightBar(bool valid, std::uint8_t r, std::uint8_t g, std::uint8_t b, int player) {
     std::lock_guard lock(stateMutex);
+    auto& output = PlayerAt(player).output;
     output.lightBarValid = valid;
     output.lightBar[0] = r;
     output.lightBar[1] = g;
@@ -308,7 +347,7 @@ void Pad::SetLightBar(bool valid, std::uint8_t r, std::uint8_t g, std::uint8_t b
     ++output.sequence;
 }
 
-void Pad::SetTriggerCommand(int trigger, const std::uint8_t* command) {
+void Pad::SetTriggerCommand(int trigger, const std::uint8_t* command, int player) {
     if (trigger < 0 || trigger > 1 || command == nullptr) return;
     std::uint32_t mode = 0;
     std::memcpy(&mode, command, 4);
@@ -366,61 +405,90 @@ void Pad::SetTriggerCommand(int trigger, const std::uint8_t* command) {
     req.valid = req.effect[0] != 0x05;
     if (!req.valid) req.fallback = 0;
     std::lock_guard lock(stateMutex);
+    auto& output = PlayerAt(player).output;
     output.trigger[trigger] = req;
     output.triggerTouched = true;
     ++output.sequence;
 }
 
-void Pad::ResetOrientation() {
+void Pad::ResetOrientation(int player) {
     std::lock_guard lock(stateMutex);
-    orientation = Quat{};
-    biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+    auto& p = PlayerAt(player);
+    p.orientation = Quat{};
+    p.biasIntegral[0] = p.biasIntegral[1] = p.biasIntegral[2] = 0.0f;
 }
 
-void Pad::SetTiltCorrection(bool enabled) {
+void Pad::SetTiltCorrection(bool enabled, int player) {
     std::lock_guard lock(stateMutex);
-    tiltCorrection = enabled;
-    biasIntegral[0] = biasIntegral[1] = biasIntegral[2] = 0.0f;
+    auto& p = PlayerAt(player);
+    p.tiltCorrection = enabled;
+    p.biasIntegral[0] = p.biasIntegral[1] = p.biasIntegral[2] = 0.0f;
 }
 
-void Pad::SetAngularVelocityDeadband(bool enabled) {
+void Pad::SetAngularVelocityDeadband(bool enabled, int player) {
     std::lock_guard lock(stateMutex);
-    angularVelocityDeadband = enabled;
+    PlayerAt(player).angularVelocityDeadband = enabled;
 }
 
-void Pad::SetAngularVelocityBiasCorrection(bool enabled) {
+void Pad::SetAngularVelocityBiasCorrection(bool enabled, int player) {
     std::lock_guard lock(stateMutex);
-    angularBiasCorrection = enabled;
-    gyroBias = {0.0f, 0.0f, 0.0f};
+    auto& p = PlayerAt(player);
+    p.angularBiasCorrection = enabled;
+    p.gyroBias = {0.0f, 0.0f, 0.0f};
 }
 
-void Pad::SetMotionEnabled(bool enabled) {
+void Pad::SetMotionEnabled(bool enabled, int player) {
     std::lock_guard lock(stateMutex);
+    auto& output = PlayerAt(player).output;
     if (output.motionEnabled == enabled) return;
     output.motionEnabled = enabled;
     ++output.sequence;
 }
 
-extern "C" void PadPublishInput_nid_postfix(const PadInputState& input) {
+extern "C" void PadPublishPlayerInput_nid_postfix(int player, const PadInputState& input) {
     std::lock_guard lock(stateMutex);
     if (failure) std::rethrow_exception(failure);
-    if (state.buttons == input.buttons && state.sticks == input.sticks &&
+    auto& p = PlayerAt(player);
+    const bool connecting = !p.connected;
+    if (connecting) {
+        p.connected = true;
+        joined |= 1u << player;
+    }
+    auto& state = p.state;
+    if (!connecting && state.buttons == input.buttons && state.sticks == input.sticks &&
         state.analogButtonsL2 == input.analogButtonsL2 && state.analogButtonsR2 == input.analogButtonsR2 &&
         state.touchLeft == input.touchLeft && state.touchRight == input.touchRight &&
         state.hasMotion == input.hasMotion && state.accel == input.accel && state.gyro == input.gyro &&
         state.touch == input.touch && state.deviceKind == input.deviceKind) return;
     const std::uint32_t pressed = input.buttons & ~state.buttons;
-    timestamp = sceKernelGetProcessTime();
+    p.timestamp = sceKernelGetProcessTime();
     if (pressed != 0) {
-        if (pressedSinceRead != 0 && timestamp - pressedAt > kLatchExpiry) pressedSinceRead = 0;
-        pressedSinceRead |= pressed;
-        pressedAt = timestamp;
-        if (pressed & 0x100u) pressedAnalogL2 = input.analogButtonsL2;
-        if (pressed & 0x200u) pressedAnalogR2 = input.analogButtonsR2;
+        if (p.pressedSinceRead != 0 && p.timestamp - p.pressedAt > kLatchExpiry) p.pressedSinceRead = 0;
+        p.pressedSinceRead |= pressed;
+        p.pressedAt = p.timestamp;
+        if (pressed & 0x100u) p.pressedAnalogL2 = input.analogButtonsL2;
+        if (pressed & 0x200u) p.pressedAnalogR2 = input.analogButtonsR2;
     }
     state = input;
-    if (queue.size() == kQueueCapacity) queue.pop_front();
-    queue.push_back({input, timestamp});
+    if (p.queue.size() == kQueueCapacity) p.queue.pop_front();
+    p.queue.push_back({input, p.timestamp});
+}
+
+extern "C" void PadPublishInput_nid_postfix(const PadInputState& input) {
+    PadPublishPlayerInput_nid_postfix(0, input);
+}
+
+// The first player's pad stays connected; another player's goes when its device does, and its
+// user stays logged in, as a console user does when the controller is turned off.
+extern "C" void PadDisconnectPlayer_nid_postfix(int player) {
+    std::lock_guard lock(stateMutex);
+    auto& p = PlayerAt(player);
+    if (player == 0 || !p.connected) return;
+    p.connected = false;
+    p.state = PadInputState{};
+    p.pressedSinceRead = 0;
+    p.queue.clear();
+    p.timestamp = sceKernelGetProcessTime();
 }
 
 extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
@@ -429,13 +497,18 @@ extern "C" void PadReportInputFailure_nid_postfix(std::exception_ptr error) {
     if (!failure) failure = error;
 }
 
-extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out) {
+extern "C" bool PadFetchPlayerOutput_nid_postfix(int player, std::uint32_t* seenSequence, PadOutputState* out) {
     std::lock_guard lock(stateMutex);
-    if (RefreshAudioHaptics()) ++output.sequence;
+    auto& output = PlayerAt(player).output;
+    if (player == 0 && RefreshAudioHaptics()) ++output.sequence;
     if (seenSequence == nullptr || out == nullptr || *seenSequence == output.sequence) return false;
     *seenSequence = output.sequence;
     *out = output;
     return true;
+}
+
+extern "C" bool PadFetchOutput_nid_postfix(std::uint32_t* seenSequence, PadOutputState* out) {
+    return PadFetchPlayerOutput_nid_postfix(0, seenSequence, out);
 }
 
 extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8_t small) {
@@ -447,17 +520,20 @@ extern "C" void PadSubmitAudioHaptics_nid_postfix(std::uint8_t large, std::uint8
     audioHapticRumble[1] = std::max(audioHapticRumble[1], small);
     audioHapticEnd = now + std::chrono::milliseconds(80);
     static_cast<void>(RefreshAudioHaptics());
-    ++output.sequence;
+    ++players[0].output.sequence;
 }
 
 extern "C" void PadQueueLegacyAudioHaptics_nid_postfix(int source, std::uint64_t begin, std::uint64_t end, std::uint8_t large, std::uint8_t small) {
     std::lock_guard lock(stateMutex);
     legacyHaptics.Queue(source, begin, end, large, small);
-    if (RefreshAudioHaptics()) ++output.sequence;
+    if (RefreshAudioHaptics()) ++players[0].output.sequence;
 }
 
 extern "C" void PadClearLegacyAudioHaptics_nid_postfix(int source) {
     std::lock_guard lock(stateMutex);
     legacyHaptics.Clear(source);
-    if (RefreshAudioHaptics()) ++output.sequence;
+    if (RefreshAudioHaptics()) ++players[0].output.sequence;
+}
+extern "C" std::uint32_t PadJoinedPlayers_nid_postfix() {
+    return Pad::JoinedPlayers();
 }

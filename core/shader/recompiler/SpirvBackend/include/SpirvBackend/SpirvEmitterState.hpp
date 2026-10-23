@@ -147,6 +147,14 @@ struct SpirvEmitterState {
     std::vector<std::uint32_t> memoryByteOffsets;
     std::map<std::array<std::uint32_t, 6>, std::uint32_t> formattedBufferFunctions;
     std::map<std::array<std::uint32_t, 6>, std::uint32_t> formattedGpuBufferFunctions;
+    struct BufferLengthCacheEntry {
+        std::array<const IrValue*, 4> descriptor{};
+        std::uint32_t variable = 0;
+        std::uint32_t element = 0;
+        std::uint32_t label = 0;
+        std::uint32_t length = 0;
+    };
+    std::vector<BufferLengthCacheEntry> bufferLengths;
     std::uint32_t bufferFormatTable = 0;
     std::uint32_t bdaPagetableVariable = 0;
     std::uint32_t faultBufferVariable = 0;
@@ -235,6 +243,7 @@ struct SpirvEmitterState {
     std::uint32_t subgroupLocalInvocationIdVariable = 0;
     std::uint32_t subgroupIdVariable = 0;
     std::uint32_t perVertexVariable = 0;
+    std::uint32_t barycentricReciprocalWVariable = 0;
     std::uint32_t pointSizeVariable = 0;
     std::uint32_t clipDistanceVariable = 0;
     std::optional<std::uint32_t> zeroPositionClipIndex;

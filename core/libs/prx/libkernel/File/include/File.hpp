@@ -6,6 +6,9 @@
 #include <filesystem>
 #include <mutex>
 #include <optional>
+#ifdef __APPLE__
+#include <sys/uio.h>
+#endif
 
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
@@ -37,6 +40,10 @@ int HostStandardError();
 void SharePositionedTransfer(int from, int to);
 #ifdef _WIN32
 std::int64_t WriteAtEnd(int descriptor, const void* buf, std::size_t nbytes);
+#endif
+#ifdef __APPLE__
+[[nodiscard]] std::unique_lock<std::mutex> LockAppendOffset(int descriptor);
+std::int64_t AppendKeepingOffset(int descriptor, const struct iovec* vectors, int count);
 #endif
 }
 

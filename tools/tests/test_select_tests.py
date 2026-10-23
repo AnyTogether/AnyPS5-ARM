@@ -230,6 +230,40 @@ class BuildErrorTests(unittest.TestCase):
         self.assertIn("CMAKE_CACHEFILE_DIR", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_cache_with_utf8_bom_is_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "CMakeCache.txt"
+            cache.write_text("\ufeffCMAKE_CACHEFILE_DIR:INTERNAL=C:/work/build\nCMAKE_HOME_DIRECTORY:INTERNAL=C:/work/source\n", encoding="utf-8")
+            with mock.patch.object(select_tests.Build, "run", return_value="Build file encoding: UTF-8"):
+                build = select_tests.Build(directory)
+                self.assertEqual(build.path, os.path.normpath("C:/work/build"))
+                self.assertEqual(build.source, os.path.normpath("C:/work/source"))
+
+    def test_explain_accepts_utf8_bom_in_graph_and_changed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph_path = root / "graph.json"
+            graph = {
+                "tests": {
+                    "unit": {
+                        "target": "tests/unit",
+                        "arguments": [],
+                        "registered": [],
+                        "sets": [],
+                        "requires": [],
+                        "depends": [],
+                    }
+                },
+                "closures": {"tests/unit": ["src/main.c"]},
+            }
+            graph_path.write_text("\ufeff" + json.dumps(graph), encoding="utf-8")
+            changed_path = root / "changed.txt"
+            changed_path.write_text("\ufeffsrc/main.c\n", encoding="utf-8")
+            result = self.run_tool("explain", graph_path, changed_path)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["tests"], ["unit"])
+
 
 class CaseInsensitivePathTests(unittest.TestCase):
     def build(self):

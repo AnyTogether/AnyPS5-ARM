@@ -17,7 +17,10 @@ void ShareDescriptor(int from, int to);
 void ForgetDescriptor(int fd);
 bool Appends(int fd);
 bool IsVnode(int fd);
+bool IsCharacterDevice(int fd);
 
 }
+
+extern "C" bool DescriptorHasNoVnode_nid_no_patch(int fd);
 
 #endif

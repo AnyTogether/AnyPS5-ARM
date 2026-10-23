@@ -16,7 +16,7 @@ BATCH = 20000
 class Build:
     def __init__(self, path):
         cache = {}
-        for line in (Path(path) / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+        for line in (Path(path) / "CMakeCache.txt").read_text(encoding="utf-8-sig").splitlines():
             name, _, value = line.partition("=")
             cache[name.partition(":")[0]] = value
         self.path = os.path.normpath(cache["CMAKE_CACHEFILE_DIR"])
@@ -225,7 +225,10 @@ def escape(name):
     return name.replace("$", "$$").replace(":", "$:").replace(" ", "$ ")
 
 
-def main():
+def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Select the tests whose build inputs a change touches")
     sub = parser.add_subparsers(dest="command", required=True)
     d = sub.add_parser("dump", help="write the test graph of a built tree")
@@ -241,15 +244,15 @@ def main():
     c = sub.add_parser("ctest", help="run ctest on a tree, limited to the selected tests if select wrote any")
     c.add_argument("build")
     c.add_argument("arguments", nargs=argparse.REMAINDER, help="ctest arguments")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "ctest":
         selected = Path(args.build, "select.tests")
-        extra = ["-I", selected.read_text(encoding="utf-8").strip()] if selected.exists() else []
+        extra = ["-I", selected.read_text(encoding="utf-8-sig").strip()] if selected.exists() else []
         return subprocess.run(["ctest", "--test-dir", args.build, *args.arguments, *extra]).returncode
     if args.command == "explain":
         try:
-            graph = json.loads(args.graph.read_text(encoding="utf-8"))
-            changed = [line.strip() for line in args.changed.read_text(encoding="utf-8").splitlines() if line.strip()]
+            graph = json.loads(args.graph.read_text(encoding="utf-8-sig"))
+            changed = [line.strip() for line in args.changed.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
             reasons = {}
             picked, full = select(graph, changed, reasons)
         except (OSError, ValueError) as error:
@@ -270,7 +273,7 @@ def main():
     if not os.path.exists(args.graph):
         print("full run: no test graph")
         return 0
-    graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    graph = json.loads(Path(args.graph).read_text(encoding="utf-8-sig"))
     changed = [line.strip() for line in Path(args.changed).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     picked, full = select(graph, changed)
     if picked is None:
