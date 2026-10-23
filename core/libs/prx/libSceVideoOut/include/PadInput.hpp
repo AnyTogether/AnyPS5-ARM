@@ -7,13 +7,18 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <vector>
 #include "prx/libSceVideoOut/include/Telemetry.hpp"
 
 class DisplayWindow;
 
+// The players' pads, fed by the keyboard and mouse, the Mac's game controllers and the phones the
+// launcher brings. A controller or phone becomes a player the first time it is used (RemotePad::Seats);
+// the keyboard and mouse always drive the first player.
 class PadInput {
 public:
     PadInput();
@@ -23,31 +28,49 @@ public:
     bool MouseModeEnabled() const { return keyboardMouse.MouseMode(); }
 
 private:
+    struct Controller {
+        SDL_GameController* handle = nullptr;
+        SDL_JoystickID id = -1;
+        PadInputState state{};
+        bool outputPending = true;
+        bool sensors = true;
+        std::chrono::steady_clock::time_point nextRumbleRefresh{};
+        LightBarPacer lightBar;
+        TriggerEffectCache triggerEffect;
+    };
+    struct Remote {
+        std::unique_ptr<RemotePad::Channel> channel;
+        std::optional<RemotePad::Input> last;
+        std::chrono::steady_clock::time_point seen{};
+        PadInputState state{};
+    };
+    struct Output {
+        std::uint32_t sequence = 0;
+        PadOutputState state{};
+    };
+
     explicit PadInput(Pad::InputConfiguration configuration);
     void publish(std::uint64_t frame);
     void setMouseMode(bool enabled);
-    void openFirstAvailableController();
+    void openAvailableControllers();
     void openController(int deviceIndex);
-    void closeController();
-    PadInputState sampleController() const;
+    void closeController(SDL_JoystickID id);
+    void sampleControllers();
+    PadInputState sampleController(SDL_GameController* controller) const;
     void applyOutput();
-    void enableSensors();
-    void updateRemote();
+    void applyOutput(Controller& controller, const PadOutputState& output, int player);
+    void enableSensors(Controller& controller, bool wanted);
+    void updateRemotes();
+    void answer(Remote& remote, int player);
+    void leave(std::uint32_t device);
 
     Pad::KeyboardMouse keyboardMouse;
-    SDL_GameController* controller = nullptr;
-    PadInputState controllerState{};
-    std::uint32_t outputSequence = 0;
-    PadOutputState outputState{};
-    bool outputPending = false;
+    std::vector<Controller> controllers;
+    std::vector<Remote> remotes;
+    RemotePad::Seats seats;
+    std::array<Output, kPadPlayers> outputs{};
+    std::array<bool, kPadPlayers> published{};
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
-    std::chrono::steady_clock::time_point nextRumbleRefresh{};
-    LightBarPacer lightBar;
-    TriggerEffectCache triggerEffect;
-    std::unique_ptr<RemotePad::Channel> remote;
-    std::optional<RemotePad::Input> remoteLast;
-    std::chrono::steady_clock::time_point remoteSeen{};
-    PadInputState remoteState{};
 };
 
 #endif

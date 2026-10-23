@@ -85,16 +85,16 @@ std::uint32_t ScriptedButtons() {
 PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 }
 
-PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)), remote(RemotePad::OpenFromEnvironment()) {
-    openFirstAvailableController();
+PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
+    for (auto& channel : RemotePad::OpenAllFromEnvironment()) remotes.push_back(Remote{std::move(channel)});
+    openAvailableControllers();
 }
 
 PadInput::~PadInput() {
-    closeController();
+    for (auto& controller : controllers) SDL_GameControllerClose(controller.handle);
 }
 
-void PadInput::openFirstAvailableController() {
-    if (controller != nullptr) return;
+void PadInput::openAvailableControllers() {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
     if ((SDL_WasInit(SDL_INIT_GAMECONTROLLER) & SDL_INIT_GAMECONTROLLER) == 0) {
@@ -103,55 +103,107 @@ void PadInput::openFirstAvailableController() {
             return;
         }
     }
-    for (int deviceIndex = 0; deviceIndex < SDL_NumJoysticks(); ++deviceIndex) {
-        if (!SDL_IsGameController(deviceIndex)) continue;
-        openController(deviceIndex);
-        if (controller != nullptr) return;
-    }
+    for (int deviceIndex = 0; deviceIndex < SDL_NumJoysticks(); ++deviceIndex) openController(deviceIndex);
 }
 
 void PadInput::openController(int deviceIndex) {
-    if (controller != nullptr || !SDL_IsGameController(deviceIndex)) return;
-    controller = SDL_GameControllerOpen(deviceIndex);
-    if (controller == nullptr) {
+    if (!SDL_IsGameController(deviceIndex)) return;
+    const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(deviceIndex);
+    if (std::any_of(controllers.begin(), controllers.end(), [id](const Controller& controller) { return controller.id == id; })) return;
+    SDL_GameController* handle = SDL_GameControllerOpen(deviceIndex);
+    if (handle == nullptr) {
         APS5_LOG_ERR("Pad: could not open game controller %d: %s", deviceIndex, SDL_GetError());
         return;
     }
-    const char* name = SDL_GameControllerName(controller);
+    const char* name = SDL_GameControllerName(handle);
     APS5_LOG_OUT("Pad: connected game controller: %s (type %d, sensors accel=%d gyro=%d, touchpads=%d, led=%d, trigger rumble=%d)",
-        name != nullptr ? name : "unknown", static_cast<int>(SDL_GameControllerGetType(controller)),
-        SDL_GameControllerHasSensor(controller, SDL_SENSOR_ACCEL) == SDL_TRUE, SDL_GameControllerHasSensor(controller, SDL_SENSOR_GYRO) == SDL_TRUE,
-        SDL_GameControllerGetNumTouchpads(controller), SDL_GameControllerHasLED(controller) == SDL_TRUE, SDL_GameControllerHasRumbleTriggers(controller) == SDL_TRUE);
-    enableSensors();
-    outputPending = true;
-    lightBar.Reset();
-    triggerEffect.Reset();
+        name != nullptr ? name : "unknown", static_cast<int>(SDL_GameControllerGetType(handle)),
+        SDL_GameControllerHasSensor(handle, SDL_SENSOR_ACCEL) == SDL_TRUE, SDL_GameControllerHasSensor(handle, SDL_SENSOR_GYRO) == SDL_TRUE,
+        SDL_GameControllerGetNumTouchpads(handle), SDL_GameControllerHasLED(handle) == SDL_TRUE, SDL_GameControllerHasRumbleTriggers(handle) == SDL_TRUE);
+    Controller controller;
+    controller.handle = handle;
+    controller.id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(handle));
+    controllers.push_back(std::move(controller));
+    enableSensors(controllers.back(), true);
 }
 
-void PadInput::enableSensors() {
-    if (controller == nullptr) return;
-    const SDL_bool wanted = outputState.motionEnabled ? SDL_TRUE : SDL_FALSE;
-    if (SDL_GameControllerHasSensor(controller, SDL_SENSOR_ACCEL) == SDL_TRUE) SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_ACCEL, wanted);
-    if (SDL_GameControllerHasSensor(controller, SDL_SENSOR_GYRO) == SDL_TRUE) SDL_GameControllerSetSensorEnabled(controller, SDL_SENSOR_GYRO, wanted);
+void PadInput::enableSensors(Controller& controller, bool wanted) {
+    controller.sensors = wanted;
+    const SDL_bool on = wanted ? SDL_TRUE : SDL_FALSE;
+    if (SDL_GameControllerHasSensor(controller.handle, SDL_SENSOR_ACCEL) == SDL_TRUE) SDL_GameControllerSetSensorEnabled(controller.handle, SDL_SENSOR_ACCEL, on);
+    if (SDL_GameControllerHasSensor(controller.handle, SDL_SENSOR_GYRO) == SDL_TRUE) SDL_GameControllerSetSensorEnabled(controller.handle, SDL_SENSOR_GYRO, on);
 }
 
-void PadInput::closeController() {
-    if (controller == nullptr) return;
-    SDL_GameControllerClose(controller);
-    controller = nullptr;
-    controllerState = {};
+void PadInput::closeController(SDL_JoystickID id) {
+    const auto found = std::find_if(controllers.begin(), controllers.end(), [id](const Controller& controller) { return controller.id == id; });
+    if (found == controllers.end()) return;
+    SDL_GameControllerClose(found->handle);
+    controllers.erase(found);
+    leave(static_cast<std::uint32_t>(id));
+}
+
+// A device gives its player back; another player's pad disconnects, the first player's stays.
+void PadInput::leave(std::uint32_t device) {
+    const int player = seats.Leave(device);
+    if (player <= 0) return;
+    PadDisconnectPlayer_nid_postfix(player);
+    published[static_cast<std::size_t>(player)] = false;
+    APS5_LOG_OUT("Pad: player %d left", player + 1);
+}
+
+void PadInput::sampleControllers() {
+    for (auto& controller : controllers) {
+        controller.state = sampleController(controller.handle);
+        const auto id = static_cast<std::uint32_t>(controller.id);
+        const bool seated = seats.Of(id) >= 0;
+        const int player = seats.Seat(id, RemotePad::Wants(controller.state));
+        if (!seated && player >= 0) {
+            controller.outputPending = true;
+            controller.lightBar.Reset();
+            controller.triggerEffect.Reset();
+            APS5_LOG_OUT("Pad: game controller is player %d", player + 1);
+        }
+    }
+}
+
+void PadInput::answer(Remote& remote, int player) {
+    if (!remote.last) return;
+    auto output = player >= 0 ? outputs[static_cast<std::size_t>(player)].state : PadOutputState{};
+    if (player > 0 && !output.lightBarValid) {
+        const auto color = RemotePad::PlayerColor(player);
+        output.lightBarValid = true;
+        std::copy(color.begin(), color.end(), output.lightBar);
+    }
+    remote.channel->Answer(*remote.last, output);
 }
 
 void PadInput::applyOutput() {
-    PadOutputState fetched;
-    if (PadFetchOutput_nid_postfix(&outputSequence, &fetched)) {
-        const bool motionChanged = fetched.motionEnabled != outputState.motionEnabled;
-        outputState = fetched;
-        outputPending = true;
-        if (motionChanged) enableSensors();
-        if (remote && remoteLast) remote->Answer(*remoteLast, outputState);
+    for (int player = 0; player < kPadPlayers; ++player) {
+        auto& output = outputs[static_cast<std::size_t>(player)];
+        PadOutputState fetched;
+        if (!PadFetchPlayerOutput_nid_postfix(player, &output.sequence, &fetched)) continue;
+        const bool motionChanged = fetched.motionEnabled != output.state.motionEnabled;
+        output.state = fetched;
+        for (auto& controller : controllers) {
+            if (seats.Of(static_cast<std::uint32_t>(controller.id)) != player) continue;
+            controller.outputPending = true;
+            if (motionChanged) enableSensors(controller, fetched.motionEnabled);
+        }
+        for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
+            if (seats.Of(RemotePad::RemoteDevice(channel)) == player) answer(remotes[channel], player);
+        }
     }
-    if (controller == nullptr) return;
+    for (auto& controller : controllers) {
+        const int player = seats.Of(static_cast<std::uint32_t>(controller.id));
+        if (player >= 0 && controller.sensors != outputs[static_cast<std::size_t>(player)].state.motionEnabled) {
+            enableSensors(controller, outputs[static_cast<std::size_t>(player)].state.motionEnabled);
+        }
+        applyOutput(controller, player >= 0 ? outputs[static_cast<std::size_t>(player)].state : PadOutputState{}, player);
+    }
+}
+
+void PadInput::applyOutput(Controller& pad, const PadOutputState& outputState, int player) {
+    SDL_GameController* controller = pad.handle;
     const auto now = std::chrono::steady_clock::now();
     const bool isPs5 = SDL_GameControllerGetType(controller) == SDL_CONTROLLER_TYPE_PS5;
     const auto large = std::max(outputState.vibrationLarge, outputState.audioVibrationLarge);
@@ -161,15 +213,15 @@ void PadInput::applyOutput() {
     if (SDL_GameControllerHasLED(controller) == SDL_TRUE) {
         const LightBarPacer::Color color = outputState.lightBarValid
             ? LightBarPacer::Color{outputState.lightBar[0], outputState.lightBar[1], outputState.lightBar[2]}
-            : LightBarPacer::Color{0, 64, 255};
-        if (lightBar.Due(color, now)) lightBar.Result(color, now, SDL_GameControllerSetLED(controller, color[0], color[1], color[2]) == 0);
+            : RemotePad::PlayerColor(std::max(player, 0));
+        if (pad.lightBar.Due(color, now)) pad.lightBar.Result(color, now, SDL_GameControllerSetLED(controller, color[0], color[1], color[2]) == 0);
     }
-    if (!outputPending) {
-        if ((rumbling || (triggerRumble && !isPs5)) && now >= nextRumbleRefresh) outputPending = true;
+    if (!pad.outputPending) {
+        if ((rumbling || (triggerRumble && !isPs5)) && now >= pad.nextRumbleRefresh) pad.outputPending = true;
         else return;
     }
-    outputPending = false;
-    nextRumbleRefresh = now + std::chrono::milliseconds(700);
+    pad.outputPending = false;
+    pad.nextRumbleRefresh = now + std::chrono::milliseconds(700);
     constexpr Uint32 rumbleMs = 2000;
     SDL_GameControllerRumble(controller, static_cast<Uint16>(large * 257), static_cast<Uint16>(small * 257), rumbling ? rumbleMs : 0);
     if (outputState.triggerTouched) {
@@ -178,8 +230,8 @@ void PadInput::applyOutput() {
             effect[0] = 0x04 | 0x08;
             std::memcpy(effect.data() + 10, outputState.trigger[1].effect, 11);
             std::memcpy(effect.data() + 21, outputState.trigger[0].effect, 11);
-            if (triggerEffect.NeedsSend(effect)) {
-                triggerEffect.Result(effect, SDL_GameControllerSendEffect(controller, effect.data(), static_cast<int>(effect.size())) == 0);
+            if (pad.triggerEffect.NeedsSend(effect)) {
+                pad.triggerEffect.Result(effect, SDL_GameControllerSendEffect(controller, effect.data(), static_cast<int>(effect.size())) == 0);
             }
         } else if (SDL_GameControllerHasRumbleTriggers(controller) == SDL_TRUE) {
             SDL_GameControllerRumbleTriggers(controller, static_cast<Uint16>(outputState.trigger[0].fallback * 257), static_cast<Uint16>(outputState.trigger[1].fallback * 257), triggerRumble ? rumbleMs : 0);
@@ -194,10 +246,10 @@ void PadInput::setMouseMode(bool enabled) {
     keyboardMouse.SetMouseMode(enabled);
 }
 
-PadInputState PadInput::sampleController() const {
+PadInputState PadInput::sampleController(SDL_GameController* controller) const {
     PadInputState result;
     if (controller == nullptr) return result;
-    const auto readButton = [this](SDL_GameControllerButton button) {
+    const auto readButton = [controller](SDL_GameControllerButton button) {
         return SDL_GameControllerGetButton(controller, button) != 0;
     };
     const auto addButton = [&result, &readButton](SDL_GameControllerButton source, Pad::PadButton button) {
@@ -221,7 +273,7 @@ PadInputState PadInput::sampleController() const {
     addButton(SDL_CONTROLLER_BUTTON_DPAD_LEFT, Pad::PadButton::Left);
     addButton(SDL_CONTROLLER_BUTTON_TOUCHPAD, Pad::PadButton::TouchPad);
 
-    const auto triggerValue = [this](SDL_GameControllerAxis axis) {
+    const auto triggerValue = [controller](SDL_GameControllerAxis axis) {
         const auto value = std::clamp<int>(SDL_GameControllerGetAxis(controller, axis), 0, 32767);
         return static_cast<std::uint8_t>((value * 255 + 16383) / 32767);
     };
@@ -230,7 +282,7 @@ PadInputState PadInput::sampleController() const {
     if (result.analogButtonsL2 != 0) result.buttons |= static_cast<std::uint32_t>(Pad::PadButton::L2);
     if (result.analogButtonsR2 != 0) result.buttons |= static_cast<std::uint32_t>(Pad::PadButton::R2);
 
-    const auto stick = [this](SDL_GameControllerAxis xAxis, SDL_GameControllerAxis yAxis, int deadzonePercent) {
+    const auto stick = [controller](SDL_GameControllerAxis xAxis, SDL_GameControllerAxis yAxis, int deadzonePercent) {
         return Pad::StickWithDeadzone(SDL_GameControllerGetAxis(controller, xAxis), SDL_GameControllerGetAxis(controller, yAxis), deadzonePercent);
     };
     const auto left = stick(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, keyboardMouse.Configuration().settings.leftStickDeadzonePercent);
@@ -272,17 +324,14 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
         openController(event.cdevice.which);
         return;
     }
-    if (event.type == SDL_CONTROLLERDEVICEREMOVED && controller != nullptr) {
-        const auto instanceId = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
-        if (instanceId == event.cdevice.which) {
-            closeController();
-            openFirstAvailableController();
-            publish(window.FrameNumber());
-        }
+    if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
+        closeController(event.cdevice.which);
+        publish(window.FrameNumber());
         return;
     }
     if (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERBUTTONUP ||
         event.type == SDL_CONTROLLERAXISMOTION || event.type == SDL_CONTROLLERDEVICEREMAPPED) {
+        sampleControllers();
         publish(window.FrameNumber());
         return;
     }
@@ -307,34 +356,51 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     if (event.type != SDL_MOUSEMOTION) publish(window.FrameNumber());
 }
 
-void PadInput::updateRemote() {
-    if (!remote) return;
+// Each phone's newest input; a phone that starts pressing takes a player, one silent for
+// RemotePad::Gone gives it back. Returns whether any phone's input changed.
+void PadInput::updateRemotes() {
     const auto now = std::chrono::steady_clock::now();
-    remote->Greet(now);
-    if (auto input = remote->Poll(now)) {
-        remoteLast = std::move(input);
-        remoteSeen = now;
-        remote->Answer(*remoteLast, outputState);
+    for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
+        auto& remote = remotes[channel];
+        const auto device = RemotePad::RemoteDevice(channel);
+        remote.channel->Greet(now);
+        if (auto input = remote.channel->Poll(now)) {
+            remote.last = std::move(input);
+            remote.seen = now;
+            const bool seated = seats.Of(device) >= 0;
+            const int player = seats.Seat(device, RemotePad::Wants(remote.last->state));
+            if (!seated && player >= 0) APS5_LOG_OUT("Pad: phone %zu is player %d", channel + 1, player + 1);
+            answer(remote, player);
+        }
+        if (remote.last && now - remote.seen >= RemotePad::Gone) {
+            remote.last.reset();
+            leave(device);
+        }
+        remote.state = RemotePad::Current(remote.last, remote.seen, now);
     }
-    remoteState = RemotePad::Current(remoteLast, remoteSeen, now);
 }
 
 void PadInput::Update(const DisplayWindow& window) {
-    if (controller != nullptr) SDL_GameControllerUpdate();
+    if (!controllers.empty()) SDL_GameControllerUpdate();
     applyOutput();
-    const auto remoteBefore = remoteState;
-    updateRemote();
-    if (remoteState.buttons != remoteBefore.buttons || remoteState.sticks != remoteBefore.sticks ||
-        remoteState.analogButtonsL2 != remoteBefore.analogButtonsL2 || remoteState.analogButtonsR2 != remoteBefore.analogButtonsR2 ||
-        remoteState.touch != remoteBefore.touch || remoteState.hasMotion) {
-        publish(window.FrameNumber());
+    std::vector<PadInputState> remotesBefore;
+    for (const auto& remote : remotes) remotesBefore.push_back(remote.state);
+    updateRemotes();
+    for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
+        const auto& before = remotesBefore[channel];
+        const auto& now = remotes[channel].state;
+        if (now.buttons != before.buttons || now.sticks != before.sticks || now.analogButtonsL2 != before.analogButtonsL2 ||
+            now.analogButtonsR2 != before.analogButtonsR2 || now.touch != before.touch || now.hasMotion) {
+            publish(window.FrameNumber());
+            break;
+        }
     }
     static std::uint32_t scripted = 0;
     if (const auto buttons = ScriptedButtons(); buttons != scripted) {
         scripted = buttons;
         publish(window.FrameNumber());
     }
-    if (controller != nullptr) controllerState = sampleController();
+    sampleControllers();
     if (keyboardMouse.MouseMode() && SDL_GetKeyboardFocus() == nullptr) {
         keyboardMouse.Release();
         setMouseMode(false);
@@ -342,12 +408,30 @@ void PadInput::Update(const DisplayWindow& window) {
         return;
     }
     const bool changed = keyboardMouse.Advance(std::chrono::steady_clock::now());
-    if (controller != nullptr || keyboardMouse.MouseMode() || changed) publish(window.FrameNumber());
+    if (!controllers.empty() || keyboardMouse.MouseMode() || changed) publish(window.FrameNumber());
 }
 
+// Every player's pad from the device seated there; the first player's also from the keyboard,
+// the mouse and APS5_PAD_SCRIPT, and published even with no device.
 void PadInput::publish(std::uint64_t frame) {
-    auto state = keyboardMouse.Compose(RemotePad::Merge(controllerState, remoteState));
-    state.buttons |= ScriptedButtons();
-    PadPublishInput_nid_postfix(state);
-    if (auto* telemetry = VideoOutTelemetry::Instance(); telemetry != nullptr) VideoOutTelemetry::EmitPadIfChanged(*telemetry, telemetryFilter, frame, state);
+    for (int player = 0; player < kPadPlayers; ++player) {
+        std::optional<PadInputState> device;
+        for (const auto& controller : controllers) {
+            if (seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.state;
+        }
+        for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
+            if (seats.Of(RemotePad::RemoteDevice(channel)) == player) device = RemotePad::Merge(device.value_or(PadInputState{}), remotes[channel].state);
+        }
+        if (player != 0) {
+            if (!device) continue;
+            PadPublishPlayerInput_nid_postfix(player, *device);
+            if (!published[static_cast<std::size_t>(player)]) APS5_LOG_OUT("Pad: player %d joined", player + 1);
+            published[static_cast<std::size_t>(player)] = true;
+            continue;
+        }
+        auto state = keyboardMouse.Compose(device.value_or(PadInputState{}));
+        state.buttons |= ScriptedButtons();
+        PadPublishInput_nid_postfix(state);
+        if (auto* telemetry = VideoOutTelemetry::Instance(); telemetry != nullptr) VideoOutTelemetry::EmitPadIfChanged(*telemetry, telemetryFilter, frame, state);
+    }
 }

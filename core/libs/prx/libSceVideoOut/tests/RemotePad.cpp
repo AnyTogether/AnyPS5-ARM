@@ -291,6 +291,66 @@ void environment() {
     ::unsetenv("ANYPS5_REMOTE_PAD");
 }
 
+
+void onlyRealInputWantsAPlayer() {
+    PadInputState state;
+    require(!RemotePad::Wants(state), "a pad at rest does not ask for a player");
+    state.hasMotion = true;
+    state.gyro = {1.0f, 0.0f, 0.0f};
+    require(!RemotePad::Wants(state), "moving the device is not asking for a player");
+    state.sticks[0] = 150;
+    require(!RemotePad::Wants(state), "a stick near the centre is not asking");
+    state.sticks[0] = 230;
+    require(RemotePad::Wants(state), "a stick pushed asks for a player");
+    state = PadInputState{};
+    state.buttons = 0x4000u;
+    require(RemotePad::Wants(state), "a button asks for a player");
+    state = PadInputState{};
+    state.analogButtonsR2 = 40;
+    require(RemotePad::Wants(state), "a trigger asks for a player");
+    state = PadInputState{};
+    state.touch[0].active = true;
+    require(RemotePad::Wants(state), "a touch asks for a player");
+}
+
+void seatsGoInOrderAndComeBack() {
+    RemotePad::Seats seats;
+    require(seats.Seat(7, false) == -1, "a device that does not ask gets no player");
+    require(seats.Seat(7, true) == 0, "the first device to ask is the first player");
+    require(seats.Seat(7, false) == 0, "a device keeps its player while it rests");
+    require(seats.Seat(RemotePad::RemoteDevice(0), true) == 1, "the next device is the second player");
+    require(seats.Seat(9, true) == 2, "then the third");
+    require(seats.Held(1) && seats.Of(RemotePad::RemoteDevice(0)) == 1, "the seat is held");
+    require(seats.Leave(7) == 0, "leaving frees the player it held");
+    require(seats.Leave(7) == -1, "leaving twice frees nothing");
+    require(!seats.Held(0), "the first player is free again");
+    require(seats.Seat(11, true) == 0, "a new device takes the lowest free player");
+    require(seats.Seat(12, true) == 3, "and the last");
+    require(seats.Seat(13, true) == -1, "a fifth device gets no player");
+    require(RemotePad::RemoteDevice(0) != RemotePad::RemoteDevice(1), "phones are told apart");
+}
+
+void environmentForMorePlayers() {
+    ::unsetenv("ANYPS5_REMOTE_PAD");
+    ::setenv("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002", 1);
+    require(RemotePad::OpenAllFromEnvironment().empty(), "no channel for later players without the first");
+    ::setenv("ANYPS5_REMOTE_PAD", "127.0.0.1:5001", 1);
+    ::setenv("ANYPS5_REMOTE_PAD_4", "127.0.0.1:5004", 1);
+    const auto channels = RemotePad::OpenAllFromEnvironment();
+    require(channels.size() == 2, "a channel for ANYPS5_REMOTE_PAD and each numbered one, stopping at a gap");
+    ::setenv("ANYPS5_REMOTE_PAD_2", "10.0.0.1:5002", 1);
+    bool threw = false;
+    try {
+        RemotePad::OpenAllFromEnvironment();
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()).find("ANYPS5_REMOTE_PAD_2") != std::string::npos;
+    }
+    require(threw, "a malformed numbered address stops with an error naming it");
+    ::unsetenv("ANYPS5_REMOTE_PAD");
+    ::unsetenv("ANYPS5_REMOTE_PAD_2");
+    ::unsetenv("ANYPS5_REMOTE_PAD_4");
+}
+
 }
 
 int main() try {
@@ -305,6 +365,9 @@ int main() try {
     answerTellsHowLongTheInputWaited();
     remoteReleasedAfterSilence();
     environment();
+    onlyRealInputWantsAPlayer();
+    seatsGoInOrderAndComeBack();
+    environmentForMorePlayers();
     std::cout << "remote pad tests passed\n";
     return 0;
 } catch (const std::exception& error) {
