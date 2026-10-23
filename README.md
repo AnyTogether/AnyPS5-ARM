@@ -176,6 +176,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad, any of them at once, with the latency shown. It takes over as soon as a game starts.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
 - **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
+- **Motion:** the phone's accelerometer and gyroscope are the DualSense's motion sensors, for games that tilt or aim with them.
 - **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
 - The phone uses the launcher's language (English by default, or Turkish).
 
