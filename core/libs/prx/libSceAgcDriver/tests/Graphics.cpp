@@ -945,6 +945,57 @@ void msaaEnableClearOneSampleTargetTests() {
     expectFailure([&] { DecodeState(queue); }, "a color target's sample count differs from the rasterizer's");
 }
 
+void UnwrittenDepthPlaneTests() {
+    using AgcDriver::Graphics::DecodeState;
+    using AgcDriver::Graphics::DrawRejection;
+    const auto fresh = [](std::uint32_t depthControl) {
+        auto written = makeState();
+        written.context[0x200] = depthControl;
+        written.context[0x1b3] = 2;
+        written.context[0x1b4] = 2;
+        AgcDriver::QueueState queue;
+        queue.shader = written.shader;
+        queue.userConfig = written.userConfig;
+        written.context.ForEach([&](std::uint32_t offset, std::uint32_t value) { queue.context[offset] = value; });
+        return queue;
+    };
+    auto queue = fresh(0x777);
+    auto state = DecodeState(queue);
+    Require(!state.depth && !state.depthTest && !state.depthWrite && !state.stencilTest, "depth and stencil tests on unwritten depth and stencil planes were kept (PPSA24040's DB_DEPTH_CONTROL)");
+    auto rejection = DrawRejection(queue, false);
+    Require(rejection.empty(), "the precheck refused depth and stencil tests on unwritten depth and stencil planes: " + rejection);
+    queue = fresh(0x77f);
+    state = DecodeState(queue);
+    Require(!state.depth && !state.depthBoundsTest, "a depth bounds test on unwritten depth and stencil planes was kept");
+    rejection = DrawRejection(queue, false);
+    Require(rejection.empty(), "the precheck refused a depth bounds test on unwritten depth and stencil planes: " + rejection);
+    queue = fresh(0x007007b3);
+    queue.context[0x010] = 0x80000183;
+    queue.context[0x012] = 0x00001000;
+    queue.context[0x014] = 0x00001000;
+    queue.context[0x007] = 0x0001001f;
+    queue.context[0x00b] = 0x3f800000;
+    state = DecodeState(queue);
+    Require(state.depth && state.depthTest && !state.stencilTest && state.renderExtent.width == 32 && state.renderExtent.height == 2, "a depth plane beside an unwritten DB_STENCIL_INFO did not decode as depth only");
+    rejection = DrawRejection(queue, false);
+    Require(rejection.empty(), "the precheck refused a depth plane beside an unwritten DB_STENCIL_INFO: " + rejection);
+    queue = fresh(0x007007b3);
+    queue.context[0x011] = 0x20000181;
+    queue.context[0x013] = 0x00002000;
+    queue.context[0x015] = 0x00002000;
+    queue.context[0x007] = 0x003f003f;
+    queue.context[0x00b] = 0x3f800000;
+    queue.context[0x10c] = 0x01ffff00;
+    queue.context[0x10d] = 0x01ffff00;
+    state = DecodeState(queue);
+    Require(!state.depthTest && state.stencilTest, "a stencil plane beside an unwritten DB_Z_INFO kept the depth test or lost the stencil test");
+    rejection = DrawRejection(queue, false);
+    Require(rejection.empty(), "the precheck refused a stencil plane beside an unwritten DB_Z_INFO: " + rejection);
+    queue.context[0x010] = 0x80000183;
+    queue.ClearContext();
+    for (const auto offset : {0x010u, 0x011u}) Require(queue.context.contains(offset) && queue.context.at(offset) == 0, "CLEAR_STATE did not reset DB_Z_INFO and DB_STENCIL_INFO to their clear-state value 0");
+}
+
 void MsaaEnableSingleSampleTests() {
     using AgcDriver::Graphics::DecodeState;
     using AgcDriver::Graphics::DrawRejection;
@@ -11570,6 +11621,7 @@ int main(int argc, char** argv) {
         UnwrittenSampleLocationTests();
         sampleLocationGridFallbackTests();
         sampleOrderTests();
+        UnwrittenDepthPlaneTests();
         depthCopyFormatTests();
         quadPixelMaskTests();
         ShaderStageTests();

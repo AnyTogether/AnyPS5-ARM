@@ -1066,11 +1066,6 @@ int APS5_VABI sceKernelGetProcessName(void) {
     return 0;
 }
 
-int APS5_VABI sceKernelGetProcessType(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI sceKernelGetProcessTypeOfBudget(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -2061,11 +2056,6 @@ int APS5_VABI sceKernelTerminateProcess(void) {
 }
 
 int APS5_VABI sceKernelTerminateSysCore(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI sceKernelTitleWorkaroundIsEnabled(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

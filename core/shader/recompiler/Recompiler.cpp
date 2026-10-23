@@ -1149,6 +1149,7 @@ RecompileResult materializeResult(const CompiledVariant& variant, const Recompil
     DescriptorBindingBuilder{}.Populate(bindings, variant.bindings, *bindingPlan, variant.info.userDataBase, snapshot, partialThreads(request), &tables);
     result.workgroupMemoryDwords = WorkgroupMemoryStrideDwords(variant.info.info);
     result.bindings = std::move(bindings.bindings);
+    if (std::ranges::none_of(result.bindings, [](const DescriptorBinding& binding) { return binding.role == DescriptorRole::BdaPagetable || binding.role == DescriptorRole::FaultBuffer; })) result.bdaAbiVersion = 0u;
     result.pushConstants = std::move(bindings.pushConstants);
     result.readsDepthRemapPush = depthRemap;
     if (request.shader.stage == ShaderStage::Compute) {

@@ -5856,10 +5856,10 @@ void verifyInt64AtomicCapabilities() {
     require(declares(compile(imageAtomic, spv::CapabilityInt64ImageEXT), spv::CapabilityInt64ImageEXT), "64-bit atomics: an image_atomic_swap on a 32_32 image does not declare Int64ImageEXT");
 }
 
-void verifySpecializedBufferAtomicBindings() {
+void verifySpecializedBufferAtomicBindings(bool finalAbiOnly = false) {
     using namespace ShaderRecompiler;
     const std::array<std::string_view, 2> extensions{"SPV_KHR_physical_storage_buffer", "SPV_KHR_8bit_storage"};
-    const std::array<std::uint32_t, 3> capabilities{spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess};
+    const std::array<std::uint32_t, 4> capabilities{spv::CapabilityInt64, spv::CapabilityPhysicalStorageBufferAddresses, spv::CapabilityStorageBuffer8BitAccess, spv::CapabilityInt64Atomics};
     alignas(256) static std::array<std::uint32_t, 64> buffer{};
     const auto bufferAddress = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(buffer.data()));
     const std::array<std::uint32_t, 16> userData{
@@ -5867,8 +5867,8 @@ void verifySpecializedBufferAtomicBindings() {
         static_cast<std::uint32_t>(bufferAddress), static_cast<std::uint32_t>((bufferAddress >> 32u) & 0xffffu), 256u, 0x31016facu,
         0u, 0u, 0u, 0u,
         0u, 0u, 0u, 0u};
-    const std::vector<std::uint32_t> code{0xe0f05000u, 0x80012803u, 0xbf810000u};
-    const auto compile = [&](std::span<const std::uint32_t> supported) {
+    const auto compile = [&](std::span<const std::uint32_t> supported, std::uint32_t opcode = 0xe0f05000u) {
+        const std::array<std::uint32_t, 3> code{opcode, 0x80012803u, 0xbf810000u};
         RecompileRequest request{};
         request.shader = {ShaderStage::Compute, 0x58800u, code, 0, {}};
         request.context.waveSize = 32;
@@ -5886,6 +5886,16 @@ void verifySpecializedBufferAtomicBindings() {
         request.useCache = false;
         return Recompile(request);
     };
+    if (finalAbiOnly) {
+        for (const auto opcode : {0xe0f05000u, 0xe1705000u}) {
+            const auto result = compile(capabilities, opcode);
+            const auto faults = std::ranges::count_if(result.bindings, [](const DescriptorBinding& binding) { return binding.role == DescriptorRole::FaultBuffer; });
+            require(faults <= 1, "specialized buffer atomic: duplicate fault buffers");
+            require(result.bdaAbiVersion == (faults == 0 ? 0u : BdaAbi::Version), "specialized buffer atomic: final fault binding and BDA ABI disagree");
+            if (opcode == 0xe1705000u) require(faults == 1, "specialized buffer atomic: a 64-bit atomic lost its live fault buffer");
+        }
+        return;
+    }
     const auto result = compile(capabilities);
     std::size_t tables = 0;
     std::size_t faults = 0;
@@ -7667,6 +7677,11 @@ int main(int argc, char** argv) {
         setenv("ANYPS5_NO_SHADER_CACHE", "1", 1);
 #endif
         using namespace ShaderRecompiler;
+        if (argc == 2 && std::string_view(argv[1]) == "--specialized-bda-abi") {
+            verifySpecializedBufferAtomicBindings(true);
+            std::cout << "Specialized programs retain the BDA ABI only while a fault buffer remains\n";
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--quad-mask-no-demote") {
             verifyQuadMaskNeighbourReads();
             std::cout << "Quad masks preserve neighbour-lane helpers or refuse without demote\n";

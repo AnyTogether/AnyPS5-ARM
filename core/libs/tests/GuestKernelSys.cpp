@@ -44,6 +44,9 @@ int APS5_VABI fchdir_nid_postfix(int);
 int APS5_VABI chdir_nid_postfix(const char*);
 int APS5_VABI chroot_nid_postfix(const char*);
 char* APS5_VABI getcwd_nid_postfix(char*, std::size_t);
+int APS5_VABI getpid_nid_postfix();
+int APS5_VABI sceKernelTitleWorkaroundIsEnabled(const void*, std::int32_t, std::int32_t*);
+int APS5_VABI sceKernelGetProcessType(int);
 int APS5_VABI sceKernelOpen(const char*, int, std::uint16_t);
 int APS5_VABI sceKernelClose(int);
 int APS5_VABI sceKernelRename(const char*, const char*);
@@ -288,12 +291,34 @@ void DirectoryRenameTests(const std::filesystem::path& parent) {
     Require(std::filesystem::remove(original) && std::filesystem::remove(moved) && std::filesystem::remove(fixture));
 }
 
+static void CheckProcessQueries() {
+    struct {
+        std::int32_t version;
+        std::int32_t align;
+        std::uint64_t ids[2];
+    } workaround{1, 0, {(1ull << 3) | (1ull << 0x39), ~0ull}};
+    std::int32_t enabled = -1;
+    Require(sceKernelTitleWorkaroundIsEnabled(nullptr, 3, &enabled) == static_cast<int>(0x8002000E));
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 3, nullptr) == static_cast<int>(0x8002000E));
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 0x3A, &enabled) == static_cast<int>(0x80020016) && enabled == -1);
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, -1, &enabled) == static_cast<int>(0x80020016) && enabled == -1);
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 3, &enabled) == 0 && enabled == 1);
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 4, &enabled) == 0 && enabled == 0);
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 63, &enabled) == static_cast<int>(0x80020016));
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 0x39, &enabled) == 0 && enabled == 1);
+    Require(sceKernelTitleWorkaroundIsEnabled(&workaround, 0x38, &enabled) == 0 && enabled == 0);
+    Require(sceKernelGetProcessType(getpid_nid_postfix()) == 0);
+    Require(sceKernelGetProcessType(-1) == 0 && sceKernelGetProcessType(0) == 0);
+    Require(sceKernelGetProcessType(getpid_nid_postfix() + 1) == static_cast<int>(0x80020003));
+}
+
 int main() {
 #ifdef _WIN32
     auto hostDirectorySpelling = std::filesystem::current_path().native();
     CharUpperBuffW(hostDirectorySpelling.data(), static_cast<DWORD>(hostDirectorySpelling.size()));
     Require(SetCurrentDirectoryW(hostDirectorySpelling.c_str()) != 0);
 #endif
+    CheckProcessQueries();
     Require(setsid_nid_postfix() == -1 && Error() == 1);
     Require(umask_nid_postfix(0) == 022);
     Require(umask_nid_postfix(07777) == 0);

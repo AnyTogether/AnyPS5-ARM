@@ -377,6 +377,16 @@ if(BUILD_TESTING)
         set_tests_properties(guest_kernel_sys guest_kernel_sys_thread_defaults guest_kernel_sys_barrier guest_kernel_sys_pthread PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libkernel_sys>")
     endif()
+
+    add_test_executable(guest_gnm_neo_packets_tests tests/GuestGnmNeoPackets.cpp)
+    target_include_directories(guest_gnm_neo_packets_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(guest_gnm_neo_packets_tests PRIVATE libSceGnmDriverForNeoMode libc)
+    configure_windows_unwind(guest_gnm_neo_packets_tests)
+    add_test(NAME guest_gnm_neo_packets COMMAND guest_gnm_neo_packets_tests)
+    if(WIN32)
+        set_tests_properties(guest_gnm_neo_packets PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceGnmDriverForNeoMode>")
+    endif()
     if(APPLE)
         add_subdirectory(tests/write_watch)
         add_subdirectory(tests/guest_arena)
