@@ -43,11 +43,18 @@ struct PairingCard: View {
 
 /// mController, the phone, in the top bar: an empty ring with no phone, orange while one
 /// connects, green with its latency once it is connected.
+/// A connected phone in the indicator: its player number, or nil while it is none yet.
+struct PhoneBadge: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let number: Int?
+}
+
 struct PhoneIndicator: View {
     let phone: (name: String, latency: Double?)?
     let connecting: String?
-    /// The connected phones' names, by player: a light for each.
-    var names: [String] = []
+    /// The connected phones, a numbered light each.
+    var badges: [PhoneBadge] = []
     @Environment(\.scale) private var scale
     @State private var pulse = false
 
@@ -57,33 +64,68 @@ struct PhoneIndicator: View {
     var body: some View {
         let color: Color? = phone != nil ? Self.green : connecting != nil ? Self.orange : nil
         HStack(spacing: 8 * scale) {
-            HStack(spacing: 4 * scale) {
-                ForEach(0..<max(names.count, 1), id: \.self) { _ in
-                    ZStack {
-                        Circle().strokeBorder(.white.opacity(color == nil ? 0.45 : 0), lineWidth: 1.5 * scale)
-                        if let color {
-                            Circle().fill(color)
-                                .shadow(color: color, radius: 4 * scale)
-                                .opacity(phone == nil && pulse ? 0.35 : 1)
-                        }
+            if badges.isEmpty {
+                ZStack {
+                    Circle().strokeBorder(.white.opacity(color == nil ? 0.45 : 0), lineWidth: 1.5 * scale)
+                    if let color {
+                        Circle().fill(color)
+                            .shadow(color: color, radius: 4 * scale)
+                            .opacity(phone == nil && pulse ? 0.35 : 1)
                     }
-                    .frame(width: 9 * scale, height: 9 * scale)
-                    .transition(.scale.combined(with: .opacity))
                 }
+                .frame(width: 9 * scale, height: 9 * scale)
+            } else {
+                HStack(spacing: 4 * scale) {
+                    ForEach(badges) { badge in
+                        Badge(number: badge.number)
+                            .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(duration: 0.4, bounce: 0.35), value: badges)
             }
-            .animation(.spring(duration: 0.35, bounce: 0.3), value: names.count)
             Text("mController").font(.display(14 * scale, .semibold))
             if let latency = phone?.latency {
                 Text("\(Int(latency.rounded())) ms").font(.display(14 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.6))
             }
         }
         .foregroundStyle(.white.opacity(color == nil ? 0.55 : 0.9))
-        .padding(.horizontal, 14 * scale)
+        .padding(.leading, (badges.isEmpty ? 14 : 8) * scale)
+        .padding(.trailing, 14 * scale)
         .frame(height: 36 * scale)
         .background(Capsule().fill(Color.white.opacity(0.1)))
         .animation(.easeInOut(duration: 0.25), value: color)
         .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true } }
-        .help(names.count > 1 ? names.map { T.format(.phoneConnected, $0) }.joined(separator: "\n")
-              : phone.map { T.format(.phoneConnected, $0.name) } ?? connecting.map { T.format(.phoneConnecting, $0) } ?? T.text(.phoneNone))
+        .help(help)
+    }
+
+    private var help: String {
+        guard badges.count > 1 || badges.first?.number == nil, !badges.isEmpty else {
+            return phone.map { T.format(.phoneConnected, $0.name) } ?? connecting.map { T.format(.phoneConnecting, $0) } ?? T.text(.phoneNone)
+        }
+        return badges.map { badge in badge.number.map { T.format(.phonePlayer, $0, badge.name) } ?? T.format(.phoneWaiting, badge.name) }
+            .joined(separator: "\n")
+    }
+
+    /// One phone: its number on a lit green disc, or an empty ring while it has none.
+    private struct Badge: View {
+        let number: Int?
+        @Environment(\.scale) private var scale
+
+        var body: some View {
+            ZStack {
+                if let number {
+                    Circle().fill(PhoneIndicator.green)
+                        .shadow(color: PhoneIndicator.green.opacity(0.7), radius: 4 * scale)
+                    Text("\(number)")
+                        .font(.system(size: 11 * scale, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.black.opacity(0.78))
+                        .contentTransition(.numericText())
+                } else {
+                    Circle().strokeBorder(PhoneIndicator.green, lineWidth: 1.5 * scale)
+                }
+            }
+            .frame(width: 18 * scale, height: 18 * scale)
+        }
     }
 }

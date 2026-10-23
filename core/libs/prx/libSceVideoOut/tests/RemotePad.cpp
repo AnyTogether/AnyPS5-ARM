@@ -234,6 +234,22 @@ void greetsEverySecond() {
     require(launcher.receive().has_value(), "a hello follows a second later");
 }
 
+// The hello says which player the channel's phone is, so the launcher can show it.
+void helloNamesThePlayer() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    const auto start = std::chrono::steady_clock::now();
+    channel.Greet(start);
+    auto hello = launcher.receive();
+    require(hello && hello->size() == RemotePad::HelloSize && (*hello)[8] == 0, "a phone that is no player yet says 0");
+    channel.SetPlayer(2);
+    channel.Greet(start + std::chrono::milliseconds(10));
+    hello = launcher.receive();
+    require(hello && (*hello)[8] == 2, "a new player is said at once, counting from 1");
+    channel.Greet(start + std::chrono::milliseconds(20));
+    require(!launcher.receive(), "and then once a second again");
+}
+
 void olderSequenceIsIgnored() {
     require(RemotePad::IsNewer(8, 7) && RemotePad::IsNewer(0, 0xFFFFFFFFu), "later sequences are newer, also across the wrap");
     require(!RemotePad::IsNewer(7, 8) && !RemotePad::IsNewer(7, 7), "earlier and equal sequences are not newer");
@@ -360,6 +376,7 @@ int main() try {
     encodesOutput();
     loopbackChannel();
     greetsEverySecond();
+    helloNamesThePlayer();
     olderSequenceIsIgnored();
     newSessionStartsANewSequence();
     answerTellsHowLongTheInputWaited();

@@ -139,6 +139,19 @@ final class RemoteRelayTests: XCTestCase {
         }
     }
 
+    /// The game's hello on a bridge says which player that bridge's phone is.
+    func testTheGameSaysWhichPlayerEachPhoneIs() async throws {
+        var told = Self.hello
+        told[8] = 2
+        let game = UDPPeer()
+        game.send(told, to: server.bridgePorts[0])
+        for _ in 0..<50 where server.phonePlayers.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(server.phonePlayers, ["phone-1": 2])
+        game.send(Self.hello, to: server.bridgePorts[0])
+        for _ in 0..<50 where !server.phonePlayers.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(server.phonePlayers, [:])
+    }
+
     /// The second phone's pad goes to the game through the second bridge, and back.
     func testEachPhoneHasItsOwnBridge() async throws {
         let known = devices.add(id: "phone-2", name: "Galaxy")

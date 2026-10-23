@@ -106,7 +106,7 @@ struct TopBar: View {
             Spacer()
             iconButton("square.grid.3x3.fill", index: 0) { model.open(.library) }
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
-            PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, names: model.connectedPhoneNames)
+            PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 ZStack {
                     Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))

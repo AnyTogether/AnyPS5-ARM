@@ -34,7 +34,8 @@ struct Input {
 
 std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes);
 std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOutputState& output);
-std::array<std::uint8_t, HelloSize> EncodeHello();
+// player is the channel's player counting from 1, or 0 while its phone is none.
+std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player = 0);
 bool IsNewer(std::uint32_t sequence, std::uint32_t than);
 PadInputState Merge(const PadInputState& controller, const PadInputState& remote);
 PadInputState Current(const std::optional<Input>& last, std::chrono::steady_clock::time_point seen, std::chrono::steady_clock::time_point now);
@@ -49,6 +50,8 @@ public:
     std::optional<Input> Poll(std::chrono::steady_clock::time_point now);
     void Answer(const Input& last, const PadOutputState& output);
     void Greet(std::chrono::steady_clock::time_point now);
+    // Which player the phone is, from 1, or 0; a change is said in the next hello at once.
+    void SetPlayer(std::uint8_t number);
     std::uint16_t Port() const { return port; }
 
 private:
@@ -60,6 +63,7 @@ private:
     std::optional<std::uint32_t> newest;
     std::optional<std::uint64_t> session;
     std::optional<std::chrono::steady_clock::time_point> greeted;
+    std::uint8_t player = 0;
 };
 
 std::unique_ptr<Channel> OpenFromEnvironment();

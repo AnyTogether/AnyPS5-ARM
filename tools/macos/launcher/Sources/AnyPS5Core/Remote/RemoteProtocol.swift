@@ -277,6 +277,13 @@ public enum RemotePacket {
 
     public static func isHello(_ data: Data) -> Bool { header(data, magic: helloMagic, size: helloSize) }
 
+    /// The player a game's hello says its bridge's phone is, from 1; nil while it is none.
+    public static func helloPlayer(_ data: Data) -> Int? {
+        guard isHello(data) else { return nil }
+        let player = data[data.startIndex + 8]
+        return player == 0 ? nil : Int(player)
+    }
+
     static func header(_ data: Data, magic: UInt32, size: Int) -> Bool {
         data.count == size && read(data, at: 0) as UInt32 == magic && read(data, at: 4) as UInt16 == version && Int(read(data, at: 6) as UInt16) == size
     }

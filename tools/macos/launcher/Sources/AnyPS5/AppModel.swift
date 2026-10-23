@@ -133,7 +133,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var phone: (name: String, latency: Double?)?
     /// The device IDs of the phones connected now, by player.
     @Published private(set) var connectedPhones: [String] = []
-    var connectedPhoneNames: [String] { connectedPhones.map { id in phones.first { $0.id == id }?.name ?? id } }
+    /// Which player each connected phone is in the game playing, from 1, by device ID.
+    @Published private(set) var phonePlayers: [String: Int] = [:]
+
+    /// The connected phones as the indicator shows them: by player in a game, a phone not
+    /// pressed yet with no number; outside a game, numbered as they connected.
+    var phoneBadges: [PhoneBadge] {
+        if let previewBadges { return previewBadges }
+        let playing = running != nil
+        let badges = connectedPhones.enumerated().map { slot, id in
+            PhoneBadge(id: id, name: phones.first { $0.id == id }?.name ?? id, number: playing ? phonePlayers[id] : slot + 1)
+        }
+        return badges.sorted { ($0.number ?? .max) < ($1.number ?? .max) }
+    }
     /// A phone that said hello and is not connected yet (pairing, or about to be welcomed).
     @Published private(set) var phoneConnecting: String?
     /// The phones allowed so far, for the settings.
@@ -686,6 +698,7 @@ final class AppModel: ObservableObject {
                 withAnimation(Motion.overlay) {
                     self.phone = self.remote?.connectedDevice.map { ($0, nil) }
                     self.connectedPhones = self.remote?.connectedDeviceIDs ?? []
+                    self.phonePlayers = self.remote?.phonePlayers ?? [:]
                 }
             } },
             latency: { milliseconds in Task { @MainActor in if let phone = self.phone { self.phone = (phone.name, milliseconds) } } },
@@ -693,6 +706,9 @@ final class AppModel: ObservableObject {
             connecting: { name in Task { @MainActor in
                 guard self.phone == nil || name != nil else { return }
                 withAnimation(Motion.overlay) { self.phoneConnecting = name }
+            } },
+            players: { Task { @MainActor in
+                withAnimation(Motion.overlay) { self.phonePlayers = self.remote?.phonePlayers ?? [:] }
             } })
         // Whatever the launcher shows changes the library the phone shows.
         librarySink = objectWillChange.debounce(for: .milliseconds(150), scheduler: RunLoop.main).sink { [weak self] _ in
@@ -733,6 +749,12 @@ final class AppModel: ObservableObject {
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
 
     func previewPhoneConnecting(_ name: String) { phoneConnecting = name }
+
+    private var previewBadges: [PhoneBadge]?
+    func previewPhones(_ badges: [PhoneBadge]) {
+        previewBadges = badges
+        phone = (badges[0].name, 9)
+    }
 
     func previewUpdate(_ release: Updates.Release, progress: Double?) {
         availableUpdate = release

@@ -112,11 +112,12 @@ std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOu
     return bytes;
 }
 
-std::array<std::uint8_t, HelloSize> EncodeHello() {
+std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player) {
     std::array<std::uint8_t, HelloSize> bytes{};
     write<std::uint32_t>(bytes.data(), 0, HelloMagic);
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(HelloSize));
+    bytes[8] = player;
     return bytes;
 }
 
@@ -215,8 +216,14 @@ void Channel::Answer(const Input& last, const PadOutputState& output) {
 void Channel::Greet(std::chrono::steady_clock::time_point now) {
     if (greeted && now - *greeted < std::chrono::seconds(1)) return;
     greeted = now;
-    const auto bytes = EncodeHello();
+    const auto bytes = EncodeHello(player);
     send(bytes.data(), bytes.size());
+}
+
+void Channel::SetPlayer(std::uint8_t number) {
+    if (number == player) return;
+    player = number;
+    greeted.reset();
 }
 
 void Channel::send(const std::uint8_t* bytes, std::size_t size) {

@@ -41,16 +41,20 @@ public final class RemoteServer: @unchecked Sendable {
         /// A phone that said hello and is not welcomed yet, by name; nil when it gave up or was
         /// refused before that.
         public var connecting: @Sendable (String?) -> Void
+        /// The game said a phone became another player, or none (`phonePlayers`).
+        public var players: @Sendable () -> Void
 
         public init(pairing: @escaping @Sendable (PairingRequest) -> Void = { _ in }, connected: @escaping @Sendable (String) -> Void = { _ in },
                     disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in },
-                    request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }, connecting: @escaping @Sendable (String?) -> Void = { _ in }) {
+                    request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }, connecting: @escaping @Sendable (String?) -> Void = { _ in },
+                    players: @escaping @Sendable () -> Void = {}) {
             self.pairing = pairing
             self.connected = connected
             self.disconnected = disconnected
             self.latency = latency
             self.request = request
             self.connecting = connecting
+            self.players = players
         }
     }
 
@@ -162,6 +166,19 @@ public final class RemoteServer: @unchecked Sendable {
 
     /// Every welcomed phone's device ID, by slot.
     public var connectedDeviceIDs: [String] { queue.sync { phones.compactMap(\.deviceID) } }
+
+    /// Which player each welcomed phone is in the game, from 1, by device ID; a phone that is
+    /// no player yet is left out.
+    public var phonePlayers: [String: Int] {
+        queue.sync {
+            var players: [String: Int] = [:]
+            for client in phones {
+                guard let id = client.deviceID, let slot = client.slot, let player = gamePlayers[slot] else { continue }
+                players[id] = player
+            }
+            return players
+        }
+    }
 
     /// The user's answer to a pairing request.
     public func respond(to id: UUID, allow: Bool) {
@@ -286,6 +303,7 @@ public final class RemoteServer: @unchecked Sendable {
             events.connecting(nil)
         } else if phones.contains(where: { $0 === client }) {
             phones.removeAll { $0 === client }
+            if let slot = client.slot, gamePlayers.indices.contains(slot) { gamePlayers[slot] = nil }
             events.disconnected()
         }
     }
@@ -312,6 +330,8 @@ public final class RemoteServer: @unchecked Sendable {
     private var bridgeSockets: [Int32] = []
     private var sources: [DispatchSourceRead] = []
     private var gameAddresses: [sockaddr_storage?] = []
+    /// The player the game last said each slot's phone is.
+    private var gamePlayers: [Int?] = []
 
     /// The UDP port the phone sends its pad to, on every interface.
     public var udpPort: UInt16? { queue.sync { relayPort } }
@@ -364,6 +384,7 @@ public final class RemoteServer: @unchecked Sendable {
             phoneSocket = phone
             bridgeSockets = bridges
             gameAddresses = Array(repeating: nil, count: bridges.count)
+            gamePlayers = Array(repeating: nil, count: bridges.count)
             sources = [watch(phone) { [weak self] in self?.fromPhone() }]
                 + bridges.indices.map { slot in watch(bridges[slot]) { [weak self] in self?.fromGame(slot) } }
         }
@@ -375,6 +396,7 @@ public final class RemoteServer: @unchecked Sendable {
         phoneSocket = -1
         bridgeSockets = []
         gameAddresses = []
+        gamePlayers = []
     }
 
     private func watch(_ socket: Int32, _ handler: @escaping () -> Void) -> DispatchSourceRead {
@@ -400,6 +422,11 @@ public final class RemoteServer: @unchecked Sendable {
         while let (data, source) = RemoteServer.receive(bridgeSockets[slot]) {
             if RemotePacket.isHello(data) {
                 gameAddresses[slot] = source
+                let player = RemotePacket.helloPlayer(data)
+                if gamePlayers[slot] != player {
+                    gamePlayers[slot] = player
+                    events.players()
+                }
             } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game),
                       var phone = phones.first(where: { $0.slot == slot })?.address {
                 RemoteServer.send(data, from: phoneSocket, to: &phone)
