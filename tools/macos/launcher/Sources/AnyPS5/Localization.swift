@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, gameLanguage, followLauncher
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -125,6 +125,8 @@ enum T {
         .overlayBottomLeft: "Sol Alt",
         .overlayBottomRight: "Sağ Alt",
         .overlayStyle: "Gösterge Stili",
+        .frameGeneration: "Ara Kare Üretimi",
+        .frameGenerationDetail: "Deneysel · her iki karenin arasına bir kare; dikey senkronizasyonu açar",
         .overlayMinimal: "Sade",
         .overlayDetailed: "Ayrıntılı",
         .gameLanguage: "Oyun Dili",
@@ -393,6 +395,8 @@ enum T {
         .overlayBottomLeft: "Bottom Left",
         .overlayBottomRight: "Bottom Right",
         .overlayStyle: "Overlay Style",
+        .frameGeneration: "Frame Generation",
+        .frameGenerationDetail: "Experimental · a frame between each two; turns on vertical sync",
         .overlayMinimal: "Minimal",
         .overlayDetailed: "Detailed",
         .gameLanguage: "Game Language",

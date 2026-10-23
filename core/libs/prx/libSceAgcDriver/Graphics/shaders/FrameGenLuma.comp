@@ -1,0 +1,24 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "FrameGenCommon.glsl"
+
+// A frame's brightness at 1/factor of its size: each texel the mean of its factor x factor block,
+// read as bilinear taps of four texels each. a.xy: output size, a.zw: input size, b.x: factor.
+layout(set = 0, binding = 3, r16f) writeonly uniform image2D outputImage;
+
+void main() {
+    const ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, push.a.xy))) return;
+    const int factor = push.b.x;
+    const vec2 size = vec2(push.a.zw);
+    float sum = 0.0;
+    int taps = 0;
+    for (int y = 0; y < factor; y += 2) {
+        for (int x = 0; x < factor; x += 2) {
+            const vec2 at = (vec2(texel * factor + ivec2(x, y)) + 1.0) / size;
+            sum += luma(textureLod(inputA, at, 0.0).rgb);
+            ++taps;
+        }
+    }
+    imageStore(outputImage, texel, vec4(sum / float(taps)));
+}

@@ -803,3 +803,18 @@ OverlayRect PerformanceOverlay::Record(VkCommandBuffer commands, std::size_t ind
 extern "C" void AgcDriverTogglePerformanceOverlay_nid_postfix() {
     AgcDriver::PerformanceOverlay::Toggle();
 }
+
+// For the minimal overlay the window draws (libSceVideoOut's StatsOverlay): whether it shows now,
+// its corner (OverlayCorner) and the process's memory, 0 when unknown. Only these C entry points
+// cross from one installed library to another.
+extern "C" bool AgcDriverMinimalOverlayShown_nid_postfix() {
+    return AgcDriver::PerformanceOverlay::Visible() && AgcDriver::PerformanceOverlay::Style() == AgcDriver::OverlayStyle::Minimal;
+}
+
+extern "C" int AgcDriverOverlayCorner_nid_postfix() {
+    return static_cast<int>(AgcDriver::PerformanceOverlay::Corner());
+}
+
+extern "C" std::uint64_t AgcDriverProcessFootprint_nid_postfix() {
+    return AgcDriver::ReadProcessPrivateBytes().value_or(0);
+}

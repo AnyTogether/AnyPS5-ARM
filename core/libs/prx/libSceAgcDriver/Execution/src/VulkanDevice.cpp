@@ -22,6 +22,7 @@
 #include "prx/libSceAgcDriver/Execution/include/SubgroupBarrier.hpp"
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
+#include "prx/libSceAgcDriver/Execution/include/FrameGeneration.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
@@ -311,6 +312,26 @@ struct WorkgroupMemory {
     }
 };
 
+namespace {
+
+// Frame generation wants presents a vertical blank apart (FIFO), so the generated frame shows for
+// one refresh before the game's, and swapchain images it can copy. Returns whether the swapchain is
+// made so.
+bool PrepareFrameGeneration(VkSwapchainCreateInfoKHR& create, const VkSurfaceCapabilitiesKHR& surface) {
+    static const bool requested = FrameGenerationRequested(std::getenv("ANYPS5_FRAME_GEN"));
+    if (!requested) return false;
+    if (create.presentMode != VK_PRESENT_MODE_FIFO_KHR) {
+        static const bool told = (std::fprintf(stderr, "[present] frame generation needs vertical sync (ANYPS5_PRESENT_MODE=fifo); off\n"), true);
+        static_cast<void>(told);
+        return false;
+    }
+    if ((surface.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) return false;
+    create.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    return true;
+}
+
+}
+
 struct VulkanDevice::State {
     bool compileOnly = false;
     void* library = nullptr;
@@ -328,6 +349,18 @@ struct VulkanDevice::State {
     std::vector<VkImage> images;
     VkFence acquireFence = VK_NULL_HANDLE;
     VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    // Frame generation (FrameGeneration.hpp): whether the swapchain was made for it, the generator
+    // once a frame was kept, whether the game's frame still has to follow the generated one just
+    // presented, and the image acquired for it.
+    bool frameGeneration = false;
+    bool frameGenerationFailed = false;
+    std::unique_ptr<FrameGenerator> frameGenerator;
+    FrameGenerationGovernor frameGenerationGovernor;
+    bool frameGenerationShown = false;
+    bool realPending = false;
+    VkFence realFence = VK_NULL_HANDLE;
+    bool realAcquired = false;
+    std::uint32_t realIndex = 0;
     struct RetiredSwapchain {
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         std::vector<VkSemaphore> rendered;
@@ -892,6 +925,7 @@ struct VulkanDevice::State {
             detiler.reset();
             colorTransfer.reset();
             overlay.reset();
+            frameGenerator.reset();
             presentation.reset();
             scaler.reset();
             hdrScaler.reset();
@@ -900,6 +934,7 @@ struct VulkanDevice::State {
             bufferPool.reset();
             const auto destroyFence = reinterpret_cast<PFN_vkDestroyFence>(deviceProc(device, "vkDestroyFence"));
             if (acquireFence) destroyFence(device, acquireFence, nullptr);
+            if (realFence) destroyFence(device, realFence, nullptr);
             const auto destroyQueryPool = reinterpret_cast<PFN_vkDestroyQueryPool>(deviceProc(device, "vkDestroyQueryPool"));
             for (const auto& slot : presentSlots) {
                 if (slot.fence) destroyFence(device, slot.fence, nullptr);
@@ -2193,6 +2228,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         swapchain.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         swapchain.presentMode = state->presentMode;
         swapchain.clipped = VK_FALSE;
+        state->frameGeneration = PrepareFrameGeneration(swapchain, surface);
         check(state->DeviceFunction<PFN_vkCreateSwapchainKHR>("vkCreateSwapchainKHR")(state->device, &swapchain, nullptr, &state->swapchain), "vkCreateSwapchainKHR");
         std::uint32_t imageCount = 0;
         auto getImages = state->DeviceFunction<PFN_vkGetSwapchainImagesKHR>("vkGetSwapchainImagesKHR");
@@ -3013,6 +3049,10 @@ void VulkanDevice::recreateSwapchain(std::uint32_t width, std::uint32_t height, 
     create.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     create.presentMode = state->presentMode;
     create.oldSwapchain = state->swapchain;
+    state->frameGeneration = PrepareFrameGeneration(create, surface);
+    // An image acquired for the game's frame after a generated one belongs to the retired swapchain.
+    state->realAcquired = false;
+    state->realPending = false;
     state->retiredSwapchains.reserve(state->retiredSwapchains.size() + 1);
     VkSwapchainKHR replacement = VK_NULL_HANDLE;
     check(state->DeviceFunction<PFN_vkCreateSwapchainKHR>("vkCreateSwapchainKHR")(state->device, &create, nullptr, &replacement), "vkCreateSwapchainKHR resize");
@@ -3604,6 +3644,36 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         pipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
     }
+    if (state->frameGeneration && !clearOnly && !state->frameGenerationFailed) {
+        // The frame as it goes to the window is kept for the frame generated before the next one.
+        // A changed window or format makes a new generator; Resize waited for the device first.
+        try {
+            if (!state->frameGenerator || !state->frameGenerator->Matches(state->surfaceFormat, state->extent)) {
+                state->frameGenerator.reset();
+                state->frameGenerator = std::make_unique<FrameGenerator>(graphicsContext(), state->surfaceFormat, state->extent);
+                std::fprintf(stderr, "[present] frame generation: a frame between each two, at %ux%u\n", state->extent.width, state->extent.height);
+            }
+            state->frameGenerator->RecordCapture(commands, barrier.image);
+            // With two kept, and where generation pays (FrameGenerationGovernor), this image shows
+            // the frame between them; the game's own goes next.
+            auto& governor = state->frameGenerationGovernor;
+            const bool generate = governor.Generate(std::chrono::steady_clock::now());
+            if (!governor.Probing() && generate != state->frameGenerationShown) {
+                std::fprintf(stderr, "[present] frame generation %s: the game at %.1f fps with it, %.1f without\n", generate ? "on" : "off, as it would cost the game frames here",
+                             governor.RateOn().value_or(0), governor.RateOff().value_or(0));
+                state->frameGenerationShown = generate;
+            }
+            if (generate && state->frameGenerator->Kept() >= 2) {
+                state->frameGenerator->RecordBetween(commands, barrier.image);
+                state->realPending = true;
+                ++presentCounters.generated;
+            }
+        } catch (const std::exception& error) {
+            state->frameGenerationFailed = true;
+            state->frameGenerator.reset();
+            std::fprintf(stderr, "[present] frame generation off: %s\n", error.what());
+        }
+    }
     if (slot.queries != VK_NULL_HANDLE) state->DeviceFunction<PFN_vkCmdWriteTimestamp>("vkCmdWriteTimestamp")(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, 1);
     check(state->DeviceFunction<PFN_vkEndCommandBuffer>("vkEndCommandBuffer")(commands), "vkEndCommandBuffer");
     APS5_LOG_CHARS_OUT_DEBUG("Presentation command buffer recorded");
@@ -3672,6 +3742,11 @@ VulkanDevice::PresentStatistics VulkanDevice::PresentCounts() {
     return presentCounters;
 }
 
+// Frames generated so far (FrameGeneration.hpp), for the overlay to count beside the game's.
+extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix() {
+    return presentCounters.generated;
+}
+
 bool VulkanDevice::PresentWaitsForSlots(const DisplayBuffer* buffer) const {
     if (buffer == nullptr || !state->SharedSlotInFlight()) return false;
     if (buffer->tilingMode == 1) return true;
@@ -3723,6 +3798,56 @@ double VulkanDevice::RetirePresents(std::size_t keepInFlight) {
 
 double VulkanDevice::FinishPresent() {
     return RetirePresents(0);
+}
+
+bool VulkanDevice::RealFramePending() const {
+    return state->realPending;
+}
+
+bool VulkanDevice::AcquireRealImage() {
+    if (!state->realPending) return false;
+    state->realPending = false;
+    if (!state->frameGenerator || state->swapchain == VK_NULL_HANDLE || state->extent.width == 0 || state->extent.height == 0) return false;
+    if (state->realFence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        check(state->DeviceFunction<PFN_vkCreateFence>("vkCreateFence")(state->device, &fence, nullptr, &state->realFence), "vkCreateFence frame");
+    }
+    check(state->DeviceFunction<PFN_vkResetFences>("vkResetFences")(state->device, 1, &state->realFence), "vkResetFences frame");
+    std::uint32_t index = 0;
+    // The image the generated frame took is queued; the next one frees at the next vertical blank.
+    const auto acquired = state->DeviceFunction<PFN_vkAcquireNextImageKHR>("vkAcquireNextImageKHR")(state->device, state->swapchain, std::numeric_limits<std::uint64_t>::max(), VK_NULL_HANDLE, state->realFence, &index);
+    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+        state->extent = {0, 0};
+        return false;
+    }
+    if (acquired == VK_NOT_READY || acquired == VK_TIMEOUT) return false;
+    if (acquired != VK_SUBOPTIMAL_KHR) check(acquired, "vkAcquireNextImageKHR frame");
+    check(state->DeviceFunction<PFN_vkWaitForFences>("vkWaitForFences")(state->device, 1, &state->realFence, VK_TRUE, std::numeric_limits<std::uint64_t>::max()), "vkWaitForFences frame");
+    require(index < state->images.size() && index < state->rendered.size(), "acquired frame image index is out of range");
+    if (state->rendered[index] == VK_NULL_HANDLE) {
+        VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        check(state->DeviceFunction<PFN_vkCreateSemaphore>("vkCreateSemaphore")(state->device, &semaphore, nullptr, &state->rendered[index]), "vkCreateSemaphore frame");
+    }
+    state->realIndex = index;
+    state->realAcquired = true;
+    return true;
+}
+
+void VulkanDevice::QueueRealFrame() {
+    if (!state->realAcquired) return;
+    state->realAcquired = false;
+    const auto index = state->realIndex;
+    require(state->frameGenerator != nullptr, "the game's frame after a generated one has no generator");
+    state->frameGenerator->SubmitNewest(state->queue, state->images[index], state->rendered[index]);
+    VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &state->rendered[index];
+    present.swapchainCount = 1;
+    present.pSwapchains = &state->swapchain;
+    present.pImageIndices = &index;
+    const auto presented = state->DeviceFunction<PFN_vkQueuePresentKHR>("vkQueuePresentKHR")(state->queue, &present);
+    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) state->extent = {0, 0};
+    else check(presented, "vkQueuePresentKHR frame");
 }
 
 void VulkanDevice::QueuePresent() {

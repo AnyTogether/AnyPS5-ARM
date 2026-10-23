@@ -1,5 +1,4 @@
 #include "prx/libSceVideoOut/include/StatsOverlay.hpp"
-#include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 
 #import <AppKit/AppKit.h>
 #include <IOKit/IOKitLib.h>
@@ -8,9 +7,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <sys/resource.h>
 #include <unistd.h>
+
+extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix();
+extern "C" bool AgcDriverMinimalOverlayShown_nid_postfix();
+extern "C" int AgcDriverOverlayCorner_nid_postfix();
+extern "C" std::uint64_t AgcDriverProcessFootprint_nid_postfix();
 
 namespace {
 
@@ -54,6 +59,8 @@ double CpuSeconds() {
 
 struct Figures {
     double fps = 0;
+    // Frames generated between the game's, per second (frame generation); fps counts them too.
+    double generated = 0;
     double frameMs = 0;
     std::optional<double> gpu;
     double cpu = 0;
@@ -64,6 +71,7 @@ struct Sampler {
     Clock::time_point since = Clock::now();
     std::uint64_t frames = 0;
     double cpuSince = CpuSeconds();
+    std::uint64_t generatedSince = AgcDriverGeneratedFrames_nid_postfix();
 
     // Counts a present; every Interval, the figures since the last ones.
     std::optional<Figures> Present() {
@@ -74,11 +82,14 @@ struct Sampler {
         const double cpu = CpuSeconds();
         static const double cores = static_cast<double>(std::max(1L, sysconf(_SC_NPROCESSORS_ONLN)));
         Figures figures;
-        figures.fps = static_cast<double>(frames) / seconds;
+        const auto generated = AgcDriverGeneratedFrames_nid_postfix();
+        figures.generated = static_cast<double>(generated - generatedSince) / seconds;
+        figures.fps = static_cast<double>(frames) / seconds + figures.generated;
         figures.frameMs = frames > 0 ? seconds * 1000.0 / static_cast<double>(frames) : 0;
+        generatedSince = generated;
         figures.gpu = GpuPercent();
         figures.cpu = std::clamp((cpu - cpuSince) / seconds / cores * 100.0, 0.0, 100.0);
-        figures.memory = AgcDriver::ReadProcessPrivateBytes();
+        if (const auto footprint = AgcDriverProcessFootprint_nid_postfix(); footprint != 0) figures.memory = footprint;
         since = now;
         frames = 0;
         cpuSince = cpu;
@@ -89,6 +100,7 @@ struct Sampler {
         since = Clock::now();
         frames = 0;
         cpuSince = CpuSeconds();
+        generatedSince = AgcDriverGeneratedFrames_nid_postfix();
     }
 };
 
@@ -123,6 +135,7 @@ NSAttributedString* Line(const Figures& figures) {
     };
     NSColor* health = figures.fps >= 55 ? Green() : figures.fps >= 28 ? Amber() : Red();
     item(@"FPS", [NSString stringWithFormat:@"%.0f", figures.fps], nil, health);
+    if (figures.generated >= 0.5) item(@"FG", [NSString stringWithFormat:@"+%.0f", figures.generated], nil, white);
     item(nil, [NSString stringWithFormat:@"%.1f", figures.frameMs], @" ms", white);
     if (figures.gpu) item(@"GPU", [NSString stringWithFormat:@"%.0f", *figures.gpu], @" %", white);
     item(@"CPU", [NSString stringWithFormat:@"%.0f", figures.cpu], @" %", white);
@@ -130,12 +143,15 @@ NSAttributedString* Line(const Figures& figures) {
     return line;
 }
 
+// AgcDriver's OverlayCorner, in its order.
+enum class Corner { TopLeft, TopRight, BottomLeft, BottomRight };
+
 // The capsule and its line, over the game's content view.
 struct Badge {
     NSView* capsule = nil;
     NSTextField* text = nil;
 
-    void Show(NSView* content, NSAttributedString* line, AgcDriver::OverlayCorner corner) {
+    void Show(NSView* content, NSAttributedString* line, Corner corner) {
         if (capsule == nil) {
             capsule = [[NSView alloc] initWithFrame:NSZeroRect];
             capsule.wantsLayer = YES;
@@ -162,8 +178,8 @@ struct Badge {
         text.frame = NSMakeRect(12, std::round((height - size.height) / 2), std::ceil(size.width), size.height);
         capsule.layer.cornerRadius = height / 2;
         const NSRect bounds = content.bounds;
-        const bool top = corner == AgcDriver::OverlayCorner::TopLeft || corner == AgcDriver::OverlayCorner::TopRight;
-        const bool right = corner == AgcDriver::OverlayCorner::TopRight || corner == AgcDriver::OverlayCorner::BottomRight;
+        const bool top = corner == Corner::TopLeft || corner == Corner::TopRight;
+        const bool right = corner == Corner::TopRight || corner == Corner::BottomRight;
         const CGFloat x = right ? NSMaxX(bounds) - width - Margin : NSMinX(bounds) + Margin;
         const bool high = top != content.isFlipped;
         const CGFloat y = high ? NSMaxY(bounds) - height - Margin : NSMinY(bounds) + Margin;
@@ -182,7 +198,7 @@ void StatsOverlay::Present(SDL_Window* window) {
     static Sampler sampler;
     static Badge badge;
     static bool shown = false;
-    const bool wanted = AgcDriver::PerformanceOverlay::Visible() && AgcDriver::PerformanceOverlay::Style() == AgcDriver::OverlayStyle::Minimal;
+    const bool wanted = AgcDriverMinimalOverlayShown_nid_postfix();
     if (!wanted) {
         if (shown) badge.Hide();
         shown = false;
@@ -190,6 +206,14 @@ void StatsOverlay::Present(SDL_Window* window) {
     }
     if (!shown) sampler.Reset();
     const auto figures = sampler.Present();
+    // ANYPS5_OVERLAY_LOG=1 also writes the figures to the game's log every five seconds, for
+    // measuring without looking at the window.
+    static const bool logged = std::getenv("ANYPS5_OVERLAY_LOG") != nullptr;
+    static int samples = 0;
+    if (logged && figures && ++samples % 10 == 0) {
+        std::fprintf(stderr, "[overlay] fps %.1f (game %.1f, generated %.1f) frame %.1f ms gpu %.0f%% cpu %.0f%%\n", figures->fps, figures->fps - figures->generated,
+                     figures->generated, figures->frameMs, figures->gpu.value_or(-1), figures->cpu);
+    }
     if (shown && !figures) return;
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
@@ -197,7 +221,7 @@ void StatsOverlay::Present(SDL_Window* window) {
     NSView* content = info.info.cocoa.window.contentView;
     if (content == nil) return;
     @autoreleasepool {
-        badge.Show(content, Line(figures.value_or(Figures{})), AgcDriver::PerformanceOverlay::Corner());
+        badge.Show(content, Line(figures.value_or(Figures{})), static_cast<Corner>(AgcDriverOverlayCorner_nid_postfix()));
     }
     shown = true;
 }

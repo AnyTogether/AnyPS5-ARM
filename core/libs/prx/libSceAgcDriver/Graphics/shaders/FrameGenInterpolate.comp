@@ -1,0 +1,29 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "FrameGenCommon.glsl"
+
+// The frame at c.x between the previous (inputA) and the current one (inputB): each pixel taken
+// along its block's motion (inputC, full-size pixels, one vector per a.z pixels square) from
+// both, and where the two disagree more than the two frames do in place (something uncovered or
+// covered), the plain blend in place instead. a.xy: size.
+layout(set = 0, binding = 3, rgba16f) writeonly uniform image2D outputImage;
+
+void main() {
+    const ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, push.a.xy))) return;
+    const vec2 size = vec2(push.a.xy);
+    const float t = push.c.x;
+    const vec2 pixel = vec2(texel) + 0.5;
+    const vec2 at = pixel / size;
+    const vec2 motion = texelFetch(inputC, min(texel / push.a.z, textureSize(inputC, 0) - 1), 0).rg;
+    const vec4 before = textureLod(inputA, (pixel - t * motion) / size, 0.0);
+    const vec4 after = textureLod(inputB, (pixel + (1.0 - t) * motion) / size, 0.0);
+    const vec4 moved = mix(before, after, t);
+    const vec4 stillBefore = textureLod(inputA, at, 0.0);
+    const vec4 stillAfter = textureLod(inputB, at, 0.0);
+    const vec4 still = mix(stillBefore, stillAfter, t);
+    const float movedError = abs(luma(before.rgb) - luma(after.rgb));
+    const float stillError = abs(luma(stillBefore.rgb) - luma(stillAfter.rgb));
+    const float trust = stillError / (stillError + movedError + 1e-4);
+    imageStore(outputImage, texel, vec4(mix(still, moved, trust).rgb, 1.0));
+}

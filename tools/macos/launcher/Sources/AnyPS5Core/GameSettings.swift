@@ -31,6 +31,9 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// nil is minimal; optional so settings saved before it existed still decode.
     public var overlayStyle: OverlayStyle?
     public var style: OverlayStyle { overlayStyle ?? .minimal }
+    /// A generated frame between each two of the game's (ANYPS5_FRAME_GEN), with vertical sync;
+    /// nil is off.
+    public var frameGeneration: Bool?
     /// The console language number (ANYPS5_LANGUAGE), nil to follow the launcher's language.
     public var language: Int?
     /// Keys moved from the launcher's layout (Controls), by pad action. Optional so settings saved
@@ -51,7 +54,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         var environment: [String: String] = [
             "ANYPS5_FULLSCREEN": fullscreen ? "1" : "0",
             "ANYPS5_WINDOW_SIZE": String(min(100, max(30, windowSize))),
-            "ANYPS5_PRESENT_MODE": vsync ? "fifo" : "immediate",
+            "ANYPS5_PRESENT_MODE": vsync || frameGeneration == true ? "fifo" : "immediate",
             "ANYPS5_LANGUAGE": String(language ?? launcherLanguage),
         ]
         if let position = overlay.position {
@@ -64,6 +67,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if let screenshots { environment["ANYPS5_SCREENSHOTS"] = screenshots.path }
         if let fonts { environment["ANYPS5_SYSTEM_FONTS"] = fonts.path }
         if shaderCache == false { environment["ANYPS5_NO_SHADER_CACHE"] = "1" }
+        if frameGeneration == true { environment["ANYPS5_FRAME_GEN"] = "1" }
         return environment
     }
 

@@ -1,0 +1,26 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "FrameGenCommon.glsl"
+
+// The motion field steadied: each vector the mean of itself and those of its 3 x 3 neighbourhood
+// within c.x pixels of it, so the jitter of one object's blocks evens out while a lone moving
+// block (a small object) and the edges between objects stay. a.xy: size.
+layout(set = 0, binding = 3, rg16f) writeonly uniform image2D outputImage;
+
+void main() {
+    const ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, push.a.xy))) return;
+    const ivec2 last = push.a.xy - 1;
+    const vec2 own = texelFetch(inputA, texel, 0).rg;
+    vec2 sum = vec2(0.0);
+    float count = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            const vec2 other = texelFetch(inputA, clamp(texel + ivec2(x, y), ivec2(0), last), 0).rg;
+            if (distance(other, own) > push.c.x) continue;
+            sum += other;
+            count += 1.0;
+        }
+    }
+    imageStore(outputImage, texel, vec4(sum / count, 0.0, 0.0));
+}

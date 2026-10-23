@@ -216,7 +216,9 @@ extension AppModel {
                 self?.update(game) { $0.windowSize = value }
             }))
         }
-        rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync) { [weak self] value in self?.update(game) { $0.vsync = value } }))
+        rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync || settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.vsync = value } }))
+        rows.append(PanelRow(id: "frameGeneration", title: T.text(.frameGeneration), detail: T.text(.frameGenerationDetail), symbol: "square.stack.3d.forward.dottedline",
+                             kind: .toggle(settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.frameGeneration = value ? true : nil } }))
         rows.append(PanelRow(id: "controls", title: T.text(.controls), symbol: "keyboard", kind: .action(destructive: false) { [weak self] in self?.open(.controls) }))
         if let set = trophies[game.id] {
             rows.append(PanelRow(id: "trophies", title: T.text(.trophies), detail: "\(set.unlockedCount)/\(set.trophies.count) · \(set.percent)%", symbol: "trophy", kind: .action(destructive: false) { [weak self] in self?.open(.trophies) }))
