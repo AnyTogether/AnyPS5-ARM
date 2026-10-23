@@ -66,6 +66,34 @@ public enum Updates {
         return release
     }
 
+    /// The async download calls tell no delegate how far they are, so the task's own Progress is
+    /// watched instead.
+    static func download(_ url: URL, to file: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
+        let watching = Locked<NSKeyValueObservation?>(nil)
+        defer { watching.value?.invalidate() }
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            let task = URLSession.shared.downloadTask(with: url) { downloaded, response, error in
+                if let error { return done.resume(throwing: error) }
+                guard let downloaded, (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    return done.resume(throwing: Failure(description: "the download failed"))
+                }
+                // The downloaded file is deleted when this handler returns.
+                do {
+                    try FileManager.default.moveItem(at: downloaded, to: file)
+                    done.resume()
+                } catch {
+                    done.resume(throwing: error)
+                }
+            }
+            watching.value = task.progress.observe(\.fractionCompleted) { reported, _ in
+                let fraction = reported.fractionCompleted
+                if fraction > 0, fraction < 1 { progress(fraction) }
+            }
+            task.resume()
+        }
+        progress(1)
+    }
+
     /// Downloads and unpacks the release, and checks that it is this app (`bundleIdentifier`) at a
     /// newer version. Returns the unpacked app, in a folder of its own under the temporary folder.
     public static func prepare(_ release: Release, bundleIdentifier: String, current: String,
@@ -74,13 +102,7 @@ public enum Updates {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let zip = folder.appendingPathComponent(assetName)
-        let watcher = DownloadProgress(progress)
-        let session = URLSession(configuration: .ephemeral, delegate: watcher, delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
-        let (file, response) = try await session.download(from: download)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure(description: "the download failed") }
-        try FileManager.default.moveItem(at: file, to: zip)
-        progress(1)
+        try await self.download(download, to: zip, progress: progress)
         let unpacked = folder.appendingPathComponent("app")
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
         let app = unpacked.appendingPathComponent("AnyPS5.app")
@@ -133,18 +155,4 @@ public enum Updates {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw Failure(description: "\(tool) failed") }
     }
-}
-
-/// Hands the download's progress on as a fraction.
-final class DownloadProgress: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let report: @Sendable (Double) -> Void
-
-    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        report(min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
 }
