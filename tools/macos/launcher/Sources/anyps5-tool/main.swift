@@ -156,13 +156,27 @@ case "remote":
             case .select(let id): selected.value = id
             case .launch(let id):
                 selected.value = id
-                playing.value = id
-                // A pretend trophy soon after, to see the phone's card.
-                if let game = games.first(where: { $0.id == id }) {
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-                        server.value?.publish(.trophy(name: "First Steps", detail: "Start \(game.name)", grade: "gold",
-                                                      icon: RemoteArt.jpeg(game.icon, longestSide: 160)))
+                // A pretend update and start, then a pretend trophy, to see the phone's cards.
+                guard let game = games.first(where: { $0.id == id }) else { return }
+                DispatchQueue.global().async {
+                    let began = Date()
+                    let steps: [(RemoteActivity.Phase, Double)] = [(.unwrap, 0.4), (.relink, 2.0), (.copy, 0.4), (.bundle, 0.3), (.finish, 0.2)]
+                    for (index, (phase, seconds)) in steps.enumerated() {
+                        for tick in 0...10 {
+                            let done = (Double(index) + Double(tick) / 10) / Double(steps.count)
+                            server.value?.publish(.activity(RemoteActivity(id: id, phase: phase, updating: true, fraction: done,
+                                                                           elapsed: Date().timeIntervalSince(began))))
+                            Thread.sleep(forTimeInterval: seconds / 10)
+                        }
                     }
+                    server.value?.publish(.activity(RemoteActivity(id: id, phase: .starting, updating: true, fraction: nil, elapsed: Date().timeIntervalSince(began))))
+                    Thread.sleep(forTimeInterval: 1.5)
+                    playing.value = id
+                    server.value?.publish(.activity(nil))
+                    tell()
+                    Thread.sleep(forTimeInterval: 1.5)
+                    server.value?.publish(.trophy(name: "First Steps", detail: "Start \(game.name)", grade: "gold",
+                                                  icon: RemoteArt.jpeg(game.icon, longestSide: 160)))
                 }
             case .close: playing.value = nil
             case .saveLayout(let id, let layout): layouts.value[id] = layout

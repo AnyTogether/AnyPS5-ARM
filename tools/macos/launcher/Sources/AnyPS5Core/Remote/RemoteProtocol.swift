@@ -25,6 +25,51 @@ public struct RemoteGame: Codable, Equatable, Sendable {
     }
 }
 
+/// What the launcher is doing with a game, for the phone to show: unlocking or updating it (the
+/// installer's steps, with how far along), waiting for its turn, or starting it.
+public struct RemoteActivity: Codable, Equatable, Sendable {
+    public enum Phase: String, Codable, Sendable {
+        case queued, unwrap, relink, copy, bundle, finish, starting
+    }
+
+    public var id: String
+    public var phase: Phase
+    /// An installed game being made again for a newer engine, rather than unlocked the first time.
+    public var updating: Bool
+    /// How much of the whole install is done, 0 to 1; nil when how long is not known.
+    public var fraction: Double?
+    /// Seconds since the launcher began with the game; the phone keeps counting from it.
+    public var elapsed: Double
+
+    public init(id: String, phase: Phase, updating: Bool, fraction: Double?, elapsed: Double) {
+        self.id = id
+        self.phase = phase
+        self.updating = updating
+        self.fraction = fraction
+        self.elapsed = elapsed
+    }
+
+    /// Whether the phone would show the same: the time it counts itself, and a hundredth of
+    /// progress is not worth a message.
+    public func looksLike(_ other: RemoteActivity) -> Bool {
+        guard id == other.id, phase == other.phase, updating == other.updating else { return false }
+        switch (fraction, other.fraction) {
+        case (nil, nil): return true
+        case let (mine?, theirs?): return abs(mine - theirs) < 0.01
+        default: return false
+        }
+    }
+
+    /// Whether the phone, told `told`, already shows `now`.
+    public static func same(_ told: RemoteActivity?, _ now: RemoteActivity?) -> Bool {
+        switch (told, now) {
+        case (nil, nil): return true
+        case let (told?, now?): return told.looksLike(now)
+        default: return false
+        }
+    }
+}
+
 /// A message on the phone's control channel: one JSON object per WebSocket text frame, told
 /// apart by its `type`.
 public enum RemoteMessage: Codable, Equatable, Sendable {
@@ -57,12 +102,14 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     /// A trophy just earned in the game playing: its name, description, grade (platinum, gold,
     /// silver or bronze) and icon as base64 PNG.
     case trophy(name: String, detail: String, grade: String, icon: String?)
+    /// What the launcher is doing with a game, sent as it changes; nil once it is done.
+    case activity(RemoteActivity?)
 
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds
-        case games, selected, running, language, id, icon, background, name, layout, detail, grade
+        case games, selected, running, language, id, icon, background, name, layout, detail, grade, activity
     }
 
     public init(from decoder: Decoder) throws {
@@ -107,6 +154,8 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case "trophy":
             self = .trophy(name: try values.decode(String.self, forKey: .name), detail: try values.decode(String.self, forKey: .detail),
                            grade: try values.decode(String.self, forKey: .grade), icon: try values.decodeIfPresent(String.self, forKey: .icon))
+        case "activity":
+            self = .activity(try values.decodeIfPresent(RemoteActivity.self, forKey: .activity))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "unknown message type \(other)")
         }
@@ -173,6 +222,9 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             try values.encode(detail, forKey: .detail)
             try values.encode(grade, forKey: .grade)
             try values.encode(icon, forKey: .icon)
+        case .activity(let activity):
+            try values.encode("activity", forKey: .type)
+            try values.encode(activity, forKey: .activity)
         }
     }
 
@@ -194,6 +246,7 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .home: return "home"
         case .saveLayout(_, let layout): return "saveLayout(\(layout?.count ?? 0) bytes)"
         case .trophy(let name, _, let grade, _): return "trophy(\(grade), \(name))"
+        case .activity(let activity): return "activity(\(activity.map { "\($0.phase.rawValue) \($0.fraction.map { String(format: "%.2f", $0) } ?? "-")" } ?? "none"))"
         }
     }
 

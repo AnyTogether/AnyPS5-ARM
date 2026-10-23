@@ -14,6 +14,7 @@ import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
+import 'ui/activity_card.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
@@ -246,7 +247,24 @@ class _RemoteAppState extends State<RemoteApp> {
               right: 0,
               top: 0,
               child: SafeArea(
-                child: Center(child: TrophyCard(trophy: _session.trophy)),
+                child: Stack(
+                  alignment: Alignment.topCenter,
+                  children: [
+                    ActivityCard(
+                      activity: _session.activity,
+                      game: (id) {
+                        final games = _session.library?.games ?? const [];
+                        final matches = games.where((game) => game.id == id);
+                        if (matches.isEmpty) return null;
+                        return (
+                          name: matches.first.name,
+                          icon: _session.art[id]?.icon,
+                        );
+                      },
+                    ),
+                    TrophyCard(trophy: _session.trophy),
+                  ],
+                ),
               ),
             ),
             const Positioned(

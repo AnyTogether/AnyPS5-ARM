@@ -247,7 +247,7 @@ public final class RemoteServer: @unchecked Sendable {
             if client === phones.first { events.latency(milliseconds) }
         case .wantArt, .command, .select, .launch, .close, .home, .saveLayout:
             if phones.contains(where: { $0 === client }) { events.request(message) }
-        case .pairing, .welcome, .rejected, .library, .art, .trophy:
+        case .pairing, .welcome, .rejected, .library, .art, .trophy, .activity:
             break
         }
     }

@@ -679,6 +679,7 @@ final class AppModel: ObservableObject {
                     TrophyBanner.shared.notice(T.format(.phoneConnected, name), detail: T.text(.phoneConnectedDetail), symbol: "iphone.gen3", sounds: self.preferences.sounds)
                 }
                 self.phoneLibrary = nil
+                self.phoneActivity = nil
                 self.tellPhone()
             } },
             disconnected: { Task { @MainActor in
@@ -762,11 +763,42 @@ final class AppModel: ObservableObject {
     /// The library as the phone shows it, sent when it differs from what the phone has.
     private func tellPhone() {
         guard let remote, phone != nil else { return }
+        let activity = activityForPhone()
+        if phoneActivity == nil || !RemoteActivity.same(phoneActivity!, activity) {
+            phoneActivity = .some(activity)
+            remote.publish(.activity(activity))
+        }
         let library = RemoteMessage.library(games: games.map(remoteGame), selected: selectedGame?.id, running: (running?.game ?? starting)?.id,
                                             language: preferences.language.rawValue)
         guard library != phoneLibrary else { return }
         phoneLibrary = library
         remote.publish(library)
+    }
+
+    /// What the phone last heard the launcher doing; nil before it heard anything.
+    private var phoneActivity: RemoteActivity??
+    /// The game the launcher is busy with and since when, so the phone counts the whole of it:
+    /// waiting, updating and starting.
+    private var activityStart: (id: String, date: Date)?
+
+    /// The game starting, else the one installing, else the next one waiting.
+    private func activityForPhone() -> RemoteActivity? {
+        guard let game = starting ?? games.first(where: { progress[$0.id] != nil }) ?? games.first(where: { queue.contains($0.id) }) else {
+            activityStart = nil
+            return nil
+        }
+        if activityStart?.id != game.id { activityStart = (game.id, Date()) }
+        var phase = RemoteActivity.Phase.queued
+        var fraction: Double?
+        switch state(of: game) {
+        case .starting: phase = .starting
+        case .installing(let step, let done):
+            phase = RemoteActivity.Phase(rawValue: "\(step)") ?? .queued
+            fraction = step.overall(done)
+        default: break
+        }
+        return RemoteActivity(id: game.id, phase: phase, updating: installedRecords[game.id] != nil, fraction: fraction,
+                              elapsed: Date().timeIntervalSince(activityStart?.date ?? Date()))
     }
 
     private func remoteGame(_ game: Game) -> RemoteGame {
@@ -1181,3 +1213,4 @@ enum Rosetta {
         return error == nil && installed
     }
 }
+

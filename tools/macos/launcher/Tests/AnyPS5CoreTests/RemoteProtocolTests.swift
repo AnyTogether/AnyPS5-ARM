@@ -64,6 +64,33 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(json?["grade"] as? String, "platinum")
     }
 
+    func testWhatTheLauncherIsDoingIsToldToThePhone() throws {
+        let activity = RemoteActivity(id: "PPSA15065", phase: .relink, updating: true, fraction: 0.42, elapsed: 12.5)
+        let message = RemoteMessage.activity(activity)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "activity")
+        let inner = json?["activity"] as? [String: Any]
+        XCTAssertEqual(inner?["phase"] as? String, "relink")
+        XCTAssertEqual(inner?["fraction"] as? Double, 0.42)
+        let idle = RemoteMessage.activity(nil)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: Data(#"{"type":"activity","activity":null}"#.utf8)), idle)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(idle)), idle)
+    }
+
+    func testAnActivityChangesForThePhoneOnlyWhenItLooksDifferent() {
+        let base = RemoteActivity(id: "g", phase: .relink, updating: false, fraction: 0.40, elapsed: 3)
+        var later = base
+        later.elapsed = 9
+        later.fraction = 0.404
+        XCTAssertTrue(base.looksLike(later))
+        later.fraction = 0.42
+        XCTAssertFalse(base.looksLike(later))
+        later = base
+        later.phase = .copy
+        XCTAssertFalse(base.looksLike(later))
+    }
+
     func testThePhoneSavesALayout() throws {
         let message = RemoteMessage.saveLayout(id: "g", layout: #"{"r1":{"hidden":true}}"#)
         XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)

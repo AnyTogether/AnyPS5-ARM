@@ -68,7 +68,11 @@ void main() {
     // The pictures arrive after the library.
     await waitFor(tester, find.byType(Image));
     // Picking a game here picks it on the Mac, and its background follows.
-    for (var tile = 0; find.textContaining('Silksong').evaluate().isEmpty; tile++) {
+    for (
+      var tile = 0;
+      find.textContaining('Silksong').evaluate().isEmpty;
+      tile++
+    ) {
       await tester.tap(find.byType(Image).at(tile));
       await settle(tester);
     }
@@ -76,6 +80,13 @@ void main() {
     await settle(tester);
     await binding.takeScreenshot('5-launcher');
     await tester.tap(find.text('Play'));
+    // The pretend launcher updates the game, then starts it: the phone shows both.
+    await waitFor(tester, find.textContaining('Converting for Mac'));
+    await settle(tester);
+    await binding.takeScreenshot('5a-updating');
+    await waitFor(tester, find.text('Opening the game on the Mac'));
+    await settle(tester);
+    await binding.takeScreenshot('5b-starting');
     await waitFor(tester, find.byType(PadScreen));
     await settle(tester);
     await binding.takeScreenshot('6-pad');
@@ -87,7 +98,10 @@ void main() {
     final area = tester.getRect(find.byType(PadScreen));
     await tester.tap(find.byIcon(Icons.lock_outline_rounded));
     await tester.pump();
-    final cross = Offset(area.left + area.width * 0.86, area.top + area.height * 0.56);
+    final cross = Offset(
+      area.left + area.width * 0.86,
+      area.top + area.height * 0.56,
+    );
     final finger = await tester.startGesture(cross);
     await finger.moveBy(Offset(-area.width * 0.06, -area.height * 0.04));
     await finger.up();

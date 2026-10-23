@@ -40,6 +40,11 @@ sealed class Message {
           grade: json['grade'] as String,
           icon: json['icon'] as String?,
         ),
+        'activity' => ActivityUpdate(
+          json['activity'] == null
+              ? null
+              : Activity.fromJson(json['activity'] as Map<String, dynamic>),
+        ),
         'art' => Art(
           id: json['id'] as String,
           icon: json['icon'] as String?,
@@ -310,4 +315,62 @@ class TrophyEarned extends Message {
     'grade': grade,
     'icon': icon,
   });
+}
+
+/// The launcher's steps with a game: waiting for its turn, the installer's five, and starting it.
+enum ActivityPhase { queued, unwrap, relink, copy, bundle, finish, starting }
+
+/// What the launcher is doing with a game.
+class Activity {
+  const Activity({
+    required this.id,
+    required this.phase,
+    required this.updating,
+    required this.fraction,
+    required this.elapsed,
+  });
+
+  factory Activity.fromJson(Map<String, dynamic> json) => Activity(
+    id: json['id'] as String,
+    phase: ActivityPhase.values.firstWhere(
+      (phase) => phase.name == json['phase'],
+      orElse: () => ActivityPhase.queued,
+    ),
+    updating: json['updating'] as bool? ?? false,
+    fraction: (json['fraction'] as num?)?.toDouble(),
+    elapsed: Duration(
+      microseconds: (((json['elapsed'] as num?) ?? 0) * 1e6).round(),
+    ),
+  );
+
+  final String id;
+  final ActivityPhase phase;
+
+  /// An installed game made again for a newer engine, not unlocked the first time.
+  final bool updating;
+
+  /// How much of the whole install is done, 0 to 1; null when not known.
+  final double? fraction;
+
+  /// How long the launcher has been at it when it said so.
+  final Duration elapsed;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'phase': phase.name,
+    'updating': updating,
+    'fraction': fraction,
+    'elapsed': elapsed.inMicroseconds / 1e6,
+  };
+}
+
+/// What the launcher is doing with a game now; null once it is done.
+class ActivityUpdate extends Message {
+  const ActivityUpdate(this.activity);
+
+  final Activity? activity;
+
+  @override
+  String toJson() =>
+      jsonEncode({'type': 'activity', 'activity': activity?.toJson()});
 }
