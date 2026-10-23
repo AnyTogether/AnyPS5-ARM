@@ -450,8 +450,16 @@ void main() {
     session.send(const SaveLayout('/Games/DOOM', '{"cross":{"hidden":true}}'));
     session.send(const SaveLayout('/Games/DOOM', null));
     await waitFor(() => launcher.received.length == 2);
-    expect(launcher.received[0], {'type': 'saveLayout', 'id': '/Games/DOOM', 'layout': '{"cross":{"hidden":true}}'});
-    expect(launcher.received[1], {'type': 'saveLayout', 'id': '/Games/DOOM', 'layout': null});
+    expect(launcher.received[0], {
+      'type': 'saveLayout',
+      'id': '/Games/DOOM',
+      'layout': '{"cross":{"hidden":true}}',
+    });
+    expect(launcher.received[1], {
+      'type': 'saveLayout',
+      'id': '/Games/DOOM',
+      'layout': null,
+    });
     await session.close();
     await launcher.stop();
   });

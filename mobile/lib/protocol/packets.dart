@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../feedback/motion.dart';
+
 /// The engine's pad button bits (libScePad PadButton).
 abstract final class PadButton {
   static const l3 = 0x0002;
@@ -62,6 +64,7 @@ Uint8List encodeInput({
   required int sentMicros,
   required BigInt session,
   required PadState state,
+  Motion? motion,
 }) {
   final bytes = Uint8List(inputSize);
   final data = ByteData.sublistView(bytes);
@@ -89,7 +92,22 @@ Uint8List encodeInput({
     data.setUint16(offset + 2, touch.x.clamp(0, 1919), Endian.little);
     data.setUint16(offset + 4, touch.y.clamp(0, 1079), Endian.little);
   }
-  data.setFloat32(60, 9.80665, Endian.little);
+  if (motion == null) {
+    data.setFloat32(60, 9.80665, Endian.little);
+    return bytes;
+  }
+  data.setUint32(12, 1, Endian.little);
+  final values = [
+    motion.accel.x,
+    motion.accel.y,
+    motion.accel.z,
+    motion.gyro.x,
+    motion.gyro.y,
+    motion.gyro.z,
+  ];
+  for (var index = 0; index < values.length; index++) {
+    data.setFloat32(56 + index * 4, values[index], Endian.little);
+  }
   return bytes;
 }
 

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../feedback/haptics.dart';
+import '../feedback/motion.dart';
 import '../protocol/messages.dart';
 import '../protocol/packets.dart';
 
@@ -57,6 +58,9 @@ class Session extends ChangeNotifier {
 
   /// The game's rumble, light bar and trigger effects felt on the phone.
   HapticsDriver? haptics;
+
+  /// The phone's tilt and turn, sent with every pad packet as the DualSense's motion.
+  MotionSource? motion;
 
   InternetAddress? _host;
   int? _port;
@@ -254,6 +258,7 @@ class Session extends ChangeNotifier {
           sentMicros: _clock.elapsedMicroseconds,
           session: session,
           state: _state,
+          motion: motion?.latest,
         ),
         _host!,
         _udpPort!,

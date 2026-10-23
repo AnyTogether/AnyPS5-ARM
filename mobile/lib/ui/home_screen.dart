@@ -129,6 +129,11 @@ class _HomeScreenState extends State<HomeScreen> {
                               value,
                             );
                           },
+                          motion: widget.session.motion?.enabled ?? true,
+                          onMotion: (value) {
+                            widget.session.motion?.enabled = value;
+                            widget.session.preferences.setBool('motion', value);
+                          },
                         ),
                         icon: const Icon(
                           Icons.info_outline_rounded,

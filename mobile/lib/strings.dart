@@ -53,6 +53,8 @@ class Strings {
   String get builtOn => _text('builtOn');
   String get vibration => _text('vibration');
   String get vibrationDetail => _text('vibrationDetail');
+  String get motion => _text('motion');
+  String get motionDetail => _text('motionDetail');
   String get editLayout => _text('editLayout');
   String get done => _text('done');
   String get editHint => _text('editHint');
@@ -103,6 +105,9 @@ class Strings {
     'builtOn': 'Built on AnyPS5',
     'vibration': 'Vibration',
     'vibrationDetail': "The game's rumble and trigger effects on the phone",
+    'motion': 'Motion',
+    'motionDetail':
+        "Tilting and turning the phone, as the DualSense's motion sensors",
     'editLayout': 'Edit Layout',
     'done': 'Done',
     'editHint': 'Drag a control to move it, tap it to change it',
@@ -154,6 +159,9 @@ class Strings {
     'builtOn': 'AnyPS5 üzerine kurulu',
     'vibration': 'Titreşim',
     'vibrationDetail': 'Oyunun titreşimi ve tetik efektleri telefonda',
+    'motion': 'Hareket',
+    'motionDetail':
+        "Telefonu eğip döndürmek, DualSense'in hareket sensörleri gibi",
     'editLayout': 'Düzeni Düzenle',
     'done': 'Bitti',
     'editHint': 'Taşımak için sürükle, değiştirmek için dokun',

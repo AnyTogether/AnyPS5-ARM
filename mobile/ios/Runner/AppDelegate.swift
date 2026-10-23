@@ -19,7 +19,14 @@ import UIKit
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "DeviceName") {
       FlutterMethodChannel(name: "org.anyps5.remote/device", binaryMessenger: registrar.messenger())
         .setMethodCallHandler { call, result in
-          result(call.method == "name" ? UIDevice.current.name : FlutterMethodNotImplemented)
+          switch call.method {
+          case "name": result(UIDevice.current.name)
+          case "rotation":
+            // Landscape right is the home side on the right: the phone's top is to the left.
+            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+            result(scene?.interfaceOrientation == .landscapeLeft ? "topRight" : "topLeft")
+          default: result(FlutterMethodNotImplemented)
+          }
         }
     }
     // The game's rumble.

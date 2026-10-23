@@ -5,6 +5,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.view.Surface
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -23,7 +24,11 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         MethodChannel(messenger, "org.anyps5.remote/device").setMethodCallHandler { call, result ->
-            if (call.method == "name") result.success(deviceName()) else result.notImplemented()
+            when (call.method) {
+                "name" -> result.success(deviceName())
+                "rotation" -> result.success(if (rotation() == Surface.ROTATION_270) "topRight" else "topLeft")
+                else -> result.notImplemented()
+            }
         }
         MethodChannel(messenger, "org.anyps5.remote/haptics").setMethodCallHandler { call, result ->
             if (call.method != "set") return@setMethodCallHandler result.notImplemented()
@@ -49,6 +54,15 @@ class MainActivity : FlutterActivity() {
             vibrator.vibrate(longArrayOf(0, 1000), 0)
         }
     }
+
+    /// ROTATION_90 is the phone turned with its top to the left, ROTATION_270 to the right.
+    private fun rotation(): Int =
+        if (Build.VERSION.SDK_INT >= 30) {
+            display?.rotation ?: Surface.ROTATION_90
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        }
 
     /// The name the user gave the phone, else its maker and model.
     private fun deviceName(): String =

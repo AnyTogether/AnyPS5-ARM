@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'connection/discovery.dart';
 import 'connection/device_name.dart';
 import 'feedback/haptics.dart';
+import 'feedback/motion.dart';
 import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
@@ -91,7 +92,9 @@ class _RemoteAppState extends State<RemoteApp> {
   late final Session _session =
       Session(preferences: widget.preferences, deviceName: widget.deviceName)
         ..haptics = (HapticsDriver(PlatformHaptics())
-          ..enabled = widget.preferences.getBool('vibration') ?? true);
+          ..enabled = widget.preferences.getBool('vibration') ?? true)
+        ..motion = (MotionSource()
+          ..enabled = widget.preferences.getBool('motion') ?? true);
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;
@@ -170,6 +173,7 @@ class _RemoteAppState extends State<RemoteApp> {
   void _show({required bool pad}) {
     _padShown = pad;
     pad ? _session.resumePad() : _session.pausePad();
+    pad ? _session.motion?.start() : _session.motion?.stop();
   }
 
   void _home() {

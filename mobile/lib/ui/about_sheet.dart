@@ -10,6 +10,8 @@ Future<void> showAbout(
   BuildContext context, {
   bool? vibration,
   ValueChanged<bool>? onVibration,
+  bool? motion,
+  ValueChanged<bool>? onMotion,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -17,14 +19,21 @@ Future<void> showAbout(
   shape: const RoundedRectangleBorder(
     borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
   ),
-  builder: (context) => _About(vibration: vibration, onVibration: onVibration),
+  builder: (context) => _About(
+    vibration: vibration,
+    onVibration: onVibration,
+    motion: motion,
+    onMotion: onMotion,
+  ),
 );
 
 class _About extends StatefulWidget {
-  const _About({this.vibration, this.onVibration});
+  const _About({this.vibration, this.onVibration, this.motion, this.onMotion});
 
   final bool? vibration;
   final ValueChanged<bool>? onVibration;
+  final bool? motion;
+  final ValueChanged<bool>? onMotion;
 
   @override
   State<_About> createState() => _AboutState();
@@ -32,6 +41,7 @@ class _About extends StatefulWidget {
 
 class _AboutState extends State<_About> {
   late bool? _vibration = widget.vibration;
+  late bool? _motion = widget.motion;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +98,30 @@ class _AboutState extends State<_About> {
                       onChanged: (value) {
                         setState(() => _vibration = value);
                         widget.onVibration?.call(value);
+                      },
+                    ),
+                  if (_motion != null)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        texts.motion,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
+                      ),
+                      subtitle: Text(
+                        texts.motionDetail,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      value: _motion!,
+                      onChanged: (value) {
+                        setState(() => _motion = value);
+                        widget.onMotion?.call(value);
                       },
                     ),
                   _Row(label: texts.madeBy, value: author),
