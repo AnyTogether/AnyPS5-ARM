@@ -37,9 +37,9 @@ ANYPS5_SHOTS=build/shots flutter drive -d <device> --driver test_driver/integrat
     --target integration_test/flow_test.dart --dart-define=ANYPS5_LAUNCHER=127.0.0.1:47790
 ```
 
-To feel the rumble and the light bar without a game, with the app in front on a phone connected to AnyPS5.app, run `python3 tool/rumble_test.py`: it plays a pretend game on the launcher's bridge and sends the large motor, the small one, a ramp, pulses and a red light bar.
-
 `--hidden` keeps that server off Bonjour and `ANYPS5_LAUNCHER` makes the app connect to it alone, so no other launcher on the network is reached. The screenshots land in `build/shots`.
+
+To feel the rumble and the light bar without a game, with the app in front on a phone connected to AnyPS5.app, run `python3 tool/rumble_test.py`: it plays a pretend game on the launcher's bridge and sends the large motor, the small one, a ramp, pulses and a red light bar.
 
 ## Design
 
