@@ -124,6 +124,15 @@ class PadLayout {
     ),
     // Not a pad button: it takes the phone back to the launcher.
     PadControl('ps', ControlKind.button, 0.50, 0.86, size: 0.055, label: 'PS'),
+    // Not a pad button either: Create, as on the DualSense, saves the last seconds as a clip.
+    PadControl(
+      'create',
+      ControlKind.button,
+      0.28,
+      0.16,
+      size: 0.045,
+      label: '◉',
+    ),
     PadControl(
       'options',
       ControlKind.button,

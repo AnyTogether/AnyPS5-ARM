@@ -129,6 +129,13 @@ extension AppModel {
                 self?.preferences.discordPresence = value
                 if !value { self?.discordOff() }
             }),
+            PanelRow(id: "clips", title: T.text(.clips), detail: T.format(.clipsDetail, clipSeconds), symbol: "record.circle", kind: .toggle(preferences.clips == true) { [weak self] value in
+                self?.clipsChanged(value)
+            }),
+            PanelRow(id: "clipLength", title: T.text(.clipLength), symbol: "timer",
+                     kind: .stepper(value: clipSeconds, range: 15...120, step: 15, format: { T.format(.seconds, $0) }) { [weak self] value in
+                         self?.preferences.clipLength = value
+                     }),
             PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
                 self?.preferences.checkUpdates = value
                 if value { self?.checkForUpdate() }
@@ -378,7 +385,7 @@ extension AppModel {
             case .down: movePanelCategory(1, count: categories.count)
             case .right, .select: enterRows(rows)
             case .back, .options: closeOverlay()
-            case .left, .previousGame, .nextGame, .home: break
+            case .left, .previousGame, .nextGame, .home, .capture: break
             }
             return true
         }
@@ -402,7 +409,7 @@ extension AppModel {
             leaveRows(single)
         case .options:
             closeOverlay()
-        case .previousGame, .nextGame, .home:
+        case .previousGame, .nextGame, .home, .capture:
             break
         }
         return true

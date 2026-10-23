@@ -25,6 +25,10 @@ struct Preferences: Codable, Equatable {
     var hideWhilePlaying = false
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
+    /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
+    /// phone); nil means off. clipLength is in seconds, nil for 30.
+    var clips: Bool?
+    var clipLength: Int?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
@@ -621,6 +625,60 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: Clips
+
+    let clipRecorder = ClipRecorder()
+    var clipSeconds: Int { preferences.clipLength ?? 30 }
+
+    /// With clips on, the game that just showed its window is kept from now on.
+    private func startClips(for app: NSRunningApplication) {
+        guard preferences.clips == true else { return }
+        let pid = app.processIdentifier
+        let seconds = Double(clipSeconds)
+        Task { @MainActor in
+            do {
+                try await self.clipRecorder.start(pid: pid, length: seconds)
+            } catch ClipRecorder.Failure.noPermission {
+                TrophyBanner.shared.notice(T.text(.clipsNeedPermission), detail: T.text(.clipsNeedPermissionDetail), symbol: "record.circle", sounds: self.preferences.sounds)
+            } catch {
+                self.show(T.text(.clipFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    /// Clips turned on: macOS asks for the screen recording permission now rather than at a game.
+    func clipsChanged(_ on: Bool) {
+        preferences.clips = on
+        guard on else { return clipRecorder.stop() }
+        Task { @MainActor in
+            if !(await ClipRecorder.allowed()) { self.show(T.text(.clipsNeedPermissionDetail), symbol: "record.circle") }
+            if let app = self.running?.app, self.clipRecorder.recordingPid == nil { self.startClips(for: app) }
+        }
+    }
+
+    /// Create, ⌥F12 or the phone: the last seconds of the game playing go to the gallery.
+    func saveClip() {
+        guard let game = running?.game else { return }
+        guard preferences.clips == true else {
+            return TrophyBanner.shared.notice(T.text(.clipsOff), detail: T.text(.clipsOffDetail), symbol: "record.circle", sounds: preferences.sounds)
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let folder = screenshotsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).mp4")
+        Task { @MainActor in
+            do {
+                try await self.clipRecorder.save(to: file)
+                Sounds.shared.play(.select)
+                TrophyBanner.shared.notice(T.text(.clipSaved), detail: T.format(.clipSavedDetail, self.clipSeconds), symbol: "film", sounds: false)
+            } catch {
+                TrophyBanner.shared.notice(T.text(.clipFailed), detail: "\(error)", symbol: "exclamationmark.triangle.fill", sounds: self.preferences.sounds)
+            }
+        }
+    }
+
     /// Games told this run that Low Power Mode holds them at 60 Hz, so it is said once a game.
     private var toldLowPower: Set<String> = []
 
@@ -658,6 +716,7 @@ final class AppModel: ObservableObject {
             app.activate()
             if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
             if let game = running?.game { tellLowPower(about: game) }
+            startClips(for: app)
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }
@@ -699,6 +758,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        clipRecorder.stop()
         discord.clear()
         loadTrophies(running.game, again: true)
         diagnose(running.game)
@@ -897,6 +957,9 @@ final class AppModel: ObservableObject {
                 remote.publish(.art(id: id, icon: RemoteArt.jpeg(game.icon, longestSide: RemoteArt.iconSide),
                                     background: RemoteArt.jpeg(game.background, longestSide: RemoteArt.backgroundSide)))
             }
+        case .command("capture"):
+            // Create on the phone's pad: a clip of the game, the game staying in front.
+            saveClip()
         case .command(let name):
             let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options,
                                                "l1": .previousGame, "r1": .nextGame]

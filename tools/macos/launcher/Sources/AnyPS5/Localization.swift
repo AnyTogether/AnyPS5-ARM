@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -128,6 +128,17 @@ enum T {
         .frameGeneration: "Ara Kare Üretimi",
         .frameGenerationDetail: "Deneysel · her iki karenin arasına bir kare; dikey senkronizasyonu açar",
         .frameGenerationLowPower: "Düşük Güç Modu açık: ekran 60 Hz'de kalıyor, ara kare çalışmaz",
+        .clips: "Klipler",
+        .clipsDetail: "Create, ⌥F12 ya da telefon son %d saniyeyi galeriye kaydeder",
+        .clipLength: "Klip Uzunluğu",
+        .seconds: "%d sn",
+        .clipsNeedPermission: "Klipler için izin gerekli",
+        .clipsNeedPermissionDetail: "Sistem Ayarları → Gizlilik ve Güvenlik → Ekran ve Sistem Sesi Kaydı'nda AnyPS5'e izin ver",
+        .clipsOff: "Klipler kapalı",
+        .clipsOffDetail: "Ayarlar → Davranış → Klipler'den aç",
+        .clipSaved: "Klip kaydedildi",
+        .clipSavedDetail: "Son %d saniye · oyunun ayarları → Ekran Görüntüleri",
+        .clipFailed: "Klip kaydedilemedi",
         .lowPowerTitle: "Düşük Güç Modu açık",
         .lowPowerFrameGeneration: "Ekran 60 Hz'de kalıyor, ara kare çalışmaz. Sistem Ayarları → Pil'den kapatabilirsin.",
         .lowPowerRefresh: "Ekran 60 Hz'de kalıyor, oyun 60 FPS'i geçmez. Sistem Ayarları → Pil'den kapatabilirsin.",
@@ -408,6 +419,17 @@ enum T {
         .frameGeneration: "Frame Generation",
         .frameGenerationDetail: "Experimental · a frame between each two; turns on vertical sync",
         .frameGenerationLowPower: "Low Power Mode is on: the display stays at 60 Hz, so frame generation cannot work",
+        .clips: "Clips",
+        .clipsDetail: "Create, ⌥F12 or the phone saves the last %d seconds to the gallery",
+        .clipLength: "Clip Length",
+        .seconds: "%d s",
+        .clipsNeedPermission: "Clips need a permission",
+        .clipsNeedPermissionDetail: "Allow AnyPS5 in System Settings → Privacy & Security → Screen & System Audio Recording",
+        .clipsOff: "Clips are off",
+        .clipsOffDetail: "Turn them on in Settings → Behaviour → Clips",
+        .clipSaved: "Clip saved",
+        .clipSavedDetail: "The last %d seconds · the game's settings → Screenshots",
+        .clipFailed: "The clip could not be saved",
         .lowPowerTitle: "Low Power Mode is on",
         .lowPowerFrameGeneration: "The display stays at 60 Hz, so frame generation cannot work. Turn it off in System Settings → Battery.",
         .lowPowerRefresh: "The display stays at 60 Hz, so the game stops at 60 fps. Turn it off in System Settings → Battery.",

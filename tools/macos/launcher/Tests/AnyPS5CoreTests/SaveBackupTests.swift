@@ -74,4 +74,15 @@ final class SaveBackupTests: XCTestCase {
         XCTAssertTrue(Screenshots.list(titleID: "PPSA99999", in: folder).isEmpty)
         XCTAssertTrue(Screenshots.list(titleID: "PPSA12544", in: folder.appendingPathComponent("missing")).isEmpty)
     }
+
+    func testClipsAreListedWithTheScreenshots() throws {
+        let folder = root.appendingPathComponent("Pictures")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in ["PPSA15065-20261024-020000.png", "PPSA15065-20261024-021500.mp4", "PPSA15065-20261024-010000.mov"] {
+            try Data().write(to: folder.appendingPathComponent(name))
+        }
+        let listed = Screenshots.list(titleID: "PPSA15065", in: folder)
+        XCTAssertEqual(listed.map(\.lastPathComponent), ["PPSA15065-20261024-021500.mp4", "PPSA15065-20261024-020000.png"])
+        XCTAssertEqual(listed.map(Screenshots.isClip), [true, false])
+    }
 }

@@ -42,6 +42,24 @@ void main() {
     expect(states.every((state) => state.buttons == 0), isTrue);
   });
 
+  testWidgets('Create asks for a clip and is not sent to the game', (
+    tester,
+  ) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final states = <PadState>[];
+    var clips = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PadScreen(onState: states.add, onCapture: () => clips++),
+      ),
+    );
+    await tester.tapAt(at('create'));
+    expect(clips, 1);
+    expect(states.every((state) => state.buttons == 0), isTrue);
+  });
+
   testWidgets('two buttons at once', (tester) async {
     final states = await show(tester);
     final first = await tester.startGesture(at('cross'));

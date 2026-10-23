@@ -216,6 +216,7 @@ class _RemoteAppState extends State<RemoteApp> {
           ? PadScreen(
               onState: _session.update,
               onHome: _home,
+              onCapture: () => _session.send(const Command('capture')),
               status: _status(),
               glow: lightColor(_session.output),
               tweaks: _runningTweaks(),

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import GameController
 
 enum Command {
@@ -7,6 +8,8 @@ enum Command {
     case previousGame, nextGame
     /// The controller's PS button: the launcher in front of the game, or back to the game.
     case home
+    /// Create on a DualSense (Share on a DualShock 4), or ⌥F12: the last seconds as a clip.
+    case capture
 }
 
 /// Keyboard and game controller input, as the commands the screens act on. Held directions repeat
@@ -49,8 +52,9 @@ final class Input {
             guard let controller = note.object as? GCController else { return }
             MainActor.assumeIsolated { self?.attach(controller) }
         }
-        // The PS button reaches the launcher while a game is in front; nothing else does then.
+        // The PS and Create buttons reach the launcher while a game is in front; nothing else does then.
         GCController.shouldMonitorBackgroundEvents = true
+        registerCaptureKey()
         GCController.controllers().forEach(attach)
         GCController.startWirelessControllerDiscovery {}
     }
@@ -122,11 +126,30 @@ final class Input {
         pad.buttonHome?.pressedChangedHandler = { [weak self] _, _, pressed in
             if pressed { MainActor.assumeIsolated { self?.controller(.home) } }
         }
+        // Only a PlayStation controller's Create (Share) is the console's; another controller's
+        // View button is its touchpad in the game.
+        if pad is GCDualSenseGamepad || pad is GCDualShockGamepad {
+            pad.buttonOptions?.pressedChangedHandler = { [weak self] _, _, pressed in
+                if pressed { MainActor.assumeIsolated { self?.controller(.capture) } }
+            }
+        }
+    }
+
+    /// ⌥F12, beside F12's screenshot, from any app: a hot key the system hands over without the
+    /// accessibility permission a key monitor in the background would need.
+    private func registerCaptureKey() {
+        var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            MainActor.assumeIsolated { Input.shared.controller(.capture) }
+            return noErr
+        }, 1, &type, nil, nil)
+        var reference: EventHotKeyRef?
+        RegisterEventHotKey(UInt32(kVK_F12), UInt32(optionKey), EventHotKeyID(signature: OSType(0x4150_5335), id: 1), GetApplicationEventTarget(), 0, &reference)
     }
 
     /// A controller command; while the launcher is behind a game only PS is acted on.
     private func controller(_ command: Command) {
-        guard NSApp.isActive || command == .home else { return }
+        guard NSApp.isActive || command == .home || command == .capture else { return }
         _ = handler?(command)
     }
 

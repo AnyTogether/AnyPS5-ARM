@@ -20,6 +20,7 @@ class PadScreen extends StatefulWidget {
     this.onTweaks,
     this.status,
     this.onHome,
+    this.onCapture,
     this.glow,
   });
 
@@ -35,6 +36,9 @@ class PadScreen extends StatefulWidget {
 
   /// The PS button: the launcher, on the phone and on the Mac.
   final VoidCallback? onHome;
+
+  /// Create: the Mac saves the last seconds of the game as a clip.
+  final VoidCallback? onCapture;
 
   /// The game's light bar colour, which the pad's background glows with.
   final Color? glow;
@@ -231,6 +235,10 @@ class _PadScreenState extends State<PadScreen> {
     if (control == null) return;
     if (control.id == 'ps') {
       widget.onHome?.call();
+      return;
+    }
+    if (control.id == 'create') {
+      widget.onCapture?.call();
       return;
     }
     if (control.behavior == ButtonBehavior.toggle &&

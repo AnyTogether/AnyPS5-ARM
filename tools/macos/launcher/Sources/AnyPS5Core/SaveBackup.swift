@@ -99,13 +99,18 @@ public enum SaveBackup {
     }
 }
 
-/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png.
+/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, and the
+/// launcher's clips beside them, named the same way but .mp4.
 public enum Screenshots {
-    /// The game's screenshots, newest first.
+    /// The game's screenshots and clips, newest first.
     public static func list(titleID: String, in folder: URL) -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return files
-            .filter { $0.pathExtension.lowercased() == "png" && $0.lastPathComponent.hasPrefix(titleID + "-") }
+            .filter { ["png", "mp4"].contains($0.pathExtension.lowercased()) && $0.lastPathComponent.hasPrefix(titleID + "-") }
             .sorted { $0.deletingPathExtension().lastPathComponent > $1.deletingPathExtension().lastPathComponent }
+    }
+
+    public static func isClip(_ file: URL) -> Bool {
+        file.pathExtension.lowercased() == "mp4"
     }
 }

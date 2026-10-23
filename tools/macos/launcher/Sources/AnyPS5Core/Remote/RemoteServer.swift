@@ -480,4 +480,9 @@ public final class Locked<Value>: @unchecked Sendable {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
+
+    /// Reads or changes the value in place, holding the lock.
+    public func withLock<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
+        try lock.withLock { try body(&stored) }
+    }
 }
