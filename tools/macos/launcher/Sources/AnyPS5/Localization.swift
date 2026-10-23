@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -128,6 +128,14 @@ enum T {
         .frameGeneration: "Ara Kare Üretimi",
         .frameGenerationDetail: "Deneysel · her iki karenin arasına bir kare; dikey senkronizasyonu açar",
         .frameGenerationLowPower: "Düşük Güç Modu açık: ekran 60 Hz'de kalıyor, ara kare çalışmaz",
+        .saveSync: "Kayıt Senkronu",
+        .saveSyncDetail: "Kayıtlar ve kupalar %@ üzerinden diğer Mac'lerle aynı kalır",
+        .saveSyncNoFolder: "Kayıtlar ve kupalar bir klasör üzerinden diğer Mac'lerle aynı kalır; önce klasör seç",
+        .syncFolder: "Senkron Klasörü",
+        .syncFolderICloud: "iCloud Drive",
+        .syncFolderNone: "Seçilmedi: iCloud Drive, Dropbox ya da paylaşılan bir klasör seç",
+        .savesSyncedFrom: "Kayıtlar %@'tan alındı",
+        .saveSyncFailed: "Kayıtlar senkronlanamadı",
         .clips: "Klipler",
         .clipsDetail: "Create, ⌥F12 ya da telefon son %d saniyeyi galeriye kaydeder",
         .clipLength: "Klip Uzunluğu",
@@ -419,6 +427,14 @@ enum T {
         .frameGeneration: "Frame Generation",
         .frameGenerationDetail: "Experimental · a frame between each two; turns on vertical sync",
         .frameGenerationLowPower: "Low Power Mode is on: the display stays at 60 Hz, so frame generation cannot work",
+        .saveSync: "Save Sync",
+        .saveSyncDetail: "Saves and trophies stay the same on your other Macs through %@",
+        .saveSyncNoFolder: "Saves and trophies stay the same on your other Macs through a folder; choose one first",
+        .syncFolder: "Sync Folder",
+        .syncFolderICloud: "iCloud Drive",
+        .syncFolderNone: "None: choose iCloud Drive, Dropbox or a shared folder",
+        .savesSyncedFrom: "Saves brought over from %@",
+        .saveSyncFailed: "Saves could not be synced",
         .clips: "Clips",
         .clipsDetail: "Create, ⌥F12 or the phone saves the last %d seconds to the gallery",
         .clipLength: "Clip Length",

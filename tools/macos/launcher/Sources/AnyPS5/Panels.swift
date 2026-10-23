@@ -136,6 +136,14 @@ extension AppModel {
                      kind: .stepper(value: clipSeconds, range: 15...120, step: 15, format: { T.format(.seconds, $0) }) { [weak self] value in
                          self?.preferences.clipLength = value
                      }),
+            PanelRow(id: "saveSync", title: T.text(.saveSync), detail: syncRoot.map { T.format(.saveSyncDetail, $0.abbreviatedPath) } ?? T.text(.saveSyncNoFolder), symbol: "arrow.triangle.2.circlepath.icloud",
+                     kind: .toggle(preferences.saveSync == true && syncRoot != nil) { [weak self] value in
+                         guard let self else { return }
+                         if value && self.syncRoot == nil { return self.chooseSyncFolder() }
+                         self.preferences.saveSync = value
+                     }),
+            PanelRow(id: "syncFolder", title: T.text(.syncFolder), detail: preferences.syncFolder.map { URL(fileURLWithPath: $0).abbreviatedPath } ?? T.text(SaveSync.iCloudDrive != nil ? .syncFolderICloud : .syncFolderNone),
+                     symbol: "folder.badge.gearshape", kind: .action(destructive: false) { [weak self] in self?.chooseSyncFolder() }),
             PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
                 self?.preferences.checkUpdates = value
                 if value { self?.checkForUpdate() }

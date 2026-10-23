@@ -81,6 +81,7 @@ public enum SaveBackup {
         if parts.contains(where: { FileManager.default.fileExists(atPath: game.appendingPathComponent($0).path) }) {
             try backUp(game, to: folder, date: date)
         }
+        try FileManager.default.createDirectory(at: game, withIntermediateDirectories: true)
         for part in restored {
             let target = game.appendingPathComponent(part)
             if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }

@@ -29,6 +29,10 @@ struct Preferences: Codable, Equatable {
     /// phone); nil means off. clipLength is in seconds, nil for 30.
     var clips: Bool?
     var clipLength: Int?
+    /// Keeping each game's saves in step through a folder other Macs see (SaveSync); nil means
+    /// off. syncFolder nil is iCloud Drive.
+    var saveSync: Bool?
+    var syncFolder: String?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
@@ -586,7 +590,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Plays the game, its saves brought in step first where save sync is on.
     func play(_ game: Game) {
+        guard root != nil, starting == nil, running == nil, syncing == nil else { return }
+        syncSaves(game) { self.start(game) }
+    }
+
+    private func start(_ game: Game) {
         guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -622,6 +632,43 @@ final class AppModel: ObservableObject {
                     self.show(T.text(.startFailed) + (error.map { ": " + $0.localizedDescription } ?? ""), symbol: "exclamationmark.triangle.fill")
                 }
             }
+        }
+    }
+
+    // MARK: Save sync
+
+    /// The game whose saves are being synced, so it does not start twice meanwhile.
+    @Published private(set) var syncing: String?
+
+    var syncRoot: URL? { preferences.syncFolder.map { URL(fileURLWithPath: $0) } ?? SaveSync.iCloudDrive }
+
+    private func saveSync(for game: Game) -> SaveSync? {
+        guard preferences.saveSync == true, let root = syncRoot, let folder = gameFolder(game) else { return nil }
+        return SaveSync(game: folder, cloud: SaveSync.folder(in: root, titleID: game.titleID), backups: SaveBackup.folder(for: game), mac: Host.current().localizedName ?? "Mac")
+    }
+
+    /// Syncs the game's saves off the main thread, says what came from another Mac, then goes on.
+    private func syncSaves(_ game: Game, then: @escaping @MainActor () -> Void) {
+        guard let sync = saveSync(for: game) else { return then() }
+        syncing = game.id
+        Task.detached {
+            let result = Result { try sync.sync(date: Date()) }
+            await MainActor.run {
+                self.syncing = nil
+                switch result {
+                case .success(.downloaded(let mac)): self.show(T.format(.savesSyncedFrom, mac), symbol: "icloud.and.arrow.down")
+                case .failure(let error): self.show(T.text(.saveSyncFailed) + ": \(error)", symbol: "exclamationmark.icloud")
+                default: break
+                }
+                then()
+            }
+        }
+    }
+
+    func chooseSyncFolder() {
+        if let url = chooseDirectory(start: syncRoot) {
+            preferences.syncFolder = url.path
+            preferences.saveSync = true
         }
     }
 
@@ -759,6 +806,7 @@ final class AppModel: ObservableObject {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
         clipRecorder.stop()
+        syncSaves(running.game) {}
         discord.clear()
         loadTrophies(running.game, again: true)
         diagnose(running.game)
