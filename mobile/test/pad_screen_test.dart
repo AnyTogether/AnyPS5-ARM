@@ -100,9 +100,72 @@ void main() {
     expect(touch.active, isTrue);
     expect(touch.x, closeTo(960, 10));
     expect(touch.y, closeTo(540, 10));
-    expect(states.last.buttons & PadButton.touchPad, PadButton.touchPad);
+    expect(
+      states.last.buttons & PadButton.touchPad,
+      0,
+      reason: 'a touch is not a click',
+    );
     await finger.up();
+    await tester.pump(const Duration(milliseconds: 200));
     expect(states.last.touch[0].active, isFalse);
+  });
+
+  bool clicked(PadState state) => state.buttons & PadButton.touchPad != 0;
+
+  testWidgets('sliding on the touchpad moves the touch and never clicks', (
+    tester,
+  ) async {
+    final states = await show(tester);
+    final finger = await tester.startGesture(at('touchPad'));
+    await finger.moveBy(const Offset(60, 0));
+    await tester.pump(const Duration(milliseconds: 600));
+    await finger.moveBy(const Offset(-30, 10));
+    await finger.up();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(states.any(clicked), isFalse);
+    expect(
+      states.map((state) => state.touch[0].x).toSet().length,
+      greaterThan(2),
+    );
+  });
+
+  testWidgets('a tap on the touchpad is a short click', (tester) async {
+    final states = await show(tester);
+    await tester.tapAt(at('touchPad'));
+    expect(clicked(states.last), isTrue);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(clicked(states.last), isFalse);
+  });
+
+  testWidgets('a finger held still on the touchpad clicks until it lifts', (
+    tester,
+  ) async {
+    final states = await show(tester);
+    final finger = await tester.startGesture(at('touchPad'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(clicked(states.last), isTrue);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(clicked(states.last), isTrue);
+    await finger.up();
+    expect(clicked(states.last), isFalse);
+  });
+
+  testWidgets('two fingers on the touchpad are two touches', (tester) async {
+    final states = await show(tester);
+    final rect = PadLayout.standard.rect(
+      PadLayout.standard.control('touchPad'),
+      size,
+    );
+    final first = await tester.startGesture(
+      rect.centerLeft + const Offset(20, 0),
+    );
+    final second = await tester.startGesture(
+      rect.centerRight - const Offset(20, 0),
+    );
+    expect(states.last.touch[0].active && states.last.touch[1].active, isTrue);
+    expect(states.last.touch[0].x, lessThan(states.last.touch[1].x));
+    await first.up();
+    await second.up();
   });
 
   testWidgets('leaving the pad releases it', (tester) async {

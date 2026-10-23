@@ -50,6 +50,10 @@ class _Finger {
   final Offset start;
   Offset position = Offset.zero;
   bool clicked = false;
+
+  /// On the touchpad: it slid, so it is a touch and never a click.
+  bool moved = false;
+  Timer? hold;
 }
 
 class _Drag {
@@ -62,6 +66,12 @@ class _Drag {
 
 class _PadScreenState extends State<PadScreen> {
   static const doubleTap = Duration(milliseconds: 300);
+
+  /// The touchpad, like the DualSense's: a touch reports where it is, a tap clicks briefly and a
+  /// finger held still clicks until it lifts.
+  static const touchHold = Duration(milliseconds: 400);
+  static const tapClick = Duration(milliseconds: 100);
+  static const tapSlop = 0.04;
   static const scaleStep = 0.1;
 
   final _fingers = <int, _Finger>{};
@@ -71,6 +81,8 @@ class _PadScreenState extends State<PadScreen> {
   PadState _state = PadState();
   Timer? _turbo;
   int _turboTicks = 0;
+  TouchPoint? _tap;
+  Timer? _tapRelease;
   Size _size = Size.zero;
 
   bool _editing = false;
@@ -90,6 +102,10 @@ class _PadScreenState extends State<PadScreen> {
   @override
   void dispose() {
     _turbo?.cancel();
+    _tapRelease?.cancel();
+    for (final finger in _fingers.values) {
+      finger.hold?.cancel();
+    }
     if (_fingers.isNotEmpty || _latched.isNotEmpty) widget.onState(PadState());
     super.dispose();
   }
@@ -233,6 +249,14 @@ class _PadScreenState extends State<PadScreen> {
         control.kind == ControlKind.stick &&
         released != null &&
         _clock.elapsed - released < doubleTap;
+    if (control.kind == ControlKind.touchPad) {
+      finger.hold = Timer(touchHold, () {
+        if (!finger.moved && _fingers.containsValue(finger)) {
+          finger.clicked = true;
+          _publish(_size);
+        }
+      });
+    }
     _fingers[event.pointer] = finger;
     _publish(size);
   }
@@ -241,6 +265,13 @@ class _PadScreenState extends State<PadScreen> {
     final finger = _fingers[event.pointer];
     if (finger == null) return;
     finger.position = event.localPosition;
+    if (finger.control.kind == ControlKind.touchPad &&
+        !finger.moved &&
+        (finger.position - finger.start).distance >
+            tapSlop * _layout.rect(finger.control, size).width) {
+      finger.moved = true;
+      finger.hold?.cancel();
+    }
     if (finger.control.kind == ControlKind.stick ||
         finger.control.kind == ControlKind.touchPad) {
       _publish(size);
@@ -252,6 +283,17 @@ class _PadScreenState extends State<PadScreen> {
     if (finger == null) return;
     if (finger.control.kind == ControlKind.stick) {
       _released[finger.control.id] = _clock.elapsed;
+    }
+    finger.hold?.cancel();
+    if (finger.control.kind == ControlKind.touchPad &&
+        !finger.moved &&
+        !finger.clicked) {
+      _tap = _touchPoint(finger, size, 0);
+      _tapRelease?.cancel();
+      _tapRelease = Timer(tapClick, () {
+        _tap = null;
+        _publish(_size);
+      });
     }
     _publish(size);
   }
@@ -297,20 +339,14 @@ class _PadScreenState extends State<PadScreen> {
           if (finger.clicked) state.buttons |= control.bit;
         case ControlKind.touchPad:
           if (touchIndex > 1) break;
-          final area = layout.rect(control, size);
-          state.buttons |= control.bit;
-          state.touch[touchIndex] = TouchPoint(
-            active: true,
-            id: touchIndex,
-            x: ((finger.position.dx - area.left) / area.width * 1920)
-                .floor()
-                .clamp(0, 1919),
-            y: ((finger.position.dy - area.top) / area.height * 1080)
-                .floor()
-                .clamp(0, 1079),
-          );
+          if (finger.clicked) state.buttons |= control.bit;
+          state.touch[touchIndex] = _touchPoint(finger, size, touchIndex);
           touchIndex++;
       }
+    }
+    if (_tap case final tap?) {
+      state.buttons |= PadButton.touchPad;
+      if (!state.touch[0].active) state.touch[0] = tap;
     }
     if (turbo) {
       _turbo ??= Timer.periodic(const Duration(milliseconds: 25), (_) {
@@ -324,6 +360,22 @@ class _PadScreenState extends State<PadScreen> {
     }
     if (mounted) setState(() => _state = state);
     widget.onState(state.copy());
+  }
+
+  TouchPoint _touchPoint(_Finger finger, Size size, int id) {
+    final area = _layout.rect(finger.control, size);
+    return TouchPoint(
+      active: true,
+      id: id,
+      x: ((finger.position.dx - area.left) / area.width * 1920).floor().clamp(
+        0,
+        1919,
+      ),
+      y: ((finger.position.dy - area.top) / area.height * 1080).floor().clamp(
+        0,
+        1079,
+      ),
+    );
   }
 
   static int _axis(double fraction) =>
