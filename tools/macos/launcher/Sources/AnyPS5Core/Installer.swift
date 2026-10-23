@@ -168,7 +168,8 @@ public final class Installer: @unchecked Sendable {
         guard fileManager.fileExists(atPath: relinked.appendingPathComponent("eboot").path) else { throw InstallError("relinker wrote no executable") }
         progress(.relink, 1)
 
-        // 3. The game files, cloned (no extra space on APFS), with the relinked modules over them.
+        // 3. The game files, cloned (no extra space on APFS) or linked where the disk cannot clone,
+        // with the relinked modules copied over them.
         try checkCancelled()
         try? fileManager.removeItem(at: partial)
         let contents = partial.appendingPathComponent("Contents")
@@ -177,7 +178,7 @@ public final class Installer: @unchecked Sendable {
         let app0 = resources.appendingPathComponent("game/app0")
         try fileManager.createDirectory(at: macOS.appendingPathComponent("libs"), withIntermediateDirectories: true)
         try fileManager.createDirectory(at: app0, withIntermediateDirectories: true)
-        try cloneTree(game.folder, into: app0) { fraction in self.progress(.copy, fraction) }
+        try cloneTree(game.folder, into: app0, linkWithoutClone: true) { fraction in self.progress(.copy, fraction) }
         let guestModules = relinked.appendingPathComponent("app0")
         if fileManager.fileExists(atPath: guestModules.path) { try cloneTree(guestModules, into: app0) { _ in } }
         try linkGuestModuleLibraries(in: app0)
@@ -382,7 +383,26 @@ public final class Installer: @unchecked Sendable {
     }
 
     /// Copies a tree with clonefile where the volume allows it, reporting the share of bytes done.
-    func cloneTree(_ source: URL, into target: URL, progress: (Double) -> Void) throws {
+    func cloneTree(_ source: URL, into target: URL, linkWithoutClone: Bool = false, progress: (Double) -> Void) throws {
+        let link = linkWithoutClone && !Installer.clones(from: source, to: target)
+        if link { log("\(game.titleID): the games folder cannot clone, so the game links to its dump instead of copying it") }
+        try Installer.copyTree(source, into: target, link: link, cancelled: checkCancelled, progress: progress)
+    }
+
+    /// Whether files from `source` can be cloned into `target`: on one volume that clones (APFS),
+    /// where a clone takes no space.
+    static func clones(from source: URL, to target: URL) -> Bool {
+        let keys: Set<URLResourceKey> = [.volumeIdentifierKey, .volumeSupportsFileCloningKey]
+        guard let from = try? source.resourceValues(forKeys: keys), let to = try? target.resourceValues(forKeys: keys),
+              let fromVolume = from.volumeIdentifier as? NSObject, let toVolume = to.volumeIdentifier as? NSObject else { return false }
+        return fromVolume.isEqual(toVolume) && to.volumeSupportsFileCloning == true
+    }
+
+    /// The files of `source` in `target`, folder by folder: each cloned (a real copy where cloning
+    /// is not possible), or with `link`, a link to the source file, so nothing takes space twice
+    /// on a disk that cannot clone. The game only reads its files, as /app0 is read-only on the
+    /// console, so a link serves as well as a copy; the dump has to stay where it is.
+    static func copyTree(_ source: URL, into target: URL, link: Bool, cancelled: () throws -> Void, progress: (Double) -> Void) throws {
         let fileManager = FileManager.default
         let base = source.resolvingSymlinksInPath().standardizedFileURL.path
         var files: [(URL, String, Int64)] = []
@@ -404,10 +424,14 @@ public final class Installer: @unchecked Sendable {
         }
         var done: Int64 = 0
         for (item, relative, size) in files {
-            try checkCancelled()
+            try cancelled()
             let destination = target.appendingPathComponent(relative)
-            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
-            if copyfile(item.path, destination.path, nil, copyfile_flags_t(COPYFILE_CLONE)) != 0 {
+            if fileManager.fileExists(atPath: destination.path) || (try? destination.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                try fileManager.removeItem(at: destination)
+            }
+            if link {
+                try fileManager.createSymbolicLink(atPath: destination.path, withDestinationPath: item.resolvingSymlinksInPath().path)
+            } else if copyfile(item.path, destination.path, nil, copyfile_flags_t(COPYFILE_CLONE)) != 0 {
                 throw InstallError("copy \(relative): \(String(cString: strerror(errno)))")
             }
             done += size
