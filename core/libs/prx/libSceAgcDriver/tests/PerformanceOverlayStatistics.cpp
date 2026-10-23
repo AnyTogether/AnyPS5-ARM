@@ -176,6 +176,16 @@ void settingsTests() {
     };
     require(refused("yes", nullptr, "ANYPS5_OVERLAY") && refused("2", nullptr, "ANYPS5_OVERLAY"), "an ANYPS5_OVERLAY value other than 1 or 0 was accepted or not named");
     require(refused("1", "center", "ANYPS5_OVERLAY_POS") && refused(nullptr, "TL", "ANYPS5_OVERLAY_POS"), "an unknown ANYPS5_OVERLAY_POS was accepted or not named");
+    require(AgcDriver::ParseOverlaySettings("1", nullptr).style == AgcDriver::OverlayStyle::Detailed, "the overlay is not the detailed panel by default");
+    require(AgcDriver::ParseOverlaySettings("1", nullptr, "detailed").style == AgcDriver::OverlayStyle::Detailed, "ANYPS5_OVERLAY_STYLE=detailed is not the panel");
+    require(AgcDriver::ParseOverlaySettings("1", nullptr, "minimal").style == AgcDriver::OverlayStyle::Minimal, "ANYPS5_OVERLAY_STYLE=minimal is not the line of figures");
+    bool named = false;
+    try {
+        static_cast<void>(AgcDriver::ParseOverlaySettings("1", nullptr, "fancy"));
+    } catch (const std::exception& error) {
+        named = std::string(error.what()).find("ANYPS5_OVERLAY_STYLE") != std::string::npos;
+    }
+    require(named, "an unknown ANYPS5_OVERLAY_STYLE was accepted or not named");
 }
 
 void composeTests() {

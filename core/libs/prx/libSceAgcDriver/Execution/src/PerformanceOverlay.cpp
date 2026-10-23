@@ -24,6 +24,8 @@
 #endif
 #include <windows.h>
 #include <psapi.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
 #endif
 
 namespace AgcDriver {
@@ -65,7 +67,7 @@ struct PacketCounterLease {
 constexpr double GigabyteBytes = 1024.0 * 1024.0 * 1024.0;
 
 const OverlaySettings& settings() {
-    static const OverlaySettings parsed = ParseOverlaySettings(std::getenv("ANYPS5_OVERLAY"), std::getenv("ANYPS5_OVERLAY_POS"));
+    static const OverlaySettings parsed = ParseOverlaySettings(std::getenv("ANYPS5_OVERLAY"), std::getenv("ANYPS5_OVERLAY_POS"), std::getenv("ANYPS5_OVERLAY_STYLE"));
     return parsed;
 }
 
@@ -104,7 +106,7 @@ bool srgbFormat(VkFormat format) {
 
 }
 
-OverlaySettings ParseOverlaySettings(const char* enabled, const char* position) {
+OverlaySettings ParseOverlaySettings(const char* enabled, const char* position, const char* style) {
     OverlaySettings parsed;
     const std::string_view visible = enabled != nullptr ? enabled : "";
     if (visible == "1") parsed.visible = true;
@@ -115,6 +117,10 @@ OverlaySettings ParseOverlaySettings(const char* enabled, const char* position) 
     else if (corner == "bl") parsed.corner = OverlayCorner::BottomLeft;
     else if (corner == "br") parsed.corner = OverlayCorner::BottomRight;
     else throw std::runtime_error("ANYPS5_OVERLAY_POS must be tl, tr, bl or br, not '" + std::string(corner) + "'");
+    const std::string_view look = style != nullptr ? style : "";
+    if (look.empty() || look == "detailed") parsed.style = OverlayStyle::Detailed;
+    else if (look == "minimal") parsed.style = OverlayStyle::Minimal;
+    else throw std::runtime_error("ANYPS5_OVERLAY_STYLE must be detailed or minimal, not '" + std::string(look) + "'");
     return parsed;
 }
 
@@ -422,6 +428,12 @@ std::optional<std::uint64_t> ReadProcessPrivateBytes() {
     counters.cb = sizeof(counters);
     if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)) == 0) return std::nullopt;
     return static_cast<std::uint64_t>(counters.PrivateUsage);
+#elif defined(__APPLE__)
+    // The footprint Activity Monitor shows: the process's own resident and compressed memory.
+    task_vm_info_data_t info{};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) return std::nullopt;
+    return static_cast<std::uint64_t>(info.phys_footprint);
 #else
     std::FILE* status = std::fopen("/proc/self/status", "r");
     if (status == nullptr) return std::nullopt;
@@ -589,6 +601,14 @@ void PerformanceOverlay::Toggle() {
 
 OverlayCorner PerformanceOverlay::Corner() {
     return settings().corner;
+}
+
+OverlayStyle PerformanceOverlay::Style() {
+#ifdef __APPLE__
+    return settings().style;
+#else
+    return OverlayStyle::Detailed;
+#endif
 }
 
 void PerformanceOverlay::NotePresent(OverlayStatistics::Clock::time_point at, VkExtent2D display) {
@@ -782,4 +802,19 @@ OverlayRect PerformanceOverlay::Record(VkCommandBuffer commands, std::size_t ind
 
 extern "C" void AgcDriverTogglePerformanceOverlay_nid_postfix() {
     AgcDriver::PerformanceOverlay::Toggle();
+}
+
+// For the minimal overlay the window draws (libSceVideoOut's StatsOverlay): whether it shows now,
+// its corner (OverlayCorner) and the process's memory, 0 when unknown. Only these C entry points
+// cross from one installed library to another.
+extern "C" bool AgcDriverMinimalOverlayShown_nid_postfix() {
+    return AgcDriver::PerformanceOverlay::Visible() && AgcDriver::PerformanceOverlay::Style() == AgcDriver::OverlayStyle::Minimal;
+}
+
+extern "C" int AgcDriverOverlayCorner_nid_postfix() {
+    return static_cast<int>(AgcDriver::PerformanceOverlay::Corner());
+}
+
+extern "C" std::uint64_t AgcDriverProcessFootprint_nid_postfix() {
+    return AgcDriver::ReadProcessPrivateBytes().value_or(0);
 }

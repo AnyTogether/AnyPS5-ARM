@@ -26,12 +26,17 @@ class Buffer;
 
 enum class OverlayCorner : std::uint8_t { TopLeft, TopRight, BottomLeft, BottomRight };
 
+// Detailed: this panel, drawn into the frame. Minimal: one line of figures the window draws over
+// the game in the system font (libSceVideoOut's StatsOverlay), where the platform has one.
+enum class OverlayStyle : std::uint8_t { Detailed, Minimal };
+
 struct OverlaySettings {
     bool visible = false;
     OverlayCorner corner = OverlayCorner::TopLeft;
+    OverlayStyle style = OverlayStyle::Detailed;
 };
 
-OverlaySettings ParseOverlaySettings(const char* enabled, const char* position);
+OverlaySettings ParseOverlaySettings(const char* enabled, const char* position, const char* style = nullptr);
 
 class PerformanceCounters {
 public:
@@ -184,6 +189,7 @@ public:
     static bool Visible();
     static void Toggle();
     static OverlayCorner Corner();
+    static OverlayStyle Style();
 
     void NotePresent(OverlayStatistics::Clock::time_point at, VkExtent2D display);
     const OverlayStatistics& Statistics() const { return statistics; }

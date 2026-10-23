@@ -1,0 +1,61 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "FrameGenCommon.glsl"
+
+// Block motion at the finer level: each block tries the coarse motion of its own and the eight
+// neighbouring coarse blocks (inputC, scaled by b.z) and no motion, then refines the best within
+// b.y texels. a.xy: blocks, a.zw: level size, b.x: block size, b.w: coarse blocks per fine block
+// column (as a divisor), c.x: full-size pixels per texel of this level. The result is in full-size
+// pixels.
+layout(set = 0, binding = 3, rg16f) writeonly uniform image2D outputImage;
+
+float sad(ivec2 origin, ivec2 motion, int block, ivec2 last) {
+    float sum = 0.0;
+    for (int y = 0; y < block; ++y) {
+        for (int x = 0; x < block; ++x) {
+            const ivec2 at = clamp(origin + ivec2(x, y), ivec2(0), last);
+            const ivec2 from = clamp(at - motion, ivec2(0), last);
+            sum += abs(texelFetch(inputB, at, 0).r - texelFetch(inputA, from, 0).r);
+        }
+    }
+    return sum;
+}
+
+void main() {
+    const ivec2 block = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(block, push.a.xy))) return;
+    const int size = push.b.x;
+    const int radius = push.b.y;
+    const int scale = push.b.z;
+    const ivec2 last = push.a.zw - 1;
+    const ivec2 origin = block * size;
+    const ivec2 coarseLast = textureSize(inputC, 0) - 1;
+    const ivec2 coarse = block / push.b.w;
+    const float perTexel = 0.002 * float(size * size);
+    ivec2 best = ivec2(0);
+    float bestCost = sad(origin, ivec2(0), size, last);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            const ivec2 cell = clamp(coarse + ivec2(x, y), ivec2(0), coarseLast);
+            const ivec2 motion = ivec2(round(texelFetch(inputC, cell, 0).rg * float(scale)));
+            const float cost = sad(origin, motion, size, last) + perTexel * float(abs(motion.x) + abs(motion.y));
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = motion;
+            }
+        }
+    }
+    const ivec2 center = best;
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            if (x == 0 && y == 0) continue;
+            const ivec2 motion = center + ivec2(x, y);
+            const float cost = sad(origin, motion, size, last) + perTexel * float(abs(motion.x) + abs(motion.y));
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = motion;
+            }
+        }
+    }
+    imageStore(outputImage, block, vec4(vec2(best) * push.c.x, 0.0, 0.0));
+}

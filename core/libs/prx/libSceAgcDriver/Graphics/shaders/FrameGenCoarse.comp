@@ -1,0 +1,44 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "FrameGenCommon.glsl"
+
+// Block motion at the coarsest level: for each block of the current frame (inputB), the offset
+// into the previous frame (inputA) within b.y texels that matches it best, as the sum of absolute
+// differences plus a small cost per texel of motion. a.xy: blocks, a.zw: level size, b.x: block
+// size. The result is in this level's texels: current(p) is previous(p - motion).
+layout(set = 0, binding = 3, rg16f) writeonly uniform image2D outputImage;
+
+float sad(ivec2 origin, ivec2 motion, int block, ivec2 last) {
+    float sum = 0.0;
+    for (int y = 0; y < block; ++y) {
+        for (int x = 0; x < block; ++x) {
+            const ivec2 at = clamp(origin + ivec2(x, y), ivec2(0), last);
+            const ivec2 from = clamp(at - motion, ivec2(0), last);
+            sum += abs(texelFetch(inputB, at, 0).r - texelFetch(inputA, from, 0).r);
+        }
+    }
+    return sum;
+}
+
+void main() {
+    const ivec2 block = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(block, push.a.xy))) return;
+    const int size = push.b.x;
+    const int radius = push.b.y;
+    const ivec2 last = push.a.zw - 1;
+    const ivec2 origin = block * size;
+    const float perTexel = 0.004 * float(size * size);
+    ivec2 best = ivec2(0);
+    float bestCost = sad(origin, ivec2(0), size, last);
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            const ivec2 motion = ivec2(x, y);
+            const float cost = sad(origin, motion, size, last) + perTexel * float(abs(x) + abs(y));
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = motion;
+            }
+        }
+    }
+    imageStore(outputImage, block, vec4(vec2(best), 0.0, 0.0));
+}

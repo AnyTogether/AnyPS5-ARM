@@ -189,6 +189,23 @@ add_custom_command(
         DEPENDS "${agcSampleDumpsShaderSource}" glslang-standalone
         VERBATIM
 )
+# Frame generation's passes (FrameGeneration.cpp), sharing FrameGenCommon.glsl.
+foreach(agcFrameGenPass IN ITEMS Luma Coarse Fine Smooth Interpolate)
+    string(TOUPPER "${agcFrameGenPass}" agcFrameGenSymbol)
+    set(agcFrameGenSource ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/FrameGen${agcFrameGenPass}.comp)
+    set(agcFrameGenSpv ${agcTextureDetileGeneratedDir}/FrameGen${agcFrameGenPass}.spv)
+    set(agcFrameGenHeader ${agcTextureDetileGeneratedDir}/FrameGen${agcFrameGenPass}_spv.h)
+    add_custom_command(
+            OUTPUT "${agcFrameGenHeader}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTextureDetileGeneratedDir}"
+            COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 -o "${agcFrameGenSpv}" "${agcFrameGenSource}"
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${agcFrameGenSpv} -DOUTPUT=${agcFrameGenHeader}
+            -DSYMBOL=FRAME_GEN_${agcFrameGenSymbol}_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
+            DEPENDS "${agcFrameGenSource}" "${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/FrameGenCommon.glsl" glslang-standalone
+            VERBATIM
+    )
+    list(APPEND agcFrameGenHeaders ${agcFrameGenHeader})
+endforeach()
 foreach(agcPresentationStage IN ITEMS Vert Frag)
     string(TOLOWER "${agcPresentationStage}" agcPresentationExtension)
     string(TOUPPER "${agcPresentationStage}" agcPresentationSymbol)
@@ -319,6 +336,7 @@ set(agcDriverSources
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationScaler.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationPass.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PerformanceOverlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/FrameGeneration.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/Screenshot.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/Draw.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/DepthSurface.cpp
@@ -362,6 +380,7 @@ set(agcDriverSources
         ${agcReadbackHeaders}
         ${agcMultisampleUploadHeader}
         ${agcCmaskClearShaderHeader}
+        ${agcFrameGenHeaders}
         ${agcDepthSampleShaderHeaders}
         ${agcMeshArgumentsShaderHeader}
         ${agcTextureDetileImageShaderHeader}
@@ -1799,6 +1818,27 @@ if(BUILD_TESTING)
         set_tests_properties(agc_host_import_sparse PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+endif()
+
+add_test_executable(agc_frame_generation_tests EXCLUDE_FROM_ALL
+        tests/FrameGeneration.cpp
+)
+target_include_directories(agc_frame_generation_tests PRIVATE
+        ${LIBS_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler
+        ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR}
+)
+target_link_libraries(agc_frame_generation_tests PRIVATE
+        libSceAgcDriver
+        SDL2-static
+        libc
+)
+set_target_properties(agc_frame_generation_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_frame_generation_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_frame_generation_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_frame_generation COMMAND agc_frame_generation_tests)
+    set_tests_properties(agc_frame_generation PROPERTIES SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()
 
 add_test_executable(agc_driver_presentation_pass_tests EXCLUDE_FROM_ALL
