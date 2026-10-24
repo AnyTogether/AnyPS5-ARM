@@ -3,30 +3,34 @@
 Each phase ships something people can use, behind a switch in the launcher until it is solid.
 "Done" means every check in its list passes, not "the code is written".
 
-## Where it stands (2026-10-24)
+## Where it stands (2026-10-25)
 
 The code is public and MIT licensed at
 [github.com/utkuhalis/AnyTogether](https://github.com/utkuhalis/AnyTogether). "Released" means in
-AnyPS5-ARM v0.2.13-arm (phone app 1.9.1); "next release" means on AnyPS5-ARM's `main`, not yet
-released.
+AnyPS5-ARM 0.2.15 (the macOS launcher), phone app 1.11.0 or AnyPS5 Desktop 0.1.1 (Windows and
+Linux); the website is released as it is built.
 
 | Phase | Status |
 |---|---|
-| 0 Foundations | **mostly built.** Repository, API, gateway, website, CI. Sign-in by email code or link, passkeys (web), phone hand-off, device code; Apple, Google and Discord checked by the API. The macOS launcher and the phone sign in (released). Left: provider buttons in the clients, the OpenAPI document, staging, backups to R2, the legal pages. |
-| 1 Profile, library, trophies | **mostly built.** Profiles, handles, avatars, privacy; catalogue, sessions, library, trophy sets, rarity; the launcher sends play time and trophies (released) and shows profiles (next release); web profiles. Left: showcase, profile theme, avatar checks, dates and rarity on the launcher's trophy screen, Open Graph images. |
-| 2 Friends, presence, feed, leaderboards | **friends and presence built** (web; launcher released; phone next release). Left: QR codes, the feed, leaderboards. |
-| 3 Messages and push | **messages built** for text (web; launcher and phone next release). Left: images, reactions, typing, push notifications. |
-| 4 Parties and voice | **built**: parties, calls, peer-to-peer voice on the web, in the launcher and on the phone (next release), push-to-talk on macOS, relay support; and **joining a friend's game** through game sessions (launcher, next release). Left: party chat, the phone as headset, call quality reports. |
-| 5 Share play | planned, **watch only**. |
-| 6 Theme Hub, downloads, compatibility | planned. |
-| 7 Online play | **in design**: the engine bridge on AnyPS5-ARM's `online-play` branch; game sessions on the server built. |
-| Running your own | **built**: Docker Compose and a self-hosting guide; the launcher and the phone can point at another server (next release). |
-| Windows and Linux | [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) is public and in development; its AnyTogether part is planned. |
+| 0 Foundations | **mostly built.** Repository, API, gateway, website, CI. Sign-in by email code or link, passkeys (web), phone hand-off, device code; Apple, Google and Discord checked by the API. Every client signs in (released). Left: provider buttons in the clients, the OpenAPI document, staging, backups to R2, the legal pages. |
+| 1 Profile, library, trophies | **mostly built.** Profiles, handles, avatars, privacy; catalogue, sessions, library, trophy sets, rarity; both launchers send play time and trophies and show profiles; the phone edits your profile; web profiles. Left: showcase, profile theme, avatar checks, dates and rarity on the launcher's own trophy screen, Open Graph images. |
+| 2 Friends, presence, feed, leaderboards | **built**: friends and presence everywhere; the activity feed with reactions and leaderboards on the web, the macOS launcher and the phone; finding players on the web (looking-for-group board, public parties and share plays, discovery, game hubs). Left: QR codes, comments, monthly and weekly boards, the feed and boards in AnyPS5 Desktop, finding players in the apps. |
+| 3 Messages and push | **built** for text with groups and typing, everywhere; notifications with the bell everywhere, browser push and a mail digest. Left: images, reactions on messages, push to the phone. |
+| 4 Parties and voice | **built**: parties, public parties, party voice and 1:1 calls with mute on the web, both launchers and the phone; push-to-talk in both launchers; relay support; **joining a friend's game** through game sessions (both launchers). Left: party chat, the phone as headset, call quality reports. |
+| 5 Share play | **built**: the macOS launcher hosts; viewers on the web, the phone and the macOS launcher; the host hands pads 2-4 and keeps player 1; public listing and Live now. Left: hosting and watching in AnyPS5 Desktop, glass-to-glass measured over real networks, quality reports. |
+| 6 Theme Hub, downloads, compatibility | **built**: the Theme Hub (the macOS launcher and the web, old launchers through the old index), the download page and releases API, the compatibility list with reports from the macOS launcher and the web. Left: profile themes, AnyPS5 Desktop's side, pad layouts and presets. |
+| 7 Online play | **in design**: the engine bridge on AnyPS5-ARM's `online-play` branch; game sessions with player properties, signalling and relay credentials on the server built. |
+| Running your own | **built**: Docker Compose and a self-hosting guide; every client can point at another server. |
+| Moderation | **built**: reports on people, messages, themes and posts; the admin page and the command-line tool; a security review's fixes (see [Security](08-security-privacy.md)). |
+| Windows and Linux | [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) 0.1.1 (early preview): installers, the engine downloads itself, and AnyTogether's sign-in, friends, messages, parties and voice, sync, profiles and joining a friend's game. |
+
+Testing: every client against one real stack (`e2e/`): sign-in, friends, messages, parties, calls,
+sync and game sessions passed on 2026-10-24 (see [Clients](07-clients.md) 7.0).
 
 ## The plan
 
-The original plan, made before the work started (the order still holds; most of phases 0 to 4
-was built well ahead of these dates):
+The original plan, made before the work started (the order still held; phases 0 to 6 were built
+well ahead of these dates):
 
 ```mermaid
 gantt
@@ -106,7 +110,7 @@ protocols. Phase 6 can run beside 3-5.
 - [ ] Starting a game shows "playing X" on a friend's launcher within 3 s; closing it within 60 s
       at most (expiry) and usually at once.
 - [x] Presence set to "nobody" and blocks hide presence completely (test).
-- [ ] Feed shows one folded item for five trophies in an hour.
+- [x] Feed shows one folded item for five trophies in an hour (test).
 
 ## Phase 3: Messages and push (≈3 weeks)
 
@@ -117,7 +121,7 @@ protocols. Phase 6 can run beside 3-5.
 - [ ] A message sent from the web arrives in the launcher under 1 s and on a locked phone as a
       push under 5 s.
 - [x] Killing the network mid-send and resending never duplicates a message (test).
-- [ ] Unread counts agree on all three doors.
+- [x] Unread counts agree on all doors (the cross-client run).
 
 ## Phase 4: Parties and voice (≈4 weeks)
 
@@ -137,27 +141,31 @@ protocols. Phase 6 can run beside 3-5.
 
 ## Phase 5: Share play (≈5 weeks)
 
-- **Watch only**: viewers see and hear, and control never passes to them.
-- Every launcher hosts: macOS from `RemotePlay`'s capture and low-latency H.264, Windows and
-  Linux from their own capture and hardware encoders; direct to each viewer, relay if needed;
-  viewers on phone, web, any launcher; quality steps; latency badge.
+- Viewers see and hear the host's game; the host can hand up to three of them a pad, as player 2,
+  3 or 4, and take it back at any time. The host's player 1 is never handed over.
+- Every launcher hosts: macOS from Remote Play's capture with WebRTC's H.264 (built), Windows and
+  Linux from their own capture and hardware encoders (planned); direct to each viewer, relay if
+  needed; viewers on phone, web, any launcher; quality steps; the link shown to both sides.
 
 **Done when**
 - [ ] A friend 500 km away watches 720p60 with glass-to-glass under 120 ms (median), with a Mac as
       host and with a Windows PC as host.
-- [ ] Nothing a viewer sends reaches the host's game (test).
+- [x] A viewer's pad reaches the host's game only while the host lets them play, and never as
+      player 1 (test).
 - [ ] A weak network steps down without freezing for more than 500 ms.
 
 ## Phase 6: Theme Hub, downloads, compatibility (≈3 weeks, beside 3-5)
 
-- Theme upload from the Studio, moderation queue, likes, versions; launcher's Themes screen reads
-  the API (GitHub folder kept as fallback); profile themes.
-- Downloads page with mirrored releases and checksums; `GET /releases/latest`.
-- Compatibility reports (opt-in) and verdicts on game pages and in the launcher's library.
+- Theme upload from the launcher, review after reports, likes, versions; the launcher's Themes
+  screen reads the API (GitHub folder kept as fallback); profile themes (planned).
+- Downloads page from the latest GitHub releases with their checksums; `GET /releases/latest`.
+- Compatibility reports (opt-in) and verdicts on the list, game hubs and in the launcher's game
+  info.
 - Later on the same shelf: phone pad layouts, per-game presets, shared shader caches.
 
 **Done when**
-- [ ] A theme made in the Studio is installable by another user 1 minute after it is approved.
+- [x] A theme shared from the launcher is installable by another user at once (it is published
+      when it passes the checks).
 - [ ] Downloads match GitHub releases byte for byte (checksum test in CI).
 - [ ] Turning compatibility reports off sends nothing (test).
 
@@ -174,8 +182,8 @@ on AnyPS5-ARM's `online-play` branch; summary in [Realtime](06-realtime-voice-sh
 - Launcher: the bridge's other end, the `anyps5` API group mapped onto game sessions, the first
   peer link (plain UDP with an HMAC per packet), off by default (built on the branch); WebRTC data
   channels or QUIC with the relay (planned).
-- AnyTogether: game sessions with the version guard (built); the players' endpoints and a session
-  key, session signalling (planned).
+- AnyTogether: game sessions with the version guard, each player's properties, signalling between
+  the players and relay credentials (built); a session key (planned).
 
 **Done when**
 - [ ] Two copies of a game built only on platform services play together on one Mac, then on two
@@ -187,5 +195,5 @@ on AnyPS5-ARM's `online-play` branch; summary in [Realtime](06-realtime-voice-sh
 ## After
 
 - End-to-end encrypted direct messages and voice; App Store / Play Store releases of
-  the phone app; tournaments and challenges on leaderboards; spectating public share play for
-  friends of friends; a public API for community tools.
+  the phone app; tournaments and challenges on leaderboards; share play to many viewers through an
+  SFU; a public API for community tools.

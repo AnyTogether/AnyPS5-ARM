@@ -5,7 +5,7 @@ Times are `timestamptz`. Every table has `created_at`.
 
 The tables below are the ones **built**, as the Drizzle schema in
 [`packages/db/src/schema.ts`](https://github.com/utkuhalis/AnyTogether/blob/main/packages/db/src/schema.ts)
-defines them on 2026-10-24, written here as SQL and shortened (`created_at` and most indexes left
+defines them on 2026-10-25, written here as SQL and shortened (`created_at` and most indexes left
 out). The **planned** tables come after them.
 
 ## Accounts and sign-in
@@ -83,7 +83,10 @@ create table profiles (
   country      text,
   avatar_url   text,                          -- /api/v1/avatars/<hash>.jpg, or the provider's picture
   privacy      jsonb not null default '{}',   -- library, trophies, friends, presence, search: everyone | friends | nobody
-  stats        jsonb not null default '{}'    -- planned: games, hours, trophies, platinums
+  notification_settings jsonb not null default '{}', -- each kind on or off, the mail digest; only what was changed
+  stats        jsonb not null default '{}',   -- planned: games, hours, trophies, platinums
+  discoverable boolean,                       -- shown in discovery; null follows the library setting
+  languages    jsonb not null default '[]'    -- languages the person plays in (ISO 639-1), at most five
 );
 
 create table handle_history (                -- a given-up handle, held for its last owner for 30 days
@@ -199,11 +202,11 @@ create table blocks (
 create table reports (
   id          uuid primary key,
   reporter_id uuid references accounts on delete set null,
-  target_kind text not null,                 -- user | message (later activity, theme, game_name)
+  target_kind text not null,                 -- user | message | theme | lfg
   target_id   text not null,
   reason      text not null,                 -- spam | harassment | hate | sexual | impersonation | cheating | piracy | other
   note        text check (length(note) <= 500),
-  snapshot    jsonb,                         -- a reported message as it was, kept even if its author deletes it
+  snapshot    jsonb,                         -- what was reported, as it was: a message's text, a post's note, a theme's name and version
   status      text not null default 'open',  -- open | actioned | dismissed
   handled_by  text,
   handled_at  timestamptz
@@ -264,10 +267,14 @@ create table messages (
 
 ```sql
 create table parties (                       -- at most eight people
-  id        uuid primary key,
-  leader_id uuid references accounts on delete set null,
-  privacy   text not null default 'invite' check (privacy in ('invite', 'friends')),
-  ended_at  timestamptz
+  id          uuid primary key,
+  leader_id   uuid references accounts on delete set null,
+  privacy     text not null default 'invite' check (privacy in ('invite', 'friends')),
+  public_join text check (public_join in ('request', 'open')), -- listed in public; null when not
+  title_id    text references games,          -- the game and language it is listed with
+  language    text,
+  listed_at   timestamptz,
+  ended_at    timestamptz
 );
 create table party_members (                 -- someone is in one party at a time
   party_id   uuid not null references parties on delete cascade,
@@ -279,6 +286,11 @@ create table party_invites (
   party_id   uuid not null references parties on delete cascade,
   account_id uuid not null references accounts on delete cascade,
   invited_by uuid references accounts on delete set null,
+  primary key (party_id, account_id)
+);
+create table party_requests (                -- asking to join a party listed in public; the leader answers with an invite
+  party_id   uuid not null references parties on delete cascade,
+  account_id uuid not null references accounts on delete cascade,
   primary key (party_id, account_id)
 );
 
@@ -318,62 +330,169 @@ create table game_session_invites (
 );
 ```
 
-Who may signal in a call and who is in it now are kept in Valkey, not in `calls`.
+Who may signal in a call, who is in it now and who is muted are kept in Valkey, not in `calls`;
+so are each game session player's own properties. **Share plays have no table**: they last as
+long as the game, so the share play, its viewers with their pads, its invites and requests live
+only in Valkey (below).
+
+## Activity, notifications
+
+```sql
+create table activities (                    -- the feed; who may read an item is worked out when it is read
+  id         uuid primary key,               -- UUIDv7: the feed pages by it
+  actor_id   uuid not null references accounts on delete cascade,
+  kind       text not null,                  -- trophy | platinum | first_play | long_session | friendship | milestone
+  section    text not null,                  -- library | trophies | friends: the privacy setting that decides who sees it
+  title_id   text references games,
+  subject_id uuid references accounts on delete cascade, -- the new friend of a friendship item
+  payload    jsonb not null default '{}',    -- trophies: {setHash, trophies [{id, grade}], count}; sessions: {seconds}; milestone: {kind, value}
+  updated_at timestamptz not null            -- later than created_at when trophies folded in
+);
+create index activities_actor on activities (actor_id, id desc);
+
+create table activity_reactions (            -- one per person per item
+  activity_id uuid not null references activities on delete cascade,
+  account_id  uuid not null references accounts on delete cascade,
+  reaction    text not null check (reaction in ('fire', 'clap', 'wow', 'heart')),
+  primary key (activity_id, account_id)
+);
+
+create table notifications (
+  id         uuid primary key,               -- UUIDv7: the list pages by it
+  account_id uuid not null references accounts on delete cascade,
+  kind       text not null,                  -- friend_request | friend_accepted | message | party_invite | game_invite
+                                             -- | missed_call | lfg_request | lfg_accepted | warning
+  actor_id   uuid references accounts on delete cascade,
+  subject_id text not null,                  -- the conversation, party, game session, call, post or person
+  data       jsonb not null default '{}',    -- e.g. a message's conversation, title and count
+  read_at    timestamptz,
+  mailed_at  timestamptz,                    -- put in a digest; each one is mailed once
+  updated_at timestamptz not null            -- later when more messages gathered into it
+);
+-- one unread notification per account, kind and subject: more messages gather into it
+
+create table push_subscriptions (            -- Web Push, one per browser, tied to its sign-in
+  id         uuid primary key,
+  account_id uuid not null references accounts on delete cascade,
+  session_id uuid not null references sessions on delete cascade, -- signing out ends it
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  lang       text not null default 'en'      -- the language its notifications are written in
+);
+```
+
+## Themes and files
+
+```sql
+create table blobs (                         -- files kept in PostgreSQL until R2: theme files and their pictures
+  key   text not null,                       -- themes/<id>/v<version>/theme.anyps5theme, preview.webp, thumb.webp
+  part  int not null,                        -- pieces of at most 1 MiB, so none is read into memory whole
+  bytes bytea not null,
+  primary key (key, part)
+);
+
+create table themes (                        -- the Theme Hub
+  id          uuid primary key,
+  maker_id    uuid references accounts on delete cascade,
+  source_id   text,                          -- the id theme.json had when first shared: the next upload is a new version
+  name        text not null check (length(name) <= 60),
+  description text check (length(description) <= 500),
+  status      text not null default 'published', -- published | review (after reports) | hidden (a moderator)
+  version     int not null default 1,
+  style       int not null default 0,        -- the launcher's motion style
+  colors      jsonb not null,                -- deep, middle, bright, accent
+  design      jsonb not null,                -- theme.json as it is in the file people download
+  background  text check (background in ('picture', 'video')),
+  music       boolean not null default false,
+  size        int not null,
+  sha256      text not null,
+  downloads   int not null default 0,
+  likes       int not null default 0,
+  updated_at  timestamptz not null,
+  unique (maker_id, source_id)
+);
+
+create table theme_likes (
+  theme_id   uuid not null references themes on delete cascade,
+  account_id uuid not null references accounts on delete cascade,
+  primary key (theme_id, account_id)
+);
+```
+
+## Compatibility
+
+```sql
+create table compat_reports (                -- kept without who sent it when the account is deleted
+  id               uuid primary key,
+  account_id       uuid references accounts on delete set null,
+  title_id         text not null references games,
+  platform         text not null check (platform in ('macos', 'windows', 'linux')),
+  status           text not null check (status in ('nothing', 'boots', 'menus', 'ingame', 'playable')),
+  launcher_version text not null,            -- 0.2.15
+  engine_version   text,                     -- 0.2.15-arm
+  game_version     text,
+  machine          text,                     -- the Mac model, or the CPU and GPU
+  os               text,                     -- macOS 26.6
+  fps_avg          real,
+  note             text check (length(note) <= 500)
+);
+
+create table compat_summaries (              -- the verdict per game and platform, worked out again with each report
+  title_id  text not null references games,
+  platform  text not null,
+  status    text not null,                   -- what most reports on the newest tested version said
+  version   text not null,                   -- the newest launcher version anyone tested
+  tested_at timestamptz not null,
+  reports   int not null,
+  primary key (title_id, platform)
+);
+```
+
+## Looking for group
+
+```sql
+create table lfg_posts (                     -- goes by itself at expires_at (within a day), when full, or when closed
+  id         uuid primary key,               -- UUIDv7: the board pages by it
+  author_id  uuid not null references accounts on delete cascade,
+  title_id   text not null references games,
+  purpose    text not null check (purpose in ('coop', 'online', 'party', 'trophies')),
+  starts_at  timestamptz,                    -- null: now
+  languages  jsonb not null,                 -- one to three
+  region     text,                           -- eu | na | sa | asia | oceania | africa | me
+  slots      int not null,                   -- 1 to 7 (co-op over share play: 1 to 3)
+  filled     int not null default 0,
+  note       text check (length(note) <= 140),
+  status     text not null default 'open',   -- open | full | closed | expired | removed
+  expires_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table lfg_requests (                  -- "I'm in"
+  post_id     uuid not null references lfg_posts on delete cascade,
+  account_id  uuid not null references accounts on delete cascade,
+  status      text not null default 'pending', -- pending | accepted | declined
+  invite      jsonb,                         -- {kind: party | share_play, id} once accepted
+  answered_at timestamptz,
+  primary key (post_id, account_id)
+);
+```
 
 ## Planned tables
 
 ```sql
-create table compatibility_reports (
-  id         uuid primary key,
-  account_id uuid references accounts on delete set null,
-  title_id   text references games,
-  verdict    text not null,                  -- nothing | menus | playable | perfect
-  engine     text not null,                  -- e.g. 0.2.13-arm
-  platform   text not null,                  -- macos | windows | linux
-  machine    text, os text,                  -- Mac model or CPU/GPU; OS and version
-  fps_avg    real,
-  exit       text,
-  note       text check (length(note) <= 500)
-);
-
-create table activities (
-  id         uuid primary key,
-  actor_id   uuid not null references accounts on delete cascade,
-  kind       text not null,                  -- trophy | platinum | new_game | long_session | completed | clip | theme | joined
-  payload    jsonb not null,
-  visibility text not null,                  -- everyone | friends
-  folded_into uuid references activities     -- several trophies in an hour become one
-);
-create index activities_actor on activities (actor_id, id desc);
-create table activity_likes (activity_id uuid references activities on delete cascade, account_id uuid, primary key (activity_id, account_id));
-create table activity_comments (id uuid primary key, activity_id uuid references activities on delete cascade, account_id uuid, text text not null);
-
-create table call_quality (                  -- one row per participant at the end of a call
-  call_id    uuid references calls on delete cascade,
+create table call_quality (                  -- one row per participant at the end of a call or share play
+  call_id    uuid,
   account_id uuid references accounts on delete set null,
   path       text not null,                  -- direct | relay-udp | relay-tls
   rtt_ms     real, loss real, glass_to_glass_ms real,
   share_play boolean not null default false
 );
-
-create table themes (
-  id        uuid primary key,
-  maker_id  uuid references accounts on delete set null,
-  name      text not null,
-  status    text not null default 'review',  -- review | published | removed
-  likes     int not null default 0,
-  installs  int not null default 0,
-  current_version int not null default 1
-);
-create table theme_versions (theme_id uuid references themes on delete cascade, version int, file_key text not null, preview_key text, design jsonb not null, primary key (theme_id, version));
-create table theme_likes (theme_id uuid references themes on delete cascade, account_id uuid, primary key (theme_id, account_id));
-
-create table releases (product text, version text, notes text, url text, sha256 text, published_at timestamptz, primary key (product, version));
+create table activity_comments (id uuid primary key, activity_id uuid references activities on delete cascade, account_id uuid, text text not null);
 ```
 
-Also planned on existing tables: `profiles.theme_id` and `showcase`, a `share_play` state on a
-party's call (who hosts, since when; there is no controller slot, share play is watch only),
-link privacy for parties.
+Also planned on existing tables: `profiles.theme_id` and `showcase`, the profile's `stats`,
+trophy icons. Releases need no table: they are read from GitHub and kept in Valkey.
 
 ## In Valkey (temporary)
 
@@ -381,17 +500,26 @@ link privacy for parties.
 |---|---|---|
 | `presence:<user>:<session>` | one device's state, title ID, since | 60 s, renewed by heartbeats |
 | `presence:<user>` | the user's presence merged over their devices, with party and game session | 70 s |
-| `presence-extra:<user>` | the party and the joinable game session shown in presence | while they last |
+| `presence-extra:<user>` | the party, the joinable game session and the share play shown in presence | while they last |
 | `presence-hidden:<user>` | set while the user's presence is visible to nobody | while set |
 | `friends:<user>` | the user's friends, for the gateway's presence fan-out | kept by the API |
 | `events:<user>` | stream of the last events, for `resume` | trimmed to 5 min |
 | `user:<user>` | the pub/sub channel the gateway listens on | - |
-| `call:<id>:members`, `call:<id>:in` | who may signal in a call; who is in it, on which device | 12 h |
+| `call:<id>:members`, `call:<id>:in`, `call:<id>:muted` | who may signal in a call; who is in it, on which device; who is muted | 12 h |
+| `share-play:<id>` and its `:viewers`, `:members`, `:invites`, `:requests`, `:removed` | the share play; each viewer's device and pad (2-4 or none); who may signal; who is invited, asking, taken out | 12 h, renewed by everything the host and viewers do |
+| `share-host:<user>`, `share-watch:<user>`, `device-shares:<device>` | the share play a user hosts, the one they watch, the ones a device is in | the same |
+| `share-departures` | devices whose socket closed while in a share play, scored by when they are taken out | until swept |
+| `public-share-plays` | share plays listed in public, by when they started | while listed |
+| `game-session:<id>:members`, `game-session:<id>:properties` | who may signal in a game session; each player's own properties and device | while the session lasts |
+| `playing:<title>` | who plays a game now (public presence), scored by the last heartbeat that said so | read only when fresh (90 s) |
+| `topic:<topic>` | pub/sub channel of a public topic (`lfg`, `discover`, per game) | - |
 | `rt-ticket:<hash>` | a one-time gateway ticket for the website | 30 s |
 | `passkey:register:<user>`, `passkey:signin:<id>` | a passkey challenge | 5 min |
 | `revoked:<session>` | a signed-out session, refused by the API and the gateway | the access token's life |
 | `rl:<name>:<who>:<window>` | rate-limit counters | the window |
-| `lb:<board>:<period>` | sorted set of user IDs by score (planned) | rebuilt every 10 min |
+| `lb:global:<board>`, `lb:friends:<user>:<board>` | a leaderboard (`points`, `game:<title>:points\|time\|completion`) | 60 s global, 30 s friends |
+| `releases:<repo>` | the latest GitHub release of a project, and the last good one | 10 min; a week |
+| `themes:dl:<theme>:<who>` | a download already counted today | 24 h |
 
 ## Counting
 
@@ -403,6 +531,10 @@ link privacy for parties.
   1-5 %, ultra rare < 1 %.
 - **Points**: bronze 15, silver 30, gold 90, platinum 300, summed into `library.points`; the
   profile's `stats` are planned.
+- **Leaderboards**: worked out on request from `library` (points, `seconds_played`, completion =
+  earned ÷ total), only for people the board may show, and kept in Valkey for a minute.
+- **Compatibility verdict**: per game and platform, the status most of the latest reports (one per
+  person) on the newest launcher version gave; a tie goes to the better one.
 
 ## Keeping data
 
@@ -412,6 +544,11 @@ link privacy for parties.
 | Sessions, trophies, library | until the account is deleted |
 | Messages | until deleted by the author or the account is deleted; deleted messages are emptied at once |
 | Reported messages | their text stays in the report for the moderators |
-| Compatibility reports (planned) | anonymised (account set null) when the account is deleted |
+| Compatibility reports | anonymised (account set null) when the account is deleted |
+| Feed items, reactions | until the account (or, for a friendship, the friendship) goes |
+| Notifications | read ones 90 days, every one 180 days |
+| Looking-for-group posts | a day at most on the board; deleted with the account |
+| Themes | until their maker deletes them or the account is deleted; files of old versions swept every hour |
+| Share plays | never stored: in Valkey while the game runs |
 | Audit log | 1 year |
 | Backups | 30 days (nightly), so a deletion is complete in backups after 30 days |

@@ -6,8 +6,11 @@ On **our own server**, as one more project beside the ones already running there
 details (address, provider, size, what else runs on it) are deliberately **not** in this public
 plan; they live in the private infrastructure notes of the AnyTogether repository.
 
-Running today (2026-10-24): web, api, realtime, PostgreSQL and Valkey. The worker, R2 and the
-staging copy are not built yet; the relay is optional.
+Running today (2026-10-25): web, api, realtime, PostgreSQL and Valkey. The worker, R2 and the
+staging copy are not built yet; the relay is optional. Files (avatars, theme files and their
+pictures) are in PostgreSQL until R2 is used, and the API runs the few background jobs itself
+(see [Architecture](02-architecture.md)). Web Push needs no outside service: the API signs pushes
+with its own VAPID keys.
 
 The server is shared with other sites, so AnyTogether is planned **small and capped**:
 
@@ -131,7 +134,9 @@ HMAC of it), valid 12 hours.
   website, `/api/v1/health`, the gateway (WebSocket handshake), STUN on the relay.
 - Metrics: API and gateway expose Prometheus metrics; coturn's Prometheus exporter (allocations,
   bytes relayed).
-- Errors: Sentry (API, web, launchers with opt-in crash reports, phone app).
+- Errors: Sentry (API, web, phone app), planned. Game crashes are not sent anywhere by
+  themselves: the macOS launcher's crash panel exports a report and opens a pre-filled GitHub
+  issue only when the player chooses to, with personal details and AnyTogether tokens taken out.
 - Clients report call quality (direct or relayed, round trip, loss, glass-to-glass samples),
   aggregated, no content. The share of relayed calls tells us how much TURN bandwidth to expect.
 
@@ -168,8 +173,12 @@ walks through it:
   small UDP range with the relay).
 - **Settings** in one `.env`: the host name, the Let's Encrypt contact, the database password, the
   Ed25519 key that signs access tokens, mail (SMTP, Resend, or the API's log for trying it out),
-  the Apple, Google and Discord client IDs (each off while empty), the TURN secret and URLs.
+  the Apple, Google and Discord client IDs (each off while empty), the TURN secret and URLs, the
+  VAPID key pair for browser push (off while empty), which header carries the visitor's address,
+  and the hosts game icons may come from.
 - **Backups**: everything is in PostgreSQL, so one `pg_dump` is a full backup.
-- **Moderation**: the same command-line tool, run inside the API's container.
-- **Clients**: the macOS launcher and the phone app can point at another server (Settings →
-  AnyTogether → Server, next release); a passkey belongs to the host name it was made for.
+- **Moderation**: the admin page at `/admin` once an account is made admin with the command-line
+  tool (`admin grant @handle`), which runs inside the API's container.
+- **Clients**: the macOS launcher, AnyPS5 Desktop and the phone app can point at another server
+  (Settings → AnyTogether → Server); a passkey belongs to the host name it was made for.
+- **Licence**: MIT; use it, change it and run it however you like.

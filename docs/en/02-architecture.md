@@ -76,7 +76,8 @@ to the website (each its own application in its own container).
 | Messages | client ↔ gateway, stored in PostgreSQL | must reach people who are offline and every device of theirs |
 | WebRTC signalling (offers, answers, ICE candidates) | client ↔ gateway ↔ client | the introduction; a few kilobytes per call |
 | **Voice** | **player ↔ player** (WebRTC, Opus) | lowest delay, no server bandwidth |
-| **Share play video and game sound** | **host → viewer** (WebRTC, H.264 + Opus) | lowest delay; a 720p60 stream is ~8 Mbit/s that our server never carries |
+| **Share play video and game sound** | **host → viewer** (WebRTC: an H.264 video track, the game's sound on a data channel) | lowest delay; a 720p60 stream is ~8 Mbit/s that our server never carries |
+| **Share play pad** | **viewer → host** (a WebRTC data channel) | only for a viewer the host handed pad 2, 3 or 4; 120 small packets a second |
 | **Online play** (each player runs the game) | **player ↔ player** (WebRTC data channels or QUIC; in design) | the games' own packets; every millisecond counts |
 | Relay when direct is impossible | player ↔ TURN ↔ player | so it always works; the relay sees only encrypted packets |
 
@@ -84,8 +85,9 @@ to the website (each its own application in its own container).
 
 The code is public and MIT licensed at
 [github.com/utkuhalis/AnyTogether](https://github.com/utkuhalis/AnyTogether). Built so far
-(2026-10-24): the API, the gateway, the website, PostgreSQL and Valkey, and the STUN/TURN relay as
-an option. The worker and R2 are not built yet.
+(2026-10-25): the API, the gateway, the website, PostgreSQL and Valkey, and the STUN/TURN relay as
+an option. The worker and R2 are not built yet: the API runs the few background jobs itself, and
+files (avatars, theme files and their pictures) are kept in PostgreSQL.
 
 ### api (TypeScript, Hono on Node 22) · built
 
@@ -96,38 +98,53 @@ launcher) and **Dart** (phone, AnyPS5-Desktop), is planned. Hono because it is s
 web-standard and portable (Node today, Bun or Cloudflare Workers later). Drizzle with reviewed SQL
 migrations, applied when the API starts. Errors as RFC 9457 problem details with stable codes
 every client translates. Until the worker exists, the API does the little background work there
-is itself: trophy rarity is counted when trophies arrive, and accounts past their 14 days are
-purged every hour.
+is itself: trophy rarity, feed items and compatibility verdicts are worked out when their data
+arrives; accounts past their 14 days are purged and unused theme files swept every hour; the mail
+digest is looked at every 10 minutes; expired looking-for-group posts are closed; and devices whose
+gateway socket went away are taken out of share plays after a short grace. Leaderboards need no
+job: they are counted on request and kept in Valkey for a minute. Downloads come from each
+project's latest GitHub release, kept in Valkey for ten minutes (and the last good answer for a
+week, in case GitHub is down).
 
 ### realtime gateway (same codebase, own process) · built
 
 One WebSocket per signed-in client. Carries presence heartbeats and changes, message delivery,
-notifications, and **WebRTC signalling**: when Ayşe calls Utku, her offer goes to the gateway,
-which forwards it to Utku's devices; answers and ICE candidates come back the same way. Holds no
-state of its own: presence in Valkey, events between gateway processes over Valkey pub/sub.
+typing, notifications, feed items, and **WebRTC signalling** for calls, game sessions and share
+play: when Ayşe calls Utku, her offer goes to the gateway, which forwards it to Utku's devices;
+answers and ICE candidates come back the same way. A socket can also watch public topics (the
+looking-for-group board, the public parties and share plays, all or one game's), which carry only
+"something changed" so the client reads the list again. The gateway keeps who plays what right now
+for game hubs. Holds no state of its own: presence in Valkey, events between gateway processes
+over Valkey pub/sub.
 Launchers and the phone say hello with their access token; the website's browser, which never
 holds one, with a one-time ticket its server asks the API for.
 
 ### worker (same codebase, own process) · planned
 
-pg-boss jobs inside PostgreSQL: trophy rarity, leaderboards, mail (sign-in codes), push
-notifications (APNs, FCM), image resizing and checks, account deletion after the grace period.
+pg-boss jobs inside PostgreSQL, taking over what the API does itself today, plus what needs a
+queue: push notifications to the phone (APNs, FCM), image checks, Open Graph images.
 
-### web (Next.js) · built in part
+### web (Next.js) · built
 
-Public profiles and game pages server-rendered (fast, shareable, link previews); the signed-in
-app (friends, messages, parties with voice in the browser, share play viewer, Theme Hub,
-downloads, leaderboards, settings) in the browser. It uses the same API as everyone. Built:
-sign-in (email code or link, passkeys), approving a launcher's device code, profiles with games,
-play time and trophies, friends, messages, parties with voice, and settings (profile, avatar,
-privacy, passkeys, signed-in devices, data download, account deletion). English by default,
-Turkish with a switcher.
+Public profiles, game hubs and the compatibility list server-rendered (fast, shareable); the
+signed-in app in the browser. It uses the same API as everyone. Built: sign-in (email code or
+link, passkeys), approving a launcher's device code, the home feed, profiles with games, play
+time, trophies and recent activity, friends, messages and groups, parties with voice, calls to a
+friend from any page, watching a friend's share play and playing along with a controller or the
+keyboard, finding players (the looking-for-group board, Live now, people), game hubs,
+leaderboards, the Theme Hub, the compatibility list, downloads, notifications with browser push,
+settings (profile, avatar, privacy, discovery, notifications, passkeys, signed-in devices, data
+download, account deletion), and the moderators' page `/admin`. English by default, Turkish with
+a switcher.
 
 ### PostgreSQL 17, Valkey 8 · built
 
-PostgreSQL holds everything that must last (avatars too, for now, until R2 is used). Valkey holds
-what may vanish: presence (60 s expiry), pub/sub, rate limits, passkey challenges, who is in which
-call, the last minutes of events for reconnects.
+PostgreSQL holds everything that must last; until R2 is used, files too: avatars, and theme files
+with their pictures in a blob table, in pieces of at most 1 MiB. Valkey holds what may vanish:
+presence (60 s expiry), pub/sub, rate limits, passkey challenges, who is in which call, share
+plays (they last as long as the game, so they live only in Valkey), who plays what now, the
+leaderboards for a minute, the downloads for ten minutes, the last minutes of events for
+reconnects.
 
 ### coturn (STUN and TURN) · built, optional
 
@@ -139,10 +156,10 @@ hear or see anything.
 ### Optional later: an SFU
 
 For a party of 8 people all talking, peer-to-peer means each sends 7 audio streams (7 × 32
-kbit/s ≈ 0.2 Mbit/s, fine). For share play to many viewers, peer-to-peer means the host uploads
-one video per viewer (3 viewers ≈ 24 Mbit/s up, too much for many homes). Only then is a
-forwarding server (an SFU such as LiveKit) worth running. It is a later, optional add-on: the
-default is direct.
+kbit/s ≈ 0.2 Mbit/s, fine). For share play, peer-to-peer means the host uploads one video per
+viewer, so a share play has at most 4 viewers and each gets 540p at 30 fps from the third viewer
+on. Share play to many more viewers is where a forwarding server (an SFU such as LiveKit) would
+be worth running. It is a later, optional add-on: the default is direct.
 
 ## Technology choices
 
@@ -156,9 +173,9 @@ default is direct.
 | WebRTC per platform | macOS: Google's WebRTC framework (prebuilt Swift package); phone and AnyPS5-Desktop (Windows/Linux): `flutter_webrtc`; web: the browser | each client in its own language |
 | Relay | coturn | the standard TURN server |
 | Website | Next.js | SSR for public pages |
-| Files (planned) | Cloudflare R2 | S3 API, no egress fees |
+| Files | PostgreSQL today (a blob table); Cloudflare R2 planned | one place to back up now; S3 API and no egress fees later |
 | Sign-in | email codes and links, passkeys (WebAuthn), OpenID Connect (Apple, Google, Discord), the phone hand-off | one tap, nothing to remember (see [API](04-api.md)) |
-| Push (planned) | APNs, FCM HTTP v1 | direct, no middleman |
+| Push | Web Push with the server's own VAPID keys (built, the website); APNs, FCM HTTP v1 for the phone (planned) | direct, no middleman |
 | Errors / metrics (planned) | Sentry, Prometheus + Grafana | standard |
 | Deploy | our own server's container platform (git push → build → deploy); Docker Compose with Caddy for anyone running their own | what the server already uses; one file for self-hosters |
 
@@ -198,13 +215,15 @@ packages/
   db/           Drizzle schema and SQL migrations
 infra/          local development services, the Dockerfiles
 deploy/         Docker Compose and Caddy for running your own
-docs/           self-hosting.md
+e2e/            every client against one local stack (the cross-client run)
+docs/           self-hosting.md, screenshots of the website
 ```
 
 The plan stays on this branch. The macOS launcher's integration lives in AnyPS5-ARM
-(`AnyPS5Core/Together/`), the phone app's in `mobile/lib/together/`, the Windows/Linux launcher's
-in [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), which connects to AnyTogether
-itself. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
+(`AnyPS5Core/Together/`, and share play's WebRTC in `AnyPS5SharePlay/`), the phone app's in
+`mobile/lib/together/`, the Windows/Linux launcher's in
+[AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) (`lib/core/together/`), which connects
+to AnyTogether itself. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
 
 ## Scale
 

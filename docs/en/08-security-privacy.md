@@ -7,8 +7,10 @@ Built unless marked planned.
 - **No passwords** to steal or reuse: sign-in is an email code, a passkey, the user's own
   signed-in phone, or Apple, Google or Discord (OpenID Connect, ID tokens verified against the
   provider's keys, PKCE for every public client).
-- Email codes: 6 digits, valid 10 minutes, at most 5 per hour per address; 10 wrong tries end the
-  code; the link in the mail is single-use. Codes and links are kept only as hashes.
+- Email codes: 6 digits, valid 10 minutes, at most 5 per hour per address; 10 tries end the code
+  (each try is counted in the same database update that checks it, so tries sent in parallel
+  count too), and 30 wrong codes a day lock an address whatever code they were for; the link in
+  the mail is single-use. Codes and links are kept only as hashes.
 - **Passkeys** (WebAuthn): added in Settings on the website, up to 10 per account; signing in with
   one needs no email. A passkey holds the account's ID, never an email or handle; its challenge is
   used once and lasts 5 minutes; a signature counter that goes backwards (a cloned key) is refused.
@@ -17,7 +19,9 @@ Built unless marked planned.
   location (city from IP) is planned.
 - Device codes (fallback): 8 characters without look-alikes, valid 10 minutes; polling faster than
   every 4 seconds is told to slow down.
-- Messages only between friends; calls only to friends and party members.
+- Messages only between friends; calls only to friends and party members. A share play is seen
+  by its host's friends while open to them, by the invited, and by others only while the host
+  lists it in public; only the host hands out a pad, and never player 1.
 - Sessions listed in settings with device and last use; any can be signed out, or all at once.
 - Refresh tokens rotate on every use; reuse of an old one revokes the session.
 - A banned account is signed out everywhere at once and refused at every way in (email code,
@@ -32,34 +36,61 @@ Built unless marked planned.
   DTLS-SRTP); they go direct, and when they must go through our TURN relay it only forwards
   encrypted packets it cannot read. The server never hears or sees a call.
 - A direct connection reveals each player's IP address to the other. Calls are only possible
-  between friends or party members; a setting **Always use the relay** (planned) hides the IP
-  address at the cost of a little delay.
+  between friends or party members; a share play listed in public, or a party or share play
+  joined from the looking-for-group board, can connect people who do not know each other. A
+  setting **Always use the relay** (planned) hides the IP address at the cost of a little delay.
 - Database disk encrypted; backups encrypted before upload (age or restic) to R2.
 - Secrets (database password, JWT signing key, TURN secret, OAuth client secrets, APNs key) in environment files
   readable only by the services, never in the repository; rotated yearly or on any suspicion.
 - Avatars are re-encoded on the server to a 256 px JPEG, which drops whatever metadata (such as
-  location) the upload carried; only PNG and JPEG up to 5 MB and 25 megapixels are taken.
+  location) the upload carried; only PNG and JPEG up to 5 MB and 25 megapixels are taken. Theme
+  files are unpacked on the server with the launcher's own rules (plain names, only the files
+  `theme.json` names, size and picture limits) and repacked; their pictures are made again as
+  WebP. Game icons are kept only from hosts the operator lists, since launchers load them for
+  everyone who sees the game.
 - R2 (planned) buckets private except `cdn` (avatars, previews, downloads); uploads only by
   presigned URLs limited in size and content type, valid 10 minutes.
 - The website's browser never holds a token: they stay in HttpOnly cookies, and the gateway socket
   opens with a one-time ticket valid 30 seconds.
-- Rate limits on every route, per address and per account ([API](04-api.md) 4.9).
+- Rate limits on every route, per address and per account ([API](04-api.md) 4.10); the operator
+  says which header carries the visitor's address (`CLIENT_IP_HEADER`), so a visitor cannot pick
+  their own. API bodies are capped at 8 MB (a theme upload at 50 MB).
+- The website sends security headers with every page (`X-Frame-Options: DENY`, a CSP with
+  `frame-ancestors 'none'`, a strict referrer policy, a permissions policy that allows only the
+  microphone for the site itself, HSTS), refuses changes posted from other sites' pages (it
+  compares the Origin with the Host), and sends the sign-in page back only to a path on the site.
+- The gateway holds at most 20 sockets per user and relays share play signals only to and from
+  the host. The bundled TURN relay refuses to start without a secret.
+- Deleting an account also deletes its sign-in requests and its event stream at once.
 
 ## 8.3 Abuse and moderation
 
-- **Report** (built for users and messages; activities, themes and game names planned): one open
-  report per person and target; a reported message's text is kept with the report even if its
-  author deletes it. Moderators work through reports with a command-line tool that runs beside the
-  API (`admin reports`, `report <id> dismiss|action`, `ban`, `unban`, `user`); an admin page
-  (`/admin`) is planned.
+- **Report** (built for users, messages, themes and looking-for-group posts; activities and game
+  names planned): one open report per person and target; what was reported (a message's text, a
+  post's note, a theme's name and version) is kept with the report even if its author deletes it.
+- **The admin page** (`/admin`, built): the reports queue with what was reported and how often,
+  and a verdict for each: dismiss, warn (the person gets a notification), ban for some days or
+  until lifted, remove the message, take the post off the board, reset the avatar or the bio; an
+  action closes every open report on the same thing. Also: finding an account (by handle, email or
+  ID: its sessions, bans and reports), the bans and lifting them, the audit log. The page grants
+  nothing itself: the API checks the admin role on every call. The command-line tool beside the
+  API does the same and more (`admin reports`, `report`, `ban`, `unban`, `user`, `grant` and
+  `revoke` for the admin role, `theme <id> show|hide|review`, `purge`).
+- **Themes**: open reports from three people put a published theme back in review, hidden from
+  everyone but its maker, until a moderator shows or hides it.
+- **Strangers**: the looking-for-group board and public share plays and parties bring together
+  people who are not friends, so new accounts (under a day old or with few trophies) may post 2
+  times a day and ask to join 10 times an hour; a post's note follows the link deny-list; a moderator can remove a post
+  with or without a report. Messages stay between friends.
 - **Block**: a blocked user cannot see your presence, profile (beyond name), activity, or send you
   requests or messages; you do not see theirs.
-- **Automatic checks**: names and bios cannot carry links (built). Planned: avatars and theme
-  pictures through a nudity classifier before others see them; links in messages checked against
-  a deny list (piracy sites, known malware); repeated identical messages throttled.
-- **Actions**: ban for a time or until lifted, on an account, an email or both (built); warn,
-  remove content, mute (planned). Each logged in `audit_log` with the moderator and reason; the user
-  is told and can appeal by mail.
+- **Automatic checks**: names, bios and compatibility notes cannot carry links, and messages and
+  looking-for-group posts cannot link to domains on a deny-list (IP loggers by default; the operator can replace
+  it) (built). Planned: avatars and theme pictures through a nudity classifier before others see
+  them; repeated identical messages throttled.
+- **Actions**: ban for a time or until lifted, on an account, an email or both; warn; remove a
+  message or a post; reset an avatar or a bio (built); mute (planned). Each logged in `audit_log`
+  with the moderator and reason; the user is told and can appeal by mail.
 - **Leaderboard integrity**: impossible trophy patterns flagged automatically, reviewed by a
   moderator.
 
@@ -73,9 +104,10 @@ This rule is in the terms, enforced by moderation, and built into the product:
 - AnyTogether stores about games only: the title ID, the name, the icon (scaled down) and trophy
   texts and icons, as the launcher reads them from the user's own game. These are used to show
   the game in profiles and libraries.
-- Share play streams the host's own session to friends they invited, to watch; control never
-  passes to them, and it is not public broadcasting. Streaming is the host's responsibility, like
-  any screen sharing.
+- Share play streams the host's own session to at most four viewers: friends, the invited, or,
+  only when the host lists it in public, others. The host may let viewers play along as player 2,
+  3 or 4; the game runs only on the host's computer, and nothing is recorded. Streaming is the
+  host's responsibility, like any screen sharing.
 - A takedown address (`abuse@kodla.agency` or similar) and a process to answer within 48 hours.
 
 ## 8.5 Privacy (KVKK and GDPR)
@@ -90,13 +122,18 @@ apply.
 | Games played, sessions, trophies | the features the user signs in for | contract |
 | Presence (online, game) | friends' presence | contract, can be hidden |
 | Messages | delivering them | contract |
+| Notifications, browser push subscriptions (endpoint and keys), the digest setting | telling you what happened while you were away | contract; each kind can be turned off |
+| Activity items and reactions | the feed | contract; follows your privacy settings |
+| Looking-for-group posts, discovery setting and languages | finding players | contract; discovery can be turned off |
+| Themes you share | the Theme Hub | contract |
 | Compatibility reports (platform, machine, OS, engine, FPS) | helping others | consent (opt-in) |
 | IP addresses, device names | security, abuse | legitimate interest, kept 30 days in logs |
-| Voice and share play media | carried live, **never recorded** by the server | contract |
+| Voice, share play picture, sound and pads | carried live between players, **never recorded** or seen by the server | contract |
 
 - **No ads, no selling or sharing data**, no third-party trackers on the website (privacy-friendly
   analytics only, e.g. self-hosted Plausible, without cookies).
-- **Export**: settings → "Download my data" gives one JSON file at once (built).
+- **Export**: settings → "Download my data" gives one JSON file at once, conversations and the
+  reports you sent included (built).
 - **Delete**: settings → "Delete account", confirmed with a code by mail (or the handle, for an
   account without email); every device is signed out and friends stop seeing the account at once;
   14 days to change your mind (signing in keeps the account), then everything is removed; messages
