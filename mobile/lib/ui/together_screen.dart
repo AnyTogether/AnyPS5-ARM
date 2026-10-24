@@ -5,9 +5,10 @@ import '../together/together_hub.dart';
 import '../together/together_socket.dart';
 import 'friends_view.dart';
 import 'messages_view.dart';
+import 'party_view.dart';
 import 'together_widgets.dart';
 
-enum TogetherTab { friends, messages }
+enum TogetherTab { friends, messages, party }
 
 /// AnyTogether's own screen over whatever the phone shows: a rail of what there is on the left,
 /// the part picked on the right, the way a phone held sideways has room for both.
@@ -109,6 +110,7 @@ class _TogetherScreenState extends State<TogetherScreen> {
                           onMessage: _message,
                         ),
                         TogetherTab.messages => MessagesPane(hub: widget.hub),
+                        TogetherTab.party => PartyPane(hub: widget.hub),
                       },
                     ),
                   ),
@@ -180,6 +182,14 @@ class _TogetherScreenState extends State<TogetherScreen> {
             selected: _tab == TogetherTab.messages,
             onTap: () => _show(TogetherTab.messages),
           ),
+          _RailItem(
+            icon: Icons.celebration_rounded,
+            label: texts.party,
+            count: hub.parties.invites.length,
+            live: hub.parties.party != null,
+            selected: _tab == TogetherTab.party,
+            onTap: () => _show(TogetherTab.party),
+          ),
           const Spacer(),
           _LiveDot(socket: hub.socket),
         ],
@@ -195,11 +205,15 @@ class _RailItem extends StatelessWidget {
     required this.count,
     required this.selected,
     required this.onTap,
+    this.live = false,
   });
 
   final IconData icon;
   final String label;
   final int count;
+
+  /// A green dot: the phone is in it (the party).
+  final bool live;
   final bool selected;
   final VoidCallback onTap;
 
@@ -232,6 +246,16 @@ class _RailItem extends StatelessWidget {
                   ),
                 ),
               ),
+              if (live && count == 0)
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: const BoxDecoration(
+                    color: togetherPlaying,
+                    shape: BoxShape.circle,
+                  ),
+                ),
               if (count > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(

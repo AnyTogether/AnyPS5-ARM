@@ -110,6 +110,28 @@ class Strings {
   String get togetherConnecting => _text('togetherConnecting');
   String get togetherNotFound => _text('togetherNotFound');
   String get back => _text('back');
+  String get party => _text('party');
+  String get partyIntro => _text('partyIntro');
+  String get partyStart => _text('partyStart');
+  String get partyInvites => _text('partyInvites');
+  String get partyJoin => _text('partyJoin');
+  String get partyLeave => _text('partyLeave');
+  String get partyInvite => _text('partyInvite');
+  String get partyInvited => _text('partyInvited');
+  String get partyInviteFriends => _text('partyInviteFriends');
+  String get partyNoFriends => _text('partyNoFriends');
+  String get partyOpen => _text('partyOpen');
+  String get partyOpenDetail => _text('partyOpenDetail');
+  String get partyLeader => _text('partyLeader');
+  String get partyFriendsParties => _text('partyFriendsParties');
+  String get partyKicked => _text('partyKicked');
+  String get partyFull => _text('partyFull');
+  String get partyKick => _text('partyKick');
+  String get partyMembers => _text('partyMembers');
+  String partyInviteFrom(String name, int size) =>
+      _text('partyInviteFrom')
+          .replaceAll('%@', name)
+          .replaceAll('{n}', '$size');
   String get messages => _text('messages');
   String get messagesNone => _text('messagesNone');
   String get messagesPick => _text('messagesPick');
@@ -238,6 +260,25 @@ class Strings {
     'togetherConnecting': 'Connecting…',
     'togetherNotFound': 'No one with that handle',
     'back': 'Back',
+    'party': 'Party',
+    'partyIntro': 'Talk while you play, up to eight of you. The phone stays the controller.',
+    'partyStart': 'Start a party',
+    'partyInvites': 'Party invites',
+    'partyJoin': 'Join',
+    'partyLeave': 'Leave party',
+    'partyInvite': 'Invite',
+    'partyInvited': 'Invited',
+    'partyInviteFriends': 'Invite friends',
+    'partyNoFriends': 'Every friend is here or invited',
+    'partyOpen': 'Friends can join',
+    'partyOpenDetail': 'Your friends join without an invite',
+    'partyLeader': 'Leader',
+    'partyFriendsParties': 'Friends\' open parties',
+    'partyKicked': 'The leader took you out of the party',
+    'partyFull': 'The party is full',
+    'partyKick': 'Remove from party',
+    'partyMembers': 'Members',
+    'partyInviteFrom': '%@ · {n} in the party',
     'messages': 'Messages',
     'messagesNone': 'No conversations yet. Write to a friend from Friends.',
     'messagesPick': 'Pick a conversation, or write to a friend from Friends.',
@@ -367,6 +408,26 @@ class Strings {
     'togetherConnecting': 'Bağlanıyor…',
     'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
     'back': 'Geri',
+    'party': 'Parti',
+    'partyIntro':
+        'Oynarken konuşun, en fazla sekiz kişi. Telefon kol olmaya devam eder.',
+    'partyStart': 'Parti başlat',
+    'partyInvites': 'Parti davetleri',
+    'partyJoin': 'Katıl',
+    'partyLeave': 'Partiden ayrıl',
+    'partyInvite': 'Davet et',
+    'partyInvited': 'Davet edildi',
+    'partyInviteFriends': 'Arkadaşlarını davet et',
+    'partyNoFriends': 'Bütün arkadaşların burada ya da davetli',
+    'partyOpen': 'Arkadaşlar katılabilir',
+    'partyOpenDetail': 'Arkadaşların davetsiz katılır',
+    'partyLeader': 'Lider',
+    'partyFriendsParties': 'Arkadaşların açık partileri',
+    'partyKicked': 'Lider seni partiden çıkardı',
+    'partyFull': 'Parti dolu',
+    'partyKick': 'Partiden çıkar',
+    'partyMembers': 'Üyeler',
+    'partyInviteFrom': '%@ · partide {n} kişi',
     'messages': 'Mesajlar',
     'messagesNone': 'Henüz konuşma yok. Arkadaşlar\'dan bir arkadaşına yaz.',
     'messagesPick': 'Bir konuşma seç ya da Arkadaşlar\'dan bir arkadaşına yaz.',
