@@ -111,6 +111,8 @@ enum Overlay: Equatable {
     case leaderboard
     /// AnyTogether's notifications, from the bell.
     case notifications
+    /// "How did it run?" after a session.
+    case compat
 }
 
 struct Toast: Identifiable, Equatable {

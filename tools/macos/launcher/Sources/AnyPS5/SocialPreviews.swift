@@ -89,6 +89,15 @@ enum SocialPreviews {
             let neon = ThemeDesign(id: "neon", name: "Neon Nights", author: "Ada", style: 1, deep: "#0A0014", middle: "#4A0E6B", bright: "#FF5EDB", accent: "#FF4FD8")
             try? AppModel.themeStill(neon)?.write(to: output.appendingPathComponent("hub-still.png"))
         }
+        render("compat-ask") { model in model.previewCompat(found.first, row: 1) }
+        render("compat-card") { model in
+            if let game = model.selectedGame { model.social.compat[game.titleID] = .some(TogetherCompatSummary(status: .ingame, version: "0.2.14", reports: 7)) }
+        }
+        render("compat-options") { model in
+            if let game = model.selectedGame { model.social.compat[game.titleID] = .some(TogetherCompatSummary(status: .playable, version: "0.2.14", reports: 12)) }
+            model.overlay = .gameSettings; model.panelInRows = true
+            model.panelRow = model.panelCategories().first?.rows.firstIndex { $0.id == "compat" } ?? 0
+        }
         render("trophies-board") { model in
             if let index = model.games.firstIndex(where: { model.trophies[$0.id] != nil }) { model.selected = index }
             model.overlay = .trophies; model.trophyIndex = 1

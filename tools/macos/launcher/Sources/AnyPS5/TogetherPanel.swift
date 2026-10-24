@@ -450,6 +450,7 @@ extension AppModel {
         guard togetherUser != nil else { return }
         togetherSync.recordSession(titleId: game.titleID, gameName: game.name, startedAt: start, endedAt: Date(), exit: "normal")
         flushTogether()
+        askHowItRan(game, played: Date().timeIntervalSince(start))
     }
 
     /// The game's trophy set as read now: new earned ones go to AnyTogether, and friends hear of them.

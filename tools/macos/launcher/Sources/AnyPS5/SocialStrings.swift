@@ -29,6 +29,10 @@ enum TS {
         case notifFriendRequest, notifFriendAccepted, notifMessage, notifMessages, notifPartyInvite, notifGameInvite, notifMissedCall, notifWarning, notifOther
         // Theme Hub
         case hubSharing, hubShared, hubSharedVersion, hubShareDetail, hubTooLarge, hubBadTheme, hubNoPreview, hubNoTheme
+        // Compatibility
+        case compatAsk, compatSubtitle, compatNothing, compatBoots, compatMenus, compatIngame, compatPlayable
+        case compatNothingDetail, compatBootsDetail, compatMenusDetail, compatIngameDetail, compatPlayableDetail
+        case compatLater, compatNever, compatNeverDetail, compatWhat, compatThanks, compatCommunity, compatReports, compatReportRow, compatNone
     }
 
     static let english: [Key: String] = [
@@ -105,6 +109,27 @@ enum TS {
         .hubBadTheme: "The Hub didn't take this theme file",
         .hubNoPreview: "The Hub needs a picture of the theme",
         .hubNoTheme: "That theme isn't on the Hub",
+        .compatAsk: "How did %@ run?",
+        .compatSubtitle: "One tap tells everyone how far it gets on a Mac",
+        .compatNothing: "Nothing",
+        .compatBoots: "Boots",
+        .compatMenus: "Menus",
+        .compatIngame: "In game",
+        .compatPlayable: "Playable",
+        .compatNothingDetail: "Nothing showed, or it closed at once",
+        .compatBootsDetail: "It started but stopped before the menus",
+        .compatMenusDetail: "The menus work, the game itself doesn't",
+        .compatIngameDetail: "It plays, with problems",
+        .compatPlayableDetail: "It plays well, start to finish",
+        .compatLater: "Not now",
+        .compatNever: "Don't ask after games",
+        .compatNeverDetail: "Reports can still be sent from the game's options",
+        .compatWhat: "Sent with it",
+        .compatThanks: "Thanks, the report is in",
+        .compatCommunity: "Community",
+        .compatReports: "%d reports",
+        .compatReportRow: "How does it run?",
+        .compatNone: "No reports yet: tell the community",
     ]
 
     static let turkish: [Key: String] = [
@@ -181,5 +206,26 @@ enum TS {
         .hubBadTheme: "Hub bu tema dosyasını kabul etmedi",
         .hubNoPreview: "Hub temanın bir resmini istiyor",
         .hubNoTheme: "Bu tema Hub'da yok",
+        .compatAsk: "%@ nasıl çalıştı?",
+        .compatSubtitle: "Tek dokunuşla herkese Mac'te nereye kadar gittiğini söyle",
+        .compatNothing: "Hiç",
+        .compatBoots: "Açılıyor",
+        .compatMenus: "Menüler",
+        .compatIngame: "Oyun içi",
+        .compatPlayable: "Oynanabilir",
+        .compatNothingDetail: "Hiçbir şey görünmedi ya da hemen kapandı",
+        .compatBootsDetail: "Açıldı ama menülerden önce durdu",
+        .compatMenusDetail: "Menüler çalışıyor, oyunun kendisi çalışmıyor",
+        .compatIngameDetail: "Oynanıyor, sorunlarla",
+        .compatPlayableDetail: "Baştan sona iyi oynanıyor",
+        .compatLater: "Şimdi değil",
+        .compatNever: "Oyunlardan sonra sorma",
+        .compatNeverDetail: "Rapor yine oyunun seçeneklerinden gönderilebilir",
+        .compatWhat: "Birlikte gönderilen",
+        .compatThanks: "Teşekkürler, rapor gönderildi",
+        .compatCommunity: "Topluluk",
+        .compatReports: "%d rapor",
+        .compatReportRow: "Nasıl çalışıyor?",
+        .compatNone: "Henüz rapor yok: topluluğa söyle",
     ]
 }

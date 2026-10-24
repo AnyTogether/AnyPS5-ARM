@@ -167,6 +167,9 @@ struct RootView: View {
         case .notifications:
             SidePanel(title: TS.text(.notifTitle), subtitle: model.notificationsSubtitle)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .compat:
+            SidePanel(title: model.compatTitle, subtitle: TS.text(.compatSubtitle))
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .log:
             LogView().transition(.opacity)
         case .trophies:

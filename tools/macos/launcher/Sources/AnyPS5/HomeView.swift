@@ -367,6 +367,7 @@ struct HeroInfo: View {
                 InfoCard(title: T.text(.version), symbol: "tag") {
                     Text(game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
                 }
+                CommunityCard(game: game)
             }
         }
         .onAppear { model.measureSelected() }
@@ -612,7 +613,7 @@ extension AppModel {
         case .leaderboard:
             leaderboardCommand(command)
             return true
-        case .notifications:
+        case .notifications, .compat:
             if command == .back {
                 closeOverlay()
                 return true
