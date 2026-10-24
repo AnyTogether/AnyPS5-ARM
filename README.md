@@ -106,6 +106,8 @@ The keyboard and mouse layout of each game. Pick a pad button or stick direction
 | Options / touchpad | Esc / Backspace (left) and Tab (right) |
 | Slow movement | none: give it a key to walk with the keyboard |
 
+For Unreal Engine games, each button also shows what the game itself does with it (Jump, Sprint, Move forward), read from the game's own input settings in its `.pak`. Games whose pak is encrypted or that keep their controls only in Enhanced Input assets show nothing there.
+
 The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls/<game>.ini` at each start and passes it to the game ([format](docs/user/INPUT_MAPPING.md)).
 
 ### Advanced settings
@@ -161,12 +163,15 @@ The list, the texts and the icons come from the game's own trophy package (`sce_
 The **library** button shows every game as a grid. **Settings** hold:
 
 - **Appearance:** the theme, the accent color, and the background (the theme animation, your own picture or a looping video). Also the selected game's artwork behind the home screen and animations.
+  - **Theme Studio:** make your own theme: the motion, its color, highlight and lightness, the accent, a picture or video behind it and menu music. Every change shows behind the panel at once. **Save as a file** makes one `.anyps5theme` to give to anyone; opening one in Finder installs it.
+  - **Themes:** the built-in themes, yours, and the ones people share on the **AnyPS5 Hub** ([`hub/`](hub/README.md)), installed with one press. **Share on the Hub** saves your theme and opens the page to send it. The phone wears the launcher's theme too.
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
 - **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing. Also:
   - **Clips:** the launcher keeps the last 15 to 120 seconds of the game playing, picture and sound; **Create** on a DualSense (Share on a DualShock 4), **⌥F12** or Create on the phone saves them as an MP4 beside the screenshots. macOS asks once for the screen recording permission.
   - **Save Sync:** each game's saves and trophies stay the same on your other Macs through iCloud Drive or any folder you choose (Dropbox, a shared or USB folder). Newer saves from another Mac come down before a game starts, and the Mac's go up when it ends; whatever is replaced is backed up first.
 - **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
+- **Links:** `anyps5://game/<title ID>` selects a game and `anyps5://play/<title ID>` starts it (Copy Link in a game's settings); a folder opened with AnyPS5 from Finder can become the games folder.
 - **About:** the app and toolkit versions, **Check for Updates**, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
 
 ### Getting around
@@ -175,7 +180,10 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 
 ### Your phone as a controller
 
-**AnyPS5 Remote** ([`mobile/`](mobile/README.md), Android and iOS) turns a phone on the same Wi-Fi into a DualSense. It finds the launcher by itself; the first time, the Mac asks once and both show the same code.
+**AnyPS5 Remote** ([`mobile/`](mobile/README.md), Android and iOS) turns a phone on the same Wi-Fi, or on a cable, into a DualSense. It finds the launcher by itself; the first time, the Mac asks once and both show the same code.
+
+- **On a cable, no Wi-Fi needed:** plug an iPhone into the Mac and it connects through the cable by itself. An Android phone does the same with USB debugging on and [adb](https://developer.android.com/tools/releases/platform-tools) installed on the Mac.
+- **Remote Play:** turn it on in the phone's About sheet and the game plays on the phone's screen behind the pad, picture and sound. It is off by default: the phone stays the controller alone. The Mac needs the screen recording permission for it.
 
 - **Launcher on the phone:** the Mac's games with their icons over the selected one's background. Picking a game on the phone picks it on the Mac too; **Play**, **Back to Game** and **Close Game** work from the phone, and the arrows, ✕, ○ and ≡ move around the launcher's own screen.
 - **The pad:** both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad (slide to move the touch, tap to click), any of them at once, with the latency shown. It takes over as soon as a game starts.
