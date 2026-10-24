@@ -34,6 +34,18 @@ The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launc
 - **Parties and voice** *(in the next release)*: start a party, invite friends or join theirs, and talk with its members, voice going straight between you.
 - **Another server** *(in the next release)*: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
 
+| Friends | Messages |
+|---|---|
+| ![Friends: requests, who plays what, a friend sharing their game](../docs/screenshots/phone-friends.jpg) | ![Messages: the conversations and one open, a friend typing](../docs/screenshots/phone-messages.jpg) |
+| **Party and voice** | **Profile** |
+| ![A party talking, one member speaking and one muted](../docs/screenshots/phone-party.jpg) | ![Your profile: totals and games](../docs/screenshots/phone-profile.jpg) |
+| **Activity** | **Notifications** |
+| ![Friends' activity with reactions](../docs/screenshots/phone-feed.jpg) | ![The notification list](../docs/screenshots/phone-notifications.jpg) |
+| **Watching a friend's share play** | |
+| ![A friend's game on the phone](../docs/screenshots/phone-shareplay.jpg) | |
+
+<sub>The pictures use demo people and data, rendered with `tool/screens/render.sh`.</sub>
+
 ## Installing
 
 - **Android:** open [AnyPS5-Remote.apk](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) on the phone and allow installing from your browser when asked.
