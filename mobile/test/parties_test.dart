@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_server.dart';
 import 'support/quiet_hub.dart';
+import 'support/scripted_hub.dart';
 
 Map<String, dynamic> party(
   String id, {
@@ -315,6 +316,104 @@ void main() {
     expect(painted, isEmpty);
     // Requests this test never answers run out.
     await tester.pump(const Duration(seconds: 30));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the leader lists the party in public and answers who asks', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final (hub, account) = await scriptedHub();
+    addTearDown(hub.dispose);
+    Map<String, dynamic>? listing;
+    var requests = ['zeynep'];
+    account.answer = (method, path, body) => switch ((method, path)) {
+      ('GET', 'me/party') => {
+        'party': party(
+          'p1',
+          members: ['me', 'ece'],
+          public: listing,
+          requests: requests,
+        ),
+        'invites': <Object>[],
+        'requests': <Object>[],
+      },
+      ('PATCH', 'parties/p1') => party(
+        'p1',
+        members: ['me', 'ece'],
+        public: listing = body!['public'] as Map<String, dynamic>?,
+        requests: requests,
+      ),
+      ('POST', 'parties/p1/requests/zeynep/accept') => party(
+        'p1',
+        members: ['me', 'ece'],
+        invited: ['zeynep'],
+        public: listing,
+        requests: requests = [],
+      ),
+      _ => null,
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(hub: hub, tab: TogetherTab.party),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    for (final text in ['ASKING TO JOIN', 'ZEYNEP', 'Accept', 'Decline']) {
+      final box = tester.getRect(find.text(text).first);
+      expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
+      expect(box.right, lessThanOrEqualTo(screen.width), reason: text);
+    }
+    // A request waits for the leader: counted on the rail.
+    expect(find.text('1'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Anyone can join'),
+      80,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pump();
+    final box = tester.getRect(find.text('Anyone can join'));
+    expect(box.right, lessThanOrEqualTo(screen.width));
+    await tester.tap(find.text('Anyone can join'));
+    await tester.pump();
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': {'join': 'open', 'titleId': null, 'language': null},
+    });
+    expect(hub.parties.party?.listing?.join, PublicJoin.open);
+    await tester.ensureVisible(find.text('Any'));
+    await tester.pump();
+    await tester.tap(find.text('Any'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Turkish').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': {'join': 'open', 'titleId': null, 'language': 'tr'},
+    });
+    await tester.tap(find.text('Accept'));
+    await tester.pump();
+    expect(
+      account.paths('POST'),
+      contains('parties/p1/requests/zeynep/accept'),
+    );
+    expect(find.text('ASKING TO JOIN'), findsNothing);
+    await tester.ensureVisible(find.text('Off'));
+    await tester.pump();
+    await tester.tap(find.text('Off'));
+    await tester.pump();
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': null,
+    });
     expect(tester.takeException(), isNull);
   });
 }
