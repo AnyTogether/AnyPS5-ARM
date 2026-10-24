@@ -1,19 +1,13 @@
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
+#include "prx/libSceVideoOut/src/RemotePadSocket.hpp"
 #include <algorithm>
-#include <arpa/inet.h>
-#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
-#include <netinet/in.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
 
 namespace RemotePad {
 
@@ -151,55 +145,37 @@ PadInputState Current(const std::optional<Input>& last, std::chrono::steady_cloc
 }
 
 Channel::Channel(std::uint16_t launcherPort) : launcherPort(launcherPort) {
-    socket = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket < 0) throw std::runtime_error(std::string("remote pad: cannot open a socket: ") + std::strerror(errno));
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    socklen_t length = sizeof(address);
-    const int stamped = 1;
-    if (::setsockopt(socket, SOL_SOCKET, SO_TIMESTAMP, &stamped, sizeof(stamped)) != 0 ||
-        ::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
-        ::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &length) != 0 ||
-        ::fcntl(socket, F_SETFL, ::fcntl(socket, F_GETFL) | O_NONBLOCK) != 0) {
-        const auto error = std::string(std::strerror(errno));
-        ::close(socket);
+    socket = Net::OpenUdp();
+    if (socket == Net::None) throw std::runtime_error("remote pad: cannot open a socket: " + Net::LastError());
+    std::optional<std::uint16_t> bound;
+    if (!Net::StampArrivals(socket) || !(bound = Net::BindLoopback(socket)) || !Net::MakeNonBlocking(socket)) {
+        const auto error = Net::LastError();
+        Net::Close(socket);
         throw std::runtime_error("remote pad: cannot bind 127.0.0.1: " + error);
     }
-    port = ntohs(address.sin_port);
+    port = *bound;
 }
 
 Channel::~Channel() {
-    if (socket >= 0) ::close(socket);
+    if (socket != Net::None) Net::Close(socket);
 }
 
 std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
     std::optional<Input> result;
     std::array<std::uint8_t, InputSize + 1> buffer{};
-    alignas(cmsghdr) std::array<std::uint8_t, CMSG_SPACE(sizeof(timeval))> control{};
+    std::optional<std::int64_t> arrived;
     while (true) {
-        iovec vector{buffer.data(), buffer.size()};
-        msghdr message{};
-        message.msg_iov = &vector;
-        message.msg_iovlen = 1;
-        message.msg_control = control.data();
-        message.msg_controllen = static_cast<socklen_t>(control.size());
-        const auto got = ::recvmsg(socket, &message, 0);
-        if (got < 0) break;
-        auto input = DecodeInput(std::span<const std::uint8_t>(buffer.data(), static_cast<std::size_t>(got)));
+        const auto got = Net::Receive(socket, buffer.data(), buffer.size(), arrived);
+        if (!got) break;
+        auto input = DecodeInput(std::span<const std::uint8_t>(buffer.data(), *got));
         if (!input) continue;
         if (session != input->session) {
             session = input->session;
             newest.reset();
         }
         if (newest && !IsNewer(input->sequence, *newest)) continue;
-        for (auto* header = CMSG_FIRSTHDR(&message); header != nullptr; header = CMSG_NXTHDR(&message, header)) {
-            if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_TIMESTAMP) continue;
-            timeval arrived{};
-            std::memcpy(&arrived, CMSG_DATA(header), sizeof(arrived));
-            timeval current{};
-            ::gettimeofday(&current, nullptr);
-            const auto waited = (static_cast<std::int64_t>(current.tv_sec) - arrived.tv_sec) * 1000000 + (static_cast<std::int64_t>(current.tv_usec) - arrived.tv_usec);
+        if (arrived) {
+            const auto waited = Net::WallMicros() - *arrived;
             input->waitMicros = static_cast<std::uint32_t>(std::clamp<std::int64_t>(waited, 0, 0xFFFFFFFF));
         }
         newest = input->sequence;
@@ -227,11 +203,7 @@ void Channel::SetPlayer(std::uint8_t number) {
 }
 
 void Channel::send(const std::uint8_t* bytes, std::size_t size) {
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(launcherPort);
-    ::sendto(socket, bytes, size, 0, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+    Net::SendTo(socket, bytes, size, launcherPort);
 }
 
 std::unique_ptr<Channel> OpenFromEnvironment() {

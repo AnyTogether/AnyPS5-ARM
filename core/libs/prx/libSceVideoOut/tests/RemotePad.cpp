@@ -1,5 +1,5 @@
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
-#include <arpa/inet.h>
+#include "prx/libSceVideoOut/src/RemotePadSocket.hpp"
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -9,19 +9,32 @@
 #include <exception>
 #include <iostream>
 #include <limits>
-#include <netinet/in.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
 namespace {
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+void setVariable(const char* name, const char* value) {
+#ifdef _WIN32
+    ::_putenv_s(name, value);
+#else
+    ::setenv(name, value, 1);
+#endif
+}
+
+void unsetVariable(const char* name) {
+#ifdef _WIN32
+    ::_putenv_s(name, "");
+#else
+    ::unsetenv(name);
+#endif
 }
 
 template <typename T>
@@ -145,39 +158,31 @@ void encodesOutput() {
 }
 
 struct Peer {
-    int socket = -1;
+    RemotePad::Net::Handle socket = RemotePad::Net::None;
     std::uint16_t port = 0;
 
     Peer() {
-        socket = ::socket(AF_INET, SOCK_DGRAM, 0);
-        require(socket >= 0, "open the test socket");
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        require(::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0, "bind the test socket");
-        socklen_t length = sizeof(address);
-        require(::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &length) == 0, "read the test port");
-        port = ntohs(address.sin_port);
-        timeval timeout{0, 200000};
-        ::setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        socket = RemotePad::Net::OpenUdp();
+        require(socket != RemotePad::Net::None, "open the test socket");
+        const auto bound = RemotePad::Net::BindLoopback(socket);
+        require(bound.has_value(), "bind the test socket and read its port");
+        port = *bound;
+        RemotePad::Net::SetReceiveTimeout(socket, std::chrono::milliseconds(200));
     }
 
-    ~Peer() { ::close(socket); }
+    ~Peer() { RemotePad::Net::Close(socket); }
 
     std::optional<std::vector<std::uint8_t>> receive() const {
         std::vector<std::uint8_t> bytes(256);
-        const auto got = ::recv(socket, bytes.data(), bytes.size(), 0);
-        if (got < 0) return std::nullopt;
-        bytes.resize(static_cast<std::size_t>(got));
+        std::optional<std::int64_t> arrived;
+        const auto got = RemotePad::Net::Receive(socket, bytes.data(), bytes.size(), arrived);
+        if (!got) return std::nullopt;
+        bytes.resize(*got);
         return bytes;
     }
 
     void send(const std::vector<std::uint8_t>& bytes, std::uint16_t to) const {
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        address.sin_port = htons(to);
-        require(::sendto(socket, bytes.data(), bytes.size(), 0, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == static_cast<ssize_t>(bytes.size()), "send from the test socket");
+        require(RemotePad::Net::SendTo(socket, bytes.data(), bytes.size(), to), "send from the test socket");
     }
 };
 
@@ -220,6 +225,22 @@ void newSessionStartsANewSequence() {
     launcher.send(fullPacket(0, 2), channel.Port());
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     require(!channel.Poll(now), "older inputs of the new session are still ignored");
+}
+
+void helloToNoLauncherHoldsNothingBack() {
+    std::uint16_t absent = 0;
+    {
+        Peer gone;
+        absent = gone.port;
+    }
+    RemotePad::Channel channel(absent);
+    channel.Greet(std::chrono::steady_clock::now());
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    Peer phone;
+    phone.send(fullPacket(6), channel.Port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const auto input = channel.Poll(std::chrono::steady_clock::now());
+    require(input && input->sequence == 6, "an input after a hello nobody heard is read at once");
 }
 
 void greetsEverySecond() {
@@ -269,7 +290,11 @@ void answerTellsHowLongTheInputWaited() {
     launcher.send(fullPacket(3), channel.Port());
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     const auto input = channel.Poll(std::chrono::steady_clock::now());
-    require(input && input->waitMicros >= 25000 && input->waitMicros < 1000000, "the time the input waited in the socket is measured");
+    if (RemotePad::Net::StampsArrivals) {
+        require(input && input->waitMicros >= 25000 && input->waitMicros < 1000000, "the time the input waited in the socket is measured");
+    } else {
+        require(input && input->waitMicros == 0, "without arrival stamps the wait is said as 0");
+    }
     channel.Answer(*input, PadOutputState{});
     const auto output = launcher.receive();
     require(output && get<std::uint32_t>(output->data(), 12) == input->waitMicros, "the answer carries the wait");
@@ -288,12 +313,12 @@ void remoteReleasedAfterSilence() {
 }
 
 void environment() {
-    ::unsetenv("ANYPS5_REMOTE_PAD");
+    unsetVariable("ANYPS5_REMOTE_PAD");
     require(RemotePad::OpenFromEnvironment() == nullptr, "no channel without ANYPS5_REMOTE_PAD");
-    ::setenv("ANYPS5_REMOTE_PAD", "", 1);
+    setVariable("ANYPS5_REMOTE_PAD", "");
     require(RemotePad::OpenFromEnvironment() == nullptr, "no channel for an empty ANYPS5_REMOTE_PAD");
     for (const char* value : {"127.0.0.1:0", "10.0.0.1:5000", "127.0.0.1:x", "127.0.0.1:70000"}) {
-        ::setenv("ANYPS5_REMOTE_PAD", value, 1);
+        setVariable("ANYPS5_REMOTE_PAD", value);
         bool threw = false;
         try {
             RemotePad::OpenFromEnvironment();
@@ -302,9 +327,9 @@ void environment() {
         }
         require(threw, "a malformed ANYPS5_REMOTE_PAD stops with an error naming it");
     }
-    ::setenv("ANYPS5_REMOTE_PAD", "127.0.0.1:5000", 1);
+    setVariable("ANYPS5_REMOTE_PAD", "127.0.0.1:5000");
     require(RemotePad::OpenFromEnvironment() != nullptr, "a loopback address opens a channel");
-    ::unsetenv("ANYPS5_REMOTE_PAD");
+    unsetVariable("ANYPS5_REMOTE_PAD");
 }
 
 
@@ -347,14 +372,14 @@ void seatsGoInOrderAndComeBack() {
 }
 
 void environmentForMorePlayers() {
-    ::unsetenv("ANYPS5_REMOTE_PAD");
-    ::setenv("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002", 1);
+    unsetVariable("ANYPS5_REMOTE_PAD");
+    setVariable("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002");
     require(RemotePad::OpenAllFromEnvironment().empty(), "no channel for later players without the first");
-    ::setenv("ANYPS5_REMOTE_PAD", "127.0.0.1:5001", 1);
-    ::setenv("ANYPS5_REMOTE_PAD_4", "127.0.0.1:5004", 1);
+    setVariable("ANYPS5_REMOTE_PAD", "127.0.0.1:5001");
+    setVariable("ANYPS5_REMOTE_PAD_4", "127.0.0.1:5004");
     const auto channels = RemotePad::OpenAllFromEnvironment();
     require(channels.size() == 2, "a channel for ANYPS5_REMOTE_PAD and each numbered one, stopping at a gap");
-    ::setenv("ANYPS5_REMOTE_PAD_2", "10.0.0.1:5002", 1);
+    setVariable("ANYPS5_REMOTE_PAD_2", "10.0.0.1:5002");
     bool threw = false;
     try {
         RemotePad::OpenAllFromEnvironment();
@@ -362,9 +387,9 @@ void environmentForMorePlayers() {
         threw = std::string(error.what()).find("ANYPS5_REMOTE_PAD_2") != std::string::npos;
     }
     require(threw, "a malformed numbered address stops with an error naming it");
-    ::unsetenv("ANYPS5_REMOTE_PAD");
-    ::unsetenv("ANYPS5_REMOTE_PAD_2");
-    ::unsetenv("ANYPS5_REMOTE_PAD_4");
+    unsetVariable("ANYPS5_REMOTE_PAD");
+    unsetVariable("ANYPS5_REMOTE_PAD_2");
+    unsetVariable("ANYPS5_REMOTE_PAD_4");
 }
 
 }
@@ -376,6 +401,7 @@ int main() try {
     encodesOutput();
     loopbackChannel();
     greetsEverySecond();
+    helloToNoLauncherHoldsNothingBack();
     helloNamesThePlayer();
     olderSequenceIsIgnored();
     newSessionStartsANewSequence();
