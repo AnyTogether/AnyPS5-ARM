@@ -181,7 +181,7 @@ void main() {
           language: 'tr',
         ),
       );
-      expect(server.requests.last.$3, {
+      expect(server.requests.lastWhere((r) => r.$1 == 'PATCH').$3, {
         'public': {'join': 'open', 'titleId': 'PPSA01234', 'language': 'tr'},
       });
       expect(parties().party?.listing?.join, PublicJoin.open);
@@ -198,11 +198,16 @@ void main() {
       });
       await until(() => parties().party!.requests.length == 1);
       await parties().answerRequest('ali', accept: true);
-      expect(server.requests.last.$2, '/api/v1/parties/p1/requests/ali/accept');
+      expect(
+        server.requests.lastWhere((r) => r.$1 == 'POST').$2,
+        '/api/v1/parties/p1/requests/ali/accept',
+      );
       expect(parties().party?.requests, isEmpty);
       expect(parties().party?.invited.single.id, 'ali');
       await parties().setPublic(null);
-      expect(server.requests.last.$3, {'public': null});
+      expect(server.requests.lastWhere((r) => r.$1 == 'PATCH').$3, {
+        'public': null,
+      });
       expect(parties().party?.listing, isNull);
     });
 
