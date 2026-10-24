@@ -117,6 +117,11 @@ public final class TogetherClient: @unchecked Sendable {
     }
 
     /// For a browser to approve: show `userCode` and open `verificationUri`.
+    /// Signs in the device that started this hand-off (the phone, or another launcher) as us.
+    public func approveHandoff(_ id: String) async throws {
+        _ = try await authorized("POST", "auth/handoff/\(id)/approve", nil)
+    }
+
     public func startDeviceCode(deviceName: String) async throws -> DeviceCode {
         try JSONDecoder.together.decode(DeviceCode.self, from: try await send("POST", "auth/device", ["deviceName": deviceName]))
     }

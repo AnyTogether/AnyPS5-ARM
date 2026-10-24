@@ -182,7 +182,7 @@ final class AppModel: ObservableObject {
     private var trophiesRead: Set<String> = []
     private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
-    private var remote: RemoteServer?
+    private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
     private var cable: UsbTunnel?
     /// Android phones on a cable, through adb when it is installed.
@@ -1251,6 +1251,8 @@ final class AppModel: ObservableObject {
         case .saveLayout(let id, let layout):
             guard let game = games.first(where: { $0.id == id }) else { return }
             update(game) { $0.phoneLayout = layout }
+        case .togetherHandoff, .togetherHandoffAnswer:
+            togetherPhoneAsked(message)
         default:
             break
         }

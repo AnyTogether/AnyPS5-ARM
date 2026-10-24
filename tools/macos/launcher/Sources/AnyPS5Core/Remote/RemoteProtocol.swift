@@ -112,12 +112,17 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     case keyFrame
     /// How Remote Play is going for the phone: on, off, noPermission (screen recording) or noGame.
     case streaming(state: String)
+    /// AnyTogether: either side asks the other, already signed in, to sign it in. The id is the
+    /// hand-off the asker started with the server; deviceName is shown before approving.
+    case togetherHandoff(id: String, deviceName: String)
+    /// The answer: approved on the server, or turned down.
+    case togetherHandoffAnswer(id: String, approved: Bool)
 
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds
-        case games, selected, running, language, id, icon, background, name, layout, detail, grade, activity, deep, middle, accent, on, width, height, state
+        case games, selected, running, language, id, icon, background, name, layout, detail, grade, activity, deep, middle, accent, on, width, height, state, approved
     }
 
     public init(from decoder: Decoder) throws {
@@ -173,6 +178,10 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             self = .streaming(state: try values.decode(String.self, forKey: .state))
         case "look":
             self = .look(deep: try values.decode(String.self, forKey: .deep), middle: try values.decode(String.self, forKey: .middle), accent: try values.decode(String.self, forKey: .accent))
+        case "togetherHandoff":
+            self = .togetherHandoff(id: try values.decode(String.self, forKey: .id), deviceName: try values.decode(String.self, forKey: .deviceName))
+        case "togetherHandoffAnswer":
+            self = .togetherHandoffAnswer(id: try values.decode(String.self, forKey: .id), approved: try values.decode(Bool.self, forKey: .approved))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "unknown message type \(other)")
         }
@@ -257,6 +266,14 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             try values.encode(deep, forKey: .deep)
             try values.encode(middle, forKey: .middle)
             try values.encode(accent, forKey: .accent)
+        case .togetherHandoff(let id, let deviceName):
+            try values.encode("togetherHandoff", forKey: .type)
+            try values.encode(id, forKey: .id)
+            try values.encode(deviceName, forKey: .deviceName)
+        case .togetherHandoffAnswer(let id, let approved):
+            try values.encode("togetherHandoffAnswer", forKey: .type)
+            try values.encode(id, forKey: .id)
+            try values.encode(approved, forKey: .approved)
         }
     }
 
@@ -282,6 +299,8 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .stream(let on, let width, let height): return "stream(\(on) \(width)x\(height))"
         case .keyFrame: return "keyFrame"
         case .streaming(let state): return "streaming(\(state))"
+        case .togetherHandoff: return "togetherHandoff"
+        case .togetherHandoffAnswer(_, let approved): return "togetherHandoffAnswer(\(approved))"
         case .activity(let activity): return "activity(\(activity.map { "\($0.phase.rawValue) \($0.fraction.map { String(format: "%.2f", $0) } ?? "-")" } ?? "none"))"
         }
     }

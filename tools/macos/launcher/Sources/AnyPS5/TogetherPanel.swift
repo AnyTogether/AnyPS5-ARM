@@ -10,6 +10,8 @@ extension AppModel {
         case busy
         case codeSent(email: String)
         case deviceCode(code: String, url: URL)
+        /// Waiting for the paired phone, signed in to AnyTogether, to approve this launcher.
+        case phone(name: String, handoff: String)
     }
 
     /// Where AnyTogether is; ANYTOGETHER_URL points the launcher at another server (staging, a local one).
@@ -36,6 +38,10 @@ extension AppModel {
         var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))]
         switch togetherStep {
         case .idle, .busy:
+            if let phone = connectedPhoneName {
+                rows.append(PanelRow(id: "together-phone", title: T.text(.togetherWithPhone), detail: T.format(.togetherWithPhoneDetail, phone), symbol: "iphone.radiowaves.left.and.right",
+                                     kind: .action(destructive: false) { [weak self] in self?.togetherWithPhone() }))
+            }
             rows += [
                 PanelRow(id: "together-email", title: T.text(.togetherEmail), symbol: "envelope", kind: .text(togetherEmail) { [weak self] text in self?.togetherEmail = text }),
                 PanelRow(id: "together-send", title: T.text(.togetherSendCode), symbol: "paperplane", kind: .action(destructive: false) { [weak self] in self?.togetherSendCode() }),
@@ -64,8 +70,18 @@ extension AppModel {
                 }),
                 PanelRow(id: "together-cancel", title: T.text(.cancel), symbol: "xmark", kind: .action(destructive: false) { [weak self] in self?.togetherCancel() }),
             ]
+        case .phone(let name, _):
+            rows += [
+                PanelRow(id: "together-onphone", title: T.format(.togetherOnPhone, name), symbol: "iphone.radiowaves.left.and.right", kind: .info("")),
+                PanelRow(id: "together-cancel", title: T.text(.cancel), symbol: "xmark", kind: .action(destructive: false) { [weak self] in self?.togetherCancel() }),
+            ]
         }
         return rows
+    }
+
+    /// The first connected phone's name, if one is connected.
+    var connectedPhoneName: String? {
+        connectedPhones.first.map { id in phones.first { $0.id == id }?.name ?? id }
     }
 
     // MARK: Signing in
@@ -117,6 +133,51 @@ extension AppModel {
                 togetherStep = .idle
                 show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
             }
+        }
+    }
+
+    /// The phone signs this launcher in: the launcher starts a hand-off, the phone approves it.
+    func togetherWithPhone() {
+        guard let name = connectedPhoneName, let remote else { return }
+        togetherStep = .busy
+        togetherWait?.cancel()
+        togetherWait = Task {
+            do {
+                let handoff = try await together.startHandoff(deviceName: Host.current().localizedName ?? "Mac")
+                withAnimation(Motion.overlay) { togetherStep = .phone(name: name, handoff: handoff.handoffId) }
+                remote.publish(.togetherHandoff(id: handoff.handoffId, deviceName: Host.current().localizedName ?? "Mac"))
+                signedIn(try await together.waitForApproval(handoff))
+            } catch is CancellationError {
+                togetherStep = .idle
+            } catch {
+                togetherStep = .idle
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    /// A phone's side of a hand-off: it asks to be signed in as us, or answers ours.
+    func togetherPhoneAsked(_ message: RemoteMessage) {
+        switch message {
+        case .togetherHandoff(let id, let deviceName):
+            // Only phones paired with this launcher get here; signed in, it approves at once.
+            guard togetherUser != nil else { return remote?.publish(.togetherHandoffAnswer(id: id, approved: false)) ?? () }
+            Task {
+                do {
+                    try await together.approveHandoff(id)
+                    remote?.publish(.togetherHandoffAnswer(id: id, approved: true))
+                    show(T.format(.togetherPhoneSignedIn, deviceName), symbol: "iphone.radiowaves.left.and.right")
+                } catch {
+                    remote?.publish(.togetherHandoffAnswer(id: id, approved: false))
+                    show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+                }
+            }
+        case .togetherHandoffAnswer(let id, false):
+            guard case .phone(_, id) = togetherStep else { return }
+            togetherCancel()
+            show(T.text(.togetherPhoneDeclined), symbol: "iphone.slash")
+        default:
+            break
         }
     }
 

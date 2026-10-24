@@ -65,6 +65,17 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(json?["accent"] as? String, "#FF4FD8")
     }
 
+    /// One device signs the other in to AnyTogether: the one asking sends its hand-off.
+    func testAHandOffGoesBothWays() throws {
+        let message = RemoteMessage.togetherHandoff(id: "0192f000-0000-7000-8000-000000000001", deviceName: "Utku's iPhone")
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "togetherHandoff")
+        XCTAssertEqual(json?["deviceName"] as? String, "Utku's iPhone")
+        let answer = RemoteMessage.togetherHandoffAnswer(id: "0192f000-0000-7000-8000-000000000001", approved: true)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(answer)), answer)
+    }
+
     func testATrophyIsToldToThePhone() throws {
         let message = RemoteMessage.trophy(name: "Pharloom's Heart", detail: "Acquire all other trophies", grade: "platinum", icon: "aWNvbg==")
         XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)

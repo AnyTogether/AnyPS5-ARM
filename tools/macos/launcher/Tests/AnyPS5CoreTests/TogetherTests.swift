@@ -139,6 +139,18 @@ final class TogetherTests: XCTestCase {
         XCTAssertEqual(polls, 3)
     }
 
+    /// Signed in here, the launcher approves the phone's hand-off with its own session.
+    func testApprovingAHandOffUsesTheSession() async throws {
+        FakeTogether.handler = { _, _ in (200, Self.tokens()) }
+        _ = try await client.verifyEmail("u@example.com", code: "111111")
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.approveHandoff("0192f000-0000-7000-8000-000000000001")
+        let approve = try XCTUnwrap(FakeTogether.requests.last?.0)
+        XCTAssertEqual(approve.httpMethod, "POST")
+        XCTAssertEqual(approve.url?.path, "/api/v1/auth/handoff/0192f000-0000-7000-8000-000000000001/approve")
+        XCTAssertNotNil(approve.value(forHTTPHeaderField: "Authorization"))
+    }
+
     func testADeviceCodeWaitsForApproval() async throws {
         var polls = 0
         FakeTogether.handler = { request, _ in

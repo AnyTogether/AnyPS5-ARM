@@ -54,6 +54,7 @@ enum T {
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
         case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
+        case togetherWithPhone, togetherWithPhoneDetail, togetherOnPhone, togetherPhoneDeclined, togetherPhoneSignedIn
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -94,6 +95,11 @@ enum T {
         .togetherSendCode: "Bana kod gönder",
         .togetherWithWebsite: "Web sitesinden giriş yap",
         .togetherWithWebsiteDetail: "Burada bir kod al, telefonundan ya da başka bir bilgisayardan yaz",
+        .togetherWithPhone: "Telefonumla giriş yap",
+        .togetherWithPhoneDetail: "%@ AnyTogether'a giriş yaptıysa tek dokunuşla onaylar",
+        .togetherOnPhone: "%@ üzerinde onayla",
+        .togetherPhoneDeclined: "Telefon onaylamadı; önce telefonda AnyTogether'a giriş yap",
+        .togetherPhoneSignedIn: "%@ AnyTogether'a giriş yaptı",
         .togetherCodeSent: "Kod gönderildi: %@",
         .togetherCode: "Maildeki kod",
         .togetherSignIn: "Giriş yap",
@@ -486,6 +492,11 @@ enum T {
         .togetherSendCode: "Email me a code",
         .togetherWithWebsite: "Sign in on the website",
         .togetherWithWebsiteDetail: "Get a code here, type it on your phone or any computer",
+        .togetherWithPhone: "Sign in with my phone",
+        .togetherWithPhoneDetail: "If %@ is signed in to AnyTogether, one tap there approves it",
+        .togetherOnPhone: "Approve on %@",
+        .togetherPhoneDeclined: "The phone did not approve; sign in to AnyTogether on the phone first",
+        .togetherPhoneSignedIn: "%@ signed in to AnyTogether",
         .togetherCodeSent: "Code sent to %@",
         .togetherCode: "Code from the mail",
         .togetherSignIn: "Sign in",
