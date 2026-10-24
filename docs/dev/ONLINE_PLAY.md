@@ -143,6 +143,21 @@ With `ANYPS5_ONLINE_LOG=<file>`, NpManager, NpWebApi, NpWebApi2, NpSessionSignal
 
 Pointers are written as `"set"` or `null`, never as addresses, so identical calls fold: a repeat of the same call is counted and written again at most every 5 s with `repeats`. Request bodies are written as text, or as hex when they are binary, cut at 4 KiB. The log works with or without a launcher; with one, every line is also sent as an `Observation` frame so the launcher can collect them per title.
 
+## Games observed
+
+### Cat Quest III (PPSA15065, 01.004.008)
+
+Unity (IL2CPP) title; the title screen offers **Single Player** and **Local Co-Op** only, with no online mode. Observed on 2026-10-24 from a scratch install with this branch's libraries: one run signed out, three signed in through a fake launcher (reachable, Plus, account and country set), through the title screen, the Local Co-Op pirate choice and into single-player gameplay on the island.
+
+| Call | When | Signed out | Signed in |
+|---|---|---|---|
+| `sceNpGetAccountIdA`, `sceNpGetAccountCountryA`, `sceNpGetState`, `sceNpGetNpReachabilityState` (initial user) | at start and again on the title screen | `SIGNED_OUT` for the account; only the account ID is asked | answered from the account; reachable |
+| `sceNpWebApi2Initialize` (pool 512 KiB), `sceNpGameIntentInitialize`, `sceNpEntitlementAccessInitialize`, `sceNpSessionSignalingInitialize` | once, while loading | 0 | 0 |
+| `sceNpWebApi2CreateUserContext` (initial user) | title screen | 0 | 0 |
+| `sceNpCheckCallback` | every frame | 0 | 0 (the state callback fires once with signed in) |
+
+No web API request, push filter, session signalling context, matching, NpSignaling, P2P socket or virtual-address packet was made, and nothing aborted on the online path. These are the platform plugin's start-up calls, not game features: the title has nothing to carry between two Macs. Its co-op is local (several pads on one machine), which the phone controller and share play already cover; two Macs could only play it together through share play (one game streams, the other sends its pad), not through the bridge.
+
 ## Compared with AnyPlay
 
 AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bridge`) solves the same problem and we learned from it. RPCN (PS3) and shadPS4's shadnet (PS4) go further and reimplement the platform service itself; we pass requests through to the launcher instead, so the engine stays small and the server is AnyTogether. We did not copy code; where we agree it is because the problem leaves little choice.
