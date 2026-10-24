@@ -133,7 +133,7 @@ std::uint32_t ImageType(SpirvEmitterState& state, const ImageResource& image) {
         FailEmit("invalid image resource class");
     }
     const auto& info = RdnaImageDimensionInfoFor(image.dimension);
-    const auto multisampled = state.singleSampleImages ? 0u : info.multisampled;
+    const auto multisampled = state.singleSampleImages && !image.targetMerge ? 0u : info.multisampled;
     if (multisampled != 0u) {
         if (sampled == 2u) {
             if (std::ranges::find(state.supportedCapabilities, spv::CapabilityStorageImageMultisample) == state.supportedCapabilities.end()) FailEmit("storage image multisampling is unavailable on the target device");
