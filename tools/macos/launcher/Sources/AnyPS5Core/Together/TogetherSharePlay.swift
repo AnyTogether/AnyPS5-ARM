@@ -60,6 +60,13 @@ public struct TogetherShareInvite: Decodable, Equatable, Sendable, Identifiable 
     public let from: TogetherPerson?
     public let titleId: String
     public let title: String?
+
+    public init(sharePlayId: String, from: TogetherPerson?, titleId: String, title: String?) {
+        self.sharePlayId = sharePlayId
+        self.from = from
+        self.titleId = titleId
+        self.title = title
+    }
 }
 
 /// In a friend's presence while they share.
@@ -71,6 +78,15 @@ public struct TogetherSharePresence: Decodable, Equatable, Sendable {
     public let open: Bool
     public let viewers: Int
     public let maxViewers: Int
+
+    public init(sharePlayId: String, titleId: String, title: String?, open: Bool, viewers: Int, maxViewers: Int) {
+        self.sharePlayId = sharePlayId
+        self.titleId = titleId
+        self.title = title
+        self.open = open
+        self.viewers = viewers
+        self.maxViewers = maxViewers
+    }
 
     /// A presence with only its share decoded.
     public struct Holder: Decodable { public let share: TogetherSharePresence? }

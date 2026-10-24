@@ -364,6 +364,8 @@ extension AppModel {
     /// `then` runs once the server has heard it and the session is forgotten here.
     func togetherSignOut(then: (@MainActor () -> Void)? = nil) {
         leaveVoice()
+        stopSharePlay()
+        share.invites = []
         let client = together
         // What waits stays in this account's outbox, for when it signs in again.
         togetherFlush?.cancel()
@@ -399,6 +401,7 @@ extension AppModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.togetherSocket = nil
+                self.endShareSession()
                 if self.overlay == .profile { self.closeProfile() }
                 withAnimation(Motion.overlay) {
                     self.togetherUser = nil
@@ -416,6 +419,7 @@ extension AppModel {
         loadInbox()
         loadParty()
         loadGameInvites()
+        loadShareInvites()
         flushTogether()
     }
 

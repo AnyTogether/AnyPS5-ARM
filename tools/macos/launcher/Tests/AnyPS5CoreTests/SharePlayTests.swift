@@ -314,3 +314,38 @@ final class SharePadRelayTests: XCTestCase {
         XCTAssertEqual(server.reservedPadBridges, [])
     }
 }
+
+/// The capture's sound cut into share play's 5 ms packets.
+final class SoundChunkerTests: XCTestCase {
+    func testWholePacketsNumberedWithTheRestKeptForTheNext() {
+        var chunker = SoundChunker()
+        let first = chunker.add([Int16](repeating: 1, count: 300 * 2), at: 10)
+        XCTAssertEqual(first.count, 1)
+        let packet = StreamPacket.Audio(first[0])
+        XCTAssertEqual(packet?.number, 1)
+        XCTAssertEqual(packet?.milliseconds, 0)
+        XCTAssertEqual(packet?.payload.count, 960)
+        let second = chunker.add([Int16](repeating: 2, count: 180 * 2), at: 10.25)
+        XCTAssertEqual(second.count, 1)
+        XCTAssertEqual(StreamPacket.Audio(second[0])?.number, 2)
+        XCTAssertEqual(StreamPacket.Audio(second[0])?.milliseconds, 250)
+        // The 60 frames left over from the first call come first in the second packet.
+        let payload = [UInt8](StreamPacket.Audio(second[0])!.payload)
+        XCTAssertEqual(payload[0 ..< 2], [1, 0])
+        XCTAssertEqual(payload[60 * 4 ..< 60 * 4 + 2], [2, 0])
+    }
+
+    func testFloatsBecomeClampedStereo() {
+        let left: [Float] = [0, 1, -2]
+        let right: [Float] = [0.5, -1, 2]
+        let planar = left.withUnsafeBufferPointer { l in right.withUnsafeBufferPointer { r in
+            SoundChunker.stereo16(first: l.baseAddress!, second: r.baseAddress!, planar: true, channels: 2, frames: 3)
+        } }
+        XCTAssertEqual(planar, [0, 16383, 32767, -32767, -32767, 32767])
+        let interleaved: [Float] = [0, 0.5, 1, -1]
+        let mixed = interleaved.withUnsafeBufferPointer { SoundChunker.stereo16(first: $0.baseAddress!, second: nil, planar: false, channels: 2, frames: 2) }
+        XCTAssertEqual(mixed, [0, 16383, 32767, -32767])
+        let mono: [Float] = [0.5, -0.5]
+        XCTAssertEqual(mono.withUnsafeBufferPointer { SoundChunker.stereo16(first: $0.baseAddress!, second: nil, planar: false, channels: 1, frames: 2) }, [16383, 16383, -16383, -16383])
+    }
+}

@@ -223,6 +223,22 @@ enum PreviewRenderer {
                                                                        titleId: found.last?.titleID ?? title, gameVersion: "01.000.000", engineBuild: "0.2.13-abc")])
             model.overlay = .friends; model.panelInRows = true; model.panelRow = 3
         }
+        render(preferences, found, root, still, output.appendingPathComponent("friends-share.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            let viewers = [TogetherSharePlay.Viewer(user: people[0], device: "web1", slot: 2, joinedAt: nil), TogetherSharePlay.Viewer(user: people[1], device: "phone1", slot: nil, joinedAt: nil)]
+            model.previewShare(TogetherSharePlay(id: "sp1", host: utku, hostDevice: "mac", titleId: found.first?.titleID ?? "PPSA01234", title: found.first?.name, open: true, maxViewers: 3,
+                                                 viewers: viewers, invited: []),
+                               links: ["f1": .init(state: .connected, roundTrip: 38, sendRate: 9_000_000, relayed: false, framesPerSecond: 60, frameHeight: 720),
+                                       "f2": .init(state: .connected, roundTrip: 71, sendRate: 4_000_000, relayed: true, framesPerSecond: 60, frameHeight: 720)])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 2
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("friends-share-invite.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewShare(nil, invites: [TogetherShareInvite(sharePlayId: "sp9", from: people[0], titleId: found.first?.titleID ?? "PPSA01234", title: "Cat Quest III")])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 2
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

@@ -22,6 +22,15 @@ public final class SharePlayHost: NSObject {
         public var relayed: Bool?
         public var framesPerSecond: Double?
         public var frameHeight: Int?
+
+        public init(state: RTCPeerConnectionState, roundTrip: Double? = nil, sendRate: Double? = nil, relayed: Bool? = nil, framesPerSecond: Double? = nil, frameHeight: Int? = nil) {
+            self.state = state
+            self.roundTrip = roundTrip
+            self.sendRate = sendRate
+            self.relayed = relayed
+            self.framesPerSecond = framesPerSecond
+            self.frameHeight = frameHeight
+        }
     }
 
     fileprivate final class Peer: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate {

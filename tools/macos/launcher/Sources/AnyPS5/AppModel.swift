@@ -443,6 +443,9 @@ final class AppModel: ObservableObject {
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// Share play: what the friends panel shows, and the running share play's pieces.
+    @Published var share = ShareState()
+    var shareSession: ShareSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?
@@ -1058,6 +1061,7 @@ final class AppModel: ObservableObject {
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()
+        followSharePlay()
         updateTogetherPresence()
         syncSaves(running.game) {}
         discord.clear()
