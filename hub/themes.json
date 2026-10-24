@@ -1,0 +1,64 @@
+{
+  "themes": [
+    {
+      "id": "neon-nights",
+      "name": "Neon Nights",
+      "author": "AnyPS5",
+      "style": 0,
+      "deep": "#0A0014",
+      "middle": "#4A0E6B",
+      "bright": "#FF5EDB",
+      "accent": "#FF4FD8",
+      "version": 1,
+      "package": "themes/neon-nights.anyps5theme"
+    },
+    {
+      "id": "forest",
+      "name": "Forest",
+      "author": "AnyPS5",
+      "style": 1,
+      "deep": "#02100A",
+      "middle": "#0E4A2C",
+      "bright": "#9BFFC4",
+      "accent": "#5CEB9F",
+      "version": 1,
+      "package": "themes/forest.anyps5theme"
+    },
+    {
+      "id": "monochrome",
+      "name": "Monochrome",
+      "author": "AnyPS5",
+      "style": 0,
+      "deep": "#050505",
+      "middle": "#262626",
+      "bright": "#E6E6E6",
+      "accent": "#F2F2F2",
+      "version": 1,
+      "package": "themes/monochrome.anyps5theme"
+    },
+    {
+      "id": "ember",
+      "name": "Ember",
+      "author": "AnyPS5",
+      "style": 2,
+      "deep": "#120402",
+      "middle": "#6B1A08",
+      "bright": "#FFB35C",
+      "accent": "#FF8A3D",
+      "version": 1,
+      "package": "themes/ember.anyps5theme"
+    },
+    {
+      "id": "deep-sea",
+      "name": "Deep Sea",
+      "author": "AnyPS5",
+      "style": 1,
+      "deep": "#000A14",
+      "middle": "#063B5C",
+      "bright": "#6FE3FF",
+      "accent": "#38C8FF",
+      "version": 1,
+      "package": "themes/deep-sea.anyps5theme"
+    }
+  ]
+}

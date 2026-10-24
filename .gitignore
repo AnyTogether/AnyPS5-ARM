@@ -115,3 +115,6 @@ cookies.txt
 !docs/games/img/*.jpg
 tools/macos/converter/.build/
 tools/macos/launcher/.build/
+
+# The Hub index is shared on purpose.
+!hub/themes.json
