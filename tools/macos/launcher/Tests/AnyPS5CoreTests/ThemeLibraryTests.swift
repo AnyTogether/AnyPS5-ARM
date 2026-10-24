@@ -124,6 +124,8 @@ final class ThemeKnobsTests: XCTestCase {
 final class HubFolderTests: XCTestCase {
     func testEveryThemeOnTheHubInstalls() throws {
         let hub = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../../hub").standardizedFileURL
+        // The launcher alone (its own branch) has no Hub folder beside it.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: hub.appendingPathComponent("themes.json").path), "no hub/ in this checkout")
         let themes = try ThemeHub.index(from: Data(contentsOf: hub.appendingPathComponent("themes.json")), base: hub.appendingPathComponent("/"))
         XCTAssertFalse(themes.isEmpty)
         let library = ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("hub-\(UUID().uuidString.prefix(8))"))
