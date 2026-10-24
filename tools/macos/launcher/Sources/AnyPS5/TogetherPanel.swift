@@ -12,8 +12,8 @@ extension AppModel {
         case deviceCode(code: String, url: URL)
     }
 
-    /// Where AnyTogether is: the staging server until the public one opens; ANYTOGETHER_URL overrides.
-    static let togetherBase = URL(string: ProcessInfo.processInfo.environment["ANYTOGETHER_URL"] ?? "https://anytogether-staging.kodla.agency")!
+    /// Where AnyTogether is; ANYTOGETHER_URL points the launcher at another server (staging, a local one).
+    static let togetherBase = URL(string: ProcessInfo.processInfo.environment["ANYTOGETHER_URL"] ?? "https://anytogether.kodla.agency")!
 
     static func makeTogetherClient() -> TogetherClient {
         let os = ProcessInfo.processInfo.operatingSystemVersion
