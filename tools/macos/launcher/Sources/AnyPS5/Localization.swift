@@ -53,7 +53,7 @@ enum T {
         case themeCosmic, themeAurora, themeSunset, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
-        case controls, controlsHint, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
+        case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
@@ -346,6 +346,7 @@ enum T {
         .gradeSilver: "Gümüş",
         .gradeBronze: "Bronz",
         .controlsHint: "Bir satır seç, sonra atamak istediğin tuşa bas. Esc vazgeçer. Kumanda bağlıysa kendi tuşlarıyla çalışır.",
+        .controlsFromGame: "Her tuşun altında oyunun kendi dosyalarında o tuşa verdiği iş yazıyor.",
         .pressKey: "Bir tuşa bas…",
         .resetControls: "Varsayılan Tuşlara Dön",
         .noKey: "Yok",
@@ -652,6 +653,7 @@ enum T {
         .gradeSilver: "Silver",
         .gradeBronze: "Bronze",
         .controlsHint: "Pick a row, then press the key you want for it. Esc cancels. A connected controller keeps its own buttons.",
+        .controlsFromGame: "Under each button is what the game's own files say it does.",
         .pressKey: "Press a key…",
         .resetControls: "Reset to Default Keys",
         .noKey: "None",

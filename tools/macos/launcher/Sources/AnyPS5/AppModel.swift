@@ -143,6 +143,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var connectedPhones: [String] = []
     /// Which player each connected phone is in the game playing, from 1, by device ID.
     @Published private(set) var phonePlayers: [String: Int] = [:]
+    /// What each game does with each pad button, by game, read from its own Unreal files the
+    /// first time its controls are opened; empty when they say nothing.
+    @Published private(set) var gameControls: [String: [PadAction: [String]]] = [:]
 
     /// The connected phones as the indicator shows them: by player in a game, a phone not
     /// pressed yet with no number; outside a game, numbered as they connected.
@@ -985,6 +988,10 @@ final class AppModel: ObservableObject {
 
     func previewPhoneConnecting(_ name: String) { phoneConnecting = name }
 
+    func previewGameControls(_ controls: [PadAction: [String]]) {
+        if let game = selectedGame { gameControls[game.id] = controls }
+    }
+
     private var previewBadges: [PhoneBadge]?
     func previewPhones(_ badges: [PhoneBadge]) {
         previewBadges = badges
@@ -1412,12 +1419,25 @@ final class AppModel: ObservableObject {
 
     // MARK: Overlays and toasts
 
+    private func readControls(_ game: Game) {
+        guard gameControls[game.id] == nil else { return }
+        gameControls[game.id] = [:]
+        let folder = game.folder, id = game.id
+        Task.detached(priority: .utility) {
+            let controls = UnrealControls.read(game: folder) ?? [:]
+            await MainActor.run { withAnimation(Motion.overlay) { self.gameControls[id] = controls } }
+        }
+    }
+
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
         // The controls panel opens on its first key, below the hint.
-        if next == .controls { panelRow = 1 }
+        if next == .controls {
+            panelRow = 1
+            if let game = selectedGame { readControls(game) }
+        }
         if next == .trophies { trophyIndex = 0 }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }

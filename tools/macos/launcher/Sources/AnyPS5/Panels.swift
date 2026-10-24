@@ -287,9 +287,12 @@ extension AppModel {
 
     private func controlRows(_ game: Game) -> [PanelRow] {
         let changes = settings(for: game).controls ?? [:]
-        var rows = [PanelRow(id: "hint", title: T.text(.controlsHint), kind: .info(""))]
+        // The game's own actions, when its files name them, under each button.
+        let actions = gameControls[game.id] ?? [:]
+        var rows = [PanelRow(id: "hint", title: T.text(.controlsHint), detail: actions.isEmpty ? nil : T.text(.controlsFromGame), kind: .info(""))]
         for action in PadAction.allCases {
-            rows.append(PanelRow(id: action.rawValue, title: action.title, symbol: action.symbol, kind: .keys(Controls.sources(action, changes), capturing: capturing == action) { [weak self] in
+            rows.append(PanelRow(id: action.rawValue, title: action.title, detail: actions[action]?.joined(separator: " · "), symbol: action.symbol,
+                                 kind: .keys(Controls.sources(action, changes), capturing: capturing == action) { [weak self] in
                 self?.startCapture(action)
             }))
         }
