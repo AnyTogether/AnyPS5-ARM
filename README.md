@@ -18,7 +18,7 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
-**On Windows or Linux?** [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) is this launcher ported to those systems, for the PCs [AnyPS5](https://github.com/boykopovar/AnyPS5) runs on (in development; it will connect to AnyTogether too). [AnyPS5 Launcher by AlxcBTW](https://github.com/AlxcBTW/anyps5-launcher) is another port.
+**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/utkuhalis/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
 
 ### First start
 
