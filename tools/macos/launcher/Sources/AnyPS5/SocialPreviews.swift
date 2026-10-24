@@ -84,6 +84,11 @@ enum SocialPreviews {
             model.focus = .top(5)
             model.show(model.notificationText(notes[0]) + " · " + (model.notificationDetail(notes[0]) ?? ""), symbol: "bubble.left.fill")
         }
+        // The still "Share on the Hub" sends with a theme that has no picture of its own.
+        if ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_ONLY"].map({ $0.split(separator: ",").contains { "hub-still".hasPrefix($0) } }) ?? true {
+            let neon = ThemeDesign(id: "neon", name: "Neon Nights", author: "Ada", style: 1, deep: "#0A0014", middle: "#4A0E6B", bright: "#FF5EDB", accent: "#FF4FD8")
+            try? AppModel.themeStill(neon)?.write(to: output.appendingPathComponent("hub-still.png"))
+        }
         render("trophies-board") { model in
             if let index = model.games.firstIndex(where: { model.trophies[$0.id] != nil }) { model.selected = index }
             model.overlay = .trophies; model.trophyIndex = 1

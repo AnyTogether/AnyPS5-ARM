@@ -27,6 +27,8 @@ enum TS {
         // Notifications
         case notifTitle, notifEmpty, notifMarkAll, notifMore, notifFailed, notifLoading, notifUnread, notifSignIn
         case notifFriendRequest, notifFriendAccepted, notifMessage, notifMessages, notifPartyInvite, notifGameInvite, notifMissedCall, notifWarning, notifOther
+        // Theme Hub
+        case hubSharing, hubShared, hubSharedVersion, hubShareDetail, hubTooLarge, hubBadTheme, hubNoPreview, hubNoTheme
     }
 
     static let english: [Key: String] = [
@@ -95,6 +97,14 @@ enum TS {
         .notifMissedCall: "Missed call from %@",
         .notifWarning: "A moderator warned you",
         .notifOther: "Something new on AnyTogether",
+        .hubSharing: "Sharing %@ on the Hub…",
+        .hubShared: "%@ is on the Hub",
+        .hubSharedVersion: "%1$@ is on the Hub, version %2$d",
+        .hubShareDetail: "Uploads it to AnyTogether's Theme Hub",
+        .hubTooLarge: "The theme is too big for the Hub (at most 50 MB)",
+        .hubBadTheme: "The Hub didn't take this theme file",
+        .hubNoPreview: "The Hub needs a picture of the theme",
+        .hubNoTheme: "That theme isn't on the Hub",
     ]
 
     static let turkish: [Key: String] = [
@@ -163,5 +173,13 @@ enum TS {
         .notifMissedCall: "Cevapsız arama: %@",
         .notifWarning: "Bir moderatör seni uyardı",
         .notifOther: "AnyTogether'da yeni bir şey var",
+        .hubSharing: "%@ Hub'da paylaşılıyor…",
+        .hubShared: "%@ Hub'da",
+        .hubSharedVersion: "%1$@ Hub'da, sürüm %2$d",
+        .hubShareDetail: "AnyTogether'ın Tema Hub'ına yükler",
+        .hubTooLarge: "Tema Hub için çok büyük (en çok 50 MB)",
+        .hubBadTheme: "Hub bu tema dosyasını kabul etmedi",
+        .hubNoPreview: "Hub temanın bir resmini istiyor",
+        .hubNoTheme: "Bu tema Hub'da yok",
     ]
 }

@@ -809,6 +809,7 @@ final class AppModel: ObservableObject {
         switch link {
         case .library: open(.library)
         case .settings: open(.settings)
+        case .theme(let id): installHubTheme(id)
         case .game(let id), .play(let id):
             guard let index = games.firstIndex(where: { $0.titleID == id }) else {
                 return show(T.format(.linkNoGame, id), symbol: "questionmark.folder")
