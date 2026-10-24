@@ -1,3 +1,4 @@
+#include "prx/libSceNetCtl/include/Online.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include <cstddef>
@@ -48,22 +49,26 @@ int APS5_VABI sceNpWebApiCreateContext() {
 }
 
 int APS5_VABI sceNpWebApiCreateHandle(int libCtxId) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)); });
     std::lock_guard lock(contextsMutex);
     const auto context = contexts.find(libCtxId);
-    if (context == contexts.end()) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
+    if (context == contexts.end()) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
     const auto handle = nextObject();
     context->second.handles.insert(handle);
-    return handle;
+    return call.Return(handle);
 }
 
 int APS5_VABI sceNpWebApiCreatePushEventFilter(int libCtxId, const void* filterParam, std::size_t filterParamNum) {
-    if (!filterParam || filterParamNum == 0) return SCE_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)).Ptr("filterParam", filterParam).Uint("filterParamNum", static_cast<std::uint64_t>(filterParamNum)); });
+    if (!filterParam || filterParamNum == 0) return call.Return(SCE_NP_WEBAPI_ERROR_INVALID_ARGUMENT);
     std::lock_guard lock(contextsMutex);
     const auto context = contexts.find(libCtxId);
-    if (context == contexts.end()) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
+    if (context == contexts.end()) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
     const auto filter = nextObject();
     context->second.pushEventFilters.insert(filter);
-    return filter;
+    return call.Return(filter);
 }
 
 int APS5_VABI sceNpWebApiCreateRequest() {
@@ -72,13 +77,15 @@ int APS5_VABI sceNpWebApiCreateRequest() {
 }
 
 int APS5_VABI sceNpWebApiCreateServicePushEventFilter(int libCtxId, int handleId, const char* npServiceName, std::uint32_t npServiceLabel, const void* filterParam, std::size_t filterParamNum) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)).Int("handleId", static_cast<std::int64_t>(handleId)).Str("npServiceName", npServiceName).Uint("npServiceLabel", static_cast<std::uint64_t>(npServiceLabel)).Ptr("filterParam", filterParam).Uint("filterParamNum", static_cast<std::uint64_t>(filterParamNum)); });
     (void)npServiceLabel;
-    if (!npServiceName || !filterParam || filterParamNum == 0) return SCE_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
+    if (!npServiceName || !filterParam || filterParamNum == 0) return call.Return(SCE_NP_WEBAPI_ERROR_INVALID_ARGUMENT);
     std::lock_guard lock(contextsMutex);
     const auto context = contexts.find(libCtxId);
-    if (context == contexts.end()) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
-    if (!context->second.handles.contains(handleId)) return SCE_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
-    return SCE_NP_WEBAPI_ERROR_SIGNED_IN_USER_NOT_FOUND;
+    if (context == contexts.end()) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
+    if (!context->second.handles.contains(handleId)) return call.Return(SCE_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND);
+    return call.Return(SCE_NP_WEBAPI_ERROR_SIGNED_IN_USER_NOT_FOUND);
 }
 
 int APS5_VABI sceNpWebApiDeleteContext() {
@@ -87,17 +94,21 @@ int APS5_VABI sceNpWebApiDeleteContext() {
 }
 
 int APS5_VABI sceNpWebApiDeleteHandle(int libCtxId, int handleId) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)).Int("handleId", static_cast<std::int64_t>(handleId)); });
     std::lock_guard lock(contextsMutex);
     const auto context = contexts.find(libCtxId);
-    if (context == contexts.end()) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
-    return context->second.handles.erase(handleId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
+    if (context == contexts.end()) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
+    return call.Return(context->second.handles.erase(handleId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND);
 }
 
 int APS5_VABI sceNpWebApiDeletePushEventFilter(int libCtxId, int filterId) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)).Int("filterId", static_cast<std::int64_t>(filterId)); });
     std::lock_guard lock(contextsMutex);
     const auto context = contexts.find(libCtxId);
-    if (context == contexts.end()) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
-    return context->second.pushEventFilters.erase(filterId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_PUSH_EVENT_FILTER_NOT_FOUND;
+    if (context == contexts.end()) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
+    return call.Return(context->second.pushEventFilters.erase(filterId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_PUSH_EVENT_FILTER_NOT_FOUND);
 }
 
 int APS5_VABI sceNpWebApiDeleteRequest() {
@@ -106,10 +117,12 @@ int APS5_VABI sceNpWebApiDeleteRequest() {
 }
 
 int APS5_VABI sceNpWebApiDeleteServicePushEventFilter(int libCtxId, int filterId) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)).Int("filterId", static_cast<std::int64_t>(filterId)); });
     (void)filterId;
     std::lock_guard lock(contextsMutex);
-    if (!contexts.contains(libCtxId)) return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
-    return SCE_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_FILTER_NOT_FOUND;
+    if (!contexts.contains(libCtxId)) return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
+    return call.Return(SCE_NP_WEBAPI_ERROR_SERVICE_PUSH_EVENT_FILTER_NOT_FOUND);
 }
 
 int APS5_VABI sceNpWebApiGetHttpResponseHeaderValue() {
@@ -128,14 +141,16 @@ int APS5_VABI sceNpWebApiGetHttpStatusCode() {
 }
 
 int APS5_VABI sceNpWebApiInitialize(int libHttpCtxId, std::size_t poolSize) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libHttpCtxId", static_cast<std::int64_t>(libHttpCtxId)).Uint("poolSize", static_cast<std::uint64_t>(poolSize)); });
     std::lock_guard lock(contextsMutex);
     for (int attempt = 0; attempt < 0x7fff; ++attempt) {
         lastContext = lastContext % 0x7fff + 1;
         if (contexts.contains(lastContext)) continue;
         contexts[lastContext] = {libHttpCtxId, poolSize, {}, {}};
-        return lastContext;
+        return call.Return(lastContext);
     }
-    return SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX;
+    return call.Return(SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_MAX);
 }
 
 int APS5_VABI sceNpWebApiReadData() {
@@ -159,8 +174,10 @@ int APS5_VABI sceNpWebApiSendRequest() {
 }
 
 int APS5_VABI sceNpWebApiTerminate(int libCtxId) {
+    Online::Call call("libSceNpWebApi", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("libCtxId", static_cast<std::int64_t>(libCtxId)); });
     std::lock_guard lock(contextsMutex);
-    return contexts.erase(libCtxId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND;
+    return call.Return(contexts.erase(libCtxId) != 0 ? 0 : SCE_NP_WEBAPI_ERROR_LIB_CONTEXT_NOT_FOUND);
 }
 
 int APS5_VABI sceNpWebApiUnregisterPushEventCallback() {

@@ -1,4 +1,5 @@
 add_library(libSceNpWebApi2 SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_link_libraries(libSceNpWebApi2 PRIVATE libSceNetCtl)
 target_include_directories(libSceNpWebApi2 PRIVATE ${LIBS_INCLUDE_DIR})
 target_link_libraries(libSceNpWebApi2 PRIVATE libc libkernel)
 configure_windows_unwind(libSceNpWebApi2)

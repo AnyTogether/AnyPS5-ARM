@@ -17,6 +17,13 @@ if(BUILD_TESTING)
     set_target_properties(online_bridge_tests PROPERTIES CXX_EXTENSIONS OFF)
     add_test(NAME online_bridge COMMAND online_bridge_tests)
     set_tests_properties(online_bridge PROPERTIES TIMEOUT 60)
+
+    add_test_executable(online_observation_tests tests/OnlineObservation.cpp)
+    target_include_directories(online_observation_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(online_observation_tests PRIVATE libSceNpManager libSceNpWebApi2 libSceNpMatching2 libSceNetCtl libc)
+    add_test(NAME online_observation COMMAND online_observation_tests)
+    set_tests_properties(online_observation PROPERTIES TIMEOUT 30
+        ENVIRONMENT "ANYPS5_ONLINE_LOG=${CMAKE_CURRENT_BINARY_DIR}/online_observation.jsonl")
 endif()
 
 if(BUILD_TESTING)

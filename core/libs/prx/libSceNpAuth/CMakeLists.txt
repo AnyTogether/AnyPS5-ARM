@@ -1,4 +1,5 @@
 add_library(libSceNpAuth SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_link_libraries(libSceNpAuth PRIVATE libSceNetCtl)
 target_include_directories(libSceNpAuth PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceNpAuth)
 

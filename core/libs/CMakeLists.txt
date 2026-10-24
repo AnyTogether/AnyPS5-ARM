@@ -228,6 +228,8 @@ foreach(LIB_DIR ${LIBS_DIRS})
 endforeach()
 
 target_link_libraries(libSceUsbStorageDialog PRIVATE libSceUserService)
+target_link_libraries(libSceNpGameIntent PRIVATE libSceNetCtl)
+target_link_libraries(libSceNpEntitlementAccess PRIVATE libSceNetCtl)
 
 if(APS5_ENABLE_TRACY)
     set_target_properties(TracyClient PROPERTIES

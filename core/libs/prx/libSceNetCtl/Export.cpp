@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include "SceTypes.hpp"
+#include "prx/libSceNetCtl/include/Online.hpp"
 #include "prx/libc/include/General.hpp"
 #include <fstream>
 #include <memory>
@@ -541,8 +542,9 @@ static void HostTraffic(std::uint64_t& sent, std::uint64_t& received) {
 extern "C" {
 
 int APS5_VABI sceNetCtlCheckCallback(void) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!HasIpv4Callback()) return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!HasIpv4Callback()) return call.Return(0);
     const int event = HostHasAddress(AF_UNSPEC) ? NET_CTL_EVENT_IPOBTAINED : NET_CTL_EVENT_DISCONNECTED;
     CallbackSlot due[MAX_CALLBACKS];
     int count = 0;
@@ -555,24 +557,28 @@ int APS5_VABI sceNetCtlCheckCallback(void) {
         }
     }
     for (int index = 0; index < count; ++index) due[index].func(event, due[index].arg);
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlGetIfStat(NetCtlIfStat* stat) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!stat) return SCE_NET_CTL_ERROR_INVALID_ADDR;
-    if (!HostHasAddress(AF_UNSPEC)) return SCE_NET_CTL_ERROR_NOT_CONNECTED;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("stat", stat); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!stat) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
+    if (!HostHasAddress(AF_UNSPEC)) return call.Return(SCE_NET_CTL_ERROR_NOT_CONNECTED);
     *stat = {};
     HostTraffic(stat->tx_bytes, stat->rx_bytes);
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!info) return SCE_NET_CTL_ERROR_INVALID_ADDR;
-    if (code < NET_CTL_INFO_DEVICE || code > NET_CTL_INFO_HTTP_PROXY_PORT) return SCE_NET_CTL_ERROR_INVALID_CODE;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("code", static_cast<std::int64_t>(code)).Ptr("info", info); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!info) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
+    if (code < NET_CTL_INFO_DEVICE || code > NET_CTL_INFO_HTTP_PROXY_PORT) return call.Return(SCE_NET_CTL_ERROR_INVALID_CODE);
     HostIpv4Interface host;
-    if (!FindHostIpv4Interface(host)) return SCE_NET_CTL_ERROR_NOT_CONNECTED;
+    if (!FindHostIpv4Interface(host)) return call.Return(SCE_NET_CTL_ERROR_NOT_CONNECTED);
     switch (code) {
         case NET_CTL_INFO_DEVICE: WriteInfoWord(info, NET_CTL_DEVICE_WIRED); break;
         case NET_CTL_INFO_ETHER_ADDR: std::memcpy(info->opaque, NET_CTL_ETHER_ADDR, sizeof(NET_CTL_ETHER_ADDR)); break;
@@ -597,65 +603,85 @@ int APS5_VABI sceNetCtlGetInfo(int code, NetCtlInfo* info) {
         case NET_CTL_INFO_HTTP_PROXY_PORT: WriteInfoWord(info, 0); break;
         default: throw std::runtime_error("sceNetCtlGetInfo: info code " + std::to_string(code) + " is not implemented");
     }
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlGetNatInfo(NetCtlNatInfo* info) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!info) return SCE_NET_CTL_ERROR_INVALID_ADDR;
-    if (info->size != sizeof(NetCtlNatInfo)) return SCE_NET_CTL_ERROR_INVALID_SIZE;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("info", info); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!info) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
+    if (info->size != sizeof(NetCtlNatInfo)) return call.Return(SCE_NET_CTL_ERROR_INVALID_SIZE);
     throw std::logic_error("sceNetCtlGetNatInfo: NAT discovery is not implemented");
 }
 
 int APS5_VABI sceNetCtlGetResult(int event, int* result) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!result) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("event", static_cast<std::int64_t>(event)).Ptr("result", result); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!result) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
     throw std::logic_error("sceNetCtlGetResult: service event results are not implemented");
 }
 
 int APS5_VABI sceNetCtlGetState(int* state) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!state) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("state", state); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!state) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
     *state = HostHasAddress(AF_UNSPEC) ? NET_CTL_STATE_IPOBTAINED : NET_CTL_STATE_DISCONNECTED;
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlGetStateV6(int* state) {
-    if (!g_initialized.load()) return SCE_NET_CTL_ERROR_NOT_INITIALIZED;
-    if (!state) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("state", state); });
+    if (!g_initialized.load()) return call.Return(SCE_NET_CTL_ERROR_NOT_INITIALIZED);
+    if (!state) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
     *state = HostHasAddress(AF_INET6) ? NET_CTL_STATE_IPOBTAINED : NET_CTL_STATE_DISCONNECTED;
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlInit(void) {
+    Online::Call call("libSceNetCtl", __func__);
     g_initialized.store(true);
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlRegisterCallback(NetCtlCallback func, void* arg, int* cid) {
-    return RegisterCallback(g_callbacks, func, arg, cid);
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("arg", arg).Ptr("cid", cid); });
+    return call.Return(RegisterCallback(g_callbacks, func, arg, cid));
 }
 
 int APS5_VABI sceNetCtlRegisterCallbackV6(NetCtlCallback func, void* arg, int* cid) {
-    return RegisterCallback(g_callbacksV6, func, arg, cid);
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("arg", arg).Ptr("cid", cid); });
+    return call.Return(RegisterCallback(g_callbacksV6, func, arg, cid));
 }
 
 int APS5_VABI sceNetCtlGetInfoV6(std::uint32_t code, NetCtlInfoV6* info) {
-    if (!info) return SCE_NET_CTL_ERROR_INVALID_ADDR;
-    if (code < NET_CTL_INFO_V6_IP_ADDRESS || code > NET_CTL_INFO_V6_SECONDARY_DNS) return SCE_NET_CTL_ERROR_INVALID_CODE;
-    if (!HostHasAddress(AF_INET6)) return SCE_NET_CTL_ERROR_NOT_CONNECTED;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Uint("code", static_cast<std::uint64_t>(code)).Ptr("info", info); });
+    if (!info) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
+    if (code < NET_CTL_INFO_V6_IP_ADDRESS || code > NET_CTL_INFO_V6_SECONDARY_DNS) return call.Return(SCE_NET_CTL_ERROR_INVALID_CODE);
+    if (!HostHasAddress(AF_INET6)) return call.Return(SCE_NET_CTL_ERROR_NOT_CONNECTED);
     throw std::runtime_error("sceNetCtlGetInfoV6: info code " + std::to_string(code) + " is not implemented");
 }
 
 void APS5_VABI sceNetCtlTerm(void) {
+    Online::Call call("libSceNetCtl", __func__);
 }
 
 int APS5_VABI sceNetCtlUnregisterCallback(int cid) {
-    return UnregisterCallback(g_callbacks, cid);
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("cid", static_cast<std::int64_t>(cid)); });
+    return call.Return(UnregisterCallback(g_callbacks, cid));
 }
 
 int APS5_VABI sceNetCtlUnregisterCallbackV6(int cid) {
-    return UnregisterCallback(g_callbacksV6, cid);
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("cid", static_cast<std::int64_t>(cid)); });
+    return call.Return(UnregisterCallback(g_callbacksV6, cid));
 }
 
 int APS5_VABI sceNetCtlRegisterCallbackForNpToolkit(NetCtlCallback callback, void* argument, int* callbackId) {
@@ -809,12 +835,14 @@ int APS5_VABI sceNetCtlUnregisterCallbackV6IpcInt(int callbackId) {
 }
 
 int APS5_VABI sceNetCtlGetResultV6(int event_type, int* error_code) {
-    if (!error_code) return SCE_NET_CTL_ERROR_INVALID_ADDR;
+    Online::Call call("libSceNetCtl", __func__);
+    call.Args([&](Online::Fields& in) { in.Int("event_type", static_cast<std::int64_t>(event_type)).Ptr("error_code", error_code); });
+    if (!error_code) return call.Return(SCE_NET_CTL_ERROR_INVALID_ADDR);
     if (event_type < NET_CTL_EVENT_DISCONNECTED || event_type > NET_CTL_EVENT_IPOBTAINED) {
         throw std::runtime_error("sceNetCtlGetResultV6: event type " + std::to_string(event_type) + " is not implemented");
     }
     *error_code = 0;
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlGetResultV6IpcInt(int event, int* result) {
@@ -878,35 +906,43 @@ int APS5_VABI sceNetCtlGetConnectionElapsedTimeIpcInt(std::uint64_t* elapsedTime
 }
 
 int APS5_VABI sceNetCtlApRpCheckCallback(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpClearEvent(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpRegisterCallback(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpUnregisterCallback(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpGetResult(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpGetState(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpGetInfo(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpStart(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApCpStart(void) {
@@ -925,15 +961,18 @@ int APS5_VABI sceNetCtlApAppStartWithRetry(const char* passcode) {
 }
 
 int APS5_VABI sceNetCtlApRpStartWithRetry(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpStartConf(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApRpStop(void) {
-    return 0;
+    Online::Call call("libSceNetCtl", __func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNetCtlApCpStop(void) {

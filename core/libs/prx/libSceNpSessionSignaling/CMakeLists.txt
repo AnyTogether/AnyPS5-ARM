@@ -1,4 +1,5 @@
 add_library(libSceNpSessionSignaling SHARED EXCLUDE_FROM_ALL Export.cpp)
+target_link_libraries(libSceNpSessionSignaling PRIVATE libSceNetCtl)
 target_include_directories(libSceNpSessionSignaling PRIVATE ${LIBS_INCLUDE_DIR})
 configure_windows_unwind(libSceNpSessionSignaling)
 
