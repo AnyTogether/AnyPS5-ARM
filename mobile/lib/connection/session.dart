@@ -24,7 +24,8 @@ class GameArt {
 }
 
 /// The phone's link to the launcher: the WebSocket control channel (hello, pairing, welcome),
-/// the UDP pad sender and the latency measured from the game's answers.
+/// the UDP pad sender and the latency measured from the game's answers. On a cable there is no
+/// UDP path: the pad and the answers go on the control channel as binary messages.
 class Session extends ChangeNotifier {
   Session({required this.preferences, required this.deviceName});
 
@@ -70,6 +71,10 @@ class Session extends ChangeNotifier {
 
   InternetAddress? _host;
   int? _port;
+  bool _cable = false;
+
+  /// Connected, or connecting, over a cable.
+  bool get cable => _cable;
   WebSocket? _socket;
   RawDatagramSocket? _udp;
   int? _udpPort;
@@ -99,10 +104,15 @@ class Session extends ChangeNotifier {
   }
 
   /// Connects to the launcher at [host]:[port], replacing any earlier target, and keeps
-  /// reconnecting until [close].
-  Future<void> connect(InternetAddress host, int port) async {
+  /// reconnecting until [close]; [cable] when that is the cable's local port.
+  Future<void> connect(
+    InternetAddress host,
+    int port, {
+    bool cable = false,
+  }) async {
     _host = host;
     _port = port;
+    _cable = cable;
     _closed = false;
     await _restart();
   }
@@ -157,7 +167,13 @@ class Session extends ChangeNotifier {
   }
 
   void _received(dynamic data, int generation) {
-    if (data is! String || generation != _generation) return;
+    if (generation != _generation) return;
+    if (data is List<int>) {
+      final answer = decodeOutput(Uint8List.fromList(data));
+      if (answer != null) _answered(answer);
+      return;
+    }
+    if (data is! String) return;
     switch (Message.fromJson(data)) {
       case Pairing(:final code):
         this.code = code;
@@ -213,7 +229,7 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> _startPad(int generation) async {
-    if (_udp == null) {
+    if (_udp == null && !_cable) {
       final udp = await RawDatagramSocket.bind(
         _host!.type == InternetAddressType.IPv6
             ? InternetAddress.anyIPv6
@@ -267,23 +283,20 @@ class Session extends ChangeNotifier {
   void _send() {
     if (!_padActive) return;
     final udp = _udp;
+    final socket = _socket;
     final session = _session;
-    if (udp == null || session == null || _udpPort == null || _sender == null) {
-      return;
-    }
+    if (session == null || _sender == null) return;
+    if (_cable ? socket == null : udp == null || _udpPort == null) return;
     _sequence = (_sequence + 1) & 0xFFFFFFFF;
+    final packet = encodeInput(
+      sequence: _sequence,
+      sentMicros: _clock.elapsedMicroseconds,
+      session: session,
+      state: _state,
+      motion: motion?.latest,
+    );
     try {
-      udp.send(
-        encodeInput(
-          sequence: _sequence,
-          sentMicros: _clock.elapsedMicroseconds,
-          session: session,
-          state: _state,
-          motion: motion?.latest,
-        ),
-        _host!,
-        _udpPort!,
-      );
+      _cable ? socket!.add(packet) : udp!.send(packet, _host!, _udpPort!);
     } on SocketException {
       // No route while the Wi-Fi is gone: the next tick tries again.
     }

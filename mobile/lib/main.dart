@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'connection/cable.dart';
 import 'connection/discovery.dart';
 import 'connection/device_name.dart';
 import 'feedback/haptics.dart';
@@ -104,6 +105,22 @@ class _RemoteAppState extends State<RemoteApp> {
   bool _manual = false;
   bool _wasConnected = false;
 
+  /// The Mac on a cable takes over from Wi-Fi; when it is unplugged the phone goes back to the
+  /// launcher it last found or was given.
+  late final CableLink _cableLink = CableLink(
+    onPlugged: (port) {
+      _plugged = true;
+      _session.connect(InternetAddress.loopbackIPv4, port, cable: true);
+    },
+    onUnplugged: () {
+      _plugged = false;
+      final last = _lastLauncher;
+      if (last != null) _session.connect(last.$1, last.$2);
+    },
+  );
+  (InternetAddress, int)? _lastLauncher;
+  bool _plugged = false;
+
   /// Past the "Ready" moment: the launcher or the pad shows.
   bool _ready = false;
 
@@ -118,6 +135,8 @@ class _RemoteAppState extends State<RemoteApp> {
     super.initState();
     _session.addListener(_changed);
     if (_welcomed) _search();
+    // Without the cable port the phone still works over Wi-Fi.
+    _cableLink.start().catchError((_) {});
   }
 
   /// Looks for the launcher; the address field shows if nothing turns up within a few seconds.
@@ -140,7 +159,8 @@ class _RemoteAppState extends State<RemoteApp> {
   /// A launcher found or typed in becomes the target unless one is already connected, so a
   /// launcher that comes back on another port or address is followed.
   void _connect(InternetAddress address, int port) {
-    if (_session.status == ConnectionStatus.connected) return;
+    _lastLauncher = (address, port);
+    if (_session.status == ConnectionStatus.connected || _plugged) return;
     _manualTimer?.cancel();
     _session.connect(address, port);
   }
@@ -202,6 +222,7 @@ class _RemoteAppState extends State<RemoteApp> {
     _manualTimer?.cancel();
     _readyTimer?.cancel();
     _layoutSave?.cancel();
+    _cableLink.stop();
     _session.close();
     super.dispose();
   }
@@ -317,6 +338,10 @@ class _RemoteAppState extends State<RemoteApp> {
     children: [
       const StatusDot(color: Color(0xFF4CD964)),
       const SizedBox(width: 8),
+      if (_session.cable) ...[
+        const Icon(Icons.usb_rounded, size: 13, color: Colors.white70),
+        const SizedBox(width: 4),
+      ],
       Text(
         [
           _session.macName ?? 'Mac',

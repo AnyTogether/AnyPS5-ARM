@@ -22,6 +22,9 @@ class FakeLauncher {
   late RawDatagramSocket udp;
   final hellos = <Map<String, dynamic>>[];
   final packets = <(DateTime, Uint8List)>[];
+
+  /// Pad packets that came on the control channel, as a phone on a cable sends them.
+  final channelPackets = <Uint8List>[];
   final sockets = <WebSocket>[];
 
   /// Everything but hellos the phone sent, in order.
@@ -50,8 +53,14 @@ class FakeLauncher {
     });
     http.transform(WebSocketTransformer()).listen((socket) {
       sockets.add(socket);
-      socket.listen((text) async {
-        final message = jsonDecode(text as String) as Map<String, dynamic>;
+      socket.listen((data) async {
+        if (data is List<int>) {
+          final packet = Uint8List.fromList(data);
+          channelPackets.add(packet);
+          if (echo) socket.add(answer(packet));
+          return;
+        }
+        final message = jsonDecode(data as String) as Map<String, dynamic>;
         if (message['type'] == 'wantArt') {
           socket.add(
             jsonEncode({
@@ -225,6 +234,31 @@ void main() {
     await session.close();
     await launcher.stop();
   });
+
+  test(
+    'on a cable the pad and its answers go on the control channel',
+    () async {
+      final launcher = FakeLauncher(echo: true);
+      await launcher.start();
+      final session = Session(preferences: preferences, deviceName: 'iPhone');
+      await session.connect(
+        InternetAddress.loopbackIPv4,
+        launcher.port,
+        cable: true,
+      );
+      await waitFor(() => session.status == ConnectionStatus.connected);
+      await waitFor(() => launcher.channelPackets.length >= 5);
+      await waitFor(() => session.latencyMs != null);
+      expect(launcher.packets, isEmpty);
+      expect(
+        ByteData.sublistView(launcher.channelPackets.first)
+            .getUint64(24, Endian.little),
+        42,
+      );
+      await session.close();
+      await launcher.stop();
+    },
+  );
 
   test('measures latency from echoes', () async {
     final launcher = FakeLauncher(echo: true);
