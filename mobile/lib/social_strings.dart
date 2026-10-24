@@ -1,5 +1,6 @@
 import 'strings.dart';
 import 'together/activity.dart';
+import 'together/calls.dart';
 import 'together/leaderboards.dart';
 import 'together/profiles.dart';
 
@@ -180,6 +181,56 @@ extension SocialTexts on Strings {
     BoardKind.completion => language == 'tr' ? '%$value' : '$value%',
   };
 
+  // Calls
+
+  String callFriend(String name) => _fill('callFriend', {'name': name});
+  String get voiceCall => _s('voiceCall');
+  String callingYou(String name) => _fill('callingYou', {'name': name});
+  String get acceptCall => _s('acceptCall');
+  String get declineCall => _s('declineCall');
+  String get calling => _s('calling');
+  String get callConnecting => _s('callConnecting');
+  String get endCall => _s('endCall');
+  String peerMuted(String name) => _fill('peerMuted', {'name': name});
+  String callEnded(CallEnd reason, String name) => switch (reason) {
+    CallEnd.declined => _fill('callDeclined', {'name': name}),
+    CallEnd.noAnswer => _s('callNoAnswer'),
+    CallEnd.elsewhere => _s('callElsewhere'),
+    CallEnd.failed => _s('callFailed'),
+    CallEnd.microphone => _s('callMicDenied'),
+    CallEnd.ended => _s('callEnded'),
+  };
+
+  /// "0:42", "12:05", "1:02:09".
+  String clock(Duration elapsed) {
+    final total = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = (total % 60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
+  }
+
+  // Messages
+
+  String typing(List<String> names) => switch (names.length) {
+    0 => '',
+    1 => _fill('typingOne', {'name': names[0]}),
+    2 => _fill('typingTwo', {'a': names[0], 'b': names[1]}),
+    _ => _s('typingMany'),
+  };
+  String get newGroup => _s('newGroup');
+  String get groupName => _s('groupName');
+  String get groupPick => _s('groupPick');
+  String groupPicked(int n, int max) =>
+      _fill('groupPicked', {'n': n, 'max': max});
+  String groupFull(int max) => _fill('groupFull', {'max': max});
+  String get startGroup => _s('startGroup');
+  String get noFriendsToMessage => _s('noFriendsToMessage');
+  String linkBlocked(String? domain) => domain == null
+      ? _s('linkBlocked')
+      : _fill('linkBlockedDomain', {'domain': domain});
+  String get cannotMessage => _s('cannotMessage');
+
   // Times and numbers
 
   /// "42 min", "3 h 5 min".
@@ -241,6 +292,34 @@ extension SocialTexts on Strings {
 }
 
 const _en = {
+  'callFriend': 'Call {name}',
+  'voiceCall': 'Voice call',
+  'callingYou': '{name} is calling',
+  'acceptCall': 'Accept',
+  'declineCall': 'Decline',
+  'calling': 'Calling…',
+  'callConnecting': 'Connecting…',
+  'callEnded': 'Call ended',
+  'callDeclined': '{name} declined',
+  'callNoAnswer': 'No answer',
+  'callElsewhere': 'Answered on another device',
+  'callFailed': 'The call could not start',
+  'callMicDenied': 'Allow the microphone for AnyPS5 Remote in Settings to call',
+  'endCall': 'End call',
+  'peerMuted': '{name} is muted',
+  'typingOne': '{name} is typing…',
+  'typingTwo': '{a} and {b} are typing…',
+  'typingMany': 'Several people are typing…',
+  'newGroup': 'New group',
+  'groupName': 'Group name (optional)',
+  'groupPick': 'Pick the friends to talk with.',
+  'groupPicked': '{n} of {max} people',
+  'groupFull': 'A group has at most {max} people.',
+  'startGroup': 'Start',
+  'noFriendsToMessage': 'Add friends first: you can message your friends.',
+  'linkBlocked': 'That link is not allowed here.',
+  'linkBlockedDomain': 'Links to {domain} are not allowed here.',
+  'cannotMessage': 'You can only message your friends.',
   'leaderboards': 'Leaderboards',
   'boardsLead':
       'Trophy points, play time and completion, among friends or everyone.',
@@ -376,6 +455,34 @@ const _en = {
 };
 
 const _tr = {
+  'callFriend': '{name} kişisini ara',
+  'voiceCall': 'Sesli arama',
+  'callingYou': '{name} arıyor',
+  'acceptCall': 'Kabul et',
+  'declineCall': 'Reddet',
+  'calling': 'Aranıyor…',
+  'callConnecting': 'Bağlanıyor…',
+  'callEnded': 'Görüşme bitti',
+  'callDeclined': '{name} reddetti',
+  'callNoAnswer': 'Cevap yok',
+  'callElsewhere': 'Başka bir cihazda cevaplandı',
+  'callFailed': 'Arama başlatılamadı',
+  'callMicDenied': "Aramak için Ayarlar'dan AnyPS5 Remote'a mikrofon izni ver",
+  'endCall': 'Aramayı bitir',
+  'peerMuted': '{name} sessizde',
+  'typingOne': '{name} yazıyor…',
+  'typingTwo': '{a} ve {b} yazıyor…',
+  'typingMany': 'Birkaç kişi yazıyor…',
+  'newGroup': 'Yeni grup',
+  'groupName': 'Grup adı (isteğe bağlı)',
+  'groupPick': 'Konuşmak istediğin arkadaşları seç.',
+  'groupPicked': '{max} kişiden {n}',
+  'groupFull': 'Bir grupta en fazla {max} kişi olabilir.',
+  'startGroup': 'Başlat',
+  'noFriendsToMessage': 'Önce arkadaş ekle: arkadaşlarına mesaj atabilirsin.',
+  'linkBlocked': 'Bu bağlantıya burada izin verilmiyor.',
+  'linkBlockedDomain': '{domain} bağlantılarına burada izin verilmiyor.',
+  'cannotMessage': 'Yalnızca arkadaşlarına mesaj atabilirsin.',
   'leaderboards': 'Sıralamalar',
   'boardsLead': 'Kupa puanı, oynama süresi ve tamamlama; arkadaşlar arasında ya da herkesle.',
   'overall': 'Tüm oyunlar',

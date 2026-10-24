@@ -1,11 +1,13 @@
 import 'package:flutter/widgets.dart';
 
+import 'calls.dart';
 import 'feed.dart';
 import 'friends.dart';
 import 'messages.dart';
 import 'parties.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
+import 'typing.dart';
 import 'voice.dart';
 import 'voice_mesh.dart';
 
@@ -32,6 +34,13 @@ class TogetherHub extends ChangeNotifier {
       parties: parties,
       engine: voiceEngine,
     );
+    calls = Calls(
+      account: account,
+      socket: this.socket,
+      partyVoice: voice,
+      engine: voiceEngine,
+    );
+    typing = Typing(account: account, socket: this.socket);
     account.addListener(_accountChanged);
     _lifecycle = AppLifecycleListener(onResume: this.socket.wake);
     _accountChanged();
@@ -43,6 +52,10 @@ class TogetherHub extends ChangeNotifier {
   late final Messages messages;
   late final Parties parties;
   late final Feed feed;
+
+  /// Calls with a friend, ringing over any screen; and who is typing where.
+  late final Calls calls;
+  late final Typing typing;
   late final Voice voice;
   late final AppLifecycleListener _lifecycle;
   String? _user;
@@ -59,6 +72,8 @@ class TogetherHub extends ChangeNotifier {
     if (user == _user) return;
     _user = user;
     voice.leave(tell: false);
+    calls.clear();
+    typing.clear();
     socket.stop();
     friends.clear();
     messages.clear();
@@ -74,6 +89,8 @@ class TogetherHub extends ChangeNotifier {
     _lifecycle.dispose();
     friends.dispose();
     messages.dispose();
+    calls.dispose();
+    typing.dispose();
     voice.dispose();
     parties.dispose();
     feed.dispose();

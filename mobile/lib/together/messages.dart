@@ -37,6 +37,7 @@ class ChatMessage {
     this.deleted = false,
     this.pending = false,
     this.failed = false,
+    this.problem,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -63,6 +64,14 @@ class ChatMessage {
   final bool deleted;
   final bool pending;
   final bool failed;
+
+  /// Why it did not get there, as the API said: link_blocked (its extra names the domain),
+  /// forbidden (not friends any more); null when it may simply be sent again.
+  final TogetherProblem? problem;
+
+  /// Sending it again would only be refused again.
+  bool get refused =>
+      problem?.code == 'link_blocked' || problem?.code == 'forbidden';
 }
 
 /// A direct conversation with a friend or a group.
@@ -296,7 +305,7 @@ class Messages extends ChangeNotifier {
         {'clientId': message.id, 'text': message.text},
       );
       _arrived(ChatMessage.fromJson(json));
-    } on Object {
+    } on Object catch (error) {
       _replace(
         ChatMessage(
           id: message.id,
@@ -306,6 +315,7 @@ class Messages extends ChangeNotifier {
           text: message.text,
           createdAt: message.createdAt,
           failed: true,
+          problem: error is TogetherProblem ? error : null,
         ),
       );
     }

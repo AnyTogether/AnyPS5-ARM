@@ -18,6 +18,7 @@ import 'strings.dart';
 import 'together/together_hub.dart';
 import 'stream/platform_player.dart';
 import 'ui/activity_card.dart';
+import 'ui/call_layer.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
@@ -335,6 +336,7 @@ class _RemoteAppState extends State<RemoteApp> {
                       },
                     ),
                     TrophyCard(trophy: _session.trophy),
+                    CallLayer(calls: _together.calls),
                     HandoffCard(
                       asked: _session.handoffAsked,
                       handle: _session.together.user?.handle,

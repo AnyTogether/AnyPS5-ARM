@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../social_strings.dart';
 import '../strings.dart';
+import '../together/people.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
 import 'feed_view.dart';
@@ -90,7 +91,11 @@ class _TogetherScreenState extends State<TogetherScreen> {
     handle: handle,
     gameName: widget.gameName,
     onMessage: _message,
+    onCall: _call,
   );
+
+  /// Calls a friend; the call shows over every screen.
+  void _call(Person friend) => widget.hub.calls.ring(friend);
 
   @override
   Widget build(BuildContext context) {
@@ -123,6 +128,7 @@ class _TogetherScreenState extends State<TogetherScreen> {
                           gameName: widget.gameName,
                           onMessage: _message,
                           onProfile: _profile,
+                          onCall: _call,
                         ),
                         TogetherTab.feed => FeedPane(
                           hub: widget.hub,

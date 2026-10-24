@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
@@ -14,6 +15,7 @@ class FriendsPane extends StatefulWidget {
     this.gameName,
     this.onMessage,
     this.onProfile,
+    this.onCall,
   });
 
   final TogetherHub hub;
@@ -24,6 +26,9 @@ class FriendsPane extends StatefulWidget {
 
   /// Opens someone's profile, by handle.
   final ValueChanged<String>? onProfile;
+
+  /// Calls a friend.
+  final ValueChanged<Person>? onCall;
 
   @override
   State<FriendsPane> createState() => _FriendsPaneState();
@@ -193,6 +198,18 @@ class _FriendsPaneState extends State<FriendsPane> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (widget.onCall case final call?)
+                      IconButton(
+                        tooltip: texts.callFriend(friend.person.displayName),
+                        onPressed: widget.hub.calls.inCall
+                            ? null
+                            : () => call(friend.person),
+                        icon: const Icon(
+                          Icons.call_outlined,
+                          size: 20,
+                          color: togetherAccent,
+                        ),
+                      ),
                     if (widget.onMessage case final message?)
                       IconButton(
                         tooltip: texts.messagesWrite,
