@@ -604,6 +604,9 @@ extension AppModel {
         case .messages:
             messagesCommand(command)
             return true
+        case .feed:
+            feedCommand(command)
+            return true
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true

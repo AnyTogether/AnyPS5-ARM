@@ -157,6 +157,8 @@ struct RootView: View {
             MessagesView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .profile:
             ProfileView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .feed:
+            FeedView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .log:
             LogView().transition(.opacity)
         case .trophies:

@@ -19,6 +19,7 @@ extension AppModel {
                 self?.openMyProfile()
             }),
         ]
+        rows += socialRows()
         for person in togetherRequests.incoming {
             rows.append(PanelRow(id: "accept-\(person.userId)", title: T.format(.friendsAccept, person.displayName), detail: "@\(person.handle) · \(T.text(.friendsWantsToBe))",
                                  symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerFriend(person, accept: true) },
@@ -139,7 +140,7 @@ extension AppModel {
         case let type where type == "signal" || type.hasPrefix("call."):
             callEvent(event)
         default:
-            break
+            socialEvent(event)
         }
     }
 }

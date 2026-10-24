@@ -105,6 +105,8 @@ enum Overlay: Equatable {
     case messages
     /// The party the user is in, or invites and friends' open parties.
     case party
+    /// Friends' activity on AnyTogether.
+    case feed
 }
 
 struct Toast: Identifiable, Equatable {
@@ -398,6 +400,8 @@ final class AppModel: ObservableObject {
     var togetherSocket: TogetherSocket?
     var togetherWait: Task<Void, Never>?
     var togetherFlush: Task<Void, Never>?
+    /// The social screens' state: activity, leaderboards, notifications.
+    lazy var social = SocialState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
