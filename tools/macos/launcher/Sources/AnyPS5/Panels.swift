@@ -623,8 +623,12 @@ struct RowList: View {
 
     var body: some View {
         if previewRender {
-            // An overlay takes no size of its own, so a long list cannot stretch the screen.
-            Color.clear.overlay(alignment: .top) { content }.clipped()
+            // An overlay takes no size of its own, so a long list cannot stretch the screen; a row
+            // focused further down moves the list up, as scrolling to it would.
+            GeometryReader { geometry in
+                Color.clear.overlay(alignment: .top) { content.offset(y: -previewShift(geometry.size.height)) }
+            }
+            .clipped()
         } else {
             scrolling
         }
@@ -643,6 +647,14 @@ struct RowList: View {
             }
         }
         .padding(6 * scale)
+    }
+
+    /// How far the list scrolls to bring the focused row to the middle, from the usual row height.
+    private func previewShift(_ height: CGFloat) -> CGFloat {
+        guard let focusedRow else { return 0 }
+        let row = 66 * scale
+        let total = CGFloat(rows.count) * row + 12 * scale
+        return min(max(0, (CGFloat(focusedRow) + 0.5) * row + 6 * scale - height / 2), max(0, total - height))
     }
 
     private var scrolling: some View {
@@ -664,6 +676,7 @@ struct RowView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @State private var text = ""
+    @Environment(\.previewRender) private var previewRender
 
     var body: some View {
         let foreground: Color = focused ? .black : .white
@@ -697,6 +710,7 @@ struct RowView: View {
             value.foregroundStyle(foreground)
         }
         .padding(.horizontal, 18 * scale)
+        .padding(.vertical, 8 * scale)
         .frame(minHeight: 58 * scale)
         .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(row.focusable ? 0.07 : 0)))
         .shadow(color: .white.opacity(focused ? 0.22 : 0), radius: 12 * scale)
@@ -734,14 +748,19 @@ struct RowView: View {
         case .keys(let sources, let capturing, _):
             KeyCaps(sources: sources, capturing: capturing, focused: focused)
         case .text(let value, let set):
-            TextField("", text: $text)
-                .textFieldStyle(.plain)
-                .font(.display(16 * scale, .semibold))
-                .multilineTextAlignment(.trailing)
-                .frame(width: 200 * scale)
-                .onAppear { text = value }
-                .onSubmit { set(text) }
-                .onChange(of: text) { _, new in set(new) }
+            if previewRender {
+                // A text field does not draw offscreen.
+                Text(value).font(.display(16 * scale, .semibold)).frame(width: 200 * scale, alignment: .trailing)
+            } else {
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale, .semibold))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 200 * scale)
+                    .onAppear { text = value }
+                    .onSubmit { set(text) }
+                    .onChange(of: text) { _, new in set(new) }
+            }
         }
     }
 

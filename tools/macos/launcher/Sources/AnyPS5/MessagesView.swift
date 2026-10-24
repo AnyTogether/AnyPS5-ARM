@@ -454,19 +454,27 @@ struct ComposerField: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @FocusState private var editing: Bool
+    @Environment(\.previewRender) private var previewRender
 
     var body: some View {
         HStack(spacing: 12 * scale) {
             Image(systemName: "keyboard").font(.system(size: 16 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
-            TextField(T.text(.messagesWrite), text: $model.messageDraft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.display(16 * scale))
-                .foregroundStyle(.white)
-                .lineLimit(1...4)
-                .focused($editing)
-                .onSubmit { model.sendMessage(model.messageDraft) }
-                .onExitCommand { model.composing = false }
-                .onChange(of: model.messageDraft) { _, _ in model.sayTyping() }
+            if previewRender {
+                // A text field does not draw offscreen.
+                Text(model.messageDraft.isEmpty ? T.text(.messagesWrite) : model.messageDraft).font(.display(16 * scale))
+                    .foregroundStyle(.white.opacity(model.messageDraft.isEmpty ? 0.4 : 1))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField(T.text(.messagesWrite), text: $model.messageDraft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale))
+                    .foregroundStyle(.white)
+                    .lineLimit(1...4)
+                    .focused($editing)
+                    .onSubmit { model.sendMessage(model.messageDraft) }
+                    .onExitCommand { model.composing = false }
+                    .onChange(of: model.messageDraft) { _, _ in model.sayTyping() }
+            }
             Image(systemName: "paperplane.fill").font(.system(size: 16 * scale, weight: .semibold))
                 .foregroundStyle(model.messageDraft.isEmpty ? .white.opacity(0.3) : model.accent)
                 .onTapGesture { model.sendMessage(model.messageDraft) }
