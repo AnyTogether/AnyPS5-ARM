@@ -111,9 +111,7 @@ engeller. Kimlik bilgileri standart TURN REST şemasıdır (kullanıcı adı = b
 id'si, parola = bunun HMAC'i), 12 saat geçerlidir.
 
 ## 9.6 Dağıtım
- Sunucunun Cloudflare API token'ının R2 yetkisi olmayabilir; bucket'ları açmak ve
-  `anytogether-cdn`'i genel bucket'ın özel alan adı olarak bağlamak gerekirse Utku tarafından
-  Cloudflare panelinden yapılır.
+
 - `utkuhalis/AnyTogether` deposunun `main` dalına push → Coolify değişen her uygulamayı derler ve
   dağıtır (webhook, bu sunucuda aynı anda tek derleme).
 - GitHub Actions yalnızca denetim yapar: typecheck, lint, PostgreSQL ve Valkey servis
