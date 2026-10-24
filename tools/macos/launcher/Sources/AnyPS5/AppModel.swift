@@ -173,6 +173,8 @@ final class AppModel: ObservableObject {
     private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
     private var starts: [String: Date] = [:]
     private var remote: RemoteServer?
+    /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
+    private var cable: UsbTunnel?
     private let pairedDevices = PairedDevices()
     /// The library the phone was told last, and what keeps it told.
     private var phoneLibrary: RemoteMessage?
@@ -944,6 +946,10 @@ final class AppModel: ObservableObject {
             let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port, bridgePort: bridge)
             if (try? server.start()) != nil {
                 remote = server
+                if let port = server.controlPort {
+                    cable = UsbTunnel(targetPort: port)
+                    cable?.start()
+                }
                 return
             }
         }

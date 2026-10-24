@@ -69,6 +69,9 @@ public final class RemoteServer: @unchecked Sendable {
         var slot: Int?
         /// Where the phone sends its pad from.
         var address: sockaddr_storage?
+        /// The phone sends its pad on this channel (on a cable, with no UDP path), and is
+        /// answered on it.
+        var padOnChannel = false
 
         init(connection: NWConnection) { self.connection = connection }
     }
@@ -223,7 +226,9 @@ public final class RemoteServer: @unchecked Sendable {
                 client.connection.cancel()
                 return
             }
-            if let data, metadata?.opcode == .text || metadata?.opcode == .binary {
+            if let data, metadata?.opcode == .binary, let session = RemotePacket.inputSession(data) {
+                self.padFromChannel(data, session: session, client: client)
+            } else if let data, metadata?.opcode == .text || metadata?.opcode == .binary {
                 if let message = try? JSONDecoder().decode(RemoteMessage.self, from: data) {
                     self.handle(message, from: client)
                 } else {
@@ -417,6 +422,14 @@ public final class RemoteServer: @unchecked Sendable {
         }
     }
 
+    /// A pad packet on a welcomed phone's own control channel goes to the game as if it had
+    /// come on UDP.
+    private func padFromChannel(_ data: Data, session: UInt64, client: Client) {
+        guard client.session == session, phones.contains(where: { $0 === client }), let slot = client.slot, gameAddresses.indices.contains(slot) else { return }
+        client.padOnChannel = true
+        if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
+    }
+
     /// A hello names the game to send to on that bridge; its answers go back to the slot's phone.
     private func fromGame(_ slot: Int) {
         while let (data, source) = RemoteServer.receive(bridgeSockets[slot]) {
@@ -428,8 +441,13 @@ public final class RemoteServer: @unchecked Sendable {
                     events.players()
                 }
             } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game),
-                      var phone = phones.first(where: { $0.slot == slot })?.address {
-                RemoteServer.send(data, from: phoneSocket, to: &phone)
+                      let client = phones.first(where: { $0.slot == slot }) {
+                if client.padOnChannel {
+                    let context = NWConnection.ContentContext(identifier: "pad", metadata: [NWProtocolWebSocket.Metadata(opcode: .binary)])
+                    client.connection.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
+                } else if var phone = client.address {
+                    RemoteServer.send(data, from: phoneSocket, to: &phone)
+                }
             }
         }
     }

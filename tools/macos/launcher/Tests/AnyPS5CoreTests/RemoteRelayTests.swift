@@ -152,6 +152,29 @@ final class RemoteRelayTests: XCTestCase {
         XCTAssertEqual(server.phonePlayers, [:])
     }
 
+    /// A phone on a cable has no UDP path: its pad comes on the control channel as binary
+    /// messages, and the game's answers go back the same way.
+    func testAPadOnTheControlChannelReachesTheGameAndBack() async throws {
+        let game = UDPPeer()
+        try greet(game)
+        let input = RemoteProtocolTests.input(session: session)
+        try await phone.task.send(.data(input))
+        XCTAssertEqual(game.receive(), input)
+        game.send(Self.output, to: server.bridgePort!)
+        let answer = Task { try await phone.task.receive() }
+        let giveUp = Task { try await Task.sleep(for: .seconds(2)); phone.close() }
+        defer { giveUp.cancel() }
+        guard case .data(let back) = try await answer.value else { return XCTFail("the answer was not binary") }
+        XCTAssertEqual(back, Self.output)
+    }
+
+    func testAForeignPadOnTheControlChannelIsDropped() async throws {
+        let game = UDPPeer()
+        try greet(game)
+        try await phone.task.send(.data(RemoteProtocolTests.input(session: session &+ 1)))
+        XCTAssertNil(game.receive())
+    }
+
     /// The second phone's pad goes to the game through the second bridge, and back.
     func testEachPhoneHasItsOwnBridge() async throws {
         let known = devices.add(id: "phone-2", name: "Galaxy")
