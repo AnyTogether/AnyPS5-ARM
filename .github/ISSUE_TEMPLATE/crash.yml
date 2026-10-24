@@ -1,0 +1,60 @@
+name: Crash report (macOS launcher)
+description: A game stopped, crashed or never showed its window in the AnyPS5 launcher on a Mac.
+title: "Crash: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The launcher fills this form in when you press **Open Issue** after a game stops (or from the game's options → **Last Session's Report**).
+        It has already taken your home folder, names, e-mail addresses and AnyTogether tokens out of everything below.
+        Please also attach the report file it saved with **Export Report**: drag the `.zip` or `.txt` into the last box.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Name, title ID and content version.
+      placeholder: Stray (PPSA02100), version 01.000.002
+    validations:
+      required: true
+  - type: textarea
+    id: reason
+    attributes:
+      label: What happened
+      description: Why the game stopped, as the launcher read it from the log and from macOS's crash report, and what you were doing.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Mac
+      description: Model, chip, memory, macOS version and the display's refresh rate.
+      placeholder: Mac15,7 · Apple M3 Pro · 18 GB · macOS 15.6 (24G84) · 120 Hz
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: The launcher, the engine the game was unlocked with, and the engine chosen for it now.
+      placeholder: Launcher 0.2.14 · unlocked with engine 0.2.14-arm-…
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Game settings
+      description: Resolution, window, V-sync, frame generation, overlay, language, shader cache, engine, controls and detailed logging.
+  - type: textarea
+    id: log
+    attributes:
+      label: Last log lines
+      description: The end of the game's log. The whole log is in the report file.
+      render: text
+  - type: textarea
+    id: report
+    attributes:
+      label: Report file
+      description: Drag the report the launcher saved (AnyPS5-<title ID>-<date>.zip or .txt) here. Turning on Detailed logging in the game's settings and playing until it stops again gives a much fuller log.
+    validations:
+      required: true
