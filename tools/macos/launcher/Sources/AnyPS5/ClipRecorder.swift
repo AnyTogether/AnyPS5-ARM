@@ -45,7 +45,10 @@ final class ClipRecorder {
               let window = ClipRecorder.mainWindow(of: pid, in: content),
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw Failure.noWindow }
         let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-        let configuration = ClipRecorder.configuration(window: window, display: display, scale: CGFloat(filter.pointPixelScale))
+        let configure = { (window: SCWindow, display: SCDisplay, scale: CGFloat) in
+            ClipRecorder.configuration(window: window, display: display, scale: scale, maxWidth: .max, maxHeight: .max, queueDepth: 6)
+        }
+        let configuration = configure(window, display, CGFloat(filter.pointPixelScale))
         let output = Output(length: length)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
@@ -54,18 +57,29 @@ final class ClipRecorder {
         self.stream = stream
         self.output = output
         recordingPid = pid
-        // A window made full screen or resized is followed.
-        watch = Task { [weak self] in
+        watch = ClipRecorder.follow(stream, pid: pid, app: app, window: window, display: display, configure: configure)
+    }
+
+    /// Follows the game's window while `stream` captures it: resized, made full screen or moved
+    /// to another display, the capture changes with it (checked every second).
+    static func follow(_ stream: SCStream, pid: pid_t, app: SCRunningApplication, window: SCWindow, display: SCDisplay,
+                       configure: @escaping (SCWindow, SCDisplay, CGFloat) -> SCStreamConfiguration) -> Task<Void, Never> {
+        Task { [weak stream] in
             var frame = window.frame
+            var screen = display.displayID
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                guard let self, let stream = self.stream,
+                try? await Task.sleep(for: .seconds(1))
+                guard let stream, !Task.isCancelled,
                       let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
                       let current = ClipRecorder.mainWindow(of: pid, in: content), current.frame != frame,
                       let display = content.displays.first(where: { $0.frame.intersects(current.frame) }) ?? content.displays.first else { continue }
                 frame = current.frame
-                let scale = CGFloat(SCContentFilter(display: display, including: [app], exceptingWindows: []).pointPixelScale)
-                try? await stream.updateConfiguration(ClipRecorder.configuration(window: current, display: display, scale: scale))
+                let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
+                if display.displayID != screen {
+                    screen = display.displayID
+                    try? await stream.updateContentFilter(filter)
+                }
+                try? await stream.updateConfiguration(configure(current, display, CGFloat(filter.pointPixelScale)))
             }
         }
     }
@@ -100,16 +114,18 @@ final class ClipRecorder {
         GameWindowArea.capture(window: window.frame, display: display.frame, titleBar: titleBar)
     }
 
-    private static func configuration(window: SCWindow, display: SCDisplay, scale: CGFloat) -> SCStreamConfiguration {
+    /// The game's area of `window` in pixels (`scale` a point) up to `maxWidth` x `maxHeight`, 60
+    /// frames a second, and its sound.
+    static func configuration(window: SCWindow, display: SCDisplay, scale: CGFloat, maxWidth: Int, maxHeight: Int, queueDepth: Int) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         let area = ClipRecorder.area(of: window, on: display)
         configuration.sourceRect = area
-        // Even sizes, as the encoder wants.
-        configuration.width = Int(area.width * scale) & ~1
-        configuration.height = Int(area.height * scale) & ~1
+        let size = GameWindowArea.outputSize(area: area.size, scale: scale, maxWidth: maxWidth, maxHeight: maxHeight)
+        configuration.width = size.width
+        configuration.height = size.height
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        configuration.queueDepth = 6
+        configuration.queueDepth = queueDepth
         configuration.showsCursor = false
         configuration.capturesAudio = true
         configuration.sampleRate = 48000
