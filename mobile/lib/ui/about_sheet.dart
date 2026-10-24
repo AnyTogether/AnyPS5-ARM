@@ -18,6 +18,8 @@ Future<void> showAbout(
   context: context,
   backgroundColor: const Color(0xF2101218),
   isScrollControlled: true,
+  // A phone on its side: the text and the switches side by side across its width.
+  constraints: const BoxConstraints(maxWidth: 980),
   shape: const RoundedRectangleBorder(
     borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
   ),
@@ -61,7 +63,7 @@ class _AboutState extends State<_About> {
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(28, 22, 28, 18),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,78 +92,6 @@ class _AboutState extends State<_About> {
                     style: const TextStyle(color: Colors.white60, fontSize: 14),
                   ),
                   const SizedBox(height: 14),
-                  if (_vibration != null)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(
-                        texts.vibration,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                        ),
-                      ),
-                      subtitle: Text(
-                        texts.vibrationDetail,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      value: _vibration!,
-                      onChanged: (value) {
-                        setState(() => _vibration = value);
-                        widget.onVibration?.call(value);
-                      },
-                    ),
-                  if (_motion != null)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(
-                        texts.motion,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                        ),
-                      ),
-                      subtitle: Text(
-                        texts.motionDetail,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      value: _motion!,
-                      onChanged: (value) {
-                        setState(() => _motion = value);
-                        widget.onMotion?.call(value);
-                      },
-                    ),
-                  if (_remotePlay != null)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(
-                        texts.remotePlay,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                        ),
-                      ),
-                      subtitle: Text(
-                        texts.remotePlayDetail,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                      value: _remotePlay!,
-                      onChanged: (value) {
-                        setState(() => _remotePlay = value);
-                        widget.onRemotePlay?.call(value);
-                      },
-                    ),
                   _Row(label: texts.madeBy, value: author),
                   _Row(
                     label: texts.sourceCode,
@@ -176,6 +106,92 @@ class _AboutState extends State<_About> {
                 ],
               ),
             ),
+            // The switches beside the text: a phone on its side has more width than height.
+            if (_vibration != null ||
+                _motion != null ||
+                _remotePlay != null) ...[
+              const SizedBox(width: 28),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_vibration != null)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(
+                          texts.vibration,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: Text(
+                          texts.vibrationDetail,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                        value: _vibration!,
+                        onChanged: (value) {
+                          setState(() => _vibration = value);
+                          widget.onVibration?.call(value);
+                        },
+                      ),
+                    if (_motion != null)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(
+                          texts.motion,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: Text(
+                          texts.motionDetail,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                        value: _motion!,
+                        onChanged: (value) {
+                          setState(() => _motion = value);
+                          widget.onMotion?.call(value);
+                        },
+                      ),
+                    if (_remotePlay != null)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(
+                          texts.remotePlay,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: Text(
+                          texts.remotePlayDetail,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                        value: _remotePlay!,
+                        onChanged: (value) {
+                          setState(() => _remotePlay = value);
+                          widget.onRemotePlay?.call(value);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -206,7 +222,7 @@ class _Row extends StatelessWidget {
         child: Row(
           children: [
             SizedBox(
-              width: 150,
+              width: 116,
               child: Text(
                 label,
                 style: const TextStyle(color: Colors.white54, fontSize: 14),
