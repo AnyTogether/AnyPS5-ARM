@@ -332,6 +332,7 @@ extension AppModel {
             togetherUser = nil
             togetherConnected = false
             togetherProfile = nil
+            inbox = nil
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
@@ -364,6 +365,7 @@ extension AppModel {
         updateTogetherPresence()
         refreshFriends()
         loadTogetherProfile()
+        loadInbox()
         flushTogether()
     }
 

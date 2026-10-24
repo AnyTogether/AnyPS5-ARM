@@ -331,13 +331,15 @@ struct ProfileColumn<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14 * scale) {
-            HStack(spacing: 10 * scale) {
-                Text(title).font(.display(20 * scale, .semibold)).foregroundStyle(.white)
-                if let count, count > 0 {
-                    Text("\(count)").font(.display(15 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.45))
+            if !title.isEmpty {
+                HStack(spacing: 10 * scale) {
+                    Text(title).font(.display(20 * scale, .semibold)).foregroundStyle(.white)
+                    if let count, count > 0 {
+                        Text("\(count)").font(.display(15 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.45))
+                    }
                 }
+                .padding(.horizontal, 8 * scale)
             }
-            .padding(.horizontal, 8 * scale)
             if previewRender {
                 Color.clear.overlay(alignment: .top) { rows }.clipped()
             } else {

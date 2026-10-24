@@ -95,6 +95,8 @@ enum Overlay: Equatable {
     case friends
     /// Someone's AnyTogether profile, the user's own or a friend's.
     case profile
+    /// Conversations and their threads on AnyTogether.
+    case messages
 }
 
 struct Toast: Identifiable, Equatable {
@@ -401,6 +403,14 @@ final class AppModel: ObservableObject {
     /// The user's own profile with its privacy, and the edits typed in Settings → AnyTogether.
     @Published var togetherProfile: TogetherOwnProfile?
     var profileDraft = ProfileDraft()
+    /// Messages: the conversations and threads, the row selected on the left, whether the thread
+    /// has the focus (a quick reply, or the field at the end), and whether the field is typed in.
+    @Published var inbox: TogetherInbox?
+    @Published var messagesIndex = 0
+    @Published var messagesInThread = false
+    @Published var messageFocus = 0
+    @Published var composing = false
+    @Published var messageDraft = ""
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes

@@ -7,7 +7,21 @@ public final class TogetherSocket: @unchecked Sendable {
     public struct Event: Sendable {
         public let id: String
         public let type: String
-        public let data: [String: String]
+        /// The event's data as the gateway sent it, JSON.
+        public let json: Data
+
+        public init(id: String, type: String, json: Data) {
+            self.id = id
+            self.type = type
+            self.json = json
+        }
+
+        /// The data's top-level strings and numbers, as text.
+        public var data: [String: String] {
+            ((try? JSONSerialization.jsonObject(with: json)) as? [String: Any] ?? [:]).compactMapValues { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
+        }
+
+        public func decode<T: Decodable>(_ type: T.Type = T.self) -> T? { try? JSONDecoder.together.decode(T.self, from: json) }
     }
 
     public enum Presence: Sendable, Equatable {
@@ -113,8 +127,8 @@ public final class TogetherSocket: @unchecked Sendable {
         case "event":
             guard let id = frame["id"] as? String, let type = frame["type"] as? String else { return }
             queue.async { self.lastEventID = id }
-            let data = (frame["data"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
-            onEvent(Event(id: id, type: type, data: data))
+            let json = frame["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed) } ?? Data("{}".utf8)
+            onEvent(Event(id: id, type: type, json: json))
         default:
             break
         }

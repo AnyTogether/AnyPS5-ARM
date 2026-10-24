@@ -127,6 +127,34 @@ enum PreviewRenderer {
             model.previewProfile(nil)
             model.profileCard = TogetherPerson(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil)
         }
+        let utku = TogetherPerson(userId: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+        let people = [TogetherPerson(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil), TogetherPerson(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil)]
+        let lines: [(String, String)] = [("f1", "Are you still on the Silksong boss?"), ("u1", "Yes, third try. The second phase is brutal"), ("f1", "Dash through the spikes, not over them"),
+                                         ("u1", "Oh! Trying that now"), ("f1", "GG when you get it 🏆"), ("u1", "On my way")]
+        let thread = lines.enumerated().map { index, line in
+            TogetherMessage(id: "m\(index)", conversationId: "c1", seq: index + 1, authorId: line.0, text: line.1, createdAt: ago(Double(lines.count - index) * 0.1))
+        }
+        var inbox = TogetherInbox(me: "u1", conversations: [
+            TogetherConversation(id: "c1", kind: "direct", title: nil, members: [utku, people[0]], lastSeq: 6, readSeq: 6, unread: 0, lastMessage: thread.last, updatedAt: ago(0.1)),
+            TogetherConversation(id: "c2", kind: "direct", title: nil, members: [utku, people[1]], lastSeq: 3, readSeq: 1, unread: 2,
+                                 lastMessage: TogetherMessage(id: "k3", conversationId: "c2", seq: 3, authorId: "f2", text: "Party tonight?", createdAt: ago(3)), updatedAt: ago(3)),
+            TogetherConversation(id: "c3", kind: "group", title: "Souls club", members: [utku] + people, lastSeq: 40, readSeq: 40, unread: 0,
+                                 lastMessage: TogetherMessage(id: "g40", conversationId: "c3", seq: 40, authorId: "f2", text: "Who has the platinum?", createdAt: ago(30)), updatedAt: ago(30)),
+        ])
+        inbox.threads["c1"] = thread
+        for (name, inThread, focus) in [("messages", false, nil), ("messages-thread", true, 2)] as [(String, Bool, Int?)] {
+            render(preferences, found, root, still, output.appendingPathComponent("\(name).png")) { model in
+                model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+                model.togetherFriends = [TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, presence: .init(state: "in_game", titleId: found.first?.titleID ?? "PPSA01234", since: nil)),
+                                         TogetherFriend(userId: "f5", handle: "deniz", displayName: "Deniz", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil))]
+                model.previewMessages(inbox, index: 0, inThread: inThread, focus: focus)
+            }
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("home-messages.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.inbox = inbox
+            model.focus = .top(3)
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

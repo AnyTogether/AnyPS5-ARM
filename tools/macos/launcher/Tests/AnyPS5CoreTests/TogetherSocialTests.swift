@@ -96,3 +96,100 @@ final class TogetherAccountTests: TogetherSignedInCase {
         }
     }
 }
+
+final class TogetherMessagesTests: TogetherSignedInCase {
+    static func message(_ seq: Int, in conversation: String = "c1", from author: String = "f1", text: String? = "hi", at: String = "2026-10-24T10:00:00.000Z") -> [String: Any] {
+        ["id": "m\(conversation)\(seq)", "conversationId": conversation, "seq": seq, "authorId": author, "text": text ?? NSNull(), "replyTo": NSNull(),
+         "editedAt": NSNull(), "deletedAt": text == nil ? at : NSNull(), "createdAt": at]
+    }
+
+    static func conversation(_ id: String = "c1", unread: Int = 2, last: Int = 5) -> [String: Any] {
+        ["id": id, "kind": "direct", "title": NSNull(), "createdBy": "u1",
+         "members": [["userId": "u1", "handle": "utku", "displayName": "Utku", "avatar": NSNull()], ["userId": "f1", "handle": "ayse", "displayName": "Ayşe", "avatar": NSNull()]],
+         "lastSeq": last, "readSeq": last - unread, "unread": unread, "lastMessage": message(last, in: id), "updatedAt": "2026-10-24T10:00:00.000Z"]
+    }
+
+    func testConversationsWithTheirUnreadCounts() async throws {
+        FakeTogether.handler = { _, _ in (200, ["conversations": [Self.conversation(), Self.conversation("c2", unread: 0, last: 1)]]) }
+        let list = try await client.conversations()
+        XCTAssertEqual(last(), "GET /api/v1/me/conversations")
+        XCTAssertEqual(list.map(\.unread), [2, 0])
+        XCTAssertEqual(list.first?.lastMessage?.text, "hi")
+        XCTAssertEqual(list.first?.others(than: "u1").map(\.handle), ["ayse"])
+        XCTAssertEqual(list.first?.name(for: "u1"), "Ayşe")
+    }
+
+    func testADirectConversationWithAFriend() async throws {
+        FakeTogether.handler = { _, _ in (200, Self.conversation()) }
+        let conversation = try await client.conversation(with: "f1")
+        XCTAssertEqual(conversation.id, "c1")
+        XCTAssertEqual(last(), "POST /api/v1/conversations")
+        XCTAssertEqual(body()?["members"] as? [String], ["f1"])
+    }
+
+    func testAPageOfHistoryAndOlderOnes() async throws {
+        FakeTogether.handler = { _, _ in (200, ["messages": [Self.message(4), Self.message(5)], "more": true]) }
+        let page = try await client.messages(in: "c1")
+        XCTAssertEqual(page.messages.map(\.seq), [4, 5])
+        XCTAssertTrue(page.more)
+        XCTAssertEqual(last(), "GET /api/v1/conversations/c1/messages?limit=50")
+        _ = try await client.messages(in: "c1", before: 4)
+        XCTAssertEqual(last(), "GET /api/v1/conversations/c1/messages?limit=50&before=4")
+    }
+
+    func testSendingCarriesItsOwnIDAndReadingMovesTheMark() async throws {
+        FakeTogether.handler = { _, _ in (201, Self.message(6, from: "u1", text: "on my way")) }
+        let id = UUID()
+        let sent = try await client.send("on my way", in: "c1", id: id)
+        XCTAssertEqual(sent.seq, 6)
+        XCTAssertEqual(last(), "POST /api/v1/conversations/c1/messages")
+        XCTAssertEqual(body()?["clientId"] as? String, id.uuidString.lowercased())
+        XCTAssertEqual(body()?["text"] as? String, "on my way")
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.markRead("c1", upTo: 6)
+        XCTAssertEqual(last(), "POST /api/v1/conversations/c1/read")
+        XCTAssertEqual(body()?["upToSeq"] as? Int, 6)
+    }
+
+    func testTheUnreadBadge() async throws {
+        FakeTogether.handler = { _, _ in (200, ["conversations": 2, "messages": 7]) }
+        let unread = try await client.unreadMessages()
+        XCTAssertEqual(unread, 7)
+        XCTAssertEqual(last(), "GET /api/v1/me/conversations/unread")
+    }
+
+    static func decoded<T: Decodable>(_ json: [String: Any]) -> T {
+        try! JSONDecoder.together.decode(T.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    /// What the socket says, applied to what the launcher holds: new messages count as unread
+    /// unless they are the user's own or the thread is open, repeats are ignored, a deletion
+    /// empties the text, reading elsewhere clears the count.
+    func testTheInboxFollowsTheSocket() {
+        var inbox = TogetherInbox(me: "u1", conversations: [Self.decoded(Self.conversation("c1", unread: 0, last: 5)), Self.decoded(Self.conversation("c2", unread: 0, last: 3))])
+        inbox.threads["c2"] = [Self.decoded(Self.message(3, in: "c2"))]
+        XCTAssertTrue(inbox.apply(Self.decoded(Self.message(4, in: "c2", at: "2026-10-24T11:00:00.000Z")), open: nil))
+        XCTAssertEqual(inbox.conversations.map(\.id), ["c2", "c1"], "the newest first")
+        XCTAssertEqual(inbox.unread, 1)
+        XCTAssertEqual(inbox.threads["c2"]?.map(\.seq), [3, 4])
+        XCTAssertTrue(inbox.apply(Self.decoded(Self.message(4, in: "c2")), open: nil))
+        XCTAssertEqual(inbox.threads["c2"]?.count, 2, "a repeat is ignored")
+        XCTAssertEqual(inbox.unread, 1)
+        XCTAssertTrue(inbox.apply(Self.decoded(Self.message(6, in: "c1", from: "u1")), open: nil))
+        XCTAssertEqual(inbox.unread, 1, "your own message is read")
+        XCTAssertTrue(inbox.apply(Self.decoded(Self.message(7, in: "c1")), open: "c1"))
+        XCTAssertEqual(inbox.unread, 1, "an open thread is being read")
+        XCTAssertTrue(inbox.apply(Self.decoded(Self.message(4, in: "c2", text: nil)), open: nil))
+        XCTAssertNil(inbox.threads["c2"]?.last?.text)
+        inbox.read("c2", by: "u1", upTo: 4)
+        XCTAssertEqual(inbox.unread, 0)
+        XCTAssertFalse(inbox.apply(Self.decoded(Self.message(1, in: "c9")), open: nil), "an unknown conversation: load the list again")
+    }
+
+    func testASocketEventDecodesItsData() {
+        let event = TogetherSocket.Event(id: "1", type: "message.created", json: try! JSONSerialization.data(withJSONObject: Self.message(2)))
+        let message: TogetherMessage? = event.decode()
+        XCTAssertEqual(message?.seq, 2)
+        XCTAssertEqual(event.data["conversationId"], "c1")
+    }
+}

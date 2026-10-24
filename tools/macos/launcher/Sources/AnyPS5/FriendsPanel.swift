@@ -114,6 +114,8 @@ extension AppModel {
             refreshFriends()
         case "friend.removed", "presence.updated":
             refreshFriends()
+        case let type where type.hasPrefix("message.") || type.hasPrefix("conversation."):
+            messageEvent(event)
         default:
             break
         }

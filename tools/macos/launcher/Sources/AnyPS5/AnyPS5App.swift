@@ -133,6 +133,8 @@ struct RootView: View {
         case .themes, .studio:
             SidePanel(title: T.text(model.overlay == .studio ? .themeStudio : .themes), subtitle: T.text(model.overlay == .studio ? .themeStudioSubtitle : .themesDetail))
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .messages:
+            MessagesView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .profile:
             ProfileView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .log:
