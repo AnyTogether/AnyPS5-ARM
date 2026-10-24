@@ -672,6 +672,7 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
+            .merging(OnlinePlayHost.environment(for: game, client: together)) { _, online in online }
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()

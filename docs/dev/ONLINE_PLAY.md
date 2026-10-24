@@ -2,7 +2,7 @@
 
 Two players each run the same game on their own Mac. The game makes the PlayStation-platform calls it always makes (sign-in, sessions, matchmaking, signalling, peer-to-peer packets) and AnyPS5 carries them, through the launcher and AnyTogether, to the other player. Nothing ever goes to Sony, and nothing stands in for a publisher's own servers.
 
-This page is the design. Built in the engine so far: the bridge client and its protocol, observation mode, sign-in state and Plus checks (NpManager), web API pass-through (NpWebApi2) and datagram game traffic over virtual addresses (libSceNet), each tested against a fake launcher. Not built yet in the engine: push events, session signalling, stream traffic and intents.
+This page is the design. Built in the engine so far: the bridge client and its protocol, observation mode, sign-in state and Plus checks (NpManager), web API pass-through (NpWebApi2) and datagram game traffic over virtual addresses (libSceNet), each tested against a fake launcher. Not built yet in the engine: push events, session signalling, stream traffic and intents. The launcher's side is in `tools/macos/launcher/Sources/AnyPS5Core/Online` (below), off unless the `OnlinePlay` default is set.
 
 ## The clean line
 
@@ -103,12 +103,24 @@ A reply has the request's type and call with the reply bit. Fields are packed in
 - **Between launchers.** Datagrams ride an unordered, unreliable WebRTC data channel (or QUIC datagrams); streams ride a reliable ordered channel (or QUIC streams). The launcher connects directly when it can and uses the AnyTogether relay when it cannot, as calls and share play already do. Session membership in AnyTogether is the signalling channel; the realtime socket carries offers and candidates.
 - **Session signalling** (`libSceNpSessionSignaling`) is answered from the launcher's peer list: `ActivateSession` asks the launcher, connection callbacks fire on `Peer` events, `GetConnectionInfo` returns the peer's virtual address and port.
 
+## Launcher side
+
+New files in `tools/macos/launcher/Sources/AnyPS5Core/Online`, plus one line in `AppModel.start` that merges `OnlinePlayHost.environment(for:client:)` into the game's environment (empty unless `defaults write <launcher> OnlinePlay -bool YES`):
+
+- `OnlineWire`: the same frames, fields and proofs as the engine, checked against the same reference bytes in both test suites.
+- `OnlineBridgeServer`: the loopback listener, the HMAC handshake (CryptoKit), the account event, web requests, datagrams and observation lines. One proven engine at a time; a reconnecting game replaces its old connection.
+- `OnlineWebRouter`: our own `anyps5` API group maps onto AnyTogether's game sessions and invitations (`POST /v1/sessions` opens one for the running title, version and engine build; `GET`/`PATCH /v1/sessions/{id}`; `POST …/join`, `…/leave`, `…/invites`; `GET /v1/me/session`). Platform groups (`sessionManager`, `matchmaking`, …) answer "not offered" and are counted per path until observation tells their formats; nothing of them goes anywhere.
+- `OnlinePlay`: one game start: the account from the signed-in AnyTogether user (a stable 64-bit number from the user ID, the handle cut to 16 letters, the Mac's country and language), the virtual address from the user's place in the session, and the peer link.
+- `OnlinePeerLink`: the first transport between launchers: plain UDP, every packet carrying both virtual addresses, ports and virtual ports and an HMAC-SHA-256 tag (16 bytes) under the session's key; a packet from outside the session, for another player or from a member's address but another endpoint is dropped. Not encrypted and without replay protection yet; WebRTC data channels or QUIC with the relay replace it.
+
+Still missing on this side: telling each launcher the others' endpoints and the session key through AnyTogether (the server has no per-player properties or game-session signalling yet), NAT traversal and the relay.
+
 ## Version guard
 
 Online play only works between identical games and compatible engines:
 
 - **Protocol.** `Hello`/`Welcome` carry the bridge protocol version; a mismatch is refused and final.
-- **Game.** The launcher sends title ID and content version (from the game's param file) when it creates or joins an AnyTogether game session; the server refuses a join whose title or version differs, and the launcher says why. The engine build travels in `Hello` so mismatched engines show up in reports, but it does not block play: the game's own netcode does not depend on it.
+- **Game and engine.** The launcher sends the title ID, the game's version (from its param file) and the engine build (from the engine's `Hello`) when it opens or joins an AnyTogether game session; the server refuses a join whose version or engine build differs (`version_mismatch`), and the game gets that refusal as the answer to its request.
 
 ## Which games can work
 
@@ -143,7 +155,7 @@ AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bri
 | Bad values | bridge silently stays off | the game stops with the variable named | matches `ANYPS5_REMOTE_PAD`; a launcher bug should be loud |
 | Frames | 12-byte header, reply = kind \| 0x8000 | 12-byte header, reply and unsupported as flag bits | type numbers stay one space |
 | Game packets | separate loopback UDP socket and keyed TCP streams per bound port | the same control connection | one authenticated channel and one reader; loopback has no loss. We will split it out only if profiling says so |
-| Peer transport | iroh (QUIC, hole punching) and iroh relays | WebRTC data channels or QUIC, with the relay AnyTogether already runs for calls | reuse what our launcher and server already do for voice and share play |
+| Peer transport | iroh (QUIC, hole punching) and iroh relays | first plain UDP with per-packet HMAC (built, loopback-tested); then WebRTC data channels or QUIC, with the relay AnyTogether already runs for calls | reuse what our launcher and server already do for voice and share play |
 | Virtual addresses | per account, leased by the cloud from 198.18.0.0/15 | per session, in join order, same range | no lease table on the server |
 | Observation | JSONL, async writer, every export | JSONL, folded repeats, flushed per line, implemented exports plus a libc hook for unimplemented ones | a line must survive the crash that follows an unimplemented call |
 | Plus check | stays signed out until a legal review | allowed while signed in through AnyTogether | the user's decision: online play is the point of signing in |
@@ -154,7 +166,7 @@ AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bri
 2. **Libraries** (`ctest -R online_observation`, `guest_np_*`): the observation log through the real exports, and each library answering as today without the variables.
 3. **Sign-in and web API through the exports** (`ctest -R online_np_manager`, `online_web_api2`): the real NpManager and NpWebApi2 exports against the fake launcher with the variables set.
 4. **Observe real games**: run class A candidates with `ANYPS5_ONLINE_LOG` only, then with a launcher that signs in and answers nothing; read which groups, paths and signalling calls each one makes.
-5. **Two instances on one Mac**: two launchers, two games, the relay disabled, loopback transport; then two Macs on one network; then two networks with the relay.
+5. **Two instances on one Mac**: `swift test --filter OnlineBridgeTests` already runs two launcher sides with two fake engines over loopback UDP; next two real games on one Mac, then two Macs on one network, then two networks with the relay.
 6. **Version guard**: mismatched title version and protocol are refused with a reason on both sides.
 
 ## Open questions
