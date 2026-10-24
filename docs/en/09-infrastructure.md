@@ -6,6 +6,9 @@ On **our own server**, as one more project beside the ones already running there
 details (address, provider, size, what else runs on it) are deliberately **not** in this public
 plan; they live in the private infrastructure notes of the AnyTogether repository.
 
+Running today (2026-10-24): web, api, realtime, PostgreSQL and Valkey. The worker, R2 and the
+staging copy are not built yet; the relay is optional.
+
 The server is shared with other sites, so AnyTogether is planned **small and capped**:
 
 | Container | Memory limit | CPU limit | Notes |
@@ -22,20 +25,20 @@ The server is shared with other sites, so AnyTogether is planned **small and cap
 A Next.js build takes another 2-3 GB while it runs; builds run one at a time, so that peak never
 overlaps another build.
 
-Because voice, share play and pads go peer-to-peer, the server never carries media except for
-the pairs that need the relay.
+Because voice, share play and online game traffic go peer-to-peer, the server never carries
+media except for the pairs that need the relay.
 
 ## 9.2 Applications
 
 | Application | Source | Route |
 |---|---|---|
-| `web` | repo `utkuhalis/AnyTogether`, `apps/web/Dockerfile` | `anytogether.kodla.agency/` |
-| `api` | same repo, `apps/api/Dockerfile` | `anytogether.kodla.agency/api` |
-| `realtime` | same repo, `apps/realtime/Dockerfile` | `anytogether.kodla.agency/rt` (WebSocket) |
-| `worker` | same repo, `apps/worker/Dockerfile` | none |
+| `web` | repo `utkuhalis/AnyTogether`, `infra/Dockerfile.web` | `anytogether.kodla.agency/` |
+| `api` | same repo, `infra/Dockerfile.node` (`APP=api`) | `anytogether.kodla.agency/api` |
+| `realtime` | same repo, `infra/Dockerfile.node` (`APP=realtime`) | `anytogether.kodla.agency/rt` (WebSocket) |
+| `worker` (planned) | same repo, `infra/Dockerfile.node` (`APP=worker`) | none |
 | `postgres`, `valkey` | managed database resources | internal network only |
 | `coturn` | container with host networking | `anytogether-relay.kodla.agency` (DNS only) |
-| staging | the same apps from the `staging` branch | `anytogether-staging.kodla.agency` |
+| staging (planned) | the same apps from the `staging` branch | `anytogether-staging.kodla.agency` |
 
 The server's reverse proxy routes by path; the "coming soon" page is replaced by `web` when the
 first version is ready.
@@ -106,10 +109,10 @@ HMAC of it), valid 12 hours.
 
 - Push to `main` of `utkuhalis/AnyTogether` → the server builds and deploys each changed app
   (webhook, one build at a time).
-- GitHub Actions only checks: typecheck, lint, tests against PostgreSQL and Valkey service
-  containers, migration check. Only what passed is deployed (branch protection on `main`).
-- Migrations run as the API container starts (`drizzle-kit migrate` before the server), always
-  backward compatible with the version still running (expand, deploy, contract).
+- GitHub Actions only checks: lint, typecheck, tests against PostgreSQL and Valkey service
+  containers (built); a migration check and branch protection on `main` are planned.
+- Migrations run as the API starts, always backward compatible with the version still running
+  (expand, deploy, contract): they only add tables, columns and indexes.
 - Health checks in each Dockerfile so the proxy only routes to a ready container.
 
 ## 9.7 Backups and recovery
@@ -144,3 +147,29 @@ HMAC of it), valid 12 hours.
 | **Total** | **≈ €0-1** |
 
 If relayed share play ever grows large, coturn moves to a small machine of its own.
+
+## 9.10 Running your own
+
+AnyTogether is MIT licensed and anyone can run it. The repository's `deploy/` folder puts the
+whole thing on one machine with Docker Compose, and
+[docs/self-hosting.md](https://github.com/utkuhalis/AnyTogether/blob/main/docs/self-hosting.md)
+walks through it:
+
+| Service | What it is |
+|---|---|
+| `caddy` | the reverse proxy: HTTPS for your host name with Let's Encrypt certificates it renews itself, `/api` to the API, `/rt` to the gateway, the rest to the website |
+| `web`, `api`, `realtime` | the three apps, built from the repository; the API applies migrations when it starts |
+| `postgres` | PostgreSQL 17, the only place data is kept (avatars too) |
+| `valkey` | rate limits, sign-in challenges, presence, the event bus; nothing written to disk |
+| `coturn` | optional (`--profile turn`): a STUN/TURN relay so voice connects behind strict networks |
+
+- **Needs**: a Linux machine with a public address, 2 GB of memory (most of it for building the
+  website), Docker with Compose, a host name pointing at it, and ports 80 and 443 (plus 3478 and a
+  small UDP range with the relay).
+- **Settings** in one `.env`: the host name, the Let's Encrypt contact, the database password, the
+  Ed25519 key that signs access tokens, mail (SMTP, Resend, or the API's log for trying it out),
+  the Apple, Google and Discord client IDs (each off while empty), the TURN secret and URLs.
+- **Backups**: everything is in PostgreSQL, so one `pg_dump` is a full backup.
+- **Moderation**: the same command-line tool, run inside the API's container.
+- **Clients**: the macOS launcher and the phone app can point at another server (Settings →
+  AnyTogether → Server, next release); a passkey belongs to the host name it was made for.

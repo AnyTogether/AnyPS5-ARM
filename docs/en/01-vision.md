@@ -4,13 +4,14 @@
 
 AnyTogether turns the AnyPS5 launcher from a program on one computer into a place where players meet:
 your profile and trophies follow you, your friends see what you play, you talk while you play,
-and a friend can watch your game or take the controller, wherever they are.
+a friend can watch your game wherever they are, and you can join each other's games.
 
 ## Why now
 
 The launcher already holds most of what an online profile needs, and it holds it on one computer
-only. On macOS that is AnyPS5-ARM's launcher; on Windows and Linux, its Rust port, which keeps
-the same things per game:
+only. On macOS that is AnyPS5-ARM's launcher; on Windows and Linux,
+[AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), its port, which keeps the same
+things per game:
 
 | Already in AnyPS5 | Where it lives today | What AnyTogether adds |
 |---|---|---|
@@ -18,8 +19,8 @@ the same things per game:
 | Trophies, read from each game and noticed live while playing | `Trophies.swift`, the trophy banner, the phone's trophy card | Trophy history with dates, rarity across all players, leaderboards |
 | The game playing right now | Discord presence (`DiscordPresence.swift`) | Presence for friends inside AnyPS5, without Discord |
 | Themes made in the Theme Studio | `hub/` folder in the GitHub repository, shared through an issue | Upload from the Studio, likes, downloads, the theme on your profile |
-| Remote Play: the game's picture and sound to a phone on the same network | `RemotePlay.swift`, `StreamEncoder.swift`, the phone's decoders | The same stream to a friend over the internet; the friend can take over |
-| Up to four phones as four pads | `RemoteServer` bridges, `ANYPS5_REMOTE_PAD_2..4` | A friend's pad from anywhere joins as player 2 |
+| Remote Play: the game's picture and sound to a phone on the same network | `RemotePlay.swift`, `StreamEncoder.swift`, the phone's decoders | The same stream to a friend over the internet, to watch (share play) |
+| Up to four phones as four pads, on one computer | `RemoteServer` bridges, `ANYPS5_REMOTE_PAD_2..4` | Online play: a friend runs the same game on their own computer and joins yours |
 | Clips and screenshots | The gallery | Highlights in the activity feed (opt-in) |
 
 ## Who it is for
@@ -45,7 +46,7 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
 8. **Activity feed**: trophies, sessions and highlights from friends.
 9. **Themes**: your profile and launcher looking the way you want, shared with everyone.
 10. **Downloads**: the official launcher, phone app, updates and tools.
-11. **Share play**: stream your session; a friend watches or takes over.
+11. **Share play**: stream your session; friends watch and talk.
 12. **Leaderboards**: trophies and play time against friends and the world.
 
 [Features](03-features.md) describes each one in full.
@@ -59,11 +60,11 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
    website are the same account and the same data. A message read on the phone is read in the
    launcher too. No platform comes second: the Windows/Linux launcher gets every feature the macOS
    one gets (see [Platforms](12-platforms.md)).
-3. **Directly between players.** Voice, share play and a friend's pad go peer-to-peer, encrypted,
-   from one player's machine to the other's. The server introduces players, keeps what must be
+3. **Directly between players.** Voice, share play and online game traffic go peer-to-peer,
+   encrypted, from one player's machine to the other's. The server introduces players, keeps what must be
    kept and relays only when a direct path is impossible.
-4. **One tap to sign in.** No sign-up form, no password: Apple, Google, Discord, an email code or
-   the phone already signed in.
+4. **One tap to sign in.** No sign-up form, no password: an email code, a passkey, the phone
+   already signed in, or Apple, Google and Discord.
 5. **Private by default, social by choice.** A new profile shows only your name and avatar to
    strangers. Play time, library, trophies and activity are visible to friends until you open
    them to everyone. Each item can be hidden.
@@ -75,7 +76,8 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
    [Security, privacy and rules](08-security-privacy.md).
 8. **Small, well-understood parts.** Proven open-source pieces (PostgreSQL, Valkey, WebRTC,
    coturn) rather than a stack of hosted services; everything runs on our own server behind
-   Cloudflare, and could move to another.
+   Cloudflare, and could move to another. The code is public and MIT licensed, and anyone can run
+   their own AnyTogether with one Docker Compose file (see [Infrastructure](09-infrastructure.md)).
 9. **Measured latency.** Voice and share play are judged by numbers (mouth-to-ear delay,
    glass-to-glass delay, input round trip), the way Remote Play's latency is shown today.
 
@@ -99,6 +101,6 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
 | Players sign in | Share of active launchers signed in, by version |
 | Profiles feel alive | Players with at least one friend; profiles opened per week |
 | Voice is good enough to keep using | Mouth-to-ear delay under 200 ms on the same continent; party length |
-| Share play feels local | Glass-to-glass delay under 120 ms within ~1000 km; input round trip under 80 ms |
+| Share play feels local | Glass-to-glass delay under 120 ms within ~1000 km |
 | Nothing breaks offline | Zero launcher regressions with the server unreachable (a test, every release) |
 | Rules hold | Reports handled within 48 h; zero game files ever stored |

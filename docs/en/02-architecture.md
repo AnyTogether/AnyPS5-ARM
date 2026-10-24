@@ -2,7 +2,7 @@
 
 ## The idea in two lines
 
-**Players talk to each other directly.** Voice, share play video and the friend's pad go
+**Players talk to each other directly.** Voice, share play video and online game traffic go
 peer-to-peer between the players' own machines, encrypted, without passing through our server.
 **The server only introduces them and keeps what must be kept:** accounts, profiles, trophies,
 friends, messages for people who are offline, and a relay for the few connections that cannot go
@@ -14,21 +14,21 @@ direct.
 flowchart LR
     subgraph Players
         L1[Launcher<br/>macOS · Swift]
-        L2[Launcher<br/>Windows / Linux · Rust]
+        L2[AnyPS5-Desktop<br/>Windows / Linux · Flutter]
         P[AnyPS5 Remote<br/>iOS / Android · Flutter]
         W[Browser]
     end
 
     subgraph Cloudflare
         CF[anytogether.kodla.agency<br/>DNS, TLS, CDN, WAF]
-        R2[(R2 files<br/>anytogether-cdn.kodla.agency)]
+        R2[(R2 files, planned<br/>anytogether-cdn.kodla.agency)]
     end
 
     subgraph "Our server"
         WEB[web · Next.js]
         API[api · TypeScript, Hono<br/>/api/v1]
         RT[realtime gateway<br/>/rt · WebSocket<br/>presence, messages, signalling]
-        WK[worker · jobs]
+        WK[worker · jobs, planned]
         PG[(PostgreSQL)]
         VK[(Valkey)]
         TURN[STUN / TURN relay<br/>anytogether-relay.kodla.agency<br/>coturn]
@@ -40,7 +40,7 @@ flowchart LR
     WK --> PG & VK
     API -. presigned URLs .-> R2
 
-    L1 <== "WebRTC, direct (P2P)<br/>voice · share play · pad" ==> P
+    L1 <== "WebRTC, direct (P2P)<br/>voice · share play · game traffic" ==> P
     L2 <== "WebRTC, direct (P2P)" ==> W
     L1 <== "WebRTC, direct (P2P)" ==> L2
     L1 -. "only if direct fails" .-> TURN
@@ -77,44 +77,59 @@ to the website (each its own application in its own container).
 | WebRTC signalling (offers, answers, ICE candidates) | client ↔ gateway ↔ client | the introduction; a few kilobytes per call |
 | **Voice** | **player ↔ player** (WebRTC, Opus) | lowest delay, no server bandwidth |
 | **Share play video and game sound** | **host → viewer** (WebRTC, H.264 + Opus) | lowest delay; a 720p60 stream is ~8 Mbit/s that our server never carries |
-| **The friend's pad** | **viewer → host** (WebRTC data channel) | every millisecond counts |
+| **Online play** (each player runs the game) | **player ↔ player** (WebRTC data channels or QUIC; in design) | the games' own packets; every millisecond counts |
 | Relay when direct is impossible | player ↔ TURN ↔ player | so it always works; the relay sees only encrypted packets |
 
 ## The services on our server
 
-### api (TypeScript, Hono on Node 22)
+The code is public and MIT licensed at
+[github.com/utkuhalis/AnyTogether](https://github.com/utkuhalis/AnyTogether). Built so far
+(2026-10-24): the API, the gateway, the website, PostgreSQL and Valkey, and the STUN/TURN relay as
+an option. The worker and R2 are not built yet.
+
+### api (TypeScript, Hono on Node 22) · built
 
 The one place that changes stored data; stateless. TypeScript because the website is TypeScript
-too, so schemas (Zod) are written once and the OpenAPI document generated from them gives typed
-clients in **Swift** (macOS launcher), **Dart** (phone), **TypeScript** (web), and in any language
-another launcher uses (the Windows/Linux port, in Rust). Hono because it is small, web-standard and portable (Node today, Bun or
-Cloudflare Workers later). Drizzle with reviewed SQL migrations. Errors as RFC 9457 problem
-details with stable codes every client translates.
+too, so schemas (Zod, in `packages/shared`) are written once. Today those schemas are the
+contract; an OpenAPI document generated from them, for typed clients in **Swift** (macOS
+launcher) and **Dart** (phone, AnyPS5-Desktop), is planned. Hono because it is small,
+web-standard and portable (Node today, Bun or Cloudflare Workers later). Drizzle with reviewed SQL
+migrations, applied when the API starts. Errors as RFC 9457 problem details with stable codes
+every client translates. Until the worker exists, the API does the little background work there
+is itself: trophy rarity is counted when trophies arrive, and accounts past their 14 days are
+purged every hour.
 
-### realtime gateway (same codebase, own process)
+### realtime gateway (same codebase, own process) · built
 
 One WebSocket per signed-in client. Carries presence heartbeats and changes, message delivery,
 notifications, and **WebRTC signalling**: when Ayşe calls Utku, her offer goes to the gateway,
 which forwards it to Utku's devices; answers and ICE candidates come back the same way. Holds no
 state of its own: presence in Valkey, events between gateway processes over Valkey pub/sub.
+Launchers and the phone say hello with their access token; the website's browser, which never
+holds one, with a one-time ticket its server asks the API for.
 
-### worker (same codebase, own process)
+### worker (same codebase, own process) · planned
 
 pg-boss jobs inside PostgreSQL: trophy rarity, leaderboards, mail (sign-in codes), push
 notifications (APNs, FCM), image resizing and checks, account deletion after the grace period.
 
-### web (Next.js)
+### web (Next.js) · built in part
 
 Public profiles and game pages server-rendered (fast, shareable, link previews); the signed-in
 app (friends, messages, parties with voice in the browser, share play viewer, Theme Hub,
-downloads, leaderboards, settings) in the browser. It uses the same API as everyone.
+downloads, leaderboards, settings) in the browser. It uses the same API as everyone. Built:
+sign-in (email code or link, passkeys), approving a launcher's device code, profiles with games,
+play time and trophies, friends, messages, parties with voice, and settings (profile, avatar,
+privacy, passkeys, signed-in devices, data download, account deletion). English by default,
+Turkish with a switcher.
 
-### PostgreSQL 17, Valkey 8
+### PostgreSQL 17, Valkey 8 · built
 
-PostgreSQL holds everything that must last. Valkey holds what may vanish: presence (60 s expiry),
-pub/sub, rate limits, short-lived sign-in codes, the last minutes of events for reconnects.
+PostgreSQL holds everything that must last (avatars too, for now, until R2 is used). Valkey holds
+what may vanish: presence (60 s expiry), pub/sub, rate limits, passkey challenges, who is in which
+call, the last minutes of events for reconnects.
 
-### coturn (STUN and TURN)
+### coturn (STUN and TURN) · built, optional
 
 STUN tells each player its public address so two players can punch through their routers to each
 other (ICE). TURN relays the media when that fails. Credentials are short-lived (issued per call
@@ -135,27 +150,27 @@ default is direct.
 |---|---|---|
 | API and gateway | TypeScript, Node 22, Hono | one language with the web, shared schemas |
 | Database | PostgreSQL 17 + Drizzle | all we need in one engine; SQL migrations |
-| Jobs | pg-boss | queue inside PostgreSQL |
+| Jobs (planned) | pg-boss | queue inside PostgreSQL |
 | Temporary state | Valkey 8 | Redis-compatible, open licence |
 | Peer-to-peer media | **WebRTC** | built for exactly this: NAT traversal (ICE/STUN/TURN), encryption (DTLS-SRTP), Opus voice, low-latency video, data channels, in every browser and with libraries for every platform |
-| WebRTC per platform | macOS: Google's WebRTC framework (Swift package); Windows/Linux: `webrtc-rs` (pure Rust) or LiveKit's `libwebrtc` Rust bindings; phone: `flutter_webrtc`; web: the browser | each launcher in its own language |
+| WebRTC per platform | macOS: Google's WebRTC framework (prebuilt Swift package); phone and AnyPS5-Desktop (Windows/Linux): `flutter_webrtc`; web: the browser | each client in its own language |
 | Relay | coturn | the standard TURN server |
 | Website | Next.js | SSR for public pages |
-| Files | Cloudflare R2 | S3 API, no egress fees |
-| Sign-in | OpenID Connect (Apple, Google, Discord) + passwordless email codes; passkeys later | one tap, nothing to remember (see [API](04-api.md)) |
-| Push | APNs, FCM HTTP v1 | direct, no middleman |
-| Errors / metrics | Sentry, Prometheus + Grafana | standard |
-| Deploy | our own server's container platform (git push → build → deploy) | what the server already uses |
+| Files (planned) | Cloudflare R2 | S3 API, no egress fees |
+| Sign-in | email codes and links, passkeys (WebAuthn), OpenID Connect (Apple, Google, Discord), the phone hand-off | one tap, nothing to remember (see [API](04-api.md)) |
+| Push (planned) | APNs, FCM HTTP v1 | direct, no middleman |
+| Errors / metrics (planned) | Sentry, Prometheus + Grafana | standard |
+| Deploy | our own server's container platform (git push → build → deploy); Docker Compose with Caddy for anyone running their own | what the server already uses; one file for self-hosters |
 
 ## How a call is set up (voice or share play)
 
 ```mermaid
 sequenceDiagram
-    participant A as Ayşe (launcher, Windows)
+    participant A as Ayşe (AnyPS5-Desktop, Windows)
     participant G as Gateway
     participant API as API
     participant U as Utku (launcher, macOS)
-    A->>API: POST /api/v1/calls {party}
+    A->>API: POST /api/v1/calls {partyId}
     API-->>A: call id, TURN credentials (12 h)
     A->>G: signal {to: Utku, offer (SDP)}
     G->>U: signal {from: Ayşe, offer}
@@ -164,35 +179,32 @@ sequenceDiagram
     G->>A: answer
     A-->>U: ICE candidates both ways through G
     A<<->>U: WebRTC: direct UDP if possible, TURN if not
-    Note over A,U: voice / video / pad flow player to player
+    Note over A,U: voice / video flow player to player
 ```
 
-## Repository layout (the code, when it starts)
+## Repository layout
 
-`utkuhalis/AnyTogether` (monorepo, pnpm workspaces):
+[`utkuhalis/AnyTogether`](https://github.com/utkuhalis/AnyTogether) (public, MIT; monorepo, pnpm
+workspaces):
 
 ```
 apps/
-  api/          Hono API (/api/v1)
-  realtime/     WebSocket gateway: presence, messages, signalling
-  worker/       pg-boss jobs
+  api/          Hono API (/api/v1), and the moderators' command-line tool
+  realtime/     WebSocket gateway: presence, events, signalling
+  worker/       pg-boss jobs (planned, empty)
   web/          Next.js website
 packages/
-  shared/       Zod schemas, event and signalling types, error codes, OpenAPI
+  shared/       Zod schemas, event and signalling types, error codes
   db/           Drizzle schema and SQL migrations
-clients/
-  swift/        generated types for the macOS launcher (used from AnyPS5-ARM)
-  dart/         generated types for the phone app
-infra/
-  Dockerfiles   one per app, built by the server on push
-  coturn/       turnserver.conf, the relay's compose file
-  backups/
-docs/           this plan
+infra/          local development services, the Dockerfiles
+deploy/         Docker Compose and Caddy for running your own
+docs/           self-hosting.md
 ```
 
-The macOS launcher's integration lives in AnyPS5-ARM (`AnyPS5Core/Together/`), the phone app's
-in `mobile/lib/together/`, the Windows/Linux launcher's in its own repository, written by its
-maintainer from the published contracts. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
+The plan stays on this branch. The macOS launcher's integration lives in AnyPS5-ARM
+(`AnyPS5Core/Together/`), the phone app's in `mobile/lib/together/`, the Windows/Linux launcher's
+in [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), which connects to AnyTogether
+itself. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
 
 ## Scale
 

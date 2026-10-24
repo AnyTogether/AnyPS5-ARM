@@ -3,31 +3,33 @@
 The technologies and defaults in this plan are proposals, chosen so work can start; any of them
 can change.
 
-## Answered (2026-10-24)
+## Answered
 
 | Question | Answer |
 |---|---|
 | The server | our own existing server (details kept out of this public plan); see [Infrastructure](09-infrastructure.md) |
 | Stack | TypeScript is fine |
-| Sign-in | one tap: Apple, Google, Discord, email code; no sign-up form, no password |
+| Sign-in | one tap: email code, passkey, the phone, Apple, Google, Discord; no sign-up form, no password |
 | Developer ID signing | yes: release builds of the macOS launcher get signed and notarized |
 | Hostnames | one level under `kodla.agency` only: everything on `anytogether.kodla.agency` by path, plus `anytogether-cdn` and `anytogether-relay` |
-| Windows and Linux | first-class: the server and its contracts are the same for every platform; the Windows/Linux launcher's maintainer connects it when porting, from the documented API and protocols |
-| AnyTogether and AnyPlay | AnyTogether is ours, built independently; the Windows/Linux launcher connects to it when porting |
-| Media through our server? | no: voice, share play and pads go directly between players; our server introduces them and relays only when direct is impossible |
+| **Repository** | **public, MIT licensed**: [github.com/utkuhalis/AnyTogether](https://github.com/utkuhalis/AnyTogether), with a self-hosting guide so anyone can run their own; the launcher and the phone can point at another server |
+| Windows and Linux | first-class: the server and its contracts are the same for every platform. The Windows/Linux launcher is [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), a public project that connects to AnyTogether itself |
+| AnyTogether and AnyPlay | AnyTogether is ours, built independently. Online play uses our own engine bridge; we read AnyPlay's public design and copied no code |
+| Media through our server? | no: voice, share play and online game traffic go directly between players; our server introduces them and relays only when direct is impossible |
+| **Share play** | **watch only**: friends see and hear the host's game; control is never handed to them. Playing together is online play, or phones on one computer |
+| Online play for games themselves | yes, our own phase (7): the engine hands the game's platform calls to the launcher, which carries them through AnyTogether; designed on AnyPS5-ARM's `online-play` branch ([Realtime](06-realtime-voice-shareplay.md) 6.7) |
+| **PlayStation Plus checks** in online play | **answered "allowed"** while the launcher reports a user signed in to AnyTogether (`sceNpCheckPlus` and the premium checks; `sceNpIsPlusMember` reports a member); signed out, they answer as before. Online play is the point of signing in |
 
 ## Still open
 
 | # | Question | Default in this plan | Needed by |
 |---|---|---|---|
-| 1 | **Server changes to approve**: the relay's ports, its DNS-only record on an address of its own, the databases, web traffic limited to Cloudflare's ranges | as listed in [Infrastructure](09-infrastructure.md) | Phase 0 (database), Phase 4 (relay) |
-| 2 | **Repository**: `utkuhalis/AnyTogether`, private until launch; the OpenAPI document and the protocol documents public, so other launchers can connect | private repo, public contracts | Phase 0 |
-| 3 | **Profile defaults**: public card with friends-only details, or fully private? | public card, friends-only details | Phase 1 |
-| 4 | **Game and trophy icons** on public pages | shown, scaled down, removed on request | Phase 1 |
-| 5 | **Messages**: server-readable at first (moderation possible) or end-to-end encrypted from day one? | server-readable, E2EE later | Phase 3 |
-| 6 | **Push on iOS** needs the phone app built with your team (APNs); TestFlight or App Store later? | APNs with your team; TestFlight when ready | Phase 3 |
-| 7 | **Big rooms**: add an SFU (LiveKit) later for parties over 8 talkers or share play to many viewers? | not at first | after Phase 5 |
-| 8 | **Online play for games themselves** (each player runs the game, the engine's network calls carried between them): a later phase of our own? | after Phase 6 | later |
-| 9 | **Moderators** besides you | you, then trusted community members | Phase 2 |
-| 10 | **Legal texts** (terms, privacy policy, KVKK disclosure) | drafted here, reviewed by you | before public sign-ups |
-| 11 | **Paid features** ever? | none planned | later |
+| 1 | **Server changes to approve**: the relay's ports, its DNS-only record on an address of its own, web traffic limited to Cloudflare's ranges | as listed in [Infrastructure](09-infrastructure.md) | the relay going live |
+| 2 | **Profile defaults**: public card with friends-only details, or fully private? | public card; games, trophies, friends list and presence for friends; found in search by everyone (built this way) | before public sign-ups |
+| 3 | **Game and trophy icons** on public pages | shown, scaled down, removed on request (not stored yet) | game pages |
+| 4 | **Messages**: server-readable (moderation possible) or end-to-end encrypted? | server-readable now (built this way, reported messages kept for moderators), E2EE later | later |
+| 5 | **Push on iOS** needs the phone app built with your team (APNs); TestFlight or App Store later? | APNs with your team; TestFlight when ready | push notifications |
+| 6 | **Big rooms**: add an SFU (LiveKit) later for parties over 8 talkers or share play to many viewers? | not at first | after Phase 5 |
+| 7 | **Moderators** besides you | you, then trusted community members | before public sign-ups |
+| 8 | **Legal texts** (terms, privacy policy, KVKK disclosure) | drafted here, reviewed by you | before public sign-ups |
+| 9 | **Paid features** ever? | none planned | later |

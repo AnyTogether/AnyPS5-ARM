@@ -1,7 +1,8 @@
 # 12. Platforms
 
 AnyTogether is for **every AnyPS5 launcher**: the macOS launcher (AnyPS5-ARM, Swift), the Windows
-and Linux launcher (the Rust port), the phone app (iOS and Android) and the web. This document
+and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), Flutter), the
+phone app (iOS and Android) and the web. This document
 lists what is the same everywhere, what each platform does its own way, and writes down the
 phone protocol so any launcher can talk to the phone app.
 
@@ -9,11 +10,12 @@ phone protocol so any launcher can talk to the phone app.
 
 | Contract | Defined in | Used by |
 |---|---|---|
-| REST API `/api/v1` | OpenAPI 3.1 document, generated from the shared Zod schemas | all clients, through generated types |
+| REST API `/api/v1` | the Zod schemas in `packages/shared` of the public repository; an OpenAPI 3.1 document generated from them is planned | all clients |
 | Realtime gateway `/rt` | `packages/shared` event and signalling types; [API](04-api.md) 4.7 | all clients |
-| Sign-in | OpenID Connect with PKCE (RFC 7636), native-app redirect rules (RFC 8252), email codes, hand-off, device code (RFC 8628) | all clients |
-| Calls | WebRTC: Opus voice, H.264 share play video (Constrained Baseline or Main, no B-frames), data channel `pad` (unordered, `maxRetransmits: 0`) | every launcher, the phone, the web |
-| Pad packet | the 80-byte input packet below (12.4) | phone → launcher, share play viewer → host |
+| Sign-in | email codes, passkeys (WebAuthn, the website), hand-off, device code (RFC 8628), OpenID Connect with PKCE (RFC 7636) and native-app redirect rules (RFC 8252) | all clients |
+| Calls | WebRTC: Opus voice (built), H.264 share play video (Constrained Baseline or Main, no B-frames; planned, watch only), data channels for online play's game traffic (planned) | every launcher, the phone, the web |
+| Pad packet | the 80-byte input packet below (12.4) | phone → launcher |
+| Game sessions | [API](04-api.md) 4.6: title ID, game version, engine build, the version guard | every launcher |
 | Trophy and session data | [Data model](05-data-model.md) | every launcher |
 | Theme file | `.anyps5theme` (zip: `theme.json` + optional picture/video and music) | every launcher, the Hub |
 
@@ -21,11 +23,11 @@ phone protocol so any launcher can talk to the phone app.
 
 | Need | macOS launcher | Windows launcher | Linux launcher | Phone | Web |
 |---|---|---|---|---|---|
-| Language | Swift | Rust | Rust | Dart (Flutter) | TypeScript |
-| AnyTogether client | `AnyPS5Core/Together` | written by the port, from the contracts | the same | `mobile/lib/together` | `apps/web` |
-| Sign-in | Apple native, `ASWebAuthenticationSession` | default browser + loopback | default browser + loopback | native Apple/Google, Discord | redirects |
+| Language | Swift | Dart (Flutter, AnyPS5-Desktop) | the same | Dart (Flutter) | TypeScript |
+| AnyTogether client | `AnyPS5Core/Together` | AnyPS5-Desktop's own, sharing the phone's Dart client (planned) | the same | `mobile/lib/together` | `apps/web` |
+| Sign-in | email code, phone hand-off (built); Apple native, `ASWebAuthenticationSession` (planned) | default browser + loopback | default browser + loopback | email code, the Mac's account by hand-off (built); native Apple/Google, Discord (planned) | email code or link, passkeys (built) |
 | Secure token store | Keychain | Credential Manager | Secret Service (GNOME Keyring, KWallet) | Keychain / Keystore | HttpOnly cookie |
-| WebRTC | Google WebRTC framework | `webrtc-rs` or `libwebrtc` bindings | the same | `flutter_webrtc` | the browser |
+| WebRTC | Google WebRTC framework | `flutter_webrtc` | the same | `flutter_webrtc` | the browser |
 | Game capture | ScreenCaptureKit | Windows.Graphics.Capture | PipeWire via xdg-desktop-portal | - (viewer only) | - (viewer only) |
 | Game sound capture | ScreenCaptureKit audio | WASAPI process loopback | PipeWire node of the game | - | - |
 | Hardware H.264 | VideoToolbox | Media Foundation, NVENC, AMF, Quick Sync | VA-API, NVENC | decoders: VideoToolbox, MediaCodec | the browser |
@@ -36,23 +38,34 @@ phone protocol so any launcher can talk to the phone app.
 | Signing | Developer ID + notarization (keeps permissions across updates) | Authenticode (avoids SmartScreen warnings) | packages (Flatpak, AppImage, distro) | App Store / sideload, Play / APK | - |
 
 **The engine**: every launcher starts games with the same engine, so features that live in the
-engine work everywhere once the launcher passes the same settings. The phone and share play pads
-use the engine's **remote pad bridges** (`ANYPS5_REMOTE_PAD`, `ANYPS5_REMOTE_PAD_2` … `_4`: a
-loopback UDP address per pad). These are in AnyPS5-ARM's engine today; a launcher that builds the
-engine from another fork needs that change in its fork (it is self-contained in the engine's pad
-library) to offer the phone pad and share play's "play together".
+engine work everywhere once the launcher passes the same settings. The phone's pads use the
+engine's **remote pad bridges** (`ANYPS5_REMOTE_PAD`, `ANYPS5_REMOTE_PAD_2` … `_4`: a loopback UDP
+address per pad). These are in AnyPS5-ARM's engine today; a launcher that builds the engine from
+another fork needs that change in its fork (it is self-contained in the engine's pad library) to
+offer the phone pad. Online play needs the engine's online bridge (`ANYPS5_ONLINE`, designed on
+AnyPS5-ARM's `online-play` branch) the same way.
 
 ## 12.3 Feature parity
 
+Every platform gets every feature; the table shows where each stands on 2026-10-24: **✓** built
+(for macOS and the phone, on AnyPS5-ARM's `main`; see [Clients](07-clients.md) for what is
+released), **○** planned, **-** not for this platform.
+
 | Feature | macOS | Windows | Linux | Phone | Web |
 |---|---|---|---|---|---|
-| Profiles, trophies, library, friends, feed, leaderboards | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Messages | ✓ | ✓ | ✓ | ✓ + push | ✓ |
-| Parties and voice | ✓ | ✓ | ✓ | ✓ (also as the computer's headset) | ✓ |
-| Share play as host | ✓ | ✓ | ✓ | - | - |
-| Share play as viewer / player 2 | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Themes and the Hub | ✓ | ✓ (once the launcher reads `.anyps5theme`) | ✓ | wears the launcher's theme | ✓ (profiles) |
-| Compatibility reports | ✓ | ✓ | ✓ | - | - |
+| Sign-in | ✓ | ○ | ○ | ✓ | ✓ (with passkeys) |
+| Profiles | ✓ | ○ | ○ | ○ | ✓ |
+| Trophies and library | ✓ | ○ | ○ | ○ | ✓ (on profiles) |
+| Friends and presence | ✓ | ○ | ○ | ✓ | ✓ |
+| Feed, leaderboards | ○ | ○ | ○ | ○ | ○ |
+| Messages | ✓ | ○ | ○ | ✓ (push ○) | ✓ |
+| Parties and voice | ✓ | ○ | ○ | ✓ (as the computer's headset ○) | ✓ |
+| Join a friend's game | ✓ | ○ | ○ | - | - |
+| Online play | ○ (in design) | ○ | ○ | - | - |
+| Share play as host (watch only) | ○ | ○ | ○ | - | - |
+| Share play as viewer | ○ | ○ | ○ | ○ | ○ |
+| Themes and the Hub | ○ | ○ (once the launcher reads `.anyps5theme`) | ○ | wears the launcher's theme | ○ (profiles) |
+| Compatibility reports | ○ | ○ | ○ | - | - |
 
 The contracts (OpenAPI document, gateway and signalling messages, pad packet, phone protocol) are
 versioned and published, so a launcher can connect without our help; a breaking change goes to a
@@ -74,7 +87,7 @@ that implements this works with the phone app as the macOS launcher does.
 |---|---|---|
 | phone → launcher | `hello` | `protocol` (1), `deviceID`, `deviceName`, `key` (null the first time) |
 | launcher → phone | `pairing` | `code`: 4 digits, shown on both; the user allows it on the computer |
-| launcher → phone | `welcome` | `session` (64-bit, as a decimal string), `udpPort`, `macName` (the computer's name), `key` (to send next time) |
+| launcher → phone | `welcome` | `session` (64-bit, as a decimal string), `udpPort`, `macName` (the computer's name), `key` (to send next time), `togetherServer` (optional: the AnyTogether server the launcher uses, so the phone can say when it is not its own) |
 | launcher → phone | `rejected` | `reason`: `denied`, `busy`, `protocol` |
 | phone → launcher | `latency` | `milliseconds` |
 | launcher → phone | `library` | `games` [`id`, `name`, `state`, `trophies`, `art`, `layout`], `selected`, `running`, `language` |
@@ -87,6 +100,8 @@ that implements this works with the phone app as the macOS launcher does.
 | phone → launcher | `stream` | `on`, `width`, `height`: Remote Play wanted or not |
 | phone → launcher | `keyFrame` | the phone lost part of the picture |
 | launcher → phone | `streaming` | `state`: on, off, noPermission, noGame |
+| either way | `togetherHandoff` | `id`, `deviceName`: sign me in to AnyTogether; `id` is the hand-off the asker started with the API ([API](04-api.md) 4.1) |
+| either way | `togetherHandoffAnswer` | `id`, `approved`: approved on the server, or turned down |
 
 Up to four phones at once, one per player; one new phone is asked about at a time.
 
@@ -95,7 +110,7 @@ Up to four phones at once, one per player; one new phone is asked about at a tim
 The phone sends its pad to `udpPort` on the launcher; the launcher relays it to the game's bridge
 of that phone's slot and relays the game's answers back. All little-endian.
 
-**Input, 80 bytes** (phone → launcher → game; also share play viewer → host):
+**Input, 80 bytes** (phone → launcher → game):
 
 | Offset | Size | Field |
 |---|---|---|

@@ -1,11 +1,34 @@
 # 3. Features
 
 Each feature: what the user sees, in the launcher (L), the phone app (P) and the website (W);
-how it works; and what it needs from the rest of the system.
+how it works; and what it needs from the rest of the system. Each one starts with its status on
+2026-10-24. "Next release" means on AnyPS5-ARM's `main` but not yet in a release (the last one is
+v0.2.13-arm).
+
+| # | Feature | Status |
+|---|---|---|
+| 3.1 | Profiles | built in part: handle, name, bio, country, avatar, privacy; theme and showcase planned |
+| 3.2 | Trophies | built: sets, earned trophies, rarity; launcher screens with dates and rarity planned |
+| 3.3 | Voice chat | built in parties: web, macOS launcher and phone (next release) |
+| 3.4 | Parties | built, with joining a friend's game; party chat planned |
+| 3.5 | Friends | built; QR codes planned |
+| 3.6 | Messages | built for text; images, reactions and push planned |
+| 3.7 | Game library | built: sessions, catalogue, play time; game pages and compatibility planned |
+| 3.8 | Activity feed | planned |
+| 3.9 | Themes | planned |
+| 3.10 | Downloads | planned |
+| 3.11 | Share play | planned, watch only |
+| 3.12 | Leaderboards | planned |
 
 ---
 
 ## 3.1 Profiles
+
+**Status:** built in part. Built: the handle, display name, bio, country, avatar and privacy per
+section; the public page `/u/<handle>` on the web with games, play time and trophies; your own
+card and your friends' in the macOS launcher (next release), with games, hours, trophies and
+points and the latest trophies' rarity. Planned: the theme on the card, the showcase, the numbers
+kept on the server, Open Graph images, checking avatars.
 
 **What the user sees**
 
@@ -24,15 +47,20 @@ how it works; and what it needs from the rest of the system.
   renamed without touching sign-in.
 - Handles: 3-20 characters, `a-z 0-9 _ .`, unique without regard to case, changeable once every
   30 days; the old handle redirects for 30 days.
-- Avatars: uploaded straight to R2 with a presigned URL (PNG/JPEG/WebP up to 5 MB); the worker
-  makes 64, 128 and 512 px WebP versions and checks for nudity with a small classifier before the
-  avatar shows to anyone else (the owner sees it at once).
+- Avatars: sent to the API (PNG or JPEG up to 5 MB), re-encoded to a 256 px JPEG without
+  metadata and served by the hash of its bytes; kept in PostgreSQL for now, R2 later. A check with
+  a small classifier before the avatar shows to anyone else is planned.
 - The four numbers are counted by the worker when trophies or sessions change, not on every view.
-- Visibility per item (see 3.5): everyone, friends, only me.
+- Visibility per section (see 3.5): everyone, friends, nobody.
 
 ---
 
 ## 3.2 Trophies
+
+**Status:** built in the API, in the macOS launcher (play time and trophies go up since 0.2.13) and
+on web profiles. Rarity is counted when trophies arrive; friends hear of a trophy as it is earned
+(a hidden one without its name). Planned: dates and rarity on the launcher's trophy screen and
+banner, the timeline, flagging impossible patterns.
 
 **What the user sees**
 
@@ -55,8 +83,9 @@ how it works; and what it needs from the rest of the system.
   others only send what they earned. Sets carry a hash of the trophy file, so a different version
   of a set is stored beside the old one, not over it.
 - Hidden trophies stay hidden (name and description) to people who have not earned them.
-- **Rarity** = players who earned it ÷ players who have played the game at least once, counted by
-  the worker for games that changed, at most every 10 minutes per game; cached in the trophy row.
+- **Rarity** = players who earned it ÷ players who have played the game at least once, counted
+  again for a game whenever trophies for it arrive (by the API until the worker exists); cached
+  in the trophy row.
   Labels: Common > 50 %, Uncommon 20-50 %, Rare 5-20 %, Very rare 1-5 %, Ultra rare < 1 %.
 - Integrity: a trophy is believed as the launcher reports it. Obviously impossible patterns (all
   trophies of a game earned in the same second, earned before the game was first played) are
@@ -66,6 +95,12 @@ how it works; and what it needs from the rest of the system.
 ---
 
 ## 3.3 Voice chat
+
+**Status:** built in parties on the web, in the macOS launcher and in the phone app (both next
+release): a peer-to-peer mesh, microphone on and off, a ring around whoever speaks, push-to-talk
+on ⌥V in the macOS launcher (a global key, so it works over a game), relay credentials renewed
+before they run out. Calls between two friends exist in the API. Planned: volume per person,
+deafen, the overlay card, the phone as the computer's headset, AnyPS5-Desktop.
 
 **What the user sees**
 
@@ -94,33 +129,51 @@ how it works; and what it needs from the rest of the system.
 
 ## 3.4 Parties
 
+**Status:** built: parties of up to 8 with a leader who invites, kicks and hands over, on the web,
+in the macOS launcher and in the phone app (next release); **joining a friend's game** in the macOS
+launcher (next release). Planned: the party's text chat, link privacy, share play from a party,
+push notifications for invites.
+
 **What the user sees**
 
-- **Start a party** from the launcher, the phone or the web; invite friends (they get a push
-  notification and a card in the launcher); up to 8 members.
-- The party shows **what each member is playing** and offers **"Play the same game"**: on a
-  member's launcher it selects that game if they have it, or says they do not.
-- A party has a text chat beside the voice (3.6 group chat tied to the party).
-- From a party, the host can start **share play** (3.11) for the others.
-- Party privacy: invite only (default), friends can join, or anyone with the link.
+- **Start a party** from the launcher, the phone or the web; invite friends (they get a card in
+  the launcher; a push notification is planned); up to 8 members.
+- The party shows **what each member is playing**, and friends see in presence that you are in a
+  party.
+- **Join a friend's game**: while a game runs, the launcher opens a game session for it, unless
+  "Let friends join my game" is off. Friends see the game as joinable and get **Play with** in the
+  Friends panel; the host can invite them too. Joining starts the same game, after checking the
+  host's game version and engine build, with a clear message when they differ. With online play
+  ([6.7](06-realtime-voice-shareplay.md)) the two copies then play together.
+- A party has a text chat beside the voice (3.6 group chat tied to the party; planned).
+- From a party, the host can start **share play** (3.11) for the others to watch (planned).
+- Party privacy: invite only (default) or friends can join; anyone with the link is planned.
 
 **How it works**
 
-- A party is a database row (owner, privacy, created) plus a call set up on demand when the
-  first member opens voice.
+- A party is a database row (leader, privacy) with its members (someone is in one party at a
+  time) and invites, plus a call set up on demand when the first member opens voice.
 - Membership changes go through the API and are pushed by the gateway (`party.member_joined`,
   `party.member_left`, `party.updated`).
-- A party with no member connected for 10 minutes ends by itself.
-- "Play the same game" sends `party.play_request {title_id}`; each launcher looks up the title ID
-  in its own library. Games themselves are never involved.
+- A party ends when its last member leaves; when the leader leaves, the next member leads.
+  Ending a party with nobody connected for 10 minutes is planned.
+- A game session is a row too: host, title ID, game version, engine build, capacity (2-16),
+  joinable or not, and up to 4 KB of properties the launchers define; its players are listed, and
+  a join with another game version or engine build is refused (`version_mismatch`). The host's
+  presence shows the game and whether there is room.
 
 ---
 
 ## 3.5 Friends
 
+**Status:** built: requests by handle or from search, accept, decline, remove, block; presence
+with the game being played and the party or game session; privacy settings. On the web, in the
+macOS launcher (since 0.2.13) and in the phone app (next release). Planned: QR codes, a friends
+row on the home screen, the settings for who may send requests.
+
 **What the user sees**
 
-- Add by @handle, by a QR code shown on the other person's phone, or from a party; requests can be
+- Add by @handle, by a QR code shown on the other person's phone (planned), or from a party; requests can be
   accepted or declined; friends can be removed and users blocked.
 - A **friends list** with presence: online, away, offline, and **what they are playing** (the
   game's name and icon, and for how long), in a party or not.
@@ -134,16 +187,24 @@ how it works; and what it needs from the rest of the system.
   (`online`, `away` after 10 min idle, `in_game` with the title ID and when it started). The
   gateway writes it to Valkey with a 60 s expiry; on change it publishes to the user's friends.
   Several devices merge: in-game wins over online wins over away.
-- Presence of someone you blocked, or who set "appear offline", is never sent.
+- Presence of someone you blocked, or who set presence to "nobody", is never sent.
 - Discord presence keeps working side by side; it does not depend on AnyTogether.
 
-**Visibility settings** (per user, each with everyone / friends / only me):
-profile details, game library, play time, trophies, activity, online status, who may send friend
-requests (everyone / friends of friends / nobody), who may message (friends / everyone).
+**Visibility settings** (per user, each with everyone / friends / nobody), as built: the game
+library and play time, trophies, the friends list, presence, and who finds you in search (a
+request to your exact handle always works). The defaults are friends, and everyone for search.
+Planned: activity, who may send friend requests (everyone / friends of friends / nobody), who may
+message (today: friends only).
 
 ---
 
 ## 3.6 Messages
+
+**Status:** built for text: direct and group conversations (up to 32 people, between friends),
+messages up to 4000 characters, replies, editing within 15 minutes, deleting, read state and
+unread counts, reporting a message. On the web, in the macOS launcher and in the phone app (next
+release). Planned: reactions, link previews, images and clips, the typing indicator, read
+receipts as a setting, push notifications.
 
 **What the user sees**
 
@@ -172,6 +233,10 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 ## 3.7 Game library
 
+**Status:** built: sessions, the catalogue taught by launchers, computers registered by the
+launcher, the library with play time and trophy progress, shown on web profiles. Planned: the game
+page `/g/<title id>`, sorting, "friends playing", compatibility reports.
+
 **What the user sees**
 
 - Every game you played: name, icon, **total play time**, **last played**, first played, trophy
@@ -198,6 +263,8 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 ## 3.8 Activity feed
 
+**Status:** planned.
+
 **What the user sees**
 
 - A stream of what friends did: earned a trophy (rare ones and platinums stand out), started
@@ -221,6 +288,8 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 ---
 
 ## 3.9 Themes
+
+**Status:** planned. The Hub stays in the GitHub folder until then.
 
 **What the user sees**
 
@@ -251,6 +320,8 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 ## 3.10 Downloads
 
+**Status:** planned. Until then each project's GitHub releases are the downloads.
+
 **What the user sees**
 
 - One page with the **official** AnyPS5 launchers for macOS, Windows and Linux (each from its own project's releases), the phone app (APK; IPA with the
@@ -270,15 +341,16 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 ## 3.11 Share play
 
+**Status:** planned. Share play is **watch only**: friends see and hear the host's game, and
+control never passes to them. To play together, each player runs the game on their own computer
+(online play, [6.7](06-realtime-voice-shareplay.md)), or friends in one room use phones as pads on
+one computer, as today.
+
 **What the user sees**
 
 - In a party or a direct chat, the host presses **Share play**: friends see the host's game live
   (picture and sound), on the phone app, the web or their own launcher.
-- **Watch** mode (default): friends watch and talk.
-- **Take over** / **Play together**: the host hands the controller to a friend (the friend's pad
-  drives player 1) or adds them as player 2 (the friend's pad becomes a second DualSense in the
-  host's game, exactly like a second phone on the same Wi-Fi today). The host can take it back
-  at any time with their own pad's PS button.
+- Friends watch and talk; nothing they do reaches the game.
 - The latency is shown to both sides, as Remote Play shows it today.
 
 **How it works** (details in [Realtime, voice and share play](06-realtime-voice-shareplay.md))
@@ -288,10 +360,7 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
   platform's capture and hardware encoder. For share play it publishes that video and the game's
   sound over a direct WebRTC connection to each viewer instead of (or as well as) sending them to a phone
   on the local network.
-- The friend's client subscribes to the tracks. A friend allowed to play sends pad state over a
-  WebRTC data channel (unreliable, unordered, 120 packets/s, the same 80-byte packet the phone
-  sends today); the host's launcher feeds it into a free remote-pad bridge (`ANYPS5_REMOTE_PAD_2`
-  etc.) so the game sees another DualSense.
+- The friend's client subscribes to the tracks and sends nothing back to the game.
 - Same-network friends keep using the local path. Over the internet the connection is direct
   between host and viewer, with our relay only when the networks cannot reach each other.
   Every launcher can host: macOS with ScreenCaptureKit, Windows with Windows.Graphics.Capture,
@@ -302,6 +371,8 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 ---
 
 ## 3.12 Leaderboards
+
+**Status:** planned. The points per game (below) are already counted in each library row.
 
 **What the user sees**
 
