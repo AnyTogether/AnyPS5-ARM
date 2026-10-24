@@ -40,6 +40,8 @@ public final class TogetherSocket: @unchecked Sendable {
     private var running = false
     private var attempt = 0
     private var typingSent: [String: Date] = [:]
+    /// The public topics listened to, sent again after each reconnect.
+    private var topics: [String] = []
     private let onEvent: @Sendable (Event) -> Void
     private let onSignedOut: @Sendable () -> Void
 
@@ -90,6 +92,22 @@ public final class TogetherSocket: @unchecked Sendable {
         queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
     }
 
+    /// The public topics to hear "changed" events of (the board, the public lists), replacing the
+    /// ones before; [] for none. Sent now and again after a reconnect.
+    public func watch(_ topics: [String]) {
+        let clean = TogetherTopics.clean(topics)
+        queue.async { [self] in
+            guard clean != self.topics else { return }
+            self.topics = clean
+            sendTopics()
+        }
+    }
+
+    private func sendTopics() {
+        guard let task else { return }
+        task.send(.string(String(decoding: TogetherTopics.frame(topics), as: UTF8.self))) { _ in }
+    }
+
     private func connect() async {
         guard queue.sync(execute: { running }) else { return }
         do {
@@ -137,7 +155,10 @@ public final class TogetherSocket: @unchecked Sendable {
                 self.heartbeat?.invalidate()
                 self.heartbeat = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in self?.queue.async { self?.sendHeartbeat() } }
             }
-            queue.async { self.sendHeartbeat() }
+            queue.async {
+                self.sendHeartbeat()
+                if !self.topics.isEmpty { self.sendTopics() }
+            }
         case "event":
             guard let event = TogetherSocket.event(frame) else { return }
             queue.async { self.lastEventID = event.id }

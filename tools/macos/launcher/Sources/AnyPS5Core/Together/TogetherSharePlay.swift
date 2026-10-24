@@ -32,8 +32,20 @@ public struct TogetherSharePlay: Codable, Equatable, Sendable, Identifiable {
     public let viewers: [Viewer]
     /// Invited and not here yet; only the host is told.
     public let invited: [TogetherPerson]?
+    /// In the public list, and how; nil when it is not listed.
+    public let listing: TogetherShareListing?
+    /// People who asked to watch; only the host is told.
+    public let requests: [TogetherPerson]?
 
-    public init(id: String, host: TogetherPerson?, hostDevice: String, titleId: String, title: String?, open: Bool, maxViewers: Int, viewers: [Viewer], invited: [TogetherPerson]? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case id, host, hostDevice, titleId, title, open, maxViewers, viewers, invited, requests
+        case listing = "public"
+    }
+
+    public init(id: String, host: TogetherPerson?, hostDevice: String, titleId: String, title: String?, open: Bool, maxViewers: Int, viewers: [Viewer], invited: [TogetherPerson]? = nil,
+                listing: TogetherShareListing? = nil, requests: [TogetherPerson]? = nil) {
+        self.listing = listing
+        self.requests = requests
         self.id = id
         self.host = host
         self.hostDevice = hostDevice
@@ -126,8 +138,9 @@ extension TogetherSocket {
 
 extension TogetherClient {
     /// Shares the game this launcher runs (ending any share play the user had).
-    public func startSharePlay(titleId: String, title: String?, open: Bool, maxViewers: Int) async throws -> TogetherSharePlayJoin {
+    public func startSharePlay(titleId: String, title: String?, open: Bool, maxViewers: Int, listing: TogetherShareListing? = nil) async throws -> TogetherSharePlayJoin {
         var body: [String: Any] = ["titleId": titleId, "open": open, "maxViewers": maxViewers]
+        if let listing { body["public"] = listing.body }
         if let title, !title.isEmpty { body["title"] = String(title.prefix(80)) }
         return try JSONDecoder.together.decode(TogetherSharePlayJoin.self, from: try await authorized("POST", "share-plays", body))
     }

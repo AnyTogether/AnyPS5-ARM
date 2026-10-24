@@ -154,8 +154,8 @@ extension AppModel {
                 try await client.kick(member.userId, from: id)
                 withAnimation(Motion.overlay) {
                     if let current = party, current.id == id {
-                        party = TogetherParty(id: current.id, leaderId: current.leaderId, privacy: current.privacy, members: current.members.filter { $0.userId != member.userId },
-                                              invited: current.invited, call: current.call.map { .init(id: $0.id, in: $0.in.filter { $0 != member.userId }) })
+                        party = current.with(members: current.members.filter { $0.userId != member.userId },
+                                             call: current.call.map { .init(id: $0.id, in: $0.in.filter { $0 != member.userId }) })
                     }
                 }
                 show(T.format(.partyRemoved, member.displayName), symbol: "person.badge.minus")

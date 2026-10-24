@@ -34,14 +34,31 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
     public let members: [TogetherPerson]
     public let invited: [TogetherPerson]
     public let call: Call?
+    /// In the public list, and how; nil when it is not listed.
+    public let listing: TogetherPartyListing?
+    /// People who asked to join (members are told).
+    public let requests: [TogetherPerson]?
 
-    public init(id: String, leaderId: String, privacy: String, members: [TogetherPerson], invited: [TogetherPerson], call: Call?) {
+    enum CodingKeys: String, CodingKey {
+        case id, leaderId, privacy, members, invited, call, requests
+        case listing = "public"
+    }
+
+    public init(id: String, leaderId: String, privacy: String, members: [TogetherPerson], invited: [TogetherPerson], call: Call?,
+                listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil) {
         self.id = id
         self.leaderId = leaderId
         self.privacy = privacy
         self.members = members
         self.invited = invited
         self.call = call
+        self.listing = listing
+        self.requests = requests
+    }
+
+    /// The same party with these members and call (someone taken out here before the server says).
+    public func with(members: [TogetherPerson], call: Call?) -> TogetherParty {
+        TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests)
     }
 
     public var open: Bool { privacy == "friends" }
@@ -68,16 +85,20 @@ public struct TogetherPartyInvite: Decodable, Equatable, Sendable, Identifiable 
 }
 
 extension TogetherClient {
-    public func myParty() async throws -> (party: TogetherParty?, invites: [TogetherPartyInvite]) {
-        struct Mine: Decodable { let party: TogetherParty?; let invites: [TogetherPartyInvite] }
+    /// The party the user is in, invites waiting, and the public parties they asked to join.
+    public func myParty() async throws -> (party: TogetherParty?, invites: [TogetherPartyInvite], asked: [String]) {
+        struct Asked: Decodable { let partyId: String }
+        struct Mine: Decodable { let party: TogetherParty?; let invites: [TogetherPartyInvite]; let requests: [Asked]? }
         let mine = try JSONDecoder.together.decode(Mine.self, from: try await authorized("GET", "me/party", nil))
-        return (mine.party, mine.invites)
+        return (mine.party, mine.invites, (mine.requests ?? []).map(\.partyId))
     }
 
     /// A new party with the user as its leader (leaving the one they were in); `open` lets
     /// friends join without an invite.
-    public func startParty(open: Bool = false) async throws -> TogetherParty {
-        try party(try await authorized("POST", "parties", ["privacy": open ? "friends" : "invite"]))
+    public func startParty(open: Bool = false, listing: TogetherPartyListing? = nil) async throws -> TogetherParty {
+        var body: [String: Any] = ["privacy": open ? "friends" : "invite"]
+        if let listing { body["public"] = listing.body }
+        return try party(try await authorized("POST", "parties", body))
     }
 
     public func setParty(_ partyId: String, open: Bool) async throws -> TogetherParty {
