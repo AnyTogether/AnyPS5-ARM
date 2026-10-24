@@ -141,44 +141,6 @@ public enum Diagnosis: Equatable, Sendable {
     }
 }
 
-/// A text file to attach to a bug report: the Mac, the launcher, the game, its settings, why it
-/// stopped and the log of its last start.
-public enum DiagnosticReport {
-    public static func text(game: Game, settings: GameSettings, launcherVersion: String, toolkitVersion: String,
-                            diagnosis: String?, session: String, crashReport: String?) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let settingsText = (try? encoder.encode(settings)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        let memory = ProcessInfo.processInfo.physicalMemory / 1_073_741_824
-        var lines = [
-            "AnyPS5 report, \(ISO8601DateFormatter().string(from: Date()))",
-            "",
-            "Game: \(game.name) (\(game.titleID), version \(game.version))",
-            "Mac: \(sysctl("hw.model") ?? "unknown"), \(sysctl("machdep.cpu.brand_string") ?? "unknown"), \(memory) GB",
-            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
-            "Launcher: \(launcherVersion)",
-            "Toolkit: \(toolkitVersion)",
-            "Reason: \(diagnosis ?? "none found")",
-            "",
-            "Settings:",
-            settingsText,
-        ]
-        if let crashReport, let exception = Diagnosis.crashException(crashReport) {
-            lines += ["", "Crash report: \(exception)"]
-        }
-        lines += ["", "Log of the last start:", String(session.suffix(400 * 1024))]
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    static func sysctl(_ name: String) -> String? {
-        var size = 0
-        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        var buffer = [CChar](repeating: 0, count: size)
-        guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
-        return String(cString: buffer)
-    }
-}
-
 /// A game's settings as a file to share: another player imports them onto their copy of the game.
 public struct SharedSettings: Codable, Sendable {
     public static let format = "anyps5-settings"

@@ -118,6 +118,8 @@ enum Overlay: Equatable {
     case notifications
     /// "How did it run?" after a session.
     case compat
+    /// A game's last start: why it stopped, the report to export and the issue to open.
+    case crashReport
 }
 
 struct Toast: Identifiable, Equatable {
@@ -167,6 +169,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var trophies: [String: TrophySet] = [:]
     /// Why each game stopped the last time it was started, when it stopped on an error.
     @Published private(set) var diagnoses: [String: Diagnosis] = [:]
+    /// The crash panel's report, while it is open.
+    @Published var sessionReport: SessionReportState?
+    /// What each game's last start was beyond its log: its process, detailed logging, its end.
+    var lastSessions: [String: LastSession] = [:]
+    /// Keeps a detailed log under its cap while the game runs.
+    private var traceTrim: Task<Void, Never>?
     /// A phone asking to be allowed, shown over everything until the user answers.
     @Published var pairing: PairingRequest?
     /// The connected phone and its last reported latency.
@@ -704,6 +712,7 @@ final class AppModel: ObservableObject {
                 self.progress[id] = nil
                 switch result {
                 case .success(let bundle):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: nil, titleID: game.titleID)
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
@@ -714,6 +723,7 @@ final class AppModel: ObservableObject {
                 case .failure(let error) where error is CancellationError:
                     break
                 case .failure(let error):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
                     self.failures[id] = error.localizedDescription
                     self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
                 }
@@ -762,13 +772,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Plays the game, its saves brought in step first where save sync is on.
-    func play(_ game: Game) {
+    /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
+    /// detailed logging on for this start only.
+    func play(_ game: Game, trace: Bool = false) {
         guard root != nil, starting == nil, running == nil, syncing == nil else { return }
-        syncSaves(game) { self.start(game) }
+        syncSaves(game) { self.start(game, trace: trace) }
     }
 
-    private func start(_ game: Game) {
+    private func start(_ game: Game, trace: Bool = false) {
         guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -780,11 +791,11 @@ final class AppModel: ObservableObject {
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder, trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
-        markStart(of: game)
+        markStart(of: game, traced: trace || settings.trace == true)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -798,6 +809,7 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.lastSessions[game.id]?.pid = app.processIdentifier
                     self.sessionStart = Date()
                     self.watchTrophies(game)
                     self.watchForExit(of: app.processIdentifier)
@@ -1101,7 +1113,11 @@ final class AppModel: ObservableObject {
         syncSaves(running.game) {}
         discord.clear()
         loadTrophies(running.game, again: true)
-        diagnose(running.game)
+        lastSessions[running.game.id]?.ended = Date()
+        lastSessions[running.game.id]?.withoutWindow = starting != nil
+        traceTrim?.cancel()
+        traceTrim = nil
+        diagnose(running.game, pid: running.app.processIdentifier)
         trophyWatch?.cancel()
         trophyWatch = nil
         exitWatch?.cancel()
@@ -1109,7 +1125,6 @@ final class AppModel: ObservableObject {
         if starting != nil {
             startWatch?.cancel()
             withAnimation(Motion.overlay) { starting = nil }
-            startedWithoutWindow = true
         }
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
@@ -1449,20 +1464,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Diagnosis
 
-    /// Set when the game that just ended never showed a window, so the toast says it did not start.
-    private var startedWithoutWindow = false
-
     nonisolated static func logFile(for game: Game) -> URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/\(game.titleID).log")
     }
 
-    /// The log line the diagnosis reads from, so only this start's output counts.
-    private func markStart(of game: Game) {
+    /// The log line the diagnosis reads from, so only this start's output counts. A log grown
+    /// too big is set aside first; a detailed one is kept under its cap while the game runs.
+    private func markStart(of game: Game, traced: Bool) {
         diagnoses[game.id] = nil
         starts[game.id] = Date()
+        lastSessions[game.id] = LastSession(traced: traced)
         let file = AppModel.logFile(for: game)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\n"
+        GameLog.rollForStart(file)
+        traceTrim?.cancel()
+        traceTrim = nil
+        if traced {
+            traceTrim = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    GameLog.trim(file, cap: TraceMode.cap)
+                }
+            }
+            TrophyBanner.shared.notice(TC.text(.traceOnNotice), detail: TC.text(.traceOnNoticeDetail), symbol: "text.magnifyingglass", sounds: false)
+        }
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n"
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))
@@ -1481,52 +1507,32 @@ final class AppModel: ObservableObject {
         return Diagnosis.lastSession(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
     }
 
-    private func diagnose(_ game: Game) {
+    /// Reads why the game stopped once macOS has had a few seconds to write its crash report,
+    /// and offers the report when it stopped abnormally.
+    private func diagnose(_ game: Game, pid: pid_t) {
         let start = starts[game.id] ?? Date().addingTimeInterval(-600)
-        let withoutWindow = startedWithoutWindow
-        startedWithoutWindow = false
+        let withoutWindow = lastSessions[game.id]?.withoutWindow ?? false
         Task.detached(priority: .userInitiated) {
-            // macOS writes the crash report a moment after the process is gone.
-            try? await Task.sleep(for: .seconds(1.5))
-            let report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
+            // macOS writes the crash report a moment after the process is gone: up to six
+            // seconds, less for a log that ends on the engine's orderly shutdown.
+            var report: String?
+            for attempt in 1...12 {
+                try? await Task.sleep(for: .milliseconds(500))
+                report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier, pid: pid)
+                if report != nil { break }
+                if attempt == 3 && Diagnosis.cleanShutdown(AppModel.lastSession(of: game)) { break }
+            }
             let found = Diagnosis.read(session: AppModel.lastSession(of: game), crashReport: report)
             await MainActor.run {
                 self.diagnoses[game.id] = found
-                if let found {
-                    self.show(game.name + ": " + found.summary, symbol: "exclamationmark.triangle.fill")
-                } else if withoutWindow {
-                    self.show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
-                }
+                if found != nil || withoutWindow { self.offerReport(game) }
             }
         }
     }
 
-    /// Writes a report for a bug report or a Discord message and shows it in Finder.
+    /// The crash panel for the last session of the game, from its options or the log.
     func makeReport(_ game: Game) {
-        let settings = settings(for: game)
-        let diagnosis = diagnoses[game.id]?.summary
-        let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let toolkitVersion = installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? "none"
-        let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
-        Task.detached(priority: .userInitiated) {
-            let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
-            let text = DiagnosticReport.text(game: game, settings: settings, launcherVersion: launcher, toolkitVersion: toolkitVersion,
-                                             diagnosis: diagnosis, session: AppModel.lastSession(of: game), crashReport: crash)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/Reports")
-            let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).txt")
-            let written = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
-                && (try? Data(text.utf8).write(to: file)) != nil
-            await MainActor.run {
-                if written {
-                    NSWorkspace.shared.activateFileViewerSelecting([file])
-                    self.show(T.text(.reportSaved), symbol: "doc.badge.checkmark")
-                } else {
-                    self.show(T.text(.reportFailed), symbol: "exclamationmark.triangle.fill")
-                }
-            }
-        }
+        openSessionReport(game, afterCrash: false)
     }
 
     // MARK: Sharing settings
@@ -1686,7 +1692,7 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1

@@ -629,6 +629,8 @@ extension AppModel {
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
+        case .crashReport:
+            return crashReportCommand(command)
         case .gallery:
             galleryCommand(command)
             return true

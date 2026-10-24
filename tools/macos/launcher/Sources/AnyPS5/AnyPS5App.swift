@@ -172,6 +172,8 @@ struct RootView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
         case .log:
             LogView().transition(.opacity)
+        case .crashReport:
+            CrashReportView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .trophies:
             if let game = model.selectedGame, let set = model.trophies[game.id] {
                 TrophyList(game: game, set: set).transition(.opacity.combined(with: .scale(scale: 1.03)))

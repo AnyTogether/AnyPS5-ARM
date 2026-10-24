@@ -203,6 +203,8 @@ Controllers that SDL recognizes, such as DualSense, DualShock and Xbox pads, wor
 #### Troubleshooting
 
 - **Log:** `~/Library/Logs/AnyPS5/<TITLE ID>.log`. When a game stops, the reason is at the end of this file. Unsupported states always end the program with an error message rather than continuing silently.
+- **Crash report:** when a game stops on an error or a crash, the launcher offers its report at once; it is also in the game's options under **Last Session's Report**. **Export Report** saves `AnyPS5-<TITLE ID>-<date>.zip` (or `.txt`) with the log, macOS's crash report, the last unlock's output, the Mac, the versions and the game's settings. **Open Issue** shows what will be shared, then opens a filled-in GitHub issue; attach the exported file to it. Your home folder, names, e-mail addresses and AnyTogether tokens are taken out of both.
+- **Detailed logging:** the game's options have **Detailed Logging (Trace)** and **Play with Detailed Logging** (once). They start the game with `APS5_LOG_SYNC`, `APS5_LOG_TIMESTAMPS`, `APS5_TRACE_EXIT`, `APS5_TRACE_UNREADABLE`, `APS5_TRACE_MEMORY`, `APS5_SAVEDATA_TRACE`, `APS5_PROFILE_PRESENT` and `MVK_CONFIG_LOG_LEVEL=3`. The game runs slower; a log past 256 MB starts again with the earlier part kept as `<TITLE ID>.trace-1.log`.
 - **Shader cache:** `~/Library/Caches/org.anyps5.<title id>/shader_cache`. The first run compiles shaders, so it can stutter; later runs load them from the cache.
 - **Performance profile:** start the executable from a terminal with `APS5_PROFILE_DRAW=1`. Every 10 seconds the log gets a `[present]` line with the number of frames drawn and the GPU time per frame.
 
@@ -414,6 +416,8 @@ SDL'in tanıdığı kollar (DualSense, DualShock, Xbox kolları gibi) kendiliği
 #### Sorun giderme
 
 - **Log:** `~/Library/Logs/AnyPS5/<TITLE ID>.log`. Oyun kapanırsa sebebi bu dosyanın sonunda yazar. Desteklenmeyen bir durumda program sessizce devam etmez, her zaman bir hata mesajıyla kapanır.
+- **Çökme raporu:** Bir oyun hatayla ya da çökerek kapanınca launcher raporunu hemen sunar; oyunun seçeneklerinde **Son Oturumun Raporu** altında da durur. **Raporu Dışa Aktar**, günlüğü, macOS'un çökme raporunu, son kilit açmanın çıktısını, Mac'i, sürümleri ve oyunun ayarlarını `AnyPS5-<TITLE ID>-<tarih>.zip` (ya da `.txt`) olarak kaydeder. **Sorun Bildir** önce neyin paylaşılacağını gösterir, sonra doldurulmuş bir GitHub bildirimi açar; dışa aktarılan dosyayı ona ekle. Ana klasörün, adların, e-posta adreslerin ve AnyTogether anahtarların ikisinden de çıkarılır.
+- **Ayrıntılı günlük:** Oyunun seçeneklerinde **Ayrıntılı Günlük (İz)** ve (bir kerelik) **Ayrıntılı Günlükle Oyna** var. Oyunu `APS5_LOG_SYNC`, `APS5_LOG_TIMESTAMPS`, `APS5_TRACE_EXIT`, `APS5_TRACE_UNREADABLE`, `APS5_TRACE_MEMORY`, `APS5_SAVEDATA_TRACE`, `APS5_PROFILE_PRESENT` ve `MVK_CONFIG_LOG_LEVEL=3` ile başlatır. Oyun yavaşlar; 256 MB'ı geçen günlük baştan başlar, önceki kısmı `<TITLE ID>.trace-1.log` olarak kalır.
 - **Shader önbelleği:** `~/Library/Caches/org.anyps5.<title id>/shader_cache`. İlk açılışta shader'lar derlendiği için takılmalar olabilir; sonraki açılışlarda önbellekten yüklenir.
 - **Performans ölçümü:** Çalıştırılabilir dosyayı terminalden `APS5_PROFILE_DRAW=1` ile başlat. Log dosyasına her 10 saniyede bir `[present]` satırı düşer; bu satırda çizilen kare sayısı ve kare başına GPU süresi yazar.
 

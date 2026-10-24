@@ -64,6 +64,7 @@ extension AppModel {
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
         case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
         case .compat: return [PanelCategory(id: "compat", title: compatTitle, symbol: "person.3.sequence", rows: compatRows())]
+        case .crashReport: return [PanelCategory(id: "report", title: TC.text(.reportKicker), symbol: "stethoscope", rows: crashReportRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -318,7 +319,17 @@ extension AppModel {
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
         rows.append(PanelRow(id: "link", title: T.text(.copyLink), detail: DeepLink.game(game.titleID).url.absoluteString, symbol: "link", kind: .action(destructive: false) { [weak self] in self?.copyLink(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
-        rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "report", title: TC.text(.lastSessionReport), detail: diagnoses[game.id]?.summary ?? TC.text(.lastSessionReportDetail), symbol: "stethoscope",
+                             kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "trace", title: TC.text(.traceTitle), detail: TC.text(.traceDetail), symbol: "text.magnifyingglass",
+                             kind: .toggle(settings.trace == true) { [weak self] value in self?.update(game) { $0.trace = value ? true : nil } }))
+        if case .installed = state {
+            rows.append(PanelRow(id: "playTraced", title: TC.text(.reportPlayTraced), detail: TC.text(.reportPlayTracedDetail), symbol: "play.circle",
+                                 kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.play(game, trace: true)
+            }))
+        }
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
