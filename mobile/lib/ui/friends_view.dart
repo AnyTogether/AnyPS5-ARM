@@ -8,10 +8,18 @@ import 'together_widgets.dart';
 /// Friends: add someone by handle at the top, the requests waiting for an answer, then everyone
 /// with what they are doing, the ones playing first.
 class FriendsPane extends StatefulWidget {
-  const FriendsPane({super.key, required this.hub, this.gameName});
+  const FriendsPane({
+    super.key,
+    required this.hub,
+    this.gameName,
+    this.onMessage,
+  });
 
   final TogetherHub hub;
   final String? Function(String titleId)? gameName;
+
+  /// Writes to a friend, by id.
+  final ValueChanged<String>? onMessage;
 
   @override
   State<FriendsPane> createState() => _FriendsPaneState();
@@ -172,16 +180,32 @@ class _FriendsPaneState extends State<FriendsPane> {
                 subtitleColor: friend.presence.state == PresenceState.offline
                     ? Colors.white38
                     : presenceColor(friend.presence.state),
-                trailing: PopupMenuButton<void>(
-                  icon: const Icon(
-                    Icons.more_horiz_rounded,
-                    color: Colors.white38,
-                  ),
-                  color: const Color(0xFF1A1D27),
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      onTap: () => _try(() => friends.remove(friend.person.id)),
-                      child: Text(texts.friendsRemove),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.onMessage case final message?)
+                      IconButton(
+                        tooltip: texts.messagesWrite,
+                        onPressed: () => message(friend.person.id),
+                        icon: const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          size: 20,
+                          color: togetherAccent,
+                        ),
+                      ),
+                    PopupMenuButton<void>(
+                      icon: const Icon(
+                        Icons.more_horiz_rounded,
+                        color: Colors.white38,
+                      ),
+                      color: const Color(0xFF1A1D27),
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          onTap: () =>
+                              _try(() => friends.remove(friend.person.id)),
+                          child: Text(texts.friendsRemove),
+                        ),
+                      ],
                     ),
                   ],
                 ),

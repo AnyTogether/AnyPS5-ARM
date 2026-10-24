@@ -292,6 +292,7 @@ class _TogetherState extends State<_Together> {
 
   static List<(TogetherTab, IconData, String)> _tabs(Strings texts) => [
     (TogetherTab.friends, Icons.people_alt_rounded, texts.friends),
+    (TogetherTab.messages, Icons.chat_bubble_rounded, texts.messages),
   ];
 
   Widget _signIn(Strings texts, TogetherStep step) {

@@ -4,9 +4,10 @@ import '../strings.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
 import 'friends_view.dart';
+import 'messages_view.dart';
 import 'together_widgets.dart';
 
-enum TogetherTab { friends }
+enum TogetherTab { friends, messages }
 
 /// AnyTogether's own screen over whatever the phone shows: a rail of what there is on the left,
 /// the part picked on the right, the way a phone held sideways has room for both.
@@ -70,6 +71,12 @@ class _TogetherScreenState extends State<TogetherScreen> {
 
   void _show(TogetherTab tab) => setState(() => _tab = tab);
 
+  /// Writes to a friend: their conversation, made the first time, in Messages.
+  void _message(String userId) {
+    _show(TogetherTab.messages);
+    widget.hub.messages.withFriend(userId).catchError((_) {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
@@ -99,7 +106,9 @@ class _TogetherScreenState extends State<TogetherScreen> {
                         TogetherTab.friends => FriendsPane(
                           hub: widget.hub,
                           gameName: widget.gameName,
+                          onMessage: _message,
                         ),
+                        TogetherTab.messages => MessagesPane(hub: widget.hub),
                       },
                     ),
                   ),
@@ -163,6 +172,13 @@ class _TogetherScreenState extends State<TogetherScreen> {
             count: hub.friends.incoming.length,
             selected: _tab == TogetherTab.friends,
             onTap: () => _show(TogetherTab.friends),
+          ),
+          _RailItem(
+            icon: Icons.chat_bubble_rounded,
+            label: texts.messages,
+            count: hub.messages.unread,
+            selected: _tab == TogetherTab.messages,
+            onTap: () => _show(TogetherTab.messages),
           ),
           const Spacer(),
           _LiveDot(socket: hub.socket),

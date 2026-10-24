@@ -110,6 +110,16 @@ class Strings {
   String get togetherConnecting => _text('togetherConnecting');
   String get togetherNotFound => _text('togetherNotFound');
   String get back => _text('back');
+  String get messages => _text('messages');
+  String get messagesNone => _text('messagesNone');
+  String get messagesPick => _text('messagesPick');
+  String get messagesWrite => _text('messagesWrite');
+  String get messagesSend => _text('messagesSend');
+  String get messagesDeleted => _text('messagesDeleted');
+  String get messagesFailed => _text('messagesFailed');
+  String get messagesEarlier => _text('messagesEarlier');
+  String get messagesYou => _text('messagesYou');
+  String get messagesEdited => _text('messagesEdited');
   String get togetherServer => _text('togetherServer');
   String get togetherServerChange => _text('togetherServerChange');
   String get togetherServerUse => _text('togetherServerUse');
@@ -228,6 +238,16 @@ class Strings {
     'togetherConnecting': 'Connecting…',
     'togetherNotFound': 'No one with that handle',
     'back': 'Back',
+    'messages': 'Messages',
+    'messagesNone': 'No conversations yet. Write to a friend from Friends.',
+    'messagesPick': 'Pick a conversation, or write to a friend from Friends.',
+    'messagesWrite': 'Message',
+    'messagesSend': 'Send',
+    'messagesDeleted': 'Message deleted',
+    'messagesFailed': 'Not sent. Tap to try again',
+    'messagesEarlier': 'Earlier messages',
+    'messagesYou': 'You',
+    'messagesEdited': 'edited',
     'togetherServer': 'Server',
     'togetherServerChange': 'Change',
     'togetherServerUse': 'Use',
@@ -347,6 +367,16 @@ class Strings {
     'togetherConnecting': 'Bağlanıyor…',
     'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
     'back': 'Geri',
+    'messages': 'Mesajlar',
+    'messagesNone': 'Henüz konuşma yok. Arkadaşlar\'dan bir arkadaşına yaz.',
+    'messagesPick': 'Bir konuşma seç ya da Arkadaşlar\'dan bir arkadaşına yaz.',
+    'messagesWrite': 'Mesaj',
+    'messagesSend': 'Gönder',
+    'messagesDeleted': 'Mesaj silindi',
+    'messagesFailed': 'Gönderilemedi. Tekrar denemek için dokun',
+    'messagesEarlier': 'Önceki mesajlar',
+    'messagesYou': 'Sen',
+    'messagesEdited': 'düzenlendi',
     'togetherServer': 'Sunucu',
     'togetherServerChange': 'Değiştir',
     'togetherServerUse': 'Kullan',
