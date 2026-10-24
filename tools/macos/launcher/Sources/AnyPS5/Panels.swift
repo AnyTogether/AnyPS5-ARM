@@ -869,6 +869,8 @@ extension Diagnosis {
         case .outOfMemory: return T.text(.diagnosisOutOfMemory)
         case .engineError(let message): return T.format(.diagnosisEngineError, message)
         case .crashed(let exception): return T.format(.diagnosisCrashed, exception)
+        case .aborted: return TC.text(.diagnosisAborted)
+        case .exited(let code): return TC.format(.diagnosisExited, code)
         }
     }
 }

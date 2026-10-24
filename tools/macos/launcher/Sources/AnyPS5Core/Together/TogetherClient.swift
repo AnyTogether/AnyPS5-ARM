@@ -75,6 +75,11 @@ public final class TokenStore: @unchecked Sendable {
         lock.withLock { (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) } }
     }
 
+    /// The tokens kept now, for a crash report to take out wherever they appear.
+    public var secrets: [String] {
+        load().map { [$0.accessToken, $0.refreshToken] } ?? []
+    }
+
     /// Changes the kept user (a new handle or name), keeping the tokens.
     func update(_ change: (inout TogetherUser) -> Void) {
         guard var saved = load() else { return }
