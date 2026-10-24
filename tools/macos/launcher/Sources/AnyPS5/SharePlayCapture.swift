@@ -28,11 +28,12 @@ final class SharePlayCapture {
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw RemotePlay.Failure.noWindow }
         let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY, width: window.frame.width, height: window.frame.height)
-        // The window's shape within 1280 x 720, even sizes for the encoder.
-        let scale = min(1, 720 / window.frame.height, 1280 / window.frame.width)
-        configuration.width = max(160, Int(window.frame.width * scale) & ~1)
-        configuration.height = max(90, Int(window.frame.height * scale) & ~1)
+        let area = ClipRecorder.area(of: window, on: display)
+        configuration.sourceRect = area
+        // The game's shape within 1280 x 720, even sizes for the encoder.
+        let scale = min(1, 720 / area.height, 1280 / area.width)
+        configuration.width = max(160, Int(area.width * scale) & ~1)
+        configuration.height = max(90, Int(area.height * scale) & ~1)
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         configuration.queueDepth = 3
