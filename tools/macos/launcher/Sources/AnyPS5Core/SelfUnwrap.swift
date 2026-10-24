@@ -1,7 +1,8 @@
 import Foundation
 
 /// Turns a decrypted SELF or fSELF container into the clean ELF the relinker reads: the Swift form
-/// of tools/unwrap_self.py, which documents the container layout. The two must write the same bytes.
+/// of tools/unwrap_self.py, which documents the container layout. The two must write the same bytes:
+/// SelfUnwrapTests checks it on synthetic containers, scripts/compare-unwrap.sh on real dumps.
 public enum SelfUnwrap {
     public struct Refused: LocalizedError {
         public let reason: String
@@ -15,7 +16,8 @@ public enum SelfUnwrap {
     static let recordHasSegment: UInt64 = 0x800
     static let recordSegmentShift: UInt64 = 20
     static let firstRegion = 0x400
-    static let maxEmptyLoadPadding = 64 * 1024 * 1024
+    /// The most zero bytes alignment may add to the output in all.
+    static let maxAlignmentPadding = 64 * 1024 * 1024
     static let ptLoad: UInt32 = 1
     static let ptNote: UInt32 = 4
     static let entropyLimit = 7.5
@@ -55,6 +57,8 @@ public enum SelfUnwrap {
         let align: UInt64
         var source: UInt64
         var placed: UInt64 = 0
+        /// The PT_LOAD whose bytes this segment lies in, when it was placed by its vaddr.
+        var host: Header?
 
         init(index: Int, type: UInt32, flags: UInt32, offset: UInt64, vaddr: UInt64, size: UInt64, memory: UInt64, align: UInt64) {
             self.index = index
@@ -149,9 +153,11 @@ public enum SelfUnwrap {
         return records
     }
 
-    static func alignUp(_ value: UInt64, _ alignment: UInt64) -> UInt64 {
-        if alignment <= 1 { return value }
-        return (value + alignment - 1) / alignment * alignment
+    /// The smallest offset at or after `cursor` congruent to `vaddr` modulo `alignment` (a power
+    /// of two, or 1): Python's `cursor + (vaddr - cursor) % alignment`.
+    static func placement(cursor: UInt64, vaddr: UInt64, alignment: UInt64) -> UInt64 {
+        guard alignment > 1 else { return cursor }
+        return cursor + ((vaddr &- cursor) & (alignment - 1))
     }
 
     static func findElf(_ data: [UInt8]) -> Int? {
@@ -167,10 +173,12 @@ public enum SelfUnwrap {
         guard let inner = findElf(data) else { throw Refused(reason: "no inner ELF header") }
         if inner + 0x40 > data.count { throw Refused(reason: "inner ELF header is truncated") }
         let header = Array(data[inner..<(inner + 0x40)])
+        if header[4] != 2 || header[5] != 1 { throw Refused(reason: "inner ELF is not 64-bit little-endian") }
         let programOffset = u64(header, 0x20)
         let entrySize = u16(header, 0x36)
         let count = Int(u16(header, 0x38))
         if entrySize != 56 || count == 0 { throw Refused(reason: "program header table is \(count) entries of \(entrySize) bytes") }
+        if programOffset < UInt64(header.count) { throw Refused(reason: "ELF program header table overlaps the ELF header") }
         let (tableEnd, overflow) = UInt64(inner).addingReportingOverflow(programOffset)
         if overflow || tableEnd + UInt64(count * 56) > UInt64(data.count) { throw Refused(reason: "ELF program header table does not fit the file") }
         var headers: [Header] = []
@@ -268,6 +276,12 @@ public enum SelfUnwrap {
                 if header.size != 0 && (offset > host.size || header.size > host.size - offset) {
                     throw Refused(reason: "segment \(header.index) does not fit the file-backed range of PT_LOAD \(host.index)")
                 }
+                // In the part of the PT_LOAD with no file bytes (.bss): nothing to copy.
+                if host.size == 0 || offset > host.size {
+                    header.source = 0
+                    continue
+                }
+                header.host = host
                 header.source = host.source + offset
                 if tail == nil || header.offset > tail!.offset {
                     tail = (header.offset, Int64(bitPattern: header.source &- header.offset))
@@ -317,8 +331,13 @@ public enum SelfUnwrap {
         try checkDecrypted(data, headers)
 
         var regions: [Region] = []
+        // Each PT_LOAD's own region: segments inside it move with it, even where load
+        // segments overlap in the container.
+        var loadRegions: [Int: Region] = [:]
         for header in headers where header.type == ptLoad && header.size != 0 {
-            regions.append(Region(old: header.source, size: header.size, vaddr: header.vaddr, align: header.align))
+            let region = Region(old: header.source, size: header.size, vaddr: header.vaddr, align: header.align)
+            regions.append(region)
+            loadRegions[header.index] = region
         }
 
         func regionFor(_ offset: UInt64, _ size: UInt64) -> Region? {
@@ -335,12 +354,13 @@ public enum SelfUnwrap {
         regions = regions.enumerated().sorted { $0.element.old != $1.element.old ? $0.element.old < $1.element.old : $0.offset < $1.offset }.map(\.element)
         let programOffset = u64(elfHeader, 0x20)
         var cursor = max(UInt64(firstRegion), programOffset + UInt64(headers.count * 56))
+        var padding: UInt64 = 0
         for region in regions {
             let alignment = region.align != 0 && region.align & (region.align - 1) == 0 ? region.align : 1
-            var placed = alignUp(cursor, alignment)
-            if region.vaddr % alignment != placed % alignment {
-                placed += (region.vaddr % alignment &+ alignment &- placed % alignment) % alignment
-            }
+            // The first offset from the cursor on with offset % align == vaddr % align, as
+            // tools/unwrap_self.py does it (not rounded up to the alignment first).
+            let placed = placement(cursor: cursor, vaddr: region.vaddr, alignment: alignment)
+            padding += placed - cursor
             region.new = placed
             cursor = placed + region.size
         }
@@ -349,8 +369,9 @@ public enum SelfUnwrap {
         for header in headers where header.type == ptLoad && header.size == 0 {
             emptyEnd = max(emptyEnd, header.vaddr % max(header.align, 1))
         }
-        if emptyEnd - cursor > UInt64(maxEmptyLoadPadding) {
-            throw Refused(reason: "empty load alignment requires more than \(maxEmptyLoadPadding) bytes of output padding")
+        padding += emptyEnd - cursor
+        if padding > UInt64(maxAlignmentPadding) {
+            throw Refused(reason: "segment alignment requires more than \(maxAlignmentPadding) bytes of output padding")
         }
         cursor = emptyEnd
 
@@ -366,7 +387,8 @@ public enum SelfUnwrap {
                 header.placed = header.type == ptLoad ? header.vaddr % max(header.align, 1) : 0
                 continue
             }
-            if let region = regionFor(header.source, header.size) {
+            let host = header.type == ptLoad ? header : header.host
+            if let region = host.flatMap({ loadRegions[$0.index] }) ?? regionFor(header.source, header.size) {
                 header.placed = region.new + (header.source - region.old)
             } else {
                 header.placed = header.source
