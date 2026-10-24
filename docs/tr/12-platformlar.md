@@ -22,7 +22,7 @@ telefon uygulamasıyla konuşabilmesi için telefon protokolünü yazıya döker
 | İhtiyaç | macOS launcher | Windows launcher | Linux launcher | Telefon | Web |
 |---|---|---|---|---|---|
 | Dil | Swift | Rust | Rust | Dart (Flutter) | TypeScript |
-| AnyTogether istemcisi | `AnyPS5Core/Together` | `anytogether` crate'i | `anytogether` crate'i | `mobile/lib/together` | `apps/web` |
+| AnyTogether istemcisi | `AnyPS5Core/Together` | port tarafından, sözleşmelere göre yazılır | aynısı | `mobile/lib/together` | `apps/web` |
 | Giriş | yerel Apple, `ASWebAuthenticationSession` | varsayılan tarayıcı + loopback | varsayılan tarayıcı + loopback | yerel Apple/Google, Discord | yönlendirmeler |
 | Güvenli token deposu | Keychain | Credential Manager | Secret Service (GNOME Keyring, KWallet) | Keychain / Keystore | HttpOnly çerez |
 | WebRTC | Google WebRTC framework'ü | `webrtc-rs` ya da `libwebrtc` bağlamaları | aynısı | `flutter_webrtc` | tarayıcı |
@@ -55,8 +55,9 @@ başına bir bütündür).
 | Temalar ve Hub | ✓ | ✓ (launcher `.anyps5theme` okuduğunda) | ✓ | launcher'ın temasını giyer | ✓ (profiller) |
 | Uyumluluk raporları | ✓ | ✓ | ✓ | - | - |
 
-Bir AnyTogether sürümü ancak mevcut launcher'lar onu kullanabildiğinde "bitmiş" sayılır; Rust
-crate'i sunucuyla aynı CI'da derlenir ve test edilir.
+Sözleşmeler (OpenAPI belgesi, gateway ve sinyalleşme mesajları, kol paketi, telefon protokolü)
+sürümlü olarak yayımlanır; böylece bir launcher bizim yardımımız olmadan bağlanabilir; geriye dönük
+uyumsuz bir değişiklik yeni bir sürüme gider, eskisi çalışmaya devam eder.
 
 ## 12.4 Telefon protokolü
 

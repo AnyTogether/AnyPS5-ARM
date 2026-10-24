@@ -86,8 +86,8 @@ sitesine (her biri kendi container'ında ayrı bir uygulama).
 
 Saklanan veriyi değiştiren tek yer; durumsuz. TypeScript, çünkü web sitesi de TypeScript;
 böylece şemalar (Zod) bir kez yazılır ve onlardan üretilen OpenAPI belgesi **Swift** (macOS launcher'ı),
-**Rust** (Windows/Linux launcher'ı), **Dart** (telefon) ve **TypeScript** (web) için tipli istemciler
-sağlar. Hono, çünkü küçük, web standartlarına uygun ve taşınabilir (bugün Node, ileride Bun ya da
+**Dart** (telefon), **TypeScript** (web) ve başka bir launcher'ın kullandığı her dil (Windows/Linux portu
+için Rust) için tipli istemciler sağlar. Hono, çünkü küçük, web standartlarına uygun ve taşınabilir (bugün Node, ileride Bun ya da
 Cloudflare Workers). İncelenmiş SQL migration'larıyla Drizzle. Hatalar, her istemcinin kendi diline çevirdiği
 sabit kodlarla RFC 9457 problem details biçiminde.
 
@@ -181,7 +181,6 @@ packages/
   shared/       Zod şemaları, olay ve sinyalleşme tipleri, hata kodları, OpenAPI
   db/           Drizzle şeması ve SQL migration'ları
 clients/
-  rust/         Windows/Linux launcher'ı için `anytogether` crate'i (MIT/Apache-2.0)
   swift/        macOS launcher'ı için üretilmiş tipler (AnyPS5-ARM'dan kullanılır)
   dart/         telefon uygulaması için üretilmiş tipler
 infra/
@@ -192,8 +191,8 @@ docs/           bu plan
 ```
 
 macOS launcher'ının entegrasyonu AnyPS5-ARM'da (`AnyPS5Core/Together/`), telefon uygulamasınınki
-`mobile/lib/together/` altında, Windows/Linux launcher'ınınki ise Rust crate'ini kullanan kendi deposunda
-yer alır. Bkz. [İstemciler](07-istemciler.md) ve [Platformlar](12-platformlar.md).
+`mobile/lib/together/` altında, Windows/Linux launcher'ınınki ise kendi deposunda yer alır ve onu
+geliştiricisi yayımlanan sözleşmelere göre yazar. Bkz. [İstemciler](07-istemciler.md) ve [Platformlar](12-platformlar.md).
 
 ## Ölçek
 

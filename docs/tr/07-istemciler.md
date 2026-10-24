@@ -54,9 +54,10 @@ Uygulama hedefi (`Sources/AnyPS5/`):
 
 ## 7.2 Windows ve Linux launcher'ı (Rust)
 
-Bu launcher'ın Windows ve Linux portu Rust ile yazılıyor. AnyTogether'a, yayımladığımız bir Rust
-crate'i olan `anytogether` üzerinden erişir (MIT ya da Apache-2.0, böylece her launcher kullanabilir);
-crate, AnyTogether deposunda `clients/rust` altında tutulur:
+Bu launcher'ın Windows ve Linux portu Rust ile yazılıyor ve geliştiricisi portlama sırasında onu
+yayımlanan OpenAPI belgesine, gateway protokolüne ve [Platformlar](12-platformlar.md) belgesine göre
+AnyTogether'a bağlıyor; sunucuda macOS'a özgü hiçbir şey yok. Oradaki bir istemci muhtemelen şu
+parçalardan oluşur (ileride bir başlangıç crate'i sunulabilir):
 
 | Modül | Görevi |
 |---|---|
@@ -67,7 +68,7 @@ crate, AnyTogether deposunda `clients/rust` altında tutulur:
 | `call` | `webrtc-rs` (saf Rust) ya da LiveKit'in `libwebrtc` bağlamalarıyla (Google'ın WebRTC'si, donanım codec'leriyle) WebRTC peer connection'ları, `socket` üzerinden sinyalleşme |
 | `share_play` | launcher'ın yakalama katmanından kodlanmış H.264 karelerini ve PCM sesi alır; `pad` veri kanalından gelen kumanda paketlerini bir callback'e teslim eder |
 
-Launcher'ın kendisinin sağladıkları (crate'te değil, platform kodunda):
+Launcher'ın platform koduyla sağladıkları:
 
 | İhtiyaç | Windows | Linux |
 |---|---|---|

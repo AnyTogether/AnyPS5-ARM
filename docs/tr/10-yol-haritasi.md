@@ -21,8 +21,9 @@ gantt
 ```
 
 Tarihler; sunucu, macOS launcher ve telefon uygulaması üzerinde Claude ile çalışan tek bir
-geliştirici için yol göstericidir; Windows/Linux launcher, Rust crate'ini aşama aşama aynı
-tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
+geliştirici için yol göstericidir; Windows/Linux launcher'ının geliştiricisi, o launcher'ı portlama
+sırasında yayımlanan API belgesine ve protokollere göre bağlar.
+6. aşama 3-5 ile paralel yürüyebilir.
 
 ## Aşama 0: Temeller (≈3 hafta)
 
@@ -36,8 +37,8 @@ tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
 - hello, heartbeat ve resume destekli realtime gateway (üzerinde henüz özellik yok).
 - macOS launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Ayarlar → AnyTogether →
   Apple / Google / Discord / telefon / e-posta ile devam et, üst çubukta oturum açık rozeti.
-- Windows/Linux launcher için `anytogether` Rust crate'i (api, auth, socket), aynı CI'da test
-  edilir; o launcher'ın geliştiricisine bir entegrasyon rehberiyle önerilir.
+- OpenAPI belgesi ve gateway protokolü sürümlü olarak yayımlanır; böylece her launcher (ilk olarak
+  Windows/Linux portu) bizim yardımımız olmadan bağlanabilir.
 - macOS launcher sürüm derlemeleri Developer ID ile imzalanır ve notarize edilir.
 - Web sitesi: "Coming soon"un yerini alan açılış sayfası, tek dokunuşla giriş, `/link`, ayarlar,
   gizlilik sayfaları.
@@ -47,7 +48,7 @@ tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
       oluşturulmuş olarak giriş yapar (tarayıcıda Google'a zaten giriş yapmışken); web'de
       çıkış yapmak launcher'ın da oturumunu 5 s içinde kapatır.
 - [ ] Oturumu açık telefon, launcher'a tek dokunuşla giriş yaptırır.
-- [ ] Rust crate'i Windows ve Linux'ta giriş yapar ve gateway'i açar (ikisinde de CI).
+- [ ] Yayımlanan OpenAPI belgesi doğrulanır ve çalışan API ile örtüşür (CI).
 - [ ] Sunucuya ulaşamayan bir launcher, AnyTogether'dan önce nasıl davranıyorsa tam olarak öyle
       davranır (otomatik test).
 - [ ] Yedekler staging'e geri yüklenir; geri yükleme testi yeşil.
@@ -100,7 +101,7 @@ tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
 
 - Sunucuda coturn (`anytogether-relay.kodla.agency`; 3478 ve 5349 portları ile relay (aktarma
   sunucusu) aralığı Utku'nun onayıyla açılır); gateway üzerinden görüşmeler ve sinyalleşme; her
-  launcher'da (macOS WebRTC framework'ü, Windows/Linux'ta Rust crate'i), telefonda
+  launcher'da (macOS'ta WebRTC framework'ü; Windows/Linux portunda kendi WebRTC kütüphanesi), telefonda
   (`flutter_webrtc`) ve web'de eşten eşe (P2P) ses; bas-konuş; kulaklık olarak telefon; parti
   sohbeti; "Aynı oyunu oyna".
 
