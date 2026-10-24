@@ -273,6 +273,7 @@ extension AppModel {
         if let set = trophies[game.id] {
             rows.append(PanelRow(id: "trophies", title: T.text(.trophies), detail: "\(set.unlockedCount)/\(set.trophies.count) · \(set.percent)%", symbol: "trophy", kind: .action(destructive: false) { [weak self] in self?.open(.trophies) }))
         }
+        rows += gameSocialRows(game)
         rows.append(PanelRow(id: "advanced", title: T.text(.advanced), detail: T.text(.advancedDetail), symbol: "slider.horizontal.below.rectangle", kind: .action(destructive: false) { [weak self] in self?.open(.advanced) }))
         let overlays = GameSettings.Overlay.allCases
         let overlayNames = [T.text(.overlayOff), T.text(.overlayTopLeft), T.text(.overlayTopRight), T.text(.overlayBottomLeft), T.text(.overlayBottomRight)]

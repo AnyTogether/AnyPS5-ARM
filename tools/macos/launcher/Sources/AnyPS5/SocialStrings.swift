@@ -20,6 +20,10 @@ enum TS {
         case feedMilestoneTrophies, feedMilestonePlatinums, feedMilestoneGames, feedMilestoneHours
         case feedAndMore, feedRare, hintReact, hintProfile
         case profileActivity, profileNoActivity
+        // Leaderboards
+        case boardTitle, boardOverall, boardPoints, boardTime, boardCompletion, scopeFriends, scopeGlobal, boardYourRank, boardOf, boardPointsValue
+        case boardEmpty, boardFailed, boardLoading, boardNoGame, boardUnlisted, boardWouldBe, boardNothing, boardRowDetail, boardGameRowDetail
+        case hintBoard, hintScope, boardYou, boardPlayers
     }
 
     static let english: [Key: String] = [
@@ -48,6 +52,29 @@ enum TS {
         .hintProfile: "Profile",
         .profileActivity: "Recent activity",
         .profileNoActivity: "No activity yet",
+        .boardTitle: "Leaderboard",
+        .boardOverall: "Trophy points",
+        .boardPoints: "Points",
+        .boardTime: "Play time",
+        .boardCompletion: "Completion",
+        .scopeFriends: "Friends",
+        .scopeGlobal: "Everyone",
+        .boardYourRank: "Your rank",
+        .boardOf: "of %d",
+        .boardPointsValue: "%@ pts",
+        .boardEmpty: "No one to rank yet",
+        .boardFailed: "Couldn't read the leaderboard",
+        .boardLoading: "Reading the leaderboard…",
+        .boardNoGame: "No one has played this on AnyTogether yet",
+        .boardUnlisted: "You're not on this board: it only lists people whose trophies and library are public",
+        .boardWouldBe: "You'd be #%d",
+        .boardNothing: "Nothing to rank yet: play and earn trophies to get on the board",
+        .boardRowDetail: "Trophy points among friends or everyone",
+        .boardGameRowDetail: "Points, play time and completion, among friends or everyone",
+        .hintBoard: "Board",
+        .hintScope: "Friends / Everyone",
+        .boardYou: "You",
+        .boardPlayers: "%d players",
     ]
 
     static let turkish: [Key: String] = [
@@ -76,5 +103,28 @@ enum TS {
         .hintProfile: "Profil",
         .profileActivity: "Son etkinlikler",
         .profileNoActivity: "Henüz etkinlik yok",
+        .boardTitle: "Sıralama",
+        .boardOverall: "Kupa puanları",
+        .boardPoints: "Puan",
+        .boardTime: "Oynama süresi",
+        .boardCompletion: "Tamamlama",
+        .scopeFriends: "Arkadaşlar",
+        .scopeGlobal: "Herkes",
+        .boardYourRank: "Sıran",
+        .boardOf: "%d kişi içinde",
+        .boardPointsValue: "%@ puan",
+        .boardEmpty: "Henüz sıralanacak kimse yok",
+        .boardFailed: "Sıralama okunamadı",
+        .boardLoading: "Sıralama okunuyor…",
+        .boardNoGame: "Bunu AnyTogether'da henüz kimse oynamadı",
+        .boardUnlisted: "Bu sıralamada değilsin: yalnızca kupaları ve kütüphanesi herkese açık olanlar listelenir",
+        .boardWouldBe: "#%d olurdun",
+        .boardNothing: "Henüz sıralanacak bir şeyin yok: oyna ve kupa kazan, sıralamaya gir",
+        .boardRowDetail: "Arkadaşlar ya da herkes arasında kupa puanları",
+        .boardGameRowDetail: "Arkadaşlar ya da herkes arasında puan, oynama süresi ve tamamlama",
+        .hintBoard: "Tablo",
+        .hintScope: "Arkadaşlar / Herkes",
+        .boardYou: "Sen",
+        .boardPlayers: "%d oyuncu",
     ]
 }

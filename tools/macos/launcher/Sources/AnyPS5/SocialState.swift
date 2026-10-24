@@ -23,6 +23,19 @@ final class SocialState: ObservableObject {
     @Published var profileActivityFailed = false
     var profileActivityTask: Task<Void, Never>?
 
+    // Leaderboards
+    /// The game whose board is open; nil for overall trophy points.
+    @Published var boardGame: TogetherActivity.Game?
+    @Published var boardKind = TogetherGameBoard.points
+    @Published var boardScope = TogetherBoardScope.friends
+    @Published var leaderboard: TogetherLeaderboard?
+    @Published var boardFailed = false
+    /// The game is not on AnyTogether (no one played it there).
+    @Published var boardMissing = false
+    @Published var boardIndex = 0
+    var boardTask: Task<Void, Never>?
+    var boardReturn: AppModel.ProfileReturn?
+
     private var forward: AnyCancellable?
 
     init(owner: AppModel) {
@@ -36,6 +49,19 @@ extension AppModel {
         [
             PanelRow(id: "friends-feed", title: TS.text(.feedRow), detail: TS.text(.feedRowDetail), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in
                 self?.openFeed()
+            }),
+            PanelRow(id: "friends-board", title: TS.text(.boardTitle), detail: TS.text(.boardRowDetail), symbol: "list.number", kind: .action(destructive: false) { [weak self] in
+                self?.openLeaderboard(nil)
+            }),
+        ]
+    }
+
+    /// The game panel's social rows, signed in: the game's leaderboard.
+    func gameSocialRows(_ game: Game) -> [PanelRow] {
+        guard togetherUser != nil else { return [] }
+        return [
+            PanelRow(id: "leaderboard", title: TS.text(.boardTitle), detail: TS.text(.boardGameRowDetail), symbol: "list.number", kind: .action(destructive: false) { [weak self] in
+                self?.openLeaderboard(game)
             }),
         ]
     }

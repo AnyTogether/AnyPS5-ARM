@@ -43,6 +43,30 @@ enum SocialPreviews {
         let items = activity(found)
         render("feed") { model in model.previewFeed(items, index: 1, reaction: 3) }
         render("feed-empty") { model in model.previewFeed([]) }
+        let person = { (id: String, name: String) in TogetherPerson(userId: id, handle: name.lowercased(), displayName: name, avatar: nil) }
+        let names = ["Ayşe", "Mert", "Kral", "Zeynep", "Deniz", "Can", "Elif", "Bora"]
+        let top = names.enumerated().map { index, name in TogetherLeaderboard.Entry(rank: index + 1, user: person("p\(index)", name), value: 9_400 - index * 870) }
+        let me = TogetherLeaderboard.Entry(rank: 41, user: person("u1", "Utku"), value: 1_830)
+        let around = [TogetherLeaderboard.Entry(rank: 40, user: person("x1", "Lin"), value: 1_905), me, TogetherLeaderboard.Entry(rank: 42, user: person("x2", "Ada"), value: 1_790)]
+        render("leaderboard-game") { model in
+            model.previewLeaderboard(TogetherLeaderboard(board: "points", scope: .global, game: nil, entries: Array(top.prefix(6)), me: .init(rank: 41, value: 1_830, listed: true), around: around, total: 312),
+                                     game: found.first, index: 8)
+        }
+        render("leaderboard-time") { model in
+            let friends = [TogetherLeaderboard.Entry(rank: 1, user: person("p0", "Ayşe"), value: 151_200), TogetherLeaderboard.Entry(rank: 2, user: person("u1", "Utku"), value: 26_100),
+                           TogetherLeaderboard.Entry(rank: 3, user: person("p2", "Kral"), value: 2_700)]
+            model.previewLeaderboard(TogetherLeaderboard(board: "time", scope: .friends, game: nil, entries: friends, me: .init(rank: 2, value: 26_100, listed: true), total: 3),
+                                     game: found.first, kind: .time, index: 1)
+        }
+        render("leaderboard-overall") { model in
+            model.previewLeaderboard(TogetherLeaderboard(board: "points", scope: .global, game: nil, entries: Array(top.prefix(5)), me: .init(rank: 57, value: 1_830, listed: false), total: 312),
+                                     game: nil, index: 0)
+        }
+        render("leaderboard-missing") { model in model.previewLeaderboard(nil, game: found.first, missing: true) }
+        render("trophies-board") { model in
+            if let index = model.games.firstIndex(where: { model.trophies[$0.id] != nil }) { model.selected = index }
+            model.overlay = .trophies; model.trophyIndex = 1
+        }
         render("profile-activity") { model in
             let ayseProfile = TogetherProfile(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, bio: "Souls games, slowly.", country: "TR", friendship: "friends")
             let library = found.prefix(3).map { TogetherPlayedGame(titleId: $0.titleID, names: ["en": $0.name], iconUrl: nil, lastPlayedAt: ago(30), secondsPlayed: 26_100, trophiesEarned: 9, trophiesTotal: 40, progress: 22, points: 420) }

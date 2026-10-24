@@ -107,6 +107,8 @@ enum Overlay: Equatable {
     case party
     /// Friends' activity on AnyTogether.
     case feed
+    /// A game's leaderboard, or overall trophy points.
+    case leaderboard
 }
 
 struct Toast: Identifiable, Equatable {

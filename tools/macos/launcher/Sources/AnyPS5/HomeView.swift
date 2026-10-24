@@ -607,6 +607,9 @@ extension AppModel {
         case .feed:
             feedCommand(command)
             return true
+        case .leaderboard:
+            leaderboardCommand(command)
+            return true
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
@@ -617,6 +620,7 @@ extension AppModel {
             switch command {
             case .up: moveTrophy(-1)
             case .down: moveTrophy(1)
+            case .select: if togetherUser != nil { openLeaderboard(selectedGame) }
             case .back, .options: closeOverlay()
             default: break
             }
