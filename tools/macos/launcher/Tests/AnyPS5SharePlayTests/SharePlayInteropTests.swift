@@ -67,7 +67,7 @@ final class SharePlayInteropTests: XCTestCase {
         let joined = try await client.startSharePlay(titleId: "PPSA01234", title: "Interop Quest", open: true, maxViewers: 2)
         let id = joined.sharePlay.id
         note("share play \(id) on device \(joined.sharePlay.hostDevice)")
-        try JSONSerialization.data(withJSONObject: ["sharePlayId": id, "hostId": me.id]).write(to: out.appendingPathComponent("share.json"))
+        try JSONSerialization.data(withJSONObject: ["sharePlayId": id, "hostId": me.id, "handle": me.handle]).write(to: out.appendingPathComponent("share.json"))
 
         let host = SharePlayHost(iceServers: joined.iceServers, send: { to, device, signal in
             note("→ \(signal.kind.rawValue) to \(to.prefix(8))")
