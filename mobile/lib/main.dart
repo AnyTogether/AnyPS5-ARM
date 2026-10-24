@@ -15,6 +15,7 @@ import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
+import 'together/together_hub.dart';
 import 'stream/platform_player.dart';
 import 'ui/activity_card.dart';
 import 'ui/home_screen.dart';
@@ -105,6 +106,9 @@ class _RemoteAppState extends State<RemoteApp> {
           ..enabled = widget.preferences.getBool('vibration') ?? true)
         ..motion = (MotionSource()
           ..enabled = widget.preferences.getBool('motion') ?? true);
+
+  /// AnyTogether's live side: friends, messages, the party and its voice, on every screen.
+  late final TogetherHub _together = TogetherHub(account: _session.together);
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;
@@ -141,6 +145,7 @@ class _RemoteAppState extends State<RemoteApp> {
   void initState() {
     super.initState();
     _session.addListener(_changed);
+    _together.addListener(_changed);
     if (_welcomed) _search();
     // Without the cable port the phone still works over Wi-Fi.
     _cableLink.start().catchError((_) {});
@@ -249,6 +254,7 @@ class _RemoteAppState extends State<RemoteApp> {
     _readyTimer?.cancel();
     _layoutSave?.cancel();
     _cableLink.stop();
+    _together.dispose();
     _session.close();
     super.dispose();
   }

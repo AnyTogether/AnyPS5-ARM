@@ -260,6 +260,23 @@ class TogetherAccount extends ChangeNotifier {
 
   // Calls
 
+  /// A signed-in call to AnyTogether's API, JSON both ways.
+  Future<Map<String, dynamic>> call(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+  ]) => _authorized(method, path, body);
+
+  /// The access token for the realtime gateway; [renew] refreshes it first, after the gateway
+  /// turned it down.
+  Future<String> accessToken({bool renew = false}) {
+    if (renew) _accessExpiry = DateTime.fromMillisecondsSinceEpoch(0);
+    return _accessToken();
+  }
+
+  /// The session was signed out on another device or the website: forgotten here too.
+  void signedOutElsewhere() => _forget();
+
   /// The access token, refreshed first when it is about to expire; one refresh at a time.
   Future<String> _accessToken() async {
     final access = _access;
@@ -287,13 +304,17 @@ class TogetherAccount extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>> _authorized(String method, String path) async {
+  Future<Map<String, dynamic>> _authorized(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async {
     try {
-      return await _send(method, path, null, token: await _accessToken());
+      return await _send(method, path, body, token: await _accessToken());
     } on TogetherProblem catch (problem) {
       if (problem.status != 401 || _refresh == null) rethrow;
       _accessExpiry = DateTime.fromMillisecondsSinceEpoch(0);
-      return _send(method, path, null, token: await _accessToken());
+      return _send(method, path, body, token: await _accessToken());
     }
   }
 
