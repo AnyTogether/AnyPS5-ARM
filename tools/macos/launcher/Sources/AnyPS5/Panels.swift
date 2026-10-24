@@ -463,8 +463,8 @@ extension AppModel {
             if command == .back || command == .left { leaveRows(single) }
             return true
         }
-        panelRow = min(panelRow, rows.count - 1)
-        if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { panelRow = first }
+        focusRow(focusedRow(in: rows), in: rows)
+        if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { focusRow(first, in: rows) }
         let row = rows[panelRow]
         switch command {
         case .up: movePanelRow(-1, rows)
@@ -495,7 +495,7 @@ extension AppModel {
 
     private func enterRows(_ rows: [PanelRow]) {
         guard let first = rows.firstIndex(where: \.focusable) else { return }
-        panelRow = first
+        focusRow(first, in: rows)
         panelInRows = true
         Sounds.shared.play(.move)
     }
@@ -510,7 +510,7 @@ extension AppModel {
         var next = panelRow + delta
         while rows.indices.contains(next) && !rows[next].focusable { next += delta }
         guard rows.indices.contains(next) else { return }
-        panelRow = next
+        focusRow(next, in: rows)
         Sounds.shared.play(.move)
     }
 
@@ -597,7 +597,7 @@ struct SettingsPanel: View {
             .frame(width: 330 * scale)
             .padding(.trailing, 36 * scale)
             if let current {
-                RowList(rows: current.rows, focusedRow: model.panelInRows ? model.panelRow : nil)
+                RowList(rows: current.rows, focusedRow: model.panelInRows ? model.focusedRow(in: current.rows) : nil)
                     .id(current.id)
                     .transition(.opacity.combined(with: .offset(x: 18 * scale)))
             }
@@ -625,7 +625,7 @@ struct SidePanel: View {
             VStack(alignment: .leading, spacing: 8 * scale) {
                 Text(title).font(.display(30 * scale, .light)).foregroundStyle(.white).lineLimit(2)
                 if let subtitle { Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)) }
-                RowList(rows: rows, focusedRow: model.panelRow)
+                RowList(rows: rows, focusedRow: model.focusedRow(in: rows))
                     .padding(.top, 18 * scale)
             }
             .padding(36 * scale)
@@ -664,7 +664,7 @@ struct RowList: View {
                     .id(row.id)
                     .onTapGesture {
                         if model.overlayHasCategories { model.panelInRows = true }
-                        model.panelRow = index
+                        model.focusRow(index, in: rows)
                         model.activate(row)
                     }
             }

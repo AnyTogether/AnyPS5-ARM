@@ -153,7 +153,23 @@ final class AppModel: ObservableObject {
         didSet { if oldValue != overlay { discoverOverlayChanged() } }
     }
     @Published var panelCategory = 0
-    @Published var panelRow = 0
+    @Published var panelRow = 0 {
+        didSet { if !keepingFocus { panelFocusID = nil } }
+    }
+    /// The item the panel's focus is on, so rows coming in above it do not move it to another.
+    var panelFocusID: String?
+    private var keepingFocus = false
+
+    /// Focuses row `index` of `rows`, remembering which item that is.
+    func focusRow(_ index: Int, in rows: [PanelRow]) {
+        keepingFocus = true
+        panelRow = index
+        panelFocusID = rows.indices.contains(index) ? rows[index].id : nil
+        keepingFocus = false
+    }
+
+    /// Where the focused item is in `rows` now.
+    func focusedRow(in rows: [PanelRow]) -> Int { ListFocus.index(of: panelFocusID, in: rows.map(\.id), fallback: panelRow) }
     @Published var panelInRows = false
     /// The pad action waiting for a key in the controls panel.
     @Published var capturing: PadAction?
