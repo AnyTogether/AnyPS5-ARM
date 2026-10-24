@@ -1,238 +1,207 @@
 # 2. Mimari
 
-## Genel tablo
+## İki satırda fikir
+
+**Oyuncular birbirleriyle doğrudan konuşur.** Ses, share play (birlikte oynama) görüntüsü ve arkadaşın kontrolcüsü,
+oyuncuların kendi makineleri arasında eşten eşe (P2P), şifreli olarak ve sunucumuzdan geçmeden akar.
+**Sunucu yalnızca onları tanıştırır ve saklanması gerekeni saklar:** hesaplar, profiller, kupalar,
+arkadaşlar, çevrimdışı olanlar için mesajlar ve doğrudan kurulamayan az sayıdaki bağlantı için bir
+relay (aktarma sunucusu).
+
+## Genel resim
 
 ```mermaid
 flowchart LR
-    subgraph Clients [İstemciler]
-        L[AnyPS5 launcher<br/>macOS, Swift]
-        P[AnyPS5 Remote<br/>iOS / Android, Flutter]
-        W[Web sitesi<br/>anytogether.kodla.agency]
+    subgraph Players [Oyuncular]
+        L1[Launcher<br/>macOS · Swift]
+        L2[Launcher<br/>Windows / Linux · Rust]
+        P[AnyPS5 Remote<br/>iOS / Android · Flutter]
+        W[Tarayıcı]
     end
 
     subgraph Cloudflare
-        CF[DNS, TLS, CDN, WAF<br/>proxy'li: web, api, rt]
-        R2[(R2 nesne depolama<br/>avatarlar, temalar, indirmeler,<br/>klip öne çıkanları)]
+        CF[anytogether.kodla.agency<br/>DNS, TLS, CDN, WAF]
+        R2[(R2 dosyaları<br/>anytogether-cdn.kodla.agency)]
     end
 
-    subgraph "Sunucumuz (Docker Compose)"
-        API[api<br/>TypeScript, Hono, Node 22]
-        RT[realtime gateway<br/>WebSocket, aynı kod tabanı]
-        WK[worker<br/>işler: nadirlik, liderlik tabloları,<br/>e-posta, anlık bildirim, temizlik]
-        WEB[web<br/>Next.js]
-        PG[(PostgreSQL 17)]
-        VK[(Valkey<br/>çevrimiçi durumu, pub/sub,<br/>istek sınırları)]
-        LK[LiveKit sunucusu<br/>WebRTC SFU: ses,<br/>Share play görüntüsü, veri]
-        TURN[coturn / LiveKit TURN<br/>UDP 3478, TLS 5349]
+    subgraph "Sunucumuz"
+        WEB[web · Next.js]
+        API[api · TypeScript, Hono<br/>/api/v1]
+        RT[gerçek zamanlı gateway<br/>/rt · WebSocket<br/>çevrimiçi durumu, mesajlar, sinyalleşme]
+        WK[worker · işler]
+        PG[(PostgreSQL)]
+        VK[(Valkey)]
+        TURN[STUN / TURN relay<br/>anytogether-relay.kodla.agency<br/>coturn]
     end
 
-    L -- HTTPS --> CF --> API
-    P -- HTTPS --> CF
-    W -- HTTPS --> CF --> WEB
-    L -- WSS --> CF --> RT
-    P -- WSS --> CF
-    W -- WSS --> CF
-    API --> PG
-    API --> VK
-    RT --> VK
-    RT --> PG
-    WK --> PG
-    WK --> VK
-    API -- presigned URL'ler --> R2
-    L -- WebRTC, UDP, proxy'siz --> LK
-    P -- WebRTC --> LK
-    W -- WebRTC --> LK
-    LK --- TURN
-    API -- oda token'ları --> LK
+    L1 & L2 & P & W -- HTTPS / WSS --> CF --> WEB & API & RT
+    API --> PG & VK
+    RT --> VK & PG
+    WK --> PG & VK
+    API -. "imzalı URL'ler" .-> R2
+
+    L1 <== "WebRTC, doğrudan (P2P)<br/>ses · share play · kontrolcü" ==> P
+    L2 <== "WebRTC, doğrudan (P2P)" ==> W
+    L1 <== "WebRTC, doğrudan (P2P)" ==> L2
+    L1 -. "yalnızca doğrudan bağlantı kurulamazsa" .-> TURN
 ```
 
-Üç kapı (launcher, telefon, web) HTTPS üzerinden tek bir API ile, bir WebSocket üzerinden de tek bir
-realtime gateway ile konuşur. Ses ve Share play görüntüsü WebRTC üzerinden istemciden SFU'ya, yani
-bir LiveKit sunucusuna gider; Cloudflare bunu proxy'leyemez (UDP), bu yüzden onun hostname'i yalnızca
-DNS'tir. Dosyalar kısa ömürlü presigned URL'lerle doğrudan Cloudflare R2'ye gider ve oradan gelir;
-böylece büyük yüklemeler hiçbir zaman sunucumuzdan geçmez.
+Sunucu gerektiren her şey Cloudflare arkasındaki **tek bir hostname'e**, `anytogether.kodla.agency`'ye
+gider: web sitesi `/`'da, API `/api/v1`'de, gerçek zamanlı gateway `/rt`'de. Medya WebRTC ile
+**oyuncudan oyuncuya** gider. Yalnızca iki oyuncunun ağları birbirine ulaşamadığında (katı
+NAT'lar, bazı mobil ve ofis ağları; genellikle çiftlerin %10-20'si) TURN relay'imizden geçer ve
+yine de uçtan uca şifreli kalır.
 
-## Hostname'ler
+## Hostname'ler (yalnızca kodla.agency'nin bir seviye altında)
 
-| Hostname | Cloudflare proxy'si | Kim yanıt veriyor |
+Cloudflare'in ücretsiz sertifikası `kodla.agency`'yi ve tek seviye derinlikte `*.kodla.agency`'yi kapsar;
+`api.anytogether.kodla.agency` gibi bir ad ücretli sertifika gerektirir ve akılda tutması da zordur. Bu yüzden
+her şey yola göre ayrılmış tek bir hostname'de durur; buna onunla paylaşılamayan iki kardeş hostname eklenir:
+
+| Hostname | Cloudflare proxy'sinden geçiyor mu | Kim yanıt veriyor |
 |---|---|---|
-| `anytogether.kodla.agency` | evet | Web sitesi (bugün: "yakında" sayfası) |
-| `api.anytogether.kodla.agency` | evet | REST API (`/v1/...`) |
-| `rt.anytogether.kodla.agency` | evet (WebSocket'ler) | Realtime gateway (`/v1/socket`) |
-| `live.anytogether.kodla.agency` | **hayır** (yalnızca DNS) | LiveKit: sinyalleşme WSS üzerinden, medya UDP 50000-60000 ve TCP 7881 üzerinden |
-| `turn.anytogether.kodla.agency` | **hayır** | UDP 3478 ve TLS 5349 üzerinden TURN (UDP'yi engelleyen ağlar için) |
-| `cdn.anytogether.kodla.agency` | evet | R2 herkese açık bucket: avatarlar, tema önizlemeleri, indirmeler |
+| `anytogether.kodla.agency` | evet | `/` web sitesi, `/api/v1/...` API, `/rt` gerçek zamanlı gateway (WebSocket), `/.well-known/...` |
+| `anytogether-cdn.kodla.agency` | evet | Cloudflare R2: avatarlar, tema dosyaları ve önizlemeleri, indirme aynaları |
+| `anytogether-relay.kodla.agency` | **hayır** (yalnızca DNS; UDP proxy'lenemez) | STUN ve TURN: UDP/TCP 3478, TLS 5349 |
 
-## Servisler
+Sunucuda Coolify'ın Traefik'i yola göre yönlendirir: `/api` API'ye, `/rt` gateway'e, geri kalanı
+web sitesine (her biri kendi container'ına sahip ayrı bir Coolify uygulaması).
+
+## Ne nereye gider
+
+| Trafik | Yol | Neden |
+|---|---|---|
+| Giriş, profiller, kupalar, kütüphane, arkadaşlar, temalar | istemci → sunucu (HTTPS) | saklanmalı ve paylaşılmalı |
+| Çevrimiçi durumu (kim çevrimiçi, ne oynuyor) | istemci ↔ gateway (WSS) | sen onlara bağlı olmasan bile arkadaşların bunu öğrenmeli |
+| Mesajlar | istemci ↔ gateway, PostgreSQL'de saklanır | çevrimdışı olanlara ve onların tüm cihazlarına ulaşmalı |
+| WebRTC sinyalleşmesi (offer'lar, answer'lar, ICE adayları) | istemci ↔ gateway ↔ istemci | tanıştırma; çağrı başına birkaç kilobayt |
+| **Ses** | **oyuncu ↔ oyuncu** (WebRTC, Opus) | en düşük gecikme, sunucu bant genişliği yok |
+| **Share play görüntüsü ve oyun sesi** | **yayıncı → izleyici** (WebRTC, H.264 + Opus) | en düşük gecikme; 720p60 bir yayın ~8 Mbit/s eder ve sunucumuz bunu hiç taşımaz |
+| **Arkadaşın kontrolcüsü** | **izleyici → yayıncı** (WebRTC veri kanalı) | her milisaniye önemli |
+| Doğrudan bağlantı mümkün değilse relay | oyuncu ↔ TURN ↔ oyuncu | her zaman çalışsın diye; relay yalnızca şifreli paketleri görür |
+
+## Sunucumuzdaki servisler
 
 ### api (TypeScript, Node 22 üzerinde Hono)
 
-Veriyi değiştiren tek yer. Durumsuzdur; Cloudflare arkasında istenen sayıda kopya çalışabilir.
+Saklanan veriyi değiştiren tek yer; durumsuz. TypeScript, çünkü web sitesi de TypeScript;
+böylece şemalar (Zod) bir kez yazılır ve onlardan üretilen OpenAPI belgesi **Swift** (macOS launcher'ı),
+**Rust** (Windows/Linux launcher'ı), **Dart** (telefon) ve **TypeScript** (web) için tipli istemciler
+sağlar. Hono, çünkü küçük, web standartlarına uygun ve taşınabilir (bugün Node, ileride Bun ya da
+Cloudflare Workers). İncelenmiş SQL migration'larıyla Drizzle. Hatalar, her istemcinin kendi diline çevirdiği
+sabit kodlarla RFC 9457 problem details biçiminde.
 
-- **Neden TypeScript:** web sitesi de TypeScript, dolayısıyla istek ve yanıt şekilleri bir kez
-  yazılır (`packages/shared`, Zod şemalarıyla) ve API, gateway ve web tarafından kullanılır.
-  Launcher (Swift) ve telefon uygulaması (Dart), API'nin yayınladığı OpenAPI belgesinden üretilen
-  tipleri alır.
-- **Neden Hono:** küçük, hızlı, standart Web API'leri (`Request`/`Response`); bugün Node üzerinde,
-  ileride yeniden yazmaya gerek kalmadan Cloudflare Workers ya da Bun üzerinde çalışır.
-- **Veritabanı erişimi:** depoda SQL migration'larıyla Drizzle ORM; her migration deploy anında
-  üretilmez, gözden geçirilmiş SQL'dir.
-- **Doğrulama:** her girdide Zod; aynı şemalar OpenAPI belgesini de üretir.
-- **Hatalar:** istemcilerin kendi dillerine çevirdiği sabit bir `code` içeren RFC 9457 problem
-  details (`application/problem+json`).
+### gerçek zamanlı gateway (aynı kod tabanı, ayrı süreç)
 
-### realtime gateway (aynı kod tabanı, ayrı süreç)
-
-Oturum açmış her istemciye açık bir WebSocket tutar ve olayları iter: bir arkadaş çevrimiçi oldu,
-bir mesaj geldi, bir parti daveti, akışta bir kupa. Kendine ait hiçbir durum tutmaz: kimin
-çevrimiçi olduğu Valkey'de durur, gateway süreçleri arasındaki olaylar Valkey pub/sub üzerinden
-taşınır; böylece A gateway'ine bağlı bir kullanıcı, B gateway'i üzerinden gönderilen bir mesajı alır.
+Giriş yapmış her istemci için bir WebSocket. Çevrimiçi durumu heartbeat'lerini ve değişikliklerini, mesaj teslimini,
+bildirimleri ve **WebRTC sinyalleşmesini** taşır: Ayşe Utku'yu aradığında offer'ı gateway'e gider,
+gateway onu Utku'nun cihazlarına iletir; answer'lar ve ICE adayları da aynı yoldan geri döner. Kendine ait
+hiçbir durum tutmaz: çevrimiçi durumu Valkey'de, gateway süreçleri arasındaki olaylar Valkey pub/sub üzerinden.
 
 ### worker (aynı kod tabanı, ayrı süreç)
 
-Bir isteği yavaşlatmaması gereken işler; pg-boss ile PostgreSQL içinde kuyruğa alınır (ek bir
-broker yok):
+PostgreSQL içinde pg-boss işleri: kupa nadirliği, liderlik tabloları, e-posta (giriş kodları), anlık
+bildirimler (APNs, FCM), görsel boyutlandırma ve denetimi, bekleme süresi dolduktan sonra hesap silme.
 
-- değişen oyunlar için kupa nadirliğini yeniden hesaplamak;
-- liderlik tablolarını yeniden oluşturmak (her 10 dakikada bir, isteyen kullanıcı için hemen);
-- e-posta (doğrulama, parola sıfırlama) ve anlık bildirim (APNs, FCM) göndermek;
-- R2'ye yüklenen avatarları ve tema önizlemelerini yeniden boyutlandırmak;
-- silinmesi istenen hesapları 14 günlük bekleme süresinden sonra silmek; eski oturumları sona erdirmek.
+### web (Next.js)
 
-### web (Next.js, App Router)
+Herkese açık profiller ve oyun sayfaları sunucu tarafında render edilir (hızlı, paylaşılabilir, bağlantı önizlemeli);
+giriş yapılmış uygulama (arkadaşlar, mesajlar, tarayıcıda sesli sohbetli partiler, share play izleyicisi, Tema Hub'ı,
+indirmeler, liderlik tabloları, ayarlar) tarayıcıda çalışır. Herkesle aynı API'yi kullanır.
 
-Web sitesi: herkese açık profiller (`/u/<name>`), oturum açma, ayarlar, arkadaşlar, mesajlar,
-tarayıcıda sesli sohbetli partiler, Tema Hub'ı, indirmeler, liderlik tabloları. Herkese açık
-sayfalar sunucu tarafında render edilir (hızlı, paylaşılabilir, iyi bağlantı önizlemeleri),
-oturum açılmış uygulama istemci tarafında. Herkesle aynı API'yi çağırır; kendine ait bir
-veritabanı erişimi yoktur.
+### PostgreSQL 17, Valkey 8
 
-### PostgreSQL 17
+PostgreSQL kalıcı olması gereken her şeyi tutar. Valkey kaybolabilecek olanları tutar: çevrimiçi durumu (60 sn ömür),
+pub/sub, istek sınırları, kısa ömürlü giriş kodları, yeniden bağlanmalar için olayların son birkaç dakikası.
 
-Asıl doğruluk kaynağı: hesaplar, profiller, oyunlar, kupalar, arkadaşlıklar, mesajlar, partiler,
-temalar, şikâyetler. Seçilme nedeni, buradaki her işi iyi yapması (ilişkisel veri, esnek meta veri
-için JSONB, kullanıcı ve oyun bulmak için tam metin ve trigram araması, sayaçlar için satır
-düzeyinde kilitler) ve iyi yedeklenen tek bir veritabanını işletmenin birkaç taneyi işletmekten
-daha kolay olması.
+### coturn (STUN ve TURN)
 
-### Valkey (açık kaynak Redis)
+STUN her oyuncuya kendi genel adresini söyler; böylece iki oyuncu router'larını delerek birbirine
+ulaşabilir (ICE). Bu başarısız olursa TURN medyayı aktarır. Kimlik bilgileri kısa ömürlüdür (API tarafından
+çağrı başına verilir, HMAC tabanlı, 12 saat geçerli). TURN yalnızca DTLS-SRTP ile şifrelenmiş medya görür:
+hiçbir şey duyamaz, hiçbir şey göremez.
 
-Hızlı, geçici durum: çevrimiçi durumu (kimin çevrimiçi olduğu ve ne oynadığı; heartbeat'lerle
-yenilenen 60 s'lik bir sona erme süresiyle), gateway süreçleri arasında pub/sub, istek sınırı
-sayaçları, kısa ömürlü cihaz bağlama kodları. Valkey'deki hiçbir şeyin yeniden başlatmadan sağ
-çıkması gerekmez; önemli olanı veritabanı yeniden oluşturabilir.
+### İleride, isteğe bağlı: bir SFU
 
-### LiveKit (açık kaynak WebRTC SFU, kendi sunucumuzda)
+Herkesin konuştuğu 8 kişilik bir partide eşten eşe, her birinin 7 ses akışı göndermesi demektir (7 × 32
+kbit/s ≈ 0.2 Mbit/s, sorun değil). Çok sayıda izleyiciye share play'de ise eşten eşe, yayıncının her izleyici için
+ayrı bir görüntü yüklemesi demektir (3 izleyici ≈ 24 Mbit/s upload; pek çok ev için fazla). Ancak o zaman
+bir yönlendirme sunucusu (LiveKit gibi bir SFU) çalıştırmaya değer. Bu sonradan eklenecek, isteğe bağlı bir eklentidir:
+varsayılan doğrudan bağlantıdır.
 
-Sesli sohbeti ve Share play'i taşır.
+## Teknoloji seçimleri
 
-- **Neden SFU:** her katılımcı sesini (yayıncı da oyun görüntüsünü) bir kez gönderir; sunucu onu
-  diğerlerine iletir. Mesh WebRTC üç-dört kişiden sonra dağılır; MCU ise karıştırma için CPU harcar.
-  Parti sesli sohbeti ve birden-birkaç kişiye yayın için standart SFU'dur.
-- **Neden LiveKit:** açık kaynak (Apache 2.0), Go ile yazılmış, tek binary ve tam da bizim üç
-  kapımız için istemci SDK'ları var: **Swift** (launcher), **Flutter** (telefon uygulaması) ve
-  **JavaScript** (web). İstemcilerde yankı engelleme ve gürültü bastırmayla Opus sesi, simulcast'i,
-  veri kanallarını (Share play'in arkadaşın kolu için kullandığı) ve API'mizin imzaladığı oda
-  token'larını halleder.
-- **TURN:** UDP'yi engelleyen ağların arkasındaki oyuncular için LiveKit'in gömülü TURN'ü ya da
-  yanında coturn. 5349 üzerinden TLS'li TURN, gecikmeden biraz ödün vererek neredeyse her
-  güvenlik duvarını aşar.
+| İhtiyaç | Seçim | Neden |
+|---|---|---|
+| API ve gateway | TypeScript, Node 22, Hono | web ile tek dil, ortak şemalar |
+| Veritabanı | PostgreSQL 17 + Drizzle | ihtiyacımız olan her şey tek motorda; SQL migration'ları |
+| İşler | pg-boss | PostgreSQL içinde kuyruk |
+| Geçici durum | Valkey 8 | Redis uyumlu, açık lisans |
+| Eşten eşe medya | **WebRTC** | tam olarak bunun için yapılmış: NAT geçişi (ICE/STUN/TURN), şifreleme (DTLS-SRTP), Opus ses, düşük gecikmeli görüntü, veri kanalları; her tarayıcıda var ve her platform için kütüphanesi mevcut |
+| Platform başına WebRTC | macOS: Google'ın WebRTC framework'ü (Swift paketi); Windows/Linux: `webrtc-rs` (saf Rust) ya da LiveKit'in `libwebrtc` Rust bağlamaları; telefon: `flutter_webrtc`; web: tarayıcının kendisi | her launcher kendi dilinde |
+| Relay | coturn | standart TURN sunucusu |
+| Web sitesi | Next.js | herkese açık sayfalar için SSR |
+| Dosyalar | Cloudflare R2 | S3 API, çıkış trafiği ücreti yok |
+| Giriş | OpenID Connect (Apple, Google, Discord) + şifresiz e-posta kodları; passkey'ler ileride | tek dokunuş, akılda tutulacak bir şey yok (bkz. [API](04-api.md)) |
+| Anlık bildirim | APNs, FCM HTTP v1 | doğrudan, aracısız |
+| Hatalar / metrikler | Sentry, Prometheus + Grafana | standart |
+| Dağıtım | Hetzner sunucumuzda Coolify (git push → build → deploy), Traefik | sunucunun zaten 30'dan fazla site için çalıştırdığı şey |
 
-### Cloudflare (zaten alan adının önünde)
-
-DNS, TLS sertifikaları, herkese açık sayfaların ve dosyaların önbelleğe alınması, uçta web
-uygulama güvenlik duvarı ve istek sınırlama, ve dosyalar için **R2**: avatarlar, tema paketleri
-ve önizlemeleri, klip öne çıkanları ve AnyPS5 sürümlerinin indirme aynaları. R2'de çıkış
-(egress) ücreti yoktur; bu da indirmeler için önemlidir.
-
-## Teknoloji seçimleri, tek tabloda
-
-| İhtiyaç | Seçim | Neden | Değerlendirilenler |
-|---|---|---|---|
-| API dili | TypeScript (Node 22 LTS) | Web ile tek dil, ortak şemalar, geniş ekosistem | Go (daha hızlı ama iki dil), sunucuda Swift (launcher ile ortak, küçük ekosistem) |
-| HTTP framework | Hono | Web standardı, çok küçük, Workers/Bun'a taşınabilir | Fastify, Express, NestJS |
-| Veritabanı | PostgreSQL 17 | İhtiyacımız olan her şey tek motorda | MySQL, SQLite (tek yazıcı), Mongo |
-| ORM / migration'lar | Drizzle + SQL migration'ları | Tipli sorgular, düz SQL olarak migration'lar | Prisma (daha ağır istemci), Kysely |
-| İşler | pg-boss | PostgreSQL içinde kuyruk, ek servis yok | BullMQ (Redis kalıcılığı gerektirir) |
-| Önbellek / çevrimiçi durumu | Valkey 8 | Redis uyumlu, açık lisans | Redis, KeyDB |
-| Gerçek zamanlı | Kendi WebSocket gateway'imiz | Olaylar ve kimlik doğrulama üzerinde tam kontrol, küçük | Socket.IO, Centrifugo, Ably |
-| Ses / görüntü | LiveKit (kendi sunucumuzda) | Swift, Flutter ve JS SDK'ları olan SFU | Janus, mediasoup (hazır mobil SDK yok), Agora (ücretli, kapalı) |
-| TURN | LiveKit TURN ya da coturn | Standart, kendini kanıtlamış | Twilio NTS (ücretli) |
-| Dosyalar | Cloudflare R2 | S3 API, çıkış ücreti yok, zaten Cloudflare'de | Backblaze B2, S3 |
-| Web sitesi | Next.js (App Router) | Herkese açık sayfalar için SSR, React | Astro, SvelteKit, Remix |
-| E-posta | Resend (ya da kodla.agency üzerinden SMTP) | Basit API, iyi teslimat | SES, Postmark |
-| Anlık bildirim | Doğrudan APNs (token auth) ve FCM HTTP v1 | Aracı yok | OneSignal |
-| Hatalar | Sentry (kendi sunucumuzda ya da SaaS) | Swift, Dart, JS ve Node SDK'ları | GlitchTip |
-| Metrikler | Prometheus + Grafana, LiveKit'in kendi metrikleri | Standart | Datadog (ücretli) |
-| Deploy | Sunucumuzda Docker Compose, imajları derlemek için GitHub Actions | Basit, başlangıç için tek makine | Kubernetes (şimdilik fazla) |
-
-## Bir istek nasıl akar
-
-**Launcher'dan oturum açma** (cihaz bağlama, Mac'te parola yazılmaz):
+## Bir çağrı nasıl kurulur (ses ya da share play)
 
 ```mermaid
 sequenceDiagram
-    participant L as Launcher
-    participant A as API
-    participant U as Kullanıcının telefonu ya da tarayıcısı
-    L->>A: POST /v1/auth/device {client: "launcher", name: "Utku's MacBook"}
-    A-->>L: {device_code, user_code: "K7Q-2MX", verify_url, interval: 5}
-    L->>L: kodu ve verify_url'nin QR'ını gösterir
-    U->>A: anytogether.kodla.agency/link'i açar, oturum açar, K7Q-2MX yazar
-    A-->>U: "Utku's MacBook'a izin verilsin mi?" → İzin ver
-    loop her 5 s'de bir
-        L->>A: POST /v1/auth/token {device_code}
-    end
-    A-->>L: {access_token (15 min), refresh_token, user}
-    L->>A: WSS rt…/v1/socket (access token)
+    participant A as Ayşe (launcher, Windows)
+    participant G as Gateway
+    participant API as API
+    participant U as Utku (launcher, macOS)
+    A->>API: POST /api/v1/calls {party}
+    API-->>A: çağrı kimliği, TURN kimlik bilgileri (12 saat)
+    A->>G: signal {to: Utku, offer (SDP)}
+    G->>U: signal {from: Ayşe, offer}
+    U->>API: (o da TURN kimlik bilgilerini alır)
+    U->>G: signal {to: Ayşe, answer}
+    G->>A: answer
+    A-->>U: ICE adayları G üzerinden iki yönde
+    A<<->>U: WebRTC: mümkünse doğrudan UDP, değilse TURN
+    Note over A,U: ses / görüntü / kontrolcü oyuncudan oyuncuya akar
 ```
 
-Bu, OAuth 2.0 Device Authorization'dır (RFC 8628). Telefon uygulaması launcher ile zaten
-eşleştirilmişse kodu tek dokunuşla kendisi onaylayabilir.
+## Depo düzeni (kod yazılmaya başlandığında)
 
-**Oynarken kazanılan bir kupa:**
-
-1. Launcher kupayı fark eder (bugün bildirim için yaptığı gibi) ve yerel giden kutusuna ekler
-   (Application Support'ta küçük bir SQLite dosyası).
-2. Giden kutusu; title ID, kupa ID'si, derece ve kazanılma zamanıyla `POST /v1/me/trophies`
-   gönderir. Çevrimdışıysa daha sonra yeniden gönderilir; sunucu zaten sahip olduğu bir kupayı yok sayar.
-3. API kaydı saklar, bu kullanıcının oyundaki ilerlemesini günceller ve bir nadirlik yeniden
-   hesaplamasını kuyruğa alır.
-4. API, `trophy.earned` olayını Valkey'e yayınlar; bir arkadaşın soketini tutan her gateway onu
-   iter ve arkadaşların launcher'ları, telefonları ve web akışları onu gösterir.
-
-## Depo yapısı (kod yazılmaya başladığında)
-
-Yeni bir depo, `utkuhalis/AnyTogether` (monorepo, pnpm workspaces):
+`utkuhalis/AnyTogether` (monorepo, pnpm workspaces):
 
 ```
 apps/
-  api/          Hono API'si (REST /v1)
-  realtime/     WebSocket gateway'i
+  api/          Hono API (/api/v1)
+  realtime/     WebSocket gateway: çevrimiçi durumu, mesajlar, sinyalleşme
   worker/       pg-boss işleri
   web/          Next.js web sitesi
 packages/
-  shared/       Zod şemaları, olay tipleri, hata kodları, OpenAPI üretimi
+  shared/       Zod şemaları, olay ve sinyalleşme tipleri, hata kodları, OpenAPI
   db/           Drizzle şeması ve SQL migration'ları
+clients/
+  rust/         Windows/Linux launcher'ı için `anytogether` crate'i (MIT/Apache-2.0)
+  swift/        macOS launcher'ı için üretilmiş tipler (AnyPS5-ARM'dan kullanılır)
+  dart/         telefon uygulaması için üretilmiş tipler
 infra/
-  compose.yaml  PostgreSQL, Valkey, LiveKit, coturn, api, realtime, worker, web, Caddy
-  livekit.yaml
-  backups/      pg_dump'ı R2'ye yükleyen script'ler
-docs/           bu plan, güncel tutulur
+  Dockerfiles   her uygulama için bir tane, Coolify tarafından build edilir
+  coturn/       turnserver.conf, relay'in compose dosyası
+  backups/
+docs/           bu plan
 ```
 
-İstemci tarafı, istemcilerin yaşadığı yerde, AnyPS5-ARM içinde durur: `tools/macos/launcher/Sources/AnyPS5Core/Together/`
-(Swift) ve `mobile/lib/together/` (Dart). Bkz. [İstemciler](07-istemciler.md).
+macOS launcher'ının entegrasyonu AnyPS5-ARM'da (`AnyPS5Core/Together/`), telefon uygulamasınınki
+`mobile/lib/together/` altında, Windows/Linux launcher'ınınki ise Rust crate'ini kullanan kendi deposunda
+yer alır. Bkz. [İstemciler](07-istemciler.md) ve [Platformlar](12-platformlar.md).
 
-## Tasarladığımız ölçek
+## Ölçek
 
-| Aşama | Kullanıcılar | Tek sunucu yeter mi? |
+| Aşama | Hesap / çevrimiçi | Sunucu |
 |---|---|---|
-| Lansman | en fazla 5,000 hesap, 500 çevrimiçi | Evet: 4 vCPU, 8 GB RAM, her şey tek makinede |
-| Büyüme | 50,000 hesap, 5,000 çevrimiçi, 200 sesli sohbet kullanıcısı | LiveKit kendi makinesine taşınır (bant genişliği), PostgreSQL kalır |
-| Büyük | daha fazlası | Birden çok API/gateway süreci (zaten durumsuz), LiveKit kümesi, okuma replikası |
+| Lansman | 5,000 / 500 | mevcut Hetzner sunucumuz (16 vCPU, 30 GB, paylaşımlı): bellek sınırlarıyla AnyTogether ~3 GB içinde kalır; medya eşten eşe |
+| Büyüme | 50,000 / 5,000 | aynısı, artı daha fazla TURN bant genişliği |
+| Büyük | daha fazlası | daha fazla gateway/API süreci (durumsuz), ikinci bir makinede TURN, bir okuma replikası |
 
-Sesli sohbet hafiftir (konuşan başına ~32 kbit/s Opus). Share play ağırdır: tek bir 720p60 yayın,
-yayıncıdan ~10 Mbit/s yukarı ve her izleyiciye aynı miktarda aşağı demektir; sunucu onu iletir,
-bu yüzden sınırı CPU'su değil bant genişliği belirler. Share play oturumlarının çoğu tek bir
-arkadaşladır ve birçoğu ileride eşler arası bağlanacaktır (bkz. [Gerçek zamanlı](06-anlik-ses-birlikte-oynama.md)).
+Medya doğrudan gittiği için sunucunun yükü küçüktür: istekler, soketler ve ihtiyaç duyan çiftler için
+relay. Bant genişliği kullanımla birlikte büyüyen tek parça relay'dir.

@@ -1,8 +1,7 @@
 # 4. API
 
-Temel adres: `https://api.anytogether.kodla.agency/v1`. Giriş ve çıkış JSON, UTF-8; zamanlar UTC'de
-RFC 3339 biçiminde, kimlikler UUIDv7 dizesi (zamana göre sıralanabilir). Hatalar RFC 9457 problem
-ayrıntısı biçimindedir:
+Temel adres: `https://anytogether.kodla.agency/api/v1` (her şey için tek hostname; bkz. [Mimari](02-mimari.md)). Giriş ve çıkış JSON, UTF-8; zamanlar UTC'de RFC 3339,
+ID'ler UUIDv7 string'leri (zamana göre sıralanabilir). Hatalar RFC 9457 problem details biçimindedir:
 
 ```json
 { "type": "https://anytogether.kodla.agency/errors/handle-taken",
@@ -10,136 +9,149 @@ ayrıntısı biçimindedir:
 ```
 
 İstemciler `code` alanını kendi dillerine çevirir (launcher ve telefon zaten İngilizce ve Türkçe
-destekliyor). API, OpenAPI 3.1 belgesini `/v1/openapi.json` adresinde yayımlar; Swift ve Dart
-tipleri bu belgeden üretilir.
+içeriyor). API, OpenAPI 3.1 belgesini `/api/v1/openapi.json` adresinde yayınlar; Swift,
+Rust, Dart ve TypeScript tipleri bundan üretilir.
 
-İstemciden gelen her istek `AnyTogether-Client: launcher/0.2.13 (macOS 26.6; Mac15,9)` başlığını
-taşır (ya da `phone/1.10.0 (iOS 27.0)`, `web/…`). API, güvenli kullanılamayacak kadar eski bir
-istemciyi `426 Upgrade Required` ve launcher'ın "AnyTogether'ı kullanmak için AnyPS5'i güncelleyin"
-olarak gösterdiği bir `code` ile reddedebilir.
+İstemciden gelen her istek, istemciyi ve platformu belirten `AnyTogether-Client` başlığını taşır:
+`launcher-macos/0.2.13 (macOS 26.6; Mac15,9)`, `launcher-windows/0.3.0 (Windows 11 24H2)`,
+`launcher-linux/0.3.0 (Fedora 41; KDE)`, `phone/1.10.0 (iOS 27.0)`, `web/…`. API, güvenli olamayacak kadar eski bir istemciyi
+`426 Upgrade Required` ve launcher'ın "AnyTogether'ı kullanmak için AnyPS5'i güncelle" olarak gösterdiği bir `code` ile reddedebilir.
 
-## 4.1 Giriş ve oturumlar
+## 4.1 Giriş: tek dokunuş, kayıt formu yok
 
-Üç giriş yolu, tek hesap:
+**Kayıt adımı da şifre de yoktur.** İlk giriş hesabı oluşturur; kullanıcı adı
+ve görünen ad sağlayıcıdan alınır (sonradan düzenlenebilir); sağlayıcıda varsa avatar da
+alınır.
 
-1. **E-posta ve parola** (web'de ve telefonda): parola Argon2id ile özetlenir
-   (m=64 MB, t=3, p=1); hesabın başkaları tarafından bulunabilmesi için e-posta önce 6 haneli bir
-   kodla doğrulanır.
-2. Web'de ve telefonda **Sign in with Apple** ve **Discord** (OAuth 2.0 / OpenID Connect);
-   doğrulanmış e-posta üzerinden ya da ayarlardan mevcut bir hesaba bağlanır.
-3. Launcher için (ve TV'ler ya da klavyesi olmayan her cihaz için) **cihaz bağlama**: OAuth 2.0
-   Device Authorization Grant, RFC 8628. Launcher bir kod ve bir QR gösterir; kullanıcı telefondan
-   ya da web'den onaylar. Launcher ile yerel ağ üzerinden zaten eşleşmiş olan telefon uygulaması
-   tek dokunuşla onaylayabilir.
-
-| Yöntem | Yol | Ne yapar |
+| Giriş yolu | Nerede | Kullanıcı ne yapar |
 |---|---|---|
-| POST | `/auth/register` | e-posta, parola, kullanıcı adı → doğrulama kodu gönderir |
-| POST | `/auth/verify-email` | kod → hesap doğrulanır |
-| POST | `/auth/login` | e-posta, parola → token'lar |
-| POST | `/auth/oauth/{apple,discord}` | sağlayıcının kodu ya da ID token'ı → token'lar |
-| POST | `/auth/device` | istemci, cihaz adı → `device_code`, `user_code`, `verification_uri`, `interval` |
-| POST | `/auth/device/approve` | (giriş yapılmış) `user_code` → o cihazı onaylar |
-| POST | `/auth/token` | `grant_type=device_code` ya da `refresh_token` → token'lar |
-| POST | `/auth/logout` | bu oturumu iptal eder |
-| GET | `/auth/sessions` | hesabın giriş yapılmış cihazları |
-| DELETE | `/auth/sessions/{id}` | bir cihazın oturumunu kapatır |
-| POST | `/auth/password/forgot`, `/auth/password/reset` | e-postayla kod gönderir, yeni parola belirler |
+| **Apple ile devam et** | macOS launcher'ı (yerel sayfa, Touch ID), iPhone (yerel), web | tek dokunuş |
+| **Google ile devam et** | her launcher (sistem tarayıcısı), Android (yerel Credential Manager), web | Google'da zaten oturum açıksa tek dokunuş |
+| **Discord ile devam et** | her launcher (sistem tarayıcısı), telefon, web | Discord'da zaten oturum açıksa tek dokunuş |
+| **E-posta kodu** | her yerde | e-postayı yaz, ardından postadaki 6 haneli kodu gir (ya da içindeki bağlantıya tıkla); akılda tutulacak bir şey yok |
+| **Telefondan** | telefon uygulaması eşleşmiş ve giriş yapmış her launcher | launcher sorar, telefon "<Mac/PC adı> için giriş yapılsın mı?" der, tek dokunuş |
+| **Cihaz kodu** (yedek) | elinin altında tarayıcı olmayan bir launcher | launcher bir kod ve bir QR gösterir; telefonda ya da web'de onaylanır |
+| Passkey'ler (ileride) | her yerde | Touch ID / Windows Hello / telefon |
 
-**Token'lar.** Erişim token'ı; kullanıcı kimliğini, oturum kimliğini ve yetki kapsamlarını taşıyan
-bir JWT'dir (EdDSA, 15 dakika). Yenileme token'ı rastgele 256 bitlik bir dizedir, yalnızca SHA-256
-özeti olarak saklanır, 60 gün geçerlidir ve **her kullanımda yenilenir**; eski bir token'ın yeniden
-kullanılması tüm oturumu iptal eder (hırsızlık tespiti). Launcher yenileme token'ını macOS
-Keychain'de, telefon iOS Keychain'de ya da Android Keystore destekli depolamada, web ise HttpOnly,
-Secure, SameSite=Lax bir çerezde tutar.
+**Launcher'lar bunu nasıl yapar**: RFC 8252'nin yerel uygulamalar için istediği gibi, sistem tarayıcısında PKCE ile
+OAuth 2.0. macOS, `ASWebAuthenticationSession` (tarayıcının oturumlarını paylaşan bir sayfa; böylece Google
+ya da Discord genellikle tek tıktır) ve Apple için `ASAuthorizationAppleIDProvider` kullanır; Windows ve Linux
+varsayılan tarayıcıyı açar ve sonucu bir loopback yönlendirmesiyle alır
+(`http://127.0.0.1:<random port>/callback`). Telefon yerel Apple, Google ve Discord akışlarını
+kullanır. Hepsi, sağlayıcının ID token'ını (OpenID Connect) doğrulayıp kendi token'larımızı veren
+API'mizde son bulur.
+
+| Metot | Yol | Ne yapar |
+|---|---|---|
+| GET | `/auth/providers` | bu istemcinin sunabileceği giriş yolları |
+| POST | `/auth/oidc/{apple,google,discord}` | sağlayıcının kodu (PKCE verifier ile) ya da ID token'ı → token'lar; ilk kullanımda hesabı oluşturur |
+| POST | `/auth/email/start` | e-posta → 6 haneli bir kod ve bir sihirli bağlantı gönderir (10 dk geçerli) |
+| POST | `/auth/email/verify` | e-posta + kod (ya da bağlantının token'ı) → token'lar |
+| POST | `/auth/handoff/start` | (launcher) cihaz adı → kullanıcının giriş yapmış telefonlarına iletilen bir handoff ID'si |
+| POST | `/auth/handoff/{id}/approve` | (telefon, giriş yapmış) → onaylar; launcher'ın yoklaması token'ları alır |
+| POST | `/auth/device` | (yedek) → `device_code`, `user_code`, `verification_uri`, `interval` (RFC 8628) |
+| POST | `/auth/device/approve` | (giriş yapmış) `user_code` → onaylar |
+| POST | `/auth/token` | `grant_type=refresh_token`, `device_code` ya da `handoff` → token'lar |
+| POST | `/auth/logout` | bu oturumu iptal eder |
+| GET / DELETE | `/auth/sessions`, `/auth/sessions/{id}` | giriş yapmış cihazlar; birinin oturumunu kapat |
+| POST | `/me/identities/{provider}` | başka bir giriş yolu bağla (tek hesapta Apple + Discord) |
+
+**Token'lar.** Erişim token'ı: kullanıcıyı, oturumu ve kapsamları içeren bir JWT (EdDSA, 15 dakika).
+Yenileme token'ı: 256 rastgele bit, yalnızca SHA-256 hash'i olarak saklanır, 90 gün geçerlidir ve **her
+kullanımda yenilenir**; eski bir token'ı yeniden kullanmak oturumu iptal eder. Platformun güvenli deposunda tutulur: macOS Keychain,
+Windows Credential Manager, Linux'ta Secret Service (GNOME Keyring, KWallet), iOS Keychain,
+Android Keystore; web'de ise HttpOnly, Secure, SameSite=Lax bir çerezde.
 
 ## 4.2 Ben, profiller ve ayarlar
 
-| Yöntem | Yol | Ne yapar |
+| Metot | Yol | Ne yapar |
 |---|---|---|
 | GET | `/me` | hesap, profil, ayarlar, sayılar |
 | PATCH | `/me/profile` | görünen ad, biyografi, ülke, vitrin, profil teması |
 | PATCH | `/me/handle` | yeni kullanıcı adı (30 günde bir) |
-| POST | `/me/avatar` | → önceden imzalanmış R2 yükleme URL'si; ardından dosya `PUT` edilir; ardından `POST /me/avatar/confirm` |
+| POST | `/me/avatar` | → imzalı R2 yükleme URL'si; ardından dosyayı `PUT` et; ardından `POST /me/avatar/confirm` |
 | PATCH | `/me/privacy` | öğe başına görünürlük (bkz. Özellikler 3.5) |
-| PATCH | `/me/notifications` | hangi anlık bildirimlerin ve e-postaların gönderileceği |
-| POST | `/me/export` | tam veri dışa aktarımını kuyruğa alır (e-postayla gelen bağlantıdan zip), KVKK/GDPR |
-| DELETE | `/me` | hesabı siler (fikir değiştirmek için 14 gün) |
-| GET | `/users/{handle}` | bir profil, isteyenin görmesine izin verildiği kadarıyla |
-| GET | `/users/search?q=` | kullanıcıları kullanıcı adına ya da isme göre bulur (trigram), yalnızca doğrulanmış hesaplar |
+| PATCH | `/me/notifications` | hangi anlık bildirimler ve e-posta bildirimleri |
+| POST | `/me/export` | tam veri dışa aktarımını sıraya al (e-postayla gelen bağlantıdan zip), KVKK/GDPR |
+| DELETE | `/me` | hesabı sil (fikrini değiştirmek için 14 gün) |
+| GET | `/users/{handle}` | bir profil, soran kişinin görebileceği haliyle |
+| GET | `/users/search?q=` | kullanıcıları kullanıcı adına ya da ada göre bul (trigram), yalnızca doğrulanmış hesaplar |
 
 ## 4.3 Oyunlar, oturumlar ve kupalar
 
-| Yöntem | Yol | Ne yapar |
+| Metot | Yol | Ne yapar |
 |---|---|---|
-| PUT | `/games/{title_id}` | kataloğa bir oyunu tanıtır: dil başına adlar, ikon yükleme URL'si (yalnızca oyun bilinmiyorsa ya da isteyen güvenilir biriyse) |
+| PUT | `/games/{title_id}` | kataloğa bir oyun öğret: dil başına adlar, ikon yükleme URL'si (yalnızca oyun bilinmiyorsa ya da soran güvenilirse) |
 | GET | `/games/{title_id}` | katalog kaydı, topluluk uyumluluğu, nadirlik özeti |
 | POST | `/me/sessions` | oturum grubu `{id, title_id, mac_id, started_at, ended_at, exit}` |
-| GET | `/users/{handle}/library` | oyunlar, oynama süresi, son oynanma, ilerleme |
-| PUT | `/trophy-sets/{title_id}/{set_hash}` | kupa seti: kimlikler, dereceler, gizli işaretleri, dil başına adlar/açıklamalar, ikon yükleme URL'leri |
+| GET | `/users/{handle}/library` | oyunlar, oynama süresi, son oynama, ilerleme |
+| PUT | `/trophy-sets/{title_id}/{set_hash}` | kupa seti: ID'ler, dereceler, gizli bayrakları, dil başına adlar/açıklamalar, ikon yükleme URL'leri |
 | POST | `/me/trophies` | grup `{title_id, set_hash, trophy_id, earned_at}`; tekrarlar yok sayılır |
-| GET | `/users/{handle}/trophies?title_id=` | kazanılan kupalar, tarihleri ve nadirlikleriyle |
+| GET | `/users/{handle}/trophies?title_id=` | tarihleri ve nadirlikleriyle kazanılmış kupalar |
 | POST | `/games/{title_id}/reports` | uyumluluk raporu (isteğe bağlı), bkz. Özellikler 3.7 |
 
 **Gruplama ve idempotency.** Launcher'ın giden kutusu en fazla 200 öğelik gruplar gönderir. Her öğe
-istemcinin ürettiği bir UUIDv7 taşır; sunucu bunu saklar ve ikinci kopyayı yok sayar, böylece bir
-grup zaman aşımından sonra çift sayım olmadan yeniden gönderilebilir. Yanıt, her öğe için `stored`,
+istemcinin ürettiği bir UUIDv7 taşır; sunucu bunu saklar ve ikinci kopyayı yok sayar; böylece bir grup,
+zaman aşımından sonra çift sayım olmadan yeniden gönderilebilir. Yanıt her öğe için `stored`,
 `duplicate` ya da bir kodla birlikte `rejected` döndürür.
 
 ## 4.4 Arkadaşlar, çevrimiçi durumu, aktivite
 
-| Yöntem | Yol | Ne yapar |
+| Metot | Yol | Ne yapar |
 |---|---|---|
-| GET | `/me/friends` | arkadaşlar, çevrimiçi durumlarıyla |
+| GET | `/me/friends` | çevrimiçi durumlarıyla arkadaşlar |
 | POST | `/me/friends/requests` | `{handle}` ya da `{qr_token}` → istek |
-| GET | `/me/friends/requests` | gelen ve giden istekler |
+| GET | `/me/friends/requests` | gelen ve giden |
 | POST | `/me/friends/requests/{id}/accept` / `decline` | |
-| DELETE | `/me/friends/{user_id}` | arkadaşlıktan çıkarır |
-| POST | `/me/blocks` / DELETE `/me/blocks/{user_id}` | engeller, engeli kaldırır |
-| GET | `/me/feed?before=` | arkadaşların aktiviteleri, en yeniden eskiye, sayfa başına 30 |
+| DELETE | `/me/friends/{user_id}` | arkadaşlıktan çıkar |
+| POST | `/me/blocks` / DELETE `/me/blocks/{user_id}` | engelle, engeli kaldır |
+| GET | `/me/feed?before=` | arkadaşların aktivitesi, en yeniden eskiye, sayfa başına 30 |
 | POST | `/activities/{id}/like` / DELETE | |
 | POST | `/activities/{id}/comments` | |
 | GET | `/me/qr` | arkadaş ekleme QR'ı için kısa ömürlü bir token |
 
-Çevrimiçi durumu REST üzerinden ayarlanmaz; anlık iletişim soketi üzerinden taşınır (4.7).
+Çevrimiçi durumu REST üzerinden ayarlanmaz; gerçek zamanlı soket üzerinden taşınır (4.7).
 
 ## 4.5 Mesajlar
 
-| Yöntem | Yol | Ne yapar |
+| Metot | Yol | Ne yapar |
 |---|---|---|
-| GET | `/me/conversations` | sohbetler, son mesaj ve okunmamış sayısıyla |
+| GET | `/me/conversations` | son mesajı ve okunmamış sayısıyla konuşmalar |
 | POST | `/conversations` | `{members: [...], title?}` → birebir (2 kişi, yeniden kullanılır) ya da grup |
-| GET | `/conversations/{id}/messages?after=&before=&limit=` | geçmiş, mesaj sırasına göre |
+| GET | `/conversations/{id}/messages?after=&before=&limit=` | mesaj sırasına göre geçmiş |
 | POST | `/conversations/{id}/messages` | `{client_id, text?, attachments?, reply_to?}` |
-| PATCH / DELETE | `/conversations/{id}/messages/{seq}` | kendi mesajını düzenler (15 dk) ya da siler |
+| PATCH / DELETE | `/conversations/{id}/messages/{seq}` | mesajını düzenle (15 dk) ya da sil |
 | POST | `/conversations/{id}/read` | `{up_to_seq}` |
-| POST | `/conversations/{id}/attachments` | → önceden imzalanmış yükleme URL'si |
+| POST | `/conversations/{id}/attachments` | → imzalı yükleme URL'si |
 | POST | `/messages/{id}/report` | |
 
-## 4.6 Partiler, ses, Share play
+## 4.6 Partiler, çağrılar, share play
 
-| Yöntem | Yol | Ne yapar |
+Ses ve share play (birlikte oynama) eşten eşe (P2P) çalışır (bkz. [Anlık iletişim](06-anlik-ses-birlikte-oynama.md)); API
+yalnızca çağrıları kurar ve relay (aktarma sunucusu) kimlik bilgilerini dağıtır.
+
+| Metot | Yol | Ne yapar |
 |---|---|---|
-| POST | `/parties` | `{privacy}` → parti (isteyen kişi sahibi olur) |
-| GET | `/parties/{id}` | üyeler, ne oynadıkları, Share play durumu |
+| POST | `/parties` | `{privacy}` → parti (soran kişi sahibidir) |
+| GET | `/parties/{id}` | üyeler, ne oynadıkları, çağrı ve share play durumu |
 | POST | `/parties/{id}/invites` | `{user_ids}` |
 | POST | `/parties/{id}/join` / `leave` | |
-| POST | `/parties/{id}/voice-token` | → LiveKit URL'si ve oda token'ı (ses yayınlama/abone olma) |
-| POST | `/parties/{id}/share-play` | ev sahibi paylaşımı başlatır → video yayınlayabilen bir token; üyeler izleyici token'ı alır |
-| POST | `/parties/{id}/share-play/controller` | `{user_id, slot}` bir üyeye kumanda yuvası verir ya da geri alır |
-| DELETE | `/parties/{id}/share-play` | durdurur |
+| POST | `/calls` | `{party_id}` ya da `{user_id}` → çağrı ID'si, ICE sunucuları (STUN, 12 saat geçerli kimlik bilgileriyle TURN) |
+| GET | `/ice-servers` | süren bir çağrı için taze TURN kimlik bilgileri |
+| POST | `/calls/{id}/share-play` | yayıncı paylaşımı başlatır; üyelere haber verilir |
+| POST | `/calls/{id}/share-play/controller` | `{user_id, slot}` bir üyeye kontrolcü yuvası ver ya da geri al |
+| DELETE | `/calls/{id}/share-play` | paylaşımı durdur |
+| POST | `/calls/{id}/quality` | istemcinin sondaki raporu: doğrudan mı relay üzerinden mi, gidiş-dönüş süresi, kayıp, ekrandan ekrana gecikme örnekleri |
 
-Oda token'ları tam olarak gereken izinleri taşır: izleyiciler abone olabilir; `pad` konusuna veri
-ise yalnızca ev sahibi onlara bir yuva verdiyse gönderebilir. İzin değiştiğinde token yeniden
-verilir.
+Offer'lar, answer'lar ve ICE adaylarının kendisi gateway üzerinden taşınır (`signal`, 4.7).
 
-## 4.7 Anlık iletişim gateway'i
+## 4.7 Gerçek zamanlı gateway
 
-`wss://rt.anytogether.kodla.agency/v1/socket`. İstemci erişim token'ını URL'de değil ilk çerçevede
-gönderir (böylece token hiçbir zaman loglara düşmez):
+`wss://anytogether.kodla.agency/rt`. İstemci erişim token'ını ilk frame'de gönderir
+(URL'de değil; böylece asla loglara düşmez):
 
 ```json
-{ "op": "hello", "token": "<access token>", "client": "launcher/0.2.13", "resume": "<last event id>" }
+{ "op": "hello", "token": "<access token>", "client": "launcher-windows/0.3.0", "resume": "<last event id>" }
 ```
 
 Sunucu `{"op":"ready","session":"…","heartbeat":25}` ile yanıt verir ve ardından olayları gönderir:
@@ -148,11 +160,10 @@ Sunucu `{"op":"ready","session":"…","heartbeat":25}` ile yanıt verir ve ardı
 { "op": "event", "id": "01J…", "type": "message.created", "data": { … } }
 ```
 
-İstemci her 25 sn'de bir (ve çevrimiçi durumu değiştiğinde hemen)
-`{"op":"heartbeat","presence":{"state":"in_game","title_id":"PPSA01234","since":"…"}}` gönderir.
-Art arda iki heartbeat kaçırılırsa soket kapanır ve çevrimiçi durumu sona erer. Yeniden bağlanırken
-son olay kimliğiyle gönderilen `resume`, son 5 dakikada kaçırılanları yeniden oynatır (kullanıcı
-başına bir Valkey stream'inde tutulur); daha eski boşluklar REST çağrılarıyla doldurulur.
+İstemci her 25 sn'de bir (ve çevrimiçi durumu değiştiğinde hemen) `{"op":"heartbeat","presence":{"state":"in_game","title_id":"PPSA01234","since":"…"}}`
+gönderir. Art arda iki heartbeat'in kaçırılması soketi kapatır ve çevrimiçi durumunun süresi dolar. Yeniden bağlanırken
+son olay ID'siyle `resume`, son 5 dakika içinde kaçırılanları yeniden oynatır (kullanıcı başına bir Valkey
+stream'inde tutulur); daha eski boşluklar REST çağrılarıyla doldurulur.
 
 | Olay | Ne zaman |
 |---|---|
@@ -160,39 +171,42 @@ başına bir Valkey stream'inde tutulur); daha eski boşluklar REST çağrılar�
 | `friend.request`, `friend.accepted`, `friend.removed` | |
 | `message.created`, `message.updated`, `message.deleted`, `conversation.read`, `typing` | |
 | `party.invite`, `party.updated`, `party.member_joined`, `party.member_left`, `party.ended` | |
+| `call.ringing`, `call.answered`, `call.ended` | sana gelen bir çağrı, başka bir cihazda yanıtlandı, bitti |
+| `signal` | bir çağrı eşinden WebRTC offer, answer, ICE adayı ya da bye (aktarılır, asla saklanmaz) |
 | `share_play.started`, `share_play.controller_changed`, `share_play.stopped` | |
+| `auth.handoff` | (telefon) bir launcher giriş yapılmasını istiyor |
 | `activity.created` | akış için bir arkadaşın aktivitesi |
 | `trophy.rarity_changed` | sahip olduğun bir kupa bir nadirlik etiketinin sınırını geçti |
 | `account.signed_out` | bu oturum başka bir yerden iptal edildi |
 
 ## 4.8 Temalar, indirmeler, liderlik tabloları
 
-| Yöntem | Yol | Ne yapar |
+| Metot | Yol | Ne yapar |
 |---|---|---|
 | GET | `/themes?sort=new\|popular\|liked&q=&cursor=` | Hub |
-| GET | `/themes/{id}` | ayrıntılar, sürümler, hazırlayan |
-| POST | `/themes` | yüklemeyi başlatır → önceden imzalanmış URL; ardından `POST /themes/{id}/publish` |
+| GET | `/themes/{id}` | ayrıntılar, sürümler, yapımcı |
+| POST | `/themes` | yüklemeyi başlat → imzalı URL; ardından `POST /themes/{id}/publish` |
 | POST | `/themes/{id}/versions` | temanın yeni bir sürümü |
 | POST / DELETE | `/themes/{id}/like` | |
 | GET | `/releases/latest?product=launcher\|phone` | sürüm, notlar, URL, SHA-256 |
-| GET | `/leaderboards/{board}?scope=global\|friends&period=all\|month\|week` | sıralamalar, seninkiyle birlikte |
+| GET | `/leaderboards/{board}?scope=global\|friends&period=all\|month\|week` | seninki dahil sıralamalar |
 | GET | `/games/{title_id}/leaderboard` | oyun başına |
 
 ## 4.9 Sınırlar
 
-Hesap başına (kimlik doğrulaması olmayan çağrılar için de Cloudflare'de IP başına):
+Hesap başına (ve kimlik doğrulaması yapılmamış çağrılar için Cloudflare'de IP başına):
 
 | Ne | Sınır |
 |---|---|
-| Giriş denemeleri | hesap başına 15 dk'da 10, IP başına 30 |
+| Giriş denemeleri | e-posta kodları: adres başına saatte 5 gönderim, 10 yanlış kod adresi 15 dk kilitler; IP başına 30 deneme |
 | Mesajlar | dakikada 30, günde 1000 |
 | Arkadaşlık istekleri | günde 50 |
 | Yüklemeler | avatar 5 MB, görsel 10 MB, tema 300 MB (launcher'ın kendi sınırı) |
 | Gruplar | 200 öğe, 1 MB |
 
-Bir sınırın aşılması `Retry-After` ile birlikte `429` döndürür.
+Bir sınırı aşmak `Retry-After` ile birlikte `429` döndürür.
 
 ## 4.10 Sürümleme
 
-`/v1` uyumlu kalır: yalnızca alan eklenir. Uyumu bozan bir değişiklik `/v2`'ye gider ve `/v1`,
+`/v1` uyumlu kalır: alanlar yalnızca eklenir. Geriye dönük uyumluluğu bozan bir değişiklik `/v2`'ye gider ve `/v1`,
 `/v2`'ye geçen launcher sürümünden sonra en az altı ay çalışmaya devam eder.

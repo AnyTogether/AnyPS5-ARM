@@ -1,8 +1,7 @@
 # 10. Yol haritası
 
-Her aşama insanların kullanabileceği bir şey çıkarır; bu özellik oturana kadar launcher'da bir
-anahtarın arkasında durur. "Bitti", "kod yazıldı" demek değildir; listesindeki her kontrolün
-geçmesi demektir.
+Her aşama insanların kullanabileceği bir şey çıkarır; bu, oturana kadar launcher'da bir anahtarın
+arkasında durur. "Bitti", "kod yazıldı" demek değildir; listesindeki her kontrolün geçmesi demektir.
 
 ```mermaid
 gantt
@@ -21,63 +20,72 @@ gantt
     6 Tema Hub'ı, indirmeler, uyumluluk :p6, after p2, 3w
 ```
 
-Tarihler, Claude ile çalışan tek bir geliştirici için yol göstericidir; 6. aşama 3-5 ile paralel
-yürüyebilir.
+Tarihler; sunucu, macOS launcher ve telefon uygulaması üzerinde Claude ile çalışan tek bir
+geliştirici için yol göstericidir; Windows/Linux launcher, Rust crate'ini aşama aşama aynı
+tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
 
 ## Aşama 0: Temeller (≈3 hafta)
 
-**Çıkanlar**: depo, sunucu, giriş sistemi ve oturum açılmış launcher.
+**Çıkanlar**: depo, sunucu, tek dokunuşla giriş ve oturumu açık tüm launcher'lar.
 
 - AnyTogether monorepo'su (apps/api, realtime, worker, web; packages/shared, db), CI, staging.
-- Docker Compose ile kurulmuş sunucu, Cloudflare DNS ve sertifikaları, yedekler, Uptime Kuma.
-- Hesaplar: doğrulamalı e-posta/parola, Sign in with Apple, Discord; oturumlar; yenileme token'ı
-  rotasyonu; web'deki `/link` sayfasıyla cihaz bağlama (RFC 8628).
-- Hello, heartbeat ve resume destekli realtime gateway (henüz üzerinde özellik yok).
-- Launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Ayarlar → AnyTogether →
-  Giriş yap (kod + QR), üst çubukta oturum açık rozeti.
-- Web sitesi: "Coming soon" yerine gelen açılış sayfası, kayıt/giriş, `/link`, ayarlar, gizlilik
-  sayfaları.
+- Sunucumuzda: Coolify uygulamaları (web, api, realtime, worker), PostgreSQL ve Valkey kaynakları,
+  bellek sınırları, R2'ye yedekler, `anytogether.kodla.agency` üzerinde `/api` ve `/rt` yolları.
+- Giriş: Apple, Google, Discord (OpenID Connect + PKCE), e-posta kodları, telefona devretme, cihaz
+  kodu yedeği; ilk giriş hesabı oluşturur; oturumlar; refresh rotasyonu.
+- hello, heartbeat ve resume destekli realtime gateway (üzerinde henüz özellik yok).
+- macOS launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Ayarlar → AnyTogether →
+  Apple / Google / Discord / telefon / e-posta ile devam et, üst çubukta oturum açık rozeti.
+- Windows/Linux launcher için `anytogether` Rust crate'i (api, auth, socket), aynı CI'da test
+  edilir; o launcher'ın geliştiricisine bir entegrasyon rehberiyle önerilir.
+- macOS launcher sürüm derlemeleri Developer ID ile imzalanır ve notarize edilir.
+- Web sitesi: "Coming soon"un yerini alan açılış sayfası, tek dokunuşla giriş, `/link`, ayarlar,
+  gizlilik sayfaları.
 
 **Bitti sayılması için**
-- [ ] Yeni bir kullanıcı web'de kaydolur, launcher'da kodla oturum açar ve launcher'da adını
-      görür; web'de çıkış yapınca launcher'daki oturum 5 s içinde kapanır.
-- [ ] Sunucuya ulaşılamadığında launcher tam olarak 0.2.12 gibi davranır (otomatik test).
-- [ ] Yedekler staging'e geri yüklenebiliyor; geri yükleme testi yeşil.
-- [ ] Yenileme token'ının yeniden kullanılması oturumu iptal ediyor (test).
+- [ ] Yeni bir kullanıcı launcher'da "Google ile devam et"e dokunur ve tek dokunuşta hesabı
+      oluşturulmuş olarak giriş yapar (tarayıcıda Google'a zaten giriş yapmışken); web'de
+      çıkış yapmak launcher'ın da oturumunu 5 s içinde kapatır.
+- [ ] Oturumu açık telefon, launcher'a tek dokunuşla giriş yaptırır.
+- [ ] Rust crate'i Windows ve Linux'ta giriş yapar ve gateway'i açar (ikisinde de CI).
+- [ ] Sunucuya ulaşamayan bir launcher, AnyTogether'dan önce nasıl davranıyorsa tam olarak öyle
+      davranır (otomatik test).
+- [ ] Yedekler staging'e geri yüklenir; geri yükleme testi yeşil.
+- [ ] Refresh token'ın yeniden kullanılması oturumu iptal eder (test).
 
 ## Aşama 1: Profil, oyun kütüphanesi, kupalar (≈4 hafta)
 
 **Çıkanlar**: oyuncu kartın, oyunların ve kupaların çevrimiçi.
 
-- Profiller, kullanıcı adları, avatarlar (R2 + worker'da yeniden boyutlandırma + çıplaklık
-  kontrolü), vitrin, gizlilik ayarları.
+- Profiller, kullanıcı adları, avatarlar (R2 + worker ile yeniden boyutlandırma + çıplaklık
+  denetimi), vitrin, gizlilik ayarları.
 - Oyun kataloğu, oturumlar (launcher `SessionRecorder` + outbox), oynama süreli kütüphane.
 - Kupa setleri ve kazanılan kupalar (launcher `TrophySync`), nadirlik işi, puanlar.
-- Launcher: profil katmanı, kupa ekranında ve banner'da tarihler ve nadirlik, tüm Mac'lerden
-  toplanan oynama süresi. Telefon: profil kartı. Web: Open Graph görselli `/u/<handle>`, oyunlar
-  ve kupalar sayfaları.
+- Launcher: profil katmanı, kupa ekranında ve bildirim bandında tarih ve nadirlik, tüm
+  bilgisayarlardan toplanan oynama süresi. Telefon: profil kartı. Web: `/u/<handle>`, Open Graph
+  görselli oyun ve kupa sayfaları.
 
 **Bitti sayılması için**
-- [ ] Silksong'u 10 dakika oynayıp bir kupa kazanınca ikisi de 30 s içinde web profilinde
-      görünür; çevrimdışıyken kazanılanlar launcher yeniden bağlandığında bir kez görünür.
-- [ ] Aynı hesaptaki iki Mac'in oynama süreleri doğru toplanır.
-- [ ] Bir kupanın nadirliği staging verisindeki elle sayımla örtüşür.
+- [ ] Silksong'u 10 dakika oynayıp bir kupa kazanmak, ikisini de 30 s içinde web profilinde
+      gösterir; çevrimdışıyken, launcher yeniden bağlandıktan sonra bir kez görünürler.
+- [ ] Tek hesaptaki iki bilgisayar (bir Mac ve bir Windows PC) oynama süresini doğru toplar.
+- [ ] Bir kupanın nadirliği, staging verisinde elle yapılan sayımla eşleşir.
 - [ ] Gizli kupalar, onları kazanmamış kullanıcılara gizli kalır.
 
 ## Aşama 2: Arkadaşlar, çevrimiçi durumu, aktivite akışı, liderlik tabloları (≈3 hafta)
 
-- Arkadaşlık istekleri (kullanıcı adı, QR), engellemeler, oyun bilgili çevrimiçi durumu,
-  gruplamalı akış, beğeniler ve yorumlar, liderlik tabloları (arkadaşlar ve genel, oyun başına).
+- Arkadaşlık istekleri (kullanıcı adı, QR), engellemeler, oyunlarla birlikte çevrimiçi durumu,
+  gruplamalı akış, beğeniler ve yorumlar, liderlik tabloları (oyun başına arkadaşlar ve genel).
 - Launcher: Arkadaşlar paneli, çevrimiçi sayısı, akış paneli, oyun sayfasında "oynayan
   arkadaşlar". Telefon: Arkadaşlar ve Akış sekmeleri. Web: arkadaşlar, akış, liderlik tabloları.
 
 **Bitti sayılması için**
-- [ ] Bir oyun başlatıldığında arkadaşın launcher'ında 3 s içinde "X oynuyor" görünür; oyun
-      kapatıldığında bu en geç 60 s içinde (süre dolumu) ve genellikle anında kalkar.
+- [ ] Bir oyunu başlatmak, bir arkadaşın launcher'ında 3 s içinde "X oynuyor" gösterir; oyunu
+      kapatmak en geç 60 s içinde (süre dolumu), genellikle anında yansır.
 - [ ] "Çevrimdışı görün" ve engellemeler çevrimiçi durumunu tamamen gizler (test).
-- [ ] Bir saatte kazanılan beş kupa için akışta tek bir gruplanmış öğe görünür.
+- [ ] Bir saat içindeki beş kupa için akış tek bir gruplanmış öğe gösterir.
 
-## Aşama 3: Mesajlar ve anlık bildirimler (≈3 hafta)
+## Aşama 3: Mesajlar ve anlık bildirim (≈3 hafta)
 
 - Birebir ve grup sohbetleri, ekler, okundu durumu, yazıyor göstergesi, şikâyetler.
 - Telefon için anlık bildirim (APNs, FCM); launcher'da oyundan odağı çalmayan bildirim balonları.
@@ -85,52 +93,57 @@ yürüyebilir.
 **Bitti sayılması için**
 - [ ] Web'den gönderilen bir mesaj launcher'a 1 s'nin altında, kilitli bir telefona da anlık
       bildirim olarak 5 s'nin altında ulaşır.
-- [ ] Gönderim sırasında ağ kesilip mesaj yeniden gönderildiğinde mesaj asla çoğalmaz (test).
-- [ ] Okunmamış sayıları üç kapıda da aynıdır.
+- [ ] Gönderim ortasında ağı kesip yeniden göndermek hiçbir zaman mesajı çoğaltmaz (test).
+- [ ] Okunmamış sayıları üç kapının hepsinde tutarlıdır.
 
 ## Aşama 4: Partiler ve ses (≈4 hafta)
 
-- Sunucuda LiveKit ve TURN; parti yaşam döngüsü; oda token'ları; launcher (Swift SDK), telefon
-  (Flutter SDK) ve web'de ses; bas-konuş; kulaklık olarak telefon; parti sohbeti; "Aynı oyunu
-  oyna".
+- Sunucuda coturn (`anytogether-relay.kodla.agency`; 3478 ve 5349 portları ile relay (aktarma
+  sunucusu) aralığı Utku'nun onayıyla açılır); gateway üzerinden görüşmeler ve sinyalleşme; her
+  launcher'da (macOS WebRTC framework'ü, Windows/Linux'ta Rust crate'i), telefonda
+  (`flutter_webrtc`) ve web'de eşten eşe (P2P) ses; bas-konuş; kulaklık olarak telefon; parti
+  sohbeti; "Aynı oyunu oyna".
 
 **Bitti sayılması için**
-- [ ] Dört kişi (Mac, iPhone, Android, tarayıcı) 30 dakika boyunca kopma olmadan konuşur;
+- [ ] Beş kişi (Mac, Windows PC, Linux, iPhone, tarayıcı) 30 dakika boyunca kopmadan konuşur;
       Türkiye/Avrupa içinde ağızdan kulağa gecikme 200 ms'nin altındadır (ölçülmüş).
+- [ ] Görüşmelerin çoğu doğrudan bağlanır; kalite raporları relay gereken
+      oranı gösterir.
 - [ ] Önde bir oyun açıkken ses devam eder; parti katmanı kimin konuştuğunu gösterir.
-- [ ] UDP'yi engelleyen bir ağdaki kullanıcı TURN/TLS üzerinden katılabilir.
+- [ ] UDP'yi engelleyen bir ağın arkasındaki kullanıcı TURN/TLS üzerinden katılır.
 
-## Aşama 5: Share play (≈5 hafta)
+## Aşama 5: Share play (birlikte oynama, ≈5 hafta)
 
-- Launcher, `RemotePlay` yakalamasını ve `StreamEncoder` karelerini LiveKit'e yayınlar; önce
-  doğrudan eşler arası bağlantı denenir; telefon, web ve launcher'da izleyiciler; data channel
-  üzerinden uzak bir kol köprüsüne kol girdisi; 1. oyuncunun kontrolünü devralmak; kalite
-  basamakları; gecikme rozeti.
+- Her launcher ev sahipliği yapar: macOS `RemotePlay`'in yakalaması ve düşük gecikmeli H.264 ile,
+  Windows ve Linux kendi yakalama ve donanım kodlayıcılarıyla; her izleyiciye doğrudan, gerekirse
+  relay üzerinden; izleyiciler telefonda, web'de, herhangi bir launcher'da; kol, data channel
+  üzerinden uzak kol köprüsüne; 1. oyuncunun kontrolünü devralmak; kalite kademeleri; gecikme
+  rozeti.
 
 **Bitti sayılması için**
 - [ ] 500 km uzaktaki bir arkadaş 720p60'ı 120 ms'nin altında (medyan) ekrandan ekrana gecikmeyle
-      izler ve 80 ms'nin altında girdi gidiş-dönüş süresiyle 2. oyuncu olarak oynar.
-- [ ] Ev sahibi PS tuşuyla 1. oyuncuyu anında geri alır.
-- [ ] Zayıf bir ağda kalite, 500 ms'den uzun donma olmadan düşürülür.
+      izler ve 80 ms'nin altında girdi gidiş-dönüşüyle 2. oyuncu olarak oynar; hem ev sahibi bir
+      Mac iken hem de ev sahibi bir Windows PC iken.
+- [ ] Ev sahibi PS ile 1. oyuncuyu anında geri alır.
+- [ ] Zayıf bir ağ, 500 ms'den uzun donmadan kaliteyi düşürür.
 
 ## Aşama 6: Tema Hub'ı, indirmeler, uyumluluk (≈3 hafta, 3-5 ile paralel)
 
 - Studio'dan tema yükleme, moderasyon kuyruğu, beğeniler, sürümler; launcher'ın Temalar ekranı
   API'den okur (GitHub klasörü yedek olarak kalır); profil temaları.
-- Yansılanmış sürümler ve checksum'larla İndirmeler sayfası; `GET /releases/latest`.
-- Uyumluluk raporları (isteğe bağlı katılım) ve oyun sayfalarında ve launcher'ın kütüphanesinde
-  uyumluluk değerlendirmeleri.
-- Aynı rafta daha sonra: telefon kol düzenleri, oyuna özel ön ayarlar, paylaşılan shader
-  önbellekleri.
+- Yansılanmış sürümler ve sağlama toplamlarıyla İndirmeler sayfası; `GET /releases/latest`.
+- Uyumluluk raporları (isteğe bağlı) ve oyun sayfalarında ve launcher'ın kütüphanesinde
+  değerlendirmeler.
+- Sonra aynı rafta: telefon kol düzenleri, oyun başına ön ayarlar, paylaşılan shader önbellekleri.
 
 **Bitti sayılması için**
 - [ ] Studio'da yapılan bir tema, onaylandıktan 1 dakika sonra başka bir kullanıcı tarafından
       kurulabilir.
-- [ ] İndirmeler GitHub sürümleriyle bayt bayt aynıdır (CI'da checksum testi).
-- [ ] Uyumluluk raporları kapatıldığında hiçbir şey gönderilmez (test).
+- [ ] İndirmeler GitHub sürümleriyle bayt bayt eşleşir (CI'da sağlama toplamı testi).
+- [ ] Uyumluluk raporlarını kapatınca hiçbir şey gönderilmez (test).
 
 ## Sonrası
 
 - Passkey'ler; uçtan uca şifreli birebir mesajlar ve ses; telefon uygulamasının App Store / Play
   Store sürümleri; liderlik tablolarında turnuvalar ve meydan okumalar; arkadaşların
-  arkadaşlarına açık share play izleme; topluluk araçları için herkese açık bir API.
+  arkadaşları için herkese açık share play'i izleme; topluluk araçları için açık bir API.

@@ -1,48 +1,57 @@
 # 5. Veri modeli
 
-Tablolar burada konuya göre gruplandı; migration'larda `themes`, ona başvuran `profiles` tablosundan önce oluşturulur.
+Tablolar burada konularına göre gruplanmıştır; migration'larda `themes`, kendisine başvuran `profiles` tablosundan önce oluşturulur.
 
-PostgreSQL 17. Kimlikler UUIDv7'dir (zamana göre sıralı; böylece indeksler derli toplu kalır ve
-kimlikler oluşturulma sırasına göre sıralanır). Zamanlar `timestamptz`'dir. Kullanıcıların aradığı
-metinler `pg_trgm` ile indekslenir. Her tabloda `created_at`, değişen tablolarda ayrıca `updated_at`
-bulunur.
+PostgreSQL 17. ID'ler UUIDv7'dir (zamana göre sıralı olduğu için indeksler kompakt kalır ve ID'ler oluşturulma sırasına göre dizilir).
+Zamanlar `timestamptz` türündedir. Kullanıcıların arama yaptığı metinler `pg_trgm` ile indekslenir. Her tabloda
+`created_at` bulunur; değişen tablolarda ayrıca `updated_at` vardır.
 
 ## Hesaplar ve profiller
 
 ```sql
 create table accounts (
   id            uuid primary key,
-  email         citext unique,              -- yalnızca Apple/Discord ile açılan hesaplarda null
-  email_verified_at timestamptz,
-  password_hash text,                        -- argon2id, parola yoksa null
+  email         citext unique,              -- doğrulanmış e-posta (sağlayıcıdan ya da e-posta kodundan); boş olabilir
   role          text not null default 'user',-- user | moderator | admin
   status        text not null default 'active', -- active | suspended | deleting
-  delete_after  timestamptz,                 -- DELETE /me ile 14 gün sonrasına ayarlanır
+  delete_after  timestamptz,                 -- DELETE /me ile ayarlanır, 14 gün sonrası
   created_at    timestamptz not null default now()
 );
 
-create table identities (                    -- Sign in with Apple, Discord
+create table identities (                    -- giriş yolları: Apple, Google, Discord, e-posta
   account_id uuid references accounts on delete cascade,
-  provider   text not null,                  -- apple | discord
-  subject    text not null,                  -- sağlayıcıdaki kullanıcı kimliği
+  provider   text not null,                  -- apple | google | discord | email
+  subject    text not null,                  -- sağlayıcıdaki kullanıcı ID'si
   primary key (provider, subject)
 );
 
 create table sessions (
   id            uuid primary key,
   account_id    uuid not null references accounts on delete cascade,
-  client        text not null,               -- launcher | phone | web
+  client        text not null,               -- launcher-macos | launcher-windows | launcher-linux | phone | web
   device_name   text,
-  refresh_hash  bytea not null,              -- geçerli yenileme token'ının sha256 özeti
-  previous_hash bytea,                       -- bir öncekinin özeti, yeniden kullanımı tespit etmek için
+  refresh_hash  bytea not null,              -- geçerli yenileme token'ının sha256'sı
+  previous_hash bytea,                       -- bir öncekininki, yeniden kullanımı yakalamak için
   last_seen_at  timestamptz,
   revoked_at    timestamptz,
   created_at    timestamptz not null default now()
 );
 
-create table device_codes (                  -- RFC 8628, kısa ömürlü (Valkey'de de kopyası tutulur)
+create table sign_in_requests (              -- e-posta kodları, telefona devretmeler, cihaz kodları; kısa ömürlü
+  id           uuid primary key,
+  kind         text not null,                 -- email | handoff | device
+  email        citext,                        -- e-posta kodları için
+  code_hash    bytea,                         -- 6 haneli kod ya da sihirli bağlantı token'ı, hash'lenmiş
+  account_id   uuid references accounts,      -- telefona devretmelerde: kimin telefonlarına sorulacağı
+  device_name  text,
+  approved_at  timestamptz,
+  attempts     int not null default 0,
+  expires_at   timestamptz not null
+);
+
+create table device_codes (                  -- RFC 8628 yedek yolu, kısa ömürlü (Valkey'de de bir kopyası tutulur)
   device_code_hash bytea primary key,
-  user_code    text unique not null,          -- ör. K7Q-2MX, 0/O/1/I içermez
+  user_code    text unique not null,          -- örn. K7Q-2MX, 0/O/1/I içermez
   client       text not null,
   device_name  text,
   approved_by  uuid references accounts,
@@ -65,11 +74,12 @@ create table profiles (
 create index profiles_handle_trgm on profiles using gin (handle gin_trgm_ops);
 create index profiles_name_trgm on profiles using gin (display_name gin_trgm_ops);
 
-create table macs (                          -- kullanıcının Mac'leri, launcher'ın rastgele kimliğiyle
+create table devices (                       -- kullanıcının bilgisayarları, launcher'ın rastgele ID'siyle
   id         uuid primary key,
   account_id uuid not null references accounts on delete cascade,
-  name       text not null,
-  model      text,
+  platform   text not null,                  -- macos | windows | linux
+  name       text not null,                  -- "Utku's MacBook Pro", "Gaming PC"
+  model      text,                           -- Mac15,9 / CPU ve GPU özeti
   last_seen_at timestamptz
 );
 ```
@@ -82,7 +92,7 @@ create table games (                         -- katalog, title ID başına bir s
   names      jsonb not null,                 -- {"en": "Hollow Knight: Silksong", "tr": ...}
   icon_key   text,
   taught_by  uuid references accounts,
-  locked     boolean not null default false  -- bir moderatör düzeltti; launcher'lar değiştiremez
+  locked     boolean not null default false  -- bir moderatör sabitlemiştir; launcher'lar değiştiremez
 );
 create index games_name_trgm on games using gin ((names->>'en') gin_trgm_ops);
 
@@ -90,7 +100,7 @@ create table play_sessions (
   id         uuid primary key,               -- launcher tarafından üretilir (idempotent)
   account_id uuid not null references accounts on delete cascade,
   title_id   text not null references games,
-  mac_id     uuid references macs,
+  device_id  uuid references devices,
   started_at timestamptz not null,
   ended_at   timestamptz not null check (ended_at > started_at),
   exit       text                            -- normal | crashed | killed (launcher'ın teşhisi)
@@ -111,7 +121,7 @@ create table library (                       -- kullanıcı ve oyun başına, wo
 
 create table trophy_sets (
   title_id  text references games,
-  set_hash  text,                            -- oyunun kupa dosyasının özeti
+  set_hash  text,                            -- oyunun kupa dosyasının hash'i
   primary key (title_id, set_hash)
 );
 
@@ -135,7 +145,7 @@ create table earned_trophies (
   set_hash   text,
   trophy_id  int,
   earned_at  timestamptz not null,
-  flagged    boolean not null default false,  -- imkânsız örüntüler, liderlik tablolarının dışında
+  flagged    boolean not null default false,  -- imkânsız örüntüler, liderlik tablolarından çıkarılır
   primary key (account_id, title_id, trophy_id),
   foreign key (title_id, set_hash, trophy_id) references trophies
 );
@@ -146,8 +156,9 @@ create table compatibility_reports (
   account_id uuid references accounts on delete set null,
   title_id   text references games,
   verdict    text not null,                  -- nothing | menus | playable | perfect
-  engine     text not null,                  -- ör. 0.2.13-arm
-  mac_model  text, macos text,
+  engine     text not null,                  -- örn. 0.2.13-arm
+  platform   text not null,                  -- macos | windows | linux
+  machine    text, os text,                  -- Mac modeli ya da CPU/GPU; işletim sistemi ve sürümü
   fps_avg    real,
   exit       text,
   note       text check (length(note) <= 500),
@@ -181,7 +192,7 @@ create table activities (
   kind       text not null,                  -- trophy | platinum | new_game | long_session | completed | clip | theme | joined
   payload    jsonb not null,
   visibility text not null,                  -- everyone | friends
-  folded_into uuid references activities     -- bir saat içindeki birden çok kupa tek aktivitede birleşir
+  folded_into uuid references activities     -- bir saat içinde kazanılan birden çok kupa tek kayıtta birleşir
 );
 create index activities_actor on activities (actor_id, id desc);
 
@@ -230,6 +241,21 @@ create table parties (
   share_play jsonb,                          -- {host, started_at, slots: {"2": user_id}}
   ended_at timestamptz
 );
+create table calls (                         -- API tarafından kurulur; medyanın kendisi eşten eşe (P2P) akar
+  id         uuid primary key,
+  party_id   uuid references parties on delete set null,
+  started_by uuid references accounts on delete set null,
+  started_at timestamptz not null default now(),
+  ended_at   timestamptz
+);
+create table call_quality (                  -- görüşme bittiğinde katılımcı başına bir satır
+  call_id    uuid references calls on delete cascade,
+  account_id uuid references accounts on delete set null,
+  path       text not null,                  -- direct | relay-udp | relay-tls
+  rtt_ms     real, loss real, glass_to_glass_ms real,
+  share_play boolean not null default false
+);
+
 create table party_members (party_id uuid references parties on delete cascade, account_id uuid references accounts on delete cascade, joined_at timestamptz not null default now(), primary key (party_id, account_id));
 ```
 
@@ -265,21 +291,21 @@ create table audit_log (id uuid primary key, actor_id uuid, action text not null
 
 | Anahtar | Değer | Süre |
 |---|---|---|
-| `presence:<user>` | hash: state, title_id, since, devices | 60 sn, heartbeat'lerle yenilenir |
+| `presence:<user>` | hash: durum, title_id, başlangıç zamanı, cihazlar | 60 sn, heartbeat'lerle yenilenir |
 | `events:<user>` | `resume` için son olayların stream'i | 5 dk'ya kırpılır |
-| `rl:<scope>:<id>` | istek sınırı sayaçları | pencere süresi |
-| `lb:<board>:<period>` | kullanıcı kimliklerinin puana göre sıralı kümesi | 10 dk'da bir yeniden oluşturulur |
+| `rl:<scope>:<id>` | hız sınırı sayaçları | pencere süresi |
+| `lb:<board>:<period>` | puana göre sıralı kullanıcı ID'leri kümesi (sorted set) | 10 dk'da bir yeniden oluşturulur |
 | `devcode:<user_code>` | cihaz kodu durumu | 10 dk |
 
 ## Sayım
 
-- **Oynama süresi**: oturumlar geldiğinde worker `ended_at - started_at` farkını `library`'ye ekler
-  (oturumlar önce kimliğe göre tekilleştirilir, böylece yeniden gönderilen bir grup asla iki kez sayılmaz).
+- **Oynama süresi**: oturumlar geldiğinde worker `ended_at - started_at` farkını `library` tablosuna
+  ekler (oturumlar önce ID'ye göre tekilleştirilir; böylece yeniden gönderilen bir paket asla iki kez sayılmaz).
 - **Nadirlik**: değişen her oyun için kupa başına `earned_count` (`earned_by_game` indeksini kullanan,
-  `earned_trophies` üzerinde bir `count(*)`) ve `players` = `library`'de o oyuna ait satır sayısı;
-  `rarity = earned / players`. Oyun başına en fazla 10 dakikada bir.
-- **Puanlar**: bronz 15, gümüş 30, altın 90, platin 300; `library.points` alanında ve profilin
-  `stats` alanında toplanır.
+  `earned_trophies` üzerinde bir `count(*)`) ve `players` = oyunun `library` tablosundaki satır sayısı; `rarity = earned /
+  players`. Oyun başına en sık 10 dakikada bir.
+- **Puanlar**: bronz 15, gümüş 30, altın 90, platin 300; toplamı `library.points` alanına ve
+  profilin `stats` alanına yazılır.
 
 ## Verilerin saklanması
 
@@ -287,8 +313,8 @@ create table audit_log (id uuid primary key, actor_id uuid, action text not null
 |---|---|
 | Hesap ve profil | silinene kadar (talepten 14 gün sonra) |
 | Oturumlar, kupalar, kütüphane | hesap silinene kadar |
-| Mesajlar | yazarı silene ya da hesap silinene kadar; silinen mesajların içeriği hemen boşaltılır |
-| Uyumluluk raporları | hesap silindiğinde anonimleştirilir (hesap null yapılır) |
+| Mesajlar | yazarı silene ya da hesap silinene kadar; silinen mesajların içeriği anında boşaltılır |
+| Uyumluluk raporları | hesap silindiğinde anonimleştirilir (hesap alanı null yapılır) |
 | İptal edilmiş oturumlar | 30 gün |
 | Denetim kaydı | 1 yıl |
-| Yedekler | 30 gün (her gece), dolayısıyla bir silme işlemi yedeklerde 30 gün sonra tamamlanır |
+| Yedekler | 30 gün (gecelik); dolayısıyla bir silme işlemi 30 gün sonra yedeklerde de tamamlanmış olur |
