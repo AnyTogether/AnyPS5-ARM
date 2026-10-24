@@ -64,7 +64,9 @@ Ses, Share play (birlikte oynama) ve kol verileri eşten eşe (P2P) gittiği iç
   yollarında açık, `/api`'de kapalı (launcher'lar tarayıcı değildir).
 - Önbellek: genel profil sayfaları 60 s, stale-while-revalidate ile; R2 dosyaları uzun süre.
 - R2 bucket'ları: `anytogether-files` (özel), `anytogether-cdn` (genel), `anytogether-backups`
-  (özel, 30 günlük yaşam döngüsü).
+  (özel, 30 günlük yaşam döngüsü). Sunucunun Cloudflare API token'ının R2 yetkisi olmayabilir; bucket'ları açmak ve
+  `anytogether-cdn`'i genel bucket'ın özel alan adı olarak bağlamak gerekirse Utku tarafından
+  Cloudflare panelinden yapılır.
 
 ## 9.4 Güvenlik duvarı (Utku'nun onayıyla açılacak)
 
