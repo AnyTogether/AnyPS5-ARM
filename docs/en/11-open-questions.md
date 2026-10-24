@@ -1,7 +1,8 @@
 # 11. Open questions
 
-Decisions this plan made on its own are marked **(proposed)** in the documents; these are the
-ones that need an answer before or during the phase named.
+The technologies and defaults in this plan are proposals, chosen so work can start; any of them
+can change. These are the decisions that need an answer before or during the phase named; the
+middle column is what the plan assumes until then.
 
 | # | Question | Default in this plan | Needed by |
 |---|---|---|---|

@@ -1,5 +1,7 @@
 # 5. Data model
 
+Tables are grouped by topic here; in the migrations, `themes` is created before `profiles`, which refers to it.
+
 PostgreSQL 17. IDs are UUIDv7 (time-ordered, so indexes stay compact and IDs sort by creation).
 Times are `timestamptz`. Text that users search is indexed with `pg_trgm`. Every table has
 `created_at`; tables that change have `updated_at`.
