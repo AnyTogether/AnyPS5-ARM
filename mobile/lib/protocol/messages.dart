@@ -22,6 +22,7 @@ sealed class Message {
           udpPort: json['udpPort'] as int,
           macName: json['macName'] as String,
           key: json['key'] as String,
+          togetherServer: json['togetherServer'] as String?,
         ),
         'rejected' => Rejected(json['reason'] as String),
         'latency' => Latency((json['milliseconds'] as num).toDouble()),
@@ -108,12 +109,16 @@ class Welcome extends Message {
     required this.udpPort,
     required this.macName,
     required this.key,
+    this.togetherServer,
   });
 
   final BigInt session;
   final int udpPort;
   final String macName;
   final String key;
+
+  /// The AnyTogether server the launcher uses, when it says.
+  final String? togetherServer;
 
   @override
   String toJson() => jsonEncode({
@@ -122,6 +127,7 @@ class Welcome extends Message {
     'udpPort': udpPort,
     'macName': macName,
     'key': key,
+    'togetherServer': ?togetherServer,
   });
 }
 

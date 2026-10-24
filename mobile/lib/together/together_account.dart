@@ -5,13 +5,41 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Where AnyTogether is; `--dart-define=ANYTOGETHER_URL=…` points the app at another server.
-final togetherBase = Uri.parse(
-  const String.fromEnvironment(
-    'ANYTOGETHER_URL',
-    defaultValue: 'https://anytogether.kodla.agency',
-  ),
-);
+/// AnyTogether's own server. AnyTogether can be hosted by anyone: the phone may be pointed at
+/// another one, and `--dart-define=ANYTOGETHER_URL=…` overrides both.
+final standardServer = Uri.parse('https://anytogether.kodla.agency');
+const forcedServer = String.fromEnvironment('ANYTOGETHER_URL');
+
+/// A server address as typed: https with a host, or http to this phone or the home network
+/// (localhost, 10.x, 172.16–31.x, 192.168.x, a .local name); no user, query or fragment; without
+/// the trailing slash. null when it is not one.
+Uri? serverAddress(String text) {
+  final trimmed = text.trim().replaceAll(RegExp(r'/+$'), '');
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    return null;
+  }
+  final scheme = uri.scheme.toLowerCase();
+  if (scheme == 'https') return uri;
+  return scheme == 'http' && _homeNetwork(uri.host.toLowerCase()) ? uri : null;
+}
+
+bool _homeNetwork(String host) {
+  if (host == 'localhost' || host == '::1' || host.endsWith('.local')) {
+    return true;
+  }
+  final parts = host.split('.').map(int.tryParse).toList();
+  if (parts.length != 4 || parts.any((part) => part == null)) return false;
+  final [a!, b!, _, _] = parts;
+  return a == 127 ||
+      a == 10 ||
+      (a == 192 && b == 168) ||
+      (a == 172 && b >= 16 && b <= 31);
+}
 
 /// Who is signed in to AnyTogether.
 class TogetherUser {
@@ -95,16 +123,43 @@ class TogetherAccount extends ChangeNotifier {
     required this.preferences,
     Uri? base,
     required this.clientName,
-  }) : base = base ?? togetherBase {
+  }) : base = base ?? _chosen(preferences),
+       serverFixed = base != null || forcedServer.isNotEmpty {
     _load();
   }
 
   final SharedPreferences preferences;
-  final Uri base;
+
+  /// The server in use: ANYTOGETHER_URL, then the one picked on the phone, then AnyTogether's.
+  Uri base;
+
+  /// Set at build time (or by a test): the phone cannot pick another server.
+  final bool serverFixed;
   final String clientName;
   final _http = HttpClient()..connectionTimeout = const Duration(seconds: 15);
 
   static const _key = 'together.session';
+  static const _serverKey = 'together.server';
+
+  static Uri _chosen(SharedPreferences preferences) {
+    if (forcedServer.isNotEmpty) return Uri.parse(forcedServer);
+    return serverAddress(preferences.getString(_serverKey) ?? '') ??
+        standardServer;
+  }
+
+  /// Uses another AnyTogether server, signing out of this one first; AnyTogether's own is kept
+  /// as no choice at all.
+  Future<void> useServer(Uri server) async {
+    if (serverFixed || server == base) return;
+    if (user != null) await signOut();
+    base = server;
+    if (server == standardServer) {
+      await preferences.remove(_serverKey);
+    } else {
+      await preferences.setString(_serverKey, server.toString());
+    }
+    notifyListeners();
+  }
 
   TogetherUser? user;
   TogetherStep step = const Idle();

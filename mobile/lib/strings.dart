@@ -110,6 +110,13 @@ class Strings {
   String get togetherConnecting => _text('togetherConnecting');
   String get togetherNotFound => _text('togetherNotFound');
   String get back => _text('back');
+  String get togetherServer => _text('togetherServer');
+  String get togetherServerChange => _text('togetherServerChange');
+  String get togetherServerUse => _text('togetherServerUse');
+  String togetherServerMac(String mac, String server) =>
+      _text('togetherServerMac').replaceAll('%@', mac).replaceAll('%s', server);
+  String get togetherServerDetail => _text('togetherServerDetail');
+  String get togetherServerInvalid => _text('togetherServerInvalid');
   String get allow => _text('allow');
   String get notNow => _text('notNow');
   String get editLayout => _text('editLayout');
@@ -221,6 +228,13 @@ class Strings {
     'togetherConnecting': 'Connecting…',
     'togetherNotFound': 'No one with that handle',
     'back': 'Back',
+    'togetherServer': 'Server',
+    'togetherServerChange': 'Change',
+    'togetherServerUse': 'Use',
+    'togetherServerMac': '%@ uses %s',
+    'togetherServerDetail': 'Another AnyTogether server, one you or your friends host. Changing it signs you out.',
+    'togetherServerInvalid':
+        'An https:// address, or http:// on your home network',
     'allow': 'Allow',
     'notNow': 'Not now',
     'remotePlayNoPermission':
@@ -333,6 +347,13 @@ class Strings {
     'togetherConnecting': 'Bağlanıyor…',
     'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
     'back': 'Geri',
+    'togetherServer': 'Sunucu',
+    'togetherServerChange': 'Değiştir',
+    'togetherServerUse': 'Kullan',
+    'togetherServerMac': '%@, %s kullanıyor',
+    'togetherServerDetail': 'Senin ya da arkadaşlarının barındırdığı başka bir AnyTogether sunucusu. Değiştirmek oturumu kapatır.',
+    'togetherServerInvalid':
+        'https:// ile başlayan bir adres ya da ev ağında http://',
     'allow': 'İzin ver',
     'notNow': 'Şimdi değil',
     'remotePlayNoPermission':

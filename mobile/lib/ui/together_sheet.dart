@@ -13,6 +13,7 @@ Future<void> showTogether(
   required String? macName,
   required Future<void> Function()? onUseMac,
   void Function(TogetherTab tab)? onOpen,
+  Uri? launcherServer,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -26,6 +27,7 @@ Future<void> showTogether(
     macName: macName,
     onUseMac: onUseMac,
     onOpen: onOpen,
+    launcherServer: launcherServer,
   ),
 );
 
@@ -35,12 +37,16 @@ class _Together extends StatefulWidget {
     required this.macName,
     required this.onUseMac,
     this.onOpen,
+    this.launcherServer,
   });
 
   final TogetherAccount account;
   final String? macName;
   final Future<void> Function()? onUseMac;
   final void Function(TogetherTab tab)? onOpen;
+
+  /// The server the connected launcher uses, offered when it is not this one.
+  final Uri? launcherServer;
 
   @override
   State<_Together> createState() => _TogetherState();
@@ -49,7 +55,10 @@ class _Together extends StatefulWidget {
 class _TogetherState extends State<_Together> {
   final _email = TextEditingController();
   final _code = TextEditingController();
+  final _server = TextEditingController();
   String? _error;
+  bool _editingServer = false;
+  String? _serverError;
 
   static const _title = TextStyle(
     color: Colors.white,
@@ -62,6 +71,7 @@ class _TogetherState extends State<_Together> {
   void dispose() {
     _email.dispose();
     _code.dispose();
+    _server.dispose();
     super.dispose();
   }
 
@@ -99,9 +109,16 @@ class _TogetherState extends State<_Together> {
               28,
               18 + MediaQuery.viewInsetsOf(context).bottom,
             ),
-            child: user != null
-                ? _signedIn(texts, user)
-                : _signIn(texts, account.step),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                user != null
+                    ? _signedIn(texts, user)
+                    : _signIn(texts, account.step),
+                _serverRow(texts),
+              ],
+            ),
           ),
         );
       },
@@ -155,6 +172,123 @@ class _TogetherState extends State<_Together> {
       ),
     ],
   );
+
+  static String _shown(Uri server) => server.scheme == 'https'
+      ? (server.hasPort ? '${server.host}:${server.port}' : server.host)
+      : server.toString();
+
+  /// Which AnyTogether this is, and a way to another one (a self-hosted server); the launcher's
+  /// first when it uses another.
+  Widget _serverRow(Strings texts) {
+    final account = widget.account;
+    final launcher = widget.launcherServer;
+    final offer =
+        launcher != null && launcher != account.base && !account.serverFixed;
+    const small = TextStyle(color: Colors.white54, fontSize: 13);
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Divider(color: Color(0x14FFFFFF), height: 1),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text(texts.togetherServer, style: small),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _shown(account.base),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+              if (offer)
+                TextButton.icon(
+                  onPressed: () => _useServer(launcher),
+                  icon: const Icon(Icons.laptop_mac_rounded, size: 16),
+                  label: Text(
+                    texts.togetherServerMac(
+                      widget.macName ?? 'Mac',
+                      _shown(launcher),
+                    ),
+                  ),
+                ),
+              if (!account.serverFixed)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _editingServer = !_editingServer;
+                    _serverError = null;
+                    _server.text = account.base.toString();
+                  }),
+                  child: Text(
+                    _editingServer ? texts.cancel : texts.togetherServerChange,
+                  ),
+                ),
+            ],
+          ),
+          if (_editingServer) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _server,
+                    autocorrect: false,
+                    keyboardType: TextInputType.url,
+                    decoration: InputDecoration(
+                      labelText: texts.togetherServer,
+                      hintText: 'https://',
+                    ),
+                    onSubmitted: (_) => _saveServer(),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (account.base != standardServer)
+                  TextButton(
+                    onPressed: () => _useServer(standardServer),
+                    child: Text(texts.reset),
+                  ),
+                FilledButton.tonal(
+                  onPressed: _saveServer,
+                  child: Text(texts.togetherServerUse),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _serverError ?? texts.togetherServerDetail,
+              style: TextStyle(
+                color: _serverError == null
+                    ? Colors.white54
+                    : const Color(0xFFFF8A80),
+                fontSize: 12.5,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _saveServer() {
+    final server = serverAddress(_server.text);
+    if (server == null) {
+      setState(() => _serverError = Texts.of(context).togetherServerInvalid);
+      return;
+    }
+    _useServer(server);
+  }
+
+  Future<void> _useServer(Uri server) async {
+    await widget.account.useServer(server);
+    if (mounted) {
+      setState(() {
+        _editingServer = false;
+        _serverError = null;
+      });
+    }
+  }
 
   static List<(TogetherTab, IconData, String)> _tabs(Strings texts) => [
     (TogetherTab.friends, Icons.people_alt_rounded, texts.friends),

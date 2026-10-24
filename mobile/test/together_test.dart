@@ -257,4 +257,77 @@ void main() {
     expect(server.requests.last.$2, '/api/v1/auth/logout');
     expect(account().user, isNull);
   });
+
+  test('a server address is https, or http on the home network', () {
+    expect(
+      serverAddress(' https://together.example.org/ '),
+      Uri.parse('https://together.example.org'),
+    );
+    expect(serverAddress('https://together.example.org:8443')?.port, 8443);
+    for (final local in [
+      'http://localhost:3000',
+      'http://127.0.0.1:8080',
+      'http://192.168.1.20',
+      'http://10.0.0.5',
+      'http://172.20.1.1',
+      'http://nas.local',
+    ]) {
+      expect(serverAddress(local), isNotNull, reason: local);
+    }
+    for (final refused in [
+      'http://together.example.org',
+      'http://172.32.0.1',
+      'http://8.8.8.8',
+      'ftp://together.example.org',
+      'together.example.org',
+      'https://user@together.example.org',
+      'https://together.example.org/?a=1',
+      '',
+    ]) {
+      expect(serverAddress(refused), isNull, reason: refused);
+    }
+  });
+
+  test('another server signs out of this one first and is kept', () async {
+    server.answer = (method, path, body) => path == '/api/v1/auth/email/verify'
+        ? (200, FakeTogether.tokens())
+        : (204, {});
+    SharedPreferences.setMockInitialValues({
+      'together.server': server.base.toString(),
+    });
+    preferences = await SharedPreferences.getInstance();
+    final chosen = TogetherAccount(
+      preferences: preferences,
+      clientName: 'remote-ios/1.9.1',
+    );
+    expect(chosen.base, server.base);
+    expect(chosen.serverFixed, isFalse);
+    await chosen.startEmail('u@example.com');
+    await chosen.verifyEmail('123456');
+    await chosen.useServer(Uri.parse('https://together.example.org'));
+    expect(server.requests.last.$2, '/api/v1/auth/logout');
+    expect(chosen.user, isNull);
+    expect(chosen.base.host, 'together.example.org');
+    expect(
+      TogetherAccount(preferences: preferences, clientName: 'x').base.host,
+      'together.example.org',
+    );
+    await chosen.useServer(standardServer);
+    expect(preferences.getString('together.server'), isNull);
+  });
+
+  test('the launcher may say which server it uses', () {
+    final welcome = Message.fromJson(
+      '{"type":"welcome","session":"1","udpPort":2,"macName":"Mac","key":"k",'
+      '"togetherServer":"https://together.example.org"}',
+    );
+    expect(
+      welcome,
+      isA<Welcome>().having(
+        (w) => w.togetherServer,
+        'togetherServer',
+        'https://together.example.org',
+      ),
+    );
+  });
 }

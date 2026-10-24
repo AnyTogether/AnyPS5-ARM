@@ -174,6 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           together: widget.session.together,
                           macName: widget.session.macName,
                           onUseMac: () => widget.session.signInWithMac(),
+                          launcherServer: widget.session.launcherServer,
                           onOpenTogether: widget.together == null
                               ? null
                               : (tab) => _openTogether(widget.together!, tab),
@@ -331,6 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
         macName: widget.session.macName,
         onUseMac: () => widget.session.signInWithMac(),
         onOpen: (tab) => _openTogether(hub, tab),
+        launcherServer: widget.session.launcherServer,
       );
       return;
     }

@@ -21,6 +21,7 @@ Future<void> showAbout(
   String? macName,
   Future<void> Function()? onUseMac,
   void Function(TogetherTab tab)? onOpenTogether,
+  Uri? launcherServer,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -41,6 +42,7 @@ Future<void> showAbout(
     macName: macName,
     onUseMac: onUseMac,
     onOpenTogether: onOpenTogether,
+    launcherServer: launcherServer,
   ),
 );
 
@@ -56,6 +58,7 @@ class _About extends StatefulWidget {
     this.macName,
     this.onUseMac,
     this.onOpenTogether,
+    this.launcherServer,
   });
 
   final bool? vibration;
@@ -68,6 +71,7 @@ class _About extends StatefulWidget {
   final String? macName;
   final Future<void> Function()? onUseMac;
   final void Function(TogetherTab tab)? onOpenTogether;
+  final Uri? launcherServer;
 
   @override
   State<_About> createState() => _AboutState();
@@ -136,6 +140,7 @@ class _AboutState extends State<_About> {
                           macName: widget.macName,
                           onUseMac: widget.onUseMac,
                           onOpen: widget.onOpenTogether,
+                          launcherServer: widget.launcherServer,
                         ),
                       ),
                     ),

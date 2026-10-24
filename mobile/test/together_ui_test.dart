@@ -148,4 +148,56 @@ void main() {
     expect(opened, [TogetherTab.friends]);
     expect(find.text('@utku'), findsNothing);
   });
+
+  testWidgets('the server can be changed, and the launcher\'s is offered', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final account = TogetherAccount(
+      preferences: await SharedPreferences.getInstance(),
+      clientName: 'test',
+    );
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showTogether(
+              context,
+              account: account,
+              macName: 'MacBook',
+              onUseMac: () async {},
+              launcherServer: Uri.parse('https://home.example.org'),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('anytogether.kodla.agency'), findsOneWidget);
+    await tester.tap(find.text('Change'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Server'),
+      'http://together.example.org',
+    );
+    await tester.tap(find.text('Use'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('An https:// address, or http:// on your home network'),
+      findsOneWidget,
+    );
+    expect(account.base.host, 'anytogether.kodla.agency');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MacBook uses home.example.org'));
+    await tester.pumpAndSettle();
+    expect(account.base, Uri.parse('https://home.example.org'));
+    expect(find.text('home.example.org'), findsOneWidget);
+    expect(find.text('MacBook uses home.example.org'), findsNothing);
+  });
 }
