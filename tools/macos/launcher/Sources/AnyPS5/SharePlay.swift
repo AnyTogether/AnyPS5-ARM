@@ -262,7 +262,7 @@ extension AppModel {
             // Ended from elsewhere (the website, another launcher): this one lets go too.
             if let session = shareSession, session.id == id { endShareSession() }
         default:
-            break
+            discoverEvent(event)
         }
     }
 

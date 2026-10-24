@@ -231,7 +231,7 @@ extension AppModel {
                 withAnimation(Motion.overlay) { party = nil }
             show(T.text(.partyEnded), symbol: "person.3")
         default:
-            break
+            discoverEvent(event)
         }
     }
 

@@ -312,6 +312,7 @@ enum PreviewRenderer {
             render(fresh, step == 2 ? found : [], root, still, output.appendingPathComponent("onboarding\(step).png")) { model in model.onboardingStep = step }
         }
         SocialPreviews.run(preferences, found, root, still, output)
+        DiscoverPreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")
     }
 

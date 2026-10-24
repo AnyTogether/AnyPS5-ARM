@@ -620,6 +620,20 @@ extension AppModel {
         case .leaderboard:
             leaderboardCommand(command)
             return true
+        case .findPlayers:
+            return panelCommand(command)
+        case .gameHub:
+            if command == .options || (command == .back && !panelInRows) {
+                backFromDiscover()
+                return true
+            }
+            return panelCommand(command)
+        case .lfgPost:
+            if command == .back || command == .options {
+                backFromDiscover()
+                return true
+            }
+            return panelCommand(command)
         case .notifications, .compat:
             if command == .back {
                 closeOverlay()

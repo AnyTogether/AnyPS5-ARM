@@ -65,6 +65,9 @@ extension AppModel {
         case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
         case .compat: return [PanelCategory(id: "compat", title: compatTitle, symbol: "person.3.sequence", rows: compatRows())]
         case .crashReport: return [PanelCategory(id: "report", title: TC.text(.reportKicker), symbol: "stethoscope", rows: crashReportRows())]
+        case .findPlayers: return findPlayersCategories()
+        case .gameHub: return hubCategories()
+        case .lfgPost: return [PanelCategory(id: "post", title: FP.text(.findPlayers), symbol: "plus.bubble", rows: lfgPostRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -437,6 +440,9 @@ extension AppModel {
     // MARK: Panel input
 
     /// Moves through the open panel; returns whether the command was used.
+    /// Panels with categories on the left (Settings, Find players, a game's hub).
+    var overlayHasCategories: Bool { overlay == .settings || overlay == .findPlayers || overlay == .gameHub }
+
     func panelCommand(_ command: Command) -> Bool {
         let categories = panelCategories()
         guard !categories.isEmpty else { return false }
@@ -551,6 +557,8 @@ extension AppModel {
 
 /// The settings screen: categories on the left, their rows on the right.
 struct SettingsPanel: View {
+    var title = T.text(.settings)
+    var subtitle: String?
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -559,7 +567,11 @@ struct SettingsPanel: View {
         let current = categories.indices.contains(model.panelCategory) ? categories[model.panelCategory] : nil
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 6 * scale) {
-                Text(T.text(.settings)).font(.display(40 * scale, .light)).foregroundStyle(.white).padding(.bottom, 26 * scale)
+                Text(title).font(.display(40 * scale, .light)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.6)
+                    .padding(.bottom, subtitle == nil ? 26 * scale : 0)
+                if let subtitle {
+                    Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)).padding(.bottom, 26 * scale)
+                }
                 ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
                     let selected = index == model.panelCategory
                     let focused = selected && !model.panelInRows
@@ -651,7 +663,7 @@ struct RowList: View {
                 RowView(row: row, focused: focusedRow == index)
                     .id(row.id)
                     .onTapGesture {
-                        if model.overlay == .settings { model.panelInRows = true }
+                        if model.overlayHasCategories { model.panelInRows = true }
                         model.panelRow = index
                         model.activate(row)
                     }

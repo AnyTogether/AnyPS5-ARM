@@ -10,23 +10,28 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         case partyInvite = "party_invite"
         case gameInvite = "game_invite"
         case missedCall = "missed_call"
+        /// Someone said "I'm in" on the user's looking-for-group post, or the poster let the user in.
+        case lfgRequest = "lfg_request"
+        case lfgAccepted = "lfg_accepted"
         /// A kind this launcher does not know yet.
         case other
 
-        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .warning, .other]
+        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .warning, .other]
 
         /// Whether a new one deserves a toast of its own: requests, invites and missed calls are
         /// announced by their own events already.
         public var toastsOnItsOwn: Bool {
             switch self {
-            case .friendRequest, .friendAccepted, .partyInvite, .gameInvite, .missedCall: return false
+            case .friendRequest, .friendAccepted, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted: return false
             case .message, .warning, .other: return true
             }
         }
     }
 
     /// What a kind carries: message {conversationId, title, group, count, text}, party_invite
-    /// {partyId, size}, game_invite {sessionId, titleId}, missed_call {callId}, warning {reason}.
+    /// {partyId, size}, game_invite {sessionId, titleId}, missed_call {callId}, warning {reason},
+    /// lfg_request {postId, titleId, gameNames, purpose, count}, lfg_accepted {postId, titleId,
+    /// gameNames, purpose, invite}.
     public struct Details: Decodable, Equatable, Sendable {
         public var conversationId: String?
         public var title: String?
@@ -39,6 +44,10 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         public var titleId: String?
         public var callId: String?
         public var reason: String?
+        public var postId: String?
+        public var gameNames: [String: String]?
+        public var purpose: String?
+        public var invite: TogetherLfgInvite?
 
         public init() {}
     }

@@ -71,7 +71,7 @@ extension AppModel {
             ]
             rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
                                  kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
-            rows += profileEditRows() + privacyRows() + serverRows()
+            rows += profileEditRows() + privacyRows() + discoveryRows() + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
             }))
@@ -382,6 +382,7 @@ extension AppModel {
             gameInvites = []
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
+            discover = DiscoverState()
         }
         Task {
             await client.signOut()
@@ -421,6 +422,7 @@ extension AppModel {
         loadGameInvites()
         loadNotifications()
         loadShareInvites()
+        loadDiscovery()
         flushTogether()
     }
 

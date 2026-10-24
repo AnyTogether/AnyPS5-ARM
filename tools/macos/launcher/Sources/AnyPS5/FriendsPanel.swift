@@ -19,6 +19,8 @@ extension AppModel {
                 self?.openMyProfile()
             }),
         ]
+        rows.append(PanelRow(id: "friends-find", title: FP.text(.findPlayers), detail: FP.text(.findPlayersDetail), symbol: "person.3.sequence",
+                             kind: .action(destructive: false) { [weak self] in self?.openFindPlayers() }))
         rows += socialRows()
         for person in togetherRequests.incoming {
             rows.append(PanelRow(id: "accept-\(person.userId)", title: T.format(.friendsAccept, person.displayName), detail: "@\(person.handle) · \(T.text(.friendsWantsToBe))",
@@ -134,6 +136,8 @@ extension AppModel {
             refreshFriends()
         case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing":
             messageEvent(event)
+        case let type where type.hasPrefix("lfg.") || type == "discover.changed":
+            discoverEvent(event)
         case let type where type.hasPrefix("party."):
             partyEvent(event)
         case let type where type.hasPrefix("game_session."):

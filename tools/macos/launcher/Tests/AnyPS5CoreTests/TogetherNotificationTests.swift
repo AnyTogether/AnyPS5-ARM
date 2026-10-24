@@ -41,6 +41,23 @@ final class TogetherNotificationTests: TogetherSignedInCase {
         XCTAssertEqual(last(), "GET /api/v1/me/notifications?before=0001&limit=20")
     }
 
+    func testLookingForGroupKinds() throws {
+        let json: [String: Any] = ["notifications": [
+            Self.note("0009", kind: "lfg_request", subject: "l1", data: ["postId": "l1", "titleId": "PPSA01234", "gameNames": ["en": "Stray"], "purpose": "coop", "count": 2]),
+            Self.note("0008", kind: "lfg_accepted", subject: "l2", data: ["postId": "l2", "titleId": "PPSA01234", "gameNames": ["en": "Stray"], "purpose": "online",
+                                                                          "invite": ["kind": "party", "id": "p1"]]),
+        ], "unread": 2, "more": false]
+        let page = try JSONDecoder.together.decode(TogetherNotificationPage.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(page.notifications.map(\.kind), [.lfgRequest, .lfgAccepted])
+        XCTAssertEqual(page.notifications[0].data.postId, "l1")
+        XCTAssertEqual(page.notifications[0].data.gameNames?["en"], "Stray")
+        XCTAssertEqual(page.notifications[0].data.count, 2)
+        XCTAssertEqual(page.notifications[1].data.purpose, "online")
+        XCTAssertEqual(page.notifications[1].data.invite, TogetherLfgInvite(kind: "party", id: "p1"))
+        // Their own events announce them.
+        XCTAssertFalse(TogetherNotification.Kind.lfgRequest.toastsOnItsOwn)
+    }
+
     func testMarkingRead() async throws {
         FakeTogether.handler = { _, _ in (200, ["unread": 4]) }
         let left = try await client.readNotification("0007")

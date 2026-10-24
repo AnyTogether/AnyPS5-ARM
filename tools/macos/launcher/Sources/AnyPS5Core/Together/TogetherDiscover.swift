@@ -424,6 +424,11 @@ public struct TogetherDiscoveredPerson: Decodable, Equatable, Sendable, Identifi
     public struct Presence: Decodable, Equatable, Sendable {
         public let state: String
         public let titleId: String?
+
+        public init(state: String, titleId: String? = nil) {
+            self.state = state
+            self.titleId = titleId
+        }
     }
 
     public var id: String { user.userId }

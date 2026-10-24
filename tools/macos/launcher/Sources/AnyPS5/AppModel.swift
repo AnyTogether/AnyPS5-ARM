@@ -120,6 +120,12 @@ enum Overlay: Equatable {
     case compat
     /// A game's last start: why it stopped, the report to export and the issue to open.
     case crashReport
+    /// Find players: the looking-for-group board, the user's posts, Live now and public parties, people.
+    case findPlayers
+    /// "Find players for <game>": a post being written.
+    case lfgPost
+    /// One game's hub: who plays it now, posts, public share plays and parties, its players.
+    case gameHub
 }
 
 struct Toast: Identifiable, Equatable {
@@ -143,7 +149,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var scanning = false
     @Published var selected = 0
     @Published var focus = HomeFocus.tiles
-    @Published var overlay: Overlay?
+    @Published var overlay: Overlay? {
+        didSet { if oldValue != overlay { discoverOverlayChanged() } }
+    }
     @Published var panelCategory = 0
     @Published var panelRow = 0
     @Published var panelInRows = false
@@ -475,6 +483,8 @@ final class AppModel: ObservableObject {
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// Find players, Live now, public parties, discovery and game hubs.
+    @Published var discover = DiscoverState()
     /// Share play: what the friends panel shows, and the running share play's pieces.
     @Published var share = ShareState()
     var shareSession: ShareSession?
