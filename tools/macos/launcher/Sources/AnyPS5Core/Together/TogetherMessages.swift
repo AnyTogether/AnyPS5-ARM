@@ -76,6 +76,13 @@ extension TogetherClient {
         try JSONDecoder.together.decode(TogetherConversation.self, from: try await authorized("POST", "conversations", ["members": [userId]]))
     }
 
+    /// A group with friends (one or more); without a name its members stand for it.
+    public func startGroup(with userIds: [String], title: String? = nil) async throws -> TogetherConversation {
+        var body: [String: Any] = ["members": userIds, "group": true]
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty { body["title"] = String(title.prefix(80)) }
+        return try JSONDecoder.together.decode(TogetherConversation.self, from: try await authorized("POST", "conversations", body))
+    }
+
     /// The newest page, or the one before `before` (a message seq); oldest first.
     public func messages(in conversationId: String, before: Int? = nil, limit: Int = 50) async throws -> (messages: [TogetherMessage], more: Bool) {
         struct Page: Decodable { let messages: [TogetherMessage]; let more: Bool }

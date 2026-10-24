@@ -34,6 +34,11 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
 
     public var open: Bool { privacy == "friends" }
     public func isLeader(_ userId: String) -> Bool { leaderId == userId }
+
+    /// Whether `me` may remove `member` or hand them the lead: the leader, about someone else in the party.
+    public func canManage(_ member: String, me: String) -> Bool {
+        isLeader(me) && member != me && members.contains { $0.userId == member }
+    }
 }
 
 /// An invite waiting for the user.
@@ -82,6 +87,16 @@ extension TogetherClient {
 
     public func leaveParty(_ partyId: String) async throws {
         _ = try await authorized("POST", "parties/\(partyId)/leave", [:])
+    }
+
+    /// The leader removes someone from the party.
+    public func kick(_ userId: String, from partyId: String) async throws {
+        _ = try await authorized("POST", "parties/\(partyId)/kick", ["userId": userId])
+    }
+
+    /// The leader hands the lead to another member.
+    public func makeLeader(_ userId: String, of partyId: String) async throws -> TogetherParty {
+        try party(try await authorized("POST", "parties/\(partyId)/leader", ["userId": userId]))
     }
 
     private func party(_ data: Data) throws -> TogetherParty { try JSONDecoder.together.decode(TogetherParty.self, from: data) }

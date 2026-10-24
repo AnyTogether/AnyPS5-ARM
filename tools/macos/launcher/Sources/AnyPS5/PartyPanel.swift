@@ -55,6 +55,13 @@ extension AppModel {
                                                      status: party.call?.in.contains(member.userId) == true ? .online : nil, speaking: voiceSpeaking.contains(member.userId))))
         }
         if leader {
+            // The leader may remove someone or hand the lead over.
+            for member in party.members where party.canManage(member.userId, me: me.id) {
+                rows.append(PanelRow(id: "party-lead-\(member.userId)", title: T.format(.partyMakeLeader, member.displayName), symbol: "crown",
+                                     kind: .action(destructive: false) { [weak self] in self?.makePartyLeader(member) }))
+                rows.append(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, member.displayName), symbol: "person.badge.minus",
+                                     kind: .action(destructive: true) { [weak self] in self?.removeFromParty(member) }))
+            }
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
                 self?.setPartyOpen(value)
             }))
@@ -125,6 +132,37 @@ extension AppModel {
         partyAction { try await $0.invite([friend.userId], to: id) }
     }
 
+    /// The lead to another member (leader only).
+    func makePartyLeader(_ member: TogetherPerson) {
+        guard let id = party?.id else { return }
+        partyAction { client in
+            let next = try await client.makeLeader(member.userId, of: id)
+            await MainActor.run { self.show(T.format(.partyNowLeads, member.displayName), symbol: "crown.fill") }
+            return next
+        }
+    }
+
+    /// Someone out of the party (leader only).
+    func removeFromParty(_ member: TogetherPerson) {
+        guard let id = party?.id else { return }
+        let client = together
+        Task {
+            do {
+                try await client.kick(member.userId, from: id)
+                withAnimation(Motion.overlay) {
+                    if let current = party, current.id == id {
+                        party = TogetherParty(id: current.id, leaderId: current.leaderId, privacy: current.privacy, members: current.members.filter { $0.userId != member.userId },
+                                              invited: current.invited, call: current.call.map { .init(id: $0.id, in: $0.in.filter { $0 != member.userId }) })
+                    }
+                }
+                show(T.format(.partyRemoved, member.displayName), symbol: "person.badge.minus")
+                loadParty()
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
     func declineParty(_ id: String) {
         Task {
             try? await together.declineParty(id)
@@ -169,6 +207,9 @@ extension AppModel {
             loadParty()
         case "party.updated":
             guard let next = event.decode(TogetherParty.self), next.id == party?.id || party == nil else { return }
+            if let me = togetherUser?.id, let before = party, !before.isLeader(me), next.isLeader(me) {
+                show(T.text(.partyYouLead), symbol: "crown.fill")
+            }
             withAnimation(Motion.overlay) { party = next }
         case "party.member_joined":
             if let name = event.decode(JoinedData.self)?.member.displayName { show(T.format(.partyJoined, name), symbol: "person.badge.plus") }

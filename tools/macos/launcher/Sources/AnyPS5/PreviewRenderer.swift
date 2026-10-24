@@ -150,6 +150,14 @@ enum PreviewRenderer {
                 model.previewMessages(inbox, index: 0, inThread: inThread, focus: focus)
             }
         }
+        render(preferences, found, root, still, output.appendingPathComponent("messages-group.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = [TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil)),
+                                     TogetherFriend(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil, presence: nil),
+                                     TogetherFriend(userId: "f5", handle: "deniz", displayName: "Deniz", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil))]
+            model.previewMessages(inbox, index: 3, inThread: true)
+            model.previewGroup(picked: ["f1", "f5"], name: "Co-op night", focus: 2)
+        }
         render(preferences, found, root, still, output.appendingPathComponent("home-messages.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
             model.inbox = inbox
@@ -256,6 +264,8 @@ enum PreviewRenderer {
     }
 
     static func render(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ file: URL, configure: (AppModel) -> Void = { _ in }) {
+        // ANYPS5_PREVIEW_ONLY=party,messages draws only the screens whose file names start so.
+        if let only = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_ONLY"]?.split(separator: ","), !only.contains(where: { file.lastPathComponent.hasPrefix($0) }) { return }
         let model = AppModel(preferences: preferences)
         model.preview(games: games, root: root)
         // ANYPS5_PREVIEW_SELECT=<title ID> picks the game the screens show.

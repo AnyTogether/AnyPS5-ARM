@@ -421,6 +421,10 @@ final class AppModel: ObservableObject {
     @Published var messageFocus = 0
     @Published var composing = false
     @Published var messageDraft = ""
+    /// A new group: the friends picked, its name, and the row focused (the name, each friend, Create).
+    @Published var groupPicked: Set<String> = []
+    @Published var groupName = ""
+    @Published var groupFocus = 0
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
     @Published var party: TogetherParty?
     @Published var partyInvites: [TogetherPartyInvite] = []

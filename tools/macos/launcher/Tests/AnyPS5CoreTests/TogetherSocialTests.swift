@@ -127,6 +127,24 @@ final class TogetherMessagesTests: TogetherSignedInCase {
         XCTAssertEqual(body()?["members"] as? [String], ["f1"])
     }
 
+    /// A group with friends, named or not: always a group, even with one friend.
+    func testAGroupWithFriends() async throws {
+        var group = Self.conversation("g1", unread: 0, last: 0)
+        group["kind"] = "group"
+        group["title"] = "Squad"
+        FakeTogether.handler = { [group] _, _ in (201, group) }
+        let made = try await client.startGroup(with: ["f1", "f2"], title: "  Squad ")
+        XCTAssertEqual(last(), "POST /api/v1/conversations")
+        XCTAssertEqual(body()?["members"] as? [String], ["f1", "f2"])
+        XCTAssertEqual(body()?["group"] as? Bool, true)
+        XCTAssertEqual(body()?["title"] as? String, "Squad")
+        XCTAssertEqual(made.kind, "group")
+        XCTAssertEqual(made.name(for: "u1"), "Squad")
+        _ = try await client.startGroup(with: ["f1"], title: " ")
+        XCTAssertNil(body()?["title"], "no name: the members stand for it")
+        XCTAssertEqual(body()?["group"] as? Bool, true)
+    }
+
     func testAPageOfHistoryAndOlderOnes() async throws {
         FakeTogether.handler = { _, _ in (200, ["messages": [Self.message(4), Self.message(5)], "more": true]) }
         let page = try await client.messages(in: "c1")
@@ -241,6 +259,25 @@ final class TogetherPartyTests: TogetherSignedInCase {
         _ = try await client.setParty("p1", open: false)
         XCTAssertEqual(last(), "PATCH /api/v1/parties/p1")
         XCTAssertEqual(body()?["privacy"] as? String, "invite")
+    }
+
+    /// The leader removes someone or hands the lead over; only the leader sees either, never for themself.
+    func testTheLeaderRemovesSomeoneAndHandsTheLeadOver() async throws {
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.kick("f1", from: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/kick")
+        XCTAssertEqual(body() as? [String: String], ["userId": "f1"])
+        var handed = Self.party(members: [Self.member("u1", "Utku"), Self.member("f1", "Ayşe")])
+        handed["leaderId"] = "f1"
+        FakeTogether.handler = { [handed] _, _ in (200, handed) }
+        let party = try await client.makeLeader("f1", of: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/leader")
+        XCTAssertEqual(body() as? [String: String], ["userId": "f1"])
+        XCTAssertTrue(party.isLeader("f1"))
+        XCTAssertFalse(party.canManage("f1", me: "u1"), "no longer the leader")
+        XCTAssertTrue(party.canManage("u1", me: "f1"))
+        XCTAssertFalse(party.canManage("f1", me: "f1"), "not yourself")
+        XCTAssertFalse(party.canManage("x9", me: "f1"), "not someone outside the party")
     }
 
     /// A friend's presence carries their party and the game they host.

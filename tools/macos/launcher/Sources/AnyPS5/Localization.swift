@@ -63,6 +63,8 @@ enum T {
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceLeave, voiceNoMic, voiceJoined
+        case messagesNewGroup, messagesNewGroupDetail, messagesGroupName, messagesGroupPicked, messagesGroupCreate, messagesGroupPick, messagesGroupMade
+        case partyMakeLeader, partyRemove, partyNowLeads, partyRemoved, partyYouLead
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -205,6 +207,18 @@ enum T {
         .voiceLeave: "Sesten çık",
         .voiceNoMic: "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan AnyPS5'e izin ver",
         .voiceJoined: "Sestesin",
+        .messagesNewGroup: "Yeni grup",
+        .messagesNewGroupDetail: "Arkadaşlarını seç, bir ad ver",
+        .messagesGroupName: "Grubun adı (isteğe bağlı)",
+        .messagesGroupPicked: "%d kişi seçildi",
+        .messagesGroupCreate: "Grubu kur",
+        .messagesGroupPick: "Önce en az bir arkadaş seç",
+        .messagesGroupMade: "%@ kuruldu",
+        .partyMakeLeader: "%@ parti lideri olsun",
+        .partyRemove: "%@ partiden çıkarılsın",
+        .partyNowLeads: "Partinin lideri artık %@",
+        .partyRemoved: "%@ partiden çıkarıldı",
+        .partyYouLead: "Partinin lideri artık sensin",
         .friendsTitle: "Arkadaşlar",
         .friendsSignIn: "Arkadaşlarını görmek için giriş yap",
         .friendsAccept: "%@: kabul et",
@@ -730,6 +744,18 @@ enum T {
         .voiceLeave: "Leave voice",
         .voiceNoMic: "Allow AnyPS5 in System Settings → Privacy & Security → Microphone",
         .voiceJoined: "You're in voice",
+        .messagesNewGroup: "New group",
+        .messagesNewGroupDetail: "Pick friends and name it",
+        .messagesGroupName: "Group name (optional)",
+        .messagesGroupPicked: "%d picked",
+        .messagesGroupCreate: "Start the group",
+        .messagesGroupPick: "Pick at least one friend first",
+        .messagesGroupMade: "%@ is ready",
+        .partyMakeLeader: "Make %@ the leader",
+        .partyRemove: "Remove %@ from the party",
+        .partyNowLeads: "%@ leads the party now",
+        .partyRemoved: "%@ was removed from the party",
+        .partyYouLead: "You lead the party now",
         .friendsTitle: "Friends",
         .friendsSignIn: "Sign in to see your friends",
         .friendsAccept: "Accept %@",

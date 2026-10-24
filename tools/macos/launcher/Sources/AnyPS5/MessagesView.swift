@@ -9,11 +9,14 @@ extension AppModel {
     /// Something the list on the left holds: a conversation, or a friend without one yet.
     enum MessageTarget: Identifiable, Equatable {
         case conversation(TogetherConversation)
+        /// A group to start: friends picked and a name.
+        case newGroup
         case friend(TogetherFriend)
 
         var id: String {
             switch self {
             case .conversation(let conversation): return conversation.id
+            case .newGroup: return "new-group"
             case .friend(let friend): return "friend-" + friend.userId
             }
         }
@@ -26,7 +29,8 @@ extension AppModel {
     var messageTargets: [MessageTarget] {
         guard let inbox else { return [] }
         let talking = Set(inbox.conversations.filter { $0.kind == "direct" }.flatMap { $0.others(than: inbox.me).map(\.userId) })
-        return inbox.conversations.map(MessageTarget.conversation) + togetherFriends.filter { !talking.contains($0.userId) }.map(MessageTarget.friend)
+        return inbox.conversations.map(MessageTarget.conversation) + (togetherFriends.isEmpty ? [] : [.newGroup])
+            + togetherFriends.filter { !talking.contains($0.userId) }.map(MessageTarget.friend)
     }
 
     /// The conversation selected on the left, when it is one.
@@ -37,6 +41,12 @@ extension AppModel {
     }
 
     var unreadMessages: Int { inbox?.unread ?? 0 }
+
+    /// Whether the row selected on the left is the new group.
+    var selectingNewGroup: Bool {
+        let targets = messageTargets
+        return targets.indices.contains(messagesIndex) && targets[messagesIndex] == .newGroup
+    }
 
     func loadInbox() {
         guard let user = togetherUser else { return }
@@ -90,6 +100,7 @@ extension AppModel {
             }
             return
         }
+        if selectingNewGroup { return groupCommand(command) }
         let count = AppModel.quickReplies.count + 1
         switch command {
         case .left:
@@ -116,6 +127,10 @@ extension AppModel {
         let targets = messageTargets
         guard targets.indices.contains(messagesIndex) else { return }
         switch targets[messagesIndex] {
+        case .newGroup:
+            withAnimation(Motion.focus) { messagesInThread = true }
+            groupFocus = 0
+            Sounds.shared.play(.select)
         case .conversation:
             withAnimation(Motion.focus) { messagesInThread = true }
             messageFocus = AppModel.quickReplies.count
@@ -135,6 +150,58 @@ extension AppModel {
                 } catch {
                     show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
                 }
+            }
+        }
+    }
+
+    /// The new group's rows: its name, each friend to pick, then Create.
+    private func groupCommand(_ command: Command) {
+        let last = togetherFriends.count + 1
+        switch command {
+        case .up, .down:
+            let next = min(last, max(0, groupFocus + (command == .down ? 1 : -1)))
+            guard next != groupFocus else { return }
+            groupFocus = next
+            Sounds.shared.play(.move)
+        case .select:
+            if groupFocus == 0 {
+                composing = true
+            } else if groupFocus == last {
+                startGroup()
+            } else {
+                let friend = togetherFriends[groupFocus - 1]
+                if groupPicked.contains(friend.userId) { groupPicked.remove(friend.userId) } else { groupPicked.insert(friend.userId) }
+                Sounds.shared.play(.move)
+            }
+        case .back, .left:
+            leaveThread()
+        case .options:
+            closeOverlay()
+        default:
+            break
+        }
+    }
+
+    /// The group with the friends picked, opened to write in.
+    func startGroup() {
+        let members = togetherFriends.map(\.userId).filter(groupPicked.contains)
+        guard !members.isEmpty else { return show(T.text(.messagesGroupPick), symbol: "person.2.badge.plus") }
+        let title = groupName
+        Task {
+            do {
+                let group = try await together.startGroup(with: members, title: title)
+                if inbox?.conversations.contains(where: { $0.id == group.id }) == false { inbox?.conversations.insert(group, at: 0) }
+                inbox?.threads[group.id] = inbox?.threads[group.id] ?? []
+                groupPicked = []
+                groupName = ""
+                messagesIndex = messageTargets.firstIndex { $0.id == group.id } ?? 0
+                withAnimation(Motion.focus) { messagesInThread = true }
+                messageFocus = AppModel.quickReplies.count
+                composing = true
+                Sounds.shared.play(.select)
+                show(T.format(.messagesGroupMade, group.name(for: inbox?.me ?? "")), symbol: "person.3.fill")
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
             }
         }
     }
@@ -200,6 +267,12 @@ extension AppModel {
         }
     }
 
+    func previewGroup(picked: Set<String>, name: String, focus: Int) {
+        groupPicked = picked
+        groupName = name
+        groupFocus = focus
+    }
+
     func previewMessages(_ inbox: TogetherInbox, index: Int, inThread: Bool, focus: Int? = nil) {
         self.inbox = inbox
         messagesIndex = index
@@ -228,7 +301,7 @@ struct MessagesView: View {
 
     private var list: some View {
         let targets = model.messageTargets
-        let firstFriend = targets.firstIndex { if case .friend = $0 { return true } else { return false } }
+        let firstFriend = targets.firstIndex { if case .conversation = $0 { return false } else { return true } }
         return VStack(alignment: .leading, spacing: 18 * scale) {
             HStack(alignment: .firstTextBaseline, spacing: 12 * scale) {
                 Text(T.text(.messagesTitle)).font(.display(34 * scale, .light)).foregroundStyle(.white)
@@ -289,6 +362,8 @@ struct MessagesView: View {
             }
             .padding(24 * scale)
             .glass(24 * scale, opacity: 0.25)
+        } else if model.selectingNewGroup {
+            GroupComposer()
         } else if targets.indices.contains(model.messagesIndex), case .friend(let friend) = targets[model.messagesIndex] {
             VStack(spacing: 18 * scale) {
                 ProfileAvatar(url: friend.avatar, name: friend.displayName, size: 96 * scale)
@@ -371,6 +446,120 @@ struct ComposerField: View {
     }
 }
 
+/// A new group: a name, the friends to have in it (picked with ✕), and Create.
+struct GroupComposer: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @Environment(\.previewRender) private var previewRender
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        let friends = model.togetherFriends
+        let inside = model.messagesInThread
+        VStack(alignment: .leading, spacing: 16 * scale) {
+            HStack(spacing: 16 * scale) {
+                Image(systemName: "person.3.fill").font(.system(size: 20 * scale, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 52 * scale, height: 52 * scale).background(Circle().fill(model.accent.opacity(0.85)))
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(T.text(.messagesNewGroup)).font(.display(22 * scale, .semibold)).foregroundStyle(.white)
+                    Text(T.format(.messagesGroupPicked, model.groupPicked.count)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer()
+                HStack(spacing: 22 * scale) {
+                    Hint(keys: "↑ ↓", label: T.text(.hintMove))
+                    Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
+                    Hint(keys: "esc / ○", label: T.text(.hintBack))
+                }
+            }
+            nameField(focused: inside && model.groupFocus == 0)
+            ProfileColumn(title: "", count: nil, focusedIndex: inside ? model.groupFocus - 1 : nil, ids: friends.map(\.userId)) {
+                ForEach(Array(friends.enumerated()), id: \.element.userId) { index, friend in
+                    friendRow(friend, focused: inside && model.groupFocus == index + 1)
+                        .id(friend.userId)
+                        .onTapGesture {
+                            model.groupFocus = index + 1
+                            if model.groupPicked.contains(friend.userId) { model.groupPicked.remove(friend.userId) } else { model.groupPicked.insert(friend.userId) }
+                        }
+                }
+            }
+            .frame(maxHeight: .infinity)
+            createButton(focused: inside && model.groupFocus == friends.count + 1)
+        }
+        .padding(24 * scale)
+        .glass(24 * scale, opacity: 0.25)
+    }
+
+    private func nameField(focused: Bool) -> some View {
+        HStack(spacing: 12 * scale) {
+            Image(systemName: "character.cursor.ibeam").font(.system(size: 16 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
+            if previewRender {
+                // A text field does not draw offscreen.
+                Text(model.groupName.isEmpty ? T.text(.messagesGroupName) : model.groupName).font(.display(16 * scale))
+                    .foregroundStyle(.white.opacity(model.groupName.isEmpty ? 0.4 : 1))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField(T.text(.messagesGroupName), text: $model.groupName)
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale))
+                    .foregroundStyle(.white)
+                    .focused($editing)
+                    .onSubmit { model.composing = false }
+                    .onExitCommand { model.composing = false }
+            }
+        }
+        .padding(.horizontal, 18 * scale)
+        .padding(.vertical, 14 * scale)
+        .background(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color.white.opacity(focused || (model.composing && model.groupFocus == 0) ? 0.12 : 0.06)))
+        .focusRing(focused && !model.composing, radius: 16 * scale, width: 2)
+        .onChange(of: model.composing) { _, on in editing = on && model.groupFocus == 0 }
+        .onChange(of: editing) { _, on in if model.composing != on { model.composing = on } }
+        .onTapGesture {
+            model.groupFocus = 0
+            model.composing = true
+        }
+    }
+
+    private func friendRow(_ friend: TogetherFriend, focused: Bool) -> some View {
+        let picked = model.groupPicked.contains(friend.userId)
+        return HStack(spacing: 14 * scale) {
+            ProfileAvatar(url: friend.avatar, name: friend.displayName, size: 40 * scale, glow: false)
+            VStack(alignment: .leading, spacing: 3 * scale) {
+                Text(friend.displayName).font(.display(16 * scale, .semibold)).lineLimit(1)
+                Text("@\(friend.handle)").font(.display(13 * scale)).opacity(0.55).lineLimit(1)
+            }
+            Spacer(minLength: 8 * scale)
+            Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 20 * scale, weight: .semibold))
+                .foregroundStyle(picked ? (focused ? Color.black : model.accent) : (focused ? Color.black.opacity(0.4) : .white.opacity(0.35)))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .foregroundStyle(focused ? Color.black : .white)
+        .padding(.horizontal, 14 * scale)
+        .padding(.vertical, 9 * scale)
+        .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(picked ? 0.1 : 0.04)))
+        .scaleEffect(focused ? 1.015 : 1)
+        .animation(Motion.focus, value: focused)
+        .animation(Motion.focus, value: picked)
+    }
+
+    private func createButton(focused: Bool) -> some View {
+        let ready = !model.groupPicked.isEmpty
+        return Button { model.startGroup() } label: {
+            HStack(spacing: 10 * scale) {
+                Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 15 * scale, weight: .semibold))
+                Text(T.text(.messagesGroupCreate)).font(.display(16 * scale, .semibold))
+            }
+            .foregroundStyle(focused ? Color.black : .white.opacity(ready ? 1 : 0.45))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13 * scale)
+            .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(focused ? Color.white : (ready ? model.accent.opacity(0.8) : Color.white.opacity(0.06))))
+            .scaleEffect(focused ? 1.015 : 1)
+        }
+        .buttonStyle(.plain)
+        .animation(Motion.focus, value: focused)
+    }
+}
+
 struct ConversationRow: View {
     let target: AppModel.MessageTarget
     let focused: Bool
@@ -398,6 +587,16 @@ struct ConversationRow: View {
                             .background(Capsule().fill(model.accent))
                     }
                 }
+            case .newGroup:
+                Image(systemName: "person.3.fill").font(.system(size: 18 * scale, weight: .semibold))
+                    .frame(width: 46 * scale, height: 46 * scale)
+                    .background(Circle().fill(focused ? Color.black.opacity(0.08) : Color.white.opacity(0.1)))
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Text(T.text(.messagesNewGroup)).font(.display(17 * scale, .semibold)).lineLimit(1)
+                    Text(T.text(.messagesNewGroupDetail)).font(.display(13 * scale)).opacity(0.55).lineLimit(1)
+                }
+                Spacer(minLength: 8 * scale)
+                Image(systemName: "plus").font(.system(size: 15 * scale, weight: .semibold)).opacity(0.6)
             case .friend(let friend):
                 ProfileAvatar(url: friend.avatar, name: friend.displayName, size: 46 * scale, glow: false)
                 VStack(alignment: .leading, spacing: 4 * scale) {
