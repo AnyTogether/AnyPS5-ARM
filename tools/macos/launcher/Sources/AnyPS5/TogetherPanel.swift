@@ -48,6 +48,7 @@ extension AppModel {
             guard let self else { return }
             self.preferences.togetherServer = url == TogetherServer.standard ? nil : url.absoluteString
             self.together = AppModel.makeTogetherClient(base: url)
+            self.remote?.togetherServer = url.absoluteString
             self.togetherSync = TogetherSync(client: self.together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
             self.serverDraft = ""
             self.show(T.format(.togetherServerNow, url.host() ?? url.absoluteString), symbol: "server.rack")

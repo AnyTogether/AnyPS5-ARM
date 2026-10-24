@@ -1086,6 +1086,8 @@ final class AppModel: ObservableObject {
         // A fixed port lets a phone on a network without Bonjour connect by address alone.
         for (port, bridge) in [(RemoteServer.preferredPort, RemoteServer.preferredBridgePort), (0, 0)] {
             let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port, bridgePort: bridge)
+            // The phone says when this Mac uses another AnyTogether server than its own.
+            server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
                 if let port = server.controlPort {

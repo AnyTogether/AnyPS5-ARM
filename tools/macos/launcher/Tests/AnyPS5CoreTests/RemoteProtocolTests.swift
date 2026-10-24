@@ -17,6 +17,19 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: Data(text.utf8)), message)
     }
 
+    /// The launcher's AnyTogether server rides along, so the phone can say when it uses another;
+    /// a welcome without it (an older launcher) still reads.
+    func testWelcomeCarriesTheTogetherServer() throws {
+        let message = RemoteMessage.welcome(session: 7, udpPort: 5000, macName: "Mac", key: "a2V5", togetherServer: "https://together.example.org")
+        let text = String(decoding: try JSONEncoder().encode(message), as: UTF8.self)
+        XCTAssertTrue(text.contains(#""togetherServer":"https:\/\/together.example.org""#), text)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: Data(text.utf8)), message)
+        let older = #"{"type":"welcome","session":"7","udpPort":5000,"macName":"Mac","key":"a2V5"}"#
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: Data(older.utf8)), .welcome(session: 7, udpPort: 5000, macName: "Mac", key: "a2V5", togetherServer: nil))
+        let none = String(decoding: try JSONEncoder().encode(RemoteMessage.welcome(session: 7, udpPort: 5000, macName: "Mac", key: "a2V5")), as: UTF8.self)
+        XCTAssertFalse(none.contains("togetherServer"))
+    }
+
     func testEveryMessageRoundTrips() throws {
         let messages: [RemoteMessage] = [.pairing(code: "0042"), .rejected(reason: "denied"), .latency(milliseconds: 9.5)]
         for message in messages {

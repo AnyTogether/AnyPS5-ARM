@@ -82,6 +82,12 @@ public final class RemoteServer: @unchecked Sendable {
     }
 
     private let name: String
+    private let together = Locked<String?>(nil)
+    /// The AnyTogether server the launcher uses, told to each phone it welcomes.
+    public var togetherServer: String? {
+        get { together.value }
+        set { together.value = newValue }
+    }
     private let devices: PairedDevices
     private let events: Events
     private let advertise: Bool
@@ -327,7 +333,7 @@ public final class RemoteServer: @unchecked Sendable {
         client.slot = slot
         phones.append(client)
         phones.sort { ($0.slot ?? 0) < ($1.slot ?? 0) }
-        send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key), to: client)
+        send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key, togetherServer: togetherServer), to: client)
         if let name = client.name { events.connected(name) }
     }
 

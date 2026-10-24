@@ -146,6 +146,7 @@ final class RemoteServerTests: XCTestCase {
     }
 
     func testUnknownPhoneIsAskedThenWelcomed() async throws {
+        server.togetherServer = "https://together.example.org"
         let phone = phone()
         try await phone.hello()
         guard case .pairing(let code) = try await phone.receive() else { return XCTFail("no pairing message") }
@@ -156,8 +157,9 @@ final class RemoteServerTests: XCTestCase {
         XCTAssertEqual(log.pairings.first?.code, code)
         XCTAssertEqual(log.pairings.first?.deviceName, "Pixel 8")
         server.respond(to: log.pairings[0].id, allow: true)
-        guard case .welcome(_, _, let macName, let key) = try await phone.receive() else { return XCTFail("no welcome") }
+        guard case .welcome(_, _, let macName, let key, let together) = try await phone.receive() else { return XCTFail("no welcome") }
         XCTAssertEqual(macName, "Test Mac")
+        XCTAssertEqual(together, "https://together.example.org", "the phone learns which AnyTogether the Mac uses")
         XCTAssertEqual(Data(base64Encoded: key)?.count, 32)
         XCTAssertEqual(devices.all.count, 1)
         let connected = await log.waitFor { self.log.connected == ["Pixel 8"] }
