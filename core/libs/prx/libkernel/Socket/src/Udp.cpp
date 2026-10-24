@@ -377,6 +377,11 @@ int Disconnect(const Socket& socket) {
     sockaddr_storage unspecified{};
     unspecified.ss_family = local.ss_family;
     if (::connect(socket.value, reinterpret_cast<sockaddr*>(&unspecified), localSize) != 0) return Fail(NativeError());
+#elif defined(__APPLE__)
+    sockaddr_storage unspecified{};
+    unspecified.ss_family = AF_UNSPEC;
+    unspecified.ss_len = static_cast<std::uint8_t>(localSize);
+    if (::connect(socket.value, reinterpret_cast<sockaddr*>(&unspecified), localSize) != 0 && errno != EAFNOSUPPORT) return Fail(NativeError());
 #else
     sockaddr unspecified{};
     unspecified.sa_family = AF_UNSPEC;
