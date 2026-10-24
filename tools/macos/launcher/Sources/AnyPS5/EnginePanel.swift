@@ -34,8 +34,9 @@ extension AppModel {
     }
 
     /// The engines at hand, in the order the choices list them.
+    /// A download of the very toolkit inside the app is not listed twice.
     var engineOptions: [EngineChoice] {
-        [.builtIn] + installedToolkits.map { .downloaded($0.version) } + (customToolkit == nil ? [] : [.custom])
+        [.builtIn] + installedToolkits.filter { $0.version != builtInToolkit?.version }.map { .downloaded($0.version) } + (customToolkit == nil ? [] : [.custom])
     }
 
     func engineName(_ choice: EngineChoice) -> String {
@@ -188,7 +189,8 @@ extension AppModel {
             }
         }
         rows.append(PanelRow(id: "engineAvailable", title: TE.text(.engineAvailableSection), kind: .info("")))
-        let downloaded = Set(installedToolkits.map(\.release))
+        // The release the app itself comes from carries the built-in toolkit.
+        let downloaded = Set(installedToolkits.map(\.release) + [builtInToolkit.map { Toolkit.release(of: $0.version) }].compactMap { $0 })
         for entry in engineCatalogue where !downloaded.contains(entry.release) {
             let date = entry.date?.formatted(date: .abbreviated, time: .omitted)
             let detail = engineDownloads[entry.release].map { TE.format(.engineDownloading, Int($0 * 100)) }
