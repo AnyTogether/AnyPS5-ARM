@@ -5,8 +5,22 @@ import Foundation
 /// tools/macos/moltenvk_patches.py) and its driver manifest, and the per-title patches.
 public struct Toolkit: Sendable {
     public let root: URL
+    /// Changes whenever the relinker or the libraries change: an installed game made by another
+    /// toolkit can be installed again. version.txt, or for a folder someone put together without
+    /// one, "local-" and the fingerprint the build script would write.
+    public let version: String
 
-    public init(root: URL) { self.root = root }
+    public init(root: URL) {
+        self.root = root
+        if let text = try? String(contentsOf: root.appendingPathComponent("version.txt"), encoding: .utf8),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            version = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let fingerprint = Toolkit.fingerprint(of: root) {
+            version = "local-" + fingerprint
+        } else {
+            version = "unknown"
+        }
+    }
 
     /// ANYPS5_TOOLKIT, else the app bundle's toolkit.
     public static func locate() -> Toolkit? {
@@ -21,11 +35,6 @@ public struct Toolkit: Sendable {
     public var vulkan: URL { root.appendingPathComponent("vulkan") }
     public var patches: URL { root.appendingPathComponent("patches") }
 
-    /// Changes whenever the relinker or the libraries change: an installed game made by another
-    /// toolkit can be installed again.
-    public var version: String {
-        (try? String(contentsOf: root.appendingPathComponent("version.txt"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
-    }
 }
 
 /// What the launcher records in an installed bundle (Contents/Resources/anyps5-install.json).

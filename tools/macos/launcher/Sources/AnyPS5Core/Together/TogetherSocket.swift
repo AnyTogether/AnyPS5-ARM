@@ -84,6 +84,12 @@ public final class TogetherSocket: @unchecked Sendable {
         queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
     }
 
+    /// The same between a share play's host and a viewer.
+    public func signal(to userId: String, device: String, share: String, kind: TogetherShareSignal.Kind, data: Any?) {
+        let frame = TogetherSocket.shareSignalFrame(to: userId, device: device, share: share, kind: kind, data: data)
+        queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
+    }
+
     private func connect() async {
         guard queue.sync(execute: { running }) else { return }
         do {

@@ -88,6 +88,9 @@ struct RootView: View {
                         .transition(.opacity)
                 }
                 overlays
+                if model.share.watching != nil {
+                    ShareWatchView().transition(.opacity)
+                }
                 if let game = model.starting {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
@@ -161,8 +164,16 @@ struct RootView: View {
             FeedView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .leaderboard:
             LeaderboardView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .notifications:
+            SidePanel(title: TS.text(.notifTitle), subtitle: model.notificationsSubtitle)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .compat:
+            SidePanel(title: model.compatTitle, subtitle: TS.text(.compatSubtitle))
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .log:
             LogView().transition(.opacity)
+        case .crashReport:
+            CrashReportView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .trophies:
             if let game = model.selectedGame, let set = model.trophies[game.id] {
                 TrophyList(game: game, set: set).transition(.opacity.combined(with: .scale(scale: 1.03)))

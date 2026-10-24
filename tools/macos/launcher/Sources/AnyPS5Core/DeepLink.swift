@@ -2,12 +2,13 @@ import Foundation
 
 /// An anyps5:// link from a web page, a message or another app: anyps5://game/<title ID> shows
 /// the game, anyps5://play/<title ID> does what Play does for it, anyps5://library and
-/// anyps5://settings open those screens.
+/// anyps5://settings open those screens, anyps5://theme/<ID> installs a theme from the Hub.
 public enum DeepLink: Equatable, Sendable {
     case game(String)
     case play(String)
     case library
     case settings
+    case theme(String)
 
     public static let scheme = "anyps5"
 
@@ -22,6 +23,9 @@ public enum DeepLink: Equatable, Sendable {
             let id = parts[0].uppercased()
             guard id.range(of: "^[A-Z]{4}[0-9]{5}$", options: .regularExpression) != nil else { return nil }
             self = host == "game" ? .game(id) : .play(id)
+        case ("theme", 1):
+            guard TogetherHubTheme.isID(parts[0]) else { return nil }
+            self = .theme(parts[0].lowercased())
         default:
             return nil
         }
@@ -33,6 +37,7 @@ public enum DeepLink: Equatable, Sendable {
         case .play(let id): return URL(string: "\(DeepLink.scheme)://play/\(id)")!
         case .library: return URL(string: "\(DeepLink.scheme)://library")!
         case .settings: return URL(string: "\(DeepLink.scheme)://settings")!
+        case .theme(let id): return URL(string: "\(DeepLink.scheme)://theme/\(id)")!
         }
     }
 }

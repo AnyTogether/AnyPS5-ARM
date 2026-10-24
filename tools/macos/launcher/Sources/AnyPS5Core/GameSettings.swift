@@ -45,12 +45,18 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var shaderCache: Bool?
     /// The phone's pad layout for this game, as the phone sent it (its JSON); nil for the default.
     public var phoneLayout: String?
+    /// The engine toolkit that unlocks this game (EngineChoice: "builtin", "custom" or a
+    /// downloaded version); nil follows the launcher's default.
+    public var engine: String?
+    /// Detailed logging (TraceMode) on every start; nil is off.
+    public var trace: Bool?
 
     public init() {}
 
     /// The environment a game starts with; `inputFile` is the anyps5-input.ini written for it,
-    /// `screenshots` and `fonts` the launcher's folders for F12 screenshots and system fonts.
-    public func environment(launcherLanguage: Int, inputFile: URL? = nil, screenshots: URL? = nil, fonts: URL? = nil) -> [String: String] {
+    /// `screenshots` and `fonts` the launcher's folders for F12 screenshots and system fonts;
+    /// `trace` turns detailed logging on for this start even when the setting is off.
+    public func environment(launcherLanguage: Int, inputFile: URL? = nil, screenshots: URL? = nil, fonts: URL? = nil, trace: Bool = false) -> [String: String] {
         var environment: [String: String] = [
             "ANYPS5_FULLSCREEN": fullscreen ? "1" : "0",
             "ANYPS5_WINDOW_SIZE": String(min(100, max(30, windowSize))),
@@ -68,6 +74,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if let fonts { environment["ANYPS5_SYSTEM_FONTS"] = fonts.path }
         if shaderCache == false { environment["ANYPS5_NO_SHADER_CACHE"] = "1" }
         if frameGeneration == true { environment["ANYPS5_FRAME_GEN"] = "1" }
+        if trace || self.trace == true { environment.merge(TraceMode.environment) { own, _ in own } }
         return environment
     }
 

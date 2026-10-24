@@ -118,6 +118,7 @@ extension AppModel {
 
     /// A socket event the other panels leave: activity, and what comes later.
     func socialEvent(_ event: TogetherSocket.Event) {
+        if let notification = TogetherNotificationEvent(event) { return notificationEvent(notification) }
         if let item = TogetherActivity.from(event) {
             // Only into a feed already read: the first read brings it anyway.
             guard social.feed.loaded else { return }

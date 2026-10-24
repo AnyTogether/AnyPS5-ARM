@@ -369,7 +369,7 @@ void PadInput::updateRemotes() {
             remote.last = std::move(input);
             remote.seen = now;
             const bool seated = seats.Of(device) >= 0;
-            const int player = seats.Seat(device, RemotePad::Wants(remote.last->state));
+            const int player = seats.Seat(device, RemotePad::Wants(remote.last->state), remote.last->seat);
             if (!seated && player >= 0) APS5_LOG_OUT("Pad: phone %zu is player %d", channel + 1, player + 1);
             remote.channel->SetPlayer(static_cast<std::uint8_t>(player + 1));
             answer(remote, player);

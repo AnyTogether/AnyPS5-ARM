@@ -28,6 +28,7 @@ extension AppModel {
                                  kind: .action(destructive: true) { [weak self] in self?.answerFriend(person, accept: false) }))
         }
         rows += gameRows()
+        rows += shareRows()
         rows.append(PanelRow(id: "friends-handle", title: T.text(.friendsAddByHandle), symbol: "at", kind: .text(friendHandle) { [weak self] text in self?.friendHandle = text }))
         rows.append(PanelRow(id: "friends-ask", title: T.text(.friendsSendRequest), symbol: "person.badge.plus", kind: .action(destructive: false) { [weak self] in self?.askFriend() }))
         if togetherFriends.isEmpty {
@@ -137,6 +138,8 @@ extension AppModel {
             partyEvent(event)
         case let type where type.hasPrefix("game_session."):
             gameSessionEvent(event)
+        case let type where type.hasPrefix("share_play."):
+            sharePlayEvent(event)
         case let type where type == "signal" || type.hasPrefix("call."):
             callEvent(event)
         default:

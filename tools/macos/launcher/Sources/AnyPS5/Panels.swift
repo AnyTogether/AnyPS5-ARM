@@ -62,6 +62,9 @@ extension AppModel {
         case .studio: return [PanelCategory(id: "studio", title: T.text(.themeStudio), symbol: "wand.and.stars", rows: studioRows())]
         case .friends: return [PanelCategory(id: "friends", title: T.text(.friendsTitle), symbol: "person.2", rows: friendRows())]
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
+        case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
+        case .compat: return [PanelCategory(id: "compat", title: compatTitle, symbol: "person.3.sequence", rows: compatRows())]
+        case .crashReport: return [PanelCategory(id: "report", title: TC.text(.reportKicker), symbol: "stethoscope", rows: crashReportRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -73,8 +76,12 @@ extension AppModel {
             ])]
         case .updateChoice:
             guard let game = selectedGame else { return [] }
+            // Which engine unlocked it and which one is chosen now.
+            let engine = installedRecords[game.id].flatMap { record in
+                engineVersion(for: game).map { TE.format(.engineSwitch, Toolkit.shortVersion(record.toolkit), Toolkit.shortVersion($0)) }
+            }
             return [PanelCategory(id: "update", title: T.text(.updateAvailable), symbol: "arrow.triangle.2.circlepath", rows: [
-                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: T.text(.updateAndPlayDetail), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
+                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: [T.text(.updateAndPlayDetail), engine].compactMap { $0 }.joined(separator: "\n"), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
                     self?.closeOverlay()
                     self?.updateAndPlay(game)
                 }),
@@ -204,7 +211,7 @@ extension AppModel {
         about.append(PanelRow(id: "checkForUpdates", title: T.text(.checkForUpdatesNow), detail: checkingUpdates ? T.text(.checkingUpdates) : checked,
                               symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.checkForUpdatesNow() }))
         about += [
-            PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
+            PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(builtInToolkit.map { Toolkit.shortVersion($0.version) } ?? "—")),
             PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
             PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/utkuhalis/AnyPS5-ARM")!)
@@ -243,6 +250,7 @@ extension AppModel {
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
+            PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
@@ -291,6 +299,7 @@ extension AppModel {
         rows.append(PanelRow(id: "language", title: T.text(.gameLanguage), symbol: "character.bubble", kind: .choice(options: [T.text(.followLauncher)] + languages.map(\.name), selected: settings.language.flatMap { number in languages.firstIndex { $0.number == number } }.map { $0 + 1 } ?? 0) { [weak self] index in
             self?.update(game) { $0.language = index == 0 ? nil : languages[index - 1].number }
         }))
+        rows.append(gameEngineRow(game))
         let state = state(of: game)
         if case .installed = state {
             rows.append(PanelRow(id: "reinstall", title: T.text(.reinstall), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
@@ -310,7 +319,17 @@ extension AppModel {
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
         rows.append(PanelRow(id: "link", title: T.text(.copyLink), detail: DeepLink.game(game.titleID).url.absoluteString, symbol: "link", kind: .action(destructive: false) { [weak self] in self?.copyLink(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
-        rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "report", title: TC.text(.lastSessionReport), detail: diagnoses[game.id]?.summary ?? TC.text(.lastSessionReportDetail), symbol: "stethoscope",
+                             kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "trace", title: TC.text(.traceTitle), detail: TC.text(.traceDetail), symbol: "text.magnifyingglass",
+                             kind: .toggle(settings.trace == true) { [weak self] value in self?.update(game) { $0.trace = value ? true : nil } }))
+        if case .installed = state {
+            rows.append(PanelRow(id: "playTraced", title: TC.text(.reportPlayTraced), detail: TC.text(.reportPlayTracedDetail), symbol: "play.circle",
+                                 kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.play(game, trace: true)
+            }))
+        }
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
@@ -615,8 +634,12 @@ struct RowList: View {
 
     var body: some View {
         if previewRender {
-            // An overlay takes no size of its own, so a long list cannot stretch the screen.
-            Color.clear.overlay(alignment: .top) { content }.clipped()
+            // An overlay takes no size of its own, so a long list cannot stretch the screen; a row
+            // focused further down moves the list up, as scrolling to it would.
+            GeometryReader { geometry in
+                Color.clear.overlay(alignment: .top) { content.offset(y: -previewShift(geometry.size.height)) }
+            }
+            .clipped()
         } else {
             scrolling
         }
@@ -635,6 +658,14 @@ struct RowList: View {
             }
         }
         .padding(6 * scale)
+    }
+
+    /// How far the list scrolls to bring the focused row to the middle, from the usual row height.
+    private func previewShift(_ height: CGFloat) -> CGFloat {
+        guard let focusedRow else { return 0 }
+        let row = 66 * scale
+        let total = CGFloat(rows.count) * row + 12 * scale
+        return min(max(0, (CGFloat(focusedRow) + 0.5) * row + 6 * scale - height / 2), max(0, total - height))
     }
 
     private var scrolling: some View {
@@ -656,6 +687,7 @@ struct RowView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @State private var text = ""
+    @Environment(\.previewRender) private var previewRender
 
     var body: some View {
         let foreground: Color = focused ? .black : .white
@@ -689,6 +721,7 @@ struct RowView: View {
             value.foregroundStyle(foreground)
         }
         .padding(.horizontal, 18 * scale)
+        .padding(.vertical, 8 * scale)
         .frame(minHeight: 58 * scale)
         .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(row.focusable ? 0.07 : 0)))
         .shadow(color: .white.opacity(focused ? 0.22 : 0), radius: 12 * scale)
@@ -726,14 +759,19 @@ struct RowView: View {
         case .keys(let sources, let capturing, _):
             KeyCaps(sources: sources, capturing: capturing, focused: focused)
         case .text(let value, let set):
-            TextField("", text: $text)
-                .textFieldStyle(.plain)
-                .font(.display(16 * scale, .semibold))
-                .multilineTextAlignment(.trailing)
-                .frame(width: 200 * scale)
-                .onAppear { text = value }
-                .onSubmit { set(text) }
-                .onChange(of: text) { _, new in set(new) }
+            if previewRender {
+                // A text field does not draw offscreen.
+                Text(value).font(.display(16 * scale, .semibold)).frame(width: 200 * scale, alignment: .trailing)
+            } else {
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale, .semibold))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 200 * scale)
+                    .onAppear { text = value }
+                    .onSubmit { set(text) }
+                    .onChange(of: text) { _, new in set(new) }
+            }
         }
     }
 
@@ -842,6 +880,8 @@ extension Diagnosis {
         case .outOfMemory: return T.text(.diagnosisOutOfMemory)
         case .engineError(let message): return T.format(.diagnosisEngineError, message)
         case .crashed(let exception): return T.format(.diagnosisCrashed, exception)
+        case .aborted: return TC.text(.diagnosisAborted)
+        case .exited(let code): return TC.format(.diagnosisExited, code)
         }
     }
 }

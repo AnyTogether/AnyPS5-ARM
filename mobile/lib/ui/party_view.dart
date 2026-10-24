@@ -234,7 +234,9 @@ class _PartyPaneState extends State<PartyPane> {
                       inVoice:
                           party.inCall.contains(member.id) ||
                           (member.id == me && voice.active),
-                      muted: member.id == me && voice.active && voice.muted,
+                      muted: member.id == me
+                          ? voice.active && voice.muted
+                          : party.muted.contains(member.id),
                       ring:
                           (member.id == me
                               ? voice.speaking

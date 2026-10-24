@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../social_strings.dart';
 import '../strings.dart';
+import '../together/groups.dart';
 import '../together/messages.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
@@ -75,14 +77,29 @@ class _MessagesPaneState extends State<MessagesPane> {
       padding: const EdgeInsets.fromLTRB(10, 14, 10, 14),
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
-          child: Text(
-            texts.messages,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-            ),
+          padding: const EdgeInsets.fromLTRB(10, 2, 0, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  texts.messages,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: texts.newGroup,
+                onPressed: _newGroup,
+                icon: const Icon(
+                  Icons.group_add_rounded,
+                  color: togetherAccent,
+                  size: 21,
+                ),
+              ),
+            ],
           ),
         ),
         if (_messages.loaded && list.isEmpty)
@@ -144,6 +161,18 @@ class _MessagesPaneState extends State<MessagesPane> {
                   ),
                 ),
               ),
+              if (!conversation.group && others.length == 1)
+                IconButton(
+                  tooltip: texts.callFriend(others.single.displayName),
+                  onPressed: widget.hub.calls.inCall
+                      ? null
+                      : () => widget.hub.calls.ring(others.single),
+                  icon: const Icon(
+                    Icons.call_outlined,
+                    color: togetherAccent,
+                    size: 20,
+                  ),
+                ),
             ],
           ),
         ),
@@ -189,9 +218,61 @@ class _MessagesPaneState extends State<MessagesPane> {
                   },
                 ),
         ),
+        _typing(texts, conversation),
         _composer(texts),
       ],
     );
+  }
+
+  /// "Ece is typing…" under the thread while someone else is.
+  Widget _typing(Strings texts, Conversation conversation) => ListenableBuilder(
+    listenable: widget.hub.typing,
+    builder: (context, _) {
+      final names = [
+        for (final id in widget.hub.typing.who(conversation.id))
+          conversation.author(id)?.displayName ?? '…',
+      ];
+      return AnimatedSize(
+        duration: const Duration(milliseconds: 160),
+        child: names.isEmpty
+            ? const SizedBox(width: double.infinity)
+            : Padding(
+                padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
+                child: Text(
+                  texts.typing(names),
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12.5,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+      );
+    },
+  );
+
+  /// A group with the friends picked, and a name if one is given.
+  Future<void> _newGroup() async {
+    final texts = Texts.of(context);
+    final friends = widget.hub.friends;
+    if (!friends.loaded) await friends.refresh().catchError((_) {});
+    if (!mounted) return;
+    final picked = await showDialog<(List<String>, String)>(
+      context: context,
+      builder: (_) => _NewGroupDialog(
+        friends: [for (final friend in friends.friends) friend.person],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await _messages.startGroup(picked.$1, title: picked.$2);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(
+          context,
+        )?.showSnackBar(SnackBar(content: Text(togetherFailure(texts, error))));
+      }
+    }
   }
 
   Widget _composer(Strings texts) => Padding(
@@ -223,6 +304,12 @@ class _MessagesPaneState extends State<MessagesPane> {
                 borderSide: BorderSide.none,
               ),
             ),
+            onChanged: (text) {
+              final id = _messages.openId;
+              if (id != null && text.trim().isNotEmpty) {
+                widget.hub.typing.typed(id);
+              }
+            },
             onSubmitted: (_) => _send(),
           ),
         ),
@@ -421,7 +508,13 @@ class _Bubble extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             message.failed
-                ? texts.messagesFailed
+                ? switch (message.problem?.code) {
+                    'link_blocked' => texts.linkBlocked(
+                      message.problem?.extra?['domain'] as String?,
+                    ),
+                    'forbidden' => texts.cannotMessage,
+                    _ => texts.messagesFailed,
+                  }
                 : [
                     _when(message.createdAt),
                     if (message.edited && !message.deleted)
@@ -457,7 +550,7 @@ class _Bubble extends StatelessWidget {
           AnimatedOpacity(
             duration: const Duration(milliseconds: 160),
             opacity: message.pending ? 0.55 : 1,
-            child: message.failed
+            child: message.failed && !message.refused
                 ? GestureDetector(onTap: onRetry, child: bubble)
                 : bubble,
           ),
@@ -465,4 +558,185 @@ class _Bubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Friends to pick for a new group (at most [maxGroupMembers] people with you), and its name.
+class _NewGroupDialog extends StatefulWidget {
+  const _NewGroupDialog({required this.friends});
+
+  final List<Person> friends;
+
+  @override
+  State<_NewGroupDialog> createState() => _NewGroupDialogState();
+}
+
+class _NewGroupDialogState extends State<_NewGroupDialog> {
+  final _name = TextEditingController();
+  final _picked = <String>{};
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final full = _picked.length + 1 >= maxGroupMembers;
+    return Dialog(
+      backgroundColor: const Color(0xFF151821),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 120, vertical: 18),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text(
+                  texts.newGroup,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _name,
+                    maxLength: 80,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      counterText: '',
+                      hintText: texts.groupName,
+                      hintStyle: const TextStyle(color: Colors.white30),
+                      filled: true,
+                      fillColor: const Color(0x14FFFFFF),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              full
+                  ? texts.groupFull(maxGroupMembers)
+                  : widget.friends.isEmpty
+                  ? texts.noFriendsToMessage
+                  : texts.groupPick,
+              style: TextStyle(
+                color: full ? togetherAway : Colors.white54,
+                fontSize: 12.5,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: GridView.extent(
+                maxCrossAxisExtent: 220,
+                childAspectRatio: 4.4,
+                children: [
+                  for (final person in widget.friends)
+                    _Pickable(
+                      person: person,
+                      picked: _picked.contains(person.id),
+                      onTap: !_picked.contains(person.id) && full
+                          ? null
+                          : () => setState(
+                              () => _picked.contains(person.id)
+                                  ? _picked.remove(person.id)
+                                  : _picked.add(person.id),
+                            ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  texts.groupPicked(_picked.length + 1, maxGroupMembers),
+                  style: const TextStyle(color: Colors.white38, fontSize: 12.5),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    texts.cancel,
+                    style: const TextStyle(color: Colors.white60),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                FilledButton(
+                  onPressed: _picked.isEmpty
+                      ? null
+                      : () =>
+                            Navigator.of(context)
+                                .pop((_picked.toList(), _name.text)),
+                  child: Text(texts.startGroup),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Pickable extends StatelessWidget {
+  const _Pickable({
+    required this.person,
+    required this.picked,
+    required this.onTap,
+  });
+
+  final Person person;
+  final bool picked;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(3),
+    child: Material(
+      color: picked ? const Color(0x268AB4FF) : const Color(0x0AFFFFFF),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Avatar(person: person, size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  person.displayName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: onTap == null ? Colors.white30 : Colors.white,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+              Icon(
+                picked
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 18,
+                color: picked ? togetherAccent : Colors.white24,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

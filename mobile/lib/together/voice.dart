@@ -95,6 +95,8 @@ class Voice extends ChangeNotifier {
       _partyId = party.id;
       _levels = Timer.periodic(measureEvery, (_) => mesh.measure());
       _renewBefore(joined['expiresAt']);
+      // Muted before joining: the others see it from the start.
+      if (muted) _tellMuted(id, true);
       // The newcomer calls everyone already in.
       for (final peer in (call['in'] as List? ?? const [])) {
         final userId = (peer as Map)['userId'] as String;
@@ -145,11 +147,18 @@ class Voice extends ChangeNotifier {
     });
   }
 
+  /// Muted or not; the others in the call are told, and see it on the party.
   void setMuted(bool on) {
     muted = on;
     _mesh?.talking = !on;
     notifyListeners();
+    final id = callId;
+    if (id != null) _tellMuted(id, on);
   }
+
+  void _tellMuted(String id, bool on) => account
+      .call('POST', 'calls/$id/mute', {'muted': on})
+      .catchError((_) => <String, dynamic>{});
 
   Future<void> _stop() async {
     final mesh = _mesh;

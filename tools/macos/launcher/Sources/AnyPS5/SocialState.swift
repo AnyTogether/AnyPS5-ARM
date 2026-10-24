@@ -36,6 +36,17 @@ final class SocialState: ObservableObject {
     var boardTask: Task<Void, Never>?
     var boardReturn: AppModel.ProfileReturn?
 
+    // Notifications
+    @Published var notifications = TogetherNotifications()
+    @Published var notificationsFailed = false
+    var notificationsTask: Task<Void, Never>?
+
+    // Compatibility
+    /// The community's status per title ID: absent until asked, nil inside when there is none.
+    @Published var compat: [String: TogetherCompatSummary?] = [:]
+    /// The game "How did it run?" asks about.
+    @Published var compatGame: Game?
+
     /// Whose feed and boards these are: another account signed in starts them again.
     private var viewer: String?
 
@@ -56,6 +67,9 @@ final class SocialState: ObservableObject {
         feedFailed = false
         leaderboard = nil
         boardGame = nil
+        notificationsTask?.cancel()
+        notifications = TogetherNotifications()
+        notificationsFailed = false
     }
 }
 
@@ -75,10 +89,14 @@ extension AppModel {
     /// The game panel's social rows, signed in: the game's leaderboard.
     func gameSocialRows(_ game: Game) -> [PanelRow] {
         guard togetherUser != nil else { return [] }
+        // Read after this draw, not during it.
+        DispatchQueue.main.async { [weak self] in self?.loadCompat(game.titleID) }
         return [
             PanelRow(id: "leaderboard", title: TS.text(.boardTitle), detail: TS.text(.boardGameRowDetail), symbol: "list.number", kind: .action(destructive: false) { [weak self] in
                 self?.openLeaderboard(game)
             }),
+            PanelRow(id: "compat", title: TS.text(.compatReportRow), detail: compatSummary(game.titleID).map { TS.text(.compatCommunity) + ": " + compatText($0) } ?? TS.text(.compatNone),
+                     symbol: "person.3.sequence", kind: .action(destructive: false) { [weak self] in self?.openCompat(game) }),
         ]
     }
 }

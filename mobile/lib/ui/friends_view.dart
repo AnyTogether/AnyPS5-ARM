@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
+import 'share_watch_screen.dart';
 import 'together_widgets.dart';
 
 /// Friends: add someone by handle at the top, the requests waiting for an answer, then everyone
@@ -14,6 +16,7 @@ class FriendsPane extends StatefulWidget {
     this.gameName,
     this.onMessage,
     this.onProfile,
+    this.onCall,
   });
 
   final TogetherHub hub;
@@ -24,6 +27,9 @@ class FriendsPane extends StatefulWidget {
 
   /// Opens someone's profile, by handle.
   final ValueChanged<String>? onProfile;
+
+  /// Calls a friend.
+  final ValueChanged<Person>? onCall;
 
   @override
   State<FriendsPane> createState() => _FriendsPaneState();
@@ -76,9 +82,10 @@ class _FriendsPaneState extends State<FriendsPane> {
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
     return ListenableBuilder(
-      listenable: widget.hub.friends,
+      listenable: Listenable.merge([widget.hub.friends, widget.hub.sharePlays]),
       builder: (context, _) {
         final friends = widget.hub.friends;
+        final shares = widget.hub.sharePlays;
         return ListView(
           padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
           children: [
@@ -139,6 +146,42 @@ class _FriendsPaneState extends State<FriendsPane> {
                   ),
                 ),
               ),
+            if (shares.invites.isNotEmpty) ...[
+              SectionLabel(texts.shareTitle),
+              for (final invite in shares.invites)
+                _PersonRow(
+                  person:
+                      invite.from ??
+                      const Person(id: '', handle: '?', displayName: '?'),
+                  subtitle: texts.shareInvited(
+                    invite.from?.displayName ?? '',
+                    widget.gameName?.call(invite.titleId) ?? invite.name,
+                  ),
+                  subtitleColor: togetherPlaying,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () => _try(() => shares.decline(invite)),
+                        child: Text(
+                          texts.decline,
+                          style: const TextStyle(color: Colors.white60),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      FilledButton.icon(
+                        onPressed: () => openShareWatch(
+                          context,
+                          hub: widget.hub,
+                          sharePlayId: invite.sharePlayId,
+                        ),
+                        icon: const Icon(Icons.live_tv_rounded, size: 18),
+                        label: Text(texts.shareWatch),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
             if (friends.incoming.isNotEmpty) ...[
               SectionLabel(texts.friendsRequests),
               for (final person in friends.incoming)
@@ -186,13 +229,42 @@ class _FriendsPaneState extends State<FriendsPane> {
                     ? null
                     : () => widget.onProfile!(friend.person.handle),
                 presence: friend.presence.state,
-                subtitle: presenceText(texts, friend.presence, widget.gameName),
+                subtitle: friend.presence.share == null
+                    ? presenceText(texts, friend.presence, widget.gameName)
+                    : '${texts.shareSharing(widget.gameName?.call(friend.presence.share!.titleId) ?? friend.presence.share!.title ?? friend.presence.share!.titleId)}'
+                          ' · ${texts.shareViewers(friend.presence.share!.viewers, friend.presence.share!.maxViewers)}',
                 subtitleColor: friend.presence.state == PresenceState.offline
                     ? Colors.white38
                     : presenceColor(friend.presence.state),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (widget.onCall case final call?)
+                      IconButton(
+                        tooltip: texts.callFriend(friend.person.displayName),
+                        onPressed: widget.hub.calls.inCall
+                            ? null
+                            : () => call(friend.person),
+                        icon: const Icon(
+                          Icons.call_outlined,
+                          size: 20,
+                          color: togetherAccent,
+                        ),
+                      ),
+                    if (friend.presence.share case final share?
+                        when share.open ||
+                            shares.invites.any(
+                              (i) => i.sharePlayId == share.sharePlayId,
+                            ))
+                      FilledButton.tonalIcon(
+                        onPressed: () => openShareWatch(
+                          context,
+                          hub: widget.hub,
+                          sharePlayId: share.sharePlayId,
+                        ),
+                        icon: const Icon(Icons.live_tv_rounded, size: 18),
+                        label: Text(texts.shareWatch),
+                      ),
                     if (widget.onMessage case final message?)
                       IconButton(
                         tooltip: texts.messagesWrite,

@@ -47,6 +47,11 @@ struct Preferences: Codable, Equatable {
     var screenshotsFolder: String?
     /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
     var fontsFolder: String?
+    /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
+    /// the built-in one, "custom" the folder below, else a downloaded version).
+    var engine: String?
+    /// A toolkit folder the user built (Settings → Engine → Engine Folder), nil for none.
+    var customToolkit: String?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -109,6 +114,12 @@ enum Overlay: Equatable {
     case feed
     /// A game's leaderboard, or overall trophy points.
     case leaderboard
+    /// AnyTogether's notifications, from the bell.
+    case notifications
+    /// "How did it run?" after a session.
+    case compat
+    /// A game's last start: why it stopped, the report to export and the issue to open.
+    case crashReport
 }
 
 struct Toast: Identifiable, Equatable {
@@ -158,6 +169,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var trophies: [String: TrophySet] = [:]
     /// Why each game stopped the last time it was started, when it stopped on an error.
     @Published private(set) var diagnoses: [String: Diagnosis] = [:]
+    /// The crash panel's report, while it is open.
+    @Published var sessionReport: SessionReportState?
+    /// What each game's last start was beyond its log: its process, detailed logging, its end.
+    var lastSessions: [String: LastSession] = [:]
+    /// Keeps a detailed log under its cap while the game runs.
+    private var traceTrim: Task<Void, Never>?
     /// A phone asking to be allowed, shown over everything until the user answers.
     @Published var pairing: PairingRequest?
     /// The connected phone and its last reported latency.
@@ -190,7 +207,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var logText = ""
     @Published var translocated = AppLocation.isTranslocated
 
-    let toolkit = Toolkit.locate()
+    /// The toolkit inside the app (or ANYPS5_TOOLKIT); the default engine.
+    let builtInToolkit = Toolkit.locate()
+    /// Downloaded engine toolkits (Settings → Engine); the previews keep theirs apart.
+    let toolkitStore: ToolkitStore
+    @Published var installedToolkits: [InstalledToolkit] = []
+    /// The toolkits on GitHub's releases, as last seen, and when.
+    @Published var engineCatalogue: [EngineCatalogue.Entry] = []
+    @Published var engineChecked: Date?
+    @Published var engineOffline = false
+    @Published var checkingEngines = false
+    /// How far each release's toolkit download is.
+    @Published var engineDownloads: [String: Double] = [:]
+    /// The custom toolkit folder, when it holds a toolkit.
+    @Published var customToolkit: Toolkit?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
@@ -223,6 +253,7 @@ final class AppModel: ObservableObject {
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
+        toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         designs = themes.all
         if persists {
@@ -230,6 +261,7 @@ final class AppModel: ObservableObject {
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
+        if persists { loadEngines() }
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
             AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
@@ -443,6 +475,10 @@ final class AppModel: ObservableObject {
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// Share play: what the friends panel shows, and the running share play's pieces.
+    @Published var share = ShareState()
+    var shareSession: ShareSession?
+    var shareWatch: ShareWatchSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?
@@ -540,7 +576,7 @@ final class AppModel: ObservableObject {
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
-        if let record = installedRecords[game.id] { return .installed(outdated: toolkit.map { $0.version != record.toolkit } ?? false) }
+        if let record = installedRecords[game.id] { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
         if game.executable == .unreadable { return .unreadable }
         return .locked
     }
@@ -625,7 +661,7 @@ final class AppModel: ObservableObject {
     }
 
     func resolutionChoices(for game: Game) -> [String] {
-        guard let toolkit, let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
+        guard let toolkit = toolkit(for: game), let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
         return patches.resolution?.choices ?? []
     }
 
@@ -633,7 +669,7 @@ final class AppModel: ObservableObject {
 
     func unlock(_ game: Game) {
         guard let root else { return }
-        guard toolkit != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
+        guard toolkit(for: game) != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
         queue.append(game.id)
@@ -642,9 +678,14 @@ final class AppModel: ObservableObject {
     }
 
     private func startNext(root: URL) {
-        guard installer == nil, let toolkit, !queue.isEmpty else { return }
+        guard installer == nil, !queue.isEmpty else { return }
         let id = queue.removeFirst()
-        guard let game = games.first(where: { $0.id == id }) else { startNext(root: root); return }
+        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game) else { startNext(root: root); return }
+        // A downloaded engine is checked against its manifest again before anything of it runs;
+        // a custom folder must still hold a whole toolkit.
+        let downloaded = installedToolkits.first { $0.folder == toolkit.root }?.version
+        let custom = customToolkit?.root == toolkit.root
+        let store = toolkitStore
         progress[id] = (.unwrap, 0)
         installLog[id] = []
         let installer = Installer(game: game, toolkit: toolkit, progress: { step, fraction in
@@ -661,12 +702,17 @@ final class AppModel: ObservableObject {
         })
         self.installer = installer
         Task.detached(priority: .userInitiated) {
-            let result: Result<URL, Error> = Result { try installer.run(root: root) }
+            let result: Result<URL, Error> = Result {
+                if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
+                if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
+                return try installer.run(root: root)
+            }
             await MainActor.run {
                 self.installer = nil
                 self.progress[id] = nil
                 switch result {
                 case .success(let bundle):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: nil, titleID: game.titleID)
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
@@ -677,6 +723,7 @@ final class AppModel: ObservableObject {
                 case .failure(let error) where error is CancellationError:
                     break
                 case .failure(let error):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
                     self.failures[id] = error.localizedDescription
                     self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
                 }
@@ -725,13 +772,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Plays the game, its saves brought in step first where save sync is on.
-    func play(_ game: Game) {
+    /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
+    /// detailed logging on for this start only.
+    func play(_ game: Game, trace: Bool = false) {
         guard root != nil, starting == nil, running == nil, syncing == nil else { return }
-        syncSaves(game) { self.start(game) }
+        syncSaves(game) { self.start(game, trace: trace) }
     }
 
-    private func start(_ game: Game) {
+    private func start(_ game: Game, trace: Bool = false) {
         guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -743,11 +791,11 @@ final class AppModel: ObservableObject {
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder, trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
-        markStart(of: game)
+        markStart(of: game, traced: trace || settings.trace == true)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -761,6 +809,7 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.lastSessions[game.id]?.pid = app.processIdentifier
                     self.sessionStart = Date()
                     self.watchTrophies(game)
                     self.watchForExit(of: app.processIdentifier)
@@ -803,6 +852,7 @@ final class AppModel: ObservableObject {
         switch link {
         case .library: open(.library)
         case .settings: open(.settings)
+        case .theme(let id): installHubTheme(id)
         case .game(let id), .play(let id):
             guard let index = games.firstIndex(where: { $0.titleID == id }) else {
                 return show(T.format(.linkNoGame, id), symbol: "questionmark.folder")
@@ -1058,11 +1108,16 @@ final class AppModel: ObservableObject {
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()
+        followSharePlay()
         updateTogetherPresence()
         syncSaves(running.game) {}
         discord.clear()
         loadTrophies(running.game, again: true)
-        diagnose(running.game)
+        lastSessions[running.game.id]?.ended = Date()
+        lastSessions[running.game.id]?.withoutWindow = starting != nil
+        traceTrim?.cancel()
+        traceTrim = nil
+        diagnose(running.game, pid: running.app.processIdentifier)
         trophyWatch?.cancel()
         trophyWatch = nil
         exitWatch?.cancel()
@@ -1070,7 +1125,6 @@ final class AppModel: ObservableObject {
         if starting != nil {
             startWatch?.cancel()
             withAnimation(Motion.overlay) { starting = nil }
-            startedWithoutWindow = true
         }
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
@@ -1410,20 +1464,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Diagnosis
 
-    /// Set when the game that just ended never showed a window, so the toast says it did not start.
-    private var startedWithoutWindow = false
-
     nonisolated static func logFile(for game: Game) -> URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/\(game.titleID).log")
     }
 
-    /// The log line the diagnosis reads from, so only this start's output counts.
-    private func markStart(of game: Game) {
+    /// The log line the diagnosis reads from, so only this start's output counts. A log grown
+    /// too big is set aside first; a detailed one is kept under its cap while the game runs.
+    private func markStart(of game: Game, traced: Bool) {
         diagnoses[game.id] = nil
         starts[game.id] = Date()
+        lastSessions[game.id] = LastSession(traced: traced)
         let file = AppModel.logFile(for: game)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\n"
+        GameLog.rollForStart(file)
+        traceTrim?.cancel()
+        traceTrim = nil
+        if traced {
+            traceTrim = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    GameLog.trim(file, cap: TraceMode.cap)
+                }
+            }
+            TrophyBanner.shared.notice(TC.text(.traceOnNotice), detail: TC.text(.traceOnNoticeDetail), symbol: "text.magnifyingglass", sounds: false)
+        }
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n"
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))
@@ -1442,52 +1507,32 @@ final class AppModel: ObservableObject {
         return Diagnosis.lastSession(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
     }
 
-    private func diagnose(_ game: Game) {
+    /// Reads why the game stopped once macOS has had a few seconds to write its crash report,
+    /// and offers the report when it stopped abnormally.
+    private func diagnose(_ game: Game, pid: pid_t) {
         let start = starts[game.id] ?? Date().addingTimeInterval(-600)
-        let withoutWindow = startedWithoutWindow
-        startedWithoutWindow = false
+        let withoutWindow = lastSessions[game.id]?.withoutWindow ?? false
         Task.detached(priority: .userInitiated) {
-            // macOS writes the crash report a moment after the process is gone.
-            try? await Task.sleep(for: .seconds(1.5))
-            let report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
+            // macOS writes the crash report a moment after the process is gone: up to six
+            // seconds, less for a log that ends on the engine's orderly shutdown.
+            var report: String?
+            for attempt in 1...12 {
+                try? await Task.sleep(for: .milliseconds(500))
+                report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier, pid: pid)
+                if report != nil { break }
+                if attempt == 3 && Diagnosis.cleanShutdown(AppModel.lastSession(of: game)) { break }
+            }
             let found = Diagnosis.read(session: AppModel.lastSession(of: game), crashReport: report)
             await MainActor.run {
                 self.diagnoses[game.id] = found
-                if let found {
-                    self.show(game.name + ": " + found.summary, symbol: "exclamationmark.triangle.fill")
-                } else if withoutWindow {
-                    self.show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
-                }
+                if found != nil || withoutWindow { self.offerReport(game) }
             }
         }
     }
 
-    /// Writes a report for a bug report or a Discord message and shows it in Finder.
+    /// The crash panel for the last session of the game, from its options or the log.
     func makeReport(_ game: Game) {
-        let settings = settings(for: game)
-        let diagnosis = diagnoses[game.id]?.summary
-        let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let toolkitVersion = toolkit?.version ?? "none"
-        let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
-        Task.detached(priority: .userInitiated) {
-            let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
-            let text = DiagnosticReport.text(game: game, settings: settings, launcherVersion: launcher, toolkitVersion: toolkitVersion,
-                                             diagnosis: diagnosis, session: AppModel.lastSession(of: game), crashReport: crash)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/Reports")
-            let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).txt")
-            let written = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
-                && (try? Data(text.utf8).write(to: file)) != nil
-            await MainActor.run {
-                if written {
-                    NSWorkspace.shared.activateFileViewerSelecting([file])
-                    self.show(T.text(.reportSaved), symbol: "doc.badge.checkmark")
-                } else {
-                    self.show(T.text(.reportFailed), symbol: "exclamationmark.triangle.fill")
-                }
-            }
-        }
+        openSessionReport(game, afterCrash: false)
     }
 
     // MARK: Sharing settings
@@ -1647,7 +1692,7 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1
@@ -1662,6 +1707,7 @@ final class AppModel: ObservableObject {
             loadParty()
             if togetherFriends.isEmpty { refreshFriends() }
         }
+        if next == .settings { refreshEngines() }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()

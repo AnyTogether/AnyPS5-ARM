@@ -24,6 +24,8 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var section: String? = nil
     /// When a handle may change again, with "handle_cooldown".
     public var handleChangeAt: Date? = nil
+    /// The theme already shared from the same file, with a 409 on sharing a theme.
+    public var themeId: String? = nil
     public var description: String { title }
 }
 
@@ -71,6 +73,11 @@ public final class TokenStore: @unchecked Sendable {
 
     func load() -> Saved? {
         lock.withLock { (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) } }
+    }
+
+    /// The tokens kept now, for a crash report to take out wherever they appear.
+    public var secrets: [String] {
+        load().map { [$0.accessToken, $0.refreshToken] } ?? []
     }
 
     /// Changes the kept user (a new handle or name), keeping the tokens.
@@ -235,7 +242,12 @@ public final class TogetherClient: @unchecked Sendable {
         request.setValue(clientName, forHTTPHeaderField: "AnyTogether-Client")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        if let body {
+        if let raw = body as? TogetherRawBody {
+            // A file going up (a theme): its own type, and time to send it.
+            request.setValue(raw.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = raw.data
+            request.timeoutInterval = 180
+        } else if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }

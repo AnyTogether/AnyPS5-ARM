@@ -18,7 +18,7 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
-**On Windows or Linux?** [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) is this launcher ported to those systems, for the PCs [AnyPS5](https://github.com/boykopovar/AnyPS5) runs on (in development; it will connect to AnyTogether too). [AnyPS5 Launcher by AlxcBTW](https://github.com/AlxcBTW/anyps5-launcher) is another port.
+**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/utkuhalis/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
 
 ### First start
 
@@ -226,6 +226,20 @@ Games unlocked before phone support need **Update and Play** once, so they carry
 - **Join a friend's game** *(in the next release)*: friends see the game you play as joinable and can start the same one, checked against your game's version first.
 - **Another server** *(in the next release)*: Settings → AnyTogether → Server, for a self-hosted AnyTogether.
 - **Discord status:** the game you play shows on Discord (Settings → Behaviour), with or without AnyTogether.
+
+| A friend's profile | Friends |
+|---|---|
+| ![A friend's profile with games, trophies and activity](docs/screenshots/launcher-profile.jpg) | ![The friends panel](docs/screenshots/launcher-friends.jpg) |
+| **Activity** | **Messages** |
+| ![Friends' activity with reactions](docs/screenshots/launcher-activity.jpg) | ![A conversation with a friend](docs/screenshots/launcher-messages.jpg) |
+| **Party with voice** | **Share play** |
+| ![A party in voice, one friend speaking](docs/screenshots/launcher-party.jpg) | ![Sharing a game with two friends](docs/screenshots/launcher-shareplay.jpg) |
+| **Leaderboard** | **Notifications** |
+| ![A game's leaderboard](docs/screenshots/launcher-leaderboard.jpg) | ![The notifications list](docs/screenshots/launcher-notifications.jpg) |
+| **Themes from the Hub** | |
+| ![Themes people share on the Hub](docs/screenshots/launcher-hub.jpg) | |
+
+<sub>The people, messages and numbers in these screenshots are made up.</sub>
 
 ## Games on a Mac
 
