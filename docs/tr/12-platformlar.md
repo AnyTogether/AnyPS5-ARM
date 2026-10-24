@@ -11,10 +11,12 @@ telefon uygulamasıyla konuşabilmesi için telefon protokolünü yazıya döker
 | Sözleşme | Tanımlandığı yer | Kullananlar |
 |---|---|---|
 | REST API `/api/v1` | herkese açık depodaki `packages/shared` içinde Zod şemaları; onlardan üretilecek bir OpenAPI 3.1 belgesi planlandı | tüm istemciler |
-| Realtime gateway `/rt` | `packages/shared` olay ve sinyalleşme tipleri; [API](04-api.md) 4.7 | tüm istemciler |
+| Realtime gateway `/rt` | `packages/shared` olay ve sinyalleşme tipleri; [API](04-api.md) 4.8 | tüm istemciler |
 | Giriş | e-posta kodları, passkey'ler (WebAuthn, web sitesi), telefona devretme, cihaz kodu (RFC 8628), PKCE'li OpenID Connect (RFC 7636) ve yerel uygulama yönlendirme kuralları (RFC 8252) | tüm istemciler |
-| Görüşmeler | WebRTC: Opus ses (yapıldı), H.264 Share play (birlikte oynama) videosu (Constrained Baseline ya da Main, B-frame yok; planlandı, yalnızca izleme), çevrimiçi oyunun oyun trafiği için data channel'lar (planlandı) | her launcher, telefon, web |
-| Kol paketi | aşağıdaki 80 baytlık girdi paketi (12.4) | telefon → launcher |
+| Görüşmeler | WebRTC: Opus ses (yapıldı) | her launcher, telefon, web |
+| Share play (birlikte oynama) | host'tan her izleyiciye WebRTC: bir H.264 video kanalı (B-frame yok), oyunun sesi kayıplı `audio` data channel'ında Remote Play'in PCM paketleri olarak, izleyicinin kolu kayıplı `pad` data channel'ında 80 baytlık paketler olarak (yapıldı); teklifi her zaman host yapar | yayını açan launcher, her izleyici |
+| Çevrimiçi oyun | oyunun kendi trafiği için data channel'lar (planlandı) | her launcher |
+| Kol paketi | aşağıdaki 80 baytlık girdi paketi (12.4) | telefon → launcher, share play izleyicisi → host |
 | Oyun oturumları | [API](04-api.md) 4.6: title ID, oyun sürümü, motor derlemesi, sürüm koruması | her launcher |
 | Kupa ve oturum verisi | [Veri modeli](05-veri-modeli.md) | her launcher |
 | Tema dosyası | `.anyps5theme` (zip: `theme.json` + isteğe bağlı resim/video ve müzik) | her launcher, Hub |
@@ -24,48 +26,57 @@ telefon uygulamasıyla konuşabilmesi için telefon protokolünü yazıya döker
 | İhtiyaç | macOS launcher | Windows launcher | Linux launcher | Telefon | Web |
 |---|---|---|---|---|---|
 | Dil | Swift | Dart (Flutter, AnyPS5-Desktop) | aynısı | Dart (Flutter) | TypeScript |
-| AnyTogether istemcisi | `AnyPS5Core/Together` | AnyPS5-Desktop'un kendisi, telefonun Dart istemcisini paylaşarak (planlandı) | aynısı | `mobile/lib/together` | `apps/web` |
-| Giriş | e-posta kodu, telefondan devir (yapıldı); yerel Apple, `ASWebAuthenticationSession` (planlandı) | varsayılan tarayıcı + loopback | varsayılan tarayıcı + loopback | e-posta kodu, devirle Mac'in hesabı (yapıldı); yerel Apple/Google, Discord (planlandı) | e-posta kodu ya da bağlantısı, passkey'ler (yapıldı) |
-| Güvenli token deposu | Keychain | Credential Manager | Secret Service (GNOME Keyring, KWallet) | Keychain / Keystore | HttpOnly çerez |
+| AnyTogether istemcisi | `AnyPS5Core/Together`, `AnyPS5SharePlay` | AnyPS5 Desktop'un kendisi, `lib/core/together` (yapıldı) | aynısı | `mobile/lib/together` | `apps/web` |
+| Giriş | e-posta kodu, telefondan devir, cihaz kodu (yapıldı); yerel Apple, `ASWebAuthenticationSession` (planlandı) | e-posta kodu, web sitesinin cihaz kodu, telefondan devir (yapıldı); varsayılan tarayıcı + loopback ile sağlayıcılar (planlandı) | aynısı | e-posta kodu, devirle Mac'in hesabı (yapıldı); yerel Apple/Google, Discord (planlandı) | e-posta kodu ya da bağlantısı, passkey'ler (yapıldı) |
+| Güvenli token deposu | Keychain | geçerli kullanıcı için DPAPI ile mühürlenmiş bir dosya | `secret-tool` üzerinden Secret Service (GNOME Keyring, KWallet), yoksa 0600 izinli bir dosya | Keychain / Keystore | HttpOnly çerez |
 | WebRTC | Google WebRTC framework'ü | `flutter_webrtc` | aynısı | `flutter_webrtc` | tarayıcı |
-| Oyun görüntüsü yakalama | ScreenCaptureKit | Windows.Graphics.Capture | xdg-desktop-portal üzerinden PipeWire | - (yalnızca izleyici) | - (yalnızca izleyici) |
-| Oyun sesi yakalama | ScreenCaptureKit ses | WASAPI süreç loopback'i | oyunun PipeWire düğümü | - | - |
-| Donanımsal H.264 | VideoToolbox | Media Foundation, NVENC, AMF, Quick Sync | VA-API, NVENC | çözücüler: VideoToolbox, MediaCodec | tarayıcı |
+| Oyun görüntüsü yakalama (share play host'u) | ScreenCaptureKit, başlık çubuğu olmadan (yapıldı) | Windows.Graphics.Capture (planlandı) | xdg-desktop-portal üzerinden PipeWire (planlandı) | - (yalnızca izleyici) | - (yalnızca izleyici) |
+| Oyun sesi yakalama | ScreenCaptureKit ses (yapıldı) | WASAPI süreç loopback'i (planlandı) | oyunun PipeWire düğümü (planlandı) | - | - |
+| Donanımsal H.264 | WebRTC üzerinden VideoToolbox (yapıldı) | Media Foundation, NVENC, AMF, Quick Sync | VA-API, NVENC | çözücüler: VideoToolbox, MediaCodec | tarayıcı |
+| Share play izleyicisinin kolu | oyun kumandası | (planlandı) | (planlandı) | ekrandaki kol | bir oyun kumandası (Gamepad API) ya da klavye |
 | Mikrofon işleme | Apple ses işleme | WebRTC APM | WebRTC APM | platform | tarayıcı |
-| Genel bas-konuş | Carbon kısayol tuşu | `RegisterHotKey` | GlobalShortcuts portalı | düğme | odaktayken tuş |
-| İstenecek izinler | Mikrofon, Ekran Kaydı | Mikrofon | Mikrofon; portalın ekran paylaşımı istemi | Mikrofon, bildirimler | Mikrofon |
-| Anlık bildirimler | - (çalışırken soket) | - | - | APNs / FCM | Web Push (sonra) |
-| İmzalama | Developer ID + notarization (güncellemelerde izinler korunur) | Authenticode (SmartScreen uyarılarını önler) | paketler (Flatpak, AppImage, dağıtım paketleri) | App Store / sideload, Play / APK | - |
+| Genel bas-konuş | Carbon kısayol tuşu (⌥V) | `GetAsyncKeyState` (seçtiğin bir tuş, varsayılan V) | X11'de `XQueryKeymap`; Wayland'de yalnızca klavye bir X11 penceresinde ya da launcher'dayken | düğme (planlandı) | odaktayken tuş |
+| İstenecek izinler | Mikrofon, Ekran Kaydı | Mikrofon | Mikrofon; portalın ekran paylaşımı istemi (share play, planlandı) | Mikrofon, bildirimler | Mikrofon, bildirimler |
+| Bildirimler | uygulamanın içinde (zil, bir bildirim balonu) | (planlandı) | (planlandı) | uygulamanın içinde (zil); APNs / FCM (planlandı) | zil; Web Push (yapıldı) |
+| Motor | AnyPS5-ARM sürümlerinden toolkit'ler, Ayarlar → Motor'dan seçilir (ya da içinde gelen) | upstream AnyPS5'in sürümü, ilk açılışta indirilir | aynısı | - | - |
+| Kurulum ve imzalama | Developer ID + notarization (güncellemelerde izinler korunur); tek satırlık kurulum | bir Inno Setup kurulum paketi ya da zip, henüz kod imzalı değil (SmartScreen uyarabilir) | AppImage, `.deb`, tar.gz | sideload: APK, AltStore ve benzerleriyle IPA | - |
 
-**Motor**: her launcher oyunları aynı motorla başlatır; bu yüzden motorda yaşayan özellikler,
-launcher aynı ayarları geçirdiği anda her yerde çalışır. Telefonun kolları, motorun **uzak kol
-köprülerini** kullanır (`ANYPS5_REMOTE_PAD`, `ANYPS5_REMOTE_PAD_2` … `_4`: kol başına bir loopback
-UDP adresi). Bunlar bugün AnyPS5-ARM'ın motorunda var; motoru başka bir fork'tan derleyen bir
-launcher, telefon kolunu sunabilmek için bu değişikliği kendi fork'una almalıdır (değişiklik motorun
-kol kütüphanesinin içinde, kendi başına bir bütündür). Çevrimiçi oyun da aynı şekilde motorun
-çevrimiçi köprüsüne (`ANYPS5_ONLINE`, AnyPS5-ARM'ın `online-play` branch'inde tasarlanıyor) ihtiyaç duyar.
+**Motor**: her launcher oyunları bir AnyPS5 motoruyla başlatır; bu yüzden motorda yaşayan
+özellikler, launcher aynı ayarları geçirdiği ve motorda bu özellikler bulunduğu anda her yerde
+çalışır. macOS launcher'ı AnyPS5-ARM'ın motorunu kullanır (her sürüm için bir toolkit, Ayarlar →
+Motor'dan seçilir); AnyPS5 Desktop, upstream AnyPS5'in kendi sistemine uygun sürümünü indirir.
+Telefonun kolları ve share play'in kolları, motorun **uzak kol köprülerini** kullanır
+(`ANYPS5_REMOTE_PAD`, `ANYPS5_REMOTE_PAD_2` … `_4`: kol başına bir loopback UDP adresi); bu
+köprüler share play'in oyuncu numarasını da 13. bayttan okur (aşağıda). Bunlar bugün AnyPS5-ARM'ın
+motorunda var, yalnızca POSIX'te (bir Winsock portu `remotepad-winsock` branch'inde); upstream'in
+kütüphaneleriyle bu değişkenler yok sayılır. Çevrimiçi oyun da aynı şekilde motorun çevrimiçi
+köprüsüne (`ANYPS5_ONLINE`, AnyPS5-ARM'ın `online-play` branch'inde tasarlanıyor) ihtiyaç duyar.
+Motor derlemesi, bir oyun oturumunun sürüm korumasının ve her uyumluluk raporunun parçasıdır.
 
 ## 12.3 Özellik eşitliği
 
-Her platform her özelliği alır; tablo 2026-10-24'te her birinin nerede durduğunu gösterir: **✓**
-yapıldı (macOS ve telefon için AnyPS5-ARM'ın `main` dalında; neyin sürüme girdiği için bkz.
-[İstemciler](07-istemciler.md)), **○** planlandı, **-** bu platform için değil.
+Her platform her özelliği alır; tablo 2026-10-25'te her birinin nerede durduğunu gösterir: **✓**
+yapıldı ve sürüme girdi (macOS launcher'ı 0.2.15, telefon 1.11.0, Windows ve Linux'ta AnyPS5 Desktop
+0.1.1), **○** planlandı, **-** bu platform için değil.
 
 | Özellik | macOS | Windows | Linux | Telefon | Web |
 |---|---|---|---|---|---|
-| Giriş | ✓ | ○ | ○ | ✓ | ✓ (passkey'lerle) |
-| Profiller | ✓ | ○ | ○ | ○ | ✓ |
-| Kupalar ve kütüphane | ✓ | ○ | ○ | ○ | ✓ (profillerde) |
-| Arkadaşlar ve çevrimiçi durumu | ✓ | ○ | ○ | ✓ | ✓ |
-| Akış, liderlik tabloları | ○ | ○ | ○ | ○ | ○ |
-| Mesajlar | ✓ | ○ | ○ | ✓ (anlık bildirim ○) | ✓ |
-| Partiler ve ses | ✓ | ○ | ○ | ✓ (bilgisayarın kulaklığı olarak ○) | ✓ |
-| Arkadaşın oyununa katılma | ✓ | ○ | ○ | - | - |
+| Giriş | ✓ | ✓ | ✓ | ✓ | ✓ (passkey'lerle) |
+| Profiller | ✓ | ✓ | ✓ | ✓ (kendininkini düzenleme) | ✓ |
+| Kupalar ve kütüphane | ✓ | ✓ | ✓ | - | ✓ (profillerde) |
+| Arkadaşlar ve çevrimiçi durumu | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Aktivite akışı, liderlik tabloları | ✓ | ○ | ○ | ✓ | ✓ |
+| Bildirimler | ✓ (zil) | ○ | ○ | ✓ (zil; anlık bildirim ○) | ✓ (zil, tarayıcı push'u) |
+| Mesajlar | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Partiler, ses, birebir çağrılar | ✓ | ✓ | ✓ | ✓ (bilgisayarın kulaklığı olarak ○) | ✓ |
+| Arkadaşın oyununa katılma | ✓ | ✓ | ✓ | - | - |
 | Çevrimiçi oyun | ○ (tasarım aşamasında) | ○ | ○ | - | - |
-| Ev sahibi olarak share play (yalnızca izleme) | ○ | ○ | ○ | - | - |
-| İzleyici olarak share play | ○ | ○ | ○ | ○ | ○ |
-| Temalar ve Hub | ○ | ○ (launcher `.anyps5theme` okuduğunda) | ○ | launcher'ın temasını giyer | ○ (profiller) |
-| Uyumluluk raporları | ○ | ○ | ○ | - | - |
+| Ev sahibi olarak share play | ✓ | ○ | ○ | - | - |
+| İzleyici olarak share play, kol verildiğinde kolla | ✓ | ○ | ○ | ✓ | ✓ |
+| Oyuncu bulma (pano, Şu an canlı, kişiler, oyun hub'ları) | ○ | ○ | ○ | ○ | ✓ |
+| Temalar ve Hub | ✓ | ○ (launcher `.anyps5theme` okuduğunda) | ○ | launcher'ın temasını giyer | ✓ |
+| Uyumluluk raporları | ✓ | ○ | ○ | - | ✓ |
+| Başka bir sunucu | ✓ | ✓ | ✓ | ✓ | (sunucunun kendisi) |
 
 Sözleşmeler (OpenAPI belgesi, gateway ve sinyalleşme mesajları, kol paketi, telefon protokolü)
 sürümlü olarak yayımlanır; böylece bir launcher bizim yardımımız olmadan bağlanabilir; geriye dönük
@@ -119,7 +130,9 @@ köprüsüne aktarır ve oyunun cevaplarını geri aktarır. Hepsi little-endian
 | 4 | 2 | sürüm 1 |
 | 6 | 2 | boyut 80 |
 | 8 | 4 | sıra numarası |
-| 12 | 4 | bayraklar: 1 = hareket verisi var |
+| 12 | 1 | bayraklar: 1 = hareket verisi var |
+| 13 | 1 | share play: host'un bu izleyiciye verdiği oyuncu (2-4), host'un launcher'ı yazar; telefondan 0. Motor böyle bir kolu o oyuncu olarak, ya da birinciden sonraki en düşük boş oyuncu olarak oturtur, asla 1. oyuncu olarak değil |
+| 14 | 2 | ayrılmış, 0 |
 | 16 | 8 | gönderim zamanı, gönderenin saatine göre mikrosaniye |
 | 24 | 8 | oturum (`welcome`'dan) |
 | 32 | 4 | düğmeler (libScePad bitleri: L3 0x2, R3 0x4, Options 0x8, Up 0x10, Right 0x20, Down 0x40, Left 0x80, L2 0x100, R2 0x200, L1 0x400, R1 0x800, Triangle 0x1000, Circle 0x2000, Cross 0x4000, Square 0x8000, Touchpad 0x100000) |
@@ -150,7 +163,9 @@ köprüsüne aktarır ve oyunun cevaplarını geri aktarır. Hepsi little-endian
 16, bayt 8 = oyunun bu kola verdiği oyuncu numarası (0 = henüz yok).
 
 Kabloyla bağlı bir telefonun UDP yolu yoktur: aynı girdi paketlerini kontrol bağlantısı üzerinden
-**ikili WebSocket çerçeveleri** olarak gönderir ve çıktıları da aynı şekilde geri alır.
+**ikili WebSocket çerçeveleri** olarak gönderir ve çıktıları da aynı şekilde geri alır. Bir share
+play izleyicisi aynı girdi paketlerini WebRTC'nin `pad` data channel'ında gönderir ve çıktıları da
+onun üzerinden geri alır.
 
 ### Remote Play (yerel ağ)
 
@@ -161,7 +176,8 @@ Launcher → telefon, UDP ile kolun geldiği adrese (ya da kabloda ikili çerçe
   ayrılmış (u16), yayın başladığından beri geçen milisaniye (u32); ardından karenin en fazla 1176
   baytı. Bir kare, start-code (Annex B) biçiminde H.264'tür; anahtar karede önce SPS ve PPS gelir.
 - **Ses**, başlık 16 bayt: magic `0x41525041` ("APRA"), sürüm 1, başlık boyutu 16, numara (u32),
-  milisaniye (u32); ardından 48 kHz'de 16 bit stereo PCM (paket başına 5 ms).
+  milisaniye (u32); ardından 48 kHz'de 16 bit stereo PCM (paket başına 5 ms). Share play bu aynı
+  paketleri WebRTC'nin `audio` data channel'ında gönderir.
 
 ### Kablo
 

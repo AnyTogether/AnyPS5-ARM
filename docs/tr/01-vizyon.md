@@ -3,8 +3,9 @@
 ## Tek cümlede
 
 AnyTogether, AnyPS5 launcher'ını tek bir bilgisayardaki programdan oyuncuların buluştuğu bir yere dönüştürür:
-profilin ve kupaların seninle gelir, arkadaşların ne oynadığını görür, oynarken konuşursunuz
-bir arkadaşın, nerede olursa olsun, oyununu izleyebilir ve birbirinizin oyununa katılabilirsiniz.
+profilin ve kupaların seninle gelir, arkadaşların ne oynadığını görür, oynarken konuşursunuz,
+bir arkadaşın nerede olursa olsun oyununu izleyebilir ve ikinci bir kumandayla sana eşlik edebilir;
+birbirinizin oyununa da katılabilirsiniz.
 
 ## Neden şimdi
 
@@ -17,19 +18,20 @@ tutan portu, [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop):
 | Oyun başına oynama süresi ve son oynama tarihi | `Preferences.lastPlayed`, launcher'daki oynama süresi | Tüm bilgisayarlarını kapsayan, arkadaşlarının görebildiği bir oyun kütüphanesi |
 | Her oyundan okunan ve oynarken anında fark edilen kupalar | `Trophies.swift`, kupa bildirimi, telefondaki kupa kartı | Tarihleriyle kupa geçmişi, tüm oyuncular genelinde nadirlik, liderlik tabloları |
 | O anda oynanan oyun | Discord durumu (`DiscordPresence.swift`) | Discord'a gerek kalmadan, AnyPS5 içinde arkadaşlara çevrimiçi durumu |
-| Tema Stüdyosu'nda yapılan temalar | GitHub deposundaki `hub/` klasörü, bir issue üzerinden paylaşılıyor | Stüdyo'dan doğrudan yükleme, beğeniler, indirmeler, profilindeki tema |
-| Remote Play: oyunun görüntüsü ve sesi aynı ağdaki bir telefona | `RemotePlay.swift`, `StreamEncoder.swift`, telefondaki decoder'lar | Aynı yayın internet üzerinden bir arkadaşa, izlemesi için (share play) |
-| Tek bilgisayarda, dört kontrolcü olarak en fazla dört telefon | `RemoteServer` köprüleri, `ANYPS5_REMOTE_PAD_2..4` | Çevrimiçi oyun: arkadaşın aynı oyunu kendi bilgisayarında çalıştırır ve seninkine katılır |
+| Tema Stüdyosu'nda yapılan temalar | GitHub deposundaki `hub/` klasörü, bir issue üzerinden paylaşılıyor | AnyTogether'daki Tema Hub: launcher'dan yükleme, beğeniler, indirmeler (yapıldı); profilindeki tema (planlandı) |
+| Remote Play: oyunun görüntüsü ve sesi aynı ağdaki bir telefona | `RemotePlay.swift`, `StreamEncoder.swift`, telefondaki decoder'lar | Oyun internet üzerinden bir arkadaşa: izlemesi için, yayıncı ona bir kumanda verdiğinde de 2., 3. ya da 4. oyuncu olarak birlikte oynaması için (share play) |
+| Tek bilgisayarda, dört kumanda olarak en fazla dört telefon | `RemoteServer` köprüleri, `ANYPS5_REMOTE_PAD_2..4` | Çevrimiçi oyun: arkadaşın aynı oyunu kendi bilgisayarında çalıştırır ve seninkine katılır |
 | Klipler ve ekran görüntüleri | Galeri | Aktivite akışında öne çıkan anlar (isteğe bağlı) |
 
 ## Kimin için
 
-1. Mac, Windows PC ya da Linux makinesinde oynayan, telefon uygulamasını kontrolcü veya ikinci ekran olarak kullanan **AnyPS5 oyuncusu**. AnyTogether'ın
+1. Mac, Windows PC ya da Linux makinesinde oynayan, telefon uygulamasını kumanda veya ikinci ekran olarak kullanan **AnyPS5 oyuncusu**. AnyTogether'ın
    büyük kısmı launcher'da ve telefon uygulamasında yaşanır; web sitesi üçüncü kapıdır.
 2. Belki hiç AnyPS5'i olmayan **arkadaşları**. Bir arkadaş web'de bir profili açabilir,
-   bir partinin sesli sohbetine tarayıcıdan ya da telefon uygulamasından katılabilir ve bir Share play (birlikte oynama) oturumunu izleyebilir.
+   bir partinin sesli sohbetine tarayıcıdan ya da telefon uygulamasından katılabilir ve bir share play (birlikte oynama)
+   oturumunu tarayıcıda izleyebilir; yayıncı ona bir kumanda verdiğinde bir kumandayla ya da klavyeyle birlikte oynar.
 3. **Topluluk**: tema yapanlar, hangi oyunların çalıştığını bildirenler, liderlik tablolarında
-   yükselenler.
+   yükselenler, bir oyunu birlikte oynayacak birini arayanlar.
 
 ## Ne olduğu
 
@@ -45,8 +47,14 @@ tutan portu, [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop):
 8. **Aktivite akışı**: arkadaşlarından kupalar, oturumlar ve öne çıkan anlar.
 9. **Temalar**: profilin ve launcher'ın istediğin gibi görünür, herkesle paylaşılır.
 10. **İndirmeler**: resmi launcher, telefon uygulaması, güncellemeler ve araçlar.
-11. **Share play**: oturumunu yayınla; arkadaşların izlesin ve konuşun.
+11. **Share play**: oturumunu yayınla; arkadaşların izlesin ve konuşun, kumanda verdiklerin de
+    2., 3. ya da 4. oyuncu olarak oynasın. Senin kumandan 1. oyuncu olarak kalır.
 12. **Liderlik tabloları**: arkadaşlarına ve tüm dünyaya karşı kupalar ve oynama süresi.
+
+Bunların yanında, yol boyunca yapılanlar: **bildirimler** (bir zil, tarayıcı bildirimleri, bir
+e-posta özeti), **oyuncu bulma** (oyuncu arama panosu, herkese açık listelenen
+partiler ve share play'ler, oyun sayfaları, aynı oyunları oynayan kişiler) ve **uyumluluk listesi**
+(oyuncuların raporlarından, her oyunun platform başına ne kadar ilerlediği).
 
 [Özellikler](03-ozellikler.md) her birini ayrıntısıyla anlatır.
 
@@ -90,7 +98,8 @@ tutan portu, [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop):
 - **Genel bir sosyal ağ değil.** Oyunlar dışında herkese açık paylaşım yok, sırf sayı olsun diye takipçi
   sayıları yok.
 - **Bir bulut oyun servisi değil.** Share play *senin* bilgisayarındaki oyunu *senin* arkadaşına,
-  doğrudan aranızda yayınlar; sunucu yalnızca sizi tanıştırır ve doğrudan bir yol mümkün olmadığında
+  doğrudan aranızda yayınlar, arkadaşının kumandası de aynı yoldan geri gelir; oyun yalnızca senin
+  bilgisayarında çalışır. Sunucu yalnızca sizi tanıştırır ve doğrudan bir yol mümkün olmadığında
   relay görevi görür. Asla oyun çalıştırmaz.
 
 ## İşe yaradığını nasıl anlayacağız

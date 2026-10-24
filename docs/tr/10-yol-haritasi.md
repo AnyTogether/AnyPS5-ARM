@@ -3,29 +3,33 @@
 Her aşama insanların kullanabileceği bir şey çıkarır; bu, oturana kadar launcher'da bir anahtarın
 arkasında durur. "Bitti", "kod yazıldı" demek değildir; listesindeki her kontrolün geçmesi demektir.
 
-## Nerede duruyor (2026-10-24)
+## Nerede duruyor (2026-10-25)
 
 Kod herkese açık ve MIT lisanslı:
 [github.com/utkuhalis/AnyTogether](https://github.com/utkuhalis/AnyTogether). "Sürümde", AnyPS5-ARM
-v0.2.13-arm'da (telefon uygulaması 1.9.1) demektir; "sonraki sürüm", AnyPS5-ARM'ın `main` dalında olup
-henüz sürüme girmemiş demektir.
+0.2.15'te (macOS launcher'ı), telefon uygulaması 1.11.0'da ya da AnyPS5 Desktop 0.1.1'de (Windows ve
+Linux) demektir; web sitesi yapıldıkça yayına girer.
 
 | Aşama | Durum |
 |---|---|
-| 0 Temeller | **büyük ölçüde yapıldı.** Depo, API, gateway, web sitesi, CI. E-posta kodu ya da bağlantısıyla giriş, passkey'ler (web), telefondan devir, cihaz kodu; Apple, Google ve Discord API'de doğrulanıyor. macOS launcher'ı ve telefon giriş yapıyor (sürümde). Kalanlar: istemcilerde sağlayıcı düğmeleri, OpenAPI belgesi, staging, R2'ye yedekler, yasal sayfalar. |
-| 1 Profil, kütüphane, kupalar | **büyük ölçüde yapıldı.** Profiller, kullanıcı adları, avatarlar, gizlilik; katalog, oturumlar, kütüphane, kupa setleri, nadirlik; launcher oynama süresini ve kupaları gönderiyor (sürümde) ve profilleri gösteriyor (sonraki sürüm); web profilleri. Kalanlar: vitrin, profil teması, avatar denetimi, launcher'ın kupa ekranında tarih ve nadirlik, Open Graph görselleri. |
-| 2 Arkadaşlar, çevrimiçi durumu, akış, liderlik tabloları | **arkadaşlar ve çevrimiçi durumu yapıldı** (web; launcher sürümde; telefon sonraki sürüm). Kalanlar: QR kodları, akış, liderlik tabloları. |
-| 3 Mesajlar ve anlık bildirim | **mesajlar metin için yapıldı** (web; launcher ve telefon sonraki sürüm). Kalanlar: görseller, tepkiler, yazıyor göstergesi, anlık bildirimler. |
-| 4 Partiler ve ses | **yapıldı**: partiler, çağrılar, web'de, launcher'da ve telefonda (sonraki sürüm) eşten eşe ses, macOS'ta bas-konuş, relay desteği; ve oyun oturumlarıyla **arkadaşın oyununa katılma** (launcher, sonraki sürüm). Kalanlar: parti sohbeti, kulaklık olarak telefon, görüşme kalitesi raporları. |
-| 5 Share play | planlandı, **yalnızca izleme**. |
-| 6 Tema Hub'ı, indirmeler, uyumluluk | planlandı. |
-| 7 Çevrimiçi oyun | **tasarım aşamasında**: AnyPS5-ARM'ın `online-play` branch'inde motor köprüsü; sunucudaki oyun oturumları yapıldı. |
-| Kendi sunucunu kurmak | **yapıldı**: Docker Compose ve bir kurulum rehberi; launcher ve telefon başka bir sunucuya yönlendirilebilir (sonraki sürüm). |
-| Windows ve Linux | [AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) herkese açık ve geliştiriliyor; AnyTogether kısmı planlandı. |
+| 0 Temeller | **büyük ölçüde yapıldı.** Depo, API, gateway, web sitesi, CI. E-posta kodu ya da bağlantısıyla giriş, passkey'ler (web), telefondan devir, cihaz kodu; Apple, Google ve Discord API'de doğrulanıyor. Her istemci giriş yapıyor (sürümde). Kalanlar: istemcilerde sağlayıcı düğmeleri, OpenAPI belgesi, staging, R2'ye yedekler, yasal sayfalar. |
+| 1 Profil, kütüphane, kupalar | **büyük ölçüde yapıldı.** Profiller, kullanıcı adları, avatarlar, gizlilik; katalog, oturumlar, kütüphane, kupa setleri, nadirlik; iki launcher da oynama süresini ve kupaları gönderiyor ve profilleri gösteriyor; telefon profilini düzenliyor; web profilleri. Kalanlar: vitrin, profil teması, avatar denetimi, launcher'ın kendi kupa ekranında tarih ve nadirlik, Open Graph görselleri. |
+| 2 Arkadaşlar, çevrimiçi durumu, akış, liderlik tabloları | **yapıldı**: her yerde arkadaşlar ve çevrimiçi durumu; web'de, macOS launcher'ında ve telefonda tepkili aktivite akışı ve liderlik tabloları; web'de oyuncu bulma (oyuncu arama panosu, herkese açık partiler ve share play'ler, keşif, oyun hub'ları). Kalanlar: QR kodları, yorumlar, aylık ve haftalık tablolar, AnyPS5 Desktop'ta akış ve tablolar, uygulamalarda oyuncu bulma. |
+| 3 Mesajlar ve anlık bildirim | metin için grupları ve yazıyor göstergesiyle, her yerde **yapıldı**; her yerde zil simgesiyle bildirimler, tarayıcı push'u ve e-posta özeti. Kalanlar: görseller, mesajlara tepkiler, telefona push. |
+| 4 Partiler ve ses | **yapıldı**: web'de, iki launcher'da ve telefonda partiler, herkese açık partiler, parti sesi ve susturmalı birebir çağrılar; iki launcher'da bas-konuş; relay desteği; oyun oturumlarıyla **arkadaşın oyununa katılma** (iki launcher). Kalanlar: parti sohbeti, kulaklık olarak telefon, görüşme kalitesi raporları. |
+| 5 Share play | **yapıldı**: macOS launcher'ı yayın açıyor; izleyiciler web'de, telefonda ve macOS launcher'ında; host 2-4. kumandaları veriyor ve 1. oyuncuyu kendinde tutuyor; herkese açık listeleme ve "Şu an canlı". Kalanlar: AnyPS5 Desktop'ta yayın açma ve izleme, gerçek ağlarda ölçülmüş ekrandan ekrana gecikme, kalite raporları. |
+| 6 Tema Hub'ı, indirmeler, uyumluluk | **yapıldı**: Tema Hub'ı (macOS launcher'ı ve web; eski launcher'lar eski dizin üzerinden), indirme sayfası ve sürümler API'si, macOS launcher'ından ve web'den gelen raporlarla uyumluluk listesi. Kalanlar: profil temaları, AnyPS5 Desktop tarafı, kumanda düzenleri ve ön ayarlar. |
+| 7 Çevrimiçi oyun | **tasarım aşamasında**: AnyPS5-ARM'ın `online-play` branch'inde motor köprüsü; sunucuda oyuncu özellikleri, sinyalleşme ve relay kimlik bilgileriyle oyun oturumları yapıldı. |
+| Kendi sunucunu kurmak | **yapıldı**: Docker Compose ve bir kurulum rehberi; her istemci başka bir sunucuya yönlendirilebilir. |
+| Moderasyon | **yapıldı**: kişiler, mesajlar, temalar ve ilanlar hakkında şikâyetler; yönetim sayfası ve komut satırı aracı; bir güvenlik incelemesinin düzeltmeleri (bkz. [Güvenlik](08-guvenlik-gizlilik.md)). |
+| Windows ve Linux | [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop) 0.1.1 (erken önizleme): kurulum paketleri, motor kendini indiriyor; AnyTogether'ın girişi, arkadaşlar, mesajlar, partiler ve ses, eşitleme, profiller ve arkadaşın oyununa katılma. |
+
+Test: her istemci tek bir gerçek kuruluma karşı (`e2e/`): giriş, arkadaşlar, mesajlar, partiler,
+çağrılar, eşitleme ve oyun oturumları 2026-10-24'te geçti (bkz. [İstemciler](07-istemciler.md) 7.0).
 
 ## Plan
 
-İş başlamadan önce yapılan ilk plan (sıra hâlâ geçerli; 0-4 arası aşamaların çoğu bu tarihlerin çok
+İş başlamadan önce yapılan ilk plan (sıra geçerli kaldı; 0-6 arası aşamalar bu tarihlerin çok
 önünde yapıldı):
 
 ```mermaid
@@ -110,7 +114,7 @@ göre kendisi bağlar. 6. aşama 3-5 ile paralel yürüyebilir.
 - [ ] Bir oyunu başlatmak, bir arkadaşın launcher'ında 3 s içinde "X oynuyor" gösterir; oyunu
       kapatmak en geç 60 s içinde (süre dolumu), genellikle anında yansır.
 - [x] "Hiç kimse" yapılan çevrimiçi durumu ve engellemeler çevrimiçi durumunu tamamen gizler (test).
-- [ ] Bir saat içindeki beş kupa için akış tek bir gruplanmış öğe gösterir.
+- [x] Bir saat içindeki beş kupa için akış tek bir gruplanmış öğe gösterir (test).
 
 ## Aşama 3: Mesajlar ve anlık bildirim (≈3 hafta)
 
@@ -121,7 +125,7 @@ göre kendisi bağlar. 6. aşama 3-5 ile paralel yürüyebilir.
 - [ ] Web'den gönderilen bir mesaj launcher'a 1 s'nin altında, kilitli bir telefona da anlık
       bildirim olarak 5 s'nin altında ulaşır.
 - [x] Gönderim ortasında ağı kesip yeniden göndermek hiçbir zaman mesajı çoğaltmaz (test).
-- [ ] Okunmamış sayıları üç kapının hepsinde tutarlıdır.
+- [x] Okunmamış sayıları bütün kapılarda tutarlıdır (istemciler arası test koşusu).
 
 ## Aşama 4: Partiler ve ses (≈4 hafta)
 
@@ -142,30 +146,32 @@ göre kendisi bağlar. 6. aşama 3-5 ile paralel yürüyebilir.
 
 ## Aşama 5: Share play (birlikte oynama, ≈5 hafta)
 
-- **Yalnızca izleme**: izleyiciler görür ve duyar, kontrol hiçbir zaman onlara geçmez.
-- Her launcher ev sahipliği yapar: macOS `RemotePlay`'in yakalaması ve düşük gecikmeli H.264 ile,
-  Windows ve Linux kendi yakalama ve donanım kodlayıcılarıyla; her izleyiciye doğrudan, gerekirse
-  relay üzerinden; izleyiciler telefonda, web'de, herhangi bir launcher'da; kalite kademeleri;
-  gecikme rozeti.
+- İzleyiciler host'un oyununu görür ve duyar; host en fazla üçüne 2., 3. ya da 4. oyuncu olarak bir
+  kumanda verebilir ve istediği an geri alabilir. Host'un 1. oyuncusu asla devredilmez.
+- Her launcher ev sahipliği yapar: macOS, Remote Play'in yakalaması ve WebRTC'nin H.264'üyle (yapıldı),
+  Windows ve Linux kendi yakalama ve donanım kodlayıcılarıyla (planlandı); her izleyiciye doğrudan,
+  gerekirse relay üzerinden; izleyiciler telefonda, web'de, herhangi bir launcher'da; kalite
+  kademeleri; bağlantı iki tarafa da gösterilir.
 
 **Bitti sayılması için**
 - [ ] 500 km uzaktaki bir arkadaş 720p60'ı 120 ms'nin altında (medyan) ekrandan ekrana gecikmeyle
       izler; hem ev sahibi bir Mac iken hem de ev sahibi bir Windows PC iken.
-- [ ] Bir izleyicinin gönderdiği hiçbir şey ev sahibinin oyununa ulaşmaz (test).
+- [x] Bir izleyicinin kumandası ev sahibinin oyununa yalnızca host oynamasına izin verdiği sürece
+      ulaşır, asla 1. oyuncu olarak değil (test).
 - [ ] Zayıf bir ağ, 500 ms'den uzun donmadan kaliteyi düşürür.
 
 ## Aşama 6: Tema Hub'ı, indirmeler, uyumluluk (≈3 hafta, 3-5 ile paralel)
 
-- Studio'dan tema yükleme, moderasyon kuyruğu, beğeniler, sürümler; launcher'ın Temalar ekranı
-  API'den okur (GitHub klasörü yedek olarak kalır); profil temaları.
-- Yansılanmış sürümler ve sağlama toplamlarıyla İndirmeler sayfası; `GET /releases/latest`.
-- Uyumluluk raporları (isteğe bağlı) ve oyun sayfalarında ve launcher'ın kütüphanesinde
+- Launcher'dan tema yükleme, şikâyetlerden sonra inceleme, beğeniler, sürümler; launcher'ın Temalar
+  ekranı API'den okur (GitHub klasörü yedek olarak kalır); profil temaları (planlandı).
+- En son GitHub sürümlerinden, sağlama toplamlarıyla İndirmeler sayfası; `GET /releases/latest`.
+- Uyumluluk raporları (isteğe bağlı) ve listede, oyun hub'larında ve launcher'ın oyun bilgisinde
   değerlendirmeler.
 - Sonra aynı rafta: telefon kol düzenleri, oyun başına ön ayarlar, paylaşılan shader önbellekleri.
 
 **Bitti sayılması için**
-- [ ] Studio'da yapılan bir tema, onaylandıktan 1 dakika sonra başka bir kullanıcı tarafından
-      kurulabilir.
+- [x] Launcher'dan paylaşılan bir tema başka bir kullanıcı tarafından hemen kurulabilir (kontrolleri
+      geçtiğinde yayımlanır).
 - [ ] İndirmeler GitHub sürümleriyle bayt bayt eşleşir (CI'da sağlama toplamı testi).
 - [ ] Uyumluluk raporlarını kapatınca hiçbir şey gönderilmez (test).
 
@@ -182,8 +188,8 @@ AnyTogether üzerinden birlikte oynar. Tasarım: AnyPS5-ARM'ın `online-play` br
 - Launcher: köprünün diğer ucu, oyun oturumlarına eşlenen `anyps5` API grubu, ilk eş bağlantısı (paket
   başına HMAC ile düz UDP), varsayılan olarak kapalı (branch'te yapıldı); relay ile WebRTC veri
   kanalları ya da QUIC (planlandı).
-- AnyTogether: sürüm korumalı oyun oturumları (yapıldı); oyuncuların uç noktaları ve bir oturum
-  anahtarı, oturum sinyalleşmesi (planlandı).
+- AnyTogether: sürüm korumalı oyun oturumları, her oyuncunun özellikleri, oyuncular arası
+  sinyalleşme ve relay kimlik bilgileri (yapıldı); bir oturum anahtarı (planlandı).
 
 **Bitti sayılması için**
 - [ ] Yalnızca platform servisleri üzerine kurulu bir oyunun iki kopyası önce tek bir Mac'te, sonra
@@ -195,5 +201,5 @@ AnyTogether üzerinden birlikte oynar. Tasarım: AnyPS5-ARM'ın `online-play` br
 ## Sonrası
 
 - Uçtan uca şifreli birebir mesajlar ve ses; telefon uygulamasının App Store / Play
-  Store sürümleri; liderlik tablolarında turnuvalar ve meydan okumalar; arkadaşların
-  arkadaşları için herkese açık share play'i izleme; topluluk araçları için açık bir API.
+  Store sürümleri; liderlik tablolarında turnuvalar ve meydan okumalar; bir SFU
+  üzerinden çok sayıda izleyiciye share play; topluluk araçları için açık bir API.

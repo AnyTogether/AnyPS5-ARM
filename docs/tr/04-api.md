@@ -14,12 +14,12 @@ bugün sözleşme `packages/shared` içindeki Zod şemalarıdır. Onlardan üret
 adresinde yayınlanacak bir OpenAPI 3.1 belgesi ve Swift, Dart ve TypeScript tipleri planlandı.
 
 İstemciden gelen her istek, istemciyi ve platformu belirten `AnyTogether-Client` başlığını taşır:
-`launcher-macos/0.2.13 (macOS 26.6; Mac15,9)`, `launcher-windows/0.3.0 (Windows 11 24H2)`,
-`launcher-linux/0.3.0 (Fedora 41; KDE)`, `phone/1.10.0 (iOS 27.0)`, `web/…`. API bunu giriş yapmış
+`launcher-macos/0.2.15 (macOS 26.6; Mac15,9)`, `launcher-windows/0.1.1 (Windows 11 24H2)`,
+`launcher-linux/0.1.1 (Fedora 41; KDE)`, `phone/1.11.0 (iOS 27.0)`, `web/…`. API bunu giriş yapmış
 her cihazla birlikte kaydeder. Güvenli olamayacak kadar eski bir istemciyi `426 Upgrade Required` ile
 (`upgrade_required` kodu, "AnyTogether'ı kullanmak için AnyPS5'i güncelle" olarak gösterilir) reddetmek planlandı.
 
-Aşağıdaki her tablo neyin **yapıldığını** (2026-10-24'teki kodda) ve neyin **planlandığını** gösterir.
+Aşağıdaki her tablo neyin **yapıldığını** (2026-10-25'teki kodda) ve neyin **planlandığını** gösterir.
 
 ## 4.1 Giriş: tek dokunuş, kayıt formu yok
 
@@ -29,10 +29,10 @@ alınır.
 
 | Giriş yolu | Nerede | Kullanıcı ne yapar | Durum |
 |---|---|---|---|
-| **E-posta kodu** | her yerde | e-postayı yaz, ardından postadaki 6 haneli kodu gir (ya da içindeki bağlantıya tıkla); akılda tutulacak bir şey yok | yapıldı: web, macOS launcher'ı, telefon |
+| **E-posta kodu** | her yerde | e-postayı yaz, ardından postadaki 6 haneli kodu gir (ya da içindeki bağlantıya tıkla); akılda tutulacak bir şey yok | yapıldı: web, iki launcher, telefon |
 | **Passkey** | web sitesi (Touch ID, Windows Hello, bir telefon, bir parola yöneticisi) | giriş yaptıktan sonra Ayarlar'dan bir tane ekle; sonraki girişlerde hiç e-posta gerekmez | yapıldı: web |
-| **Telefondan** | telefon uygulaması eşleşmiş ve giriş yapmış her launcher, ve tersi | launcher sorar, telefon "<Mac/PC adı> için giriş yapılsın mı?" der, tek dokunuş | yapıldı: macOS launcher'ı ve telefon |
-| **Cihaz kodu** (yedek) | elinin altında tarayıcı olmayan bir launcher | launcher bir kod ve bir QR gösterir; web'de `/link` adresinde onaylanır | API'de ve web'de yapıldı |
+| **Telefondan** | telefon uygulaması eşleşmiş ve giriş yapmış her launcher, ve tersi | launcher sorar, telefon "<Mac/PC adı> için giriş yapılsın mı?" der, tek dokunuş | yapıldı: iki launcher ve telefon |
+| **Cihaz kodu** | elinin altında tarayıcı olan bir launcher: passkey'ler ve web sitesinin diğer giriş yolları orada çalışır | launcher bir kod gösterir ve `/link` adresini açar; orada onaylanır | yapıldı: API, web, iki launcher |
 | **Apple ile devam et** | macOS launcher'ı (yerel sayfa, Touch ID), iPhone (yerel), web | tek dokunuş | API yapıldı (sunucuya istemci ID'leri verilene kadar kapalı); düğmeler planlandı |
 | **Google ile devam et** | her launcher (sistem tarayıcısı), Android (yerel Credential Manager), web | Google'da zaten oturum açıksa tek dokunuş | aynısı |
 | **Discord ile devam et** | her launcher (sistem tarayıcısı), telefon, web | Discord'da zaten oturum açıksa tek dokunuş | aynısı |
@@ -89,6 +89,7 @@ hesabın 16 baytlık ID'sidir; asla bir e-posta ya da kullanıcı adı değildir
 Yasaklı bir hesap her yerde olduğu gibi burada da reddedilir; silinmeyi bekleyen bir hesaba giriş
 yapmak onu korur.
 
+
 ## 4.2 Ben, profiller ve ayarlar
 
 | Metot | Yol | Ne yapar | Durum |
@@ -101,34 +102,33 @@ yapmak onu korur.
 | DELETE | `/me/avatar` | kaldır | yapıldı |
 | GET | `/avatars/{hash}.jpg` | baytlarının hash'iyle bir avatar (bir yıl önbelleğe alınır) | yapıldı |
 | PATCH | `/me/privacy` | bölüm başına: `library`, `trophies`, `friends`, `presence`, `search`; her biri `everyone`, `friends` ya da `nobody` (bkz. Özellikler 3.5) | yapıldı |
-| GET | `/me/export` | tüm verilerin tek bir JSON dosyası olarak, anında (KVKK/GDPR) | yapıldı |
+| GET / PATCH | `/me/discovery` | `{discoverable, languages}`: "<oyun> oynayanlar" listesinde, önerilerde ve oyun sayfalarında görünmek (`null` kütüphane ayarını izler) ve oynadığın en fazla 5 dil | yapıldı |
+| GET | `/me/export` | tüm verilerin tek bir JSON dosyası olarak, anında (KVKK/GDPR); konuşmalar ve gönderdiğin şikâyetler dahil | yapıldı |
 | POST | `/me/deletion` | silmeyi onaylamak için 6 haneli bir kod gönderir; e-postası olmayan bir hesap kullanıcı adıyla onaylar | yapıldı |
 | DELETE | `/me` | `{code}` ya da `{handle}` → hesap 14 gün sonra silinir; o zamana kadar giriş yapmak onu korur | yapıldı |
 | GET | `/users/{handle}` | soranın görebileceği haliyle bir profil | yapıldı |
 | GET | `/users/{handle}/friends` | gizliliği izin veriyorsa arkadaşları | yapıldı |
 | GET | `/users/search?q=` | kullanıcı adına ya da ada göre kişi bul (`search` ayarı izin verenler) | yapıldı |
-| PATCH | `/me/notifications` | hangi anlık bildirimler ve e-posta bildirimleri | planlandı |
 
 ## 4.3 Oyunlar, oturumlar ve kupalar
 
 | Metot | Yol | Ne yapar | Durum |
 |---|---|---|---|
 | POST | `/me/devices` | bir bilgisayarı kaydet: `{id, platform, name, model?}` (launcher'ın kendi rastgele ID'si) | yapıldı |
-| PUT | `/games/{titleId}` | kataloğa bir oyun öğret: dil başına adlar, ikon (bir moderatör kilitlediyse reddedilir) | yapıldı |
+| PUT | `/games/{titleId}` | kataloğa bir oyun öğret: dil başına adlar, ikon (bir moderatör kilitlediyse reddedilir; ikon URL'si yalnızca operatörün listelediği bir hosttan) | yapıldı |
 | GET | `/games/{titleId}` | katalog kaydı, kaç oyuncusu olduğu, kupa setleri | yapıldı |
 | POST | `/me/sessions` | oturum grubu `{id, titleId, deviceId, startedAt, endedAt, exit?}` | yapıldı |
 | GET | `/users/{handle}/library` | oyunlar, oynama süresi, son oynama, ilerleme | yapıldı |
 | PUT | `/trophy-sets/{titleId}/{setHash}` | kupa seti: ID'ler, dereceler, gizli işaretleri, dil başına adlar ve açıklamalar | yapıldı |
 | POST | `/me/trophies` | grup `{titleId, setHash, trophyId, earnedAt}`; tekrarlar yok sayılır; arkadaşlar `trophy.earned` alır | yapıldı |
 | GET | `/users/{handle}/trophies?titleId=` | tarihleri ve nadirlikleriyle kazanılmış kupalar | yapıldı |
-| POST | `/games/{titleId}/reports` | uyumluluk raporu (isteğe bağlı), bkz. Özellikler 3.7 | planlandı |
 
 **Gruplama ve idempotency.** Launcher en fazla 200 öğelik gruplar gönderir. Oturumlar istemcinin
 ürettiği bir UUID taşır, kupalar da hesap, oyun ve kupaya göre anahtarlanır; böylece bir grup zaman
 aşımından sonra çift sayılmadan yeniden gönderilebilir. Yanıt her öğe için `stored`, `duplicate` ya da
 bir kodla (`unknown_device`, `unknown_trophy` gibi) `rejected` listeler.
 
-## 4.4 Arkadaşlar, çevrimiçi durumu, aktivite
+## 4.4 Arkadaşlar, çevrimiçi durumu, aktivite, liderlik tabloları
 
 | Metot | Yol | Ne yapar | Durum |
 |---|---|---|---|
@@ -138,13 +138,18 @@ bir kodla (`unknown_device`, `unknown_trophy` gibi) `rejected` listeler.
 | POST | `/me/friends/requests/{userId}/accept` / `decline` | | yapıldı |
 | DELETE | `/me/friends/{userId}` | arkadaşlıktan çıkar | yapıldı |
 | POST | `/me/blocks` / DELETE `/me/blocks/{userId}` | engelle, engeli kaldır | yapıldı |
+| GET | `/me/feed?before=&limit=` | arkadaşların aktivitesi, en yeniden eskiye, sayfa başına 30 (en fazla 50) | yapıldı |
+| GET | `/users/{handle}/activity?before=` | bir kişinin aktivitesi, soranın görebileceği haliyle | yapıldı |
+| PUT / DELETE | `/activities/{id}/reaction` | `{reaction: "fire" \| "clap" \| "wow" \| "heart"}`, öğe başına kişi başına bir tane | yapıldı |
+| GET | `/leaderboards/points?scope=friends\|global` | toplam kupa puanı: en fazla 100 kayıt, senin sıran ve değerin, çevrendeki kişiler, toplam | yapıldı |
+| GET | `/games/{titleId}/leaderboard?by=points\|time\|completion&scope=` | tek bir oyunun tablosu | yapıldı |
+| GET | `/leaderboards/games` | tablosu seçilebilecek oyunlar: önce seninkiler, sonra en çok oynananlar | yapıldı |
 | POST | `/me/friends/requests` | kısa ömürlü bir token için `GET /me/qr` ile birlikte `{qrToken}` | planlandı |
-| GET | `/me/feed?before=` | arkadaşların aktivitesi, en yeniden eskiye, sayfa başına 30 | planlandı |
-| POST / DELETE | `/activities/{id}/like`, POST `/activities/{id}/comments` | | planlandı |
+| GET | `/leaderboards/...?period=month\|week` | bu ayın ve bu haftanın tabloları | planlandı |
 
-Çevrimiçi durumu REST üzerinden ayarlanmaz; gerçek zamanlı soket üzerinden taşınır (4.7).
+Çevrimiçi durumu REST üzerinden ayarlanmaz; gerçek zamanlı soket üzerinden taşınır (4.8).
 
-## 4.5 Mesajlar ve şikâyetler
+## 4.5 Mesajlar, bildirimler ve şikâyetler
 
 Konuşmalar arkadaşlar arasındadır.
 
@@ -156,42 +161,81 @@ Konuşmalar arkadaşlar arasındadır.
 | GET / PATCH | `/conversations/{id}` | bir konuşma; grubu yeniden adlandır | yapıldı |
 | POST | `/conversations/{id}/members` / DELETE `/conversations/{id}/members/{userId}` | gruba ekle; birini çıkar ya da ayrıl | yapıldı |
 | GET | `/conversations/{id}/messages?after=&before=&limit=` | mesaj sırasına göre geçmiş (sayfa başına en fazla 100) | yapıldı |
-| POST | `/conversations/{id}/messages` | `{clientId, text, replyTo?}`; metin en fazla 4000 karakter | yapıldı |
+| POST | `/conversations/{id}/messages` | `{clientId, text, replyTo?}`; metin en fazla 4000 karakter, engel listesindeki bir alan adına bağlantı yok (`link_blocked`) | yapıldı |
 | PATCH / DELETE | `/conversations/{id}/messages/{seq}` | mesajını düzenle (15 dk) ya da sil | yapıldı |
 | POST | `/conversations/{id}/read` | `{upToSeq}` | yapıldı |
-| POST | `/reports` | `{targetKind: "user" \| "message", targetId, reason, note?}`; şikâyet edilen mesajın metni moderatörler için saklanır | yapıldı |
+| GET | `/me/notifications?before=` | bildirimler, en yeniden eskiye, sayfa başına 30 | yapıldı |
+| GET | `/me/notifications/unread` | zil için okunmamış sayısı | yapıldı |
+| POST | `/me/notifications/read-all`, `/me/notifications/{id}/read` | okundu olarak işaretle; kişinin diğer cihazları da bunu duyar | yapıldı |
+| GET / PATCH | `/me/notifications/settings` | her türü aç ya da kapat, e-posta özeti (`digest`); yanıt ayrıca bu sunucunun anlık bildirim gönderip göndermediğini VAPID anahtarıyla birlikte söyler | yapıldı |
+| POST / DELETE | `/me/push` | bu tarayıcının anlık bildirim aboneliği (`PushSubscription.toJSON()` ve bir dil), tarayıcının girişine bağlı | yapıldı |
+| POST | `/reports` | `{targetKind: "user" \| "message" \| "theme" \| "lfg", targetId, reason, note?}`; şikâyet edilen şey (bir mesajın metni, bir ilanın notu, bir temanın adı ve sürümü) moderatörler için saklanır | yapıldı |
 | POST | `/conversations/{id}/attachments` | → bir görsel için yükleme URL'si | planlandı |
 
 ## 4.6 Partiler, çağrılar, oyun oturumları, share play
 
-Ses eşten eşedir (bkz. [Anlık iletişim](06-anlik-ses-birlikte-oynama.md)); API yalnızca çağrıları kurar
-ve relay kimlik bilgilerini dağıtır. Oyun oturumları, arkadaşın oyununa katılmanın ve çevrimiçi
-oyunun sunucu tarafıdır.
+Ses ve share play (birlikte oynama) eşten eşedir (bkz. [Anlık iletişim](06-anlik-ses-birlikte-oynama.md));
+API yalnızca onları kurar ve relay kimlik bilgilerini dağıtır. Oyun oturumları, arkadaşın oyununa
+katılmanın ve çevrimiçi oyunun sunucu tarafıdır.
 
 | Metot | Yol | Ne yapar | Durum |
 |---|---|---|---|
-| POST | `/parties` | `{privacy: "invite" \| "friends"}` → parti; soran lider olur (ve varsa başka partiden ayrılır) | yapıldı |
+| POST | `/parties` | `{privacy: "invite" \| "friends", public?}` → parti; soran lider olur (ve varsa başka partiden ayrılır) | yapıldı |
 | GET | `/me/party` | içinde olduğum parti ve beni bekleyen davetler | yapıldı |
-| GET / PATCH | `/parties/{id}` | üyeler, ne oynadıkları, çağrı; gizliliği değiştir (lider) | yapıldı |
+| GET / PATCH | `/parties/{id}` | üyeler, ne oynadıkları, çağrı; gizliliği ya da herkese açık listelemeyi `{join: "request" \| "open", titleId?, language?}` veya `null` olarak değiştir (lider) | yapıldı |
 | POST | `/parties/{id}/invites` | `{userIds}` (arkadaşlar) | yapıldı |
 | POST | `/parties/{id}/join` / `decline` / `leave` | en fazla 8 üye | yapıldı |
 | POST | `/parties/{id}/kick` / `leader` | `{userId}`: lider birini çıkarır ya da liderliği devreder | yapıldı |
+| GET | `/parties/public?titleId=&language=` | soranın görebileceği, herkese açık listelenen partiler | yapıldı |
+| POST | `/parties/{id}/requests`, DELETE `/parties/{id}/requests/me` | "istekle" listelenen bir partiye katılmak iste ya da isteği geri al | yapıldı |
+| POST | `/parties/{id}/requests/{userId}/accept` / `decline` | lider yanıt verir; evet bir davettir | yapıldı |
 | POST | `/calls` | `{partyId}` (partinin sesi) ya da `{userId}` (bir arkadaş) → çağrı, ICE sunucuları (STUN, 12 saat geçerli kimlik bilgileriyle TURN) | yapıldı |
-| GET | `/calls/{id}` | içinde kim var, hangi cihazda | yapıldı |
+| GET | `/calls/{id}` | içinde kim var, hangi cihazda, kim sessizde | yapıldı |
 | POST | `/calls/{id}/answer` / `decline` / `leave` | sana gelen bir çağrı, bu cihazda yanıtlandı; parti çağrısı son ses ayrılınca biter | yapıldı |
+| POST | `/calls/{id}/mute` | `{muted}`: diğerleri bunu görür | yapıldı |
 | GET | `/ice-servers` | süren bir çağrı için taze TURN kimlik bilgileri | yapıldı |
 | POST | `/game-sessions` | `{titleId, gameVersion, engineBuild, capacity (2-16), joinable, properties (≤ 4 KB)}` → soranın yayıncı olduğu oturum | yapıldı |
 | GET | `/me/game-session` | içinde oynadığım oturum ve beni bekleyen davetler | yapıldı |
 | GET / PATCH / DELETE | `/game-sessions/{id}` | gör (oyuncular, davet edilenler ve katılınabilirken yayıncının arkadaşları); kapasiteyi, katılınabilirliği, özellikleri değiştir; bitir (yayıncı) | yapıldı |
+| PUT | `/game-sessions/{id}/members/me` | `{properties}` (≤ 2 KB): bu oyuncunun kendi özellikleri, oynadığı cihazla birlikte | yapıldı |
+| GET | `/game-sessions/{id}/ice-servers` | oturumun oyuncuları için relay kimlik bilgileri | yapıldı |
 | POST | `/game-sessions/{id}/invites` | `{userIds}` (arkadaşlar) | yapıldı |
 | POST | `/game-sessions/{id}/join` | `{gameVersion, engineBuild}`; başka bir sürüm ya da derleme `version_mismatch`, dolu bir oturum `full` ile reddedilir | yapıldı |
 | POST | `/game-sessions/{id}/decline` / `leave` | yayıncının ayrılması oturumu bitirir | yapıldı |
-| POST / DELETE | `/calls/{id}/share-play` | yayıncı paylaşmayı başlatır ya da durdurur; üyelere bildirilir. Yalnızca izleme: hiçbir endpoint kontrolü bir izleyiciye vermez | planlandı |
+| POST | `/share-plays` | `{titleId, title?, open (friends walk in, default true), maxViewers (1-4, default 2), public?}` (`open`: arkadaşlar davetsiz girebilir) → bu cihazın yayıncı olduğu share play ve ICE sunucuları; yayıncının önceki share play'i biter | yapıldı |
+| GET | `/me/share-play` | yayıncısı olduğum share play, izlediğim share play ve beni bekleyen davetler | yapıldı |
+| GET / PATCH / DELETE | `/share-plays/{id}` | gör (kumandalarıyla izleyiciler; yayıncı için davet edilenler ve istekler de); oyunu, `open`, `maxViewers` ve herkese açık listelemeyi değiştir; durdur (yayıncı) | yapıldı |
+| POST | `/share-plays/{id}/invites` / `decline` | yayıncı arkadaşlarını davet eder; davet edilen reddeder | yapıldı |
+| POST | `/share-plays/{id}/join` | bu cihazda izle → share play ve ICE sunucuları; yeniden katılmak koltuğu buraya taşır ve kumandayı korur; dolu bir share play `full` ile reddedilir | yapıldı |
+| POST | `/share-plays/{id}/leave` | izlemeyi bırak | yapıldı |
+| PUT | `/share-plays/{id}/viewers/{userId}/slot` | `{slot: 2 \| 3 \| 4 \| null}`: yayıncı bir izleyiciye kumanda verir ya da geri alır; izleyici başına bir kumanda, kumanda başına bir izleyici. 1. oyuncu asla verilmez: o yayıncınındır | yapıldı |
+| DELETE | `/share-plays/{id}/viewers/{userId}` | yayıncı bir izleyiciyi çıkarır; ancak yeniden davet edilirse geri gelebilir | yapıldı |
+| GET | `/share-plays/{id}/ice-servers` | yayıncı ya da bir izleyici için taze relay kimlik bilgileri | yapıldı |
+| GET | `/share-plays/public?titleId=&language=&live=1` | herkese açık listelenen share play'ler; `live=1` yalnızca "Şu an canlı" altındakileri bırakır | yapıldı |
+| POST | `/share-plays/{id}/requests`, DELETE `/share-plays/{id}/requests/me` | "istekle" listelenen bir share play'e katılmak iste ya da isteği geri al | yapıldı |
+| POST | `/share-plays/{id}/requests/{userId}/accept` / `decline` | yayıncı yanıt verir; evet bir davettir | yapıldı |
 | POST | `/calls/{id}/quality` | istemcinin sondaki raporu: doğrudan mı relay'li mi, gidiş-dönüş, kayıp, ekrandan ekrana örnekler | planlandı |
 
-Offer'lar, answer'lar ve ICE adaylarının kendileri gateway üzerinden taşınır (`signal`, 4.7).
+Offer'lar, answer'lar ve ICE adaylarının kendileri gateway üzerinden taşınır (`signal`, 4.8).
 
-## 4.7 Gerçek zamanlı gateway
+## 4.7 Oyuncu bulma
+
+Bunların herhangi birinde kimin görüneceği engellere (iki yönde de) ve her kişinin gizlilik ayarlarına uyar.
+
+| Metot | Yol | Ne yapar | Durum |
+|---|---|---|---|
+| GET | `/lfg?titleId=&purpose=&language=&now=1&before=` | oyuncu arama panosu, en yeniden eskiye; `now=1` yarım saat içinde başlayacakları bırakır | yapıldı |
+| GET | `/lfg/games` | açık ilanı olan oyunlar | yapıldı |
+| GET | `/me/lfg` | ilanlarım ve kimlerin katılmak istediği; katılmak istediğim ilanlar | yapıldı |
+| POST | `/lfg` | `{titleId, purpose: "coop" \| "online" \| "party" \| "trophies", startsAt?, languages (1-3), region?, slots, note? (140), expiresAt?}`; co-op'ta 3 oyunculuk, diğerlerinde 7 oyunculuk daha yer var; en fazla 3 açık ilan | yapıldı |
+| GET / DELETE | `/lfg/{id}` | bir ilan; kapat (ilan sahibi) | yapıldı |
+| POST | `/lfg/{id}/requests`, DELETE `/lfg/{id}/requests/me` | "Ben varım" ya da geri al | yapıldı |
+| POST | `/lfg/{id}/requests/{userId}/accept` / `decline` | ilan sahibi yanıt verir; evet, oyuncuyu ilan sahibinin share play'ine (co-op) ya da partisine davet eder ve bir yeri doldurur | yapıldı |
+| GET | `/discover/players?titleId=` | bir oyunu oynayan ve kütüphanesini gösteren kişiler | yapıldı |
+| GET | `/discover/suggestions` | tanıyor olabileceğin kişiler: ortak arkadaşlar, ikinizin de oynadığı oyunlar, ortak bir dil | yapıldı |
+| GET | `/games/{titleId}/hub` | bir oyunun sayfası: şu an kimin oynadığı, açık ilanlar, herkese açık partiler ve share play'ler, oyunu gösteren oyuncular | yapıldı |
+
+## 4.8 Gerçek zamanlı gateway
 
 `wss://anytogether.kodla.agency/rt`. Yapıldı. İstemci kim olduğunu ilk çerçevede söyler (URL'de
 değil; böylece asla loglara düşmez): launcher'lar ve telefon erişim token'larıyla, web sitesinin
@@ -199,7 +243,7 @@ tarayıcısı ise hiç token tutmadığı için sitenin sunucusunun istediği te
 (`POST /realtime/ticket`, 30 sn geçerli):
 
 ```json
-{ "op": "hello", "token": "<access token>", "client": "launcher-windows/0.3.0", "resume": "<last event id>" }
+{ "op": "hello", "token": "<access token>", "client": "launcher-windows/0.1.1", "resume": "<last event id>" }
 ```
 
 Sunucu `{"op":"ready","session":"…","heartbeat":25}` ile yanıt verir ve ardından olayları gönderir:
@@ -213,64 +257,96 @@ Sunucu `{"op":"ready","session":"…","heartbeat":25}` ile yanıt verir ve ardı
 kaçırmak soketi kapatır ve çevrimiçi durumunun süresi dolar. Yeniden bağlanırken son olay ID'siyle
 `resume`, son 5 dakikada kaçırılanları yeniden oynatır (kullanıcı başına bir Valkey stream'inde
 tutulur); daha eski boşluklar REST çağrılarıyla doldurulur. Kapanış kodları: 4001 merhaba yok ya da
-hatalı, 4003 oturum kapatıldı, 4008 heartbeat yok, 4029 çok fazla çerçeve.
+hatalı, 4003 oturum kapatıldı, 4008 heartbeat yok, 4029 çok fazla çerçeve ya da sinyal. Bir kullanıcı
+tek bir gateway sürecinde 20 soket tutabilir.
+
+İstemcinin heartbeat'ler dışında gönderdikleri:
+
+| Çerçeve | Ne yapar |
+|---|---|
+| `{"op":"signal","to":…,"device":…,"call" \| "session" \| "share":…,"kind":…,"data":…}` | aynı çağrının bir üyesine, aynı oyun oturumunun bir oyuncusuna ya da bir share play'in yayıncısıyla bir izleyicisi arasında (asla izleyiciden izleyiciye değil) WebRTC sinyalleşmesi; aktarılır, asla saklanmaz |
+| `{"op":"typing","conversation":…}` | konuşmanın diğer üyelerine "yazıyorum", en fazla iki saniyede bir |
+| `{"op":"watch","topics":["lfg","discover:PPSA01234",…]}` | bu soketin izlediği herkese açık konular (en fazla 8): pano, herkese açık listeler, tümü ya da tek bir oyununki |
 
 | Olay | Ne zaman | Durum |
 |---|---|---|
-| `presence.updated` | bir arkadaşın durumu ya da oyunu değişti; partisi ve katılınabilir oyun oturumu da | yapıldı |
+| `presence.updated` | bir arkadaşın durumu ya da oyunu değişti; partisi, katılınabilir oyun oturumu ve share play'i de | yapıldı |
 | `friend.request`, `friend.accepted`, `friend.removed` | | yapıldı |
 | `trophy.earned` | bir arkadaş kupa kazandı (gizli bir kupa adı olmadan) | yapıldı |
-| `message.created`, `message.updated`, `message.deleted`, `conversation.read`, `conversation.updated` | | yapıldı |
+| `feed.item` | bir arkadaşın aktivite öğesi; yeni ya da içine yeni kupalar katılmış | yapıldı |
+| `message.created`, `message.updated`, `message.deleted`, `conversation.read`, `conversation.updated`, `typing` | | yapıldı |
+| `notification`, `notification.read` | yeni okunmamış sayısıyla yeni bir bildirim; bir cihazda okundu | yapıldı |
 | `party.invite`, `party.updated`, `party.member_joined`, `party.member_left`, `party.ended` | | yapıldı |
-| `call.ringing`, `call.answered`, `call.joined`, `call.left`, `call.ended` | sana gelen bir çağrı; başka bir cihazda yanıtlandı; biri partinin sesine girdi ya da çıktı; bitti | yapıldı |
-| `signal` | bir çağrı eşinden WebRTC offer, answer, ICE adayı, bye ya da renegotiate (aktarılır, asla saklanmaz) | yapıldı |
-| `game_session.invite`, `game_session.updated`, `game_session.ended` | | yapıldı |
+| `party.request`, `party.request_cancelled`, `party.request_answered` | herkese açık bir partiye katılma isteği | yapıldı |
+| `call.ringing`, `call.answered`, `call.joined`, `call.left`, `call.updated`, `call.ended` | sana gelen bir çağrı; başka bir cihazda yanıtlandı; biri partinin sesine girdi ya da çıktı; sessize alındı; bitti | yapıldı |
+| `signal` | bir çağrı eşinden WebRTC offer, answer, ICE adayı, bye ya da renegotiate | yapıldı |
+| `game_session.invite`, `game_session.updated`, `game_session.ended`, `game_session.signal` | | yapıldı |
+| `share_play.invite`, `share_play.updated`, `share_play.ended`, `share_play.signal` | davet edildin; biri geldi ya da gitti, bir kumanda verildi ya da geri alındı; durduruldu ya da çıkarıldın; yayıncıyla sinyalleşme | yapıldı |
+| `share_play.request`, `share_play.request_cancelled`, `share_play.request_answered` | herkese açık bir share play'e katılma isteği | yapıldı |
+| `lfg.request`, `lfg.request_cancelled`, `lfg.answered` | biri ilanına katılmak istiyor; ilan sahibi yanıt verdi | yapıldı |
+| `lfg.changed`, `discover.changed` | izlenen bir konuda: bir ilan ya da herkese açık bir parti veya share play geldi, değişti ya da gitti (listeyi yeniden oku) | yapıldı |
 | `account.signed_out` | bu oturum başka bir yerden iptal edildi | yapıldı |
-| `typing` | | planlandı |
-| `share_play.started`, `share_play.stopped` | | planlandı |
-| `activity.created` | akış için bir arkadaşın aktivitesi | planlandı |
 | `trophy.rarity_changed` | sahip olduğun bir kupa bir nadirlik etiketini geçti | planlandı |
 
 `auth.handoff` ortak tiplerde var; devrin kendisi telefonun yerel bağlantısından geçtiği için (4.1)
 gateway bugün onu göndermiyor.
 
-## 4.8 Temalar, indirmeler, liderlik tabloları
+## 4.9 Temalar, uyumluluk, indirmeler, yönetim
 
-Hepsi planlandı.
+| Metot | Yol | Ne yapar | Durum |
+|---|---|---|---|
+| GET | `/themes?sort=new\|popular\|liked&q=&author=&cursor=&limit=` | Hub: yayınlanmış temalar, sayfa başına 24 (en fazla 60) | yapıldı |
+| GET | `/hub/themes.json` | eski launcher'ların okuduğu dizin (GitHub klasörünün biçimi): Hub adreslerini `/api/v1/hub/` olarak ayarla | yapıldı |
+| GET | `/themes/{id}`, `/me/themes` | bir tema (sürümler, yapan, beğeniler, senin beğenin); durumları ne olursa olsun kendi temaların | yapıldı |
+| GET | `/themes/{id}/preview.webp`, `/thumb.webp` | görselleri (`?v=<version>` ile kalıcı olarak önbelleğe alınır) | yapıldı |
+| GET | `/themes/{id}/download` | `X-Theme-Version` ve `X-Theme-SHA256` ile `.anyps5theme` dosyası | yapıldı |
+| POST | `/themes` | multipart: tema dosyası (50 MB'a kadar) ve dosyada yoksa bir önizleme görseli (8 MB'a kadar); hemen yayınlanır | yapıldı |
+| POST | `/themes/{id}/versions` | temanın bir sonraki sürümü, aynı şekilde | yapıldı |
+| PATCH / DELETE | `/themes/{id}` | yeniden adlandır ya da açıklama yaz; sil (yapan) | yapıldı |
+| PUT / DELETE | `/themes/{id}/like` | | yapıldı |
+| GET | `/compat?q=&platform=&status=&cursor=` | uyumluluk listesi: platform başına kararlarıyla oyunlar (herkes) | yapıldı |
+| GET | `/compat/{titleId}` | tek bir oyun: kararlar ve raporlar | yapıldı |
+| POST | `/compat/reports` | `{titleId, name?, platform, status: "nothing" \| "boots" \| "menus" \| "ingame" \| "playable", launcherVersion, engineVersion?, machine?, os?, fpsAvg?, gameVersion?, note?}` | yapıldı |
+| DELETE | `/compat/reports/{id}` | raporunu sil | yapıldı |
+| GET | `/releases` | AnyPS5-ARM'ın (macOS, telefon) ve AnyPS5-Desktop'ın son sürümü | yapıldı |
+| GET | `/releases/latest?product=launcher\|phone\|phone-ios\|desktop` | sürüm, etiket, notlar, sayfa, ana dosyanın URL'si, boyutu ve SHA-256'sı | yapıldı |
+| GET | `/admin/reports?status=open\|actioned\|dismissed\|all&before=` | şikâyet kuyruğu; neyin şikâyet edildiği ve ne sıklıkla (yalnızca yöneticiler) | yapıldı |
+| POST | `/admin/reports/{id}` | `{action: "dismiss" \| "warn" \| "ban" \| "remove_message" \| "reset_avatar" \| "reset_bio" \| "remove_post", days?, reason?}`; bir işlem aynı şey hakkındaki tüm açık şikâyetleri kapatır | yapıldı |
+| POST | `/admin/lfg/{id}/remove` | bir ilanı şikâyet olmadan panodan kaldır | yapıldı |
+| GET | `/admin/users?q=` | kullanıcı adı, e-posta (hash'i, hesabı olmayan bir adrese konmuş yasakları da bulur) ya da ID ile bir hesap: oturumlar, yasaklar, şikâyetler | yapıldı |
+| POST | `/admin/users/{id}/ban`, GET `/admin/bans`, POST `/admin/bans/{id}/lift` | yasaklar | yapıldı |
+| GET | `/admin/audit` | denetim kaydı | yapıldı |
 
-| Metot | Yol | Ne yapar |
-|---|---|---|
-| GET | `/themes?sort=new\|popular\|liked&q=&cursor=` | Hub |
-| GET | `/themes/{id}` | ayrıntılar, sürümler, yapan |
-| POST | `/themes` | bir yükleme başlat → yükleme URL'si; ardından `POST /themes/{id}/publish` |
-| POST | `/themes/{id}/versions` | temanın yeni bir sürümü |
-| POST / DELETE | `/themes/{id}/like` | |
-| GET | `/releases/latest?product=launcher\|phone` | sürüm, notlar, URL, SHA-256 |
-| GET | `/leaderboards/{board}?scope=global\|friends&period=all\|month\|week` | seninki dahil sıralamalar |
-| GET | `/games/{titleId}/leaderboard` | oyun başına |
+Yönetim yolları hesabın rolünü her istekte kontrol eder. Yönetici rolünü vermek ve geri almak, bir
+temayı göstermek, gizlemek ya da incelemeye almak API'nin yanındaki komut satırı aracıyla yapılır
+(`admin grant`, `admin revoke`, `admin theme <id> show|hide|review`).
 
-## 4.9 Sınırlar
+## 4.10 Sınırlar
 
 Adres başına ve hesap başına, Valkey'de sayılır (yapıldı):
 
 | Ne | Sınır |
 |---|---|
-| Her istek | adres başına dakikada 600, hesap başına dakikada 300 |
-| Giriş | adres başına 15 dakikada 30 deneme (istenen ve denenen kodlar, sağlayıcılar, passkey'ler, devirler); e-posta kodları: adres başına saatte 5, 10 yanlış deneme kodu bitirir |
+| Her istek | adres başına dakikada 600, hesap başına dakikada 300; bir gövde en fazla 8 MB (tema yüklemesi 50 MB) |
+| Giriş | adres başına 15 dakikada 30 deneme (istenen ve denenen kodlar, sağlayıcılar, passkey'ler, devirler); e-posta kodları: adres başına saatte 5, kod başına 10 deneme (atomik olarak sayılır), adres başına günde 30 yanlış kod |
 | Token çağrıları | adres başına 10 dakikada 300 (yenilemeler, cihaz kodu yoklamaları; 4 sn'den sık bir yoklama `slow_down` alır) |
 | Mesajlar | dakikada 30, günde 1000 |
 | Arkadaşlık istekleri | günde 50 |
-| Aramalar | dakikada 120 |
+| Aramalar | dakikada 120; keşif listeleri dakikada 60 |
 | Şikâyetler | günde 20 |
 | Profil değişiklikleri | saatte 30; avatarlar saatte 10, her biri 5 MB |
-| Başlatılan çağrılar | saatte 60; açılan oyun oturumları: saatte 120 |
+| Başlatılan çağrılar | saatte 60; açılan oyun oturumları: saatte 120; başlatılan share play'ler: saatte 60 |
+| Tepkiler | saatte 300 |
+| Temalar | günde 20 paylaşma ya da güncelleme; beğeniler saatte 300 |
+| Uyumluluk raporları | günde 60 |
+| Oyuncu arama | günde 10 ilan (yeni bir hesap için 2); yabancıların ilanlarına, partilerine ve share play'lerine katılma isteği saatte 60 (yeni bir hesap için 10) |
 | Eklenen passkey'ler | saatte 20 |
 | Gruplar | 200 öğe |
 
-Bir sınırı aşmak `Retry-After` ile `429` döndürür. Gateway'de: 10 saniyede 30 çerçeve, bir çağrının
-kurulumu için 10 saniyede 300 sinyal.
+Yeni hesap, bir günden yeni olan ya da az kupası olan hesaptır. Bir sınırı aşmak `Retry-After` ile
+`429` döndürür. Gateway'de: 10 saniyede 30 çerçeve, bir çağrının kurulumu için 10 saniyede 300 sinyal.
 
-## 4.10 Sürümleme
+## 4.11 Sürümleme
 
 `/v1` uyumlu kalır: alanlar yalnızca eklenir. Geriye dönük uyumsuz bir değişiklik `/v2`'ye gider ve `/v1`,
 `/v2`'ye geçen launcher sürümünden sonra en az altı ay çalışmaya devam eder.

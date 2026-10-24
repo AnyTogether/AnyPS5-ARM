@@ -3,7 +3,7 @@
 PostgreSQL 17. ID'ler UUIDv7'dir (zamana göre sıralı olduğu için indeksler kompakt kalır ve ID'ler oluşturulma sırasına göre dizilir).
 Zamanlar `timestamptz` türündedir. Her tabloda `created_at` bulunur.
 
-Aşağıdaki tablolar **yapılmış** olanlardır; 2026-10-24'te
+Aşağıdaki tablolar **yapılmış** olanlardır; 2026-10-25'te
 [`packages/db/src/schema.ts`](https://github.com/utkuhalis/AnyTogether/blob/main/packages/db/src/schema.ts)
 içindeki Drizzle şemasının tanımladığı gibi, burada SQL olarak ve kısaltılarak yazıldı (`created_at` ve
 indekslerin çoğu atlandı). **Planlanan** tablolar onlardan sonra gelir.
@@ -83,7 +83,10 @@ create table profiles (
   country      text,
   avatar_url   text,                          -- /api/v1/avatars/<hash>.jpg ya da sağlayıcının resmi
   privacy      jsonb not null default '{}',   -- library, trophies, friends, presence, search: everyone | friends | nobody
-  stats        jsonb not null default '{}'    -- planlandı: oyunlar, saatler, kupalar, platinler
+  notification_settings jsonb not null default '{}', -- her tür açık ya da kapalı, e-posta özeti; yalnızca değiştirilenler
+  stats        jsonb not null default '{}',   -- planlandı: oyunlar, saatler, kupalar, platinler
+  discoverable boolean,                       -- keşifte gösterilir; null kütüphane ayarını izler
+  languages    jsonb not null default '[]'    -- kişinin oynadığı diller (ISO 639-1), en fazla beş
 );
 
 create table handle_history (                -- bırakılmış bir kullanıcı adı, son sahibi için 30 gün tutulur
@@ -199,11 +202,11 @@ create table blocks (
 create table reports (
   id          uuid primary key,
   reporter_id uuid references accounts on delete set null,
-  target_kind text not null,                 -- user | message (ileride activity, theme, game_name)
+  target_kind text not null,                 -- user | message | theme | lfg
   target_id   text not null,
   reason      text not null,                 -- spam | harassment | hate | sexual | impersonation | cheating | piracy | other
   note        text check (length(note) <= 500),
-  snapshot    jsonb,                         -- şikâyet edilen mesajın o anki hali; yazarı silse de tutulur
+  snapshot    jsonb,                         -- şikâyet edilen şeyin o anki hali: bir mesajın metni, bir ilanın notu, bir temanın adı ve sürümü
   status      text not null default 'open',  -- open | actioned | dismissed
   handled_by  text,
   handled_at  timestamptz
@@ -264,10 +267,14 @@ create table messages (
 
 ```sql
 create table parties (                       -- en fazla sekiz kişi
-  id        uuid primary key,
-  leader_id uuid references accounts on delete set null,
-  privacy   text not null default 'invite' check (privacy in ('invite', 'friends')),
-  ended_at  timestamptz
+  id          uuid primary key,
+  leader_id   uuid references accounts on delete set null,
+  privacy     text not null default 'invite' check (privacy in ('invite', 'friends')),
+  public_join text check (public_join in ('request', 'open')), -- herkese açık listelenir; listelenmiyorsa null
+  title_id    text references games,          -- listelendiği oyun ve dil
+  language    text,
+  listed_at   timestamptz,
+  ended_at    timestamptz
 );
 create table party_members (                 -- biri aynı anda tek bir partide olabilir
   party_id   uuid not null references parties on delete cascade,
@@ -279,6 +286,11 @@ create table party_invites (
   party_id   uuid not null references parties on delete cascade,
   account_id uuid not null references accounts on delete cascade,
   invited_by uuid references accounts on delete set null,
+  primary key (party_id, account_id)
+);
+create table party_requests (                -- herkese açık listelenen bir partiye katılma isteği; lider bir davetle yanıt verir
+  party_id   uuid not null references parties on delete cascade,
+  account_id uuid not null references accounts on delete cascade,
   primary key (party_id, account_id)
 );
 
@@ -318,62 +330,169 @@ create table game_session_invites (
 );
 ```
 
-Bir çağrıda kimin sinyal gönderebileceği ve şu an kimin içinde olduğu `calls` tablosunda değil, Valkey'de tutulur.
+Bir çağrıda kimin sinyal gönderebileceği, şu an kimin içinde olduğu ve kimin sessizde olduğu `calls`
+tablosunda değil, Valkey'de tutulur; her oyun oturumu oyuncusunun kendi özellikleri de öyle. **Share
+play'lerin tablosu yoktur**: oyun sürdüğü kadar sürerler; bu yüzden share play, kumandalarıyla
+izleyicileri, davetleri ve istekleri yalnızca Valkey'de yaşar (aşağıda).
+
+## Aktivite, bildirimler
+
+```sql
+create table activities (                    -- akış; bir öğeyi kimin okuyabileceği okunurken hesaplanır
+  id         uuid primary key,               -- UUIDv7: akış buna göre sayfalanır
+  actor_id   uuid not null references accounts on delete cascade,
+  kind       text not null,                  -- trophy | platinum | first_play | long_session | friendship | milestone
+  section    text not null,                  -- library | trophies | friends: kimin göreceğine karar veren gizlilik ayarı
+  title_id   text references games,
+  subject_id uuid references accounts on delete cascade, -- bir arkadaşlık öğesindeki yeni arkadaş
+  payload    jsonb not null default '{}',    -- kupalar: {setHash, trophies [{id, grade}], count}; oturumlar: {seconds}; milestone: {kind, value}
+  updated_at timestamptz not null            -- içine kupalar katıldığında created_at'ten sonradır
+);
+create index activities_actor on activities (actor_id, id desc);
+
+create table activity_reactions (            -- öğe başına kişi başına bir tane
+  activity_id uuid not null references activities on delete cascade,
+  account_id  uuid not null references accounts on delete cascade,
+  reaction    text not null check (reaction in ('fire', 'clap', 'wow', 'heart')),
+  primary key (activity_id, account_id)
+);
+
+create table notifications (
+  id         uuid primary key,               -- UUIDv7: liste buna göre sayfalanır
+  account_id uuid not null references accounts on delete cascade,
+  kind       text not null,                  -- friend_request | friend_accepted | message | party_invite | game_invite
+                                             -- | missed_call | lfg_request | lfg_accepted | warning
+  actor_id   uuid references accounts on delete cascade,
+  subject_id text not null,                  -- konuşma, parti, oyun oturumu, çağrı, ilan ya da kişi
+  data       jsonb not null default '{}',    -- örn. bir mesajın konuşması, başlığı ve sayısı
+  read_at    timestamptz,
+  mailed_at  timestamptz,                    -- bir özete kondu; her biri bir kez postalanır
+  updated_at timestamptz not null            -- içinde daha fazla mesaj toplandığında güncellenir
+);
+-- hesap, tür ve konu başına tek okunmamış bildirim: yeni mesajlar onun içinde toplanır
+
+create table push_subscriptions (            -- Web Push, tarayıcı başına bir tane, tarayıcının girişine bağlı
+  id         uuid primary key,
+  account_id uuid not null references accounts on delete cascade,
+  session_id uuid not null references sessions on delete cascade, -- çıkış yapmak onu bitirir
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  lang       text not null default 'en'      -- bildirimlerinin yazıldığı dil
+);
+```
+
+## Temalar ve dosyalar
+
+```sql
+create table blobs (                         -- R2'ye kadar PostgreSQL'de tutulan dosyalar: tema dosyaları ve görselleri
+  key   text not null,                       -- themes/<id>/v<version>/theme.anyps5theme, preview.webp, thumb.webp
+  part  int not null,                        -- en fazla 1 MiB'lık parçalar; böylece hiçbiri belleğe tümüyle okunmaz
+  bytes bytea not null,
+  primary key (key, part)
+);
+
+create table themes (                        -- Tema Hub'ı
+  id          uuid primary key,
+  maker_id    uuid references accounts on delete cascade,
+  source_id   text,                          -- theme.json'un ilk paylaşıldığındaki id'si: sonraki yükleme yeni bir sürümdür
+  name        text not null check (length(name) <= 60),
+  description text check (length(description) <= 500),
+  status      text not null default 'published', -- published | review (şikâyetlerden sonra) | hidden (bir moderatör)
+  version     int not null default 1,
+  style       int not null default 0,        -- launcher'ın hareket stili
+  colors      jsonb not null,                -- deep, middle, bright, accent
+  design      jsonb not null,                -- theme.json, insanların indirdiği dosyadaki haliyle
+  background  text check (background in ('picture', 'video')),
+  music       boolean not null default false,
+  size        int not null,
+  sha256      text not null,
+  downloads   int not null default 0,
+  likes       int not null default 0,
+  updated_at  timestamptz not null,
+  unique (maker_id, source_id)
+);
+
+create table theme_likes (
+  theme_id   uuid not null references themes on delete cascade,
+  account_id uuid not null references accounts on delete cascade,
+  primary key (theme_id, account_id)
+);
+```
+
+## Uyumluluk
+
+```sql
+create table compat_reports (                -- hesap silindiğinde gönderenin kim olduğu olmadan tutulur
+  id               uuid primary key,
+  account_id       uuid references accounts on delete set null,
+  title_id         text not null references games,
+  platform         text not null check (platform in ('macos', 'windows', 'linux')),
+  status           text not null check (status in ('nothing', 'boots', 'menus', 'ingame', 'playable')),
+  launcher_version text not null,            -- 0.2.15
+  engine_version   text,                     -- 0.2.15-arm
+  game_version     text,
+  machine          text,                     -- Mac modeli ya da CPU ve GPU
+  os               text,                     -- macOS 26.6
+  fps_avg          real,
+  note             text check (length(note) <= 500)
+);
+
+create table compat_summaries (              -- oyun ve platform başına karar, her raporla yeniden hesaplanır
+  title_id  text not null references games,
+  platform  text not null,
+  status    text not null,                   -- test edilen en yeni sürümdeki raporların çoğunun söylediği
+  version   text not null,                   -- herhangi birinin test ettiği en yeni launcher sürümü
+  tested_at timestamptz not null,
+  reports   int not null,
+  primary key (title_id, platform)
+);
+```
+
+## Oyuncu arama
+
+```sql
+create table lfg_posts (                     -- expires_at'te (bir gün içinde), dolunca ya da kapatılınca kendiliğinden kalkar
+  id         uuid primary key,               -- UUIDv7: pano buna göre sayfalanır
+  author_id  uuid not null references accounts on delete cascade,
+  title_id   text not null references games,
+  purpose    text not null check (purpose in ('coop', 'online', 'party', 'trophies')),
+  starts_at  timestamptz,                    -- null: şimdi
+  languages  jsonb not null,                 -- bir ile üç arası
+  region     text,                           -- eu | na | sa | asia | oceania | africa | me
+  slots      int not null,                   -- 1 ile 7 arası (share play üzerinden co-op: 1 ile 3 arası)
+  filled     int not null default 0,
+  note       text check (length(note) <= 140),
+  status     text not null default 'open',   -- open | full | closed | expired | removed
+  expires_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table lfg_requests (                  -- "Ben varım"
+  post_id     uuid not null references lfg_posts on delete cascade,
+  account_id  uuid not null references accounts on delete cascade,
+  status      text not null default 'pending', -- pending | accepted | declined
+  invite      jsonb,                         -- kabul edildiğinde {kind: party | share_play, id}
+  answered_at timestamptz,
+  primary key (post_id, account_id)
+);
+```
 
 ## Planlanan tablolar
 
 ```sql
-create table compatibility_reports (
-  id         uuid primary key,
-  account_id uuid references accounts on delete set null,
-  title_id   text references games,
-  verdict    text not null,                  -- nothing | menus | playable | perfect
-  engine     text not null,                  -- örn. 0.2.13-arm
-  platform   text not null,                  -- macos | windows | linux
-  machine    text, os text,                  -- Mac modeli ya da CPU/GPU; işletim sistemi ve sürümü
-  fps_avg    real,
-  exit       text,
-  note       text check (length(note) <= 500)
-);
-
-create table activities (
-  id         uuid primary key,
-  actor_id   uuid not null references accounts on delete cascade,
-  kind       text not null,                  -- trophy | platinum | new_game | long_session | completed | clip | theme | joined
-  payload    jsonb not null,
-  visibility text not null,                  -- everyone | friends
-  folded_into uuid references activities     -- bir saat içindeki birkaç kupa tek öğe olur
-);
-create index activities_actor on activities (actor_id, id desc);
-create table activity_likes (activity_id uuid references activities on delete cascade, account_id uuid, primary key (activity_id, account_id));
-create table activity_comments (id uuid primary key, activity_id uuid references activities on delete cascade, account_id uuid, text text not null);
-
-create table call_quality (                  -- bir çağrının sonunda katılımcı başına bir satır
-  call_id    uuid references calls on delete cascade,
+create table call_quality (                  -- bir çağrının ya da share play'in sonunda katılımcı başına bir satır
+  call_id    uuid,
   account_id uuid references accounts on delete set null,
   path       text not null,                  -- direct | relay-udp | relay-tls
   rtt_ms     real, loss real, glass_to_glass_ms real,
   share_play boolean not null default false
 );
-
-create table themes (
-  id        uuid primary key,
-  maker_id  uuid references accounts on delete set null,
-  name      text not null,
-  status    text not null default 'review',  -- review | published | removed
-  likes     int not null default 0,
-  installs  int not null default 0,
-  current_version int not null default 1
-);
-create table theme_versions (theme_id uuid references themes on delete cascade, version int, file_key text not null, preview_key text, design jsonb not null, primary key (theme_id, version));
-create table theme_likes (theme_id uuid references themes on delete cascade, account_id uuid, primary key (theme_id, account_id));
-
-create table releases (product text, version text, notes text, url text, sha256 text, published_at timestamptz, primary key (product, version));
+create table activity_comments (id uuid primary key, activity_id uuid references activities on delete cascade, account_id uuid, text text not null);
 ```
 
-Mevcut tablolarda da planlananlar: `profiles.theme_id` ve `showcase`, bir partinin çağrısında
-`share_play` durumu (kim yayınlıyor, ne zamandan beri; kontrolcü yuvası yok, share play yalnızca
-izlemedir), partiler için bağlantıyla gizlilik.
+Mevcut tablolarda da planlananlar: `profiles.theme_id` ve `showcase`, profilin `stats` alanı,
+kupa ikonları. Sürümlerin tabloya ihtiyacı yoktur: GitHub'dan okunur ve Valkey'de tutulur.
 
 ## Valkey'de (geçici)
 
@@ -381,17 +500,26 @@ izlemedir), partiler için bağlantıyla gizlilik.
 |---|---|---|
 | `presence:<user>:<session>` | bir cihazın durumu, title ID'si, başlangıç zamanı | 60 sn, heartbeat'lerle yenilenir |
 | `presence:<user>` | kullanıcının cihazları üzerinden birleştirilmiş çevrimiçi durumu, parti ve oyun oturumuyla | 70 sn |
-| `presence-extra:<user>` | çevrimiçi durumunda gösterilen parti ve katılınabilir oyun oturumu | sürdükleri sürece |
+| `presence-extra:<user>` | çevrimiçi durumunda gösterilen parti, katılınabilir oyun oturumu ve share play | sürdükleri sürece |
 | `presence-hidden:<user>` | kullanıcının çevrimiçi durumu hiç kimseye görünmezken ayarlıdır | ayarlı olduğu sürece |
 | `friends:<user>` | gateway'in çevrimiçi durumu dağıtımı için kullanıcının arkadaşları | API tarafından tutulur |
 | `events:<user>` | `resume` için son olayların stream'i | 5 dk'ya kırpılır |
 | `user:<user>` | gateway'in dinlediği pub/sub kanalı | - |
-| `call:<id>:members`, `call:<id>:in` | bir çağrıda kimin sinyal gönderebileceği; kimin hangi cihazda içinde olduğu | 12 saat |
+| `call:<id>:members`, `call:<id>:in`, `call:<id>:muted` | bir çağrıda kimin sinyal gönderebileceği; kimin hangi cihazda içinde olduğu; kimin sessizde olduğu | 12 saat |
+| `share-play:<id>` ve onun `:viewers`, `:members`, `:invites`, `:requests`, `:removed` anahtarları | share play; her izleyicinin cihazı ve kumandası (2-4 ya da yok); kimin sinyal gönderebileceği; kimin davet edildiği, istek attığı, çıkarıldığı | 12 saat, yayıncının ve izleyicilerin yaptığı her şeyle yenilenir |
+| `share-host:<user>`, `share-watch:<user>`, `device-shares:<device>` | bir kullanıcının yayıncısı olduğu share play, izlediği share play, bir cihazın içinde olduğu share play'ler | aynısı |
+| `share-departures` | share play'deyken soketi kapanan cihazlar, ne zaman çıkarılacaklarına göre puanlanmış | süpürülene kadar |
+| `public-share-plays` | herkese açık listelenen share play'ler, başlama zamanına göre | listelendikleri sürece |
+| `game-session:<id>:members`, `game-session:<id>:properties` | bir oyun oturumunda kimin sinyal gönderebileceği; her oyuncunun kendi özellikleri ve cihazı | oturum sürdüğü sürece |
+| `playing:<title>` | bir oyunu şu an kimin oynadığı (herkese açık çevrimiçi durumu), bunu söyleyen son heartbeat'e göre puanlanmış | yalnızca tazeyken okunur (90 sn) |
+| `topic:<topic>` | herkese açık bir konunun pub/sub kanalı (`lfg`, `discover`, oyun başına) | - |
 | `rt-ticket:<hash>` | web sitesi için tek kullanımlık gateway bileti | 30 sn |
 | `passkey:register:<user>`, `passkey:signin:<id>` | bir passkey challenge'ı | 5 dk |
 | `revoked:<session>` | kapatılmış bir oturum; API ve gateway reddeder | erişim token'ının ömrü |
 | `rl:<name>:<who>:<window>` | hız sınırı sayaçları | pencere süresi |
-| `lb:<board>:<period>` | puana göre sıralı kullanıcı ID'leri kümesi (planlandı) | 10 dk'da bir yeniden oluşturulur |
+| `lb:global:<board>`, `lb:friends:<user>:<board>` | bir liderlik tablosu (`points`, `game:<title>:points\|time\|completion`) | genel 60 sn, arkadaşlar 30 sn |
+| `releases:<repo>` | bir projenin GitHub'daki son sürümü ve son sağlam olanı | 10 dk; bir hafta |
+| `themes:dl:<theme>:<who>` | bugün zaten sayılmış bir indirme | 24 saat |
 
 ## Sayım
 
@@ -403,6 +531,11 @@ izlemedir), partiler için bağlantıyla gizlilik.
   %1-5, ultra nadir < %1.
 - **Puanlar**: bronz 15, gümüş 30, altın 90, platin 300; toplamı `library.points` alanına yazılır;
   profilin `stats` alanı planlandı.
+- **Liderlik tabloları**: istek geldiğinde `library` tablosundan hesaplanır (puanlar, `seconds_played`,
+  tamamlama = kazanılan ÷ toplam), yalnızca tablonun gösterebileceği kişiler için, ve bir dakika
+  Valkey'de tutulur.
+- **Uyumluluk kararı**: oyun ve platform başına, en yeni launcher sürümündeki en son raporların (kişi
+  başına bir tane) çoğunun verdiği durum; eşitlikte daha iyi olan kazanır.
 
 ## Verilerin saklanması
 
@@ -412,6 +545,11 @@ izlemedir), partiler için bağlantıyla gizlilik.
 | Oturumlar, kupalar, kütüphane | hesap silinene kadar |
 | Mesajlar | yazarı silene ya da hesap silinene kadar; silinen mesajların içeriği anında boşaltılır |
 | Şikâyet edilen mesajlar | metinleri moderatörler için şikâyette kalır |
-| Uyumluluk raporları (planlandı) | hesap silindiğinde anonimleştirilir (hesap alanı null yapılır) |
+| Uyumluluk raporları | hesap silindiğinde anonimleştirilir (hesap alanı null yapılır) |
+| Akış öğeleri, tepkiler | hesap (ya da bir arkadaşlık öğesi için arkadaşlık) gidene kadar |
+| Bildirimler | okunanlar 90 gün, hepsi 180 gün |
+| Oyuncu arama ilanları | panoda en fazla bir gün; hesapla birlikte silinir |
+| Temalar | yapanı silene ya da hesap silinene kadar; eski sürümlerin dosyaları saatte bir süpürülür |
+| Share play'ler | asla saklanmaz: oyun çalışırken Valkey'de |
 | Denetim kaydı | 1 yıl |
 | Yedekler | 30 gün (gecelik); dolayısıyla bir silme işlemi 30 gün sonra yedeklerde de tamamlanmış olur |

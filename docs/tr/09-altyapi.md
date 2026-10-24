@@ -6,8 +6,11 @@
 ayrıntıları (adresi, sağlayıcısı, boyutu, üstünde başka ne çalıştığı) bu herkese açık plana
 bilerek **yazılmadı**; AnyTogether deposunun özel altyapı notlarında duruyor.
 
-Bugün çalışanlar (2026-10-24): web, api, realtime, PostgreSQL ve Valkey. Worker, R2 ve staging
-kopyası henüz yok; relay isteğe bağlı.
+Bugün çalışanlar (2026-10-25): web, api, realtime, PostgreSQL ve Valkey. Worker, R2 ve staging
+kopyası henüz yok; relay isteğe bağlı. Dosyalar (avatarlar, tema dosyaları ve görselleri) R2
+kullanılana kadar PostgreSQL'de duruyor ve az sayıdaki arka plan işini API kendisi çalıştırıyor
+(bkz. [Mimari](02-mimari.md)). Web Push dışarıdan bir servise ihtiyaç duymaz: API push'ları kendi
+VAPID anahtarlarıyla imzalar.
 
 Sunucu başka sitelerle paylaşıldığı için AnyTogether **küçük ve sınırlı** planlandı:
 
@@ -134,7 +137,10 @@ id'si, parola = bunun HMAC'i), 12 saat geçerlidir.
   üzerinde STUN.
 - Metrikler: API ve gateway Prometheus metrikleri sunar; coturn'ün Prometheus exporter'ı
   (tahsisler, relay edilen bayt).
-- Hatalar: Sentry (API, web, isteğe bağlı çökme raporlarıyla launcher'lar, telefon uygulaması).
+- Hatalar: Sentry (API, web, telefon uygulaması), planlandı. Oyun çökmeleri kendiliğinden hiçbir
+  yere gönderilmez: macOS launcher'ının çökme paneli bir rapor dışa aktarır ve yalnızca oyuncu
+  isterse, kişisel ayrıntılar ve AnyTogether token'ları çıkarılmış, önceden doldurulmuş bir GitHub
+  issue'su açar.
 - İstemciler görüşme kalitesini raporlar (doğrudan mı relay'li mi, gidiş-dönüş süresi, kayıp,
   ekrandan ekrana gecikme örnekleri); toplu halde, içerik olmadan. Relay'li görüşmelerin oranı
   bize ne kadar TURN bant genişliği bekleyeceğimizi söyler.
@@ -172,8 +178,12 @@ adım adım anlatır:
   bir UDP aralığı).
 - **Ayarlar** tek bir `.env` dosyasında: hostname, Let's Encrypt iletişim adresi, veritabanı parolası,
   erişim token'larını imzalayan Ed25519 anahtarı, e-posta (SMTP, Resend ya da denemek için API'nin
-  logu), Apple, Google ve Discord istemci ID'leri (boşken her biri kapalı), TURN sırrı ve URL'leri.
+  logu), Apple, Google ve Discord istemci ID'leri (boşken her biri kapalı), TURN sırrı ve URL'leri,
+  tarayıcı push'u için VAPID anahtar çifti (boşken kapalı), ziyaretçinin adresini hangi header'ın
+  taşıdığı ve oyun simgelerinin gelebileceği host'lar.
 - **Yedekler**: her şey PostgreSQL'de olduğu için tek bir `pg_dump` tam bir yedektir.
-- **Moderasyon**: aynı komut satırı aracı, API'nin container'ı içinde çalıştırılır.
-- **İstemciler**: macOS launcher'ı ve telefon uygulaması başka bir sunucuya yönlendirilebilir (Ayarlar →
-  AnyTogether → Sunucu, sonraki sürüm); bir passkey, yapıldığı hostname'e aittir.
+- **Moderasyon**: bir hesap, API'nin container'ı içinde çalışan komut satırı aracıyla
+  (`admin grant @handle`) admin yapıldıktan sonra `/admin` adresindeki yönetim sayfası.
+- **İstemciler**: macOS launcher'ı, AnyPS5 Desktop ve telefon uygulaması başka bir sunucuya
+  yönlendirilebilir (Ayarlar → AnyTogether → Sunucu); bir passkey, yapıldığı hostname'e aittir.
+- **Lisans**: MIT; istediğin gibi kullan, değiştir ve çalıştır.
