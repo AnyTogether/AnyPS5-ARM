@@ -12,7 +12,7 @@ extension AppModel {
 
     /// The engine a game was unlocked with: only the same build is relied on to talk to itself.
     func engineBuild(for game: Game) -> String {
-        TogetherGameSession.engineBuild(installedRecords[game.id]?.toolkit ?? toolkit?.version ?? AppModel.runningVersion)
+        TogetherGameSession.engineBuild(installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? AppModel.runningVersion)
     }
 
     func gameVersion(for game: Game) -> String { TogetherGameSession.gameVersion(game.version) }

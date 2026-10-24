@@ -102,7 +102,8 @@ final class EngineToolkitTests: XCTestCase {
 
     func testTheShortVersionKeepsTheReleaseAndAPieceOfTheFingerprint() {
         XCTAssertEqual(Toolkit.shortVersion("0.2.15-arm-f5a134ca6b11"), "0.2.15-arm · f5a134")
-        XCTAssertEqual(Toolkit.shortVersion("0.2.14-arm-20-g4129291e1-f5a134ca6b11"), "0.2.14-arm-20-g4129291e1 · f5a134")
+        // Between releases, git describe's commits since the tag stay, its hash goes.
+        XCTAssertEqual(Toolkit.shortVersion("0.2.14-arm-20-g4129291e1-f5a134ca6b11"), "0.2.14-arm+20 · f5a134")
         XCTAssertEqual(Toolkit.shortVersion("local-f5a134ca6b11"), "local · f5a134")
         XCTAssertEqual(Toolkit.shortVersion("unknown"), "unknown")
     }

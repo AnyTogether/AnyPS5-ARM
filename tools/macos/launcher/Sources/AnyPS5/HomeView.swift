@@ -365,7 +365,14 @@ struct HeroInfo: View {
                     Text(game.titleID).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
                 }
                 InfoCard(title: T.text(.version), symbol: "tag") {
-                    Text(game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
+                    VStack(alignment: .leading, spacing: 1 * scale) {
+                        Text(game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
+                        // The engine that unlocked it.
+                        if let record = model.installedRecords[game.id] {
+                            Text(TE.text(.engineTitle) + " " + Toolkit.shortVersion(record.toolkit))
+                                .font(.display(12 * scale, .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
                 }
                 CommunityCard(game: game)
             }

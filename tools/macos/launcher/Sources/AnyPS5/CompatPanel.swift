@@ -56,7 +56,7 @@ extension AppModel {
         [Self.runningVersion, engineVersion(game), Self.machineModel, Self.osName].compactMap { $0 }.joined(separator: " · ")
     }
 
-    private func engineVersion(_ game: Game) -> String? { installedRecords[game.id]?.toolkit ?? toolkit?.version }
+    private func engineVersion(_ game: Game) -> String? { installedRecords[game.id]?.toolkit ?? engineVersion(for: game) }
 
     static var osName: String {
         let version = ProcessInfo.processInfo.operatingSystemVersion

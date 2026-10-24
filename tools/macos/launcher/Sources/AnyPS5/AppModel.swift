@@ -47,6 +47,11 @@ struct Preferences: Codable, Equatable {
     var screenshotsFolder: String?
     /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
     var fontsFolder: String?
+    /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
+    /// the built-in one, "custom" the folder below, else a downloaded version).
+    var engine: String?
+    /// A toolkit folder the user built (Settings → Engine → Engine Folder), nil for none.
+    var customToolkit: String?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -194,7 +199,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var logText = ""
     @Published var translocated = AppLocation.isTranslocated
 
-    let toolkit = Toolkit.locate()
+    /// The toolkit inside the app (or ANYPS5_TOOLKIT); the default engine.
+    let builtInToolkit = Toolkit.locate()
+    /// Downloaded engine toolkits (Settings → Engine); the previews keep theirs apart.
+    let toolkitStore: ToolkitStore
+    @Published var installedToolkits: [InstalledToolkit] = []
+    /// The toolkits on GitHub's releases, as last seen, and when.
+    @Published var engineCatalogue: [EngineCatalogue.Entry] = []
+    @Published var engineChecked: Date?
+    @Published var engineOffline = false
+    @Published var checkingEngines = false
+    /// How far each release's toolkit download is.
+    @Published var engineDownloads: [String: Double] = [:]
+    /// The custom toolkit folder, when it holds a toolkit.
+    @Published var customToolkit: Toolkit?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
@@ -227,6 +245,7 @@ final class AppModel: ObservableObject {
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
+        toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         designs = themes.all
         if persists {
@@ -234,6 +253,7 @@ final class AppModel: ObservableObject {
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
+        if persists { loadEngines() }
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
             AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
@@ -548,7 +568,7 @@ final class AppModel: ObservableObject {
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
-        if let record = installedRecords[game.id] { return .installed(outdated: toolkit.map { $0.version != record.toolkit } ?? false) }
+        if let record = installedRecords[game.id] { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
         if game.executable == .unreadable { return .unreadable }
         return .locked
     }
@@ -633,7 +653,7 @@ final class AppModel: ObservableObject {
     }
 
     func resolutionChoices(for game: Game) -> [String] {
-        guard let toolkit, let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
+        guard let toolkit = toolkit(for: game), let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
         return patches.resolution?.choices ?? []
     }
 
@@ -641,7 +661,7 @@ final class AppModel: ObservableObject {
 
     func unlock(_ game: Game) {
         guard let root else { return }
-        guard toolkit != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
+        guard toolkit(for: game) != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
         queue.append(game.id)
@@ -650,9 +670,14 @@ final class AppModel: ObservableObject {
     }
 
     private func startNext(root: URL) {
-        guard installer == nil, let toolkit, !queue.isEmpty else { return }
+        guard installer == nil, !queue.isEmpty else { return }
         let id = queue.removeFirst()
-        guard let game = games.first(where: { $0.id == id }) else { startNext(root: root); return }
+        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game) else { startNext(root: root); return }
+        // A downloaded engine is checked against its manifest again before anything of it runs;
+        // a custom folder must still hold a whole toolkit.
+        let downloaded = installedToolkits.first { $0.folder == toolkit.root }?.version
+        let custom = customToolkit?.root == toolkit.root
+        let store = toolkitStore
         progress[id] = (.unwrap, 0)
         installLog[id] = []
         let installer = Installer(game: game, toolkit: toolkit, progress: { step, fraction in
@@ -669,7 +694,11 @@ final class AppModel: ObservableObject {
         })
         self.installer = installer
         Task.detached(priority: .userInitiated) {
-            let result: Result<URL, Error> = Result { try installer.run(root: root) }
+            let result: Result<URL, Error> = Result {
+                if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
+                if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
+                return try installer.run(root: root)
+            }
             await MainActor.run {
                 self.installer = nil
                 self.progress[id] = nil
@@ -1477,7 +1506,7 @@ final class AppModel: ObservableObject {
         let settings = settings(for: game)
         let diagnosis = diagnoses[game.id]?.summary
         let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let toolkitVersion = toolkit?.version ?? "none"
+        let toolkitVersion = installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? "none"
         let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
         Task.detached(priority: .userInitiated) {
             let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
@@ -1672,6 +1701,7 @@ final class AppModel: ObservableObject {
             loadParty()
             if togetherFriends.isEmpty { refreshFriends() }
         }
+        if next == .settings { refreshEngines() }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()

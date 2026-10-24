@@ -15,6 +15,17 @@ public struct ToolkitManifest: Codable, Equatable, Sendable {
     /// sha256 (hex) by path inside the toolkit folder.
     public var files: [String: String]
 
+    public init(format: Int = ToolkitManifest.supportedFormat, version: String, engineCommit: String? = nil, upstreamBase: String? = nil,
+                buildDate: String? = nil, minimumLauncher: String? = nil, files: [String: String] = [:]) {
+        self.format = format
+        self.version = version
+        self.engineCommit = engineCommit
+        self.upstreamBase = upstreamBase
+        self.buildDate = buildDate
+        self.minimumLauncher = minimumLauncher
+        self.files = files
+    }
+
     /// The newest format this launcher reads.
     public static let supportedFormat = 1
 
@@ -71,9 +82,14 @@ extension Toolkit {
     }
 
     /// A version as the launcher shows it: the release and six digits of the fingerprint.
+    /// Between releases git describe's "-<commits>-g<hash>" becomes "+<commits>".
     public static func shortVersion(_ version: String) -> String {
-        let release = release(of: version)
+        var release = release(of: version)
         guard release != version else { return version }
+        let parts = release.split(separator: "-", omittingEmptySubsequences: false)
+        if parts.count >= 3, let hash = parts.last, hash.hasPrefix("g"), hash.dropFirst().allSatisfy(\.isHexDigit), Int(parts[parts.count - 2]) != nil {
+            release = parts.dropLast(2).joined(separator: "-") + "+" + parts[parts.count - 2]
+        }
         return release + " · " + version.suffix(12).prefix(6)
     }
 }
@@ -214,6 +230,12 @@ public struct InstalledToolkit: Equatable, Sendable {
     public let version: String
     public let folder: URL
     public let manifest: ToolkitManifest
+
+    public init(version: String, folder: URL, manifest: ToolkitManifest) {
+        self.version = version
+        self.folder = folder
+        self.manifest = manifest
+    }
 
     public var release: String { Toolkit.release(of: version) }
     public var toolkit: Toolkit { Toolkit(root: folder) }

@@ -75,8 +75,12 @@ extension AppModel {
             ])]
         case .updateChoice:
             guard let game = selectedGame else { return [] }
+            // Which engine unlocked it and which one is chosen now.
+            let engine = installedRecords[game.id].flatMap { record in
+                engineVersion(for: game).map { TE.format(.engineSwitch, Toolkit.shortVersion(record.toolkit), Toolkit.shortVersion($0)) }
+            }
             return [PanelCategory(id: "update", title: T.text(.updateAvailable), symbol: "arrow.triangle.2.circlepath", rows: [
-                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: T.text(.updateAndPlayDetail), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
+                PanelRow(id: "update", title: T.text(.updateAndPlay), detail: [T.text(.updateAndPlayDetail), engine].compactMap { $0 }.joined(separator: "\n"), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
                     self?.closeOverlay()
                     self?.updateAndPlay(game)
                 }),
@@ -206,7 +210,7 @@ extension AppModel {
         about.append(PanelRow(id: "checkForUpdates", title: T.text(.checkForUpdatesNow), detail: checkingUpdates ? T.text(.checkingUpdates) : checked,
                               symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.checkForUpdatesNow() }))
         about += [
-            PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(toolkit?.version ?? "—")),
+            PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(builtInToolkit.map { Toolkit.shortVersion($0.version) } ?? "—")),
             PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
             PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/utkuhalis/AnyPS5-ARM")!)
@@ -245,6 +249,7 @@ extension AppModel {
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
+            PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
@@ -293,6 +298,7 @@ extension AppModel {
         rows.append(PanelRow(id: "language", title: T.text(.gameLanguage), symbol: "character.bubble", kind: .choice(options: [T.text(.followLauncher)] + languages.map(\.name), selected: settings.language.flatMap { number in languages.firstIndex { $0.number == number } }.map { $0 + 1 } ?? 0) { [weak self] index in
             self?.update(game) { $0.language = index == 0 ? nil : languages[index - 1].number }
         }))
+        rows.append(gameEngineRow(game))
         let state = state(of: game)
         if case .installed = state {
             rows.append(PanelRow(id: "reinstall", title: T.text(.reinstall), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in

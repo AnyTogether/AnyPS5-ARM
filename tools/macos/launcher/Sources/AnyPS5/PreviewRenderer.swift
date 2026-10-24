@@ -266,10 +266,11 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("about-update.png")) { model in
             model.previewUpdate(Updates.Release(tag: "v0.2.6-arm", version: "0.2.6", page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.6-arm")!, download: nil, size: nil), progress: 0.42)
             model.overlay = .settings
-            model.panelCategory = 5
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "about" } ?? 0
             model.panelInRows = true
             model.panelRow = 2
         }
+        renderEngines(preferences, found, root, still, output)
         render(preferences, found, root, still, output.appendingPathComponent("gallery.png")) { model in model.open(.gallery); model.galleryIndex = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("gallery-viewer.png")) { model in model.open(.gallery); model.galleryViewing = true }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings-saves.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 10 }
@@ -329,6 +330,56 @@ enum PreviewRenderer {
         renderer.scale = 1
         guard let image = renderer.cgImage else { return }
         try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+    }
+
+    /// The engine picker: Settings → Engine with downloaded engines and the releases' ones, a
+    /// game's own engine, and the Update and Play offer after switching it.
+    static func renderEngines(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
+        func installed(_ version: String, built: String) -> InstalledToolkit {
+            InstalledToolkit(version: version, folder: URL(fileURLWithPath: "/nonexistent/\(version)"), manifest: ToolkitManifest(version: version, buildDate: built))
+        }
+        let downloaded = [installed("0.2.16-arm-5c0ffee12345", built: "2026-11-02T10:00:00Z"), installed("0.2.15-arm-0badc0de4321", built: "2026-10-25T10:00:00Z")]
+        let page = URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases")!
+        let day = { (days: Double) in Date().addingTimeInterval(-days * 86_400) }
+        let catalogue = [
+            EngineCatalogue.Entry(release: "0.2.17-arm", tag: "v0.2.17-arm", title: "AnyPS5-ARM 0.2.17", summary: "Faster shader cache · Stray holds 60 FPS", date: day(1), page: page, download: page, size: 39_000_000, digest: nil, prerelease: false),
+            EngineCatalogue.Entry(release: "0.2.16-arm", tag: "v0.2.16-arm", title: "AnyPS5-ARM 0.2.16", summary: "Co-op fixes", date: day(9), page: page, download: page, size: 39_000_000, digest: nil, prerelease: false),
+            EngineCatalogue.Entry(release: "0.2.18-arm", tag: "v0.2.18-arm", title: "AnyPS5-ARM 0.2.18", summary: "Experimental frame generation", date: day(0.2), page: page, download: page, size: 39_000_000, digest: nil, prerelease: true),
+        ]
+        var chosen = preferences
+        chosen.engine = downloaded[0].version
+        render(chosen, games, root, still, output.appendingPathComponent("engine.png")) { model in
+            model.previewEngines(installed: downloaded, catalogue: catalogue, checked: day(0.01), downloads: ["0.2.18-arm": 0.37])
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "engine" } ?? 0
+            model.panelInRows = true
+            model.panelRow = 0
+        }
+        render(chosen, games, root, still, output.appendingPathComponent("engine-offline.png")) { model in
+            model.previewEngines(installed: [], catalogue: catalogue, checked: day(3))
+            model.engineOffline = true
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "engine" } ?? 0
+            model.panelInRows = true
+            model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "engineRefresh" } ?? 0
+        }
+        guard let game = games.indices.contains(min(1, max(0, games.count - 1))) ? games[min(1, max(0, games.count - 1))] : nil else { return }
+        var own = chosen
+        own.games[game.id, default: GameSettings()].engine = downloaded[1].version
+        render(own, games, root, still, output.appendingPathComponent("engine-game.png")) { model in
+            model.previewEngines(installed: downloaded, catalogue: catalogue, checked: day(0.01))
+            model.overlay = .gameSettings
+            model.panelInRows = true
+            model.panelRow = model.panelCategories().first?.rows.firstIndex { $0.id == "engine" } ?? 0
+        }
+        render(own, games, root, still, output.appendingPathComponent("engine-update.png")) { model in
+            model.previewEngines(installed: downloaded, catalogue: catalogue, checked: day(0.01))
+            model.overlay = .updateChoice
+            model.panelInRows = true
+        }
+        render(own, games, root, still, output.appendingPathComponent("engine-home.png")) { model in
+            model.previewEngines(installed: downloaded, catalogue: catalogue, checked: day(0.01))
+        }
     }
 
     static func render(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ file: URL, configure: (AppModel) -> Void = { _ in }) {
