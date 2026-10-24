@@ -74,6 +74,17 @@ enum PreviewRenderer {
             model.togetherConnected = true
             model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
         }
+        render(preferences, found, root, still, output.appendingPathComponent("friends.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            let since = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-25 * 60))
+            model.togetherFriends = [
+                TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, presence: .init(state: "in_game", titleId: found.first?.titleID ?? "PPSA01234", since: since)),
+                TogetherFriend(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil)),
+                TogetherFriend(userId: "f3", handle: "mert", displayName: "Mert", avatar: nil, presence: nil),
+            ]
+            model.togetherRequests = TogetherRequests(incoming: [TogetherPerson(userId: "f4", handle: "zeynep", displayName: "Zeynep", avatar: nil)], outgoing: [])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

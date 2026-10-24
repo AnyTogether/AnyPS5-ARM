@@ -144,6 +144,8 @@ extension AppModel {
         withAnimation(Motion.overlay) {
             togetherUser = nil
             togetherConnected = false
+            togetherFriends = []
+            togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
         Task { await client.signOut() }
     }
@@ -151,8 +153,11 @@ extension AppModel {
     /// Keeps the session live: friends see the launcher online, and a sign-out elsewhere ends it here.
     func startTogetherSocket() {
         guard togetherUser != nil, togetherSocket == nil else { return }
-        let socket = TogetherSocket(client: together, onEvent: { _ in
-            Task { @MainActor [weak self] in self?.togetherConnected = true }
+        let socket = TogetherSocket(client: together, onEvent: { event in
+            Task { @MainActor [weak self] in
+                self?.togetherConnected = true
+                self?.togetherEvent(event)
+            }
         }, onSignedOut: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -168,6 +173,7 @@ extension AppModel {
         socket.start()
         togetherConnected = true
         updateTogetherPresence()
+        refreshFriends()
     }
 
     /// In a game or online, as friends will see it.

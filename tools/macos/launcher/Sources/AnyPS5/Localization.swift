@@ -54,6 +54,7 @@ enum T {
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
         case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
+        case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
@@ -67,6 +68,26 @@ enum T {
     }
 
     static let turkish: [Key: String] = [
+        .friendsTitle: "Arkadaşlar",
+        .friendsSignIn: "Arkadaşlarını görmek için giriş yap",
+        .friendsAccept: "%@: kabul et",
+        .friendsDecline: "%@: reddet",
+        .friendsWantsToBe: "arkadaş olmak istiyor",
+        .friendsAddByHandle: "Kullanıcı adıyla ekle",
+        .friendsSendRequest: "Arkadaşlık isteği gönder",
+        .friendsNone: "Henüz arkadaş yok",
+        .friendsYourHandle: "Seninki @%@: arkadaşlarına ver",
+        .friendsWaiting: "istek gönderildi",
+        .friendsOffline: "Çevrimdışı",
+        .friendsOnline: "Çevrimiçi",
+        .friendsAway: "Uzakta",
+        .friendsPlaying: "%@ oynuyor",
+        .friendsPlayingFor: "%@ oynuyor · %d dk",
+        .friendsRequestSent: "%@ kişisine istek gönderildi",
+        .friendsNowFriends: "%@ ile artık arkadaşsınız",
+        .friendsNoOne: "%@ diye biri yok",
+        .friendsAsked: "%@ arkadaş olmak istiyor",
+        .friendsOnlineCount: "%d çevrimiçi",
         .togetherIntro: "AnyTogether'a giriş yap",
         .togetherIntroDetail: "Profilin, kupaların ve arkadaşların online. Şifre yok: e-postayla ya da web sitesinden bir kod.",
         .togetherEmail: "E-posta",
@@ -439,6 +460,26 @@ enum T {
     ]
 
     static let english: [Key: String] = [
+        .friendsTitle: "Friends",
+        .friendsSignIn: "Sign in to see your friends",
+        .friendsAccept: "Accept %@",
+        .friendsDecline: "Decline %@",
+        .friendsWantsToBe: "wants to be friends",
+        .friendsAddByHandle: "Add by handle",
+        .friendsSendRequest: "Send a friend request",
+        .friendsNone: "No friends yet",
+        .friendsYourHandle: "Yours is @%@: give it to your friends",
+        .friendsWaiting: "request sent",
+        .friendsOffline: "Offline",
+        .friendsOnline: "Online",
+        .friendsAway: "Away",
+        .friendsPlaying: "Playing %@",
+        .friendsPlayingFor: "Playing %@ · %d min",
+        .friendsRequestSent: "Request sent to %@",
+        .friendsNowFriends: "You and %@ are friends",
+        .friendsNoOne: "No one is called %@",
+        .friendsAsked: "%@ wants to be friends",
+        .friendsOnlineCount: "%d online",
         .togetherIntro: "Sign in to AnyTogether",
         .togetherIntroDetail: "Your profile, trophies and friends, online. No password: a code by email or from the website.",
         .togetherEmail: "Email",

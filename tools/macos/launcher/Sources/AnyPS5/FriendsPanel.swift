@@ -1,0 +1,111 @@
+import AnyPS5Core
+import SwiftUI
+
+/// Friends on AnyTogether: who plays what, requests to answer, adding someone by handle. The
+/// socket's events keep it current while it is open and the top bar's count up to date.
+extension AppModel {
+    func friendRows() -> [PanelRow] {
+        guard togetherUser != nil else {
+            return [
+                PanelRow(id: "friends-out", title: T.text(.friendsSignIn), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info("")),
+                PanelRow(id: "friends-signin", title: T.text(.togetherSignIn), symbol: "person.crop.circle.badge.plus", kind: .action(destructive: false) { [weak self] in
+                    self?.openTogetherSettings()
+                }),
+            ]
+        }
+        var rows: [PanelRow] = []
+        for person in togetherRequests.incoming {
+            rows.append(PanelRow(id: "accept-\(person.userId)", title: T.format(.friendsAccept, person.displayName), detail: "@\(person.handle) · \(T.text(.friendsWantsToBe))",
+                                 symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerFriend(person, accept: true) }))
+            rows.append(PanelRow(id: "decline-\(person.userId)", title: T.format(.friendsDecline, person.displayName), symbol: "xmark.circle",
+                                 kind: .action(destructive: true) { [weak self] in self?.answerFriend(person, accept: false) }))
+        }
+        rows.append(PanelRow(id: "friends-handle", title: T.text(.friendsAddByHandle), symbol: "at", kind: .text(friendHandle) { [weak self] text in self?.friendHandle = text }))
+        rows.append(PanelRow(id: "friends-ask", title: T.text(.friendsSendRequest), symbol: "person.badge.plus", kind: .action(destructive: false) { [weak self] in self?.askFriend() }))
+        if togetherFriends.isEmpty {
+            rows.append(PanelRow(id: "friends-none", title: T.text(.friendsNone), detail: T.format(.friendsYourHandle, togetherUser?.handle ?? ""), symbol: "person.2", kind: .info("")))
+        }
+        for friend in togetherFriends {
+            rows.append(PanelRow(id: "friend-\(friend.userId)", title: friend.displayName, detail: "@\(friend.handle) · \(presenceText(friend.presence))",
+                                 symbol: friend.presence?.playing == true ? "gamecontroller.fill" : friend.presence?.online == true ? "circle.fill" : "circle",
+                                 kind: .info("")))
+        }
+        for person in togetherRequests.outgoing {
+            rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info("")))
+        }
+        return rows
+    }
+
+    /// "Playing Hollow Knight: Silksong · 25 min", "Online", "Offline".
+    func presenceText(_ presence: TogetherFriend.Presence?) -> String {
+        guard let presence, presence.online else { return T.text(.friendsOffline) }
+        guard presence.playing, let title = presence.titleId else { return presence.state == "away" ? T.text(.friendsAway) : T.text(.friendsOnline) }
+        let name = games.first { $0.titleID == title }?.name ?? title
+        let minutes = presence.since.flatMap { ISO8601DateFormatter().date(from: $0) }.map { max(1, Int(Date().timeIntervalSince($0) / 60)) }
+        return minutes.map { T.format(.friendsPlayingFor, name, $0) } ?? T.format(.friendsPlaying, name)
+    }
+
+    var friendsOnline: Int { togetherFriends.filter { $0.presence?.online == true }.count }
+
+    func refreshFriends() {
+        guard togetherUser != nil else { return }
+        Task {
+            async let friends = together.friends()
+            async let requests = together.friendRequests()
+            if let friends = try? await friends { withAnimation(Motion.overlay) { togetherFriends = friends } }
+            if let requests = try? await requests { withAnimation(Motion.overlay) { togetherRequests = requests } }
+        }
+    }
+
+    func askFriend() {
+        let handle = friendHandle.trimmingCharacters(in: .whitespaces)
+        guard !handle.isEmpty else { return }
+        Task {
+            do {
+                let state = try await together.askFriend(handle)
+                friendHandle = ""
+                show(T.format(state == "accepted" ? .friendsNowFriends : .friendsRequestSent, handle), symbol: "person.badge.plus")
+                refreshFriends()
+            } catch let problem as TogetherProblem where problem.status == 404 {
+                show(T.format(.friendsNoOne, handle), symbol: "person.crop.circle.badge.questionmark")
+            } catch {
+                show(T.text(.togetherUnreachable), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    func answerFriend(_ person: TogetherPerson, accept: Bool) {
+        Task {
+            try? await together.answerFriend(person.userId, accept: accept)
+            if accept { show(T.format(.friendsNowFriends, person.displayName), symbol: "person.2.fill") }
+            refreshFriends()
+        }
+    }
+
+    func openTogetherSettings() {
+        open(.settings)
+        if let index = panelCategories().firstIndex(where: { $0.id == "together" }) {
+            panelCategory = index
+            panelInRows = true
+            panelRow = 1
+        }
+    }
+
+    /// What the socket says that concerns friends: requests and answers as cards, presence as it changes.
+    func togetherEvent(_ event: TogetherSocket.Event) {
+        switch event.type {
+        case "friend.request":
+            let name = event.data["displayName"] ?? event.data["handle"] ?? ""
+            show(T.format(.friendsAsked, name), symbol: "person.badge.plus")
+            if !NSApp.isActive { TrophyBanner.shared.notice(T.format(.friendsAsked, name), detail: "@\(event.data["handle"] ?? "")", symbol: "person.badge.plus", sounds: preferences.sounds) }
+            refreshFriends()
+        case "friend.accepted":
+            show(T.format(.friendsNowFriends, event.data["displayName"] ?? ""), symbol: "person.2.fill")
+            refreshFriends()
+        case "friend.removed", "presence.updated":
+            refreshFriends()
+        default:
+            break
+        }
+    }
+}

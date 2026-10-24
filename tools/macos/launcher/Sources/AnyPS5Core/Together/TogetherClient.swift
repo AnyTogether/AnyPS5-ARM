@@ -212,7 +212,8 @@ public final class TogetherClient: @unchecked Sendable {
     }
 
     func send(_ method: String, _ path: String, _ body: [String: String]?, token: String? = nil) async throws -> Data {
-        var request = URLRequest(url: base.appendingPathComponent("api/v1").appendingPathComponent(path))
+        // A path may carry a query ("users/search?q=…"), which appendingPathComponent would escape.
+        var request = URLRequest(url: URL(string: base.appendingPathComponent("api/v1").absoluteString + "/" + path)!)
         request.httpMethod = method
         request.timeoutInterval = 20
         request.setValue(clientName, forHTTPHeaderField: "AnyTogether-Client")

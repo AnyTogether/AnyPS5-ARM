@@ -115,6 +115,7 @@ struct TopBar: View {
             Spacer()
             iconButton("square.grid.3x3.fill", index: 0) { model.open(.library) }
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
+            iconButton("person.2.fill", index: 2, badge: model.togetherRequests.incoming.count + model.friendsOnline) { model.open(.friends) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 ZStack {
@@ -128,7 +129,7 @@ struct TopBar: View {
         }
     }
 
-    private func iconButton(_ symbol: String, index: Int, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, index: Int, badge: Int = 0, action: @escaping () -> Void) -> some View {
         let focused = model.focus == .top(index) && model.overlay == nil
         return Button(action: action) {
             Image(systemName: symbol)
@@ -136,6 +137,14 @@ struct TopBar: View {
                 .foregroundStyle(focused ? Color.black : .white.opacity(0.9))
                 .frame(width: 44 * scale, height: 44 * scale)
                 .background(Circle().fill(focused ? Color.white : Color.white.opacity(0.1)))
+                .overlay(alignment: .topTrailing) {
+                    // Friends online or asking, in the accent.
+                    if badge > 0 {
+                        Text("\(min(badge, 99))").font(.display(11 * scale, .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 5 * scale).frame(minWidth: 18 * scale, minHeight: 18 * scale)
+                            .background(Capsule().fill(model.accent)).offset(x: 4 * scale, y: -4 * scale)
+                    }
+                }
                 .scaleEffect(focused ? 1.1 : 1)
                 .shadow(color: .white.opacity(focused ? 0.4 : 0), radius: 10 * scale)
         }
@@ -575,6 +584,12 @@ extension AppModel {
                 return true
             }
             return panelCommand(command)
+        case .friends:
+            if command == .back {
+                closeOverlay()
+                return true
+            }
+            return panelCommand(command)
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
@@ -614,9 +629,9 @@ extension AppModel {
         case (.tiles, .up): moveFocus(.top(1))
         case (.tiles, .select): primaryAction(game)
         case (.top(let index), .left): moveFocus(.top(max(0, index - 1)))
-        case (.top(let index), .right): moveFocus(.top(min(1, index + 1)))
+        case (.top(let index), .right): moveFocus(.top(min(2, index + 1)))
         case (.top, .down), (.top, .back): moveFocus(.tiles)
-        case (.top(let index), .select): open(index == 0 ? .library : .settings)
+        case (.top(let index), .select): open(index == 0 ? .library : index == 1 ? .settings : .friends)
         case (.actions(let index), .left): moveFocus(.actions(max(0, index - 1)))
         case (.actions(let index), .right): moveFocus(.actions(min(actionCount - 1, index + 1)))
         case (.actions, .up), (.actions, .back): moveFocus(.tiles)

@@ -227,3 +227,43 @@ final class TogetherSocketLiveTests: XCTestCase {
         XCTAssertNil(launcher.user, "the launcher forgot the session")
     }
 }
+
+final class TogetherFriendsTests: XCTestCase {
+    func testFriendsWithPresenceAndRequests() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("together-friends-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeTogether.self]
+        let client = TogetherClient(base: URL(string: "https://anytogether.test")!, store: TokenStore(file: folder.appendingPathComponent("s.json")),
+                                    session: URLSession(configuration: configuration), clientName: "launcher-macos/test")
+        FakeTogether.requests = []
+        FakeTogether.handler = { _, _ in (200, TogetherTests.tokens()) }
+        _ = try await client.verifyEmail("u@example.com", code: "111111")
+        FakeTogether.handler = { request, _ in
+            switch (request.httpMethod ?? "", request.url!.path) {
+            case ("GET", "/api/v1/me/friends"):
+                return (200, ["friends": [["userId": "f1", "handle": "ayse", "displayName": "Ayşe", "avatar": NSNull(),
+                                           "presence": ["state": "in_game", "titleId": "PPSA01234", "since": "2026-10-24T10:00:00Z"]]]])
+            case ("GET", "/api/v1/me/friends/requests"):
+                return (200, ["incoming": [["userId": "f2", "handle": "kral", "displayName": "Kral", "avatar": NSNull()]], "outgoing": []])
+            case ("POST", "/api/v1/me/friends/requests"): return (201, ["state": "pending"])
+            case ("POST", "/api/v1/me/friends/requests/f2/accept"): return (204, [:])
+            case ("GET", "/api/v1/users/search"): return (200, ["users": [["userId": "f3", "handle": "utkan", "displayName": "Utkan", "avatar": NSNull()]]])
+            default: return (404, ["code": "not_found", "status": 404, "title": "x"])
+            }
+        }
+        let friends = try await client.friends()
+        XCTAssertEqual(friends.first?.presence?.titleId, "PPSA01234")
+        XCTAssertTrue(friends.first?.presence?.playing ?? false)
+        let requests = try await client.friendRequests()
+        XCTAssertEqual(requests.incoming.map(\.handle), ["kral"])
+        let state = try await client.askFriend("@ayse ")
+        XCTAssertEqual(state, "pending")
+        let asked = FakeTogether.requests.first { $0.0.httpMethod == "POST" && $0.0.url!.path == "/api/v1/me/friends/requests" }
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: asked?.1 ?? Data()) as? [String: String], ["handle": "ayse"])
+        try await client.answerFriend("f2", accept: true)
+        let found = try await client.searchPeople("utk")
+        XCTAssertEqual(found.map(\.handle), ["utkan"])
+        XCTAssertEqual(FakeTogether.requests.last?.0.url?.query, "q=utk")
+    }
+}

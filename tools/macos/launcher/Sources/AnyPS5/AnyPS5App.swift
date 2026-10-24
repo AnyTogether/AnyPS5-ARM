@@ -127,6 +127,9 @@ struct RootView: View {
                 SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+        case .friends:
+            SidePanel(title: T.text(.friendsTitle), subtitle: model.togetherUser.map { "@\($0.handle) · \(T.format(.friendsOnlineCount, model.friendsOnline))" })
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .themes, .studio:
             SidePanel(title: T.text(model.overlay == .studio ? .themeStudio : .themes), subtitle: T.text(model.overlay == .studio ? .themeStudioSubtitle : .themesDetail))
                 .transition(.move(edge: .trailing).combined(with: .opacity))

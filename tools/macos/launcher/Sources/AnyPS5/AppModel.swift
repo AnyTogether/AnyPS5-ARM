@@ -91,6 +91,8 @@ enum Overlay: Equatable {
     /// The themes on this Mac and on the Hub, and the Theme Studio.
     case themes
     case studio
+    /// Friends on AnyTogether.
+    case friends
 }
 
 struct Toast: Identifiable, Equatable {
@@ -380,6 +382,9 @@ final class AppModel: ObservableObject {
     var togetherCode = ""
     var togetherSocket: TogetherSocket?
     var togetherWait: Task<Void, Never>?
+    @Published var togetherFriends: [TogetherFriend] = []
+    @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
+    var friendHandle = ""
 
     // MARK: Themes
 
@@ -1553,7 +1558,8 @@ final class AppModel: ObservableObject {
         if next == .trophies { trophyIndex = 0 }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
-        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio
+        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends
+        if next == .friends { refreshFriends() }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()
