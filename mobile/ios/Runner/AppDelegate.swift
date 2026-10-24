@@ -13,6 +13,8 @@ import VideoToolbox
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // The game's rumble keeps going while the party's voice records.
+    try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -267,7 +269,10 @@ final class StreamPlayer: NSObject, FlutterTexture {
         }
       }
       if !self.engine.isRunning {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        // In a party's voice the session records too: the game's sound joins it as it is.
+        if AVAudioSession.sharedInstance().category != .playAndRecord {
+          try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        }
         try? AVAudioSession.sharedInstance().setPreferredIOBufferDuration(0.005)
         try? AVAudioSession.sharedInstance().setActive(true)
         try? self.engine.start()

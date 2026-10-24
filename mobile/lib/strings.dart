@@ -110,6 +110,20 @@ class Strings {
   String get togetherConnecting => _text('togetherConnecting');
   String get togetherNotFound => _text('togetherNotFound');
   String get back => _text('back');
+  String get voice => _text('voice');
+  String get voiceJoin => _text('voiceJoin');
+  String get voiceLeave => _text('voiceLeave');
+  String get voiceMute => _text('voiceMute');
+  String get voiceUnmute => _text('voiceUnmute');
+  String get voiceMicDenied => _text('voiceMicDenied');
+  String get voiceFailed => _text('voiceFailed');
+  String get voiceAlone => _text('voiceAlone');
+  String get voicePad => _text('voicePad');
+  String voiceConnected(int n) =>
+      _text('voiceConnected').replaceAll('{n}', '$n');
+  String voiceConnecting(int n) =>
+      _text('voiceConnecting').replaceAll('{n}', '$n');
+  String voiceInCall(int n) => _text('voiceInCall').replaceAll('{n}', '$n');
   String get party => _text('party');
   String get partyIntro => _text('partyIntro');
   String get partyStart => _text('partyStart');
@@ -260,6 +274,19 @@ class Strings {
     'togetherConnecting': 'Connecting…',
     'togetherNotFound': 'No one with that handle',
     'back': 'Back',
+    'voice': 'Voice',
+    'voiceJoin': 'Join voice',
+    'voiceLeave': 'Leave voice',
+    'voiceMute': 'Mute',
+    'voiceUnmute': 'Unmute',
+    'voiceMicDenied':
+        'Allow the microphone for AnyPS5 Remote in Settings to talk',
+    'voiceFailed': 'Couldn\'t join the voice',
+    'voiceAlone': 'No one else is in voice yet',
+    'voicePad': 'The phone stays the controller while you talk',
+    'voiceConnected': 'Talking with {n}',
+    'voiceConnecting': 'Connecting to {n}…',
+    'voiceInCall': '{n} in voice',
     'party': 'Party',
     'partyIntro': 'Talk while you play, up to eight of you. The phone stays the controller.',
     'partyStart': 'Start a party',
@@ -408,6 +435,19 @@ class Strings {
     'togetherConnecting': 'Bağlanıyor…',
     'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
     'back': 'Geri',
+    'voice': 'Sesli sohbet',
+    'voiceJoin': 'Sesliye katıl',
+    'voiceLeave': 'Sesliden ayrıl',
+    'voiceMute': 'Sessize al',
+    'voiceUnmute': 'Sesi aç',
+    'voiceMicDenied':
+        'Konuşmak için Ayarlar\'dan AnyPS5 Remote\'a mikrofon izni ver',
+    'voiceFailed': 'Sesliye katılınamadı',
+    'voiceAlone': 'Seslide henüz başka kimse yok',
+    'voicePad': 'Konuşurken telefon kol olmaya devam eder',
+    'voiceConnected': '{n} kişiyle konuşuluyor',
+    'voiceConnecting': '{n} kişiye bağlanıyor…',
+    'voiceInCall': 'Seslide {n} kişi',
     'party': 'Parti',
     'partyIntro':
         'Oynarken konuşun, en fazla sekiz kişi. Telefon kol olmaya devam eder.',

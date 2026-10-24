@@ -5,19 +5,30 @@ import 'messages.dart';
 import 'parties.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
+import 'voice.dart';
+import 'voice_mesh.dart';
 
 /// AnyTogether's live side on the phone: the gateway socket, open while someone is signed in
 /// and brought back as soon as the app is in the foreground again, and what it keeps up to date:
-/// the friends, the messages and the party.
+/// the friends, the messages, the party and its voice.
 class TogetherHub extends ChangeNotifier {
-  TogetherHub({required this.account, TogetherSocket? socket})
-    : socket = socket ?? TogetherSocket(account: account) {
+  TogetherHub({
+    required this.account,
+    TogetherSocket? socket,
+    VoiceEngine Function()? voiceEngine,
+  }) : socket = socket ?? TogetherSocket(account: account) {
     friends = Friends(account: account, socket: this.socket)
       ..addListener(notifyListeners);
     messages = Messages(account: account, socket: this.socket)
       ..addListener(notifyListeners);
     parties = Parties(account: account, socket: this.socket)
       ..addListener(notifyListeners);
+    voice = Voice(
+      account: account,
+      socket: this.socket,
+      parties: parties,
+      engine: voiceEngine,
+    );
     account.addListener(_accountChanged);
     _lifecycle = AppLifecycleListener(onResume: this.socket.wake);
     _accountChanged();
@@ -28,6 +39,7 @@ class TogetherHub extends ChangeNotifier {
   late final Friends friends;
   late final Messages messages;
   late final Parties parties;
+  late final Voice voice;
   late final AppLifecycleListener _lifecycle;
   String? _user;
 
@@ -42,6 +54,7 @@ class TogetherHub extends ChangeNotifier {
     final user = account.user?.id;
     if (user == _user) return;
     _user = user;
+    voice.leave(tell: false);
     socket.stop();
     friends.clear();
     messages.clear();
@@ -56,6 +69,7 @@ class TogetherHub extends ChangeNotifier {
     _lifecycle.dispose();
     friends.dispose();
     messages.dispose();
+    voice.dispose();
     parties.dispose();
     socket.dispose();
     super.dispose();

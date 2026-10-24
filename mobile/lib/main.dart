@@ -23,6 +23,7 @@ import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
 import 'ui/handoff_card.dart';
 import 'ui/trophy_card.dart';
+import 'ui/voice_pill.dart';
 import 'ui/welcome_screen.dart';
 import 'version.dart';
 
@@ -145,7 +146,6 @@ class _RemoteAppState extends State<RemoteApp> {
   void initState() {
     super.initState();
     _session.addListener(_changed);
-    _together.addListener(_changed);
     if (_welcomed) _search();
     // Without the cable port the phone still works over Wi-Fi.
     _cableLink.start().catchError((_) {});
@@ -410,6 +410,7 @@ class _RemoteAppState extends State<RemoteApp> {
           fontWeight: FontWeight.w600,
         ),
       ),
+      VoicePill(voice: _together.voice),
     ],
   );
 }

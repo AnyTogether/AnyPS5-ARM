@@ -187,13 +187,15 @@ void main() {
       ..notifyListeners();
     await tester.pumpAndSettle();
     final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
-    for (final text in ['HAKAN', 'Leave party', 'ZEYNEP']) {
+    for (final text in ['HAKAN', 'Join voice', 'ZEYNEP']) {
       final box = tester.getRect(find.text(text).first);
       expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
       expect(box.right, lessThanOrEqualTo(screen.width), reason: text);
     }
     expect(find.text('Invite'), findsNWidgets(2));
-    expect(find.byIcon(Icons.headset_mic_rounded), findsNWidgets(2));
+    // Two members in voice, and the button to join them.
+    expect(find.byIcon(Icons.headset_mic_rounded), findsNWidgets(3));
+    expect(find.text('2 in voice'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

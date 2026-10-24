@@ -5,6 +5,7 @@ import '../together/parties.dart';
 import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
+import '../together/voice.dart';
 import 'together_widgets.dart';
 
 /// The party: without one, a way to start one and the invites and friends' open parties to
@@ -51,7 +52,11 @@ class _PartyPaneState extends State<PartyPane> {
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.hub.parties, widget.hub.friends]),
+      listenable: Listenable.merge([
+        widget.hub.parties,
+        widget.hub.friends,
+        widget.hub.voice,
+      ]),
       builder: (context, _) {
         final party = widget.hub.parties.party;
         return party == null ? _noParty(texts) : _inParty(texts, party);
@@ -176,10 +181,23 @@ class _PartyPaneState extends State<PartyPane> {
     );
   }
 
+  Widget _voiceCard(Strings texts, Party party, Voice voice) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: voice.active ? const Color(0x144CD964) : const Color(0x0DFFFFFF),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(
+        color: voice.active ? const Color(0x554CD964) : const Color(0x14FFFFFF),
+      ),
+    ),
+    child: _voiceCardBody(texts, party, voice, _try),
+  );
+
   Widget _inParty(Strings texts, Party party) {
     final me = widget.hub.me;
     final leader = party.leaderId == me;
     final parties = widget.hub.parties;
+    final voice = widget.hub.voice;
     final invitable = widget.hub.friends.friends
         .where(
           (f) =>
@@ -213,7 +231,16 @@ class _PartyPaneState extends State<PartyPane> {
                     _Member(
                       person: member,
                       leader: member.id == party.leaderId,
-                      inVoice: party.inCall.contains(member.id),
+                      inVoice:
+                          party.inCall.contains(member.id) ||
+                          (member.id == me && voice.active),
+                      muted: member.id == me && voice.active && voice.muted,
+                      ring:
+                          (member.id == me
+                              ? voice.speaking
+                              : voice.speakingOf(member.id))
+                          ? togetherPlaying
+                          : null,
                       onKick: leader && member.id != me
                           ? () => _try(() => parties.kick(member.id))
                           : null,
@@ -250,6 +277,8 @@ class _PartyPaneState extends State<PartyPane> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 14, 14),
             children: [
+              SectionLabel(texts.voice),
+              _voiceCard(texts, party, voice),
               SectionLabel(texts.partyInviteFriends),
               if (invitable.isEmpty)
                 Text(
@@ -303,18 +332,108 @@ class _PartyPaneState extends State<PartyPane> {
   }
 }
 
-/// Someone in the party: their picture, a headset while in voice, a crown for the leader.
+/// Joining the voice, or, in it: who is heard, mute and leave.
+Widget _voiceCardBody(
+  Strings texts,
+  Party party,
+  Voice voice,
+  Future<void> Function(Future<void> Function()) run,
+) {
+  if (!voice.active) {
+    final others = party.inCall.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: voice.joining ? null : () => run(voice.join),
+          icon: voice.joining
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.headset_mic_rounded, size: 18),
+          label: Text(texts.voiceJoin),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          switch (voice.problem) {
+            VoiceProblem.microphone => texts.voiceMicDenied,
+            VoiceProblem.failed => texts.voiceFailed,
+            null => others > 0 ? texts.voiceInCall(others) : texts.voicePad,
+          },
+          style: TextStyle(
+            color: voice.problem == null ? Colors.white54 : togetherError,
+            fontSize: 12.5,
+          ),
+        ),
+      ],
+    );
+  }
+  final peers = voice.peers;
+  final connected = peers.where((p) => p.state == 'connected').length;
+  final connecting = peers.length - connected;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        peers.isEmpty
+            ? texts.voiceAlone
+            : connecting > 0
+            ? texts.voiceConnecting(connecting)
+            : texts.voiceConnected(connected),
+        style: const TextStyle(color: Colors.white70, fontSize: 13),
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: FilledButton.tonalIcon(
+              onPressed: () => voice.setMuted(!voice.muted),
+              style: voice.muted
+                  ? FilledButton.styleFrom(
+                      backgroundColor: const Color(0x33FF8A80),
+                      foregroundColor: togetherError,
+                    )
+                  : null,
+              icon: Icon(
+                voice.muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                size: 18,
+              ),
+              label: Text(voice.muted ? texts.voiceUnmute : texts.voiceMute),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.outlined(
+            tooltip: texts.voiceLeave,
+            onPressed: () => run(voice.leave),
+            color: togetherError,
+            icon: const Icon(Icons.call_end_rounded, size: 18),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// Someone in the party: their picture with a ring while they speak, a headset while in voice
+/// (crossed out when muted), a crown for the leader.
 class _Member extends StatelessWidget {
   const _Member({
     required this.person,
     required this.leader,
     required this.inVoice,
+    this.ring,
+    this.muted = false,
     this.onKick,
   });
 
   final Person person;
   final bool leader;
   final bool inVoice;
+
+  /// Green while they speak.
+  final Color? ring;
+  final bool muted;
   final VoidCallback? onKick;
 
   @override
@@ -327,7 +446,7 @@ class _Member extends StatelessWidget {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              Avatar(person: person, size: 60),
+              Avatar(person: person, size: 60, ring: ring),
               if (inVoice)
                 Positioned(
                   right: -2,
@@ -338,10 +457,10 @@ class _Member extends StatelessWidget {
                       color: togetherPanel,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.headset_mic_rounded,
+                    child: Icon(
+                      muted ? Icons.mic_off_rounded : Icons.headset_mic_rounded,
                       size: 15,
-                      color: togetherPlaying,
+                      color: muted ? togetherError : togetherPlaying,
                     ),
                   ),
                 ),
