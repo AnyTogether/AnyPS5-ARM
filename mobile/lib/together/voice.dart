@@ -10,7 +10,8 @@ import 'voice_webrtc.dart';
 
 enum VoiceProblem { microphone, failed }
 
-/// Voice in the party, the way the website does it: the call from /calls with its ICE servers,
+/// Voice in the party, the way the website does it: the call from /calls with its ICE servers
+/// (renewed from /ice-servers before they run out),
 /// the offers and candidates through the gateway, a mesh of peer connections. It lives beside
 /// the screens, so the phone stays the pad while the party talks.
 class Voice extends ChangeNotifier {
@@ -34,6 +35,7 @@ class Voice extends ChangeNotifier {
 
   VoiceMesh? _mesh;
   Timer? _levels;
+  Timer? _renew;
   String? callId;
   String? _partyId;
   bool joining = false;
@@ -92,6 +94,7 @@ class Voice extends ChangeNotifier {
       callId = id;
       _partyId = party.id;
       _levels = Timer.periodic(measureEvery, (_) => mesh.measure());
+      _renewBefore(joined['expiresAt']);
       // The newcomer calls everyone already in.
       for (final peer in (call['in'] as List? ?? const [])) {
         final userId = (peer as Map)['userId'] as String;
@@ -121,6 +124,27 @@ class Voice extends ChangeNotifier {
     }
   }
 
+  /// Fresh relay credentials ten minutes before these run out (a call can outlast them).
+  void _renewBefore(Object? expiresAt) {
+    final expiry = DateTime.tryParse(expiresAt as String? ?? '');
+    _renew?.cancel();
+    if (expiry == null) return;
+    final wait =
+        expiry.difference(DateTime.now()) - const Duration(minutes: 10);
+    _renew = Timer(wait.isNegative ? Duration.zero : wait, () async {
+      try {
+        final fresh = await account.call('GET', 'ice-servers');
+        _mesh?.iceServers = [
+          for (final server in (fresh['iceServers'] as List? ?? const []))
+            Map<String, dynamic>.from(server as Map),
+        ];
+        if (_mesh != null) _renewBefore(fresh['expiresAt']);
+      } on Object {
+        // The ones held still work until they expire.
+      }
+    });
+  }
+
   void setMuted(bool on) {
     muted = on;
     _mesh?.talking = !on;
@@ -133,6 +157,7 @@ class Voice extends ChangeNotifier {
     callId = null;
     _partyId = null;
     _levels?.cancel();
+    _renew?.cancel();
     notifyListeners();
     await mesh?.close();
   }

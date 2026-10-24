@@ -291,8 +291,10 @@ void main() {
     late TogetherHub hub;
     late FakeEngine engine;
     var deny = false;
+    String? expiresAt;
 
     setUp(() async {
+      expiresAt = null;
       TestWidgetsFlutterBinding.ensureInitialized();
       HttpOverrides.global = null;
       deny = false;
@@ -322,6 +324,19 @@ void main() {
                 'urls': ['turn:turn.example.org:3478'],
                 'username': '1:me',
                 'credential': 'c',
+              },
+            ],
+            'expiresAt': expiresAt,
+          },
+        ),
+        ('GET', '/api/v1/ice-servers') => (
+          200,
+          {
+            'iceServers': [
+              {
+                'urls': ['turn:turn.example.org:3478'],
+                'username': '2:me',
+                'credential': 'd',
               },
             ],
             'expiresAt': null,
@@ -432,5 +447,27 @@ void main() {
       expect(voice().problem, VoiceProblem.microphone);
       expect(server.requests.any((r) => r.$2 == '/api/v1/calls'), isFalse);
     });
+
+    test(
+      'relay credentials about to run out are renewed for new connections',
+      () async {
+        expiresAt = DateTime.now()
+            .add(const Duration(minutes: 5))
+            .toIso8601String();
+        await voice().join();
+        await until(
+          () => server.requests.any((r) => r.$2 == '/api/v1/ice-servers'),
+        );
+        server.push('signal', {
+          'call': 'call1',
+          'from': 'can',
+          'device': 'dev-can',
+          'kind': 'offer',
+          'data': {'type': 'offer', 'sdp': offerSdp},
+        }, id: '17-c');
+        await until(() => engine.links.length == 2);
+        expect(engine.ice!.single['username'], '2:me');
+      },
+    );
   });
 }

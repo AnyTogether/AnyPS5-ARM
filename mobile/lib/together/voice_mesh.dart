@@ -75,7 +75,9 @@ class VoiceMesh {
 
   final String me;
   final VoiceEngine engine;
-  final List<Map<String, dynamic>> iceServers;
+
+  /// Relays for the connections made from now on; renewed before their credentials run out.
+  List<Map<String, dynamic>> iceServers;
   final bool Function(String to, String device, String kind, Object? data)
   signal;
   final void Function() onChange;
