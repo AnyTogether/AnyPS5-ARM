@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../social_strings.dart';
 import '../strings.dart';
+import '../together/notifications.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
@@ -9,12 +10,21 @@ import 'feed_view.dart';
 import 'friends_view.dart';
 import 'leaderboard_view.dart';
 import 'messages_view.dart';
+import 'notifications_view.dart';
 import 'party_view.dart';
 import 'profile_edit.dart';
 import 'profile_view.dart';
 import 'together_widgets.dart';
 
-enum TogetherTab { friends, feed, messages, party, leaderboards, profile }
+enum TogetherTab {
+  friends,
+  feed,
+  messages,
+  party,
+  leaderboards,
+  profile,
+  notifications,
+}
 
 /// AnyTogether's own screen over whatever the phone shows: a rail of what there is on the left,
 /// the part picked on the right, the way a phone held sideways has room for both.
@@ -97,6 +107,25 @@ class _TogetherScreenState extends State<TogetherScreen> {
   /// Calls a friend; the call shows over every screen.
   void _call(Person friend) => widget.hub.calls.ring(friend);
 
+  /// Where a notification leads: the requests, the conversation, the party, or the person.
+  void _openNotice(Notice notice) {
+    final actor = notice.actor;
+    switch (notice.kind) {
+      case NoticeKind.friendRequest:
+        _show(TogetherTab.friends);
+      case NoticeKind.message:
+        final id = notice.data['conversationId'] as String? ?? notice.subjectId;
+        _show(TogetherTab.messages);
+        if (id != null) widget.hub.messages.show(id).catchError((_) {});
+      case NoticeKind.partyInvite:
+        _show(TogetherTab.party);
+      case NoticeKind.friendAccepted || NoticeKind.missedCall
+          when actor != null:
+        _profile(actor.handle);
+      case _:
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
@@ -137,6 +166,11 @@ class _TogetherScreenState extends State<TogetherScreen> {
                         TogetherTab.leaderboards => LeaderboardPane(
                           hub: widget.hub,
                           onProfile: _profile,
+                        ),
+                        TogetherTab.notifications => NotificationsPane(
+                          hub: widget.hub,
+                          gameName: widget.gameName,
+                          onOpen: _openNotice,
                         ),
                         TogetherTab.messages => MessagesPane(hub: widget.hub),
                         TogetherTab.party => PartyPane(hub: widget.hub),
@@ -197,12 +231,17 @@ class _TogetherScreenState extends State<TogetherScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                texts.together,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  texts.together,
+                                  maxLines: 1,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                               if (handle != null)
@@ -220,6 +259,14 @@ class _TogetherScreenState extends State<TogetherScreen> {
                           ),
                         ),
                       ),
+                    ),
+                    NotificationBell(
+                      hub: hub,
+                      compact: true,
+                      color: _tab == TogetherTab.notifications
+                          ? togetherAccent
+                          : Colors.white70,
+                      onPressed: () => _show(TogetherTab.notifications),
                     ),
                   ],
                 ),

@@ -2,6 +2,7 @@ import 'strings.dart';
 import 'together/activity.dart';
 import 'together/calls.dart';
 import 'together/leaderboards.dart';
+import 'together/notifications.dart';
 import 'together/profiles.dart';
 
 /// AnyTogether's social texts (profiles, the feed, leaderboards, calls), English and Turkish,
@@ -231,6 +232,44 @@ extension SocialTexts on Strings {
       : _fill('linkBlockedDomain', {'domain': domain});
   String get cannotMessage => _s('cannotMessage');
 
+  // Notifications
+
+  String get notifications => _s('notifications');
+  String get notificationsLead => _s('notificationsLead');
+  String get markAllRead => _s('markAllRead');
+  String get noNotifications => _s('noNotifications');
+  String get notifySettings => _s('notifySettings');
+  String get notifySettingsLead => _s('notifySettingsLead');
+  String noticeKind(NoticeKind kind) => _s('nk_${kind.wire}');
+  String get digest => _s('digest');
+  String get digestHint => _s('digestHint');
+  String get digestNoEmail => _s('digestNoEmail');
+  String get gameInviteHint => _s('n_game_invite_hint');
+  String get noPushYet => _s('noPushYet');
+
+  /// What a notification says, with {name} left for the caller to set in bold.
+  String notice(Notice n, {String? Function(String titleId)? gameName}) {
+    final group = n.data['group'] == true;
+    final count = n.count;
+    final title = '${n.data['title'] ?? ''}';
+    final key = switch (n.kind) {
+      NoticeKind.message when group =>
+        count > 1 ? 'n_messages_group' : 'n_message_group',
+      NoticeKind.message => count > 1 ? 'n_messages' : 'n_message',
+      _ => 'n_${n.kind.wire}',
+    };
+    final titleId = '${n.data['titleId'] ?? ''}';
+    return _fill(key, {
+      'n': count,
+      'title': title,
+      'game': gameName?.call(titleId) ?? titleId,
+    });
+  }
+
+  String get someone => _s('n_someone');
+  String warningReason(String reason) =>
+      _fill('n_warning_reason', {'reason': reason});
+
   // Times and numbers
 
   /// "42 min", "3 h 5 min".
@@ -292,6 +331,37 @@ extension SocialTexts on Strings {
 }
 
 const _en = {
+  'notifications': 'Notifications',
+  'notificationsLead': 'Friend requests, invites, missed calls, and messages that came while you were away.',
+  'markAllRead': 'Mark all read',
+  'noNotifications':
+      'Nothing new. Friend requests, invites and missed calls show up here.',
+  'notifySettings': 'What to show',
+  'notifySettingsLead':
+      'Choose what you hear about. Everything shows under the bell.',
+  'nk_friend_request': 'Friend requests',
+  'nk_friend_accepted': 'Accepted requests',
+  'nk_message': 'Messages while you are away',
+  'nk_party_invite': 'Party invites',
+  'nk_game_invite': 'Game invites',
+  'nk_missed_call': 'Missed calls',
+  'digest': 'Mail digest',
+  'digestHint': 'A mail about unread messages and friend requests while you are away, at most every 6 hours. Message text is never mailed.',
+  'digestNoEmail': 'Your account has no email address to mail.',
+  'noPushYet': 'The phone shows these while the app is open; notifications with the app closed are not here yet.',
+  'n_friend_request': '{name} wants to be your friend.',
+  'n_friend_accepted': '{name} accepted your friend request.',
+  'n_message': '{name} sent you a message.',
+  'n_messages': '{name} sent {n} messages.',
+  'n_message_group': '{name} wrote in {title}.',
+  'n_messages_group': '{name} and others wrote {n} messages in {title}.',
+  'n_party_invite': '{name} invited you to their party.',
+  'n_game_invite': '{name} invited you to play {game}.',
+  'n_game_invite_hint': 'Join from your launcher.',
+  'n_missed_call': 'Missed call from {name}.',
+  'n_warning': 'A moderator warned you.',
+  'n_warning_reason': 'Reason: {reason}',
+  'n_someone': 'Someone',
   'callFriend': 'Call {name}',
   'voiceCall': 'Voice call',
   'callingYou': '{name} is calling',
@@ -455,6 +525,36 @@ const _en = {
 };
 
 const _tr = {
+  'notifications': 'Bildirimler',
+  'notificationsLead': 'Arkadaşlık istekleri, davetler, cevapsız aramalar ve sen yokken gelen mesajlar.',
+  'markAllRead': 'Hepsini okundu yap',
+  'noNotifications': 'Yeni bir şey yok. Arkadaşlık istekleri, davetler ve cevapsız aramalar burada görünür.',
+  'notifySettings': 'Neler gösterilsin',
+  'notifySettingsLead':
+      'Neyi duymak istediğini seç. Hepsi zilin altında görünür.',
+  'nk_friend_request': 'Arkadaşlık istekleri',
+  'nk_friend_accepted': 'Kabul edilen istekler',
+  'nk_message': 'Sen yokken gelen mesajlar',
+  'nk_party_invite': 'Parti davetleri',
+  'nk_game_invite': 'Oyun davetleri',
+  'nk_missed_call': 'Cevapsız aramalar',
+  'digest': 'E-posta özeti',
+  'digestHint': 'Sen yokken okunmamış mesajlar ve arkadaşlık istekleri için en fazla 6 saatte bir e-posta. Mesaj metni asla gönderilmez.',
+  'digestNoEmail': 'Hesabında e-posta adresi yok.',
+  'noPushYet': 'Telefon bunları uygulama açıkken gösterir; uygulama kapalıyken bildirim henüz yok.',
+  'n_friend_request': '{name} arkadaşın olmak istiyor.',
+  'n_friend_accepted': '{name} arkadaşlık isteğini kabul etti.',
+  'n_message': '{name} sana mesaj gönderdi.',
+  'n_messages': '{name} sana {n} mesaj gönderdi.',
+  'n_message_group': '{name}, {title} grubuna yazdı.',
+  'n_messages_group': '{name} ve diğerleri {title} grubuna {n} mesaj yazdı.',
+  'n_party_invite': '{name} seni partisine çağırdı.',
+  'n_game_invite': '{name} seni {game} oynamaya çağırdı.',
+  'n_game_invite_hint': "Launcher'ından katıl.",
+  'n_missed_call': '{name} seni aradı, açamadın.',
+  'n_warning': 'Bir moderatör seni uyardı.',
+  'n_warning_reason': 'Sebep: {reason}',
+  'n_someone': 'Biri',
   'callFriend': '{name} kişisini ara',
   'voiceCall': 'Sesli arama',
   'callingYou': '{name} arıyor',

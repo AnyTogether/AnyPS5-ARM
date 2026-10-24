@@ -4,6 +4,7 @@ import 'calls.dart';
 import 'feed.dart';
 import 'friends.dart';
 import 'messages.dart';
+import 'notifications.dart';
 import 'parties.dart';
 import 'share_play.dart';
 import 'share_play_webrtc.dart';
@@ -31,6 +32,8 @@ class TogetherHub extends ChangeNotifier {
     parties = Parties(account: account, socket: this.socket)
       ..addListener(notifyListeners);
     feed = Feed(account: account, socket: this.socket)
+      ..addListener(notifyListeners);
+    notifications = Notifications(account: account, socket: this.socket)
       ..addListener(notifyListeners);
     voice = Voice(
       account: account,
@@ -62,6 +65,9 @@ class TogetherHub extends ChangeNotifier {
   late final Messages messages;
   late final Parties parties;
   late final Feed feed;
+
+  /// The bell: what happened while away, and its unread count.
+  late final Notifications notifications;
 
   /// Calls with a friend, ringing over any screen; and who is typing where.
   late final Calls calls;
@@ -95,6 +101,7 @@ class TogetherHub extends ChangeNotifier {
     messages.clear();
     parties.clear();
     feed.clear();
+    notifications.clear();
     sharePlays.clear();
     if (user != null) socket.start();
     notifyListeners();
@@ -112,6 +119,7 @@ class TogetherHub extends ChangeNotifier {
     sharePlays.dispose();
     parties.dispose();
     feed.dispose();
+    notifications.dispose();
     socket.dispose();
     super.dispose();
   }

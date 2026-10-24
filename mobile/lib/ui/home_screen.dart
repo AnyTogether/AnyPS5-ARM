@@ -7,6 +7,7 @@ import '../protocol/messages.dart';
 import '../strings.dart';
 import '../together/together_hub.dart';
 import 'about_sheet.dart';
+import 'notifications_view.dart';
 import 'together_screen.dart';
 import 'together_sheet.dart';
 import 'together_widgets.dart';
@@ -135,6 +136,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       if (widget.status != null) widget.status!,
                       const Spacer(),
+                      if (widget.together case final hub?)
+                        NotificationBell(
+                          hub: hub,
+                          onPressed: () =>
+                              _openTogether(hub, TogetherTab.notifications),
+                        ),
                       if (widget.together case final hub?)
                         ListenableBuilder(
                           listenable: hub,
