@@ -365,6 +365,8 @@ extension AppModel {
     func togetherSignOut(then: (@MainActor () -> Void)? = nil) {
         leaveVoice()
         let client = together
+        // What waits stays in this account's outbox, for when it signs in again.
+        togetherFlush?.cancel()
         togetherSocket?.stop()
         togetherSocket = nil
         withAnimation(Motion.overlay) {
