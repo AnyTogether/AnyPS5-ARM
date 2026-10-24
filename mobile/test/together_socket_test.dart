@@ -158,4 +158,46 @@ void main() {
       await until(() => server.sockets.single.closeCode != null);
     },
   );
+
+  test('topics watched by each part are sent together, and again after a reconnect', () async {
+    final live = await socket();
+    // Asked before the socket is up: sent once it is.
+    live.watchTopics('board', {'lfg'});
+    live.start();
+    await until(() => server.sent('watch').isNotEmpty);
+    expect(server.sent('watch').last, {
+      'op': 'watch',
+      'topics': ['lfg'],
+    });
+    live.watchTopics('live', {'discover'});
+    await until(() => server.sent('watch').length == 2);
+    expect(server.sent('watch').last['topics'], ['lfg', 'discover']);
+    // The same again sends nothing.
+    live.watchTopics('live', {'discover'});
+    live.watchTopics('board', {'lfg:PPSA01234'});
+    await until(() => server.sent('watch').length == 3);
+    expect(server.sent('watch').last['topics'], ['lfg:PPSA01234', 'discover']);
+    live.watchTopics('board', const {});
+    await until(() => server.sent('watch').length == 4);
+    expect(server.sent('watch').last['topics'], ['discover']);
+    // The gateway forgets a socket's topics with it: the new one hears them again.
+    final next = server.connected();
+    await server.sockets.last.close(1001);
+    await next;
+    await until(() => server.sent('watch').length == 5);
+    expect(server.sent('watch').last['topics'], ['discover']);
+    // Nothing watched any more: an empty list replaces the last one.
+    live.watchTopics('live', const {});
+    await until(() => server.sent('watch').length == 6);
+    expect(server.sent('watch').last['topics'], isEmpty);
+  });
+
+  test('at most eight topics, the oldest asked first', () async {
+    final live = await socket();
+    live.start();
+    await until(() => live.status == SocketStatus.ready);
+    live.watchTopics('many', {for (var n = 0; n < 10; n++) 'lfg:PPSA0000$n'});
+    await until(() => server.sent('watch').isNotEmpty);
+    expect(server.sent('watch').last['topics'], hasLength(8));
+  });
 }
