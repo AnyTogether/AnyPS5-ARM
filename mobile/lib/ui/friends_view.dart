@@ -13,6 +13,7 @@ class FriendsPane extends StatefulWidget {
     required this.hub,
     this.gameName,
     this.onMessage,
+    this.onProfile,
   });
 
   final TogetherHub hub;
@@ -20,6 +21,9 @@ class FriendsPane extends StatefulWidget {
 
   /// Writes to a friend, by id.
   final ValueChanged<String>? onMessage;
+
+  /// Opens someone's profile, by handle.
+  final ValueChanged<String>? onProfile;
 
   @override
   State<FriendsPane> createState() => _FriendsPaneState();
@@ -141,6 +145,9 @@ class _FriendsPaneState extends State<FriendsPane> {
                 _PersonRow(
                   person: person,
                   subtitle: '@${person.handle}',
+                  onTap: widget.onProfile == null
+                      ? null
+                      : () => widget.onProfile!(person.handle),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -175,6 +182,9 @@ class _FriendsPaneState extends State<FriendsPane> {
             for (final friend in friends.friends)
               _PersonRow(
                 person: friend.person,
+                onTap: widget.onProfile == null
+                    ? null
+                    : () => widget.onProfile!(friend.person.handle),
                 presence: friend.presence.state,
                 subtitle: presenceText(texts, friend.presence, widget.gameName),
                 subtitleColor: friend.presence.state == PresenceState.offline
@@ -236,9 +246,11 @@ class _PersonRow extends StatelessWidget {
     this.subtitleColor = Colors.white54,
     this.presence,
     this.trailing,
+    this.onTap,
   });
 
   final Person person;
+  final VoidCallback? onTap;
   final String subtitle;
   final Color subtitleColor;
   final PresenceState? presence;
@@ -249,27 +261,37 @@ class _PersonRow extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 6),
     child: Row(
       children: [
-        Avatar(person: person, presence: presence),
-        const SizedBox(width: 12),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                person.displayName,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Row(
+              children: [
+                Avatar(person: person, presence: presence),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        person.displayName,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: subtitleColor, fontSize: 12.5),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Text(
-                subtitle,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: subtitleColor, fontSize: 12.5),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         ?trailing,

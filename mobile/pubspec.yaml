@@ -40,6 +40,7 @@ dependencies:
   url_launcher: ^6.3.3
   sensors_plus: ^7.1.1
   flutter_webrtc: ^1.6.2
+  image_picker: ^1.2.4
 
 dev_dependencies:
   flutter_test:
