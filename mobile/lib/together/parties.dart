@@ -20,6 +20,7 @@ class Party {
     required this.invited,
     required this.callId,
     required this.inCall,
+    this.muted = const {},
   });
 
   factory Party.fromJson(Map<String, dynamic> json) {
@@ -40,6 +41,12 @@ class Party {
       inCall: call is Map<String, dynamic>
           ? {for (final id in (call['in'] as List? ?? const [])) id as String}
           : const {},
+      muted: call is Map<String, dynamic>
+          ? {
+              for (final id in (call['muted'] as List? ?? const []))
+                id as String,
+            }
+          : const {},
     );
   }
 
@@ -52,6 +59,9 @@ class Party {
   /// The party's voice call, and who is talking in it.
   final String? callId;
   final Set<String> inCall;
+
+  /// Who in the call muted themselves; everyone sees it.
+  final Set<String> muted;
 
   bool get full => members.length >= maxPartySize;
 
@@ -72,6 +82,7 @@ class Party {
     invited: invited ?? this.invited,
     callId: callId == null ? this.callId : callId(),
     inCall: inCall ?? this.inCall,
+    muted: muted,
   );
 }
 

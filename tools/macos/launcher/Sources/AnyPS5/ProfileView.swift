@@ -33,6 +33,7 @@ extension AppModel {
         withAnimation(Motion.overlay) { overlay = .profile }
         Sounds.shared.play(.select)
         profileTask?.cancel()
+        loadProfileActivity(handle)
         profileTask = Task {
             do {
                 let page = try await together.profilePage(handle, card: card)
@@ -74,7 +75,7 @@ extension AppModel {
 
     /// Up and down in a column, left and right between the games and the trophies.
     func profileCommand(_ command: Command) {
-        let counts = [profileGames.count, profileTrophies.count]
+        let counts = [profileGames.count, profileTrophies.count, social.profileActivity?.count ?? 0]
         switch command {
         case .up, .down:
             let count = counts[profileColumn]
@@ -83,8 +84,9 @@ extension AppModel {
             profileIndex = next
             Sounds.shared.play(.move)
         case .left, .right:
-            let column = command == .right ? 1 : 0
-            guard column != profileColumn, counts[column] > 0 else { return }
+            // The next column that has something, that way.
+            let way = command == .right ? 1 : -1
+            guard let column = stride(from: profileColumn + way, to: way > 0 ? counts.count : -1, by: way).first(where: { counts[$0] > 0 }) else { return }
             withAnimation(Motion.focus) {
                 profileColumn = column
                 profileIndex = min(profileIndex, counts[column] - 1)
@@ -122,7 +124,9 @@ struct ProfileView: View {
                     gamesColumn(page)
                         .frame(maxWidth: .infinity)
                     trophiesColumn(page)
-                        .frame(width: 560 * scale)
+                        .frame(width: 440 * scale)
+                    ProfileActivityColumn()
+                        .frame(width: 420 * scale)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
             } else {

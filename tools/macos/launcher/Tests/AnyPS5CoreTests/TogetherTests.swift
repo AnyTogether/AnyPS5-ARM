@@ -5,6 +5,8 @@ import XCTest
 final class FakeTogether: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest, Data?) -> (Int, Any))?
     nonisolated(unsafe) static var requests: [(URLRequest, Data?)] = []
+    /// How long an answer takes; 0 answers at once.
+    nonisolated(unsafe) static var delay: TimeInterval = 0
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -23,7 +25,21 @@ final class FakeTogether: URLProtocol, @unchecked Sendable {
             return data
         }
         FakeTogether.requests.append((request, body))
+        // The answer is decided now, so a late one never reaches the next test's handler.
         let (status, json) = FakeTogether.handler?(request, body) ?? (404, ["code": "not_found"])
+        guard FakeTogether.delay == 0 else {
+            let request = request
+            nonisolated(unsafe) let json = json
+            DispatchQueue.global().asyncAfter(deadline: .now() + FakeTogether.delay) { [weak self] in self?.answer(request, status, json) }
+            return
+        }
+        answer(request, status, json)
+    }
+
+    private var stopped = false
+
+    private func answer(_ request: URLRequest, _ status: Int, _ json: Any) {
+        guard !stopped else { return }
         let data = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
         let type = status >= 400 ? "application/problem+json" : "application/json"
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": type])!, cacheStoragePolicy: .notAllowed)
@@ -31,7 +47,7 @@ final class FakeTogether: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() { stopped = true }
 }
 
 final class TogetherTests: XCTestCase {
@@ -298,7 +314,7 @@ final class TogetherSyncTests: XCTestCase {
     override func tearDown() { try? FileManager.default.removeItem(at: folder) }
 
     func sync() -> TogetherSync {
-        TogetherSync(client: client, file: folder.appendingPathComponent("outbox.json"), deviceName: "Utku's Mac", model: "Mac15,9")
+        TogetherSync(client: client, folder: folder, deviceName: "Utku's Mac", model: "Mac15,9")
     }
 
     static let set = TogetherSync.TrophySetRecord(titleId: "PPSA01234", gameName: "Silksong", language: "en", trophies: [
@@ -359,6 +375,109 @@ final class TogetherSyncTests: XCTestCase {
         XCTAssertTrue(later.isEmpty)
     }
 
+    static func tokens(user: String, access: String) -> [String: Any] {
+        ["accessToken": access, "expiresIn": 900, "refreshToken": "refresh-\(user)",
+         "user": ["id": user, "handle": user, "displayName": user, "avatar": NSNull()]]
+    }
+
+    func signIn(_ client: TogetherClient, as user: String, access: String) async throws {
+        FakeTogether.handler = { _, _ in (200, Self.tokens(user: user, access: access)) }
+        _ = try await client.verifyEmail("\(user)@example.com", code: "111111")
+    }
+
+    /// Answers every batch as stored; keeps which token sent which sessions.
+    func acceptEverything() -> () -> [(token: String, sessions: Int)] {
+        var sent: [(String, Int)] = []
+        FakeTogether.handler = { request, body in
+            let path = request.url!.path
+            if path.hasSuffix("/me/sessions") {
+                let count = (try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: [Any]])?["sessions"]?.count ?? 0
+                sent.append((request.value(forHTTPHeaderField: "Authorization") ?? "", count))
+                return (200, ["results": (0 ..< count).map { ["index": $0, "status": "stored"] }])
+            }
+            if path.hasSuffix("/me/trophies") { return (200, ["results": [["index": 0, "status": "stored"]]]) }
+            return (201, [:])
+        }
+        return { sent }
+    }
+
+    /// Signed out and in as someone else: what the first account played stays theirs, sent only
+    /// when they are back.
+    func testAnotherAccountDoesNotGetTheOutboxOfTheFirst() async throws {
+        let sync = sync()
+        sync.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date(timeIntervalSince1970: 1_800_000_000), endedAt: Date(timeIntervalSince1970: 1_800_003_600), exit: "normal")
+        try await signIn(client, as: "u2", access: "access-u2")
+        let sent = acceptEverything()
+        try await sync.flush()
+        XCTAssertTrue(sent().isEmpty, "u1's session went to u2")
+        XCTAssertTrue(sync.isEmpty, "u2 has nothing waiting")
+        sync.recordSession(titleId: "PPSA05678", gameName: "Stray", startedAt: Date(timeIntervalSince1970: 1_800_010_000), endedAt: Date(timeIntervalSince1970: 1_800_011_000), exit: "normal")
+        try await sync.flush()
+        XCTAssertEqual(sent().map(\.token), ["Bearer access-u2"])
+        try await signIn(client, as: "u1", access: "access-u1-again")
+        let back = acceptEverything()
+        try await sync.flush()
+        XCTAssertEqual(back().map(\.token), ["Bearer access-u1-again"], "u1's session waits for u1")
+        XCTAssertEqual(back().first?.sessions, 1)
+    }
+
+    /// Another server, even with the same user ID: nothing recorded for the first goes there.
+    func testAnotherServerDoesNotGetTheOutboxOfTheFirst() async throws {
+        let first = sync()
+        first.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date(timeIntervalSince1970: 1_800_000_000), endedAt: Date(timeIntervalSince1970: 1_800_003_600), exit: "normal")
+        first.recordTrophies(Self.set)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeTogether.self]
+        let other = TogetherClient(base: URL(string: "https://other.test")!, store: TokenStore(file: folder.appendingPathComponent("other.json")),
+                                   session: URLSession(configuration: configuration), clientName: "launcher-macos/test")
+        try await signIn(other, as: "u1", access: "access-other")
+        var hosts: [String] = []
+        let sent = acceptEverything()
+        let accept = FakeTogether.handler
+        FakeTogether.handler = { request, body in
+            hosts.append("\(request.httpMethod!) \(request.url!.host!)\(request.url!.path)")
+            return accept!(request, body)
+        }
+        let second = TogetherSync(client: other, folder: folder, deviceName: "Utku's Mac", model: "Mac15,9")
+        try await second.flush()
+        XCTAssertTrue(sent().isEmpty)
+        XCTAssertFalse(hosts.contains { $0.contains("/games/") || $0.contains("/trophy-sets/") || $0.contains("/me/trophies") }, "\(hosts)")
+        XCTAssertTrue(second.isEmpty)
+        XCTAssertFalse(first.isEmpty, "still waiting for the first server")
+    }
+
+    /// The outbox one file held before: kept by the account signed in, then gone.
+    func testAnOutboxFromBeforeGoesToTheAccountSignedIn() async throws {
+        let session: [String: Any] = ["id": "s-1", "titleId": "PPSA01234", "startedAt": "2027-01-15T08:00:00Z", "endedAt": "2027-01-15T09:00:00Z", "exit": "normal"]
+        let legacy: [String: Any] = ["deviceId": "d-legacy", "deviceRegistered": true, "gameNames": ["PPSA01234": "Silksong"], "taughtGames": ["PPSA01234"],
+                                     "sets": [:], "uploadedSets": [], "sentTrophies": [], "sessions": [session]]
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: legacy).write(to: folder.appendingPathComponent("outbox.json"))
+        let sent = acceptEverything()
+        let sync = sync()
+        XCTAssertFalse(sync.isEmpty)
+        try await sync.flush()
+        XCTAssertEqual(sent().map(\.sessions), [1])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("outbox.json").path))
+        XCTAssertEqual(FakeTogether.requests.first { $0.0.url!.path.hasSuffix("/me/sessions") }.flatMap { String(data: $0.1 ?? Data(), encoding: .utf8) }?.contains("d-legacy"), true)
+    }
+
+    /// A device ID another account registered on this server: the outbox takes a new one.
+    func testADeviceIDOfAnotherAccountIsReplaced() async throws {
+        var devices: [String] = []
+        FakeTogether.handler = { request, body in
+            guard request.url!.path.hasSuffix("/me/devices") else { return (201, [:]) }
+            devices.append((try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any])?["id"] as? String ?? "")
+            return devices.count == 1 ? (409, ["code": "conflict", "status": 409, "title": "This device ID belongs to another account"]) : (201, [:])
+        }
+        let sync = sync()
+        sync.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date(timeIntervalSince1970: 1_800_000_000), endedAt: Date(timeIntervalSince1970: 1_800_003_600), exit: "normal")
+        do { try await sync.flush() } catch {}
+        _ = try? await sync.flush()
+        XCTAssertEqual(devices.count, 2)
+        XCTAssertNotEqual(devices[0], devices[1])
+    }
+
     func testTheSetHashFollowsTheTrophiesNotTheirTexts() {
         var other = Self.set
         other.trophies[1].name = "Bağlandı"
@@ -381,7 +500,7 @@ final class TogetherSyncLiveTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         let code = try XCTUnwrap(try String(contentsOfFile: log, encoding: .utf8).components(separatedBy: "\n").last { $0.contains(email) }?.components(separatedBy: ": ").last?.prefix(6))
         let user = try await client.verifyEmail(email, code: String(code))
-        let sync = TogetherSync(client: client, file: folder.appendingPathComponent("outbox.json"), deviceName: "Test Mac", model: "Mac15,9")
+        let sync = TogetherSync(client: client, folder: folder, deviceName: "Test Mac", model: "Mac15,9")
         sync.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date().addingTimeInterval(-3600), endedAt: Date(), exit: "normal")
         sync.recordTrophies(TogetherSyncTests.set)
         try await sync.flush()

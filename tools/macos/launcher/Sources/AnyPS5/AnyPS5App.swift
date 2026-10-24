@@ -53,6 +53,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// A call is left on the server before the app goes (waiting two seconds at most), so friends
+    /// do not keep a silent member.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard let leaving = AppModel.beforeQuit?() else { return .terminateNow }
+            Task { @MainActor in
+                await leaving.value
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+    }
+
     /// anyps5:// links, and folders opened with AnyPS5 from Finder.
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated { AppModel.received(urls) }
@@ -75,9 +88,16 @@ struct RootView: View {
                         .transition(.opacity)
                 }
                 overlays
+                if model.share.watching != nil {
+                    ShareWatchView().transition(.opacity)
+                }
                 if let game = model.starting {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                }
+                if let call = model.ringing, model.pairing == nil {
+                    RingingCard(call: call)
+                        .transition(.opacity.combined(with: .scale(scale: 1.03)))
                 }
                 if let request = model.pairing {
                     PairingCard(request: request)
@@ -140,6 +160,16 @@ struct RootView: View {
             MessagesView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .profile:
             ProfileView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .feed:
+            FeedView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .leaderboard:
+            LeaderboardView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .notifications:
+            SidePanel(title: TS.text(.notifTitle), subtitle: model.notificationsSubtitle)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .compat:
+            SidePanel(title: model.compatTitle, subtitle: TS.text(.compatSubtitle))
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .log:
             LogView().transition(.opacity)
         case .trophies:

@@ -6,7 +6,7 @@ import AVFoundation
 final class Sounds {
     static let shared = Sounds()
 
-    enum Cue { case move, select, back, unlocked }
+    enum Cue { case move, select, back, unlocked, ring }
 
     var enabled = true
     /// 0 to 1, on top of the sounds' own soft level.
@@ -31,6 +31,8 @@ final class Sounds {
         buffers[.select] = tone([(880, 0.0, 0.07), (1320, 0.05, 0.1)], decay: 32)
         buffers[.back] = tone([(990, 0.0, 0.06), (660, 0.045, 0.09)], decay: 34)
         buffers[.unlocked] = tone([(660, 0.0, 0.12), (990, 0.09, 0.14), (1320, 0.18, 0.3)], decay: 12)
+        // A friend calling: two soft trills.
+        buffers[.ring] = tone([(988, 0.0, 0.11), (1319, 0.1, 0.11), (988, 0.2, 0.11), (1319, 0.3, 0.16)], decay: 5)
     }
 
     func play(_ cue: Cue) {

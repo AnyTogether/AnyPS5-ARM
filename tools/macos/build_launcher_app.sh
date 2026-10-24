@@ -7,6 +7,7 @@
 # provides the loader and MoltenVK that every unlocked title carries. MoltenVK is patched here
 # (tools/macos/moltenvk_patches.py), so the launcher needs neither Python nor the developer tools.
 set -eu
+. "$(dirname "$0")/toolkit_layout.sh"
 
 if [ $# -ne 3 ]; then
     echo "usage: $0 <build dir> <Vulkan SDK macOS dir> <output dir>" >&2
@@ -19,7 +20,7 @@ mkdir -p "$3"
 output="$(cd "$3" && pwd)"
 source="$root/tools/macos/launcher"
 app="$output/AnyPS5.app"
-version="$(git -C "$root" describe --tags --always 2>/dev/null | sed "s/^v//" || echo 0.0.0)"
+version="$(toolkit_release_version "$root")"
 
 swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --product AnyPS5
 products="$(swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --show-bin-path)"
@@ -31,23 +32,14 @@ webrtc="$(find "$products" -maxdepth 2 -name WebRTC.framework -type d | head -n 
 
 rm -rf "$app"
 toolkit="$app/Contents/Resources/toolkit"
-mkdir -p "$app/Contents/MacOS" "$toolkit/libs" "$toolkit/vulkan" "$toolkit/patches" "$app/Contents/Resources/licenses"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/licenses"
 cp "$binary" "$app/Contents/MacOS/AnyPS5"
 mkdir -p "$app/Contents/Frameworks"
 ditto "$webrtc" "$app/Contents/Frameworks/WebRTC.framework"
 otool -l "$app/Contents/MacOS/AnyPS5" | grep -q "@executable_path/../Frameworks" ||
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$app/Contents/MacOS/AnyPS5"
 webrtc_license="$(find "$source/.build/artifacts" -path '*WebRTC.xcframework/LICENSE' | head -n 1)"
-cp "$build/core/relinker/relinker" "$toolkit/relinker"
-cp "$build"/core/libs/libs/*.prx "$toolkit/libs/"
-cp -L "$vulkan/lib/libvulkan.1.dylib" "$vulkan/lib/libMoltenVK.dylib" "$toolkit/vulkan/"
-chmod u+w "$toolkit/vulkan/"*.dylib
-python3 "$root/tools/macos/moltenvk_patches.py" "$toolkit/vulkan/libMoltenVK.dylib"
-sed 's#"library_path": "[^"]*"#"library_path": "../../../MacOS/libs/libMoltenVK.dylib"#' "$vulkan/share/vulkan/icd.d/MoltenVK_icd.json" > "$toolkit/vulkan/MoltenVK_icd.json"
-cp "$root"/tools/macos/patches/*.json "$toolkit/patches/"
-# An installed game made by another toolkit can be installed again (the launcher offers it).
-fingerprint="$(cat "$toolkit/relinker" "$toolkit"/libs/*.prx "$toolkit"/patches/*.json | shasum -a 256 | cut -c1-12)"
-echo "$version-$fingerprint" > "$toolkit/version.txt"
+make_toolkit "$root" "$build" "$vulkan" "$toolkit" "$version"
 cp "$root/LICENSE" "$app/Contents/Resources/licenses/AnyPS5-LICENSE.txt"
 cp "$vulkan/../Licenses/LICENSE.txt" "$app/Contents/Resources/licenses/VulkanSDK-LICENSE.txt"
 [ -z "$webrtc_license" ] || cp "$webrtc_license" "$app/Contents/Resources/licenses/WebRTC-LICENSE.txt"
@@ -80,7 +72,7 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
     <key>GCSupportsControllerUserInteraction</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>AnyPS5 sends your voice to the friends in your AnyTogether party while voice is on.</string>
+    <key>NSMicrophoneUsageDescription</key><string>AnyPS5 sends your voice to your friends in AnyTogether parties and calls while your microphone is on.</string>
     <key>NSLocalNetworkUsageDescription</key><string>AnyPS5 finds your phone on this network so it can be used as a controller.</string>
     <key>NSBonjourServices</key><array><string>_anyps5-remote._tcp</string></array>
     <key>CFBundleURLTypes</key>

@@ -76,6 +76,13 @@ extension TogetherClient {
         try JSONDecoder.together.decode(TogetherConversation.self, from: try await authorized("POST", "conversations", ["members": [userId]]))
     }
 
+    /// A group with friends (one or more); without a name its members stand for it.
+    public func startGroup(with userIds: [String], title: String? = nil) async throws -> TogetherConversation {
+        var body: [String: Any] = ["members": userIds, "group": true]
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty { body["title"] = String(title.prefix(80)) }
+        return try JSONDecoder.together.decode(TogetherConversation.self, from: try await authorized("POST", "conversations", body))
+    }
+
     /// The newest page, or the one before `before` (a message seq); oldest first.
     public func messages(in conversationId: String, before: Int? = nil, limit: Int = 50) async throws -> (messages: [TogetherMessage], more: Bool) {
         struct Page: Decodable { let messages: [TogetherMessage]; let more: Bool }
@@ -92,6 +99,43 @@ extension TogetherClient {
 
     public func markRead(_ conversationId: String, upTo seq: Int) async throws {
         _ = try await authorized("POST", "conversations/\(conversationId)/read", ["upToSeq": seq])
+    }
+}
+
+/// Who is typing where: someone shows as typing for a few seconds after they last said so, or
+/// until their message arrives.
+public struct TogetherTyping: Equatable, Sendable {
+    /// How often a client says it is typing, and how long it shows after.
+    public static let every: TimeInterval = 2
+    public static let shows: TimeInterval = 5
+
+    private var said: [String: [String: Date]] = [:]
+
+    public init() {}
+
+    public mutating func typing(_ userId: String, in conversation: String, at now: Date = Date()) {
+        said[conversation, default: [:]][userId] = now
+    }
+
+    /// Their message came: they stopped typing it.
+    public mutating func wrote(_ userId: String, in conversation: String) {
+        said[conversation]?[userId] = nil
+    }
+
+    /// Who types in the conversation now, in user ID order.
+    public func who(in conversation: String, at now: Date = Date()) -> [String] {
+        (said[conversation] ?? [:]).filter { now.timeIntervalSince($0.value) < TogetherTyping.shows }.keys.sorted()
+    }
+
+    /// Forgets what has stopped showing; true when anything went.
+    @discardableResult
+    public mutating func expire(at now: Date = Date()) -> Bool {
+        let before = said
+        said = said.compactMapValues { users in
+            let kept = users.filter { now.timeIntervalSince($0.value) < TogetherTyping.shows }
+            return kept.isEmpty ? nil : kept
+        }
+        return said != before
     }
 }
 

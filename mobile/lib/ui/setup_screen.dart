@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../connection/session.dart';
 import '../strings.dart';
+import '../together/together_hub.dart';
+import 'together_screen.dart';
+import 'together_widgets.dart';
 
 /// Getting connected, step by step: finding the Mac, the Mac allowing the phone, ready. Every
 /// step moves on by itself; when nothing is found, tips and an address field show.
@@ -15,6 +18,7 @@ class SetupScreen extends StatefulWidget {
     required this.showManual,
     required this.onAddress,
     required this.onRetry,
+    this.together,
   });
 
   final Session session;
@@ -24,6 +28,9 @@ class SetupScreen extends StatefulWidget {
   final bool showManual;
   final void Function(InternetAddress address) onAddress;
   final VoidCallback onRetry;
+
+  /// AnyTogether while signed in: friends and their share plays need no Mac nearby.
+  final TogetherHub? together;
 
   @override
   State<SetupScreen> createState() => _SetupScreenState();
@@ -66,52 +73,103 @@ class _SetupScreenState extends State<SetupScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF07080B),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _StepRow(
-                    state: findStep,
-                    title: found
-                        ? texts.found(macName ?? 'Mac')
-                        : texts.searching,
-                    detail: found ? null : texts.searchingDetail,
-                  ),
-                  if (!found && widget.showManual) _manual(texts),
-                  _StepRow(
-                    state: allowStep,
-                    title: refused
-                        ? (session.rejectedReason == 'busy'
-                              ? texts.busy
-                              : texts.refused)
-                        : texts.allowOnMac,
-                    detail: status == ConnectionStatus.pairing
-                        ? texts.sameCode
-                        : null,
-                    child:
-                        status == ConnectionStatus.pairing &&
-                            session.code != null
-                        ? _code(session.code!)
-                        : refused
-                        ? _retry(texts)
-                        : null,
-                  ),
-                  _StepRow(
-                    state: readyStep,
-                    title: texts.ready,
-                    detail: status == ConnectionStatus.connected
-                        ? texts.opening
-                        : null,
-                    last: true,
-                  ),
-                ],
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _steps(
+              texts,
+              session,
+              found,
+              refused,
+              macName,
+              findStep,
+              allowStep,
+              readyStep,
+            ),
+          ),
+          if (widget.together case final hub?)
+            Positioned(
+              right: 12,
+              top: 8,
+              child: SafeArea(
+                child: ListenableBuilder(
+                  listenable: hub,
+                  builder: (context, _) => hub.me == null
+                      ? const SizedBox.shrink()
+                      : IconButton(
+                          tooltip: texts.together,
+                          onPressed: () => openTogether(context, hub: hub),
+                          icon: CountBadge(
+                            count: hub.badge,
+                            child: const Icon(
+                              Icons.people_alt_rounded,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ),
+                ),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _steps(
+    Strings texts,
+    Session session,
+    bool found,
+    bool refused,
+    String? macName,
+    _StepState findStep,
+    _StepState allowStep,
+    _StepState readyStep,
+  ) {
+    final status = session.status;
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _StepRow(
+                  state: findStep,
+                  title: found
+                      ? texts.found(macName ?? 'Mac')
+                      : texts.searching,
+                  detail: found ? null : texts.searchingDetail,
+                ),
+                if (!found && widget.showManual) _manual(texts),
+                _StepRow(
+                  state: allowStep,
+                  title: refused
+                      ? (session.rejectedReason == 'busy'
+                            ? texts.busy
+                            : texts.refused)
+                      : texts.allowOnMac,
+                  detail: status == ConnectionStatus.pairing
+                      ? texts.sameCode
+                      : null,
+                  child:
+                      status == ConnectionStatus.pairing && session.code != null
+                      ? _code(session.code!)
+                      : refused
+                      ? _retry(texts)
+                      : null,
+                ),
+                _StepRow(
+                  state: readyStep,
+                  title: texts.ready,
+                  detail: status == ConnectionStatus.connected
+                      ? texts.opening
+                      : null,
+                  last: true,
+                ),
+              ],
             ),
           ),
         ),

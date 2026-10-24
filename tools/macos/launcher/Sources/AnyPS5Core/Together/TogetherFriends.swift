@@ -40,13 +40,16 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
         public let since: String?
         public let party: Party?
         public let game: Game?
+        /// The game they share for friends to watch.
+        public let share: TogetherSharePresence?
 
-        public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil) {
+        public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil, share: TogetherSharePresence? = nil) {
             self.state = state
             self.titleId = titleId
             self.since = since
             self.party = party
             self.game = game
+            self.share = share
         }
 
         public var playing: Bool { state == "in_game" }

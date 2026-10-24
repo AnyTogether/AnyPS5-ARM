@@ -68,11 +68,14 @@ class TogetherUser {
 
 /// An error AnyTogether answered with: RFC 9457 problem details with a stable code.
 class TogetherProblem implements Exception {
-  const TogetherProblem(this.status, this.code, this.title);
+  const TogetherProblem(this.status, this.code, this.title, [this.extra]);
 
   final int status;
   final String code;
   final String title;
+
+  /// The problem's extension members: the private `section`, the blocked link's `domain`.
+  final Map<String, dynamic>? extra;
 
   @override
   String toString() => title;
@@ -322,6 +325,51 @@ class TogetherAccount extends ChangeNotifier {
     Map<String, dynamic>? body,
   ]) => _authorized(method, path, body);
 
+  /// A signed-in upload of raw bytes (a picture), JSON back.
+  Future<Map<String, dynamic>> upload(
+    String path,
+    List<int> bytes,
+    String contentType,
+  ) async {
+    Future<Map<String, dynamic>> send() async => _send(
+      'PUT',
+      path,
+      null,
+      token: await _accessToken(),
+      bytes: bytes,
+      contentType: contentType,
+    );
+    try {
+      return await send();
+    } on TogetherProblem catch (problem) {
+      if (problem.status != 401 || _refresh == null) rethrow;
+      _accessExpiry = DateTime.fromMillisecondsSinceEpoch(0);
+      return send();
+    }
+  }
+
+  /// The profile's name or handle changed: the account shows the new one, and keeps it.
+  void renamed({String? handle, String? displayName}) {
+    final current = user;
+    if (current == null) return;
+    user = TogetherUser(
+      id: current.id,
+      handle: handle ?? current.handle,
+      displayName: displayName ?? current.displayName,
+    );
+    final saved = preferences.getString(_key);
+    if (saved != null) {
+      try {
+        final json = jsonDecode(saved) as Map<String, dynamic>;
+        json['user'] = user!.toJson();
+        preferences.setString(_key, jsonEncode(json));
+      } on Object {
+        // Kept for this run; the next sign-in saves it again.
+      }
+    }
+    notifyListeners();
+  }
+
   /// The access token for the realtime gateway; [renew] refreshes it first, after the gateway
   /// turned it down.
   Future<String> accessToken({bool renew = false}) {
@@ -378,6 +426,8 @@ class TogetherAccount extends ChangeNotifier {
     String path,
     Map<String, dynamic>? body, {
     String? token,
+    List<int>? bytes,
+    String? contentType,
   }) async {
     final request = await _http.openUrl(
       method,
@@ -391,7 +441,11 @@ class TogetherAccount extends ChangeNotifier {
     if (token != null) {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
     }
-    if (body != null) {
+    if (bytes != null) {
+      request.headers.set(HttpHeaders.contentTypeHeader, contentType!);
+      request.contentLength = bytes.length;
+      request.add(bytes);
+    } else if (body != null) {
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
     }
@@ -409,6 +463,7 @@ class TogetherAccount extends ChangeNotifier {
           response.statusCode,
           json['code'] as String,
           json['title'] as String? ?? '',
+          json,
         );
       }
       throw TogetherProblem(

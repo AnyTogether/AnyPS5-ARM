@@ -127,6 +127,40 @@ final class TogetherMessagesTests: TogetherSignedInCase {
         XCTAssertEqual(body()?["members"] as? [String], ["f1"])
     }
 
+    /// A group with friends, named or not: always a group, even with one friend.
+    func testAGroupWithFriends() async throws {
+        var group = Self.conversation("g1", unread: 0, last: 0)
+        group["kind"] = "group"
+        group["title"] = "Squad"
+        FakeTogether.handler = { [group] _, _ in (201, group) }
+        let made = try await client.startGroup(with: ["f1", "f2"], title: "  Squad ")
+        XCTAssertEqual(last(), "POST /api/v1/conversations")
+        XCTAssertEqual(body()?["members"] as? [String], ["f1", "f2"])
+        XCTAssertEqual(body()?["group"] as? Bool, true)
+        XCTAssertEqual(body()?["title"] as? String, "Squad")
+        XCTAssertEqual(made.kind, "group")
+        XCTAssertEqual(made.name(for: "u1"), "Squad")
+        _ = try await client.startGroup(with: ["f1"], title: " ")
+        XCTAssertNil(body()?["title"], "no name: the members stand for it")
+        XCTAssertEqual(body()?["group"] as? Bool, true)
+    }
+
+    /// Someone typing shows for a few seconds after they last said so, or until their message comes.
+    func testWhoIsTyping() {
+        var typing = TogetherTyping()
+        let start = Date(timeIntervalSince1970: 1000)
+        typing.typing("f2", in: "c1", at: start)
+        typing.typing("f1", in: "c1", at: start.addingTimeInterval(1))
+        typing.typing("f1", in: "c2", at: start)
+        XCTAssertEqual(typing.who(in: "c1", at: start.addingTimeInterval(2)), ["f1", "f2"])
+        XCTAssertEqual(typing.who(in: "c1", at: start.addingTimeInterval(5.5)), ["f1"], "f2 stopped saying so")
+        typing.wrote("f1", in: "c1")
+        XCTAssertEqual(typing.who(in: "c1", at: start.addingTimeInterval(2)), ["f2"])
+        XCTAssertTrue(typing.expire(at: start.addingTimeInterval(10)))
+        XCTAssertEqual(typing, TogetherTyping())
+        XCTAssertFalse(typing.expire(at: start.addingTimeInterval(11)))
+    }
+
     func testAPageOfHistoryAndOlderOnes() async throws {
         FakeTogether.handler = { _, _ in (200, ["messages": [Self.message(4), Self.message(5)], "more": true]) }
         let page = try await client.messages(in: "c1")
@@ -241,6 +275,25 @@ final class TogetherPartyTests: TogetherSignedInCase {
         _ = try await client.setParty("p1", open: false)
         XCTAssertEqual(last(), "PATCH /api/v1/parties/p1")
         XCTAssertEqual(body()?["privacy"] as? String, "invite")
+    }
+
+    /// The leader removes someone or hands the lead over; only the leader sees either, never for themself.
+    func testTheLeaderRemovesSomeoneAndHandsTheLeadOver() async throws {
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.kick("f1", from: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/kick")
+        XCTAssertEqual(body() as? [String: String], ["userId": "f1"])
+        var handed = Self.party(members: [Self.member("u1", "Utku"), Self.member("f1", "Ayşe")])
+        handed["leaderId"] = "f1"
+        FakeTogether.handler = { [handed] _, _ in (200, handed) }
+        let party = try await client.makeLeader("f1", of: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/leader")
+        XCTAssertEqual(body() as? [String: String], ["userId": "f1"])
+        XCTAssertTrue(party.isLeader("f1"))
+        XCTAssertFalse(party.canManage("f1", me: "u1"), "no longer the leader")
+        XCTAssertTrue(party.canManage("u1", me: "f1"))
+        XCTAssertFalse(party.canManage("f1", me: "f1"), "not yourself")
+        XCTAssertFalse(party.canManage("x9", me: "f1"), "not someone outside the party")
     }
 
     /// A friend's presence carries their party and the game they host.
@@ -389,6 +442,102 @@ final class TogetherCallTests: TogetherSignedInCase {
         FakeTogether.handler = { _, _ in (204, [:]) }
         try await client.leaveCall("call1")
         XCTAssertEqual(last(), "POST /api/v1/calls/call1/leave")
+    }
+
+    static let direct: [String: Any] = [
+        "call": ["id": "call2", "kind": "direct", "partyId": NSNull(), "startedBy": "f1", "calleeId": "u1",
+                 "in": [["userId": "f1", "device": "sess-f1", "muted": true]],
+                 "startedAt": "2026-10-24T10:00:00.000Z", "answeredAt": NSNull(), "endedAt": NSNull()],
+        "iceServers": [["urls": ["stun:stun.example.org:3478"]]],
+        "expiresAt": "2026-10-24T22:00:00.000Z",
+    ]
+
+    /// A friend rings: answered here (the caller is in it already, so the answer calls them), or declined.
+    func testARingingCallAnsweredOrDeclined() async throws {
+        let json: [String: Any] = ["callId": "call2", "from": TogetherPartyTests.member("f1", "Ayşe"), "device": "sess-f1"]
+        let ringing = try XCTUnwrap(TogetherSocket.Event(id: "1", type: "call.ringing", json: JSONSerialization.data(withJSONObject: json)).decode(TogetherRinging.self))
+        XCTAssertEqual(ringing.id, "call2")
+        XCTAssertEqual(ringing.from.displayName, "Ayşe")
+        FakeTogether.handler = { _, _ in (200, Self.direct) }
+        let answered = try await client.answerCall("call2")
+        XCTAssertEqual(last(), "POST /api/v1/calls/call2/answer")
+        XCTAssertEqual(answered.call.kind, "direct")
+        XCTAssertEqual(answered.call.calleeId, "u1")
+        XCTAssertEqual(answered.peersToCall(me: "u1"), [TogetherCallPeer(userId: "f1", device: "sess-f1", muted: true)])
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.declineCall("call2")
+        XCTAssertEqual(last(), "POST /api/v1/calls/call2/decline")
+    }
+
+    func testCallingAFriend() async throws {
+        FakeTogether.handler = { _, _ in (201, Self.direct) }
+        _ = try await client.call(friend: "f1")
+        XCTAssertEqual(last(), "POST /api/v1/calls")
+        XCTAssertEqual(body() as? [String: String], ["userId": "f1"])
+    }
+
+    /// Relay credentials end (12 h): renewed ten minutes before, never sooner than a moment from now.
+    func testRelayCredentialsAreRenewedBeforeTheyEnd() async throws {
+        FakeTogether.handler = { _, _ in (200, ["iceServers": [["urls": ["turn:turn.example.org:3478"], "username": "1800043200:u1", "credential": "bmV3"]], "expiresAt": "2027-01-15T20:00:00.000Z"]) }
+        let fresh = try await client.iceServers()
+        XCTAssertEqual(last(), "GET /api/v1/ice-servers")
+        XCTAssertEqual(fresh.iceServers.first?.username, "1800043200:u1")
+        let end = try XCTUnwrap(fresh.expiresAt)
+        XCTAssertEqual(TogetherVoice.renewal(expiresAt: end, now: end.addingTimeInterval(-12 * 3600)), end.addingTimeInterval(-600))
+        XCTAssertEqual(TogetherVoice.renewal(expiresAt: end, now: end.addingTimeInterval(-120)), end.addingTimeInterval(-90), "late: soon, not at once")
+        XCTAssertNil(TogetherVoice.renewal(expiresAt: nil, now: end), "no relay, nothing to renew")
+    }
+
+    /// Who muted themselves, in a call and in the party's call; servers that do not say mean no one.
+    func testWhoIsMuted() throws {
+        let call = try JSONDecoder.together.decode(TogetherCallJoin.self, from: JSONSerialization.data(withJSONObject: Self.direct))
+        XCTAssertEqual(call.call.in.first?.muted, true)
+        let older = try JSONDecoder.together.decode(TogetherCallJoin.self, from: JSONSerialization.data(withJSONObject: Self.join))
+        XCTAssertEqual(older.call.in.map(\.muted), [false, false])
+        let party = try JSONDecoder.together.decode(TogetherParty.self, from: JSONSerialization.data(withJSONObject: TogetherPartyTests.party(call: ["id": "call1", "in": ["u1", "f1"], "muted": ["f1"]])))
+        XCTAssertEqual(party.call?.muted, ["f1"])
+        let quiet = try JSONDecoder.together.decode(TogetherParty.self, from: JSONSerialization.data(withJSONObject: TogetherPartyTests.party(call: ["id": "call1", "in": ["u1"]])))
+        XCTAssertEqual(quiet.call?.muted, [])
+    }
+
+    /// The gateway's event frames keep their data whole: a party with its members and call, a
+    /// signal with its description.
+    func testAnEventFrameKeepsNestedData() throws {
+        let party: [String: Any] = ["op": "event", "id": "7", "type": "party.updated",
+                                    "data": TogetherPartyTests.party(members: [TogetherPartyTests.member("u1", "Utku"), TogetherPartyTests.member("f1", "Ayşe")],
+                                                                     call: ["id": "call1", "in": ["u1", "f1"], "muted": ["f1"]])]
+        let event = try XCTUnwrap(TogetherSocket.event(party))
+        XCTAssertEqual(event.id, "7")
+        let decoded = try XCTUnwrap(event.decode(TogetherParty.self))
+        XCTAssertEqual(decoded.members.map(\.displayName), ["Utku", "Ayşe"])
+        XCTAssertEqual(decoded.call?.muted, ["f1"])
+        let signal: [String: Any] = ["op": "event", "id": "8", "type": "signal",
+                                     "data": ["call": "call1", "from": "f1", "device": "d", "kind": "offer", "data": ["type": "offer", "sdp": "v=0"]]]
+        XCTAssertEqual(TogetherSocket.event(signal)?.decode(TogetherSignal.self)?.description?.sdp, "v=0")
+        let mute: [String: Any] = ["op": "event", "id": "9", "type": "call.updated", "data": ["callId": "call1", "partyId": NSNull(), "userId": "f1", "muted": true]]
+        XCTAssertEqual(TogetherSocket.event(mute)?.decode(TogetherMuteChange.self), TogetherMuteChange(callId: "call1", partyId: nil, userId: "f1", muted: true))
+        XCTAssertNil(TogetherSocket.event(["op": "ready"]))
+    }
+
+    func testMutingTellsTheCall() async throws {
+        FakeTogether.handler = { _, _ in (200, Self.direct["call"]!) }
+        try await client.setMuted(true, in: "call1")
+        XCTAssertEqual(last(), "POST /api/v1/calls/call1/mute")
+        XCTAssertEqual(body()?["muted"] as? Bool, true)
+    }
+
+    /// Quitting leaves the call, but does not wait long for a slow server.
+    func testLeavingOnQuitDoesNotWaitLong() async throws {
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        let left = await client.leaveCall("call1", within: .seconds(2))
+        XCTAssertTrue(left)
+        XCTAssertEqual(last(), "POST /api/v1/calls/call1/leave")
+        FakeTogether.delay = 3
+        defer { FakeTogether.delay = 0 }
+        let start = Date()
+        let gaveUp = await client.leaveCall("call1", within: .milliseconds(300))
+        XCTAssertFalse(gaveUp)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
     }
 
     /// A signal goes to one device of one peer; the gateway relays it without storing it.

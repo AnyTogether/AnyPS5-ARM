@@ -37,11 +37,12 @@ final class RemotePlay {
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw Failure.noWindow }
         let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY, width: window.frame.width, height: window.frame.height)
-        // The window's shape at the phone's height or less, even sizes for the encoder.
-        let scale = min(1, Double(height) / window.frame.height, Double(width) / window.frame.width)
-        configuration.width = max(160, Int(window.frame.width * scale) & ~1)
-        configuration.height = max(90, Int(window.frame.height * scale) & ~1)
+        let area = ClipRecorder.area(of: window, on: display)
+        configuration.sourceRect = area
+        // The game's shape at the phone's height or less, even sizes for the encoder.
+        let scale = min(1, Double(height) / area.height, Double(width) / area.width)
+        configuration.width = max(160, Int(area.width * scale) & ~1)
+        configuration.height = max(90, Int(area.height * scale) & ~1)
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         configuration.queueDepth = 3

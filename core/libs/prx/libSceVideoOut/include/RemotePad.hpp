@@ -29,6 +29,9 @@ struct Input {
     std::uint64_t sentMicros = 0;
     std::uint32_t waitMicros = 0;
     std::uint64_t session = 0;
+    // The player (2 to 4) the launcher holds for a share play guest, from byte 13; 0 for a phone,
+    // which may be any player.
+    std::uint8_t seat = 0;
     PadInputState state{};
 };
 
@@ -81,7 +84,9 @@ bool Wants(const PadInputState& state);
 // RemoteDevice(its channel).
 class Seats {
 public:
-    int Seat(std::uint32_t device, bool wants);
+    // guest is the player (2 to 4) held for a share play guest: it takes that one, or the lowest
+    // free one after the first, never the first (the host's); 0 takes the lowest free one.
+    int Seat(std::uint32_t device, bool wants, std::uint8_t guest = 0);
     int Leave(std::uint32_t device);
     int Of(std::uint32_t device) const;
     bool Held(int player) const;

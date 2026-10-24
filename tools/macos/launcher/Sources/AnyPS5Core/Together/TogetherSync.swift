@@ -64,25 +64,31 @@ public final class TogetherSync: @unchecked Sendable {
     }
 
     private let client: TogetherClient
-    private let file: URL
+    private let folder: URL
     private let deviceName: String
     private let model: String
     private let lock = NSLock()
-    private var outbox: Outbox
+    /// Whose outbox is loaded: the server and the account it was recorded for.
+    private var owner: String?
+    private var outbox = Outbox()
     private var flushing = false
 
-    public init(client: TogetherClient, file: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/Together/outbox.json"),
+    /// Each account on each server has its own outbox in `folder`: what one played is never sent
+    /// as another's, nor to another server.
+    public init(client: TogetherClient, folder: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/Together"),
                 deviceName: String, model: String) {
         self.client = client
-        self.file = file
+        self.folder = folder
         self.deviceName = deviceName
         self.model = model
-        outbox = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.together.decode(Outbox.self, from: $0) } ?? Outbox()
     }
 
-    /// Nothing waits to be sent.
+    /// Nothing waits to be sent for the account signed in now.
     public var isEmpty: Bool {
-        lock.withLock { outbox.sessions.isEmpty && pendingTrophies(outbox).isEmpty && outbox.sets.keys.allSatisfy { outbox.uploadedSets.contains(setKey(outbox.sets[$0]!)) } }
+        lock.withLock {
+            guard current() != nil else { return true }
+            return outbox.sessions.isEmpty && pendingTrophies(outbox).isEmpty && outbox.sets.keys.allSatisfy { outbox.uploadedSets.contains(setKey(outbox.sets[$0]!)) }
+        }
     }
 
     public func recordSession(titleId: String, gameName: String, startedAt: Date, endedAt: Date, exit: String) {
@@ -111,17 +117,34 @@ public final class TogetherSync: @unchecked Sendable {
         }) else { return }
         defer { lock.withLock { flushing = false } }
         let iso = ISO8601DateFormatter()
+        // Everything below is this account's, and stops if another signs in meanwhile.
+        guard let owner = lock.withLock({ current() }) else { return }
+        func snapshot() throws -> Outbox {
+            try lock.withLock {
+                guard current() == owner else { throw CancellationError() }
+                return outbox
+            }
+        }
+        func change(_ body: (inout Outbox) -> Void) { self.change(owner, body) }
 
-        if !snapshot.deviceRegistered {
-            let id = snapshot.deviceId
-            _ = try await client.authorized("POST", "me/devices", ["id": id, "platform": "macos", "name": deviceName, "model": model])
+        if try !snapshot().deviceRegistered {
+            let id = try snapshot().deviceId
+            do {
+                _ = try await client.authorized("POST", "me/devices", ["id": id, "platform": "macos", "name": deviceName, "model": model])
+            } catch let problem as TogetherProblem where problem.status == 409 {
+                // Another account on this server has this ID: this outbox takes a new one.
+                change { $0.deviceId = UUID().uuidString.lowercased() }
+                throw problem
+            }
             change { $0.deviceRegistered = true }
         }
-        for (titleId, name) in snapshot.gameNames where !snapshot.taughtGames.contains(titleId) {
+        for (titleId, name) in try snapshot().gameNames {
+            guard try !snapshot().taughtGames.contains(titleId) else { continue }
             _ = try await client.authorized("PUT", "games/\(titleId)", ["names": ["en": name]])
             change { _ = $0.taughtGames.insert(titleId) }
         }
-        for set in snapshot.sets.values where !snapshot.uploadedSets.contains(setKey(set)) {
+        for set in try snapshot().sets.values {
+            guard try !snapshot().uploadedSets.contains(setKey(set)) else { continue }
             let trophies: [[String: Any]] = set.trophies.map {
                 ["id": $0.id, "grade": $0.grade, "hidden": $0.hidden, "texts": [set.language: ["name": $0.name, "detail": $0.detail]]]
             }
@@ -129,10 +152,11 @@ public final class TogetherSync: @unchecked Sendable {
             change { _ = $0.uploadedSets.insert(setKey(set)) }
         }
 
-        let sessions = Array(snapshot.sessions.prefix(200))
+        let sessions = try Array(snapshot().sessions.prefix(200))
         if !sessions.isEmpty {
+            let deviceId = try snapshot().deviceId
             let body: [String: Any] = ["sessions": sessions.map {
-                ["id": $0.id, "titleId": $0.titleId, "deviceId": snapshot.deviceId, "startedAt": iso.string(from: $0.startedAt), "endedAt": iso.string(from: $0.endedAt), "exit": $0.exit]
+                ["id": $0.id, "titleId": $0.titleId, "deviceId": deviceId, "startedAt": iso.string(from: $0.startedAt), "endedAt": iso.string(from: $0.endedAt), "exit": $0.exit]
             }]
             let results = try await TogetherSync.results(try await client.authorized("POST", "me/sessions", body))
             if results.contains(where: { $0.code == "unknown_device" }) { change { $0.deviceRegistered = false } }
@@ -142,7 +166,7 @@ public final class TogetherSync: @unchecked Sendable {
             change { $0.sessions.removeAll { done.contains($0.id) } }
         }
 
-        let earned = Array(pendingTrophies(snapshot).prefix(200))
+        let earned = try Array(pendingTrophies(snapshot()).prefix(200))
         if !earned.isEmpty {
             let body: [String: Any] = ["trophies": earned.map { ["titleId": $0.titleId, "setHash": $0.setHash, "trophyId": $0.trophyId, "earnedAt": iso.string(from: $0.earnedAt)] }]
             let results = try await TogetherSync.results(try await client.authorized("POST", "me/trophies", body))
@@ -187,13 +211,62 @@ public final class TogetherSync: @unchecked Sendable {
 
     private func setKey(_ set: TrophySetRecord) -> String { "\(set.titleId)/\(set.setHash)" }
 
-    private var snapshot: Outbox { lock.withLock { outbox } }
+    /// The key of an account on a server.
+    static func owner(base: URL, userId: String) -> String {
+        SHA256.hash(data: Data("\(base.absoluteString)\n\(userId)".utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
 
+    private func file(_ owner: String) -> URL { folder.appendingPathComponent("outbox-\(owner).json") }
+
+    /// The outbox kept in a single file before outboxes were kept by account.
+    private var legacyFile: URL { folder.appendingPathComponent("outbox.json") }
+
+    /// The owner signed in now, its outbox loaded; nil when no one is. Called with the lock held.
+    private func current() -> String? {
+        guard let user = client.user else { return nil }
+        let key = TogetherSync.owner(base: client.base, userId: user.id)
+        if key != owner {
+            outbox = load(key)
+            owner = key
+        }
+        return key
+    }
+
+    private func load(_ owner: String) -> Outbox {
+        if let data = try? Data(contentsOf: file(owner)), let saved = try? JSONDecoder.together.decode(Outbox.self, from: data) { return saved }
+        // The old single outbox goes to the first account that is signed in: the one it was
+        // recorded for, as a server change signed out and an account was needed to record.
+        guard let data = try? Data(contentsOf: legacyFile), let legacy = try? JSONDecoder.together.decode(Outbox.self, from: data) else { return Outbox() }
+        save(legacy, to: owner)
+        try? FileManager.default.removeItem(at: legacyFile)
+        return legacy
+    }
+
+    private func save(_ outbox: Outbox, to owner: String) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder.together.encode(outbox) { try? data.write(to: file(owner), options: .atomic) }
+    }
+
+    /// A change to the outbox of the account signed in now; dropped when no one is.
     private func change(_ body: (inout Outbox) -> Void) {
         lock.withLock {
+            guard let owner = current() else { return }
             body(&outbox)
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if let data = try? JSONEncoder.together.encode(outbox) { try? data.write(to: file, options: .atomic) }
+            save(outbox, to: owner)
+        }
+    }
+
+    /// A change to one owner's outbox, loaded or not.
+    private func change(_ owner: String, _ body: (inout Outbox) -> Void) {
+        lock.withLock {
+            if owner == self.owner {
+                body(&outbox)
+                save(outbox, to: owner)
+            } else {
+                var other = load(owner)
+                body(&other)
+                save(other, to: owner)
+            }
         }
     }
 }

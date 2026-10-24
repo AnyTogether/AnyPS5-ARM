@@ -49,12 +49,22 @@ extension AppModel {
             var details: [String] = ["@\(member.handle)"]
             if party.isLeader(member.userId) { details.append(T.text(.partyLeader)) }
             if party.call?.in.contains(member.userId) == true { details.append(T.text(.partyInVoice)) }
+            if party.call?.muted.contains(member.userId) == true || (voiceCall == party.call?.id && voiceMuted.contains(member.userId)) {
+                details.append(T.text(.voiceMuted))
+            }
             rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : member.displayName,
                                  detail: details.joined(separator: " · "), symbol: "person", kind: .info(""),
                                  person: PanelPerson(name: member.displayName, avatar: member.avatar,
                                                      status: party.call?.in.contains(member.userId) == true ? .online : nil, speaking: voiceSpeaking.contains(member.userId))))
         }
         if leader {
+            // The leader may remove someone or hand the lead over.
+            for member in party.members where party.canManage(member.userId, me: me.id) {
+                rows.append(PanelRow(id: "party-lead-\(member.userId)", title: T.format(.partyMakeLeader, member.displayName), symbol: "crown",
+                                     kind: .action(destructive: false) { [weak self] in self?.makePartyLeader(member) }))
+                rows.append(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, member.displayName), symbol: "person.badge.minus",
+                                     kind: .action(destructive: true) { [weak self] in self?.removeFromParty(member) }))
+            }
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
                 self?.setPartyOpen(value)
             }))
@@ -125,6 +135,37 @@ extension AppModel {
         partyAction { try await $0.invite([friend.userId], to: id) }
     }
 
+    /// The lead to another member (leader only).
+    func makePartyLeader(_ member: TogetherPerson) {
+        guard let id = party?.id else { return }
+        partyAction { client in
+            let next = try await client.makeLeader(member.userId, of: id)
+            await MainActor.run { self.show(T.format(.partyNowLeads, member.displayName), symbol: "crown.fill") }
+            return next
+        }
+    }
+
+    /// Someone out of the party (leader only).
+    func removeFromParty(_ member: TogetherPerson) {
+        guard let id = party?.id else { return }
+        let client = together
+        Task {
+            do {
+                try await client.kick(member.userId, from: id)
+                withAnimation(Motion.overlay) {
+                    if let current = party, current.id == id {
+                        party = TogetherParty(id: current.id, leaderId: current.leaderId, privacy: current.privacy, members: current.members.filter { $0.userId != member.userId },
+                                              invited: current.invited, call: current.call.map { .init(id: $0.id, in: $0.in.filter { $0 != member.userId }) })
+                    }
+                }
+                show(T.format(.partyRemoved, member.displayName), symbol: "person.badge.minus")
+                loadParty()
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
     func declineParty(_ id: String) {
         Task {
             try? await together.declineParty(id)
@@ -169,6 +210,9 @@ extension AppModel {
             loadParty()
         case "party.updated":
             guard let next = event.decode(TogetherParty.self), next.id == party?.id || party == nil else { return }
+            if let me = togetherUser?.id, let before = party, !before.isLeader(me), next.isLeader(me) {
+                show(T.text(.partyYouLead), symbol: "crown.fill")
+            }
             withAnimation(Motion.overlay) { party = next }
         case "party.member_joined":
             if let name = event.decode(JoinedData.self)?.member.displayName { show(T.format(.partyJoined, name), symbol: "person.badge.plus") }
@@ -209,11 +253,16 @@ extension AppModel {
 /// hot key, so it works with a game in front), and who is speaking.
 extension AppModel {
     func voiceRows(_ party: TogetherParty) -> [PanelRow] {
-        guard voiceCall != nil else {
+        guard voiceCall != nil, callFriend == nil else {
             let others = party.call?.in.filter { $0 != togetherUser?.id }.count ?? 0
             return [PanelRow(id: "voice-join", title: T.text(.voiceJoin), detail: others > 0 ? T.format(.voiceInCall, others) : T.text(.voiceJoinDetail), symbol: "waveform",
                              kind: .action(destructive: false) { [weak self] in self?.joinVoice() })]
         }
+        return voiceControlRows()
+    }
+
+    /// The microphone, push-to-talk and leaving: the same in the party's voice and a friend's call.
+    func voiceControlRows() -> [PanelRow] {
         let pushToTalk = preferences.pushToTalk ?? false
         var rows: [PanelRow] = []
         if !pushToTalk {
@@ -222,7 +271,8 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.text(.voicePushToTalkOn) : nil, symbol: "keyboard",
                              kind: .toggle(pushToTalk) { [weak self] value in self?.setPushToTalk(value) }))
-        rows.append(PanelRow(id: "voice-leave", title: T.text(.voiceLeave), symbol: "phone.down.fill", kind: .action(destructive: true) { [weak self] in self?.leaveVoice() }))
+        rows.append(PanelRow(id: "voice-leave", title: T.text(callFriend == nil ? .voiceLeave : .callHangUp), symbol: "phone.down.fill",
+                             kind: .action(destructive: true) { [weak self] in self?.leaveVoice() }))
         return rows
     }
 
@@ -230,26 +280,60 @@ extension AppModel {
     var micSending: Bool { voiceCall != nil && ((preferences.pushToTalk ?? false) ? talkHeld : micOn) }
 
     func joinVoice() {
-        guard let party, let me = togetherUser, voiceCall == nil else { return }
+        guard let party, togetherUser != nil else { return }
+        if callFriend != nil { leaveVoice() }
+        guard voiceCall == nil else { return }
         Task {
             guard await PartyVoice.microphoneAllowed() else {
                 return show(T.text(.voiceNoMic), symbol: "mic.slash.fill")
             }
             do {
-                let joined = try await together.joinCall(party: party.id)
-                let voice = PartyVoice(me: me.id, call: joined.call.id, iceServers: joined.iceServers, send: { [weak self] to, device, kind, data in
-                    self?.togetherSocket?.signal(to: to, device: device, call: joined.call.id, kind: kind, data: data)
-                }, changed: { [weak self] in self?.voiceChanged() })
-                partyVoice = voice
-                withAnimation(Motion.overlay) { voiceCall = joined.call.id }
-                micOn = true
-                for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
-                Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
-                voiceChanged()
+                startVoice(try await together.joinCall(party: party.id))
                 Sounds.shared.play(.select)
                 show(T.text(.voiceJoined), symbol: "waveform")
             } catch {
                 show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    /// Into a call joined on the server: the party's voice, or a friend's call (`friend`).
+    func startVoice(_ joined: TogetherCallJoin, friend: TogetherPerson? = nil, waiting: Bool = false) {
+        guard let me = togetherUser else { return }
+        let call = joined.call.id
+        let voice = PartyVoice(me: me.id, call: call, iceServers: joined.iceServers, send: { [weak self] to, device, kind, data in
+            self?.togetherSocket?.signal(to: to, device: device, call: call, kind: kind, data: data)
+        }, changed: { [weak self] in self?.voiceChanged() })
+        partyVoice = voice
+        voiceSentMuted = false
+        withAnimation(Motion.overlay) {
+            voiceCall = call
+            callFriend = friend
+            callWaiting = waiting
+            voiceMuted = Set(joined.call.in.filter(\.muted).map(\.userId))
+        }
+        micOn = true
+        for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
+        Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
+        voiceChanged()
+        renewIceServers(at: TogetherVoice.renewal(expiresAt: joined.expiresAt), call: call)
+    }
+
+    /// The relay's credentials last hours: new ones before they end keep a long call through it.
+    private func renewIceServers(at time: Date?, call: String) {
+        iceRenewal?.cancel()
+        guard let time else { return }
+        iceRenewal = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(1, time.timeIntervalSinceNow)))
+            guard let self, !Task.isCancelled, self.voiceCall == call else { return }
+            do {
+                let fresh = try await self.together.iceServers()
+                guard self.voiceCall == call else { return }
+                self.partyVoice?.renew(fresh.iceServers)
+                self.renewIceServers(at: TogetherVoice.renewal(expiresAt: fresh.expiresAt), call: call)
+            } catch {
+                // Offline for a moment: try again in a minute.
+                self.renewIceServers(at: Date().addingTimeInterval(60), call: call)
             }
         }
     }
@@ -259,10 +343,15 @@ extension AppModel {
         guard let call = voiceCall else { return }
         partyVoice?.close()
         partyVoice = nil
+        iceRenewal?.cancel()
+        iceRenewal = nil
         Input.shared.unregisterHotKey(id: Input.talkKey)
         withAnimation(Motion.overlay) {
             voiceCall = nil
             voiceSpeaking = []
+            voiceMuted = []
+            callFriend = nil
+            callWaiting = false
             talkHeld = false
         }
         if tellServer {
@@ -293,8 +382,15 @@ extension AppModel {
         voiceChanged()
     }
 
-    private func voiceChanged() {
+    func voiceChanged() {
         partyVoice?.talking = micSending
+        // The others see the user muted when the open microphone is off (push-to-talk is not muted).
+        let muted = voiceCall != nil && !(preferences.pushToTalk ?? false) && !micOn
+        if let call = voiceCall, muted != voiceSentMuted {
+            voiceSentMuted = muted
+            let client = together
+            Task { try? await client.setMuted(muted, in: call) }
+        }
         let speaking = partyVoice?.speaking ?? []
         if speaking != voiceSpeaking { voiceSpeaking = speaking }
     }
@@ -305,11 +401,21 @@ extension AppModel {
         case "signal":
             if let signal = event.decode(TogetherSignal.self) { partyVoice?.receive(signal) }
         case "call.left":
-            if let userId = event.data["userId"] { partyVoice?.drop(userId, sayBye: false) }
+            if let userId = event.data["userId"] {
+                partyVoice?.drop(userId, sayBye: false)
+                voiceMuted.remove(userId)
+            }
             loadParty()
         case "call.joined":
             loadParty()
+        case "call.updated":
+            // Someone muted or unmuted themselves (the party's view follows with party.updated).
+            guard let change = event.decode(TogetherMuteChange.self), change.callId == voiceCall else { return }
+            if change.muted { voiceMuted.insert(change.userId) } else { voiceMuted.remove(change.userId) }
+        case "call.ringing", "call.answered":
+            directCallEvent(event)
         case "call.ended":
+            directCallEvent(event)
             if event.data["callId"] == voiceCall { leaveVoice(tellServer: false) }
             loadParty()
         default:

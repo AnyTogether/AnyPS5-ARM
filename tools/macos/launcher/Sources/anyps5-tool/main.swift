@@ -5,6 +5,9 @@ import Foundation
 // anyps5-tool scan <games folder>
 // anyps5-tool install <game folder> <games folder>    (ANYPS5_TOOLKIT names the toolkit)
 // anyps5-tool theme <snd0.at9> <out.wav>   (a game's theme song, decoded)
+// anyps5-tool toolkit-check <AnyPS5-toolkit-macos-….zip> [<store folder>]   (unpacks and verifies it as the
+//   launcher's engine picker does, into a temporary store unless one is named; prints its version)
+// anyps5-tool engines   (the toolkits on GitHub's releases, as the engine picker lists them)
 // anyps5-tool remote [--allow-all] [--devices <file>] [--port <control port>] [--games <folder> [--language en|tr]] [--hidden]
 //   (the phone server, until killed; with --games it shows that library and plays games only pretend;
 //   --hidden leaves it out of Bonjour, so only a phone given its address finds it)
@@ -13,7 +16,7 @@ func fail(_ message: String) -> Never {
     exit(2)
 }
 
-let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | theme <snd0.at9> <out.wav> | update-check <version> [--download] | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]] [--hidden]"
+let usage = "usage: anyps5-tool unwrap <self> <elf> | scan <games folder> | theme <snd0.at9> <out.wav> | update-check <version> [--download] | toolkit-check <zip> [<store folder>] | engines | install <game folder> <games folder> | remote [--allow-all] [--devices <file>] [--port <port>] [--games <folder> [--language en|tr]] [--hidden]"
 
 /// Prints a line at once, so a script reading the output sees it while the server runs.
 func say(_ line: String) {
@@ -53,6 +56,35 @@ case "install":
     } catch {
         fail("FAIL: \(error.localizedDescription)")
     }
+case "toolkit-check":
+    guard arguments.count == 2 || arguments.count == 3 else { fail(usage) }
+    let zip = URL(fileURLWithPath: arguments[1])
+    let name = zip.deletingPathExtension().lastPathComponent
+    let release = name.hasPrefix(EngineCatalogue.assetPrefix) ? String(name.dropFirst(EngineCatalogue.assetPrefix.count)) : nil
+    let temporary = arguments.count == 2
+    let store = ToolkitStore(folder: temporary ? FileManager.default.temporaryDirectory.appendingPathComponent("anyps5-toolkit-check-\(UUID().uuidString)") : URL(fileURLWithPath: arguments[2]))
+    defer { if temporary { try? FileManager.default.removeItem(at: store.folder) } }
+    do {
+        let installed = try store.install(zip: zip, digest: nil, release: release, launcherVersion: "dev")
+        _ = try store.verifiedToolkit(version: installed.version)
+        print("OK \(installed.version): \(installed.manifest.files.count) files verified, engine \(installed.manifest.engineCommit ?? "?"), built \(installed.manifest.buildDate ?? "?"), needs launcher \(installed.manifest.minimumLauncher ?? "any")")
+    } catch {
+        fail("FAIL: \(error.localizedDescription)")
+    }
+case "engines":
+    let done = DispatchSemaphore(value: 0)
+    Task {
+        if let entries = await EngineCatalogue.fetch() {
+            if entries.isEmpty { print("no toolkits on the releases yet") }
+            for entry in entries {
+                print("\(entry.release)\t\(entry.date.map { ISO8601DateFormatter().string(from: $0) } ?? "?")\t\(entry.size ?? 0) bytes\t\(entry.digest == nil ? "no digest" : "sha256 known")\t\(entry.summary)")
+            }
+        } else {
+            print("GitHub did not answer")
+        }
+        done.signal()
+    }
+    done.wait()
 case "update-check":
     guard arguments.count >= 2 else { fail(usage) }
     let current = arguments[1]

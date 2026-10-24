@@ -364,7 +364,11 @@ extension AppModel {
     /// `then` runs once the server has heard it and the session is forgotten here.
     func togetherSignOut(then: (@MainActor () -> Void)? = nil) {
         leaveVoice()
+        stopSharePlay()
+        share.invites = []
         let client = together
+        // What waits stays in this account's outbox, for when it signs in again.
+        togetherFlush?.cancel()
         togetherSocket?.stop()
         togetherSocket = nil
         withAnimation(Motion.overlay) {
@@ -397,6 +401,7 @@ extension AppModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.togetherSocket = nil
+                self.endShareSession()
                 if self.overlay == .profile { self.closeProfile() }
                 withAnimation(Motion.overlay) {
                     self.togetherUser = nil
@@ -414,6 +419,8 @@ extension AppModel {
         loadInbox()
         loadParty()
         loadGameInvites()
+        loadNotifications()
+        loadShareInvites()
         flushTogether()
     }
 
@@ -443,6 +450,7 @@ extension AppModel {
         guard togetherUser != nil else { return }
         togetherSync.recordSession(titleId: game.titleID, gameName: game.name, startedAt: start, endedAt: Date(), exit: "normal")
         flushTogether()
+        askHowItRan(game, played: Date().timeIntervalSince(start))
     }
 
     /// The game's trophy set as read now: new earned ones go to AnyTogether, and friends hear of them.
@@ -474,6 +482,7 @@ extension AppModel {
             case "handle_reserved": return T.text(.togetherHandleReserved)
             case "handle_cooldown": return problem.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? problem.title
             case "links_not_allowed": return T.text(.togetherNoLinks)
+            case "link_blocked": return T.text(.togetherLinkBlocked)
             case "code_invalid": return T.text(.togetherCodeWrong)
             case "code_expired", "expired_token": return T.text(.togetherCodeExpired)
             case "code_locked": return T.text(.togetherCodeLocked)
