@@ -69,7 +69,14 @@ class FakeLauncher {
         if (data is List<int>) {
           final packet = Uint8List.fromList(data);
           channelPackets.add(packet);
-          if (echo) socket.add(answer(packet));
+          // A packet still arriving as the phone closes is not answered.
+          if (echo && socket.closeCode == null) {
+            try {
+              socket.add(answer(packet));
+            } on StateError {
+              // Closed in between.
+            }
+          }
           return;
         }
         final message = jsonDecode(data as String) as Map<String, dynamic>;

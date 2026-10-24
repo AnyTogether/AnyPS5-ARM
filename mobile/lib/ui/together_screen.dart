@@ -126,74 +126,82 @@ class _TogetherScreenState extends State<TogetherScreen> {
   Widget _rail(Strings texts) {
     final hub = widget.hub;
     final handle = hub.account.user?.handle;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 6, 10, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              IconButton(
-                tooltip: texts.back,
-                onPressed: () => Navigator.of(context).maybePop(),
-                icon: const Icon(
-                  Icons.chevron_left_rounded,
-                  color: Colors.white70,
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    // Scrolls when the keyboard leaves it little height.
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(6, 6, 10, 12),
+          sliver: SliverFillRemaining(
+            hasScrollBody: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      texts.together,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                    IconButton(
+                      tooltip: texts.back,
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(
+                        Icons.chevron_left_rounded,
+                        color: Colors.white70,
                       ),
                     ),
-                    if (handle != null)
-                      Text(
-                        '@$handle',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12.5,
-                        ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            texts.together,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (handle != null)
+                            Text(
+                              '@$handle',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                _RailItem(
+                  icon: Icons.people_alt_rounded,
+                  label: texts.friends,
+                  count: hub.friends.incoming.length,
+                  selected: _tab == TogetherTab.friends,
+                  onTap: () => _show(TogetherTab.friends),
+                ),
+                _RailItem(
+                  icon: Icons.chat_bubble_rounded,
+                  label: texts.messages,
+                  count: hub.messages.unread,
+                  selected: _tab == TogetherTab.messages,
+                  onTap: () => _show(TogetherTab.messages),
+                ),
+                _RailItem(
+                  icon: Icons.celebration_rounded,
+                  label: texts.party,
+                  count: hub.parties.invites.length,
+                  live: hub.parties.party != null,
+                  selected: _tab == TogetherTab.party,
+                  onTap: () => _show(TogetherTab.party),
+                ),
+                const Spacer(),
+                _LiveDot(socket: hub.socket),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          _RailItem(
-            icon: Icons.people_alt_rounded,
-            label: texts.friends,
-            count: hub.friends.incoming.length,
-            selected: _tab == TogetherTab.friends,
-            onTap: () => _show(TogetherTab.friends),
-          ),
-          _RailItem(
-            icon: Icons.chat_bubble_rounded,
-            label: texts.messages,
-            count: hub.messages.unread,
-            selected: _tab == TogetherTab.messages,
-            onTap: () => _show(TogetherTab.messages),
-          ),
-          _RailItem(
-            icon: Icons.celebration_rounded,
-            label: texts.party,
-            count: hub.parties.invites.length,
-            live: hub.parties.party != null,
-            selected: _tab == TogetherTab.party,
-            onTap: () => _show(TogetherTab.party),
-          ),
-          const Spacer(),
-          _LiveDot(socket: hub.socket),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

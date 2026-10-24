@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:anyps5_remote/together/parties.dart';
 import 'package:anyps5_remote/together/people.dart';
-import 'package:anyps5_remote/together/friends.dart';
 import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:anyps5_remote/ui/together_screen.dart';

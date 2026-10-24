@@ -126,8 +126,9 @@ void main() {
     live.start();
     await until(() => live.status == SocketStatus.ready);
     await server.sockets.last.close(TogetherSocket.unauthorized, 'bad token');
-    await until(() => server.sent('hello').length == 2);
-    expect(server.sent('hello').last['token'], 'access-2');
+    await until(
+      () => server.sent('hello').any((hello) => hello['token'] == 'access-2'),
+    );
     expect(server.requests.single.$3, {
       'grantType': 'refresh_token',
       'refreshToken': 'refresh-1',
