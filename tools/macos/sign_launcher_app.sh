@@ -37,7 +37,10 @@ else
     find "$toolkit/libs" "$toolkit/vulkan" -type f \( -name '*.prx' -o -name '*.dylib' \) -print0 | xargs -0 -n 64 codesign --force --timestamp --sign "$identity"
 fi
 sign --options runtime "$toolkit/relinker"
-sign --options runtime "$app"
+# WebRTC for party voice, signed as ours so library validation lets the app load it.
+[ ! -d "$app/Contents/Frameworks/WebRTC.framework" ] || sign "$app/Contents/Frameworks/WebRTC.framework"
+# The microphone (party voice) under the hardened runtime.
+sign --options runtime --entitlements "$(dirname "$0")/launcher/AnyPS5.entitlements" "$app"
 codesign --verify --deep --strict "$app"
 echo "signed $app"
 

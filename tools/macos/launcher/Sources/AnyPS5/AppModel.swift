@@ -25,6 +25,8 @@ struct Preferences: Codable, Equatable {
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
     var hideWhilePlaying = false
+    /// The party's voice sends only while ⌥V is held; nil means off (open microphone).
+    var pushToTalk: Bool?
     /// A session friends can join while a game runs; nil means on.
     var friendsJoin: Bool?
     /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
@@ -427,6 +429,12 @@ final class AppModel: ObservableObject {
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
+    @Published var voiceCall: String?
+    var partyVoice: PartyVoice?
+    @Published var micOn = true
+    @Published var talkHeld = false
+    @Published var voiceSpeaking: Set<String> = []
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes

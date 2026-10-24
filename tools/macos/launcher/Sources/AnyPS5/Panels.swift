@@ -37,6 +37,8 @@ struct PanelPerson {
     let name: String
     let avatar: String?
     var status: Status?
+    /// Speaking in the party's voice: a ring in the accent.
+    var speaking = false
 }
 
 struct PanelCategory: Identifiable {
@@ -659,6 +661,8 @@ struct RowView: View {
         HStack(spacing: 14 * scale) {
             if let person = row.person {
                 ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false)
+                    .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(person.speaking ? 1 : 0))
+                    .animation(.easeOut(duration: 0.15), value: person.speaking)
                     .overlay(alignment: .bottomTrailing) {
                         if let status = person.status, status != .offline {
                             Circle().fill(status == .playing ? model.accent : Color(red: 0.3, green: 0.85, blue: 0.45))

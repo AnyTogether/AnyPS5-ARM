@@ -117,7 +117,9 @@ struct TopBar: View {
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
             iconButton("person.2.fill", index: 2, badge: model.togetherRequests.incoming.count + model.friendsOnline) { model.open(.friends) }
             iconButton("bubble.left.and.bubble.right.fill", index: 3, badge: model.unreadMessages) { model.openMessages() }
-            iconButton(model.party == nil ? "person.3" : "person.3.fill", index: 4, badge: model.partyInvites.count) { model.open(.party) }
+            // In the party's voice: the microphone, ringed while someone speaks.
+            iconButton(model.voiceCall == nil ? (model.party == nil ? "person.3" : "person.3.fill") : (model.micSending ? "mic.fill" : "mic.slash.fill"),
+                       index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty) { model.open(.party) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
@@ -129,7 +131,7 @@ struct TopBar: View {
         }
     }
 
-    private func iconButton(_ symbol: String, index: Int, badge: Int = 0, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, action: @escaping () -> Void) -> some View {
         let focused = model.focus == .top(index) && model.overlay == nil
         return Button(action: action) {
             Image(systemName: symbol)
@@ -137,6 +139,7 @@ struct TopBar: View {
                 .foregroundStyle(focused ? Color.black : .white.opacity(0.9))
                 .frame(width: 44 * scale, height: 44 * scale)
                 .background(Circle().fill(focused ? Color.white : Color.white.opacity(0.1)))
+                .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(ring ? 1 : 0).animation(.easeOut(duration: 0.15), value: ring))
                 .overlay(alignment: .topTrailing) {
                     // Friends online or asking, in the accent.
                     if badge > 0 {

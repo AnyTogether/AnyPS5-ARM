@@ -167,6 +167,13 @@ enum PreviewRenderer {
                                              call: .init(id: "call1", in: ["u1", "f1"])))
             model.overlay = .party; model.panelInRows = true; model.panelRow = 4
         }
+        render(preferences, found, root, still, output.appendingPathComponent("party-voice.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "friends", members: [utku, people[0], people[1]], invited: [], call: .init(id: "call1", in: ["u1", "f1", "f2"])))
+            model.previewVoice(call: "call1", speaking: ["f1"])
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("party-none.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
             model.togetherFriends = partyFriends

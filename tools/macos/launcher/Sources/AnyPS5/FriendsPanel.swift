@@ -129,6 +129,8 @@ extension AppModel {
             partyEvent(event)
         case let type where type.hasPrefix("game_session."):
             gameSessionEvent(event)
+        case let type where type == "signal" || type.hasPrefix("call."):
+            callEvent(event)
         default:
             break
         }

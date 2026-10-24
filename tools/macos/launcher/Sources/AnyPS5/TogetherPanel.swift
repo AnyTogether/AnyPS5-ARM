@@ -363,6 +363,7 @@ extension AppModel {
 
     /// `then` runs once the server has heard it and the session is forgotten here.
     func togetherSignOut(then: (@MainActor () -> Void)? = nil) {
+        leaveVoice()
         let client = together
         togetherSocket?.stop()
         togetherSocket = nil

@@ -76,6 +76,13 @@ public final class TogetherSocket: @unchecked Sendable {
         }
     }
 
+    /// WebRTC signalling to one device of a peer in the same call; dropped while disconnected
+    /// (the peer connection's own retries cover it).
+    public func signal(to userId: String, device: String, call: String, kind: TogetherSignalKind, data: Any?) {
+        let frame = TogetherSocket.signalFrame(to: userId, device: device, call: call, kind: kind, data: data)
+        queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
+    }
+
     private func connect() async {
         guard queue.sync(execute: { running }) else { return }
         do {

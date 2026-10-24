@@ -365,3 +365,88 @@ final class TogetherGameSessionTests: TogetherSignedInCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
 }
+
+final class TogetherCallTests: TogetherSignedInCase {
+    static let join: [String: Any] = [
+        "call": ["id": "call1", "kind": "party", "partyId": "p1", "startedBy": "f1", "calleeId": NSNull(),
+                 "in": [["userId": "f1", "device": "sess-f1"], ["userId": "u1", "device": "sess-u1"]],
+                 "startedAt": "2026-10-24T10:00:00.000Z", "answeredAt": NSNull(), "endedAt": NSNull()],
+        "iceServers": [["urls": ["stun:stun.example.org:3478"]], ["urls": ["turn:turn.example.org:3478?transport=udp"], "username": "1800000000:u1", "credential": "c2VjcmV0"]],
+        "expiresAt": "2026-10-24T22:00:00.000Z",
+    ]
+
+    func testJoiningThePartysVoice() async throws {
+        FakeTogether.handler = { _, _ in (201, Self.join) }
+        let joined = try await client.joinCall(party: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/calls")
+        XCTAssertEqual(body() as? [String: String], ["partyId": "p1"])
+        XCTAssertEqual(joined.call.id, "call1")
+        XCTAssertEqual(joined.call.in.map(\.device), ["sess-f1", "sess-u1"])
+        XCTAssertEqual(joined.iceServers.count, 2)
+        XCTAssertEqual(joined.iceServers[1].username, "1800000000:u1")
+        XCTAssertNil(joined.iceServers[0].credential)
+        XCTAssertEqual(joined.peersToCall(me: "u1"), [TogetherCallPeer(userId: "f1", device: "sess-f1")], "the newcomer calls everyone already in it")
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.leaveCall("call1")
+        XCTAssertEqual(last(), "POST /api/v1/calls/call1/leave")
+    }
+
+    /// A signal goes to one device of one peer; the gateway relays it without storing it.
+    func testASignalFrame() throws {
+        let frame = TogetherSocket.signalFrame(to: "f1", device: "sess-f1", call: "call1", kind: .offer, data: ["type": "offer", "sdp": "v=0"])
+        let json = try JSONSerialization.jsonObject(with: frame) as? [String: Any]
+        XCTAssertEqual(json?["op"] as? String, "signal")
+        XCTAssertEqual(json?["to"] as? String, "f1")
+        XCTAssertEqual(json?["device"] as? String, "sess-f1")
+        XCTAssertEqual(json?["call"] as? String, "call1")
+        XCTAssertEqual(json?["kind"] as? String, "offer")
+        XCTAssertEqual((json?["data"] as? [String: String])?["sdp"], "v=0")
+        let bye = try JSONSerialization.jsonObject(with: TogetherSocket.signalFrame(to: "f1", device: "sess-f1", call: "call1", kind: .bye, data: nil)) as? [String: Any]
+        XCTAssertTrue(bye?["data"] is NSNull)
+    }
+
+    func testAnIncomingSignal() {
+        let json: [String: Any] = ["call": "call1", "from": "f1", "device": "sess-f1", "kind": "candidate",
+                                   "data": ["candidate": "candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host", "sdpMid": "0", "sdpMLineIndex": 0]]
+        let event = TogetherSocket.Event(id: "1", type: "signal", json: try! JSONSerialization.data(withJSONObject: json))
+        let signal = event.decode(TogetherSignal.self)
+        XCTAssertEqual(signal?.kind, .candidate)
+        XCTAssertEqual(signal?.from, "f1")
+        XCTAssertEqual(signal?.candidate?.sdpMid, "0")
+        XCTAssertEqual(signal?.candidate?.sdpMLineIndex, 0)
+        XCTAssertNil(signal?.description)
+    }
+
+    func testAnOfferSignalCarriesItsDescription() {
+        let json: [String: Any] = ["call": "call1", "from": "f1", "device": "d", "kind": "offer", "data": ["type": "offer", "sdp": "v=0\r\n"]]
+        let signal = TogetherSocket.Event(id: "1", type: "signal", json: try! JSONSerialization.data(withJSONObject: json)).decode(TogetherSignal.self)
+        XCTAssertEqual(signal?.description?.type, "offer")
+        XCTAssertEqual(signal?.description?.sdp, "v=0\r\n")
+    }
+
+    /// Two offering at once: the larger user ID is polite and gives way, as on the website.
+    func testWhoGivesWay() {
+        XCTAssertTrue(TogetherVoice.polite(me: "b", peer: "a"))
+        XCTAssertFalse(TogetherVoice.polite(me: "a", peer: "b"))
+    }
+
+    /// Opus for voice: in-band FEC, DTX, mono, at most 32 kbit/s, kept or added to its fmtp line.
+    func testOpusIsTunedForVoice() {
+        let sdp = "m=audio 9 UDP/TLS/RTP/SAVPF 111 63\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=0\r\na=rtpmap:63 red/48000/2\r\n"
+        let tuned = TogetherVoice.tuneOpus(sdp)
+        XCTAssertTrue(tuned.contains("a=fmtp:111 minptime=10;useinbandfec=1;usedtx=1;stereo=0;maxaveragebitrate=32000\r\n"), tuned)
+        let bare = TogetherVoice.tuneOpus("a=rtpmap:111 opus/48000/2\r\nx\r\n")
+        XCTAssertEqual(bare, "a=rtpmap:111 opus/48000/2\r\na=fmtp:111 useinbandfec=1;usedtx=1;stereo=0;maxaveragebitrate=32000\r\nx\r\n")
+        XCTAssertEqual(TogetherVoice.tuneOpus("no opus here"), "no opus here")
+    }
+
+    /// The speaking ring: on above the level, kept a moment after so it does not flicker.
+    func testTheSpeakingRingHolds() {
+        var ring = TogetherVoice.Speaking()
+        let start = Date(timeIntervalSince1970: 1000)
+        XCTAssertFalse(ring.update(level: 0.01, at: start))
+        XCTAssertTrue(ring.update(level: 0.2, at: start.addingTimeInterval(0.1)))
+        XCTAssertTrue(ring.update(level: 0.0, at: start.addingTimeInterval(0.3)), "held")
+        XCTAssertFalse(ring.update(level: 0.0, at: start.addingTimeInterval(0.6)), "quiet long enough")
+    }
+}

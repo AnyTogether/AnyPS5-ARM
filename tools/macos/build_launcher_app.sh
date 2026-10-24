@@ -22,12 +22,22 @@ app="$output/AnyPS5.app"
 version="$(git -C "$root" describe --tags --always 2>/dev/null | sed "s/^v//" || echo 0.0.0)"
 
 swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --product AnyPS5
-binary="$(swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --show-bin-path)/AnyPS5"
+products="$(swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --show-bin-path)"
+binary="$products/AnyPS5"
+# WebRTC (party voice) is a framework beside the executable in the build; the app carries it in
+# Contents/Frameworks.
+webrtc="$(find "$products" -maxdepth 2 -name WebRTC.framework -type d | head -n 1)"
+[ -n "$webrtc" ] || { echo "WebRTC.framework not found in $products" >&2; exit 1; }
 
 rm -rf "$app"
 toolkit="$app/Contents/Resources/toolkit"
 mkdir -p "$app/Contents/MacOS" "$toolkit/libs" "$toolkit/vulkan" "$toolkit/patches" "$app/Contents/Resources/licenses"
 cp "$binary" "$app/Contents/MacOS/AnyPS5"
+mkdir -p "$app/Contents/Frameworks"
+ditto "$webrtc" "$app/Contents/Frameworks/WebRTC.framework"
+otool -l "$app/Contents/MacOS/AnyPS5" | grep -q "@executable_path/../Frameworks" ||
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$app/Contents/MacOS/AnyPS5"
+webrtc_license="$(find "$source/.build/artifacts" -path '*WebRTC.xcframework/LICENSE' | head -n 1)"
 cp "$build/core/relinker/relinker" "$toolkit/relinker"
 cp "$build"/core/libs/libs/*.prx "$toolkit/libs/"
 cp -L "$vulkan/lib/libvulkan.1.dylib" "$vulkan/lib/libMoltenVK.dylib" "$toolkit/vulkan/"
@@ -40,6 +50,7 @@ fingerprint="$(cat "$toolkit/relinker" "$toolkit"/libs/*.prx "$toolkit"/patches/
 echo "$version-$fingerprint" > "$toolkit/version.txt"
 cp "$root/LICENSE" "$app/Contents/Resources/licenses/AnyPS5-LICENSE.txt"
 cp "$vulkan/../Licenses/LICENSE.txt" "$app/Contents/Resources/licenses/VulkanSDK-LICENSE.txt"
+[ -z "$webrtc_license" ] || cp "$webrtc_license" "$app/Contents/Resources/licenses/WebRTC-LICENSE.txt"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -69,6 +80,7 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
     <key>GCSupportsControllerUserInteraction</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>AnyPS5 sends your voice to the friends in your AnyTogether party while voice is on.</string>
     <key>NSLocalNetworkUsageDescription</key><string>AnyPS5 finds your phone on this network so it can be used as a controller.</string>
     <key>NSBonjourServices</key><array><string>_anyps5-remote._tcp</string></array>
     <key>CFBundleURLTypes</key>

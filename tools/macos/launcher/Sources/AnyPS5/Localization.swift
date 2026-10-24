@@ -62,6 +62,7 @@ enum T {
         case partyTitle, partyStart, partyStartDetail, partyOpen, partyOpenDetail, partyJoinOf, partySize, partyDecline, partyNone, partyMembers, partyLeader, partyInVoice, partyInviteFriends, partyInvite, partyInvited, partyLeave, partyInvites, partyInvitedYou, partyJoined, partyLeft, partyKicked, partyEnded, partyFull, friendsInParty
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
+        case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceLeave, voiceNoMic, voiceJoined
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -194,6 +195,16 @@ enum T {
         .gameJoined: "%1$@ ile %2$@ başlıyor",
         .togetherFriendsJoin: "Arkadaşlarım oyunuma katılabilsin",
         .togetherFriendsJoinDetail: "Oynarken arkadaşların görür ve aynı oyunu başlatıp katılabilir",
+        .voiceJoin: "Sese katıl",
+        .voiceJoinDetail: "Partiyle konuş",
+        .voiceInCall: "%d kişi seste",
+        .voiceMic: "Mikrofon",
+        .voicePushToTalk: "Bas-konuş",
+        .voicePushToTalkOn: "Konuşmak için ⌥V'yi basılı tut, oyunda da",
+        .voicePushToTalkOff: "⌥V mikrofonu açıp kapatır, oyunda da",
+        .voiceLeave: "Sesten çık",
+        .voiceNoMic: "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan AnyPS5'e izin ver",
+        .voiceJoined: "Sestesin",
         .friendsTitle: "Arkadaşlar",
         .friendsSignIn: "Arkadaşlarını görmek için giriş yap",
         .friendsAccept: "%@: kabul et",
@@ -709,6 +720,16 @@ enum T {
         .gameJoined: "Starting %2$@ with %1$@",
         .togetherFriendsJoin: "Let friends join my game",
         .togetherFriendsJoinDetail: "While you play, friends see it and can start the same game to join",
+        .voiceJoin: "Join voice",
+        .voiceJoinDetail: "Talk with the party",
+        .voiceInCall: "%d in voice",
+        .voiceMic: "Microphone",
+        .voicePushToTalk: "Push to talk",
+        .voicePushToTalkOn: "Hold ⌥V to talk, in a game too",
+        .voicePushToTalkOff: "⌥V turns the microphone on and off, in a game too",
+        .voiceLeave: "Leave voice",
+        .voiceNoMic: "Allow AnyPS5 in System Settings → Privacy & Security → Microphone",
+        .voiceJoined: "You're in voice",
         .friendsTitle: "Friends",
         .friendsSignIn: "Sign in to see your friends",
         .friendsAccept: "Accept %@",

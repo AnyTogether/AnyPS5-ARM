@@ -1,5 +1,6 @@
 import AnyPS5Core
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// Parties on AnyTogether: start one (invite only, or open to friends), invite friends, see who
@@ -42,6 +43,7 @@ extension AppModel {
             return rows
         }
         let leader = party.isLeader(me.id)
+        rows += voiceRows(party)
         rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))
         for member in party.members {
             var details: [String] = ["@\(member.handle)"]
@@ -50,7 +52,7 @@ extension AppModel {
             rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : member.displayName,
                                  detail: details.joined(separator: " · "), symbol: "person", kind: .info(""),
                                  person: PanelPerson(name: member.displayName, avatar: member.avatar,
-                                                     status: party.call?.in.contains(member.userId) == true ? .online : nil)))
+                                                     status: party.call?.in.contains(member.userId) == true ? .online : nil, speaking: voiceSpeaking.contains(member.userId))))
         }
         if leader {
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
@@ -132,6 +134,7 @@ extension AppModel {
 
     func leaveParty() {
         guard let id = party?.id else { return }
+        leaveVoice()
         Task {
             try? await together.leaveParty(id)
             withAnimation(Motion.overlay) { party = nil }
@@ -180,6 +183,7 @@ extension AppModel {
             loadParty()
         case "party.ended":
             guard event.data["partyId"] == party?.id else { return loadParty() }
+            leaveVoice(tellServer: false)
                 withAnimation(Motion.overlay) { party = nil }
             show(T.text(.partyEnded), symbol: "person.3")
         default:
@@ -190,8 +194,126 @@ extension AppModel {
     private struct InviteData: Decodable { let from: TogetherPerson }
     private struct JoinedData: Decodable { let member: TogetherPerson }
 
+    func previewVoice(call: String, speaking: Set<String>) {
+        voiceCall = call
+        voiceSpeaking = speaking
+    }
+
     func previewParty(_ party: TogetherParty?, invites: [TogetherPartyInvite] = []) {
         self.party = party
         partyInvites = invites
+    }
+}
+
+/// The party's voice: joining and leaving the call, the microphone, push-to-talk on ⌥V (a global
+/// hot key, so it works with a game in front), and who is speaking.
+extension AppModel {
+    func voiceRows(_ party: TogetherParty) -> [PanelRow] {
+        guard voiceCall != nil else {
+            let others = party.call?.in.filter { $0 != togetherUser?.id }.count ?? 0
+            return [PanelRow(id: "voice-join", title: T.text(.voiceJoin), detail: others > 0 ? T.format(.voiceInCall, others) : T.text(.voiceJoinDetail), symbol: "waveform",
+                             kind: .action(destructive: false) { [weak self] in self?.joinVoice() })]
+        }
+        let pushToTalk = preferences.pushToTalk ?? false
+        var rows: [PanelRow] = []
+        if !pushToTalk {
+            rows.append(PanelRow(id: "voice-mic", title: T.text(.voiceMic), detail: T.text(.voicePushToTalkOff), symbol: micOn ? "mic.fill" : "mic.slash.fill",
+                                 kind: .toggle(micOn) { [weak self] value in self?.setMic(value) }))
+        }
+        rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.text(.voicePushToTalkOn) : nil, symbol: "keyboard",
+                             kind: .toggle(pushToTalk) { [weak self] value in self?.setPushToTalk(value) }))
+        rows.append(PanelRow(id: "voice-leave", title: T.text(.voiceLeave), symbol: "phone.down.fill", kind: .action(destructive: true) { [weak self] in self?.leaveVoice() }))
+        return rows
+    }
+
+    /// The microphone sends: on (open mic), or ⌥V held (push-to-talk).
+    var micSending: Bool { voiceCall != nil && ((preferences.pushToTalk ?? false) ? talkHeld : micOn) }
+
+    func joinVoice() {
+        guard let party, let me = togetherUser, voiceCall == nil else { return }
+        Task {
+            guard await PartyVoice.microphoneAllowed() else {
+                return show(T.text(.voiceNoMic), symbol: "mic.slash.fill")
+            }
+            do {
+                let joined = try await together.joinCall(party: party.id)
+                let voice = PartyVoice(me: me.id, call: joined.call.id, iceServers: joined.iceServers, send: { [weak self] to, device, kind, data in
+                    self?.togetherSocket?.signal(to: to, device: device, call: joined.call.id, kind: kind, data: data)
+                }, changed: { [weak self] in self?.voiceChanged() })
+                partyVoice = voice
+                withAnimation(Motion.overlay) { voiceCall = joined.call.id }
+                micOn = true
+                for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
+                Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
+                voiceChanged()
+                Sounds.shared.play(.select)
+                show(T.text(.voiceJoined), symbol: "waveform")
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    /// Out of the call here; `tellServer` false when the server ended it already.
+    func leaveVoice(tellServer: Bool = true) {
+        guard let call = voiceCall else { return }
+        partyVoice?.close()
+        partyVoice = nil
+        Input.shared.unregisterHotKey(id: Input.talkKey)
+        withAnimation(Motion.overlay) {
+            voiceCall = nil
+            voiceSpeaking = []
+            talkHeld = false
+        }
+        if tellServer {
+            let client = together
+            Task { try? await client.leaveCall(call) }
+        }
+    }
+
+    func setMic(_ on: Bool) {
+        micOn = on
+        voiceChanged()
+    }
+
+    func setPushToTalk(_ on: Bool) {
+        preferences.pushToTalk = on
+        talkHeld = false
+        voiceChanged()
+    }
+
+    /// ⌥V: held to talk in push-to-talk, else it turns the microphone on and off.
+    private func talkKey(_ pressed: Bool) {
+        if preferences.pushToTalk ?? false {
+            talkHeld = pressed
+        } else if pressed {
+            micOn.toggle()
+            Sounds.shared.play(.move)
+        }
+        voiceChanged()
+    }
+
+    private func voiceChanged() {
+        partyVoice?.talking = micSending
+        let speaking = partyVoice?.speaking ?? []
+        if speaking != voiceSpeaking { voiceSpeaking = speaking }
+    }
+
+    /// Signals and call changes from the socket.
+    func callEvent(_ event: TogetherSocket.Event) {
+        switch event.type {
+        case "signal":
+            if let signal = event.decode(TogetherSignal.self) { partyVoice?.receive(signal) }
+        case "call.left":
+            if let userId = event.data["userId"] { partyVoice?.drop(userId, sayBye: false) }
+            loadParty()
+        case "call.joined":
+            loadParty()
+        case "call.ended":
+            if event.data["callId"] == voiceCall { leaveVoice(tellServer: false) }
+            loadParty()
+        default:
+            break
+        }
     }
 }
