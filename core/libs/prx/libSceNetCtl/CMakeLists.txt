@@ -1,6 +1,23 @@
-add_library(libSceNetCtl SHARED EXCLUDE_FROM_ALL Export.cpp)
-target_include_directories(libSceNetCtl PRIVATE ${LIBS_INCLUDE_DIR})
+set(onlineBridgeSources
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/OnlineWire.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/OnlineBridge.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/OnlineObserver.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/OnlineEnvironment.cpp
+)
+add_library(libSceNetCtl SHARED EXCLUDE_FROM_ALL Export.cpp ${onlineBridgeSources} ${CMAKE_CURRENT_SOURCE_DIR}/src/OnlineExports.cpp)
+target_include_directories(libSceNetCtl PRIVATE ${LIBS_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/core/libs/prx/libSceAgcDriver/generated)
+add_dependencies(libSceNetCtl agc_trace_revision)
+target_link_libraries(libSceNetCtl PRIVATE mbedcrypto)
 configure_windows_unwind(libSceNetCtl)
+
+if(BUILD_TESTING)
+    add_test_executable(online_bridge_tests tests/OnlineBridge.cpp tests/FakeLauncher.cpp ${onlineBridgeSources})
+    target_include_directories(online_bridge_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(online_bridge_tests PRIVATE mbedcrypto)
+    set_target_properties(online_bridge_tests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME online_bridge COMMAND online_bridge_tests)
+    set_tests_properties(online_bridge PROPERTIES TIMEOUT 60)
+endif()
 
 if(BUILD_TESTING)
     add_test_executable(guest_net_ctl_tests ${LIBS_INCLUDE_DIR}/tests/GuestNetCtl.cpp)

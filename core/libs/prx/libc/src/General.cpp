@@ -832,6 +832,15 @@ extern "C" int DuplicateHostDescriptor_nid_no_patch(int descriptor) {
 }
 #endif
 
+namespace {
+std::atomic<void (*)(const char*)> notImplementedObserver{nullptr};
+}
+
+extern "C" void SetNotImplementedObserver_nid_no_patch(void (*observer)(const char* funcName)) {
+    notImplementedObserver.store(observer);
+}
+
 extern "C" [[noreturn]] void NotImplemented_nid_no_patch(const char* funcName) {
+    if (const auto observer = notImplementedObserver.load()) observer(funcName);
     throw std::runtime_error(std::string(funcName) + " not implemented");
 }
