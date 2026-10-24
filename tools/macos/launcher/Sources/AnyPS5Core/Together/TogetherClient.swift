@@ -6,6 +6,13 @@ public struct TogetherUser: Codable, Equatable, Sendable {
     public let handle: String
     public let displayName: String
     public let avatar: String?
+
+    public init(id: String, handle: String, displayName: String, avatar: String?) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.avatar = avatar
+    }
 }
 
 /// An error AnyTogether answered with: RFC 9457 problem details with a stable code.

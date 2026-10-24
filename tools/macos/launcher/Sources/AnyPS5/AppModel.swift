@@ -207,6 +207,10 @@ final class AppModel: ObservableObject {
         self.preferences = preferences ?? Preferences.load()
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         designs = themes.all
+        if persists {
+            togetherUser = together.user
+            if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
+        }
         apply()
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
@@ -365,6 +369,17 @@ final class AppModel: ObservableObject {
     }
 
     var accent: Color { activeDesign.map { Color(rgb: $0.accentRGB) } ?? preferences.accentColor }
+
+    // MARK: AnyTogether
+
+    let together = AppModel.makeTogetherClient()
+    @Published var togetherUser: TogetherUser?
+    @Published var togetherStep = TogetherStep.idle
+    @Published var togetherConnected = false
+    var togetherEmail = ""
+    var togetherCode = ""
+    var togetherSocket: TogetherSocket?
+    var togetherWait: Task<Void, Never>?
 
     // MARK: Themes
 
@@ -906,6 +921,7 @@ final class AppModel: ObservableObject {
             startClips(for: app)
             gameWindowShown = true
             updateRemotePlay()
+            updateTogetherPresence()
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }
@@ -950,6 +966,7 @@ final class AppModel: ObservableObject {
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()
+        updateTogetherPresence()
         syncSaves(running.game) {}
         discord.clear()
         loadTrophies(running.game, again: true)

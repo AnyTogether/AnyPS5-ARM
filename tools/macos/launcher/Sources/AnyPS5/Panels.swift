@@ -227,6 +227,7 @@ extension AppModel {
             PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
+            PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]

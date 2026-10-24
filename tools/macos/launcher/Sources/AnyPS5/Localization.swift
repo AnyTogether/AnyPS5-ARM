@@ -53,6 +53,7 @@ enum T {
         case themeCosmic, themeAurora, themeSunset, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
+        case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
@@ -66,6 +67,30 @@ enum T {
     }
 
     static let turkish: [Key: String] = [
+        .togetherIntro: "AnyTogether'a giriş yap",
+        .togetherIntroDetail: "Profilin, kupaların ve arkadaşların online. Şifre yok: e-postayla ya da web sitesinden bir kod.",
+        .togetherEmail: "E-posta",
+        .togetherSendCode: "Bana kod gönder",
+        .togetherWithWebsite: "Web sitesinden giriş yap",
+        .togetherWithWebsiteDetail: "Burada bir kod al, telefonundan ya da başka bir bilgisayardan yaz",
+        .togetherCodeSent: "Kod gönderildi: %@",
+        .togetherCode: "Maildeki kod",
+        .togetherSignIn: "Giriş yap",
+        .togetherOtherEmail: "Başka bir e-posta",
+        .togetherTypeCode: "%@/link adresinde yaz",
+        .togetherOpenWebsite: "Web sitesini aç",
+        .togetherWelcome: "%@ olarak giriş yapıldı",
+        .togetherSignOut: "AnyTogether'dan çıkış yap",
+        .togetherOnline: "AnyTogether",
+        .togetherConnected: "Bağlı",
+        .togetherConnecting: "Bağlanıyor…",
+        .togetherSignedOutElsewhere: "Başka bir cihazdan AnyTogether oturumu kapatıldı",
+        .togetherEmailInvalid: "Önce e-postanı yaz",
+        .togetherCodeWrong: "Kod yanlış",
+        .togetherCodeExpired: "Kodun süresi doldu; yenisini iste",
+        .togetherCodeLocked: "Çok fazla yanlış kod; yenisini iste",
+        .togetherTooMany: "Şimdilik çok fazla kod istendi; biraz sonra dene",
+        .togetherUnreachable: "AnyTogether'a ulaşılamadı",
         .remotePlayPermissionTitle: "Remote Play için izin gerekli",
         .remotePlayNeedsPermission: "Oyunu telefona göndermek için Sistem Ayarları > Gizlilik > Ekran Kaydı'nda AnyPS5'e izin ver.",
         .themes: "Temalar",
@@ -414,6 +439,30 @@ enum T {
     ]
 
     static let english: [Key: String] = [
+        .togetherIntro: "Sign in to AnyTogether",
+        .togetherIntroDetail: "Your profile, trophies and friends, online. No password: a code by email or from the website.",
+        .togetherEmail: "Email",
+        .togetherSendCode: "Email me a code",
+        .togetherWithWebsite: "Sign in on the website",
+        .togetherWithWebsiteDetail: "Get a code here, type it on your phone or any computer",
+        .togetherCodeSent: "Code sent to %@",
+        .togetherCode: "Code from the mail",
+        .togetherSignIn: "Sign in",
+        .togetherOtherEmail: "Use another email",
+        .togetherTypeCode: "Type it at %@/link",
+        .togetherOpenWebsite: "Open the website",
+        .togetherWelcome: "Signed in as %@",
+        .togetherSignOut: "Sign out of AnyTogether",
+        .togetherOnline: "AnyTogether",
+        .togetherConnected: "Connected",
+        .togetherConnecting: "Connecting…",
+        .togetherSignedOutElsewhere: "Signed out of AnyTogether from another device",
+        .togetherEmailInvalid: "Type your email first",
+        .togetherCodeWrong: "That code is not right",
+        .togetherCodeExpired: "The code has expired; ask for a new one",
+        .togetherCodeLocked: "Too many wrong codes; ask for a new one",
+        .togetherTooMany: "Too many codes for now; try again later",
+        .togetherUnreachable: "AnyTogether could not be reached",
         .remotePlayPermissionTitle: "Remote Play needs a permission",
         .remotePlayNeedsPermission: "To send the game to the phone, allow AnyPS5 in System Settings > Privacy > Screen Recording.",
         .themes: "Themes",

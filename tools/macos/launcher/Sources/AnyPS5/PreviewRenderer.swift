@@ -62,6 +62,18 @@ enum PreviewRenderer {
                 model.overlay = overlay; model.panelInRows = true; model.panelRow = row
             }
         }
+        render(preferences, found, root, still, output.appendingPathComponent("together.png")) { model in
+            model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("together-code.png")) { model in
+            model.togetherStep = .deviceCode(code: "K7QM-2XZP", url: URL(string: "https://anytogether.kodla.agency/link?code=K7QM-2XZP")!)
+            model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("together-in.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherConnected = true
+            model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }
