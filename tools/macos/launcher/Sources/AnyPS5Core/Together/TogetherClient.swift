@@ -251,9 +251,19 @@ private actor Refresher {
 }
 
 extension JSONDecoder {
+    /// ISO 8601 dates with or without milliseconds: the server sends them with.
     static let together: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let text = try container.decode(String.self)
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            guard let date = fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Not an ISO 8601 date: \(text)")
+            }
+            return date
+        }
         return decoder
     }()
 }

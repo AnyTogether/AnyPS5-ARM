@@ -395,3 +395,140 @@ final class TogetherSyncLiveTests: XCTestCase {
         XCTAssertEqual(game.points, 15)
     }
 }
+
+final class TogetherProfileTests: XCTestCase {
+    var folder: URL!
+    var client: TogetherClient!
+
+    override func setUp() async throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("together-profile-\(UUID().uuidString.prefix(8))")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeTogether.self]
+        client = TogetherClient(base: URL(string: "https://anytogether.test")!, store: TokenStore(file: folder.appendingPathComponent("s.json")),
+                                session: URLSession(configuration: configuration), clientName: "launcher-macos/test")
+        FakeTogether.requests = []
+        FakeTogether.handler = { _, _ in (200, TogetherTests.tokens()) }
+        _ = try await client.verifyEmail("u@example.com", code: "111111")
+    }
+
+    override func tearDown() { try? FileManager.default.removeItem(at: folder) }
+
+    static let profile: [String: Any] = ["userId": "f1", "handle": "ayse", "displayName": "Ayşe", "avatar": "https://cdn.test/a.webp", "bio": "Souls games, slowly", "country": "TR", "friendship": "friends"]
+    static let library: [String: Any] = ["games": [
+        ["titleId": "PPSA01234", "names": ["en": "Hollow Knight: Silksong", "tr": "Hollow Knight: Silksong TR"], "iconUrl": NSNull(),
+         "firstPlayedAt": "2026-10-01T18:00:00.000Z", "lastPlayedAt": "2026-10-23T21:30:12.345Z",
+         "secondsPlayed": 7200, "trophiesEarned": 12, "trophiesTotal": 48, "progress": 25, "points": 450],
+        ["titleId": "PPSA05678", "names": ["ja": "ストレイ"], "iconUrl": "https://cdn.test/stray.webp",
+         "firstPlayedAt": NSNull(), "lastPlayedAt": NSNull(), "secondsPlayed": 1800, "trophiesEarned": 0, "trophiesTotal": NSNull(), "progress": NSNull(), "points": 0],
+    ]]
+    static let trophies: [String: Any] = ["trophies": [
+        ["titleId": "PPSA01234", "gameNames": ["en": "Hollow Knight: Silksong"], "setHash": String(repeating: "a", count: 64), "trophyId": 7, "grade": "gold", "hidden": false,
+         "texts": ["en": ["name": "Bound", "detail": "Bind a skill"], "tr": ["name": "Bağlandı"]], "earnedAt": "2026-10-23T21:00:00.000Z",
+         "earnedCount": 3, "rarity": 0.0312, "rarityLabel": "very_rare"],
+        ["titleId": "PPSA01234", "gameNames": ["en": "Hollow Knight: Silksong"], "setHash": String(repeating: "a", count: 64), "trophyId": 9, "grade": "bronze", "hidden": true,
+         "texts": NSNull(), "earnedAt": "2026-10-22T10:00:00Z", "earnedCount": 40, "rarity": NSNull(), "rarityLabel": NSNull()],
+    ]]
+
+    func testAProfileWithItsGamesAndTrophies() async throws {
+        FakeTogether.handler = { request, _ in
+            switch request.url!.path {
+            case "/api/v1/users/ayse": return (200, Self.profile)
+            case "/api/v1/users/ayse/library": return (200, Self.library)
+            case "/api/v1/users/ayse/trophies": return (200, Self.trophies)
+            default: return (404, ["code": "not_found", "status": 404, "title": "x"])
+            }
+        }
+        let page = try await client.profilePage("@ayse")
+        XCTAssertEqual(page.profile.displayName, "Ayşe")
+        XCTAssertEqual(page.profile.bio, "Souls games, slowly")
+        XCTAssertEqual(page.profile.friendship, "friends")
+        XCTAssertFalse(page.profile.isMe)
+        guard case .shown(let games) = page.library, case .shown(let trophies) = page.trophies else { return XCTFail("\(page)") }
+        XCTAssertEqual(games.map(\.titleId), ["PPSA01234", "PPSA05678"])
+        XCTAssertEqual(games[0].lastPlayedAt, ISO8601DateFormatter().date(from: "2026-10-23T21:30:12Z")?.addingTimeInterval(0.345), "dates with milliseconds, as the server sends them")
+        XCTAssertNil(games[1].trophiesTotal)
+        XCTAssertEqual(page.totals, .init(games: 2, seconds: 9000, trophies: 12, points: 450))
+        XCTAssertEqual(trophies.first?.rarityLabel, "very_rare")
+        XCTAssertEqual(trophies.first?.rarity ?? 0, 0.0312, accuracy: 0.0001)
+        XCTAssertEqual(trophies.first?.name(in: "tr"), "Bağlandı")
+        XCTAssertNil(trophies.last?.name(in: "en"), "a hidden trophy the asker has not earned keeps its name")
+        XCTAssertEqual(Set(FakeTogether.requests.map { $0.0.url!.path }), ["/api/v1/auth/email/verify", "/api/v1/users/ayse", "/api/v1/users/ayse/library", "/api/v1/users/ayse/trophies"])
+    }
+
+    func testANameInTheUsersLanguageOrAnyOther() {
+        let both = TogetherPlayedGame(titleId: "PPSA01234", names: ["en": "Silksong", "tr": "Silksong TR"], iconUrl: nil, lastPlayedAt: nil, secondsPlayed: 0, trophiesEarned: 0, trophiesTotal: nil, progress: nil, points: 0)
+        XCTAssertEqual(both.name(in: "tr"), "Silksong TR")
+        XCTAssertEqual(both.name(in: "de"), "Silksong", "English when the language is missing")
+        let other = TogetherPlayedGame(titleId: "PPSA05678", names: ["ja": "ストレイ"], iconUrl: nil, lastPlayedAt: nil, secondsPlayed: 0, trophiesEarned: 0, trophiesTotal: nil, progress: nil, points: 0)
+        XCTAssertEqual(other.name(in: "en"), "ストレイ")
+        let none = TogetherPlayedGame(titleId: "PPSA09999", names: [:], iconUrl: nil, lastPlayedAt: nil, secondsPlayed: 0, trophiesEarned: 0, trophiesTotal: nil, progress: nil, points: 0)
+        XCTAssertEqual(none.name(in: "en"), "PPSA09999")
+    }
+
+    /// Someone who is not a friend, or who keeps a section to themselves: those sections are
+    /// private, the rest of the profile still shows.
+    func testSectionsTheServerKeepsToItselfArePrivate() async throws {
+        FakeTogether.handler = { request, _ in
+            switch request.url!.path {
+            case "/api/v1/users/mert": return (200, ["userId": "f3", "handle": "mert", "displayName": "Mert", "avatar": NSNull(), "bio": NSNull(), "country": NSNull(), "friendship": "none"])
+            case "/api/v1/users/mert/library": return (403, ["code": "forbidden", "status": 403, "title": "Only friends can see this"])
+            case "/api/v1/users/mert/trophies": return (200, ["private": true, "trophies": []])
+            default: return (404, ["code": "not_found", "status": 404, "title": "x"])
+            }
+        }
+        let page = try await client.profilePage("mert")
+        XCTAssertEqual(page.library, .private)
+        XCTAssertEqual(page.trophies, .private)
+        XCTAssertNil(page.totals, "no numbers without the library")
+        XCTAssertNil(page.profile.bio)
+    }
+
+    func testASectionThatCouldNotBeReadSaysSo() async throws {
+        FakeTogether.handler = { request, _ in
+            switch request.url!.path {
+            case "/api/v1/users/utku": return (200, ["userId": "u1", "handle": "utku", "displayName": "Utku", "avatar": NSNull(), "bio": NSNull(), "country": NSNull(), "friendship": "me"])
+            case "/api/v1/users/utku/library": return (200, Self.library)
+            default: return (503, ["code": "internal", "status": 503, "title": "down"])
+            }
+        }
+        let page = try await client.profilePage("utku")
+        XCTAssertTrue(page.profile.isMe)
+        XCTAssertEqual(page.trophies, .failed)
+        XCTAssertEqual(page.totals?.games, 2)
+    }
+
+    /// Profile details kept private: the card the launcher already knows stands in for them.
+    func testPrivateDetailsFallBackToTheKnownCard() async throws {
+        FakeTogether.handler = { request, _ in
+            switch request.url!.path {
+            case "/api/v1/users/kral": return (403, ["code": "private", "status": 403, "title": "Private"])
+            case "/api/v1/users/kral/library": return (200, ["games": []])
+            case "/api/v1/users/kral/trophies": return (200, ["trophies": []])
+            default: return (404, ["code": "not_found", "status": 404, "title": "x"])
+            }
+        }
+        let card = TogetherPerson(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil)
+        let page = try await client.profilePage("kral", card: card)
+        XCTAssertEqual(page.profile.displayName, "Kral")
+        XCTAssertTrue(page.detailsPrivate)
+        XCTAssertEqual(page.totals, .init(games: 0, seconds: 0, trophies: 0, points: 0))
+        do {
+            _ = try await client.profilePage("kral")
+            XCTFail("no card, no profile")
+        } catch let problem as TogetherProblem {
+            XCTAssertEqual(problem.status, 403)
+        }
+    }
+
+    func testNoOneWithThatHandle() async {
+        FakeTogether.handler = { _, _ in (404, ["code": "not_found", "status": 404, "title": "No one with that handle"]) }
+        do {
+            _ = try await client.profilePage("nobody")
+            XCTFail("no error")
+        } catch let problem as TogetherProblem {
+            XCTAssertEqual(problem.status, 404)
+        } catch {
+            XCTFail("\(error)")
+        }
+    }
+}

@@ -28,6 +28,9 @@ extension AppModel {
         if let user = togetherUser {
             return [
                 PanelRow(id: "together-user", title: "@\(user.handle)", detail: user.displayName, symbol: "person.crop.circle.badge.checkmark", kind: .info("")),
+                PanelRow(id: "together-profile", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.text.rectangle", kind: .action(destructive: false) { [weak self] in
+                    self?.openMyProfile()
+                }),
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
                 PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
@@ -225,6 +228,7 @@ extension AppModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.togetherSocket = nil
+                if self.overlay == .profile { self.closeProfile() }
                 withAnimation(Motion.overlay) {
                     self.togetherUser = nil
                     self.togetherConnected = false

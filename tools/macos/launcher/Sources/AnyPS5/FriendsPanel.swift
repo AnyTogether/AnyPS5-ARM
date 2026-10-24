@@ -13,7 +13,11 @@ extension AppModel {
                 }),
             ]
         }
-        var rows: [PanelRow] = []
+        var rows: [PanelRow] = [
+            PanelRow(id: "friends-me", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.crop.circle", kind: .action(destructive: false) { [weak self] in
+                self?.openMyProfile()
+            }),
+        ]
         for person in togetherRequests.incoming {
             rows.append(PanelRow(id: "accept-\(person.userId)", title: T.format(.friendsAccept, person.displayName), detail: "@\(person.handle) · \(T.text(.friendsWantsToBe))",
                                  symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerFriend(person, accept: true) }))
@@ -28,7 +32,9 @@ extension AppModel {
         for friend in togetherFriends {
             rows.append(PanelRow(id: "friend-\(friend.userId)", title: friend.displayName, detail: "@\(friend.handle) · \(presenceText(friend.presence))",
                                  symbol: friend.presence?.playing == true ? "gamecontroller.fill" : friend.presence?.online == true ? "circle.fill" : "circle",
-                                 kind: .info("")))
+                                 kind: .action(destructive: false) { [weak self] in
+                                     self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar))
+                                 }))
         }
         for person in togetherRequests.outgoing {
             rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info("")))

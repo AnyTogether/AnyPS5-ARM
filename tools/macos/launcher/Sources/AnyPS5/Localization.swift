@@ -55,6 +55,8 @@ enum T {
         case unreadableDump
         case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
         case togetherWithPhone, togetherWithPhoneDetail, togetherOnPhone, togetherPhoneDeclined, togetherPhoneSignedIn
+        case profileTitle, profileMine, profileMineDetail, profileGames, profileHours, profileTrophies, profilePoints, profileGamesTitle, profileRecentTrophies, profilePrivate, profileFriendsOnly, profileDetailsPrivate, profileFailed, profileNoGames, profileNoTrophies, profileLoading, profileHoursMinutes, profileHoursOnly, profileMinutes, profileLastPlayed, profileYou, profileFriend
+        case rarityCommon, rarityUncommon, rarityRare, rarityVeryRare, rarityUltraRare
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -69,6 +71,33 @@ enum T {
     }
 
     static let turkish: [Key: String] = [
+        .profileTitle: "Profil",
+        .profileMine: "Profilim",
+        .profileMineDetail: "Oyunların, süren ve kupaların",
+        .profileGames: "Oyun",
+        .profileHours: "Saat",
+        .profileTrophies: "Kupa",
+        .profilePoints: "Puan",
+        .profileGamesTitle: "Oyunlar",
+        .profileRecentTrophies: "Son kupalar",
+        .profilePrivate: "%@ bunu gizli tutuyor",
+        .profileFriendsOnly: "Bunu yalnızca %@ ile arkadaş olanlar görür",
+        .profileDetailsPrivate: "Profil ayrıntıları gizli",
+        .profileFailed: "Şu an yüklenemedi",
+        .profileNoGames: "Henüz oynanmış oyun yok",
+        .profileNoTrophies: "Henüz kupa yok",
+        .profileLoading: "Yükleniyor…",
+        .profileHoursMinutes: "%d sa %d dk",
+        .profileHoursOnly: "%d sa",
+        .profileMinutes: "%d dk",
+        .profileLastPlayed: "%@ oynandı",
+        .profileYou: "Sen",
+        .profileFriend: "Arkadaş",
+        .rarityCommon: "Yaygın",
+        .rarityUncommon: "Az yaygın",
+        .rarityRare: "Nadir",
+        .rarityVeryRare: "Çok nadir",
+        .rarityUltraRare: "Ultra nadir",
         .friendsTitle: "Arkadaşlar",
         .friendsSignIn: "Arkadaşlarını görmek için giriş yap",
         .friendsAccept: "%@: kabul et",
@@ -466,6 +495,33 @@ enum T {
     ]
 
     static let english: [Key: String] = [
+        .profileTitle: "Profile",
+        .profileMine: "My profile",
+        .profileMineDetail: "Your games, play time and trophies",
+        .profileGames: "Games",
+        .profileHours: "Hours",
+        .profileTrophies: "Trophies",
+        .profilePoints: "Points",
+        .profileGamesTitle: "Games",
+        .profileRecentTrophies: "Recent trophies",
+        .profilePrivate: "%@ keeps this private",
+        .profileFriendsOnly: "Only %@'s friends can see this",
+        .profileDetailsPrivate: "Profile details are private",
+        .profileFailed: "Couldn't load this right now",
+        .profileNoGames: "No games played yet",
+        .profileNoTrophies: "No trophies yet",
+        .profileLoading: "Loading…",
+        .profileHoursMinutes: "%d h %d min",
+        .profileHoursOnly: "%d h",
+        .profileMinutes: "%d min",
+        .profileLastPlayed: "last played %@",
+        .profileYou: "You",
+        .profileFriend: "Friend",
+        .rarityCommon: "Common",
+        .rarityUncommon: "Uncommon",
+        .rarityRare: "Rare",
+        .rarityVeryRare: "Very rare",
+        .rarityUltraRare: "Ultra rare",
         .friendsTitle: "Friends",
         .friendsSignIn: "Sign in to see your friends",
         .friendsAccept: "Accept %@",

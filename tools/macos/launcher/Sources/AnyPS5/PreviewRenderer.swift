@@ -85,6 +85,39 @@ enum PreviewRenderer {
             model.togetherRequests = TogetherRequests(incoming: [TogetherPerson(userId: "f4", handle: "zeynep", displayName: "Zeynep", avatar: nil)], outgoing: [])
             model.overlay = .friends; model.panelInRows = true; model.panelRow = 0
         }
+        let ago = { (hours: Double) in Date().addingTimeInterval(-hours * 3600) }
+        let library: [TogetherPlayedGame] = found.prefix(3).enumerated().map { index, game in
+            TogetherPlayedGame(titleId: game.titleID, names: ["en": game.name], iconUrl: nil, lastPlayedAt: ago(Double(index * 30 + 2)),
+                               secondsPlayed: [151_200, 26_100, 2_700][index], trophiesEarned: [31, 9, 1][index], trophiesTotal: [48, 40, nil][index], progress: [64, 22, nil][index], points: [1_830, 420, 15][index])
+        } + [TogetherPlayedGame(titleId: "PPSA09999", names: ["en": "Stray"], iconUrl: nil, lastPlayedAt: ago(400), secondsPlayed: 72_000, trophiesEarned: 12, trophiesTotal: 41, progress: 29, points: 600)]
+        let earned: [TogetherEarnedTrophy] = [
+            ("Platinum", "platinum", 0.008, "ultra_rare"), ("Against All Odds", "gold", 0.031, "very_rare"), ("Night Walker", "silver", 0.12, "rare"),
+            ("Curious Cat", "bronze", 0.34, "uncommon"), ("First Steps", "bronze", 0.92, "common"), ("Secret", "bronze", 0.4, "uncommon"),
+        ].enumerated().map { index, item in
+            let game = library[min(index / 2, library.count - 1)]
+            return TogetherEarnedTrophy(titleId: game.titleId, gameNames: game.names, trophyId: index, grade: item.1, hidden: index == 5,
+                                        texts: index == 5 ? nil : ["en": .init(name: item.0)], earnedAt: ago(Double(index * 20 + 1)), rarity: item.2, rarityLabel: item.3)
+        }
+        let ayse = TogetherProfile(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, bio: "Souls games, slowly. Platinum hunter on weekends.", country: "TR", friendship: "friends")
+        render(preferences, found, root, still, output.appendingPathComponent("profile.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.previewProfile(TogetherProfilePage(profile: ayse, library: .shown(library), trophies: .shown(earned)), column: 0, index: 1)
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("profile-trophies.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            let me = TogetherProfile(userId: "u1", handle: "utku", displayName: "Utku", avatar: nil, bio: nil, country: nil, friendship: "me")
+            model.previewProfile(TogetherProfilePage(profile: me, library: .shown(library), trophies: .shown(earned)), column: 1, index: 1)
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("profile-private.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            let mert = TogetherProfile(userId: "f3", handle: "mert", displayName: "Mert", avatar: nil, bio: nil, country: nil, friendship: "none")
+            model.previewProfile(TogetherProfilePage(profile: mert, library: .private, trophies: .private))
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("profile-loading.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.previewProfile(nil)
+            model.profileCard = TogetherPerson(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil)
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

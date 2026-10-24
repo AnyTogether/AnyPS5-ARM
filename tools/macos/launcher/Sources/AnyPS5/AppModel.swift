@@ -93,6 +93,8 @@ enum Overlay: Equatable {
     case studio
     /// Friends on AnyTogether.
     case friends
+    /// Someone's AnyTogether profile, the user's own or a friend's.
+    case profile
 }
 
 struct Toast: Identifiable, Equatable {
@@ -389,6 +391,14 @@ final class AppModel: ObservableObject {
     @Published var togetherFriends: [TogetherFriend] = []
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
+    /// The profile open: who (known before it loads), what came back, and the focused row.
+    @Published var profileCard: TogetherPerson?
+    @Published var profilePage: TogetherProfilePage?
+    @Published var profileFailed = false
+    @Published var profileColumn = 0
+    @Published var profileIndex = 0
+    var profileReturn: ProfileReturn?
+    var profileTask: Task<Void, Never>?
 
     // MARK: Themes
 

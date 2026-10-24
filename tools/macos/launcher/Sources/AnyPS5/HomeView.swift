@@ -590,6 +590,9 @@ extension AppModel {
                 return true
             }
             return panelCommand(command)
+        case .profile:
+            profileCommand(command)
+            return true
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
