@@ -40,10 +40,13 @@ extension AppModel {
                                      person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: .online)))
             }
             if rows.count == 2 { rows.append(PanelRow(id: "party-none", title: T.text(.partyNone), symbol: "person.3", kind: .info(""))) }
+            rows.append(PanelRow(id: "party-find", title: FP.text(.findParty), detail: FP.text(.findPartyDetail), symbol: "person.3.sequence",
+                                 kind: .action(destructive: false) { [weak self] in self?.openFindPlayers(category: 2) }))
             return rows
         }
         let leader = party.isLeader(me.id)
         rows += voiceRows(party)
+        if leader { rows += partyRequestRows(party) }
         rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))
         for member in party.members {
             var details: [String] = ["@\(member.handle)"]
@@ -68,6 +71,7 @@ extension AppModel {
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
                 self?.setPartyOpen(value)
             }))
+            rows += partyListingRows(party)
         }
         let inside = Set(party.members.map(\.userId))
         let invited = Set(party.invited.map(\.userId))
@@ -90,6 +94,65 @@ extension AppModel {
             self?.leaveParty()
         }))
         return rows
+    }
+
+    // MARK: In public
+
+    /// Strangers who asked to join, for the leader to let in (an invite) or not.
+    func partyRequestRows(_ party: TogetherParty) -> [PanelRow] {
+        (party.requests ?? []).flatMap { person -> [PanelRow] in
+            [
+                PanelRow(id: "party-request-accept-\(person.userId)", title: FP.format(.letIn, person.displayName), detail: "@\(person.handle) · " + FP.text(.letInParty),
+                         symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerPartyRequest(person, accept: true) },
+                         person: PanelPerson(name: person.displayName, avatar: person.avatar)),
+                PanelRow(id: "party-request-decline-\(person.userId)", title: FP.format(.notNow, person.displayName), symbol: "xmark.circle",
+                         kind: .action(destructive: true) { [weak self] in self?.answerPartyRequest(person, accept: false) }),
+            ]
+        }
+    }
+
+    /// The game a public party or share play is about: the one running, else the one selected.
+    var listingGame: Game? { running?.game ?? selectedGame }
+
+    /// Listing the party in public: off, anyone may ask, anyone may walk in; its game and language.
+    func partyListingRows(_ party: TogetherParty) -> [PanelRow] {
+        let joins: [TogetherPublicJoin?] = [nil, .request, .open]
+        let listing = party.listing
+        var rows = [
+            PanelRow(id: "party-public", title: FP.text(.listPublic), detail: FP.text(.listPublicDetail), symbol: "globe",
+                     kind: .choice(options: [FP.text(.listOff), FP.text(.listAsk), FP.text(.listOpen)], selected: joins.firstIndex(of: listing?.join) ?? 0) { [weak self] index in
+                         self?.listParty(joins[index].map { TogetherPartyListing(join: $0, titleId: listing?.titleId ?? self?.listingGame?.titleID, language: listing?.language) })
+                     }),
+        ]
+        guard let listing else { return rows }
+        var titles: [String?] = [nil]
+        if let game = listingGame { titles.append(game.titleID) }
+        if let title = listing.titleId, !titles.contains(title) { titles.append(title) }
+        let languages: [String?] = [nil] + TogetherLanguages.common
+        rows.append(PanelRow(id: "party-public-game", title: FP.text(.listGame), symbol: "gamecontroller",
+                             kind: .choice(options: titles.map { $0.map(gameName) ?? FP.text(.listNoGame) }, selected: titles.firstIndex(of: listing.titleId) ?? 0) { [weak self] index in
+                                 self?.listParty(TogetherPartyListing(join: listing.join, titleId: titles[index], language: listing.language))
+                             }))
+        rows.append(PanelRow(id: "party-public-language", title: FP.text(.listLanguage), symbol: "character.bubble",
+                             kind: .choice(options: languages.map { $0.map { TogetherLanguages.name($0, in: lang) } ?? FP.text(.anyLanguage) },
+                                           selected: languages.firstIndex(of: listing.language) ?? 0) { [weak self] index in
+                                 self?.listParty(TogetherPartyListing(join: listing.join, titleId: listing.titleId, language: languages[index]))
+                             }))
+        return rows
+    }
+
+    func listParty(_ listing: TogetherPartyListing?) {
+        guard let id = party?.id else { return }
+        partyAction { try await $0.setPartyListing(id, listing) }
+    }
+
+    func answerPartyRequest(_ person: TogetherPerson, accept: Bool) {
+        guard let id = party?.id else { return }
+        partyAction { client in
+            let next = try await client.answerPartyRequest(id, user: person.userId, accept: accept)
+            if accept { await MainActor.run { self.show(FP.format(.letInDone, person.displayName), symbol: "person.badge.plus") } }
+            return next
+        }
     }
 
     var partySubtitle: String? {

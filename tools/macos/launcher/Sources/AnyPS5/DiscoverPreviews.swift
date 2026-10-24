@@ -96,6 +96,13 @@ enum DiscoverPreviews {
             model.overlay = .party; model.panelInRows = true
             model.panelRow = model.partyRows().firstIndex { $0.id.hasPrefix("party-request-accept") } ?? 0
         }
+        render("share-public") { model in
+            model.previewShare(TogetherSharePlay(id: "s1", host: robin, hostDevice: "d1", titleId: found.first?.titleID ?? "PPSA01234", title: found.first?.name, open: true, maxViewers: 3,
+                                                 viewers: [.init(user: mira, device: "d2", slot: nil, joinedAt: nil)], listing: TogetherShareListing(join: .open, language: "tr", live: true),
+                                                 requests: [sol]))
+            model.overlay = .friends; model.panelInRows = true
+            model.panelRow = model.friendRows().firstIndex { $0.id == "share-public" } ?? 0
+        }
         render("party-find") { model in
             model.previewParty(nil)
             model.overlay = .party; model.panelInRows = true

@@ -301,6 +301,7 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "share-on", title: SP.format(.sharing, hosting.title ?? gameName(hosting.titleId)), detail: SP.format(.watching, hosting.viewers.count, hosting.maxViewers),
                              symbol: "shareplay", kind: .info("")))
+        rows += shareRequestRows(hosting)
         for viewer in hosting.viewers {
             let name = viewer.user.displayName
             let person = PanelPerson(name: name, avatar: viewer.user.avatar, status: viewer.slot == nil ? .online : .playing)
@@ -324,6 +325,7 @@ extension AppModel {
                              kind: .stepper(value: hosting.maxViewers, range: max(1, hosting.viewers.count) ... SharePlayRoster.maxViewers, step: 1, format: { "\($0)" }) { [weak self] count in
                                  self?.setShareMaxViewers(count)
                              }))
+        rows += shareListingRows(hosting)
         let watching = Set(hosting.viewers.map(\.user.userId))
         let invited = Set((hosting.invited ?? []).map(\.userId))
         for friend in togetherFriends where friend.presence?.online == true && !watching.contains(friend.userId) {
@@ -334,6 +336,67 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "share-stop", title: SP.text(.stop), symbol: "stop.circle", kind: .action(destructive: true) { [weak self] in self?.stopSharePlay() }))
         return rows
+    }
+}
+
+/// Listing the share play in public, and answering who asked to watch.
+extension AppModel {
+    func shareRequestRows(_ hosting: TogetherSharePlay) -> [PanelRow] {
+        (hosting.requests ?? []).flatMap { person -> [PanelRow] in
+            [
+                PanelRow(id: "share-request-accept-\(person.userId)", title: FP.format(.letWatch, person.displayName), detail: "@\(person.handle)",
+                         symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerShareRequest(person, accept: true) },
+                         person: PanelPerson(name: person.displayName, avatar: person.avatar)),
+                PanelRow(id: "share-request-decline-\(person.userId)", title: FP.format(.notNow, person.displayName), symbol: "xmark.circle",
+                         kind: .action(destructive: true) { [weak self] in self?.answerShareRequest(person, accept: false) }),
+            ]
+        }
+    }
+
+    func shareListingRows(_ hosting: TogetherSharePlay) -> [PanelRow] {
+        let joins: [TogetherPublicJoin?] = [nil, .request, .open]
+        let listing = hosting.listing
+        var rows = [
+            PanelRow(id: "share-public", title: FP.text(.listPublic), detail: FP.text(.listPublicDetail), symbol: "globe",
+                     kind: .choice(options: [FP.text(.listOff), FP.text(.listAsk), FP.text(.listOpenWatch)], selected: joins.firstIndex(of: listing?.join) ?? 0) { [weak self] index in
+                         self?.listShare(joins[index].map { TogetherShareListing(join: $0, language: listing?.language, live: listing?.live ?? ($0 == .open)) })
+                     }),
+        ]
+        guard let listing else { return rows }
+        if listing.join == .open {
+            rows.append(PanelRow(id: "share-live", title: FP.text(.liveToggle), detail: FP.text(.liveToggleDetail), symbol: "dot.radiowaves.left.and.right",
+                                 kind: .toggle(listing.live) { [weak self] value in self?.listShare(TogetherShareListing(join: listing.join, language: listing.language, live: value)) }))
+        }
+        let languages: [String?] = [nil] + TogetherLanguages.common
+        rows.append(PanelRow(id: "share-language", title: FP.text(.listLanguage), symbol: "character.bubble",
+                             kind: .choice(options: languages.map { $0.map { TogetherLanguages.name($0, in: lang) } ?? FP.text(.anyLanguage) },
+                                           selected: languages.firstIndex(of: listing.language) ?? 0) { [weak self] index in
+                                 self?.listShare(TogetherShareListing(join: listing.join, language: languages[index], live: listing.live))
+                             }))
+        return rows
+    }
+
+    func listShare(_ listing: TogetherShareListing?) {
+        guard let session = shareSession else { return }
+        Task {
+            do {
+                applyShare(try await together.setShareListing(session.id, listing))
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    func answerShareRequest(_ person: TogetherPerson, accept: Bool) {
+        guard let session = shareSession else { return }
+        Task {
+            do {
+                applyShare(try await together.answerShareRequest(session.id, user: person.userId, accept: accept))
+                if accept { show(SP.format(.invited, person.displayName), symbol: "paperplane.fill") }
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 }
 
