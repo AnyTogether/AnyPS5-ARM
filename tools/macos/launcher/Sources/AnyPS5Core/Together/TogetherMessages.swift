@@ -102,6 +102,43 @@ extension TogetherClient {
     }
 }
 
+/// Who is typing where: someone shows as typing for a few seconds after they last said so, or
+/// until their message arrives.
+public struct TogetherTyping: Equatable, Sendable {
+    /// How often a client says it is typing, and how long it shows after.
+    public static let every: TimeInterval = 2
+    public static let shows: TimeInterval = 5
+
+    private var said: [String: [String: Date]] = [:]
+
+    public init() {}
+
+    public mutating func typing(_ userId: String, in conversation: String, at now: Date = Date()) {
+        said[conversation, default: [:]][userId] = now
+    }
+
+    /// Their message came: they stopped typing it.
+    public mutating func wrote(_ userId: String, in conversation: String) {
+        said[conversation]?[userId] = nil
+    }
+
+    /// Who types in the conversation now, in user ID order.
+    public func who(in conversation: String, at now: Date = Date()) -> [String] {
+        (said[conversation] ?? [:]).filter { now.timeIntervalSince($0.value) < TogetherTyping.shows }.keys.sorted()
+    }
+
+    /// Forgets what has stopped showing; true when anything went.
+    @discardableResult
+    public mutating func expire(at now: Date = Date()) -> Bool {
+        let before = said
+        said = said.compactMapValues { users in
+            let kept = users.filter { now.timeIntervalSince($0.value) < TogetherTyping.shows }
+            return kept.isEmpty ? nil : kept
+        }
+        return said != before
+    }
+}
+
 /// The conversations and the threads read so far, kept current by the socket's events.
 public struct TogetherInbox: Equatable, Sendable {
     public let me: String

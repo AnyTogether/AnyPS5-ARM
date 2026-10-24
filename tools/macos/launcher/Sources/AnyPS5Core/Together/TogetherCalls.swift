@@ -4,18 +4,64 @@ import Foundation
 public struct TogetherCallPeer: Codable, Equatable, Hashable, Sendable {
     public let userId: String
     public let device: String
+    /// They muted themselves (false where the server does not say).
+    public let muted: Bool
 
-    public init(userId: String, device: String) {
+    public init(userId: String, device: String, muted: Bool = false) {
         self.userId = userId
         self.device = device
+        self.muted = muted
+    }
+
+    enum CodingKeys: String, CodingKey { case userId, device, muted }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        userId = try container.decode(String.self, forKey: .userId)
+        device = try container.decode(String.self, forKey: .device)
+        muted = try container.decodeIfPresent(Bool.self, forKey: .muted) ?? false
     }
 }
 
 /// A call: the party's voice, or a friend.
 public struct TogetherCall: Decodable, Equatable, Sendable {
     public let id: String
+    /// "party" or "direct".
+    public let kind: String?
     public let partyId: String?
+    public let startedBy: String?
+    /// Who was called, in a direct call.
+    public let calleeId: String?
     public let `in`: [TogetherCallPeer]
+}
+
+/// A friend calling: rings on every device of the user until one answers or declines.
+public struct TogetherRinging: Decodable, Equatable, Sendable, Identifiable {
+    public var id: String { callId }
+    public let callId: String
+    public let from: TogetherPerson
+    /// The caller's device.
+    public let device: String
+
+    public init(callId: String, from: TogetherPerson, device: String) {
+        self.callId = callId
+        self.from = from
+        self.device = device
+    }
+}
+
+/// Someone in a call muted or unmuted themselves.
+public struct TogetherMuteChange: Decodable, Equatable, Sendable {
+    public let callId: String
+    public let partyId: String?
+    public let userId: String
+    public let muted: Bool
+}
+
+/// Fresh relay credentials, for a call that outlives the ones it was given.
+public struct TogetherIceRenewal: Decodable, Equatable, Sendable {
+    public let iceServers: [TogetherIceServer]
+    public let expiresAt: Date?
 }
 
 /// A STUN or TURN server, as a peer connection takes it.
@@ -94,6 +140,45 @@ extension TogetherClient {
     public func leaveCall(_ callId: String) async throws {
         _ = try await authorized("POST", "calls/\(callId)/leave", [:])
     }
+
+    /// Leaving as the app quits: true once the server has it, false when it did not answer in time.
+    public func leaveCall(_ callId: String, within deadline: Duration) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { (try? await self.leaveCall(callId)) != nil }
+            group.addTask {
+                try? await Task.sleep(for: deadline)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
+    /// Calls a friend: it rings on their devices; the call is joined already, waiting for them.
+    public func call(friend userId: String) async throws -> TogetherCallJoin {
+        try JSONDecoder.together.decode(TogetherCallJoin.self, from: try await authorized("POST", "calls", ["userId": userId]))
+    }
+
+    /// A ringing call answered on this device (refused with "conflict" when another device did first).
+    public func answerCall(_ callId: String) async throws -> TogetherCallJoin {
+        try JSONDecoder.together.decode(TogetherCallJoin.self, from: try await authorized("POST", "calls/\(callId)/answer", [:]))
+    }
+
+    /// A ringing call declined: it ends for the caller too.
+    public func declineCall(_ callId: String) async throws {
+        _ = try await authorized("POST", "calls/\(callId)/decline", [:])
+    }
+
+    /// Muted or not, as every member of the call sees it.
+    public func setMuted(_ muted: Bool, in callId: String) async throws {
+        _ = try await authorized("POST", "calls/\(callId)/mute", ["muted": muted])
+    }
+
+    /// New relay credentials for a long call.
+    public func iceServers() async throws -> TogetherIceRenewal {
+        try JSONDecoder.together.decode(TogetherIceRenewal.self, from: try await authorized("GET", "ice-servers", nil))
+    }
 }
 
 extension TogetherSocket {
@@ -107,6 +192,16 @@ extension TogetherSocket {
 /// The rules of the party voice mesh, the same as the website's: one peer connection per member,
 /// the newcomer offers, the polite side gives way when both offer, Opus tuned for speech.
 public enum TogetherVoice {
+    /// How long a call to the user rings before it counts as not answered.
+    public static let ringFor: TimeInterval = 45
+
+    /// When to ask for new relay credentials: ten minutes before these end, but not sooner than
+    /// a moment from now; nil when there are none to renew.
+    public static func renewal(expiresAt: Date?, now: Date = Date()) -> Date? {
+        guard let expiresAt else { return nil }
+        return max(expiresAt.addingTimeInterval(-600), now.addingTimeInterval(30))
+    }
+
     /// Two offers at once: the larger user ID is polite and takes the other's.
     public static func polite(me: String, peer: String) -> Bool { me > peer }
 

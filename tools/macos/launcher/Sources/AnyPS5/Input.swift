@@ -145,6 +145,9 @@ final class Input {
 
     static let captureKey: UInt32 = 1
     static let talkKey: UInt32 = 2
+    /// ⌥A and ⌥D while a friend's call rings.
+    static let answerKey: UInt32 = 3
+    static let declineKey: UInt32 = 4
     private var hotKeys: [UInt32: (handler: (Bool) -> Void, reference: EventHotKeyRef?)] = [:]
     private var hotKeyHandler = false
 

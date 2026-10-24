@@ -206,6 +206,22 @@ extension AppModel {
         }
     }
 
+    /// The user types in the open thread: its other members see so.
+    func sayTyping() {
+        guard composing, !messageDraft.isEmpty, let conversation = selectedConversation else { return }
+        togetherSocket?.typing(in: conversation.id)
+    }
+
+    /// "Ayşe is typing…" for the conversation, or nil.
+    func typingText(_ conversation: TogetherConversation) -> String? {
+        let names = typing.who(in: conversation.id).compactMap { id in conversation.members.first { $0.userId == id }?.displayName }
+        switch names.count {
+        case 0: return nil
+        case 1: return T.format(.messagesTyping, names[0])
+        default: return T.format(.messagesTypingMany, names.joined(separator: ", "))
+        }
+    }
+
     func leaveThread() {
         composing = false
         withAnimation(Motion.focus) { messagesInThread = false }
@@ -232,7 +248,11 @@ extension AppModel {
                 messagesIndex = 0
             } catch {
                 if messageDraft.isEmpty, !AppModel.quickReplies.contains(raw) { messageDraft = raw }
-                show(T.text(.messagesFailed), symbol: "exclamationmark.bubble.fill")
+                if let problem = error as? TogetherProblem, problem.code == "link_blocked" {
+                    show(T.text(.togetherLinkBlocked), symbol: "link.badge.plus")
+                } else {
+                    show(T.text(.messagesFailed), symbol: "exclamationmark.bubble.fill")
+                }
             }
         }
     }
@@ -244,6 +264,7 @@ extension AppModel {
             guard let message = event.decode(TogetherMessage.self) else { return }
             let viewing = overlay == .messages && messagesInThread && selectedConversation?.id == message.conversationId && NSApp.isActive
             let selectedID = selectedConversation?.id
+            if event.type == "message.created", let author = message.authorId { typing.wrote(author, in: message.conversationId) }
             guard inbox?.apply(message, open: viewing ? message.conversationId : nil) == true else { return loadInbox() }
             // The list moved under the selection: keep the same conversation selected.
             if let selectedID, let index = messageTargets.firstIndex(where: { $0.id == selectedID }) { messagesIndex = index }
@@ -262,6 +283,16 @@ extension AppModel {
             inbox?.read(id, by: user, upTo: seq)
         case "conversation.updated":
             loadInbox()
+        case "typing":
+            let data = event.data
+            guard let id = data["conversationId"], let user = data["userId"], user != togetherUser?.id else { return }
+            typing.typing(user, in: id)
+            typingExpiry?.cancel()
+            typingExpiry = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(TogetherTyping.shows + 0.1))
+                guard !Task.isCancelled else { return }
+                self?.typing.expire()
+            }
         default:
             break
         }
@@ -358,6 +389,9 @@ struct MessagesView: View {
                 }
                 messages(conversation, me: me)
                     .frame(maxHeight: .infinity)
+                if let typing = model.typingText(conversation) {
+                    TypingLine(text: typing).transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
                 composer
             }
             .padding(24 * scale)
@@ -432,6 +466,7 @@ struct ComposerField: View {
                 .focused($editing)
                 .onSubmit { model.sendMessage(model.messageDraft) }
                 .onExitCommand { model.composing = false }
+                .onChange(of: model.messageDraft) { _, _ in model.sayTyping() }
             Image(systemName: "paperplane.fill").font(.system(size: 16 * scale, weight: .semibold))
                 .foregroundStyle(model.messageDraft.isEmpty ? .white.opacity(0.3) : model.accent)
                 .onTapGesture { model.sendMessage(model.messageDraft) }
@@ -443,6 +478,30 @@ struct ComposerField: View {
         .onChange(of: model.composing) { _, on in editing = on }
         .onChange(of: editing) { _, on in if model.composing != on { model.composing = on } }
         .onTapGesture { model.composing = true }
+    }
+}
+
+/// "Ayşe is typing…" with three dots that breathe in turn.
+struct TypingLine: View {
+    let text: String
+    @Environment(\.scale) private var scale
+    @Environment(\.previewRender) private var previewRender
+    @State private var phase = false
+
+    var body: some View {
+        HStack(spacing: 10 * scale) {
+            HStack(spacing: 4 * scale) {
+                ForEach(0 ..< 3) { dot in
+                    Circle().fill(Color.white.opacity(0.7)).frame(width: 6 * scale, height: 6 * scale)
+                        .opacity(previewRender ? 0.4 + Double(dot) * 0.25 : (phase ? 1 : 0.3))
+                        .animation(Motion.reduced ? nil : .easeInOut(duration: 0.55).repeatForever().delay(Double(dot) * 0.18), value: phase)
+                }
+            }
+            .padding(.horizontal, 10 * scale).padding(.vertical, 8 * scale)
+            .background(Capsule().fill(Color.white.opacity(0.1)))
+            Text(text).font(.display(13 * scale, .medium)).foregroundStyle(.white.opacity(0.55))
+        }
+        .onAppear { phase = true }
     }
 }
 

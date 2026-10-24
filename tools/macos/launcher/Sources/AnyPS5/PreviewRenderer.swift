@@ -150,6 +150,11 @@ enum PreviewRenderer {
                 model.previewMessages(inbox, index: 0, inThread: inThread, focus: focus)
             }
         }
+        render(preferences, found, root, still, output.appendingPathComponent("messages-typing.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.previewMessages(inbox, index: 0, inThread: true)
+            model.typing.typing("f1", in: "c1")
+        }
         render(preferences, found, root, still, output.appendingPathComponent("messages-group.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
             model.togetherFriends = [TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil)),
@@ -179,6 +184,24 @@ enum PreviewRenderer {
             model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
             model.togetherFriends = partyFriends
             model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "friends", members: [utku, people[0], people[1]], invited: [], call: .init(id: "call1", in: ["u1", "f1", "f2"])))
+            model.previewVoice(call: "call1", speaking: ["f1"])
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("call-ringing.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.previewRinging(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"))
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("call-friends.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewCall(with: people[0], waiting: false, speaking: ["f1"], muted: [])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 1
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("party-muted.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "friends", members: [utku, people[0], people[1]], invited: [],
+                                             call: .init(id: "call1", in: ["u1", "f1", "f2"], muted: ["f2"])))
             model.previewVoice(call: "call1", speaking: ["f1"])
             model.overlay = .party; model.panelInRows = true; model.panelRow = 0
         }
@@ -229,6 +252,7 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("game-settings-saves.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 10 }
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
         renderBanner(preferences, found, root, output.appendingPathComponent("trophy-banner.png"))
+        renderRingBanner(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"), output.appendingPathComponent("call-banner.png"))
         var fresh = preferences
         fresh.onboarded = false
         fresh.gamesFolder = nil
@@ -254,6 +278,26 @@ enum PreviewRenderer {
                 Color.black
             }
             TrophyToast(trophy: trophy, still: true) {}
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        guard let image = renderer.cgImage else { return }
+        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+    }
+
+    /// The ringing card over a game, on a picture of one (ANYPS5_PREVIEW_BANNER_BACKDROP) or black.
+    static func renderRingBanner(_ call: TogetherRinging, _ file: URL) {
+        if let only = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_ONLY"]?.split(separator: ","), !only.contains(where: { file.lastPathComponent.hasPrefix($0) }) { return }
+        let backdrop = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_BANNER_BACKDROP"].flatMap { NSImage(contentsOfFile: $0) }
+        let view = ZStack(alignment: .top) {
+            if let backdrop {
+                Image(nsImage: backdrop).resizable().aspectRatio(contentMode: .fill).frame(width: size.width, height: size.height)
+            } else {
+                Color(white: 0.15)
+            }
+            RingToast(call: call, still: true)
         }
         .frame(width: size.width, height: size.height)
         .clipped()

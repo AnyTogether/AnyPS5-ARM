@@ -228,6 +228,7 @@ final class AppModel: ObservableObject {
         apply()
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
+            AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
             let waiting = AppModel.pending
             AppModel.pending = []
             if !waiting.isEmpty { DispatchQueue.main.async { [weak self] in self?.open(waiting) } }
@@ -421,6 +422,9 @@ final class AppModel: ObservableObject {
     @Published var messageFocus = 0
     @Published var composing = false
     @Published var messageDraft = ""
+    /// Who is typing in which conversation, and what forgets them when they stop.
+    @Published var typing = TogetherTyping()
+    var typingExpiry: Task<Void, Never>?
     /// A new group: the friends picked, its name, and the row focused (the name, each friend, Create).
     @Published var groupPicked: Set<String> = []
     @Published var groupName = ""
@@ -439,6 +443,18 @@ final class AppModel: ObservableObject {
     @Published var micOn = true
     @Published var talkHeld = false
     @Published var voiceSpeaking: Set<String> = []
+    /// Who in the call muted themselves, as the server says.
+    @Published var voiceMuted: Set<String> = []
+    /// Whether the server was last told the user is muted.
+    var voiceSentMuted = false
+    /// The friend in a direct call (nil in the party's voice), and whether they have not answered yet.
+    @Published var callFriend: TogetherPerson?
+    @Published var callWaiting = false
+    /// A friend calling now, and what rings and gives up on it.
+    @Published var ringing: TogetherRinging?
+    var ringTask: Task<Void, Never>?
+    /// New relay credentials before the call's run out.
+    var iceRenewal: Task<Void, Never>?
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes
@@ -756,6 +772,8 @@ final class AppModel: ObservableObject {
     /// What macOS hands the app before the model is there, and where it goes once it is.
     private static var pending: [URL] = []
     private static var opener: (([URL]) -> Void)?
+    /// What has to reach a server before the app quits (leaving a call), when there is any.
+    static var beforeQuit: (() -> Task<Void, Never>?)?
 
     static func received(_ urls: [URL]) {
         if let opener { opener(urls) } else { pending += urls }

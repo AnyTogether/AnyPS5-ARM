@@ -5,6 +5,8 @@ import XCTest
 final class FakeTogether: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest, Data?) -> (Int, Any))?
     nonisolated(unsafe) static var requests: [(URLRequest, Data?)] = []
+    /// How long an answer takes; 0 answers at once.
+    nonisolated(unsafe) static var delay: TimeInterval = 0
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -23,7 +25,21 @@ final class FakeTogether: URLProtocol, @unchecked Sendable {
             return data
         }
         FakeTogether.requests.append((request, body))
+        // The answer is decided now, so a late one never reaches the next test's handler.
         let (status, json) = FakeTogether.handler?(request, body) ?? (404, ["code": "not_found"])
+        guard FakeTogether.delay == 0 else {
+            let request = request
+            nonisolated(unsafe) let json = json
+            DispatchQueue.global().asyncAfter(deadline: .now() + FakeTogether.delay) { [weak self] in self?.answer(request, status, json) }
+            return
+        }
+        answer(request, status, json)
+    }
+
+    private var stopped = false
+
+    private func answer(_ request: URLRequest, _ status: Int, _ json: Any) {
+        guard !stopped else { return }
         let data = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
         let type = status >= 400 ? "application/problem+json" : "application/json"
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": type])!, cacheStoragePolicy: .notAllowed)
@@ -31,7 +47,7 @@ final class FakeTogether: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() { stopped = true }
 }
 
 final class TogetherTests: XCTestCase {

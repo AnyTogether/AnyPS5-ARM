@@ -63,6 +63,9 @@ enum T {
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceLeave, voiceNoMic, voiceJoined
+        case togetherLinkBlocked
+        case messagesTyping, messagesTypingMany
+        case callRinging, callAnswer, callDecline, callKeys, callWith, callCalling, callFriend, callHangUp, callMissed, callDeclined, callEnded, callNoAnswer, callAnsweredElsewhere, voiceMuted, voiceSpeaking
         case messagesNewGroup, messagesNewGroupDetail, messagesGroupName, messagesGroupPicked, messagesGroupCreate, messagesGroupPick, messagesGroupMade
         case partyMakeLeader, partyRemove, partyNowLeads, partyRemoved, partyYouLead
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
@@ -207,6 +210,24 @@ enum T {
         .voiceLeave: "Sesten çık",
         .voiceNoMic: "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan AnyPS5'e izin ver",
         .voiceJoined: "Sestesin",
+        .togetherLinkBlocked: "Bu bağlantıya izin verilmiyor",
+        .messagesTyping: "%@ yazıyor…",
+        .messagesTypingMany: "%@ yazıyor…",
+        .callRinging: "Seni arıyor",
+        .callAnswer: "Cevapla",
+        .callDecline: "Reddet",
+        .callKeys: "⌥A cevapla · ⌥D reddet",
+        .callWith: "%@ ile görüşmedesin",
+        .callCalling: "%@ aranıyor…",
+        .callFriend: "%@ kişisini ara",
+        .callHangUp: "Görüşmeyi bitir",
+        .callMissed: "%@ aradı, cevaplanmadı",
+        .callDeclined: "%@ aramayı reddetti",
+        .callEnded: "%@ ile görüşme bitti",
+        .callNoAnswer: "%@ cevap vermedi",
+        .callAnsweredElsewhere: "Arama başka bir cihazda cevaplandı",
+        .voiceMuted: "sessiz",
+        .voiceSpeaking: "konuşuyor",
         .messagesNewGroup: "Yeni grup",
         .messagesNewGroupDetail: "Arkadaşlarını seç, bir ad ver",
         .messagesGroupName: "Grubun adı (isteğe bağlı)",
@@ -744,6 +765,24 @@ enum T {
         .voiceLeave: "Leave voice",
         .voiceNoMic: "Allow AnyPS5 in System Settings → Privacy & Security → Microphone",
         .voiceJoined: "You're in voice",
+        .togetherLinkBlocked: "That link isn't allowed",
+        .messagesTyping: "%@ is typing…",
+        .messagesTypingMany: "%@ are typing…",
+        .callRinging: "is calling you",
+        .callAnswer: "Answer",
+        .callDecline: "Decline",
+        .callKeys: "⌥A answer · ⌥D decline",
+        .callWith: "In a call with %@",
+        .callCalling: "Calling %@…",
+        .callFriend: "Call %@",
+        .callHangUp: "Hang up",
+        .callMissed: "Missed call from %@",
+        .callDeclined: "%@ declined the call",
+        .callEnded: "The call with %@ ended",
+        .callNoAnswer: "%@ didn't answer",
+        .callAnsweredElsewhere: "The call was answered on another device",
+        .voiceMuted: "muted",
+        .voiceSpeaking: "speaking",
         .messagesNewGroup: "New group",
         .messagesNewGroupDetail: "Pick friends and name it",
         .messagesGroupName: "Group name (optional)",

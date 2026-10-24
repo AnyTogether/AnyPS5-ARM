@@ -13,7 +13,8 @@ extension AppModel {
                 }),
             ]
         }
-        var rows: [PanelRow] = [
+        var rows: [PanelRow] = callRows()
+        rows += [
             PanelRow(id: "friends-me", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.crop.circle", kind: .action(destructive: false) { [weak self] in
                 self?.openMyProfile()
             }),
@@ -39,6 +40,12 @@ extension AppModel {
                                  },
                                  person: PanelPerson(name: friend.displayName, avatar: friend.avatar,
                                                      status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline)))
+            // Online friends can be called, unless the user is in a call with them already.
+            if friend.presence?.online == true, callFriend?.userId != friend.userId {
+                let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar)
+                rows.append(PanelRow(id: "friend-call-\(friend.userId)", title: T.format(.callFriend, friend.displayName), symbol: "phone",
+                                     kind: .action(destructive: false) { [weak self] in self?.startCall(with: person) }))
+            }
         }
         for person in togetherRequests.outgoing {
             rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info(""),
@@ -123,7 +130,7 @@ extension AppModel {
             refreshFriends()
         case "friend.removed", "presence.updated":
             refreshFriends()
-        case let type where type.hasPrefix("message.") || type.hasPrefix("conversation."):
+        case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing":
             messageEvent(event)
         case let type where type.hasPrefix("party."):
             partyEvent(event)

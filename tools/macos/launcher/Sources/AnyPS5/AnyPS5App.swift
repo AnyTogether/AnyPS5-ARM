@@ -53,6 +53,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// A call is left on the server before the app goes (waiting two seconds at most), so friends
+    /// do not keep a silent member.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard let leaving = AppModel.beforeQuit?() else { return .terminateNow }
+            Task { @MainActor in
+                await leaving.value
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
+    }
+
     /// anyps5:// links, and folders opened with AnyPS5 from Finder.
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated { AppModel.received(urls) }
@@ -78,6 +91,10 @@ struct RootView: View {
                 if let game = model.starting {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                }
+                if let call = model.ringing, model.pairing == nil {
+                    RingingCard(call: call)
+                        .transition(.opacity.combined(with: .scale(scale: 1.03)))
                 }
                 if let request = model.pairing {
                     PairingCard(request: request)

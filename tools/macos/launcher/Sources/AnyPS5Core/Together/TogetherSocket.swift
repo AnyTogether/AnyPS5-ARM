@@ -39,6 +39,7 @@ public final class TogetherSocket: @unchecked Sendable {
     private var heartbeat: Timer?
     private var running = false
     private var attempt = 0
+    private var typingSent: [String: Date] = [:]
     private let onEvent: @Sendable (Event) -> Void
     private let onSignedOut: @Sendable () -> Void
 
@@ -132,12 +133,31 @@ public final class TogetherSocket: @unchecked Sendable {
             }
             queue.async { self.sendHeartbeat() }
         case "event":
-            guard let id = frame["id"] as? String, let type = frame["type"] as? String else { return }
-            queue.async { self.lastEventID = id }
-            let json = frame["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed) } ?? Data("{}".utf8)
-            onEvent(Event(id: id, type: type, json: json))
+            guard let event = TogetherSocket.event(frame) else { return }
+            queue.async { self.lastEventID = event.id }
+            onEvent(event)
         default:
             break
+        }
+    }
+
+    /// An event frame as the gateway sends it: its data kept whole, nested objects and all (a
+    /// party, a call's peers, a signal's description), for `decode`.
+    static func event(_ frame: [String: Any]) -> Event? {
+        guard frame["op"] as? String == "event", let id = frame["id"] as? String, let type = frame["type"] as? String else { return nil }
+        let json = frame["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed) } ?? Data("{}".utf8)
+        return Event(id: id, type: type, json: json)
+    }
+
+    /// "I am typing" in a conversation, to its other members; at most every two seconds (the
+    /// gateway drops more).
+    public func typing(in conversation: String, at now: Date = Date()) {
+        queue.async { [self] in
+            if let last = typingSent[conversation], now.timeIntervalSince(last) < TogetherTyping.every { return }
+            typingSent[conversation] = now
+            let frame: [String: Any] = ["op": "typing", "conversation": conversation]
+            guard let data = try? JSONSerialization.data(withJSONObject: frame) else { return }
+            task?.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
         }
     }
 

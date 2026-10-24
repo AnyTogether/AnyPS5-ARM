@@ -476,6 +476,7 @@ extension AppModel {
             case "handle_reserved": return T.text(.togetherHandleReserved)
             case "handle_cooldown": return problem.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? problem.title
             case "links_not_allowed": return T.text(.togetherNoLinks)
+            case "link_blocked": return T.text(.togetherLinkBlocked)
             case "code_invalid": return T.text(.togetherCodeWrong)
             case "code_expired", "expired_token": return T.text(.togetherCodeExpired)
             case "code_locked": return T.text(.togetherCodeLocked)

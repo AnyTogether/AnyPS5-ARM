@@ -555,6 +555,11 @@ extension AppModel {
             if command == .back { answerPairing(false) }
             return true
         }
+        if ringing != nil, command != .home {
+            if command == .select { acceptRinging() }
+            if command == .back { declineRinging() }
+            return true
+        }
         guard preferences.onboarded else { return onboardingCommand(command) }
         if starting != nil {
             if command == .back { cancelStart() }

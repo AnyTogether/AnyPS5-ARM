@@ -32,7 +32,7 @@ final class PartyVoice: NSObject {
 
     let me: String
     let call: String
-    private let configuration: RTCConfiguration
+    private var configuration: RTCConfiguration
     private let send: (_ to: String, _ device: String, _ kind: TogetherSignalKind, _ data: Any?) -> Void
     private let changed: () -> Void
     private var peers: [String: Peer] = [:]
@@ -140,6 +140,16 @@ final class PartyVoice: NSObject {
         peer.connection.close()
         speaking.remove(userId)
         changed()
+    }
+
+    /// New relay credentials: every connection takes them, and the impolite side restarts ICE so
+    /// its relay allocations are made again with them before the old ones stop working.
+    func renew(_ iceServers: [TogetherIceServer]) {
+        configuration.iceServers = iceServers.map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
+        for peer in peers.values {
+            peer.connection.setConfiguration(configuration)
+            if me < peer.userId { Task { await offer(peer, restart: true) } }
+        }
     }
 
     func close() {
