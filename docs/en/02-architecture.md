@@ -1,231 +1,207 @@
 # 2. Architecture
 
+## The idea in two lines
+
+**Players talk to each other directly.** Voice, share play video and the friend's pad go
+peer-to-peer between the players' own machines, encrypted, without passing through our server.
+**The server only introduces them and keeps what must be kept:** accounts, profiles, trophies,
+friends, messages for people who are offline, and a relay for the few connections that cannot go
+direct.
+
 ## The picture
 
 ```mermaid
 flowchart LR
-    subgraph Clients
-        L[AnyPS5 launcher<br/>macOS, Swift]
-        P[AnyPS5 Remote<br/>iOS / Android, Flutter]
-        W[Website<br/>anytogether.kodla.agency]
+    subgraph Players
+        L1[Launcher<br/>macOS · Swift]
+        L2[Launcher<br/>Windows / Linux · Rust]
+        P[AnyPS5 Remote<br/>iOS / Android · Flutter]
+        W[Browser]
     end
 
     subgraph Cloudflare
-        CF[DNS, TLS, CDN, WAF<br/>proxied: web, api, rt]
-        R2[(R2 object storage<br/>avatars, themes, downloads,<br/>clip highlights)]
+        CF[anytogether.kodla.agency<br/>DNS, TLS, CDN, WAF]
+        R2[(R2 files<br/>anytogether-cdn.kodla.agency)]
     end
 
-    subgraph "Our server (Docker Compose)"
-        API[api<br/>TypeScript, Hono, Node 22]
-        RT[realtime gateway<br/>WebSocket, same codebase]
-        WK[worker<br/>jobs: rarity, leaderboards,<br/>mail, push, cleanup]
-        WEB[web<br/>Next.js]
-        PG[(PostgreSQL 17)]
-        VK[(Valkey<br/>presence, pub/sub,<br/>rate limits)]
-        LK[LiveKit server<br/>WebRTC SFU: voice,<br/>share play video, data]
-        TURN[coturn / LiveKit TURN<br/>UDP 3478, TLS 5349]
+    subgraph "Our server"
+        WEB[web · Next.js]
+        API[api · TypeScript, Hono<br/>/api/v1]
+        RT[realtime gateway<br/>/rt · WebSocket<br/>presence, messages, signalling]
+        WK[worker · jobs]
+        PG[(PostgreSQL)]
+        VK[(Valkey)]
+        TURN[STUN / TURN relay<br/>anytogether-relay.kodla.agency<br/>coturn]
     end
 
-    L -- HTTPS --> CF --> API
-    P -- HTTPS --> CF
-    W -- HTTPS --> CF --> WEB
-    L -- WSS --> CF --> RT
-    P -- WSS --> CF
-    W -- WSS --> CF
-    API --> PG
-    API --> VK
-    RT --> VK
-    RT --> PG
-    WK --> PG
-    WK --> VK
-    API -- presigned URLs --> R2
-    L -- WebRTC, UDP, not proxied --> LK
-    P -- WebRTC --> LK
-    W -- WebRTC --> LK
-    LK --- TURN
-    API -- room tokens --> LK
+    L1 & L2 & P & W -- HTTPS / WSS --> CF --> WEB & API & RT
+    API --> PG & VK
+    RT --> VK & PG
+    WK --> PG & VK
+    API -. presigned URLs .-> R2
+
+    L1 <== "WebRTC, direct (P2P)<br/>voice · share play · pad" ==> P
+    L2 <== "WebRTC, direct (P2P)" ==> W
+    L1 <== "WebRTC, direct (P2P)" ==> L2
+    L1 -. "only if direct fails" .-> TURN
 ```
 
-Three doors (launcher, phone, web) talk to one API over HTTPS and to one realtime gateway over a
-WebSocket. Voice and share play video go peer-to-SFU over WebRTC to a LiveKit server, which
-Cloudflare cannot proxy (UDP), so its hostname is DNS-only. Files go straight to and from
-Cloudflare R2 with short-lived presigned URLs, so large uploads never pass through our server.
+Everything that needs a server goes to **one hostname**, `anytogether.kodla.agency`, behind
+Cloudflare: the website at `/`, the API at `/api/v1`, the realtime gateway at `/rt`. Media goes
+**player to player** with WebRTC. Only when two players' networks cannot reach each other (strict
+NATs, some mobile and office networks, typically 10-20 % of pairs) does it go through our TURN
+relay, still encrypted end to end.
 
-## Hostnames
+## Hostnames (one level under kodla.agency only)
 
-| Hostname | Proxied by Cloudflare | What answers |
+Cloudflare's free certificate covers `kodla.agency` and `*.kodla.agency`, one level deep; a name
+like `api.anytogether.kodla.agency` would need a paid certificate and is harder to remember. So
+everything lives on one hostname, split by path, plus two siblings that cannot share it:
+
+| Hostname | Through Cloudflare's proxy | What answers |
 |---|---|---|
-| `anytogether.kodla.agency` | yes | The website (today: the coming-soon page) |
-| `api.anytogether.kodla.agency` | yes | REST API (`/v1/...`) |
-| `rt.anytogether.kodla.agency` | yes (WebSockets) | Realtime gateway (`/v1/socket`) |
-| `live.anytogether.kodla.agency` | **no** (DNS only) | LiveKit: signalling over WSS, media over UDP 50000-60000 and TCP 7881 |
-| `turn.anytogether.kodla.agency` | **no** | TURN over UDP 3478 and TLS 5349 (for networks that block UDP) |
-| `cdn.anytogether.kodla.agency` | yes | R2 public bucket: avatars, theme previews, downloads |
+| `anytogether.kodla.agency` | yes | `/` website, `/api/v1/...` API, `/rt` realtime gateway (WebSocket), `/.well-known/...` |
+| `anytogether-cdn.kodla.agency` | yes | Cloudflare R2: avatars, theme files and previews, download mirrors |
+| `anytogether-relay.kodla.agency` | **no** (DNS only; UDP can't be proxied) | STUN and TURN: UDP/TCP 3478, TLS 5349 |
 
-## The services
+On the server, Coolify's Traefik routes by path: `/api` to the API, `/rt` to the gateway, the rest
+to the website (each its own Coolify application with its own container).
+
+## What goes where
+
+| Traffic | Path | Why |
+|---|---|---|
+| Sign-in, profiles, trophies, library, friends, themes | client → server (HTTPS) | must be stored and shared |
+| Presence (who is online, what they play) | client ↔ gateway (WSS) | friends must learn it even when you are not connected to them |
+| Messages | client ↔ gateway, stored in PostgreSQL | must reach people who are offline and every device of theirs |
+| WebRTC signalling (offers, answers, ICE candidates) | client ↔ gateway ↔ client | the introduction; a few kilobytes per call |
+| **Voice** | **player ↔ player** (WebRTC, Opus) | lowest delay, no server bandwidth |
+| **Share play video and game sound** | **host → viewer** (WebRTC, H.264 + Opus) | lowest delay; a 720p60 stream is ~8 Mbit/s that our server never carries |
+| **The friend's pad** | **viewer → host** (WebRTC data channel) | every millisecond counts |
+| Relay when direct is impossible | player ↔ TURN ↔ player | so it always works; the relay sees only encrypted packets |
+
+## The services on our server
 
 ### api (TypeScript, Hono on Node 22)
 
-The one place that changes data. Stateless; any number can run behind Cloudflare.
+The one place that changes stored data; stateless. TypeScript because the website is TypeScript
+too, so schemas (Zod) are written once and the OpenAPI document generated from them gives typed
+clients in **Swift** (macOS launcher), **Rust** (Windows/Linux launcher), **Dart** (phone) and
+**TypeScript** (web). Hono because it is small, web-standard and portable (Node today, Bun or
+Cloudflare Workers later). Drizzle with reviewed SQL migrations. Errors as RFC 9457 problem
+details with stable codes every client translates.
 
-- **Why TypeScript:** the website is TypeScript too, so request and response shapes are written
-  once (`packages/shared`, with Zod schemas) and used by the API, the gateway and the web. The
-  launcher (Swift) and the phone app (Dart) get generated types from the OpenAPI document the API
-  publishes.
-- **Why Hono:** small, fast, standard Web APIs (`Request`/`Response`), runs on Node today and on
-  Cloudflare Workers or Bun later without a rewrite.
-- **Database access:** Drizzle ORM with SQL migrations in the repository; every migration is
-  reviewed SQL, not generated at deploy time.
-- **Validation:** Zod on every input; the same schemas produce the OpenAPI document.
-- **Errors:** RFC 9457 problem details (`application/problem+json`) with a stable `code` the
-  clients translate into their own language.
+### realtime gateway (same codebase, own process)
 
-### realtime gateway (same codebase, its own process)
+One WebSocket per signed-in client. Carries presence heartbeats and changes, message delivery,
+notifications, and **WebRTC signalling**: when Ayşe calls Utku, her offer goes to the gateway,
+which forwards it to Utku's devices; answers and ICE candidates come back the same way. Holds no
+state of its own: presence in Valkey, events between gateway processes over Valkey pub/sub.
 
-Keeps a WebSocket open to every signed-in client and pushes events: a friend came online, a
-message arrived, a party invite, a trophy in the feed. It holds no state of its own: who is
-online lives in Valkey, and events between gateway processes travel over Valkey pub/sub, so a
-user connected to gateway A gets a message sent through gateway B.
+### worker (same codebase, own process)
 
-### worker (same codebase, its own process)
+pg-boss jobs inside PostgreSQL: trophy rarity, leaderboards, mail (sign-in codes), push
+notifications (APNs, FCM), image resizing and checks, account deletion after the grace period.
 
-Jobs that must not slow a request down, queued in PostgreSQL with pg-boss (no extra broker):
+### web (Next.js)
 
-- recount trophy rarity for games that changed;
-- rebuild leaderboards (every 10 minutes, and at once for a user who asks);
-- send mail (verification, password reset) and push notifications (APNs, FCM);
-- resize avatars and theme previews uploaded to R2;
-- delete accounts asked to be deleted after the 14-day grace period; expire old sessions.
+Public profiles and game pages server-rendered (fast, shareable, link previews); the signed-in
+app (friends, messages, parties with voice in the browser, share play viewer, Theme Hub,
+downloads, leaderboards, settings) in the browser. It uses the same API as everyone.
 
-### web (Next.js, App Router)
+### PostgreSQL 17, Valkey 8
 
-The website: public profiles (`/u/<name>`), sign-in, settings, friends, messages, parties with
-voice in the browser, the Theme Hub, downloads, leaderboards. Server-rendered for public pages
-(fast, shareable, good link previews), client-side for the signed-in app. It calls the same API
-as everyone else; it has no database access of its own.
+PostgreSQL holds everything that must last. Valkey holds what may vanish: presence (60 s expiry),
+pub/sub, rate limits, short-lived sign-in codes, the last minutes of events for reconnects.
 
-### PostgreSQL 17
+### coturn (STUN and TURN)
 
-The source of truth: accounts, profiles, games, trophies, friendships, messages, parties, themes,
-reports. Chosen because it does everything here well (relational data, JSONB for flexible
-metadata, full-text and trigram search for finding users and games, row-level locks for
-counters) and because one well-backed-up database is easier to run than several.
+STUN tells each player its public address so two players can punch through their routers to each
+other (ICE). TURN relays the media when that fails. Credentials are short-lived (issued per call
+by the API, HMAC-based, valid 12 hours). TURN only ever sees DTLS-SRTP encrypted media: it cannot
+hear or see anything.
 
-### Valkey (the open-source Redis)
+### Optional later: an SFU
 
-Fast, temporary state: presence (who is online and what they play, with a 60 s expiry renewed by
-heartbeats), pub/sub between gateway processes, rate-limit counters, short-lived device-link
-codes. Nothing in Valkey must survive a restart; the database can rebuild what matters.
+For a party of 8 people all talking, peer-to-peer means each sends 7 audio streams (7 × 32
+kbit/s ≈ 0.2 Mbit/s, fine). For share play to many viewers, peer-to-peer means the host uploads
+one video per viewer (3 viewers ≈ 24 Mbit/s up, too much for many homes). Only then is a
+forwarding server (an SFU such as LiveKit) worth running. It is a later, optional add-on: the
+default is direct.
 
-### LiveKit (open source WebRTC SFU, self-hosted)
+## Technology choices
 
-Carries voice and share play.
+| Need | Choice | Why |
+|---|---|---|
+| API and gateway | TypeScript, Node 22, Hono | one language with the web, shared schemas |
+| Database | PostgreSQL 17 + Drizzle | all we need in one engine; SQL migrations |
+| Jobs | pg-boss | queue inside PostgreSQL |
+| Temporary state | Valkey 8 | Redis-compatible, open licence |
+| Peer-to-peer media | **WebRTC** | built for exactly this: NAT traversal (ICE/STUN/TURN), encryption (DTLS-SRTP), Opus voice, low-latency video, data channels, in every browser and with libraries for every platform |
+| WebRTC per platform | macOS: Google's WebRTC framework (Swift package); Windows/Linux: `webrtc-rs` (pure Rust) or LiveKit's `libwebrtc` Rust bindings; phone: `flutter_webrtc`; web: the browser | each launcher in its own language |
+| Relay | coturn | the standard TURN server |
+| Website | Next.js | SSR for public pages |
+| Files | Cloudflare R2 | S3 API, no egress fees |
+| Sign-in | OpenID Connect (Apple, Google, Discord) + passwordless email codes; passkeys later | one tap, nothing to remember (see [API](04-api.md)) |
+| Push | APNs, FCM HTTP v1 | direct, no middleman |
+| Errors / metrics | Sentry, Prometheus + Grafana | standard |
+| Deploy | Coolify on our Hetzner server (git push → build → deploy), Traefik | what the server already runs for 30+ sites |
 
-- **Why an SFU:** each participant sends their audio (and the host their game video) once; the
-  server forwards it to the others. Mesh WebRTC breaks down past three or four people; an MCU
-  costs CPU to mix. An SFU is the standard for party voice and one-to-few streaming.
-- **Why LiveKit:** open source (Apache 2.0), written in Go, one binary, and it has client SDKs for
-  exactly our three doors: **Swift** (launcher), **Flutter** (phone app) and **JavaScript**
-  (web). It handles Opus audio with echo cancellation and noise suppression on the clients,
-  simulcast, data channels (which share play uses for the friend's pad), and room tokens signed
-  by our API.
-- **TURN:** LiveKit's embedded TURN, or coturn beside it, for players behind networks that block
-  UDP. TURN over TLS on 5349 gets through almost any firewall, at some cost in delay.
-
-### Cloudflare (already in front of the domain)
-
-DNS, TLS certificates, caching of public pages and files, the web application firewall and rate
-limiting at the edge, and **R2** for files: avatars, theme packages and previews, clip
-highlights, and the download mirrors of AnyPS5's releases. R2 has no egress fees, which matters
-for downloads.
-
-## Technology choices, in one table
-
-| Need | Choice | Why | Considered |
-|---|---|---|---|
-| API language | TypeScript (Node 22 LTS) | One language with the web, shared schemas, large ecosystem | Go (faster, but two languages), Swift on server (shared with launcher, small ecosystem) |
-| HTTP framework | Hono | Web-standard, tiny, portable to Workers/Bun | Fastify, Express, NestJS |
-| Database | PostgreSQL 17 | Everything we need in one engine | MySQL, SQLite (single writer), Mongo |
-| ORM / migrations | Drizzle + SQL migrations | Typed queries, migrations as plain SQL | Prisma (heavier client), Kysely |
-| Jobs | pg-boss | Queue inside PostgreSQL, no extra service | BullMQ (needs Redis persistence) |
-| Cache / presence | Valkey 8 | Redis-compatible, open license | Redis, KeyDB |
-| Realtime | WebSocket gateway of our own | Full control of events and auth, small | Socket.IO, Centrifugo, Ably |
-| Voice / video | LiveKit (self-hosted) | SFU with Swift, Flutter and JS SDKs | Janus, mediasoup (no ready mobile SDKs), Agora (paid, closed) |
-| TURN | LiveKit TURN or coturn | Standard, proven | Twilio NTS (paid) |
-| Files | Cloudflare R2 | S3 API, no egress fees, already on Cloudflare | Backblaze B2, S3 |
-| Website | Next.js (App Router) | SSR for public pages, React | Astro, SvelteKit, Remix |
-| Mail | Resend (or SMTP from kodla.agency) | Simple API, good delivery | SES, Postmark |
-| Push | APNs (token auth) and FCM HTTP v1 directly | No middleman | OneSignal |
-| Errors | Sentry (self-hosted or SaaS) | Swift, Dart, JS and Node SDKs | GlitchTip |
-| Metrics | Prometheus + Grafana, LiveKit's own metrics | Standard | Datadog (paid) |
-| Deploy | Docker Compose on our server, GitHub Actions to build images | Simple, one machine to start | Kubernetes (too much for now) |
-
-## How a request flows
-
-**Signing in from the launcher** (device link, no password typed on the Mac):
+## How a call is set up (voice or share play)
 
 ```mermaid
 sequenceDiagram
-    participant L as Launcher
-    participant A as API
-    participant U as User's phone or browser
-    L->>A: POST /v1/auth/device {client: "launcher", name: "Utku's MacBook"}
-    A-->>L: {device_code, user_code: "K7Q-2MX", verify_url, interval: 5}
-    L->>L: shows the code and a QR of verify_url
-    U->>A: opens anytogether.kodla.agency/link, signs in, types K7Q-2MX
-    A-->>U: "Allow Utku's MacBook?" → Allow
-    loop every 5 s
-        L->>A: POST /v1/auth/token {device_code}
-    end
-    A-->>L: {access_token (15 min), refresh_token, user}
-    L->>A: WSS rt…/v1/socket (access token)
+    participant A as Ayşe (launcher, Windows)
+    participant G as Gateway
+    participant API as API
+    participant U as Utku (launcher, macOS)
+    A->>API: POST /api/v1/calls {party}
+    API-->>A: call id, TURN credentials (12 h)
+    A->>G: signal {to: Utku, offer (SDP)}
+    G->>U: signal {from: Ayşe, offer}
+    U->>API: (gets TURN credentials too)
+    U->>G: signal {to: Ayşe, answer}
+    G->>A: answer
+    A-->>U: ICE candidates both ways through G
+    A<<->>U: WebRTC: direct UDP if possible, TURN if not
+    Note over A,U: voice / video / pad flow player to player
 ```
-
-This is OAuth 2.0 Device Authorization (RFC 8628). The phone app, when it is already paired with
-the launcher, can confirm the code itself in one tap.
-
-**A trophy earned while playing:**
-
-1. The launcher notices the trophy (as it does today for the banner) and appends it to its local
-   outbox (a small SQLite file in Application Support).
-2. The outbox sends `POST /v1/me/trophies` with the title ID, trophy ID, grade and the time it was
-   earned. Sent again later if offline; the server ignores a trophy it already has.
-3. The API stores it, bumps the game's progress for this user and queues a rarity recount.
-4. The API publishes `trophy.earned` to Valkey; every gateway holding a friend's socket pushes it,
-   and the friends' launchers, phones and web feeds show it.
 
 ## Repository layout (the code, when it starts)
 
-A new repository, `utkuhalis/AnyTogether` (monorepo, pnpm workspaces):
+`utkuhalis/AnyTogether` (monorepo, pnpm workspaces):
 
 ```
 apps/
-  api/          Hono API (REST /v1)
-  realtime/     WebSocket gateway
+  api/          Hono API (/api/v1)
+  realtime/     WebSocket gateway: presence, messages, signalling
   worker/       pg-boss jobs
   web/          Next.js website
 packages/
-  shared/       Zod schemas, event types, error codes, OpenAPI generation
+  shared/       Zod schemas, event and signalling types, error codes, OpenAPI
   db/           Drizzle schema and SQL migrations
+clients/
+  rust/         the `anytogether` crate for the Windows/Linux launcher (MIT/Apache-2.0)
+  swift/        generated types for the macOS launcher (used from AnyPS5-ARM)
+  dart/         generated types for the phone app
 infra/
-  compose.yaml  PostgreSQL, Valkey, LiveKit, coturn, api, realtime, worker, web, Caddy
-  livekit.yaml
-  backups/      pg_dump to R2 scripts
-docs/           this plan, kept up to date
+  Dockerfiles   one per app, built by Coolify
+  coturn/       turnserver.conf, the relay's compose file
+  backups/
+docs/           this plan
 ```
 
-The client side lives where the clients live, in AnyPS5-ARM: `tools/macos/launcher/Sources/AnyPS5Core/Together/`
-(Swift) and `mobile/lib/together/` (Dart). See [Clients](07-clients.md).
+The macOS launcher's integration lives in AnyPS5-ARM (`AnyPS5Core/Together/`), the phone app's
+in `mobile/lib/together/`, the Windows/Linux launcher's in its own repository using the Rust
+crate. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
 
-## Scale we design for
+## Scale
 
-| Stage | Users | One server is enough? |
+| Stage | Accounts / online | Server |
 |---|---|---|
-| Launch | up to 5,000 accounts, 500 online | Yes: 4 vCPU, 8 GB RAM, everything on one machine |
-| Growing | 50,000 accounts, 5,000 online, 200 voice users | Move LiveKit to its own machine (bandwidth), PostgreSQL stays |
-| Large | more | Several API/gateway processes (already stateless), LiveKit cluster, read replica |
+| Launch | 5,000 / 500 | our existing Hetzner server (16 vCPU, 30 GB, shared): AnyTogether within ~3 GB with memory limits; media is peer-to-peer |
+| Growing | 50,000 / 5,000 | the same, plus more TURN bandwidth |
+| Large | more | more gateway/API processes (stateless), TURN on a second machine, a read replica |
 
-Voice is light (Opus at ~32 kbit/s per speaker). Share play is heavy: one 720p60 stream is
-~10 Mbit/s up from the host and the same down to each viewer; the server forwards it, so its
-bandwidth, not its CPU, sets the limit. Most share play sessions are one friend, and many will
-connect peer-to-peer later (see [Realtime](06-realtime-voice-shareplay.md)).
+Because media is direct, the server's load is small: requests, sockets and the relay for the
+pairs that need it. The relay is the only part whose bandwidth grows with use.

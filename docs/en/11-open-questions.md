@@ -1,23 +1,33 @@
 # 11. Open questions
 
 The technologies and defaults in this plan are proposals, chosen so work can start; any of them
-can change. These are the decisions that need an answer before or during the phase named; the
-middle column is what the plan assumes until then.
+can change.
+
+## Answered (2026-10-24)
+
+| Question | Answer |
+|---|---|
+| The server | our Hetzner machine in Falkenstein (16 vCPU, 30 GB, shared, Coolify + Traefik); see [Infrastructure](09-infrastructure.md) |
+| Stack | TypeScript is fine |
+| Sign-in | one tap: Apple, Google, Discord, email code; no sign-up form, no password |
+| Developer ID signing | yes: release builds of the macOS launcher get signed and notarized |
+| Hostnames | one level under `kodla.agency` only: everything on `anytogether.kodla.agency` by path, plus `anytogether-cdn` and `anytogether-relay` |
+| Windows and Linux | first-class: the Rust launcher gets every feature, through the `anytogether` crate |
+| Media through our server? | no: voice, share play and pads go directly between players; our server introduces them and relays only when direct is impossible |
+
+## Still open
 
 | # | Question | Default in this plan | Needed by |
 |---|---|---|---|
-| 1 | **The server**: which machine, where (city), how much CPU/RAM/bandwidth, what already runs on it? | One 4 vCPU / 16 GB machine in Istanbul or Frankfurt, Docker Compose | Phase 0 |
-| 2 | **Stack**: is TypeScript (Hono, Next.js) fine, or does kodla.agency already use something it would rather keep? | TypeScript | Phase 0 |
-| 3 | **Sign-in methods** at launch: email + Apple + Discord? Google too? | email, Apple, Discord | Phase 0 |
-| 4 | **Repository**: a new `utkuhalis/AnyTogether` (private or public)? | new repository, private until launch | Phase 0 |
-| 5 | **Signing the launcher with Developer ID** so microphone and screen recording permissions survive updates (they are lost at every ad-hoc-signed update today) | needed before voice | Phase 4 (better: Phase 0) |
-| 6 | **Profile defaults**: public profile with friends-only details (this plan), or fully private by default? | public card, friends-only details | Phase 1 |
-| 7 | **Game icons and trophy icons** on public pages: show them (taught by launchers) or only on signed-in pages? | shown, scaled down, removed on request | Phase 1 |
-| 8 | **Messages encryption**: server-readable at first (moderation possible) or end-to-end from day one? | server-readable, E2EE later | Phase 3 |
-| 9 | **Push on iOS** needs the phone app signed with your team for APNs; distribution through AltStore today: TestFlight or the App Store later? | APNs with your team; TestFlight when ready | Phase 3 |
-| 10 | **Voice recording**: never (this plan). Any reason to ever record (reports)? | never | Phase 4 |
-| 11 | **Share play to people outside the party** (public streams)? | no, party members only | Phase 5 |
-| 12 | **Branding**: AnyTogether inside AnyPS5 as "AnyTogether" with its two-ring mark; also a logo for the launcher's top bar? | the two-ring mark | Phase 0 |
-| 13 | **Moderators**: who besides you? | you, then trusted community members | Phase 2 |
-| 14 | **Legal texts**: terms, privacy policy, KVKK disclosure: written by kodla.agency's usual counsel or drafted here first? | drafted here, reviewed | before public sign-ups |
-| 15 | **Paid features** ever (cosmetic themes, larger share play quality)? | none planned | later |
+| 1 | **Server changes to approve** (the server-control session does them): open UDP/TCP 3478, TCP 5349 and UDP 49160-49360 in ufw (and the Hetzner Cloud Firewall if there is one), DNS-only record `anytogether-relay`, Coolify PostgreSQL and Valkey resources | as listed in [Infrastructure](09-infrastructure.md) 9.4 | Phase 0 (database), Phase 4 (relay) |
+| 2 | **AnyPlay**: the Windows/Linux launcher's makers are designing their own network (Rust, accounts, friends, encrypted QUIC tunnels between players, a self-hostable cloud, and an engine bridge for games' own online modes). Build AnyTogether independently and offer them the `anytogether` crate, or work together (shared protocol, their bridge for game online play, our accounts/profiles/trophies)? | independent, with the crate and the phone protocol offered openly | before Phase 0 ends |
+| 3 | **Repository**: a new `utkuhalis/AnyTogether`, private until launch? The Rust crate public from the start (so the Windows/Linux launcher can use it)? | private repo, public crate | Phase 0 |
+| 4 | **Profile defaults**: public card with friends-only details, or fully private? | public card, friends-only details | Phase 1 |
+| 5 | **Game and trophy icons** on public pages | shown, scaled down, removed on request | Phase 1 |
+| 6 | **Messages**: server-readable at first (moderation possible) or end-to-end encrypted from day one? | server-readable, E2EE later | Phase 3 |
+| 7 | **Push on iOS** needs the phone app built with your team (APNs); TestFlight or App Store later? | APNs with your team; TestFlight when ready | Phase 3 |
+| 8 | **Big rooms**: add an SFU (LiveKit) later for parties over 8 talkers or share play to many viewers? | not at first | after Phase 5 |
+| 9 | **Online play for games themselves** (each player runs the game, the engine's network calls carried between them): a later phase of our own, or AnyPlay's bridge (question 2)? | after Phase 6, decided with question 2 | later |
+| 10 | **Moderators** besides you | you, then trusted community members | Phase 2 |
+| 11 | **Legal texts** (terms, privacy policy, KVKK disclosure) | drafted here, reviewed by you | before public sign-ups |
+| 12 | **Paid features** ever? | none planned | later |

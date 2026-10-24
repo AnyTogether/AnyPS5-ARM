@@ -20,25 +20,34 @@ gantt
     6 Theme Hub, downloads, compatibility :p6, after p2, 3w
 ```
 
-Dates are a guide for one developer working with Claude; phase 6 can run beside 3-5.
+Dates are a guide for one developer working with Claude on the server, the macOS launcher and
+the phone app; the Windows/Linux launcher integrates the Rust crate in step, phase by phase.
+Phase 6 can run beside 3-5.
 
 ## Phase 0: Foundations (≈3 weeks)
 
-**Ships**: the repository, the server, sign-in, and the launcher signed in.
+**Ships**: the repository, the server, one-tap sign-in, and every launcher signed in.
 
 - AnyTogether monorepo (apps/api, realtime, worker, web; packages/shared, db), CI, staging.
-- Server set up with Docker Compose, Cloudflare DNS and certificates, backups, Uptime Kuma.
-- Accounts: email/password with verification, Sign in with Apple, Discord; sessions; refresh
-  rotation; device link (RFC 8628) with the web `/link` page.
+- On our server: the Coolify apps (web, api, realtime, worker), PostgreSQL and Valkey resources,
+  memory limits, backups to R2, the `/api` and `/rt` routes on `anytogether.kodla.agency`.
+- Sign-in: Apple, Google, Discord (OpenID Connect + PKCE), email codes, phone hand-off, device
+  code fallback; the first sign-in creates the account; sessions; refresh rotation.
 - Realtime gateway with hello, heartbeats, resume (no features on it yet).
-- Launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Settings → AnyTogether →
-  Sign in (code + QR), signed-in chip in the top bar.
-- Website: landing page replacing "Coming soon", sign up/in, `/link`, settings, privacy pages.
+- macOS launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Settings → AnyTogether →
+  Continue with Apple / Google / Discord / phone / email, signed-in chip in the top bar.
+- The `anytogether` Rust crate (api, auth, socket) for the Windows/Linux launcher, tested in the
+  same CI; offered to that launcher's maintainer with an integration guide.
+- macOS launcher release builds signed with Developer ID and notarized.
+- Website: landing page replacing "Coming soon", one-tap sign-in, `/link`, settings, privacy pages.
 
 **Done when**
-- [ ] A new user signs up on the web, signs the launcher in by code, sees their name in the
-      launcher; signing out on the web signs the launcher out within 5 s.
-- [ ] The launcher with the server unreachable behaves exactly as 0.2.12 (automated test).
+- [ ] A new user taps "Continue with Google" in the launcher and is signed in, with an account
+      created, in one tap (already signed in to Google in the browser); signing out on the web
+      signs the launcher out within 5 s.
+- [ ] The phone, signed in, signs the launcher in with one tap.
+- [ ] The Rust crate signs in and opens the gateway on Windows and Linux (CI on both).
+- [ ] A launcher with the server unreachable behaves exactly as before AnyTogether (automated test).
 - [ ] Backups restore on staging; the restore test is green.
 - [ ] Refresh-token reuse revokes the session (test).
 
@@ -50,12 +59,12 @@ Dates are a guide for one developer working with Claude; phase 6 can run beside 
 - Game catalogue, sessions (launcher `SessionRecorder` + outbox), library with play time.
 - Trophy sets and earned trophies (launcher `TrophySync`), rarity job, points.
 - Launcher: profile overlay, dates and rarity on the trophy screen and banner, play time from all
-  Macs. Phone: profile card. Web: `/u/<handle>`, games, trophies pages with Open Graph images.
+  computers. Phone: profile card. Web: `/u/<handle>`, games, trophies pages with Open Graph images.
 
 **Done when**
 - [ ] Playing Silksong for 10 minutes and earning a trophy shows both on the web profile within
       30 s; offline, they appear after the launcher reconnects, once.
-- [ ] Two Macs on one account add up play time correctly.
+- [ ] Two computers on one account (a Mac and a Windows PC) add up play time correctly.
 - [ ] Rarity of a trophy matches a hand count on staging data.
 - [ ] Hidden trophies stay hidden to users who have not earned them.
 
@@ -85,24 +94,28 @@ Dates are a guide for one developer working with Claude; phase 6 can run beside 
 
 ## Phase 4: Parties and voice (≈4 weeks)
 
-- LiveKit and TURN on the server; party lifecycle; room tokens; voice in launcher (Swift SDK),
-  phone (Flutter SDK), web; push-to-talk; the phone as headset; party chat; "Play the same game".
+- coturn on the server (`anytogether-relay.kodla.agency`, ports 3478, 5349, relay range opened
+  with Utku's approval); calls and signalling over the gateway; peer-to-peer voice in every
+  launcher (macOS WebRTC framework, Rust crate on Windows/Linux), the phone (`flutter_webrtc`) and
+  the web; push-to-talk; the phone as headset; party chat; "Play the same game".
 
 **Done when**
-- [ ] Four people (Mac, iPhone, Android, browser) talk for 30 minutes with no drop, mouth-to-ear
-      under 200 ms within Türkiye/Europe (measured).
+- [ ] Five people (Mac, Windows PC, Linux, iPhone, browser) talk for 30 minutes with no drop,
+      mouth-to-ear under 200 ms within Türkiye/Europe (measured).
+- [ ] Most calls connect directly; the quality reports show the share that needed the relay.
 - [ ] A game in front keeps voice going; the party overlay shows who speaks.
 - [ ] A user behind a UDP-blocking network joins through TURN/TLS.
 
 ## Phase 5: Share play (≈5 weeks)
 
-- Launcher publishes `RemotePlay` capture and `StreamEncoder` frames to LiveKit; direct
-  peer-to-peer first; viewers on phone, web, launcher; pad over data channel into a remote pad
+- Every launcher hosts: macOS from `RemotePlay`'s capture and low-latency H.264, Windows and
+  Linux from their own capture and hardware encoders; direct to each viewer, relay if needed;
+  viewers on phone, web, any launcher; pad over data channel into a remote pad
   bridge; take over player 1; quality steps; latency badge.
 
 **Done when**
 - [ ] A friend 500 km away watches 720p60 with glass-to-glass under 120 ms (median) and plays as
-      player 2 with input round trip under 80 ms.
+      player 2 with input round trip under 80 ms, with a Mac as host and with a Windows PC as host.
 - [ ] The host takes player 1 back with PS at once.
 - [ ] A weak network steps down without freezing for more than 500 ms.
 

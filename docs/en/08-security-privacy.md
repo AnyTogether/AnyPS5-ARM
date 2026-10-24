@@ -2,27 +2,31 @@
 
 ## 8.1 Accounts
 
-- Passwords: Argon2id (64 MB, 3 passes); minimum 10 characters; checked against known breached
-  passwords (k-anonymity range query, Have I Been Pwned) at sign-up and change.
-- Email verification before an account can be found or messaged; new accounts may not message
-  strangers for 24 hours.
-- Optional two-step sign-in (TOTP) from the start for web and phone; passkeys (WebAuthn) as a
-  later step.
-- Sessions listed in settings with device and last use; any can be signed out; a password change
-  signs out every other session.
-- Refresh tokens rotate on every use; reuse of an old one revokes the session (theft signal).
-- Device codes: 8 characters from an alphabet without look-alikes, valid 10 minutes, at most 5
-  wrong entries per account per hour; the approval screen names the device and its location
-  (city from IP) so a phished code is noticed.
+- **No passwords** to steal or reuse: sign-in is Apple, Google or Discord (OpenID Connect, ID
+  tokens verified against the provider's keys, PKCE for every public client), an email code, or
+  the user's own signed-in phone.
+- Email codes: 6 digits, valid 10 minutes, at most 5 sends per hour per address and 10 wrong tries
+  before a 15-minute lock; the magic link is single-use.
+- Phone hand-off: the approval screen names the computer, its platform and approximate location
+  (city from IP), so a request the user did not make is noticed.
+- Device codes (fallback): 8 characters without look-alikes, valid 10 minutes.
+- New accounts may not message strangers for 24 hours.
+- Sessions listed in settings with device and last use; any can be signed out.
+- Refresh tokens rotate on every use; reuse of an old one revokes the session.
+- Passkeys (WebAuthn) as an additional way in later.
 
 ## 8.2 Transport and storage
 
 - TLS everywhere (Cloudflare to the browser, Cloudflare to our origin with an origin certificate,
   authenticated origin pulls so only Cloudflare reaches the origin).
-- WebRTC media is encrypted (DTLS-SRTP); LiveKit sees media in the SFU (standard for SFUs). End-to-
-  end encryption for voice (LiveKit supports E2EE with insertable streams) is a later option.
+- Voice, share play and pads are **end-to-end encrypted** between the players (WebRTC's
+  DTLS-SRTP); they go direct, and when they must go through our TURN relay it only forwards
+  encrypted packets it cannot read. The server never hears or sees a call.
+- A direct connection reveals each player's IP address to the other. Calls are only possible
+  between friends or party members; a setting **Always use the relay** hides the IP address at the
+  cost of a little delay.
 - Database disk encrypted; backups encrypted before upload (age or restic) to R2.
-- Secrets (database password, JWT signing key, LiveKit key, APNs key) in environment files
+- Secrets (database password, JWT signing key, TURN secret, OAuth client secrets, APNs key) in environment files
   readable only by the services, never in the repository; rotated yearly or on any suspicion.
 - R2 buckets private except `cdn` (avatars, previews, downloads); uploads only by presigned URLs
   limited in size and content type, valid 10 minutes.
@@ -67,7 +71,7 @@ apply.
 | Games played, sessions, trophies | the features the user signs in for | contract |
 | Presence (online, game) | friends' presence | contract, can be hidden |
 | Messages | delivering them | contract |
-| Compatibility reports (Mac model, macOS, engine, FPS) | helping others | consent (opt-in) |
+| Compatibility reports (platform, machine, OS, engine, FPS) | helping others | consent (opt-in) |
 | IP addresses, device names | security, abuse | legitimate interest, kept 30 days in logs |
 | Voice and share play media | carried live, **never recorded** by the server | contract |
 

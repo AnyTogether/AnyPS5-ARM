@@ -2,99 +2,148 @@
 
 ## 9.1 Where it runs
 
-Start on **one server** (the one we already have, if it fits; otherwise a VPS):
+On **our existing server**, as one more Coolify project beside the others:
 
-| Resource | Start | Why |
+| | Today (read by the server-control session, 2026-10-24) |
+|---|---|
+| Machine | Hetzner Cloud, Falkenstein (fsn1, eu-central), 16 vCPU AMD EPYC Genoa, 30 GiB RAM, 601 GB disk (281 GB free) |
+| OS | Ubuntu 22.04 LTS |
+| Network | public IPv4 only (142.132.181.43), 20 TB/month included, ~1 TB/month used |
+| Runs | Docker, **Coolify v4**, Traefik as reverse proxy (80/443, HTTP/3), ~100 containers, 30+ sites; per-app PostgreSQL and Redis resources |
+| DNS | `kodla.agency` on Cloudflare; `anytogether.kodla.agency` → this server, proxied, served today by a "coming soon" nginx app in Coolify project "AnyTogether" |
+| Deploy | Coolify: GitHub repo with deploy key and webhook, build from Dockerfile on push |
+
+**The server is shared**, and on 19 October it ran out of memory because of parallel Next.js
+builds. So AnyTogether is planned **small and capped**:
+
+| Container | Memory limit | CPU limit | Notes |
+|---|---|---|---|
+| web (Next.js, standalone output) | 512 MB | 1 | built once per deploy (Coolify builds one at a time) |
+| api | 384 MB | 1 | one replica at start |
+| realtime | 384 MB | 1 | tens of thousands of idle sockets fit |
+| worker | 256 MB | 0.5 | |
+| postgres (Coolify resource, 17) | 1 GB | 2 | `shared_buffers=256MB`, `max_connections=50` |
+| valkey (Coolify resource) | 128 MB | 0.5 | `maxmemory 96mb`, `allkeys-lru`, no persistence |
+| coturn | 256 MB | 1 | host network for UDP |
+| **Total** | **≈ 3 GB** | | well inside what is free |
+
+Because voice, share play and pads go peer-to-peer, the server never carries media except for
+the pairs that need the relay.
+
+## 9.2 Coolify layout
+
+Project **AnyTogether** (already exists), environments `production` and `staging`:
+
+| Coolify resource | Source | Domain / route |
 |---|---|---|
-| CPU | 4 vCPU | API, gateway, worker, web, PostgreSQL, LiveKit together |
-| RAM | 8 GB (16 GB comfortable) | PostgreSQL buffers, Next.js, LiveKit |
-| Disk | 160 GB NVMe | database and logs; files live in R2 |
-| Network | 1 Gbit/s, generous traffic | share play is bandwidth: 1 Gbit/s ≈ 100 viewers of 720p60 |
-| OS | Ubuntu 24.04 LTS or Debian 12 | |
-| Location | close to most players (Istanbul or Frankfurt) | voice and share play delay |
+| `web` | repo `utkuhalis/AnyTogether`, `apps/web/Dockerfile` | `anytogether.kodla.agency` (path `/`) |
+| `api` | same repo, `apps/api/Dockerfile` | `anytogether.kodla.agency/api` (Traefik `PathPrefix(/api)`) |
+| `realtime` | same repo, `apps/realtime/Dockerfile` | `anytogether.kodla.agency/rt` (WebSocket) |
+| `worker` | same repo, `apps/worker/Dockerfile` | none |
+| `postgres` | Coolify PostgreSQL 17 resource | internal network only |
+| `valkey` | Coolify Redis/Valkey resource | internal network only |
+| `coturn` | Docker Compose resource, `network_mode: host` | `anytogether-relay.kodla.agency` (DNS only) |
+| staging | the same apps from the `staging` branch | `anytogether-staging.kodla.agency` |
 
-When share play grows, LiveKit moves first to its own machine with more bandwidth; everything
-else stays.
-
-## 9.2 Docker Compose
-
-```yaml
-services:
-  caddy:      # TLS at the origin (Cloudflare origin cert), reverse proxy to web/api/rt
-  web:        # Next.js, port 3000
-  api:        # Hono, port 8080, 2 replicas
-  realtime:   # gateway, port 8081
-  worker:     # pg-boss jobs
-  postgres:   # 17, volume on NVMe, tuned shared_buffers=2GB
-  valkey:     # 8, no persistence needed (appendonly no)
-  livekit:    # host networking for UDP 50000-60000, 7880 (WSS behind Caddy), 7881 TCP
-  coturn:     # optional if LiveKit's TURN is used; 3478 UDP/TCP, 5349 TLS
-  backup:     # nightly pg_dump | age | upload to R2
-  uptime:     # Uptime Kuma, checks every service
-```
-
-Firewall (ufw/nftables): 443 only from Cloudflare's ranges (web, api, rt, cdn); 7880 WSS and
-UDP 50000-60000, TCP 7881, 3478, 5349 open to all for LiveKit/TURN; SSH by key only from known
-addresses.
+The "coming soon" app is replaced by `web` when the first version is ready.
 
 ## 9.3 Cloudflare
 
-- DNS: `anytogether`, `api.anytogether`, `rt.anytogether`, `cdn.anytogether` proxied (orange);
-  `live.anytogether`, `turn.anytogether` DNS only (grey).
-- SSL mode Full (strict) with an origin certificate; Authenticated Origin Pulls on.
-- WAF managed rules; rate limiting at the edge for `/v1/auth/*`; bot fight mode on the web, not on
-  the API (the launcher is not a browser).
-- Cache: public profile pages cached for 60 s with stale-while-revalidate; `cdn` cached long.
-- R2 buckets: `anytogether-files` (private), `anytogether-cdn` (public through `cdn.`),
-  `anytogether-backups` (private, lifecycle 30 days).
-- WebSockets on `rt.` (supported on proxied hostnames).
+- DNS (all one level under `kodla.agency`, so the existing certificates cover them):
+  - `anytogether` → 142.132.181.43, **proxied** (already).
+  - `anytogether-cdn` → R2 public bucket custom domain, proxied.
+  - `anytogether-relay` → 142.132.181.43, **DNS only** (grey): STUN/TURN over UDP cannot be proxied.
+  - `anytogether-staging` → 142.132.181.43, proxied.
+- SSL Full (strict); Traefik already gets Let's Encrypt certificates by DNS-01 through Cloudflare.
+  coturn's TLS port (5349) uses its own Let's Encrypt certificate for `anytogether-relay` (DNS-01,
+  renewed by a small certbot container, coturn reloaded on renewal).
+- WAF managed rules; edge rate limits on `/api/v1/auth/*`; bot fight mode on the website paths,
+  not on `/api` (launchers are not browsers).
+- Cache: public profile pages 60 s with stale-while-revalidate; R2 files long.
+- R2 buckets: `anytogether-files` (private), `anytogether-cdn` (public), `anytogether-backups`
+  (private, 30-day lifecycle).
 
-## 9.4 Deploy
+## 9.4 Firewall (to be opened with Utku's approval)
 
-- **CI (GitHub Actions)** on every push: typecheck, lint, unit tests, API tests against a real
-  PostgreSQL and Valkey in services, migration check (applies on a copy of the previous schema),
-  build Docker images, push to GitHub Container Registry.
-- **CD**: on a tag `vX.Y.Z`, an action connects over SSH and runs
-  `docker compose pull && docker compose up -d` with zero-downtime for api/web (two replicas,
-  Caddy health checks); migrations run first as a one-off job and must be backward compatible with
-  the running code (expand, deploy, contract).
-- **Staging**: the same compose on a smaller machine or a second project on the same one, at
-  `staging.anytogether.kodla.agency`, used by test builds of the launcher and phone app.
+Today ufw drops everything not allowed, and no relay port is open. Needed for the relay only:
 
-## 9.5 Backups and recovery
+| Port | Protocol | For |
+|---|---|---|
+| 3478 | UDP and TCP | STUN and TURN |
+| 5349 | TCP | TURN over TLS (networks that block UDP) |
+| 49160-49360 | UDP | TURN relay ports (200 ports ≈ 100 relayed calls at once; widened if needed) |
 
-- PostgreSQL: nightly `pg_dump -Fc`, encrypted with `age`, uploaded to R2 (kept 30 days); WAL
-  archiving with `wal-g` to R2 for point-in-time recovery (to the minute) once there are real
-  users.
-- A restore is tested monthly on staging (a script that restores the latest dump and runs the API
-  tests against it).
-- R2 has object versioning on the files bucket.
-- Recovery goals: RPO 5 minutes (with WAL), RTO 1 hour.
+Docker's published ports bypass ufw, so coturn runs with host networking and these rules are
+set explicitly in ufw (and in the Hetzner Cloud Firewall, if one is attached to the server:
+Utku checks the Hetzner console). Everything else stays behind Traefik on 443.
 
-## 9.6 Monitoring
+## 9.5 coturn
 
-- **Uptime Kuma**: HTTP checks of web, api, rt (WebSocket), LiveKit, TURN, every minute; alerts by
-  mail and Telegram/Discord.
-- **Prometheus + Grafana**: request rates and latencies (API), sockets (gateway), job queue depth
-  (worker), PostgreSQL (postgres_exporter), LiveKit (its own `/metrics`: rooms, participants,
-  packet loss, bandwidth), host metrics (node_exporter).
-- **Logs**: JSON logs from every service to Loki (or simply `docker logs` with rotation at the
-  start); no message texts, no tokens in logs.
-- **Errors**: Sentry SDKs in API, web, launcher (opt-in crash reports), phone app.
-- **Clients report** voice and share play quality (round trip, loss, glass-to-glass samples) to a
-  metrics endpoint, aggregated, no content.
+```
+listening-port=3478
+tls-listening-port=5349
+min-port=49160
+max-port=49360
+external-ip=142.132.181.43
+realm=anytogether.kodla.agency
+use-auth-secret
+static-auth-secret=<from Coolify env>   # the API issues time-limited credentials from it
+cert=/certs/anytogether-relay/fullchain.pem
+pkey=/certs/anytogether-relay/privkey.pem
+no-cli
+no-multicast-peers
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+total-quota=200
+user-quota=4
+max-bps=2000000                         # 2 MB/s per allocation (~16 Mbit/s), enough for 720p60
+```
 
-## 9.7 Costs (rough, per month)
+The denied private ranges stop the relay from being used to reach the server's internal Docker
+networks. Credentials are the standard TURN REST scheme (username = expiry:user id, password =
+HMAC of it), valid 12 hours.
 
-| Item | Start |
+## 9.6 Deploy
+
+- Push to `main` of `utkuhalis/AnyTogether` → Coolify builds and deploys each changed app
+  (webhook, one build at a time on this server).
+- GitHub Actions only checks: typecheck, lint, tests against PostgreSQL and Valkey service
+  containers, migration check. Coolify deploys only what passed (branch protection on `main`).
+- Migrations run as the API container starts (`drizzle-kit migrate` before the server), always
+  backward compatible with the version still running (expand, deploy, contract).
+- Health checks in each Dockerfile so Traefik only routes to a ready container.
+
+## 9.7 Backups and recovery
+
+- Coolify's scheduled PostgreSQL backups, daily, to the R2 backups bucket (S3-compatible
+  destination in Coolify), encrypted; kept 30 days.
+- A monthly restore test into the staging database.
+- R2 versioning on the files bucket.
+- Goals: RPO 24 h at launch (daily dumps), 5 min once WAL archiving (wal-g to R2) is added;
+  RTO 1 h.
+
+## 9.8 Monitoring
+
+- Coolify's own container health and notifications.
+- Uptime checks (Uptime Kuma, already common on such servers, or Cloudflare health checks): the
+  website, `/api/v1/health`, the gateway (WebSocket handshake), STUN on the relay.
+- Metrics: API and gateway expose Prometheus metrics; coturn's Prometheus exporter (allocations,
+  bytes relayed).
+- Errors: Sentry (API, web, launchers with opt-in crash reports, phone app).
+- Clients report call quality (direct or relayed, round trip, loss, glass-to-glass samples),
+  aggregated, no content. The share of relayed calls tells us how much TURN bandwidth to expect.
+
+## 9.9 Costs
+
+| Item | Per month |
 |---|---|
-| Server (4 vCPU, 16 GB, 1 Gbit/s, Frankfurt/Istanbul) | €20-60 (or €0 on our existing server) |
-| Cloudflare (free plan; Pro €20 if WAF rules need it) | €0-20 |
-| R2 (10 GB stored, egress free) | < €1 |
-| Mail (Resend free tier or own SMTP) | €0 |
-| Apple Developer (APNs, signing, maybe App Store) | ~€8 (€99/year) |
-| Domain | already kodla.agency |
-| **Total** | **€0-90** |
+| Server | €0 extra (existing Hetzner machine) |
+| Traffic | inside the 20 TB included; relayed calls only |
+| Cloudflare (free plan), R2 (a few GB, no egress fees) | ~€0-1 |
+| Mail for sign-in codes (Resend free tier or kodla.agency SMTP) | €0 |
+| Apple Developer (already paid: APNs, Developer ID signing) | €0 extra |
+| **Total** | **≈ €0-1** |
 
-Bandwidth is the cost that grows with share play; LiveKit on a bandwidth-friendly host (Hetzner
-includes 20 TB) keeps it flat.
+If relayed share play ever grows large, coturn moves to a cheap Hetzner machine of its own
+(20 TB included there too).

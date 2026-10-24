@@ -11,18 +11,16 @@ Times are `timestamptz`. Text that users search is indexed with `pg_trgm`. Every
 ```sql
 create table accounts (
   id            uuid primary key,
-  email         citext unique,              -- null for accounts made with Apple/Discord only
-  email_verified_at timestamptz,
-  password_hash text,                        -- argon2id, null without a password
+  email         citext unique,              -- verified email (from the provider or an email code); may be null
   role          text not null default 'user',-- user | moderator | admin
   status        text not null default 'active', -- active | suspended | deleting
   delete_after  timestamptz,                 -- set by DELETE /me, 14 days later
   created_at    timestamptz not null default now()
 );
 
-create table identities (                    -- Sign in with Apple, Discord
+create table identities (                    -- the ways in: Apple, Google, Discord, email
   account_id uuid references accounts on delete cascade,
-  provider   text not null,                  -- apple | discord
+  provider   text not null,                  -- apple | google | discord | email
   subject    text not null,                  -- the provider's user ID
   primary key (provider, subject)
 );
@@ -30,7 +28,7 @@ create table identities (                    -- Sign in with Apple, Discord
 create table sessions (
   id            uuid primary key,
   account_id    uuid not null references accounts on delete cascade,
-  client        text not null,               -- launcher | phone | web
+  client        text not null,               -- launcher-macos | launcher-windows | launcher-linux | phone | web
   device_name   text,
   refresh_hash  bytea not null,              -- sha256 of the current refresh token
   previous_hash bytea,                       -- the one before, to detect reuse
@@ -39,7 +37,19 @@ create table sessions (
   created_at    timestamptz not null default now()
 );
 
-create table device_codes (                  -- RFC 8628, short-lived (also mirrored in Valkey)
+create table sign_in_requests (              -- email codes, phone hand-offs, device codes; short-lived
+  id           uuid primary key,
+  kind         text not null,                 -- email | handoff | device
+  email        citext,                        -- for email codes
+  code_hash    bytea,                         -- the 6-digit code or the magic link token, hashed
+  account_id   uuid references accounts,      -- for hand-offs: whose phones are asked
+  device_name  text,
+  approved_at  timestamptz,
+  attempts     int not null default 0,
+  expires_at   timestamptz not null
+);
+
+create table device_codes (                  -- RFC 8628 fallback, short-lived (also mirrored in Valkey)
   device_code_hash bytea primary key,
   user_code    text unique not null,          -- e.g. K7Q-2MX, no 0/O/1/I
   client       text not null,
@@ -64,11 +74,12 @@ create table profiles (
 create index profiles_handle_trgm on profiles using gin (handle gin_trgm_ops);
 create index profiles_name_trgm on profiles using gin (display_name gin_trgm_ops);
 
-create table macs (                          -- a user's Macs, by the launcher's random ID
+create table devices (                       -- a user's computers, by the launcher's random ID
   id         uuid primary key,
   account_id uuid not null references accounts on delete cascade,
-  name       text not null,
-  model      text,
+  platform   text not null,                  -- macos | windows | linux
+  name       text not null,                  -- "Utku's MacBook Pro", "Gaming PC"
+  model      text,                           -- Mac15,9 / CPU and GPU summary
   last_seen_at timestamptz
 );
 ```
@@ -89,7 +100,7 @@ create table play_sessions (
   id         uuid primary key,               -- made by the launcher (idempotent)
   account_id uuid not null references accounts on delete cascade,
   title_id   text not null references games,
-  mac_id     uuid references macs,
+  device_id  uuid references devices,
   started_at timestamptz not null,
   ended_at   timestamptz not null check (ended_at > started_at),
   exit       text                            -- normal | crashed | killed (the launcher's diagnosis)
@@ -146,7 +157,8 @@ create table compatibility_reports (
   title_id   text references games,
   verdict    text not null,                  -- nothing | menus | playable | perfect
   engine     text not null,                  -- e.g. 0.2.13-arm
-  mac_model  text, macos text,
+  platform   text not null,                  -- macos | windows | linux
+  machine    text, os text,                  -- Mac model or CPU/GPU; OS and version
   fps_avg    real,
   exit       text,
   note       text check (length(note) <= 500),
@@ -229,6 +241,21 @@ create table parties (
   share_play jsonb,                          -- {host, started_at, slots: {"2": user_id}}
   ended_at timestamptz
 );
+create table calls (                         -- set up by the API; the media itself is peer-to-peer
+  id         uuid primary key,
+  party_id   uuid references parties on delete set null,
+  started_by uuid references accounts on delete set null,
+  started_at timestamptz not null default now(),
+  ended_at   timestamptz
+);
+create table call_quality (                  -- one row per participant at the end of a call
+  call_id    uuid references calls on delete cascade,
+  account_id uuid references accounts on delete set null,
+  path       text not null,                  -- direct | relay-udp | relay-tls
+  rtt_ms     real, loss real, glass_to_glass_ms real,
+  share_play boolean not null default false
+);
+
 create table party_members (party_id uuid references parties on delete cascade, account_id uuid references accounts on delete cascade, joined_at timestamptz not null default now(), primary key (party_id, account_id));
 ```
 

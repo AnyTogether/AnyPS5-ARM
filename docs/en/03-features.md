@@ -15,7 +15,7 @@ how it works; and what it needs from the rest of the system.
   picture or video as the banner, its accent on the numbers.
 - **Showcase**: up to six chosen games or trophies pinned to the top of the profile.
 - L: the profile name in the top bar becomes the avatar; choosing it opens your card, edit it
-  there. P: the same card under the Mac's name. W: `anytogether.kodla.agency/u/<handle>`, a public
+  there. P: the same card under the computer's name. W: `anytogether.kodla.agency/u/<handle>`, a public
   page with link previews (Open Graph image rendered from the card).
 
 **How it works**
@@ -70,24 +70,25 @@ how it works; and what it needs from the rest of the system.
 **What the user sees**
 
 - Inside a party (3.4), everyone's voice, with a speaking ring around their avatar, their own
-  volume each, mute, deafen, push-to-talk (a key on the Mac, a button on the phone).
+  volume each, mute, deafen, push-to-talk (a key on the computer, a button on the phone).
 - Voice keeps going while a game is in front: the launcher stays in the background and still
   carries the party; a small overlay card can show who is talking (like the trophy banner today).
 - **The phone as a headset**: the party's voice can go through the phone (its mic and speaker or
-  headphones) instead of the Mac, while the phone is also the pad. Useful when the Mac's speakers
+  headphones) instead of the computer, while the phone is also the pad. Useful when the computer's speakers
   carry the game.
 - W: join the party's voice from a browser, no install.
 
 **How it works**
 
-- Each party is a LiveKit room. The API gives each member a room token (a JWT signed with the
-  LiveKit secret, valid 6 hours, with permissions: publish audio, subscribe).
+- Voice goes **directly between the members** (WebRTC, each member connected to each other one;
+  up to 8 talking members). The server only introduces them (signalling over the gateway) and
+  hands out relay credentials for the pairs whose networks cannot connect directly.
 - Audio: Opus, 48 kHz, 24-48 kbit/s, with the platforms' echo cancellation, noise suppression and
   automatic gain (Apple's voice processing on macOS/iOS, WebRTC's on Android and the web).
-- On the Mac: the LiveKit Swift SDK in the launcher; the game's own sound is not sent (the
+- In every launcher (macOS, Windows, Linux): the launcher's WebRTC; the game's own sound is not sent (the
   launcher captures the microphone only). The launcher must ask for the microphone permission.
-- Target: mouth-to-ear under 200 ms on the same continent (LiveKit typically adds 20-50 ms over
-  the network path).
+- Target: mouth-to-ear under 200 ms on the same continent; a direct path adds nothing on top of
+  the network itself.
 
 ---
 
@@ -105,8 +106,8 @@ how it works; and what it needs from the rest of the system.
 
 **How it works**
 
-- A party is a database row (owner, privacy, created) plus a LiveKit room created on demand when
-  the first member opens voice.
+- A party is a database row (owner, privacy, created) plus a call set up on demand when the
+  first member opens voice.
 - Membership changes go through the API and are pushed by the gateway (`party.member_joined`,
   `party.member_left`, `party.updated`).
 - A party with no member connected for 10 minutes ends by itself.
@@ -174,21 +175,21 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 **What the user sees**
 
 - Every game you played: name, icon, **total play time**, **last played**, first played, trophy
-  progress (bar and percent), on which Macs. Sort by recent, time, name, completion.
+  progress (bar and percent), on which computers. Sort by recent, time, name, completion.
 - Per game page on the web (`/g/<title id>`): who among your friends plays it, their progress,
   the community's compatibility verdict (see below), global trophy rarity.
-- L: the existing library and home screen get "Friends playing" and play time from all your Macs.
+- L: the existing library and home screen get "Friends playing" and play time from all your computers.
 
 **How it works**
 
-- The launcher records **sessions**: title ID, start, end, Mac (a stable random ID per Mac, named
+- The launcher records **sessions**: title ID, start, end, computer (a stable random ID per computer, named
   by the user). Sessions go through the outbox like trophies. Play time = sum of sessions.
 - **Game catalogue**: one row per title ID with the name in each language and the icon, taught by
   the first launcher that has the game (name from `param.json`, icon from `icon0.png` scaled to
   256 px). Moderators can fix names. Only the title ID, name and icon: never other game files.
 - **Compatibility** (the old idea 6, now here): after a session the launcher may ask "How did it
   run?" with four answers (didn't start, menus only, playable with problems, plays well), plus
-  automatic facts it already knows: the engine version, the Mac model, macOS version, average FPS
+  automatic facts it already knows: the engine version, the platform, the machine (Mac model or CPU/GPU), OS version, average FPS
   (from the overlay's counters) and how the game ended (normal exit or the launcher's diagnosis of
   a crash). Off unless the user turns on "Help others: report how games run". The game page shows
   the latest verdict per engine version.
@@ -252,7 +253,7 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 **What the user sees**
 
-- One page with the **official** AnyPS5 launcher for Mac, the phone app (APK; IPA with the
+- One page with the **official** AnyPS5 launchers for macOS, Windows and Linux (each from its own project's releases), the phone app (APK; IPA with the
   sideloading guide; later the stores), release notes, and tools the project makes.
 - Version checks: the launcher's "Check for Updates" may ask AnyTogether as well as GitHub.
 
@@ -282,16 +283,19 @@ requests (everyone / friends of friends / nobody), who may message (friends / ev
 
 **How it works** (details in [Realtime, voice and share play](06-realtime-voice-shareplay.md))
 
-- The launcher already captures the game (ScreenCaptureKit) and encodes it with low latency
-  (`StreamEncoder`: H.264, no reordering). For share play it publishes that video and the game's
-  sound as tracks into the party's LiveKit room instead of (or as well as) sending them to a phone
+- The macOS launcher already captures the game (ScreenCaptureKit) and encodes it with low latency
+  (`StreamEncoder`: H.264, no reordering); the Windows/Linux launcher does the same with its
+  platform's capture and hardware encoder. For share play it publishes that video and the game's
+  sound over a direct WebRTC connection to each viewer instead of (or as well as) sending them to a phone
   on the local network.
 - The friend's client subscribes to the tracks. A friend allowed to play sends pad state over a
-  LiveKit data channel (unreliable, unordered, 120 packets/s, the same 80-byte packet the phone
+  WebRTC data channel (unreliable, unordered, 120 packets/s, the same 80-byte packet the phone
   sends today); the host's launcher feeds it into a free remote-pad bridge (`ANYPS5_REMOTE_PAD_2`
   etc.) so the game sees another DualSense.
-- Same-network friends keep using the local path; LiveKit is for the internet. For two people,
-  a direct peer-to-peer connection is tried first (lower delay) with the SFU as fallback.
+- Same-network friends keep using the local path. Over the internet the connection is direct
+  between host and viewer, with our relay only when the networks cannot reach each other.
+  Every launcher can host: macOS with ScreenCaptureKit, Windows with Windows.Graphics.Capture,
+  Linux with PipeWire (see [Platforms](12-platforms.md)).
 - Targets: glass-to-glass under 120 ms within ~1000 km; 720p60 at 6-10 Mbit/s, dropping to 540p
   or 30 fps when the network says so.
 

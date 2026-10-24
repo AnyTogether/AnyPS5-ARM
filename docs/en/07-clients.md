@@ -1,9 +1,11 @@
 # 7. Clients
 
-The three doors. The launcher and the phone app live in AnyPS5-ARM; the website lives in the
-AnyTogether repository.
+Four doors: the launcher on macOS (AnyPS5-ARM, Swift), the launcher on Windows and Linux (the
+Rust port), the phone app (Flutter, in AnyPS5-ARM's `mobile/`) and the website (in the AnyTogether
+repository). Every one of them is a full AnyTogether client; none is second. [Platforms](12-platforms.md)
+lists what each platform does differently.
 
-## 7.1 The launcher (macOS, Swift)
+## 7.1 The macOS launcher (Swift)
 
 ### New code
 
@@ -12,21 +14,22 @@ AnyTogether repository.
 | File | Job |
 |---|---|
 | `TogetherClient.swift` | HTTP calls to `/v1`, token refresh with a single in-flight refresh, problem-details errors, the `AnyTogether-Client` header |
-| `TogetherAuth.swift` | device link (RFC 8628): request a code, poll, store the refresh token in the Keychain |
+| `TogetherAuth.swift` | one-tap sign-in: Apple (`ASAuthorizationAppleIDProvider`), Google and Discord (`ASWebAuthenticationSession` with PKCE), email code, hand-off to the paired phone, device code as fallback; refresh token in the Keychain |
 | `TogetherSocket.swift` | the realtime gateway: hello, heartbeats with presence, resume, reconnect with backoff (1, 2, 4 … 30 s, with jitter) |
 | `TogetherOutbox.swift` | an append-only queue in SQLite (`Application Support/AnyPS5/Together/outbox.sqlite`) for sessions, trophies, catalogue entries, reports; sends in batches when online, keeps order per kind, drops nothing |
 | `TogetherModels.swift` | types generated from the OpenAPI document |
 | `TrophySync.swift` | turns the launcher's `TrophySet` into trophy-set uploads and earned trophies |
 | `SessionRecorder.swift` | turns game start/stop (already tracked for Discord and save sync) into sessions |
-| `PartyVoice.swift` | LiveKit Swift SDK: join a party room, mic, mute, push-to-talk, speaking events |
-| `SharePlay.swift` | publishes `RemotePlay`'s frames and sound to LiveKit; receives pad packets from the data channel into a `RemoteServer` bridge slot |
+| `TogetherCall.swift` | WebRTC (Google's WebRTC framework as a Swift package): peer connections per party member, signalling through `TogetherSocket`, ICE servers from the API, path and quality reporting |
+| `PartyVoice.swift` | the microphone track (Apple voice processing), mute, push-to-talk, speaking levels |
+| `SharePlay.swift` | hands `RemotePlay`'s ScreenCaptureKit frames to WebRTC's H.264 encoder (VideoToolbox, low-latency settings as `StreamEncoder`) and the game sound as Opus; receives pad packets from the `pad` data channel into a `RemoteServer` bridge slot |
 
 App target (`Sources/AnyPS5/`):
 
 | Screen | What it is |
 |---|---|
 | Top bar | the profile chip becomes the avatar with a status dot; a Friends button with the online count; a Messages button with unread count |
-| Sign-in panel | "Sign in to AnyTogether": the code, a QR, "Open on this Mac" (opens the web link page) |
+| Sign-in panel | "Continue with Apple / Google / Discord", "Use my phone" (when the phone app is paired and signed in), "Email me a code"; the device code only as a fallback |
 | Profile overlay | your card (wearing your theme), edit name/bio/avatar/showcase, privacy |
 | Friends panel | list with presence and games; requests; add by handle or QR; per friend: profile, message, invite to party |
 | Messages panel | conversations and a chat view, usable with a controller (the on-screen keyboard is the macOS one; a pad user can send quick replies) |
@@ -49,19 +52,55 @@ App target (`Sources/AnyPS5/`):
 - **Signing**: to keep the microphone and screen recording permissions across updates, release
   builds need a stable signature (Developer ID Application), see open questions.
 
-## 7.2 The phone app (Flutter)
+## 7.2 The Windows and Linux launcher (Rust)
+
+The port of this launcher to Windows and Linux is written in Rust. It gets AnyTogether through a
+Rust crate we publish, `anytogether` (MIT or Apache-2.0, so any launcher may use it), kept in the
+AnyTogether repository under `clients/rust`:
+
+| Module | Job |
+|---|---|
+| `api` | typed REST client generated from the OpenAPI document (`reqwest`, `serde`), token refresh |
+| `auth` | Apple, Google, Discord with PKCE in the default browser and a loopback redirect (`127.0.0.1:<random port>`, RFC 8252); email code; phone hand-off; device code fallback; tokens in Windows Credential Manager or the Linux Secret Service (`keyring` crate) |
+| `socket` | the realtime gateway (`tokio-tungstenite`): hello, heartbeats, resume, events as a typed stream |
+| `outbox` | the same append-only queue as the macOS launcher, in SQLite (`rusqlite`), for sessions, trophies, catalogue entries, reports |
+| `call` | WebRTC peer connections with `webrtc-rs` (pure Rust) or LiveKit's `libwebrtc` bindings (Google's WebRTC, with hardware codecs), signalling through `socket` |
+| `share_play` | takes encoded H.264 frames and PCM sound from the launcher's capture; delivers pad packets from the `pad` data channel to a callback |
+
+What the launcher itself provides (platform code, not in the crate):
+
+| Need | Windows | Linux |
+|---|---|---|
+| Game capture | Windows.Graphics.Capture (the game window) | PipeWire screencast through xdg-desktop-portal (asks the user once) |
+| Game sound | WASAPI process loopback (the game's process only) | PipeWire stream of the game's node |
+| H.264 low latency | Media Foundation hardware MFT, or NVENC / AMF / Quick Sync directly | VA-API (Intel, AMD) or NVENC |
+| Microphone with echo cancellation | WebRTC's audio processing | WebRTC's audio processing (PipeWire/PulseAudio input) |
+| Pad from a friend | the engine's remote pad bridge (`ANYPS5_REMOTE_PAD_2…4`) | the same |
+| Trophies, play sessions | as the launcher already reads them per game | the same |
+| Push-to-talk key | `RegisterHotKey` | the desktop's global shortcut portal |
+
+The screens are the same as the macOS launcher's (7.1), in its own PS5-style interface, with the
+same strings (English, Turkish) taken from the shared error codes and event names.
+
+The phone app (7.3) works with this launcher as it does with the macOS one, once the launcher
+speaks the phone protocol (pairing on WebSocket port 47700, pad by UDP, the cable paths). That
+protocol is written down in [Platforms](12-platforms.md) so it can be implemented from the
+document alone.
+
+## 7.3 The phone app (Flutter)
 
 ### New code
 
-`mobile/lib/together/`: `together_client.dart`, `together_socket.dart`, `auth.dart` (email,
-Apple, Discord; device-link approval), `party_voice.dart` (LiveKit Flutter), `share_play_view.dart`.
+`mobile/lib/together/`: `together_client.dart`, `together_socket.dart`, `auth.dart` (Apple, Google,
+Discord natively, email code; approving a launcher's hand-off or device code), `call.dart`
+(`flutter_webrtc`), `share_play_view.dart`.
 
 ### Screens
 
 | Screen | What it is |
 |---|---|
-| Account | sign in / sign up; or "Use the launcher's account": the phone, paired with the launcher, asks it to approve a session for the phone (no password typed) |
-| Approve | scanning the launcher's QR or typing its code approves the Mac in one tap |
+| Account | one tap: Apple, Google or Discord, or an email code; the first sign-in creates the account |
+| Approve | "Sign in <Mac/PC name>?" when a launcher asks (hand-off), or scan its fallback QR: one tap |
 | Friends, Messages, Feed | tabs beside the existing launcher mode; push notifications for messages, invites, friend requests |
 | Party | members, voice (the phone can carry it while being the pad), share play viewer |
 | Share play viewer | the stream full screen with the pad over it, the same as Remote Play's pad over the picture today; works from anywhere |
@@ -70,17 +109,17 @@ Apple, Discord; device-link approval), `party_voice.dart` (LiveKit Flutter), `sh
 ### Rules for the phone
 
 - The pad over the local network stays exactly as it is; AnyTogether never sits between the
-  phone and the Mac when they are together.
+  phone and the computer when they are together.
 - Push: APNs (iOS) and FCM (Android) tokens registered per session; notifications carry only
   IDs and a short text; content is fetched when opened.
 - Battery: the gateway socket is closed in the background (push takes over), opened on resume.
 
-## 7.3 The website (Next.js)
+## 7.4 The website (Next.js)
 
 | Page | Path |
 |---|---|
 | Landing (replaces "Coming soon") | `/` |
-| Sign in / up / link a device | `/login`, `/signup`, `/link` |
+| Sign in (one tap; the first time creates the account), approve a launcher | `/login`, `/link` |
 | Profile (public, SSR, Open Graph image) | `/u/<handle>` |
 | Library, trophies of a profile | `/u/<handle>/games`, `/u/<handle>/trophies/<title id>` |
 | Game page | `/g/<title id>` |
@@ -95,10 +134,12 @@ The look follows the coming-soon page (dark, `#07080c`, the blue/violet/teal acc
 Grotesk and JetBrains Mono) and the launcher's console style. A signed-in user's own pages wear
 their profile theme. English and Turkish, by the browser's language and a switch.
 
-## 7.4 Shared pieces
+## 7.5 Shared pieces
 
-- **Types**: generated from the OpenAPI document for Swift (swift-openapi-generator) and Dart
-  (openapi-generator dart-dio or a small hand generator), so the three clients agree.
+- **Types**: generated from the OpenAPI document for Swift (swift-openapi-generator), Rust
+  (progenitor or openapi-generator), Dart and TypeScript, so the four clients agree.
 - **Strings**: the error `code`s and event names translated in each client (English, Turkish).
+- **The phone protocol** (pairing, pad, cable) and the **pad packet** are specified once, so the
+  macOS and Windows/Linux launchers and the phone app all interoperate.
 - **Assets**: the AnyTogether mark (the two rings of the favicon) in the launcher, the phone and
   the web.

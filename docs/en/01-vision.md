@@ -2,18 +2,19 @@
 
 ## One sentence
 
-AnyTogether turns the AnyPS5 launcher from a program on one Mac into a place where players meet:
+AnyTogether turns the AnyPS5 launcher from a program on one computer into a place where players meet:
 your profile and trophies follow you, your friends see what you play, you talk while you play,
 and a friend can watch your game or take the controller, wherever they are.
 
 ## Why now
 
-The launcher already holds most of what an online profile needs, and it holds it on one Mac
-only:
+The launcher already holds most of what an online profile needs, and it holds it on one computer
+only. On macOS that is AnyPS5-ARM's launcher; on Windows and Linux, its Rust port, which keeps
+the same things per game:
 
 | Already in AnyPS5 | Where it lives today | What AnyTogether adds |
 |---|---|---|
-| Play time and last played per game | `Preferences.lastPlayed`, play time in the launcher | A game library across all your Macs, visible to friends |
+| Play time and last played per game | `Preferences.lastPlayed`, play time in the launcher | A game library across all your computers, visible to friends |
 | Trophies, read from each game and noticed live while playing | `Trophies.swift`, the trophy banner, the phone's trophy card | Trophy history with dates, rarity across all players, leaderboards |
 | The game playing right now | Discord presence (`DiscordPresence.swift`) | Presence for friends inside AnyPS5, without Discord |
 | Themes made in the Theme Studio | `hub/` folder in the GitHub repository, shared through an issue | Upload from the Studio, likes, downloads, the theme on your profile |
@@ -23,7 +24,7 @@ only:
 
 ## Who it is for
 
-1. **The AnyPS5 player** on a Mac, with the phone app as controller or second screen. Most of
+1. **The AnyPS5 player** on a Mac, a Windows PC or a Linux machine, with the phone app as controller or second screen. Most of
    AnyTogether happens inside the launcher and the phone app; the website is the third door.
 2. **Their friends**, who may not have AnyPS5 at all. A friend can open a profile on the web,
    join a party's voice from the browser or the phone app, and watch a share play session.
@@ -54,21 +55,28 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
 1. **The launcher never needs AnyTogether.** Everything works offline and signed out, as today.
    Signing in adds things; it never takes anything away or blocks playing. If the server is down,
    the launcher queues what it would have sent and plays on.
-2. **One account, three doors.** The launcher, the phone app and the website are the same
-   account and the same data. A message read on the phone is read in the launcher too.
-3. **Private by default, social by choice.** A new profile shows only your name and avatar to
+2. **One account, every door.** The launcher on macOS, Windows and Linux, the phone app and the
+   website are the same account and the same data. A message read on the phone is read in the
+   launcher too. No platform comes second: the Windows/Linux launcher gets every feature the macOS
+   one gets (see [Platforms](12-platforms.md)).
+3. **Directly between players.** Voice, share play and a friend's pad go peer-to-peer, encrypted,
+   from one player's machine to the other's. The server introduces players, keeps what must be
+   kept and relays only when a direct path is impossible.
+4. **One tap to sign in.** No sign-up form, no password: Apple, Google, Discord, an email code or
+   the phone already signed in.
+5. **Private by default, social by choice.** A new profile shows only your name and avatar to
    strangers. Play time, library, trophies and activity are visible to friends until you open
    them to everyone. Each item can be hidden.
-4. **It looks like AnyPS5.** The same console-style interface, the same themes. A profile wears
+6. **It looks like AnyPS5.** The same console-style interface, the same themes. A profile wears
    the theme its owner made in the Theme Studio.
-5. **No game files, ever.** AnyTogether never stores, sends or links game dumps, keys, firmware or
+7. **No game files, ever.** AnyTogether never stores, sends or links game dumps, keys, firmware or
    anything that would let someone play a game they do not own. Downloads are AnyPS5's own
    software and what the community makes (themes, layouts). See
    [Security, privacy and rules](08-security-privacy.md).
-6. **Small, well-understood parts.** Proven open-source pieces (PostgreSQL, Valkey, LiveKit,
+8. **Small, well-understood parts.** Proven open-source pieces (PostgreSQL, Valkey, WebRTC,
    coturn) rather than a stack of hosted services; everything runs on our own server behind
    Cloudflare, and could move to another.
-7. **Measured latency.** Voice and share play are judged by numbers (mouth-to-ear delay,
+9. **Measured latency.** Voice and share play are judged by numbers (mouth-to-ear delay,
    glass-to-glass delay, input round trip), the way Remote Play's latency is shown today.
 
 ## What it is not
@@ -77,11 +85,12 @@ The twelve features announced on [anytogether.kodla.agency](https://anytogether.
   links, no trading of accounts or keys.
 - **Not a replacement for PSN.** Trophies come from what AnyPS5 reads in the user's own games;
   they are AnyTogether trophies, not PlayStation ones, and are never sent to Sony.
-- **Not required for co-op on one Mac.** Local co-op with phones keeps working as it does.
+- **Not required for co-op on one computer.** Local co-op with phones keeps working as it does.
 - **Not a general social network.** No public posting outside games, no follower counts for
   their own sake.
-- **Not a cloud gaming service.** Share play streams *your* Mac's game to *your* friend; the
-  server relays when it must, it never runs games.
+- **Not a cloud gaming service.** Share play streams *your* computer's game to *your* friend,
+  directly between you; the server only introduces you and relays when a direct path is
+  impossible. It never runs games.
 
 ## How we will know it works
 
