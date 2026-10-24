@@ -180,7 +180,7 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
-    private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
+    private let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
@@ -1114,6 +1114,12 @@ final class AppModel: ObservableObject {
     }
 
     func discordOff() { discord.clear() }
+
+    /// Turned on again with a game in front: Discord shows it at once, from when it started.
+    func discordOn() {
+        guard let game = running?.game else { return }
+        discord.playing(game.name, since: sessionStart ?? Date())
+    }
 
     /// A trophy just earned shows on the phone too, with its icon made small.
     private func tellPhone(_ trophy: TrophySet.Trophy) {
