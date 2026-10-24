@@ -255,3 +255,27 @@ final class TogetherPartyTests: TogetherSignedInCase {
         XCTAssertEqual(friend.presence?.game?.sessionId, "s1")
     }
 }
+
+final class TogetherServerTests: XCTestCase {
+    /// Another AnyTogether (it is self-hostable): https, or http only on this Mac.
+    func testAServerAddressIsChecked() {
+        XCTAssertEqual(TogetherServer.address(" https://together.example.org/ ")?.absoluteString, "https://together.example.org")
+        XCTAssertEqual(TogetherServer.address("https://example.org:8443/anytogether")?.absoluteString, "https://example.org:8443/anytogether")
+        XCTAssertEqual(TogetherServer.address("http://localhost:3000")?.absoluteString, "http://localhost:3000")
+        XCTAssertEqual(TogetherServer.address("http://127.0.0.1:3000")?.absoluteString, "http://127.0.0.1:3000")
+        XCTAssertEqual(TogetherServer.address("http://[::1]:3000")?.absoluteString, "http://[::1]:3000")
+        XCTAssertNil(TogetherServer.address("http://together.example.org"), "plain http only on this Mac")
+        XCTAssertNil(TogetherServer.address("together.example.org"), "a scheme is needed")
+        XCTAssertNil(TogetherServer.address("ftp://example.org"))
+        XCTAssertNil(TogetherServer.address("https://"))
+        XCTAssertNil(TogetherServer.address("https://example.org/?q=1"))
+        XCTAssertNil(TogetherServer.address("https://user:pass@example.org"))
+    }
+
+    func testTheEnvironmentWinsThenTheChoiceThenTheDefault() {
+        XCTAssertEqual(TogetherServer.base(environment: ["ANYTOGETHER_URL": "http://localhost:4000"], chosen: "https://mine.example.org"), URL(string: "http://localhost:4000"))
+        XCTAssertEqual(TogetherServer.base(environment: [:], chosen: "https://mine.example.org"), URL(string: "https://mine.example.org"))
+        XCTAssertEqual(TogetherServer.base(environment: [:], chosen: nil), TogetherServer.standard)
+        XCTAssertEqual(TogetherServer.base(environment: [:], chosen: "not a url"), TogetherServer.standard)
+    }
+}

@@ -25,6 +25,8 @@ struct Preferences: Codable, Equatable {
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
     var hideWhilePlaying = false
+    /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
+    var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
     /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
@@ -380,7 +382,9 @@ final class AppModel: ObservableObject {
 
     // MARK: AnyTogether
 
-    let together = AppModel.makeTogetherClient()
+    /// The client for the server chosen in Settings → AnyTogether (or ANYTOGETHER_URL).
+    lazy var together = AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer))
+    var serverDraft = ""
     @Published var togetherUser: TogetherUser?
     @Published var togetherStep = TogetherStep.idle
     @Published var togetherConnected = false

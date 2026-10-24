@@ -60,6 +60,7 @@ enum T {
         case togetherEditProfile, togetherName, togetherBio, togetherCountry, togetherCountryDetail, togetherSaveProfile, togetherProfileSaved, togetherHandle, togetherHandleDetail, togetherHandleAgain, togetherChangeHandle, togetherHandleChanged, togetherHandleTaken, togetherHandleReserved, togetherHandleInvalid, togetherNoLinks, togetherPrivacyTitle, privacyLibrary, privacyTrophies, privacyFriends, privacyPresence, privacySearch, visibilityEveryone, visibilityFriends, visibilityNobody, visibilityNoOne
         case messagesTitle, messagesNone, messagesStart, messagesSayHello, messagesYou, messagesDeleted, messagesWrite, messagesFrom, messagesPick, messagesEmptyThread, messagesFailed, messagesEdited, messagesSend, quickHello, quickOnMyWay, quickJoinMe, quickOneSec
         case partyTitle, partyStart, partyStartDetail, partyOpen, partyOpenDetail, partyJoinOf, partySize, partyDecline, partyNone, partyMembers, partyLeader, partyInVoice, partyInviteFriends, partyInvite, partyInvited, partyLeave, partyInvites, partyInvitedYou, partyJoined, partyLeft, partyKicked, partyEnded, partyFull, friendsInParty
+        case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case friendsTitle, friendsSignIn, friendsAccept, friendsDecline, friendsWantsToBe, friendsAddByHandle, friendsSendRequest, friendsNone, friendsYourHandle, friendsWaiting, friendsOffline, friendsOnline, friendsAway, friendsPlaying, friendsPlayingFor, friendsRequestSent, friendsNowFriends, friendsNoOne, friendsAsked, friendsOnlineCount
         case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
@@ -168,6 +169,12 @@ enum T {
         .partyEnded: "Parti bitti",
         .partyFull: "Parti dolu",
         .friendsInParty: "partide %d/%d",
+        .togetherServer: "Sunucu",
+        .togetherServerDetail: "Gelişmiş: başka bir AnyTogether sunucusu",
+        .togetherServerForced: "ANYTOGETHER_URL ile belirlendi",
+        .togetherServerUse: "Bu sunucuyu kullan",
+        .togetherServerInvalid: "https:// ile bir adres yaz (http:// yalnızca bu Mac için)",
+        .togetherServerNow: "Artık %@ kullanılıyor",
         .friendsTitle: "Arkadaşlar",
         .friendsSignIn: "Arkadaşlarını görmek için giriş yap",
         .friendsAccept: "%@: kabul et",
@@ -659,6 +666,12 @@ enum T {
         .partyEnded: "The party ended",
         .partyFull: "The party is full",
         .friendsInParty: "in a party %d/%d",
+        .togetherServer: "Server",
+        .togetherServerDetail: "Advanced: another AnyTogether server",
+        .togetherServerForced: "Set by ANYTOGETHER_URL",
+        .togetherServerUse: "Use this server",
+        .togetherServerInvalid: "Type an https:// address (http:// only for this Mac)",
+        .togetherServerNow: "Now using %@",
         .friendsTitle: "Friends",
         .friendsSignIn: "Sign in to see your friends",
         .friendsAccept: "Accept %@",

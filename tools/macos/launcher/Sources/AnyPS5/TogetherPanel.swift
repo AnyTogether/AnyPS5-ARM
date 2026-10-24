@@ -14,12 +14,45 @@ extension AppModel {
         case phone(name: String, handoff: String)
     }
 
-    /// Where AnyTogether is; ANYTOGETHER_URL points the launcher at another server (staging, a local one).
-    static let togetherBase = URL(string: ProcessInfo.processInfo.environment["ANYTOGETHER_URL"] ?? "https://anytogether.kodla.agency")!
-
-    static func makeTogetherClient() -> TogetherClient {
+    static func makeTogetherClient(base: URL) -> TogetherClient {
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        return TogetherClient(base: togetherBase, clientName: "launcher-macos/\(runningVersion) (macOS \(os.majorVersion).\(os.minorVersion))")
+        return TogetherClient(base: base, clientName: "launcher-macos/\(runningVersion) (macOS \(os.majorVersion).\(os.minorVersion))")
+    }
+
+    // MARK: Server
+
+    /// The server row: which AnyTogether this launcher uses. ANYTOGETHER_URL, when set, decides.
+    func serverRows() -> [PanelRow] {
+        if let forced = ProcessInfo.processInfo.environment["ANYTOGETHER_URL"] {
+            return [PanelRow(id: "together-server", title: T.text(.togetherServer), detail: T.text(.togetherServerForced), symbol: "server.rack", kind: .info(forced))]
+        }
+        let current = together.base.absoluteString
+        return [
+            PanelRow(id: "together-server-\(current)", title: T.text(.togetherServer), detail: T.text(.togetherServerDetail), symbol: "server.rack",
+                     kind: .text(current) { [weak self] text in self?.serverDraft = text }),
+            PanelRow(id: "together-server-use", title: T.text(.togetherServerUse), symbol: "arrow.right.circle", kind: .action(destructive: false) { [weak self] in
+                self?.useServer(self?.serverDraft ?? "")
+            }),
+        ]
+    }
+
+    /// Another server: a session belongs to one server, so this one is signed out first.
+    func useServer(_ text: String) {
+        guard ProcessInfo.processInfo.environment["ANYTOGETHER_URL"] == nil else { return }
+        guard let url = TogetherServer.address(text.isEmpty ? together.base.absoluteString : text) else {
+            return show(T.text(.togetherServerInvalid), symbol: "exclamationmark.triangle.fill")
+        }
+        guard url != together.base else { return }
+        togetherCancel()
+        let switchOver = { [weak self] in
+            guard let self else { return }
+            self.preferences.togetherServer = url == TogetherServer.standard ? nil : url.absoluteString
+            self.together = AppModel.makeTogetherClient(base: url)
+            self.togetherSync = TogetherSync(client: self.together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
+            self.serverDraft = ""
+            self.show(T.format(.togetherServerNow, url.host() ?? url.absoluteString), symbol: "server.rack")
+        }
+        if togetherUser != nil { togetherSignOut(then: switchOver) } else { switchOver() }
     }
 
     // MARK: Rows
@@ -35,7 +68,7 @@ extension AppModel {
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
             ]
-            rows += profileEditRows() + privacyRows()
+            rows += profileEditRows() + privacyRows() + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
             }))
@@ -82,6 +115,7 @@ extension AppModel {
                 PanelRow(id: "together-cancel", title: T.text(.cancel), symbol: "xmark", kind: .action(destructive: false) { [weak self] in self?.togetherCancel() }),
             ]
         }
+        if togetherStep == .idle { rows += serverRows() }
         return rows
     }
 
@@ -324,7 +358,8 @@ extension AppModel {
         for game in games { loadTrophies(game, again: true) }
     }
 
-    func togetherSignOut() {
+    /// `then` runs once the server has heard it and the session is forgotten here.
+    func togetherSignOut(then: (@MainActor () -> Void)? = nil) {
         let client = together
         togetherSocket?.stop()
         togetherSocket = nil
@@ -338,7 +373,10 @@ extension AppModel {
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
-        Task { await client.signOut() }
+        Task {
+            await client.signOut()
+            then?()
+        }
     }
 
     /// Keeps the session live: friends see the launcher online, and a sign-out elsewhere ends it here.
