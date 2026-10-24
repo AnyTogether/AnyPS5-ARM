@@ -88,6 +88,9 @@ struct RootView: View {
                         .transition(.opacity)
                 }
                 overlays
+                if model.share.watching != nil {
+                    ShareWatchView().transition(.opacity)
+                }
                 if let game = model.starting {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))

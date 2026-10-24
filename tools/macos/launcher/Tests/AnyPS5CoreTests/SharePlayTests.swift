@@ -349,3 +349,44 @@ final class SoundChunkerTests: XCTestCase {
         XCTAssertEqual(mono.withUnsafeBufferPointer { SoundChunker.stereo16(first: $0.baseAddress!, second: nil, planar: false, channels: 1, frames: 2) }, [16383, 16383, -16383, -16383])
     }
 }
+
+/// A viewer's launcher: the controller as the engine's pad packet, and the sound kept steady.
+final class SharePadStateTests: XCTestCase {
+    func testThePacketHasThePhonesLayout() {
+        var pad = SharePadState()
+        pad.buttons = SharePadState.Button.cross | SharePadState.Button.l1
+        pad.sticks = [SharePadState.axis(-1), SharePadState.axis(1, up: true), SharePadState.axis(0), SharePadState.axis(0.5)]
+        pad.l2 = SharePadState.trigger(1)
+        pad.r2 = SharePadState.trigger(0.5)
+        let packet = pad.packet(sequence: 7, sentMicros: 123_456, session: 0xABCDEF)
+        XCTAssertEqual(packet.count, 80)
+        XCTAssertEqual(RemotePacket.inputSession(packet), 0xABCDEF)
+        XCTAssertEqual(RemotePacket.read(packet, at: 8) as UInt32, 7)
+        XCTAssertEqual(RemotePacket.read(packet, at: 12) as UInt32, 0)
+        XCTAssertEqual(RemotePacket.read(packet, at: 16) as UInt64, 123_456)
+        XCTAssertEqual(RemotePacket.read(packet, at: 32) as UInt32, 0x4400)
+        XCTAssertEqual([UInt8](packet[36 ..< 42]), [0, 0, 128, 191, 255, 128])
+        XCTAssertEqual(Float(bitPattern: RemotePacket.read(packet, at: 60) as UInt32), 9.80665, accuracy: 0.0001)
+        XCTAssertEqual([UInt8](packet[44 ..< 56]), [UInt8](repeating: 0, count: 12))
+    }
+
+    func testTheSoundPrimesPlaysAndDropsWhatIsTooOld() {
+        var buffer = SoundJitterBuffer(target: 480, limit: 960)
+        func packet(_ number: UInt32, _ value: Int16) -> Data { StreamPacket.audio(Data([Int16](repeating: value.littleEndian, count: 480).withUnsafeBytes { Data($0) }), number: number, milliseconds: 0) }
+        buffer.push(packet(1, 1))
+        XCTAssertEqual(buffer.pull(100), [Int16](repeating: 0, count: 200))
+        buffer.push(packet(2, 2))
+        XCTAssertEqual(buffer.pull(240).first, 1)
+        // A late, older packet is not played.
+        buffer.push(packet(1, 9))
+        XCTAssertEqual(buffer.buffered, 240)
+        for number in UInt32(3) ... 8 { buffer.push(packet(number, Int16(number))) }
+        XCTAssertLessThanOrEqual(buffer.buffered, 960)
+        // Past the limit the oldest went down to the target: 5 to 8 are left.
+        XCTAssertEqual(buffer.buffered, 960)
+        XCTAssertEqual(buffer.pull(1).first, 5)
+        // Dry: silence, then priming again.
+        _ = buffer.pull(10_000)
+        XCTAssertEqual(buffer.pull(10), [Int16](repeating: 0, count: 20))
+    }
+}

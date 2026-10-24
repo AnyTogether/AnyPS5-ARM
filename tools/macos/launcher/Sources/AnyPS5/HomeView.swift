@@ -560,6 +560,7 @@ extension AppModel {
             if command == .back { declineRinging() }
             return true
         }
+        if let watching = watchCommand(command) { return watching }
         guard preferences.onboarded else { return onboardingCommand(command) }
         if starting != nil {
             if command == .back { cancelStart() }

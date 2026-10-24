@@ -446,6 +446,7 @@ final class AppModel: ObservableObject {
     /// Share play: what the friends panel shows, and the running share play's pieces.
     @Published var share = ShareState()
     var shareSession: ShareSession?
+    var shareWatch: ShareWatchSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?

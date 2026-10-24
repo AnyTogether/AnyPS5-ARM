@@ -12,6 +12,16 @@ struct ShareState {
     var starting = false
     /// Each viewer's link, by user ID.
     var links: [String: SharePlayHost.Link] = [:]
+    /// The friend's share play the user watches here, whether its picture comes, and how well.
+    var watching: TogetherSharePlay?
+    var watchConnected = false
+    var watchStats: WatchStats?
+
+    struct WatchStats: Equatable {
+        var roundTrip: Double?
+        var fps: Double?
+        var height: Int?
+    }
 }
 
 /// A running share play's pieces: the WebRTC host, the capture feeding it, and the router that
@@ -229,13 +239,8 @@ extension AppModel {
         Task { try? await together.declineSharePlay(invite.sharePlayId) }
     }
 
-    /// Watching happens on the website (or the phone): the share play's page opens in the browser.
-    func watchShare(_ id: String) {
-        let url = together.base.appendingPathComponent("watch").appendingPathComponent(id)
-        NSWorkspace.shared.open(url)
-    }
-
     func sharePlayEvent(_ event: TogetherSocket.Event) {
+        if watchEvent(event) { return }
         switch event.type {
         case "share_play.updated":
             guard let sharePlay = event.decode(TogetherSharePlay.self) else { return }
@@ -338,6 +343,7 @@ enum SP {
         case start, startDetail, starting, started, couldNotStart, sharing, watching, letPlay, stopPlaying, remove, invite, invitedAlready, invited
         case openToFriends, openToFriendsDetail, maxViewers, maxViewersDetail, stop, stopped, noPadFree, nowPlays, invitedYou, watchFriend, watchDetail, decline
         case player, onlyWatches, connecting, direct, relayed, roundTrip
+        case full, couldNotWatch, youPlay, youWatch, tookYouOut, hostStopped, leave
     }
 
     static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
@@ -377,7 +383,7 @@ enum SP {
         .nowPlays: "%@ plays as player %d",
         .invitedYou: "%@ shares %@ with you",
         .watchFriend: "Watch %@ play %@",
-        .watchDetail: "Opens in your browser",
+        .watchDetail: "Full screen here; your controller plays once they let you",
         .decline: "Not now, %@",
         .player: "Player %d",
         .onlyWatches: "Watching",
@@ -385,6 +391,13 @@ enum SP {
         .direct: "Direct",
         .relayed: "Through the relay",
         .roundTrip: "%d ms",
+        .full: "Nobody else can watch right now",
+        .couldNotWatch: "Could not watch",
+        .youPlay: "You play as player %d",
+        .youWatch: "You watch again",
+        .tookYouOut: "%@ took you out",
+        .hostStopped: "%@ stopped sharing",
+        .leave: "Leave",
     ]
 
     static let turkish: [Key: String] = [
@@ -411,7 +424,7 @@ enum SP {
         .nowPlays: "%@ artık %d. oyuncu",
         .invitedYou: "%@ seninle %@ paylaşıyor",
         .watchFriend: "İzle: %@, %@",
-        .watchDetail: "Tarayıcında açılır",
+        .watchDetail: "Burada tam ekran; izin verince kolunla oynarsın",
         .decline: "Şimdi değil, %@",
         .player: "%d. oyuncu",
         .onlyWatches: "İzliyor",
@@ -419,5 +432,12 @@ enum SP {
         .direct: "Doğrudan",
         .relayed: "Aktarıcı üzerinden",
         .roundTrip: "%d ms",
+        .full: "Şu an başka kimse izleyemez",
+        .couldNotWatch: "İzlenemedi",
+        .youPlay: "Artık %d. oyuncusun",
+        .youWatch: "Yeniden izliyorsun",
+        .tookYouOut: "%@ seni çıkardı",
+        .hostStopped: "%@ paylaşmayı bıraktı",
+        .leave: "Çık",
     ]
 }

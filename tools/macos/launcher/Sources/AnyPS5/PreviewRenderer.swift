@@ -239,6 +239,13 @@ enum PreviewRenderer {
             model.previewShare(nil, invites: [TogetherShareInvite(sharePlayId: "sp9", from: people[0], titleId: found.first?.titleID ?? "PPSA01234", title: "Cat Quest III")])
             model.overlay = .friends; model.panelInRows = true; model.panelRow = 2
         }
+        render(preferences, found, root, still, output.appendingPathComponent("share-watch.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.share.watching = TogetherSharePlay(id: "sp9", host: people[0], hostDevice: "mac9", titleId: "PPSA01234", title: "Cat Quest III", open: true, maxViewers: 2,
+                                                     viewers: [TogetherSharePlay.Viewer(user: utku, device: "mac", slot: nil, joinedAt: nil)])
+            model.share.watchConnected = true
+            model.share.watchStats = .init(roundTrip: 42, fps: 60, height: 720)
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }
