@@ -8,8 +8,10 @@ import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/protocol/packets.dart';
 import 'package:anyps5_remote/stream/stream_packets.dart';
 import 'package:anyps5_remote/stream/stream_player.dart';
+import 'package:anyps5_remote/together/together_account.dart';
 
 import 'stream_test.dart' show pieces;
+import 'together_test.dart' show FakeTogether;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -613,6 +615,95 @@ void main() {
     expect(player.sounds.single.samples, hasLength(960));
     await session.close();
     await launcher.stop();
+  });
+
+  test(
+    'the Mac asking to be signed in waits for the phone to approve',
+    () async {
+      final together = FakeTogether();
+      await together.start();
+      together.answer = (method, path, body) =>
+          path == '/api/v1/auth/email/verify'
+          ? (200, FakeTogether.tokens())
+          : (204, {});
+      final launcher = FakeLauncher();
+      await launcher.start();
+      final session = Session(
+        preferences: preferences,
+        deviceName: 'Pixel 8',
+        together: TogetherAccount(
+          preferences: preferences,
+          base: together.base,
+          clientName: 'test',
+        ),
+      );
+      await session.together.startEmail('u@example.com');
+      await session.together.verifyEmail('123456');
+      await session.connect(InternetAddress.loopbackIPv4, launcher.port);
+      await waitFor(() => session.status == ConnectionStatus.connected);
+      launcher.tell({
+        'type': 'togetherHandoff',
+        'id': 'h1',
+        'deviceName': 'MacBook',
+      });
+      await waitFor(() => session.handoffAsked.value != null);
+      expect(session.handoffAsked.value!.deviceName, 'MacBook');
+      await session.answerHandoff(session.handoffAsked.value!, approve: true);
+      expect(together.requests.last.$2, '/api/v1/auth/handoff/h1/approve');
+      await waitFor(() => launcher.received.isNotEmpty);
+      expect(launcher.received.last, {
+        'type': 'togetherHandoffAnswer',
+        'id': 'h1',
+        'approved': true,
+      });
+      expect(session.handoffAsked.value, isNull);
+      await session.close();
+      await launcher.stop();
+      await together.http.close(force: true);
+    },
+  );
+
+  test('the phone signs in with the Mac\'s account, and stops when the Mac says no', () async {
+    final together = FakeTogether();
+    await together.start();
+    together.answer = (method, path, body) =>
+        path == '/api/v1/auth/handoff/start'
+        ? (201, {'handoffId': 'h2', 'secret': 's' * 43, 'expiresIn': 300})
+        : (
+            400,
+            {'code': 'authorization_pending', 'status': 400, 'title': 'wait'},
+          );
+    final launcher = FakeLauncher();
+    await launcher.start();
+    final session = Session(
+      preferences: preferences,
+      deviceName: 'Pixel 8',
+      together: TogetherAccount(
+        preferences: preferences,
+        base: together.base,
+        clientName: 'test',
+      ),
+    );
+    await session.connect(InternetAddress.loopbackIPv4, launcher.port);
+    await waitFor(() => session.status == ConnectionStatus.connected);
+    final signingIn = session.signInWithMac(
+      every: const Duration(milliseconds: 10),
+    );
+    await waitFor(() => launcher.received.isNotEmpty);
+    expect(launcher.received.last, {
+      'type': 'togetherHandoff',
+      'id': 'h2',
+      'deviceName': 'Pixel 8',
+    });
+    launcher.tell({
+      'type': 'togetherHandoffAnswer',
+      'id': 'h2',
+      'approved': false,
+    });
+    await expectLater(signingIn, throwsA(isA<TogetherCancelled>()));
+    await session.close();
+    await launcher.stop();
+    await together.http.close(force: true);
   });
 
   test('a trophy from the launcher is kept to show', () async {

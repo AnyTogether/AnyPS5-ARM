@@ -148,6 +148,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           remotePlay: widget.remotePlay,
                           onRemotePlay: widget.onRemotePlay,
+                          together: widget.session.together,
+                          macName: widget.session.macName,
+                          onUseMac: () => widget.session.signInWithMac(),
                         ),
                         icon: const Icon(
                           Icons.info_outline_rounded,

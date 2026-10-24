@@ -1,0 +1,277 @@
+import 'package:flutter/material.dart';
+
+import '../strings.dart';
+import '../together/together_account.dart';
+
+/// AnyTogether on the phone: who is signed in, or the ways in. With a Mac connected
+/// ([macName]), its account comes first: one tap, the Mac approves.
+Future<void> showTogether(
+  BuildContext context, {
+  required TogetherAccount account,
+  required String? macName,
+  required Future<void> Function()? onUseMac,
+}) => showModalBottomSheet<void>(
+  context: context,
+  backgroundColor: const Color(0xF2101218),
+  isScrollControlled: true,
+  constraints: const BoxConstraints(maxWidth: 980),
+  shape: const RoundedRectangleBorder(
+    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  ),
+  builder: (context) =>
+      _Together(account: account, macName: macName, onUseMac: onUseMac),
+);
+
+class _Together extends StatefulWidget {
+  const _Together({
+    required this.account,
+    required this.macName,
+    required this.onUseMac,
+  });
+
+  final TogetherAccount account;
+  final String? macName;
+  final Future<void> Function()? onUseMac;
+
+  @override
+  State<_Together> createState() => _TogetherState();
+}
+
+class _TogetherState extends State<_Together> {
+  final _email = TextEditingController();
+  final _code = TextEditingController();
+  String? _error;
+
+  static const _title = TextStyle(
+    color: Colors.white,
+    fontSize: 20,
+    fontWeight: FontWeight.w600,
+  );
+  static const _faint = TextStyle(color: Colors.white60, fontSize: 14);
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  /// Runs a step, showing what went wrong under it; a stop on the phone shows nothing.
+  Future<void> _try(Future<void> Function() step) async {
+    setState(() => _error = null);
+    try {
+      await step();
+    } on TogetherCancelled {
+      if (mounted && widget.account.user == null && widget.onUseMac != null) {
+        setState(() => _error = Texts.of(context).togetherMacDeclined);
+      }
+    } on TogetherProblem catch (problem) {
+      if (mounted) setState(() => _error = problem.title);
+    } on Object {
+      if (mounted) {
+        setState(() => _error = Texts.of(context).togetherUnreachable);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    return ListenableBuilder(
+      listenable: widget.account,
+      builder: (context, _) {
+        final account = widget.account;
+        final user = account.user;
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              28,
+              22,
+              28,
+              18 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: user != null
+                ? _signedIn(texts, user)
+                : _signIn(texts, account.step),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _signedIn(Strings texts, TogetherUser user) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _Mark(),
+      const SizedBox(width: 18),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('@${user.handle}', style: _title),
+            const SizedBox(height: 2),
+            Text(
+              user.displayName,
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
+            ),
+            const SizedBox(height: 10),
+            Text(texts.togetherSignedIn, style: _faint),
+          ],
+        ),
+      ),
+      const SizedBox(width: 18),
+      OutlinedButton(
+        onPressed: widget.account.signOut,
+        child: Text(texts.togetherSignOut),
+      ),
+    ],
+  );
+
+  Widget _signIn(Strings texts, TogetherStep step) {
+    final mac = widget.macName;
+    final useMac = widget.onUseMac;
+    final waiting = step is WaitingForMac;
+    final busy = step is Busy;
+    final macSide = mac == null || useMac == null
+        ? null
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.icon(
+                onPressed: waiting ? null : () => _try(useMac),
+                icon: waiting
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.laptop_mac_rounded),
+                label: Text(
+                  waiting
+                      ? texts.togetherWaitingMac(mac)
+                      : texts.togetherUseMac(mac),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                texts.togetherUseMacDetail,
+                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+              ),
+              if (waiting)
+                TextButton(
+                  onPressed: widget.account.cancel,
+                  child: Text(texts.cancel),
+                ),
+            ],
+          );
+    final emailSide = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (macSide != null) Text(texts.togetherOrEmail, style: _faint),
+        if (step case CodeSent(:final email)) ...[
+          Text(
+            texts.togetherCodeSent(email),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          TextField(
+            controller: _code,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            autofillHints: const [AutofillHints.oneTimeCode],
+            decoration: InputDecoration(labelText: texts.togetherCode),
+            onChanged: (text) {
+              final digits = text.replaceAll(RegExp(r'\D'), '');
+              if (digits.length == 6) {
+                _try(() => widget.account.verifyEmail(digits));
+              }
+            },
+          ),
+          TextButton(
+            onPressed: () {
+              _code.clear();
+              widget.account.cancel();
+            },
+            child: Text(texts.togetherOtherEmail),
+          ),
+        ] else ...[
+          TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
+            autocorrect: false,
+            decoration: InputDecoration(labelText: texts.togetherEmail),
+            onSubmitted: (_) => _sendCode(),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: busy ? null : _sendCode,
+            child: Text(texts.togetherSendCode),
+          ),
+        ],
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            const _Mark(),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(texts.together, style: _title),
+                  Text(texts.togetherIntro, style: _faint),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        // A phone on its side: the Mac's way and the email way side by side.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (macSide != null) ...[
+              Expanded(child: macSide),
+              const SizedBox(width: 28),
+            ],
+            Expanded(child: emailSide),
+          ],
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            _error!,
+            style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 13.5),
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _sendCode() {
+    final email = _email.text.trim();
+    if (!email.contains('@')) return;
+    _try(() => widget.account.startEmail(email));
+  }
+}
+
+class _Mark extends StatelessWidget {
+  const _Mark();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 48,
+    height: 48,
+    decoration: BoxDecoration(
+      color: const Color(0x228AB4FF),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: const Icon(Icons.group_rounded, color: Color(0xFF8AB4FF)),
+  );
+}

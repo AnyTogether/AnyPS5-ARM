@@ -66,6 +66,29 @@ class Strings {
   String get remotePlay => _text('remotePlay');
   String get remotePlayDetail => _text('remotePlayDetail');
   String get remotePlayNoPermission => _text('remotePlayNoPermission');
+  String get together => 'AnyTogether';
+  String get togetherIntro => _text('togetherIntro');
+  String get togetherSignIn => _text('togetherSignIn');
+  String togetherUseMac(String mac) =>
+      _text('togetherUseMac').replaceAll('%@', mac);
+  String get togetherUseMacDetail => _text('togetherUseMacDetail');
+  String togetherWaitingMac(String mac) =>
+      _text('togetherWaitingMac').replaceAll('%@', mac);
+  String get togetherMacDeclined => _text('togetherMacDeclined');
+  String get togetherOrEmail => _text('togetherOrEmail');
+  String get togetherEmail => _text('togetherEmail');
+  String get togetherSendCode => _text('togetherSendCode');
+  String togetherCodeSent(String email) =>
+      _text('togetherCodeSent').replaceAll('%@', email);
+  String get togetherCode => _text('togetherCode');
+  String get togetherOtherEmail => _text('togetherOtherEmail');
+  String get togetherSignedIn => _text('togetherSignedIn');
+  String get togetherSignOut => _text('togetherSignOut');
+  String get togetherUnreachable => _text('togetherUnreachable');
+  String togetherMacAsks(String mac, String handle) =>
+      _text('togetherMacAsks').replaceAll('%@', mac).replaceAll('%h', handle);
+  String get allow => _text('allow');
+  String get notNow => _text('notNow');
   String get editLayout => _text('editLayout');
   String get done => _text('done');
   String get editHint => _text('editHint');
@@ -135,6 +158,28 @@ class Strings {
         "Tilting and turning the phone, as the DualSense's motion sensors",
     'remotePlay': 'Remote Play',
     'remotePlayDetail': 'The game on the phone, behind the pad. Off, the phone is only the controller',
+    'togetherIntro':
+        'Friends, trophies and play time, on the Mac, the phone and the web',
+    'togetherSignIn': 'Sign in',
+    'togetherUseMac': "Use %@'s account",
+    'togetherUseMacDetail':
+        'The Mac, signed in to AnyTogether, approves it at once',
+    'togetherWaitingMac': 'Waiting for %@…',
+    'togetherMacDeclined':
+        'The Mac is not signed in to AnyTogether; use your email',
+    'togetherOrEmail': 'or with your email',
+    'togetherEmail': 'Email',
+    'togetherSendCode': 'Email me a code',
+    'togetherCodeSent': 'Code sent to %@',
+    'togetherCode': 'Code from the mail',
+    'togetherOtherEmail': 'Use another email',
+    'togetherSignedIn':
+        'Signed in. The Mac can sign in with this account from its settings.',
+    'togetherSignOut': 'Sign out',
+    'togetherUnreachable': "Couldn't reach AnyTogether",
+    'togetherMacAsks': '%@ wants to sign in to AnyTogether as @%h',
+    'allow': 'Allow',
+    'notNow': 'Not now',
     'remotePlayNoPermission':
         'Allow AnyPS5 to record the screen on the Mac to see the game here',
     'editLayout': 'Edit Layout',
@@ -207,6 +252,26 @@ class Strings {
     'remotePlay': 'Remote Play',
     'remotePlayDetail':
         'Oyun telefonda, kolun arkasında. Kapalıyken telefon sadece kol',
+    'togetherIntro':
+        "Arkadaşlar, kupalar ve oynama süresi; Mac'te, telefonda ve webde",
+    'togetherSignIn': 'Giriş yap',
+    'togetherUseMac': '%@ hesabını kullan',
+    'togetherUseMacDetail': "AnyTogether'a giriş yapmış Mac hemen onaylar",
+    'togetherWaitingMac': '%@ bekleniyor…',
+    'togetherMacDeclined': "Mac AnyTogether'a giriş yapmamış; e-postanla gir",
+    'togetherOrEmail': 'ya da e-postanla',
+    'togetherEmail': 'E-posta',
+    'togetherSendCode': 'Bana kod gönder',
+    'togetherCodeSent': 'Kod gönderildi: %@',
+    'togetherCode': 'Maildeki kod',
+    'togetherOtherEmail': 'Başka bir e-posta',
+    'togetherSignedIn':
+        'Giriş yapıldı. Mac de ayarlarından bu hesapla girebilir.',
+    'togetherSignOut': 'Çıkış yap',
+    'togetherUnreachable': "AnyTogether'a ulaşılamadı",
+    'togetherMacAsks': "%@, AnyTogether'a @%h olarak girmek istiyor",
+    'allow': 'İzin ver',
+    'notNow': 'Şimdi değil',
     'remotePlayNoPermission':
         "Oyunu burada görmek için Mac'te AnyPS5'e ekran kaydı izni ver",
     'editLayout': 'Düzeni Düzenle',

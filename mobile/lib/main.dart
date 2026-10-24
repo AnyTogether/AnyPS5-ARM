@@ -20,6 +20,7 @@ import 'ui/activity_card.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
+import 'ui/handoff_card.dart';
 import 'ui/trophy_card.dart';
 import 'ui/welcome_screen.dart';
 import 'version.dart';
@@ -327,6 +328,13 @@ class _RemoteAppState extends State<RemoteApp> {
                       },
                     ),
                     TrophyCard(trophy: _session.trophy),
+                    HandoffCard(
+                      asked: _session.handoffAsked,
+                      handle: _session.together.user?.handle,
+                      onAnswer: (ask, approve) => _session
+                          .answerHandoff(ask, approve: approve)
+                          .catchError((_) {}),
+                    ),
                   ],
                 ),
               ),

@@ -13,6 +13,8 @@ import '../protocol/messages.dart';
 import '../protocol/packets.dart';
 import '../stream/stream_packets.dart';
 import '../stream/stream_player.dart';
+import '../together/together_account.dart';
+import '../version.dart';
 
 enum ConnectionStatus { searching, connecting, pairing, connected, rejected }
 
@@ -52,10 +54,25 @@ class GameArt {
 /// the UDP pad sender and the latency measured from the game's answers. On a cable there is no
 /// UDP path: the pad and the answers go on the control channel as binary messages.
 class Session extends ChangeNotifier {
-  Session({required this.preferences, required this.deviceName});
+  Session({
+    required this.preferences,
+    required this.deviceName,
+    TogetherAccount? together,
+  }) : together =
+           together ??
+           TogetherAccount(
+             preferences: preferences,
+             clientName: 'remote-${Platform.operatingSystem}/$appVersion',
+           );
 
   final SharedPreferences preferences;
   final String deviceName;
+
+  /// The phone's AnyTogether account, which signs the Mac in or is signed in by it.
+  final TogetherAccount together;
+
+  /// The Mac asking to be signed in to AnyTogether as this phone's account, until answered.
+  final handoffAsked = ValueNotifier<TogetherHandoff?>(null);
 
   static const sendInterval = Duration(milliseconds: 8);
   static const reportInterval = Duration(seconds: 2);
@@ -277,6 +294,20 @@ class Session extends ChangeNotifier {
         notifyListeners();
       case Streaming(:final state):
         streaming.value = state;
+      case final TogetherHandoff ask:
+        if (together.user == null) {
+          // Nothing to sign the Mac in with: it says so and offers the other ways.
+          _socket?.add(
+            TogetherHandoffAnswer(id: ask.id, approved: false).toJson(),
+          );
+        } else {
+          handoffAsked.value = ask;
+        }
+      case TogetherHandoffAnswer(:final id, approved: false):
+        final waiting = together.step;
+        if (waiting is WaitingForMac && waiting.handoff.id == id) {
+          together.cancel();
+        }
       case Rejected(:final reason):
         rejectedReason = reason;
         if (reason == 'busy') {
@@ -387,6 +418,32 @@ class Session extends ChangeNotifier {
     _state = state.copy();
     _send();
     _handlingMicros = _clock.elapsedMicroseconds - touched;
+  }
+
+  /// Approves the Mac's sign-in with this phone's account, or turns it down.
+  Future<void> answerHandoff(
+    TogetherHandoff ask, {
+    required bool approve,
+  }) async {
+    if (handoffAsked.value?.id == ask.id) handoffAsked.value = null;
+    var approved = false;
+    try {
+      if (approve) {
+        await together.approveHandoff(ask.id);
+        approved = true;
+      }
+    } finally {
+      send(TogetherHandoffAnswer(id: ask.id, approved: approved));
+    }
+  }
+
+  /// Signs the phone in with the Mac's account: the Mac, signed in, approves it at once.
+  Future<TogetherUser> signInWithMac({
+    Duration every = const Duration(seconds: 2),
+  }) async {
+    final handoff = await together.startHandoff(deviceName);
+    send(TogetherHandoff(id: handoff.id, deviceName: deviceName));
+    return together.waitForApproval(handoff, every: every);
   }
 
   /// A request to the launcher on the control channel; dropped while not connected.

@@ -56,6 +56,14 @@ sealed class Message {
           icon: json['icon'] as String?,
           background: json['background'] as String?,
         ),
+        'togetherHandoff' => TogetherHandoff(
+          id: json['id'] as String,
+          deviceName: json['deviceName'] as String,
+        ),
+        'togetherHandoffAnswer' => TogetherHandoffAnswer(
+          id: json['id'] as String,
+          approved: json['approved'] as bool,
+        ),
         _ => null,
       };
     } on Object {
@@ -435,4 +443,35 @@ class ActivityUpdate extends Message {
   @override
   String toJson() =>
       jsonEncode({'type': 'activity', 'activity': activity?.toJson()});
+}
+
+/// AnyTogether: either side asks the other, already signed in, to sign it in. The id is the
+/// hand-off the asker started with the server; [deviceName] is shown before approving.
+class TogetherHandoff extends Message {
+  const TogetherHandoff({required this.id, required this.deviceName});
+
+  final String id;
+  final String deviceName;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'togetherHandoff',
+    'id': id,
+    'deviceName': deviceName,
+  });
+}
+
+/// The answer: approved on the server, or turned down.
+class TogetherHandoffAnswer extends Message {
+  const TogetherHandoffAnswer({required this.id, required this.approved});
+
+  final String id;
+  final bool approved;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'togetherHandoffAnswer',
+    'id': id,
+    'approved': approved,
+  });
 }
