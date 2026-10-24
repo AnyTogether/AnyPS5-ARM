@@ -9622,6 +9622,7 @@ void ProvokingVertexTests() {
     expectFailure([&] { ValidateProvokingVertex(supported, lastStrip, slotShaders); }, "last provoking vertex with explicit per-vertex triangle-strip interpolation is unsupported");
     ValidateProvokingVertex(supported, lastList, slotShaders);
     ShaderRecompiler::RecompileResult fragment{};
+    fragment.spirv = std::vector<std::uint32_t>{spv::MagicNumber, 0x10300u, 0u, 4u, 0u};
     const std::array<CompiledShader, 1> shaders{{{ShaderRecompiler::ShaderStage::Fragment, &fragment, 0}}};
     for (const auto topology : {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN}) {
         auto state = last;
