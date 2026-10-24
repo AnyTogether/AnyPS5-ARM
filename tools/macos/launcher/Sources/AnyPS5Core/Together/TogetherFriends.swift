@@ -70,7 +70,7 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
 }
 
 /// Someone who asked to be friends, or whom this user asked.
-public struct TogetherPerson: Decodable, Equatable, Sendable, Identifiable {
+public struct TogetherPerson: Codable, Equatable, Sendable, Identifiable {
     public var id: String { userId }
     public let userId: String
     public let handle: String

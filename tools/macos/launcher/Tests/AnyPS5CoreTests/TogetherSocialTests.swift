@@ -279,3 +279,89 @@ final class TogetherServerTests: XCTestCase {
         XCTAssertEqual(TogetherServer.base(environment: [:], chosen: "not a url"), TogetherServer.standard)
     }
 }
+
+final class TogetherGameSessionTests: TogetherSignedInCase {
+    static func session(players: [[String: Any]] = [TogetherPartyTests.member("u1", "Utku")], joinable: Bool = true) -> [String: Any] {
+        ["id": "s1", "host": TogetherPartyTests.member("u1", "Utku"), "titleId": "PPSA01234", "gameVersion": "01.000.002", "engineBuild": "0.2.13-a1b2c3d4e5f6",
+         "capacity": 4, "joinable": joinable, "players": players, "properties": ["mode": "coop", "slots": [1, 2]], "createdAt": "2026-10-24T10:00:00.000Z", "endedAt": NSNull()]
+    }
+
+    func testOpeningASessionForTheGamePlaying() async throws {
+        FakeTogether.handler = { _, _ in (201, Self.session()) }
+        let session = try await client.openGameSession(titleId: "PPSA01234", gameVersion: "01.000.002", engineBuild: "0.2.13-a1b2c3d4e5f6", capacity: 4)
+        XCTAssertEqual(last(), "POST /api/v1/game-sessions")
+        XCTAssertEqual(body()?["titleId"] as? String, "PPSA01234")
+        XCTAssertEqual(body()?["capacity"] as? Int, 4)
+        XCTAssertEqual(body()?["joinable"] as? Bool, true)
+        XCTAssertEqual(session.properties["mode"], .string("coop"))
+        XCTAssertEqual(session.properties["slots"], .array([.number(1), .number(2)]))
+        FakeTogether.handler = { _, _ in (200, Self.session(joinable: false)) }
+        _ = try await client.updateGameSession("s1", joinable: false)
+        XCTAssertEqual(last(), "PATCH /api/v1/game-sessions/s1")
+        XCTAssertEqual(body() as? [String: Bool], ["joinable": false])
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.endGameSession("s1")
+        XCTAssertEqual(last(), "DELETE /api/v1/game-sessions/s1")
+        try await client.leaveGameSession("s1")
+        XCTAssertEqual(last(), "POST /api/v1/game-sessions/s1/leave")
+    }
+
+    func testJoiningSendsTheVersionsAndAMismatchIsRefused() async throws {
+        FakeTogether.handler = { _, _ in (200, Self.session(players: [TogetherPartyTests.member("u1", "Utku"), TogetherPartyTests.member("f1", "Ayse")])) }
+        let joined = try await client.joinGameSession("s1", gameVersion: "01.000.002", engineBuild: "0.2.13-a1b2c3d4e5f6")
+        XCTAssertEqual(last(), "POST /api/v1/game-sessions/s1/join")
+        XCTAssertEqual(body() as? [String: String], ["gameVersion": "01.000.002", "engineBuild": "0.2.13-a1b2c3d4e5f6"])
+        XCTAssertEqual(joined.players.count, 2)
+        FakeTogether.handler = { _, _ in (409, ["code": "version_mismatch", "status": 409, "title": "This game needs version 01.000.002 on engine build 0.2.13-a1b2c3d4e5f6"]) }
+        do {
+            _ = try await client.joinGameSession("s1", gameVersion: "01.000.001", engineBuild: "0.2.13-a1b2c3d4e5f6")
+            XCTFail("no error")
+        } catch let problem as TogetherProblem {
+            XCTAssertEqual(problem.code, "version_mismatch")
+        }
+    }
+
+    func testMySessionAndInvites() async throws {
+        FakeTogether.handler = { _, _ in
+            (200, ["session": NSNull(), "invites": [["sessionId": "s9", "from": TogetherPartyTests.member("f1", "Ayse"), "titleId": "PPSA01234", "gameVersion": "1.02",
+                                                      "engineBuild": "0.2.13-x", "invitedAt": "2026-10-24T10:00:00.000Z"]]])
+        }
+        let mine = try await client.myGameSession()
+        XCTAssertNil(mine.session)
+        XCTAssertEqual(mine.invites.first?.from?.displayName, "Ayse")
+        XCTAssertEqual(mine.invites.first?.gameVersion, "1.02")
+        FakeTogether.handler = { _, _ in (200, ["invited": ["f1"]]) }
+        try await client.inviteToGame(["f1"], session: "s1")
+        XCTAssertEqual(last(), "POST /api/v1/game-sessions/s1/invites")
+        XCTAssertEqual(body()?["userIds"] as? [String], ["f1"])
+    }
+
+    /// The same game version and engine build, or a clear reason why not, before asking.
+    func testTheVersionGuard() throws {
+        let session = try JSONDecoder.together.decode(TogetherGameSession.self, from: JSONSerialization.data(withJSONObject: Self.session()))
+        XCTAssertEqual(session.mismatch(gameVersion: "01.000.002", engineBuild: "0.2.13-a1b2c3d4e5f6"), nil)
+        XCTAssertEqual(session.mismatch(gameVersion: "01.000.001", engineBuild: "0.2.13-a1b2c3d4e5f6"), .gameVersion)
+        XCTAssertEqual(session.mismatch(gameVersion: "01.000.002", engineBuild: "0.2.12-ffffffffffff"), .engineBuild)
+        XCTAssertEqual(TogetherGameSession.engineBuild("0.2.13 dev/build+7"), "0.2.13-dev-build+7")
+        XCTAssertEqual(TogetherGameSession.engineBuild(String(repeating: "a", count: 80)).count, 64)
+        XCTAssertEqual(TogetherGameSession.engineBuild(""), "unknown")
+    }
+
+    /// What the engine's online bridge reads: the session, who the user is in it, and their role.
+    func testTheSessionFileForTheEngine() throws {
+        let session = try JSONDecoder.together.decode(TogetherGameSession.self, from: JSONSerialization.data(withJSONObject: Self.session()))
+        let file = folder.appendingPathComponent("game-session.json")
+        try TogetherGameSession.write(session, me: "u1", to: file)
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+        XCTAssertEqual(json?["role"] as? String, "host")
+        XCTAssertEqual(json?["userId"] as? String, "u1")
+        let written = json?["session"] as? [String: Any]
+        XCTAssertEqual(written?["id"] as? String, "s1")
+        XCTAssertEqual(written?["engineBuild"] as? String, "0.2.13-a1b2c3d4e5f6")
+        XCTAssertEqual((written?["properties"] as? [String: Any])?["mode"] as? String, "coop")
+        try TogetherGameSession.write(session, me: "f1", to: file)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])?["role"] as? String, "guest")
+        try TogetherGameSession.write(nil, me: "u1", to: file)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+}

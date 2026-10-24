@@ -25,6 +25,7 @@ extension AppModel {
             rows.append(PanelRow(id: "decline-\(person.userId)", title: T.format(.friendsDecline, person.displayName), symbol: "xmark.circle",
                                  kind: .action(destructive: true) { [weak self] in self?.answerFriend(person, accept: false) }))
         }
+        rows += gameRows()
         rows.append(PanelRow(id: "friends-handle", title: T.text(.friendsAddByHandle), symbol: "at", kind: .text(friendHandle) { [weak self] text in self?.friendHandle = text }))
         rows.append(PanelRow(id: "friends-ask", title: T.text(.friendsSendRequest), symbol: "person.badge.plus", kind: .action(destructive: false) { [weak self] in self?.askFriend() }))
         if togetherFriends.isEmpty {
@@ -48,9 +49,11 @@ extension AppModel {
 
     /// "Playing Hollow Knight: Silksong · 25 min", "Online", "Offline", with the party they are in.
     func presenceText(_ presence: TogetherFriend.Presence?) -> String {
-        let base = stateText(presence)
-        guard let party = presence?.party, presence?.online == true else { return base }
-        return base + " · " + T.format(.friendsInParty, party.size, party.max)
+        var text = stateText(presence)
+        guard presence?.online == true else { return text }
+        if presence?.game?.joinable == true { text += " · " + T.text(.gameJoinable) }
+        if let party = presence?.party { text += " · " + T.format(.friendsInParty, party.size, party.max) }
+        return text
     }
 
     private func stateText(_ presence: TogetherFriend.Presence?) -> String {
@@ -124,6 +127,8 @@ extension AppModel {
             messageEvent(event)
         case let type where type.hasPrefix("party."):
             partyEvent(event)
+        case let type where type.hasPrefix("game_session."):
+            gameSessionEvent(event)
         default:
             break
         }

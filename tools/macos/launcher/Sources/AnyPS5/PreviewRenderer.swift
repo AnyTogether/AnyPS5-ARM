@@ -173,6 +173,18 @@ enum PreviewRenderer {
             model.previewParty(nil, invites: [TogetherPartyInvite(partyId: "p9", from: people[0], size: 2)])
             model.overlay = .party; model.panelInRows = true; model.panelRow = 0
         }
+        render(preferences, found, root, still, output.appendingPathComponent("friends-games.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            let title = found.first?.titleID ?? "PPSA01234"
+            model.togetherFriends = [
+                TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil,
+                               presence: .init(state: "in_game", titleId: title, since: nil, game: .init(sessionId: "s1", titleId: title, joinable: true, players: 1, capacity: 4))),
+                TogetherFriend(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil, party: .init(id: "p7", size: 3, max: 8, open: true))),
+            ]
+            model.previewGameSession(nil, invites: [TogetherGameInvite(sessionId: "s2", from: TogetherPerson(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil),
+                                                                       titleId: found.last?.titleID ?? title, gameVersion: "01.000.000", engineBuild: "0.2.13-abc")])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 3
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

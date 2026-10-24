@@ -69,6 +69,8 @@ extension AppModel {
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
             ]
+            rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
+                                 kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
             rows += profileEditRows() + privacyRows() + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
@@ -371,6 +373,8 @@ extension AppModel {
             inbox = nil
             party = nil
             partyInvites = []
+            gameSession = nil
+            gameInvites = []
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
@@ -408,12 +412,14 @@ extension AppModel {
         loadTogetherProfile()
         loadInbox()
         loadParty()
+        loadGameInvites()
         flushTogether()
     }
 
     /// In a game or online, as friends will see it.
     func updateTogetherPresence() {
         guard let socket = togetherSocket else { return }
+        followGameSession()
         if let running {
             socket.setPresence(.inGame(titleID: running.game.titleID, since: preferences.lastPlayed[running.game.id] ?? Date()))
         } else {

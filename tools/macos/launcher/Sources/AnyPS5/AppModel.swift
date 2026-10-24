@@ -25,6 +25,8 @@ struct Preferences: Codable, Equatable {
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
     var hideWhilePlaying = false
+    /// A session friends can join while a game runs; nil means on.
+    var friendsJoin: Bool?
     /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
     var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
@@ -421,6 +423,10 @@ final class AppModel: ObservableObject {
     @Published var party: TogetherParty?
     @Published var partyInvites: [TogetherPartyInvite] = []
     @Published var partyStartsOpen = false
+    /// The game session the user hosts or joined, and invitations to friends' games.
+    @Published var gameSession: TogetherGameSession?
+    @Published var gameInvites: [TogetherGameInvite] = []
+    var openingSession = false
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes
@@ -705,6 +711,8 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
+            // Where the engine's online bridge finds the AnyTogether game session, once there is one.
+            .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
