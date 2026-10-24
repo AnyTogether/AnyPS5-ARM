@@ -25,11 +25,11 @@ std::optional<Endpoint> ParseEndpoint(const char* address, const char* secret) {
 }
 
 std::optional<Endpoint> BridgeEndpoint() {
-    return ParseEndpoint(std::getenv(EndpointVariable), std::getenv(SecretVariable));
+    return ParseEndpoint(std::getenv("ANYPS5_ONLINE"), std::getenv("ANYPS5_ONLINE_SECRET"));
 }
 
 std::optional<std::string> ObservationPath() {
-    const char* value = std::getenv(ObservationVariable);
+    const char* value = std::getenv("ANYPS5_ONLINE_LOG");
     if (value == nullptr || *value == '\0') return std::nullopt;
     return std::string(value);
 }

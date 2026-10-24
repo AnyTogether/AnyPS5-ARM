@@ -486,6 +486,14 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 |------|------|--------|---------|-------------|
 | `ANYPS5_SYSTEM_FONTS` | string | `core/libs/prx/libSceFont/src/SystemFont.cpp` |  | directory holding the system fonts, defaulting to anyps5-fonts beside the executable |
 
+### libSceNetCtl
+
+| Name | Kind | Source | Default | Description |
+|------|------|--------|---------|-------------|
+| `ANYPS5_ONLINE` | string | `core/libs/prx/libSceNetCtl/src/OnlineEnvironment.cpp` |  | `127.0.0.1:<port>` of the launcher's online bridge; with `ANYPS5_ONLINE_SECRET` it turns on sign-in and web API pass-through (see [online play](ONLINE_PLAY.md)) |
+| `ANYPS5_ONLINE_LOG` | presence | `core/libs/prx/libSceNetCtl/src/OnlineEnvironment.cpp` |  | file the online libraries append every observed call to, one JSON object per line |
+| `ANYPS5_ONLINE_SECRET` | string | `core/libs/prx/libSceNetCtl/src/OnlineEnvironment.cpp` |  | 64 hexadecimal digits the launcher made for this game start; both ends prove they know it, it is never sent |
+
 ### libSceNpEntitlementAccess
 
 | Name | Kind | Source | Default | Description |
