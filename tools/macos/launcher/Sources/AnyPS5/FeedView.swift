@@ -11,6 +11,7 @@ extension AppModel {
 
     func openFeed() {
         guard togetherUser != nil else { return }
+        social.follow(togetherUser?.id)
         if let overlay, overlay != .feed, overlay != .profile {
             social.feedReturn = ProfileReturn(overlay: overlay, category: panelCategory, row: panelRow, inRows: panelInRows)
         }

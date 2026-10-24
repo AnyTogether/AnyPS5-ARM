@@ -9,6 +9,7 @@ extension AppModel {
     /// Opens a game's board (from this Mac's game), or overall points with nil.
     func openLeaderboard(_ game: Game?) {
         guard togetherUser != nil else { return }
+        social.follow(togetherUser?.id)
         if let overlay, overlay != .leaderboard, overlay != .profile {
             social.boardReturn = ProfileReturn(overlay: overlay, category: panelCategory, row: panelRow, inRows: panelInRows)
         }

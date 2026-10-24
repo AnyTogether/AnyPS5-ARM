@@ -36,10 +36,26 @@ final class SocialState: ObservableObject {
     var boardTask: Task<Void, Never>?
     var boardReturn: AppModel.ProfileReturn?
 
+    /// Whose feed and boards these are: another account signed in starts them again.
+    private var viewer: String?
+
     private var forward: AnyCancellable?
 
     init(owner: AppModel) {
         forward = objectWillChange.sink { [weak owner] _ in owner?.objectWillChange.send() }
+    }
+
+    /// Forgets what another account read.
+    func follow(_ user: String?) {
+        guard user != viewer else { return }
+        viewer = user
+        feedTask?.cancel()
+        feedOlderTask?.cancel()
+        boardTask?.cancel()
+        feed = TogetherFeed()
+        feedFailed = false
+        leaderboard = nil
+        boardGame = nil
     }
 }
 
