@@ -34,6 +34,11 @@ sealed class Message {
           running: json['running'] as String?,
           language: json['language'] as String,
         ),
+        'look' => LookUpdate(
+          deep: json['deep'] as String,
+          middle: json['middle'] as String,
+          accent: json['accent'] as String,
+        ),
         'trophy' => TrophyEarned(
           name: json['name'] as String,
           detail: json['detail'] as String? ?? '',
@@ -290,6 +295,27 @@ class SaveLayout extends Message {
 }
 
 /// A trophy just earned in the game playing.
+/// The launcher's theme for the phone to wear, as #RRGGBB.
+class LookUpdate extends Message {
+  const LookUpdate({
+    required this.deep,
+    required this.middle,
+    required this.accent,
+  });
+
+  final String deep;
+  final String middle;
+  final String accent;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'look',
+    'deep': deep,
+    'middle': middle,
+    'accent': accent,
+  });
+}
+
 class TrophyEarned extends Message {
   const TrophyEarned({
     required this.name,

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:anyps5_remote/connection/session.dart';
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/protocol/packets.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -496,6 +497,27 @@ void main() {
     });
     await session.close();
     await launcher.stop();
+  });
+
+  test('the launcher\'s theme is worn and kept for next time', () async {
+    final launcher = FakeLauncher();
+    await launcher.start();
+    final session = Session(preferences: preferences, deviceName: 'Pixel 8');
+    await session.connect(InternetAddress.loopbackIPv4, launcher.port);
+    await waitFor(() => session.status == ConnectionStatus.connected);
+    launcher.tell({
+      'type': 'look',
+      'deep': '#0A0014',
+      'middle': '#4A0E6B',
+      'accent': '#FF4FD8',
+    });
+    await waitFor(() => session.look.value != null);
+    expect(session.look.value!.accent, const Color(0xFFFF4FD8));
+    expect(session.look.value!.middle, const Color(0xFF4A0E6B));
+    await session.close();
+    await launcher.stop();
+    final later = Session(preferences: preferences, deviceName: 'Pixel 8');
+    expect(later.look.value?.deep, const Color(0xFF0A0014));
   });
 
   test('a trophy from the launcher is kept to show', () async {

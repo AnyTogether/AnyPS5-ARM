@@ -951,6 +951,7 @@ final class AppModel: ObservableObject {
                     TrophyBanner.shared.notice(T.format(.phoneConnected, name), detail: T.text(.phoneConnectedDetail), symbol: "iphone.gen3", sounds: self.preferences.sounds)
                 }
                 self.phoneLibrary = nil
+                self.phoneLookSent = nil
                 self.phoneActivity = nil
                 self.tellPhone()
             } },
@@ -1066,12 +1067,27 @@ final class AppModel: ObservableObject {
             phoneActivity = .some(activity)
             remote.publish(.activity(activity))
         }
+        let look = phoneLook
+        if look != phoneLookSent {
+            phoneLookSent = look
+            remote.publish(look)
+        }
         let library = RemoteMessage.library(games: games.map(remoteGame), selected: selectedGame?.id, running: (running?.game ?? starting)?.id,
                                             language: preferences.language.rawValue)
         guard library != phoneLibrary else { return }
         phoneLibrary = library
         remote.publish(library)
     }
+
+    /// The theme in use, as the phone wears it.
+    private var phoneLook: RemoteMessage {
+        let (deep, middle, _) = activeDesign?.palette ?? preferences.theme.palette
+        let accent = NSColor(accent).usingColorSpace(.sRGB) ?? .systemBlue
+        return .look(deep: ThemeDesign.hex(deep), middle: ThemeDesign.hex(middle),
+                     accent: ThemeDesign.hex(SIMD3(Float(accent.redComponent), Float(accent.greenComponent), Float(accent.blueComponent))))
+    }
+
+    private var phoneLookSent: RemoteMessage?
 
     /// What the phone last heard the launcher doing; nil before it heard anything.
     private var phoneActivity: RemoteActivity??

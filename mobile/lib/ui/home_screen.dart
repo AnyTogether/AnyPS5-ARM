@@ -63,6 +63,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final background = selected == null
         ? null
         : widget.session.art[selected.id]?.background;
+    // The launcher's theme behind a game with no picture.
+    final look = widget.session.look.value;
+    final deep = look?.deep ?? ink;
+    final glow = look == null
+        ? const Color(0xFF1A1D27)
+        : Color.lerp(look.deep, look.middle, 0.7)!;
 
     return Scaffold(
       backgroundColor: ink,
@@ -75,11 +81,11 @@ class _HomeScreenState extends State<HomeScreen> {
             layoutBuilder: (current, previous) =>
                 Stack(fit: StackFit.expand, children: [...previous, ?current]),
             child: background == null
-                ? const DecoratedBox(
-                    key: ValueKey('none'),
+                ? DecoratedBox(
+                    key: ValueKey('none ${glow.toARGB32()}'),
                     decoration: BoxDecoration(
                       gradient: RadialGradient(
-                        colors: [Color(0xFF1A1D27), ink],
+                        colors: [glow, deep],
                         radius: 1.1,
                       ),
                     ),

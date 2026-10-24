@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../feedback/haptics.dart';
@@ -12,6 +13,28 @@ import '../protocol/messages.dart';
 import '../protocol/packets.dart';
 
 enum ConnectionStatus { searching, connecting, pairing, connected, rejected }
+
+/// The launcher's theme as the phone wears it.
+class Look {
+  const Look({required this.deep, required this.middle, required this.accent});
+
+  final Color deep;
+  final Color middle;
+  final Color accent;
+
+  static Color? _color(String? hex) {
+    if (hex == null) return null;
+    final digits = hex.startsWith('#') ? hex.substring(1) : hex;
+    final value = digits.length == 6 ? int.tryParse(digits, radix: 16) : null;
+    return value == null ? null : Color(0xFF000000 | value);
+  }
+
+  static Look? parse(String? deep, String? middle, String? accent) {
+    final colors = [_color(deep), _color(middle), _color(accent)];
+    if (colors.contains(null)) return null;
+    return Look(deep: colors[0]!, middle: colors[1]!, accent: colors[2]!);
+  }
+}
 
 /// A game's pictures as the launcher sent them, for the [tag] they were sent for.
 class GameArt {
@@ -53,6 +76,15 @@ class Session extends ChangeNotifier {
   /// The launcher's games as it last told them, and their pictures by game.
   Library? library;
   final art = <String, GameArt>{};
+
+  /// The launcher's theme, kept from the last time when not connected.
+  late final look = ValueNotifier<Look?>(
+    Look.parse(
+      preferences.getString('lookDeep'),
+      preferences.getString('lookMiddle'),
+      preferences.getString('lookAccent'),
+    ),
+  );
 
   /// The trophy earned last, shown for a moment over whatever the phone shows.
   final trophy = ValueNotifier<TrophyEarned?>(null);
@@ -193,6 +225,15 @@ class Session extends ChangeNotifier {
           art[game.id] = GameArt(game.art);
           _socket?.add(WantArt(game.id).toJson());
         }
+        notifyListeners();
+      case LookUpdate(:final deep, :final middle, :final accent):
+        final worn = Look.parse(deep, middle, accent);
+        if (worn == null) break;
+        look.value = worn;
+        preferences
+          ..setString('lookDeep', deep)
+          ..setString('lookMiddle', middle)
+          ..setString('lookAccent', accent);
         notifyListeners();
       case final TrophyEarned earned:
         trophy.value = earned;

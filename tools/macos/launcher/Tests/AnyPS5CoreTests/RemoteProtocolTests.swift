@@ -56,6 +56,15 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(games.first?.layout)
     }
 
+    /// The theme in use tints the phone: its deep and middle tones and its accent.
+    func testTheLookIsToldToThePhone() throws {
+        let message = RemoteMessage.look(deep: "#0A0014", middle: "#4A0E6B", accent: "#FF4FD8")
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "look")
+        XCTAssertEqual(json?["accent"] as? String, "#FF4FD8")
+    }
+
     func testATrophyIsToldToThePhone() throws {
         let message = RemoteMessage.trophy(name: "Pharloom's Heart", detail: "Acquire all other trophies", grade: "platinum", icon: "aWNvbg==")
         XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
