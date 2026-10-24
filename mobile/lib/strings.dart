@@ -87,6 +87,29 @@ class Strings {
   String get togetherUnreachable => _text('togetherUnreachable');
   String togetherMacAsks(String mac, String handle) =>
       _text('togetherMacAsks').replaceAll('%@', mac).replaceAll('%h', handle);
+  String get friends => _text('friends');
+  String get friendsHandle => _text('friendsHandle');
+  String get friendsAdd => _text('friendsAdd');
+  String friendsRequested(String handle) =>
+      _text('friendsRequested').replaceAll('%h', handle);
+  String friendsAdded(String handle) =>
+      _text('friendsAdded').replaceAll('%h', handle);
+  String get friendsRequests => _text('friendsRequests');
+  String get friendsSent => _text('friendsSent');
+  String get friendsWaiting => _text('friendsWaiting');
+  String get friendsNone => _text('friendsNone');
+  String get friendsRemove => _text('friendsRemove');
+  String get accept => _text('accept');
+  String get decline => _text('decline');
+  String presencePlaying(String game) =>
+      _text('presencePlaying').replaceAll('%@', game);
+  String get presenceOnline => _text('presenceOnline');
+  String get presenceAway => _text('presenceAway');
+  String get presenceOffline => _text('presenceOffline');
+  String get togetherLive => _text('togetherLive');
+  String get togetherConnecting => _text('togetherConnecting');
+  String get togetherNotFound => _text('togetherNotFound');
+  String get back => _text('back');
   String get allow => _text('allow');
   String get notNow => _text('notNow');
   String get editLayout => _text('editLayout');
@@ -178,6 +201,26 @@ class Strings {
     'togetherSignOut': 'Sign out',
     'togetherUnreachable': "Couldn't reach AnyTogether",
     'togetherMacAsks': '%@ wants to sign in to AnyTogether as @%h',
+    'friends': 'Friends',
+    'friendsHandle': 'Their handle',
+    'friendsAdd': 'Add',
+    'friendsRequested': 'Asked @%h to be friends',
+    'friendsAdded': 'You and @%h are friends now',
+    'friendsRequests': 'Friend requests',
+    'friendsSent': 'Waiting for them',
+    'friendsWaiting': 'Waiting',
+    'friendsNone': 'No friends here yet. Add someone by their handle.',
+    'friendsRemove': 'Remove friend',
+    'accept': 'Accept',
+    'decline': 'Decline',
+    'presencePlaying': 'Playing %@',
+    'presenceOnline': 'Online',
+    'presenceAway': 'Away',
+    'presenceOffline': 'Offline',
+    'togetherLive': 'Live',
+    'togetherConnecting': 'Connecting…',
+    'togetherNotFound': 'No one with that handle',
+    'back': 'Back',
     'allow': 'Allow',
     'notNow': 'Not now',
     'remotePlayNoPermission':
@@ -270,6 +313,26 @@ class Strings {
     'togetherSignOut': 'Çıkış yap',
     'togetherUnreachable': "AnyTogether'a ulaşılamadı",
     'togetherMacAsks': "%@, AnyTogether'a @%h olarak girmek istiyor",
+    'friends': 'Arkadaşlar',
+    'friendsHandle': 'Kullanıcı adı',
+    'friendsAdd': 'Ekle',
+    'friendsRequested': '@%h kişisine arkadaşlık isteği gönderildi',
+    'friendsAdded': '@%h ile artık arkadaşsınız',
+    'friendsRequests': 'Arkadaşlık istekleri',
+    'friendsSent': 'Yanıt bekleniyor',
+    'friendsWaiting': 'Bekliyor',
+    'friendsNone': 'Burada henüz arkadaş yok. Birini kullanıcı adıyla ekle.',
+    'friendsRemove': 'Arkadaşlıktan çıkar',
+    'accept': 'Kabul et',
+    'decline': 'Reddet',
+    'presencePlaying': '%@ oynuyor',
+    'presenceOnline': 'Çevrimiçi',
+    'presenceAway': 'Uzakta',
+    'presenceOffline': 'Çevrimdışı',
+    'togetherLive': 'Canlı',
+    'togetherConnecting': 'Bağlanıyor…',
+    'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
+    'back': 'Geri',
     'allow': 'İzin ver',
     'notNow': 'Şimdi değil',
     'remotePlayNoPermission':

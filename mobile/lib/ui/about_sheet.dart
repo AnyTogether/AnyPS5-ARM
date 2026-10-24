@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../strings.dart';
 import '../together/together_account.dart';
+import 'together_screen.dart';
 import 'together_sheet.dart';
 import '../version.dart';
 
@@ -19,6 +20,7 @@ Future<void> showAbout(
   TogetherAccount? together,
   String? macName,
   Future<void> Function()? onUseMac,
+  void Function(TogetherTab tab)? onOpenTogether,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -38,6 +40,7 @@ Future<void> showAbout(
     together: together,
     macName: macName,
     onUseMac: onUseMac,
+    onOpenTogether: onOpenTogether,
   ),
 );
 
@@ -52,6 +55,7 @@ class _About extends StatefulWidget {
     this.together,
     this.macName,
     this.onUseMac,
+    this.onOpenTogether,
   });
 
   final bool? vibration;
@@ -63,6 +67,7 @@ class _About extends StatefulWidget {
   final TogetherAccount? together;
   final String? macName;
   final Future<void> Function()? onUseMac;
+  final void Function(TogetherTab tab)? onOpenTogether;
 
   @override
   State<_About> createState() => _AboutState();
@@ -130,6 +135,7 @@ class _AboutState extends State<_About> {
                           account: together,
                           macName: widget.macName,
                           onUseMac: widget.onUseMac,
+                          onOpen: widget.onOpenTogether,
                         ),
                       ),
                     ),

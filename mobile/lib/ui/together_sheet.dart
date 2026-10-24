@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../strings.dart';
 import '../together/together_account.dart';
+import 'together_screen.dart';
 
 /// AnyTogether on the phone: who is signed in, or the ways in. With a Mac connected
-/// ([macName]), its account comes first: one tap, the Mac approves.
+/// ([macName]), its account comes first: one tap, the Mac approves. Signed in, [onOpen] goes on
+/// to AnyTogether's own screen, the sheets closed first.
 Future<void> showTogether(
   BuildContext context, {
   required TogetherAccount account,
   required String? macName,
   required Future<void> Function()? onUseMac,
+  void Function(TogetherTab tab)? onOpen,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -18,8 +21,12 @@ Future<void> showTogether(
   shape: const RoundedRectangleBorder(
     borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
   ),
-  builder: (context) =>
-      _Together(account: account, macName: macName, onUseMac: onUseMac),
+  builder: (context) => _Together(
+    account: account,
+    macName: macName,
+    onUseMac: onUseMac,
+    onOpen: onOpen,
+  ),
 );
 
 class _Together extends StatefulWidget {
@@ -27,11 +34,13 @@ class _Together extends StatefulWidget {
     required this.account,
     required this.macName,
     required this.onUseMac,
+    this.onOpen,
   });
 
   final TogetherAccount account;
   final String? macName;
   final Future<void> Function()? onUseMac;
+  final void Function(TogetherTab tab)? onOpen;
 
   @override
   State<_Together> createState() => _TogetherState();
@@ -117,6 +126,25 @@ class _TogetherState extends State<_Together> {
             ),
             const SizedBox(height: 10),
             Text(texts.togetherSignedIn, style: _faint),
+            if (widget.onOpen case final open?) ...[
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  for (final (tab, icon, label) in _tabs(texts))
+                    FilledButton.tonalIcon(
+                      onPressed: () {
+                        Navigator.of(context)
+                            .popUntil((route) => route.isFirst);
+                        open(tab);
+                      },
+                      icon: Icon(icon, size: 18),
+                      label: Text(label),
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -127,6 +155,10 @@ class _TogetherState extends State<_Together> {
       ),
     ],
   );
+
+  static List<(TogetherTab, IconData, String)> _tabs(Strings texts) => [
+    (TogetherTab.friends, Icons.people_alt_rounded, texts.friends),
+  ];
 
   Widget _signIn(Strings texts, TogetherStep step) {
     final mac = widget.macName;

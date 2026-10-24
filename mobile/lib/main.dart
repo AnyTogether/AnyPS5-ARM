@@ -292,6 +292,7 @@ class _RemoteAppState extends State<RemoteApp> {
               status: _status(),
               remotePlay: _remotePlay,
               onRemotePlay: _setRemotePlay,
+              together: _together,
             );
     } else {
       home = SetupScreen(
