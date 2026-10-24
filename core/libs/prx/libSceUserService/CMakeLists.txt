@@ -1,6 +1,6 @@
 add_library(libSceUserService SHARED EXCLUDE_FROM_ALL Export.cpp)
 target_include_directories(libSceUserService PRIVATE ${LIBS_INCLUDE_DIR})
-target_link_libraries(libSceUserService PRIVATE libSceSystemService libScePad)
+target_link_libraries(libSceUserService PRIVATE libSceSystemService)
 configure_windows_unwind(libSceUserService)
 
 if(BUILD_TESTING)
@@ -33,18 +33,6 @@ if(BUILD_TESTING)
     add_test(NAME guest_user_service_lifecycle COMMAND guest_user_service_lifecycle_tests)
     if(WIN32)
         set_tests_properties(guest_user_service_lifecycle PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceUserService>")
-    endif()
-endif()
-
-if(BUILD_TESTING)
-    add_test_executable(guest_user_service_players_tests ${LIBS_INCLUDE_DIR}/tests/GuestUserServicePlayers.cpp)
-    target_include_directories(guest_user_service_players_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(guest_user_service_players_tests PRIVATE libSceUserService libScePad libSceSystemService libc)
-    configure_windows_unwind(guest_user_service_players_tests)
-    add_test(NAME guest_user_service_players COMMAND guest_user_service_players_tests)
-    if(WIN32)
-        set_tests_properties(guest_user_service_players PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceUserService>")
     endif()
 endif()

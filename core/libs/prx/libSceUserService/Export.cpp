@@ -3,30 +3,35 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include <atomic>
+#include <array>
 #include <cstring>
-#include <cstdio>
+#include <deque>
+#include <mutex>
 #include "prx/libSceUserService/UserService.hpp"
 
-static std::atomic<bool> initialized{false};
-static std::atomic<std::uint32_t> loginsReported{0};
+namespace {
 
-// A user is logged in once a pad has been given to them: the first user from the start, the
-// nth when the nth player's pad first connects.
-extern "C" std::uint32_t PadJoinedPlayers_nid_postfix();
-static constexpr int kUsers = 4;
+std::atomic<bool> initialized{false};
+std::mutex userMutex;
 
-static int UserIndex(int user_id) {
- const int index = user_id - USER_SERVICE_INITIAL_USER_ID;
- return index >= 0 && index < kUsers ? index : -1;
+struct UserEvent {
+    std::uint32_t eventType;
+    int userId;
+};
+
+std::deque<UserEvent> eventQueue;
+std::array<bool, USER_SERVICE_MAX_USERS> userConnected{true, false, false, false};
+
+int UserIndex(int userId) {
+    if (userId >= USER_SERVICE_INITIAL_USER_ID && userId < USER_SERVICE_INITIAL_USER_ID + USER_SERVICE_MAX_USERS) {
+        return userId - USER_SERVICE_INITIAL_USER_ID;
+    }
+    return -1;
 }
 
-static bool LoggedIn(int user_id) {
+int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t value) {
  const int index = UserIndex(user_id);
- return index == 0 || (index > 0 && (PadJoinedPlayers_nid_postfix() & (1u << index)) != 0);
-}
-
-static int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t value) {
- if (!LoggedIn(user_id)) {
+ if (index < 0) {
   return USER_SERVICE_ERROR_NOT_LOGGED_IN;
  }
  if (setting == nullptr) {
@@ -36,6 +41,17 @@ static int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t val
  return USER_SERVICE_OK;
 }
 
+void PopulateInitialLoginEvents() {
+ std::lock_guard lock(userMutex);
+ eventQueue.clear();
+ constexpr std::uint32_t EventTypeLogin = 0;
+ eventQueue.push_back({EventTypeLogin, USER_SERVICE_INITIAL_USER_ID});
+ for (int i = 1; i < USER_SERVICE_MAX_USERS; ++i) {
+  if (userConnected[i]) {
+   eventQueue.push_back({EventTypeLogin, USER_SERVICE_INITIAL_USER_ID + i});
+  }
+ }
+}
 
 extern "C" int APS5_VABI sceSystemServiceParamGetInt(int param_id, int* value);
 
@@ -63,14 +79,42 @@ static int ReportKeyboardSetting(int user_id, int32_t* type, int32_t (*value)())
  if (type == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- if (!LoggedIn(user_id)) {
+ if (UserIndex(user_id) < 0) {
   return USER_SERVICE_ERROR_UNKNOWN_USER;
  }
  *type = value();
  return USER_SERVICE_OK;
 }
+}
 
 extern "C" {
+
+void UserServiceSetUserConnected_nid_postfix(int userIndex, bool connected) {
+    if (userIndex <= 0 || userIndex >= USER_SERVICE_MAX_USERS) return;
+    std::lock_guard lock(userMutex);
+    if (userConnected[userIndex] != connected) {
+        userConnected[userIndex] = connected;
+        if (initialized.load()) {
+            constexpr std::uint32_t EventTypeLogin = 0;
+            constexpr std::uint32_t EventTypeLogout = 1;
+            const std::uint32_t eventType = connected ? EventTypeLogin : EventTypeLogout;
+            const int userId = USER_SERVICE_INITIAL_USER_ID + userIndex;
+            bool collapsed = false;
+            for (auto it = eventQueue.begin(); it != eventQueue.end(); ++it) {
+                if (it->userId == userId) {
+                    if (it->eventType != eventType) {
+                        eventQueue.erase(it);
+                    }
+                    collapsed = true;
+                    break;
+                }
+            }
+            if (!collapsed) {
+                eventQueue.push_back({eventType, userId});
+            }
+        }
+    }
+}
 
 int APS5_VABI sceUserServiceGetAccessibilityChatTranscription(int user_id, int32_t* chat_transcription) {
  return ReportAccessibilitySetting(user_id, chat_transcription, 0);
@@ -107,7 +151,8 @@ int APS5_VABI sceUserServiceGetAccessibilityZoomFollowFocus(int user_id, int32_t
 }
 
 int APS5_VABI sceUserServiceGetAgeLevel(int user_id, uint32_t* age_level) {
- if (!LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (index < 0) {
   return USER_SERVICE_ERROR_NOT_LOGGED_IN;
  }
  if (age_level == nullptr) {
@@ -118,7 +163,7 @@ int APS5_VABI sceUserServiceGetAgeLevel(int user_id, uint32_t* age_level) {
  return USER_SERVICE_OK;
 }
 
-// Each logged-in user is reported as logging in once per initialization, the initial user first.
+// The initial user is reported as logging in once per initialization; afterwards there are no user events.
 int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event) {
  if (!initialized.load()) {
   return USER_SERVICE_ERROR_NOT_INITIALIZED;
@@ -126,23 +171,23 @@ int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event) {
  if (event == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- const std::uint32_t logged = PadJoinedPlayers_nid_postfix() | 1u;
- for (int index = 0; index < kUsers; ++index) {
-  const std::uint32_t bit = 1u << index;
-  if ((logged & bit) == 0 || (loginsReported.fetch_or(bit) & bit) != 0) continue;
-  constexpr std::uint32_t EventTypeLogin = 0;
-  event->event_type = EventTypeLogin;
-  event->user_id = USER_SERVICE_INITIAL_USER_ID + index;
-  return USER_SERVICE_OK;
+ std::lock_guard lock(userMutex);
+ if (eventQueue.empty()) {
+  return USER_SERVICE_ERROR_NO_EVENT;
  }
- return USER_SERVICE_ERROR_NO_EVENT;
+ const auto item = eventQueue.front();
+ eventQueue.pop_front();
+ event->event_type = item.eventType;
+ event->user_id = item.userId;
+ return USER_SERVICE_OK;
 }
 
 int APS5_VABI sceUserServiceGetGamePresets(int user_id, UserServiceGamePresets* presets) {
  // System-wide game presets (difficulty, view inversion, subtitles, audio language) of the user's
  // profile. A fresh console has none set: every field is 0, "not specified", and the title falls
  // back to its own defaults. this_size is the caller's.
- if (presets == nullptr || !LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (presets == nullptr || index < 0) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
  presets->difficulty = 0;
@@ -171,11 +216,14 @@ int APS5_VABI sceUserServiceGetLoginUserIdList(UserServiceLoginUserIdList* user_
  if (user_id_list == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- int count = 0;
- for (int index = 0; index < kUsers; ++index) {
-  if (LoggedIn(USER_SERVICE_INITIAL_USER_ID + index)) user_id_list->user_id[count++] = USER_SERVICE_INITIAL_USER_ID + index;
+ std::lock_guard lock(userMutex);
+ for (int i = 0; i < 4; ++i) {
+  if (i < USER_SERVICE_MAX_USERS && userConnected[i]) {
+   user_id_list->user_id[i] = USER_SERVICE_INITIAL_USER_ID + i;
+  } else {
+   user_id_list->user_id[i] = USER_SERVICE_USER_ID_INVALID;
+  }
  }
- while (count < kUsers) user_id_list->user_id[count++] = USER_SERVICE_USER_ID_INVALID;
  return USER_SERVICE_OK;
 }
 
@@ -183,26 +231,24 @@ int APS5_VABI sceUserServiceGetUserName(int user_id, char* name, size_t size) {
  if (name == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- if (!LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (index < 0) {
   return USER_SERVICE_ERROR_UNKNOWN_USER;
  }
  if (size < USER_SERVICE_MAX_USER_NAME_LENGTH + 1) {
   std::memset(name, 0, size);
   return USER_SERVICE_ERROR_BUFFER_TOO_SHORT;
  }
- if (const int index = UserIndex(user_id); index == 0) {
-  std::strncpy(name, USER_SERVICE_INITIAL_USER_NAME, size);
- } else {
-  std::snprintf(name, size, "%s %d", USER_SERVICE_INITIAL_USER_NAME, index + 1);
- }
+ std::strncpy(name, USER_SERVICE_USER_NAMES[index], size);
  return USER_SERVICE_OK;
 }
 
 int APS5_VABI sceUserServiceGetUserNumber(int user_id, int32_t* number) {
- if (number == nullptr || !LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (number == nullptr || index < 0) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- *number = UserIndex(user_id) + 1;
+ *number = index + 1;
  return USER_SERVICE_OK;
 }
 
@@ -214,7 +260,7 @@ static int MarkInitialized() {
  if (initialized.exchange(true)) {
   return USER_SERVICE_ERROR_ALREADY_INITIALIZED;
  }
- loginsReported.store(0);
+ PopulateInitialLoginEvents();
  return USER_SERVICE_OK;
 }
 
@@ -238,6 +284,8 @@ int APS5_VABI sceUserServiceTerminate(void) {
  if (!initialized.exchange(false)) {
   return USER_SERVICE_ERROR_NOT_INITIALIZED;
  }
+ std::lock_guard lock(userMutex);
+ eventQueue.clear();
  return USER_SERVICE_OK;
 }
 
@@ -261,19 +309,23 @@ int APS5_VABI sceUserServiceGetRegisteredUserIdList(UserServiceRegisteredUserIdL
  if (user_id_list == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- int count = 0;
- for (int index = 0; index < kUsers; ++index) {
-  if (LoggedIn(USER_SERVICE_INITIAL_USER_ID + index)) user_id_list->user_id[count++] = USER_SERVICE_INITIAL_USER_ID + index;
+ std::lock_guard lock(userMutex);
+ for (int i = 0; i < 16; ++i) {
+  if (i < USER_SERVICE_MAX_USERS && userConnected[i]) {
+   user_id_list->user_id[i] = USER_SERVICE_INITIAL_USER_ID + i;
+  } else {
+   user_id_list->user_id[i] = USER_SERVICE_USER_ID_INVALID;
+  }
  }
- while (count < 16) user_id_list->user_id[count++] = USER_SERVICE_USER_ID_INVALID;
  return USER_SERVICE_OK;
 }
 
 int APS5_VABI sceUserServiceGetUserColor(int user_id, int* color) {
- if (color == nullptr || !LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (color == nullptr || index < 0) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- *color = UserIndex(user_id);
+ *color = index;
  return USER_SERVICE_OK;
 }
 
@@ -290,10 +342,11 @@ int APS5_VABI sceUserServiceGetTraditionalChineseInputType(int user_id, int32_t*
 }
 
 int APS5_VABI sceUserServiceGetNpAccountId(int user_id, uint64_t* account_id) {
- if (account_id == nullptr || !LoggedIn(user_id)) {
+ const int index = UserIndex(user_id);
+ if (account_id == nullptr || index < 0) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- *account_id = static_cast<uint64_t>(UserIndex(user_id));
+ *account_id = 0;
  return USER_SERVICE_OK;
 }
 

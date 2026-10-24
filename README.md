@@ -254,7 +254,7 @@ The [shader recompiler](core/shader/recompiler/Recompiler.cpp) successfully prod
 
 [Tested games and their frame rates](docs/user/COMPATIBILITY.md)
 
-Per-game progress (stage reached, open blockers, libraries and GPU coverage) is tracked on the [blocker map](https://alxcbtw.github.io/anyps5-roadmap/), a community project built from public GitHub data ([source](https://github.com/AlxcBTW/anyps5-roadmap)). Test reports go in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
+Per-game status and test reports live in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
 
 ## About
 

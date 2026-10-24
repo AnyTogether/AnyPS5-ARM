@@ -29,9 +29,8 @@ static void RequireError(const char* path, int flags, int error) {
     Require(shm_open_nid_postfix(path, flags, 0600) == -1);
     Require(*__error_nid_postfix() == error);
 }
-#ifndef __linux__
-// Linux names host POSIX shared memory, which the guest_named_shm tests cover; elsewhere a named
-// object lives in the process until shm_unlink.
+#ifdef __APPLE__
+// On macOS a named object lives in the process until shm_unlink.
 static void CheckNamed() {
     const char* const name = "/anyps5-shm";
     RequireError(name, 0x2, 2);
@@ -135,7 +134,7 @@ int main() {
     RequireInvalid("/anyps5-shm", 0x1);
     RequireInvalid("/anyps5-shm", 0x202 | 0x8);
     RequireInvalid("", 0x202);
-#ifndef __linux__
+#ifdef __APPLE__
     CheckNamed();
 #endif
 }

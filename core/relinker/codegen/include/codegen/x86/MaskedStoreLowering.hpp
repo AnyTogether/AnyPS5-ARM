@@ -10,21 +10,17 @@
 namespace Codegen {
 
 struct MaskedStoreOperands {
-    std::uint8_t Source;
-    std::uint8_t Mask;
-    std::uint8_t ElementBytes;
+    const char* Name;
+    std::uint8_t ElementSize;
     bool Wide;
-    std::vector<std::uint8_t> AddressLea;
-    std::optional<std::size_t> RipDisplacementOffset;
-    std::int64_t RipTarget = 0;
+    std::uint8_t Mask;
+    MemoryOperand Memory;
+    std::vector<std::uint8_t> Instruction;
+    std::size_t DisplacementOffset;
 };
 
-[[nodiscard]] std::optional<MaskedStoreOperands> DecodeVexMaskedStore(const std::uint8_t* data, std::size_t length);
-
-class MaskedStoreLowering {
-public:
-    void EmitOutOfLine(StubBodyBuilder& body, const MaskedStoreOperands& operands) const;
-};
+[[nodiscard]] std::optional<MaskedStoreOperands> DecodeMaskedStore(const std::uint8_t* data, std::size_t length);
+void EmitMaskedStore(StubBodyBuilder& body, const MaskedStoreOperands& operands);
 
 }
 

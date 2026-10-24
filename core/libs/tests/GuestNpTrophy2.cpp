@@ -1,4 +1,5 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include "prx/libSceNpTrophy2/include/NpTrophy2Constants.hpp"
 #include "prx/libSceNpTrophy2/include/NpTrophy2Types.hpp"
 #include <cstddef>
 #include <cstdlib>
@@ -10,8 +11,8 @@ int APS5_VABI sceNpTrophy2UnregisterUnlockCallback();
 int APS5_VABI sceNpTrophy2GetGameInfo(int, int, NpTrophy2GameDetails*, NpTrophy2GameData*);
 int APS5_VABI sceNpTrophy2GetGroupInfo(int, int, int, NpTrophy2GroupDetails*, NpTrophy2GroupData*);
 int APS5_VABI sceNpTrophy2GetTrophyInfo(int, int, int, NpTrophy2Details*, NpTrophy2Data*);
-int APS5_VABI sceNpTrophy2GetRewardIcon(int, int, int, void*, size_t*);
 int APS5_VABI sceNpTrophy2ShowTrophyList(int);
+int APS5_VABI sceNpTrophy2GetRewardIcon(int, int, int, void*, std::size_t*);
 }
 
 static void Require(bool value) { if (!value) std::abort(); }
@@ -59,15 +60,10 @@ int main() {
     Require(sceNpTrophy2GetTrophyInfo(1, 1, 3, nullptr, &trophyData) == 0);
     Require(trophyData.trophy_id == 3);
     Require(ThrowsInvalidArgument([] { sceNpTrophy2GetTrophyInfo(1, 1, 3, nullptr, nullptr); }));
-
-    size_t size = 99;
-    bool threw = false;
-    try {
-        sceNpTrophy2GetRewardIcon(1, 1, 0, nullptr, &size);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    Require(threw && size == 0);
+    std::size_t iconSize = 1234;
+    Require(sceNpTrophy2GetRewardIcon(1, 1, 1, nullptr, &iconSize) == SCE_NP_TROPHY2_ERROR_ICON_FILE_NOT_FOUND);
+    Require(iconSize == 0);
+    Require(sceNpTrophy2GetRewardIcon(1, 1, 1, nullptr, nullptr) == SCE_NP_TROPHY2_ERROR_ICON_FILE_NOT_FOUND);
 
     Require(sceNpTrophy2ShowTrophyList(1) == 0);
 }

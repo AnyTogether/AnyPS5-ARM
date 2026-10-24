@@ -92,6 +92,8 @@ private:
     VkDescriptorSetLayout emptySetLayout = VK_NULL_HANDLE;
     std::size_t attachments = 0;
     std::size_t colorAttachments = 0;
+    std::vector<bool> boundAttachments;
+    std::uint32_t boundColorAttachments = 0;
     bool depthBounds = false;
     bool depthBias = false;
     bool libraries = false;

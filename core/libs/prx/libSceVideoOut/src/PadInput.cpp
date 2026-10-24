@@ -15,6 +15,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/PadInputTypes.hpp"
+#include "prx/libSceUserService/UserService.hpp"
 #include "prx/libc/include/General.hpp"
 #include <chrono>
 #include <vector>
@@ -146,7 +147,7 @@ void PadInput::closeController(SDL_JoystickID id) {
 void PadInput::leave(std::uint32_t device) {
     const int player = seats.Leave(device);
     if (player <= 0) return;
-    PadDisconnectPlayer_nid_postfix(player);
+    PadSetPortConnected_nid_postfix(player, false);
     published[static_cast<std::size_t>(player)] = false;
     APS5_LOG_OUT("Pad: player %d left", player + 1);
 }
@@ -178,10 +179,10 @@ void PadInput::answer(Remote& remote, int player) {
 }
 
 void PadInput::applyOutput() {
-    for (int player = 0; player < kPadPlayers; ++player) {
+    for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
         auto& output = outputs[static_cast<std::size_t>(player)];
         PadOutputState fetched;
-        if (!PadFetchPlayerOutput_nid_postfix(player, &output.sequence, &fetched)) continue;
+        if (!PadFetchOutputForPort_nid_postfix(player, &output.sequence, &fetched)) continue;
         const bool motionChanged = fetched.motionEnabled != output.state.motionEnabled;
         output.state = fetched;
         for (auto& controller : controllers) {
@@ -416,7 +417,7 @@ void PadInput::Update(const DisplayWindow& window) {
 // Every player's pad from the device seated there; the first player's also from the keyboard,
 // the mouse and APS5_PAD_SCRIPT, and published even with no device.
 void PadInput::publish(std::uint64_t frame) {
-    for (int player = 0; player < kPadPlayers; ++player) {
+    for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
         std::optional<PadInputState> device;
         for (const auto& controller : controllers) {
             if (seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.state;
@@ -426,9 +427,13 @@ void PadInput::publish(std::uint64_t frame) {
         }
         if (player != 0) {
             if (!device) continue;
-            PadPublishPlayerInput_nid_postfix(player, *device);
-            if (!published[static_cast<std::size_t>(player)]) APS5_LOG_OUT("Pad: player %d joined", player + 1);
+            if (!published[static_cast<std::size_t>(player)]) {
+                PadSetPortConnected_nid_postfix(player, true);
+                UserServiceSetUserConnected_nid_postfix(player, true);
+                APS5_LOG_OUT("Pad: player %d joined", player + 1);
+            }
             published[static_cast<std::size_t>(player)] = true;
+            PadPublishInputForPort_nid_postfix(player, *device);
             continue;
         }
         auto state = keyboardMouse.Compose(device.value_or(PadInputState{}));

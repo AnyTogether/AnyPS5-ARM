@@ -29,7 +29,7 @@ Plays from the main menu through the first levels, unlocks and huge waves includ
 | ✅ | **MSAA memory size** | The size of the 4x MSAA target was computed 2 MB too large and overlapped a small image; fixed with AddrLib's GFX10 rule. |
 | ✅ | **Rosetta + AVX crash** | Fixed by upstream #4194; 53,718 stores were split in the executable. |
 | ✅ | **Main menu and game** | Played by hand through levels 1-1, 1-2 and 1-3: main menu at ~120 FPS, in game 60–120 FPS on a 120 Hz display. |
-| ✅ | **Startup abort fixed** | One of two launches used to end during startup with a Rosetta `EmulateForward` abort: a masked `vmaskmovps` store crossed into a write-watched page. The relinker now stores masked stores element by element (b8dce7fb9; 63 sites in this game). Five launches in a row since: no abort. |
+| ✅ | **Startup abort fixed** | One of two launches used to end during startup with a Rosetta `EmulateForward` abort: a masked `vmaskmovps` store crossed into a write-watched page. The relinker stored masked stores element by element (b8dce7fb9; 63 sites in this game); five launches in a row then: no abort. Since the upstream merge of 2026-10-25 it probes every active element before the store instead (upstream 3cae921a6), not yet measured on this game. |
 
 ✅ done · 🔧 in progress · ⏭️ next
 

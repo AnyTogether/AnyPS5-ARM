@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <vector>
+#include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 
 namespace RemotePad {
@@ -87,7 +88,7 @@ public:
     bool Held(int player) const;
 
 private:
-    std::array<std::optional<std::uint32_t>, kPadPlayers> holders;
+    std::array<std::optional<std::uint32_t>, PAD_MAX_CONTROLLERS> holders;
 };
 
 constexpr std::uint32_t RemoteDevice(std::size_t channel) { return 0x80000000u | static_cast<std::uint32_t>(channel); }
