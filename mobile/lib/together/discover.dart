@@ -925,7 +925,8 @@ class Discover extends ChangeNotifier {
         _reload();
       case 'discover.changed' when showing == DiscoverView.live:
         _reload();
-      case 'lfg.request' || 'lfg.request_cancelled' when mineLoaded:
+      case 'lfg.request' || 'lfg.request_cancelled':
+        // Read even when not on screen: the asks count on the badge.
         loadMine().catchError((_) {});
       case 'lfg.answered':
         final postId = data['postId'];

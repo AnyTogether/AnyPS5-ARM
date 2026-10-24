@@ -92,12 +92,17 @@ class TogetherHub extends ChangeNotifier {
   /// Who is signed in, by id.
   String? get me => account.user?.id;
 
-  /// What waits for an answer: friend requests, unread messages, party and share play invites.
+  /// What waits for an answer: friend requests, unread messages, party and share play invites,
+  /// people asking into the party this phone leads, and "I'm in"s on its open posts.
   int get badge =>
       friends.incoming.length +
       messages.unread +
       parties.invites.length +
-      sharePlays.invites.length;
+      sharePlays.invites.length +
+      (parties.party?.leaderId == me && me != null
+          ? parties.party!.requests.length
+          : 0) +
+      discover.waiting;
 
   void _accountChanged() {
     final user = account.user?.id;

@@ -189,6 +189,8 @@ void main() {
       expect(parties().party?.listing?.language, 'tr');
       server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
       await until(() => parties().party!.requests.length == 1);
+      // The leader is the one to answer: it waits on the badge.
+      expect(hub.badge, 2);
       // Told twice (the event, then the party as it is now): still one.
       server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
       server.push('party.request', {'partyId': 'p1', 'from': card('can')});

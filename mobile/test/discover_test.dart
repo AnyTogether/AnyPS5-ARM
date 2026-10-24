@@ -558,6 +558,21 @@ void main() {
       );
     });
 
+    test(
+      'an ask on a post counts on the badge, my posts read or not',
+      () async {
+        expect(hub.badge, 0);
+        server.push('lfg.request', {
+          'postId': 'm1',
+          'titleId': 'PPSA01234',
+          'from': card('ali'),
+        });
+        await until(() => discover().mineLoaded);
+        expect(discover().waiting, 1);
+        expect(hub.badge, 1);
+      },
+    );
+
     test('posting sends the draft and keeps the post among mine', () async {
       await discover().loadMine();
       final post = await discover().post(
