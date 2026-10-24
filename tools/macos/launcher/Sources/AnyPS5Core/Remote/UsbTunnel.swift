@@ -113,7 +113,7 @@ public final class UsbTunnel: @unchecked Sendable {
     }
 
     /// A TCP connection to the launcher's own port.
-    private static func loopback(_ port: UInt16) -> Int32? {
+    static func loopback(_ port: UInt16) -> Int32? {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         Usbmux.noSignal(fd)
@@ -133,7 +133,7 @@ public final class UsbTunnel: @unchecked Sendable {
     }
 
     /// Copies each way until either end closes, then closes both and calls `ended`.
-    private static func join(_ left: Int32, _ right: Int32, ended: @escaping @Sendable () -> Void) {
+    static func join(_ left: Int32, _ right: Int32, ended: @escaping @Sendable () -> Void) {
         let remaining = Locked(2)
         for (from, to) in [(left, right), (right, left)] {
             Thread.detachNewThread {

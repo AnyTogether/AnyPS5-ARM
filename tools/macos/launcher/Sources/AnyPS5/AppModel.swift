@@ -175,6 +175,8 @@ final class AppModel: ObservableObject {
     private var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
     private var cable: UsbTunnel?
+    /// Android phones on a cable, through adb when it is installed.
+    private var androidCable: AdbTunnel?
     private let pairedDevices = PairedDevices()
     /// The library the phone was told last, and what keeps it told.
     private var phoneLibrary: RemoteMessage?
@@ -949,6 +951,8 @@ final class AppModel: ObservableObject {
                 if let port = server.controlPort {
                     cable = UsbTunnel(targetPort: port)
                     cable?.start()
+                    androidCable = AdbTunnel.locate().map { AdbTunnel(adb: $0, targetPort: port) }
+                    androidCable?.start()
                 }
                 return
             }
