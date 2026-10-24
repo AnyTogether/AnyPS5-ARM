@@ -135,6 +135,8 @@ extension AppModel {
         Sounds.shared.play(.select)
         show(T.format(.togetherWelcome, user.displayName), symbol: "person.2.circle.fill")
         startTogetherSocket()
+        // Every game's trophies go up once, the earned ones with their dates.
+        for game in games { loadTrophies(game, again: true) }
     }
 
     func togetherSignOut() {
@@ -174,6 +176,7 @@ extension AppModel {
         togetherConnected = true
         updateTogetherPresence()
         refreshFriends()
+        flushTogether()
     }
 
     /// In a game or online, as friends will see it.
@@ -183,6 +186,45 @@ extension AppModel {
             socket.setPresence(.inGame(titleID: running.game.titleID, since: preferences.lastPlayed[running.game.id] ?? Date()))
         } else {
             socket.setPresence(.online)
+        }
+    }
+
+    // MARK: Play and trophies
+
+    static var machineModel: String {
+        var size = 0
+        sysctlbyname("hw.model", nil, &size, nil, 0)
+        var model = [CChar](repeating: 0, count: max(1, size))
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        return String(cString: model)
+    }
+
+    /// A game played for a while: the session goes to AnyTogether (or waits until it can).
+    func recordPlay(_ game: Game, from start: Date) {
+        guard togetherUser != nil else { return }
+        togetherSync.recordSession(titleId: game.titleID, gameName: game.name, startedAt: start, endedAt: Date(), exit: "normal")
+        flushTogether()
+    }
+
+    /// The game's trophy set as read now: new earned ones go to AnyTogether, and friends hear of them.
+    func recordTrophies(_ game: Game, _ set: TrophySet) {
+        guard togetherUser != nil, !set.trophies.isEmpty else { return }
+        let names: [TrophySet.Grade: String] = [.platinum: "platinum", .gold: "gold", .silver: "silver", .bronze: "bronze"]
+        let language = trophyLanguages(game).first.flatMap { $0.split(separator: "-").first.map(String.init) } ?? "en"
+        let record = TogetherSync.TrophySetRecord(titleId: game.titleID, gameName: game.name, language: language, trophies: set.trophies.map {
+            .init(id: $0.serviceLabel * 1000 + $0.number, grade: names[$0.grade] ?? "bronze", hidden: $0.hidden, name: $0.name, detail: $0.detail, earnedAt: $0.unlocked)
+        })
+        togetherSync.recordTrophies(record)
+        flushTogether()
+    }
+
+    /// Sends what waits, a moment later so a burst of changes goes up together.
+    func flushTogether() {
+        togetherFlush?.cancel()
+        togetherFlush = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, togetherUser != nil else { return }
+            try? await togetherSync.flush()
         }
     }
 

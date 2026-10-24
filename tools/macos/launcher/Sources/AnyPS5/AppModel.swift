@@ -382,6 +382,10 @@ final class AppModel: ObservableObject {
     var togetherCode = ""
     var togetherSocket: TogetherSocket?
     var togetherWait: Task<Void, Never>?
+    var togetherFlush: Task<Void, Never>?
+    lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
+    /// When the running game started, for the play session AnyTogether keeps.
+    var sessionStart: Date?
     @Published var togetherFriends: [TogetherFriend] = []
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
@@ -478,12 +482,15 @@ final class AppModel: ObservableObject {
         let languages = trophyLanguages(game)
         Task.detached(priority: .utility) {
             let set = Trophies.load(game, bundle: bundle, languages: languages)
-            await MainActor.run { self.trophies[game.id] = set }
+            await MainActor.run {
+                self.trophies[game.id] = set
+                if let set { self.recordTrophies(game, set) }
+            }
         }
     }
 
     /// The trophy texts follow the language the game runs in.
-    private func trophyLanguages(_ game: Game) -> [String] {
+    func trophyLanguages(_ game: Game) -> [String] {
         let number = settings(for: game).language ?? preferences.language.consoleLanguage
         return ConsoleLanguage.tag(number).map { [$0] } ?? []
     }
@@ -679,6 +686,7 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.sessionStart = Date()
                     self.watchTrophies(game)
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
@@ -968,6 +976,8 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        if let start = sessionStart { recordPlay(running.game, from: start) }
+        sessionStart = nil
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()
@@ -1289,6 +1299,7 @@ final class AppModel: ObservableObject {
                 let earned = set.trophies.filter { fresh.contains($0.id) }
                 await MainActor.run {
                     self.trophies[game.id] = set
+                    self.recordTrophies(game, set)
                     for trophy in earned {
                         TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds)
                         self.tellPhone(trophy)

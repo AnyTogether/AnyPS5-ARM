@@ -173,7 +173,7 @@ public final class TogetherClient: @unchecked Sendable {
     }
 
     /// A call with the access token; a 401 refreshes it once and calls again.
-    func authorized(_ method: String, _ path: String, _ body: [String: String]?) async throws -> Data {
+    func authorized(_ method: String, _ path: String, _ body: Any?) async throws -> Data {
         let token = try await accessToken()
         do {
             return try await send(method, path, body, token: token)
@@ -211,7 +211,7 @@ public final class TogetherClient: @unchecked Sendable {
         return tokens.user
     }
 
-    func send(_ method: String, _ path: String, _ body: [String: String]?, token: String? = nil) async throws -> Data {
+    func send(_ method: String, _ path: String, _ body: Any?, token: String? = nil) async throws -> Data {
         // A path may carry a query ("users/search?q=…"), which appendingPathComponent would escape.
         var request = URLRequest(url: URL(string: base.appendingPathComponent("api/v1").absoluteString + "/" + path)!)
         request.httpMethod = method

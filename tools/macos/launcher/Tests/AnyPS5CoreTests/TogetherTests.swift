@@ -267,3 +267,119 @@ final class TogetherFriendsTests: XCTestCase {
         XCTAssertEqual(FakeTogether.requests.last?.0.url?.query, "q=utk")
     }
 }
+
+final class TogetherSyncTests: XCTestCase {
+    var folder: URL!
+    var client: TogetherClient!
+
+    override func setUp() async throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("together-sync-\(UUID().uuidString.prefix(8))")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FakeTogether.self]
+        client = TogetherClient(base: URL(string: "https://anytogether.test")!, store: TokenStore(file: folder.appendingPathComponent("s.json")),
+                                session: URLSession(configuration: configuration), clientName: "launcher-macos/test")
+        FakeTogether.requests = []
+        FakeTogether.handler = { _, _ in (200, TogetherTests.tokens()) }
+        _ = try await client.verifyEmail("u@example.com", code: "111111")
+    }
+
+    override func tearDown() { try? FileManager.default.removeItem(at: folder) }
+
+    func sync() -> TogetherSync {
+        TogetherSync(client: client, file: folder.appendingPathComponent("outbox.json"), deviceName: "Utku's Mac", model: "Mac15,9")
+    }
+
+    static let set = TogetherSync.TrophySetRecord(titleId: "PPSA01234", gameName: "Silksong", language: "en", trophies: [
+        .init(id: 0, grade: "platinum", hidden: false, name: "All", detail: "Every trophy", earnedAt: nil),
+        .init(id: 1, grade: "bronze", hidden: false, name: "Bound", detail: "Bind a skill", earnedAt: Date(timeIntervalSince1970: 1_790_000_000)),
+        .init(id: 2, grade: "gold", hidden: true, name: "Secret", detail: "Shh", earnedAt: nil),
+    ])
+
+    /// The first time: the computer is registered, the game taught, its trophy set uploaded, then
+    /// the session and the earned trophy go up; nothing is sent twice.
+    func testAGameAndItsTrophiesGoUpInOrderOnce() async throws {
+        var paths: [String] = []
+        FakeTogether.handler = { request, _ in
+            paths.append("\(request.httpMethod!) \(request.url!.path)")
+            if request.url!.path.hasSuffix("/me/sessions") || request.url!.path.hasSuffix("/me/trophies") {
+                return (200, ["results": [["index": 0, "status": "stored"]]])
+            }
+            return (201, [:])
+        }
+        let sync = sync()
+        sync.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date(timeIntervalSince1970: 1_800_000_000), endedAt: Date(timeIntervalSince1970: 1_800_003_600), exit: "normal")
+        sync.recordTrophies(Self.set)
+        try await sync.flush()
+        XCTAssertEqual(paths, [
+            "POST /api/v1/me/devices",
+            "PUT /api/v1/games/PPSA01234",
+            "PUT /api/v1/trophy-sets/PPSA01234/\(Self.set.setHash)",
+            "POST /api/v1/me/sessions",
+            "POST /api/v1/me/trophies",
+        ])
+        let trophies = try XCTUnwrap(FakeTogether.requests.last?.1).flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let items = trophies?["trophies"] as? [[String: Any]]
+        XCTAssertEqual(items?.count, 1, "only the earned one")
+        XCTAssertEqual(items?.first?["trophyId"] as? Int, 1)
+        paths = []
+        sync.recordTrophies(Self.set)
+        try await sync.flush()
+        XCTAssertEqual(paths, [], "nothing new: the set, the game and the trophy were sent")
+    }
+
+    /// Offline: everything waits in the outbox, kept on disk, and goes up later.
+    func testWhatCouldNotBeSentWaitsForNextTime() async throws {
+        FakeTogether.handler = { _, _ in (503, ["code": "internal", "status": 503, "title": "down"]) }
+        let first = sync()
+        first.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date(), endedAt: Date().addingTimeInterval(60), exit: "normal")
+        do { try await first.flush() } catch {}
+        var sessions = 0
+        FakeTogether.handler = { request, body in
+            if request.url!.path.hasSuffix("/me/sessions") {
+                sessions += (try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: [Any]])?["sessions"]?.count ?? 0
+                return (200, ["results": [["index": 0, "status": "stored"]]])
+            }
+            return (201, [:])
+        }
+        let later = sync()
+        try await later.flush()
+        XCTAssertEqual(sessions, 1)
+        XCTAssertTrue(later.isEmpty)
+    }
+
+    func testTheSetHashFollowsTheTrophiesNotTheirTexts() {
+        var other = Self.set
+        other.trophies[1].name = "Bağlandı"
+        XCTAssertEqual(other.setHash, Self.set.setHash)
+        other.trophies[1].grade = "silver"
+        XCTAssertNotEqual(other.setHash, Self.set.setHash)
+    }
+}
+
+/// The sync against a real AnyTogether API: the library and trophies come back as sent.
+final class TogetherSyncLiveTests: XCTestCase {
+    func testPlayAndTrophiesReachTheLibrary() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let url = environment["ANYTOGETHER_TEST_URL"].flatMap(URL.init(string:)), let log = environment["ANYTOGETHER_TEST_LOG"] else { throw XCTSkip("no AnyTogether server given") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("together-sync-live-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let client = TogetherClient(base: url, store: TokenStore(file: folder.appendingPathComponent("s.json")), clientName: "launcher-macos/test")
+        let email = "sync-\(UUID().uuidString.prefix(6).lowercased())@example.com"
+        try await client.startEmail(email)
+        try await Task.sleep(for: .milliseconds(200))
+        let code = try XCTUnwrap(try String(contentsOfFile: log, encoding: .utf8).components(separatedBy: "\n").last { $0.contains(email) }?.components(separatedBy: ": ").last?.prefix(6))
+        let user = try await client.verifyEmail(email, code: String(code))
+        let sync = TogetherSync(client: client, file: folder.appendingPathComponent("outbox.json"), deviceName: "Test Mac", model: "Mac15,9")
+        sync.recordSession(titleId: "PPSA01234", gameName: "Silksong", startedAt: Date().addingTimeInterval(-3600), endedAt: Date(), exit: "normal")
+        sync.recordTrophies(TogetherSyncTests.set)
+        try await sync.flush()
+        XCTAssertTrue(sync.isEmpty)
+        struct Library: Decodable { struct Game: Decodable { let titleId: String; let secondsPlayed: Int; let trophiesEarned: Int; let points: Int }; let games: [Game] }
+        let library = try JSONDecoder().decode(Library.self, from: try await client.authorized("GET", "users/\(user.handle)/library", nil))
+        let game = try XCTUnwrap(library.games.first)
+        XCTAssertEqual(game.titleId, "PPSA01234")
+        XCTAssertEqual(game.secondsPlayed, 3600, accuracy: 2)
+        XCTAssertEqual(game.trophiesEarned, 1)
+        XCTAssertEqual(game.points, 15)
+    }
+}
