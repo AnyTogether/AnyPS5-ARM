@@ -139,51 +139,55 @@ class _TogetherScreenState extends State<TogetherScreen> {
             children: [
               SizedBox(width: 196, child: _rail(texts)),
               Expanded(
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(0, 10, 12, 10),
-                  decoration: BoxDecoration(
+                // A Material, not a coloured box: the switches and rows in the panes splash
+                // their ink on it, where it shows.
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 10, 12, 10),
+                  child: Material(
                     color: togetherPanel,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: const Color(0x14FFFFFF)),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: KeyedSubtree(
-                      key: ValueKey(_tab),
-                      child: switch (_tab) {
-                        TogetherTab.friends => FriendsPane(
-                          hub: widget.hub,
-                          gameName: widget.gameName,
-                          onMessage: _message,
-                          onProfile: _profile,
-                          onCall: _call,
-                        ),
-                        TogetherTab.feed => FeedPane(
-                          hub: widget.hub,
-                          onProfile: _profile,
-                        ),
-                        TogetherTab.leaderboards => LeaderboardPane(
-                          hub: widget.hub,
-                          onProfile: _profile,
-                        ),
-                        TogetherTab.notifications => NotificationsPane(
-                          hub: widget.hub,
-                          gameName: widget.gameName,
-                          onOpen: _openNotice,
-                        ),
-                        TogetherTab.messages => MessagesPane(hub: widget.hub),
-                        TogetherTab.party => PartyPane(hub: widget.hub),
-                        TogetherTab.profile => ProfileView(
-                          hub: widget.hub,
-                          handle: widget.hub.account.user?.handle ?? '',
-                          gameName: widget.gameName,
-                          onEdit: () => openProfileEdit(
-                            context,
-                            account: widget.hub.account,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                      side: const BorderSide(color: Color(0x14FFFFFF)),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: KeyedSubtree(
+                        key: ValueKey(_tab),
+                        child: switch (_tab) {
+                          TogetherTab.friends => FriendsPane(
+                            hub: widget.hub,
+                            gameName: widget.gameName,
+                            onMessage: _message,
+                            onProfile: _profile,
+                            onCall: _call,
                           ),
-                        ),
-                      },
+                          TogetherTab.feed => FeedPane(
+                            hub: widget.hub,
+                            onProfile: _profile,
+                          ),
+                          TogetherTab.leaderboards => LeaderboardPane(
+                            hub: widget.hub,
+                            onProfile: _profile,
+                          ),
+                          TogetherTab.notifications => NotificationsPane(
+                            hub: widget.hub,
+                            gameName: widget.gameName,
+                            onOpen: _openNotice,
+                          ),
+                          TogetherTab.messages => MessagesPane(hub: widget.hub),
+                          TogetherTab.party => PartyPane(hub: widget.hub),
+                          TogetherTab.profile => ProfileView(
+                            hub: widget.hub,
+                            handle: widget.hub.account.user?.handle ?? '',
+                            gameName: widget.gameName,
+                            onEdit: () => openProfileEdit(
+                              context,
+                              account: widget.hub.account,
+                            ),
+                          ),
+                        },
+                      ),
                     ),
                   ),
                 ),

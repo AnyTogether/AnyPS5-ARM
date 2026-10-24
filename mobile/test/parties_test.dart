@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_server.dart';
+import 'support/quiet_hub.dart';
 
 Map<String, dynamic> party(
   String id, {
@@ -196,6 +197,47 @@ void main() {
     // Two members in voice, and the button to join them.
     expect(find.byIcon(Icons.headset_mic_rounded), findsNWidgets(3));
     expect(find.text('2 in voice'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the leader\'s switches ripple on a Material, not under a box', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final hub = await quietHub();
+    addTearDown(hub.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(hub: hub, tab: TogetherTab.party),
+      ),
+    );
+    hub.parties
+      ..party = Party.fromJson(party('p1', members: ['me', 'ece']))
+      ..notifyListeners();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final ink = find.descendant(
+      of: find.byType(SwitchListTile),
+      matching: find.byType(InkWell),
+    );
+    expect(ink, findsWidgets);
+    // Between the switch's ink and the Material it splashes on, nothing paints a colour over it.
+    final painted = <String>[];
+    tester.element(ink.first).visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is Material) return false;
+      if (widget is DecoratedBox &&
+          widget.decoration is BoxDecoration &&
+          ((widget.decoration as BoxDecoration).color?.a ?? 0) > 0) {
+        painted.add('$widget');
+      }
+      return true;
+    });
+    expect(painted, isEmpty);
+    // Requests this test never answers run out.
+    await tester.pump(const Duration(seconds: 30));
     expect(tester.takeException(), isNull);
   });
 }
