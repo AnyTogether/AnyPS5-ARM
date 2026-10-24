@@ -31,6 +31,7 @@ int APS5_VABI sceNpIsPlusMember(int userId, bool* isMember);
 int APS5_VABI sceNpNotifyPlusFeature(const void* param);
 int APS5_VABI sceNpRegisterStateCallbackA(void* callback, void* userdata);
 int APS5_VABI sceNpCheckCallback(void);
+int APS5_VABI sceNpGetNpReachabilityState(int userId, std::uint32_t* state);
 }
 
 namespace {
@@ -118,6 +119,9 @@ int main() {
         require(sceNpCheckCallback() == 0 && lastState == 2, "the callback reports signed in");
         require(state() == 2, "the initial user is signed in");
         require(state(InitialUser + 1) == 1, "other local users stay signed out");
+        std::uint32_t reachability = 9;
+        require(sceNpGetNpReachabilityState(InitialUser, &reachability) == 0 && reachability == 2, "the signed-in user is reachable");
+        require(sceNpGetNpReachabilityState(InitialUser + 1, &reachability) == 0 && reachability == 0, "other users are unavailable");
 
         NpOnlineId id{};
         require(sceNpGetOnlineId(InitialUser, &id) == 0 && std::string(id.data) == "anyps5-player", "the online ID is the launcher's handle");
@@ -163,6 +167,7 @@ int main() {
         launcher.SetAccount(Online::Wire::Account{});
         require(eventually([] { return state() == 1; }), "the launcher signing out signs the game out");
         require(sceNpGetOnlineId(InitialUser, &id) == SignedOut, "identity questions fail again");
+        require(sceNpGetNpReachabilityState(InitialUser, &reachability) == 0 && reachability == 0, "signed out, the user is unavailable again");
         const int signedOutRequest = sceNpCreateRequest();
         PlusResult afterSignOut;
         require(sceNpCheckPlus(signedOutRequest, &plus, &afterSignOut) == SignedOut && afterSignOut.authorized == 0, "signed out, the Plus check is refused as before");

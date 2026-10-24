@@ -28,6 +28,7 @@ static constexpr uint32_t NP_STATE_SIGNED_OUT = 1;
 static constexpr uint32_t NP_STATE_SIGNED_IN = 2;
 static constexpr int NP_POLL_ASYNC_FINISHED = 0;
 static constexpr uint32_t NP_REACHABILITY_STATE_UNAVAILABLE = 0;
+static constexpr uint32_t NP_REACHABILITY_STATE_REACHABLE = 2;
 static constexpr uint32_t NP_GAME_PRESENCE_STATUS_OFFLINE = 0;
 
 static std::atomic<int> g_nextRequest{1};
@@ -963,10 +964,9 @@ int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id) {
 int APS5_VABI sceNpGetNpReachabilityState(int user_id, uint32_t* state) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("state", state); });
-    (void)user_id;
     if (!state) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    *state = NP_REACHABILITY_STATE_UNAVAILABLE;
-    return call.Return(0);
+    *state = SignedInUser(user_id) ? NP_REACHABILITY_STATE_REACHABLE : NP_REACHABILITY_STATE_UNAVAILABLE;
+    return call.Return(0, [&](Online::Fields& out) { out.Uint("state", *state); });
 }
 
 int APS5_VABI sceNpGetOnlineId(int user_id, NpOnlineId* online_id) {
