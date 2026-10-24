@@ -165,3 +165,31 @@ final class SharePlayWiringTests: XCTestCase {
         try await waitUntil { watcher.state != .connected }
     }
 }
+
+/// A viewer asking for an offer while one waits for its answer gets the same one again; asking
+/// once connected (a viewer that started over) gets a fresh connection.
+@MainActor
+final class SharePlayRenegotiateTests: XCTestCase {
+    func testAskingAgainResendsThePendingOfferThenStartsOver() async throws {
+        let offers = Locked<[String]>([])
+        let host = SharePlayHost(iceServers: [], send: { _, _, signal in
+            if case .offer(let sdp) = signal { offers.withLock { $0.append(sdp) } }
+        }, onPad: { _, _ in })
+        defer { host.close() }
+        host.call("viewer", device: "web")
+        let end = Date().addingTimeInterval(5)
+        while offers.value.isEmpty, Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        host.receive(.renegotiate, from: "viewer", device: "web")
+        while offers.value.count < 2, Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(offers.value.count, 2)
+        // The same offer (its ICE credentials), now with the candidates gathered since.
+        func ufrag(_ sdp: String) -> String? { sdp.components(separatedBy: "\r\n").first { $0.hasPrefix("a=ice-ufrag:") } }
+        XCTAssertNotNil(ufrag(offers.value[0]))
+        XCTAssertEqual(ufrag(offers.value[0]), ufrag(offers.value[1]))
+        // Another device of the same viewer: a new connection, a new offer.
+        host.receive(.renegotiate, from: "viewer", device: "phone")
+        while offers.value.count < 3, Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(offers.value.count, 3)
+        XCTAssertNotEqual(ufrag(offers.value[2]), ufrag(offers.value[0]))
+    }
+}

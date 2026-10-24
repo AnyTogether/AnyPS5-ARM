@@ -184,11 +184,15 @@ public final class SharePlayHost: NSObject {
     private func handle(_ signal: ShareSignal, from userId: String, device: String) async {
         switch signal {
         case .renegotiate:
-            // A viewer that joined (or whose link broke) asks: a new connection to that device,
-            // or a fresh offer with an ICE restart on the one it has.
-            if let peer = peers[userId], peer.device == device, peer.link.state != .failed, peer.link.state != .closed {
-                await offer(peer, restart: peer.link.state != .new)
+            // A viewer asks for a connection: after joining (the share play's update may have
+            // started one already), again while waiting for the offer, or with a fresh connection
+            // of its own after its link broke. An offer still waiting for its answer is sent
+            // again; otherwise the old connection goes and a new one is offered.
+            if let peer = peers[userId], peer.device == device, peer.connection.signalingState == .haveLocalOffer,
+               let pending = peer.connection.localDescription {
+                send(userId, device, .offer(sdp: pending.sdp))
             } else {
+                if peers[userId] != nil { hangUp(userId, sayBye: false) }
                 call(userId, device: device)
             }
         case .answer(let sdp):
