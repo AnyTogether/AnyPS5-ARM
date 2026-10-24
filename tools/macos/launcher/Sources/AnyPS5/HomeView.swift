@@ -118,12 +118,10 @@ struct TopBar: View {
             iconButton("person.2.fill", index: 2, badge: model.togetherRequests.incoming.count + model.friendsOnline) { model.open(.friends) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
-                ZStack {
-                    Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Text(String(model.preferences.profileName.prefix(1)).uppercased()).font(.display(16 * scale, .bold)).foregroundStyle(.white)
-                }
-                .frame(width: 36 * scale, height: 36 * scale)
-                Text(model.preferences.profileName).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
+                // Signed in to AnyTogether: the avatar and name others see.
+                let name = model.togetherUser?.displayName ?? model.preferences.profileName
+                ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false)
+                Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
             }
             Clock()
         }

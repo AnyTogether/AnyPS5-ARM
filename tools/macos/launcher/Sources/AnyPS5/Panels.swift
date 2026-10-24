@@ -21,11 +21,22 @@ struct PanelRow: Identifiable {
     var detail: String?
     var symbol: String?
     let kind: Kind
+    /// Someone on AnyTogether: their avatar stands in for the symbol.
+    var person: PanelPerson?
 
     var focusable: Bool {
         if case .info = kind { return false }
         return true
     }
+}
+
+/// A person a row is about: avatar (or initial), and a dot for playing or online.
+struct PanelPerson {
+    enum Status { case playing, online, offline }
+
+    let name: String
+    let avatar: String?
+    var status: Status?
 }
 
 struct PanelCategory: Identifiable {
@@ -645,7 +656,18 @@ struct RowView: View {
     var body: some View {
         let foreground: Color = focused ? .black : .white
         HStack(spacing: 14 * scale) {
-            if let symbol = row.symbol {
+            if let person = row.person {
+                ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let status = person.status, status != .offline {
+                            Circle().fill(status == .playing ? model.accent : Color(red: 0.3, green: 0.85, blue: 0.45))
+                                .frame(width: 10 * scale, height: 10 * scale)
+                                .overlay(Circle().strokeBorder(focused ? Color.white : Color(white: 0.1), lineWidth: 2 * scale))
+                                .offset(x: 2 * scale, y: 2 * scale)
+                        }
+                    }
+                    .frame(width: 30 * scale)
+            } else if let symbol = row.symbol {
                 Image(systemName: symbol).font(.system(size: 17 * scale, weight: .medium)).frame(width: 24 * scale)
                     .foregroundStyle(destructive && !focused ? Color(red: 1, green: 0.55, blue: 0.5) : foreground.opacity(0.85))
             }

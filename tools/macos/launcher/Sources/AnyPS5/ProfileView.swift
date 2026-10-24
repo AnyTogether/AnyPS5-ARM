@@ -519,6 +519,7 @@ struct ProfileAvatar: View {
     let url: String?
     let name: String
     let size: CGFloat
+    var glow = true
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
@@ -531,8 +532,8 @@ struct ProfileAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 2))
-        .shadow(color: model.accent.opacity(0.35), radius: size * 0.18)
+        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: glow ? 2 : 1))
+        .shadow(color: model.accent.opacity(glow ? 0.35 : 0), radius: size * 0.18)
     }
 }
 

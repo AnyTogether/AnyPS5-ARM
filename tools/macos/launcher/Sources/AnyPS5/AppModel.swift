@@ -398,6 +398,9 @@ final class AppModel: ObservableObject {
     @Published var profileColumn = 0
     @Published var profileIndex = 0
     var profileReturn: ProfileReturn?
+    /// The user's own profile with its privacy, and the edits typed in Settings → AnyTogether.
+    @Published var togetherProfile: TogetherOwnProfile?
+    var profileDraft = ProfileDraft()
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes

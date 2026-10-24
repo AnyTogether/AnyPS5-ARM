@@ -26,17 +26,20 @@ extension AppModel {
 
     func togetherRows() -> [PanelRow] {
         if let user = togetherUser {
-            return [
-                PanelRow(id: "together-user", title: "@\(user.handle)", detail: user.displayName, symbol: "person.crop.circle.badge.checkmark", kind: .info("")),
+            var rows = [
+                PanelRow(id: "together-user", title: "@\(user.handle)", detail: user.displayName, symbol: "person.crop.circle.badge.checkmark", kind: .info(""),
+                         person: PanelPerson(name: user.displayName, avatar: user.avatar)),
                 PanelRow(id: "together-profile", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.text.rectangle", kind: .action(destructive: false) { [weak self] in
                     self?.openMyProfile()
                 }),
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
-                PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
-                    self?.togetherSignOut()
-                }),
             ]
+            rows += profileEditRows() + privacyRows()
+            rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
+                self?.togetherSignOut()
+            }))
+            return rows
         }
         var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))]
         switch togetherStep {
@@ -80,6 +83,124 @@ extension AppModel {
             ]
         }
         return rows
+    }
+
+    // MARK: Profile and privacy
+
+    /// Name, bio, country and handle as typed, until saved. `loads` renews the text fields when
+    /// the profile comes back from the server.
+    struct ProfileDraft {
+        var name = ""
+        var bio = ""
+        var country = ""
+        var handle = ""
+        var loads = 0
+    }
+
+    private func profileEditRows() -> [PanelRow] {
+        guard let profile = togetherProfile else { return [] }
+        let version = profileDraft.loads
+        let handleDetail = profile.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? T.text(.togetherHandleDetail)
+        return [
+            PanelRow(id: "together-edit", title: T.text(.togetherEditProfile), symbol: "pencil", kind: .info("")),
+            PanelRow(id: "together-name-\(version)", title: T.text(.togetherName), symbol: "textformat", kind: .text(profileDraft.name) { [weak self] text in self?.profileDraft.name = text }),
+            PanelRow(id: "together-bio-\(version)", title: T.text(.togetherBio), symbol: "text.quote", kind: .text(profileDraft.bio) { [weak self] text in self?.profileDraft.bio = text }),
+            PanelRow(id: "together-country-\(version)", title: T.text(.togetherCountry), detail: T.text(.togetherCountryDetail), symbol: "flag",
+                     kind: .text(profileDraft.country) { [weak self] text in self?.profileDraft.country = text }),
+            PanelRow(id: "together-save", title: T.text(.togetherSaveProfile), symbol: "checkmark.circle", kind: .action(destructive: false) { [weak self] in self?.saveTogetherProfile() }),
+            PanelRow(id: "together-handle-\(version)", title: T.text(.togetherHandle), detail: handleDetail, symbol: "at", kind: .text(profileDraft.handle) { [weak self] text in self?.profileDraft.handle = text }),
+            PanelRow(id: "together-handle-save", title: T.text(.togetherChangeHandle), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.changeTogetherHandle() }),
+        ]
+    }
+
+    private func privacyRows() -> [PanelRow] {
+        guard let privacy = togetherProfile?.privacy else { return [] }
+        let sections: [(TogetherPrivacy.Section, T.Key, String)] = [
+            (.library, .privacyLibrary, "gamecontroller"), (.trophies, .privacyTrophies, "trophy"), (.friends, .privacyFriends, "person.2"),
+            (.presence, .privacyPresence, "dot.radiowaves.left.and.right"), (.search, .privacySearch, "magnifyingglass"),
+        ]
+        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + sections.map { section, key, symbol in
+            let names = TogetherVisibility.allCases.map { visibility -> String in
+                switch visibility {
+                case .everyone: return T.text(.visibilityEveryone)
+                case .friends: return T.text(.visibilityFriends)
+                case .nobody: return T.text(section == .search ? .visibilityNoOne : .visibilityNobody)
+                }
+            }
+            return PanelRow(id: "privacy-\(section.rawValue)", title: T.text(key), symbol: symbol,
+                            kind: .choice(options: names, selected: TogetherVisibility.allCases.firstIndex(of: privacy[section]) ?? 1) { [weak self] index in
+                                self?.setPrivacy(section, TogetherVisibility.allCases[index])
+                            })
+        }
+    }
+
+    func previewOwnProfile(_ profile: TogetherOwnProfile) {
+        togetherProfile = profile
+        profileDraft = ProfileDraft(name: profile.displayName, bio: profile.bio ?? "", country: profile.country ?? "", handle: profile.handle)
+    }
+
+    func loadTogetherProfile() {
+        guard togetherUser != nil else { return }
+        Task {
+            guard let profile = try? await together.myProfile() else { return }
+            keepProfile(profile)
+        }
+    }
+
+    private func keepProfile(_ profile: TogetherOwnProfile) {
+        togetherProfile = profile
+        profileDraft = ProfileDraft(name: profile.displayName, bio: profile.bio ?? "", country: profile.country ?? "", handle: profile.handle, loads: profileDraft.loads + 1)
+        togetherUser = together.user
+    }
+
+    func saveTogetherProfile() {
+        guard let profile = togetherProfile else { return }
+        let draft = profileDraft
+        let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                let saved = try await together.updateProfile(displayName: name != profile.displayName && !name.isEmpty ? name : nil,
+                                                             bio: draft.bio != (profile.bio ?? "") ? draft.bio : nil,
+                                                             country: draft.country.uppercased() != (profile.country ?? "") ? draft.country : nil)
+                keepProfile(saved)
+                show(T.text(.togetherProfileSaved), symbol: "checkmark.circle.fill")
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    func changeTogetherHandle() {
+        let handle = profileDraft.handle.trimmingCharacters(in: .whitespaces)
+        guard !handle.isEmpty, handle.lowercased() != togetherProfile?.handle else { return }
+        Task {
+            do {
+                let saved = try await together.changeHandle(handle)
+                keepProfile(saved)
+                show(T.format(.togetherHandleChanged, saved.handle), symbol: "at")
+            } catch let problem as TogetherProblem where problem.code == "bad_request" {
+                show(T.text(.togetherHandleInvalid), symbol: "at")
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    /// Shown changed at once; put back if the server says no.
+    func setPrivacy(_ section: TogetherPrivacy.Section, _ visibility: TogetherVisibility) {
+        guard var profile = togetherProfile else { return }
+        let before = profile.privacy
+        profile.privacy[section] = visibility
+        togetherProfile = profile
+        Task {
+            do {
+                let privacy = try await together.updatePrivacy(section, to: visibility)
+                togetherProfile?.privacy = privacy
+            } catch {
+                togetherProfile?.privacy = before
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     /// The first connected phone's name, if one is connected.
@@ -210,6 +331,7 @@ extension AppModel {
         withAnimation(Motion.overlay) {
             togetherUser = nil
             togetherConnected = false
+            togetherProfile = nil
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
@@ -241,6 +363,7 @@ extension AppModel {
         togetherConnected = true
         updateTogetherPresence()
         refreshFriends()
+        loadTogetherProfile()
         flushTogether()
     }
 
@@ -293,9 +416,13 @@ extension AppModel {
         }
     }
 
-    private func togetherMessage(_ error: Error) -> String {
+    func togetherMessage(_ error: Error) -> String {
         if let problem = error as? TogetherProblem {
             switch problem.code {
+            case "handle_taken": return T.text(.togetherHandleTaken)
+            case "handle_reserved": return T.text(.togetherHandleReserved)
+            case "handle_cooldown": return problem.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? problem.title
+            case "links_not_allowed": return T.text(.togetherNoLinks)
             case "code_invalid": return T.text(.togetherCodeWrong)
             case "code_expired", "expired_token": return T.text(.togetherCodeExpired)
             case "code_locked": return T.text(.togetherCodeLocked)

@@ -20,7 +20,8 @@ extension AppModel {
         ]
         for person in togetherRequests.incoming {
             rows.append(PanelRow(id: "accept-\(person.userId)", title: T.format(.friendsAccept, person.displayName), detail: "@\(person.handle) · \(T.text(.friendsWantsToBe))",
-                                 symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerFriend(person, accept: true) }))
+                                 symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerFriend(person, accept: true) },
+                                 person: PanelPerson(name: person.displayName, avatar: person.avatar)))
             rows.append(PanelRow(id: "decline-\(person.userId)", title: T.format(.friendsDecline, person.displayName), symbol: "xmark.circle",
                                  kind: .action(destructive: true) { [weak self] in self?.answerFriend(person, accept: false) }))
         }
@@ -34,10 +35,13 @@ extension AppModel {
                                  symbol: friend.presence?.playing == true ? "gamecontroller.fill" : friend.presence?.online == true ? "circle.fill" : "circle",
                                  kind: .action(destructive: false) { [weak self] in
                                      self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar))
-                                 }))
+                                 },
+                                 person: PanelPerson(name: friend.displayName, avatar: friend.avatar,
+                                                     status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline)))
         }
         for person in togetherRequests.outgoing {
-            rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info("")))
+            rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info(""),
+                                 person: PanelPerson(name: person.displayName, avatar: person.avatar)))
         }
         return rows
     }

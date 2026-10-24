@@ -74,6 +74,15 @@ enum PreviewRenderer {
             model.togetherConnected = true
             model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
         }
+        for (name, row) in [("together-edit", 4), ("together-privacy", 11)] {
+            render(preferences, found, root, still, output.appendingPathComponent("\(name).png")) { model in
+                model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+                model.togetherConnected = true
+                model.previewOwnProfile(TogetherOwnProfile(handle: "utku", displayName: "Utku", bio: "Platinum hunter", avatar: nil, country: "TR",
+                                                           handleChangeAt: Date().addingTimeInterval(12 * 86_400), privacy: .standard))
+                model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = row
+            }
+        }
         render(preferences, found, root, still, output.appendingPathComponent("friends.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
             let since = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-25 * 60))
