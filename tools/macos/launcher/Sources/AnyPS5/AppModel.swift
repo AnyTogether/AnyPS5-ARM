@@ -805,6 +805,8 @@ final class AppModel: ObservableObject {
                 for wish in wishes { remote.tell(.streaming(state: "noPermission"), deviceID: wish.deviceID) }
                 TrophyBanner.shared.notice(T.text(.remotePlayPermissionTitle), detail: T.text(.remotePlayNeedsPermission), symbol: "iphone.gen3", sounds: self.preferences.sounds)
             } catch {
+                // `log stream --predicate 'subsystem == "org.anyps5.launcher"'` shows why.
+                RemoteServer.log.error("remote play: \(String(describing: error), privacy: .public)")
                 for wish in wishes { remote.tell(.streaming(state: "noGame"), deviceID: wish.deviceID) }
             }
         }

@@ -11,6 +11,7 @@ final class RemotePlay {
     enum Failure: Error {
         case noPermission
         case noWindow
+        case capture(Error)
     }
 
     private var stream: SCStream?
@@ -22,11 +23,15 @@ final class RemotePlay {
     func start(pid: pid_t, width: Int, height: Int, send: @escaping @Sendable ([Data]) -> Void) async throws {
         if self.pid == pid, let size, size == (width, height) { return }
         stop()
+        // Without the permission macOS shows its own prompt, once.
+        if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         } catch {
-            throw Failure.noPermission
+            // Only a refusal is a missing permission; anything else is said as it is.
+            if (error as NSError).code == SCStreamError.userDeclined.rawValue || !CGPreflightScreenCaptureAccess() { throw Failure.noPermission }
+            throw Failure.capture(error)
         }
         guard let app = content.applications.first(where: { $0.processID == pid }), let window = ClipRecorder.mainWindow(of: pid, in: content),
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw Failure.noWindow }

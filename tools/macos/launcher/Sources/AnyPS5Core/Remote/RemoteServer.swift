@@ -23,7 +23,7 @@ public struct PairingRequest: Identifiable, Sendable {
 public final class RemoteServer: @unchecked Sendable {
     /// `log stream --predicate 'subsystem == "org.anyps5.launcher"'` shows what the phone and the
     /// launcher tell each other.
-    static let log = Logger(subsystem: "org.anyps5.launcher", category: "phone")
+    public static let log = Logger(subsystem: "org.anyps5.launcher", category: "phone")
     public static let serviceType = "_anyps5-remote._tcp"
     /// The control port the launcher tries first; the phone's manual address field assumes it.
     public static let preferredPort: UInt16 = 47700
