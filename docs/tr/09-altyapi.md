@@ -25,7 +25,10 @@ yüzden AnyTogether **küçük ve sınırlandırılmış** olarak planlanıyor:
 | postgres (Coolify kaynağı, 17) | 1 GB | 2 | `shared_buffers=256MB`, `max_connections=50` |
 | valkey (Coolify kaynağı) | 128 MB | 0.5 | `maxmemory 96mb`, `allkeys-lru`, kalıcılık yok |
 | coturn | 256 MB | 1 | UDP için host ağı |
-| **Toplam** | **≈ 3 GB** | | boş kapasitenin rahatça içinde |
+| **Toplam** | **≈ 3 GB** | | boş kapasitenin rahatça içinde (bugün ~9 GiB boş) |
+
+Bir Next.js build'i çalışırken ayrıca 2-3 GB bellek kullanır; Coolify bu sunucuda build'leri
+sırayla yaptığı için bu tepe başka bir build'le çakışmaz.
 
 Ses, Share play (birlikte oynama) ve kol verileri eşten eşe (P2P) gittiği için sunucu, relay
 (aktarma sunucusu) gerektiren çiftler dışında hiçbir zaman medya taşımaz.
@@ -106,7 +109,9 @@ engeller. Kimlik bilgileri standart TURN REST şemasıdır (kullanıcı adı = b
 id'si, parola = bunun HMAC'i), 12 saat geçerlidir.
 
 ## 9.6 Dağıtım
-
+ Sunucunun Cloudflare API token'ının R2 yetkisi olmayabilir; bucket'ları açmak ve
+  `anytogether-cdn`'i genel bucket'ın özel alan adı olarak bağlamak gerekirse Utku tarafından
+  Cloudflare panelinden yapılır.
 - `utkuhalis/AnyTogether` deposunun `main` dalına push → Coolify değişen her uygulamayı derler ve
   dağıtır (webhook, bu sunucuda aynı anda tek derleme).
 - GitHub Actions yalnızca denetim yapar: typecheck, lint, PostgreSQL ve Valkey servis

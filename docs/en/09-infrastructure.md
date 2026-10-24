@@ -25,7 +25,10 @@ builds. So AnyTogether is planned **small and capped**:
 | postgres (Coolify resource, 17) | 1 GB | 2 | `shared_buffers=256MB`, `max_connections=50` |
 | valkey (Coolify resource) | 128 MB | 0.5 | `maxmemory 96mb`, `allkeys-lru`, no persistence |
 | coturn | 256 MB | 1 | host network for UDP |
-| **Total** | **≈ 3 GB** | | well inside what is free |
+| **Total** | **≈ 3 GB** | | well inside what is free (~9 GiB available today) |
+
+A Next.js build takes another 2-3 GB while it runs; Coolify builds one app at a time on this
+server, so that peak never overlaps another build.
 
 Because voice, share play and pads go peer-to-peer, the server never carries media except for
 the pairs that need the relay.
@@ -61,7 +64,9 @@ The "coming soon" app is replaced by `web` when the first version is ready.
   not on `/api` (launchers are not browsers).
 - Cache: public profile pages 60 s with stale-while-revalidate; R2 files long.
 - R2 buckets: `anytogether-files` (private), `anytogether-cdn` (public), `anytogether-backups`
-  (private, 30-day lifecycle).
+  (private, 30-day lifecycle). The server's Cloudflare API token may not have R2 rights; creating
+  the buckets and attaching `anytogether-cdn` as the public bucket's custom domain may be done by
+  Utku in the Cloudflare dashboard.
 
 ## 9.4 Firewall (to be opened with Utku's approval)
 
