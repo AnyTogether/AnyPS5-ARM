@@ -129,6 +129,28 @@ class Strings {
   String get partyStart => _text('partyStart');
   String get partyInvites => _text('partyInvites');
   String get partyJoin => _text('partyJoin');
+  String get shareTitle => _text('shareTitle');
+  String get shareWatch => _text('shareWatch');
+  String get shareLeave => _text('shareLeave');
+  String get shareWatching => _text('shareWatching');
+  String get shareFull => _text('shareFull');
+  String get shareFailed => _text('shareFailed');
+  String get shareTaken => _text('shareTaken');
+  String shareInvited(String name, String game) =>
+      _text('shareInvited').replaceAll('%@', name).replaceAll('%s', game);
+  String shareSharing(String game) =>
+      _text('shareSharing').replaceAll('%@', game);
+  String shareViewers(int count, int most) =>
+      _text('shareViewers')
+          .replaceAll('%@', '$count')
+          .replaceAll('%s', '$most');
+  String sharePlayer(int number) =>
+      _text('sharePlayer').replaceAll('%@', '$number');
+  String shareConnecting(String name) =>
+      _text('shareConnecting').replaceAll('%@', name);
+  String shareEnded(String name) => _text('shareEnded').replaceAll('%@', name);
+  String shareRemoved(String name) =>
+      _text('shareRemoved').replaceAll('%@', name);
   String get partyLeave => _text('partyLeave');
   String get partyInvite => _text('partyInvite');
   String get partyInvited => _text('partyInvited');
@@ -292,6 +314,20 @@ class Strings {
     'partyStart': 'Start a party',
     'partyInvites': 'Party invites',
     'partyJoin': 'Join',
+    'shareTitle': 'Share play',
+    'shareWatch': 'Watch',
+    'shareLeave': 'Stop watching',
+    'shareWatching': 'Watching',
+    'shareFull': 'Nobody else can watch right now',
+    'shareFailed': 'Could not watch',
+    'shareTaken': 'The host took the pad back',
+    'shareInvited': '%@ shares %s with you',
+    'shareSharing': 'Sharing %@',
+    'shareViewers': '%@ of %s watching',
+    'sharePlayer': 'Player %@',
+    'shareConnecting': 'Connecting to %@…',
+    'shareEnded': '%@ stopped sharing',
+    'shareRemoved': '%@ took you out',
     'partyLeave': 'Leave party',
     'partyInvite': 'Invite',
     'partyInvited': 'Invited',
@@ -454,6 +490,20 @@ class Strings {
     'partyStart': 'Parti başlat',
     'partyInvites': 'Parti davetleri',
     'partyJoin': 'Katıl',
+    'shareTitle': 'Oyun paylaşımı',
+    'shareWatch': 'İzle',
+    'shareLeave': 'İzlemeyi bırak',
+    'shareWatching': 'İzliyorsun',
+    'shareFull': 'Şu anda başka kimse izleyemez',
+    'shareFailed': 'İzlenemedi',
+    'shareTaken': 'Ev sahibi kolu geri aldı',
+    'shareInvited': '%@ seninle %s paylaşıyor',
+    'shareSharing': '%@ oyununu paylaşıyor',
+    'shareViewers': '%s kişiden %@ izliyor',
+    'sharePlayer': 'Oyuncu %@',
+    'shareConnecting': '%@ ile bağlanılıyor…',
+    'shareEnded': '%@ paylaşımı durdurdu',
+    'shareRemoved': '%@ seni çıkardı',
     'partyLeave': 'Partiden ayrıl',
     'partyInvite': 'Davet et',
     'partyInvited': 'Davet edildi',

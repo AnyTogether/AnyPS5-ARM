@@ -35,8 +35,41 @@ class Person {
 
 enum PresenceState { inGame, online, away, offline }
 
-/// What a friend shows: in a game (which, since when), online, away or offline, and the party
-/// they are in.
+/// A friend sharing the game they play: friends may watch while it is open and not full.
+class SharePresence {
+  const SharePresence({
+    required this.sharePlayId,
+    required this.titleId,
+    this.title,
+    this.open = false,
+    this.viewers = 0,
+    this.maxViewers = 0,
+  });
+
+  static SharePresence? fromJson(Object? json) {
+    if (json is! Map<String, dynamic> || json['sharePlayId'] is! String) {
+      return null;
+    }
+    return SharePresence(
+      sharePlayId: json['sharePlayId'] as String,
+      titleId: json['titleId'] as String? ?? '',
+      title: json['title'] as String?,
+      open: json['open'] == true,
+      viewers: (json['viewers'] as num?)?.toInt() ?? 0,
+      maxViewers: (json['maxViewers'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String sharePlayId;
+  final String titleId;
+  final String? title;
+  final bool open;
+  final int viewers;
+  final int maxViewers;
+}
+
+/// What a friend shows: in a game (which, since when), online, away or offline, the party
+/// they are in, and the game they share.
 class Presence {
   const Presence({
     this.state = PresenceState.offline,
@@ -44,6 +77,7 @@ class Presence {
     this.since,
     this.partyId,
     this.partyOpen = false,
+    this.share,
   });
 
   factory Presence.fromJson(Map<String, dynamic>? json) {
@@ -60,6 +94,7 @@ class Presence {
       since: DateTime.tryParse(json['since'] as String? ?? ''),
       partyId: party is Map<String, dynamic> ? party['id'] as String? : null,
       partyOpen: party is Map<String, dynamic> && party['open'] == true,
+      share: SharePresence.fromJson(json['share']),
     );
   }
 
@@ -72,6 +107,9 @@ class Presence {
   /// The party they are in, and whether friends may walk in.
   final String? partyId;
   final bool partyOpen;
+
+  /// Their share play, while they share.
+  final SharePresence? share;
 }
 
 /// A friend and what they are doing.

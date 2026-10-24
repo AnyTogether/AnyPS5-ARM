@@ -302,6 +302,7 @@ class _RemoteAppState extends State<RemoteApp> {
         showManual: _manual,
         onAddress: (address) => _connect(address, launcherPort),
         onRetry: _session.retry,
+        together: _together,
       );
     }
     return Texts(
