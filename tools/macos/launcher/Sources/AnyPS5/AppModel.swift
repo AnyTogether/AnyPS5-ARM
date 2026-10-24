@@ -109,6 +109,8 @@ enum Overlay: Equatable {
     case feed
     /// A game's leaderboard, or overall trophy points.
     case leaderboard
+    /// AnyTogether's notifications, from the bell.
+    case notifications
 }
 
 struct Toast: Identifiable, Equatable {

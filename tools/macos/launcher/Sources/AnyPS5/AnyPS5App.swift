@@ -164,6 +164,9 @@ struct RootView: View {
             FeedView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .leaderboard:
             LeaderboardView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .notifications:
+            SidePanel(title: TS.text(.notifTitle), subtitle: model.notificationsSubtitle)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .log:
             LogView().transition(.opacity)
         case .trophies:

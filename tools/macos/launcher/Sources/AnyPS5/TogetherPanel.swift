@@ -419,6 +419,7 @@ extension AppModel {
         loadInbox()
         loadParty()
         loadGameInvites()
+        loadNotifications()
         loadShareInvites()
         flushTogether()
     }

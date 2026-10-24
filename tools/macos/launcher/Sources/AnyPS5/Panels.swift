@@ -62,6 +62,7 @@ extension AppModel {
         case .studio: return [PanelCategory(id: "studio", title: T.text(.themeStudio), symbol: "wand.and.stars", rows: studioRows())]
         case .friends: return [PanelCategory(id: "friends", title: T.text(.friendsTitle), symbol: "person.2", rows: friendRows())]
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
+        case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [

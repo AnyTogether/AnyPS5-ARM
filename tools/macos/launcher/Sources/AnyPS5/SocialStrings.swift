@@ -24,6 +24,9 @@ enum TS {
         case boardTitle, boardOverall, boardPoints, boardTime, boardCompletion, scopeFriends, scopeGlobal, boardYourRank, boardOf, boardPointsValue
         case boardEmpty, boardFailed, boardLoading, boardNoGame, boardUnlisted, boardWouldBe, boardNothing, boardRowDetail, boardGameRowDetail
         case hintBoard, hintScope, boardYou, boardPlayers
+        // Notifications
+        case notifTitle, notifEmpty, notifMarkAll, notifMore, notifFailed, notifLoading, notifUnread, notifSignIn
+        case notifFriendRequest, notifFriendAccepted, notifMessage, notifMessages, notifPartyInvite, notifGameInvite, notifMissedCall, notifWarning, notifOther
     }
 
     static let english: [Key: String] = [
@@ -75,6 +78,23 @@ enum TS {
         .hintScope: "Friends / Everyone",
         .boardYou: "You",
         .boardPlayers: "%d players",
+        .notifTitle: "Notifications",
+        .notifEmpty: "You're all caught up",
+        .notifMarkAll: "Mark all as read",
+        .notifMore: "Older notifications",
+        .notifFailed: "Couldn't read the notifications",
+        .notifLoading: "Reading the notifications…",
+        .notifUnread: "%d unread",
+        .notifSignIn: "Sign in to AnyTogether to get notifications",
+        .notifFriendRequest: "%@ wants to be friends",
+        .notifFriendAccepted: "%@ accepted your friend request",
+        .notifMessage: "%@ wrote to you",
+        .notifMessages: "%1$@ sent you %2$d messages",
+        .notifPartyInvite: "%@ invited you to their party",
+        .notifGameInvite: "%1$@ invited you to play %2$@",
+        .notifMissedCall: "Missed call from %@",
+        .notifWarning: "A moderator warned you",
+        .notifOther: "Something new on AnyTogether",
     ]
 
     static let turkish: [Key: String] = [
@@ -126,5 +146,22 @@ enum TS {
         .hintScope: "Arkadaşlar / Herkes",
         .boardYou: "Sen",
         .boardPlayers: "%d oyuncu",
+        .notifTitle: "Bildirimler",
+        .notifEmpty: "Hepsini gördün",
+        .notifMarkAll: "Tümünü okundu say",
+        .notifMore: "Daha eski bildirimler",
+        .notifFailed: "Bildirimler okunamadı",
+        .notifLoading: "Bildirimler okunuyor…",
+        .notifUnread: "%d okunmamış",
+        .notifSignIn: "Bildirim almak için AnyTogether'a giriş yap",
+        .notifFriendRequest: "%@ arkadaş olmak istiyor",
+        .notifFriendAccepted: "%@ arkadaşlık isteğini kabul etti",
+        .notifMessage: "%@ sana yazdı",
+        .notifMessages: "%1$@ sana %2$d mesaj gönderdi",
+        .notifPartyInvite: "%@ seni partisine davet etti",
+        .notifGameInvite: "%1$@ seni %2$@ oynamaya davet etti",
+        .notifMissedCall: "Cevapsız arama: %@",
+        .notifWarning: "Bir moderatör seni uyardı",
+        .notifOther: "AnyTogether'da yeni bir şey var",
     ]
 }

@@ -63,6 +63,27 @@ enum SocialPreviews {
                                      game: nil, index: 0)
         }
         render("leaderboard-missing") { model in model.previewLeaderboard(nil, game: found.first, missing: true) }
+        var details = TogetherNotification.Details()
+        details.count = 3
+        details.text = "are you on tonight? the raid starts at nine"
+        var invite = TogetherNotification.Details()
+        invite.titleId = found.first?.titleID
+        var warning = TogetherNotification.Details()
+        warning.reason = "Keep the group chats friendly"
+        let notes = [
+            TogetherNotification(id: "0007", kind: .message, actor: ayse, data: details, createdAt: ago(0.1)),
+            TogetherNotification(id: "0006", kind: .gameInvite, actor: mert, data: invite, createdAt: ago(0.5)),
+            TogetherNotification(id: "0005", kind: .friendRequest, actor: TogetherPerson(userId: "f9", handle: "zeynep", displayName: "Zeynep", avatar: nil), createdAt: ago(2)),
+            TogetherNotification(id: "0004", kind: .missedCall, actor: kral, read: true, createdAt: ago(5)),
+            TogetherNotification(id: "0003", kind: .partyInvite, actor: ayse, read: true, createdAt: ago(26)),
+            TogetherNotification(id: "0002", kind: .warning, actor: nil, data: warning, read: true, createdAt: ago(50)),
+        ]
+        render("notifications") { model in model.previewNotifications(notes, unread: 3, more: true) }
+        render("notifications-bell") { model in
+            model.social.notifications.load(TogetherNotificationPage(notifications: notes, unread: 3, more: false))
+            model.focus = .top(5)
+            model.show(model.notificationText(notes[0]) + " · " + (model.notificationDetail(notes[0]) ?? ""), symbol: "bubble.left.fill")
+        }
         render("trophies-board") { model in
             if let index = model.games.firstIndex(where: { model.trophies[$0.id] != nil }) { model.selected = index }
             model.overlay = .trophies; model.trophyIndex = 1

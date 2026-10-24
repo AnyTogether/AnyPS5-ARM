@@ -120,6 +120,7 @@ struct TopBar: View {
             // In the party's voice: the microphone, ringed while someone speaks.
             iconButton(model.voiceCall == nil ? (model.party == nil ? "person.3" : "person.3.fill") : (model.micSending ? "mic.fill" : "mic.slash.fill"),
                        index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty) { model.open(.party) }
+            iconButton(model.social.notifications.unread > 0 ? "bell.badge.fill" : "bell.fill", index: 5, badge: model.social.notifications.unread) { model.openNotifications() }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
@@ -611,6 +612,12 @@ extension AppModel {
         case .leaderboard:
             leaderboardCommand(command)
             return true
+        case .notifications:
+            if command == .back {
+                closeOverlay()
+                return true
+            }
+            return panelCommand(command)
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
@@ -651,10 +658,11 @@ extension AppModel {
         case (.tiles, .up): moveFocus(.top(1))
         case (.tiles, .select): primaryAction(game)
         case (.top(let index), .left): moveFocus(.top(max(0, index - 1)))
-        case (.top(let index), .right): moveFocus(.top(min(4, index + 1)))
+        case (.top(let index), .right): moveFocus(.top(min(5, index + 1)))
         case (.top, .down), (.top, .back): moveFocus(.tiles)
         case (.top(3), .select): openMessages()
         case (.top(4), .select): open(.party)
+        case (.top(5), .select): openNotifications()
         case (.top(let index), .select): open(index == 0 ? .library : index == 1 ? .settings : .friends)
         case (.actions(let index), .left): moveFocus(.actions(max(0, index - 1)))
         case (.actions(let index), .right): moveFocus(.actions(min(actionCount - 1, index + 1)))

@@ -36,6 +36,11 @@ final class SocialState: ObservableObject {
     var boardTask: Task<Void, Never>?
     var boardReturn: AppModel.ProfileReturn?
 
+    // Notifications
+    @Published var notifications = TogetherNotifications()
+    @Published var notificationsFailed = false
+    var notificationsTask: Task<Void, Never>?
+
     /// Whose feed and boards these are: another account signed in starts them again.
     private var viewer: String?
 
@@ -56,6 +61,9 @@ final class SocialState: ObservableObject {
         feedFailed = false
         leaderboard = nil
         boardGame = nil
+        notificationsTask?.cancel()
+        notifications = TogetherNotifications()
+        notificationsFailed = false
     }
 }
 
