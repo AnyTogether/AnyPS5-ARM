@@ -64,8 +64,8 @@ everything lives on one hostname, split by path, plus two siblings that cannot s
 | `anytogether-cdn.kodla.agency` | yes | Cloudflare R2: avatars, theme files and previews, download mirrors |
 | `anytogether-relay.kodla.agency` | **no** (DNS only; UDP can't be proxied) | STUN and TURN: UDP/TCP 3478, TLS 5349 |
 
-On the server, Coolify's Traefik routes by path: `/api` to the API, `/rt` to the gateway, the rest
-to the website (each its own Coolify application with its own container).
+On the server, the reverse proxy routes by path: `/api` to the API, `/rt` to the gateway, the rest
+to the website (each its own application in its own container).
 
 ## What goes where
 
@@ -145,7 +145,7 @@ default is direct.
 | Sign-in | OpenID Connect (Apple, Google, Discord) + passwordless email codes; passkeys later | one tap, nothing to remember (see [API](04-api.md)) |
 | Push | APNs, FCM HTTP v1 | direct, no middleman |
 | Errors / metrics | Sentry, Prometheus + Grafana | standard |
-| Deploy | Coolify on our Hetzner server (git push → build → deploy), Traefik | what the server already runs for 30+ sites |
+| Deploy | our own server's container platform (git push → build → deploy) | what the server already uses |
 
 ## How a call is set up (voice or share play)
 
@@ -185,7 +185,7 @@ clients/
   swift/        generated types for the macOS launcher (used from AnyPS5-ARM)
   dart/         generated types for the phone app
 infra/
-  Dockerfiles   one per app, built by Coolify
+  Dockerfiles   one per app, built by the server on push
   coturn/       turnserver.conf, the relay's compose file
   backups/
 docs/           this plan
@@ -199,7 +199,7 @@ crate. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
 
 | Stage | Accounts / online | Server |
 |---|---|---|
-| Launch | 5,000 / 500 | our existing Hetzner server (16 vCPU, 30 GB, shared): AnyTogether within ~3 GB with memory limits; media is peer-to-peer |
+| Launch | 5,000 / 500 | our existing server, shared: AnyTogether within ~3 GB with memory limits; media is peer-to-peer |
 | Growing | 50,000 / 5,000 | the same, plus more TURN bandwidth |
 | Large | more | more gateway/API processes (stateless), TURN on a second machine, a read replica |
 

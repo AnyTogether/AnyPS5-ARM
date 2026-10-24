@@ -29,7 +29,7 @@ Phase 6 can run beside 3-5.
 **Ships**: the repository, the server, one-tap sign-in, and every launcher signed in.
 
 - AnyTogether monorepo (apps/api, realtime, worker, web; packages/shared, db), CI, staging.
-- On our server: the Coolify apps (web, api, realtime, worker), PostgreSQL and Valkey resources,
+- On our server: the apps (web, api, realtime, worker), PostgreSQL and Valkey,
   memory limits, backups to R2, the `/api` and `/rt` routes on `anytogether.kodla.agency`.
 - Sign-in: Apple, Google, Discord (OpenID Connect + PKCE), email codes, phone hand-off, device
   code fallback; the first sign-in creates the account; sessions; refresh rotation.

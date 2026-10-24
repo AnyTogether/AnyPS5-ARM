@@ -119,7 +119,7 @@ bugün yaptığı gibi, paketin zaman damgasının oyunun çıkış paketinde ge
   60 sn süreyle Valkey'e yazılır; değişiklikler bunu görmeye yetkili arkadaşlara yayımlanır.
 - **Resume**: kullanıcı başına son 5 dakikanın olayları bir Valkey stream'inde tutulur; yeniden bağlanan
   istemci kaçırdıklarını alır; daha eski boşluklar REST ile doldurulur.
-- Durumsuzdur; Cloudflare ve Traefik WebSocket'leri geçirir; birden çok süreç yan yana çalışabilir.
+- Durumsuzdur; Cloudflare ve reverse proxy WebSocket'leri geçirir; birden çok süreç yan yana çalışabilir.
 
 ## 6.7 İleride: oyunların kendisi için çevrimiçi oyun
 

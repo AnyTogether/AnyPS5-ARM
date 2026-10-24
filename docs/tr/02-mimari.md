@@ -64,8 +64,8 @@ her şey yola göre ayrılmış tek bir hostname'de durur; buna onunla paylaşı
 | `anytogether-cdn.kodla.agency` | evet | Cloudflare R2: avatarlar, tema dosyaları ve önizlemeleri, indirme aynaları |
 | `anytogether-relay.kodla.agency` | **hayır** (yalnızca DNS; UDP proxy'lenemez) | STUN ve TURN: UDP/TCP 3478, TLS 5349 |
 
-Sunucuda Coolify'ın Traefik'i yola göre yönlendirir: `/api` API'ye, `/rt` gateway'e, geri kalanı
-web sitesine (her biri kendi container'ına sahip ayrı bir Coolify uygulaması).
+Sunucuda reverse proxy yola göre yönlendirir: `/api` API'ye, `/rt` gateway'e, geri kalanı web
+sitesine (her biri kendi container'ında ayrı bir uygulama).
 
 ## Ne nereye gider
 
@@ -145,7 +145,7 @@ varsayılan doğrudan bağlantıdır.
 | Giriş | OpenID Connect (Apple, Google, Discord) + şifresiz e-posta kodları; passkey'ler ileride | tek dokunuş, akılda tutulacak bir şey yok (bkz. [API](04-api.md)) |
 | Anlık bildirim | APNs, FCM HTTP v1 | doğrudan, aracısız |
 | Hatalar / metrikler | Sentry, Prometheus + Grafana | standart |
-| Dağıtım | Hetzner sunucumuzda Coolify (git push → build → deploy), Traefik | sunucunun zaten 30'dan fazla site için çalıştırdığı şey |
+| Dağıtım | kendi sunucumuzun container platformu (git push → build → deploy) | sunucunun zaten kullandığı şey |
 
 ## Bir çağrı nasıl kurulur (ses ya da share play)
 
@@ -185,7 +185,7 @@ clients/
   swift/        macOS launcher'ı için üretilmiş tipler (AnyPS5-ARM'dan kullanılır)
   dart/         telefon uygulaması için üretilmiş tipler
 infra/
-  Dockerfiles   her uygulama için bir tane, Coolify tarafından build edilir
+  Dockerfiles   her uygulama için bir tane, push'ta sunucu tarafından build edilir
   coturn/       turnserver.conf, relay'in compose dosyası
   backups/
 docs/           bu plan
@@ -199,7 +199,7 @@ yer alır. Bkz. [İstemciler](07-istemciler.md) ve [Platformlar](12-platformlar.
 
 | Aşama | Hesap / çevrimiçi | Sunucu |
 |---|---|---|
-| Lansman | 5,000 / 500 | mevcut Hetzner sunucumuz (16 vCPU, 30 GB, paylaşımlı): bellek sınırlarıyla AnyTogether ~3 GB içinde kalır; medya eşten eşe |
+| Lansman | 5,000 / 500 | mevcut sunucumuz, paylaşımlı: bellek sınırlarıyla AnyTogether ~3 GB içinde kalır; medya eşten eşe |
 | Büyüme | 50,000 / 5,000 | aynısı, artı daha fazla TURN bant genişliği |
 | Büyük | daha fazlası | daha fazla gateway/API süreci (durumsuz), ikinci bir makinede TURN, bir okuma replikası |
 

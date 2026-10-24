@@ -29,7 +29,7 @@ tempoda entegre eder. 6. aşama 3-5 ile paralel yürüyebilir.
 **Çıkanlar**: depo, sunucu, tek dokunuşla giriş ve oturumu açık tüm launcher'lar.
 
 - AnyTogether monorepo'su (apps/api, realtime, worker, web; packages/shared, db), CI, staging.
-- Sunucumuzda: Coolify uygulamaları (web, api, realtime, worker), PostgreSQL ve Valkey kaynakları,
+- Sunucumuzda: uygulamalar (web, api, realtime, worker), PostgreSQL ve Valkey,
   bellek sınırları, R2'ye yedekler, `anytogether.kodla.agency` üzerinde `/api` ve `/rt` yolları.
 - Giriş: Apple, Google, Discord (OpenID Connect + PKCE), e-posta kodları, telefona devretme, cihaz
   kodu yedeği; ilk giriş hesabı oluşturur; oturumlar; refresh rotasyonu.

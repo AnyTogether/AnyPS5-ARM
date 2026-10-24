@@ -7,7 +7,7 @@ değişebilir.
 
 | Soru | Cevap |
 |---|---|
-| Sunucu | Falkenstein'daki Hetzner makinemiz (16 vCPU, 30 GB, paylaşımlı, Coolify + Traefik); bkz. [Altyapı](09-altyapi.md) |
+| Sunucu | mevcut kendi sunucumuz (ayrıntılar bu herkese açık plana yazılmadı); bkz. [Altyapı](09-altyapi.md) |
 | Teknoloji yığını | TypeScript uygun |
 | Giriş | tek dokunuş: Apple, Google, Discord, e-posta kodu; kayıt formu yok, parola yok |
 | Developer ID imzalama | evet: macOS launcher'ın sürüm derlemeleri imzalanır ve notarize edilir |
@@ -19,7 +19,7 @@ değişebilir.
 
 | # | Soru | Bu plandaki varsayılan | Ne zamana kadar |
 |---|---|---|---|
-| 1 | **Onaylanacak sunucu değişiklikleri** (bunları sunucu yönetimi oturumu yapar): ufw'de (ve varsa Hetzner Cloud Firewall'da) UDP/TCP 3478, TCP 5349 ve UDP 49160-49360'ı açmak, yalnızca DNS'li `anytogether-relay` kaydı, Coolify PostgreSQL ve Valkey kaynakları | [Altyapı](09-altyapi.md) 9.4'te listelendiği gibi | Aşama 0 (veritabanı), Aşama 4 (relay) |
+| 1 | **Onaylanacak sunucu değişiklikleri**: relay portları, relay'in kendine ait bir adreste yalnızca DNS'li kaydı, veritabanları, web trafiğinin Cloudflare aralıklarıyla sınırlanması | [Altyapı](09-altyapi.md) belgesindeki gibi | Aşama 0 (veritabanı), Aşama 4 (relay) |
 | 2 | **AnyPlay**: Windows/Linux launcher'ın geliştiricileri kendi ağlarını tasarlıyor (Rust, hesaplar, arkadaşlar, oyuncular arasında şifreli QUIC tünelleri, kendi sunucusunda barındırılabilen bir bulut ve oyunların kendi çevrimiçi modları için bir motor köprüsü). AnyTogether'ı bağımsız geliştirip onlara `anytogether` crate'ini mi önermeli, yoksa birlikte mi çalışmalı (ortak protokol, oyunların çevrimiçi oyunu için onların köprüsü, bizim hesaplarımız/profillerimiz/kupalarımız)? | bağımsız; crate ve telefon protokolü açıkça önerilir | Aşama 0 bitmeden |
 | 3 | **Depo**: yeni bir `utkuhalis/AnyTogether`, lansmana kadar özel mi? Rust crate'i baştan açık mı (Windows/Linux launcher kullanabilsin diye)? | özel depo, açık crate | Aşama 0 |
 | 4 | **Profil varsayılanları**: ayrıntıları yalnızca arkadaşlara açık genel bir kart mı, yoksa tamamen özel mi? | genel kart, ayrıntılar yalnızca arkadaşlara | Aşama 1 |

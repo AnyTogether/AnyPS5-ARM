@@ -116,7 +116,7 @@ measured with the packet's timestamp echoed in the game's output packet, as the 
   Valkey with a 60 s expiry; changes published to friends who may see them.
 - **Resume**: the last 5 minutes of events per user are kept in a Valkey stream; a reconnecting
   client gets what it missed; older gaps are filled by REST.
-- Stateless; Cloudflare and Traefik pass WebSockets; several processes can run side by side.
+- Stateless; Cloudflare and the reverse proxy pass WebSockets; several processes can run side by side.
 
 ## 6.7 Later: online play for games themselves
 

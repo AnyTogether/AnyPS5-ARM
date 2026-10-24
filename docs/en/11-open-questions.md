@@ -7,7 +7,7 @@ can change.
 
 | Question | Answer |
 |---|---|
-| The server | our Hetzner machine in Falkenstein (16 vCPU, 30 GB, shared, Coolify + Traefik); see [Infrastructure](09-infrastructure.md) |
+| The server | our own existing server (details kept out of this public plan); see [Infrastructure](09-infrastructure.md) |
 | Stack | TypeScript is fine |
 | Sign-in | one tap: Apple, Google, Discord, email code; no sign-up form, no password |
 | Developer ID signing | yes: release builds of the macOS launcher get signed and notarized |
@@ -19,7 +19,7 @@ can change.
 
 | # | Question | Default in this plan | Needed by |
 |---|---|---|---|
-| 1 | **Server changes to approve** (the server-control session does them): open UDP/TCP 3478, TCP 5349 and UDP 49160-49360 in ufw (and the Hetzner Cloud Firewall if there is one), DNS-only record `anytogether-relay`, Coolify PostgreSQL and Valkey resources | as listed in [Infrastructure](09-infrastructure.md) 9.4 | Phase 0 (database), Phase 4 (relay) |
+| 1 | **Server changes to approve**: the relay's ports, its DNS-only record on an address of its own, the databases, web traffic limited to Cloudflare's ranges | as listed in [Infrastructure](09-infrastructure.md) | Phase 0 (database), Phase 4 (relay) |
 | 2 | **AnyPlay**: the Windows/Linux launcher's makers are designing their own network (Rust, accounts, friends, encrypted QUIC tunnels between players, a self-hostable cloud, and an engine bridge for games' own online modes). Build AnyTogether independently and offer them the `anytogether` crate, or work together (shared protocol, their bridge for game online play, our accounts/profiles/trophies)? | independent, with the crate and the phone protocol offered openly | before Phase 0 ends |
 | 3 | **Repository**: a new `utkuhalis/AnyTogether`, private until launch? The Rust crate public from the start (so the Windows/Linux launcher can use it)? | private repo, public crate | Phase 0 |
 | 4 | **Profile defaults**: public card with friends-only details, or fully private? | public card, friends-only details | Phase 1 |
