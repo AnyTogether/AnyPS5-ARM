@@ -46,8 +46,14 @@ extension AppModel {
         return rows
     }
 
-    /// "Playing Hollow Knight: Silksong · 25 min", "Online", "Offline".
+    /// "Playing Hollow Knight: Silksong · 25 min", "Online", "Offline", with the party they are in.
     func presenceText(_ presence: TogetherFriend.Presence?) -> String {
+        let base = stateText(presence)
+        guard let party = presence?.party, presence?.online == true else { return base }
+        return base + " · " + T.format(.friendsInParty, party.size, party.max)
+    }
+
+    private func stateText(_ presence: TogetherFriend.Presence?) -> String {
         guard let presence, presence.online else { return T.text(.friendsOffline) }
         guard presence.playing, let title = presence.titleId else { return presence.state == "away" ? T.text(.friendsAway) : T.text(.friendsOnline) }
         let name = games.first { $0.titleID == title }?.name ?? title
@@ -116,6 +122,8 @@ extension AppModel {
             refreshFriends()
         case let type where type.hasPrefix("message.") || type.hasPrefix("conversation."):
             messageEvent(event)
+        case let type where type.hasPrefix("party."):
+            partyEvent(event)
         default:
             break
         }

@@ -3,14 +3,50 @@ import Foundation
 /// A friend as AnyTogether shows them: who, and what they are doing now.
 public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
     public struct Presence: Decodable, Equatable, Sendable {
+        /// The party they are in: its size, and whether friends may walk in.
+        public struct Party: Decodable, Equatable, Sendable {
+            public let id: String
+            public let size: Int
+            public let max: Int
+            public let open: Bool
+
+            public init(id: String, size: Int, max: Int, open: Bool) {
+                self.id = id
+                self.size = size
+                self.max = max
+                self.open = open
+            }
+        }
+
+        /// The game session they host: open to friends and not full when joinable.
+        public struct Game: Decodable, Equatable, Sendable {
+            public let sessionId: String
+            public let titleId: String
+            public let joinable: Bool
+            public let players: Int
+            public let capacity: Int
+
+            public init(sessionId: String, titleId: String, joinable: Bool, players: Int, capacity: Int) {
+                self.sessionId = sessionId
+                self.titleId = titleId
+                self.joinable = joinable
+                self.players = players
+                self.capacity = capacity
+            }
+        }
+
         public let state: String
         public let titleId: String?
         public let since: String?
+        public let party: Party?
+        public let game: Game?
 
-        public init(state: String, titleId: String?, since: String?) {
+        public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil) {
             self.state = state
             self.titleId = titleId
             self.since = since
+            self.party = party
+            self.game = game
         }
 
         public var playing: Bool { state == "in_game" }

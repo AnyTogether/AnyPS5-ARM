@@ -97,6 +97,8 @@ enum Overlay: Equatable {
     case profile
     /// Conversations and their threads on AnyTogether.
     case messages
+    /// The party the user is in, or invites and friends' open parties.
+    case party
 }
 
 struct Toast: Identifiable, Equatable {
@@ -411,6 +413,10 @@ final class AppModel: ObservableObject {
     @Published var messageFocus = 0
     @Published var composing = false
     @Published var messageDraft = ""
+    /// The party the user is in, the invites waiting, and whether a new party is open to friends.
+    @Published var party: TogetherParty?
+    @Published var partyInvites: [TogetherPartyInvite] = []
+    @Published var partyStartsOpen = false
     var profileTask: Task<Void, Never>?
 
     // MARK: Themes
@@ -1600,8 +1606,12 @@ final class AppModel: ObservableObject {
         if next == .trophies { trophyIndex = 0 }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
-        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends
+        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
         if next == .friends { refreshFriends() }
+        if next == .party {
+            loadParty()
+            if togetherFriends.isEmpty { refreshFriends() }
+        }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()

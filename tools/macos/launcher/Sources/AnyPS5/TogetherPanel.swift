@@ -333,6 +333,8 @@ extension AppModel {
             togetherConnected = false
             togetherProfile = nil
             inbox = nil
+            party = nil
+            partyInvites = []
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
         }
@@ -366,6 +368,7 @@ extension AppModel {
         refreshFriends()
         loadTogetherProfile()
         loadInbox()
+        loadParty()
         flushTogether()
     }
 

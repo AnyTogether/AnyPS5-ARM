@@ -117,6 +117,7 @@ struct TopBar: View {
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
             iconButton("person.2.fill", index: 2, badge: model.togetherRequests.incoming.count + model.friendsOnline) { model.open(.friends) }
             iconButton("bubble.left.and.bubble.right.fill", index: 3, badge: model.unreadMessages) { model.openMessages() }
+            iconButton(model.party == nil ? "person.3" : "person.3.fill", index: 4, badge: model.partyInvites.count) { model.open(.party) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
@@ -583,7 +584,7 @@ extension AppModel {
                 return true
             }
             return panelCommand(command)
-        case .friends:
+        case .friends, .party:
             if command == .back {
                 closeOverlay()
                 return true
@@ -634,9 +635,10 @@ extension AppModel {
         case (.tiles, .up): moveFocus(.top(1))
         case (.tiles, .select): primaryAction(game)
         case (.top(let index), .left): moveFocus(.top(max(0, index - 1)))
-        case (.top(let index), .right): moveFocus(.top(min(3, index + 1)))
+        case (.top(let index), .right): moveFocus(.top(min(4, index + 1)))
         case (.top, .down), (.top, .back): moveFocus(.tiles)
         case (.top(3), .select): openMessages()
+        case (.top(4), .select): open(.party)
         case (.top(let index), .select): open(index == 0 ? .library : index == 1 ? .settings : .friends)
         case (.actions(let index), .left): moveFocus(.actions(max(0, index - 1)))
         case (.actions(let index), .right): moveFocus(.actions(min(actionCount - 1, index + 1)))

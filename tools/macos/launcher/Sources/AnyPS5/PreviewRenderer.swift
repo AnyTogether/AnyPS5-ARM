@@ -155,6 +155,24 @@ enum PreviewRenderer {
             model.inbox = inbox
             model.focus = .top(3)
         }
+        let partyFriends = [
+            TogetherFriend(userId: "f1", handle: "ayse", displayName: "Ayşe", avatar: nil, presence: .init(state: "in_game", titleId: found.first?.titleID ?? "PPSA01234", since: nil)),
+            TogetherFriend(userId: "f2", handle: "kral", displayName: "Kral", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil, party: .init(id: "p7", size: 3, max: 8, open: true))),
+            TogetherFriend(userId: "f3", handle: "mert", displayName: "Mert", avatar: nil, presence: nil),
+        ]
+        render(preferences, found, root, still, output.appendingPathComponent("party.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "invite", members: [utku, people[0]], invited: [TogetherPerson(userId: "f3", handle: "mert", displayName: "Mert", avatar: nil)],
+                                             call: .init(id: "call1", in: ["u1", "f1"])))
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 4
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("party-none.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "utku", displayName: "Utku", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(nil, invites: [TogetherPartyInvite(partyId: "p9", from: people[0], size: 2)])
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

@@ -193,3 +193,65 @@ final class TogetherMessagesTests: TogetherSignedInCase {
         XCTAssertEqual(event.data["conversationId"], "c1")
     }
 }
+
+final class TogetherPartyTests: TogetherSignedInCase {
+    static func member(_ id: String, _ name: String) -> [String: Any] { ["userId": id, "handle": name.lowercased(), "displayName": name, "avatar": NSNull()] }
+
+    static func party(members: [[String: Any]] = [member("u1", "Utku")], invited: [[String: Any]] = [], call: Any = NSNull(), privacy: String = "invite") -> [String: Any] {
+        ["id": "p1", "leaderId": "u1", "privacy": privacy, "members": members.map { $0.merging(["joinedAt": "2026-10-24T10:00:00.000Z"]) { a, _ in a } },
+         "invited": invited, "call": call, "createdAt": "2026-10-24T10:00:00.000Z"]
+    }
+
+    func testThePartyIAmInAndMyInvites() async throws {
+        FakeTogether.handler = { _, _ in
+            (200, ["party": Self.party(members: [Self.member("u1", "Utku"), Self.member("f1", "Ayşe")], call: ["id": "call1", "in": ["f1"]]),
+                   "invites": [["partyId": "p2", "from": Self.member("f2", "Kral"), "size": 3, "invitedAt": "2026-10-24T10:00:00.000Z"]]])
+        }
+        let mine = try await client.myParty()
+        XCTAssertEqual(last(), "GET /api/v1/me/party")
+        XCTAssertEqual(mine.party?.members.map(\.displayName), ["Utku", "Ayşe"])
+        XCTAssertEqual(mine.party?.call?.in, ["f1"])
+        XCTAssertEqual(mine.party?.isLeader("u1"), true)
+        XCTAssertEqual(mine.invites.first?.from?.displayName, "Kral")
+        XCTAssertEqual(mine.invites.first?.size, 3)
+        FakeTogether.handler = { _, _ in (200, ["party": NSNull(), "invites": []]) }
+        let none = try await client.myParty()
+        XCTAssertNil(none.party)
+    }
+
+    func testStartingInvitingJoiningAndLeaving() async throws {
+        FakeTogether.handler = { _, _ in (201, Self.party(privacy: "friends")) }
+        let party = try await client.startParty(open: true)
+        XCTAssertEqual(last(), "POST /api/v1/parties")
+        XCTAssertEqual(body()?["privacy"] as? String, "friends")
+        XCTAssertTrue(party.open)
+        FakeTogether.handler = { _, _ in (200, Self.party(invited: [Self.member("f1", "Ayşe")])) }
+        let invited = try await client.invite(["f1"], to: "p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/invites")
+        XCTAssertEqual(body()?["userIds"] as? [String], ["f1"])
+        XCTAssertEqual(invited.invited.map(\.userId), ["f1"])
+        _ = try await client.joinParty("p2")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p2/join")
+        FakeTogether.handler = { _, _ in (204, [:]) }
+        try await client.leaveParty("p1")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p1/leave")
+        try await client.declineParty("p2")
+        XCTAssertEqual(last(), "POST /api/v1/parties/p2/decline")
+        FakeTogether.handler = { _, _ in (200, Self.party(privacy: "invite")) }
+        _ = try await client.setParty("p1", open: false)
+        XCTAssertEqual(last(), "PATCH /api/v1/parties/p1")
+        XCTAssertEqual(body()?["privacy"] as? String, "invite")
+    }
+
+    /// A friend's presence carries their party and the game they host.
+    func testPresenceWithAPartyAndAGame() throws {
+        let json: [String: Any] = ["userId": "f1", "handle": "ayse", "displayName": "Ayşe", "avatar": NSNull(),
+                                   "presence": ["state": "in_game", "titleId": "PPSA01234", "since": "2026-10-24T10:00:00.000Z",
+                                                "party": ["id": "p9", "size": 2, "max": 8, "open": true],
+                                                "game": ["sessionId": "s1", "titleId": "PPSA01234", "joinable": true, "players": 1, "capacity": 4]]]
+        let friend = try JSONDecoder.together.decode(TogetherFriend.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(friend.presence?.party, .init(id: "p9", size: 2, max: 8, open: true))
+        XCTAssertEqual(friend.presence?.game?.joinable, true)
+        XCTAssertEqual(friend.presence?.game?.sessionId, "s1")
+    }
+}
