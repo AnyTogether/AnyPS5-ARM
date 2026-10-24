@@ -21,7 +21,7 @@ A typical host-based or peer-to-peer PS5 game goes through these steps. "Today" 
 | NAT type | `sceNetCtlGetNatInfo` | throws (not implemented) | planned: the launcher's measured NAT type; layout unverified on PS5 |
 | Signed in? | `sceNpGetState`, `sceNpRegisterStateCallbackA` + `sceNpCheckCallback`, `sceNpHasSignedUp` | signed out | signed in when the launcher says so; callbacks fire on every change |
 | Who am I | `sceNpGetOnlineId`, `sceNpGetNpId`, `sceNpGetAccountIdA`, `sceNpGetUserIdByAccountId`, `sceNpGetAccountCountryA`, `sceNpGetAccountLanguageA` | `SIGNED_OUT` errors | the AnyTogether handle and account number |
-| Allowed online | `sceNpCheckNpAvailabilityA`, `sceNpGetParentalControlInfoA`, `sceNpCheckPlus`, `sceNpNotifyPlusFeature` | `SIGNED_OUT` | availability: yes; parental info from the launcher when it has an age; **Plus: unchanged, open question** |
+| Allowed online | `sceNpCheckNpAvailabilityA`, `sceNpGetParentalControlInfoA`, `sceNpCheckPlus`, `sceNpNotifyPlusFeature` | `SIGNED_OUT` | availability: yes; Plus and premium checks: allowed while the launcher reports a signed-in user (decision below); parental info unchanged |
 | Sessions, matchmaking, friends | Web API: `sceNpWebApi2CreateUserContext`, `CreateRequest(apiGroup, path, method)`, `AddHttpRequestHeader`, `SendRequest`, `ReadData`, `GetHttpResponseHeaderValue`; C++ wrappers in `libSceNpCppWebApi` end up here when a title ships its own copy | requests created, `SendRequest` fails with `0x80553406` | passed through, body untouched, to the launcher; the launcher answers the API groups it implements and says "not offered" for the rest, which the game sees exactly as today |
 | Session and invitation news | `sceNpWebApi2PushEventCreateHandle`, `CreateFilter`, `RegisterCallback`, `CreatePushContext`, `StartPushContextCallback` | handles exist, nothing is ever delivered | planned (push frames); callback signature and filter layout still to be observed |
 | Join from the system | `sceNpGameIntent*`, `libScePlayerInvitationDialog` | no intents | planned: an AnyTogether invitation becomes a join intent |
@@ -113,7 +113,7 @@ Online play only works between identical games and compatible engines:
 
 - **Class A, the target:** online built only on platform services: player or game sessions, matchmaking through the web API, session signalling, P2P or host-based traffic. Two copies can play once the groups the title uses are answered.
 - **Class B:** games that talk to publisher servers (their own back end or a third-party online service). Out of scope: we do not stand in for those servers.
-- **Class C:** games that need something we will not provide, such as a PS Plus check that must pass, server-side entitlement checks or anti-cheat. `sceNpCheckPlus` keeps today's answer until there is a decision (see below).
+- **Class C:** games that need something we will not provide, such as server-side entitlement checks or anti-cheat.
 
 The observation log tells which class a title is in: class A titles only show Np library calls and web API groups; class B titles also open their own sockets or HTTP connections to publisher hosts.
 
@@ -145,7 +145,7 @@ AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bri
 | Peer transport | iroh (QUIC, hole punching) and iroh relays | WebRTC data channels or QUIC, with the relay AnyTogether already runs for calls | reuse what our launcher and server already do for voice and share play |
 | Virtual addresses | per account, leased by the cloud from 198.18.0.0/15 | per session, in join order, same range | no lease table on the server |
 | Observation | JSONL, async writer, every export | JSONL, folded repeats, flushed per line, implemented exports plus a libc hook for unimplemented ones | a line must survive the crash that follows an unimplemented call |
-| Plus check | stays signed out until a legal review | same, until decided | |
+| Plus check | stays signed out until a legal review | allowed while signed in through AnyTogether | the user's decision: online play is the point of signing in |
 
 ## Test plan
 
@@ -158,7 +158,7 @@ AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bri
 
 ## Open questions
 
-- **PS Plus.** Most P2P titles call `sceNpCheckPlus` before online play. Answering "allowed" is a product and legal decision, not a technical one.
+- **PS Plus (decided).** Most P2P titles call `sceNpCheckPlus` before online play. While the bridge is up and the launcher reports a signed-in AnyTogether user, the Plus and premium checks answer "allowed" and `sceNpIsPlusMember` reports a member; signed out, they answer as before. Every answer is in the observation log.
 - **Push events.** The callback signature and filter parameters of WebApi2 push events are still unknown; they come next from observation.
 - **NAT info and P2P socket semantics** (`sceNetCtlGetNatInfo`, P2P socket options, virtual-port rules) need measuring on titles that use them.
 - **Voice chat** (`libSceVoiceChat`) can ride the same peer connections; not designed yet.

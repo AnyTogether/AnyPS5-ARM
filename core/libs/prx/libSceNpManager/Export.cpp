@@ -51,6 +51,28 @@ std::optional<Online::Wire::Account> SignedInUser(int userId) {
     return SignedInAccount();
 }
 
+struct PlusCheckParameter {
+    std::uint64_t size;
+    std::int32_t userId;
+    std::uint8_t padding[4];
+    std::uint64_t features;
+    std::uint8_t reserved[32];
+};
+static_assert(sizeof(PlusCheckParameter) == 56);
+
+bool PlusAllowed(const void* param) {
+    PlusCheckParameter fields{};
+    std::memcpy(&fields, param, sizeof(fields));
+    return fields.size == sizeof(PlusCheckParameter) && SignedInUser(fields.userId).has_value();
+}
+
+void PlusFields(Online::Fields& in, const void* param) {
+    if (!param) return;
+    PlusCheckParameter fields{};
+    std::memcpy(&fields, param, sizeof(fields));
+    in.Uint("size", fields.size).Int("user_id", fields.userId).Hex("features", fields.features);
+}
+
 void FillOnlineId(NpOnlineId& out, const std::string& onlineId) {
     std::memset(&out, 0, sizeof(out));
     std::memcpy(out.data, onlineId.data(), std::min(onlineId.size(), sizeof(out.data) - 1));
@@ -408,12 +430,12 @@ int APS5_VABI sceNpIntRegisterGamePresenceCallback(void) {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
-int APS5_VABI sceNpIsPlusMember(int, bool* isMember) {
+int APS5_VABI sceNpIsPlusMember(int userId, bool* isMember) {
     Online::Call call("libSceNpManager", __func__);
-    call.Args([&](Online::Fields& in) { in.Ptr("isMember", isMember); });
+    call.Args([&](Online::Fields& in) { in.Int("user_id", userId).Ptr("isMember", isMember); });
     if (!isMember) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    *isMember = false;
-    return call.Return(0);
+    *isMember = SignedInUser(userId).has_value();
+    return call.Return(0, [&](Online::Fields& out) { out.Bool("is_member", *isMember); });
 }
 int APS5_VABI sceNpManagerIntAbortRequest(void) {
     NotImplemented_nid_no_patch(__func__);
@@ -777,10 +799,15 @@ int APS5_VABI sceNpCheckNpReachability(int req_id, int user_id) {
 
 int APS5_VABI sceNpCheckPremium(int req_id, const NpCheckPremiumParameter* param, NpCheckPremiumResult* result) {
     Online::Call call("libSceNpManager", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("param", param).Ptr("result", result); });
-    (void)req_id;
-    (void)param;
-    (void)result;
+    call.Args([&](Online::Fields& in) {
+        in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("param", param).Ptr("result", result);
+        PlusFields(in, param);
+    });
+    if (req_id != 0 && param && result && PlusAllowed(param)) {
+        const int answer = RequestResult(req_id, 0);
+        if (answer == 0) result->opaque[0] = 1;
+        return call.Return(answer, [&](Online::Fields& out) { out.Bool("authorized", answer == 0); });
+    }
     return call.Return(SCE_NP_ERROR_SIGNED_OUT);
 }
 
@@ -857,15 +884,24 @@ int APS5_VABI sceNpGetUserIdByOnlineId(const NpOnlineId* online_id, int* user_id
 
 int APS5_VABI sceNpCheckPlus(int req_id, const void* param, void* result) {
     Online::Call call("libSceNpManager", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("param", param).Ptr("result", result); });
+    call.Args([&](Online::Fields& in) {
+        in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("param", param).Ptr("result", result);
+        PlusFields(in, param);
+    });
     if (req_id == 0 || !param || !result) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
+    if (PlusAllowed(param)) {
+        const int answer = RequestResult(req_id, 0);
+        if (answer == 0) *static_cast<std::uint8_t*>(result) = 1;
+        return call.Return(answer, [&](Online::Fields& out) { out.Bool("authorized", answer == 0); });
+    }
     return call.Return(SCE_NP_ERROR_SIGNED_OUT);
 }
 
 int APS5_VABI sceNpNotifyPlusFeature(const void* param) {
-    (void)param;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    Online::Call call("libSceNpManager", __func__);
+    call.Args([&](Online::Fields& in) { in.Ptr("param", param); });
+    if (!SignedInAccount()) NotImplemented_nid_no_patch(__func__);
+    return call.Return(0);
 }
 
 int APS5_VABI sceNpGetAccountId(const NpOnlineId* online_id, uint64_t* account_id) {

@@ -26,6 +26,9 @@ int APS5_VABI sceNpDeleteRequest(int reqId);
 int APS5_VABI sceNpCheckNpAvailabilityA(int reqId, int userId);
 int APS5_VABI sceNpPollAsync(int reqId, int* result);
 int APS5_VABI sceNpCheckPlus(int reqId, const void* param, void* result);
+int APS5_VABI sceNpCheckPremium(int reqId, const void* param, void* result);
+int APS5_VABI sceNpIsPlusMember(int userId, bool* isMember);
+int APS5_VABI sceNpNotifyPlusFeature(const void* param);
 int APS5_VABI sceNpRegisterStateCallbackA(void* callback, void* userdata);
 int APS5_VABI sceNpCheckCallback(void);
 }
@@ -60,6 +63,20 @@ bool eventually(TPredicate predicate) {
     }
     return predicate();
 }
+
+struct PlusParameter {
+    std::uint64_t size = sizeof(PlusParameter);
+    std::int32_t userId = InitialUser;
+    std::uint8_t padding[4] = {};
+    std::uint64_t features = 1;
+    std::uint8_t reserved[32] = {};
+};
+static_assert(sizeof(PlusParameter) == 56);
+
+struct PlusResult {
+    std::uint8_t authorized = 0;
+    std::uint8_t reserved[63] = {};
+};
 
 std::uint32_t state(int userId = InitialUser) {
     std::uint32_t value = 0;
@@ -125,12 +142,32 @@ int main() {
         int result = -1;
         require(sceNpCheckNpAvailabilityA(request, InitialUser) == 0, "the network is available to the signed-in user");
         require(sceNpPollAsync(request, &result) == 0 && result == 0, "polling the request reports success");
-        require(sceNpCheckPlus(request, &result, &result) == SignedOut, "the Plus check keeps its offline answer");
+        PlusParameter plus;
+        PlusResult granted;
+        require(sceNpCheckPlus(request, &plus, &granted) == 0 && granted.authorized == 1, "the signed-in user is allowed online play");
+        require(sceNpPollAsync(request, &result) == 0 && result == 0, "the Plus request polls as done");
+        PlusResult premium;
+        require(sceNpCheckPremium(request, &plus, &premium) == 0 && premium.authorized == 1, "the premium check allows the signed-in user");
+        PlusParameter otherUser;
+        otherUser.userId = InitialUser + 1;
+        PlusResult refused;
+        require(sceNpCheckPlus(request, &otherUser, &refused) == SignedOut && refused.authorized == 0, "another local user stays signed out");
+        PlusParameter wrongSize;
+        wrongSize.size = 40;
+        require(sceNpCheckPremium(request, &wrongSize, &refused) == SignedOut && refused.authorized == 0, "an unknown parameter layout keeps the offline answer");
+        bool member = false;
+        require(sceNpIsPlusMember(InitialUser, &member) == 0 && member, "the signed-in user is a Plus member");
+        require(sceNpNotifyPlusFeature(&plus) == 0, "a Plus feature notice is accepted while signed in");
         sceNpDeleteRequest(request);
 
         launcher.SetAccount(Online::Wire::Account{});
         require(eventually([] { return state() == 1; }), "the launcher signing out signs the game out");
         require(sceNpGetOnlineId(InitialUser, &id) == SignedOut, "identity questions fail again");
+        const int signedOutRequest = sceNpCreateRequest();
+        PlusResult afterSignOut;
+        require(sceNpCheckPlus(signedOutRequest, &plus, &afterSignOut) == SignedOut && afterSignOut.authorized == 0, "signed out, the Plus check is refused as before");
+        require(sceNpIsPlusMember(InitialUser, &member) == 0 && !member, "signed out, the user is no Plus member");
+        sceNpDeleteRequest(signedOutRequest);
         require(sceNpCheckCallback() == 0 && lastState == 1, "the callback reports the sign-out");
         const int before = calls;
         require(sceNpCheckCallback() == 0 && calls == before, "an unchanged state is not reported again");
