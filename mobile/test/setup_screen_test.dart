@@ -43,6 +43,7 @@ void main() {
     );
     expect(find.text('Looking for AnyPS5 on the Mac'), findsOneWidget);
     expect(find.textContaining('same Wi-Fi'), findsWidgets);
+    expect(find.textContaining('with a cable'), findsWidgets);
 
     await show(
       tester,

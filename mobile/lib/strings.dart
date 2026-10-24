@@ -82,7 +82,7 @@ class Strings {
     'start': 'Start',
     'found': '%@ found',
     'searching': 'Looking for AnyPS5 on the Mac',
-    'searchingDetail': 'Keep AnyPS5 open on the Mac, with the phone and the Mac on the same Wi-Fi.',
+    'searchingDetail': 'Keep AnyPS5 open on the Mac, with the phone and the Mac on the same Wi-Fi, or plug the phone into the Mac with a cable.',
     'busy': 'Another phone is connected',
     'refused': 'The Mac refused the connection',
     'allowOnMac': 'Allow it on the Mac',
@@ -150,8 +150,7 @@ class Strings {
     'start': 'Başla',
     'found': '%@ bulundu',
     'searching': "Mac'teki AnyPS5 aranıyor",
-    'searchingDetail':
-        "Mac'te AnyPS5 açık olsun, telefon ile Mac aynı Wi-Fi'da olsun.",
+    'searchingDetail': "Mac'te AnyPS5 açık olsun, telefon ile Mac aynı Wi-Fi'da olsun ya da telefonu Mac'e kabloyla tak.",
     'busy': 'Başka bir telefon bağlı',
     'refused': 'Mac bağlantıyı reddetti',
     'allowOnMac': "Mac'te izin ver",
