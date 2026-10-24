@@ -16,6 +16,8 @@ class HomeScreen extends StatefulWidget {
     required this.session,
     required this.onResume,
     this.status,
+    this.remotePlay = false,
+    this.onRemotePlay,
   });
 
   final Session session;
@@ -25,6 +27,10 @@ class HomeScreen extends StatefulWidget {
 
   /// Drawn at the top left: the connection dot and the Mac's name.
   final Widget? status;
+
+  /// The game shown on the phone behind the pad, rather than the pad alone.
+  final bool remotePlay;
+  final ValueChanged<bool>? onRemotePlay;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -140,6 +146,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             widget.session.motion?.enabled = value;
                             widget.session.preferences.setBool('motion', value);
                           },
+                          remotePlay: widget.remotePlay,
+                          onRemotePlay: widget.onRemotePlay,
                         ),
                         icon: const Icon(
                           Icons.info_outline_rounded,

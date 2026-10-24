@@ -15,6 +15,7 @@ import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
+import 'stream/platform_player.dart';
 import 'ui/activity_card.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
@@ -92,8 +93,13 @@ class RemoteApp extends StatefulWidget {
 class _RemoteAppState extends State<RemoteApp> {
   static const readyPause = Duration(milliseconds: 900);
 
+  /// Remote Play's decoder and speaker; the stream is asked for only with [_remotePlay] on.
+  final _player = PlatformStreamPlayer();
+  late bool _remotePlay = widget.preferences.getBool('remotePlay') ?? false;
+
   late final Session _session =
       Session(preferences: widget.preferences, deviceName: widget.deviceName)
+        ..player = _player
         ..haptics = (HapticsDriver(PlatformHaptics())
           ..enabled = widget.preferences.getBool('vibration') ?? true)
         ..motion = (MotionSource()
@@ -196,6 +202,25 @@ class _RemoteAppState extends State<RemoteApp> {
     _padShown = pad;
     pad ? _session.resumePad() : _session.pausePad();
     pad ? _session.motion?.start() : _session.motion?.stop();
+    _stream();
+  }
+
+  /// The game's picture while the pad shows and Remote Play is on; the pad alone otherwise.
+  void _stream() {
+    if (_padShown && _remotePlay) {
+      if (_session.streamWanted) return;
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      final size = view.physicalSize;
+      _session.startStream(size.longestSide.round(), size.shortestSide.round());
+    } else {
+      _session.stopStream();
+    }
+  }
+
+  void _setRemotePlay(bool on) {
+    widget.preferences.setBool('remotePlay', on);
+    setState(() => _remotePlay = on);
+    _stream();
   }
 
   void _home() {
@@ -242,8 +267,25 @@ class _RemoteAppState extends State<RemoteApp> {
               glow: lightColor(_session.output),
               tweaks: _runningTweaks(),
               onTweaks: _saveTweaks,
+              video: _remotePlay
+                  ? StreamView(
+                      player: _player,
+                      notice: _session.streaming.value == 'noPermission'
+                          ? Strings.of(
+                              _session.library?.language ??
+                                  widget.preferences.getString('language'),
+                            ).remotePlayNoPermission
+                          : null,
+                    )
+                  : null,
             )
-          : HomeScreen(session: _session, onResume: _resume, status: _status());
+          : HomeScreen(
+              session: _session,
+              onResume: _resume,
+              status: _status(),
+              remotePlay: _remotePlay,
+              onRemotePlay: _setRemotePlay,
+            );
     } else {
       home = SetupScreen(
         session: _session,

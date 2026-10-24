@@ -63,6 +63,9 @@ class Strings {
   String get activityReady => _text('activity.ready');
   String percent(int value) => _text('percent').replaceAll('{n}', '$value');
   String get motionDetail => _text('motionDetail');
+  String get remotePlay => _text('remotePlay');
+  String get remotePlayDetail => _text('remotePlayDetail');
+  String get remotePlayNoPermission => _text('remotePlayNoPermission');
   String get editLayout => _text('editLayout');
   String get done => _text('done');
   String get editHint => _text('editHint');
@@ -130,6 +133,10 @@ class Strings {
     'percent': '{n}%',
     'motionDetail':
         "Tilting and turning the phone, as the DualSense's motion sensors",
+    'remotePlay': 'Remote Play',
+    'remotePlayDetail': 'The game on the phone, behind the pad. Off, the phone is only the controller',
+    'remotePlayNoPermission':
+        'Allow AnyPS5 to record the screen on the Mac to see the game here',
     'editLayout': 'Edit Layout',
     'done': 'Done',
     'editHint': 'Drag a control to move it, tap it to change it',
@@ -197,6 +204,11 @@ class Strings {
     'percent': '%{n}',
     'motionDetail':
         "Telefonu eğip döndürmek, DualSense'in hareket sensörleri gibi",
+    'remotePlay': 'Remote Play',
+    'remotePlayDetail':
+        'Oyun telefonda, kolun arkasında. Kapalıyken telefon sadece kol',
+    'remotePlayNoPermission':
+        "Oyunu burada görmek için Mac'te AnyPS5'e ekran kaydı izni ver",
     'editLayout': 'Düzeni Düzenle',
     'done': 'Bitti',
     'editHint': 'Taşımak için sürükle, değiştirmek için dokun',

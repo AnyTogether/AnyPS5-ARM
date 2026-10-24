@@ -12,6 +12,8 @@ Future<void> showAbout(
   ValueChanged<bool>? onVibration,
   bool? motion,
   ValueChanged<bool>? onMotion,
+  bool? remotePlay,
+  ValueChanged<bool>? onRemotePlay,
 }) => showModalBottomSheet<void>(
   context: context,
   backgroundColor: const Color(0xF2101218),
@@ -24,16 +26,27 @@ Future<void> showAbout(
     onVibration: onVibration,
     motion: motion,
     onMotion: onMotion,
+    remotePlay: remotePlay,
+    onRemotePlay: onRemotePlay,
   ),
 );
 
 class _About extends StatefulWidget {
-  const _About({this.vibration, this.onVibration, this.motion, this.onMotion});
+  const _About({
+    this.vibration,
+    this.onVibration,
+    this.motion,
+    this.onMotion,
+    this.remotePlay,
+    this.onRemotePlay,
+  });
 
   final bool? vibration;
   final ValueChanged<bool>? onVibration;
   final bool? motion;
   final ValueChanged<bool>? onMotion;
+  final bool? remotePlay;
+  final ValueChanged<bool>? onRemotePlay;
 
   @override
   State<_About> createState() => _AboutState();
@@ -42,6 +55,7 @@ class _About extends StatefulWidget {
 class _AboutState extends State<_About> {
   late bool? _vibration = widget.vibration;
   late bool? _motion = widget.motion;
+  late bool? _remotePlay = widget.remotePlay;
 
   @override
   Widget build(BuildContext context) {
@@ -122,6 +136,30 @@ class _AboutState extends State<_About> {
                       onChanged: (value) {
                         setState(() => _motion = value);
                         widget.onMotion?.call(value);
+                      },
+                    ),
+                  if (_remotePlay != null)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(
+                        texts.remotePlay,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
+                      ),
+                      subtitle: Text(
+                        texts.remotePlayDetail,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      value: _remotePlay!,
+                      onChanged: (value) {
+                        setState(() => _remotePlay = value);
+                        widget.onRemotePlay?.call(value);
                       },
                     ),
                   _Row(label: texts.madeBy, value: author),

@@ -22,6 +22,7 @@ class PadScreen extends StatefulWidget {
     this.onHome,
     this.onCapture,
     this.glow,
+    this.video,
   });
 
   final void Function(PadState state) onState;
@@ -42,6 +43,9 @@ class PadScreen extends StatefulWidget {
 
   /// The game's light bar colour, which the pad's background glows with.
   final Color? glow;
+
+  /// Remote Play's picture, drawn behind the controls in place of the pad's background.
+  final Widget? video;
 
   @override
   State<PadScreen> createState() => _PadScreenState();
@@ -126,6 +130,7 @@ class _PadScreenState extends State<PadScreen> {
           _size = size;
           return Stack(
             children: [
+              if (widget.video != null) Positioned.fill(child: widget.video!),
               Positioned.fill(
                 child: Listener(
                   behavior: HitTestBehavior.opaque,
@@ -153,6 +158,7 @@ class _PadScreenState extends State<PadScreen> {
                         glow,
                         editing: _editing,
                         selected: _selected,
+                        clear: widget.video != null,
                       ),
                     ),
                   ),
@@ -565,6 +571,7 @@ class _PadPainter extends CustomPainter {
     this.glow, {
     required this.editing,
     required this.selected,
+    this.clear = false,
   });
 
   final PadLayout layout;
@@ -574,23 +581,28 @@ class _PadPainter extends CustomPainter {
   final bool editing;
   final String? selected;
 
+  /// The game shows behind: no background of its own.
+  final bool clear;
+
   static const base = Color(0xFF16181F);
   static const glass = Color(0x1AFFFFFF);
   static const edge = Color(0x24FFFFFF);
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            Color.lerp(base, glow ?? base, 0.38)!,
-            const Color(0xFF07080B),
-          ],
-          radius: 1.1,
-        ).createShader(Offset.zero & size),
-    );
+    if (!clear) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              Color.lerp(base, glow ?? base, 0.38)!,
+              const Color(0xFF07080B),
+            ],
+            radius: 1.1,
+          ).createShader(Offset.zero & size),
+      );
+    }
     for (final control in layout.controls) {
       if (control.hidden && !editing) continue;
       final fade = control.hidden ? 0.25 : control.opacity;
@@ -735,5 +747,6 @@ class _PadPainter extends CustomPainter {
       old.layout != layout ||
       old.glow != glow ||
       old.editing != editing ||
-      old.selected != selected;
+      old.selected != selected ||
+      old.clear != clear;
 }

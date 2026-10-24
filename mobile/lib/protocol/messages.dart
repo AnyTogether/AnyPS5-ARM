@@ -45,6 +45,7 @@ sealed class Message {
           grade: json['grade'] as String,
           icon: json['icon'] as String?,
         ),
+        'streaming' => Streaming(json['state'] as String),
         'activity' => ActivityUpdate(
           json['activity'] == null
               ? null
@@ -275,6 +276,41 @@ class CloseGame extends Message {
 }
 
 /// The PS button: the launcher comes in front of the game.
+/// Remote Play: the game's picture and sound at about this size, or no more.
+class StreamRequest extends Message {
+  const StreamRequest({required this.on, this.width = 0, this.height = 0});
+
+  final bool on;
+  final int width;
+  final int height;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'stream',
+    'on': on,
+    'width': width,
+    'height': height,
+  });
+}
+
+/// Part of the picture was lost: the decoder waits for a key frame.
+class KeyFrame extends Message {
+  const KeyFrame();
+
+  @override
+  String toJson() => jsonEncode({'type': 'keyFrame'});
+}
+
+/// How Remote Play is going: on, off, noPermission or noGame.
+class Streaming extends Message {
+  const Streaming(this.state);
+
+  final String state;
+
+  @override
+  String toJson() => jsonEncode({'type': 'streaming', 'state': state});
+}
+
 class Home extends Message {
   const Home();
 

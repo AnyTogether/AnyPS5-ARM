@@ -30,6 +30,28 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Remote Play's picture and sound.
+        val streamChannel = MethodChannel(messenger, "org.anyps5.remote/stream")
+        val player = StreamPlayer(flutterEngine.renderer, streamChannel)
+        streamChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "open" -> result.success(player.open())
+                "frame" -> {
+                    player.frame(call.argument<ByteArray>("data") ?: ByteArray(0), call.argument<Boolean>("key") ?: false,
+                        (call.argument<Number>("milliseconds") ?: 0).toLong())
+                    result.success(null)
+                }
+                "sound" -> {
+                    player.sound(call.argument<ByteArray>("data") ?: ByteArray(0))
+                    result.success(null)
+                }
+                "close" -> {
+                    player.close()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(messenger, "org.anyps5.remote/haptics").setMethodCallHandler { call, result ->
             if (call.method != "set") return@setMethodCallHandler result.notImplemented()
             rumble((call.argument<Int>("strength") ?: 0).coerceIn(0, 255))

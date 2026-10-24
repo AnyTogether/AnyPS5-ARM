@@ -11,6 +11,8 @@ import '../feedback/haptics.dart';
 import '../feedback/motion.dart';
 import '../protocol/messages.dart';
 import '../protocol/packets.dart';
+import '../stream/stream_packets.dart';
+import '../stream/stream_player.dart';
 
 enum ConnectionStatus { searching, connecting, pairing, connected, rejected }
 
@@ -94,6 +96,17 @@ class Session extends ChangeNotifier {
 
   /// Off while the phone shows the launcher: the game gets no pad from it then.
   bool _padActive = true;
+
+  /// Remote Play's decoder and speaker; the stream is asked for with [startStream].
+  StreamPlayer? player;
+
+  /// How Remote Play is going, as the launcher last said; null before it said anything.
+  final streaming = ValueNotifier<String?>(null);
+
+  /// The picture size asked for, while Remote Play is wanted.
+  (int, int)? _streamSize;
+  FrameAssembler? _assembler;
+  int _keyAsked = -1 << 62;
 
   /// The game's rumble, light bar and trigger effects felt on the phone.
   HapticsDriver? haptics;
@@ -201,8 +214,7 @@ class Session extends ChangeNotifier {
   void _received(dynamic data, int generation) {
     if (generation != _generation) return;
     if (data is List<int>) {
-      final answer = decodeOutput(Uint8List.fromList(data));
-      if (answer != null) _answered(answer);
+      _datagram(data is Uint8List ? data : Uint8List.fromList(data));
       return;
     }
     if (data is! String) return;
@@ -218,6 +230,12 @@ class Session extends ChangeNotifier {
         code = null;
         _startPad(generation);
         _setStatus(ConnectionStatus.connected);
+        final size = _streamSize;
+        if (size != null) {
+          _socket?.add(
+            StreamRequest(on: true, width: size.$1, height: size.$2).toJson(),
+          );
+        }
       case final Library library:
         this.library = library;
         for (final game in library.games) {
@@ -257,6 +275,8 @@ class Session extends ChangeNotifier {
           ..background = background == null ? null : base64Decode(background)
           ..arrived = true;
         notifyListeners();
+      case Streaming(:final state):
+        streaming.value = state;
       case Rejected(:final reason):
         rejectedReason = reason;
         if (reason == 'busy') {
@@ -281,8 +301,7 @@ class Session extends ChangeNotifier {
       udp.listen((event) {
         if (event != RawSocketEvent.read) return;
         final datagram = udp.receive();
-        final answer = datagram == null ? null : decodeOutput(datagram.data);
-        if (answer != null) _answered(answer);
+        if (datagram != null) _datagram(datagram.data);
       });
     }
     if (generation != _generation) return;
@@ -293,6 +312,73 @@ class Session extends ChangeNotifier {
       if (latencyMs != null) _socket?.add(Latency(latencyMs!).toJson());
     });
     _send();
+  }
+
+  /// A pad answer, or Remote Play's picture or sound.
+  void _datagram(Uint8List data) {
+    final answer = decodeOutput(data);
+    if (answer != null) return _answered(answer);
+    if (_streamSize == null) return;
+    final piece = decodeVideo(data);
+    if (piece != null) return _assembler?.add(piece);
+    final sound = decodeAudio(data);
+    if (sound != null) player?.sound(sound);
+  }
+
+  /// Asks the launcher for the game's picture and sound at about [width] by [height].
+  void startStream(int width, int height) {
+    _streamSize = (width, height);
+    _assembler = FrameAssembler(
+      onFrame: (frame) => player?.frame(frame),
+      onLoss: () {
+        // One request at a time: the key frame takes a moment to come.
+        final now = _clock.elapsedMilliseconds;
+        if (now - _keyAsked < 250) return;
+        _keyAsked = now;
+        send(const KeyFrame());
+      },
+    );
+    send(StreamRequest(on: true, width: width, height: height));
+    // The launcher sends the picture to where the pad comes from: a still pad says where.
+    _ping();
+  }
+
+  /// Back to the pad alone.
+  void stopStream() {
+    if (_streamSize == null) return;
+    _streamSize = null;
+    _assembler = null;
+    streaming.value = null;
+    player?.stop();
+    send(const StreamRequest(on: false));
+  }
+
+  bool get streamWanted => _streamSize != null;
+
+  void _ping() {
+    final udp = _udp;
+    final session = _session;
+    if (_cable ||
+        udp == null ||
+        session == null ||
+        _udpPort == null ||
+        _padActive) {
+      return;
+    }
+    try {
+      udp.send(
+        encodeInput(
+          sequence: _sequence,
+          sentMicros: _clock.elapsedMicroseconds,
+          session: session,
+          state: PadState(),
+        ),
+        _host!,
+        _udpPort!,
+      );
+    } on SocketException {
+      // The pad's next packet says it instead.
+    }
   }
 
   /// The new pad state, sent at once; the moment it arrives is when the touch was received.
