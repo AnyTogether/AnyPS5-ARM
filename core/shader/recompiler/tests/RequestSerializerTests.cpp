@@ -550,7 +550,7 @@ int main() {
                         version43.pop_back();
                         version43[4] = 43u;
                         const auto replay43 = serializer.Deserialize(EncodeBase64(version43));
-                        Require(serializer.Serialize(replay43.request) == EncodeBase64(version46));
+                        Require(serializer.Serialize(replay43.request) == serializer.Serialize(pointed));
                         Require(replay43.request.graphics->tessellation->mergedHull == merged && replay43.request.context.vertex->pointList && replay43.request.context.vertex->pointSize == 3.0f && replay43.request.context.vertex->pointSizeMin == 1.0f && replay43.request.context.vertex->pointSizeMax == 8.0f);
                         auto version42 = version43;
                         version42.resize(version42.size() - 13u);
@@ -662,7 +662,7 @@ int main() {
     const auto orderOffset = std::search(version42.begin(), version42.end(), pixel.sampleLocations.begin(), pixel.sampleLocations.end()) - version42.begin() + static_cast<std::ptrdiff_t>(pixel.sampleLocations.size() + 1u);
     Require(version42.end() - version42.begin() > orderOffset + static_cast<std::ptrdiff_t>(sizeof(pixel.sampleOrder)) && version42[static_cast<std::size_t>(orderOffset)] == 0x10u);
     EraseDefaultTargetMerge(version42, orderOffset + static_cast<std::ptrdiff_t>(sizeof(pixel.sampleOrder)));
-    version42.resize(version42.size() - 4u);
+    version42.resize(version42.size() - 4u - 5u);
     version42.pop_back();
     version42.pop_back();
     version42[4] = 42u;
@@ -674,8 +674,6 @@ int main() {
     auto version41 = version42;
     version41.erase(version41.begin() + orderOffset, version41.begin() + orderOffset + static_cast<std::ptrdiff_t>(sizeof(pixel.sampleOrder)));
     version41[4] = 41u;
-    // The fork's version 44 fields (subgroup stage mask, mesh-as-compute flag) trail the request.
-    version41.resize(version41.size() - 5u);
     const auto replay41 = serializer.Deserialize(EncodeBase64(version41));
     Require(replay41.request.context.pixel.has_value() && replay41.request.context.pixel->sampleLocations == pixel.sampleLocations && replay41.request.context.pixel->sampleOrder == std::array<std::uint32_t, 4>{});
     pixel.sampleOrder = {};
@@ -733,7 +731,9 @@ int main() {
         for (const std::uint8_t version : {32u, 33u, 34u, 35u, 36u, 37u, 38u}) {
             pointRequest.target.spannedWaves = spanned;
             auto legacy = DecodeBase64(serializer.Serialize(pointRequest));
-            legacy.resize(legacy.size() - (version >= 36u ? 25u : version >= 35u ? 26u : 31u));
+            const std::size_t dropped = version >= 36u ? 25u : version >= 35u ? 26u : 31u;
+            legacy.resize(legacy.size() - dropped);
+            if (version == 33u) legacy.insert(legacy.end(), {0xffu, 0xffu, 0xffu, 0xffu, 0u});
             legacy[4] = version;
             const auto replayLegacy = serializer.Deserialize(EncodeBase64(legacy));
             Require(replayLegacy.request.target.spannedWaves == spanned);
@@ -745,7 +745,7 @@ int main() {
             Require(!replayLegacy.request.context.vertex->pointList && replayLegacy.request.context.vertex->pointSize == 1.0f);
             Require(replayLegacy.request.context.vertex->pointSizeMin == 0.0f && replayLegacy.request.context.vertex->pointSizeMax == 0.0f);
             const auto upgradedLegacy = DecodeBase64(serializer.Serialize(replayLegacy.request));
-            Require(upgradedLegacy[4] == 47u && upgradedLegacy.size() == legacy.size() + (version >= 36u ? 25u : version >= 35u ? 26u : 31u));
+            Require(upgradedLegacy[4] == 47u && upgradedLegacy.size() == legacy.size() + dropped - (version == 33u ? 5u : 0u));
         }
     }
 
@@ -787,7 +787,8 @@ int main() {
         request.target.fusedExactArithmetic = fused;
         request.target.largePixelFunctionLdsBuffer = false;
         auto bytes = DecodeBase64(serializer.Serialize(request));
-        Require(serializer.Deserialize(EncodeBase64(bytes)).request.target.fusedExactArithmetic == fused && bytes[bytes.size() - 6u] == (fused ? 1u : 0u) && bytes[bytes.size() - 5u] == 0u);
+        Require(serializer.Deserialize(EncodeBase64(bytes)).request.target.fusedExactArithmetic == fused && bytes[bytes.size() - 11u] == (fused ? 1u : 0u) && bytes[bytes.size() - 10u] == 0u);
+        bytes.resize(bytes.size() - 5u);
         const auto fusedMerge = std::search(bytes.begin(), bytes.end(), pixel.sampleLocations.begin(), pixel.sampleLocations.end()) - bytes.begin() + static_cast<std::ptrdiff_t>(pixel.sampleLocations.size() + 1u + sizeof(pixel.sampleOrder));
         EraseDefaultTargetMerge(bytes, fusedMerge);
         bytes.resize(bytes.size() - 4u);

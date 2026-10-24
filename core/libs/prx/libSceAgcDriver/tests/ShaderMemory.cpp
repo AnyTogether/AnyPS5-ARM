@@ -5856,8 +5856,7 @@ void verifyVertexInfoVersion19() {
     version29.pop_back();
     version29.pop_back();
     version29.pop_back();
-    // The float32 denorm flag (version 41) and the fork's version 44 fields trail the request.
-    version29.resize(version29.size() - 6u);
+    version29.pop_back();
     version29.erase(version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes), version29.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
     auto version36 = version43Bytes(sampledBytes);
     version36.pop_back();
@@ -5872,8 +5871,7 @@ void verifyVertexInfoVersion19() {
     version28.pop_back();
     version28.pop_back();
     version28.pop_back();
-    // The float32 denorm flag (version 41) and the fork's version 44 fields trail the request.
-    version28.resize(version28.size() - 6u);
+    version28.pop_back();
     version28.erase(version28.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u), version28.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
     version28[4] = 28u;
     const auto replay28 = serializer.Deserialize(encodeBase64(version28));
@@ -5882,8 +5880,7 @@ void verifyVertexInfoVersion19() {
     version27.pop_back();
     version27.pop_back();
     version27.pop_back();
-    // The float32 denorm flag (version 41) and the fork's version 44 fields trail the request.
-    version27.resize(version27.size() - 6u);
+    version27.pop_back();
     version27.erase(version27.begin() + static_cast<std::ptrdiff_t>(maskOffset), version27.begin() + static_cast<std::ptrdiff_t>(maskOffset + 1u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
     version27[4] = 27u;
     const auto replay27 = serializer.Deserialize(encodeBase64(version27));
@@ -5892,8 +5889,7 @@ void verifyVertexInfoVersion19() {
     legacyPixel.pop_back();
     legacyPixel.pop_back();
     legacyPixel.pop_back();
-    // The float32 denorm flag (version 41) and the fork's version 44 fields trail the request.
-    legacyPixel.resize(legacyPixel.size() - 6u);
+    legacyPixel.pop_back();
     legacyPixel.erase(legacyPixel.begin() + static_cast<std::ptrdiff_t>(allBitsOffset), legacyPixel.begin() + static_cast<std::ptrdiff_t>(allBitsOffset + 2u + sampleMaskBytes + 4u + iterationBytes + sampleOrderBytes));
     legacyPixel[4] = 26u;
     const auto replay26 = serializer.Deserialize(encodeBase64(legacyPixel));
