@@ -82,7 +82,7 @@ public final class TogetherClient: @unchecked Sendable {
     public let base: URL
     let store: TokenStore
     let session: URLSession
-    let clientName: String
+    public let clientName: String
     private let refresher = Refresher()
 
     public init(base: URL, store: TokenStore = TokenStore(), session: URLSession = .shared, clientName: String) {
@@ -140,6 +140,11 @@ public final class TogetherClient: @unchecked Sendable {
             }
         }
         throw TogetherProblem(status: 400, code: "expired_token", title: "The sign-in was not approved in time")
+    }
+
+    /// Forgets the session here only (it ended elsewhere).
+    public func forget() {
+        store.save(nil)
     }
 
     public func signOut() async {

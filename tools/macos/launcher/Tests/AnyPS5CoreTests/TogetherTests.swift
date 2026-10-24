@@ -190,3 +190,40 @@ final class TogetherLiveTests: XCTestCase {
         XCTAssertNil(client.user)
     }
 }
+
+/// The socket against a real gateway and API (both from the server's repository, run locally):
+/// signing the launcher's session out from another device closes its socket within seconds.
+final class TogetherSocketLiveTests: XCTestCase {
+    func testSigningOutElsewhereEndsTheSocket() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let url = environment["ANYTOGETHER_TEST_URL"].flatMap(URL.init(string:)), let log = environment["ANYTOGETHER_TEST_LOG"],
+              let realtime = environment["ANYTOGETHER_TEST_RT"].flatMap(URL.init(string:)) else { throw XCTSkip("no AnyTogether server given") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("together-socket-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let email = "socket-\(UUID().uuidString.prefix(6).lowercased())@example.com"
+        func signIn(_ name: String, _ base: URL) async throws -> TogetherClient {
+            let client = TogetherClient(base: base, store: TokenStore(file: folder.appendingPathComponent("\(name).json")), clientName: "\(name)/test")
+            try await client.startEmail(email)
+            try await Task.sleep(for: .milliseconds(200))
+            let code = try XCTUnwrap(try String(contentsOfFile: log, encoding: .utf8).components(separatedBy: "\n").last { $0.contains(email) }?.components(separatedBy: ": ").last?.prefix(6))
+            _ = try await client.verifyEmail(email, code: String(code))
+            return client
+        }
+        // The launcher talks to the API for tokens and to the gateway for the socket.
+        let launcher = try await signIn("launcher-macos", url)
+        let web = try await signIn("web", url)
+        let socketClient = TogetherClient(base: realtime, store: launcher.store, clientName: "launcher-macos/test")
+        let ended = expectation(description: "signed out")
+        let socket = TogetherSocket(client: socketClient) { ended.fulfill() }
+        socket.start()
+        try await Task.sleep(for: .milliseconds(500))
+        struct Sessions: Decodable { struct Item: Decodable { let id: String; let client: String }; let sessions: [Item] }
+        let list = try JSONDecoder().decode(Sessions.self, from: try await web.authorized("GET", "auth/sessions", nil))
+        let mac = try XCTUnwrap(list.sessions.first { $0.client == "launcher-macos" })
+        let started = Date()
+        _ = try await web.authorized("DELETE", "auth/sessions/\(mac.id)", nil)
+        await fulfillment(of: [ended], timeout: 5)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        XCTAssertNil(launcher.user, "the launcher forgot the session")
+    }
+}
