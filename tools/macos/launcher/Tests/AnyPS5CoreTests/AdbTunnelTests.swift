@@ -44,7 +44,9 @@ final class AdbTunnelTests: XCTestCase {
         let tunnel = AdbTunnel(adb: try fakeAdb(phone: phone.port), targetPort: launcher.port, interval: 0.2) { serials in wired.value = serials }
         tunnel.start()
         defer { tunnel.stop() }
-        let deadline = Date().addingTimeInterval(3)
+        // Generous: on a busy Mac starting the pretend adb alone can take seconds, and the first
+        // try that misses waits two more. The loop ends as soon as both are seen.
+        let deadline = Date().addingTimeInterval(15)
         while phone.heard.value.count < 9 || wired.value.isEmpty, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
         XCTAssertEqual(String(decoding: phone.heard.value, as: UTF8.self), "hello mac")
         XCTAssertEqual(wired.value, ["R5CXC3L8NNK"])
