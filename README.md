@@ -133,6 +133,10 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 - **Sharing:** **Export Settings** saves the game's keys and every setting as one file, and **Import Settings** applies a file someone shared. Post a setup that works for a game, or take one from a friend.
 - **Reset Advanced Settings** brings back the engine's defaults.
 
+**Engine versions:** **Settings → Engine** lists the engine builds published with this project's releases. Download one (it is checked before use) and choose it for every game or for one game only; a game unlocked with another engine offers **Update and Play**. **Engine Folder** uses an engine you built yourself. A game's options show which engine unlocked it.
+
+**Crash reports:** when a game stops on an error, **Export Report** saves the log, macOS's crash report and the game's settings in one file, and **Open Issue** opens a pre-filled GitHub issue (your name, email and sign-in tokens are removed first). **Detailed logging (trace)** in a game's settings records more for a hard bug.
+
 ### Trophies
 
 ![The trophy list of Hollow Knight: Silksong](docs/screenshots/launcher-trophies.jpg)
