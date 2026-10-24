@@ -31,29 +31,43 @@ final class ThemeMusic {
         engine.attach(player)
     }
 
-    /// The song of `game`, or silence for nil; asking again for the song playing changes nothing.
-    func play(_ game: Game?) {
-        let id = game?.music != nil ? game?.id : nil
-        guard id != wanted else { return }
-        wanted = id
+    /// The song of `game`, or the theme's menu music when the game has none (`fallback`), or
+    /// silence; asking again for the music playing changes nothing.
+    func play(_ game: Game?, fallback: URL? = nil) {
+        let song: (id: String, url: URL, atrac9: Bool)?
+        if let game, let music = game.music {
+            song = (game.id, music, true)
+        } else {
+            song = fallback.map { ("theme:" + $0.path, $0, false) }
+        }
+        guard song?.id != wanted else { return }
+        wanted = song?.id
         pending?.cancel()
         stop()
-        guard let game, let music = game.music, volume > 0 else { return }
+        guard let song, volume > 0 else { return }
         pending = Task { [weak self] in
             try? await Task.sleep(for: ThemeMusic.settle)
-            guard let self, !Task.isCancelled, self.wanted == game.id else { return }
+            guard let self, !Task.isCancelled, self.wanted == song.id else { return }
             let buffers: ThemeSong.Buffers
-            if let cached = self.cache[game.id] {
+            if let cached = self.cache[song.id] {
                 buffers = cached
             } else {
-                guard let song = await Task.detached(priority: .userInitiated, operation: { try? ThemeSong.decode(music) }).value,
-                      let made = song.buffers() else { return }
+                let url = song.url, atrac9 = song.atrac9
+                guard let made = await Task.detached(priority: .userInitiated, operation: { atrac9 ? (try? ThemeSong.decode(url))?.buffers() : ThemeMusic.decodeFile(url) }).value else { return }
                 buffers = made
-                self.remember(game.id, made)
+                self.remember(song.id, made)
             }
-            guard !Task.isCancelled, self.wanted == game.id else { return }
-            self.start(game.id, buffers)
+            guard !Task.isCancelled, self.wanted == song.id else { return }
+            self.start(song.id, buffers)
         }
+    }
+
+    /// Any file AVFoundation reads (m4a, mp3, wav), its first five minutes, repeating whole.
+    nonisolated static func decodeFile(_ url: URL) -> ThemeSong.Buffers? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let frames = AVAudioFrameCount(min(file.length, Int64(file.processingFormat.sampleRate * 300)))
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames), (try? file.read(into: buffer, frameCount: frames)) != nil else { return nil }
+        return (buffer, nil)
     }
 
     private func start(_ id: String, _ buffers: ThemeSong.Buffers) {

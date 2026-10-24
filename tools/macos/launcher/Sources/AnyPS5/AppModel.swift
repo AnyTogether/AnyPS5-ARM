@@ -12,6 +12,8 @@ struct Preferences: Codable, Equatable {
     var language = Language.english
     var theme = Theme.cosmic
     var accent: AccentColor?
+    /// A made or installed theme (ThemeDesign id) in place of the built-in theme and accent.
+    var customTheme: String?
     var backdrop = Backdrop.theme
     var backdropFile: String?
     var gameArtwork = true
@@ -86,6 +88,9 @@ enum Overlay: Equatable {
     case advanced
     /// The selected game's F12 screenshots.
     case gallery
+    /// The themes on this Mac and on the Hub, and the Theme Studio.
+    case themes
+    case studio
 }
 
 struct Toast: Identifiable, Equatable {
@@ -200,6 +205,8 @@ final class AppModel: ObservableObject {
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
+        themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
+        designs = themes.all
         apply()
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
@@ -353,10 +360,25 @@ final class AppModel: ObservableObject {
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
     private func updateMusic() {
         let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0
-        ThemeMusic.shared.play(quiet ? nil : selectedGame)
+        let menuMusic = activeDesign.flatMap { themes.file($0.music, of: $0) }
+        ThemeMusic.shared.play(quiet ? nil : selectedGame, fallback: quiet ? nil : menuMusic)
     }
 
-    var accent: Color { preferences.accentColor }
+    var accent: Color { activeDesign.map { Color(rgb: $0.accentRGB) } ?? preferences.accentColor }
+
+    // MARK: Themes
+
+    /// Previews keep their themes in a folder of their own.
+    let themes: ThemeLibrary
+    /// The themes on this Mac, made here or installed.
+    @Published var designs: [ThemeDesign] = []
+    @Published var hub = HubState.idle
+
+    /// The theme in use, when it is a made or installed one.
+    var activeDesign: ThemeDesign? { preferences.customTheme.flatMap { id in designs.first { $0.id == id } } }
+
+    /// The animated background drawn: the made theme's, else the built-in theme.
+    var lookStyle: Theme { activeDesign.flatMap { Theme(rawValue: $0.style) } ?? preferences.theme }
     var root: URL? { preferences.gamesFolder.map { URL(fileURLWithPath: $0) } }
     var selectedGame: Game? { games.indices.contains(selected) ? games[selected] : nil }
 
@@ -661,7 +683,13 @@ final class AppModel: ObservableObject {
     private func open(_ urls: [URL]) {
         guard preferences.onboarded else { return }
         for url in urls {
-            if url.isFileURL { openFolder(url) } else if let link = DeepLink(url: url) { follow(link) }
+            if url.isFileURL && url.pathExtension.lowercased() == ThemeDesign.fileExtension {
+                installTheme(url)
+            } else if url.isFileURL {
+                openFolder(url)
+            } else if let link = DeepLink(url: url) {
+                follow(link)
+            }
         }
     }
 
@@ -987,6 +1015,12 @@ final class AppModel: ObservableObject {
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
 
     func previewPhoneConnecting(_ name: String) { phoneConnecting = name }
+
+    func previewThemes(_ shown: [ThemeDesign], active: ThemeDesign?, hub shared: [ThemeDesign]) {
+        designs = shown
+        preferences.customTheme = active?.id
+        hub = .loaded(shared.map { ThemeHub.Theme(design: $0, package: URL(string: "https://example.com/\($0.id).anyps5theme")!, preview: nil) })
+    }
 
     func previewGameControls(_ controls: [PadAction: [String]]) {
         if let game = selectedGame { gameControls[game.id] = controls }
@@ -1441,7 +1475,11 @@ final class AppModel: ObservableObject {
         if next == .trophies { trophyIndex = 0 }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
-        panelInRows = panelInRows || next == .advanced
+        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio
+        if next == .themes {
+            panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
+            loadHub()
+        }
         withAnimation(Motion.overlay) { overlay = next }
         Sounds.shared.play(.select)
     }

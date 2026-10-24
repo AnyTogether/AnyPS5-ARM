@@ -86,6 +86,22 @@ cat > "$app/Contents/Info.plist" <<EOF
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>public.folder</string></array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>AnyPS5 Theme</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Owner</string>
+            <key>LSItemContentTypes</key><array><string>org.anyps5.theme</string></array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>org.anyps5.theme</string>
+            <key>UTTypeDescription</key><string>AnyPS5 Theme</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.archive</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>anyps5theme</string></array></dict>
+        </dict>
     </array>
 </dict>
 </plist>

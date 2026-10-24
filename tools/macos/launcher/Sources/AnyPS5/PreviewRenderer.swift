@@ -52,6 +52,16 @@ enum PreviewRenderer {
                                        .leftStickUp: ["Move forward"], .options: ["Open menu"]])
             model.overlay = .controls; model.panelInRows = true; model.panelRow = 1
         }
+        let neon = ThemeDesign(id: "neon", name: "Neon Nights", author: "Ada", style: 0, deep: "#0A0014", middle: "#4A0E6B", bright: "#FF5EDB", accent: "#FF4FD8")
+        let forest = ThemeDesign(id: "forest", name: "Forest", author: "Utku", style: 1, deep: "#02100A", middle: "#0E4A2C", bright: "#9BFFC4", accent: "#5CEB9F")
+        for (name, overlay, row) in [("themes", Overlay.themes, 4), ("studio", Overlay.studio, 3)] {
+            let palette = overlay == .studio ? neon.palette : forest.palette
+            let tinted = BackgroundView.still(theme: overlay == .studio ? .cosmic : .aurora, palette: palette, width: Int(size.width), height: Int(size.height), time: 260)
+            render(preferences, found, root, tinted, output.appendingPathComponent("\(name).png")) { model in
+                model.previewThemes([forest, neon], active: overlay == .studio ? neon : forest, hub: [neon, ThemeDesign(id: "mono", name: "Monochrome", author: "Lin", style: 2, deep: "#050505", middle: "#2A2A2A", bright: "#E6E6E6", accent: "#FFFFFF")])
+                model.overlay = overlay; model.panelInRows = true; model.panelRow = row
+            }
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
         render(preferences, found, root, still, output.appendingPathComponent("home-phone.png")) { model in model.previewPhone("Pixel 8", latency: 9) }

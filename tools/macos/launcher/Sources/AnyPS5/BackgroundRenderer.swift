@@ -6,17 +6,19 @@ import SwiftUI
 /// window's pixel size: the backgrounds are soft, and the GPU is left to the games.
 struct ThemeBackground: NSViewRepresentable {
     let theme: Theme
+    /// A made theme's own colors in place of the built-in theme's.
+    var palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)?
     var paused: Bool
     var speed: Float = 1
 
     func makeNSView(context: Context) -> BackgroundView {
         let view = BackgroundView()
-        view.configure(theme: theme, paused: paused, speed: speed)
+        view.configure(theme: theme, palette: palette, paused: paused, speed: speed)
         return view
     }
 
     func updateNSView(_ view: BackgroundView, context: Context) {
-        view.configure(theme: theme, paused: paused, speed: speed)
+        view.configure(theme: theme, palette: palette, paused: paused, speed: speed)
     }
 }
 
@@ -65,10 +67,13 @@ final class BackgroundView: MTKView, MTKViewDelegate {
 
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func configure(theme: Theme, paused: Bool, speed: Float) {
-        if theme != self.theme {
-            self.theme = theme
-            palette = theme.palette
+    func configure(theme: Theme, palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)? = nil, paused: Bool, speed: Float) {
+        self.theme = theme
+        let wanted = palette ?? theme.palette
+        if wanted != self.palette {
+            self.palette = wanted
+            // A paused background shows the new colors too.
+            if isPaused { needsDisplay = true }
         }
         self.speed = speed
         if isPaused != paused {
@@ -102,7 +107,7 @@ final class BackgroundView: MTKView, MTKViewDelegate {
     }
 
     /// One frame of a theme, drawn offscreen.
-    static func still(theme: Theme, width: Int, height: Int, time: Float) -> NSImage? {
+    static func still(theme: Theme, palette custom: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)? = nil, width: Int, height: Int, time: Float) -> NSImage? {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
               let library = try? device.makeLibrary(source: shader, options: nil) else { return nil }
         let descriptor = MTLRenderPipelineDescriptor()
@@ -119,7 +124,7 @@ final class BackgroundView: MTKView, MTKViewDelegate {
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return nil }
-        let palette = theme.palette
+        let palette = custom ?? theme.palette
         var uniforms = Uniforms(deep: SIMD4(palette.0, 1), middle: SIMD4(palette.1, 1), bright: SIMD4(palette.2, 1), size: SIMD2(Float(width), Float(height)), time: time, theme: Int32(theme.rawValue))
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)

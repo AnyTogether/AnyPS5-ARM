@@ -10,6 +10,13 @@ struct Backdrop: View {
         let preferences = model.preferences
         let paused = model.running != nil || !model.active || preferences.reducedMotion
         ZStack {
+            if let design = model.activeDesign, let file = model.themes.file(design.background, of: design) {
+                if design.backgroundIsVideo {
+                    LoopingVideo(url: file, paused: paused)
+                } else {
+                    DriftingImage(url: file, animated: !preferences.reducedMotion)
+                }
+            } else {
             switch preferences.backdrop {
             case .image where preferences.backdropFile != nil:
                 DriftingImage(url: URL(fileURLWithPath: preferences.backdropFile!), animated: !preferences.reducedMotion)
@@ -19,8 +26,9 @@ struct Backdrop: View {
                 if let still = stillBackground {
                     Image(nsImage: still).resizable()
                 } else {
-                    ThemeBackground(theme: preferences.theme, paused: paused)
+                    ThemeBackground(theme: model.lookStyle, palette: model.activeDesign?.palette, paused: paused)
                 }
+            }
             }
             if preferences.onboarded, preferences.gameArtwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
                 GameArtwork(url: background, animated: !preferences.reducedMotion)
@@ -30,6 +38,7 @@ struct Backdrop: View {
         }
         .animation(Motion.fade, value: model.selectedGame?.id)
         .animation(Motion.fade, value: preferences.theme)
+        .animation(Motion.fade, value: model.activeDesign?.background)
         .ignoresSafeArea()
     }
 }
@@ -557,6 +566,12 @@ extension AppModel {
         case .controls, .advanced:
             if command == .back || command == .options {
                 backToGameSettings()
+                return true
+            }
+            return panelCommand(command)
+        case .themes, .studio:
+            if command == .back || command == .options {
+                backFromThemes()
                 return true
             }
             return panelCommand(command)

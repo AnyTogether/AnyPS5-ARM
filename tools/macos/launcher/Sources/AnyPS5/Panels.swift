@@ -45,6 +45,8 @@ extension AppModel {
         case .gameSettings: return selectedGame.map { [PanelCategory(id: "game", title: $0.name, symbol: "gamecontroller", rows: gameRows($0))] } ?? []
         case .controls: return selectedGame.map { [PanelCategory(id: "controls", title: $0.name, symbol: "keyboard", rows: controlRows($0))] } ?? []
         case .advanced: return selectedGame.map { [PanelCategory(id: "advanced", title: $0.name, symbol: "slider.horizontal.below.rectangle", rows: advancedRows($0))] } ?? []
+        case .themes: return [PanelCategory(id: "themes", title: T.text(.themes), symbol: "paintpalette", rows: themeRows())]
+        case .studio: return [PanelCategory(id: "studio", title: T.text(.themeStudio), symbol: "wand.and.stars", rows: studioRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -72,13 +74,27 @@ extension AppModel {
 
     private func settingsCategories() -> [PanelCategory] {
         let preferences = self.preferences
+        // The built-in themes, then the made and installed ones.
+        let designs = self.designs
+        let custom = designs.firstIndex { $0.id == preferences.customTheme }
         var appearance: [PanelRow] = [
-            PanelRow(id: "theme", title: T.text(.theme), symbol: "paintpalette", kind: .choice(options: Theme.allCases.map(\.title), selected: preferences.theme.rawValue) { [weak self] index in
-                self?.preferences.theme = Theme(rawValue: index) ?? .cosmic
+            PanelRow(id: "theme", title: T.text(.theme), symbol: "paintpalette", kind: .choice(options: Theme.allCases.map(\.title) + designs.map(\.name), selected: custom.map { Theme.allCases.count + $0 } ?? preferences.theme.rawValue) { [weak self] index in
+                if index < Theme.allCases.count {
+                    self?.preferences.theme = Theme(rawValue: index) ?? .cosmic
+                    self?.preferences.customTheme = nil
+                } else {
+                    self?.preferences.customTheme = designs[index - Theme.allCases.count].id
+                }
             }),
-            PanelRow(id: "accent", title: T.text(.accent), symbol: "circle.lefthalf.filled", kind: .choice(options: AccentColor.allCases.map(\.title), selected: AccentColor.allCases.firstIndex(of: preferences.accent ?? preferences.theme.defaultAccent) ?? 0) { [weak self] index in
+        ]
+        if custom == nil {
+            appearance.append(PanelRow(id: "accent", title: T.text(.accent), symbol: "circle.lefthalf.filled", kind: .choice(options: AccentColor.allCases.map(\.title), selected: AccentColor.allCases.firstIndex(of: preferences.accent ?? preferences.theme.defaultAccent) ?? 0) { [weak self] index in
                 self?.preferences.accent = AccentColor.allCases[index]
-            }),
+            }))
+        }
+        appearance += [
+            PanelRow(id: "themes", title: T.text(.themes), detail: T.text(.themesDetail), symbol: "square.grid.2x2", kind: .action(destructive: false) { [weak self] in self?.open(.themes) }),
+            PanelRow(id: "studio", title: T.text(.themeStudio), detail: T.text(.themeStudioDetail), symbol: "wand.and.stars", kind: .action(destructive: false) { [weak self] in self?.openStudio() }),
             PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
                 let backdrop = [Preferences.Backdrop.theme, .image, .video][index]
                 if backdrop != .theme && (self?.preferences.backdropFile == nil || self?.preferences.backdrop != backdrop) {
