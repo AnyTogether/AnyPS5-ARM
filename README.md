@@ -220,12 +220,16 @@ Games unlocked before phone support need **Update and Play** once, so they carry
 - **Sign-in:** Settings → AnyTogether, with a code sent to your email, or with one tap on your phone if it is already signed in (and the other way round). No password, no sign-up form. On the website you can also add a passkey.
 - **Friends:** add someone by their handle and see who is online and what they are playing.
 - **Play time and trophies:** each session and trophy goes to your account, so friends see them on your profile and hear of a new trophy as you earn it.
-- **Profiles** *(in the next release)*: yours and your friends': games, hours, trophies and points, and the latest trophies with how rare they are. Change your name, bio, country and handle, and who sees your games, trophies, friends and online status.
-- **Messages** *(in the next release)*: chats with a friend and group chats, also on the phone and the website.
-- **Parties and voice** *(in the next release)*: up to eight friends together, with voice that goes straight between you; push-to-talk on ⌥V works over a game, and a ring shows who is speaking. The leader invites, removes and hands the lead over.
-- **Join a friend's game** *(in the next release)*: friends see the game you play as joinable and can start the same one, checked against your game's version first.
-- **Another server** *(in the next release)*: Settings → AnyTogether → Server, for a self-hosted AnyTogether.
+- **Profiles**: yours and your friends': games, hours, trophies and points, and the latest trophies with how rare they are. Change your name, bio, country and handle, and who sees your games, trophies, friends and online status.
+- **Messages**: chats with a friend and group chats, also on the phone and the website.
+- **Parties and voice**: up to eight friends together, with voice that goes straight between you; push-to-talk on ⌥V works over a game, and a ring shows who is speaking. The leader invites, removes and hands the lead over.
+- **Join a friend's game**: friends see the game you play as joinable and can start the same one, checked against your game's version first.
+- **Another server**: Settings → AnyTogether → Server, for a self-hosted AnyTogether.
 - **Discord status:** the game you play shows on Discord (Settings → Behaviour), with or without AnyTogether.
+- **Share play:** while you play, start Share play from the Friends panel. Friends watch in their browser, on the phone or in their launcher, and you can let one play as player 2, 3 or 4: local co-op together from anywhere. Your controller stays player 1.
+- **Activity, leaderboards and notifications:** what friends unlock and play with reactions, boards per game and overall, and a bell in the top bar.
+- **Theme Hub:** Settings → Appearance → Themes lists the themes people share on AnyTogether; Share on the Hub uploads yours.
+- **How did it run?** After a session, one tap sends a compatibility report for the [compatibility list](https://anytogether.kodla.agency/compatibility).
 
 | A friend's profile | Friends |
 |---|---|
