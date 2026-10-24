@@ -370,6 +370,19 @@ void main() {
             ],
           },
         ),
+        ('GET', '/api/v1/users/utku/library') => (
+          200,
+          {
+            'games': [
+              {
+                'titleId': 'PPSA01234',
+                'names': {'en': 'Astro Bot'},
+                'iconUrl': null,
+                'lastPlayedAt': '2026-10-25T10:00:00Z',
+              },
+            ],
+          },
+        ),
         ('GET', '/api/v1/me/party') => (
           200,
           {'party': null, 'invites': <Object>[], 'requests': <Object>[]},
@@ -387,6 +400,10 @@ void main() {
     });
 
     Discover discover() => hub.discover;
+
+    /// The last request sent with [method]: the phone's own reads at start-up are all GETs.
+    (String, String, Map<String, dynamic>?) lastOf(String method) =>
+        server.requests.lastWhere((r) => r.$1 == method);
 
     test('the board, a page at a time, and its games', () async {
       await discover().loadBoard();
@@ -425,6 +442,26 @@ void main() {
       },
     );
 
+    test('a screen gone hides only what it showed', () async {
+      final first = Object();
+      final second = Object();
+      discover().show(DiscoverView.board, by: first);
+      discover().show(DiscoverView.live, by: second);
+      discover().hide(first);
+      expect(discover().showing, DiscoverView.live);
+      discover().hide(second);
+      expect(discover().showing, isNull);
+    });
+
+    test('the reader\'s games to post for', () async {
+      final games = await discover().myGames();
+      expect(
+        server.requests.map((r) => r.$2),
+        contains('/api/v1/users/utku/library'),
+      );
+      expect(games.single.name('en'), 'Astro Bot');
+    });
+
     test(
       'the board reads itself again when it changes, only while shown',
       () async {
@@ -450,17 +487,13 @@ void main() {
     test('"I\'m in", then taken back', () async {
       await discover().loadBoard();
       await discover().imIn('l1');
-      expect(server.requests.last.$1, 'POST');
+      expect(lastOf('POST').$2, '/api/v1/lfg/l1/requests');
       expect(
         discover().board.firstWhere((p) => p.id == 'l1').myRequest?.status,
         LfgAnswer.pending,
       );
       await discover().takeBack('l1');
-      expect(server.requests.last, (
-        'DELETE',
-        '/api/v1/lfg/l1/requests/me',
-        null,
-      ));
+      expect(lastOf('DELETE'), ('DELETE', '/api/v1/lfg/l1/requests/me', null));
       expect(
         discover().board.firstWhere((p) => p.id == 'l1').myRequest,
         isNull,
@@ -505,7 +538,7 @@ void main() {
       expect(discover().mine.single.requests.single.invite?.id, 'p1');
       expect(discover().waiting, 0);
       await discover().close('m1');
-      expect(server.requests.last, ('DELETE', '/api/v1/lfg/m1', null));
+      expect(lastOf('DELETE'), ('DELETE', '/api/v1/lfg/m1', null));
       expect(discover().mine.single.status, LfgStatus.closed);
     });
 
@@ -536,8 +569,8 @@ void main() {
         ),
       );
       expect(post.id, 'm2');
-      expect(server.requests.last.$3?['purpose'], 'coop');
-      expect(server.requests.last.$3?['slots'], 2);
+      expect(lastOf('POST').$3?['purpose'], 'coop');
+      expect(lastOf('POST').$3?['slots'], 2);
       expect(discover().mine.first.id, 'm2');
     });
 
@@ -546,7 +579,7 @@ void main() {
       expect(discover().liveShares.single.id, 's1');
       expect(discover().publicParties.single.id, 'p1');
       await discover().askParty('p1');
-      expect(server.requests.last.$2, '/api/v1/parties/p1/requests');
+      expect(lastOf('POST').$2, '/api/v1/parties/p1/requests');
       expect(discover().publicParties.single.requested, isTrue);
       server.push('party.request_answered', {
         'partyId': 'p1',
@@ -554,7 +587,7 @@ void main() {
       });
       await until(() => !discover().publicParties.single.requested);
       await discover().askShare('s1');
-      expect(server.requests.last.$2, '/api/v1/share-plays/s1/requests');
+      expect(lastOf('POST').$2, '/api/v1/share-plays/s1/requests');
       expect(discover().liveShares.single.requested, isTrue);
     });
 
@@ -583,13 +616,13 @@ void main() {
       await discover().loadDiscovery();
       expect(discover().discovery?.discoverable, isFalse);
       await discover().setDiscoverable(true);
-      expect(server.requests.last.$3, {'discoverable': true});
+      expect(lastOf('PATCH').$3, {'discoverable': true});
       expect(discover().discovery?.chosen, isTrue);
       await discover().setDiscoverable(null);
-      expect(server.requests.last.$3, {'discoverable': null});
+      expect(lastOf('PATCH').$3, {'discoverable': null});
       expect(discover().discovery?.chosen, isNull);
       await discover().setLanguages(['tr', 'en']);
-      expect(server.requests.last.$3, {
+      expect(lastOf('PATCH').$3, {
         'languages': ['tr', 'en'],
       });
       expect(discover().discovery?.languages, ['tr', 'en']);

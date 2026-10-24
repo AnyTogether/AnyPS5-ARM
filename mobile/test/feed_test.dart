@@ -379,6 +379,7 @@ void main() {
         'Activity',
         'Messages',
         'Party',
+        'Find players',
         'Leaderboards',
       ]) {
         final box = tester.getRect(find.text(text).first);

@@ -616,8 +616,9 @@ class Discover extends ChangeNotifier {
       .fold(0, (sum, post) => sum + post.waiting);
 
   /// Puts [view] on screen (null: none), reads it and watches what it shows.
-  void show(DiscoverView? view) {
+  void show(DiscoverView? view, {Object? by}) {
     showing = view;
+    _shownBy = view == null ? null : by;
     _watch();
     final load = switch (view) {
       DiscoverView.board => loadBoard(),
@@ -627,6 +628,27 @@ class Discover extends ChangeNotifier {
       null => null,
     };
     load?.catchError((_) {});
+  }
+
+  Object? _shownBy;
+
+  /// The screen [by] is gone: nothing is on screen, unless another one showed something since.
+  void hide(Object by) {
+    if (identical(_shownBy, by)) show(null);
+  }
+
+  /// The reader's own games, the most recently played first, to post for.
+  Future<List<GameRef>> myGames() async {
+    final handle = account.user?.handle;
+    if (handle == null) return const [];
+    final json = await account.call(
+      'GET',
+      'users/${Uri.encodeComponent(handle)}/library',
+    );
+    return [
+      for (final game in (json['games'] as List? ?? const []))
+        GameRef.fromJson(game as Map<String, dynamic>),
+    ];
   }
 
   void _watch() => socket.watchTopics(this, switch (showing) {
