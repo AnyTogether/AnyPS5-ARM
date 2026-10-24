@@ -774,6 +774,42 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: Remote Play
+
+    let remotePlay = RemotePlay()
+    /// The running game has a window to send.
+    private var gameWindowShown = false
+
+    /// Sends the running game to the phones that ask for it, at the largest size one asked for
+    /// up to 720p; stops when none asks or no game plays.
+    func updateRemotePlay() {
+        guard let remote else { return }
+        let wishes = remote.streamWishes
+        guard !wishes.isEmpty else {
+            remotePlay.stop()
+            return
+        }
+        guard let pid = running?.app.processIdentifier, gameWindowShown else {
+            remotePlay.stop()
+            for wish in wishes { remote.tell(.streaming(state: "noGame"), deviceID: wish.deviceID) }
+            return
+        }
+        // The phone's long side across: the size it asked for, no more than 1280 x 720.
+        let height = min(720, wishes.map { min($0.width, $0.height) }.max() ?? 720)
+        let width = min(1280, wishes.map { max($0.width, $0.height) }.max() ?? 1280)
+        Task { @MainActor in
+            do {
+                try await self.remotePlay.start(pid: pid, width: width, height: height) { [weak remote] packets in remote?.sendStream(packets) }
+                for wish in wishes { remote.tell(.streaming(state: "on"), deviceID: wish.deviceID) }
+            } catch RemotePlay.Failure.noPermission {
+                for wish in wishes { remote.tell(.streaming(state: "noPermission"), deviceID: wish.deviceID) }
+                TrophyBanner.shared.notice(T.text(.remotePlayPermissionTitle), detail: T.text(.remotePlayNeedsPermission), symbol: "iphone.gen3", sounds: self.preferences.sounds)
+            } catch {
+                for wish in wishes { remote.tell(.streaming(state: "noGame"), deviceID: wish.deviceID) }
+            }
+        }
+    }
+
     // MARK: Clips
 
     let clipRecorder = ClipRecorder()
@@ -866,6 +902,8 @@ final class AppModel: ObservableObject {
             if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
             if let game = running?.game { tellLowPower(about: game) }
             startClips(for: app)
+            gameWindowShown = true
+            updateRemotePlay()
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
         }
@@ -908,6 +946,8 @@ final class AppModel: ObservableObject {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
         clipRecorder.stop()
+        gameWindowShown = false
+        updateRemotePlay()
         syncSaves(running.game) {}
         discord.clear()
         loadTrophies(running.game, again: true)
@@ -970,7 +1010,8 @@ final class AppModel: ObservableObject {
             } },
             players: { Task { @MainActor in
                 withAnimation(Motion.overlay) { self.phonePlayers = self.remote?.phonePlayers ?? [:] }
-            } })
+            } },
+            streamWishes: { Task { @MainActor in self.updateRemotePlay() } })
         // Whatever the launcher shows changes the library the phone shows.
         librarySink = objectWillChange.debounce(for: .milliseconds(150), scheduler: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.tellPhone() }
@@ -1139,6 +1180,8 @@ final class AppModel: ObservableObject {
                 remote.publish(.art(id: id, icon: RemoteArt.jpeg(game.icon, longestSide: RemoteArt.iconSide),
                                     background: RemoteArt.jpeg(game.background, longestSide: RemoteArt.backgroundSide)))
             }
+        case .keyFrame:
+            remotePlay.wantKey()
         case .command("capture"):
             // Create on the phone's pad: a clip of the game, the game staying in front.
             saveClip()

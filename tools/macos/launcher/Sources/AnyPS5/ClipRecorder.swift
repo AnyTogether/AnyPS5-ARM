@@ -84,7 +84,7 @@ final class ClipRecorder {
         try await output.encoder.save(to: file)
     }
 
-    private static func mainWindow(of pid: pid_t, in content: SCShareableContent) -> SCWindow? {
+    static func mainWindow(of pid: pid_t, in content: SCShareableContent) -> SCWindow? {
         content.windows.filter { $0.owningApplication?.processID == pid && $0.frame.height > 200 }
             .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }

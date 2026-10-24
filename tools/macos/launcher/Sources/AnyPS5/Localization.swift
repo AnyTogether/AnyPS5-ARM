@@ -53,7 +53,7 @@ enum T {
         case themeCosmic, themeAurora, themeSunset, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
-        case themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
+        case remotePlayNeedsPermission, remotePlayPermissionTitle, themes, themesDetail, themeStudio, themeStudioDetail, themeStudioSubtitle, themesOnMac, themesHub, hubLoading, hubFailed, hubEmpty, installThemeFile, themeBy, themeActive, themeInstalled, themeDownloading, themeInstallFailed, themeSaveFailed, themeSaved, themeName, themeAuthor, themeMotion, themeHue, themeHighlight, themeDepth, themeAccent, themeBackground, themeNoFile, themeRemoveBackground, themeMusic, themeMusicDetail, themeRemoveMusic, exportTheme, exportThemeDetail, shareTheme, shareThemeDetail, shareThemeHint, themeShareNext, deleteTheme, newThemeName
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
@@ -66,6 +66,8 @@ enum T {
     }
 
     static let turkish: [Key: String] = [
+        .remotePlayPermissionTitle: "Remote Play için izin gerekli",
+        .remotePlayNeedsPermission: "Oyunu telefona göndermek için Sistem Ayarları > Gizlilik > Ekran Kaydı'nda AnyPS5'e izin ver.",
         .themes: "Temalar",
         .themesDetail: "Seninkiler ve paylaşılanlar",
         .themeStudio: "Tema Stüdyosu",
@@ -412,6 +414,8 @@ enum T {
     ]
 
     static let english: [Key: String] = [
+        .remotePlayPermissionTitle: "Remote Play needs a permission",
+        .remotePlayNeedsPermission: "To send the game to the phone, allow AnyPS5 in System Settings > Privacy > Screen Recording.",
         .themes: "Themes",
         .themesDetail: "Yours and the ones people share",
         .themeStudio: "Theme Studio",
