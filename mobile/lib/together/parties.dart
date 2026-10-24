@@ -9,8 +9,38 @@ import 'together_socket.dart';
 /// At most eight in a party: its voice is a mesh, each phone talking to every other.
 const maxPartySize = 8;
 
+/// How a public party or share play lets people in: they ask first, or anyone walks in.
+enum PublicJoin { request, open }
+
+PublicJoin publicJoinFrom(Object? value) =>
+    value == 'open' ? PublicJoin.open : PublicJoin.request;
+
+/// A party in the public list, as its leader set it: how people get in, and the game and
+/// language it is about (null: any).
+class PartyListing {
+  const PartyListing({required this.join, this.titleId, this.language});
+
+  static PartyListing? fromJson(Object? json) => json is Map<String, dynamic>
+      ? PartyListing(
+          join: publicJoinFrom(json['join']),
+          titleId: json['titleId'] as String?,
+          language: json['language'] as String?,
+        )
+      : null;
+
+  final PublicJoin join;
+  final String? titleId;
+  final String? language;
+
+  Map<String, dynamic> toJson() => {
+    'join': join.name,
+    'titleId': titleId,
+    'language': language,
+  };
+}
+
 /// The party someone is in: who leads it, who is in it and who is invited, whether friends may
-/// walk in, and its voice call while one runs.
+/// walk in, its public listing and who asked to join, and its voice call while one runs.
 class Party {
   const Party({
     required this.id,
@@ -21,6 +51,8 @@ class Party {
     required this.callId,
     required this.inCall,
     this.muted = const {},
+    this.listing,
+    this.requests = const [],
   });
 
   factory Party.fromJson(Map<String, dynamic> json) {
@@ -47,6 +79,11 @@ class Party {
                 id as String,
             }
           : const {},
+      listing: PartyListing.fromJson(json['public']),
+      requests: [
+        for (final person in (json['requests'] as List? ?? const []))
+          Person.fromJson(person as Map<String, dynamic>),
+      ],
     );
   }
 
@@ -63,6 +100,12 @@ class Party {
   /// Who in the call muted themselves; everyone sees it.
   final Set<String> muted;
 
+  /// In the public list, and how; null when it is not.
+  final PartyListing? listing;
+
+  /// People who asked to join (members see them, the leader answers).
+  final List<Person> requests;
+
   bool get full => members.length >= maxPartySize;
 
   bool has(String userId) => members.any((person) => person.id == userId);
@@ -74,6 +117,7 @@ class Party {
     List<Person>? invited,
     String? Function()? callId,
     Set<String>? inCall,
+    List<Person>? requests,
   }) => Party(
     id: id,
     leaderId: leaderId ?? this.leaderId,
@@ -83,6 +127,8 @@ class Party {
     callId: callId == null ? this.callId : callId(),
     inCall: inCall ?? this.inCall,
     muted: muted,
+    listing: listing,
+    requests: requests ?? this.requests,
   );
 }
 
@@ -116,6 +162,9 @@ class Parties extends ChangeNotifier {
 
   Party? party;
   List<PartyInvite> invites = const [];
+
+  /// Public parties this phone asked to join, waiting for their leader.
+  Set<String> asked = const {};
   bool loaded = false;
 
   /// Set when the leader took this phone out of the party, until the next party.
@@ -132,6 +181,11 @@ class Parties extends ChangeNotifier {
       for (final invite in (json['invites'] as List? ?? const []))
         PartyInvite.fromJson(invite as Map<String, dynamic>),
     ];
+    asked = {
+      for (final request in (json['requests'] as List? ?? const []))
+        if (request is Map && request['partyId'] is String)
+          request['partyId'] as String,
+    };
     loaded = true;
     notifyListeners();
   }
@@ -186,6 +240,30 @@ class Parties extends ChangeNotifier {
     );
   }
 
+  /// Leader only: lists the party in public (anyone may ask, or walk in), or takes it off the
+  /// list with null.
+  Future<void> setPublic(PartyListing? listing) async {
+    final current = party;
+    if (current == null) return;
+    _keep(
+      await account.call('PATCH', 'parties/${current.id}', {
+        'public': listing?.toJson(),
+      }),
+    );
+  }
+
+  /// Leader only: lets someone who asked in (an invite they join with), or says no.
+  Future<void> answerRequest(String userId, {required bool accept}) async {
+    final current = party;
+    if (current == null) return;
+    _keep(
+      await account.call(
+        'POST',
+        'parties/${current.id}/requests/$userId/${accept ? 'accept' : 'decline'}',
+      ),
+    );
+  }
+
   /// Leader only: someone out of the party.
   Future<void> kick(String userId) async {
     final current = party;
@@ -204,6 +282,7 @@ class Parties extends ChangeNotifier {
   void clear() {
     party = null;
     invites = const [];
+    asked = const {};
     loaded = false;
     kicked = false;
     notifyListeners();
@@ -220,6 +299,9 @@ class Parties extends ChangeNotifier {
     switch (event.type) {
       case 'live.ready':
         refresh().catchError((_) {});
+      case 'party.request_answered':
+        asked = {...asked}..remove(data['partyId']);
+        notifyListeners();
       case 'party.invite':
         final invite = PartyInvite.fromJson(data);
         invites = [
@@ -263,6 +345,24 @@ class Parties extends ChangeNotifier {
         notifyListeners();
       case 'party.ended':
         party = null;
+        notifyListeners();
+      case 'party.request':
+        final from = data['from'];
+        if (from is! Map<String, dynamic>) return;
+        final person = Person.fromJson(from);
+        party = current.copyWith(
+          requests: [
+            ...current.requests.where((p) => p.id != person.id),
+            person,
+          ],
+        );
+        notifyListeners();
+      case 'party.request_cancelled':
+        party = current.copyWith(
+          requests: current.requests
+              .where((p) => p.id != data['userId'])
+              .toList(),
+        );
         notifyListeners();
       case 'call.joined':
         party = current.copyWith(

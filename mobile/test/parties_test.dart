@@ -18,6 +18,8 @@ Map<String, dynamic> party(
   String leader = 'me',
   List<String> invited = const [],
   Map<String, dynamic>? call,
+  Map<String, dynamic>? public,
+  List<String>? requests,
 }) => {
   'id': id,
   'leaderId': leader,
@@ -28,6 +30,10 @@ Map<String, dynamic> party(
   ],
   'invited': [for (final person in invited) card(person)],
   'call': call,
+  'public': public,
+  'requests': ?(requests == null
+      ? null
+      : [for (final person in requests) card(person)]),
   'createdAt': '2026-10-24T12:00:00Z',
 };
 
@@ -54,7 +60,28 @@ void main() {
                 'invitedAt': '2026-10-24T12:00:00Z',
               },
             ],
+            'requests': [
+              {'partyId': 'p7', 'askedAt': '2026-10-24T12:00:00Z'},
+            ],
           },
+        ),
+        ('PATCH', '/api/v1/parties/p1') => (
+          200,
+          party(
+            'p1',
+            public: body?['public'] == null
+                ? null
+                : {
+                    'join': (body!['public'] as Map)['join'],
+                    'titleId': (body['public'] as Map)['titleId'],
+                    'language': (body['public'] as Map)['language'],
+                  },
+            requests: const [],
+          ),
+        ),
+        ('POST', '/api/v1/parties/p1/requests/ali/accept') => (
+          200,
+          party('p1', invited: ['ali'], requests: const []),
         ),
         ('POST', '/api/v1/parties') => (201, party('p1')),
         ('POST', '/api/v1/parties/p1/invites') => (
@@ -132,6 +159,51 @@ void main() {
       });
       await until(() => parties().party == null);
       expect(parties().kicked, isTrue);
+    });
+
+    test('the public parties this phone asked to join', () async {
+      await until(() => parties().loaded);
+      expect(parties().asked, {'p7'});
+      server.push('party.request_answered', {
+        'partyId': 'p7',
+        'answer': 'declined',
+      });
+      await until(() => parties().asked.isEmpty);
+    });
+
+    test('the leader lists the party in public and lets someone in', () async {
+      await until(() => parties().loaded);
+      await parties().create();
+      await parties().setPublic(
+        const PartyListing(
+          join: PublicJoin.open,
+          titleId: 'PPSA01234',
+          language: 'tr',
+        ),
+      );
+      expect(server.requests.last.$3, {
+        'public': {'join': 'open', 'titleId': 'PPSA01234', 'language': 'tr'},
+      });
+      expect(parties().party?.listing?.join, PublicJoin.open);
+      expect(parties().party?.listing?.language, 'tr');
+      server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
+      await until(() => parties().party!.requests.length == 1);
+      // Told twice (the event, then the party as it is now): still one.
+      server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
+      server.push('party.request', {'partyId': 'p1', 'from': card('can')});
+      await until(() => parties().party!.requests.length == 2);
+      server.push('party.request_cancelled', {
+        'partyId': 'p1',
+        'userId': 'can',
+      });
+      await until(() => parties().party!.requests.length == 1);
+      await parties().answerRequest('ali', accept: true);
+      expect(server.requests.last.$2, '/api/v1/parties/p1/requests/ali/accept');
+      expect(parties().party?.requests, isEmpty);
+      expect(parties().party?.invited.single.id, 'ali');
+      await parties().setPublic(null);
+      expect(server.requests.last.$3, {'public': null});
+      expect(parties().party?.listing, isNull);
     });
 
     test('leaving tells the server', () async {
