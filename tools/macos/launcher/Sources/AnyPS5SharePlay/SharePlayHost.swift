@@ -6,9 +6,11 @@ import WebRTC
 
 /// The host's side of share play: the captured game as one WebRTC video track (H.264 on the
 /// Mac's media engine through WebRTC's VideoToolbox encoder, 720p60, following WebRTC's
-/// bandwidth estimate), sent to each viewer on a peer connection of its own; the game's sound on
-/// a lossy data channel ("audio"); and each viewer's pad on another ("pad"), handed to `onPad`
-/// (SharePadRouter decides whether it reaches the game). The host always makes the offers.
+/// bandwidth estimate), sent to each viewer on a peer connection of its own; the game's sound as
+/// an Opus audio track to viewers who ask for it on the "audio" channel, as PCM on that lossy
+/// channel to the rest (ShareAudioCodec); and each viewer's pad on another channel ("pad"), handed
+/// to `onPad` (SharePadRouter decides whether it reaches the game). The host always makes the
+/// offers.
 @MainActor
 public final class SharePlayHost: NSObject {
     /// How a viewer's connection is doing, for the host's list.
@@ -22,6 +24,10 @@ public final class SharePlayHost: NSObject {
         public var relayed: Bool?
         public var framesPerSecond: Double?
         public var frameHeight: Int?
+        /// How the game's sound reaches them.
+        public var audio: ShareAudioCodec = .pcm
+        /// The Opus track's rate, bit/s, once measured.
+        public var audioRate: Double?
 
         public init(state: RTCPeerConnectionState, roundTrip: Double? = nil, sendRate: Double? = nil, relayed: Bool? = nil, framesPerSecond: Double? = nil, frameHeight: Int? = nil) {
             self.state = state
@@ -40,6 +46,9 @@ public final class SharePlayHost: NSObject {
         var pad: RTCDataChannel?
         var audio: RTCDataChannel?
         var sender: RTCRtpSender?
+        /// The Opus track's sender, once the viewer asked for it.
+        var audioSender: RTCRtpSender?
+        var audioBytes: (bytes: Double, at: Double)?
         var queued: [RTCIceCandidate] = []
         var link = Link(state: .new)
         weak var host: SharePlayHost?
@@ -78,8 +87,17 @@ public final class SharePlayHost: NSObject {
             if dataChannel.label == ShareWebRTC.audioLabel { host?.audioChannels(changed: self, channel: dataChannel) }
         }
 
-        /// A viewer's pad packet, as it comes (WebRTC's own thread): straight on, no hop.
+        /// A viewer's pad packet, as it comes (WebRTC's own thread): straight on, no hop. A text
+        /// message on the sound channel is the viewer's hello.
         func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+            if dataChannel.label == ShareWebRTC.audioLabel, !buffer.isBinary,
+               let hello = String(data: buffer.data, encoding: .utf8).flatMap(ShareAudioHello.init(text:)) {
+                Task { @MainActor [weak self] in
+                    guard let self, let host = self.host else { return }
+                    host.hello(hello, from: self)
+                }
+                return
+            }
             guard dataChannel.label == ShareWebRTC.padLabel, buffer.isBinary else { return }
             host?.onPad(userId, buffer.data)
         }
@@ -104,8 +122,12 @@ public final class SharePlayHost: NSObject {
     /// Every viewer's connection now, by user ID.
     public var links: [String: Link] { peers.mapValues(\.link) }
 
+    /// Whether viewers who ask get the Opus track; off, everyone gets PCM as from hosts before it.
+    private let opus: Bool
+
     public init(iceServers: [TogetherIceServer], send: @escaping (_ to: String, _ device: String, _ signal: ShareSignal) -> Void,
-                onPad: @escaping @Sendable (_ userId: String, _ packet: Data) -> Void, changed: @escaping () -> Void = {}) {
+                onPad: @escaping @Sendable (_ userId: String, _ packet: Data) -> Void, changed: @escaping () -> Void = {}, opus: Bool = true) {
+        self.opus = opus
         configuration = ShareWebRTC.configuration(iceServers)
         self.send = send
         self.onPad = onPad
@@ -128,11 +150,21 @@ public final class SharePlayHost: NSObject {
         video.capturer(capturer, didCapture: frame)
     }
 
-    /// The game's sound as StreamPacket audio, to every viewer whose sound channel is open; a
-    /// viewer whose channel is backed up skips it rather than fall behind.
+    /// The game's sound as StreamPacket audio (16-bit stereo at 48 kHz), from the capture's
+    /// thread: into the Opus track while any viewer takes it, and as it is to every PCM viewer
+    /// whose sound channel is open; a viewer whose channel is backed up skips it rather than fall
+    /// behind.
     public nonisolated func push(sound packet: Data) {
+        if ShareWebRTC.audioDevice.isRecording, let audio = StreamPacket.Audio(packet), audio.payload.count >= 4 {
+            audio.payload.withUnsafeBytes { raw in
+                guard let samples = raw.bindMemory(to: Int16.self).baseAddress else { return }
+                ShareWebRTC.audioDevice.record(samples, frames: UInt32(raw.count / 4))
+            }
+        }
+        let channels = sound.value
+        guard !channels.isEmpty else { return }
         let buffer = RTCDataBuffer(data: packet, isBinary: true)
-        for channel in sound.value.values where channel.readyState == .open && channel.bufferedAmount < 64 * 1024 {
+        for channel in channels.values where channel.readyState == .open && channel.bufferedAmount < 64 * 1024 {
             channel.sendData(buffer)
         }
     }
@@ -197,11 +229,16 @@ public final class SharePlayHost: NSObject {
             }
         case .answer(let sdp):
             guard let peer = peers[userId], peer.device == device, peer.connection.signalingState == .haveLocalOffer else { return }
-            let tuned = SharePlayRoster.tuneVideo(sdp, startKbps: encoding.startKbps, maxKbps: encoding.maxBitrate / 1000)
+            let video = SharePlayRoster.tuneVideo(sdp, startKbps: encoding.startKbps, maxKbps: encoding.maxBitrate / 1000)
+            let tuned = ShareAudioSDP.stereoOpus(video, kbps: ShareAudioSDP.kbps, frameMs: ShareAudioSDP.frameMs)
             do {
                 try await peer.connection.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: tuned))
             } catch {
                 try? await peer.connection.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp))
+            }
+            // The Opus track taken: no more PCM for this viewer.
+            if peer.audioSender != nil, peer.connection.signalingState == .stable, ShareAudioSDP.takesOpus(sdp) {
+                setAudio(.opus, for: peer)
             }
             await flush(peer)
         case .candidate(let sdp, let mid, let index):
@@ -260,7 +297,37 @@ public final class SharePlayHost: NSObject {
 
     fileprivate nonisolated func audioChannels(changed peer: Peer, channel: RTCDataChannel) {
         let userId = peer.userId
-        sound.withLock { $0[userId] = channel.readyState == .open ? channel : nil }
+        let open = channel.readyState == .open
+        Task { @MainActor [weak self] in
+            guard let self, let current = self.peers[userId], current === peer else { return }
+            self.sound.withLock { $0[userId] = open && current.link.audio == .pcm ? channel : nil }
+        }
+    }
+
+    /// A viewer's hello: the Opus track added to their connection and offered, if they take it.
+    fileprivate func hello(_ hello: ShareAudioHello, from peer: Peer) {
+        guard opus, peers[peer.userId] === peer, hello.chosen == .opus, peer.audioSender == nil else { return }
+        let initial = RTCRtpTransceiverInit()
+        initial.direction = .sendOnly
+        // A stream of its own: in the picture's, the viewer's WebRTC would hold the picture back to
+        // keep lips in sync whenever the sound's jitter buffer grows, and the picture's delay is
+        // what a viewer playing along feels.
+        initial.streamIds = ["game-sound"]
+        guard let transceiver = peer.connection.addTransceiver(with: ShareWebRTC.gameAudio, init: initial) else { return }
+        try? transceiver.setCodecPreferences(ShareWebRTC.audioCodecs(), error: ())
+        peer.audioSender = transceiver.sender
+        Task { await offer(peer) }
+    }
+
+    private func setAudio(_ codec: ShareAudioCodec, for peer: Peer) {
+        guard peer.link.audio != codec else { return }
+        peer.link.audio = codec
+        if codec == .opus {
+            sound.withLock { $0[peer.userId] = nil }
+        } else if let channel = peer.audio, channel.readyState == .open {
+            sound.withLock { $0[peer.userId] = channel }
+        }
+        changed()
     }
 
     /// Each viewer's stream as the number of viewers allows (720p60, or 540p30 from three on).
@@ -287,6 +354,7 @@ public final class SharePlayHost: NSObject {
         for peer in peers.values where peer.link.state == .connected {
             peer.connection.statistics { [weak self] report in
                 var link = Link(state: .connected)
+                var audioBytes: (bytes: Double?, at: Double)?
                 var pairs: [String: RTCStatistics] = [:]
                 var candidates: [String: RTCStatistics] = [:]
                 for statistic in report.statistics.values {
@@ -296,6 +364,8 @@ public final class SharePlayHost: NSObject {
                     case "outbound-rtp" where (statistic.values["kind"] as? String) == "video":
                         link.framesPerSecond = (statistic.values["framesPerSecond"] as? NSNumber)?.doubleValue
                         link.frameHeight = (statistic.values["frameHeight"] as? NSNumber)?.intValue
+                    case "outbound-rtp" where (statistic.values["kind"] as? String) == "audio":
+                        audioBytes = ((statistic.values["bytesSent"] as? NSNumber)?.doubleValue, statistic.timestamp_us / 1_000_000)
                     default: break
                     }
                 }
@@ -308,6 +378,13 @@ public final class SharePlayHost: NSObject {
                 Task { @MainActor [weak self] in
                     guard let self, let current = self.peers[peer.userId], current === peer else { return }
                     link.state = current.link.state
+                    link.audio = current.link.audio
+                    if let sent = audioBytes, let bytes = sent.bytes {
+                        if let before = current.audioBytes, sent.at > before.at {
+                            link.audioRate = (bytes - before.bytes) * 8 / (sent.at - before.at)
+                        }
+                        current.audioBytes = (bytes, sent.at)
+                    }
                     current.link = link
                     self.changed()
                 }

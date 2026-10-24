@@ -14,8 +14,10 @@ let package = Package(
                 cSettings: [.unsafeFlags(["-w"])]),
         // Game folders, SELF unwrapping, patches and the conversion into a Mac bundle: no UI.
         .target(name: "AnyPS5Core", dependencies: ["CAtrac9"], path: "Sources/AnyPS5Core"),
+        // Share play's audio device for WebRTC: the game's sound in, the received sound out.
+        .target(name: "CShareAudio", dependencies: [.product(name: "WebRTC", package: "WebRTC")], path: "Sources/CShareAudio"),
         // Share play over WebRTC: the host's stream to each viewer and a viewer's side of it.
-        .target(name: "AnyPS5SharePlay", dependencies: ["AnyPS5Core", .product(name: "WebRTC", package: "WebRTC")], path: "Sources/AnyPS5SharePlay"),
+        .target(name: "AnyPS5SharePlay", dependencies: ["AnyPS5Core", "CShareAudio", .product(name: "WebRTC", package: "WebRTC")], path: "Sources/AnyPS5SharePlay"),
         // The PS5-style launcher.
         .executableTarget(name: "AnyPS5", dependencies: ["AnyPS5Core", "AnyPS5SharePlay", .product(name: "WebRTC", package: "WebRTC")], path: "Sources/AnyPS5"),
         // The same pipeline from the command line, for scripted checks.

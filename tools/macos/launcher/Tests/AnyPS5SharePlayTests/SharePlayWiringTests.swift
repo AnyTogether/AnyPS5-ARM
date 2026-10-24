@@ -84,7 +84,8 @@ final class SharePlayWiringTests: XCTestCase {
             XCTAssertEqual(to, "host")
             XCTAssertEqual(device, "mac")
             Task { @MainActor in host.receive(signal, from: "viewer", device: "web") }
-        }, onSound: { packet in sounds.withLock { $0.append(packet) } }, onPadOutput: { packet in outputs.withLock { $0.append(packet) } })
+        }, onSound: { packet in sounds.withLock { $0.append(packet) } }, onPadOutput: { packet in outputs.withLock { $0.append(packet) } },
+           audio: [] /* a viewer from before the Opus track: PCM on the channel (SharePlayOpusTests has the track) */)
         defer {
             watcher.close()
             host.close()
