@@ -22,7 +22,7 @@ phone protocol so any launcher can talk to the phone app.
 | Need | macOS launcher | Windows launcher | Linux launcher | Phone | Web |
 |---|---|---|---|---|---|
 | Language | Swift | Rust | Rust | Dart (Flutter) | TypeScript |
-| AnyTogether client | `AnyPS5Core/Together` | `anytogether` crate | `anytogether` crate | `mobile/lib/together` | `apps/web` |
+| AnyTogether client | `AnyPS5Core/Together` | written by the port, from the contracts | the same | `mobile/lib/together` | `apps/web` |
 | Sign-in | Apple native, `ASWebAuthenticationSession` | default browser + loopback | default browser + loopback | native Apple/Google, Discord | redirects |
 | Secure token store | Keychain | Credential Manager | Secret Service (GNOME Keyring, KWallet) | Keychain / Keystore | HttpOnly cookie |
 | WebRTC | Google WebRTC framework | `webrtc-rs` or `libwebrtc` bindings | the same | `flutter_webrtc` | the browser |
@@ -54,8 +54,9 @@ library) to offer the phone pad and share play's "play together".
 | Themes and the Hub | ✓ | ✓ (once the launcher reads `.anyps5theme`) | ✓ | wears the launcher's theme | ✓ (profiles) |
 | Compatibility reports | ✓ | ✓ | ✓ | - | - |
 
-A release of AnyTogether is "done" only when the launchers that exist can use it; the Rust crate
-is built and tested in the same CI as the server.
+The contracts (OpenAPI document, gateway and signalling messages, pad packet, phone protocol) are
+versioned and published, so a launcher can connect without our help; a breaking change goes to a
+new version while the old one keeps working.
 
 ## 12.4 The phone protocol
 

@@ -54,9 +54,10 @@ App target (`Sources/AnyPS5/`):
 
 ## 7.2 The Windows and Linux launcher (Rust)
 
-The port of this launcher to Windows and Linux is written in Rust. It gets AnyTogether through a
-Rust crate we publish, `anytogether` (MIT or Apache-2.0, so any launcher may use it), kept in the
-AnyTogether repository under `clients/rust`:
+The port of this launcher to Windows and Linux is written in Rust, and its maintainer connects it
+to AnyTogether when porting, from the published OpenAPI document, the gateway protocol and
+[Platforms](12-platforms.md); nothing on the server is specific to macOS. A client there would
+likely have these parts (a starter crate could be offered later):
 
 | Module | Job |
 |---|---|
@@ -67,7 +68,7 @@ AnyTogether repository under `clients/rust`:
 | `call` | WebRTC peer connections with `webrtc-rs` (pure Rust) or LiveKit's `libwebrtc` bindings (Google's WebRTC, with hardware codecs), signalling through `socket` |
 | `share_play` | takes encoded H.264 frames and PCM sound from the launcher's capture; delivers pad packets from the `pad` data channel to a callback |
 
-What the launcher itself provides (platform code, not in the crate):
+What the launcher provides with platform code:
 
 | Need | Windows | Linux |
 |---|---|---|

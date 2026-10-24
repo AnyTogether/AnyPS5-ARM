@@ -86,8 +86,8 @@ to the website (each its own application in its own container).
 
 The one place that changes stored data; stateless. TypeScript because the website is TypeScript
 too, so schemas (Zod) are written once and the OpenAPI document generated from them gives typed
-clients in **Swift** (macOS launcher), **Rust** (Windows/Linux launcher), **Dart** (phone) and
-**TypeScript** (web). Hono because it is small, web-standard and portable (Node today, Bun or
+clients in **Swift** (macOS launcher), **Dart** (phone), **TypeScript** (web), and in any language
+another launcher uses (the Windows/Linux port, in Rust). Hono because it is small, web-standard and portable (Node today, Bun or
 Cloudflare Workers later). Drizzle with reviewed SQL migrations. Errors as RFC 9457 problem
 details with stable codes every client translates.
 
@@ -181,7 +181,6 @@ packages/
   shared/       Zod schemas, event and signalling types, error codes, OpenAPI
   db/           Drizzle schema and SQL migrations
 clients/
-  rust/         the `anytogether` crate for the Windows/Linux launcher (MIT/Apache-2.0)
   swift/        generated types for the macOS launcher (used from AnyPS5-ARM)
   dart/         generated types for the phone app
 infra/
@@ -192,8 +191,8 @@ docs/           this plan
 ```
 
 The macOS launcher's integration lives in AnyPS5-ARM (`AnyPS5Core/Together/`), the phone app's
-in `mobile/lib/together/`, the Windows/Linux launcher's in its own repository using the Rust
-crate. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
+in `mobile/lib/together/`, the Windows/Linux launcher's in its own repository, written by its
+maintainer from the published contracts. See [Clients](07-clients.md) and [Platforms](12-platforms.md).
 
 ## Scale
 

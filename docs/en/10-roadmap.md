@@ -21,7 +21,8 @@ gantt
 ```
 
 Dates are a guide for one developer working with Claude on the server, the macOS launcher and
-the phone app; the Windows/Linux launcher integrates the Rust crate in step, phase by phase.
+the phone app; the Windows/Linux launcher's maintainer connects that launcher when porting, from
+the published API document and protocols.
 Phase 6 can run beside 3-5.
 
 ## Phase 0: Foundations (≈3 weeks)
@@ -36,8 +37,8 @@ Phase 6 can run beside 3-5.
 - Realtime gateway with hello, heartbeats, resume (no features on it yet).
 - macOS launcher: `TogetherClient`, `TogetherAuth`, `TogetherSocket`, Settings → AnyTogether →
   Continue with Apple / Google / Discord / phone / email, signed-in chip in the top bar.
-- The `anytogether` Rust crate (api, auth, socket) for the Windows/Linux launcher, tested in the
-  same CI; offered to that launcher's maintainer with an integration guide.
+- The OpenAPI document and the gateway protocol published, versioned, so any launcher (the
+  Windows/Linux port first) can connect without our help.
 - macOS launcher release builds signed with Developer ID and notarized.
 - Website: landing page replacing "Coming soon", one-tap sign-in, `/link`, settings, privacy pages.
 
@@ -46,7 +47,7 @@ Phase 6 can run beside 3-5.
       created, in one tap (already signed in to Google in the browser); signing out on the web
       signs the launcher out within 5 s.
 - [ ] The phone, signed in, signs the launcher in with one tap.
-- [ ] The Rust crate signs in and opens the gateway on Windows and Linux (CI on both).
+- [ ] The published OpenAPI document validates and matches the running API (CI).
 - [ ] A launcher with the server unreachable behaves exactly as before AnyTogether (automated test).
 - [ ] Backups restore on staging; the restore test is green.
 - [ ] Refresh-token reuse revokes the session (test).
@@ -96,7 +97,7 @@ Phase 6 can run beside 3-5.
 
 - coturn on the server (`anytogether-relay.kodla.agency`, ports 3478, 5349, relay range opened
   with Utku's approval); calls and signalling over the gateway; peer-to-peer voice in every
-  launcher (macOS WebRTC framework, Rust crate on Windows/Linux), the phone (`flutter_webrtc`) and
+  launcher (the macOS WebRTC framework; the Windows/Linux port with its own WebRTC library), the phone (`flutter_webrtc`) and
   the web; push-to-talk; the phone as headset; party chat; "Play the same game".
 
 **Done when**
