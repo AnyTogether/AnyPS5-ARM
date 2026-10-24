@@ -2,7 +2,7 @@
 
 Two players each run the same game on their own Mac. The game makes the PlayStation-platform calls it always makes (sign-in, sessions, matchmaking, signalling, peer-to-peer packets) and AnyPS5 carries them, through the launcher and AnyTogether, to the other player. Nothing ever goes to Sony, and nothing stands in for a publisher's own servers.
 
-This page is the design. The engine side of steps 1 to 3 below is on branch `online-play`; the launcher side and game traffic are not built yet.
+This page is the design. Built in the engine so far: the bridge client and its protocol, observation mode, sign-in state (NpManager) and web API pass-through (NpWebApi2), each tested against a fake launcher. Not built yet: the launcher side, push events, session signalling, game traffic and intents.
 
 ## The clean line
 
@@ -132,7 +132,7 @@ Pointers are written as `"set"` or `null`, never as addresses, so identical call
 
 ## Compared with AnyPlay
 
-AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bridge`) solves the same problem and we learned from it. We did not copy code; where we agree it is because the problem leaves little choice.
+AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bridge`) solves the same problem and we learned from it. RPCN (PS3) and shadPS4's shadnet (PS4) go further and reimplement the platform service itself; we pass requests through to the launcher instead, so the engine stays small and the server is AnyTogether. We did not copy code; where we agree it is because the problem leaves little choice.
 
 | Topic | AnyPlay | Ours | Why |
 |---|---|---|---|
@@ -151,7 +151,7 @@ AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bri
 
 1. **Unit** (`ctest -R online_bridge`): frame and field encoding byte for byte, HMAC proofs against reference values, environment parsing, and the client against an in-process fake launcher: handshake, an impostor launcher, refusal, account changes, concurrent web requests answered out of order, unsupported and timed-out requests, unknown frames, oversized frames, dropping and reconnecting, launcher gone.
 2. **Libraries** (`ctest -R online_observation`, `guest_np_*`): the observation log through the real exports, and each library answering as today without the variables.
-3. **Sign-in and web API through the exports**: the Np tests run against the fake launcher with the variables set.
+3. **Sign-in and web API through the exports** (`ctest -R online_np_manager`, `online_web_api2`): the real NpManager and NpWebApi2 exports against the fake launcher with the variables set.
 4. **Observe real games**: run class A candidates with `ANYPS5_ONLINE_LOG` only, then with a launcher that signs in and answers nothing; read which groups, paths and signalling calls each one makes.
 5. **Two instances on one Mac**: two launchers, two games, the relay disabled, loopback transport; then two Macs on one network; then two networks with the relay.
 6. **Version guard**: mismatched title version and protocol are refused with a reason on both sides.
