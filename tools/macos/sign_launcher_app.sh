@@ -12,6 +12,7 @@
 # Executables get the hardened runtime that notarization asks for. Games the launcher unlocks
 # later are not signed here or anywhere: their relinked executables stay unsigned.
 set -eu
+. "$(dirname "$0")/toolkit_layout.sh"
 
 if [ $# -lt 2 ]; then
     echo "usage: $0 <AnyPS5.app> <identity> [<notary profile>]" >&2
@@ -30,14 +31,11 @@ sign() {
     fi
 }
 
-# xargs cannot call a shell function, so the libraries go through codesign directly.
-if [ "$identity" = "-" ]; then
-    find "$toolkit/libs" "$toolkit/vulkan" -type f \( -name '*.prx' -o -name '*.dylib' \) -print0 | xargs -0 -n 64 codesign --force --sign -
-else
-    find "$toolkit/libs" "$toolkit/vulkan" -type f \( -name '*.prx' -o -name '*.dylib' \) -print0 | xargs -0 -n 64 codesign --force --timestamp --sign "$identity"
-fi
-sign --options runtime "$toolkit/relinker"
-sign --options runtime "$app"
+sign_toolkit "$toolkit" "$identity"
+# WebRTC for party voice, signed as ours so library validation lets the app load it.
+[ ! -d "$app/Contents/Frameworks/WebRTC.framework" ] || sign "$app/Contents/Frameworks/WebRTC.framework"
+# The microphone (party voice) under the hardened runtime.
+sign --options runtime --entitlements "$(dirname "$0")/launcher/AnyPS5.entitlements" "$app"
 codesign --verify --deep --strict "$app"
 echo "signed $app"
 

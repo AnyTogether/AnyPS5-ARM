@@ -45,6 +45,9 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var shaderCache: Bool?
     /// The phone's pad layout for this game, as the phone sent it (its JSON); nil for the default.
     public var phoneLayout: String?
+    /// The engine toolkit that unlocks this game (EngineChoice: "builtin", "custom" or a
+    /// downloaded version); nil follows the launcher's default.
+    public var engine: String?
 
     public init() {}
 

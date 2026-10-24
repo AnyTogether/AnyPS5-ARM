@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/ui/handoff_card.dart';
+import 'package:anyps5_remote/ui/together_screen.dart';
 import 'package:anyps5_remote/ui/together_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -103,5 +106,98 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('account'), findsNothing);
     expect(find.text('Email me a code'), findsOneWidget);
+  });
+
+  testWidgets('signed in, the sheet goes on to the friends', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'together.session': jsonEncode({
+        'accessToken': 'a',
+        'accessExpiry': DateTime.now()
+            .add(const Duration(minutes: 15))
+            .toIso8601String(),
+        'refreshToken': 'r',
+        'user': {'id': 'me', 'handle': 'utku', 'displayName': 'Utku'},
+      }),
+    });
+    final account = TogetherAccount(
+      preferences: await SharedPreferences.getInstance(),
+      clientName: 'test',
+    );
+    final opened = <TogetherTab>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showTogether(
+              context,
+              account: account,
+              macName: null,
+              onUseMac: null,
+              onOpen: opened.add,
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('@utku'), findsOneWidget);
+    await tester.tap(find.text('Friends'));
+    await tester.pumpAndSettle();
+    expect(opened, [TogetherTab.friends]);
+    expect(find.text('@utku'), findsNothing);
+  });
+
+  testWidgets('the server can be changed, and the launcher\'s is offered', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final account = TogetherAccount(
+      preferences: await SharedPreferences.getInstance(),
+      clientName: 'test',
+    );
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showTogether(
+              context,
+              account: account,
+              macName: 'MacBook',
+              onUseMac: () async {},
+              launcherServer: Uri.parse('https://home.example.org'),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('anytogether.kodla.agency'), findsOneWidget);
+    await tester.tap(find.text('Change'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Server'),
+      'http://together.example.org',
+    );
+    await tester.tap(find.text('Use'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('An https:// address, or http:// on your home network'),
+      findsOneWidget,
+    );
+    expect(account.base.host, 'anytogether.kodla.agency');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MacBook uses home.example.org'));
+    await tester.pumpAndSettle();
+    expect(account.base, Uri.parse('https://home.example.org'));
+    expect(find.text('home.example.org'), findsOneWidget);
+    expect(find.text('MacBook uses home.example.org'), findsNothing);
   });
 }

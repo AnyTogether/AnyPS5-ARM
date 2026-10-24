@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AppKit
 import CoreMedia
 import ScreenCaptureKit
 
@@ -89,12 +90,23 @@ final class ClipRecorder {
             .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }
 
+    /// A standard window's title bar, as the engine's windowed game has one.
+    static var titleBar: CGFloat {
+        NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled]).height - 100
+    }
+
+    /// What to capture of the game's window: the game, without its title bar.
+    static func area(of window: SCWindow, on display: SCDisplay) -> CGRect {
+        GameWindowArea.capture(window: window.frame, display: display.frame, titleBar: titleBar)
+    }
+
     private static func configuration(window: SCWindow, display: SCDisplay, scale: CGFloat) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = CGRect(x: window.frame.minX - display.frame.minX, y: window.frame.minY - display.frame.minY, width: window.frame.width, height: window.frame.height)
+        let area = ClipRecorder.area(of: window, on: display)
+        configuration.sourceRect = area
         // Even sizes, as the encoder wants.
-        configuration.width = Int(window.frame.width * scale) & ~1
-        configuration.height = Int(window.frame.height * scale) & ~1
+        configuration.width = Int(area.width * scale) & ~1
+        configuration.height = Int(area.height * scale) & ~1
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         configuration.queueDepth = 6

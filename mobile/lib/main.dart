@@ -15,13 +15,16 @@ import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
+import 'together/together_hub.dart';
 import 'stream/platform_player.dart';
 import 'ui/activity_card.dart';
+import 'ui/call_layer.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
 import 'ui/handoff_card.dart';
 import 'ui/trophy_card.dart';
+import 'ui/voice_pill.dart';
 import 'ui/welcome_screen.dart';
 import 'version.dart';
 
@@ -105,6 +108,9 @@ class _RemoteAppState extends State<RemoteApp> {
           ..enabled = widget.preferences.getBool('vibration') ?? true)
         ..motion = (MotionSource()
           ..enabled = widget.preferences.getBool('motion') ?? true);
+
+  /// AnyTogether's live side: friends, messages, the party and its voice, on every screen.
+  late final TogetherHub _together = TogetherHub(account: _session.together);
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;
@@ -249,6 +255,7 @@ class _RemoteAppState extends State<RemoteApp> {
     _readyTimer?.cancel();
     _layoutSave?.cancel();
     _cableLink.stop();
+    _together.dispose();
     _session.close();
     super.dispose();
   }
@@ -286,6 +293,7 @@ class _RemoteAppState extends State<RemoteApp> {
               status: _status(),
               remotePlay: _remotePlay,
               onRemotePlay: _setRemotePlay,
+              together: _together,
             );
     } else {
       home = SetupScreen(
@@ -294,6 +302,7 @@ class _RemoteAppState extends State<RemoteApp> {
         showManual: _manual,
         onAddress: (address) => _connect(address, launcherPort),
         onRetry: _session.retry,
+        together: _together,
       );
     }
     return Texts(
@@ -328,6 +337,7 @@ class _RemoteAppState extends State<RemoteApp> {
                       },
                     ),
                     TrophyCard(trophy: _session.trophy),
+                    CallLayer(calls: _together.calls),
                     HandoffCard(
                       asked: _session.handoffAsked,
                       handle: _session.together.user?.handle,
@@ -403,6 +413,7 @@ class _RemoteAppState extends State<RemoteApp> {
           fontWeight: FontWeight.w600,
         ),
       ),
+      VoicePill(voice: _together.voice),
     ],
   );
 }

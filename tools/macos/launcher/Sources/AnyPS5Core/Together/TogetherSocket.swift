@@ -7,7 +7,21 @@ public final class TogetherSocket: @unchecked Sendable {
     public struct Event: Sendable {
         public let id: String
         public let type: String
-        public let data: [String: String]
+        /// The event's data as the gateway sent it, JSON.
+        public let json: Data
+
+        public init(id: String, type: String, json: Data) {
+            self.id = id
+            self.type = type
+            self.json = json
+        }
+
+        /// The data's top-level strings and numbers, as text.
+        public var data: [String: String] {
+            ((try? JSONSerialization.jsonObject(with: json)) as? [String: Any] ?? [:]).compactMapValues { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
+        }
+
+        public func decode<T: Decodable>(_ type: T.Type = T.self) -> T? { try? JSONDecoder.together.decode(T.self, from: json) }
     }
 
     public enum Presence: Sendable, Equatable {
@@ -25,6 +39,7 @@ public final class TogetherSocket: @unchecked Sendable {
     private var heartbeat: Timer?
     private var running = false
     private var attempt = 0
+    private var typingSent: [String: Date] = [:]
     private let onEvent: @Sendable (Event) -> Void
     private let onSignedOut: @Sendable () -> Void
 
@@ -60,6 +75,19 @@ public final class TogetherSocket: @unchecked Sendable {
             self.presence = presence
             sendHeartbeat()
         }
+    }
+
+    /// WebRTC signalling to one device of a peer in the same call; dropped while disconnected
+    /// (the peer connection's own retries cover it).
+    public func signal(to userId: String, device: String, call: String, kind: TogetherSignalKind, data: Any?) {
+        let frame = TogetherSocket.signalFrame(to: userId, device: device, call: call, kind: kind, data: data)
+        queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
+    }
+
+    /// The same between a share play's host and a viewer.
+    public func signal(to userId: String, device: String, share: String, kind: TogetherShareSignal.Kind, data: Any?) {
+        let frame = TogetherSocket.shareSignalFrame(to: userId, device: device, share: share, kind: kind, data: data)
+        queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
     }
 
     private func connect() async {
@@ -111,12 +139,31 @@ public final class TogetherSocket: @unchecked Sendable {
             }
             queue.async { self.sendHeartbeat() }
         case "event":
-            guard let id = frame["id"] as? String, let type = frame["type"] as? String else { return }
-            queue.async { self.lastEventID = id }
-            let data = (frame["data"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String ?? ($0 as? NSNumber)?.stringValue }
-            onEvent(Event(id: id, type: type, data: data))
+            guard let event = TogetherSocket.event(frame) else { return }
+            queue.async { self.lastEventID = event.id }
+            onEvent(event)
         default:
             break
+        }
+    }
+
+    /// An event frame as the gateway sends it: its data kept whole, nested objects and all (a
+    /// party, a call's peers, a signal's description), for `decode`.
+    static func event(_ frame: [String: Any]) -> Event? {
+        guard frame["op"] as? String == "event", let id = frame["id"] as? String, let type = frame["type"] as? String else { return nil }
+        let json = frame["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed) } ?? Data("{}".utf8)
+        return Event(id: id, type: type, json: json)
+    }
+
+    /// "I am typing" in a conversation, to its other members; at most every two seconds (the
+    /// gateway drops more).
+    public func typing(in conversation: String, at now: Date = Date()) {
+        queue.async { [self] in
+            if let last = typingSent[conversation], now.timeIntervalSince(last) < TogetherTyping.every { return }
+            typingSent[conversation] = now
+            let frame: [String: Any] = ["op": "typing", "conversation": conversation]
+            guard let data = try? JSONSerialization.data(withJSONObject: frame) else { return }
+            task?.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
         }
     }
 

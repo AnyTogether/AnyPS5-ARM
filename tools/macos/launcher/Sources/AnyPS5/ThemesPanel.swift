@@ -122,7 +122,7 @@ extension AppModel {
             PanelRow(id: "export", title: T.text(.exportTheme), detail: T.text(.exportThemeDetail), symbol: "square.and.arrow.down.on.square", kind: .action(destructive: false) { [weak self] in
                 _ = self?.export(design)
             }),
-            PanelRow(id: "share", title: T.text(.shareTheme), detail: T.text(.shareThemeDetail), symbol: "square.and.arrow.up", kind: .action(destructive: false) { [weak self] in self?.share(design) }),
+            PanelRow(id: "share", title: T.text(.shareTheme), detail: togetherUser != nil ? TS.text(.hubShareDetail) : T.text(.shareThemeDetail), symbol: "square.and.arrow.up", kind: .action(destructive: false) { [weak self] in self?.share(design) }),
             PanelRow(id: "delete", title: T.text(.deleteTheme), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.deleteDesign(design) }),
         ]
         return rows
@@ -199,6 +199,8 @@ extension AppModel {
 
     /// Saves the theme as a file and opens the page it is sent to the Hub from.
     func share(_ design: ThemeDesign) {
+        // Signed in to AnyTogether: straight onto its Hub.
+        if togetherUser != nil { return shareOnHub(design) }
         guard let file = export(design) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([file])
         var page = URLComponents(url: ThemeHub.shareURL, resolvingAgainstBaseURL: false)
@@ -249,7 +251,7 @@ extension AppModel {
         hub = .loading
         Task {
             do {
-                let shared = try await ThemeHub.themes()
+                let shared = try await ThemeHub.themes(from: self.hubBases)
                 withAnimation(Motion.overlay) { self.hub = .loaded(shared) }
             } catch {
                 withAnimation(Motion.overlay) { self.hub = .failed }

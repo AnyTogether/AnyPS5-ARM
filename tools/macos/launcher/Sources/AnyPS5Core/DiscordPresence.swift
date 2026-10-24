@@ -79,24 +79,47 @@ public struct DiscordGames: Sendable {
 }
 
 /// "Playing <game>" on the user's Discord profile, through the Discord app's local socket
-/// (discord-ipc-N in the temporary folder). Without Discord, or without an application ID,
-/// nothing happens; a Discord started later is found on the next game.
+/// (discord-ipc-N in the runtime or temporary folder). Without Discord, or without an application
+/// ID, nothing happens; a Discord started later is found on the next game.
 public final class DiscordPresence: @unchecked Sendable {
     /// The AnyPS5 application in the Discord Developer Portal; empty turns the presence off.
     public static let anyps5ApplicationID = "1562749843724566549"
 
-    private let applicationID: String
-    private let directory: URL
+    /// The application the launcher shows as: ANYPS5_DISCORD_APP_ID puts another one in its
+    /// place, and set but empty turns the presence off.
+    public static var applicationID: String { applicationID(environment: ProcessInfo.processInfo.environment) }
+
+    static func applicationID(environment: [String: String]) -> String {
+        environment["ANYPS5_DISCORD_APP_ID"].map { $0.trimmingCharacters(in: .whitespaces) } ?? anyps5ApplicationID
+    }
+
+    /// Where Discord makes its sockets: XDG_RUNTIME_DIR when set, the user's temporary folder, then /tmp.
+    public static func socketDirectories(environment: [String: String] = ProcessInfo.processInfo.environment) -> [URL] {
+        var paths: [String] = []
+        for value in [environment["XDG_RUNTIME_DIR"], environment["TMPDIR"] ?? NSTemporaryDirectory(), "/tmp"] {
+            guard let value, !value.isEmpty else { continue }
+            let path = URL(fileURLWithPath: value).standardizedFileURL.path
+            if !paths.contains(path) { paths.append(path) }
+        }
+        return paths.map { URL(fileURLWithPath: $0) }
+    }
+
+    private let ownID: String
+    private let directories: [URL]
     private let queue = DispatchQueue(label: "org.anyps5.discord")
     private var socket: Int32 = -1
     /// The application the open socket shook hands as.
     private var connectedID: String?
     private var games: DiscordGames
 
-    public init(applicationID: String, directory: URL = URL(fileURLWithPath: NSTemporaryDirectory()), games: DiscordGames = DiscordGames()) {
-        self.applicationID = applicationID
-        self.directory = directory
+    public init(applicationID: String, directories: [URL] = DiscordPresence.socketDirectories(), games: DiscordGames = DiscordGames()) {
+        self.ownID = applicationID
+        self.directories = directories
         self.games = games
+    }
+
+    public convenience init(applicationID: String, directory: URL, games: DiscordGames = DiscordGames()) {
+        self.init(applicationID: applicationID, directories: [directory], games: games)
     }
 
     public func use(_ games: DiscordGames) {
@@ -118,7 +141,7 @@ public final class DiscordPresence: @unchecked Sendable {
                 activity["details"] = game
                 activity["state"] = "AnyPS5 · Mac"
             }
-            setActivity(activity, as: known ?? applicationID)
+            setActivity(activity, as: known ?? ownID)
         }
     }
 
@@ -137,7 +160,7 @@ public final class DiscordPresence: @unchecked Sendable {
     }
 
     private func setActivity(_ activity: Any, as application: String) {
-        guard !applicationID.isEmpty, !application.isEmpty else { return }
+        guard !ownID.isEmpty, !application.isEmpty else { return }
         // Discord ties a socket to the application it shook hands as: another one needs its own.
         if socket >= 0, connectedID != application {
             Darwin.close(socket)
@@ -161,39 +184,44 @@ public final class DiscordPresence: @unchecked Sendable {
     /// Connects and shakes hands with the first Discord socket that answers.
     private func connected(as application: String) -> Bool {
         if socket >= 0 { return true }
-        for index in 0..<10 {
-            let path = directory.appendingPathComponent("discord-ipc-\(index)").path
-            guard FileManager.default.fileExists(atPath: path) else { continue }
-            let candidate = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-            guard candidate >= 0 else { continue }
-            var on: Int32 = 1
-            setsockopt(candidate, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-            var timeout = timeval(tv_sec: 2, tv_usec: 0)
-            setsockopt(candidate, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-            var address = sockaddr_un()
-            address.sun_family = sa_family_t(AF_UNIX)
-            let fits = withUnsafeMutableBytes(of: &address.sun_path) { raw -> Bool in
-                let bytes = Array(path.utf8) + [0]
-                guard bytes.count <= raw.count else { return false }
-                raw.copyBytes(from: bytes)
-                return true
-            }
-            let reached = fits && withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(candidate, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0 }
-            }
-            guard reached else {
-                Darwin.close(candidate)
-                continue
-            }
-            socket = candidate
-            let handshake = try? JSONSerialization.data(withJSONObject: ["v": 1, "client_id": application])
-            if let handshake, write(op: 0, json: handshake), let ready = read(), ready.op == 1 {
-                connectedID = application
-                return true
-            }
-            Darwin.close(candidate)
-            socket = -1
+        for directory in directories {
+            for index in 0..<10 where open(directory.appendingPathComponent("discord-ipc-\(index)").path, as: application) { return true }
         }
+        return false
+    }
+
+    /// Connects to one socket and shakes hands; false leaves no socket open.
+    private func open(_ path: String, as application: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        let candidate = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard candidate >= 0 else { return false }
+        var on: Int32 = 1
+        setsockopt(candidate, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(candidate, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let fits = withUnsafeMutableBytes(of: &address.sun_path) { raw -> Bool in
+            let bytes = Array(path.utf8) + [0]
+            guard bytes.count <= raw.count else { return false }
+            raw.copyBytes(from: bytes)
+            return true
+        }
+        let reached = fits && withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(candidate, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0 }
+        }
+        guard reached else {
+            Darwin.close(candidate)
+            return false
+        }
+        socket = candidate
+        let handshake = try? JSONSerialization.data(withJSONObject: ["v": 1, "client_id": application])
+        if let handshake, write(op: 0, json: handshake), let ready = read(), ready.op == 1 {
+            connectedID = application
+            return true
+        }
+        Darwin.close(candidate)
+        socket = -1
         return false
     }
 

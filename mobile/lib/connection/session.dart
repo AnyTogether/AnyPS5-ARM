@@ -71,6 +71,9 @@ class Session extends ChangeNotifier {
   /// The phone's AnyTogether account, which signs the Mac in or is signed in by it.
   final TogetherAccount together;
 
+  /// The AnyTogether server the connected launcher uses, when it says which.
+  Uri? launcherServer;
+
   /// The Mac asking to be signed in to AnyTogether as this phone's account, until answered.
   final handoffAsked = ValueNotifier<TogetherHandoff?>(null);
 
@@ -239,9 +242,16 @@ class Session extends ChangeNotifier {
       case Pairing(:final code):
         this.code = code;
         _setStatus(ConnectionStatus.pairing);
-      case Welcome(:final session, :final udpPort, :final macName, :final key):
+      case Welcome(
+        :final session,
+        :final udpPort,
+        :final macName,
+        :final key,
+        :final togetherServer,
+      ):
         preferences.setString('key', key);
         this.macName = macName;
+        launcherServer = serverAddress(togetherServer ?? '');
         _session = session;
         _udpPort = udpPort;
         code = null;

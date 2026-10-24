@@ -25,6 +25,12 @@ struct Preferences: Codable, Equatable {
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
     var hideWhilePlaying = false
+    /// The party's voice sends only while ⌥V is held; nil means off (open microphone).
+    var pushToTalk: Bool?
+    /// A session friends can join while a game runs; nil means on.
+    var friendsJoin: Bool?
+    /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
+    var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
     /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
@@ -41,6 +47,11 @@ struct Preferences: Codable, Equatable {
     var screenshotsFolder: String?
     /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
     var fontsFolder: String?
+    /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
+    /// the built-in one, "custom" the folder below, else a downloaded version).
+    var engine: String?
+    /// A toolkit folder the user built (Settings → Engine → Engine Folder), nil for none.
+    var customToolkit: String?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -93,6 +104,20 @@ enum Overlay: Equatable {
     case studio
     /// Friends on AnyTogether.
     case friends
+    /// Someone's AnyTogether profile, the user's own or a friend's.
+    case profile
+    /// Conversations and their threads on AnyTogether.
+    case messages
+    /// The party the user is in, or invites and friends' open parties.
+    case party
+    /// Friends' activity on AnyTogether.
+    case feed
+    /// A game's leaderboard, or overall trophy points.
+    case leaderboard
+    /// AnyTogether's notifications, from the bell.
+    case notifications
+    /// "How did it run?" after a session.
+    case compat
 }
 
 struct Toast: Identifiable, Equatable {
@@ -174,13 +199,26 @@ final class AppModel: ObservableObject {
     @Published private(set) var logText = ""
     @Published var translocated = AppLocation.isTranslocated
 
-    let toolkit = Toolkit.locate()
+    /// The toolkit inside the app (or ANYPS5_TOOLKIT); the default engine.
+    let builtInToolkit = Toolkit.locate()
+    /// Downloaded engine toolkits (Settings → Engine); the previews keep theirs apart.
+    let toolkitStore: ToolkitStore
+    @Published var installedToolkits: [InstalledToolkit] = []
+    /// The toolkits on GitHub's releases, as last seen, and when.
+    @Published var engineCatalogue: [EngineCatalogue.Entry] = []
+    @Published var engineChecked: Date?
+    @Published var engineOffline = false
+    @Published var checkingEngines = false
+    /// How far each release's toolkit download is.
+    @Published var engineDownloads: [String: Double] = [:]
+    /// The custom toolkit folder, when it holds a toolkit.
+    @Published var customToolkit: Toolkit?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
-    private let discord = DiscordPresence(applicationID: DiscordPresence.anyps5ApplicationID)
+    private let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
@@ -207,6 +245,7 @@ final class AppModel: ObservableObject {
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
+        toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         designs = themes.all
         if persists {
@@ -214,8 +253,10 @@ final class AppModel: ObservableObject {
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
+        if persists { loadEngines() }
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
+            AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
             let waiting = AppModel.pending
             AppModel.pending = []
             if !waiting.isEmpty { DispatchQueue.main.async { [weak self] in self?.open(waiting) } }
@@ -374,7 +415,9 @@ final class AppModel: ObservableObject {
 
     // MARK: AnyTogether
 
-    let together = AppModel.makeTogetherClient()
+    /// The client for the server chosen in Settings → AnyTogether (or ANYTOGETHER_URL).
+    lazy var together = AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer))
+    var serverDraft = ""
     @Published var togetherUser: TogetherUser?
     @Published var togetherStep = TogetherStep.idle
     @Published var togetherConnected = false
@@ -383,12 +426,70 @@ final class AppModel: ObservableObject {
     var togetherSocket: TogetherSocket?
     var togetherWait: Task<Void, Never>?
     var togetherFlush: Task<Void, Never>?
+    /// The social screens' state: activity, leaderboards, notifications.
+    lazy var social = SocialState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
     @Published var togetherFriends: [TogetherFriend] = []
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
+    /// The profile open: who (known before it loads), what came back, and the focused row.
+    @Published var profileCard: TogetherPerson?
+    @Published var profilePage: TogetherProfilePage?
+    @Published var profileFailed = false
+    @Published var profileColumn = 0
+    @Published var profileIndex = 0
+    var profileReturn: ProfileReturn?
+    /// The user's own profile with its privacy, and the edits typed in Settings → AnyTogether.
+    @Published var togetherProfile: TogetherOwnProfile?
+    var profileDraft = ProfileDraft()
+    /// Messages: the conversations and threads, the row selected on the left, whether the thread
+    /// has the focus (a quick reply, or the field at the end), and whether the field is typed in.
+    @Published var inbox: TogetherInbox?
+    @Published var messagesIndex = 0
+    @Published var messagesInThread = false
+    @Published var messageFocus = 0
+    @Published var composing = false
+    @Published var messageDraft = ""
+    /// Who is typing in which conversation, and what forgets them when they stop.
+    @Published var typing = TogetherTyping()
+    var typingExpiry: Task<Void, Never>?
+    /// A new group: the friends picked, its name, and the row focused (the name, each friend, Create).
+    @Published var groupPicked: Set<String> = []
+    @Published var groupName = ""
+    @Published var groupFocus = 0
+    /// The party the user is in, the invites waiting, and whether a new party is open to friends.
+    @Published var party: TogetherParty?
+    @Published var partyInvites: [TogetherPartyInvite] = []
+    @Published var partyStartsOpen = false
+    /// The game session the user hosts or joined, and invitations to friends' games.
+    @Published var gameSession: TogetherGameSession?
+    @Published var gameInvites: [TogetherGameInvite] = []
+    var openingSession = false
+    /// Share play: what the friends panel shows, and the running share play's pieces.
+    @Published var share = ShareState()
+    var shareSession: ShareSession?
+    var shareWatch: ShareWatchSession?
+    /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
+    @Published var voiceCall: String?
+    var partyVoice: PartyVoice?
+    @Published var micOn = true
+    @Published var talkHeld = false
+    @Published var voiceSpeaking: Set<String> = []
+    /// Who in the call muted themselves, as the server says.
+    @Published var voiceMuted: Set<String> = []
+    /// Whether the server was last told the user is muted.
+    var voiceSentMuted = false
+    /// The friend in a direct call (nil in the party's voice), and whether they have not answered yet.
+    @Published var callFriend: TogetherPerson?
+    @Published var callWaiting = false
+    /// A friend calling now, and what rings and gives up on it.
+    @Published var ringing: TogetherRinging?
+    var ringTask: Task<Void, Never>?
+    /// New relay credentials before the call's run out.
+    var iceRenewal: Task<Void, Never>?
+    var profileTask: Task<Void, Never>?
 
     // MARK: Themes
 
@@ -467,7 +568,7 @@ final class AppModel: ObservableObject {
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
-        if let record = installedRecords[game.id] { return .installed(outdated: toolkit.map { $0.version != record.toolkit } ?? false) }
+        if let record = installedRecords[game.id] { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
         if game.executable == .unreadable { return .unreadable }
         return .locked
     }
@@ -552,7 +653,7 @@ final class AppModel: ObservableObject {
     }
 
     func resolutionChoices(for game: Game) -> [String] {
-        guard let toolkit, let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
+        guard let toolkit = toolkit(for: game), let patches = GamePatches.load(titleID: game.titleID, from: toolkit.patches) else { return [] }
         return patches.resolution?.choices ?? []
     }
 
@@ -560,7 +661,7 @@ final class AppModel: ObservableObject {
 
     func unlock(_ game: Game) {
         guard let root else { return }
-        guard toolkit != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
+        guard toolkit(for: game) != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
         queue.append(game.id)
@@ -569,9 +670,14 @@ final class AppModel: ObservableObject {
     }
 
     private func startNext(root: URL) {
-        guard installer == nil, let toolkit, !queue.isEmpty else { return }
+        guard installer == nil, !queue.isEmpty else { return }
         let id = queue.removeFirst()
-        guard let game = games.first(where: { $0.id == id }) else { startNext(root: root); return }
+        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game) else { startNext(root: root); return }
+        // A downloaded engine is checked against its manifest again before anything of it runs;
+        // a custom folder must still hold a whole toolkit.
+        let downloaded = installedToolkits.first { $0.folder == toolkit.root }?.version
+        let custom = customToolkit?.root == toolkit.root
+        let store = toolkitStore
         progress[id] = (.unwrap, 0)
         installLog[id] = []
         let installer = Installer(game: game, toolkit: toolkit, progress: { step, fraction in
@@ -588,7 +694,11 @@ final class AppModel: ObservableObject {
         })
         self.installer = installer
         Task.detached(priority: .userInitiated) {
-            let result: Result<URL, Error> = Result { try installer.run(root: root) }
+            let result: Result<URL, Error> = Result {
+                if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
+                if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
+                return try installer.run(root: root)
+            }
             await MainActor.run {
                 self.installer = nil
                 self.progress[id] = nil
@@ -673,6 +783,8 @@ final class AppModel: ObservableObject {
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             .merging(OnlinePlayHost.environment(for: game, client: together)) { _, online in online }
+            // Where the engine's online bridge finds the AnyTogether game session, once there is one.
+            .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
         markStart(of: game)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
@@ -704,6 +816,8 @@ final class AppModel: ObservableObject {
     /// What macOS hands the app before the model is there, and where it goes once it is.
     private static var pending: [URL] = []
     private static var opener: (([URL]) -> Void)?
+    /// What has to reach a server before the app quits (leaving a call), when there is any.
+    static var beforeQuit: (() -> Task<Void, Never>?)?
 
     static func received(_ urls: [URL]) {
         if let opener { opener(urls) } else { pending += urls }
@@ -727,6 +841,7 @@ final class AppModel: ObservableObject {
         switch link {
         case .library: open(.library)
         case .settings: open(.settings)
+        case .theme(let id): installHubTheme(id)
         case .game(let id), .play(let id):
             guard let index = games.firstIndex(where: { $0.titleID == id }) else {
                 return show(T.format(.linkNoGame, id), symbol: "questionmark.folder")
@@ -982,6 +1097,7 @@ final class AppModel: ObservableObject {
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()
+        followSharePlay()
         updateTogetherPresence()
         syncSaves(running.game) {}
         discord.clear()
@@ -1054,6 +1170,8 @@ final class AppModel: ObservableObject {
         // A fixed port lets a phone on a network without Bonjour connect by address alone.
         for (port, bridge) in [(RemoteServer.preferredPort, RemoteServer.preferredBridgePort), (0, 0)] {
             let server = RemoteServer(name: Host.current().localizedName ?? "Mac", devices: pairedDevices, events: events, controlPort: port, bridgePort: bridge)
+            // The phone says when this Mac uses another AnyTogether server than its own.
+            server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
                 if let port = server.controlPort {
@@ -1115,6 +1233,12 @@ final class AppModel: ObservableObject {
     }
 
     func discordOff() { discord.clear() }
+
+    /// Turned on again with a game in front: Discord shows it at once, from when it started.
+    func discordOn() {
+        guard let game = running?.game else { return }
+        discord.playing(game.name, since: sessionStart ?? Date())
+    }
 
     /// A trophy just earned shows on the phone too, with its icon made small.
     private func tellPhone(_ trophy: TrophySet.Trophy) {
@@ -1383,7 +1507,7 @@ final class AppModel: ObservableObject {
         let settings = settings(for: game)
         let diagnosis = diagnoses[game.id]?.summary
         let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let toolkitVersion = toolkit?.version ?? "none"
+        let toolkitVersion = installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? "none"
         let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
         Task.detached(priority: .userInitiated) {
             let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
@@ -1572,8 +1696,13 @@ final class AppModel: ObservableObject {
         if next == .trophies { trophyIndex = 0 }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
-        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends
+        panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
         if next == .friends { refreshFriends() }
+        if next == .party {
+            loadParty()
+            if togetherFriends.isEmpty { refreshFriends() }
+        }
+        if next == .settings { refreshEngines() }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()

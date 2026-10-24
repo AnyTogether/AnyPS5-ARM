@@ -68,7 +68,10 @@ struct TrophyList: View {
                 }
             }
             Spacer(minLength: 0)
-            HintBar(options: false)
+            VStack(alignment: .trailing, spacing: 18 * scale) {
+                HintBar(options: false)
+                if model.togetherUser != nil { LeaderboardChip(game: game) }
+            }
         }
     }
 

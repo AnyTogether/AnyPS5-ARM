@@ -30,6 +30,10 @@
 	<array>
 		<string>_anyps5-remote._tcp</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>AnyPS5 Remote sends your voice to your AnyTogether party while you play.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>AnyPS5 Remote lets you pick a picture from your library as your AnyTogether avatar.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AnyPS5 Remote finds AnyPS5 on your Mac on this network, to use the phone as its controller.</string>
 	<key>UIApplicationSceneManifest</key>

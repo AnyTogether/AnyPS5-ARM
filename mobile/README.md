@@ -22,7 +22,29 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **Language.** The phone uses the launcher's language: English by default, or Turkish.
 - The version is shown faintly in the bottom right corner.
 
-It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once.
+It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), the launcher for Windows and Linux (in development), speaks the same phone protocol.
+
+## AnyTogether
+
+The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launchers' online home ([open source](https://github.com/utkuhalis/AnyTogether), MIT). Signed out, the phone is the controller as always.
+
+- **Sign-in:** with a code sent to your email, or with one tap using the account the Mac is signed in with; a signed-in phone also signs the Mac in. No password, no sign-up form.
+- **Friends** *(in the next release)*: from the people button on the home screen: who is online and what they play, requests, adding by handle.
+- **Messages** *(in the next release)*: your conversations, the same ones as on the Mac and the website, with unread counts; write to a friend from their entry.
+- **Parties and voice** *(in the next release)*: start a party, invite friends or join theirs, and talk with its members, voice going straight between you.
+- **Another server** *(in the next release)*: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
+
+| Friends | Messages |
+|---|---|
+| ![Friends: requests, who plays what, a friend sharing their game](../docs/screenshots/phone-friends.jpg) | ![Messages: the conversations and one open, a friend typing](../docs/screenshots/phone-messages.jpg) |
+| **Party and voice** | **Profile** |
+| ![A party talking, one member speaking and one muted](../docs/screenshots/phone-party.jpg) | ![Your profile: totals and games](../docs/screenshots/phone-profile.jpg) |
+| **Activity** | **Notifications** |
+| ![Friends' activity with reactions](../docs/screenshots/phone-feed.jpg) | ![The notification list](../docs/screenshots/phone-notifications.jpg) |
+| **Watching a friend's share play** | |
+| ![A friend's game on the phone](../docs/screenshots/phone-shareplay.jpg) | |
+
+<sub>The pictures use demo people and data, rendered with `tool/screens/render.sh`.</sub>
 
 ## Installing
 

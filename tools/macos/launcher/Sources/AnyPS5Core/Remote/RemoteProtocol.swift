@@ -78,7 +78,9 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     /// The Mac is asking its user to allow the phone; both show `code`.
     case pairing(code: String)
     /// The phone may send pad packets with `session` to `udpPort`; `key` lets it in next time.
-    case welcome(session: UInt64, udpPort: UInt16, macName: String, key: String)
+    /// togetherServer: the AnyTogether server the launcher uses, so the phone can say when it is
+    /// not its own; older launchers leave it out.
+    case welcome(session: UInt64, udpPort: UInt16, macName: String, key: String, togetherServer: String? = nil)
     case rejected(reason: String)
     /// The phone's measured latency, every two seconds.
     case latency(milliseconds: Double)
@@ -121,7 +123,7 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
-        case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds
+        case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds, togetherServer
         case games, selected, running, language, id, icon, background, name, layout, detail, grade, activity, deep, middle, accent, on, width, height, state, approved
     }
 
@@ -139,7 +141,7 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
                 throw DecodingError.dataCorruptedError(forKey: .session, in: values, debugDescription: "session is not a decimal UInt64")
             }
             self = .welcome(session: session, udpPort: try values.decode(UInt16.self, forKey: .udpPort), macName: try values.decode(String.self, forKey: .macName),
-                            key: try values.decode(String.self, forKey: .key))
+                            key: try values.decode(String.self, forKey: .key), togetherServer: try? values.decodeIfPresent(String.self, forKey: .togetherServer))
         case "rejected":
             self = .rejected(reason: try values.decode(String.self, forKey: .reason))
         case "latency":
@@ -199,12 +201,13 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .pairing(let code):
             try values.encode("pairing", forKey: .type)
             try values.encode(code, forKey: .code)
-        case .welcome(let session, let udpPort, let macName, let key):
+        case .welcome(let session, let udpPort, let macName, let key, let togetherServer):
             try values.encode("welcome", forKey: .type)
             try values.encode(String(session), forKey: .session)
             try values.encode(udpPort, forKey: .udpPort)
             try values.encode(macName, forKey: .macName)
             try values.encode(key, forKey: .key)
+            try values.encodeIfPresent(togetherServer, forKey: .togetherServer)
         case .rejected(let reason):
             try values.encode("rejected", forKey: .type)
             try values.encode(reason, forKey: .reason)

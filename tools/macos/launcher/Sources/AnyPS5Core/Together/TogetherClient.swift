@@ -20,6 +20,12 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public let status: Int
     public let code: String
     public let title: String
+    /// The private part of a profile a 403 is about ("library", "trophies", "friends").
+    public var section: String? = nil
+    /// When a handle may change again, with "handle_cooldown".
+    public var handleChangeAt: Date? = nil
+    /// The theme already shared from the same file, with a 409 on sharing a theme.
+    public var themeId: String? = nil
     public var description: String { title }
 }
 
@@ -67,6 +73,13 @@ public final class TokenStore: @unchecked Sendable {
 
     func load() -> Saved? {
         lock.withLock { (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) } }
+    }
+
+    /// Changes the kept user (a new handle or name), keeping the tokens.
+    func update(_ change: (inout TogetherUser) -> Void) {
+        guard var saved = load() else { return }
+        change(&saved.user)
+        save(saved)
     }
 
     func save(_ saved: Saved?) {
@@ -224,7 +237,12 @@ public final class TogetherClient: @unchecked Sendable {
         request.setValue(clientName, forHTTPHeaderField: "AnyTogether-Client")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        if let body {
+        if let raw = body as? TogetherRawBody {
+            // A file going up (a theme): its own type, and time to send it.
+            request.setValue(raw.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = raw.data
+            request.timeoutInterval = 180
+        } else if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
@@ -251,9 +269,19 @@ private actor Refresher {
 }
 
 extension JSONDecoder {
+    /// ISO 8601 dates with or without milliseconds: the server sends them with.
     static let together: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let text = try container.decode(String.self)
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            guard let date = fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Not an ISO 8601 date: \(text)")
+            }
+            return date
+        }
         return decoder
     }()
 }

@@ -138,13 +138,43 @@ final class Input {
     /// ⌥F12, beside F12's screenshot, from any app: a hot key the system hands over without the
     /// accessibility permission a key monitor in the background would need.
     private func registerCaptureKey() {
-        var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            MainActor.assumeIsolated { Input.shared.controller(.capture) }
-            return noErr
-        }, 1, &type, nil, nil)
+        registerHotKey(id: Input.captureKey, keyCode: kVK_F12, modifiers: optionKey) { [weak self] pressed in
+            if pressed { self?.controller(.capture) }
+        }
+    }
+
+    static let captureKey: UInt32 = 1
+    static let talkKey: UInt32 = 2
+    /// ⌥A and ⌥D while a friend's call rings.
+    static let answerKey: UInt32 = 3
+    static let declineKey: UInt32 = 4
+    private var hotKeys: [UInt32: (handler: (Bool) -> Void, reference: EventHotKeyRef?)] = [:]
+    private var hotKeyHandler = false
+
+    /// A key with modifiers that reaches the launcher from any app, pressed and released (a
+    /// party's push-to-talk while a game is in front).
+    func registerHotKey(id: UInt32, keyCode: Int, modifiers: Int, handler: @escaping (Bool) -> Void) {
+        if !hotKeyHandler {
+            hotKeyHandler = true
+            var types = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+                         EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var key = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &key)
+                let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+                MainActor.assumeIsolated { Input.shared.hotKeys[key.id]?.handler(pressed) }
+                return noErr
+            }, 2, &types, nil, nil)
+        }
+        unregisterHotKey(id: id)
         var reference: EventHotKeyRef?
-        RegisterEventHotKey(UInt32(kVK_F12), UInt32(optionKey), EventHotKeyID(signature: OSType(0x4150_5335), id: 1), GetApplicationEventTarget(), 0, &reference)
+        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), EventHotKeyID(signature: OSType(0x4150_5335), id: id), GetApplicationEventTarget(), 0, &reference)
+        hotKeys[id] = (handler, reference)
+    }
+
+    func unregisterHotKey(id: UInt32) {
+        if let reference = hotKeys[id]?.reference { UnregisterEventHotKey(reference) }
+        hotKeys[id] = nil
     }
 
     /// A controller command; while the launcher is behind a game only PS is acted on.

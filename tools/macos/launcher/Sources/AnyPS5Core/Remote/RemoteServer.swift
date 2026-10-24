@@ -82,6 +82,12 @@ public final class RemoteServer: @unchecked Sendable {
     }
 
     private let name: String
+    private let together = Locked<String?>(nil)
+    /// The AnyTogether server the launcher uses, told to each phone it welcomes.
+    public var togetherServer: String? {
+        get { together.value }
+        set { together.value = newValue }
+    }
     private let devices: PairedDevices
     private let events: Events
     private let advertise: Bool
@@ -320,14 +326,14 @@ public final class RemoteServer: @unchecked Sendable {
     }
 
     private func welcome(_ client: Client, key: String) {
-        guard let slot = (0..<RemoteServer.maxPhones).first(where: { slot in !phones.contains { $0.slot == slot } }) else { return reject(client, "busy") }
+        guard let slot = (0..<RemoteServer.maxPhones).first(where: { slot in !phones.contains { $0.slot == slot } && !reservedBridges.contains(slot) }) else { return reject(client, "busy") }
         var session: UInt64 = 0
         while session == 0 { session = UInt64.random(in: UInt64.min...UInt64.max) }
         client.session = session
         client.slot = slot
         phones.append(client)
         phones.sort { ($0.slot ?? 0) < ($1.slot ?? 0) }
-        send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key), to: client)
+        send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key, togetherServer: togetherServer), to: client)
         if let name = client.name { events.connected(name) }
     }
 
@@ -479,6 +485,8 @@ public final class RemoteServer: @unchecked Sendable {
                     gamePlayers[slot] = player
                     events.players()
                 }
+            } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game), reservedBridges.contains(slot) {
+                padOutputs.value?(slot, data)
             } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game),
                       let client = phones.first(where: { $0.slot == slot }) {
                 if client.padOnChannel {
@@ -489,6 +497,28 @@ public final class RemoteServer: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    // MARK: Share play pads
+
+    /// Bridges share play holds for its viewers' pads; phones are not given them.
+    private var reservedBridges: Set<Int> = []
+    private let padOutputs = Locked<(@Sendable (Int, Data) -> Void)?>(nil)
+
+    /// The game's answers (vibration, light bar) on a bridge share play holds, by bridge.
+    public var padOutput: (@Sendable (Int, Data) -> Void)? {
+        get { padOutputs.value }
+        set { padOutputs.value = newValue }
+    }
+
+    var reservedPadBridges: [Int] { queue.sync { reservedBridges.sorted() } }
+    var phoneSlots: [Int] { queue.sync { phones.compactMap(\.slot) } }
+
+    fileprivate var bridgeIndices: Range<Int> { bridgeSockets.indices }
+
+    fileprivate func forwardPad(_ data: Data, bridge: Int) {
+        guard reservedBridges.contains(bridge), gameAddresses.indices.contains(bridge), var game = gameAddresses[bridge] else { return }
+        RemoteServer.send(data, from: bridgeSockets[bridge], to: &game)
     }
 
     private static func bind<Address>(_ socket: Int32, _ address: inout Address) -> Bool {
@@ -541,5 +571,31 @@ public final class Locked<Value>: @unchecked Sendable {
     /// Reads or changes the value in place, holding the lock.
     public func withLock<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
         try lock.withLock { try body(&stored) }
+    }
+}
+
+extension RemoteServer: SharePadBridges {
+    /// A bridge no phone uses, for a share play viewer's pad: the last free one, so the first
+    /// stay with phones; nil when none is free.
+    public func reservePadBridge() -> Int? {
+        queue.sync {
+            guard let free = bridgeIndices.reversed().first(where: { slot in !phones.contains { $0.slot == slot } && !reservedBridges.contains(slot) }) else { return nil }
+            reservedBridges.insert(free)
+            return free
+        }
+    }
+
+    public func releasePadBridge(_ bridge: Int) {
+        queue.sync { _ = reservedBridges.remove(bridge) }
+    }
+
+    /// The player the game says a bridge's pad is, from 1; nil while it is none.
+    public func padPlayer(bridge: Int) -> Int? {
+        queue.sync { gamePlayers.indices.contains(bridge) ? gamePlayers[bridge] : nil }
+    }
+
+    /// A share play viewer's pad packet to the game through the bridge held for them.
+    public func sendPad(_ data: Data, bridge: Int) {
+        queue.async { [self] in forwardPad(data, bridge: bridge) }
     }
 }

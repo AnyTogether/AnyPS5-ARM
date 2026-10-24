@@ -165,6 +165,28 @@ final class DiscordPresenceTests: XCTestCase {
         presence.close()
     }
 
+    func testTheApplicationIDCanComeFromTheEnvironment() {
+        XCTAssertEqual(DiscordPresence.applicationID(environment: [:]), DiscordPresence.anyps5ApplicationID)
+        XCTAssertEqual(DiscordPresence.applicationID(environment: ["ANYPS5_DISCORD_APP_ID": " 987654321 "]), "987654321")
+        XCTAssertEqual(DiscordPresence.applicationID(environment: ["ANYPS5_DISCORD_APP_ID": ""]), "", "set and empty turns the presence off")
+    }
+
+    func testDiscordIsLookedForWhereItsSocketsLive() {
+        let folders = DiscordPresence.socketDirectories(environment: ["XDG_RUNTIME_DIR": "/run/user/501", "TMPDIR": "/var/folders/ab/T/"])
+        XCTAssertEqual(folders.map(\.path), ["/run/user/501", "/var/folders/ab/T", "/tmp"])
+        XCTAssertEqual(DiscordPresence.socketDirectories(environment: ["TMPDIR": "/tmp/"]).map(\.path), ["/tmp"], "each folder once")
+    }
+
+    func testASocketInALaterFolderIsFound() throws {
+        let discord = try FakeDiscord()
+        let empty = URL(fileURLWithPath: "/tmp/anyps5-no-discord-\(UInt32.random(in: 0...UInt32.max))")
+        let presence = DiscordPresence(applicationID: "1234", directories: [empty, discord.directory])
+        presence.playing("Stray", since: Date())
+        XCTAssertTrue(discord.waitFor(2))
+        XCTAssertEqual(discord.frames[0].1["client_id"] as? String, "1234")
+        presence.close()
+    }
+
     func testNoApplicationIDIsOff() throws {
         let discord = try FakeDiscord()
         let presence = DiscordPresence(applicationID: "", directory: discord.directory)

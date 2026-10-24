@@ -59,7 +59,7 @@ final class RemoteRelayTests: XCTestCase {
         try server.start()
         phone = FakePhone(port: server.controlPort!)
         try await phone.hello(key: known.key)
-        guard case .welcome(let session, let udpPort, _, _) = try await phone.receive() else { return XCTFail("no welcome") }
+        guard case .welcome(let session, let udpPort, _, _, _) = try await phone.receive() else { return XCTFail("no welcome") }
         self.session = session
         self.udpPort = udpPort
     }
@@ -213,7 +213,7 @@ final class RemoteRelayTests: XCTestCase {
         let known = devices.add(id: "phone-2", name: "Galaxy")
         let other = FakePhone(port: server.controlPort!)
         try await other.hello(id: known.id, name: known.name, key: known.key)
-        guard case .welcome(let otherSession, _, _, _) = try await other.receive() else { return XCTFail("no welcome") }
+        guard case .welcome(let otherSession, _, _, _, _) = try await other.receive() else { return XCTFail("no welcome") }
         let firstGame = UDPPeer()
         let secondGame = UDPPeer()
         firstGame.send(Self.hello, to: server.bridgePorts[0])

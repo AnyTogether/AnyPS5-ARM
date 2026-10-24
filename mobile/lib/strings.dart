@@ -87,6 +87,104 @@ class Strings {
   String get togetherUnreachable => _text('togetherUnreachable');
   String togetherMacAsks(String mac, String handle) =>
       _text('togetherMacAsks').replaceAll('%@', mac).replaceAll('%h', handle);
+  String get friends => _text('friends');
+  String get friendsHandle => _text('friendsHandle');
+  String get friendsAdd => _text('friendsAdd');
+  String friendsRequested(String handle) =>
+      _text('friendsRequested').replaceAll('%h', handle);
+  String friendsAdded(String handle) =>
+      _text('friendsAdded').replaceAll('%h', handle);
+  String get friendsRequests => _text('friendsRequests');
+  String get friendsSent => _text('friendsSent');
+  String get friendsWaiting => _text('friendsWaiting');
+  String get friendsNone => _text('friendsNone');
+  String get friendsRemove => _text('friendsRemove');
+  String get accept => _text('accept');
+  String get decline => _text('decline');
+  String presencePlaying(String game) =>
+      _text('presencePlaying').replaceAll('%@', game);
+  String get presenceOnline => _text('presenceOnline');
+  String get presenceAway => _text('presenceAway');
+  String get presenceOffline => _text('presenceOffline');
+  String get togetherLive => _text('togetherLive');
+  String get togetherConnecting => _text('togetherConnecting');
+  String get togetherNotFound => _text('togetherNotFound');
+  String get back => _text('back');
+  String get voice => _text('voice');
+  String get voiceJoin => _text('voiceJoin');
+  String get voiceLeave => _text('voiceLeave');
+  String get voiceMute => _text('voiceMute');
+  String get voiceUnmute => _text('voiceUnmute');
+  String get voiceMicDenied => _text('voiceMicDenied');
+  String get voiceFailed => _text('voiceFailed');
+  String get voiceAlone => _text('voiceAlone');
+  String get voicePad => _text('voicePad');
+  String voiceConnected(int n) =>
+      _text('voiceConnected').replaceAll('{n}', '$n');
+  String voiceConnecting(int n) =>
+      _text('voiceConnecting').replaceAll('{n}', '$n');
+  String voiceInCall(int n) => _text('voiceInCall').replaceAll('{n}', '$n');
+  String get party => _text('party');
+  String get partyIntro => _text('partyIntro');
+  String get partyStart => _text('partyStart');
+  String get partyInvites => _text('partyInvites');
+  String get partyJoin => _text('partyJoin');
+  String get shareTitle => _text('shareTitle');
+  String get shareWatch => _text('shareWatch');
+  String get shareLeave => _text('shareLeave');
+  String get shareWatching => _text('shareWatching');
+  String get shareFull => _text('shareFull');
+  String get shareFailed => _text('shareFailed');
+  String get shareTaken => _text('shareTaken');
+  String shareInvited(String name, String game) =>
+      _text('shareInvited').replaceAll('%@', name).replaceAll('%s', game);
+  String shareSharing(String game) =>
+      _text('shareSharing').replaceAll('%@', game);
+  String shareViewers(int count, int most) =>
+      _text('shareViewers')
+          .replaceAll('%@', '$count')
+          .replaceAll('%s', '$most');
+  String sharePlayer(int number) =>
+      _text('sharePlayer').replaceAll('%@', '$number');
+  String shareConnecting(String name) =>
+      _text('shareConnecting').replaceAll('%@', name);
+  String shareEnded(String name) => _text('shareEnded').replaceAll('%@', name);
+  String shareRemoved(String name) =>
+      _text('shareRemoved').replaceAll('%@', name);
+  String get partyLeave => _text('partyLeave');
+  String get partyInvite => _text('partyInvite');
+  String get partyInvited => _text('partyInvited');
+  String get partyInviteFriends => _text('partyInviteFriends');
+  String get partyNoFriends => _text('partyNoFriends');
+  String get partyOpen => _text('partyOpen');
+  String get partyOpenDetail => _text('partyOpenDetail');
+  String get partyLeader => _text('partyLeader');
+  String get partyFriendsParties => _text('partyFriendsParties');
+  String get partyKicked => _text('partyKicked');
+  String get partyFull => _text('partyFull');
+  String get partyKick => _text('partyKick');
+  String get partyMembers => _text('partyMembers');
+  String partyInviteFrom(String name, int size) =>
+      _text('partyInviteFrom')
+          .replaceAll('%@', name)
+          .replaceAll('{n}', '$size');
+  String get messages => _text('messages');
+  String get messagesNone => _text('messagesNone');
+  String get messagesPick => _text('messagesPick');
+  String get messagesWrite => _text('messagesWrite');
+  String get messagesSend => _text('messagesSend');
+  String get messagesDeleted => _text('messagesDeleted');
+  String get messagesFailed => _text('messagesFailed');
+  String get messagesEarlier => _text('messagesEarlier');
+  String get messagesYou => _text('messagesYou');
+  String get messagesEdited => _text('messagesEdited');
+  String get togetherServer => _text('togetherServer');
+  String get togetherServerChange => _text('togetherServerChange');
+  String get togetherServerUse => _text('togetherServerUse');
+  String togetherServerMac(String mac, String server) =>
+      _text('togetherServerMac').replaceAll('%@', mac).replaceAll('%s', server);
+  String get togetherServerDetail => _text('togetherServerDetail');
+  String get togetherServerInvalid => _text('togetherServerInvalid');
   String get allow => _text('allow');
   String get notNow => _text('notNow');
   String get editLayout => _text('editLayout');
@@ -178,6 +276,89 @@ class Strings {
     'togetherSignOut': 'Sign out',
     'togetherUnreachable': "Couldn't reach AnyTogether",
     'togetherMacAsks': '%@ wants to sign in to AnyTogether as @%h',
+    'friends': 'Friends',
+    'friendsHandle': 'Their handle',
+    'friendsAdd': 'Add',
+    'friendsRequested': 'Asked @%h to be friends',
+    'friendsAdded': 'You and @%h are friends now',
+    'friendsRequests': 'Friend requests',
+    'friendsSent': 'Waiting for them',
+    'friendsWaiting': 'Waiting',
+    'friendsNone': 'No friends here yet. Add someone by their handle.',
+    'friendsRemove': 'Remove friend',
+    'accept': 'Accept',
+    'decline': 'Decline',
+    'presencePlaying': 'Playing %@',
+    'presenceOnline': 'Online',
+    'presenceAway': 'Away',
+    'presenceOffline': 'Offline',
+    'togetherLive': 'Live',
+    'togetherConnecting': 'Connecting…',
+    'togetherNotFound': 'No one with that handle',
+    'back': 'Back',
+    'voice': 'Voice',
+    'voiceJoin': 'Join voice',
+    'voiceLeave': 'Leave voice',
+    'voiceMute': 'Mute',
+    'voiceUnmute': 'Unmute',
+    'voiceMicDenied':
+        'Allow the microphone for AnyPS5 Remote in Settings to talk',
+    'voiceFailed': 'Couldn\'t join the voice',
+    'voiceAlone': 'No one else is in voice yet',
+    'voicePad': 'The phone stays the controller while you talk',
+    'voiceConnected': 'Talking with {n}',
+    'voiceConnecting': 'Connecting to {n}…',
+    'voiceInCall': '{n} in voice',
+    'party': 'Party',
+    'partyIntro': 'Talk while you play, up to eight of you. The phone stays the controller.',
+    'partyStart': 'Start a party',
+    'partyInvites': 'Party invites',
+    'partyJoin': 'Join',
+    'shareTitle': 'Share play',
+    'shareWatch': 'Watch',
+    'shareLeave': 'Stop watching',
+    'shareWatching': 'Watching',
+    'shareFull': 'Nobody else can watch right now',
+    'shareFailed': 'Could not watch',
+    'shareTaken': 'The host took the pad back',
+    'shareInvited': '%@ shares %s with you',
+    'shareSharing': 'Sharing %@',
+    'shareViewers': '%@ of %s watching',
+    'sharePlayer': 'Player %@',
+    'shareConnecting': 'Connecting to %@…',
+    'shareEnded': '%@ stopped sharing',
+    'shareRemoved': '%@ took you out',
+    'partyLeave': 'Leave party',
+    'partyInvite': 'Invite',
+    'partyInvited': 'Invited',
+    'partyInviteFriends': 'Invite friends',
+    'partyNoFriends': 'Every friend is here or invited',
+    'partyOpen': 'Friends can join',
+    'partyOpenDetail': 'Your friends join without an invite',
+    'partyLeader': 'Leader',
+    'partyFriendsParties': 'Friends\' open parties',
+    'partyKicked': 'The leader took you out of the party',
+    'partyFull': 'The party is full',
+    'partyKick': 'Remove from party',
+    'partyMembers': 'Members',
+    'partyInviteFrom': '%@ · {n} in the party',
+    'messages': 'Messages',
+    'messagesNone': 'No conversations yet. Write to a friend from Friends.',
+    'messagesPick': 'Pick a conversation, or write to a friend from Friends.',
+    'messagesWrite': 'Message',
+    'messagesSend': 'Send',
+    'messagesDeleted': 'Message deleted',
+    'messagesFailed': 'Not sent. Tap to try again',
+    'messagesEarlier': 'Earlier messages',
+    'messagesYou': 'You',
+    'messagesEdited': 'edited',
+    'togetherServer': 'Server',
+    'togetherServerChange': 'Change',
+    'togetherServerUse': 'Use',
+    'togetherServerMac': '%@ uses %s',
+    'togetherServerDetail': 'Another AnyTogether server, one you or your friends host. Changing it signs you out.',
+    'togetherServerInvalid':
+        'An https:// address, or http:// on your home network',
     'allow': 'Allow',
     'notNow': 'Not now',
     'remotePlayNoPermission':
@@ -270,6 +451,90 @@ class Strings {
     'togetherSignOut': 'Çıkış yap',
     'togetherUnreachable': "AnyTogether'a ulaşılamadı",
     'togetherMacAsks': "%@, AnyTogether'a @%h olarak girmek istiyor",
+    'friends': 'Arkadaşlar',
+    'friendsHandle': 'Kullanıcı adı',
+    'friendsAdd': 'Ekle',
+    'friendsRequested': '@%h kişisine arkadaşlık isteği gönderildi',
+    'friendsAdded': '@%h ile artık arkadaşsınız',
+    'friendsRequests': 'Arkadaşlık istekleri',
+    'friendsSent': 'Yanıt bekleniyor',
+    'friendsWaiting': 'Bekliyor',
+    'friendsNone': 'Burada henüz arkadaş yok. Birini kullanıcı adıyla ekle.',
+    'friendsRemove': 'Arkadaşlıktan çıkar',
+    'accept': 'Kabul et',
+    'decline': 'Reddet',
+    'presencePlaying': '%@ oynuyor',
+    'presenceOnline': 'Çevrimiçi',
+    'presenceAway': 'Uzakta',
+    'presenceOffline': 'Çevrimdışı',
+    'togetherLive': 'Canlı',
+    'togetherConnecting': 'Bağlanıyor…',
+    'togetherNotFound': 'Bu kullanıcı adıyla kimse yok',
+    'back': 'Geri',
+    'voice': 'Sesli sohbet',
+    'voiceJoin': 'Sesliye katıl',
+    'voiceLeave': 'Sesliden ayrıl',
+    'voiceMute': 'Sessize al',
+    'voiceUnmute': 'Sesi aç',
+    'voiceMicDenied':
+        'Konuşmak için Ayarlar\'dan AnyPS5 Remote\'a mikrofon izni ver',
+    'voiceFailed': 'Sesliye katılınamadı',
+    'voiceAlone': 'Seslide henüz başka kimse yok',
+    'voicePad': 'Konuşurken telefon kol olmaya devam eder',
+    'voiceConnected': '{n} kişiyle konuşuluyor',
+    'voiceConnecting': '{n} kişiye bağlanıyor…',
+    'voiceInCall': 'Seslide {n} kişi',
+    'party': 'Parti',
+    'partyIntro':
+        'Oynarken konuşun, en fazla sekiz kişi. Telefon kol olmaya devam eder.',
+    'partyStart': 'Parti başlat',
+    'partyInvites': 'Parti davetleri',
+    'partyJoin': 'Katıl',
+    'shareTitle': 'Oyun paylaşımı',
+    'shareWatch': 'İzle',
+    'shareLeave': 'İzlemeyi bırak',
+    'shareWatching': 'İzliyorsun',
+    'shareFull': 'Şu anda başka kimse izleyemez',
+    'shareFailed': 'İzlenemedi',
+    'shareTaken': 'Ev sahibi kolu geri aldı',
+    'shareInvited': '%@ seninle %s paylaşıyor',
+    'shareSharing': '%@ oyununu paylaşıyor',
+    'shareViewers': '%s kişiden %@ izliyor',
+    'sharePlayer': 'Oyuncu %@',
+    'shareConnecting': '%@ ile bağlanılıyor…',
+    'shareEnded': '%@ paylaşımı durdurdu',
+    'shareRemoved': '%@ seni çıkardı',
+    'partyLeave': 'Partiden ayrıl',
+    'partyInvite': 'Davet et',
+    'partyInvited': 'Davet edildi',
+    'partyInviteFriends': 'Arkadaşlarını davet et',
+    'partyNoFriends': 'Bütün arkadaşların burada ya da davetli',
+    'partyOpen': 'Arkadaşlar katılabilir',
+    'partyOpenDetail': 'Arkadaşların davetsiz katılır',
+    'partyLeader': 'Lider',
+    'partyFriendsParties': 'Arkadaşların açık partileri',
+    'partyKicked': 'Lider seni partiden çıkardı',
+    'partyFull': 'Parti dolu',
+    'partyKick': 'Partiden çıkar',
+    'partyMembers': 'Üyeler',
+    'partyInviteFrom': '%@ · partide {n} kişi',
+    'messages': 'Mesajlar',
+    'messagesNone': 'Henüz konuşma yok. Arkadaşlar\'dan bir arkadaşına yaz.',
+    'messagesPick': 'Bir konuşma seç ya da Arkadaşlar\'dan bir arkadaşına yaz.',
+    'messagesWrite': 'Mesaj',
+    'messagesSend': 'Gönder',
+    'messagesDeleted': 'Mesaj silindi',
+    'messagesFailed': 'Gönderilemedi. Tekrar denemek için dokun',
+    'messagesEarlier': 'Önceki mesajlar',
+    'messagesYou': 'Sen',
+    'messagesEdited': 'düzenlendi',
+    'togetherServer': 'Sunucu',
+    'togetherServerChange': 'Değiştir',
+    'togetherServerUse': 'Kullan',
+    'togetherServerMac': '%@, %s kullanıyor',
+    'togetherServerDetail': 'Senin ya da arkadaşlarının barındırdığı başka bir AnyTogether sunucusu. Değiştirmek oturumu kapatır.',
+    'togetherServerInvalid':
+        'https:// ile başlayan bir adres ya da ev ağında http://',
     'allow': 'İzin ver',
     'notNow': 'Şimdi değil',
     'remotePlayNoPermission':

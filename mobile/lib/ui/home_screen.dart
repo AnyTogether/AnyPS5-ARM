@@ -5,7 +5,12 @@ import 'package:flutter/material.dart';
 import '../connection/session.dart';
 import '../protocol/messages.dart';
 import '../strings.dart';
+import '../together/together_hub.dart';
 import 'about_sheet.dart';
+import 'notifications_view.dart';
+import 'together_screen.dart';
+import 'together_sheet.dart';
+import 'together_widgets.dart';
 
 /// The launcher on the phone: the Mac's games over the selected one's background, the way the
 /// launcher shows them. Picking a game picks it on the Mac too; the arrows, ✕, ○ and ≡ at the
@@ -18,9 +23,13 @@ class HomeScreen extends StatefulWidget {
     this.status,
     this.remotePlay = false,
     this.onRemotePlay,
+    this.together,
   });
 
   final Session session;
+
+  /// AnyTogether's live side, behind the people button next to About.
+  final TogetherHub? together;
 
   /// Back to the pad and the game playing.
   final VoidCallback onResume;
@@ -127,6 +136,27 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       if (widget.status != null) widget.status!,
                       const Spacer(),
+                      if (widget.together case final hub?)
+                        NotificationBell(
+                          hub: hub,
+                          onPressed: () =>
+                              _openTogether(hub, TogetherTab.notifications),
+                        ),
+                      if (widget.together case final hub?)
+                        ListenableBuilder(
+                          listenable: hub,
+                          builder: (context, _) => IconButton(
+                            tooltip: texts.together,
+                            onPressed: () => _openTogether(hub),
+                            icon: CountBadge(
+                              count: hub.badge,
+                              child: const Icon(
+                                Icons.people_alt_rounded,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ),
+                        ),
                       IconButton(
                         tooltip: texts.about,
                         onPressed: () => showAbout(
@@ -151,6 +181,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           together: widget.session.together,
                           macName: widget.session.macName,
                           onUseMac: () => widget.session.signInWithMac(),
+                          launcherServer: widget.session.launcherServer,
+                          onOpenTogether: widget.together == null
+                              ? null
+                              : (tab) => _openTogether(widget.together!, tab),
                         ),
                         icon: const Icon(
                           Icons.info_outline_rounded,
@@ -295,6 +329,28 @@ class _HomeScreenState extends State<HomeScreen> {
       ],
     );
   }
+
+  /// AnyTogether's screen, or its sign-in first.
+  void _openTogether(TogetherHub hub, [TogetherTab tab = TogetherTab.friends]) {
+    if (hub.account.user == null) {
+      showTogether(
+        context,
+        account: hub.account,
+        macName: widget.session.macName,
+        onUseMac: () => widget.session.signInWithMac(),
+        onOpen: (tab) => _openTogether(hub, tab),
+        launcherServer: widget.session.launcherServer,
+      );
+      return;
+    }
+    openTogether(context, hub: hub, tab: tab, gameName: _gameName);
+  }
+
+  /// A game's name from the Mac's library, for a friend playing it.
+  String? _gameName(String titleId) => widget.session.library?.games
+      .where((game) => game.id == titleId)
+      .firstOrNull
+      ?.name;
 
   void _pick(RemoteGame game, String? selectedID) {
     if (game.id == selectedID) return;
