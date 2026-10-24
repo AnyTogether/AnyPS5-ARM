@@ -257,8 +257,9 @@ public protocol SharePadBridges: AnyObject, Sendable {
 }
 
 /// Viewers' pad packets to the game: only from a viewer the host handed a pad, each through a
-/// bridge of their own (so the engine seats them as players of their own, after the host's
-/// player 1); a pad taken back lets go of every button before its bridge is freed.
+/// bridge of their own, carrying the pad the host gave (byte 13) so the engine seats them as
+/// that player and never as the host's player 1; a pad taken back lets go of every button
+/// before its bridge is freed.
 public final class SharePadRouter: @unchecked Sendable {
     private let bridges: SharePadBridges
     private let lock = NSLock()
@@ -266,12 +267,19 @@ public final class SharePadRouter: @unchecked Sendable {
     private var held: [String: Int] = [:]
     /// Each viewer's newest packet, to let go of from.
     private var last: [String: Data] = [:]
+    /// The pad (2-4) each viewer was given.
+    private var pads: [String: Int] = [:]
+
+    /// Where a packet carries the player the launcher holds for a share play guest (2-4); the
+    /// engine never seats such a pad as player 1. Phones leave it 0.
+    public static let seatByte = 13
 
     public init(bridges: SharePadBridges) { self.bridges = bridges }
 
     /// The pads as the share play has them now (user ID → pad 2-4).
     public func update(pads: [String: Int]) {
         let (gone, wanted): ([(String, Int, Data?)], [String]) = lock.withLock {
+            self.pads = pads
             let gone = held.filter { pads[$0.key] == nil }.map { ($0.key, $0.value, last[$0.key]) }
             for (userId, _, _) in gone {
                 held[userId] = nil
@@ -294,9 +302,10 @@ public final class SharePadRouter: @unchecked Sendable {
     @discardableResult
     public func receive(_ data: Data, from userId: String) -> Bool {
         guard let session = RemotePacket.inputSession(data), session != 0 else { return false }
-        let packet = Data(data)
+        var packet = Data(data)
         guard let bridge: Int = lock.withLock({
-            guard let bridge = held[userId] else { return nil }
+            guard let bridge = held[userId], let pad = pads[userId] else { return nil }
+            packet[packet.startIndex + SharePadRouter.seatByte] = UInt8(clamping: pad)
             last[userId] = packet
             return bridge
         }) else { return false }

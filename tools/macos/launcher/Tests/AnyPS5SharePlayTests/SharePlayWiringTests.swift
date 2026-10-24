@@ -149,7 +149,10 @@ final class SharePlayWiringTests: XCTestCase {
             watcher.sendPad(input)
             return !bridges.sent.value.isEmpty
         }
-        XCTAssertEqual(bridges.sent.value.first?.0, input)
+        // As the viewer sent it, naming the pad the host gave.
+        var seated = input
+        seated[SharePadRouter.seatByte] = 2
+        XCTAssertEqual(bridges.sent.value.first?.0, seated)
         XCTAssertEqual(bridges.sent.value.first?.1, 3)
 
         // The game's answer on that bridge goes back to the viewer.

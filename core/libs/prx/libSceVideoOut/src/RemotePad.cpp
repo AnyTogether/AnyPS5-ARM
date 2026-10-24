@@ -65,6 +65,7 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     input.sequence = read<std::uint32_t>(bytes, 8);
     input.sentMicros = read<std::uint64_t>(bytes, 16);
     input.session = read<std::uint64_t>(bytes, 24);
+    if (const auto seat = bytes[13]; seat >= 2 && seat <= kPadPlayers) input.seat = seat;
     auto& state = input.state;
     state.buttons = read<std::uint32_t>(bytes, 32) & KnownButtons;
     for (std::size_t axis = 0; axis < 4; ++axis) state.sticks[axis] = bytes[36 + axis];
@@ -259,9 +260,13 @@ bool Wants(const PadInputState& state) {
         state.touch[0].active || state.touch[1].active || stick;
 }
 
-int Seats::Seat(std::uint32_t device, bool wants) {
+int Seats::Seat(std::uint32_t device, bool wants, std::uint8_t guest) {
     if (const int held = Of(device); held >= 0 || !wants) return held;
-    for (std::size_t player = 0; player < holders.size(); ++player) {
+    if (guest >= 2 && guest <= holders.size() && !holders[guest - 1u]) {
+        holders[guest - 1u] = device;
+        return guest - 1;
+    }
+    for (std::size_t player = guest >= 2 ? 1 : 0; player < holders.size(); ++player) {
         if (holders[player]) continue;
         holders[player] = device;
         return static_cast<int>(player);

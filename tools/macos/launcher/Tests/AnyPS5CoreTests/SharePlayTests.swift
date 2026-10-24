@@ -207,7 +207,9 @@ final class SharePadRouterTests: XCTestCase {
         XCTAssertFalse(router.receive(Data(repeating: 0, count: 80), from: "a"))
         XCTAssertFalse(router.receive(pad(session: 7).prefix(79), from: "a"))
         XCTAssertEqual(bridges.sent.count, 1)
-        XCTAssertEqual(bridges.sent.first?.0, pad(session: 7))
+        var seated = pad(session: 7)
+        seated[13] = 2
+        XCTAssertEqual(bridges.sent.first?.0, seated)
         XCTAssertEqual(bridges.sent.first?.1, 3)
         XCTAssertEqual(router.bridge(of: "a"), 3)
         XCTAssertNil(router.bridge(of: "b"))
@@ -235,6 +237,31 @@ final class SharePadRouterTests: XCTestCase {
         XCTAssertEqual(router.bridge(of: "b"), b)
         router.update(pads: [:])
         XCTAssertEqual(bridges.released.count, 2)
+    }
+
+    /// The engine seats a pad on its own: the first to press takes player 1. The packet carries
+    /// the pad the host gave (byte 13), whatever the viewer sent there, so a viewer never takes
+    /// the host's player 1.
+    func testThePacketCarriesThePadTheHostGave() {
+        let bridges = FakeBridges()
+        let router = SharePadRouter(bridges: bridges)
+        router.update(pads: ["a": 2, "b": 3])
+        var claimsOne = pad(session: 7)
+        claimsOne[13] = 1
+        router.receive(claimsOne, from: "a")
+        router.receive(pad(session: 8), from: "b")
+        XCTAssertEqual(bridges.sent.map { $0.0[13] }, [2, 3])
+        // Everything else goes on as the viewer sent it.
+        XCTAssertEqual(bridges.sent[1].0.prefix(13), pad(session: 8).prefix(13))
+        XCTAssertEqual(bridges.sent[1].0.suffix(from: 14), pad(session: 8).suffix(from: 14))
+        // Another pad for a viewer who keeps their bridge: the next packet says so.
+        router.update(pads: ["a": 4, "b": 3])
+        router.receive(pad(session: 7, sequence: 2), from: "a")
+        XCTAssertEqual(bridges.sent.last?.0[13], 4)
+        // Taken back: letting go still names the pad, so the engine sees the same guest.
+        router.update(pads: ["b": 3])
+        XCTAssertEqual(bridges.sent.last?.0[13], 4)
+        XCTAssertEqual(bridges.sent.last.map { RemotePacket.read($0.0, at: 32) as UInt32 }, 0)
     }
 
     func testTheGamesAnswerGoesBackToTheViewerOfThatBridge() {
@@ -289,7 +316,9 @@ final class SharePadRelayTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.05)
         let packet = SharePadRouterTests().pad(session: 99)
         XCTAssertTrue(router.receive(packet, from: "viewer"))
-        XCTAssertEqual(games[bridge].receive(), packet)
+        var seated = packet
+        seated[SharePadRouter.seatByte] = 2
+        XCTAssertEqual(games[bridge].receive(), seated)
         XCTAssertNil(games[0].receive())
         XCTAssertFalse(router.receive(packet, from: "stranger"))
         XCTAssertNil(games[bridge].receive())

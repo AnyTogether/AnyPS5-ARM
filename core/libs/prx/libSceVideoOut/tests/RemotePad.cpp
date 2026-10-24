@@ -346,6 +346,28 @@ void seatsGoInOrderAndComeBack() {
     require(RemotePad::RemoteDevice(0) != RemotePad::RemoteDevice(1), "phones are told apart");
 }
 
+// A share play guest's packets carry the player the launcher holds for it (byte 13, 2 to 4): it
+// takes that player, or the lowest free one after the first, never the host's first player.
+void guestsNeverTakeTheFirstPlayer() {
+    auto packet = fullPacket(1);
+    require(RemotePad::DecodeInput(view(packet))->seat == 0, "a phone's packet holds no seat");
+    packet[13] = 2;
+    const auto guest = RemotePad::DecodeInput(view(packet));
+    require(guest.has_value() && guest->seat == 2 && guest->state.hasMotion, "a guest's packet names its player and keeps its motion flag");
+    packet[13] = 1;
+    require(RemotePad::DecodeInput(view(packet))->seat == 0, "the first player is no seat to hold");
+    packet[13] = 5;
+    require(RemotePad::DecodeInput(view(packet))->seat == 0, "nor is a fifth");
+
+    RemotePad::Seats seats;
+    require(seats.Seat(RemotePad::RemoteDevice(3), true, 2) == 1, "a guest asking first takes its own player, not the first");
+    require(!seats.Held(0), "the first player stays free for the host");
+    require(seats.Seat(RemotePad::RemoteDevice(2), true, 2) == 2, "a guest whose player is taken gets the lowest free one after the first");
+    require(seats.Seat(RemotePad::RemoteDevice(1), true, 4) == 3, "and one holding the fourth gets it");
+    require(seats.Seat(RemotePad::RemoteDevice(0), true, 3) == -1, "with players 2 to 4 taken a guest waits");
+    require(seats.Seat(7, true) == 0, "while a controller still takes the first player");
+}
+
 void environmentForMorePlayers() {
     ::unsetenv("ANYPS5_REMOTE_PAD");
     ::setenv("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002", 1);
@@ -384,6 +406,7 @@ int main() try {
     environment();
     onlyRealInputWantsAPlayer();
     seatsGoInOrderAndComeBack();
+    guestsNeverTakeTheFirstPlayer();
     environmentForMorePlayers();
     std::cout << "remote pad tests passed\n";
     return 0;
