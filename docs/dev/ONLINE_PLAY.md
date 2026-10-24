@@ -2,7 +2,7 @@
 
 Two players each run the same game on their own Mac. The game makes the PlayStation-platform calls it always makes (sign-in, sessions, matchmaking, signalling, peer-to-peer packets) and AnyPS5 carries them, through the launcher and AnyTogether, to the other player. Nothing ever goes to Sony, and nothing stands in for a publisher's own servers.
 
-This page is the design. Built in the engine so far: the bridge client and its protocol, observation mode, sign-in state (NpManager) and web API pass-through (NpWebApi2), each tested against a fake launcher. Not built yet: the launcher side, push events, session signalling, game traffic and intents.
+This page is the design. Built in the engine so far: the bridge client and its protocol, observation mode, sign-in state and Plus checks (NpManager), web API pass-through (NpWebApi2) and datagram game traffic over virtual addresses (libSceNet), each tested against a fake launcher. Not built yet in the engine: push events, session signalling, stream traffic and intents.
 
 ## The clean line
 
@@ -26,7 +26,7 @@ A typical host-based or peer-to-peer PS5 game goes through these steps. "Today" 
 | Session and invitation news | `sceNpWebApi2PushEventCreateHandle`, `CreateFilter`, `RegisterCallback`, `CreatePushContext`, `StartPushContextCallback` | handles exist, nothing is ever delivered | planned (push frames); callback signature and filter layout still to be observed |
 | Join from the system | `sceNpGameIntent*`, `libScePlayerInvitationDialog` | no intents | planned: an AnyTogether invitation becomes a join intent |
 | Connect to peers | `sceNpSessionSignalingInitialize`, `CreateContext2`, `ActivateSession`, `ActivateUser`, `GetConnectionInfo`, `GetConnectionStatus`, `GetLocalNetInfo`; older titles `libSceNpSignaling`, `libSceNpMatching2` | contexts exist, activation `UNAVAILABLE`; Signaling and Matching2 not implemented | planned: connection events from the launcher's peer list, each peer at a virtual address |
-| Game packets | `sceNetSocket` with the P2P types (datagram and stream, with virtual ports), `sceNetSendto`/`sceNetRecvfrom`, often under `libSceRudp` | P2P types fail with `EPROTONOSUPPORT`; ordinary sockets reach the real network | planned: packets to a virtual address go through the bridge to the launcher, which carries them to the peer |
+| Game packets | `sceNetSocket` with the P2P types (datagram and stream, with virtual ports), `sceNetSendto`/`sceNetRecvfrom`, often under `libSceRudp` | P2P types fail with `EPROTONOSUPPORT`; ordinary sockets reach the real network | datagram P2P sockets and UDP to a virtual address go through the bridge to the launcher, which carries them to the peer; stream P2P and TCP planned |
 | Activities, trophies, add-ons | `libSceNpUniversalDataSystem`, `libSceNpTrophy2`, `libSceNpEntitlementAccess` | offline implementations | unchanged |
 
 Unimplemented exports in these libraries stop the game, as everywhere in AnyPS5. The observation log records them first, which is how we learn what a title needs next.
@@ -90,7 +90,8 @@ A reply has the request's type and call with the reply bit. Fields are packed in
 | 0x0201 | WebRequest | engine →, call | i32 user, str API group, str path with query, str method, pairs headers, bytes body → reply: u16 status (0 = not offered), pairs headers, bytes body |
 | 0x0202–0x0204 | PushFilter, PushFilterGone, PushEvent | planned | filter ID, service, data types; event data opaque |
 | 0x0301–0x0306 | SessionActivate, SessionDeactivate, Peer, PeerInfo | planned | session ID; peer account, handle, virtual address, state (connecting, connected, gone, failed), RTT, relayed |
-| 0x0310–0x0313 | Datagram, StreamOpen, StreamData, StreamClose | planned | virtual address, ports, virtual ports, bytes |
+| 0x0310 | Datagram | both, event | u32 peer virtual address (host order value), u16 peer port, u16 peer virtual port, u16 local port, u16 local virtual port, u8 kind (1 UDP, 2 P2P), bytes data (≤ 65535) |
+| 0x0311–0x0313 | StreamOpen, StreamData, StreamClose | planned | virtual address, ports, virtual ports, bytes |
 | 0x0401–0x0402 | Intent, InvitationDialog | planned | intent type and properties; session, maximum |
 
 **Web API.** The engine passes the request as the game built it; the body stays opaque in both directions. The launcher keeps one handler per API group (sessions and matchmaking first) that maps the request onto AnyTogether's game sessions and invitations. Status 0, a timeout (30 s unless the game set one) or a lost connection make the engine answer exactly as it does offline. The launcher never forwards anything to Sony and never invents a 200 for a group it has no specification for.
@@ -98,7 +99,7 @@ A reply has the request's type and call with the reply bit. Fields are packed in
 ## Game traffic
 
 - **Virtual addresses.** Each member of an AnyTogether game session gets an address from 198.18.0.0/15 (reserved for benchmarking, so it never collides with a real network), assigned by the session in join order. The game learns peers' addresses from session signalling, as it would learn real ones.
-- **Engine side.** A send from a P2P socket, or any UDP or TCP socket, to a virtual address becomes a `Datagram` or `Stream*` frame on the same loopback connection; frames from the launcher are delivered as if they came from that address and virtual port. Sends never block the game: datagrams drop when the queue is full, as UDP would. Loopback TCP adds well under a millisecond and loses nothing, so head-of-line blocking does not matter on that hop.
+- **Engine side (datagrams built).** A send from a datagram P2P socket, or any UDP socket, to a virtual address becomes a `Datagram` frame on the same loopback connection, queued for a writer thread so the game never blocks (the queue drops when full, as UDP would). A P2P socket is a host UDP socket on 127.0.0.1; datagrams from the launcher are injected into it from a loopback relay socket with a 12-byte header that receive strips, so the host's poll, epoll, non-blocking mode and timeouts keep working and the game sees the peer's virtual address and virtual port. Streams (stream P2P, TCP to a virtual address) will become `Stream*` frames. Loopback TCP adds well under a millisecond and loses nothing, so head-of-line blocking does not matter on that hop.
 - **Between launchers.** Datagrams ride an unordered, unreliable WebRTC data channel (or QUIC datagrams); streams ride a reliable ordered channel (or QUIC streams). The launcher connects directly when it can and uses the AnyTogether relay when it cannot, as calls and share play already do. Session membership in AnyTogether is the signalling channel; the realtime socket carries offers and candidates.
 - **Session signalling** (`libSceNpSessionSignaling`) is answered from the launcher's peer list: `ActivateSession` asks the launcher, connection callbacks fire on `Peer` events, `GetConnectionInfo` returns the peer's virtual address and port.
 

@@ -18,6 +18,7 @@ namespace Online::Testing {
 class FakeLauncher {
 public:
     using WebHandler = std::function<std::optional<Wire::WebReply>(const Wire::WebRequest&)>;
+    using DatagramHandler = std::function<std::optional<Wire::Datagram>(const Wire::Datagram&)>;
 
     explicit FakeLauncher(const Wire::Secret& secret);
     ~FakeLauncher();
@@ -27,6 +28,9 @@ public:
     std::uint16_t Port() const { return port; }
     void SetAccount(const Wire::Account& account);
     void SetWebHandler(WebHandler handler);
+    void SetDatagramHandler(DatagramHandler handler);
+    bool WaitForDatagrams(std::size_t count, std::chrono::milliseconds timeout);
+    std::vector<Wire::Datagram> Datagrams();
     void SetRefusal(std::optional<Wire::Refuse> refuse);
     void SetProofSecret(const Wire::Secret& secret);
     void DropClient();
@@ -57,6 +61,8 @@ private:
     std::condition_variable changed;
     Wire::Account account;
     WebHandler webHandler;
+    DatagramHandler datagramHandler;
+    std::vector<Wire::Datagram> datagrams;
     std::optional<Wire::Refuse> refusal;
     int client = -1;
     int sessions = 0;

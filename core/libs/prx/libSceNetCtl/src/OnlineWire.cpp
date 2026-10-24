@@ -224,6 +224,31 @@ std::vector<std::uint8_t> Encode(const WebReply& message) {
     return writer.Take();
 }
 
+std::vector<std::uint8_t> Encode(const Datagram& message) {
+    if (message.data.size() > MaxDatagram) throw std::length_error("online bridge: a datagram is larger than 65535 bytes");
+    Writer writer;
+    writer.U32(message.peer).U16(message.peerPort).U16(message.peerVport).U16(message.localPort).U16(message.localVport)
+        .U8(static_cast<std::uint8_t>(message.kind)).Bytes(message.data);
+    return writer.Take();
+}
+
+std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload) {
+    auto datagram = decode<Datagram>(payload, [](Reader& reader) {
+        Datagram message;
+        message.peer = reader.U32();
+        message.peerPort = reader.U16();
+        message.peerVport = reader.U16();
+        message.localPort = reader.U16();
+        message.localVport = reader.U16();
+        message.kind = static_cast<DatagramKind>(reader.U8());
+        message.data = reader.Bytes();
+        return message;
+    });
+    if (!datagram || !IsVirtual(datagram->peer) || datagram->data.size() > MaxDatagram) return std::nullopt;
+    if (datagram->kind != DatagramKind::Udp && datagram->kind != DatagramKind::P2p) return std::nullopt;
+    return datagram;
+}
+
 std::optional<Hello> DecodeHello(std::span<const std::uint8_t> payload) {
     return decode<Hello>(payload, [](Reader& reader) {
         Hello message;

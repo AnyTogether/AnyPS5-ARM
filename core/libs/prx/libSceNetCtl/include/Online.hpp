@@ -16,6 +16,8 @@ extern "C" bool OnlineEnabled_nid_no_patch();
 extern "C" bool OnlineAccount_nid_no_patch(Online::AccountState& out);
 extern "C" bool OnlineWeb_nid_no_patch(const Online::Wire::WebRequest& request, std::uint32_t timeoutMilliseconds, Online::Wire::WebReply& reply);
 extern "C" bool OnlineObserving_nid_no_patch();
+extern "C" bool OnlineSendDatagram_nid_no_patch(const Online::Wire::Datagram& datagram);
+extern "C" void OnlineSetDatagramReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Datagram& datagram));
 extern "C" void OnlineObserve_nid_no_patch(const char* library, const char* function, const std::string& in, const std::string& out, const std::int64_t* result);
 
 namespace Online {

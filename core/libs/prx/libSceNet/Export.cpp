@@ -42,6 +42,7 @@
 #include "prx/libc/include/GuestHeap.hpp"
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
+#include "prx/libSceNet/include/VirtualNet.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "src/ResolverTestHooks.hpp"
@@ -265,6 +266,7 @@ constexpr int NET_AF_INET = 2;
 constexpr int NET_AF_INET6 = 28;
 constexpr int NET_SOCK_STREAM = 1;
 constexpr int NET_SOCK_DGRAM = 2;
+constexpr int NET_SOCK_DGRAM_P2P = 6;
 constexpr int NET_SOCK_RAW = 3;
 constexpr int NET_EPOLL_CTL_ADD = 1;
 constexpr int NET_EPOLL_CTL_MOD = 2;
@@ -402,6 +404,13 @@ struct Sock {
     int snd_buffer = 0;
     int rcv_buffer = 0;
     int onesbcast = 0;
+    bool p2p = false;
+    bool virtualRoute = false;
+    std::uint16_t gamePort = 0;
+    std::uint16_t gameVport = 0;
+    std::uint32_t virtualPeer = 0;
+    std::uint16_t virtualPeerPort = 0;
+    std::uint16_t virtualPeerVport = 0;
 };
 
 #ifdef _WIN32
@@ -787,6 +796,88 @@ void GuestSceNetTest::SetResolverLookupForTests_nid_no_patch(ResolverLookup look
     g_resolverLookupForTests.store(lookup);
 }
 
+std::uint16_t native_port(const NativeSocketHandle& handle) {
+    sockaddr_storage local{};
+    NativeLength length = sizeof(local);
+    if (::getsockname(handle.value, reinterpret_cast<sockaddr*>(&local), &length) != 0 || local.ss_family != AF_INET) return 0;
+    return ntohs(reinterpret_cast<const sockaddr_in&>(local).sin_port);
+}
+
+bool route_virtual(int s, Sock& socket) {
+    if (socket.virtualRoute) return true;
+    if (!socket.bound) {
+        sockaddr_in any{};
+        any.sin_family = AF_INET;
+        if (::bind(socket.native->value, reinterpret_cast<const sockaddr*>(&any), sizeof(any)) != 0) return false;
+    }
+    const auto port = native_port(*socket.native);
+    if (!VirtualNet::Register(Online::Wire::DatagramKind::Udp, port, 0, port, s)) return false;
+    std::lock_guard lk(g_mutex);
+    auto it = g_socks.find(s);
+    if (it != g_socks.end()) {
+        it->second.bound = true;
+        it->second.virtualRoute = true;
+    }
+    socket.bound = true;
+    socket.virtualRoute = true;
+    return true;
+}
+
+std::int64_t send_virtual(int s, Sock& socket, const void* buf, std::size_t len, std::uint32_t peer, std::uint16_t peerPort, std::uint16_t peerVport) {
+    if (len > Online::Wire::MaxDatagram) return fail(NET_EMSGSIZE);
+    if (!socket.p2p && !route_virtual(s, socket)) return fail(NET_EADDRINUSE);
+    Online::Wire::Datagram datagram;
+    datagram.peer = peer;
+    datagram.peerPort = peerPort;
+    datagram.peerVport = socket.p2p ? peerVport : 0;
+    datagram.localPort = socket.p2p ? socket.gamePort : native_port(*socket.native);
+    datagram.localVport = socket.p2p ? socket.gameVport : 0;
+    datagram.kind = socket.p2p ? Online::Wire::DatagramKind::P2p : Online::Wire::DatagramKind::Udp;
+    if (len) datagram.data.assign(static_cast<const std::uint8_t*>(buf), static_cast<const std::uint8_t*>(buf) + len);
+    VirtualNet::Send(datagram);
+    return static_cast<std::int64_t>(len);
+}
+
+struct VirtualReceived {
+    std::int64_t length = 0;
+    bool fromVirtual = false;
+    VirtualNet::Source source;
+    sockaddr_storage peer{};
+};
+
+std::optional<VirtualReceived> receive_virtual(const Sock& socket, int flags, char* buf, std::size_t len) {
+    std::vector<char> buffer;
+    try {
+        buffer.resize(len + VirtualNet::HeaderSize);
+    } catch (const std::bad_alloc&) {
+        errno = ENOBUFS;
+        return std::nullopt;
+    }
+    VirtualReceived received;
+    NativeLength peer_length = sizeof(received.peer);
+    const int result = native_transfer(*socket.native, flags, false, [&](int) {
+        peer_length = sizeof(received.peer);
+        return ::recvfrom(socket.native->value, buffer.data(), static_cast<int>(buffer.size()), native_message_flags(flags),
+            reinterpret_cast<sockaddr*>(&received.peer), &peer_length);
+    });
+    if (result < 0) return std::nullopt;
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(buffer.data());
+    std::size_t offset = 0;
+    std::size_t size = static_cast<std::size_t>(result);
+    if (VirtualNet::FromRelay(received.peer)) {
+        if (const auto source = VirtualNet::ReadHeader({bytes, size})) {
+            received.fromVirtual = true;
+            received.source = *source;
+            offset = VirtualNet::HeaderSize;
+            size -= VirtualNet::HeaderSize;
+        }
+    }
+    const auto copied = std::min(size, len);
+    if (copied) std::memcpy(buf, buffer.data() + offset, copied);
+    received.length = static_cast<std::int64_t>(copied);
+    return received;
+}
+
 extern "C" {
 
 extern const std::uint32_t sce_net_in6addr_any[4] = {};
@@ -980,12 +1071,24 @@ int APS5_VABI sceNetSocket(const char* name, int family, int type, int protocol)
     if (family != NET_AF_INET && family != NET_AF_INET6) {
         return fail(NET_EAFNOSUPPORT);
     }
-    if (type != NET_SOCK_STREAM && type != NET_SOCK_DGRAM && type != NET_SOCK_RAW) {
+    const bool p2p = type == NET_SOCK_DGRAM_P2P && VirtualNet::Enabled();
+    if (p2p && family != NET_AF_INET) return fail(NET_EAFNOSUPPORT);
+    if (type != NET_SOCK_STREAM && type != NET_SOCK_DGRAM && type != NET_SOCK_RAW && !p2p) {
         return fail(NET_EPROTONOSUPPORT);
     }
     if (!initialize_sockets()) return fail(5);
-    const NativeSocket native = ::socket(family == NET_AF_INET ? AF_INET : AF_INET6, type, protocol);
+    const NativeSocket native = ::socket(family == NET_AF_INET ? AF_INET : AF_INET6, p2p ? NET_SOCK_DGRAM : type, p2p ? 0 : protocol);
     if (native == INVALID_NATIVE_SOCKET) return fail(native_error());
+    if (p2p) {
+        sockaddr_in loopback{};
+        loopback.sin_family = AF_INET;
+        loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (::bind(native, reinterpret_cast<const sockaddr*>(&loopback), sizeof(loopback)) != 0) {
+            const int error = native_error();
+            close_socket(native);
+            return fail(error);
+        }
+    }
 #ifdef _WIN32
     u_long nonblocking = 1;
     if (ioctlsocket(native, FIONBIO, &nonblocking) != 0) {
@@ -1013,7 +1116,8 @@ int APS5_VABI sceNetSocket(const char* name, int family, int type, int protocol)
     std::lock_guard lk(g_mutex);
     Sock s;
     s.family = family;
-    s.type = type;
+    s.type = p2p ? NET_SOCK_DGRAM : type;
+    s.p2p = p2p;
     s.native = std::move(handle);
     g_socks[fd] = s;
     return fd;
@@ -1039,6 +1143,7 @@ int APS5_VABI sceNetSocketClose(int s) {
         return close_nid_postfix(s) == 0 ? 0 : fail(*__error_nid_postfix());
     }
     KernelReleaseSocketNumber_nid_no_patch(s);
+    VirtualNet::Forget(s);
     if (native) {
 #ifdef _WIN32
         ::shutdown(native->value, SD_BOTH);
@@ -1082,11 +1187,31 @@ int APS5_VABI sceNetBind_nid_postfix(int s, const void* addr, uint32_t addrlen) 
     NativeLength native_length = 0;
     if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
     if (native.ss_family != (socket.family == NET_AF_INET ? AF_INET : AF_INET6)) return fail(NET_EAFNOSUPPORT);
+    if (socket.p2p) {
+        const auto port = ntohs(reinterpret_cast<const sockaddr_in&>(native).sin_port);
+        const auto vport = VirtualNet::GuestVport(addr, addrlen);
+        if (!VirtualNet::Register(Online::Wire::DatagramKind::P2p, port, vport, native_port(*socket.native), s)) return fail(NET_EADDRINUSE);
+        std::lock_guard lk(g_mutex);
+        auto it = g_socks.find(s);
+        if (it != g_socks.end()) {
+            it->second.bound = true;
+            it->second.virtualRoute = true;
+            it->second.gamePort = port;
+            it->second.gameVport = vport;
+        }
+        g_cv.NotifyAll();
+        return 0;
+    }
     if (::bind(socket.native->value, reinterpret_cast<const sockaddr*>(&native), native_length) != 0)
         return fail(native_error());
+    const bool routed = socket.type == NET_SOCK_DGRAM && socket.family == NET_AF_INET && VirtualNet::Enabled() &&
+        VirtualNet::Register(Online::Wire::DatagramKind::Udp, native_port(*socket.native), 0, native_port(*socket.native), s);
     std::lock_guard lk(g_mutex);
     auto it = g_socks.find(s);
-    if (it != g_socks.end()) it->second.bound = true;
+    if (it != g_socks.end()) {
+        it->second.bound = true;
+        if (routed) it->second.virtualRoute = true;
+    }
     g_cv.NotifyAll();
     return 0;
 }
@@ -1210,8 +1335,28 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
         socket = it->second;
     }
     if (socket.type == NET_SOCK_DGRAM && addr && addrlen >= 2 && static_cast<const std::uint8_t*>(addr)[1] == 0) {
+        if (socket.virtualPeer != 0) {
+            std::lock_guard lk(g_mutex);
+            auto it = g_socks.find(s);
+            if (it != g_socks.end()) it->second.virtualPeer = 0;
+        }
         if (const int error = disconnect_datagram(socket)) return error;
         return fail(NET_EAFNOSUPPORT);
+    }
+    if (socket.type == NET_SOCK_DGRAM && VirtualNet::Enabled()) {
+        if (const auto peer = VirtualNet::VirtualDestination(addr, addrlen)) {
+            if (!socket.p2p && !route_virtual(s, socket)) return fail(NET_EADDRINUSE);
+            std::uint16_t port = 0;
+            std::memcpy(&port, static_cast<const std::uint8_t*>(addr) + 2, 2);
+            std::lock_guard lk(g_mutex);
+            auto it = g_socks.find(s);
+            if (it == g_socks.end()) return fail(NET_EBADF);
+            it->second.virtualPeer = *peer;
+            it->second.virtualPeerPort = ntohs(port);
+            it->second.virtualPeerVport = VirtualNet::GuestVport(addr, addrlen);
+            return 0;
+        }
+        if (socket.p2p) return fail(NET_EHOSTUNREACH);
     }
     sockaddr_storage native{};
     NativeLength native_length = 0;
@@ -1262,6 +1407,10 @@ int64_t APS5_VABI sceNetRecv(int s, void* buf, size_t len, int flags) {
 #endif
     const GuestArena::HostWrite destination(len == 0 ? nullptr : buf, len);
     if (!destination.Open()) return fail(NET_EFAULT);
+    if (socket.virtualRoute) {
+        const auto received = receive_virtual(socket, flags, static_cast<char*>(buf), len);
+        return received ? received->length : fail(native_error());
+    }
     const int native_flags = native_message_flags(flags);
     const int result = native_transfer(*socket.native, flags, false, [&](int) {
         return ::recv(socket.native->value, static_cast<char*>(buf), static_cast<int>(len), native_flags);
@@ -1299,6 +1448,16 @@ int64_t APS5_VABI sceNetRecvfrom(int s, void* buf, size_t len, int flags, void* 
     if (!addressOutput.Open()) return fail(NET_EFAULT);
     const GuestArena::HostWrite destination(len == 0 ? nullptr : buf, len);
     if (!destination.Open()) return fail(NET_EFAULT);
+    if (socket.virtualRoute) {
+        const auto received = receive_virtual(socket, flags, static_cast<char*>(buf), len);
+        if (!received) return fail(native_error());
+        if (from && received->fromVirtual) {
+            VirtualNet::WriteGuestAddress(received->source, from, fromlen);
+        } else if (from && !native_to_guest_address(received->peer, from, fromlen)) {
+            return fail(NET_EAFNOSUPPORT);
+        }
+        return received->length;
+    }
     sockaddr_storage peer{};
     NativeLength peer_length = sizeof(peer);
     const int native_flags = native_message_flags(flags);
@@ -1326,6 +1485,7 @@ int64_t APS5_VABI sceNetSend(int s, const void* buf, size_t len, int flags) {
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (socket.virtualPeer != 0) return send_virtual(s, socket, buf, len, socket.virtualPeer, socket.virtualPeerPort, socket.virtualPeerVport);
     const int result = native_transfer(*socket.native, flags, true, [&](int offset) {
         return ::send(socket.native->value, offset ? static_cast<const char*>(buf) + offset : static_cast<const char*>(buf), static_cast<int>(len) - offset, NATIVE_SEND_FLAGS | native_message_flags(flags));
     }, true, static_cast<int>(len));
@@ -1343,6 +1503,15 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (!to && socket.virtualPeer != 0 && tolen == 0) return send_virtual(s, socket, buf, len, socket.virtualPeer, socket.virtualPeerPort, socket.virtualPeerVport);
+    if (to && socket.type == NET_SOCK_DGRAM && VirtualNet::Enabled()) {
+        if (const auto peer = VirtualNet::VirtualDestination(to, tolen)) {
+            std::uint16_t port = 0;
+            std::memcpy(&port, static_cast<const std::uint8_t*>(to) + 2, 2);
+            return send_virtual(s, socket, buf, len, *peer, ntohs(port), VirtualNet::GuestVport(to, tolen));
+        }
+    }
+    if (socket.p2p) return fail(NET_EHOSTUNREACH);
     int result;
     if (!to) {
         if (tolen != 0) return fail(NET_EINVAL);
@@ -1413,6 +1582,27 @@ int64_t APS5_VABI sceNetRecvmsg(int s, NetMsghdr* msg, int flags) {
         return 0;
     }
 #endif
+    if (socket.virtualRoute) {
+        std::vector<char> gathered(static_cast<std::size_t>(total));
+        const auto received = receive_virtual(socket, flags, gathered.data(), gathered.size());
+        if (!received) return fail(native_error());
+        std::size_t offset = 0;
+        for (int i = 0; i < msg->iov_length && offset < static_cast<std::size_t>(received->length); ++i) {
+            const auto count = std::min<std::size_t>(msg->iov[i].length, static_cast<std::size_t>(received->length) - offset);
+            std::memcpy(msg->iov[i].base, gathered.data() + offset, count);
+            offset += count;
+        }
+        msg->flags = 0;
+        if (msg->name) {
+            if (received->fromVirtual) {
+                VirtualNet::WriteGuestAddress(received->source, msg->name, &msg->name_length);
+            } else if (!native_to_guest_address(received->peer, msg->name, &msg->name_length)) {
+                msg->name_length = 0;
+            }
+        }
+        msg->control_length = 0;
+        return received->length;
+    }
     std::vector<char> buffer;
     try {
         buffer.resize(static_cast<std::size_t>(total) + (datagram ? 1u : 0u));
@@ -1614,6 +1804,10 @@ int APS5_VABI sceNetGetsockname(int s, void* addr, uint32_t* addrlen) {
         socket = it->second;
     }
     if (!addr || !addrlen) return fail(NET_EINVAL);
+    if (socket.p2p) {
+        VirtualNet::WriteGuestAddress({VirtualNet::OwnAddress(), socket.gamePort, socket.gameVport}, addr, addrlen);
+        return 0;
+    }
     sockaddr_storage native{};
     NativeLength native_length = sizeof(native);
     if (::getsockname(socket.native->value, reinterpret_cast<sockaddr*>(&native), &native_length) != 0) {

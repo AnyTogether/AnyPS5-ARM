@@ -3,7 +3,9 @@
 #include "prx/libSceNetCtl/include/OnlineEnvironment.hpp"
 #include "prx/libSceNetCtl/include/OnlineObserver.hpp"
 #include "prx/libSceNetCtl/include/OnlineWire.hpp"
+#include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -355,6 +357,58 @@ void noLauncher() {
     require(std::chrono::steady_clock::now() - again < 50ms, "only the first question waits");
 }
 
+void datagrams() {
+    require(Wire::IsVirtual(0xC6120001u) && Wire::IsVirtual(0xC613FFFFu) && !Wire::IsVirtual(0xC6140000u) && !Wire::IsVirtual(0x7F000001u),
+        "the virtual network is 198.18.0.0/15");
+    Wire::Datagram datagram{0xC6120002u, 3658, 1, 3658, 2, Wire::DatagramKind::P2p, {1, 2, 3}};
+    const auto bytes = Wire::Encode(datagram);
+    require(hex(bytes) == "020012c6" "4a0e" "0100" "4a0e" "0200" "02" "03000000" "010203", "datagram layout");
+    const auto back = Wire::DecodeDatagram(bytes);
+    require(back && back->peer == 0xC6120002u && back->peerPort == 3658 && back->peerVport == 1 && back->localPort == 3658 && back->localVport == 2 &&
+            back->kind == Wire::DatagramKind::P2p && back->data == datagram.data,
+        "datagram round trip");
+    datagram.peer = 0x0A000001u;
+    require(!Wire::DecodeDatagram(Wire::Encode(datagram)), "a datagram from outside the virtual network is dropped");
+    datagram.peer = 0xC6120002u;
+    datagram.kind = static_cast<Wire::DatagramKind>(9);
+    require(!Wire::DecodeDatagram(Wire::Encode(datagram)), "an unknown datagram kind is dropped");
+
+    Testing::FakeLauncher launcher(testSecret());
+    launcher.SetAccount(signedInAccount());
+    launcher.SetDatagramHandler([](const Wire::Datagram& in) -> std::optional<Wire::Datagram> {
+        Wire::Datagram out = in;
+        std::reverse(out.data.begin(), out.data.end());
+        return out;
+    });
+    Bridge bridge(launcher.Port(), testSecret(), fastOptions());
+    require(bridge.Account().connected, "connected");
+    std::mutex receivedMutex;
+    std::vector<Wire::Datagram> received;
+    bridge.SetDatagramReceiver([&](const Wire::Datagram& in) {
+        std::lock_guard lock(receivedMutex);
+        received.push_back(in);
+    });
+    for (std::uint8_t index = 0; index < 50; ++index) {
+        require(bridge.SendDatagram({0xC6120002u, 9000, 0, 5000, 0, Wire::DatagramKind::Udp, {index, 1, 2}}), "a datagram is queued");
+    }
+    require(launcher.WaitForDatagrams(50, 3000ms), "datagrams reach the launcher");
+    const auto sent = launcher.Datagrams();
+    for (std::size_t index = 0; index < sent.size(); ++index) require(sent[index].data[0] == index, "datagrams keep their order on the loopback hop");
+    require(eventually([&] {
+        std::lock_guard lock(receivedMutex);
+        return received.size() == 50;
+    }), "datagrams from the launcher reach the receiver");
+    {
+        std::lock_guard lock(receivedMutex);
+        require(received[7].data == std::vector<std::uint8_t>{2, 1, 7} && received[7].peer == 0xC6120002u && received[7].localPort == 5000, "the receiver gets the launcher's datagram");
+    }
+    Wire::Datagram tooLarge{0xC6120002u, 1, 0, 1, 0, Wire::DatagramKind::Udp, std::vector<std::uint8_t>(Wire::MaxDatagram + 1)};
+    require(!bridge.SendDatagram(tooLarge), "a datagram over 65535 bytes is refused");
+    launcher.DropClient();
+    require(eventually([&] { return !bridge.SendDatagram({0xC6120002u, 1, 0, 1, 0, Wire::DatagramKind::Udp, {1}}) || launcher.ProvenSessions() >= 2; }),
+        "while the launcher is gone datagrams are dropped");
+}
+
 std::vector<std::string> readLines(const std::string& path) {
     std::ifstream file(path);
     std::vector<std::string> lines;
@@ -422,6 +476,7 @@ int main() {
         {"observations forwarded", observationsForwarded},
         {"no launcher", noLauncher},
         {"observer file", observerFile},
+        {"datagrams", datagrams},
     };
     int failed = 0;
     for (const auto& [name, test] : tests) {

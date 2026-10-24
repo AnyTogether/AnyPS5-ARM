@@ -75,6 +75,7 @@ std::optional<Frame> readFrame(int socket) {
 Bridge::Bridge(std::uint16_t launcherPort, const Wire::Secret& secret, BridgeOptions options)
     : launcherPort(launcherPort), secret(secret), options(std::move(options)), started(std::chrono::steady_clock::now()) {
     worker = std::thread([this] { run(); });
+    writer = std::thread([this] { writeLoop(); });
 }
 
 Bridge::~Bridge() {
@@ -84,7 +85,53 @@ Bridge::~Bridge() {
         if (liveSocket >= 0) ::shutdown(liveSocket, SHUT_RDWR);
     }
     changed.notify_all();
+    outgoingChanged.notify_all();
     if (worker.joinable()) worker.join();
+    if (writer.joinable()) writer.join();
+}
+
+bool Bridge::SendDatagram(const Wire::Datagram& datagram) {
+    constexpr std::size_t MaxQueuedFrames = 1024;
+    constexpr std::size_t MaxQueuedBytes = 8u * 1024u * 1024u;
+    if (datagram.data.size() > Wire::MaxDatagram) return false;
+    auto frame = Wire::Frame(Wire::Type::Datagram, 0, 0, Wire::Encode(datagram));
+    {
+        std::lock_guard lock(mutex);
+        if (!state.connected || liveSocket < 0) return false;
+        if (outgoing.size() >= MaxQueuedFrames || outgoingBytes + frame.size() > MaxQueuedBytes) return false;
+        outgoingBytes += frame.size();
+        outgoing.push_back(std::move(frame));
+    }
+    outgoingChanged.notify_one();
+    return true;
+}
+
+void Bridge::SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver) {
+    std::lock_guard lock(mutex);
+    datagramReceiver = std::move(receiver);
+}
+
+void Bridge::writeLoop() {
+    while (true) {
+        std::vector<std::uint8_t> frame;
+        int socket = -1;
+        {
+            std::unique_lock lock(mutex);
+            outgoingChanged.wait(lock, [this] { return stopping || !outgoing.empty(); });
+            if (stopping) return;
+            frame = std::move(outgoing.front());
+            outgoing.pop_front();
+            outgoingBytes -= frame.size();
+            socket = liveSocket;
+        }
+        if (socket < 0) continue;
+        std::lock_guard writing(writeMutex);
+        {
+            std::lock_guard lock(mutex);
+            if (liveSocket != socket) continue;
+        }
+        if (!writeAll(socket, frame.data(), frame.size())) ::shutdown(socket, SHUT_RDWR);
+    }
 }
 
 void Bridge::waitForFirstAccount(std::unique_lock<std::mutex>& lock) {
@@ -143,7 +190,11 @@ void Bridge::Observe(std::string_view line) {
 
 bool Bridge::send(int socket, Wire::Type type, std::uint16_t flags, std::uint32_t call, std::span<const std::uint8_t> payload) {
     const auto frame = Wire::Frame(type, flags, call, payload);
-    std::lock_guard lock(writeMutex);
+    std::lock_guard writing(writeMutex);
+    {
+        std::lock_guard lock(mutex);
+        if (liveSocket != socket) return false;
+    }
     if (writeAll(socket, frame.data(), frame.size())) return true;
     ::shutdown(socket, SHUT_RDWR);
     return false;
@@ -220,6 +271,17 @@ void Bridge::dispatch(const Wire::Header& header, std::span<const std::uint8_t> 
         changed.notify_all();
         return;
     }
+    if (header.type == static_cast<std::uint16_t>(Wire::Type::Datagram)) {
+        const auto datagram = Wire::DecodeDatagram(payload);
+        if (!datagram) return;
+        std::function<void(const Wire::Datagram&)> receiver;
+        {
+            std::lock_guard lock(mutex);
+            receiver = datagramReceiver;
+        }
+        if (receiver) receiver(*datagram);
+        return;
+    }
     if (header.type == static_cast<std::uint16_t>(Wire::Type::Account)) {
         const auto account = Wire::DecodeAccount(payload);
         if (!account) return;
@@ -256,8 +318,11 @@ void Bridge::disconnect(int socket) {
             ++state.generation;
         }
         for (auto& [call, entry] : pending) entry->done = true;
+        outgoing.clear();
+        outgoingBytes = 0;
         changed.notify_all();
     }
+    std::lock_guard writing(writeMutex);
     ::close(socket);
 }
 

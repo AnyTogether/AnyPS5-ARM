@@ -28,7 +28,18 @@ enum class Type : std::uint16_t {
     Account = 0x0101,
     Observation = 0x0102,
     WebRequest = 0x0201,
+    Datagram = 0x0310,
 };
+
+enum class DatagramKind : std::uint8_t {
+    Udp = 1,
+    P2p = 2,
+};
+
+constexpr std::uint32_t VirtualNetwork = 0xC6120000u;
+constexpr std::uint32_t VirtualMask = 0xFFFE0000u;
+constexpr bool IsVirtual(std::uint32_t address) { return (address & VirtualMask) == VirtualNetwork; }
+constexpr std::size_t MaxDatagram = 65535;
 
 enum Flags : std::uint16_t {
     FlagReply = 0x0001,
@@ -143,6 +154,16 @@ struct WebReply {
     std::vector<std::uint8_t> body;
 };
 
+struct Datagram {
+    std::uint32_t peer = 0;
+    std::uint16_t peerPort = 0;
+    std::uint16_t peerVport = 0;
+    std::uint16_t localPort = 0;
+    std::uint16_t localVport = 0;
+    DatagramKind kind = DatagramKind::Udp;
+    std::vector<std::uint8_t> data;
+};
+
 std::vector<std::uint8_t> Encode(const Hello& message);
 std::vector<std::uint8_t> Encode(const Welcome& message);
 std::vector<std::uint8_t> Encode(const ProofBytes& proof);
@@ -150,6 +171,7 @@ std::vector<std::uint8_t> Encode(const Refuse& message);
 std::vector<std::uint8_t> Encode(const Account& message);
 std::vector<std::uint8_t> Encode(const WebRequest& message);
 std::vector<std::uint8_t> Encode(const WebReply& message);
+std::vector<std::uint8_t> Encode(const Datagram& message);
 
 std::optional<Hello> DecodeHello(std::span<const std::uint8_t> payload);
 std::optional<Welcome> DecodeWelcome(std::span<const std::uint8_t> payload);
@@ -158,6 +180,7 @@ std::optional<Refuse> DecodeRefuse(std::span<const std::uint8_t> payload);
 std::optional<Account> DecodeAccount(std::span<const std::uint8_t> payload);
 std::optional<WebRequest> DecodeWebRequest(std::span<const std::uint8_t> payload);
 std::optional<WebReply> DecodeWebReply(std::span<const std::uint8_t> payload);
+std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload);
 
 enum class Side : std::uint8_t { Launcher, Engine };
 ProofBytes MakeProof(const Secret& secret, Side side, const Nonce& engine, const Nonce& launcher);

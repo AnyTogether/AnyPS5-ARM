@@ -88,6 +88,21 @@ void FakeLauncher::SetWebHandler(WebHandler handler) {
     webHandler = std::move(handler);
 }
 
+void FakeLauncher::SetDatagramHandler(DatagramHandler handler) {
+    std::lock_guard lock(mutex);
+    datagramHandler = std::move(handler);
+}
+
+bool FakeLauncher::WaitForDatagrams(std::size_t count, std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex);
+    return changed.wait_for(lock, timeout, [&] { return datagrams.size() >= count; });
+}
+
+std::vector<Wire::Datagram> FakeLauncher::Datagrams() {
+    std::lock_guard lock(mutex);
+    return datagrams;
+}
+
 void FakeLauncher::SetRefusal(std::optional<Wire::Refuse> refuse) {
     std::lock_guard lock(mutex);
     refusal = std::move(refuse);
@@ -245,6 +260,29 @@ void FakeLauncher::serve(int socket) {
             std::lock_guard lock(mutex);
             observations.push_back(std::move(line));
             changed.notify_all();
+            continue;
+        }
+        if (type == static_cast<std::uint16_t>(Wire::Type::Datagram)) {
+            Wire::Reader reader(frame->payload);
+            Wire::Datagram datagram;
+            datagram.peer = reader.U32();
+            datagram.peerPort = reader.U16();
+            datagram.peerVport = reader.U16();
+            datagram.localPort = reader.U16();
+            datagram.localVport = reader.U16();
+            datagram.kind = static_cast<Wire::DatagramKind>(reader.U8());
+            datagram.data = reader.Bytes();
+            if (!reader.Ok()) continue;
+            DatagramHandler handler;
+            {
+                std::lock_guard lock(mutex);
+                datagrams.push_back(datagram);
+                handler = datagramHandler;
+                changed.notify_all();
+            }
+            if (handler) {
+                if (const auto reply = handler(datagram)) write(socket, Wire::Frame(Wire::Type::Datagram, 0, 0, Wire::Encode(*reply)));
+            }
             continue;
         }
         if (type == static_cast<std::uint16_t>(Wire::Type::WebRequest)) {

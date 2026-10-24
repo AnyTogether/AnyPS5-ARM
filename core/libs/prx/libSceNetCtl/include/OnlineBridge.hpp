@@ -5,6 +5,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -39,6 +41,8 @@ public:
     std::optional<Wire::WebReply> Web(const Wire::WebRequest& request, std::chrono::milliseconds timeout);
     void Observe(std::string_view line);
     std::optional<Wire::Refuse> Refusal();
+    bool SendDatagram(const Wire::Datagram& datagram);
+    void SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver);
 
 private:
     struct Pending {
@@ -54,6 +58,7 @@ private:
     void disconnect(int socket);
     bool send(int socket, Wire::Type type, std::uint16_t flags, std::uint32_t call, std::span<const std::uint8_t> payload);
     void waitForFirstAccount(std::unique_lock<std::mutex>& lock);
+    void writeLoop();
 
     const std::uint16_t launcherPort;
     const Wire::Secret secret;
@@ -72,8 +77,14 @@ private:
     std::uint32_t lastCall = 0;
     std::map<std::uint32_t, Pending*> pending;
 
+    std::deque<std::vector<std::uint8_t>> outgoing;
+    std::size_t outgoingBytes = 0;
+    std::condition_variable outgoingChanged;
+    std::function<void(const Wire::Datagram&)> datagramReceiver;
+
     std::mutex writeMutex;
     std::thread worker;
+    std::thread writer;
 };
 
 }

@@ -76,3 +76,18 @@ extern "C" bool OnlineObserving_nid_no_patch() {
 extern "C" void OnlineObserve_nid_no_patch(const char* library, const char* function, const std::string& in, const std::string& out, const std::int64_t* result) {
     if (auto* observer = services().observer.get()) observer->Record(library ? library : "", function ? function : "", in, out, result);
 }
+
+extern "C" bool OnlineSendDatagram_nid_no_patch(const Online::Wire::Datagram& datagram) {
+    auto* bridge = services().bridge.get();
+    return bridge && bridge->SendDatagram(datagram);
+}
+
+extern "C" void OnlineSetDatagramReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Datagram& datagram)) {
+    auto* bridge = services().bridge.get();
+    if (!bridge) return;
+    if (receiver) {
+        bridge->SetDatagramReceiver([receiver](const Online::Wire::Datagram& datagram) { receiver(datagram); });
+    } else {
+        bridge->SetDatagramReceiver({});
+    }
+}

@@ -36,6 +36,12 @@ if(BUILD_TESTING)
     target_link_libraries(online_web_api2_tests PRIVATE libSceNpWebApi2 libSceNetCtl libc mbedcrypto)
     add_test(NAME online_web_api2 COMMAND online_web_api2_tests)
     set_tests_properties(online_web_api2 PROPERTIES TIMEOUT 60)
+
+    add_test_executable(online_net_p2p_tests tests/OnlineNetP2p.cpp tests/FakeLauncher.cpp src/OnlineWire.cpp)
+    target_include_directories(online_net_p2p_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(online_net_p2p_tests PRIVATE libSceNet libSceNetCtl libkernel libc mbedcrypto)
+    add_test(NAME online_net_p2p COMMAND online_net_p2p_tests)
+    set_tests_properties(online_net_p2p PROPERTIES TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING)
