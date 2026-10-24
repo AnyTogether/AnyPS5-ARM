@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:anyps5_remote/social_strings.dart';
+import 'package:anyps5_remote/strings.dart';
 import 'package:anyps5_remote/together/notifications.dart';
 import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
@@ -290,6 +292,114 @@ void main() {
       expect(hub.notifications.items[1].read, isTrue);
       expect(hub.notifications.unread, 1);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'a looking-for-group ask and a yes read well, in both languages',
+      (tester) async {
+        tester.view.physicalSize = const Size(2556, 1179);
+        tester.view.devicePixelRatio = 3;
+        addTearDown(tester.view.reset);
+        const game = {
+          'postId': 'l1',
+          'titleId': 'PPSA01234',
+          'gameNames': {'en': 'Astro Bot', 'tr': 'Astro Bot TR'},
+          'purpose': 'coop',
+        };
+        hub.notifications
+          ..items = [
+            Notice.fromJson(
+              note(1, 'lfg_request', data: {...game, 'count': 1}),
+            )!,
+            Notice.fromJson(
+              note(2, 'lfg_request', data: {...game, 'count': 3}),
+            )!,
+            Notice.fromJson(
+              note(
+                3,
+                'lfg_accepted',
+                data: {
+                  ...game,
+                  'invite': {'kind': 'party', 'id': 'p1'},
+                },
+              ),
+            )!,
+            Notice.fromJson(
+              note(
+                4,
+                'lfg_accepted',
+                data: {
+                  ...game,
+                  'invite': {'kind': 'share_play', 'id': 's1'},
+                },
+              ),
+            )!,
+          ]
+          ..unread = 4
+          ..loaded = true;
+        final opened = <NoticeKind>[];
+        Widget pane(Strings strings) => MaterialApp(
+          home: Texts(
+            strings: strings,
+            child: Scaffold(
+              body: NotificationsPane(
+                hub: hub,
+                onOpen: (n) => opened.add(n.kind),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpWidget(pane(Strings.english));
+        await tester.pump();
+        final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+        for (final text in [
+          'Ece wants in on your Astro Bot post.',
+          'Ece and 2 more want in on your Astro Bot post.',
+          'Ece let you in for Astro Bot.',
+          'Your party invite is waiting.',
+          'Watch and play along.',
+        ]) {
+          final found = find.textContaining(text, findRichText: true).first;
+          final box = tester.getRect(found);
+          expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
+          expect(box.right, lessThanOrEqualTo(screen.width), reason: text);
+        }
+        await tester.tap(
+          find.textContaining('Ece wants in', findRichText: true).first,
+        );
+        await tester.pump();
+        expect(opened, [NoticeKind.lfgRequest]);
+        await tester.pumpWidget(pane(Strings.turkish));
+        await tester.pump();
+        expect(
+          find.textContaining(
+            'Ece, Astro Bot TR ilanına katılmak istiyor.',
+            findRichText: true,
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining(
+            'Ece seni Astro Bot TR için kabul etti.',
+            findRichText: true,
+          ),
+          findsNWidgets(2),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    test('the looking-for-group kinds can be turned off', () {
+      expect(optionalNoticeKinds, contains(NoticeKind.lfgRequest));
+      expect(optionalNoticeKinds, contains(NoticeKind.lfgAccepted));
+      expect(
+        Strings.english.noticeKind(NoticeKind.lfgRequest),
+        'People asking in on your posts',
+      );
+      expect(
+        Strings.turkish.noticeKind(NoticeKind.lfgAccepted),
+        'Bir ilan sahibi seni kabul ettiğinde',
+      );
     });
 
     testWidgets('the rail has the bell, which opens the list', (tester) async {

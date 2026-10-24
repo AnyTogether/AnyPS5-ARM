@@ -258,12 +258,30 @@ extension SocialTexts on Strings {
       NoticeKind.message => count > 1 ? 'n_messages' : 'n_message',
       _ => 'n_${n.kind.wire}',
     };
+    final lfgKey = switch (n.kind) {
+      NoticeKind.lfgRequest when count > 1 => 'n_lfg_requests',
+      _ => key,
+    };
     final titleId = '${n.data['titleId'] ?? ''}';
-    return _fill(key, {
+    return _fill(lfgKey, {
       'n': count,
+      'others': count - 1,
       'title': title,
-      'game': gameName?.call(titleId) ?? titleId,
+      'game':
+          gameName?.call(titleId) ??
+          localName(namesFrom(n.data['gameNames']), language) ??
+          titleId,
     });
+  }
+
+  /// Under a poster's yes: where the invite is.
+  String lfgAcceptedHint(Notice n) {
+    final invite = n.data['invite'];
+    return _s(
+      invite is Map && invite['kind'] == 'share_play'
+          ? 'n_lfg_accepted_share'
+          : 'n_lfg_accepted_party',
+    );
   }
 
   String get someone => _s('n_someone');
@@ -345,6 +363,8 @@ const _en = {
   'nk_party_invite': 'Party invites',
   'nk_game_invite': 'Game invites',
   'nk_missed_call': 'Missed calls',
+  'nk_lfg_request': 'People asking in on your posts',
+  'nk_lfg_accepted': 'When a poster lets you in',
   'digest': 'Mail digest',
   'digestHint': 'A mail about unread messages and friend requests while you are away, at most every 6 hours. Message text is never mailed.',
   'digestNoEmail': 'Your account has no email address to mail.',
@@ -359,6 +379,11 @@ const _en = {
   'n_game_invite': '{name} invited you to play {game}.',
   'n_game_invite_hint': 'Join from your launcher.',
   'n_missed_call': 'Missed call from {name}.',
+  'n_lfg_request': '{name} wants in on your {game} post.',
+  'n_lfg_requests': '{name} and {others} more want in on your {game} post.',
+  'n_lfg_accepted': '{name} let you in for {game}.',
+  'n_lfg_accepted_party': 'Your party invite is waiting.',
+  'n_lfg_accepted_share': 'Watch and play along.',
   'n_warning': 'A moderator warned you.',
   'n_warning_reason': 'Reason: {reason}',
   'n_someone': 'Someone',
@@ -538,6 +563,8 @@ const _tr = {
   'nk_party_invite': 'Parti davetleri',
   'nk_game_invite': 'Oyun davetleri',
   'nk_missed_call': 'Cevapsız aramalar',
+  'nk_lfg_request': 'İlanlarına katılmak isteyenler',
+  'nk_lfg_accepted': 'Bir ilan sahibi seni kabul ettiğinde',
   'digest': 'E-posta özeti',
   'digestHint': 'Sen yokken okunmamış mesajlar ve arkadaşlık istekleri için en fazla 6 saatte bir e-posta. Mesaj metni asla gönderilmez.',
   'digestNoEmail': 'Hesabında e-posta adresi yok.',
@@ -552,6 +579,12 @@ const _tr = {
   'n_game_invite': '{name} seni {game} oynamaya çağırdı.',
   'n_game_invite_hint': "Launcher'ından katıl.",
   'n_missed_call': '{name} seni aradı, açamadın.',
+  'n_lfg_request': '{name}, {game} ilanına katılmak istiyor.',
+  'n_lfg_requests':
+      '{name} ve {others} kişi daha {game} ilanına katılmak istiyor.',
+  'n_lfg_accepted': '{name} seni {game} için kabul etti.',
+  'n_lfg_accepted_party': 'Parti davetin seni bekliyor.',
+  'n_lfg_accepted_share': 'İzle ve birlikte oyna.',
   'n_warning': 'Bir moderatör seni uyardı.',
   'n_warning_reason': 'Sebep: {reason}',
   'n_someone': 'Biri',
