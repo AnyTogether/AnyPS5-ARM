@@ -156,6 +156,14 @@ final class SharePlayRosterTests: XCTestCase {
         XCTAssertNil(SharePlayRoster.freePad([viewer("a", "w", slot: 2), viewer("b", "w", slot: 3), viewer("c", "w", slot: 4)]))
     }
 
+    func testSeveralViewersGetASmallerStreamEach() {
+        XCTAssertEqual(SharePlayRoster.encoding(viewers: 1).maxFramerate, 60)
+        XCTAssertEqual(SharePlayRoster.encoding(viewers: 2).maxBitrate, 10_000_000)
+        XCTAssertEqual(SharePlayRoster.encoding(viewers: 3).maxFramerate, 30)
+        XCTAssertEqual(SharePlayRoster.encoding(viewers: 4).scaleDown, 4.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(SharePlayRoster.encoding(viewers: 3).maxBitrate, 5_000_000)
+    }
+
     func testStartBitrateGoesOnTheH264LinesOfTheAnswer() {
         let sdp = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 102\r\na=rtpmap:96 VP8/90000\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r\n"
         let tuned = SharePlayRoster.tuneVideo(sdp, startKbps: 2500, maxKbps: 10000)

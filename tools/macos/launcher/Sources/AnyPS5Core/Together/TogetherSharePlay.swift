@@ -197,6 +197,21 @@ public enum SharePlayRoster {
         return pads.first { !taken.contains($0) }
     }
 
+    /// What each viewer's stream may take: 720p60 up to 10 Mbit/s for one or two viewers; from
+    /// three on, the host uploads a stream each, so 540p30 up to 5 Mbit/s apiece.
+    public struct Encoding: Equatable, Sendable {
+        public let maxBitrate: Int
+        public let maxFramerate: Int
+        /// Of the captured 720p picture: 1 keeps it, 4/3 makes it 540p.
+        public let scaleDown: Double
+        public let startKbps: Int
+    }
+
+    public static func encoding(viewers: Int) -> Encoding {
+        viewers >= 3 ? Encoding(maxBitrate: 5_000_000, maxFramerate: 30, scaleDown: 4.0 / 3.0, startKbps: 1500)
+            : Encoding(maxBitrate: 10_000_000, maxFramerate: 60, scaleDown: 1, startKbps: 2500)
+    }
+
     /// The viewer's answer with WebRTC's own bit rate hints on each H.264 format: start high
     /// enough that the first picture is sharp, never above `maxKbps`, never starved below 600.
     /// They apply to what the host sends, which follows the remote description.
