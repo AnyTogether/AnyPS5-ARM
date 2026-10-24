@@ -1,5 +1,6 @@
 import 'strings.dart';
 import 'together/activity.dart';
+import 'together/leaderboards.dart';
 import 'together/profiles.dart';
 
 /// AnyTogether's social texts (profiles, the feed, leaderboards, calls), English and Turkish,
@@ -151,6 +152,34 @@ extension SocialTexts on Strings {
     return daysAgo(when, now: now);
   }
 
+  // Leaderboards
+
+  String get leaderboards => _s('leaderboards');
+  String get boardsLead => _s('boardsLead');
+  String get overall => _s('overall');
+  String get yourGames => _s('yourGames');
+  String get mostPlayed => _s('mostPlayed');
+  String scope(BoardScope scope) => _s('scope_${scope.name}');
+  String boardKind(BoardKind kind) => _s('board_${kind.name}');
+  String get yourRank => _s('yourRank');
+  String rankOf(int rank, int total) =>
+      _fill('rankOf', {'rank': rank, 'total': number(total)});
+  String get notRanked => _s('notRanked');
+  String wouldBe(int rank, {required bool library}) =>
+      _fill(library ? 'wouldBeLibrary' : 'wouldBe', {'rank': rank});
+  String get nothingToRank => _s('nothingToRank');
+  String boardEmpty(BoardScope scope) =>
+      _s(scope == BoardScope.global ? 'boardEmptyGlobal' : 'boardEmpty');
+  String playersCount(int n) => _fill('playersCount', {'n': number(n)});
+  String get boardFailed => _s('boardFailed');
+
+  /// A board's value as it reads: "1,230 pts", "12 h", "85%".
+  String boardValue(BoardKind kind, int value) => switch (kind) {
+    BoardKind.points => _fill('pointsValue', {'n': number(value)}),
+    BoardKind.time => totalTime(value),
+    BoardKind.completion => language == 'tr' ? '%$value' : '$value%',
+  };
+
   // Times and numbers
 
   /// "42 min", "3 h 5 min".
@@ -212,6 +241,28 @@ extension SocialTexts on Strings {
 }
 
 const _en = {
+  'leaderboards': 'Leaderboards',
+  'boardsLead':
+      'Trophy points, play time and completion, among friends or everyone.',
+  'overall': 'All games',
+  'yourGames': 'Your games',
+  'mostPlayed': 'Most played',
+  'scope_friends': 'Friends',
+  'scope_global': 'Global',
+  'board_points': 'Points',
+  'board_time': 'Time',
+  'board_completion': 'Completion',
+  'yourRank': 'Your rank',
+  'rankOf': '#{rank} of {total}',
+  'notRanked': 'Not ranked yet',
+  'wouldBe': 'You would be #{rank}: your trophies are not public, so the global board leaves you out.',
+  'wouldBeLibrary': 'You would be #{rank}: your games are not public, so the global board leaves you out.',
+  'nothingToRank': 'Play and earn trophies to get on the board.',
+  'boardEmpty': 'No one on this board yet.',
+  'boardEmptyGlobal': 'No one on this board yet. Only players whose trophies are public show up here.',
+  'pointsValue': '{n} pts',
+  'playersCount': '{n} players',
+  'boardFailed': "Couldn't load this board",
   'feed': 'Activity',
   'feedLead': 'What your friends played, earned and reached.',
   'feedEmpty': 'Nothing here yet. When your friends earn trophies or start a new game, it shows up here.',
@@ -325,6 +376,27 @@ const _en = {
 };
 
 const _tr = {
+  'leaderboards': 'Sıralamalar',
+  'boardsLead': 'Kupa puanı, oynama süresi ve tamamlama; arkadaşlar arasında ya da herkesle.',
+  'overall': 'Tüm oyunlar',
+  'yourGames': 'Senin oyunların',
+  'mostPlayed': 'En çok oynananlar',
+  'scope_friends': 'Arkadaşlar',
+  'scope_global': 'Herkes',
+  'board_points': 'Puan',
+  'board_time': 'Süre',
+  'board_completion': 'Tamamlama',
+  'yourRank': 'Sıran',
+  'rankOf': '{total} kişide #{rank}',
+  'notRanked': 'Henüz sıralamada değilsin',
+  'wouldBe': '#{rank} olurdun: kupaların herkese açık değil, bu yüzden genel sıralamada yoksun.',
+  'wouldBeLibrary': '#{rank} olurdun: oyunların herkese açık değil, bu yüzden genel sıralamada yoksun.',
+  'nothingToRank': 'Sıralamaya girmek için oyna ve kupa kazan.',
+  'boardEmpty': 'Bu sıralamada henüz kimse yok.',
+  'boardEmptyGlobal': 'Bu sıralamada henüz kimse yok. Yalnızca kupaları herkese açık olanlar burada görünür.',
+  'pointsValue': '{n} puan',
+  'playersCount': '{n} oyuncu',
+  'boardFailed': 'Bu sıralama yüklenemedi',
   'feed': 'Etkinlik',
   'feedLead': 'Arkadaşlarının oynadıkları, kazandıkları ve ulaştıkları.',
   'feedEmpty': 'Henüz bir şey yok. Arkadaşların kupa kazanınca ya da yeni bir oyuna başlayınca burada görünür.',

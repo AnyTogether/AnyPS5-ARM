@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'feed.dart';
 import 'friends.dart';
 import 'messages.dart';
 import 'parties.dart';
@@ -23,6 +24,8 @@ class TogetherHub extends ChangeNotifier {
       ..addListener(notifyListeners);
     parties = Parties(account: account, socket: this.socket)
       ..addListener(notifyListeners);
+    feed = Feed(account: account, socket: this.socket)
+      ..addListener(notifyListeners);
     voice = Voice(
       account: account,
       socket: this.socket,
@@ -39,6 +42,7 @@ class TogetherHub extends ChangeNotifier {
   late final Friends friends;
   late final Messages messages;
   late final Parties parties;
+  late final Feed feed;
   late final Voice voice;
   late final AppLifecycleListener _lifecycle;
   String? _user;
@@ -59,6 +63,7 @@ class TogetherHub extends ChangeNotifier {
     friends.clear();
     messages.clear();
     parties.clear();
+    feed.clear();
     if (user != null) socket.start();
     notifyListeners();
   }
@@ -71,6 +76,7 @@ class TogetherHub extends ChangeNotifier {
     messages.dispose();
     voice.dispose();
     parties.dispose();
+    feed.dispose();
     socket.dispose();
     super.dispose();
   }

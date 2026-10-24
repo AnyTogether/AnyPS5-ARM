@@ -174,6 +174,32 @@ class _ProfileViewState extends State<ProfileView> {
     if (mounted) setState(() => _busy = false);
   }
 
+  /// A reaction on one of their items, shown at once, put back when the server says no.
+  Future<void> _react(Activity item, Reaction? reaction) async {
+    void show(Reactions reactions) => setState(
+      () => _activity = [
+        for (final i in _activity)
+          if (i.id == item.id) i.withReactions(reactions) else i,
+      ],
+    );
+    show(item.reactions.picked(reaction));
+    try {
+      final counted = reaction == null
+          ? await widget.hub.account.call(
+              'DELETE',
+              'activities/${item.id}/reaction',
+            )
+          : await widget.hub.account.call(
+              'PUT',
+              'activities/${item.id}/reaction',
+              {'reaction': reaction.name},
+            );
+      if (mounted) show(Reactions.fromJson(counted));
+    } on Object {
+      if (mounted) show(item.reactions);
+    }
+  }
+
   Future<void> _friendAction(Future<void> Function() step) async {
     setState(() => _busy = true);
     try {
@@ -427,7 +453,12 @@ class _ProfileViewState extends State<ProfileView> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final item in _activity) ActivityTile(item: item),
+            for (final item in _activity)
+              ActivityTile(
+                key: ValueKey(item.id),
+                item: item,
+                onReact: (reaction) => _react(item, reaction),
+              ),
             if (_next != null)
               Center(
                 child: TextButton(

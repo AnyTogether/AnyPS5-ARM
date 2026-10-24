@@ -4,14 +4,16 @@ import '../social_strings.dart';
 import '../strings.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
+import 'feed_view.dart';
 import 'friends_view.dart';
+import 'leaderboard_view.dart';
 import 'messages_view.dart';
 import 'party_view.dart';
 import 'profile_edit.dart';
 import 'profile_view.dart';
 import 'together_widgets.dart';
 
-enum TogetherTab { friends, messages, party, profile }
+enum TogetherTab { friends, feed, messages, party, leaderboards, profile }
 
 /// AnyTogether's own screen over whatever the phone shows: a rail of what there is on the left,
 /// the part picked on the right, the way a phone held sideways has room for both.
@@ -122,6 +124,14 @@ class _TogetherScreenState extends State<TogetherScreen> {
                           onMessage: _message,
                           onProfile: _profile,
                         ),
+                        TogetherTab.feed => FeedPane(
+                          hub: widget.hub,
+                          onProfile: _profile,
+                        ),
+                        TogetherTab.leaderboards => LeaderboardPane(
+                          hub: widget.hub,
+                          onProfile: _profile,
+                        ),
                         TogetherTab.messages => MessagesPane(hub: widget.hub),
                         TogetherTab.party => PartyPane(hub: widget.hub),
                         TogetherTab.profile => ProfileView(
@@ -216,6 +226,13 @@ class _TogetherScreenState extends State<TogetherScreen> {
                   onTap: () => _show(TogetherTab.friends),
                 ),
                 _RailItem(
+                  icon: Icons.dynamic_feed_rounded,
+                  label: texts.feed,
+                  count: _tab == TogetherTab.feed ? 0 : hub.feed.unseen,
+                  selected: _tab == TogetherTab.feed,
+                  onTap: () => _show(TogetherTab.feed),
+                ),
+                _RailItem(
                   icon: Icons.chat_bubble_rounded,
                   label: texts.messages,
                   count: hub.messages.unread,
@@ -229,6 +246,13 @@ class _TogetherScreenState extends State<TogetherScreen> {
                   live: hub.parties.party != null,
                   selected: _tab == TogetherTab.party,
                   onTap: () => _show(TogetherTab.party),
+                ),
+                _RailItem(
+                  icon: Icons.leaderboard_rounded,
+                  label: texts.leaderboards,
+                  count: 0,
+                  selected: _tab == TogetherTab.leaderboards,
+                  onTap: () => _show(TogetherTab.leaderboards),
                 ),
                 const Spacer(),
                 _LiveDot(socket: hub.socket),
