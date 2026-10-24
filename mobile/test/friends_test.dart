@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:anyps5_remote/strings.dart';
 import 'package:anyps5_remote/together/friends.dart';
 import 'package:anyps5_remote/together/people.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
@@ -151,6 +152,139 @@ void main() {
       expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
       expect(box.right, lessThanOrEqualTo(screen.width), reason: text);
     }
+    expect(tester.takeException(), isNull);
+  });
+
+  test('a friend hosting a game shows whether there is room', () {
+    final presence = Presence.fromJson({
+      'state': 'in_game',
+      'titleId': 'PPSA01',
+      'game': {
+        'sessionId': 's1',
+        'titleId': 'PPSA01',
+        'joinable': true,
+        'players': 2,
+        'capacity': 4,
+      },
+    });
+    expect(presence.game?.sessionId, 's1');
+    expect(presence.game?.joinable, isTrue);
+    expect(presence.game?.players, 2);
+    expect(presence.game?.capacity, 4);
+    expect(Presence.fromJson({'state': 'online'}).game, isNull);
+    expect(Presence.fromJson({'state': 'online', 'game': 'x'}).game, isNull);
+  });
+
+  testWidgets('a friend\'s joinable game says so, and how to join', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final hub = TogetherHub(
+      account: TogetherAccount(
+        preferences: await SharedPreferences.getInstance(),
+        clientName: 'test',
+      ),
+    );
+    addTearDown(hub.dispose);
+    hub.friends
+      ..friends = [
+        Friend(
+          Person.fromJson(card('ece', name: 'Ece')),
+          const Presence(
+            state: PresenceState.inGame,
+            titleId: 'PPSA01',
+            game: GamePresence(
+              sessionId: 's1',
+              titleId: 'PPSA01',
+              joinable: true,
+              players: 2,
+              capacity: 4,
+            ),
+          ),
+        ),
+        Friend(
+          Person.fromJson(card('ali', name: 'Ali')),
+          const Presence(
+            state: PresenceState.inGame,
+            titleId: 'PPSA02',
+            game: GamePresence(
+              sessionId: 's2',
+              titleId: 'PPSA02',
+              joinable: false,
+              players: 4,
+              capacity: 4,
+            ),
+          ),
+        ),
+      ]
+      ..loaded = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(
+          hub: hub,
+          gameName: (id) => id == 'PPSA01' ? 'Astro Bot' : null,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final pill = find.text('Joinable · 2/4');
+    expect(pill, findsOneWidget);
+    final box = tester.getRect(pill);
+    expect(box.right, lessThanOrEqualTo(screen.width));
+    expect(box.bottom, lessThanOrEqualTo(screen.height));
+    await tester.tap(pill);
+    await tester.pump();
+    expect(
+      find.text('Join from AnyTogether in the launcher on your Mac.'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('in Turkish it is Katılınabilir', (tester) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final hub = TogetherHub(
+      account: TogetherAccount(
+        preferences: await SharedPreferences.getInstance(),
+        clientName: 'test',
+      ),
+    );
+    addTearDown(hub.dispose);
+    hub.friends
+      ..friends = [
+        Friend(
+          Person.fromJson(card('ece', name: 'Ece')),
+          const Presence(
+            state: PresenceState.inGame,
+            titleId: 'PPSA01',
+            game: GamePresence(
+              sessionId: 's1',
+              titleId: 'PPSA01',
+              joinable: true,
+              players: 1,
+              capacity: 2,
+            ),
+          ),
+        ),
+      ]
+      ..loaded = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Texts(
+          strings: Strings.turkish,
+          child: TogetherScreen(hub: hub),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Katılınabilir · 1/2'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
