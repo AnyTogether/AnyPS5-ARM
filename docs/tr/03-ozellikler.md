@@ -1,11 +1,34 @@
 # 3. Özellikler
 
 Her özellik için: kullanıcının launcher'da (L), telefon uygulamasında (P) ve web sitesinde (W) ne gördüğü;
-nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
+nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu. Her biri 2026-10-24 itibarıyla
+durumuyla başlar. "Sonraki sürüm", AnyPS5-ARM'ın `main` dalında olup henüz bir sürüme girmemiş demektir
+(son sürüm v0.2.13-arm).
+
+| # | Özellik | Durum |
+|---|---|---|
+| 3.1 | Profiller | kısmen yapıldı: kullanıcı adı, ad, biyografi, ülke, avatar, gizlilik; tema ve vitrin planlandı |
+| 3.2 | Kupalar | yapıldı: setler, kazanılan kupalar, nadirlik; launcher'da tarih ve nadirlik gösteren ekranlar planlandı |
+| 3.3 | Sesli sohbet | partilerde yapıldı: web, macOS launcher'ı ve telefon (sonraki sürüm) |
+| 3.4 | Partiler | arkadaşın oyununa katılmayla birlikte yapıldı; parti sohbeti planlandı |
+| 3.5 | Arkadaşlar | yapıldı; QR kodları planlandı |
+| 3.6 | Mesajlar | metin için yapıldı; görseller, tepkiler ve anlık bildirim planlandı |
+| 3.7 | Oyun kütüphanesi | yapıldı: oturumlar, katalog, oynama süresi; oyun sayfaları ve uyumluluk planlandı |
+| 3.8 | Aktivite akışı | planlandı |
+| 3.9 | Temalar | planlandı |
+| 3.10 | İndirmeler | planlandı |
+| 3.11 | Share play | planlandı, yalnızca izleme |
+| 3.12 | Liderlik tabloları | planlandı |
 
 ---
 
 ## 3.1 Profiller
+
+**Durum:** kısmen yapıldı. Yapılanlar: kullanıcı adı, görünen ad, biyografi, ülke, avatar ve bölüm
+başına gizlilik; web'de oyunlar, oynama süresi ve kupalarla herkese açık `/u/<handle>` sayfası;
+macOS launcher'ında oyunlar, saatler, kupalar ve puanlarla ve son kupaların nadirliğiyle kendi kartın
+ve arkadaşlarınınki (sonraki sürüm). Planlananlar: kartın üzerindeki tema, vitrin, sunucuda tutulan
+sayılar, Open Graph görselleri, avatar denetimi.
 
 **Kullanıcının gördüğü**
 
@@ -24,15 +47,20 @@ nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
   yeniden adlandırılabilir.
 - Kullanıcı adları: 3-20 karakter, `a-z 0-9 _ .`, büyük/küçük harf ayrımı gözetmeksizin benzersiz, 30 günde bir
   değiştirilebilir; eski kullanıcı adı 30 gün boyunca yenisine yönlendirir.
-- Avatarlar: imzalı bir URL ile doğrudan R2'ye yüklenir (5 MB'a kadar PNG/JPEG/WebP); worker
-  64, 128 ve 512 px WebP sürümlerini üretir ve avatar başkalarına gösterilmeden önce küçük bir sınıflandırıcıyla
-  çıplaklık denetimi yapar (sahibi onu hemen görür).
+- Avatarlar: API'ye gönderilir (5 MB'a kadar PNG ya da JPEG), meta verisi olmadan 256 px JPEG olarak
+  yeniden kodlanır ve baytlarının hash'iyle sunulur; şimdilik PostgreSQL'de, ileride R2'de tutulur.
+  Avatar başkalarına gösterilmeden önce küçük bir sınıflandırıcıyla denetlenmesi planlandı.
 - Dört sayı her görüntülemede değil, kupalar ya da oturumlar değiştiğinde worker tarafından hesaplanır.
-- Öğe başına görünürlük (bkz. 3.5): herkes, arkadaşlar, yalnızca ben.
+- Bölüm başına görünürlük (bkz. 3.5): herkes, arkadaşlar, hiç kimse.
 
 ---
 
 ## 3.2 Kupalar
+
+**Durum:** API'de, macOS launcher'ında (oynama süresi ve kupalar 0.2.13'ten beri gönderiliyor) ve web
+profillerinde yapıldı. Nadirlik kupalar geldiğinde hesaplanır; arkadaşlar bir kupayı kazanıldığı anda
+duyar (gizli bir kupayı adı olmadan). Planlananlar: launcher'ın kupa ekranında ve bildiriminde tarihler
+ve nadirlik, zaman çizelgesi, imkânsız örüntülerin işaretlenmesi.
 
 **Kullanıcının gördüğü**
 
@@ -55,8 +83,8 @@ nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
   diğerleri yalnızca kazandıklarını gönderir. Setler kupa dosyasının bir hash'ini taşır; böylece bir setin farklı
   bir sürümü eskisinin üzerine değil, yanına kaydedilir.
 - Gizli kupalar, onları kazanmamış olanlara gizli kalır (adı ve açıklaması).
-- **Nadirlik** = kupayı kazanan oyuncular ÷ oyunu en az bir kez oynamış oyuncular; değişen oyunlar için
-  worker tarafından, oyun başına en fazla 10 dakikada bir hesaplanır ve kupa satırında önbelleğe alınır.
+- **Nadirlik** = kupayı kazanan oyuncular ÷ oyunu en az bir kez oynamış oyuncular; bir oyun için kupa
+  geldikçe yeniden hesaplanır (worker yapılana kadar API tarafından) ve kupa satırında önbelleğe alınır.
   Etiketler: Yaygın > %50, Az yaygın %20-50, Nadir %5-20, Çok nadir %1-5, Ultra nadir < %1.
 - Bütünlük: bir kupa, launcher'ın bildirdiği gibi kabul edilir. Açıkça imkânsız örüntüler (bir oyunun tüm
   kupalarının aynı saniyede kazanılması, oyun ilk kez oynanmadan önce kazanılması) işaretlenir ve
@@ -66,6 +94,12 @@ nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
 ---
 
 ## 3.3 Sesli sohbet
+
+**Durum:** partilerde web'de, macOS launcher'ında ve telefon uygulamasında (ikisi de sonraki sürüm)
+yapıldı: eşten eşe bir ağ, mikrofonu açıp kapama, konuşanın çevresinde bir halka, macOS launcher'ında
+⌥V ile bas-konuş (genel bir tuş, oyunun üstünde de çalışır), süresi dolmadan yenilenen relay kimlik
+bilgileri. İki arkadaş arasındaki çağrılar API'de var. Planlananlar: kişi başına ses düzeyi,
+sağırlaştırma, kaplama kartı, bilgisayarın kulaklığı olarak telefon, AnyPS5-Desktop.
 
 **Kullanıcının gördüğü**
 
@@ -94,33 +128,50 @@ nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
 
 ## 3.4 Partiler
 
+**Durum:** yapıldı: davet eden, çıkaran ve liderliği devreden bir liderle en fazla 8 kişilik partiler;
+web'de, macOS launcher'ında ve telefon uygulamasında (sonraki sürüm); macOS launcher'ında
+**arkadaşın oyununa katılma** (sonraki sürüm). Planlananlar: partinin yazılı sohbeti, bağlantıyla
+gizlilik, partiden share play, davetler için anlık bildirim.
+
 **Kullanıcının gördüğü**
 
-- Launcher'dan, telefondan ya da web'den **parti kur**; arkadaşlarını davet et (anlık bildirim ve
-  launcher'da bir kart alırlar); en fazla 8 üye.
-- Parti **her üyenin ne oynadığını** gösterir ve **"Aynı oyunu oyna"** seçeneği sunar: bir üyenin
-  launcher'ında, o oyun varsa onu seçer, yoksa olmadığını söyler.
-- Partinin sesli sohbetin yanında bir yazılı sohbeti vardır (3.6'daki partiye bağlı grup sohbeti).
-- Parti içinden yayıncı, diğerleri için **share play (birlikte oynama)** başlatabilir (3.11).
-- Parti gizliliği: yalnızca davetle (varsayılan), arkadaşlar katılabilir ya da bağlantıya sahip herkes.
+- Launcher'dan, telefondan ya da web'den **parti kur**; arkadaşlarını davet et (launcher'da bir kart
+  alırlar; anlık bildirim planlandı); en fazla 8 üye.
+- Parti **her üyenin ne oynadığını** gösterir; arkadaşlar da çevrimiçi durumunda partide olduğunu görür.
+- **Arkadaşın oyununa katıl**: bir oyun çalışırken launcher, "Arkadaşlarım oyunuma katılabilsin"
+  kapalı değilse, onun için bir oyun oturumu açar. Arkadaşlar oyunu katılınabilir olarak görür ve
+  Arkadaşlar panelinde **<arkadaş> ile oyna** seçeneğini alır; yayıncı onları davet de edebilir. Katılmak,
+  yayıncının oyun sürümü ve motor derlemesi kontrol edildikten sonra aynı oyunu başlatır; farklıysa
+  bunu açıkça söyler. Çevrimiçi oyunla ([6.7](06-anlik-ses-birlikte-oynama.md)) iki kopya sonra birlikte oynar.
+- Partinin sesli sohbetin yanında bir yazılı sohbeti vardır (3.6'daki partiye bağlı grup sohbeti; planlandı).
+- Parti içinden yayıncı, diğerlerinin izlemesi için **share play (birlikte oynama)** başlatabilir (3.11; planlandı).
+- Parti gizliliği: yalnızca davetle (varsayılan) ya da arkadaşlar katılabilir; bağlantıya sahip herkes planlandı.
 
 **Nasıl çalışır**
 
-- Parti bir veritabanı satırıdır (sahip, gizlilik, oluşturulma zamanı); buna ilk üye sesi açtığında
-  ihtiyaç anında kurulan bir çağrı eşlik eder.
+- Parti, üyeleri (biri aynı anda tek bir partide olabilir) ve davetleriyle bir veritabanı satırıdır
+  (lider, gizlilik); buna ilk üye sesi açtığında ihtiyaç anında kurulan bir çağrı eşlik eder.
 - Üyelik değişiklikleri API üzerinden geçer ve gateway tarafından iletilir (`party.member_joined`,
   `party.member_left`, `party.updated`).
-- 10 dakika boyunca hiçbir üyesi bağlı olmayan parti kendiliğinden sona erer.
-- "Aynı oyunu oyna" `party.play_request {title_id}` gönderir; her launcher title ID'yi kendi
-  kütüphanesinde arar. Oyunların kendisi hiçbir şekilde işin içine girmez.
+- Parti son üyesi ayrılınca sona erer; lider ayrılınca sıradaki üye lider olur. 10 dakika boyunca
+  kimse bağlı olmayan bir partinin sona ermesi planlandı.
+- Oyun oturumu da bir satırdır: yayıncı, title ID, oyun sürümü, motor derlemesi, kapasite (2-16),
+  katılınabilir olup olmadığı ve launcher'ların belirlediği en fazla 4 KB özellik; oyuncuları
+  listelenir ve başka bir oyun sürümü ya da motor derlemesiyle katılma reddedilir (`version_mismatch`).
+  Yayıncının çevrimiçi durumu oyunu ve yer olup olmadığını gösterir.
 
 ---
 
 ## 3.5 Arkadaşlar
 
+**Durum:** yapıldı: kullanıcı adıyla ya da aramadan istek, kabul, ret, silme, engelleme; oynanan oyunla
+ve parti ya da oyun oturumuyla çevrimiçi durumu; gizlilik ayarları. Web'de, macOS launcher'ında
+(0.2.13'ten beri) ve telefon uygulamasında (sonraki sürüm). Planlananlar: QR kodları, ana ekranda
+arkadaşlar satırı, kimlerin istek gönderebileceği ayarı.
+
 **Kullanıcının gördüğü**
 
-- @kullanıcı adıyla, karşı tarafın telefonunda gösterilen bir QR koduyla ya da bir partiden ekleme; istekler
+- @kullanıcı adıyla, karşı tarafın telefonunda gösterilen bir QR koduyla (planlandı) ya da bir partiden ekleme; istekler
   kabul ya da reddedilebilir; arkadaşlar silinebilir, kullanıcılar engellenebilir.
 - Çevrimiçi durumuyla bir **arkadaş listesi**: çevrimiçi, uzakta, çevrimdışı ve **ne oynadıkları** (oyunun
   adı ve ikonu, ne zamandır oynadıkları), partide olup olmadıkları.
@@ -134,16 +185,24 @@ nasıl çalıştığı; ve sistemin geri kalanından neye ihtiyaç duyduğu.
   (`online`; 10 dk boşta kalınca `away`; title ID ve başlama zamanıyla `in_game`). Gateway bunu
   60 sn ömürle Valkey'e yazar; değiştiğinde kullanıcının arkadaşlarına yayınlar.
   Birden fazla cihaz birleştirilir: oyunda, çevrimiçiye; çevrimiçi de uzaktaya üstün gelir.
-- Engellediğin ya da "çevrimdışı görün" ayarını seçmiş birinin çevrimiçi durumu asla gönderilmez.
+- Engellediğin ya da çevrimiçi durumunu "hiç kimse" yapmış birinin çevrimiçi durumu asla gönderilmez.
 - Discord durumu yan yana çalışmaya devam eder; AnyTogether'a bağlı değildir.
 
-**Görünürlük ayarları** (kullanıcı başına, her biri herkes / arkadaşlar / yalnızca ben seçenekli):
-profil ayrıntıları, oyun kütüphanesi, oynama süresi, kupalar, aktivite, çevrimiçi durumu, kimlerin arkadaşlık
-isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), kimlerin mesaj atabileceği (arkadaşlar / herkes).
+**Görünürlük ayarları** (kullanıcı başına, her biri herkes / arkadaşlar / hiç kimse seçenekli), yapıldığı
+haliyle: oyun kütüphanesi ve oynama süresi, kupalar, arkadaş listesi, çevrimiçi durumu ve aramada seni
+kimlerin bulabileceği (tam kullanıcı adına istek her zaman gönderilebilir). Varsayılanlar arkadaşlar,
+arama için herkes. Planlananlar: aktivite, kimlerin arkadaşlık isteği gönderebileceği (herkes /
+arkadaşların arkadaşları / hiç kimse), kimlerin mesaj atabileceği (bugün: yalnızca arkadaşlar).
 
 ---
 
 ## 3.6 Mesajlar
+
+**Durum:** metin için yapıldı: birebir ve grup konuşmaları (en fazla 32 kişi, arkadaşlar arasında),
+4000 karaktere kadar mesajlar, yanıtlar, 15 dakika içinde düzenleme, silme, okunma durumu ve okunmamış
+sayıları, bir mesajı şikâyet etme. Web'de, macOS launcher'ında ve telefon uygulamasında (sonraki sürüm).
+Planlananlar: tepkiler, bağlantı önizlemeleri, görseller ve klipler, yazıyor göstergesi, ayar olarak
+okundu bilgisi, anlık bildirimler.
 
 **Kullanıcının gördüğü**
 
@@ -172,6 +231,10 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 
 ## 3.7 Oyun kütüphanesi
 
+**Durum:** yapıldı: oturumlar, launcher'ların öğrettiği katalog, launcher'ın kaydettiği bilgisayarlar,
+oynama süresi ve kupa ilerlemesiyle kütüphane; web profillerinde gösteriliyor. Planlananlar:
+`/g/<title id>` oyun sayfası, sıralama, "oynayan arkadaşlar", uyumluluk raporları.
+
 **Kullanıcının gördüğü**
 
 - Oynadığın her oyun: ad, ikon, **toplam oynama süresi**, **son oynama**, ilk oynama, kupa
@@ -198,6 +261,8 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 
 ## 3.8 Aktivite akışı
 
+**Durum:** planlandı.
+
 **Kullanıcının gördüğü**
 
 - Arkadaşların yaptıklarından oluşan bir akış: bir kupa kazandı (nadir olanlar ve platinler öne çıkar), yeni bir
@@ -221,6 +286,8 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 ---
 
 ## 3.9 Temalar
+
+**Durum:** planlandı. O zamana kadar Hub GitHub klasöründe kalır.
 
 **Kullanıcının gördüğü**
 
@@ -251,6 +318,8 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 
 ## 3.10 İndirmeler
 
+**Durum:** planlandı. O zamana kadar indirmeler her projenin GitHub sürümlerindedir.
+
 **Kullanıcının gördüğü**
 
 - macOS, Windows ve Linux için **resmi** AnyPS5 launcher'ları (her biri kendi projesinin sürümlerinden), telefon uygulaması (APK; sideload
@@ -270,15 +339,16 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 
 ## 3.11 Share play
 
+**Durum:** planlandı. Share play **yalnızca izlemedir**: arkadaşlar yayıncının oyununu görür ve duyar,
+kontrol hiçbir zaman onlara geçmez. Birlikte oynamak için her oyuncu oyunu kendi bilgisayarında
+çalıştırır (çevrimiçi oyun, [6.7](06-anlik-ses-birlikte-oynama.md)) ya da aynı odadaki arkadaşlar,
+bugün olduğu gibi, tek bilgisayarda telefonları kontrolcü olarak kullanır.
+
 **Kullanıcının gördüğü**
 
 - Bir partide ya da birebir sohbette yayıncı **Share play**'e basar: arkadaşlar yayıncının oyununu canlı olarak
   (görüntü ve ses) telefon uygulamasında, web'de ya da kendi launcher'larında görür.
-- **İzleme** modu (varsayılan): arkadaşlar izler ve konuşur.
-- **Kontrolü devral** / **Birlikte oyna**: yayıncı kontrolcüyü bir arkadaşına devreder (arkadaşın
-  kontrolcüsü 1. oyuncuyu yönetir) ya da onu 2. oyuncu olarak ekler (arkadaşın kontrolcüsü, tıpkı bugün aynı Wi-Fi'daki ikinci bir
-  telefon gibi, yayıncının oyununda ikinci bir DualSense olur). Yayıncı kendi kontrolcüsünün PS düğmesiyle
-  kontrolü istediği an geri alabilir.
+- Arkadaşlar izler ve konuşur; yaptıkları hiçbir şey oyuna ulaşmaz.
 - Gecikme, bugün Remote Play'in gösterdiği gibi her iki tarafa da gösterilir.
 
 **Nasıl çalışır** (ayrıntılar [Anlık iletişim, ses ve birlikte oynama](06-anlik-ses-birlikte-oynama.md) belgesinde)
@@ -288,10 +358,7 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
   yakalama altyapısı ve donanım kodlayıcısıyla yapar. Share play için bu görüntüyü ve oyunun sesini,
   yerel ağdaki bir telefona göndermek yerine (ya da buna ek olarak) her izleyiciye doğrudan bir WebRTC
   bağlantısı üzerinden yayınlar.
-- Arkadaşın istemcisi bu track'lere abone olur. Oynamasına izin verilen bir arkadaş, kontrolcü durumunu bir
-  WebRTC veri kanalı üzerinden gönderir (güvenilmez, sırasız, saniyede 120 paket; telefonun bugün gönderdiği
-  80 baytlık paketin aynısı); yayıncının launcher'ı bunu boştaki bir uzak kontrolcü köprüsüne (`ANYPS5_REMOTE_PAD_2`
-  vb.) verir; böylece oyun bir DualSense daha görür.
+- Arkadaşın istemcisi bu track'lere abone olur ve oyuna hiçbir şey geri göndermez.
 - Aynı ağdaki arkadaşlar yerel yolu kullanmaya devam eder. İnternet üzerinden bağlantı yayıncı ile
   izleyici arasında doğrudandır; relay'imiz yalnızca ağlar birbirine ulaşamadığında devreye girer.
   Her launcher yayıncı olabilir: macOS ScreenCaptureKit ile, Windows Windows.Graphics.Capture ile,
@@ -302,6 +369,8 @@ isteği gönderebileceği (herkes / arkadaşların arkadaşları / hiç kimse), 
 ---
 
 ## 3.12 Liderlik tabloları
+
+**Durum:** planlandı. Oyun başına puanlar (aşağıda) her kütüphane satırında zaten hesaplanıyor.
 
 **Kullanıcının gördüğü**
 

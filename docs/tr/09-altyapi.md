@@ -6,6 +6,9 @@
 ayrıntıları (adresi, sağlayıcısı, boyutu, üstünde başka ne çalıştığı) bu herkese açık plana
 bilerek **yazılmadı**; AnyTogether deposunun özel altyapı notlarında duruyor.
 
+Bugün çalışanlar (2026-10-24): web, api, realtime, PostgreSQL ve Valkey. Worker, R2 ve staging
+kopyası henüz yok; relay isteğe bağlı.
+
 Sunucu başka sitelerle paylaşıldığı için AnyTogether **küçük ve sınırlı** planlandı:
 
 | Container | Bellek sınırı | CPU sınırı | Notlar |
@@ -22,20 +25,20 @@ Sunucu başka sitelerle paylaşıldığı için AnyTogether **küçük ve sını
 Bir Next.js derlemesi çalışırken ayrıca 2-3 GB bellek kullanır; derlemeler sırayla yapıldığı için
 bu tepe başka bir derlemeyle çakışmaz.
 
-Ses, share play ve kol verisi eşten eşe gittiği için sunucu, relay'e ihtiyaç duyan çiftler
-dışında hiçbir zaman medya taşımaz.
+Ses, share play ve çevrimiçi oyun trafiği eşten eşe gittiği için sunucu, relay'e ihtiyaç duyan
+çiftler dışında hiçbir zaman medya taşımaz.
 
 ## 9.2 Uygulamalar
 
 | Uygulama | Kaynak | Yol |
 |---|---|---|
-| `web` | `utkuhalis/AnyTogether` deposu, `apps/web/Dockerfile` | `anytogether.kodla.agency/` |
-| `api` | aynı depo, `apps/api/Dockerfile` | `anytogether.kodla.agency/api` |
-| `realtime` | aynı depo, `apps/realtime/Dockerfile` | `anytogether.kodla.agency/rt` (WebSocket) |
-| `worker` | aynı depo, `apps/worker/Dockerfile` | yok |
+| `web` | `utkuhalis/AnyTogether` deposu, `infra/Dockerfile.web` | `anytogether.kodla.agency/` |
+| `api` | aynı depo, `infra/Dockerfile.node` (`APP=api`) | `anytogether.kodla.agency/api` |
+| `realtime` | aynı depo, `infra/Dockerfile.node` (`APP=realtime`) | `anytogether.kodla.agency/rt` (WebSocket) |
+| `worker` (planlandı) | aynı depo, `infra/Dockerfile.node` (`APP=worker`) | yok |
 | `postgres`, `valkey` | yönetilen veritabanı kaynakları | yalnızca iç ağ |
 | `coturn` | host ağıyla çalışan container | `anytogether-relay.kodla.agency` (yalnızca DNS) |
-| staging | `staging` dalından aynı uygulamalar | `anytogether-staging.kodla.agency` |
+| staging (planlandı) | `staging` dalından aynı uygulamalar | `anytogether-staging.kodla.agency` |
 
 Sunucunun reverse proxy'si yola göre yönlendirir; ilk sürüm hazır olduğunda "yakında" sayfasının
 yerini `web` alır.
@@ -106,11 +109,11 @@ id'si, parola = bunun HMAC'i), 12 saat geçerlidir.
 
 - `utkuhalis/AnyTogether` deposunun `main` dalına push → sunucu değişen her uygulamayı derler ve
   dağıtır (webhook, aynı anda tek derleme).
-- GitHub Actions yalnızca denetim yapar: typecheck, lint, PostgreSQL ve Valkey servis
-  container'larına karşı testler, migration kontrolü. Yalnızca geçen dağıtılır (`main`
-  üzerinde dal koruması).
-- Migration'lar API container'ı başlarken çalışır (sunucudan önce `drizzle-kit migrate`) ve her
-  zaman hâlâ çalışan sürümle geriye dönük uyumludur (genişlet, dağıt, daralt).
+- GitHub Actions yalnızca denetim yapar: lint, typecheck, PostgreSQL ve Valkey servis
+  container'larına karşı testler (yapıldı); migration kontrolü ve `main` üzerinde dal koruması
+  planlandı.
+- Migration'lar API başlarken çalışır ve her zaman hâlâ çalışan sürümle geriye dönük uyumludur
+  (genişlet, dağıt, daralt): yalnızca tablo, sütun ve indeks eklerler.
 - Her Dockerfile'da sağlık kontrolleri var; böylece proxy yalnızca hazır bir container'a
   yönlendirir.
 
@@ -148,3 +151,29 @@ id'si, parola = bunun HMAC'i), 12 saat geçerlidir.
 | **Toplam** | **≈ €0-1** |
 
 Relay'li share play bir gün çok büyürse coturn kendine ait küçük bir makineye taşınır.
+
+## 9.10 Kendi sunucunu kurmak
+
+AnyTogether MIT lisanslı ve herkes çalıştırabilir. Deponun `deploy/` klasörü her şeyi Docker Compose
+ile tek bir makineye kurar;
+[docs/self-hosting.md](https://github.com/utkuhalis/AnyTogether/blob/main/docs/self-hosting.md)
+adım adım anlatır:
+
+| Servis | Nedir |
+|---|---|
+| `caddy` | reverse proxy: kendini yenileyen Let's Encrypt sertifikalarıyla hostname'in için HTTPS, `/api` API'ye, `/rt` gateway'e, gerisi web sitesine |
+| `web`, `api`, `realtime` | depodan derlenen üç uygulama; API açılırken migration'ları uygular |
+| `postgres` | PostgreSQL 17, verinin tutulduğu tek yer (avatarlar dahil) |
+| `valkey` | hız sınırları, giriş challenge'ları, çevrimiçi durumu, olay yolu; diske hiçbir şey yazılmaz |
+| `coturn` | isteğe bağlı (`--profile turn`): sesin katı ağların arkasında da bağlanması için bir STUN/TURN relay |
+
+- **Gerekenler**: genel adresi olan bir Linux makinesi, 2 GB bellek (çoğu web sitesini derlemek için),
+  Compose'lu Docker, ona işaret eden bir hostname, 80 ve 443 portları (relay ile birlikte 3478 ve küçük
+  bir UDP aralığı).
+- **Ayarlar** tek bir `.env` dosyasında: hostname, Let's Encrypt iletişim adresi, veritabanı parolası,
+  erişim token'larını imzalayan Ed25519 anahtarı, e-posta (SMTP, Resend ya da denemek için API'nin
+  logu), Apple, Google ve Discord istemci ID'leri (boşken her biri kapalı), TURN sırrı ve URL'leri.
+- **Yedekler**: her şey PostgreSQL'de olduğu için tek bir `pg_dump` tam bir yedektir.
+- **Moderasyon**: aynı komut satırı aracı, API'nin container'ı içinde çalıştırılır.
+- **İstemciler**: macOS launcher'ı ve telefon uygulaması başka bir sunucuya yönlendirilebilir (Ayarlar →
+  AnyTogether → Sunucu, sonraki sürüm); bir passkey, yapıldığı hostname'e aittir.
