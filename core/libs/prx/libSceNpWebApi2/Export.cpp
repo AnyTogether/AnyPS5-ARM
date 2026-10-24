@@ -5,7 +5,12 @@
 #include "prx/libc/include/General.hpp"
 #include <atomic>
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -49,6 +54,44 @@ struct PushHandle {
 
 static std::unordered_map<int, PushHandle> pushHandles;
 
+struct BridgedRequest {
+    int userContextId = 0;
+    std::string apiGroup;
+    std::string path;
+    std::string method;
+    Online::Wire::Pairs headers;
+    std::optional<Online::Wire::WebReply> reply;
+    std::size_t readOffset = 0;
+};
+
+static constexpr std::size_t MaxBridgedHeaders = 64;
+static constexpr std::size_t MaxBridgedBody = 8u * 1024u * 1024u;
+static constexpr std::uint32_t BridgedTimeoutMilliseconds = 30000;
+static std::mutex g_bridgedMutex;
+static std::unordered_map<int, int> g_bridgedUsers;
+static std::unordered_map<std::int64_t, BridgedRequest> g_bridgedRequests;
+
+static std::string CopyText(const char* text) {
+    return text ? std::string(text) : std::string();
+}
+
+static bool SameHeaderName(std::string_view left, std::string_view right) {
+    return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin(), [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+    });
+}
+
+static std::optional<std::string> ReplyHeader(std::int64_t requestId, const char* name) {
+    if (!name) return std::nullopt;
+    std::lock_guard lock(g_bridgedMutex);
+    const auto found = g_bridgedRequests.find(requestId);
+    if (found == g_bridgedRequests.end() || !found->second.reply) return std::nullopt;
+    for (const auto& [field, value] : found->second.reply->headers) {
+        if (SameHeaderName(field, name)) return value;
+    }
+    return std::nullopt;
+}
+
 extern "C" {
 
 int APS5_VABI sceNpWebApi2AbortRequest(int64_t request_id) {
@@ -61,9 +104,11 @@ int APS5_VABI sceNpWebApi2AbortRequest(int64_t request_id) {
 int APS5_VABI sceNpWebApi2AddHttpRequestHeader(int64_t request_id, const char* field_name, const char* value) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Str("field_name", field_name).Str("value", value); });
-    (void)request_id;
-    (void)field_name;
-    (void)value;
+    if (Online::Enabled() && field_name && value) {
+        std::lock_guard lock(g_bridgedMutex);
+        const auto found = g_bridgedRequests.find(request_id);
+        if (found != g_bridgedRequests.end() && found->second.headers.size() < MaxBridgedHeaders) found->second.headers.emplace_back(field_name, value);
+    }
     return call.Return(0);
 }
 
@@ -82,55 +127,66 @@ void APS5_VABI sceNpWebApi2CheckTimeout(void) {
 int APS5_VABI sceNpWebApi2CreateRequest(int user_context_id, const char* api_group, const char* path, const char* method, const void* content_parameter, int64_t* request_id) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)).Str("api_group", api_group).Str("path", path).Str("method", method).Ptr("content_parameter", content_parameter).Ptr("request_id", request_id); });
-    (void)user_context_id;
-    (void)api_group;
-    (void)path;
-    (void)method;
     (void)content_parameter;
     if (!request_id) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
     *request_id = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
-    return call.Return(0);
+    if (Online::Enabled()) {
+        std::lock_guard lock(g_bridgedMutex);
+        g_bridgedRequests[*request_id] = BridgedRequest{user_context_id, CopyText(api_group), CopyText(path), CopyText(method), {}, std::nullopt, 0};
+    }
+    return call.Return(0, [&](Online::Fields& out) { out.Int("request_id", *request_id); });
 }
 
 int APS5_VABI sceNpWebApi2CreateUserContext(int lib_ctx_id, int user_id) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("lib_ctx_id", static_cast<std::int64_t>(lib_ctx_id)).Int("user_id", static_cast<std::int64_t>(user_id)); });
     (void)lib_ctx_id;
-    (void)user_id;
-    return call.Return(g_nextHandle.fetch_add(1, std::memory_order_relaxed));
+    const int userContextId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    if (Online::Enabled()) {
+        std::lock_guard lock(g_bridgedMutex);
+        g_bridgedUsers[userContextId] = user_id;
+    }
+    return call.Return(userContextId);
 }
 
 int APS5_VABI sceNpWebApi2DeleteRequest(int64_t request_id) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)); });
-    (void)request_id;
+    {
+        std::lock_guard lock(g_bridgedMutex);
+        g_bridgedRequests.erase(request_id);
+    }
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2DeleteUserContext(int user_context_id) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)); });
-    (void)user_context_id;
+    {
+        std::lock_guard lock(g_bridgedMutex);
+        g_bridgedUsers.erase(user_context_id);
+    }
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValue(int64_t request_id, const char* field_name, char* value, size_t value_size) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Str("field_name", field_name).Ptr("value", value).Uint("value_size", static_cast<std::uint64_t>(value_size)); });
-    (void)request_id;
-    (void)field_name;
-    (void)value;
-    (void)value_size;
-    return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    const auto header = ReplyHeader(request_id, field_name);
+    if (!header) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    if (!value || value_size <= header->size()) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
+    std::memcpy(value, header->c_str(), header->size() + 1);
+    return call.Return(0, [&](Online::Fields& out) { out.Text("value", *header); });
 }
 
 int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValueLength(int64_t request_id, const char* field_name, size_t* value_length) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Str("field_name", field_name).Ptr("value_length", value_length); });
-    (void)request_id;
-    (void)field_name;
-    (void)value_length;
-    return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    const auto header = ReplyHeader(request_id, field_name);
+    if (!header) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    if (!value_length) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
+    *value_length = header->size();
+    return call.Return(0, [&](Online::Fields& out) { out.Uint("value_length", *value_length); });
 }
 
 int APS5_VABI sceNpWebApi2Initialize(int lib_http_ctx_id, size_t pool_size) {
@@ -217,20 +273,51 @@ int APS5_VABI sceNpWebApi2PushEventRegisterCallback(int user_context_id, int fil
 int APS5_VABI sceNpWebApi2ReadData(int64_t request_id, void* data, size_t size) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Ptr("data", data).Uint("size", static_cast<std::uint64_t>(size)); });
-    (void)request_id;
-    (void)data;
-    (void)size;
-    return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    std::lock_guard lock(g_bridgedMutex);
+    const auto found = g_bridgedRequests.find(request_id);
+    if (found == g_bridgedRequests.end() || !found->second.reply) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    if (!data && size != 0) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
+    auto& request = found->second;
+    const auto& body = request.reply->body;
+    const auto count = std::min(size, body.size() - request.readOffset);
+    if (count != 0) std::memcpy(data, body.data() + request.readOffset, count);
+    request.readOffset += count;
+    return call.Return(static_cast<int>(count), [&](Online::Fields& out) { out.Data("data", data, count); });
 }
 
 int APS5_VABI sceNpWebApi2SendRequest(int64_t request_id, const void* data, size_t data_size, NpWebApi2ResponseInformationOption* response_info_option) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Data("data", data, data_size).Uint("data_size", static_cast<std::uint64_t>(data_size)).Ptr("response_info_option", response_info_option); });
-    (void)request_id;
-    (void)data;
-    (void)data_size;
-    (void)response_info_option;
-    return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    if (!Online::Enabled() || (!data && data_size != 0) || data_size > MaxBridgedBody) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    Online::Wire::WebRequest request;
+    {
+        std::lock_guard lock(g_bridgedMutex);
+        const auto found = g_bridgedRequests.find(request_id);
+        if (found == g_bridgedRequests.end()) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+        const auto user = g_bridgedUsers.find(found->second.userContextId);
+        request.userId = user == g_bridgedUsers.end() ? -1 : user->second;
+        request.apiGroup = found->second.apiGroup;
+        request.path = found->second.path;
+        request.method = found->second.method;
+        request.headers = found->second.headers;
+    }
+    if (data_size != 0) request.body.assign(static_cast<const std::uint8_t*>(data), static_cast<const std::uint8_t*>(data) + data_size);
+    Online::Wire::WebReply reply;
+    if (!OnlineWeb_nid_no_patch(request, BridgedTimeoutMilliseconds, reply)) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    const auto status = reply.status;
+    const auto size = reply.body.size();
+    {
+        std::lock_guard lock(g_bridgedMutex);
+        const auto found = g_bridgedRequests.find(request_id);
+        if (found == g_bridgedRequests.end()) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+        found->second.reply = std::move(reply);
+        found->second.readOffset = 0;
+    }
+    if (response_info_option) {
+        response_info_option->http_status = status;
+        response_info_option->response_data_size = size;
+    }
+    return call.Return(0, [&](Online::Fields& out) { out.Uint("http_status", status).Uint("response_data_size", size); });
 }
 
 int APS5_VABI sceNpWebApi2Terminate(int lib_ctx_id) {
