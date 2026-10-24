@@ -24,6 +24,12 @@ if(BUILD_TESTING)
     add_test(NAME online_observation COMMAND online_observation_tests)
     set_tests_properties(online_observation PROPERTIES TIMEOUT 30
         ENVIRONMENT "ANYPS5_ONLINE_LOG=${CMAKE_CURRENT_BINARY_DIR}/online_observation.jsonl")
+
+    add_test_executable(online_np_manager_tests tests/OnlineNpManager.cpp tests/FakeLauncher.cpp src/OnlineWire.cpp)
+    target_include_directories(online_np_manager_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(online_np_manager_tests PRIVATE libSceNpManager libSceNetCtl libc mbedcrypto)
+    add_test(NAME online_np_manager COMMAND online_np_manager_tests)
+    set_tests_properties(online_np_manager PROPERTIES TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING)

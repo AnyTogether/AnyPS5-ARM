@@ -4,9 +4,15 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceUserService/UserService.hpp"
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <atomic>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 // PSN is not emulated: the user is reported as signed out and online queries fail.
@@ -19,6 +25,7 @@ static constexpr int SCE_NP_ERROR_INVALID_SIZE = static_cast<int>(0x80550011);
 static constexpr int SCE_NP_ERROR_REQUEST_NOT_FOUND = static_cast<int>(0x80550014);
 static constexpr int SCE_NP_ERROR_CALLBACK_MAX = static_cast<int>(0x8055001D);
 static constexpr uint32_t NP_STATE_SIGNED_OUT = 1;
+static constexpr uint32_t NP_STATE_SIGNED_IN = 2;
 static constexpr int NP_POLL_ASYNC_FINISHED = 0;
 static constexpr uint32_t NP_REACHABILITY_STATE_UNAVAILABLE = 0;
 static constexpr uint32_t NP_GAME_PRESENCE_STATUS_OFFLINE = 0;
@@ -31,6 +38,28 @@ void* reachabilityCallback = nullptr;
 void* reachabilityUserdata = nullptr;
 std::mutex requestMutex;
 std::unordered_set<int> liveRequests;
+std::unordered_map<int, int> requestResults;
+
+std::optional<Online::Wire::Account> SignedInAccount() {
+    const auto state = Online::CurrentAccount();
+    if (!state || !state->account.signedIn) return std::nullopt;
+    return state->account;
+}
+
+std::optional<Online::Wire::Account> SignedInUser(int userId) {
+    if (userId != USER_SERVICE_INITIAL_USER_ID) return std::nullopt;
+    return SignedInAccount();
+}
+
+void FillOnlineId(NpOnlineId& out, const std::string& onlineId) {
+    std::memset(&out, 0, sizeof(out));
+    std::memcpy(out.data, onlineId.data(), std::min(onlineId.size(), sizeof(out.data) - 1));
+}
+
+bool SameOnlineId(const NpOnlineId& onlineId, const std::string& ours) {
+    const std::string_view theirs(onlineId.data, strnlen(onlineId.data, sizeof(onlineId.data) - 1));
+    return theirs == ours;
+}
 
 int AddRequest() {
     const int reqId = g_nextRequest.fetch_add(1, std::memory_order_relaxed);
@@ -39,10 +68,16 @@ int AddRequest() {
     return reqId;
 }
 
-int SignedOutRequest(int reqId) {
+int RequestResult(int reqId, int result) {
     if (reqId == 0) return SCE_NP_ERROR_INVALID_ARGUMENT;
     std::lock_guard lock(requestMutex);
-    return liveRequests.count(reqId) ? SCE_NP_ERROR_SIGNED_OUT : SCE_NP_ERROR_REQUEST_NOT_FOUND;
+    if (!liveRequests.count(reqId)) return SCE_NP_ERROR_REQUEST_NOT_FOUND;
+    requestResults[reqId] = result;
+    return result;
+}
+
+int SignedOutRequest(int reqId) {
+    return RequestResult(reqId, SCE_NP_ERROR_SIGNED_OUT);
 }
 
 using NpStateCallbackA = void (APS5_VABI *)(int userId, uint32_t state, void* userdata);
@@ -65,6 +100,7 @@ struct StateCallback {
 std::mutex stateMutex;
 std::array<StateCallbackA, NP_STATE_CALLBACK_MAX> stateCallbacksA;
 StateCallback stateCallback;
+std::uint64_t seenAccountGeneration = 0;
 }
 
 extern "C" {
@@ -265,6 +301,7 @@ int APS5_VABI sceNpCheckNpAvailabilityA(int reqId, int userId) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("reqId", static_cast<std::int64_t>(reqId)).Int("userId", static_cast<std::int64_t>(userId)); });
     if (userId == USER_SERVICE_USER_ID_INVALID) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
+    if (SignedInUser(userId)) return call.Return(RequestResult(reqId, 0));
     return call.Return(SignedOutRequest(reqId));
 }
 int APS5_VABI sceNpGetAccountDateOfBirthA(int userId, void* dateOfBirth) {
@@ -696,18 +733,28 @@ int APS5_VABI sceNpAbortRequest(int req_id) {
 
 int APS5_VABI sceNpCheckCallback(void) {
     Online::Call call("libSceNpManager", __func__);
+    const auto account = Online::CurrentAccount();
+    const bool signedIn = account && account->account.signedIn;
+    NpId npId{};
+    if (signedIn) FillOnlineId(npId.online_id, account->account.onlineId);
+    const auto state = signedIn ? NP_STATE_SIGNED_IN : NP_STATE_SIGNED_OUT;
     std::array<StateCallbackA, NP_STATE_CALLBACK_MAX> callbacksA;
     StateCallback legacy;
     {
         std::lock_guard lock(stateMutex);
+        if (account && account->generation != seenAccountGeneration) {
+            seenAccountGeneration = account->generation;
+            for (auto& entry : stateCallbacksA) entry.pending = entry.callback != nullptr;
+            stateCallback.pending = stateCallback.callback != nullptr;
+        }
         callbacksA = stateCallbacksA;
         legacy = stateCallback;
         for (auto& entry : stateCallbacksA) entry.pending = false;
         stateCallback.pending = false;
     }
-    if (legacy.pending) legacy.callback(USER_SERVICE_INITIAL_USER_ID, NP_STATE_SIGNED_OUT, nullptr, legacy.userdata);
+    if (legacy.pending) legacy.callback(USER_SERVICE_INITIAL_USER_ID, state, signedIn ? &npId : nullptr, legacy.userdata);
     for (const auto& entry : callbacksA) {
-        if (entry.pending) entry.callback(USER_SERVICE_INITIAL_USER_ID, NP_STATE_SIGNED_OUT, entry.userdata);
+        if (entry.pending) entry.callback(USER_SERVICE_INITIAL_USER_ID, state, entry.userdata);
     }
     return call.Return(0);
 }
@@ -754,6 +801,7 @@ int APS5_VABI sceNpDeleteRequest(int req_id) {
     call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)); });
     std::lock_guard lock(requestMutex);
     liveRequests.erase(req_id);
+    requestResults.erase(req_id);
     return call.Return(0);
 }
 
@@ -800,7 +848,11 @@ int APS5_VABI sceNpGetUserIdByOnlineId(const NpOnlineId* online_id, int* user_id
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Ptr("online_id", online_id).Ptr("user_id", user_id); });
     if (!online_id || !user_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInAccount();
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    if (!SameOnlineId(*online_id, account->onlineId)) return call.Return(SCE_NP_ERROR_USER_NOT_FOUND);
+    *user_id = USER_SERVICE_INITIAL_USER_ID;
+    return call.Return(0, [&](Online::Fields& out) { out.Int("user_id", *user_id); });
 }
 
 int APS5_VABI sceNpCheckPlus(int req_id, const void* param, void* result) {
@@ -820,7 +872,11 @@ int APS5_VABI sceNpGetAccountId(const NpOnlineId* online_id, uint64_t* account_i
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Ptr("online_id", online_id).Ptr("account_id", account_id); });
     if (!online_id || !account_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInAccount();
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    if (!SameOnlineId(*online_id, account->onlineId)) return call.Return(SCE_NP_ERROR_USER_NOT_FOUND);
+    *account_id = account->accountId;
+    return call.Return(0, [&](Online::Fields& out) { out.Uint("account_id", *account_id); });
 }
 
 int APS5_VABI sceNpSetGamePresenceOnline(int req_id, const NpOnlineId* online_id, uint32_t presence) {
@@ -838,25 +894,34 @@ int APS5_VABI sceNpSetGamePresenceOnline(int req_id, const NpOnlineId* online_id
 int APS5_VABI sceNpGetAccountCountryA(int user_id, void* country_code) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("country_code", country_code); });
-    (void)user_id;
     if (!country_code) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInUser(user_id);
+    if (!account || account->country.size() != 2) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    auto* code = static_cast<char*>(country_code);
+    std::memset(code, 0, 4);
+    std::memcpy(code, account->country.data(), 2);
+    return call.Return(0, [&](Online::Fields& out) { out.Text("country_code", account->country); });
 }
 
 int APS5_VABI sceNpGetAccountIdA(int user_id, uint64_t* account_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("account_id", account_id); });
-    (void)user_id;
-    (void)account_id;
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    if (!account_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
+    const auto account = SignedInUser(user_id);
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    *account_id = account->accountId;
+    return call.Return(0, [&](Online::Fields& out) { out.Uint("account_id", *account_id); });
 }
 
 int APS5_VABI sceNpGetNpId(int user_id, NpId* np_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("np_id", np_id); });
-    (void)user_id;
     if (!np_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInUser(user_id);
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    std::memset(np_id, 0, sizeof(*np_id));
+    FillOnlineId(np_id->online_id, account->onlineId);
+    return call.Return(0, [&](Online::Fields& out) { out.Text("online_id", account->onlineId); });
 }
 
 int APS5_VABI sceNpGetNpReachabilityState(int user_id, uint32_t* state) {
@@ -871,35 +936,40 @@ int APS5_VABI sceNpGetNpReachabilityState(int user_id, uint32_t* state) {
 int APS5_VABI sceNpGetOnlineId(int user_id, NpOnlineId* online_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("online_id", online_id); });
-    (void)user_id;
     if (!online_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInUser(user_id);
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    FillOnlineId(*online_id, account->onlineId);
+    return call.Return(0, [&](Online::Fields& out) { out.Text("online_id", account->onlineId); });
 }
 
 int APS5_VABI sceNpGetState(int user_id, uint32_t* state) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("state", state); });
-    (void)user_id;
     if (!state) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    *state = NP_STATE_SIGNED_OUT;
+    *state = SignedInUser(user_id) ? NP_STATE_SIGNED_IN : NP_STATE_SIGNED_OUT;
     return call.Return(0, [&](Online::Fields& out) { out.Uint("state", *state); });
 }
 
 int APS5_VABI sceNpHasSignedUp(int user_id, bool* has_signed_up) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_id", static_cast<std::int64_t>(user_id)).Ptr("has_signed_up", has_signed_up); });
-    (void)user_id;
     if (!has_signed_up) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    *has_signed_up = false;
-    return call.Return(0);
+    *has_signed_up = SignedInUser(user_id).has_value();
+    return call.Return(0, [&](Online::Fields& out) { out.Bool("has_signed_up", *has_signed_up); });
 }
 
 int APS5_VABI sceNpPollAsync(int req_id, int* result) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("result", result); });
-    (void)req_id;
-    if (result) *result = SCE_NP_ERROR_SIGNED_OUT;
-    return call.Return(NP_POLL_ASYNC_FINISHED);
+    int value = SCE_NP_ERROR_SIGNED_OUT;
+    {
+        std::lock_guard lock(requestMutex);
+        const auto found = requestResults.find(req_id);
+        if (found != requestResults.end()) value = found->second;
+    }
+    if (result) *result = value;
+    return call.Return(NP_POLL_ASYNC_FINISHED, [&](Online::Fields& out) { out.Int("result", value); });
 }
 
 // Presence changes come from PlayStation Network, so a registered callback is never called.
@@ -1064,7 +1134,11 @@ int APS5_VABI sceNpGetUserIdByAccountId(uint64_t account_id, int* user_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Uint("account_id", static_cast<std::uint64_t>(account_id)).Ptr("user_id", user_id); });
     if (account_id == 0 || !user_id) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
-    return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    const auto account = SignedInAccount();
+    if (!account) return call.Return(SCE_NP_ERROR_SIGNED_OUT);
+    if (account->accountId != account_id) return call.Return(SCE_NP_ERROR_USER_NOT_FOUND);
+    *user_id = USER_SERVICE_INITIAL_USER_ID;
+    return call.Return(0, [&](Online::Fields& out) { out.Int("user_id", *user_id); });
 }
 
 int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {
