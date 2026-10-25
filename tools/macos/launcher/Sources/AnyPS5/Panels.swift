@@ -102,8 +102,30 @@ extension AppModel {
                     self?.play(game)
                 }),
             ])]
+        case .noSpace:
+            guard let (game, shortage) = spaceShortage else { return [] }
+            return [PanelCategory(id: "noSpace", title: TPrep.text(.noSpaceTitle), symbol: "externaldrive.badge.exclamationmark", rows: noSpaceRows(game, shortage))]
         default: return []
         }
+    }
+
+    /// The no-space panel: how much the unlock needs and what is free, and the ways out.
+    func noSpaceRows(_ game: Game, _ shortage: SpaceShortage) -> [PanelRow] {
+        [
+            PanelRow(id: "amount", title: TPrep.format(.noSpaceAmount, shortage.needed.byteText, shortage.free.byteText, shortage.volume),
+                     detail: TPrep.text(.noSpaceNothingWritten) + "\n" + TPrep.text(.noSpaceWhy), symbol: "externaldrive.badge.exclamationmark", kind: .info(""), wraps: true),
+            PanelRow(id: "folder", title: TPrep.text(.noSpaceFolder), detail: TPrep.text(.noSpaceFolderDetail), symbol: "folder", kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.pickGamesFolder()
+            }),
+            PanelRow(id: "storage", title: TPrep.text(.noSpaceStorage), detail: TPrep.text(.noSpaceStorageDetail), symbol: "internaldrive", kind: .action(destructive: false) {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.settings.Storage") { NSWorkspace.shared.open(url) }
+            }),
+            PanelRow(id: "retry", title: TPrep.text(.noSpaceRetry), detail: TPrep.text(.noSpaceRetryDetail), symbol: "arrow.clockwise", kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.unlock(game)
+            }),
+        ]
     }
 
     private func settingsCategories() -> [PanelCategory] {
@@ -170,6 +192,8 @@ extension AppModel {
                 Sounds.shared.play(.select)
             }),
             PanelRow(id: "clones", title: T.text(.installedSize), kind: .info("")),
+            PanelRow(id: "prepare", title: TPrep.text(.prepareNewGames), detail: TPrep.text(.prepareNewGamesDetail), symbol: "arrow.down.circle",
+                     kind: .toggle(preparesNewGames) { [weak self] value in self?.preferences.prepareNewGames = value ? nil : false }),
         ]
 
         let language = PanelRow(id: "language", title: T.text(.language), symbol: "globe", kind: .choice(options: Language.allCases.map(\.displayName), selected: Language.allCases.firstIndex(of: preferences.language) ?? 0) { [weak self] index in

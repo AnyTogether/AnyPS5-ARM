@@ -443,6 +443,7 @@ enum PreviewRenderer {
         renderBanner(preferences, found, root, output.appendingPathComponent("trophy-banner.png"))
         renderRingBanner(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"), output.appendingPathComponent("call-banner.png"))
         renderNewGame(preferences, found, root, still, output)
+        renderPrepare(preferences, found, root, still, output)
         var fresh = preferences
         fresh.onboarded = false
         fresh.gamesFolder = nil
@@ -509,6 +510,70 @@ enum PreviewRenderer {
             renderer.scale = 2
             guard let image = renderer.cgImage else { continue }
             try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+        }
+    }
+
+    /// The free-space check and new games prepared in the background: the no-space panel, the
+    /// notices, a game being prepared and paused on the home screen, the setting.
+    static func renderPrepare(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
+        let pick = selectedTitle.flatMap { id in games.first { $0.titleID == id } } ?? games.first
+        guard let game = pick else { return }
+        let others = games.filter { $0 != game }
+        func select(_ model: AppModel) { model.selected = model.games.firstIndex(of: game) ?? 0 }
+        let shortage = SpaceShortage(needed: 14_200_000_000, free: 3_100_000_000, volume: "Macintosh HD", copying: false)
+        render(preferences, games, root, still, output.appendingPathComponent("prepare-no-space.png")) { model in
+            select(model)
+            model.spaceShortage = (game, shortage)
+            model.open(.noSpace)
+            model.panelRow = 1
+        }
+        let toasts: [(String, String, String)] = [
+            ("prepare-toast-new.png", AppModel.newGameText([game.name], preparing: true, waiting: false, skipped: nil), "gamecontroller.fill"),
+            ("prepare-toast-waiting.png", AppModel.newGameText([game.name], preparing: false, waiting: true, skipped: nil), "gamecontroller.fill"),
+            ("prepare-toast-ready.png", TPrep.format(.readyToPlay, game.name), "checkmark.circle.fill"),
+            ("prepare-toast-battery.png", AppModel.newGameText([game.name], preparing: false, waiting: false, skipped: .battery(18)), "gamecontroller.fill"),
+            ("prepare-toast-space.png", TPrep.format(.notPreparedSpace, game.name, shortage.needed.byteText, shortage.free.byteText), "externaldrive.badge.exclamationmark"),
+            ("prepare-toast-play-when-ready.png", TPrep.format(.startsWhenReady, game.name), "play.circle.fill"),
+        ]
+        for (name, text, symbol) in toasts {
+            render(preferences, games, root, still, output.appendingPathComponent(name)) { model in
+                select(model)
+                model.show(text, symbol: symbol, icon: game.icon)
+            }
+        }
+        render(preferences, games, root, still, output.appendingPathComponent("prepare-home.png")) { model in
+            select(model)
+            model.previewProgress(game, step: .relink, fraction: 0.42)
+            model.previewPreparing(game, waiting: Array(others.prefix(1)))
+        }
+        render(preferences, games, root, still, output.appendingPathComponent("prepare-home-paused.png")) { model in
+            select(model)
+            model.previewProgress(game, step: .relink, fraction: 0.42)
+            model.previewPreparing(game, paused: true)
+        }
+        if let next = others.first {
+            render(preferences, games, root, still, output.appendingPathComponent("prepare-home-waiting.png")) { model in
+                model.selected = model.games.firstIndex(of: next) ?? 0
+                model.previewProgress(game, step: .relink, fraction: 0.42)
+                model.previewPreparing(game, waiting: [next])
+            }
+        }
+        render(preferences, games, root, still, output.appendingPathComponent("prepare-settings.png")) { model in
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "library" } ?? 0
+            model.panelInRows = true
+            model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "prepare" } ?? 0
+        }
+        let file = output.appendingPathComponent("prepare-banner-ready.png")
+        if ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_ONLY"]?.split(separator: ",").contains(where: { file.lastPathComponent.hasPrefix($0) }) ?? true {
+            let view = ZStack(alignment: .top) {
+                Color(white: 0.15)
+                NoticeToast(title: TPrep.format(.readyToPlay, game.name), detail: TPrep.text(.readyToPlayDetail), symbol: "checkmark.circle.fill", icon: game.icon, still: true) {}
+            }
+            .frame(width: TrophyBanner.size.width, height: TrophyBanner.size.height)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2
+            if let image = renderer.cgImage { try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file) }
         }
     }
 

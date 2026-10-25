@@ -371,7 +371,7 @@ struct TileRow: View {
                                 .font(.display(22 * scale, .semibold))
                                 .foregroundStyle(.white)
                                 .lineLimit(2)
-                            StateLabel(state: model.state(of: game))
+                            StateLabel(state: model.state(of: game), game: game)
                         }
                         .legible(16)
                         .frame(width: label - gap, alignment: .leading)
@@ -455,15 +455,20 @@ struct GameTile: View {
 
 struct StateLabel: View {
     let state: GameState
+    /// The game it is about, for what the background preparation adds.
+    var game: Game? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
     var body: some View {
         let (symbol, text, tint): (String, String, Color) = {
             switch state {
+            case .locked where model.prepare.pending.contains(game?.id ?? ""): return ("clock", TPrep.text(.waitingToPrepare), .white.opacity(0.75))
             case .locked: return ("lock.fill", T.text(.locked), .white.opacity(0.75))
             case .unreadable: return ("xmark.octagon.fill", T.text(.unreadableDump), Color(red: 1, green: 0.6, blue: 0.55))
             case .queued: return ("clock", T.text(.queued), .white.opacity(0.75))
+            case .installing where game.map(model.isPreparing) == true:
+                return model.prepare.paused ? ("pause.circle.fill", TPrep.text(.preparingPaused), .white.opacity(0.75)) : ("arrow.down.circle.fill", TPrep.text(.preparing), model.accent)
             case .installing(let step, _): return ("arrow.down.circle.fill", step.title, model.accent)
             case .failed: return ("exclamationmark.triangle.fill", T.text(.failed), Color(red: 1, green: 0.6, blue: 0.55))
             case .installed(let outdated): return (outdated ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill", outdated ? T.text(.updateAvailable) : T.text(.ready), outdated ? Color(red: 1, green: 0.82, blue: 0.4) : .white.opacity(0.75))
@@ -498,7 +503,8 @@ struct HeroInfo: View {
                 .legible(26)
             HStack(spacing: 16 * scale) {
                 let family = model.familyPrimary(game, state)
-                ConsoleButton(title: family?.title ?? primaryTitle(state), symbol: family?.symbol ?? primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
+                let preparing = model.isPreparing(game)
+                ConsoleButton(title: family?.title ?? (preparing ? TPrep.text(.playWhenReady) : primaryTitle(state)), symbol: family?.symbol ?? (preparing ? "play.fill" : primarySymbol(state)), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
                     model.focus = .actions(0)
                     model.primaryAction(game)
                 }
@@ -516,7 +522,7 @@ struct HeroInfo: View {
                 if case .installing(let step, let fraction) = state {
                     VStack(alignment: .leading, spacing: 8 * scale) {
                         HStack {
-                            Text(step.title).font(.display(15 * scale, .medium))
+                            Text(model.isPreparing(game) ? (model.prepare.paused ? TPrep.text(.preparingPaused) : TPrep.format(.preparingStep, step.title)) : step.title).font(.display(15 * scale, .medium))
                             Spacer()
                             Text("\(Int(step.overall(fraction) * 100))%").font(.display(15 * scale, .semibold)).monospacedDigit()
                         }
@@ -550,7 +556,7 @@ struct HeroInfo: View {
             .glassGroup(look, spacing: 12 * scale)
             .animation(Motion.layout, value: state)
             HStack(spacing: 14 * scale) {
-                InfoCard(title: T.text(.status), symbol: "circle.dashed") { StateLabel(state: state) }
+                InfoCard(title: T.text(.status), symbol: "circle.dashed") { StateLabel(state: state, game: game) }
                 InfoCard(title: T.text(.size), symbol: "internaldrive") {
                     Text((model.sizes[game.id] ?? -1).byteText).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
                 }
@@ -680,7 +686,7 @@ struct LibraryGrid: View {
                             VStack(alignment: .leading, spacing: 10 * scale) {
                                 GameTile(game: game, size: 196 * scale, focused: focused)
                                 Text(game.name).font(.display(15 * scale, focused ? .semibold : .regular)).foregroundStyle(.white.opacity(focused ? 1 : 0.75)).lineLimit(1)
-                                StateLabel(state: model.state(of: game)).font(.display(12 * scale))
+                                StateLabel(state: model.state(of: game), game: game).font(.display(12 * scale))
                             }
                             .id(game.id)
                             .hoverTick("library-\(game.id)")
@@ -786,7 +792,7 @@ extension AppModel {
             return true
         }
         switch overlay {
-        case .settings, .gameSettings, .confirmUninstall, .updateChoice:
+        case .settings, .gameSettings, .confirmUninstall, .updateChoice, .noSpace:
             return panelCommand(command)
         case .controls, .advanced:
             if command == .back || command == .options {

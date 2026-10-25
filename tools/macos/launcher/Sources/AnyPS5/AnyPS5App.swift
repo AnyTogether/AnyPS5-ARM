@@ -203,6 +203,11 @@ struct RootView: View {
             SettingsPanel().transition(.opacity)
         case .library:
             LibraryGrid().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .noSpace:
+            if let (game, _) = model.spaceShortage {
+                SidePanel(title: TPrep.text(.noSpaceTitle), subtitle: game.name + " · " + TPrep.text(.noSpaceSubtitle))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         case .gameSettings, .confirmUninstall, .controls, .advanced, .updateChoice:
             if let game = model.selectedGame {
                 SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))

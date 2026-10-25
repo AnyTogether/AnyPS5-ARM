@@ -481,7 +481,7 @@ public final class Installer: @unchecked Sendable {
 
     /// Every .prx and .sprx of the dump outside sce_sys, relative to its folder.
     static func modules(in folder: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
+        guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey], options: [.skipsHiddenFiles]) else { return [] }
         var found: [URL] = []
         let base = folder.standardizedFileURL.path
         for case let file as URL in enumerator {
@@ -489,7 +489,10 @@ public final class Installer: @unchecked Sendable {
             guard path.hasPrefix(base + "/") else { continue }
             let relative = String(path.dropFirst(base.count + 1))
             if relative.hasPrefix("sce_sys/") { enumerator.skipDescendants(); continue }
-            if relative.split(separator: "/").count > 3 { continue }
+            let depth = relative.split(separator: "/").count
+            if depth > 3 { continue }
+            // Nothing below the third level counts: a game's thousands of data files are not walked.
+            if depth == 3, (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { enumerator.skipDescendants(); continue }
             let name = file.lastPathComponent.lowercased()
             guard name.hasSuffix(".prx") || name.hasSuffix(".sprx") else { continue }
             found.append(URL(fileURLWithPath: relative))

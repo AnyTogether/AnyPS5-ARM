@@ -85,6 +85,8 @@ struct Preferences: Codable, Equatable {
     var engine: String?
     /// A toolkit folder the user built (Settings → Engine → Engine Folder), nil for none.
     var customToolkit: String?
+    /// Settings → Game Library: new games unlocked in the background (PrepareQueue); nil means on.
+    var prepareNewGames: Bool?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -141,6 +143,8 @@ enum Overlay: Equatable {
     case confirmUninstall
     /// Play on a game an older toolkit made: update it first, or play it as it is.
     case updateChoice
+    /// An unlock that did not start for want of room (spaceShortage): how much, and what to do.
+    case noSpace
     case controls
     case trophies
     case advanced
@@ -259,9 +263,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var progress: [String: (Installer.Step, Double)] = [:]
     @Published private(set) var queue: [String] = []
     @Published private(set) var failures: [String: String] = [:]
-    @Published private(set) var running: (game: Game, app: NSRunningApplication)?
+    @Published private(set) var running: (game: Game, app: NSRunningApplication)? {
+        didSet { if (oldValue == nil) != (running == nil) { prepareSoon() } }
+    }
     /// The game from the press of Play until its first window shows.
-    @Published private(set) var starting: Game?
+    @Published private(set) var starting: Game? {
+        didSet { if (oldValue == nil) != (starting == nil) { prepareSoon() } }
+    }
+
+    /// A game starting or ending: the background preparation stops for it or goes on, once the
+    /// change has settled.
+    private func prepareSoon() {
+        guard persists else { return }
+        DispatchQueue.main.async { [weak self] in self?.stepPrepare() }
+    }
     @Published private(set) var sizes: [String: Int64] = [:]
     @Published private(set) var installedRecords: [String: InstallRecord] = [:]
     @Published private(set) var trophies: [String: TrophySet] = [:]
@@ -342,6 +357,12 @@ final class AppModel: ObservableObject {
     var fontLogOffsets: [String: UInt64] = [:]
     var fontWatch: Task<Void, Never>?
     private var installer: Installer?
+    /// New games prepared in the background (PrepareQueue) and the unlock doing it.
+    @Published private(set) var prepare = PrepareQueue()
+    private var preparer: Installer?
+    private var prepareTimer: Timer?
+    /// The unlock the no-space panel is about.
+    @Published var spaceShortage: (game: Game, shortage: SpaceShortage)?
     private var installLog: [String: [String]] = [:]
     /// Watches the games folder and scans it again when something is copied in (LibraryWatch.swift).
     private var libraryMonitor: LibraryMonitor?
@@ -442,6 +463,14 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.active = false }
         }
+        // Unlocks going on stop with the launcher; a relinker paused for a game would otherwise
+        // stay stopped.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.preparer?.cancel()
+                self?.installer?.cancel()
+            }
+        }
         // A games folder on an external drive: watched again and scanned when the drive comes or goes.
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
@@ -501,8 +530,19 @@ final class AppModel: ObservableObject {
         starting = game
     }
 
+    /// Shows `game` being prepared in the background (paused for a game, or not), and `waiting`
+    /// in line, without unlocking anything.
+    func previewPreparing(_ game: Game, paused: Bool = false, waiting: [Game] = []) {
+        var queue = PrepareQueue()
+        queue.add([game.id] + waiting.map(\.id))
+        _ = queue.step(.idle) { _ in nil }
+        if paused { _ = queue.step(PrepareConditions(playing: true)) { _ in nil } }
+        prepare = queue
+    }
+
     private func apply() {
         T.language = preferences.language
+        if persists { DispatchQueue.main.async { [weak self] in self?.stepPrepare() } }
         Motion.reduced = preferences.reducedMotion
         Sounds.shared.enabled = preferences.sounds
         Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
@@ -866,7 +906,7 @@ final class AppModel: ObservableObject {
     func rescan() {
         guard let root else { return }
         scanning = true
-        if installer == nil { Installer.removeLeftovers(root: root) }
+        if installer == nil && preparer == nil { Installer.removeLeftovers(root: root) }
         if let monitor = libraryMonitor, monitor.root == root {
             monitor.rescan()
             return
@@ -912,7 +952,8 @@ final class AppModel: ObservableObject {
     /// over everything otherwise, and the game selected when the home screen shows.
     private func announceNewGames(_ added: [Game]) {
         guard preferences.onboarded else { return }
-        let text = added.count == 1 ? T.format(.newGame, added[0].name) : T.format(.newGames, added.count)
+        let prepared = prepareNewGames(added)
+        let text = AppModel.newGameText(added.map(\.name), preparing: prepared.preparing, waiting: prepared.waiting, skipped: prepared.skipped)
         let icon = added.count == 1 ? added[0].icon : nil
         if overlay == nil, running == nil, starting == nil, let index = games.firstIndex(of: added[0]) {
             withAnimation(Motion.focus) {
@@ -927,6 +968,19 @@ final class AppModel: ObservableObject {
             let detail = added.count == 1 ? T.text(.newGameDetail) : ListFormatter.localizedString(byJoining: added.prefix(3).map(\.name)) + (added.count > 3 ? "…" : "")
             TrophyBanner.shared.notice(text, detail: detail, symbol: "gamecontroller.fill", icon: icon, cue: .select, sounds: preferences.sounds)
         }
+    }
+
+    /// "New game: <name>", with what happens to it when it is prepared in the background.
+    static func newGameText(_ names: [String], preparing: Bool, waiting: Bool, skipped: PrepareSkip?) -> String {
+        let one = names.count == 1
+        switch skipped {
+        case .battery: return TPrep.format(.newGameNotPreparedBattery, names[0])
+        case .space: return TPrep.format(.newGameNotPreparedSpace, names[0])
+        case nil: break
+        }
+        if preparing { return one ? TPrep.format(.newGamePreparing, names[0]) : TPrep.format(.newGamesPreparing, names.count) }
+        if waiting { return one ? TPrep.format(.newGameWaiting, names[0]) : TPrep.format(.newGamesWaiting, names.count) }
+        return one ? T.format(.newGame, names[0]) : T.format(.newGames, names.count)
     }
 
     func chooseFolder(_ url: URL) {
@@ -1045,20 +1099,68 @@ final class AppModel: ObservableObject {
 
     func unlock(_ game: Game) {
         guard let root else { return }
-        guard toolkit(for: game) != nil else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
+        guard let toolkit = toolkit(for: game) else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
+        // Asked for while it is being prepared: it becomes the user's own and goes on at full speed.
+        if prepare.active == game.id { return promotePreparation(game) }
+        prepare.cancel(game.id)
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
+        // The room first: a drive that is short says so before anything is written.
+        if let shortage = Installer.plan(game: game, toolkit: toolkit, root: root).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root)) {
+            return tellShortage(shortage, for: game)
+        }
         queue.append(game.id)
         Sounds.shared.play(.select)
         startNext(root: root)
+        stepPrepare()
+    }
+
+    /// The unlock of `game` did not start for want of room: the panel says how much is needed and
+    /// free, and what to do.
+    private func tellShortage(_ shortage: SpaceShortage, for game: Game) {
+        if playAfterUnlock == game.id { playAfterUnlock = nil }
+        spaceShortage = (game, shortage)
+        Sounds.shared.play(.back)
+        Feel.shared.vibrate(.error)
+        if let index = games.firstIndex(of: game) { selected = index }
+        open(.noSpace)
     }
 
     private func startNext(root: URL) {
         guard installer == nil, !queue.isEmpty else { return }
         let id = queue.removeFirst()
         guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game) else { startNext(root: root); return }
-        // A downloaded engine is checked against its manifest again before anything of it runs;
-        // a custom folder must still hold a whole toolkit.
+        installer = runUnlock(game, toolkit: toolkit, root: root, background: false) { [weak self] result in
+            guard let self else { return }
+            self.installer = nil
+            switch result {
+            case .success:
+                Sounds.shared.play(.unlocked)
+                self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
+                if self.playAfterUnlock == id {
+                    self.playAfterUnlock = nil
+                    self.play(game)
+                }
+            case .failure(let error) where error is CancellationError:
+                break
+            case .failure(let shortage as SpaceShortage):
+                self.tellShortage(shortage, for: game)
+            case .failure(let error):
+                self.failures[id] = error.localizedDescription
+                self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
+            }
+            self.startNext(root: root)
+            self.stepPrepare()
+        }
+    }
+
+    /// Starts unlocking `game`: its progress, its log, the toolkit checked again where it was
+    /// downloaded or put together by the user. `done` runs on the main actor after the log and
+    /// the record are written.
+    private func runUnlock(_ game: Game, toolkit: Toolkit, root: URL, background: Bool, done: @escaping (Result<URL, Error>) -> Void) -> Installer {
+        let id = game.id
+        // A downloaded engine is checked against its manifest again before anything of it runs
+        // (once per change of its files); a custom folder must still hold a whole toolkit.
         let downloaded = installedToolkits.first { $0.folder == toolkit.root }?.version
         let custom = customToolkit?.root == toolkit.root
         let store = toolkitStore
@@ -1076,37 +1178,29 @@ final class AppModel: ObservableObject {
                 if self.installLog[id]!.count > 600 { self.installLog[id]!.removeFirst(100) }
             }
         })
-        self.installer = installer
-        Task.detached(priority: .userInitiated) {
+        installer.background = background
+        Task.detached(priority: background ? .utility : .userInitiated) {
             let result: Result<URL, Error> = Result {
                 if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
                 if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
                 return try installer.run(root: root)
             }
             await MainActor.run {
-                self.installer = nil
                 self.progress[id] = nil
                 switch result {
                 case .success(let bundle):
                     try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: nil, titleID: game.titleID)
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     self.recordsGeneration += 1
-                    Sounds.shared.play(.unlocked)
-                    self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
-                    if self.playAfterUnlock == id {
-                        self.playAfterUnlock = nil
-                        self.play(game)
-                    }
-                case .failure(let error) where error is CancellationError:
+                case .failure(let error) where error is CancellationError || error is SpaceShortage:
                     break
                 case .failure(let error):
                     try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
-                    self.failures[id] = error.localizedDescription
-                    self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
                 }
-                self.startNext(root: root)
+                done(result)
             }
         }
+        return installer
     }
 
     /// The update the Play prompt offers: unlock the game again, then start it.
@@ -1117,15 +1211,143 @@ final class AppModel: ObservableObject {
 
     func cancelUnlock(_ game: Game) {
         if playAfterUnlock == game.id { playAfterUnlock = nil }
-        if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); return }
+        if prepare.contains(game.id) {
+            if prepare.cancel(game.id) { preparer?.cancel() }
+            Sounds.shared.play(.back)
+            return
+        }
+        if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); stepPrepare(); return }
         if progress[game.id] != nil { installer?.cancel() }
         Sounds.shared.play(.back)
+    }
+
+    // MARK: Preparing new games
+
+    /// Settings → Game Library → Prepare New Games Automatically; on unless turned off.
+    var preparesNewGames: Bool { preferences.prepareNewGames ?? true }
+
+    /// The game being prepared in the background.
+    func isPreparing(_ game: Game) -> Bool { prepare.active == game.id && !prepare.promoted }
+
+    /// What the background preparation looks at now.
+    private var prepareConditions: PrepareConditions {
+        PrepareConditions(enabled: preparesNewGames && preferences.onboarded && persists, playing: running != nil || starting != nil,
+                          unlocking: installer != nil || !queue.isEmpty, power: PowerState.current())
+    }
+
+    /// Takes the queue's steps until it has nothing more to do now; the skips it makes are told
+    /// (unless `quiet`, when the caller tells them) and returned.
+    @discardableResult
+    func stepPrepare(quiet: Bool = false) -> [(String, PrepareSkip)] {
+        guard let root else { return [] }
+        let conditions = prepareConditions
+        var skipped: [(String, PrepareSkip)] = []
+        while true {
+            let action = prepare.step(conditions) { [weak self] id in
+                guard let self, let game = self.games.first(where: { $0.id == id }), let toolkit = self.toolkit(for: game) else { return nil }
+                return Installer.plan(game: game, toolkit: toolkit, root: root).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
+            }
+            switch action {
+            case .none:
+                schedulePrepareCheck()
+                if !quiet { for (id, reason) in skipped { tellSkipped(id, reason) } }
+                return skipped
+            case .start(let id): startPreparing(id, root: root)
+            case .pause: preparer?.pause()
+            case .resume: preparer?.resume()
+            case .skip(let id, let reason): skipped.append((id, reason))
+            }
+        }
+    }
+
+    /// While games wait or one is being prepared, the power is looked at again now and then
+    /// (plugged in, or the battery charged past the line).
+    private func schedulePrepareCheck() {
+        let waiting = !prepare.pending.isEmpty || prepare.active != nil
+        if !waiting { prepareTimer?.invalidate(); prepareTimer = nil; return }
+        guard prepareTimer == nil else { return }
+        prepareTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepPrepare() }
+        }
+    }
+
+    private func startPreparing(_ id: String, root: URL) {
+        guard let game = games.first(where: { $0.id == id }), state(of: game) == .locked, let toolkit = toolkit(for: game) else {
+            prepare.finished(id)
+            return
+        }
+        preparer = runUnlock(game, toolkit: toolkit, root: root, background: true) { [weak self] result in
+            guard let self else { return }
+            let promoted = self.prepare.promoted
+            self.preparer = nil
+            self.prepare.finished(id)
+            switch result {
+            case .success:
+                Sounds.shared.play(.unlocked)
+                let text = TPrep.format(.readyToPlay, game.name)
+                if NSApp.isActive || !self.persists {
+                    self.show(text, symbol: "checkmark.circle.fill", icon: game.icon)
+                } else if self.running == nil && self.starting == nil {
+                    TrophyBanner.shared.notice(text, detail: TPrep.text(.readyToPlayDetail), symbol: "checkmark.circle.fill", icon: game.icon, cue: .unlocked, sounds: self.preferences.sounds)
+                }
+                if promoted, self.playAfterUnlock == id {
+                    self.playAfterUnlock = nil
+                    self.play(game)
+                }
+            case .failure(let error) where error is CancellationError:
+                if self.playAfterUnlock == id { self.playAfterUnlock = nil }
+            case .failure(let shortage as SpaceShortage):
+                // The room went while it waited: told like a skip.
+                if promoted { self.tellShortage(shortage, for: game) } else { self.tellSkipped(id, .space(shortage)) }
+            case .failure(let error):
+                if self.playAfterUnlock == id { self.playAfterUnlock = nil }
+                self.failures[id] = error.localizedDescription
+                self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
+            }
+            self.startNext(root: root)
+            self.stepPrepare()
+        }
+    }
+
+    /// Play on a game being prepared: it no longer waits for anything but a game playing, runs at
+    /// full speed and starts when it is ready.
+    private func promotePreparation(_ game: Game) {
+        prepare.promote(game.id)
+        preparer?.background = false
+        playAfterUnlock = game.id
+        Sounds.shared.play(.select)
+        show(TPrep.format(.startsWhenReady, game.name), symbol: "play.circle.fill", icon: game.icon)
+        stepPrepare()
+    }
+
+    private func tellSkipped(_ id: String, _ reason: PrepareSkip) {
+        guard let game = games.first(where: { $0.id == id }) else { return }
+        switch reason {
+        case .battery:
+            show(TPrep.format(.notPreparedBattery, game.name), symbol: "battery.25percent", icon: game.icon)
+        case .space(let shortage):
+            show(TPrep.format(.notPreparedSpace, game.name, shortage.needed.byteText, shortage.free.byteText), symbol: "externaldrive.badge.exclamationmark", icon: game.icon)
+        }
+    }
+
+    /// New games from a scan: the locked ones go to the background queue, and the "New game"
+    /// notice says what happens to them.
+    private func prepareNewGames(_ added: [Game]) -> (preparing: Bool, waiting: Bool, skipped: PrepareSkip?) {
+        guard preparesNewGames, persists else { return (false, false, nil) }
+        let locked = added.filter { state(of: $0) == .locked }
+        guard !locked.isEmpty else { return (false, false, nil) }
+        prepare.add(locked.map(\.id))
+        let skips = stepPrepare(quiet: true)
+        let first = locked[0].id
+        if let skip = skips.first(where: { $0.0 == first }) { return (false, false, skip.1) }
+        return (prepare.active == first, prepare.pending.contains(first), nil)
     }
 
     func uninstall(_ game: Game) {
         guard let root else { return }
         try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
         try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
+        try? FileManager.default.removeItem(at: Installer.keptRelink(for: game, root: root))
         installedRecords[game.id] = nil
         recordsGeneration += 1
         show(T.text(.uninstallDone), symbol: "trash")
@@ -1144,6 +1366,7 @@ final class AppModel: ObservableObject {
         switch state(of: game) {
         case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
         case .locked, .failed: unlock(game)
+        case .installing where isPreparing(game): promotePreparation(game)
         case .installing, .queued: cancelUnlock(game)
         case .running: running?.app.activate()
         case .starting: break
@@ -2197,7 +2420,7 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport || next == .noSpace
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1
