@@ -18,14 +18,17 @@ final class SlowServer: @unchecked Sendable {
                 connection.send(content: head, completion: .idempotent)
                 let pieces = 6
                 let size = body.count / pieces
-                for piece in 0..<pieces {
+                // Each piece goes once the one before it has: timers set side by side on a
+                // concurrent queue can fire together and out of order (under taskpolicy -b
+                // they mostly do), and the file comes out the right size but scrambled.
+                func send(_ piece: Int) {
                     let end = piece == pieces - 1 ? body.count : (piece + 1) * size
-                    DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(120 * piece)) {
-                        connection.send(content: body.subdata(in: piece * size..<end), completion: .contentProcessed { _ in
-                            if piece == pieces - 1 { connection.cancel() }
-                        })
-                    }
+                    connection.send(content: body.subdata(in: piece * size..<end), completion: .contentProcessed { _ in
+                        if piece == pieces - 1 { return connection.cancel() }
+                        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(120)) { send(piece + 1) }
+                    })
                 }
+                send(0)
             }
         }
         let ready = DispatchSemaphore(value: 0)
