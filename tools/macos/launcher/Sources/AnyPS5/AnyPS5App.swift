@@ -160,6 +160,7 @@ struct RootView: View {
             }
             .environment(\.scale, scale)
             .environment(\.look, look)
+            .environment(\.circleConfirms, model.preferences.confirmCircle == true)
             .animation(Motion.fade, value: look)
             .preferredColorScheme(.dark)
         }
@@ -245,6 +246,8 @@ struct RootView: View {
             LogView().transition(.opacity)
         case .crashReport:
             CrashReportView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .controllerTest:
+            ControllerTestView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .cropPicture:
             PictureCropView().transition(.opacity.combined(with: .scale(scale: 1.02)))
         case .trophies:

@@ -213,6 +213,8 @@ struct TopBar: View {
             iconButton(model.voiceCall == nil ? (model.party == nil ? "person.3" : "person.3.fill") : (model.micSending ? "mic.fill" : "mic.slash.fill"),
                        index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty) { model.open(.party) }
             iconButton(model.social.notifications.unread > 0 ? "bell.badge.fill" : "bell.fill", index: 5, badge: model.social.notifications.unread) { model.openNotifications() }
+            // A controller running out of battery says so here (and in Settings → Controllers).
+            if let line = PadTroubleshooter.statusLine(Controllers.shared.pads) { PadStatusPill(text: line) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
@@ -862,6 +864,8 @@ extension AppModel {
             return true
         case .crashReport:
             return crashReportCommand(command)
+        case .controllerTest:
+            return controllerTestCommand(command)
         case .gallery:
             galleryCommand(command)
             return true

@@ -23,6 +23,8 @@ struct PanelRow: Identifiable {
     let kind: Kind
     /// Someone on AnyTogether: their avatar stands in for the symbol.
     var person: PanelPerson?
+    /// The detail is advice to read whole (the controller troubleshooter): no line limit.
+    var wraps = false
 
     var focusable: Bool {
         if case .info = kind { return false }
@@ -295,6 +297,7 @@ extension AppModel {
             PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
+            PanelCategory(id: "controllers", title: TP.text(.title), symbol: "gamecontroller", rows: controllerRows()),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
             PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
@@ -778,7 +781,8 @@ struct RowView: View {
                     .foregroundStyle(destructive && !focused ? Color(red: 1, green: 0.6, blue: 0.55) : foreground.opacity(row.focusable ? 1 : 0.62))
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = row.detail {
-                    Text(detail).font(.display(13 * scale)).foregroundStyle(foreground.opacity(0.55)).lineLimit(2).truncationMode(.middle)
+                    Text(detail).font(.display(13 * scale)).foregroundStyle(foreground.opacity(0.55)).lineLimit(row.wraps ? nil : 2).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: row.wraps)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

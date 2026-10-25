@@ -55,6 +55,7 @@ extension AppModel {
         let diagnosis = diagnoses[game.id]
         let channel = updateChannel.rawValue
         let display = NSScreen.main?.maximumFramesPerSecond
+        let controllers = Controllers.shared.reportLines
         // The computer's name from SystemConfiguration: Host.current() can wait on the network.
         let names = [SCDynamicStoreCopyComputerName(nil, nil) as String?, togetherUser?.handle, togetherUser?.displayName].compactMap { $0 }
         Task.detached(priority: .userInitiated) {
@@ -75,6 +76,7 @@ extension AppModel {
             report.ended = facts?.ended
             report.crashReport = crash
             report.unlockLog = GameLog.readUnlockLog(titleID: game.titleID)
+            report.controllers = controllers
             let finished = report
             let issue = IssueDraft.crash(finished)
             let engineIssue = IssueDraft.engine(finished)

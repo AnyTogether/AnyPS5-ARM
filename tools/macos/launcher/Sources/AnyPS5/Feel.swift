@@ -75,17 +75,42 @@ final class PadHaptics: HapticOutput {
     private weak var controller: GCController?
     private var engine: CHHapticEngine?
     private var player: CHHapticPatternPlayer?
+    /// A controller the launcher reads itself (the DualShock 3): its motors set at each pulse.
+    private var external: String?
+    private var timers: [Timer] = []
 
     /// The controller used last is the one that answers.
     func use(_ controller: GCController) {
-        guard controller !== self.controller else { return }
+        guard controller !== self.controller || external != nil else { return }
         stop()
         engine?.stop()
         engine = nil
+        external = nil
         self.controller = controller
     }
 
+    func use(external id: String) {
+        guard external != id else { return }
+        stop()
+        engine?.stop()
+        engine = nil
+        controller = nil
+        external = id
+    }
+
     func play(_ pulses: [HapticPulse]) {
+        if let external {
+            stop()
+            for pulse in pulses {
+                timers.append(Timer.scheduledTimer(withTimeInterval: pulse.start, repeats: false) { _ in
+                    MainActor.assumeIsolated { Controllers.shared.externalRumble(external, strong: pulse.strong, weak: pulse.weak) }
+                })
+                timers.append(Timer.scheduledTimer(withTimeInterval: pulse.start + max(pulse.length, 0.05), repeats: false) { _ in
+                    MainActor.assumeIsolated { Controllers.shared.externalRumble(external, strong: 0, weak: 0) }
+                })
+            }
+            return
+        }
         guard !pulses.isEmpty, let engine = startedEngine() else { return }
         let events = pulses.map { pulse in
             CHHapticEvent(eventType: .hapticContinuous, parameters: [
@@ -109,6 +134,9 @@ final class PadHaptics: HapticOutput {
     func stop() {
         try? player?.stop(atTime: CHHapticTimeImmediate)
         player = nil
+        timers.forEach { $0.invalidate() }
+        timers = []
+        if let external { MainActor.assumeIsolated { Controllers.shared.externalRumble(external, strong: 0, weak: 0) } }
     }
 
     private func startedEngine() -> CHHapticEngine? {

@@ -201,6 +201,16 @@ extension EnvironmentValues {
         get { self[HintHover.self] }
         set { self[HintHover.self] = newValue }
     }
+
+    /// Settings → Controllers → Confirm Button is Circle: the hints show ○ to select and ✕ to go back.
+    var circleConfirms: Bool {
+        get { self[CircleConfirms.self] }
+        set { self[CircleConfirms.self] = newValue }
+    }
+}
+
+struct CircleConfirms: EnvironmentKey {
+    static let defaultValue = false
 }
 
 /// A key or button glyph with what it does. A click does what the key does: the whole pill when
@@ -210,12 +220,13 @@ struct Hint: View {
     let keys: String
     let label: String
     @Environment(\.scale) private var scale
+    @Environment(\.circleConfirms) private var circleConfirms
 
     var body: some View {
         if let command = HintKeys.single(keys) {
             Button { Input.shared.press(command) } label: {
                 HStack(spacing: 8 * scale) {
-                    keycap(Text(keys).font(glyphFont).padding(.horizontal, 7 * scale).padding(.vertical, 3 * scale))
+                    keycap(Text(ConfirmButton.glyphs(keys, circleConfirms: circleConfirms)).font(glyphFont).padding(.horizontal, 7 * scale).padding(.vertical, 3 * scale))
                     Text(label).font(.display(13 * scale, .medium))
                 }
             }
@@ -226,7 +237,7 @@ struct Hint: View {
                     ForEach(Array(HintKeys.tokens(keys).enumerated()), id: \.offset) { _, token in
                         if let command = token.command {
                             Button { Input.shared.press(command) } label: {
-                                Text(token.text).font(glyphFont)
+                                Text(ConfirmButton.glyphs(token.text, circleConfirms: circleConfirms)).font(glyphFont)
                             }
                             .buttonStyle(HintGlyphStyle(command: command))
                         } else {

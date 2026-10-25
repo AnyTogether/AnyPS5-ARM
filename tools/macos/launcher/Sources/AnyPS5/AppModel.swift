@@ -75,6 +75,11 @@ struct Preferences: Codable, Equatable {
     var steamUser: String?
     var steamGames: Bool?
     var steamFullscreen: Bool?
+    /// Settings → Controllers: the light bar's colour (PadLight; nil is the theme's accent),
+    /// Circle confirming (nil means Cross) and the sticks' dead zone in percent (nil is none).
+    var controllerLight: String?
+    var confirmCircle: Bool?
+    var stickDeadzone: Int?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -120,7 +125,7 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub:
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest:
             return true
         default:
             return false
@@ -174,6 +179,8 @@ enum Overlay: Equatable {
     case cloudStorage
     /// Trophies compared with someone: the games, then one game's trophies side by side.
     case compare
+    /// Settings → Controllers → Test Buttons and Sticks.
+    case controllerTest
 }
 
 /// A newer launcher downloaded and checked, unpacked in a folder of its own, waiting for a restart.
@@ -206,9 +213,15 @@ final class AppModel: ObservableObject {
     @Published var selected = 0
     @Published var focus = HomeFocus.tiles
     @Published var overlay: Overlay? {
-        didSet { if oldValue != overlay { discoverOverlayChanged() } }
+        didSet {
+            if oldValue != overlay { discoverOverlayChanged() }
+            // The controller test takes the pads' buttons: only PS acts while it is open.
+            Input.shared.testing = overlay == .controllerTest
+        }
     }
     @Published var panelCategory = 0
+    /// Controllers.shared's roster changes redraw the screens (ControllersPanel.swift).
+    var controllerSink: AnyCancellable?
     @Published var panelRow = 0 {
         didSet { if !keepingFocus { panelFocusID = nil } }
     }
@@ -449,6 +462,7 @@ final class AppModel: ObservableObject {
             await MainActor.run { self.rosettaMissing = missing }
         }
         if self.preferences.onboarded && persists { rescan() }
+        if persists { startControllers() }
         if persists {
             // The theme song follows whatever the launcher shows.
             musicSink = objectWillChange.debounce(for: .milliseconds(120), scheduler: RunLoop.main).sink { [weak self] _ in
@@ -494,6 +508,13 @@ final class AppModel: ObservableObject {
         Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
         Feel.shared.vibration = preferences.controllerVibration ?? true
         ThemeMusic.shared.volume = Float(musicVolume) / 100
+        Input.shared.circleConfirms = preferences.confirmCircle == true
+        Input.shared.deadzone = preferences.stickDeadzone ?? 0
+        let controllers = Controllers.shared
+        controllers.light = preferences.controllerLight.flatMap(PadLight.init(rawValue:)) ?? .theme
+        if let rgb = NSColor(accent).usingColorSpace(.sRGB) {
+            controllers.accent = (Double(rgb.redComponent), Double(rgb.greenComponent), Double(rgb.blueComponent))
+        }
     }
 
     static let defaultMusicVolume = 50
@@ -1143,7 +1164,9 @@ final class AppModel: ObservableObject {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = false
-        let settings = settings(for: game)
+        var settings = settings(for: game)
+        // Settings → Controllers → Stick Dead Zone, for a game that set none of its own.
+        if let deadzone = preferences.stickDeadzone, deadzone > 0 { settings.tuning = StickDeadzone.tuning(settings.tuning, percent: deadzone) }
         let inputFile = AppModel.inputFile(for: game)
         // Without the file the game keeps the engine's built-in keys.
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
@@ -1961,7 +1984,9 @@ final class AppModel: ObservableObject {
             }
             TrophyBanner.shared.notice(TC.text(.traceOnNotice), detail: TC.text(.traceOnNoticeDetail), symbol: "text.magnifyingglass", sounds: false)
         }
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n"
+        // The controllers connected at the start, in the log a crash report reads.
+        let pads = Controllers.shared.reportLines.map { "[anyps5-launcher] controllers: \($0)\n" }.joined()
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n" + pads
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))

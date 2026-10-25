@@ -30,8 +30,16 @@ final class Input {
     private var repeats = 0
     private var edge = EdgeBump()
     /// Each controller's D-pad and stick, the D-pad winning while it is pressed.
-    private var dpads: [ObjectIdentifier: Command] = [:]
-    private var sticks: [ObjectIdentifier: StickGate] = [:]
+    private var dpads: [AnyHashable: Command] = [:]
+    private var sticks: [AnyHashable: StickGate] = [:]
+    /// Settings → Controllers → Confirm Button: Circle confirms and Cross goes back.
+    var circleConfirms = false
+    /// Settings → Controllers → Stick Dead Zone, in percent.
+    var deadzone = 0
+    /// The controller test is open: the pads' buttons are being tried, not used (only PS acts).
+    var testing = false {
+        didSet { if testing { hold(nil) } }
+    }
 
     func start() {
         guard monitor == nil else { return }
@@ -124,7 +132,7 @@ final class Input {
 
     private func attach(_ controller: GCController) {
         guard let pad = controller.extendedGamepad else { return }
-        let id = ObjectIdentifier(controller)
+        let id = AnyHashable(ObjectIdentifier(controller))
         pad.dpad.valueChangedHandler = { [weak self, weak controller] _, x, y in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -137,7 +145,8 @@ final class Input {
                 guard let self else { return }
                 var stick = self.sticks[id] ?? StickGate()
                 let before = stick.held
-                _ = stick.update(x: Double(x), y: Double(y))
+                let zoned = StickDeadzone.apply(x: Double(x), y: Double(y), percent: self.deadzone)
+                _ = stick.update(x: zoned.x, y: zoned.y)
                 self.sticks[id] = stick
                 if stick.held != before { self.padMoved(id, controller) }
             }
@@ -209,17 +218,44 @@ final class Input {
         _ = handler?(command)
     }
 
-    /// A controller command; while the launcher is behind a game only PS is acted on.
+    /// A controller command; while the launcher is behind a game only PS is acted on. Cross and
+    /// Circle change places when Circle confirms.
     private func controller(_ command: Command, from controller: GCController?) {
         if NSApp.isActive, let controller { Feel.shared.usedPad(controller) }
         guard NSApp.isActive || command == .home || command == .capture else { return }
-        _ = dispatch(command, repeat: false)
+        guard !testing || command == .home else { return }
+        _ = dispatch(controller == nil ? command : ConfirmButton.command(command, circleConfirms: circleConfirms), repeat: false)
+    }
+
+    /// A controller the launcher reads itself (the DualShock 3): its new state against the one
+    /// before, as the same commands a GameController pad gives.
+    func external(_ id: String, state: PadState, previous: PadState) {
+        let key = AnyHashable(id)
+        let buttons: [(PadButton, Command)] = [(.south, .select), (.east, .back), (.north, .options), (.start, .options),
+                                               (.l1, .previousGame), (.r1, .nextGame), (.guide, .home), (.select, .capture)]
+        for (button, command) in buttons where state.pressed.contains(button) && !previous.pressed.contains(button) {
+            if NSApp.isActive {
+                Feel.shared.haptics.padInUse = true
+                Feel.shared.pad.use(external: id)
+            }
+            guard NSApp.isActive || command == .home || command == .capture else { continue }
+            guard !testing || command == .home else { continue }
+            _ = dispatch(ConfirmButton.command(command, circleConfirms: circleConfirms), repeat: false)
+        }
+        let p = state.pressed
+        dpads[key] = p.contains(.dpadLeft) ? .left : p.contains(.dpadRight) ? .right : p.contains(.dpadUp) ? .up : p.contains(.dpadDown) ? .down : nil
+        var stick = sticks[key] ?? StickGate()
+        let zoned = StickDeadzone.apply(x: state.leftX, y: -state.leftY, percent: deadzone)
+        _ = stick.update(x: zoned.x, y: zoned.y)
+        sticks[key] = stick
+        padMoved(key, nil)
     }
 
     /// A controller's D-pad or stick changed: the direction it holds now, the D-pad first.
-    private func padMoved(_ id: ObjectIdentifier, _ controller: GCController?) {
+    private func padMoved(_ id: AnyHashable, _ controller: GCController?) {
         let command = dpads[id] ?? sticks[id]?.held
         if command != nil, NSApp.isActive { Feel.shared.usedPad(controller) }
+        guard !testing else { return }
         // Another input's hold is let go only by that input.
         guard heldKey == nil || command != nil else { return }
         guard command != held || heldKey != nil else { return }
