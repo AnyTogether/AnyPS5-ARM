@@ -178,6 +178,15 @@ The **library** button shows every game as a grid. **Settings** hold:
 - **Links:** `anyps5://game/<title ID>` selects a game and `anyps5://play/<title ID>` starts it (Copy Link in a game's settings); a folder opened with AnyPS5 from Finder can become the games folder.
 - **About:** the app and toolkit versions, **Check for Updates**, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
 
+### Broadcasting
+
+Like the console's **Broadcast**, the launcher streams the game playing live to **Twitch**, **YouTube** or any **RTMP / RTMPS** server (another service's ingest address, or your own nginx-rtmp or MediaMTX).
+
+- **Set it up once** in **Settings → Broadcasting:** the service, the stream key (typed in a hidden field or pasted from the clipboard; **Get your key** opens the service's page for it), the quality (**720p60 · 3 Mbit/s**, **1080p30 · 4.5 Mbit/s** or **1080p60 · 6 Mbit/s**), the microphone for commentary with its own level, the **LIVE** badge and the link viewers watch on.
+- **Go live** from the game's panel while it plays (PS, then **⋯** / △ on the running game), or **Go Live** on the phone's launcher screen. The panel then shows how long you have been on air, the bit rate going out, dropped frames, **Copy viewer link**, the microphone and **Stop broadcast**; the broadcast also ends with the game.
+- The game's window and sound are captured as for clips (macOS asks once for the screen recording permission) and encoded on the Mac's media engine: H.264 High with a key frame every two seconds and no B-frames, AAC at 48 kHz stereo 160 kbit/s, as Twitch and YouTube ask. When the upload cannot keep up, frames are dropped instead of the stream falling behind, and a lost connection is made again by itself.
+- The stream key is kept in `~/Library/Application Support/AnyPS5/Broadcast/keys.json`, readable by your user only, rather than the Keychain: the app is signed ad hoc, so the Keychain would ask for it again after every update. The launcher never shows the key in full. The LIVE badge is drawn over the game for you and is not part of the broadcast.
+
 ### Getting around
 
 The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, `Q` / `E` (L1 / R1) for the previous or next game, also inside a game's panels, or a game controller (D-pad, ✕, ○, △, L1, R1; its PS button brings the launcher in front of the game, and back). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
@@ -196,6 +205,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **Trophies:** a trophy earned in the game drops in at the top of the phone too, and the phone buzzes.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
 - **Create** (◉, left of the touchpad) saves the last seconds of the game as a clip, as on the DualSense.
+- **Go Live / End Broadcast** beside **Back to Game** starts and stops the launcher's [broadcast](#broadcasting) of the game playing.
 - **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
 - **Motion:** the phone's accelerometer and gyroscope are the DualSense's motion sensors, for games that tilt or aim with them.
 - **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
