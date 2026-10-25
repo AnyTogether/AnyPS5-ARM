@@ -78,6 +78,125 @@ public struct DiscordGames: Sendable {
     }
 }
 
+/// What the user's Discord profile shows: the game, the party they are in (with its size), and a
+/// Join button that opens the code's web page. Built here, with no socket, so it can be checked.
+public struct DiscordActivity: Equatable, Sendable {
+    /// A button under the activity: Discord takes two at most, a label of 32 characters at most
+    /// and an https link of 512 at most.
+    public struct Button: Equatable, Sendable {
+        public static let maxLabel = 32
+        public static let maxURL = 512
+
+        public let label: String
+        public let url: String
+
+        public init(label: String, url: String) {
+            self.label = label
+            self.url = url
+        }
+
+        /// As SET_ACTIVITY takes it; nil when Discord would refuse it.
+        var json: [String: String]? {
+            let label = String(self.label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Button.maxLabel))
+            guard !label.isEmpty, url.lowercased().hasPrefix("https://"), url.utf8.count <= Button.maxURL, URL(string: url)?.host != nil else { return nil }
+            return ["label": label, "url": url]
+        }
+    }
+
+    /// The party, shown as "(2 of 8)".
+    public struct Party: Equatable, Sendable {
+        public let id: String
+        public let size: Int
+        public let max: Int
+
+        public init(id: String, size: Int, max: Int) {
+            self.id = id
+            self.size = size
+            self.max = max
+        }
+    }
+
+    public var game: String?
+    public var since: Date?
+    public var party: Party?
+    public var buttons: [Button]
+    /// "In a party", in the launcher's language.
+    public var partyText: String
+
+    public init(game: String? = nil, since: Date? = nil, party: Party? = nil, button: Button? = nil, partyText: String) {
+        self.game = game
+        self.since = since
+        self.party = party
+        buttons = button.map { [$0] } ?? []
+        self.partyText = partyText
+    }
+
+    /// The activity for SET_ACTIVITY, nil when there is nothing to show (no game, no party). A
+    /// game Discord knows (`knownGame`) shows as itself, so the launcher's name goes under it.
+    public func json(knownGame: Bool) -> [String: Any]? {
+        guard game != nil || party != nil else { return nil }
+        var activity: [String: Any] = ["type": 0]
+        if let since { activity["timestamps"] = ["start": Int(since.timeIntervalSince1970)] }
+        if let game {
+            if knownGame {
+                activity["details"] = "AnyPS5 Launcher · Mac"
+                // Discord shows the party's size next to the state.
+                if party != nil { activity["state"] = partyText }
+            } else {
+                activity["details"] = game
+                activity["state"] = "AnyPS5 · Mac"
+            }
+        } else {
+            activity["details"] = partyText
+            activity["state"] = "AnyPS5 · Mac"
+        }
+        if let party {
+            let size = Swift.max(1, party.size)
+            activity["party"] = ["id": party.id, "size": [size, Swift.max(size, party.max)]] as [String: Any]
+        }
+        let buttons = buttons.compactMap(\.json).prefix(2)
+        if !buttons.isEmpty { activity["buttons"] = Array(buttons) }
+        return activity
+    }
+}
+
+/// Which code the Join button on Discord opens: one that works (the share play the user hosts
+/// first, then the party), else a new one made for it, but only for the party's leader or the
+/// share play's host, and never again where the user stopped the code themselves.
+public enum DiscordJoin {
+    public struct Source: Equatable, Sendable {
+        public let id: String
+        public let code: TogetherJoinCode?
+        /// The user leads the party or hosts the share play.
+        public let mine: Bool
+        /// A code may be made for the button (the user did not stop one here, and none failed).
+        public let mayMake: Bool
+
+        public init(id: String, code: TogetherJoinCode?, mine: Bool, mayMake: Bool) {
+            self.id = id
+            self.code = code
+            self.mine = mine
+            self.mayMake = mayMake
+        }
+    }
+
+    public enum Plan: Equatable, Sendable {
+        case none
+        case button(String)
+        case makeShare(String)
+        case makeParty(String)
+    }
+
+    public static func plan(share: Source?, party: Source?, now: Date = Date()) -> Plan {
+        for source in [share, party].compactMap({ $0 }) {
+            if let code = source.code, code.works(at: now) { return .button(code.url) }
+        }
+        if let share, share.mine, share.mayMake { return .makeShare(share.id) }
+        if let party, party.mine, party.mayMake { return .makeParty(party.id) }
+        return .none
+    }
+}
+
 /// "Playing <game>" on the user's Discord profile, through the Discord app's local socket
 /// (discord-ipc-N in the runtime or temporary folder). Without Discord, or without an application
 /// ID, nothing happens; a Discord started later is found on the next game.
@@ -132,24 +251,26 @@ public final class DiscordPresence: @unchecked Sendable {
     /// as itself, with AnyPS5 under it; any other shows under AnyPS5. No image is named, so Discord
     /// shows the application's own icon.
     public func playing(_ game: String, since: Date) {
+        show(DiscordActivity(game: game, since: since, partyText: ""))
+    }
+
+    /// The whole activity: the game (as itself when Discord knows it), the party and the Join
+    /// button; nil, or one with nothing to show, clears it.
+    public func show(_ activity: DiscordActivity?) {
         queue.async { [self] in
-            let known = games.applicationID(for: game)
-            var activity: [String: Any] = ["timestamps": ["start": Int(since.timeIntervalSince1970)], "type": 0]
-            if known != nil {
-                activity["details"] = "AnyPS5 Launcher · Mac"
-            } else {
-                activity["details"] = game
-                activity["state"] = "AnyPS5 · Mac"
-            }
-            setActivity(activity, as: known ?? ownID)
+            let known = activity?.game.flatMap { games.applicationID(for: $0) }
+            guard let json = activity?.json(knownGame: known != nil) else { return clearNow() }
+            setActivity(json, as: known ?? ownID)
         }
     }
 
     public func clear() {
-        queue.async { [self] in
-            guard socket >= 0, let connectedID else { return }
-            setActivity(NSNull(), as: connectedID)
-        }
+        queue.async { [self] in clearNow() }
+    }
+
+    private func clearNow() {
+        guard socket >= 0, let connectedID else { return }
+        setActivity(NSNull(), as: connectedID)
     }
 
     public func close() {

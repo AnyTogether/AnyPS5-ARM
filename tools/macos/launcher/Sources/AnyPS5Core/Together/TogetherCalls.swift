@@ -6,20 +6,24 @@ public struct TogetherCallPeer: Codable, Equatable, Hashable, Sendable {
     public let device: String
     /// They muted themselves (false where the server does not say).
     public let muted: Bool
+    /// They hear nobody (and are muted).
+    public let deafened: Bool
 
-    public init(userId: String, device: String, muted: Bool = false) {
+    public init(userId: String, device: String, muted: Bool = false, deafened: Bool = false) {
         self.userId = userId
         self.device = device
         self.muted = muted
+        self.deafened = deafened
     }
 
-    enum CodingKeys: String, CodingKey { case userId, device, muted }
+    enum CodingKeys: String, CodingKey { case userId, device, muted, deafened }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         userId = try container.decode(String.self, forKey: .userId)
         device = try container.decode(String.self, forKey: .device)
         muted = try container.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+        deafened = try container.decodeIfPresent(Bool.self, forKey: .deafened) ?? false
     }
 }
 
@@ -50,12 +54,90 @@ public struct TogetherRinging: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// Someone in a call muted or unmuted themselves.
+/// Someone in a call muted or unmuted, deafened or undeafened themselves.
 public struct TogetherMuteChange: Decodable, Equatable, Sendable {
     public let callId: String
     public let partyId: String?
     public let userId: String
     public let muted: Bool
+    /// False where the server does not say.
+    public let deafened: Bool
+
+    public init(callId: String, partyId: String?, userId: String, muted: Bool, deafened: Bool = false) {
+        self.callId = callId
+        self.partyId = partyId
+        self.userId = userId
+        self.muted = muted
+        self.deafened = deafened
+    }
+
+    enum CodingKeys: String, CodingKey { case callId, partyId, userId, muted, deafened }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        callId = try container.decode(String.self, forKey: .callId)
+        partyId = try container.decodeIfPresent(String.self, forKey: .partyId)
+        userId = try container.decode(String.self, forKey: .userId)
+        muted = try container.decode(Bool.self, forKey: .muted)
+        deafened = try container.decodeIfPresent(Bool.self, forKey: .deafened) ?? false
+    }
+}
+
+/// The user's microphone in a call, and deafening as Discord does it: deafened hears nobody and
+/// sends nothing; undeafening gives the microphone back as it was; unmuting undeafens.
+public struct TogetherVoiceMic: Equatable, Sendable {
+    /// What the others are told.
+    public struct State: Equatable, Sendable {
+        public let muted: Bool
+        public let deafened: Bool
+
+        public init(muted: Bool, deafened: Bool) {
+            self.muted = muted
+            self.deafened = deafened
+        }
+    }
+
+    /// The open microphone's switch.
+    public private(set) var on: Bool
+    public private(set) var deafened = false
+    /// The switch as it was when deafened.
+    private var onBefore: Bool
+
+    public init(on: Bool = true) {
+        self.on = on
+        onBefore = on
+    }
+
+    /// The microphone on or off; on while deafened undeafens.
+    public mutating func set(on: Bool) {
+        self.on = on
+        if on { deafened = false }
+    }
+
+    public mutating func deafen() {
+        guard !deafened else { return }
+        onBefore = on
+        on = false
+        deafened = true
+    }
+
+    public mutating func undeafen() {
+        guard deafened else { return }
+        deafened = false
+        on = onBefore
+    }
+
+    public mutating func toggleDeafen() {
+        if deafened { undeafen() } else { deafen() }
+    }
+
+    /// Muted as the others see it: deafened, or the open microphone off (push-to-talk is not muted).
+    public func muted(pushToTalk: Bool) -> Bool { deafened || (!pushToTalk && !on) }
+
+    /// Whether the microphone sends now.
+    public func sending(pushToTalk: Bool, held: Bool) -> Bool { !deafened && (pushToTalk ? held : on) }
+
+    public func state(pushToTalk: Bool) -> State { State(muted: muted(pushToTalk: pushToTalk), deafened: deafened) }
 }
 
 /// Fresh relay credentials, for a call that outlives the ones it was given.
@@ -170,9 +252,12 @@ extension TogetherClient {
         _ = try await authorized("POST", "calls/\(callId)/decline", [:])
     }
 
-    /// Muted or not, as every member of the call sees it.
-    public func setMuted(_ muted: Bool, in callId: String) async throws {
-        _ = try await authorized("POST", "calls/\(callId)/mute", ["muted": muted])
+    /// Muted or not, deafened or not, as every member of the call sees it; `deafened` nil leaves
+    /// it to the server (unmuting undeafens there).
+    public func setMuted(_ muted: Bool, deafened: Bool? = nil, in callId: String) async throws {
+        var body: [String: Any] = ["muted": muted]
+        if let deafened { body["deafened"] = deafened }
+        _ = try await authorized("POST", "calls/\(callId)/mute", body)
     }
 
     /// New relay credentials for a long call.

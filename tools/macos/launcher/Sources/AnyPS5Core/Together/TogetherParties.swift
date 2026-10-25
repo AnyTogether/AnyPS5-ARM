@@ -8,20 +8,24 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
         public let `in`: [String]
         /// Who of them muted themselves (none where the server does not say).
         public let muted: [String]
+        /// Who of them hear nobody (deafened is always muted too).
+        public let deafened: [String]
 
-        public init(id: String, in members: [String], muted: [String] = []) {
+        public init(id: String, in members: [String], muted: [String] = [], deafened: [String] = []) {
             self.id = id
             self.in = members
             self.muted = muted
+            self.deafened = deafened
         }
 
-        enum CodingKeys: String, CodingKey { case id, `in`, muted }
+        enum CodingKeys: String, CodingKey { case id, `in`, muted, deafened }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
             self.in = try container.decode([String].self, forKey: .in)
             muted = try container.decodeIfPresent([String].self, forKey: .muted) ?? []
+            deafened = try container.decodeIfPresent([String].self, forKey: .deafened) ?? []
         }
     }
 
@@ -36,16 +40,20 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
     public let call: Call?
     /// In the public list, and how; nil when it is not listed.
     public let listing: TogetherPartyListing?
-    /// People who asked to join (members are told).
+    /// People who asked to join, from the public list or with the code (members are told).
     public let requests: [TogetherPerson]?
+    /// The code anyone may ask to join with, while one works (members see it; older servers never say).
+    public let joinCode: TogetherJoinCode?
+    /// The party's Discord server or channel, set by the leader.
+    public let discord: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, leaderId, privacy, members, invited, call, requests
+        case id, leaderId, privacy, members, invited, call, requests, joinCode, discord
         case listing = "public"
     }
 
     public init(id: String, leaderId: String, privacy: String, members: [TogetherPerson], invited: [TogetherPerson], call: Call?,
-                listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil) {
+                listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil, discord: String? = nil) {
         self.id = id
         self.leaderId = leaderId
         self.privacy = privacy
@@ -54,11 +62,20 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
         self.call = call
         self.listing = listing
         self.requests = requests
+        self.joinCode = joinCode
+        self.discord = discord
     }
 
     /// The same party with these members and call (someone taken out here before the server says).
     public func with(members: [TogetherPerson], call: Call?) -> TogetherParty {
-        TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests)
+        TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
+                      joinCode: joinCode, discord: discord)
+    }
+
+    /// The same party with a new code, or none (made or stopped here before the server says).
+    public func with(joinCode: TogetherJoinCode?) -> TogetherParty {
+        TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
+                      joinCode: joinCode, discord: discord)
     }
 
     public var open: Bool { privacy == "friends" }
