@@ -106,4 +106,57 @@ final class LookStyleTests: XCTestCase {
         XCTAssertFalse(GlassRecipe.prefersDarkInk(on: RGB(0.2, 0.3, 0.8)))
         XCTAssertFalse(GlassRecipe.prefersDarkInk(on: RGB(0.6, 0.1, 0.2)))
     }
+
+    // MARK: The see-through window
+
+    /// Glass opens the window onto the desktop; Reduce Transparency, the slider at 0 % and every
+    /// other look keep it opaque.
+    func testOnlyGlassLetsTheDesktopThrough() {
+        XCTAssertEqual(GlassWindowRecipe.make(glass: true, reduceTransparency: false, transparency: nil).translucent, true)
+        XCTAssertEqual(GlassWindowRecipe.make(glass: true, reduceTransparency: true, transparency: nil), .opaque)
+        XCTAssertEqual(GlassWindowRecipe.make(glass: true, reduceTransparency: false, transparency: 0), .opaque)
+        XCTAssertEqual(GlassWindowRecipe.make(glass: false, reduceTransparency: false, transparency: 100), .opaque)
+        XCTAssertEqual(GlassWindowRecipe.make(glass: true, reduceTransparency: false, transparency: nil).tint,
+                       GlassWindowRecipe.tint(transparency: GlassWindowRecipe.defaultTransparency))
+    }
+
+    /// The slider runs from a solid pane down to the floor and never below it.
+    func testTheTintRunsFromSolidToTheFloor() {
+        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 0), 1, accuracy: 0.0001)
+        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 100), GlassWindowRecipe.tintFloor, accuracy: 0.0001)
+        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 250), GlassWindowRecipe.tintFloor, accuracy: 0.0001)
+        XCTAssertGreaterThan(GlassWindowRecipe.tint(transparency: 40), GlassWindowRecipe.tint(transparency: 60))
+        // A real see-through: more than a third of the desktop's light comes through at the floor.
+        XCTAssertLessThan(GlassWindowRecipe.tintFloor, 0.66)
+    }
+
+    /// Whatever is behind the window (a white page, a snowy or a dark wallpaper), the text on the
+    /// tinted desktop reads at every slider step, with no help from the blur.
+    func testTextReadsOverAnyDesktopAtAnyTransparency() {
+        for transparency in stride(from: 0, through: 100, by: 10) {
+            let tint = GlassWindowRecipe.tint(transparency: transparency)
+            for backdrop in backdrops {
+                let behind = GlassRecipe.over(GlassRecipe.scrim, tint, backdrop)
+                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, behind), 4.5, "white at \(transparency) % over \(backdrop)")
+                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.over(white, 0.7, behind), behind), 3, "70 % white at \(transparency) % over \(backdrop)")
+                // Glass surfaces on the tinted desktop, and the focused chip's ink.
+                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, GlassRecipe.surface(over: behind)), 4.5)
+                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.ink, GlassRecipe.chip(over: behind)), 7)
+            }
+        }
+    }
+
+    /// The desktop picture is read only where macOS asks no permission for it.
+    func testTheWallpaperIsReadOnlyWithoutAPrompt() {
+        let home = URL(fileURLWithPath: "/Users/robin")
+        XCTAssertTrue(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic"), home: home))
+        XCTAssertTrue(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/System/Library/Desktop Pictures/Sequoia.heic"), home: home))
+        XCTAssertTrue(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Users/robin/Pictures/lake.jpg"), home: home))
+        XCTAssertTrue(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Users/robin/Desktopper/lake.jpg"), home: home))
+        XCTAssertFalse(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Users/robin/Desktop/lake.jpg"), home: home))
+        XCTAssertFalse(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Users/robin/Downloads/a/b.png"), home: home))
+        XCTAssertFalse(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Users/robin/Library/Mobile Documents/com~apple~CloudDocs/x.heic"), home: home))
+        XCTAssertFalse(GlassWindowRecipe.mayReadWallpaper(URL(fileURLWithPath: "/Volumes/USB/x.jpg"), home: home))
+        XCTAssertFalse(GlassWindowRecipe.mayReadWallpaper(URL(string: "https://example.com/x.jpg")!, home: home))
+    }
 }
