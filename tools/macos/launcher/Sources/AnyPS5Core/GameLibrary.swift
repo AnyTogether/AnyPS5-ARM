@@ -37,17 +37,44 @@ public enum GameLibrary {
     public static let storeName = ".AnyPS5"
     static let skipped: Set<String> = [storeName, "sce_sys", "sce_module", "sce_modules", "prx", "out", "rel"]
 
-    /// Finds every game folder under `root`, down to three levels.
-    public static func scan(_ root: URL) -> [Game] {
-        var found: [Game] = []
-        visit(root, depth: 0, into: &found)
-        return found.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    /// What a look through the games folder found: the games, and the folders that look like a
+    /// game still being copied (a sce_sys folder or an eboot.bin, but no whole game yet).
+    public struct Survey: Sendable {
+        public var games: [Game] = []
+        public var incomplete: [URL] = []
     }
 
-    static func visit(_ folder: URL, depth: Int, into found: inout [Game]) {
+    /// Finds every game folder under `root`, down to three levels.
+    public static func scan(_ root: URL) -> [Game] {
+        survey(root).games
+    }
+
+    /// The games under `root` and the dumps that are not whole yet. Cheap: a folder listing per
+    /// level and each game's param.json.
+    public static func survey(_ root: URL) -> Survey {
+        var found = Survey()
+        visit(root, depth: 0, into: &found)
+        found.games.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return found
+    }
+
+    /// Whether two scans show the same library: the same folders, names, art and states.
+    public static func sameListing(_ left: [Game], _ right: [Game]) -> Bool {
+        guard left.count == right.count else { return false }
+        return zip(left, right).allSatisfy { a, b in
+            a.folder == b.folder && a.titleID == b.titleID && a.name == b.name && a.version == b.version && a.icon == b.icon
+                && a.background == b.background && a.music == b.music && a.executable == b.executable && a.ageLevels == b.ageLevels
+        }
+    }
+
+    static func visit(_ folder: URL, depth: Int, into found: inout Survey) {
         if let game = inspect(folder) {
-            found.append(game)
+            found.games.append(game)
             return
+        }
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: folder.appendingPathComponent("sce_sys").path) || fileManager.fileExists(atPath: folder.appendingPathComponent("eboot.bin").path) {
+            found.incomplete.append(folder)
         }
         guard depth < 3, let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey], options: [.skipsHiddenFiles]) else { return }
         for entry in entries {

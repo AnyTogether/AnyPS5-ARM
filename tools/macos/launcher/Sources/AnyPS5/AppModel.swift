@@ -4,6 +4,7 @@ import AppKit
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+import os
 
 /// What the user chose, kept in UserDefaults.
 struct Preferences: Codable, Equatable {
@@ -151,6 +152,8 @@ struct Toast: Identifiable, Equatable {
     let id = UUID()
     let text: String
     let symbol: String
+    /// A game's icon in place of the symbol.
+    var icon: URL? = nil
 }
 
 @MainActor
@@ -284,8 +287,15 @@ final class AppModel: ObservableObject {
     var fontWatch: Task<Void, Never>?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
-    private var watcher: DispatchSourceFileSystemObject?
-    private var lastScan = Date.distantPast
+    /// Watches the games folder and scans it again when something is copied in (LibraryWatch.swift).
+    private var libraryMonitor: LibraryMonitor?
+    /// Bumped whenever an unlock or an uninstall changes the records, so a scan read before does
+    /// not put back what they replaced.
+    private nonisolated let recordsStamp = OSAllocatedUnfairLock(initialState: 0)
+    private var recordsGeneration: Int {
+        get { recordsStamp.withLock { $0 } }
+        set { recordsStamp.withLock { $0 = newValue } }
+    }
     private var trophiesRead: Set<String> = []
     let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
@@ -342,7 +352,8 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.active = true
-                if let self, Date().timeIntervalSince(self.lastScan) > 3 { self.rescan() }
+                // Something copied in while the launcher was away shows at once.
+                self?.libraryMonitor?.rescan()
                 // Coming back to the launcher after a while asks again, so a new release shows
                 // without a restart.
                 if let self, self.lastUpdateCheck.map({ Date().timeIntervalSince($0) > 30 * 60 }) ?? false { self.checkForUpdate() }
@@ -355,6 +366,16 @@ final class AppModel: ObservableObject {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.active = false }
+        }
+        // A games folder on an external drive: watched again and scanned when the drive comes or goes.
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let volume = (note.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL)?.standardizedFileURL.path
+                MainActor.assumeIsolated {
+                    guard let self, let root = self.root?.standardizedFileURL.path else { return }
+                    if volume.map({ root == $0 || root.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }) ?? true { self.libraryMonitor?.refresh() }
+                }
+            }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
@@ -653,40 +674,72 @@ final class AppModel: ObservableObject {
 
     // MARK: Library
 
+    /// Scans the games folder now, and watches it from then on: games copied in later show up by
+    /// themselves, with a "New game" notice.
     func rescan() {
         guard let root else { return }
-        lastScan = Date()
         scanning = true
         if installer == nil { Installer.removeLeftovers(root: root) }
-        let current = selectedGame?.id
-        Task.detached(priority: .userInitiated) {
-            let found = GameLibrary.scan(root)
-            let records = Dictionary(uniqueKeysWithValues: found.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
-            await MainActor.run {
-                self.games = found
-                self.installedRecords = records
-                self.scanning = false
-                if let current, let index = found.firstIndex(where: { $0.id == current }) { self.selected = index } else { self.selected = min(self.selected, max(0, found.count - 1)) }
-                self.measureSelected()
-            }
+        if let monitor = libraryMonitor, monitor.root == root {
+            monitor.rescan()
+            return
         }
-        watch(root)
+        libraryMonitor?.stop()
+        let stamp = recordsStamp
+        let monitor = LibraryMonitor(root: root) { [weak self] update in
+            // The records are read off the main thread too; each game's is one small file.
+            let generation = stamp.withLock { $0 }
+            let records = AppModel.records(of: update.games, root: root)
+            Task { @MainActor in self?.libraryScanned(update, records: records, generation: generation, root: root) }
+        }
+        libraryMonitor = monitor
+        monitor.start()
     }
 
-    private func watch(_ root: URL) {
-        watcher?.cancel()
-        let descriptor = Darwin.open(root.path, O_EVTONLY)
-        guard descriptor >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename, .delete], queue: .main)
-        source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, Date().timeIntervalSince(self.lastScan) > 2, self.progress.isEmpty else { return }
-                self.rescan()
+    nonisolated private static func records(of games: [Game], root: URL) -> [String: InstallRecord] {
+        Dictionary(uniqueKeysWithValues: games.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
+    }
+
+    /// A scan's result: the library follows without moving the selection off the game it is on,
+    /// and games that were not there before are announced.
+    private func libraryScanned(_ update: LibraryMonitor.Update, records scanned: [String: InstallRecord], generation: Int, root: URL) {
+        guard libraryMonitor?.root == root, self.root == root else { return }
+        scanning = false
+        let records = generation == recordsGeneration ? scanned : AppModel.records(of: update.games, root: root)
+        let listingChanged = !GameLibrary.sameListing(games, update.games)
+        if records.mapValues(\.toolkit) != installedRecords.mapValues(\.toolkit) || records.mapValues(\.date) != installedRecords.mapValues(\.date) {
+            installedRecords = records
+        }
+        if listingChanged {
+            let current = selectedGame?.id
+            let focusedInLibrary = games.indices.contains(libraryIndex) ? games[libraryIndex].id : nil
+            games = update.games
+            if let current, let index = games.firstIndex(where: { $0.id == current }) { selected = index } else { selected = min(selected, max(0, games.count - 1)) }
+            if let focusedInLibrary, let index = games.firstIndex(where: { $0.id == focusedInLibrary }) { libraryIndex = index } else { libraryIndex = min(libraryIndex, max(0, games.count - 1)) }
+        }
+        if !update.added.isEmpty { announceNewGames(update.added) }
+        measureSelected()
+    }
+
+    /// "New game: <name>" (or "3 new games"): a toast while the launcher is in front, the banner
+    /// over everything otherwise, and the game selected when the home screen shows.
+    private func announceNewGames(_ added: [Game]) {
+        guard preferences.onboarded else { return }
+        let text = added.count == 1 ? T.format(.newGame, added[0].name) : T.format(.newGames, added.count)
+        let icon = added.count == 1 ? added[0].icon : nil
+        if overlay == nil, running == nil, starting == nil, let index = games.firstIndex(of: added[0]) {
+            withAnimation(Motion.focus) {
+                selected = index
+                focus = .tiles
             }
         }
-        source.setCancelHandler { Darwin.close(descriptor) }
-        source.resume()
-        watcher = source
+        if NSApp.isActive {
+            show(text, symbol: "gamecontroller.fill", icon: icon)
+            if preferences.sounds { Sounds.shared.play(.select) }
+        } else {
+            let detail = added.count == 1 ? T.text(.newGameDetail) : ListFormatter.localizedString(byJoining: added.prefix(3).map(\.name)) + (added.count > 3 ? "…" : "")
+            TrophyBanner.shared.notice(text, detail: detail, symbol: "gamecontroller.fill", icon: icon, cue: .select, sounds: preferences.sounds)
+        }
     }
 
     func chooseFolder(_ url: URL) {
@@ -850,6 +903,7 @@ final class AppModel: ObservableObject {
                 case .success(let bundle):
                     try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: nil, titleID: game.titleID)
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
+                    self.recordsGeneration += 1
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
                     if self.playAfterUnlock == id {
@@ -886,6 +940,7 @@ final class AppModel: ObservableObject {
         try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
         try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
         installedRecords[game.id] = nil
+        recordsGeneration += 1
         show(T.text(.uninstallDone), symbol: "trash")
     }
 
@@ -1972,9 +2027,9 @@ final class AppModel: ObservableObject {
         Sounds.shared.play(.back)
     }
 
-    func show(_ text: String, symbol: String) {
+    func show(_ text: String, symbol: String, icon: URL? = nil) {
         toastTask?.cancel()
-        withAnimation(Motion.overlay) { toast = Toast(text: text, symbol: symbol) }
+        withAnimation(Motion.overlay) { toast = Toast(text: text, symbol: symbol, icon: icon) }
         toastTask = Task {
             try? await Task.sleep(nanoseconds: 3_200_000_000)
             guard !Task.isCancelled else { return }

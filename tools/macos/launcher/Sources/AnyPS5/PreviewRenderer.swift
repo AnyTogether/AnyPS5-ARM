@@ -392,6 +392,7 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("library.png")) { model in model.overlay = .library; model.libraryIndex = 1 }
         renderBanner(preferences, found, root, output.appendingPathComponent("trophy-banner.png"))
         renderRingBanner(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"), output.appendingPathComponent("call-banner.png"))
+        renderNewGame(preferences, found, root, still, output)
         var fresh = preferences
         fresh.onboarded = false
         fresh.gamesFolder = nil
@@ -429,6 +430,34 @@ enum PreviewRenderer {
         renderer.scale = 1
         guard let image = renderer.cgImage else { return }
         try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+    }
+
+    /// A game just copied into the games folder: the toast in the launcher, and the banner over
+    /// everything when the launcher is in the background (one game, then three).
+    static func renderNewGame(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
+        let pick = selectedTitle.flatMap { id in games.first { $0.titleID == id } } ?? games.first
+        guard let game = pick else { return }
+        render(preferences, games, root, still, output.appendingPathComponent("new-game-toast.png")) { model in
+            model.selected = model.games.firstIndex(of: game) ?? 0
+            model.show(T.format(.newGame, game.name), symbol: "gamecontroller.fill", icon: game.icon)
+        }
+        let cards: [(String, NoticeToast)] = [
+            ("new-game-banner.png", NoticeToast(title: T.format(.newGame, game.name), detail: T.text(.newGameDetail), symbol: "gamecontroller.fill", icon: game.icon, still: true) {}),
+            ("new-games-banner.png", NoticeToast(title: T.format(.newGames, 3), detail: ListFormatter.localizedString(byJoining: games.prefix(3).map(\.name)), symbol: "gamecontroller.fill", still: true) {}),
+        ]
+        for (name, card) in cards {
+            let file = output.appendingPathComponent(name)
+            if let only = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_ONLY"]?.split(separator: ","), !only.contains(where: { file.lastPathComponent.hasPrefix($0) }) { continue }
+            let view = ZStack(alignment: .top) {
+                Color(white: 0.15)
+                card
+            }
+            .frame(width: TrophyBanner.size.width, height: TrophyBanner.size.height)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2
+            guard let image = renderer.cgImage else { continue }
+            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+        }
     }
 
     /// The ringing card over a game, on a picture of one (ANYPS5_PREVIEW_BANNER_BACKDROP) or black.

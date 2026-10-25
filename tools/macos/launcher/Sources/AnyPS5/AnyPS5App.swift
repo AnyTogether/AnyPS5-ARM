@@ -282,7 +282,13 @@ struct ToastView: View {
 
     var body: some View {
         HStack(spacing: 12 * scale) {
-            Image(systemName: toast.symbol).font(.system(size: 17 * scale, weight: .semibold))
+            if let image = toast.icon.flatMap({ NSImage(contentsOf: $0) }) {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    .frame(width: 30 * scale, height: 30 * scale)
+                    .clipShape(RoundedRectangle(cornerRadius: 7 * scale, style: .continuous))
+            } else {
+                Image(systemName: toast.symbol).font(.system(size: 17 * scale, weight: .semibold))
+            }
             Text(toast.text).font(.display(16 * scale, .medium)).lineLimit(2)
         }
         .foregroundStyle(.white)

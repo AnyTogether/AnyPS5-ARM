@@ -12,7 +12,7 @@ final class TrophyBanner {
 
     enum Item {
         case trophy(TrophySet.Trophy)
-        case notice(title: String, detail: String, symbol: String)
+        case notice(title: String, detail: String, symbol: String, icon: URL?)
         case level(TogetherLevelBadge)
     }
 
@@ -20,31 +20,39 @@ final class TrophyBanner {
     private var panel: NSPanel?
     private var showing = false
     private var sounds = true
+    private var cues: [Sounds.Cue] = []
 
     func show(_ trophy: TrophySet.Trophy, sounds: Bool) {
         self.sounds = sounds
-        queue.append(.trophy(trophy))
+        enqueue(.trophy(trophy), cue: .unlocked)
         next()
     }
 
-    /// Any other short message over the game, in the same card.
-    func notice(_ title: String, detail: String, symbol: String, sounds: Bool) {
+    /// Any other short message over the game, in the same card; `icon` (a game's) in place of the
+    /// symbol, and `cue` the sound it comes with.
+    func notice(_ title: String, detail: String, symbol: String, icon: URL? = nil, cue: Sounds.Cue = .unlocked, sounds: Bool) {
         self.sounds = sounds
-        queue.append(.notice(title: title, detail: detail, symbol: symbol))
+        enqueue(.notice(title: title, detail: detail, symbol: symbol, icon: icon), cue: cue)
         next()
     }
 
     /// A new trophy level of the user's own, in its tier's metal, with the trophy sound.
     func levelUp(_ badge: TogetherLevelBadge, sounds: Bool) {
         self.sounds = sounds
-        queue.append(.level(badge))
+        enqueue(.level(badge), cue: .unlocked)
         next()
+    }
+
+    private func enqueue(_ item: Item, cue: Sounds.Cue) {
+        queue.append(item)
+        cues.append(cue)
     }
 
     private func next() {
         guard !showing, !queue.isEmpty, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         showing = true
         let item = queue.removeFirst()
+        let cue = cues.removeFirst()
         let size = TrophyBanner.size
         // Below the notch and the menu bar, centered.
         let top = screen.frame.maxY - screen.safeAreaInsets.top
@@ -54,11 +62,11 @@ final class TrophyBanner {
         let done: () -> Void = { [weak self] in self?.finish() }
         switch item {
         case .trophy(let trophy): panel.contentView = NSHostingView(rootView: TrophyToast(trophy: trophy, done: done))
-        case .notice(let title, let detail, let symbol): panel.contentView = NSHostingView(rootView: NoticeToast(title: title, detail: detail, symbol: symbol, done: done))
+        case .notice(let title, let detail, let symbol, let icon): panel.contentView = NSHostingView(rootView: NoticeToast(title: title, detail: detail, symbol: symbol, icon: icon, done: done))
         case .level(let badge): panel.contentView = NSHostingView(rootView: LevelUpToast(badge: badge, done: done))
         }
         panel.orderFrontRegardless()
-        if sounds { Sounds.shared.play(.unlocked) }
+        if sounds { Sounds.shared.play(cue) }
     }
 
     private func finish() {
@@ -164,18 +172,29 @@ struct NoticeToast: View {
     let title: String
     let detail: String
     let symbol: String
+    /// A game's icon, drawn instead of the symbol when it reads.
+    var icon: URL? = nil
     var still = false
     let done: () -> Void
 
     var body: some View {
         DroppingCard(still: still, done: done) { popped in
             HStack(spacing: 16) {
-                Image(systemName: symbol)
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 60, height: 60)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.1)))
-                    .scaleEffect(popped ? 1 : 0.6)
+                Group {
+                    if let image = icon.flatMap({ NSImage(contentsOf: $0) }) {
+                        Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                            .frame(width: 60, height: 60)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 60, height: 60)
+                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.1)))
+                    }
+                }
+                .scaleEffect(popped ? 1 : 0.6)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                     Text(detail).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6)).lineLimit(2)

@@ -44,6 +44,7 @@ enum T {
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
         case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, linkNoGame, folderNoGames, useGamesFolder, useGamesFolderDetail, useGamesFolderConfirm, copyLink, linkCopied, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
+        case newGame, newGames, newGameDetail
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
@@ -402,6 +403,9 @@ enum T {
         .frameGenerationLowPower: "Düşük Güç Modu açık: ekran 60 Hz'de kalıyor, ara kare çalışmaz",
         .linkNoGame: "%@ kütüphanende yok",
         .folderNoGames: "Bu klasörde PS5 oyunu yok",
+        .newGame: "Yeni oyun: %@",
+        .newGames: "%d yeni oyun",
+        .newGameDetail: "Oyunlar klasörüne eklendi",
         .useGamesFolder: "Oyun klasörü “%@” olsun mu?",
         .useGamesFolderDetail: "İçinde %d oyun var: %@. Launcher oyunlarını bundan sonra burada arar.",
         .useGamesFolderConfirm: "Oyun Klasörü Yap",
@@ -986,6 +990,9 @@ enum T {
         .frameGenerationLowPower: "Low Power Mode is on: the display stays at 60 Hz, so frame generation cannot work",
         .linkNoGame: "%@ is not in your library",
         .folderNoGames: "There is no PS5 game in that folder",
+        .newGame: "New game: %@",
+        .newGames: "%d new games",
+        .newGameDetail: "Added to your games folder",
         .useGamesFolder: "Use “%@” as the games folder?",
         .useGamesFolderDetail: "It holds %d games: %@. The launcher looks for games there from now on.",
         .useGamesFolderConfirm: "Use as Games Folder",
