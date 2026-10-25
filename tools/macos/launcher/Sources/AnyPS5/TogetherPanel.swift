@@ -75,6 +75,11 @@ extension AppModel {
             if cloudAvailable { rows.append(cloudStorageRow()) }
             rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
                                  kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
+            rows.append(PanelRow(id: "together-online-play", title: T.text(.togetherOnlinePlay), detail: T.format(.togetherOnlinePlayDetail, user.handle), symbol: "network",
+                                 kind: .toggle(OnlinePlayHost.enabled) { [weak self] value in
+                                     OnlinePlayHost.enabled = value
+                                     self?.objectWillChange.send()
+                                 }))
             rows += profileEditRows() + privacyRows() + (familyAllows(.discovery) ? discoveryRows() : []) + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()

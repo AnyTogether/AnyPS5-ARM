@@ -49,6 +49,7 @@ extension AppModel {
     private func keepSession(_ session: TogetherGameSession?, me: String) {
         withAnimation(Motion.overlay) { gameSession = session }
         try? TogetherGameSession.write(session, me: me, to: TogetherGameSession.bridgeFile)
+        OnlinePlayHost.follow(sessionId: session?.id)
     }
 
     /// "Let friends join my game" turned on or off: a session open now follows.
@@ -136,6 +137,8 @@ extension AppModel {
 
     /// What the socket says about game sessions.
     func gameSessionEvent(_ event: TogetherSocket.Event) {
+        // Online play follows the same session: players joining, leaving, publishing, signalling.
+        OnlinePlayHost.handle(event)
         switch event.type {
         case "game_session.invite":
             guard let invite = event.decode(TogetherGameInvite.self) else { return }

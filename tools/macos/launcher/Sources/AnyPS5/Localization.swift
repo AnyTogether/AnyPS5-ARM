@@ -64,6 +64,7 @@ enum T {
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceLeave, voiceNoMic, voiceJoined
         case togetherLinkBlocked
+        case togetherOnlinePlay, togetherOnlinePlayDetail
         case messagesTyping, messagesTypingMany
         case callRinging, callAnswer, callDecline, callKeys, callWith, callCalling, callFriend, callHangUp, callMissed, callDeclined, callEnded, callNoAnswer, callAnsweredElsewhere, voiceMuted, voiceSpeaking
         case messagesNewGroup, messagesNewGroupDetail, messagesGroupName, messagesGroupPicked, messagesGroupCreate, messagesGroupPick, messagesGroupMade
@@ -204,6 +205,8 @@ enum T {
         .gameJoined: "%1$@ ile %2$@ başlıyor",
         .togetherFriendsJoin: "Arkadaşlarım oyunuma katılabilsin",
         .togetherFriendsJoinDetail: "Oynarken arkadaşların görür ve aynı oyunu başlatıp katılabilir",
+        .togetherOnlinePlay: "Çevrimiçi oyun (deneysel)",
+        .togetherOnlinePlayDetail: "Oyunlar seni @%@ olarak oturum açmış ve AnyTogether arkadaşlarınla görür; her oyunun ne istediği bir kayda yazılır. Oyunu yeniden başlatınca geçerli olur",
         .voiceJoin: "Sese katıl",
         .voiceJoinDetail: "Partiyle konuş",
         .voiceInCall: "%d kişi seste",
@@ -786,6 +789,8 @@ enum T {
         .gameJoined: "Starting %2$@ with %1$@",
         .togetherFriendsJoin: "Let friends join my game",
         .togetherFriendsJoinDetail: "While you play, friends see it and can start the same game to join",
+        .togetherOnlinePlay: "Online play (experimental)",
+        .togetherOnlinePlayDetail: "Games see you signed in as @%@ with your AnyTogether friends, and what each game asks for is written to a log. Takes effect when a game starts",
         .voiceJoin: "Join voice",
         .voiceJoinDetail: "Talk with the party",
         .voiceInCall: "%d in voice",

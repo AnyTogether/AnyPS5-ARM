@@ -921,7 +921,7 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
-            .merging(OnlinePlayHost.environment(for: game, client: together)) { _, online in online }
+            .merging(OnlinePlayHost.environment(for: game, client: together, engineBuild: engineBuild(for: game))) { _, online in online }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
         markStart(of: game, traced: trace || settings.trace == true)
@@ -1246,6 +1246,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        OnlinePlayHost.stop()
         if let start = sessionStart { recordPlay(running.game, from: start) }
         sessionStart = nil
         familyGameEnded()
