@@ -35,6 +35,8 @@ struct Preferences: Codable, Equatable {
     var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
+    /// A Join button with it, opening the party's or share play's join code page; nil means on.
+    var discordJoin: Bool?
     /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
     /// phone); nil means off. clipLength is in seconds, nil for 30.
     var clips: Bool?
@@ -282,7 +284,7 @@ final class AppModel: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
-    private let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
+    let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
@@ -563,9 +565,28 @@ final class AppModel: ObservableObject {
     @Published var groupName = ""
     @Published var groupFocus = 0
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
-    @Published var party: TogetherParty?
+    @Published var party: TogetherParty? {
+        didSet { partyChanged() }
+    }
     @Published var partyInvites: [TogetherPartyInvite] = []
     @Published var partyStartsOpen = false
+    /// "Join with a code": what was typed, what it opens, and asking with it.
+    @Published var joinEntry = JoinEntry()
+    var joinLookup: Task<Void, Never>?
+    /// Parties and share plays (by ID) whose code the user stopped this session, or for which one
+    /// was made for Discord already: no code is made for the Join button again.
+    var codeStopped: Set<String> = []
+    var codeMakingForDiscord: Set<String> = []
+    /// Who asked with the code (party.request / share_play.request said so), by user ID.
+    @Published var codeAskers: Set<String> = []
+    /// The Discord link typed for the party, sent once it reads as one.
+    var discordLinkSend: Task<Void, Never>?
+    /// What Discord was shown last, and since when the user is in the party.
+    var discordShown: DiscordActivity?
+    var discordCleared = true
+    /// When the running game's window showed: its time on Discord.
+    var discordSince: Date?
+    var partySince: (id: String, at: Date)?
     /// The game session the user hosts or joined, and invitations to friends' games.
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
@@ -573,19 +594,28 @@ final class AppModel: ObservableObject {
     /// Find players, Live now, public parties, discovery and game hubs.
     @Published var discover = DiscoverState()
     /// Share play: what the friends panel shows, and the running share play's pieces.
-    @Published var share = ShareState()
+    @Published var share = ShareState() {
+        didSet {
+            // Discord's Join button follows the share play hosted and its code.
+            if oldValue.hosting?.id != share.hosting?.id || oldValue.hosting?.joinCode != share.hosting?.joinCode { updateDiscord() }
+        }
+    }
     var shareSession: ShareSession?
     var shareWatch: ShareWatchSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?
-    @Published var micOn = true
+    /// The microphone's switch and deafening.
+    @Published var mic = TogetherVoiceMic()
+    var micOn: Bool { mic.on }
+    var deafened: Bool { mic.deafened }
     @Published var talkHeld = false
     @Published var voiceSpeaking: Set<String> = []
-    /// Who in the call muted themselves, as the server says.
+    /// Who in the call muted or deafened themselves, as the server says.
     @Published var voiceMuted: Set<String> = []
-    /// Whether the server was last told the user is muted.
-    var voiceSentMuted = false
+    @Published var voiceDeafened: Set<String> = []
+    /// What the server was last told about the user (nil: nothing yet in this call).
+    var voiceSent: TogetherVoiceMic.State?
     /// The friend in a direct call (nil in the party's voice), and whether they have not answered yet.
     @Published var callFriend: TogetherPerson?
     @Published var callWaiting = false
@@ -1167,10 +1197,11 @@ final class AppModel: ObservableObject {
             }
             NSApp.yieldActivation(to: app)
             app.activate()
-            if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
+            discordSince = Date()
             if let game = running?.game { tellLowPower(about: game) }
             startClips(for: app)
             gameWindowShown = true
+            updateDiscord()
             updateRemotePlay()
             updateTogetherPresence()
             withAnimation(Motion.overlay) { starting = nil }
@@ -1224,7 +1255,8 @@ final class AppModel: ObservableObject {
         followSharePlay()
         updateTogetherPresence()
         syncSaves(running.game) {}
-        discord.clear()
+        discordSince = nil
+        updateDiscord()
         loadTrophies(running.game, again: true)
         lastSessions[running.game.id]?.ended = Date()
         lastSessions[running.game.id]?.withoutWindow = starting != nil
@@ -1361,12 +1393,77 @@ final class AppModel: ObservableObject {
         updateProgress = progress
     }
 
-    func discordOff() { discord.clear() }
+    func discordOff() { updateDiscord() }
 
     /// Turned on again with a game in front: Discord shows it at once, from when it started.
-    func discordOn() {
-        guard let game = running?.game else { return }
-        discord.playing(game.name, since: sessionStart ?? Date())
+    func discordOn() { updateDiscord() }
+
+    /// Since when the user is in the party, for Discord; a party left forgets who asked with its code.
+    func partyChanged() {
+        guard party?.id != partySince?.id else { return updateDiscord() }
+        partySince = party.map { ($0.id, Date()) }
+        codeAskers = []
+        updateDiscord()
+    }
+
+    /// What the user's Discord profile shows, when the presence setting is on: the game once its
+    /// window is up, the party they are in ("In a party", with its size, even with no game), and
+    /// the Join button with the share play's or party's code. The party's leader or the share
+    /// play's host gets a code made for the button when none works, but not where they stopped
+    /// it themselves. Discord is told only when something changed.
+    func updateDiscord() {
+        guard persists else { return }
+        let game = gameWindowShown ? running?.game : nil
+        guard preferences.discordPresence ?? true, game != nil || party != nil else {
+            discordShown = nil
+            if !discordCleared {
+                discordCleared = true
+                discord.clear()
+            }
+            return
+        }
+        var button: DiscordActivity.Button?
+        if preferences.discordJoin ?? true, let me = togetherUser?.id {
+            let allowed = familyAllows(.publicMatchmaking)
+            let hosting = share.hosting.map {
+                DiscordJoin.Source(id: $0.id, code: $0.joinCode, mine: true, mayMake: allowed && !codeStopped.contains($0.id) && !codeMakingForDiscord.contains($0.id))
+            }
+            let partySource = party.map {
+                DiscordJoin.Source(id: $0.id, code: $0.joinCode, mine: $0.isLeader(me), mayMake: allowed && !codeStopped.contains($0.id) && !codeMakingForDiscord.contains($0.id))
+            }
+            switch DiscordJoin.plan(share: hosting, party: partySource) {
+            case .button(let url): button = DiscordActivity.Button(label: JS.text(.discordJoinLabel), url: url)
+            case .makeShare(let id): makeCodeForDiscord(id, sharePlay: true)
+            case .makeParty(let id): makeCodeForDiscord(id, sharePlay: false)
+            case .none: break
+            }
+        }
+        let activity = DiscordActivity(game: game?.name, since: game != nil ? discordSince ?? sessionStart : partySince?.at,
+                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: TogetherParty.maxSize) },
+                                       button: button, partyText: JS.text(.inParty))
+        guard activity != discordShown else { return }
+        discordShown = activity
+        discordCleared = false
+        discord.show(activity)
+    }
+
+    /// A code for the Join button, made once; one that fails is not tried again this session.
+    private func makeCodeForDiscord(_ id: String, sharePlay: Bool) {
+        codeMakingForDiscord.insert(id)
+        let client = together
+        Task {
+            do {
+                let code = sharePlay ? try await client.makeJoinCode(sharePlay: id) : try await client.makeJoinCode(party: id)
+                codeMakingForDiscord.remove(id)
+                if sharePlay, let hosting = share.hosting, hosting.id == id {
+                    share.hosting = hosting.with(joinCode: code)
+                } else if !sharePlay, let current = party, current.id == id {
+                    party = current.with(joinCode: code)
+                }
+            } catch {
+                // Refused (family settings, a muted account, too many): no button for it.
+            }
+        }
     }
 
     /// A trophy just earned shows on the phone too, with its icon made small.

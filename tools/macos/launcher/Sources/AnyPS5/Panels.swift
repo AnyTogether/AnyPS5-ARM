@@ -176,6 +176,11 @@ extension AppModel {
                 self?.preferences.discordPresence = value
                 if value { self?.discordOn() } else { self?.discordOff() }
             }),
+            PanelRow(id: "discordJoin", title: JS.text(.discordJoin), detail: JS.text(.discordJoinDetail), symbol: "person.badge.plus",
+                     kind: .toggle(preferences.discordJoin ?? true) { [weak self] value in
+                         self?.preferences.discordJoin = value ? nil : false
+                         self?.updateDiscord()
+                     }),
             PanelRow(id: "clips", title: T.text(.clips), detail: T.format(.clipsDetail, clipSeconds), symbol: "record.circle", kind: .toggle(preferences.clips == true) { [weak self] value in
                 self?.clipsChanged(value)
             }),

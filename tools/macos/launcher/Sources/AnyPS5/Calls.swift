@@ -141,7 +141,11 @@ extension AppModel {
     func callRows() -> [PanelRow] {
         guard let friend = callFriend, voiceCall != nil else { return [] }
         var details: [String] = []
-        if voiceMuted.contains(friend.userId) { details.append(T.text(.voiceMuted)) }
+        if voiceDeafened.contains(friend.userId) {
+            details.append(JS.text(.deafened))
+        } else if voiceMuted.contains(friend.userId) {
+            details.append(T.text(.voiceMuted))
+        }
         if voiceSpeaking.contains(friend.userId) { details.append(T.text(.voiceSpeaking)) }
         return [PanelRow(id: "call-\(friend.userId)", title: T.format(callWaiting ? .callCalling : .callWith, friend.displayName),
                          detail: details.isEmpty ? "@\(friend.handle)" : details.joined(separator: " · "), symbol: "phone.fill", kind: .info(""),
@@ -160,12 +164,15 @@ extension AppModel {
 
     func previewRinging(_ call: TogetherRinging?) { ringing = call }
 
-    func previewCall(with friend: TogetherPerson, waiting: Bool, speaking: Set<String> = [], muted: Set<String> = []) {
+    func previewCall(with friend: TogetherPerson, waiting: Bool, speaking: Set<String> = [], muted: Set<String> = [], deafened: Set<String> = [], deafenedHere: Bool = false) {
         voiceCall = "call-preview"
         callFriend = friend
         callWaiting = waiting
         voiceSpeaking = speaking
         voiceMuted = muted
+        voiceDeafened = deafened
+        mic = TogetherVoiceMic()
+        if deafenedHere { mic.deafen() }
     }
 }
 

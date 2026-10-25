@@ -44,19 +44,19 @@ extension AppModel {
                 rows.append(PanelRow(id: "party-find", title: FP.text(.findParty), detail: FP.text(.findPartyDetail), symbol: "person.3.sequence",
                                      kind: .action(destructive: false) { [weak self] in self?.openFindPlayers(category: 2) }))
             }
+            rows += joinCodeEntryRows()
             return rows
         }
         let leader = party.isLeader(me.id)
         rows += voiceRows(party)
         if leader { rows += partyRequestRows(party) }
+        rows += partyCodeRows(party, leader: leader)
         rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))
         for member in party.members {
             var details: [String] = ["@\(member.handle)"]
             if party.isLeader(member.userId) { details.append(T.text(.partyLeader)) }
             if party.call?.in.contains(member.userId) == true { details.append(T.text(.partyInVoice)) }
-            if party.call?.muted.contains(member.userId) == true || (voiceCall == party.call?.id && voiceMuted.contains(member.userId)) {
-                details.append(T.text(.voiceMuted))
-            }
+            if let state = voiceState(of: member.userId, in: party) { details.append(state) }
             rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : member.displayName,
                                  detail: details.joined(separator: " · "), symbol: "person", kind: .info(""),
                                  person: PanelPerson(name: member.displayName, avatar: member.avatar,
@@ -92,10 +92,19 @@ extension AppModel {
                 }
             }
         }
+        rows += joinCodeEntryRows()
         rows.append(PanelRow(id: "party-leave", title: T.text(.partyLeave), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
             self?.leaveParty()
         }))
         return rows
+    }
+
+    /// "deafened" or "muted" for someone in the call, as the server or the call's own events say.
+    func voiceState(of userId: String, in party: TogetherParty) -> String? {
+        let live = voiceCall != nil && voiceCall == party.call?.id
+        if party.call?.deafened.contains(userId) == true || (live && voiceDeafened.contains(userId)) { return JS.text(.deafened) }
+        if party.call?.muted.contains(userId) == true || (live && voiceMuted.contains(userId)) { return T.text(.voiceMuted) }
+        return nil
     }
 
     // MARK: In public
@@ -104,7 +113,8 @@ extension AppModel {
     func partyRequestRows(_ party: TogetherParty) -> [PanelRow] {
         (party.requests ?? []).flatMap { person -> [PanelRow] in
             [
-                PanelRow(id: "party-request-accept-\(person.userId)", title: FP.format(.letIn, person.displayName), detail: "@\(person.handle) · " + FP.text(.letInParty),
+                PanelRow(id: "party-request-accept-\(person.userId)", title: FP.format(.letIn, person.displayName),
+                         detail: (["@\(person.handle)", FP.text(.letInParty)] + (codeAskers.contains(person.userId) ? [JS.text(.withCode)] : [])).joined(separator: " · "),
                          symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerPartyRequest(person, accept: true) },
                          person: PanelPerson(name: person.displayName, avatar: person.avatar)),
                 PanelRow(id: "party-request-decline-\(person.userId)", title: FP.format(.notNow, person.displayName), symbol: "xmark.circle",
@@ -336,6 +346,8 @@ extension AppModel {
             rows.append(PanelRow(id: "voice-mic", title: T.text(.voiceMic), detail: T.text(.voicePushToTalkOff), symbol: micOn ? "mic.fill" : "mic.slash.fill",
                                  kind: .toggle(micOn) { [weak self] value in self?.setMic(value) }))
         }
+        rows.append(PanelRow(id: "voice-deafen", title: JS.text(.deafen), detail: JS.text(.deafenDetail), symbol: deafened ? "headphones.slash" : "headphones",
+                             kind: .toggle(deafened) { [weak self] value in self?.setDeafened(value) }))
         rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.text(.voicePushToTalkOn) : nil, symbol: "keyboard",
                              kind: .toggle(pushToTalk) { [weak self] value in self?.setPushToTalk(value) }))
         rows.append(PanelRow(id: "voice-leave", title: T.text(callFriend == nil ? .voiceLeave : .callHangUp), symbol: "phone.down.fill",
@@ -344,7 +356,7 @@ extension AppModel {
     }
 
     /// The microphone sends: on (open mic), or ⌥V held (push-to-talk).
-    var micSending: Bool { voiceCall != nil && ((preferences.pushToTalk ?? false) ? talkHeld : micOn) }
+    var micSending: Bool { voiceCall != nil && mic.sending(pushToTalk: preferences.pushToTalk ?? false, held: talkHeld) }
 
     func joinVoice() {
         guard let party, togetherUser != nil, familyPermits(.voiceChat) else { return }
@@ -372,14 +384,15 @@ extension AppModel {
             self?.togetherSocket?.signal(to: to, device: device, call: call, kind: kind, data: data)
         }, changed: { [weak self] in self?.voiceChanged() })
         partyVoice = voice
-        voiceSentMuted = false
+        voiceSent = TogetherVoiceMic.State(muted: false, deafened: false)
         withAnimation(Motion.overlay) {
             voiceCall = call
             callFriend = friend
             callWaiting = waiting
             voiceMuted = Set(joined.call.in.filter(\.muted).map(\.userId))
+            voiceDeafened = Set(joined.call.in.filter(\.deafened).map(\.userId))
         }
-        micOn = true
+        mic = TogetherVoiceMic()
         for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
         Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
         voiceChanged()
@@ -417,6 +430,8 @@ extension AppModel {
             voiceCall = nil
             voiceSpeaking = []
             voiceMuted = []
+            voiceDeafened = []
+            mic = TogetherVoiceMic()
             callFriend = nil
             callWaiting = false
             talkHeld = false
@@ -427,8 +442,15 @@ extension AppModel {
         }
     }
 
+    /// The microphone on or off; on while deafened undeafens.
     func setMic(_ on: Bool) {
-        micOn = on
+        mic.set(on: on)
+        voiceChanged()
+    }
+
+    /// Deafened: nobody is heard and the microphone is off; undeafened, it is as it was before.
+    func setDeafened(_ on: Bool) {
+        if on { mic.deafen() } else { mic.undeafen() }
         voiceChanged()
     }
 
@@ -443,7 +465,7 @@ extension AppModel {
         if preferences.pushToTalk ?? false {
             talkHeld = pressed
         } else if pressed {
-            micOn.toggle()
+            mic.set(on: !mic.on)
             Sounds.shared.play(.move)
         }
         voiceChanged()
@@ -451,12 +473,14 @@ extension AppModel {
 
     func voiceChanged() {
         partyVoice?.talking = micSending
-        // The others see the user muted when the open microphone is off (push-to-talk is not muted).
-        let muted = voiceCall != nil && !(preferences.pushToTalk ?? false) && !micOn
-        if let call = voiceCall, muted != voiceSentMuted {
-            voiceSentMuted = muted
+        partyVoice?.deafened = deafened
+        // The others see the user muted when deafened or the open microphone is off (push-to-talk
+        // is not muted), and deafened as it is; both go each time, as the server takes them.
+        let state = mic.state(pushToTalk: preferences.pushToTalk ?? false)
+        if let call = voiceCall, state != voiceSent {
+            voiceSent = state
             let client = together
-            Task { try? await client.setMuted(muted, in: call) }
+            Task { try? await client.setMuted(state.muted, deafened: state.deafened, in: call) }
         }
         let speaking = partyVoice?.speaking ?? []
         if speaking != voiceSpeaking { voiceSpeaking = speaking }
@@ -471,6 +495,7 @@ extension AppModel {
             if let userId = event.data["userId"] {
                 partyVoice?.drop(userId, sayBye: false)
                 voiceMuted.remove(userId)
+                voiceDeafened.remove(userId)
             }
             loadParty()
         case "call.joined":
@@ -479,6 +504,7 @@ extension AppModel {
             // Someone muted or unmuted themselves (the party's view follows with party.updated).
             guard let change = event.decode(TogetherMuteChange.self), change.callId == voiceCall else { return }
             if change.muted { voiceMuted.insert(change.userId) } else { voiceMuted.remove(change.userId) }
+            if change.deafened { voiceDeafened.insert(change.userId) } else { voiceDeafened.remove(change.userId) }
         case "call.ringing", "call.answered":
             directCallEvent(event)
         case "call.ended":

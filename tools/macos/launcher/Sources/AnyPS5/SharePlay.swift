@@ -302,6 +302,7 @@ extension AppModel {
         rows.append(PanelRow(id: "share-on", title: SP.format(.sharing, hosting.title ?? gameName(hosting.titleId)), detail: SP.format(.watching, hosting.viewers.count, hosting.maxViewers),
                              symbol: "shareplay", kind: .info("")))
         rows += shareRequestRows(hosting)
+        rows += shareCodeRows(hosting)
         for viewer in hosting.viewers {
             let name = viewer.user.displayName
             let person = PanelPerson(name: name, avatar: viewer.user.avatar, status: viewer.slot == nil ? .online : .playing)
@@ -344,7 +345,8 @@ extension AppModel {
     func shareRequestRows(_ hosting: TogetherSharePlay) -> [PanelRow] {
         (hosting.requests ?? []).flatMap { person -> [PanelRow] in
             [
-                PanelRow(id: "share-request-accept-\(person.userId)", title: FP.format(.letWatch, person.displayName), detail: "@\(person.handle)",
+                PanelRow(id: "share-request-accept-\(person.userId)", title: FP.format(.letWatch, person.displayName),
+                         detail: (["@\(person.handle)"] + (codeAskers.contains(person.userId) ? [JS.text(.withCode)] : [])).joined(separator: " · "),
                          symbol: "person.crop.circle.badge.checkmark", kind: .action(destructive: false) { [weak self] in self?.answerShareRequest(person, accept: true) },
                          person: PanelPerson(name: person.displayName, avatar: person.avatar)),
                 PanelRow(id: "share-request-decline-\(person.userId)", title: FP.format(.notNow, person.displayName), symbol: "xmark.circle",

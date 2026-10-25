@@ -715,6 +715,7 @@ extension AppModel {
             }
             refreshMine()
         case "party.request":
+            noteJoinRequest(event)
             let name = event.decode(AskData.self)?.from.displayName ?? ""
             show(FP.format(.asksParty, name), symbol: "hand.raised.fill")
             if !NSApp.isActive { TrophyBanner.shared.notice(FP.format(.asksParty, name), detail: T.text(.partyTitle), symbol: "hand.raised.fill", sounds: preferences.sounds) }
@@ -726,6 +727,7 @@ extension AppModel {
             loadParty()
             reloadDiscoverSoon()
         case "share_play.request":
+            noteJoinRequest(event)
             let name = event.decode(AskData.self)?.from.displayName ?? ""
             show(FP.format(.asksWatch, name), symbol: "hand.raised.fill")
             if !NSApp.isActive { TrophyBanner.shared.notice(FP.format(.asksWatch, name), detail: T.text(.friendsTitle), symbol: "hand.raised.fill", sounds: preferences.sounds) }
