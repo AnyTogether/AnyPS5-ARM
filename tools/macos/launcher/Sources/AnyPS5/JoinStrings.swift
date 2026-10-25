@@ -16,8 +16,9 @@ enum JS {
     /// "14:05", or "26 Eki 14:05" when it is not today, in the launcher's language.
     static func until(_ date: Date) -> String {
         let locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
-        let style = Calendar.current.isDateInToday(date) ? Date.FormatStyle(date: .omitted, time: .shortened) : Date.FormatStyle(date: .abbreviated, time: .shortened)
-        return date.formatted(style.locale(locale))
+        let time = Date.FormatStyle(date: .omitted, time: .shortened).locale(locale)
+        guard !Calendar.current.isDateInToday(date) else { return date.formatted(time) }
+        return date.formatted(Date.FormatStyle().month(.abbreviated).day().locale(locale)) + " " + date.formatted(time)
     }
 
     static let turkish: [Key: String] = [

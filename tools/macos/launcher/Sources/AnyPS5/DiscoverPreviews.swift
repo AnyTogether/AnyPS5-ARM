@@ -108,5 +108,54 @@ enum DiscoverPreviews {
             model.overlay = .party; model.panelInRows = true
             model.panelRow = model.partyRows().firstIndex { $0.id == "party-find" } ?? 0
         }
+        renderCodes(render, found)
+    }
+
+    /// Join codes: the leader's code with a request that came with it, the party's Discord link,
+    /// Deafen in the voice, a share play's code and "Join with a code".
+    static func renderCodes(_ render: (String, (AppModel) -> Void) -> Void, _ found: [Game]) {
+        let robin = person("u1", "Robin"), mira = person("f1", "Mira"), sol = person("f3", "Sol"), lin = person("x1", "Lin")
+        let code = TogetherJoinCode(code: "K7QM3XPA", url: "https://anytogether.kodla.agency/join/K7QM3XPA", expiresAt: Date().addingTimeInterval(20 * 3600))
+        render("party-code") { model in
+            model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "invite", members: [robin, mira, sol], invited: [],
+                                             call: .init(id: "call1", in: ["u1", "f1", "f3"], muted: ["f3"], deafened: ["f3"]), requests: [lin], joinCode: code,
+                                             discord: "https://discord.gg/anyps5"))
+            model.previewVoice(call: "call1", speaking: ["f1"])
+            model.codeAskers = ["x1"]
+            model.mic.deafen()
+            model.overlay = .party; model.panelInRows = true
+            model.panelRow = model.partyRows().firstIndex { $0.id == "party-code-copy" } ?? 0
+        }
+        render("party-member-code") { model in
+            model.previewParty(TogetherParty(id: "p1", leaderId: "f1", privacy: "invite", members: [mira, robin], invited: [], call: nil, joinCode: code, discord: "https://discord.gg/anyps5"))
+            model.overlay = .party; model.panelInRows = true
+            model.panelRow = model.partyRows().firstIndex { $0.id == "party-code-copy" } ?? 0
+        }
+        render("party-join-code") { model in
+            model.previewParty(nil)
+            model.previewJoinEntry(JoinEntry(text: "K7QM-3XPA", info: TogetherJoinInfo(code: "K7QM3XPA", kind: .party, id: "p7", host: .init(userId: "f1", handle: "mira", displayName: "Mira", avatar: nil),
+                                                                                       game: found.first.map { .init(titleId: $0.titleID, title: $0.name) }, size: 3, max: 8,
+                                                                                       expiresAt: Date().addingTimeInterval(3600), state: .notIn)))
+            model.overlay = .party; model.panelInRows = true
+            model.panelRow = model.partyRows().firstIndex { $0.id == "join-code-ask" } ?? 0
+        }
+        render("party-join-code-wrong") { model in
+            model.previewParty(nil)
+            model.previewJoinEntry(JoinEntry(text: "ZZZZ-ZZZZ", message: JS.text(.noSuchCode)))
+            model.overlay = .party; model.panelInRows = true
+            model.panelRow = model.partyRows().firstIndex { $0.id == "join-code" } ?? 0
+        }
+        render("share-code") { model in
+            model.previewShare(TogetherSharePlay(id: "s1", host: robin, hostDevice: "d1", titleId: found.first?.titleID ?? "PPSA01234", title: found.first?.name, open: true, maxViewers: 3,
+                                                 viewers: [.init(user: mira, device: "d2", slot: nil, joinedAt: nil)], requests: [sol], joinCode: code))
+            model.codeAskers = ["f3"]
+            model.overlay = .friends; model.panelInRows = true
+            model.panelRow = model.friendRows().firstIndex { $0.id == "share-code-copy" } ?? 0
+        }
+        render("call-deafened") { model in
+            model.previewCall(with: mira, waiting: false, muted: ["f1"], deafened: ["f1"], deafenedHere: true)
+            model.overlay = .friends; model.panelInRows = true
+            model.panelRow = model.friendRows().firstIndex { $0.id == "voice-deafen" } ?? 0
+        }
     }
 }

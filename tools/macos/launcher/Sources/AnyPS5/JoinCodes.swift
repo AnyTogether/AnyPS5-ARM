@@ -178,7 +178,7 @@ extension AppModel {
         if let game = info.game { details.append(game.name(in: lang)) }
         details.append(T.format(.partySize, info.size, info.max))
         rows.append(PanelRow(id: "join-code-what", title: JS.format(info.kind == .party ? .codeParty : .codeShare, host), detail: details.joined(separator: " · "),
-                             symbol: info.kind == .party ? "person.3.fill" : "shareplay", kind: .info(TogetherJoinCode.display(info.code)),
+                             symbol: info.kind == .party ? "person.3.fill" : "shareplay", kind: .info(""),
                              person: info.host.map { PanelPerson(name: $0.displayName, avatar: $0.avatar, status: info.kind == .sharePlay ? .playing : nil) }))
         switch entry.asked ?? info.state {
         case .member:
