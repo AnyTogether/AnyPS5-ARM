@@ -142,6 +142,8 @@ public struct SessionReport: Sendable {
     public var crashReport: String?
     /// What the last unlock of the game printed (unwrapping, relinking, patching).
     public var unlockLog: String?
+    /// The controllers connected and the last connects and disconnects (PadLog.report).
+    public var controllers: [String] = []
     public var created: Date
     public var privacy: ReportPrivacy
 
@@ -263,6 +265,7 @@ public struct SessionReport: Sendable {
             "",
             "Settings: \(settings.reportSummary)",
         ]
+        if !controllers.isEmpty { lines += ["", "Controllers:"] + controllers.map { "  " + $0 } }
         let crash = crashSummary(frames: 24)
         if !crash.isEmpty { lines += ["", "macOS crash report (the whole report: crash-report.ips):"] + crash.map { "  " + $0 } }
         if unlockLog != nil { lines += ["", "The last unlock's output: unlock.log"] }

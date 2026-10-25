@@ -37,7 +37,8 @@ public struct IssueDraft: Sendable {
             Field(id: "reason", label: "What happened", value: reason),
             Field(id: "system", label: "Mac", value: report.system.line),
             Field(id: "versions", label: "Versions", value: report.versionsLine),
-            Field(id: "settings", label: "Game settings", value: report.settings.reportSummary + "\nSession: " + report.sessionLine),
+            Field(id: "settings", label: "Game settings", value: report.settings.reportSummary + "\nSession: " + report.sessionLine
+                + (report.controllers.first.map { "\nController: " + $0 } ?? "")),
         ]
         let attach = Field(id: "report", label: "Report file", value: String(format: attachHint, report.fileName))
         return fit(repository: repository, template: "crash.yml", title: "Crash: \(report.gameName) (\(report.titleID))",
