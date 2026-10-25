@@ -25,7 +25,7 @@ let package = Package(
         // The same pipeline from the command line, for scripted checks.
         .executableTarget(name: "anyps5-tool", dependencies: ["AnyPS5Core"], path: "Sources/anyps5-tool"),
         // Unit tests of the core, run with `swift test`.
-        .testTarget(name: "AnyPS5CoreTests", dependencies: ["AnyPS5Core"], path: "Tests/AnyPS5CoreTests"),
+        .testTarget(name: "AnyPS5CoreTests", dependencies: ["AnyPS5Core"], path: "Tests/AnyPS5CoreTests", exclude: ["Fixtures"]),
         // Share play's WebRTC wiring end to end in one process, with a synthetic picture.
         .testTarget(name: "AnyPS5SharePlayTests", dependencies: ["AnyPS5SharePlay"], path: "Tests/AnyPS5SharePlayTests"),
         // Online play end to end in one process: two launchers, two fake engines, real data channels.
