@@ -30,6 +30,16 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var feature: String? = nil
     /// Whose family limit it was, with "restricted_by_family": "self" (the asker's) or "other".
     public var side: String? = nil
+    /// With "quota_exceeded": bytes used, the quota and what the refused upload needed.
+    public var used: Int? = nil
+    public var limit: Int? = nil
+    public var needed: Int? = nil
+    /// With "quota_exceeded" on a save: replacing the slot's newest version would make room.
+    public var canReplace: Bool? = nil
+    /// With "save_conflict" (the newer version) or a replaceable "quota_exceeded" (the newest).
+    public var latest: TogetherSaveVersion? = nil
+    /// With "conflict" on completing an upload: the parts that have not arrived.
+    public var missing: [Int]? = nil
     public var description: String { title }
 }
 
@@ -216,6 +226,12 @@ public final class TogetherClient: @unchecked Sendable {
         }
     }
 
+    /// A new access token, whatever the old one's time (it was refused).
+    func refreshedToken() async throws -> String {
+        guard let saved = store.load() else { throw TogetherProblem(status: 401, code: "unauthorized", title: "Not signed in") }
+        return try await refresh(from: saved.refreshToken)
+    }
+
     /// One refresh at a time: calls that fail together share it.
     private func refresh(from refreshToken: String) async throws -> String {
         try await refresher.run {
@@ -258,6 +274,7 @@ public final class TogetherClient: @unchecked Sendable {
         if let raw = body as? TogetherRawBody {
             // A file going up (a theme): its own type, and time to send it.
             request.setValue(raw.contentType, forHTTPHeaderField: "Content-Type")
+            for (name, value) in raw.headers { request.setValue(value, forHTTPHeaderField: name) }
             request.httpBody = raw.data
             request.timeoutInterval = 180
         } else if let body {

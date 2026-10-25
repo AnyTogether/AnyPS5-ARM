@@ -38,8 +38,20 @@ final class FakeTogether: URLProtocol, @unchecked Sendable {
 
     private var stopped = false
 
+    /// An answer that is not JSON (a file being downloaded), with its own headers.
+    struct Raw {
+        let data: Data
+        var headers: [String: String] = [:]
+    }
+
     private func answer(_ request: URLRequest, _ status: Int, _ json: Any) {
         guard !stopped else { return }
+        if let raw = json as? Raw {
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: raw.headers)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: raw.data)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         let data = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
         let type = status >= 400 ? "application/problem+json" : "application/json"
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["content-type": type])!, cacheStoragePolicy: .notAllowed)
