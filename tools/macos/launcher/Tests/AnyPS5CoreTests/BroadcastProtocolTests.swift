@@ -36,6 +36,18 @@ final class BroadcastProtocolTests: XCTestCase {
         XCTAssertThrowsError(try AMF0.decodeAll(Data([0x0D])))
     }
 
+    func testAMF0RefusesValuesNestedTooDeep() {
+        // A strict array of one inside another, 200 000 deep: read without a limit, this runs
+        // out of stack long before it runs out of bytes.
+        var bytes = Data()
+        for _ in 0 ..< 200_000 { bytes.append(contentsOf: [0x0A, 0, 0, 0, 1]) }
+        bytes.append(0x05)
+        XCTAssertThrowsError(try AMF0.decodeAll(bytes))
+        var shallow = AMF0.null
+        for _ in 0 ..< 30 { shallow = .strictArray([shallow]) }
+        XCTAssertEqual(try AMF0.decodeAll(AMF0.encode([shallow])), [shallow])
+    }
+
     // MARK: Chunks
 
     /// The first message on a chunk stream has a full header (type 0); a message longer than the

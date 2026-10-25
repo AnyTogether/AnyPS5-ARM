@@ -125,23 +125,28 @@ public indirect enum AMF0: Equatable, Sendable {
         return values
     }
 
-    static func decode(_ reader: inout ByteReader) throws -> AMF0 {
+    /// How deep objects and arrays may sit inside each other. RTMP's commands go two or three
+    /// levels down; a server sending thousands would otherwise run the reader out of stack.
+    static let deepest = 64
+
+    static func decode(_ reader: inout ByteReader, depth: Int = 0) throws -> AMF0 {
+        guard depth <= deepest else { throw Malformed(description: "values nested deeper than \(deepest)") }
         let marker = try reader.byte()
         switch marker {
         case 0x00: return .number(Double(bitPattern: try reader.bigEndian(UInt64.self)))
         case 0x01: return .boolean(try reader.byte() != 0)
         case 0x02: return .string(try reader.string(length: Int(try reader.bigEndian(UInt16.self))))
         case 0x0C: return .string(try reader.string(length: Int(try reader.bigEndian(UInt32.self))))
-        case 0x03: return .object(try properties(&reader))
+        case 0x03: return .object(try properties(&reader, depth: depth + 1))
         case 0x05: return .null
         case 0x06: return .undefined
         case 0x08:
             _ = try reader.bigEndian(UInt32.self)
-            return .ecmaArray(try properties(&reader))
+            return .ecmaArray(try properties(&reader, depth: depth + 1))
         case 0x0A:
             let count = Int(try reader.bigEndian(UInt32.self))
             guard count <= reader.remaining else { throw Malformed(description: "an array longer than its message") }
-            return .strictArray(try (0 ..< count).map { _ in try decode(&reader) })
+            return .strictArray(try (0 ..< count).map { _ in try decode(&reader, depth: depth + 1) })
         case 0x0B:
             let milliseconds = Double(bitPattern: try reader.bigEndian(UInt64.self))
             _ = try reader.bigEndian(UInt16.self)
@@ -151,7 +156,7 @@ public indirect enum AMF0: Equatable, Sendable {
         }
     }
 
-    private static func properties(_ reader: inout ByteReader) throws -> [Property] {
+    private static func properties(_ reader: inout ByteReader, depth: Int) throws -> [Property] {
         var properties: [Property] = []
         while true {
             let key = try reader.string(length: Int(try reader.bigEndian(UInt16.self)))
@@ -159,7 +164,7 @@ public indirect enum AMF0: Equatable, Sendable {
                 _ = try reader.byte()
                 return properties
             }
-            properties.append(Property(key, try decode(&reader)))
+            properties.append(Property(key, try decode(&reader, depth: depth)))
         }
     }
 }
