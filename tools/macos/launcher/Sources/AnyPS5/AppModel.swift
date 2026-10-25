@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5Online
 import AppKit
 import Combine
 import SwiftUI
@@ -326,6 +327,10 @@ final class AppModel: ObservableObject {
         apply()
         if persists { loadEngines(); loadProfilePicture() }
         if persists {
+            // Online play's packets ride WebRTC data channels; their signals go out on the socket.
+            OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in
+                DispatchQueue.main.async { self?.togetherSocket?.signal(to: to, device: device, gameSession: session, kind: kind, json: data) }
+            })
             AppModel.opener = { [weak self] urls in self?.open(urls) }
             AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
             let waiting = AppModel.pending

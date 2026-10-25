@@ -175,6 +175,16 @@ final class OnlinePlayTests: XCTestCase {
         let data = try XCTUnwrap(JSONSerialization.jsonObject(with: signal.json) as? [String: Any])
         XCTAssertEqual(data["sdpMid"] as? String, "0")
         XCTAssertNil(OnlinePeerSignal(event: Data(#"{"from":"b-id"}"#.utf8)))
+
+        let frame = TogetherSocket.gameSignalFrame(to: "b-id", device: "dev-b", session: "s1", kind: "offer", json: Data(#"{"type":"offer","sdp":"v=0"}"#.utf8))
+        let sent = try XCTUnwrap(JSONSerialization.jsonObject(with: frame) as? [String: Any])
+        XCTAssertEqual(sent["op"] as? String, "signal")
+        XCTAssertEqual(sent["session"] as? String, "s1", "a game session's signal names the session, as the gateway wants it")
+        XCTAssertEqual(sent["to"] as? String, "b-id")
+        XCTAssertEqual(sent["device"] as? String, "dev-b")
+        XCTAssertEqual((sent["data"] as? [String: Any])?["sdp"] as? String, "v=0", "the data goes as JSON, not as a string")
+        let bye = try XCTUnwrap(JSONSerialization.jsonObject(with: TogetherSocket.gameSignalFrame(to: "b-id", device: "dev-b", session: "s1", kind: "bye", json: Data("null".utf8))) as? [String: Any])
+        XCTAssertTrue(bye["data"] is NSNull)
     }
 
     func testEachTitleHasItsObservationLogAndABigOneIsKeptAside() throws {

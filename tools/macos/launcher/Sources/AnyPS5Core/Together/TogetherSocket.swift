@@ -92,6 +92,19 @@ public final class TogetherSocket: @unchecked Sendable {
         queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
     }
 
+    /// The same between two players of a game session (`game_session.signal`): online play's
+    /// data channels. `json` is the signal's data as JSON.
+    public func signal(to userId: String, device: String, gameSession: String, kind: String, json: Data) {
+        let frame = TogetherSocket.gameSignalFrame(to: userId, device: device, session: gameSession, kind: kind, json: json)
+        queue.async { [self] in task?.send(.string(String(decoding: frame, as: UTF8.self))) { _ in } }
+    }
+
+    static func gameSignalFrame(to userId: String, device: String, session: String, kind: String, json: Data) -> Data {
+        let data = (try? JSONSerialization.jsonObject(with: json, options: .fragmentsAllowed)) ?? NSNull()
+        let frame: [String: Any] = ["op": "signal", "to": userId, "device": device, "session": session, "kind": kind, "data": data]
+        return (try? JSONSerialization.data(withJSONObject: frame)) ?? Data()
+    }
+
     /// The public topics to hear "changed" events of (the board, the public lists), replacing the
     /// ones before; [] for none. Sent now and again after a reconnect.
     public func watch(_ topics: [String]) {
