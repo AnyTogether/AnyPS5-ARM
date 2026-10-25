@@ -322,6 +322,10 @@ Each branch is its own project, with its own README:
 | [`rosetta`](https://github.com/utkuhalis/AnyPS5-ARM/tree/rosetta) | The engine only, the way it runs today: x86-64 code under Rosetta 2. |
 | [`native-arm64`](https://github.com/utkuhalis/AnyPS5-ARM/tree/native-arm64) | The engine running games as native arm64 code, without Rosetta (experimental). |
 
+## Credits
+
+- Online play's bridge protocol design is based on AnyPlay's bridge spec ([anyplaynet/network](https://github.com/anyplaynet/network/blob/main/spec/bridge-protocol.md), MIT/Apache-2.0): the frame header, the message numbering, the virtual LAN range and the A/B/C screening of games come from it. See [Online play](docs/dev/ONLINE_PLAY.md#compared-with-anyplay).
+
 ## Disclaimer
 
 This project is intended for interoperability, research, preservation and compatibility purposes. It does not include, distribute or require copyrighted software, firmware, cryptographic keys or proprietary libraries. Users are responsible for obtaining and using any binaries with this project in accordance with applicable laws and their license terms.

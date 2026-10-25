@@ -166,7 +166,7 @@ No web API request, push filter, session signalling context, matching, NpSignali
 
 ## Compared with AnyPlay
 
-AnyPlay's public design (`anyplay-gg/network`, engine pull request `feat/net-bridge`) solves the same problem and we learned from it. RPCN (PS3) and shadPS4's shadnet (PS4) go further and reimplement the platform service itself; we pass requests through to the launcher instead, so the engine stays small and the server is AnyTogether. We did not copy code; where we agree it is because the problem leaves little choice.
+Our protocol design is based on AnyPlay's bridge spec ([anyplaynet/network](https://github.com/anyplaynet/network/blob/main/spec/bridge-protocol.md), MIT/Apache-2.0) and their engine bridge (`anyplaynet/AnyPS5`, pull request `feat/net-bridge`): the 12-byte frame header and 16 MiB cap, the message numbering, the virtual LAN range 198.18.0.0/15 and the A/B/C screening of games come from it, and our reader and writer follow theirs. RPCN (PS3) and shadPS4's shadnet (PS4) go further and reimplement the platform service itself; we pass requests through to the launcher instead, so the engine stays small and the server is AnyTogether. Where we differ, and why:
 
 | Topic | AnyPlay | Ours | Why |
 |---|---|---|---|

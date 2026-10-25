@@ -7,7 +7,7 @@ Wire format and the per-library tables: [docs/dev/ONLINE_PLAY.md](../../dev/ONLI
 
 Two people who own the same game run it on their own computers and play its online mode together, through AnyTogether, the way the game would have played over the console's network. Today AnyTogether is social only (friends, parties, calls, share play) and every game runs signed out and offline.
 
-AnyPlay ships the same idea (`anyplaynet/AnyPS5` bridge plus `anyplaynet/network`). Their own status page says no real game plays online yet: the bridge is under review and every platform web API group is still answered "not offered". So the race is not about plumbing, which both sides have, but about who first learns what real games need and answers it.
+AnyPlay ships the same idea (`anyplaynet/AnyPS5` bridge plus `anyplaynet/network`), and this design is based on their bridge spec (https://github.com/anyplaynet/network/blob/main/spec/bridge-protocol.md, MIT/Apache-2.0). Their own status page says no real game plays online yet: the bridge is under review and every platform web API group is still answered "not offered". So the race is not about plumbing, which both sides have, but about who first learns what real games need and answers it.
 
 ## The clean line
 
