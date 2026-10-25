@@ -117,6 +117,7 @@ struct RootView: View {
         .ignoresSafeArea()
         .onAppear {
             Input.shared.handler = { [weak model] command in model?.handle(command) ?? false }
+            Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
             Input.shared.scrollHandler = { [weak model] command in
                 guard let model, model.preferences.onboarded, model.overlay == nil else { return false }
                 model.moveSelection(command == .left ? -1 : 1)

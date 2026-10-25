@@ -61,6 +61,9 @@ struct Preferences: Codable, Equatable {
     var cjkGames: [String]?
     /// Hidden trophies show what they are before they are earned; nil means off.
     var alwaysShowHiddenTrophies: Bool?
+    /// Soft pulses in the controller for select, back, errors, trophies, calls and the end of a
+    /// row; nil means on.
+    var controllerVibration: Bool?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -96,6 +99,8 @@ enum GameState: Equatable {
 
 enum HomeFocus: Equatable {
     case top(Int)
+    /// The update notice's buttons, left of the top bar's: 0 Restart Now, 1 Later.
+    case notice(Int)
     case tiles
     case actions(Int)
 }
@@ -148,6 +153,12 @@ enum Overlay: Equatable {
     case compare
 }
 
+/// A newer launcher downloaded and checked, unpacked in a folder of its own, waiting for a restart.
+struct ReadyUpdate: Equatable {
+    var release: Updates.Release
+    var app: URL
+}
+
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let text: String
@@ -185,8 +196,10 @@ final class AppModel: ObservableObject {
     /// Focuses row `index` of `rows`, remembering which item that is.
     func focusRow(_ index: Int, in rows: [PanelRow]) {
         keepingFocus = true
-        panelRow = index
-        panelFocusID = rows.indices.contains(index) ? rows[index].id : nil
+        // Only what changes is written, so a move that went nowhere changes nothing.
+        if panelRow != index { panelRow = index }
+        let id = rows.indices.contains(index) ? rows[index].id : nil
+        if panelFocusID != id { panelFocusID = id }
         keepingFocus = false
     }
 
@@ -313,6 +326,20 @@ final class AppModel: ObservableObject {
     /// A newer launcher on GitHub, and how far its download is once asked for.
     @Published private(set) var availableUpdate: Updates.Release?
     @Published private(set) var updateProgress: Double?
+    /// The newer launcher downloaded, its signature and sums checked, unpacked and waiting for a
+    /// restart (or for the launcher to quit).
+    @Published private(set) var readyUpdate: ReadyUpdate?
+    /// The last check found no answer (offline, a rate limit).
+    @Published private(set) var updateCheckFailed = false
+    /// Later on the home screen's notice, by version.
+    @Published var updateNotice = UpdateNotice()
+    /// Restart Now with a game running: the restart waits for the game to close.
+    @Published private(set) var restartAfterGame = false
+    /// The update was handed to the replacement script already.
+    private var updatePlaced = false
+    /// Counts every change of the model, for Input's edge bump.
+    private(set) var changeCount = 0
+    private var changeSink: AnyCancellable?
     /// The game the phone asked for while another one was still playing.
     private var launchAfterExit: String?
     /// The game to start as soon as its update finishes.
@@ -337,6 +364,7 @@ final class AppModel: ObservableObject {
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
+        changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
         if persists { loadEngines(); loadProfilePicture() }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
@@ -344,7 +372,11 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.async { self?.togetherSocket?.signal(to: to, device: device, gameSession: session, kind: kind, json: data) }
             })
             AppModel.opener = { [weak self] urls in self?.open(urls) }
-            AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
+            AppModel.beforeQuit = { [weak self] in
+                // A ready update goes in as the launcher quits: the next launch is the new version.
+                self?.placeUpdate(relaunch: false)
+                return self?.leaveTogetherOnQuit()
+            }
             let waiting = AppModel.pending
             AppModel.pending = []
             if !waiting.isEmpty { DispatchQueue.main.async { [weak self] in self?.open(waiting) } }
@@ -430,6 +462,7 @@ final class AppModel: ObservableObject {
         Motion.reduced = preferences.reducedMotion
         Sounds.shared.enabled = preferences.sounds
         Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
+        Feel.shared.vibration = preferences.controllerVibration ?? true
         ThemeMusic.shared.volume = Float(musicVolume) / 100
     }
 
@@ -450,6 +483,12 @@ final class AppModel: ObservableObject {
         guard channel != updateChannel else { return }
         preferences.updateChannel = channel == .stable ? nil : channel.rawValue
         availableUpdate = nil
+        // A build of the other channel waiting for a restart is not this channel's.
+        if let ready = readyUpdate {
+            try? FileManager.default.removeItem(at: ready.app.deletingLastPathComponent().deletingLastPathComponent())
+            readyUpdate = nil
+            restartAfterGame = false
+        }
         guard updateProgress == nil else { return }
         // A check on its way asks again for the new channel when it ends.
         guard !checkingUpdates else { return }
@@ -483,12 +522,20 @@ final class AppModel: ObservableObject {
             switch found {
             case .newer(let release):
                 self.lastUpdateCheck = Date()
+                self.updateCheckFailed = false
                 let first = self.availableUpdate?.tag != release.tag
                 self.availableUpdate = release
-                if first || told { self.show(T.format(.launcherUpdateAvailable, release.version), symbol: "arrow.down.circle.fill") }
+                if self.readyUpdate?.release.tag == release.tag { return }
+                if self.canReplaceItself {
+                    // Downloaded quietly; the notice comes once it is ready.
+                    self.downloadUpdate(told: told)
+                } else if first || told {
+                    self.show(T.format(.launcherUpdateAvailable, release.version), symbol: "arrow.down.circle.fill")
+                }
             case .current:
                 self.lastUpdateCheck = Date()
-                self.availableUpdate = nil
+                self.updateCheckFailed = false
+                if self.readyUpdate == nil { self.availableUpdate = nil }
                 // On Stable after a nightly: this version stays until a newer release.
                 if told, channel == .stable, Updates.Version(current)?.isNightly == true {
                     self.show(T.format(.updateChannelStays, current), symbol: "checkmark.circle.fill")
@@ -496,34 +543,123 @@ final class AppModel: ObservableObject {
                     self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill")
                 }
             case .failed:
+                self.updateCheckFailed = true
                 if told { self.show(T.text(.updateCheckFailed), symbol: "exclamationmark.triangle.fill") }
             }
         }
     }
 
-    /// Downloads the update, then quits so that it takes this app's place and opens.
-    func installUpdate() {
-        guard let release = availableUpdate, updateProgress == nil else { return }
-        guard running == nil, starting == nil else { return show(T.text(.updateCloseGame), symbol: "exclamationmark.triangle.fill") }
-        let app = Bundle.main.bundleURL
-        guard !AppLocation.isTranslocated, FileManager.default.isWritableFile(atPath: app.deletingLastPathComponent().path) else {
-            return show(T.text(.updateNotWritable), symbol: "exclamationmark.triangle.fill")
-        }
+    /// Where the launcher's own update stands (About, the home screen's notice).
+    var launcherUpdateState: LauncherUpdateState {
+        .of(checking: checkingUpdates, newer: availableUpdate?.version, progress: updateProgress, ready: readyUpdate?.release.version,
+            lastCheck: lastUpdateCheck, failed: updateCheckFailed)
+    }
+
+    /// The home screen's quiet notice: an update ready, or a restart waiting for the game.
+    var showsUpdateNotice: Bool { restartAfterGame || updateNotice.shows(launcherUpdateState) }
+
+    /// This copy can put a new version in its own place: not run from a translocated or
+    /// read-only folder.
+    var canReplaceItself: Bool {
+        !AppLocation.isTranslocated && FileManager.default.isWritableFile(atPath: Bundle.main.bundleURL.deletingLastPathComponent().path)
+    }
+
+    /// Downloads the newer launcher, checks its signature and sums (Updates.prepare) and keeps it
+    /// ready for a restart. Nothing is replaced yet.
+    func downloadUpdate(told: Bool = true) {
+        guard let release = availableUpdate, updateProgress == nil, readyUpdate?.release.tag != release.tag else { return }
+        guard canReplaceItself else { return show(T.text(.updateNotWritable), symbol: "exclamationmark.triangle.fill") }
         updateProgress = 0
         let identifier = Bundle.main.bundleIdentifier ?? "org.anyps5.launcher"
         let current = AppModel.runningVersion
         Task { @MainActor in
             do {
                 let new = try await Updates.prepare(release, bundleIdentifier: identifier, current: current) { fraction in
-                    Task { @MainActor in self.updateProgress = fraction }
+                    Task { @MainActor in if self.updateProgress != nil { self.updateProgress = fraction } }
                 }
-                try Updates.replace(app, with: new, pid: ProcessInfo.processInfo.processIdentifier)
-                NSApp.terminate(nil)
+                self.updateProgress = nil
+                if let old = self.readyUpdate, old.app != new {
+                    try? FileManager.default.removeItem(at: old.app.deletingLastPathComponent().deletingLastPathComponent())
+                }
+                self.readyUpdate = ReadyUpdate(release: release, app: new)
             } catch {
                 self.updateProgress = nil
-                self.show(T.text(.updateFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+                // The periodic check says nothing over a game or a screen; About shows it.
+                if told { self.show(T.text(.updateFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill") }
             }
         }
+    }
+
+    /// Settings → About → Update: the download, or Restart Now once it is ready.
+    func installUpdate() {
+        if readyUpdate != nil { return restartForUpdate() }
+        downloadUpdate(told: true)
+    }
+
+    /// Restart Now: the new version takes this one's place and opens; with a game running, the
+    /// restart waits for it to close.
+    func restartForUpdate() {
+        guard readyUpdate != nil else { return }
+        switch UpdateRestart.decide(gameRunning: running != nil || starting != nil) {
+        case .afterGame:
+            restartAfterGame = true
+        case .now:
+            restartAfterGame = false
+            guard placeUpdate(relaunch: true) else { return }
+            NSApp.terminate(nil)
+        }
+    }
+
+    func cancelRestartAfterGame() {
+        restartAfterGame = false
+    }
+
+    /// Later: the update goes in when the launcher quits; the notice does not come back for it.
+    func updateLater() {
+        updateNotice.later(launcherUpdateState)
+        restartAfterGame = false
+        Sounds.shared.play(.back)
+    }
+
+    /// Hands the ready update to the replacement script, which waits for this app to end.
+    @discardableResult
+    private func placeUpdate(relaunch: Bool) -> Bool {
+        guard let ready = readyUpdate, !updatePlaced, persists else { return false }
+        do {
+            try Updates.replace(Bundle.main.bundleURL, with: ready.app, pid: ProcessInfo.processInfo.processIdentifier, relaunch: relaunch)
+            updatePlaced = true
+            return true
+        } catch {
+            show(T.text(.updateFailed) + ": \(error)", symbol: "exclamationmark.triangle.fill")
+            return false
+        }
+    }
+
+    /// A game closed while a restart waited for it: a moment for its saves, then the restart.
+    private func restartIfWaiting() {
+        guard restartAfterGame else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard self.restartAfterGame, self.running == nil, self.starting == nil else { return }
+            self.restartForUpdate()
+        }
+    }
+
+    /// Previews of the notice and of About's update rows.
+    func previewUpdate(_ state: LauncherUpdateState, waitingForGame: Bool = false) {
+        let release = Updates.Release(tag: "v0.2.20-arm", version: "0.2.20", page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.20-arm")!,
+                                      download: nil, size: nil)
+        lastUpdateCheck = Date(timeIntervalSince1970: 1_793_000_000)
+        switch state {
+        case .checking: checkingUpdates = true
+        case .failed: updateCheckFailed = true
+        case .available: availableUpdate = release
+        case .downloading(_, let fraction): availableUpdate = release; updateProgress = fraction
+        case .ready: availableUpdate = release; readyUpdate = ReadyUpdate(release: release, app: URL(fileURLWithPath: "/tmp/AnyPS5.app"))
+        case .idle: lastUpdateCheck = nil
+        case .upToDate: break
+        }
+        restartAfterGame = waitingForGame
     }
 
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
@@ -1310,6 +1446,7 @@ final class AppModel: ObservableObject {
     private func applicationEnded(_ pid: pid_t?) {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
+        defer { restartIfWaiting() }
         OnlinePlayHost.stop()
         if let start = sessionStart { recordPlay(running.game, from: start) }
         sessionStart = nil
@@ -1744,6 +1881,7 @@ final class AppModel: ObservableObject {
                     self.recordTrophies(game, set)
                     for trophy in earned {
                         TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds)
+                        Feel.shared.vibrate(.trophy)
                         self.tellPhone(trophy)
                     }
                 }
@@ -2028,6 +2166,8 @@ final class AppModel: ObservableObject {
     }
 
     func show(_ text: String, symbol: String, icon: URL? = nil) {
+        // Something went wrong: two short taps in the controller.
+        if symbol.hasPrefix("exclamationmark") { Feel.shared.vibrate(.error) }
         toastTask?.cancel()
         withAnimation(Motion.overlay) { toast = Toast(text: text, symbol: symbol, icon: icon) }
         toastTask = Task {

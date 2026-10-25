@@ -35,4 +35,19 @@ final class HiddenTrophiesTests: XCTestCase {
         XCTAssertFalse(hidden.canToggle(secret))
         XCTAssertFalse(hidden.toggle(secret, game: "g"), "nothing to show or hide with the setting on")
     }
+
+    func testAnEarnedTrophyIsNeverSecret() {
+        // Earned while hidden: its name, description and icon show, whatever was chosen before.
+        let earned = trophy(5, hidden: true, earned: true)
+        for always in [false, true] {
+            var hidden = HiddenTrophies(always: always, shown: [HiddenTrophies.key(game: "g", trophy: earned)])
+            XCTAssertFalse(hidden.secret(earned, game: "g"), "always \(always)")
+            XCTAssertFalse(hidden.secret(earned, game: "other"), "always \(always)")
+            XCTAssertFalse(hidden.toggle(earned, game: "g"), "nothing to hide again")
+        }
+        // Only the unearned hidden one is masked.
+        let hidden = HiddenTrophies(always: false)
+        let list = [trophy(1, hidden: false), trophy(2, hidden: true), trophy(3, hidden: true, earned: true), trophy(4, hidden: false, earned: true)]
+        XCTAssertEqual(list.filter { hidden.secret($0, game: "g") }.map(\.number), [2])
+    }
 }

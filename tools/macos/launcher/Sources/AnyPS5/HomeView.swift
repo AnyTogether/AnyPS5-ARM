@@ -113,6 +113,11 @@ struct TopBar: View {
                 ProgressView().controlSize(.small).tint(.white).scaleEffect(scale)
             }
             Spacer()
+            if model.showsUpdateNotice {
+                UpdateNoticeView()
+                    .transition(.opacity.combined(with: .offset(y: -8 * scale)))
+                    .padding(.trailing, 6 * scale)
+            }
             iconButton("square.grid.3x3.fill", index: 0) { model.open(.library) }
             iconButton("gearshape.fill", index: 1) { model.open(.settings) }
             iconButton("person.2.fill", index: 2, badge: model.togetherRequests.incoming.count + model.friendsOnline) { model.open(.friends) }
@@ -135,6 +140,7 @@ struct TopBar: View {
             }
             Clock()
         }
+        .animation(Motion.overlay, value: model.showsUpdateNotice)
     }
 
     private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, action: @escaping () -> Void) -> some View {
@@ -158,6 +164,60 @@ struct TopBar: View {
                 .shadow(color: .white.opacity(focused ? 0.4 : 0), radius: 10 * scale)
         }
         .buttonStyle(.plain)
+        .hoverTick("top-\(index)")
+        .animation(Motion.focus, value: focused)
+    }
+}
+
+/// The launcher's own update, ready: a quiet line beside the top bar's buttons with Restart Now
+/// and Later; nothing blocks, nothing comes back after Later. With a game running, Restart Now
+/// waits for it and the line says so.
+struct UpdateNoticeView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        let waiting = model.restartAfterGame
+        let version = model.readyUpdate?.release.version ?? ""
+        HStack(spacing: 12 * scale) {
+            Image(systemName: waiting ? "hourglass" : "arrow.down.circle.fill")
+                .font(.system(size: 16 * scale, weight: .semibold))
+                .foregroundStyle(model.accent)
+            Text(waiting ? TU.text(.noticeWaiting) : TU.format(.noticeReady, version))
+                .font(.display(15 * scale, .medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .fixedSize()
+            HStack(spacing: 6 * scale) {
+                pill(waiting ? TU.text(.cancelRestart) : TU.text(.restartNow), index: 0) {
+                    waiting ? model.cancelRestartAfterGame() : model.restartForUpdate()
+                }
+                if !waiting {
+                    pill(TU.text(.later), index: 1) { model.updateLater() }
+                }
+            }
+        }
+        .padding(.leading, 16 * scale)
+        .padding(.trailing, 5 * scale)
+        .frame(height: 44 * scale)
+        .background(Capsule().fill(Color.black.opacity(0.28)).background(.ultraThinMaterial, in: Capsule()))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private func pill(_ title: String, index: Int, action: @escaping () -> Void) -> some View {
+        let focused = model.focus == .notice(index) && model.overlay == nil
+        return Button(action: action) {
+            Text(title)
+                .font(.display(13 * scale, .semibold))
+                .foregroundStyle(focused ? Color.black : .white.opacity(index == 0 ? 0.95 : 0.7))
+                .padding(.horizontal, 14 * scale)
+                .frame(height: 34 * scale)
+                .background(Capsule().fill(focused ? Color.white : Color.white.opacity(index == 0 ? 0.14 : 0.06)))
+                .contentShape(Capsule())
+                .scaleEffect(focused ? 1.05 : 1)
+        }
+        .buttonStyle(.plain)
+        .hoverTick("notice-\(index)")
         .animation(Motion.focus, value: focused)
     }
 }
@@ -185,6 +245,7 @@ struct TileRow: View {
                     GameTile(game: game, size: selected ? large : small, focused: selected && model.focus == .tiles && model.overlay == nil)
                         .offset(x: x, y: selected ? 0 : (large - small) * 0.18)
                         .opacity(offset < 0 ? 0.0 : 1)
+                        .hoverTick("tile-\(game.id)")
                         .onTapGesture(count: 2) { model.selected = index; model.primaryAction(game) }
                         .onTapGesture {
                             if model.selected != index { Sounds.shared.play(.move) }
@@ -496,6 +557,7 @@ struct LibraryGrid: View {
                                 StateLabel(state: model.state(of: game)).font(.display(12 * scale))
                             }
                             .id(game.id)
+                            .hoverTick("library-\(game.id)")
                             .onTapGesture { model.libraryIndex = index; model.pickFromLibrary() }
                         }
                     }
@@ -708,13 +770,26 @@ extension AppModel {
             if command == .select { pickGamesFolder() }
             return true
         }
+        // The notice went (Later, or the update went in): its focus goes to the top bar.
+        if case .notice = focus, !showsUpdateNotice { focus = .top(0) }
+        if case .notice(1) = focus, restartAfterGame { focus = .notice(0) }
         switch (focus, command) {
         case (.tiles, .left): moveSelection(-1)
         case (.tiles, .right): moveSelection(1)
         case (.tiles, .down): moveFocus(.actions(0))
         case (.tiles, .up): moveFocus(.top(1))
         case (.tiles, .select): primaryAction(game)
+        case (.top(0), .left) where showsUpdateNotice: moveFocus(.notice(restartAfterGame ? 0 : 1))
         case (.top(let index), .left): moveFocus(.top(max(0, index - 1)))
+        case (.notice(let index), .left): moveFocus(.notice(max(0, index - 1)))
+        case (.notice(let index), .right): moveFocus(index == 1 || restartAfterGame ? .top(0) : .notice(1))
+        case (.notice, .down), (.notice, .back): moveFocus(.tiles)
+        case (.notice(0), .select):
+            Sounds.shared.play(.select)
+            restartAfterGame ? cancelRestartAfterGame() : restartForUpdate()
+        case (.notice, .select):
+            updateLater()
+            moveFocus(.top(0))
         case (.top(let index), .right): moveFocus(.top(min(5, index + 1)))
         case (.top, .down), (.top, .back): moveFocus(.tiles)
         case (.top(3), .select): openMessages()

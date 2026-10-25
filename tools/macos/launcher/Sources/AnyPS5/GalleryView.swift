@@ -77,6 +77,7 @@ struct Gallery: View {
                     ForEach(Array(shots.enumerated()), id: \.element) { index, shot in
                         Thumbnail(url: shot, focused: index == model.galleryIndex, accent: model.accent)
                             .id(shot)
+                            .hoverTick("shot-\(index)")
                             .onTapGesture {
                                 if model.galleryIndex == index { model.galleryViewing = true } else { model.galleryIndex = index }
                             }

@@ -173,6 +173,12 @@ extension AppModel {
                      kind: .stepper(value: musicVolume, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.musicVolume = value
                      }),
+            PanelRow(id: "vibration", title: TU.text(.controllerVibration), detail: TU.text(.controllerVibrationDetail), symbol: "gamecontroller",
+                     kind: .toggle(preferences.controllerVibration ?? true) { [weak self] value in
+                         self?.preferences.controllerVibration = value ? nil : false
+                         // Turned on from the pad: a pulse at once says what it feels like.
+                         if value { Feel.shared.vibrate(.select) }
+                     }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
             PanelRow(id: "hiddenTrophies", title: T.text(.alwaysShowHiddenTrophies), detail: T.text(.alwaysShowHiddenTrophiesDetail), symbol: "trophy",
                      kind: .toggle(preferences.alwaysShowHiddenTrophies == true) { [weak self] value in self?.preferences.alwaysShowHiddenTrophies = value ? true : nil }),
@@ -214,17 +220,32 @@ extension AppModel {
                          self?.setUpdateChannel(index == 1 ? .nightly : .stable)
                      }),
         ]
-        if let update = availableUpdate {
-            let detail = updateProgress.map { T.format(.updateDownloading, Int($0 * 100)) } ?? T.text(.updateDetail)
-            about.append(PanelRow(id: "update", title: T.format(.updateTo, update.version), detail: detail, symbol: "arrow.down.circle.fill", kind: .action(destructive: false) { [weak self] in
-                self?.installUpdate()
-            }))
+        // The launcher's own update: at most one row that acts, then the check and its state.
+        let updateState = launcherUpdateState
+        switch updateState {
+        case .ready(let version):
+            if restartAfterGame {
+                about.append(PanelRow(id: "update", title: TU.text(.noticeWaiting), detail: TU.text(.cancelRestart), symbol: "hourglass", kind: .action(destructive: false) { [weak self] in
+                    self?.cancelRestartAfterGame()
+                }))
+            } else {
+                about.append(PanelRow(id: "update", title: TU.format(.noticeReady, version) + " · " + TU.text(.restartNow), detail: TU.text(.noticeReadyDetail),
+                                      symbol: "arrow.clockwise.circle.fill", kind: .action(destructive: false) { [weak self] in self?.restartForUpdate() }))
+            }
+        case .downloading(let version, _):
+            about.append(PanelRow(id: "update", title: TU.format(.stateDownloading, version, updateState.percent ?? 0), symbol: "arrow.down.circle", kind: .info("")))
+        case .available(let version):
+            about.append(PanelRow(id: "update", title: T.format(.updateTo, version), detail: canReplaceItself ? TU.text(.stateAvailableDetail) : T.text(.updateNotWritable),
+                                  symbol: "arrow.down.circle.fill", kind: .action(destructive: false) { [weak self] in self?.installUpdate() }))
+        default:
+            break
+        }
+        if let update = readyUpdate?.release ?? availableUpdate {
             about.append(PanelRow(id: "whatsNew", title: T.text(.whatsNew), detail: update.page.absoluteString.replacingOccurrences(of: "https://", with: ""), symbol: "sparkles", kind: .action(destructive: false) {
                 NSWorkspace.shared.open(update.page)
             }))
         }
-        let checked = lastUpdateCheck.map { T.format(.lastChecked, $0.formatted(date: .omitted, time: .shortened)) } ?? T.text(.checkForUpdatesDetail)
-        about.append(PanelRow(id: "checkForUpdates", title: T.text(.checkForUpdatesNow), detail: checkingUpdates ? T.text(.checkingUpdates) : checked,
+        about.append(PanelRow(id: "checkForUpdates", title: T.text(.checkForUpdatesNow), detail: TU.checkLine(updateState),
                               symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.checkForUpdatesNow() }))
         about += [
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(builtInToolkit.map { Toolkit.shortVersion($0.version) } ?? "—")),
@@ -458,7 +479,8 @@ extension AppModel {
     func panelCommand(_ command: Command) -> Bool {
         let categories = panelCategories()
         guard !categories.isEmpty else { return false }
-        panelCategory = min(panelCategory, categories.count - 1)
+        // Written only when it changes: a command that changed nothing hit the end (Input's bump).
+        if panelCategory > categories.count - 1 { panelCategory = categories.count - 1 }
         let rows = categories[panelCategory].rows
         let single = categories.count == 1
         if !panelInRows && !single {
@@ -597,6 +619,7 @@ struct SettingsPanel: View {
                     .frame(height: 52 * scale)
                     .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(selected ? 0.12 : 0)))
                     .contentShape(Rectangle())
+                    .hoverTick("category-\(index)")
                     .onTapGesture {
                         model.panelCategory = index
                         model.panelRow = 0
@@ -674,6 +697,7 @@ struct RowList: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 RowView(row: row, focused: focusedRow == index)
                     .id(row.id)
+                    .hoverTick("row-\(row.id)")
                     .onTapGesture {
                         if model.overlayHasCategories { model.panelInRows = true }
                         model.focusRow(index, in: rows)

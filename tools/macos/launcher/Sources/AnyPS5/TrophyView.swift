@@ -88,6 +88,7 @@ struct TrophyList: View {
             ForEach(Array(set.trophies.enumerated()).dropFirst(first), id: \.element.id) { index, trophy in
                 TrophyRow(game: game, trophy: trophy, focused: index == model.trophyIndex)
                     .id(trophy.id)
+                    .hoverTick("trophy-\(trophy.id)")
                     .onTapGesture { model.trophyIndex = index }
             }
         }

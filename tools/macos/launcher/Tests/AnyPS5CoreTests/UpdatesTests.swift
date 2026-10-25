@@ -82,6 +82,14 @@ final class UpdatesTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: opened.path))
     }
 
+    func testLaterPutsTheUpdateInPlaceWithoutOpeningIt() throws {
+        XCTAssertEqual(Updates.relaunchCommand(true), "/usr/bin/open")
+        let old = try app("Applications/AnyPS5.app", version: "0.2.5-arm", marker: "old")
+        let new = try app("update/app/AnyPS5.app", version: "0.2.6-arm", marker: "new")
+        try runScript(Updates.replacementScript(old: old, new: new, pid: 999_999, relaunch: Updates.relaunchCommand(false)))
+        XCTAssertEqual(marker(old), "new", "the next launch is the new version")
+    }
+
     func testAFailedCopyKeepsTheOldApp() throws {
         let old = try app("Applications/AnyPS5.app", version: "0.2.5-arm", marker: "old")
         let missing = folder.appendingPathComponent("update/app/AnyPS5.app")

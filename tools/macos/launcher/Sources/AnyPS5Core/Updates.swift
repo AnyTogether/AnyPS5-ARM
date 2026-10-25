@@ -269,11 +269,15 @@ public enum Updates {
         """
     }
 
+    /// What the replacement runs on the new app: `open` for Restart Now, nothing for Later (the
+    /// update goes in as the launcher quits, and the next launch is the new version).
+    public static func relaunchCommand(_ relaunch: Bool) -> String { relaunch ? "/usr/bin/open" : "true" }
+
     /// Starts the replacement; the caller quits right after so that `pid` (itself) ends.
-    public static func replace(_ old: URL, with new: URL, pid: Int32) throws {
+    public static func replace(_ old: URL, with new: URL, pid: Int32, relaunch: Bool = true) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", replacementScript(old: old, new: new, pid: pid)]
+        process.arguments = ["-c", replacementScript(old: old, new: new, pid: pid, relaunch: relaunchCommand(relaunch))]
         try process.run()
     }
 

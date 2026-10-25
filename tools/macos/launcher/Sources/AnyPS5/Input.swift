@@ -3,8 +3,9 @@ import AppKit
 import Carbon.HIToolbox
 import GameController
 
-/// Keyboard and game controller input, as the commands the screens act on. Held directions repeat
-/// the way a console menu does.
+/// Keyboard and game controller input, as the commands the screens act on. A held direction
+/// repeats the way a console menu does, at the same pace under a finger and under a thumb
+/// (KeyRepeat: the system's own key repeats are dropped); a direction with nowhere to go bumps.
 @MainActor
 final class Input {
     static let shared = Input()
@@ -12,22 +13,55 @@ final class Input {
     /// Scroll wheel turns as left and right moves, where the screen wants them.
     var scrollHandler: ((Command) -> Bool)?
     /// Takes every key while a binding waits for one (the controls panel); returns whether it used it.
-    var capture: ((NSEvent) -> Bool)?
+    var capture: ((NSEvent) -> Bool)? {
+        didSet { if capture != nil { hold(nil) } }
+    }
+    /// A number that changes whenever a command did something (the model changed or a sound
+    /// played): a direction that left it as it was hit the end of its row.
+    var activity: (() -> Int)?
     private var monitor: Any?
     private var wheelMonitor: Any?
+    private var mouseMonitor: Any?
     private var accumulated: CGFloat = 0
     private var repeatTimer: Timer?
+    /// The direction being held and what holds it: the controller, or an arrow key (its code).
     private var held: Command?
+    private var heldKey: UInt16?
+    private var repeats = 0
+    private var edge = EdgeBump()
+    /// Each controller's D-pad and stick, the D-pad winning while it is pressed.
+    private var dpads: [ObjectIdentifier: Command] = [:]
+    private var sticks: [ObjectIdentifier: StickGate] = [:]
 
     func start() {
         guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self, !Input.belongsToPanel(event) else { return event }
-            if let capture = self.capture { return capture(event) ? nil : event }
+            if let capture = self.capture { return event.type == .keyUp ? event : (capture(event) ? nil : event) }
+            if event.type == .keyUp {
+                if event.keyCode == self.heldKey { self.hold(nil) }
+                return event
+            }
             guard event.type == .keyDown, let command = Input.command(for: event) else { return event }
             // Text fields keep their keys.
             if let responder = event.window?.firstResponder as? NSTextView, responder.isEditable { return event }
-            return self.handler?(command) == true ? nil : event
+            Feel.shared.usedKeyboard()
+            if EdgeBump.isDirection(command) {
+                // The system's repeats of the held arrow: the launcher's own repeat paces it.
+                if event.isARepeat { return event.keyCode == self.heldKey ? nil : event }
+                guard self.dispatch(command, repeat: false) else { return event }
+                self.hold(command, key: event.keyCode)
+                return nil
+            }
+            return self.dispatch(command, repeat: false) ? nil : event
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            Feel.shared.usedKeyboard()
+            return event
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            // A key let go in another app never says so here.
+            MainActor.assumeIsolated { self?.hold(nil) }
         }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self, !Input.belongsToPanel(event) else { return event }
@@ -90,39 +124,40 @@ final class Input {
 
     private func attach(_ controller: GCController) {
         guard let pad = controller.extendedGamepad else { return }
-        pad.dpad.valueChangedHandler = { [weak self] _, x, y in
-            MainActor.assumeIsolated { self?.direction(x: x, y: y) }
+        let id = ObjectIdentifier(controller)
+        pad.dpad.valueChangedHandler = { [weak self, weak controller] _, x, y in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.dpads[id] = abs(x) > abs(y) ? (x > 0 ? .right : x < 0 ? .left : nil) : (y > 0 ? .up : y < 0 ? .down : nil)
+                self.padMoved(id, controller)
+            }
         }
-        pad.leftThumbstick.valueChangedHandler = { [weak self] _, x, y in
-            MainActor.assumeIsolated { self?.direction(x: abs(x) > 0.55 ? x : 0, y: abs(y) > 0.55 ? y : 0) }
+        pad.leftThumbstick.valueChangedHandler = { [weak self, weak controller] _, x, y in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                var stick = self.sticks[id] ?? StickGate()
+                let before = stick.held
+                _ = stick.update(x: Double(x), y: Double(y))
+                self.sticks[id] = stick
+                if stick.held != before { self.padMoved(id, controller) }
+            }
         }
-        pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.select) } }
+        func button(_ input: GCControllerButtonInput?, _ command: Command) {
+            input?.pressedChangedHandler = { [weak self, weak controller] _, _, pressed in
+                if pressed { MainActor.assumeIsolated { self?.controller(command, from: controller) } }
+            }
         }
-        pad.buttonB.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.back) } }
-        }
-        pad.buttonY.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.options) } }
-        }
-        pad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.options) } }
-        }
-        pad.leftShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.previousGame) } }
-        }
-        pad.rightShoulder.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.nextGame) } }
-        }
-        pad.buttonHome?.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed { MainActor.assumeIsolated { self?.controller(.home) } }
-        }
+        button(pad.buttonA, .select)
+        button(pad.buttonB, .back)
+        button(pad.buttonY, .options)
+        button(pad.buttonMenu, .options)
+        button(pad.leftShoulder, .previousGame)
+        button(pad.rightShoulder, .nextGame)
+        button(pad.buttonHome, .home)
         // Only a PlayStation controller's Create (Share) is the console's; another controller's
         // View button is its touchpad in the game.
         if pad is GCDualSenseGamepad || pad is GCDualShockGamepad {
-            pad.buttonOptions?.pressedChangedHandler = { [weak self] _, _, pressed in
-                if pressed { MainActor.assumeIsolated { self?.controller(.capture) } }
-            }
+            button(pad.buttonOptions, .capture)
         }
     }
 
@@ -130,7 +165,7 @@ final class Input {
     /// accessibility permission a key monitor in the background would need.
     private func registerCaptureKey() {
         registerHotKey(id: Input.captureKey, keyCode: kVK_F12, modifiers: optionKey) { [weak self] pressed in
-            if pressed { self?.controller(.capture) }
+            if pressed { self?.controller(.capture, from: nil) }
         }
     }
 
@@ -175,26 +210,54 @@ final class Input {
     }
 
     /// A controller command; while the launcher is behind a game only PS is acted on.
-    private func controller(_ command: Command) {
+    private func controller(_ command: Command, from controller: GCController?) {
+        if NSApp.isActive, let controller { Feel.shared.usedPad(controller) }
         guard NSApp.isActive || command == .home || command == .capture else { return }
-        _ = handler?(command)
+        _ = dispatch(command, repeat: false)
     }
 
-    private func direction(x: Float, y: Float) {
-        let command: Command? = abs(x) > abs(y) ? (x > 0 ? .right : x < 0 ? .left : nil) : (y > 0 ? .up : y < 0 ? .down : nil)
-        guard command != held else { return }
-        held = command
+    /// A controller's D-pad or stick changed: the direction it holds now, the D-pad first.
+    private func padMoved(_ id: ObjectIdentifier, _ controller: GCController?) {
+        let command = dpads[id] ?? sticks[id]?.held
+        if command != nil, NSApp.isActive { Feel.shared.usedPad(controller) }
+        // Another input's hold is let go only by that input.
+        guard heldKey == nil || command != nil else { return }
+        guard command != held || heldKey != nil else { return }
+        guard let command, NSApp.isActive, capture == nil else { return hold(nil) }
+        _ = dispatch(command, repeat: false)
+        hold(command)
+    }
+
+    /// Hands a command to the screens; a direction that did nothing bumps (once per hold).
+    @discardableResult
+    private func dispatch(_ command: Command, repeat isRepeat: Bool) -> Bool {
+        let before = activity?()
+        let used = handler?(command) == true
+        if used, let before, edge.handled(command, repeat: isRepeat, changed: activity?() != before) {
+            Sounds.shared.play(.bump)
+        }
+        return used
+    }
+
+    /// Starts repeating `command` (nil stops): the first repeat after 0.40 s, then faster.
+    private func hold(_ command: Command?, key: UInt16? = nil) {
         repeatTimer?.invalidate()
-        guard let command, NSApp.isActive else { return }
-        _ = handler?(command)
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.38, repeats: false) { [weak self] _ in
+        repeatTimer = nil
+        held = command
+        heldKey = command == nil ? nil : key
+        repeats = 0
+        if command != nil { scheduleRepeat() }
+    }
+
+    private func scheduleRepeat() {
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: KeyRepeat.delay(beforeRepeat: repeats + 1), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.085, repeats: true) { _ in
-                    MainActor.assumeIsolated {
-                        guard let self, let held = self.held else { return }
-                        _ = self.handler?(held)
-                    }
-                }
+                guard let self, let held = self.held else { return }
+                // The hold ends when a dialog or a binding takes the keys, or the launcher goes behind.
+                guard NSApp.isActive, self.capture == nil, NSApp.modalWindow == nil else { return self.hold(nil) }
+                self.repeats += 1
+                self.dispatch(held, repeat: true)
+                self.scheduleRepeat()
             }
         }
     }

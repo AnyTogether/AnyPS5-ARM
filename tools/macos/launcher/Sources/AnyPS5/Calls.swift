@@ -56,6 +56,7 @@ extension AppModel {
             let start = Date()
             while !Task.isCancelled, Date().timeIntervalSince(start) < TogetherVoice.ringFor {
                 Sounds.shared.play(.ring)
+                Feel.shared.vibrate(.ring)
                 try? await Task.sleep(for: .seconds(2.4))
             }
             guard !Task.isCancelled, let self, self.ringing?.callId == call.callId else { return }

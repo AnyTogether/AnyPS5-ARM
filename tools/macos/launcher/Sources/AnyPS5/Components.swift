@@ -101,6 +101,7 @@ struct ConsoleButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .hoverTick("button-\(title)-\(symbol ?? "")")
         .animation(Motion.focus, value: focused)
     }
 }
@@ -257,6 +258,7 @@ private struct HintPress<Label: View>: View {
             .overlay(shape.strokeBorder(Color.white.opacity(whole && lit ? 0.14 : 0), lineWidth: 1))
             .contentShape(shape)
             .pointingHand($hovering)
+            .hoverTick("hint-\(command.rawValue)-\(whole)")
             .padding(.horizontal, whole ? -inset.width : 0)
             .padding(.vertical, whole ? -inset.height : 0)
             .scaleEffect(pressed ? (whole ? 0.96 : 0.9) : 1)
