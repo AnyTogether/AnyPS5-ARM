@@ -68,6 +68,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   OwnProfile? _profile;
   String? _country;
   Privacy _privacy = defaultPrivacy;
+  bool _appearOffline = false;
   bool _saving = false;
   bool _picture = false;
   Object? _loadError;
@@ -110,6 +111,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _bio.text = profile.bio ?? '';
         _country = profile.country;
         _privacy = profile.privacy;
+        _appearOffline = profile.appearOffline;
       });
     } on Object catch (error) {
       if (mounted) setState(() => _loadError = error);
@@ -180,6 +182,28 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         setState(() {
           _privacy = before;
           _error = _problem(Texts.of(context), error);
+        });
+      }
+    }
+  }
+
+  /// Saved as it is picked; back as it was when the server did not take it.
+  Future<void> _setAppearOffline(bool appearOffline) async {
+    final texts = Texts.of(context);
+    setState(() {
+      _appearOffline = appearOffline;
+      _error = null;
+    });
+    try {
+      final saved = await _profiles.setAppearOffline(appearOffline);
+      if (mounted) setState(() => _appearOffline = saved);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _appearOffline = !appearOffline;
+          _error = error is TogetherProblem && error.status == 404
+              ? texts.presenceUnavailable
+              : _problem(texts, error);
         });
       }
     }
@@ -514,7 +538,123 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ],
             ),
           ),
+      SectionLabel(texts.presenceMode),
+      _TwoWayPicker(
+        labels: [texts.presenceOnline, texts.presenceAppearOffline],
+        dots: const [togetherAccent, null],
+        value: _appearOffline ? 1 : 0,
+        onChanged: (index) => _setAppearOffline(index == 1),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          children: [
+            if (_appearOffline) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Text(
+                  texts.appearingOffline,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                texts.presenceModeHint,
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
     ],
+  );
+}
+
+/// Two segments, the picked one lit; a segment may carry a status dot (null: a hollow ring).
+class _TwoWayPicker extends StatelessWidget {
+  const _TwoWayPicker({
+    required this.labels,
+    required this.dots,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final List<String> labels;
+  final List<Color?> dots;
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(3),
+    decoration: BoxDecoration(
+      color: const Color(0x0FFFFFFF),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        for (var index = 0; index < labels.length; index++)
+          Expanded(
+            child: Semantics(
+              button: true,
+              selected: index == value,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: index == value ? null : () => onChanged(index),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  decoration: BoxDecoration(
+                    color: index == value
+                        ? const Color(0x338AB4FF)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: dots[index],
+                          border: dots[index] == null
+                              ? Border.all(color: Colors.white54, width: 1.5)
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          labels[index],
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: index == value
+                                ? Colors.white
+                                : Colors.white54,
+                            fontSize: 13,
+                            fontWeight: index == value
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
   );
 }
 

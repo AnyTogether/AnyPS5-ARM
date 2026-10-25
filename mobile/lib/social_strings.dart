@@ -80,6 +80,16 @@ extension SocialTexts on Strings {
       ? _s('vis_nobody_search')
       : _s('vis_${audience.name}');
   String get searchHint => _s('searchHint');
+  String get presenceMode => _s('presenceMode');
+  String get presenceOnline => _s('presenceOnline');
+  String get presenceAppearOffline => _s('presenceAppearOffline');
+  String get presenceModeHint => _s('presenceModeHint');
+  String get appearingOffline => _s('appearingOffline');
+  String get presenceUnavailable => _s('presenceUnavailable');
+  String trophyLevel(int level) => _fill('trophyLevel', {'level': level});
+  String levelProgress(int progress, int next) =>
+      _fill('levelProgress', {'progress': progress, 'next': next});
+  String get levelTop => _s('levelTop');
   String get avatar => _s('avatar');
   String get changeAvatar => _s('changeAvatar');
   String get removeAvatar => _s('removeAvatar');
@@ -520,6 +530,15 @@ const _en = {
   'saved': 'Saved',
   'privacy': 'Privacy',
   'privacyLead': 'Your card (picture, name, handle, bio) is shown to anyone signed in. Choose who sees the rest; you always see all of it.',
+  'presenceMode': 'Your status',
+  'presenceOnline': 'Online',
+  'presenceAppearOffline': 'Appear offline',
+  'presenceModeHint': 'Friends see you as offline. Messages, parties and cloud saves keep working.',
+  'appearingOffline': 'Appearing offline',
+  'presenceUnavailable': 'Not available on this server yet.',
+  'trophyLevel': 'Trophy level {level}',
+  'levelProgress': '{progress}% to level {next}',
+  'levelTop': 'The top level',
   'privacy_library': 'Games and play time',
   'privacy_trophies': 'Trophies',
   'privacy_friends': 'Friends list',
@@ -723,6 +742,15 @@ const _tr = {
   'saved': 'Kaydedildi',
   'privacy': 'Gizlilik',
   'privacyLead': 'Kartın (resim, isim, kullanıcı adı, bio) giriş yapmış herkese görünür. Gerisini kimin göreceğini seç; sen hepsini her zaman görürsün.',
+  'presenceMode': 'Durumun',
+  'presenceOnline': 'Çevrimiçi',
+  'presenceAppearOffline': 'Çevrimdışı görün',
+  'presenceModeHint': 'Arkadaşların seni çevrimdışı görür. Mesajlar, partiler ve bulut kayıtları çalışmaya devam eder.',
+  'appearingOffline': 'Çevrimdışı görünüyorsun',
+  'presenceUnavailable': 'Bu sunucuda henüz yok.',
+  'trophyLevel': 'Kupa seviyesi {level}',
+  'levelProgress': '{next}. seviyeye %{progress}',
+  'levelTop': 'En üst seviye',
   'privacy_library': 'Oyunlar ve oynama süresi',
   'privacy_trophies': 'Kupalar',
   'privacy_friends': 'Arkadaş listesi',

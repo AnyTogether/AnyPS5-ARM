@@ -79,6 +79,53 @@ const countryCodes =
     'SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI '
     'VN VU WF WS YE YT ZA ZM ZW';
 
+/// The tier a trophy level is drawn in: bronze 1-99, silver 100-299, gold 300-599, platinum
+/// 600-999.
+enum LevelTier { bronze, silver, gold, platinum }
+
+/// The trophy level: one number from all trophy points (the PlayStation curve), with the way to
+/// the next one.
+class TrophyLevel {
+  const TrophyLevel({
+    required this.level,
+    required this.tier,
+    required this.frame,
+    this.points = 0,
+    this.levelPoints = 0,
+    this.nextLevelPoints,
+    this.progress = 0,
+  });
+
+  /// Null for anything that is not a level (a private one, an answer this phone does not know).
+  static TrophyLevel? fromJson(Object? json) {
+    if (json is! Map || json['level'] is! int) return null;
+    final level = json['level'] as int;
+    return TrophyLevel(
+      level: level,
+      tier: LevelTier.values.asNameMap()[json['tier']] ?? LevelTier.bronze,
+      frame: json['frame'] is int ? json['frame'] as int : level ~/ 100 + 1,
+      points: json['points'] is int ? json['points'] as int : 0,
+      levelPoints: json['levelPoints'] is int ? json['levelPoints'] as int : 0,
+      nextLevelPoints: json['nextLevelPoints'] as int?,
+      progress: json['progress'] is int ? json['progress'] as int : 0,
+    );
+  }
+
+  final int level;
+  final LevelTier tier;
+
+  /// 1 for levels 1-99, 2 for 100-199 … 10 for 900-999.
+  final int frame;
+  final int points;
+  final int levelPoints;
+
+  /// Null at the top.
+  final int? nextLevelPoints;
+
+  /// 0-99 towards the next level (100 at the top).
+  final int progress;
+}
+
 /// The signed-in person's own profile, with what only they see.
 class OwnProfile {
   const OwnProfile({
@@ -89,6 +136,8 @@ class OwnProfile {
     this.country,
     this.handleChangeAt,
     this.privacy = defaultPrivacy,
+    this.appearOffline = false,
+    this.trophyLevel,
   });
 
   factory OwnProfile.fromJson(Map<String, dynamic> json) => OwnProfile(
@@ -99,6 +148,8 @@ class OwnProfile {
     country: json['country'] as String?,
     handleChangeAt: DateTime.tryParse(json['handleChangeAt'] as String? ?? ''),
     privacy: privacyFrom(json['privacy']),
+    appearOffline: json['appearOffline'] == true,
+    trophyLevel: TrophyLevel.fromJson(json['trophyLevel']),
   );
 
   final String handle;
@@ -111,10 +162,15 @@ class OwnProfile {
   final DateTime? handleChangeAt;
   final Privacy privacy;
 
+  /// Signed in and working, but shown to everyone as offline.
+  final bool appearOffline;
+  final TrophyLevel? trophyLevel;
+
   OwnProfile copyWith({
     String? avatar,
     bool clearAvatar = false,
     Privacy? privacy,
+    bool? appearOffline,
   }) => OwnProfile(
     handle: handle,
     displayName: displayName,
@@ -123,6 +179,8 @@ class OwnProfile {
     country: country,
     handleChangeAt: handleChangeAt,
     privacy: privacy ?? this.privacy,
+    appearOffline: appearOffline ?? this.appearOffline,
+    trophyLevel: trophyLevel,
   );
 }
 
@@ -137,6 +195,7 @@ class UserProfile {
     this.friendship = Friendship.none,
     this.visible = const {},
     this.presence,
+    this.trophyLevel,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -159,6 +218,7 @@ class UserProfile {
       presence: json['presence'] is Map<String, dynamic>
           ? Presence.fromJson(json['presence'] as Map<String, dynamic>)
           : null,
+      trophyLevel: TrophyLevel.fromJson(json['trophyLevel']),
     );
   }
 
@@ -168,6 +228,9 @@ class UserProfile {
   final Friendship friendship;
   final Set<PrivacySection> visible;
   final Presence? presence;
+
+  /// Null when their trophies are private to the asker (or on an older server).
+  final TrophyLevel? trophyLevel;
 }
 
 /// A game in someone's library: play time, and trophies when those are shown too.
@@ -408,6 +471,14 @@ class Profiles {
           section.name: audience.name,
         }),
       );
+
+  /// Appear offline (signed in, shown to everyone as offline) or online again; what the server
+  /// kept comes back.
+  Future<bool> setAppearOffline(bool appearOffline) async =>
+      (await account.call('PATCH', 'me/presence', {
+        'appearOffline': appearOffline,
+      }))['appearOffline'] ==
+      true;
 
   /// A square picture (PNG or JPEG) as the new avatar; its address comes back.
   Future<String> uploadAvatar(Uint8List bytes) async {

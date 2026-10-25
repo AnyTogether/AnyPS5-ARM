@@ -208,7 +208,32 @@ class FakeProfiles extends Profiles {
     calls.add('privacy ${section.name} ${audience.name}');
     return {...own!.privacy, section: audience};
   }
+
+  Object? presenceError;
+
+  @override
+  Future<bool> setAppearOffline(bool appearOffline) async {
+    calls.add('appear offline $appearOffline');
+    if (presenceError != null) throw presenceError!;
+    return appearOffline;
+  }
 }
+
+Map<String, dynamic> trophyLevel({int level = 12, int progress = 40}) => {
+  'level': level,
+  'tier': level >= 600
+      ? 'platinum'
+      : level >= 300
+      ? 'gold'
+      : level >= 100
+      ? 'silver'
+      : 'bronze',
+  'frame': level ~/ 100 + 1,
+  'points': 684,
+  'levelPoints': 660,
+  'nextLevelPoints': 720,
+  'progress': progress,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -323,6 +348,54 @@ void main() {
       expect(privacy[PrivacySection.trophies], Audience.friends);
       expect(privacyFrom({})[PrivacySection.gallery], Audience.friends);
     });
+
+    test(
+      'appear offline goes to me/presence, and comes back as kept',
+      () async {
+        server.answer = (method, path, body) => (200, {'appearOffline': true});
+        expect(await Profiles(account).setAppearOffline(true), isTrue);
+        expect(server.requests.last.$1, 'PATCH');
+        expect(server.requests.last.$2, '/api/v1/me/presence');
+        expect(server.requests.last.$3, {'appearOffline': true});
+      },
+    );
+
+    test(
+      'the trophy level and appear offline parse; older answers lack them',
+      () {
+        final own = OwnProfile.fromJson({
+          ...ownProfile(),
+          'appearOffline': true,
+          'trophyLevel': trophyLevel(level: 312, progress: 7),
+        });
+        expect(own.appearOffline, isTrue);
+        expect(own.trophyLevel!.level, 312);
+        expect(own.trophyLevel!.tier, LevelTier.gold);
+        expect(own.trophyLevel!.frame, 4);
+        expect(own.trophyLevel!.progress, 7);
+        expect(own.trophyLevel!.nextLevelPoints, 720);
+        final old = OwnProfile.fromJson(ownProfile());
+        expect(old.appearOffline, isFalse);
+        expect(old.trophyLevel, isNull);
+        expect(old.copyWith(appearOffline: true).appearOffline, isTrue);
+        final card = UserProfile.fromJson({
+          ...userCard(),
+          'trophyLevel': trophyLevel(),
+        });
+        expect(card.trophyLevel!.tier, LevelTier.bronze);
+        // Private to the asker: null. Something unknown: no level rather than a crash.
+        expect(
+          UserProfile.fromJson({...userCard(), 'trophyLevel': null})
+              .trophyLevel,
+          isNull,
+        );
+        expect(TrophyLevel.fromJson({'level': 'x'}), isNull);
+        expect(
+          TrophyLevel.fromJson({'level': 5, 'tier': 'new'})!.tier,
+          LevelTier.bronze,
+        );
+      },
+    );
 
     test('privacy sends only the section changed', () async {
       server.answer = (method, path, body) =>
@@ -531,6 +604,86 @@ void main() {
       expect(messaged, ['ece-id']);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('a profile shows the trophy level and the way to the next', (
+      tester,
+    ) async {
+      sideways(tester);
+      final card = {
+        ...userCard(),
+        'trophyLevel': trophyLevel(level: 12, progress: 40),
+      };
+      final profiles = FakeProfiles(
+        hub.account,
+        page: ProfilePage(
+          profile: UserProfile.fromJson(card),
+          games: const [],
+          trophies: null,
+          friends: null,
+          activity: const FeedPage([], null),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileView(
+              hub: hub,
+              handle: 'ece',
+              profiles: profiles,
+              gameName: (_) => null,
+              onMessage: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Trophy level 12'), findsOneWidget);
+      expect(find.text('40% to level 13'), findsOneWidget);
+      expect(find.byKey(const ValueKey('level-badge-bronze')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'editing: appear offline changes as it is picked, and goes back on failure',
+      (tester) async {
+        sideways(tester);
+        final profiles = FakeProfiles(
+          hub.account,
+          own: OwnProfile.fromJson(ownProfile()),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ProfileEditScreen(
+              profiles: profiles,
+              pickPhoto: () async => null,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.dragUntilVisible(
+          find.text('Appear offline'),
+          find.byType(ListView).last,
+          const Offset(0, -80),
+        );
+        expect(find.text('YOUR STATUS'), findsOneWidget);
+        expect(
+          find.text(
+            'Friends see you as offline. Messages, parties and cloud saves keep working.',
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Appear offline'));
+        await tester.pumpAndSettle();
+        expect(profiles.calls, ['appear offline true']);
+        expect(find.text('Appearing offline'), findsOneWidget);
+        profiles.presenceError = const SocketException('gone');
+        await tester.tap(find.text('Online'));
+        await tester.pumpAndSettle();
+        expect(profiles.calls.last, 'appear offline false');
+        // The server never heard it: still appearing offline.
+        expect(find.text('Appearing offline'), findsOneWidget);
+      },
+    );
 
     testWidgets('someone not a friend can be added from their profile', (
       tester,

@@ -303,6 +303,10 @@ class _ProfileViewState extends State<ProfileView> {
                 where,
                 style: const TextStyle(color: Colors.white54, fontSize: 13),
               ),
+              if (profile.trophyLevel case final level?) ...[
+                const SizedBox(height: 8),
+                LevelLine(level: level),
+              ],
               if (presence != null &&
                   presence.state != PresenceState.offline) ...[
                 const SizedBox(height: 4),
@@ -824,4 +828,96 @@ class _PersonChip extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// The colours a tier is drawn in: the ring's light and dark ends.
+const levelTierColors = <LevelTier, (Color, Color)>{
+  LevelTier.bronze: (Color(0xFFE2A271), Color(0xFF8A4E2B)),
+  LevelTier.silver: (Color(0xFFE8EDF5), Color(0xFF8C96A8)),
+  LevelTier.gold: (Color(0xFFFFDC7A), Color(0xFFB7862C)),
+  LevelTier.platinum: (Color(0xFFDDE9FF), Color(0xFF7FA2D9)),
+};
+
+/// The trophy level as a badge in its tier's ring (one more notch for each hundred levels), with
+/// the way to the next one.
+class LevelLine extends StatelessWidget {
+  const LevelLine({super.key, required this.level});
+
+  final TrophyLevel level;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final (light, dark) = levelTierColors[level.tier]!;
+    final top = level.nextLevelPoints == null;
+    return Row(
+      children: [
+        Container(
+          key: ValueKey('level-badge-${level.tier.name}'),
+          width: 30,
+          height: 30,
+          padding: EdgeInsets.all(level.frame >= 5 ? 2.5 : 2),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [light, dark],
+            ),
+            boxShadow: [
+              BoxShadow(color: dark.withValues(alpha: 0.45), blurRadius: 8),
+            ],
+          ),
+          child: Container(
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFF0B0D12),
+            ),
+            child: Text(
+              '${level.level}',
+              style: TextStyle(
+                color: light,
+                fontSize: level.level >= 100 ? 10.5 : 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                texts.trophyLevel(level.level),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: level.progress / 100,
+                  minHeight: 3,
+                  backgroundColor: const Color(0x1FFFFFFF),
+                  valueColor: AlwaysStoppedAnimation(light),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                top
+                    ? texts.levelTop
+                    : texts.levelProgress(level.progress, level.level + 1),
+                style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
