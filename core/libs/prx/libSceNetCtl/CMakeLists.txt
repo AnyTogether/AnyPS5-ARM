@@ -42,6 +42,15 @@ if(BUILD_TESTING)
     target_link_libraries(online_net_p2p_tests PRIVATE libSceNet libSceNetCtl libkernel libc mbedcrypto)
     add_test(NAME online_net_p2p COMMAND online_net_p2p_tests)
     set_tests_properties(online_net_p2p PROPERTIES TIMEOUT 60)
+
+    # A stand-in game for the launcher's interop test (OnlineEngineInteropTests); here it only
+    # has to show the offline answers without a launcher.
+    add_test_executable(online_probe tests/OnlineProbe.cpp)
+    target_include_directories(online_probe PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(online_probe PRIVATE libSceNpManager libSceNpWebApi2 libSceNetCtl libc)
+    add_test(NAME online_probe_offline COMMAND online_probe)
+    set_tests_properties(online_probe_offline PROPERTIES TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "state=1\nonline_id_error=0x80550006\n.*friends_error=0x80553406\n")
 endif()
 
 if(BUILD_TESTING)
