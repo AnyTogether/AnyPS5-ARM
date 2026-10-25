@@ -188,6 +188,14 @@ Like the console's **Broadcast**, the launcher streams the game playing live to 
 - The game's window and sound are captured as for clips (macOS asks once for the screen recording permission) and encoded on the Mac's media engine: H.264 High with a key frame every two seconds and no B-frames, AAC at 48 kHz stereo 160 kbit/s, as Twitch and YouTube ask. When the upload cannot keep up, frames are dropped instead of the stream falling behind, and a lost connection is made again by itself.
 - The stream key is kept in `~/Library/Application Support/AnyPS5/Broadcast/keys.json`, readable by your user only, rather than the Keychain: the app is signed ad hoc, so the Keychain would ask for it again after every update. The launcher never shows the key in full. The LIVE badge is drawn over the game for you and is not part of the broadcast.
 
+### Play from Steam
+
+**Settings → Steam → Add to Steam** puts AnyPS5 in your Steam library as a non-Steam game, tagged **AnyPS5**, with artwork drawn in the Cosmic look: the portrait cover, the wide capsule, the hero banner, the logo and the icon. Start it from Steam or Big Picture like any other game; Steam Input and the overlay apply to it.
+
+- **Add My Games Too** gives every unlocked game its own entry with its own art (from the dump's `pic0` and `icon0`), started with `--steam --play <title ID>`: the game opens at once, and the launcher quits when it ends so Steam sees it end (a crash keeps it open on the report). A launcher already open takes the request instead of a second one starting.
+- The shortcuts go into `~/Library/Application Support/Steam/userdata/<account>/config/shortcuts.vdf` of the account signed in last (a choice when there are several), the pictures into `config/grid`, named after each shortcut's ID (the CRC-32 of the quoted program and the name with the top bit set, written into the shortcut so Steam uses it). **Open Full Screen from Steam** adds `--fullscreen`.
+- Steam writes its own copy of the file when it quits, so the launcher writes only while Steam is closed: with Steam open it offers **Quit Steam and Add**. The file is read and written back to the byte with only AnyPS5's entries changed, after a copy to `shortcuts.vdf.anyps5-backup`; **Remove from Steam** takes out only AnyPS5's entries and their pictures. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) does the same, for the Steam Deck too.
+
 ### Getting around
 
 The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `O` (△) for options, `Q` / `E` (L1 / R1) for the previous or next game, also inside a game's panels, or a game controller (D-pad, ✕, ○, △, L1, R1; its PS button brings the launcher in front of the game, and back). The mouse and trackpad work too: click a tile, double-click to play, scroll through the row.
