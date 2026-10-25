@@ -1,0 +1,108 @@
+import Foundation
+
+/// The built-in looks, each an animated background with the colors the interface draws over it.
+/// Saved by number (preferences, theme files), so a new look only ever goes at the end.
+public enum LookStyle: Int, CaseIterable, Identifiable, Sendable, Codable {
+    case cosmic
+    case aurora
+    case sunset
+    /// Frosted ice: the background and the game's key art seen through layers of glass.
+    case glass
+
+    public var id: Int { rawValue }
+
+    /// A number from a theme file or an older or newer launcher's preferences: one this launcher
+    /// does not know is Cosmic, never a failure that loses the rest of the settings.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(Int.self)
+        self = LookStyle(rawValue: raw) ?? .cosmic
+    }
+
+    public static func style(_ raw: Int) -> LookStyle { LookStyle(rawValue: raw) ?? .cosmic }
+
+    /// Deep, middle and bright tones the background blends.
+    public var palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>) {
+        switch self {
+        case .cosmic: return (SIMD3(0.012, 0.024, 0.090), SIMD3(0.040, 0.150, 0.420), SIMD3(0.420, 0.640, 1.000))
+        case .aurora: return (SIMD3(0.006, 0.030, 0.045), SIMD3(0.020, 0.300, 0.300), SIMD3(0.560, 1.000, 0.780))
+        case .sunset: return (SIMD3(0.060, 0.010, 0.040), SIMD3(0.520, 0.110, 0.220), SIMD3(1.000, 0.640, 0.330))
+        case .glass: return (SIMD3(0.016, 0.063, 0.110), SIMD3(0.110, 0.310, 0.450), SIMD3(0.812, 0.937, 1.000))
+        }
+    }
+
+    /// Surfaces are layered glass rather than dark panels.
+    public var isGlass: Bool { self == .glass }
+}
+
+/// How the Glass look draws its surfaces here and now.
+public enum GlassRendering: Equatable, Sendable {
+    /// macOS 26's Liquid Glass: real refraction of what is behind, in a live window.
+    case liquid
+    /// Drawn frost: a blurring material where there is a window, translucent layers with a lit
+    /// rim offscreen and on older macOS.
+    case frosted
+    /// Reduce Transparency: opaque surfaces with the same rim.
+    case solid
+
+    public static func choose(reduceTransparency: Bool, liquidAvailable: Bool, offscreen: Bool) -> GlassRendering {
+        if reduceTransparency { return .solid }
+        // Liquid Glass draws nothing at all in an offscreen render, not even what it holds.
+        if offscreen || !liquidAvailable { return .frosted }
+        return .liquid
+    }
+}
+
+/// The Glass look's layers as numbers, and the WCAG contrast arithmetic that keeps text on them
+/// readable over any key art.
+public enum GlassRecipe {
+    public typealias RGB = SIMD3<Double>
+
+    /// Navy laid over the frosted key art everywhere; the gradients that darken behind the text
+    /// only add to it.
+    public static let scrim = RGB(0.016, 0.063, 0.110)
+    public static let scrimOpacity = 0.42
+    /// A surface's own dark base, under its white sheen.
+    public static let surfaceBase = RGB(0.024, 0.071, 0.125)
+    public static let surfaceOpacity = 0.48
+    /// The sheen's strongest white, at the lit corner.
+    public static let sheenOpacity = 0.09
+    /// The card over a game (trophy, notice, call): any game frame may be behind it.
+    public static let bannerOpacity = 0.72
+    /// A full-screen panel's frost (settings, library, profile).
+    public static let screenOpacity = 0.62
+    /// The focused element: a bright frosted chip with dark ink.
+    public static let chipLow = 0.80
+    public static let ink = RGB(0.027, 0.078, 0.133)
+    /// Reduce Transparency's opaque surface.
+    public static let solid = RGB(0.039, 0.102, 0.165)
+
+    /// `top` at `opacity` over `bottom`, blended as the screen does, in sRGB.
+    public static func over(_ top: RGB, _ opacity: Double, _ bottom: RGB) -> RGB {
+        top * opacity + bottom * (1 - opacity)
+    }
+
+    /// WCAG 2 relative luminance of an sRGB color.
+    public static func luminance(_ color: RGB) -> Double {
+        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        return 0.2126 * linear(color.x) + 0.7152 * linear(color.y) + 0.0722 * linear(color.z)
+    }
+
+    public static func contrast(_ a: RGB, _ b: RGB) -> Double {
+        let (la, lb) = (luminance(a), luminance(b))
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    }
+
+    /// A surface over a backdrop pixel: the scrim, the surface's base, then its sheen.
+    public static func surface(over backdrop: RGB) -> RGB {
+        let scrimmed = over(scrim, scrimOpacity, backdrop)
+        return over(RGB(1, 1, 1), sheenOpacity, over(surfaceBase, surfaceOpacity, scrimmed))
+    }
+
+    /// The focused chip at its darkest point, over a backdrop pixel.
+    public static func chip(over backdrop: RGB) -> RGB { over(RGB(1, 1, 1), chipLow, backdrop) }
+
+    /// Ink that reads on a fill: dark on light colors (the Ice accent, the White one), else white.
+    public static func prefersDarkInk(on fill: RGB) -> Bool {
+        contrast(ink, fill) > contrast(RGB(1, 1, 1), fill)
+    }
+}

@@ -10,7 +10,7 @@ public struct ThemeDesign: Codable, Equatable, Hashable, Identifiable, Sendable 
     public var name: String
     public var author: String
     public var version: Int
-    /// The animated background: 0 cosmic, 1 aurora, 2 sunset.
+    /// The animated background: 0 cosmic, 1 aurora, 2 sunset, 3 glass (LookStyle).
     public var style: Int
     /// Deep, middle and bright tones of the background, and the accent, as #RRGGBB.
     public var deep: String
