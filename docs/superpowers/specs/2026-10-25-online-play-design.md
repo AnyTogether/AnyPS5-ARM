@@ -1,6 +1,6 @@
 # Online play: design
 
-Date: 2026-10-25. Status: phase 0 built, phase 1 transport built and tested in one process, phase 2 designed.
+Date: 2026-10-25. Status: phase 0 built; phase 1 built and tested on one Mac (two launchers, two engine processes, real WebRTC data channels), not yet run between two Macs; phase 2 designed.
 Wire format and the per-library tables: [docs/dev/ONLINE_PLAY.md](../../dev/ONLINE_PLAY.md).
 
 ## Goal
@@ -73,9 +73,9 @@ With `ANYPS5_ONLINE_LOG`, the online libraries append one JSON object per call (
 
 **Between launchers: WebRTC data channels.** One `RTCPeerConnection` per pair of players in the session:
 
-- Channel `game`: unordered, `maxRetransmits = 0`. One message per datagram: an 9-byte header (source port, source virtual port, destination port, destination virtual port, kind) and the game's bytes. The sender's virtual address is not in the packet; the receiver knows it from the connection, so a peer cannot pretend to be another.
+- Channel `game`: unordered, `maxRetransmits = 0`. One message per datagram: a 9-byte header (source port, source virtual port, destination port, destination virtual port, kind) and the game's bytes. The sender's virtual address is not in the packet; the receiver knows it from the connection, so a peer cannot pretend to be another.
 - Channel `stream` (phase 2): ordered and reliable, multiplexing the game's streams.
-- Signalling: offer, answer and ICE candidates as `game_session.signal`, sent to the device each player published in its member properties (`{"online": 1}` is enough; publishing sets the device). The player with the smaller user ID offers, so two launchers never offer at once.
+- Signalling: offer, answer and ICE candidates as `game_session.signal`, sent to the device each player published in its member properties (`{"online": 1}` is enough; publishing sets the device). The player with the smaller user ID offers, so two launchers never offer at once; a launcher that starts following later sends `renegotiate` so the offer is made again once it listens; leaving sends `bye`.
 - ICE servers: `GET /game-sessions/:id/ice-servers`, STUN plus TURN with REST credentials. Direct when the NATs allow; TURN when they do not.
 - Security: the gateway relays signals only between the session's players over the authenticated socket, so each side learns the other's DTLS fingerprint from AnyTogether; data channels are encrypted. A frame from a connection whose player is not in the session is dropped.
 
@@ -96,10 +96,12 @@ The plain-UDP `OnlinePeerLink` from 2026-10-24 (per-packet HMAC, no NAT traversa
 ## Phases
 
 **Phase 0: identity, web API, observation. Built.**
-Engine bridge (handshake, account, web requests, observation, reconnect), NpManager sign-in and identity, Plus checks, NpWebApi2 pass-through; launcher bridge server, per-game observation file, `userProfile` friends from AnyTogether, the setting "Online play (experimental)" (off by default). Tests: `online_bridge`, `online_observation`, `online_np_manager`, `online_web_api2`, the guest NP and Net suites unchanged, `swift test --filter OnlineBridgeTests`, and `OnlineEngineInteropTests`, which starts the real engine libraries in a probe process against the real launcher service and checks the probe signs in as the AnyTogether user and gets its friends.
+Engine bridge (handshake, account, web requests, observation, reconnect), NpManager sign-in and identity, Plus checks, NpWebApi2 pass-through; launcher bridge server, per-title observation file, `userProfile` friends from AnyTogether, the setting Together → "Online play (experimental)" (off by default). Tests: `online_bridge`, `online_observation`, `online_np_manager`, `online_web_api2`, `online_probe_offline`, the guest NP and Net suites unchanged; `swift test --filter Online`, including `OnlineEngineInteropTests`, which starts the real engine libraries in a stand-in game (`online_probe`) against the launcher's real service and checks the game signs in as the AnyTogether user (handle, account ID, country) and gets its AnyTogether friends through `userProfile`.
 
-**Phase 1: packets between two computers. Engine and transport built; wiring to a live session built, untested across the internet.**
-Datagram P2P sockets and UDP to virtual addresses (engine, `online_net_p2p`); WebRTC data-channel transport with game-session signalling (`OnlinePeerMesh`, tested with two launchers and two fake engines in one process over real data channels); the launcher opens the mesh for the running game's AnyTogether session. Done when two Macs on different networks pass a test program's packets both ways, which needs production TURN.
+**Phase 1: packets between two computers. Built; tested on one Mac.**
+Datagram P2P sockets and UDP to virtual addresses (engine, `online_net_p2p`); WebRTC data-channel transport with game-session signalling (`OnlinePeerMesh`); the app makes it the transport and follows the AnyTogether game session it already keeps for the running game. Tests: `OnlinePeerMeshTests` (two launchers, two fake engines, real data channels: ping, pong, a burst of 200 packets of 1200 bytes, a stranger's address refused, a goodbye on leaving) and `OnlineEngineP2pTests` (two `online_probe` processes play ping-pong through P2P sockets, each behind its own launcher). Done when two Macs on different networks pass the probe's packets both ways, which needs production STUN and TURN.
+
+Left in phase 1: the two-Mac run; the peers' connection state in the UI (`OnlinePeerMesh.states` and `traffic` exist); TURN credential renewal for sessions longer than the credentials (calls renew them; the mesh asks once per session); a slow game that stops reading its bridge would block WebRTC's thread on delivery (the engine reads on its own thread, so this needs a stuck process).
 
 **Phase 2: sessions a real game accepts.**
 `libSceNpSessionSignaling` answered from the mesh (activation, connection events, peer address and RTT); stream P2P and TCP to virtual addresses over the `stream` channel; push events; join intents and the invitation dialog from AnyTogether invitations; the `sessionManager` player-session requests of the first class A title mapped onto AnyTogether game sessions. Done when one real title plays a match between two Macs.
