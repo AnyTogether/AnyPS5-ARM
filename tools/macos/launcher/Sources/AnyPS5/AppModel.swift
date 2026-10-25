@@ -2118,9 +2118,14 @@ final class AppModel: ObservableObject {
     }
 
     /// PS on a controller: from the game to the launcher, and from the launcher back to the game
-    /// playing.
+    /// playing. One press is one switch: a press within `toggleDebounce` of the last switch does
+    /// nothing (macOS tells the launcher it is active a moment after the switch, and the same press
+    /// seen again then would switch straight back).
     func togglePlaying() {
         guard let running, starting == nil else { return bringLauncherFront() }
+        let now = Date()
+        if let last = lastToggle, now.timeIntervalSince(last) < Self.toggleDebounce, now >= last { return }
+        lastToggle = now
         if NSApp.isActive {
             Sounds.shared.play(.select)
             NSApp.yieldActivation(to: running.app)
@@ -2130,6 +2135,9 @@ final class AppModel: ObservableObject {
             Sounds.shared.play(.select)
         }
     }
+
+    static let toggleDebounce: TimeInterval = 0.45
+    private var lastToggle: Date?
 
     private func bringLauncherFront() {
         guard !NSApp.isActive else { return }

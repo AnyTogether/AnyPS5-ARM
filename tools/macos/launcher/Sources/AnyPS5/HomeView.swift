@@ -15,12 +15,12 @@ struct Backdrop: View {
                 if design.backgroundIsVideo {
                     LoopingVideo(url: file, paused: paused)
                 } else {
-                    DriftingImage(url: file, animated: !preferences.reducedMotion)
+                    DriftingImage(url: file, animated: !preferences.reducedMotion && !paused)
                 }
             } else {
             switch preferences.backdrop {
             case .image where preferences.backdropFile != nil:
-                DriftingImage(url: URL(fileURLWithPath: preferences.backdropFile!), animated: !preferences.reducedMotion)
+                DriftingImage(url: URL(fileURLWithPath: preferences.backdropFile!), animated: !preferences.reducedMotion && !paused)
             case .video where preferences.backdropFile != nil:
                 LoopingVideo(url: URL(fileURLWithPath: preferences.backdropFile!), paused: paused)
             default:
@@ -40,10 +40,10 @@ struct Backdrop: View {
             if preferences.onboarded, artwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
                 Group {
                     if look.glass {
-                        FrostedArtwork(url: background, animated: !look.reduceMotion, solid: look.solid)
+                        FrostedArtwork(url: background, animated: !look.reduceMotion && !paused, solid: look.solid)
                             .opacity(look.seeThrough ? 0.72 : 1)
                     } else {
-                        GameArtwork(url: background, animated: !preferences.reducedMotion)
+                        GameArtwork(url: background, animated: !preferences.reducedMotion && !paused)
                     }
                 }
                 .id(game.id)
@@ -74,10 +74,7 @@ struct GameArtwork: View {
                 LinearGradient(stops: [.init(color: .black.opacity(0.55), location: 0), .init(color: .clear, location: 0.3), .init(color: .clear, location: 0.55), .init(color: .black.opacity(0.85), location: 1)], startPoint: .top, endPoint: .bottom)
             }
         }
-        .onAppear {
-            guard animated else { return }
-            withAnimation(.easeInOut(duration: 24).repeatForever(autoreverses: true)) { drift = true }
-        }
+        .drifting($drift, animated: animated, period: 24)
     }
 }
 
@@ -119,10 +116,7 @@ struct FrostedArtwork: View {
             }
             .animation(.easeOut(duration: 0.35), value: artwork.frosted(url) != nil)
         }
-        .onAppear {
-            guard animated else { return }
-            withAnimation(.easeInOut(duration: 28).repeatForever(autoreverses: true)) { drift = true }
-        }
+        .drifting($drift, animated: animated, period: 28)
     }
 }
 

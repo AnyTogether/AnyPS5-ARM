@@ -170,9 +170,25 @@ struct DriftingImage: View {
                 .offset(x: drift ? -proxy.size.width * 0.015 : proxy.size.width * 0.015)
                 .clipped()
         }
-        .onAppear {
+        .drifting($drift, animated: animated, period: 28)
+    }
+}
+
+extension View {
+    /// The slow drift of a background picture: running while `animated`, settling back when not (a
+    /// game playing, the launcher behind other windows), as a forever-repeating animation keeps the
+    /// window drawing frames, and the GPU busy, the whole time.
+    func drifting(_ drift: Binding<Bool>, animated: Bool, period: Double) -> some View {
+        onAppear {
             guard animated else { return }
-            withAnimation(.easeInOut(duration: 28).repeatForever(autoreverses: true)) { drift = true }
+            withAnimation(.easeInOut(duration: period).repeatForever(autoreverses: true)) { drift.wrappedValue = true }
+        }
+        .onChange(of: animated) { _, on in
+            if on {
+                withAnimation(.easeInOut(duration: period).repeatForever(autoreverses: true)) { drift.wrappedValue = true }
+            } else {
+                withAnimation(.easeOut(duration: 0.6)) { drift.wrappedValue = false }
+            }
         }
     }
 }
