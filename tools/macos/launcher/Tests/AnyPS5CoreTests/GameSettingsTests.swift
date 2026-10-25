@@ -14,6 +14,14 @@ final class GameSettingsTests: XCTestCase {
         XCTAssertEqual(settings.environment(launcherLanguage: 1)["ANYPS5_OVERLAY_STYLE"], "detailed")
     }
 
+    func testTheGameReadsThePadOnlyWhileItsWindowIsInFront() {
+        XCTAssertEqual(GameSettings().environment(launcherLanguage: 1)["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"], "0",
+                       "with the launcher over the game (PS), the game leaves the pad alone")
+        var traced = GameSettings()
+        traced.trace = true
+        XCTAssertEqual(traced.environment(launcherLanguage: 1, trace: true)["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"], "0")
+    }
+
     func testFrameGenerationTurnsOnVerticalSync() {
         var settings = GameSettings()
         settings.vsync = false

@@ -53,6 +53,12 @@ public struct GameSettings: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// The game reads the controllers (through SDL2) only while its window is in front: with the
+    /// launcher brought over it with PS, the pad drives the launcher alone. The engine asks SDL for
+    /// background events with a plain SDL_SetHint, which the same name in the environment overrides
+    /// (an SDL hint from the environment wins over every priority but OVERRIDE).
+    public static let backgroundPadEnvironment = ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS": "0"]
+
     /// The environment a game starts with; `inputFile` is the anyps5-input.ini written for it,
     /// `screenshots` and `fonts` the launcher's folders for F12 screenshots and system fonts;
     /// `trace` turns detailed logging on for this start even when the setting is off.
@@ -63,6 +69,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
             "ANYPS5_PRESENT_MODE": vsync || frameGeneration == true ? "fifo" : "immediate",
             "ANYPS5_LANGUAGE": String(language ?? launcherLanguage),
         ]
+        environment.merge(Self.backgroundPadEnvironment) { own, _ in own }
         if let position = overlay.position {
             environment["ANYPS5_OVERLAY"] = "1"
             environment["ANYPS5_OVERLAY_POS"] = position
