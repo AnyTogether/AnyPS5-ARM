@@ -191,9 +191,9 @@ extension AppModel {
                 self?.rescan()
                 Sounds.shared.play(.select)
             }),
-            PanelRow(id: "clones", title: T.text(.installedSize), kind: .info("")),
             PanelRow(id: "prepare", title: TPrep.text(.prepareNewGames), detail: TPrep.text(.prepareNewGamesDetail), symbol: "arrow.down.circle",
                      kind: .toggle(preparesNewGames) { [weak self] value in self?.preferences.prepareNewGames = value ? nil : false }),
+            PanelRow(id: "clones", title: T.text(.installedSize), kind: .info("")),
         ]
 
         let language = PanelRow(id: "language", title: T.text(.language), symbol: "globe", kind: .choice(options: Language.allCases.map(\.displayName), selected: Language.allCases.firstIndex(of: preferences.language) ?? 0) { [weak self] index in
