@@ -25,7 +25,8 @@
 #   ANYPS5_NIGHTLY_OUT    where the files are made (default: build-nightly/<tag>)
 #   ANYPS5_SKIP_ENGINE=1  use the build folder as it is, without running ninja
 #   ANYPS5_SKIP_PHONE=1   publish without the phone app
-#   ANYPS5_SKIP_SIGN=1    publish without SHA256SUMS(.sig) (the release key is not on this Mac)
+#   ANYPS5_SKIP_SIGN=1    publish without SHA256SUMS(.sig) (the release key is not on this Mac);
+#                         launchers that check signatures then refuse its app and engine
 #   ANYPS5_SIGN_IDENTITY, ANYPS5_NOTARY_PROFILE  as for build_launcher_app.sh
 set -eu
 
@@ -126,7 +127,7 @@ if [ "${ANYPS5_SKIP_PHONE:-0}" != 1 ]; then
 fi
 
 # Signed as releases are (docs/dev/SIGNED_UPDATES.md), so the launcher's check accepts it.
-if [ -x "$root/tools/release/sign.sh" ] && [ "${ANYPS5_SKIP_SIGN:-0}" != 1 ]; then
+if [ "${ANYPS5_SKIP_SIGN:-0}" != 1 ]; then
     # shellcheck disable=SC2086
     "$root/tools/release/sign.sh" -o "$out" $files
     files="$files $out/SHA256SUMS $out/SHA256SUMS.sig"

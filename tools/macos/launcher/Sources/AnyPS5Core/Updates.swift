@@ -28,8 +28,12 @@ public enum Updates {
         public var size: Int?
         public var prerelease: Bool
         public var published: Date?
+        /// The release's SHA256SUMS and SHA256SUMS.sig; nil when it is not signed, and then it is
+        /// never installed.
+        public var signature: ReleaseSigning.Assets?
 
-        public init(tag: String, version: String, page: URL, download: URL?, size: Int?, prerelease: Bool = false, published: Date? = nil) {
+        public init(tag: String, version: String, page: URL, download: URL?, size: Int?, prerelease: Bool = false, published: Date? = nil,
+                    signature: ReleaseSigning.Assets? = nil) {
             self.tag = tag
             self.version = version
             self.page = page
@@ -37,6 +41,7 @@ public enum Updates {
             self.size = size
             self.prerelease = prerelease
             self.published = published
+            self.signature = signature
         }
     }
 
@@ -101,10 +106,12 @@ public enum Updates {
               json["draft"] as? Bool != true, let version = Version(tag) else { return nil }
         let prerelease = json["prerelease"] as? Bool == true
         guard allowed || !prerelease else { return nil }
-        let asset = (json["assets"] as? [[String: Any]] ?? []).first { $0["name"] as? String == assetName }
+        let assets = json["assets"] as? [[String: Any]] ?? []
+        let asset = assets.first { $0["name"] as? String == assetName }
         return Release(tag: tag, version: version.description, page: page,
                        download: (asset?["browser_download_url"] as? String).flatMap(URL.init(string:)), size: asset?["size"] as? Int,
-                       prerelease: prerelease, published: (json["published_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) })
+                       prerelease: prerelease, published: (json["published_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) },
+                       signature: ReleaseSigning.assets(in: assets))
     }
 
     /// The release GitHub calls latest; drafts, prereleases and other answers (an error, a rate
@@ -199,15 +206,33 @@ public enum Updates {
         progress(1)
     }
 
-    /// Downloads and unpacks the release, and checks that it is this app (`bundleIdentifier`) at a
-    /// newer version. Returns the unpacked app, in a folder of its own under the temporary folder.
-    public static func prepare(_ release: Release, bundleIdentifier: String, current: String,
-                               progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> URL {
+    /// Checks the release's signature (SHA256SUMS.sig by a key built into this launcher), downloads
+    /// it, checks the download against the signed SHA256SUMS, unpacks it and checks that it is this
+    /// app (`bundleIdentifier`) at a newer version. Returns the unpacked app, in a folder of its own
+    /// under the temporary folder. An unsigned release is refused before anything is downloaded:
+    /// every version newer than a launcher that checks signatures came out signed.
+    public static func prepare(_ release: Release, bundleIdentifier: String, current: String, keys: [ReleaseSigning.Key] = ReleaseSigning.trustedKeys,
+                               session: URLSession = .shared, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> URL {
         guard let download = release.download else { throw Failure(description: "the release has no \(assetName)") }
+        guard let signature = release.signature else {
+            throw Failure(description: "AnyPS5 \(release.version) is not signed, so it was not installed; get it from \(release.page.absoluteString) only if you trust it")
+        }
+        let sums: ReleaseSigning.Sums
+        do {
+            sums = try await ReleaseSigning.fetch(signature, keys: keys, session: session)
+        } catch let failure as ReleaseSigning.Failure {
+            throw Failure(description: "the update was not installed: \(failure.description)")
+        }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let zip = folder.appendingPathComponent(assetName)
         try await self.download(download, to: zip, progress: progress)
+        do {
+            try sums.check(zip, as: assetName)
+        } catch let failure as ReleaseSigning.Failure {
+            try? FileManager.default.removeItem(at: folder)
+            throw Failure(description: "the update was not installed: \(failure.description)")
+        }
         let unpacked = folder.appendingPathComponent("app")
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
         let app = unpacked.appendingPathComponent("AnyPS5.app")

@@ -6,7 +6,8 @@
 #
 # Writes <output dir>/AnyPS5-toolkit-macos-<release version>.zip: one folder of that name with the
 # same layout as the toolkit inside AnyPS5.app (tools/macos/toolkit_layout.sh) and a toolkit.json
-# naming every file's sha256. Attach it to the release; the launcher finds it by its name.
+# naming every file's sha256. Attach it to the release, signed with the release's other files by
+# tools/release/sign.sh (docs/dev/SIGNED_UPDATES.md); the launcher finds it by its name.
 #
 # ANYPS5_SIGN_IDENTITY signs the toolkit's code first, as sign_launcher_app.sh does in the app.
 # ANYPS5_TOOLKIT_MIN_LAUNCHER is the oldest launcher that may use it (default: the first one

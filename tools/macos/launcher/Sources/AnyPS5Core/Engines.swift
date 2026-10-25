@@ -156,10 +156,20 @@ public enum EngineCatalogue {
         /// The asset's sha256 as GitHub reports it, when it does.
         public var digest: String?
         public var prerelease: Bool
+        /// The release's SHA256SUMS and SHA256SUMS.sig, nil when it is not signed.
+        public var signature: ReleaseSigning.Assets?
 
         public var id: String { release }
 
-        public init(release: String, tag: String, title: String, summary: String, date: Date?, page: URL, download: URL, size: Int?, digest: String?, prerelease: Bool) {
+        /// The asset's name, as the release's SHA256SUMS lists it.
+        public var assetName: String { EngineCatalogue.assetPrefix + release + ".zip" }
+
+        /// Signed; unsigned but older than signing (allowed with a warning); or unsigned and
+        /// refused.
+        public var trust: ReleaseSigning.Trust { ReleaseSigning.trust(release: release, signed: signature != nil) }
+
+        public init(release: String, tag: String, title: String, summary: String, date: Date?, page: URL, download: URL, size: Int?, digest: String?, prerelease: Bool,
+                    signature: ReleaseSigning.Assets? = nil) {
             self.release = release
             self.tag = tag
             self.title = title
@@ -170,6 +180,7 @@ public enum EngineCatalogue {
             self.size = size
             self.digest = digest
             self.prerelease = prerelease
+            self.signature = signature
         }
     }
 
@@ -181,7 +192,9 @@ public enum EngineCatalogue {
         var entries: [Entry] = []
         for release in list where release["draft"] as? Bool != true {
             guard let tag = release["tag_name"] as? String, let page = (release["html_url"] as? String).flatMap(URL.init(string:)) else { continue }
-            for asset in release["assets"] as? [[String: Any]] ?? [] {
+            let assets = release["assets"] as? [[String: Any]] ?? []
+            let signature = ReleaseSigning.assets(in: assets)
+            for asset in assets {
                 guard let name = asset["name"] as? String, name.hasPrefix(assetPrefix), name.hasSuffix(".zip"),
                       let download = (asset["browser_download_url"] as? String).flatMap(URL.init(string:)) else { continue }
                 let version = String(name.dropFirst(assetPrefix.count).dropLast(4))
@@ -189,7 +202,8 @@ public enum EngineCatalogue {
                 let digest = (asset["digest"] as? String).flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)).lowercased() : nil }
                 entries.append(Entry(release: version, tag: tag, title: release["name"] as? String ?? tag, summary: summary(of: release["body"] as? String ?? ""),
                                      date: (release["published_at"] as? String).flatMap(dates.date(from:)), page: page, download: download,
-                                     size: asset["size"] as? Int, digest: digest, prerelease: release["prerelease"] as? Bool == true))
+                                     size: asset["size"] as? Int, digest: digest, prerelease: release["prerelease"] as? Bool == true,
+                                     signature: signature))
             }
         }
         return entries
@@ -319,8 +333,16 @@ public struct ToolkitStore: Sendable {
     }
 
     /// Downloads a catalogue entry and installs it; the download is 90% of the progress.
+    ///
+    /// A signed release's signature is checked first and the download against its signed sums. An
+    /// unsigned release published after signing began is refused; an older one only goes ahead
+    /// with `allowUnsigned` (the user saw the warning) and is then checked with GitHub's sha256,
+    /// which it must have.
     @discardableResult
-    public func download(_ entry: EngineCatalogue.Entry, launcherVersion: String, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> InstalledToolkit {
+    public func download(_ entry: EngineCatalogue.Entry, launcherVersion: String, allowUnsigned: Bool = false,
+                         keys: [ReleaseSigning.Key] = ReleaseSigning.trustedKeys, session: URLSession = .shared,
+                         progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> InstalledToolkit {
+        let digest = try await ToolkitStore.expectedDigest(of: entry, allowUnsigned: allowUnsigned, keys: keys, session: session)
         let fileManager = FileManager.default
         let downloads = folder.appendingPathComponent(".downloads")
         try fileManager.createDirectory(at: downloads, withIntermediateDirectories: true)
@@ -330,9 +352,31 @@ public struct ToolkitStore: Sendable {
             if (try? fileManager.contentsOfDirectory(atPath: downloads.path))?.isEmpty == true { try? fileManager.removeItem(at: downloads) }
         }
         try await Updates.download(entry.download, to: file) { progress($0 * 0.9) }
-        let installed = try install(zip: file, digest: entry.digest, release: entry.release, launcherVersion: launcherVersion)
+        let installed = try install(zip: file, digest: digest, release: entry.release, launcherVersion: launcherVersion)
         progress(1)
         return installed
+    }
+
+    /// The sha256 the download of `entry` must have, from its signed sums or (an older unsigned
+    /// release the user agreed to) from GitHub; throws when it may not be downloaded at all.
+    static func expectedDigest(of entry: EngineCatalogue.Entry, allowUnsigned: Bool, keys: [ReleaseSigning.Key], session: URLSession) async throws -> String {
+        switch entry.trust {
+        case .signed:
+            guard let signature = entry.signature else { throw InstallError("engine \(entry.release) is not signed") }
+            do {
+                let sums = try await ReleaseSigning.fetch(signature, keys: keys, session: session)
+                guard let digest = sums.digest(for: entry.assetName) else { throw ReleaseSigning.Failure("the signed release does not list \(entry.assetName)") }
+                return digest
+            } catch let failure as ReleaseSigning.Failure {
+                throw InstallError("engine \(entry.release) was refused: \(failure.description)")
+            }
+        case .unsignedRefused:
+            throw InstallError("engine \(entry.release) is not signed, though it came out after releases began to be signed: refused")
+        case .unsignedOlder:
+            guard allowUnsigned else { throw InstallError("engine \(entry.release) is unsigned (an older release)") }
+            guard let digest = entry.digest else { throw InstallError("engine \(entry.release) has neither a signature nor a checksum from GitHub") }
+            return digest
+        }
     }
 
     public func remove(version: String) throws {

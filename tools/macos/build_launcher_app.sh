@@ -21,6 +21,9 @@ output="$(cd "$3" && pwd)"
 source="$root/tools/macos/launcher"
 app="$output/AnyPS5.app"
 version="$(toolkit_release_version "$root")"
+# The release keys the app trusts for its updates (docs/dev/SIGNED_UPDATES.md) must be the ones
+# in tools/release/release-signing.pub.
+"$root/tools/release/embed_keys.sh" --check --swift-only
 
 swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --product AnyPS5
 products="$(swift build --package-path "$source" -c release --arch arm64 --arch x86_64 --show-bin-path)"

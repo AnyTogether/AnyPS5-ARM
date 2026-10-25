@@ -18,6 +18,7 @@ enum TE {
         case engineDownloadedSection, engineAvailableSection, engineCustomSection
         case engineInUse, engineDeleteHint, engineDeleted, engineInUseNoDelete, engineDeleteUnused, engineDeleteUnusedDetail, engineNothingUnused
         case engineDownloadHint, engineDownloading, engineReady, engineDownloadFailed, enginePrerelease, engineBuilt
+        case engineSigned, engineUnsignedOlder, engineUnsignedOlderDetail, engineUnsignedReady, engineUnsignedRefused, engineUnsignedRefusedDetail
         case engineRefresh, engineChecked, engineChecking, engineOffline, engineNeverChecked, engineNoneYet, engineCheckFailed
         case engineFolder, engineFolderNone, engineFolderReset, engineFolderInvalid, engineFolderPick, engineFolderUsed
         case engineHint
@@ -49,6 +50,12 @@ enum TE {
         .engineReady: "Engine %@ is ready",
         .engineDownloadFailed: "The engine could not be downloaded",
         .enginePrerelease: "Pre-release",
+        .engineSigned: "Signed",
+        .engineUnsignedOlder: "Unsigned (older release)",
+        .engineUnsignedOlderDetail: "Came out before releases were signed: only GitHub's checksum checks it. Select to download anyway",
+        .engineUnsignedReady: "Engine %@ is ready (unsigned, older release)",
+        .engineUnsignedRefused: "Not signed",
+        .engineUnsignedRefusedDetail: "Releases are signed now, and this one is not: it is not downloaded",
         .engineBuilt: "Built %@",
         .engineRefresh: "Check for Engines",
         .engineChecked: "Last checked %@",
@@ -92,6 +99,12 @@ enum TE {
         .engineReady: "%@ motoru hazır",
         .engineDownloadFailed: "Motor indirilemedi",
         .enginePrerelease: "Ön sürüm",
+        .engineSigned: "İmzalı",
+        .engineUnsignedOlder: "İmzasız (eski sürüm)",
+        .engineUnsignedOlderDetail: "Sürümler imzalanmadan önce çıktı: yalnızca GitHub'ın sağlama toplamı denetler. Yine de indirmek için seç",
+        .engineUnsignedReady: "%@ motoru hazır (imzasız, eski sürüm)",
+        .engineUnsignedRefused: "İmzasız",
+        .engineUnsignedRefusedDetail: "Sürümler artık imzalanıyor, bu imzasız: indirilmez",
         .engineBuilt: "%@ derlendi",
         .engineRefresh: "Motorları Denetle",
         .engineChecked: "Son denetim %@",
