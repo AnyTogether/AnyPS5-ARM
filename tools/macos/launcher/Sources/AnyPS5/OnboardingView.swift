@@ -75,7 +75,7 @@ private struct LanguageStep: View {
                         .foregroundStyle(focused ? Color.black : .white)
                         .padding(26 * scale)
                         .frame(width: 280 * scale, height: 150 * scale, alignment: .bottomLeading)
-                        .background(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(0.1)))
+                        .background(FocusFill(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(0.1)))
                         .overlay(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous).strokeBorder(Color.white.opacity(focused ? 0 : 0.14)))
                         .scaleEffect(focused ? 1.04 : 1)
                         .shadow(color: .white.opacity(focused ? 0.3 : 0), radius: 20 * scale)
@@ -92,6 +92,8 @@ private struct ThemeStep: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @Environment(\.themeStills) private var stills
+    /// Four themes fit where three did.
+    private var cardWidth: CGFloat { Theme.allCases.count > 3 ? 300 : 330 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 46 * scale) {
@@ -107,7 +109,7 @@ private struct ThemeStep: View {
                                 ThemeBackground(theme: theme, paused: !focused)
                             }
                         }
-                            .frame(width: 330 * scale, height: 186 * scale)
+                            .frame(width: cardWidth * scale, height: cardWidth * 0.5636 * scale)
                             .clipShape(RoundedRectangle(cornerRadius: 18 * scale, style: .continuous))
                             .focusRing(focused, radius: 18 * scale)
                         HStack {
@@ -116,7 +118,7 @@ private struct ThemeStep: View {
                             Circle().fill(theme.defaultAccent.color).frame(width: 12 * scale, height: 12 * scale)
                         }
                     }
-                    .frame(width: 330 * scale)
+                    .frame(width: cardWidth * scale)
                     .scaleEffect(focused ? 1.04 : 0.97)
                     .opacity(focused ? 1 : 0.72)
                     .onTapGesture {

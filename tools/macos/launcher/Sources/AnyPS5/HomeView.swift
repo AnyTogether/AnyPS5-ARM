@@ -5,6 +5,7 @@ import SwiftUI
 struct Backdrop: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.stillBackground) private var stillBackground
+    @Environment(\.look) private var look
 
     var body: some View {
         let preferences = model.preferences
@@ -31,9 +32,15 @@ struct Backdrop: View {
             }
             }
             if preferences.onboarded, preferences.gameArtwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
-                GameArtwork(url: background, animated: !preferences.reducedMotion)
-                    .id(game.id)
-                    .transition(.opacity)
+                Group {
+                    if look.glass {
+                        FrostedArtwork(url: background, animated: !look.reduceMotion, solid: look.solid)
+                    } else {
+                        GameArtwork(url: background, animated: !preferences.reducedMotion)
+                    }
+                }
+                .id(game.id)
+                .transition(.opacity)
             }
         }
         .animation(Motion.fade, value: model.selectedGame?.id)
@@ -64,6 +71,76 @@ struct GameArtwork: View {
             guard animated else { return }
             withAnimation(.easeInOut(duration: 24).repeatForever(autoreverses: true)) { drift = true }
         }
+    }
+}
+
+/// The Glass theme's key art: pic0.png seen through frosted ice — blurred once at a small size,
+/// a navy scrim over it everywhere (deeper where the text sits), a cold light from the top right
+/// and fine grain. With Reduce Transparency the art gives way to the theme's solid colors.
+struct FrostedArtwork: View {
+    let url: URL
+    var animated: Bool
+    var solid = false
+    @ObservedObject private var artwork = Artwork.shared
+    @State private var drift = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                if solid {
+                    LinearGradient(colors: [Ice.solid, Ice.scrim], startPoint: .topTrailing, endPoint: .bottomLeading)
+                } else {
+                    if let image = artwork.frosted(url) {
+                        Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .scaleEffect(drift ? 1.09 : 1.04, anchor: .topTrailing)
+                            .clipped()
+                            .transition(.opacity)
+                    }
+                    // A cold cast over any art: ice is blue whatever is behind it.
+                    LinearGradient(colors: [Ice.frost, Color(red: 0.32, green: 0.56, blue: 0.82)], startPoint: .topTrailing, endPoint: .bottomLeading)
+                        .blendMode(.color)
+                        .opacity(0.32)
+                    Ice.scrim.opacity(GlassRecipe.scrimOpacity)
+                    LinearGradient(stops: [.init(color: Ice.scrim.opacity(0.5), location: 0), .init(color: Ice.scrim.opacity(0.18), location: 0.5), .init(color: .clear, location: 0.85)], startPoint: .leading, endPoint: .trailing)
+                    LinearGradient(stops: [.init(color: Ice.scrim.opacity(0.3), location: 0), .init(color: .clear, location: 0.28), .init(color: .clear, location: 0.5), .init(color: Ice.scrim.opacity(0.72), location: 1)], startPoint: .top, endPoint: .bottom)
+                    RadialGradient(colors: [Ice.frost.opacity(0.16), .clear], center: UnitPoint(x: 0.88, y: -0.08), startRadius: 0, endRadius: proxy.size.width * 0.5)
+                    // Where the pane refracts: a soft streak of light, cold along one edge.
+                    LightStreak(drift: drift)
+                    GrainLayer(strength: 0.045)
+                }
+            }
+            .animation(.easeOut(duration: 0.35), value: artwork.frosted(url) != nil)
+        }
+        .onAppear {
+            guard animated else { return }
+            withAnimation(.easeInOut(duration: 28).repeatForever(autoreverses: true)) { drift = true }
+        }
+    }
+}
+
+/// A diagonal streak of light across the Glass theme's key art, moving a little with its drift.
+struct LightStreak: View {
+    var drift: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width, height = proxy.size.height
+            ZStack {
+                LinearGradient(stops: [.init(color: .white.opacity(0), location: 0), .init(color: .white.opacity(0.07), location: 0.5), .init(color: .white.opacity(0), location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: width * 0.16)
+                LinearGradient(stops: [.init(color: Ice.cyan.opacity(0), location: 0), .init(color: Ice.cyan.opacity(0.07), location: 0.5), .init(color: Ice.cyan.opacity(0), location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 22)
+                    .offset(x: width * 0.08)
+            }
+            .frame(height: height * 2)
+            .rotationEffect(.degrees(28))
+            .position(x: width * (drift ? 0.66 : 0.62), y: height * 0.45)
+        }
+        .blendMode(.plusLighter)
+        .allowsHitTesting(false)
     }
 }
 
@@ -103,6 +180,8 @@ struct HomeView: View {
 struct TopBar: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    @Environment(\.look) private var look
+    @Namespace private var lens
 
     var body: some View {
         HStack(spacing: 22 * scale) {
@@ -140,28 +219,36 @@ struct TopBar: View {
             }
             Clock()
         }
+        .glassGroup(look, spacing: 10 * scale)
         .animation(Motion.overlay, value: model.showsUpdateNotice)
     }
 
     private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, action: @escaping () -> Void) -> some View {
         let focused = model.focus == .top(index) && model.overlay == nil
         return Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 18 * scale, weight: .semibold))
-                .foregroundStyle(focused ? Color.black : .white.opacity(0.9))
-                .frame(width: 44 * scale, height: 44 * scale)
-                .background(Circle().fill(focused ? Color.white : Color.white.opacity(0.1)))
+            Group {
+                let icon = Image(systemName: symbol)
+                    .font(.system(size: 18 * scale, weight: .semibold))
+                    .frame(width: 44 * scale, height: 44 * scale)
+                if look.glass {
+                    icon.foregroundStyle(focused ? Ice.ink : .white.opacity(0.92))
+                        .modifier(ButtonGlass(shape: Circle(), focused: focused, lens: ("top-\(index)", lens)))
+                } else {
+                    icon.foregroundStyle(focused ? Color.black : .white.opacity(0.9))
+                        .background(Circle().fill(focused ? Color.white : Color.white.opacity(0.1)))
+                }
+            }
                 .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(ring ? 1 : 0).animation(.easeOut(duration: 0.15), value: ring))
                 .overlay(alignment: .topTrailing) {
                     // Friends online or asking, in the accent.
                     if badge > 0 {
-                        Text("\(min(badge, 99))").font(.display(11 * scale, .bold)).foregroundStyle(.white)
+                        Text("\(min(badge, 99))").font(.display(11 * scale, .bold)).foregroundStyle(look.glass ? model.accent.onFill : .white)
                             .padding(.horizontal, 5 * scale).frame(minWidth: 18 * scale, minHeight: 18 * scale)
                             .background(Capsule().fill(model.accent)).offset(x: 4 * scale, y: -4 * scale)
                     }
                 }
                 .scaleEffect(focused ? 1.1 : 1)
-                .shadow(color: .white.opacity(focused ? 0.4 : 0), radius: 10 * scale)
+                .shadow(color: .white.opacity(focused && !look.glass ? 0.4 : 0), radius: 10 * scale)
         }
         .buttonStyle(.plain)
         .hoverTick("top-\(index)")
@@ -175,6 +262,7 @@ struct TopBar: View {
 struct UpdateNoticeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    @Environment(\.look) private var look
 
     var body: some View {
         let waiting = model.restartAfterGame
@@ -200,8 +288,7 @@ struct UpdateNoticeView: View {
         .padding(.leading, 16 * scale)
         .padding(.trailing, 5 * scale)
         .frame(height: 44 * scale)
-        .background(Capsule().fill(Color.black.opacity(0.28)).background(.ultraThinMaterial, in: Capsule()))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        .modifier(NoticeCapsule())
     }
 
     private func pill(_ title: String, index: Int, action: @escaping () -> Void) -> some View {
@@ -209,16 +296,31 @@ struct UpdateNoticeView: View {
         return Button(action: action) {
             Text(title)
                 .font(.display(13 * scale, .semibold))
-                .foregroundStyle(focused ? Color.black : .white.opacity(index == 0 ? 0.95 : 0.7))
+                .foregroundStyle(focused ? (look.glass ? Ice.ink : Color.black) : .white.opacity(index == 0 ? 0.95 : 0.7))
                 .padding(.horizontal, 14 * scale)
                 .frame(height: 34 * scale)
-                .background(Capsule().fill(focused ? Color.white : Color.white.opacity(index == 0 ? 0.14 : 0.06)))
+                .background(FocusFill(Capsule(), focused: focused, idle: Color.white.opacity(index == 0 ? 0.14 : 0.06)))
                 .contentShape(Capsule())
                 .scaleEffect(focused ? 1.05 : 1)
         }
         .buttonStyle(.plain)
         .hoverTick("notice-\(index)")
         .animation(Motion.focus, value: focused)
+    }
+}
+
+/// The update notice's capsule: dark frost, or a pane of glass in the Glass theme.
+private struct NoticeCapsule: ViewModifier {
+    @Environment(\.look) private var look
+
+    func body(content: Content) -> some View {
+        if look.glass {
+            content.iceSurface(Capsule(), shadow: false)
+        } else {
+            content
+                .background(Capsule().fill(Color.black.opacity(0.28)).background(.ultraThinMaterial, in: Capsule()))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+        }
     }
 }
 
@@ -279,6 +381,7 @@ struct GameTile: View {
     let focused: Bool
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    @Environment(\.look) private var look
 
     var body: some View {
         let state = model.state(of: game)
@@ -291,10 +394,16 @@ struct GameTile: View {
                 Image(systemName: "gamecontroller.fill").font(.system(size: size * 0.32)).foregroundStyle(.white.opacity(0.5))
             }
             overlay(for: state)
+            if look.glass {
+                // The icon under glass: light across its top, the ice rim around it.
+                LinearGradient(stops: [.init(color: .white.opacity(focused ? 0.2 : 0.12), location: 0), .init(color: .white.opacity(0), location: 0.42)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .allowsHitTesting(false)
+                IceRim(shape: RoundedRectangle(cornerRadius: radius, style: .continuous), strength: focused ? 0.9 : 0.6)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .shadow(color: .black.opacity(0.45), radius: focused ? 22 * scale : 10 * scale, y: 8 * scale)
+        .shadow(color: look.glass ? Ice.scrim.opacity(0.7) : .black.opacity(0.45), radius: focused ? 22 * scale : 10 * scale, y: 8 * scale)
         .focusRing(focused, radius: radius)
         .animation(Motion.focus, value: focused)
         .animation(Motion.layout, value: size)
@@ -363,6 +472,8 @@ struct HeroInfo: View {
     let game: Game
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    @Environment(\.look) private var look
+    @Namespace private var lens
 
     var body: some View {
         let state = model.state(of: game)
@@ -375,18 +486,18 @@ struct HeroInfo: View {
                 .shadow(color: .black.opacity(0.35), radius: 12)
             HStack(spacing: 16 * scale) {
                 let family = model.familyPrimary(game, state)
-                ConsoleButton(title: family?.title ?? primaryTitle(state), symbol: family?.symbol ?? primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210) {
+                ConsoleButton(title: family?.title ?? primaryTitle(state), symbol: family?.symbol ?? primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
                     model.focus = .actions(0)
                     model.primaryAction(game)
                 }
                 if let set = model.trophies[game.id] {
-                    ConsoleButton(title: "\(set.unlockedCount)/\(set.trophies.count)", symbol: "trophy.fill", focused: model.focus == .actions(1) && model.overlay == nil) {
+                    ConsoleButton(title: "\(set.unlockedCount)/\(set.trophies.count)", symbol: "trophy.fill", focused: model.focus == .actions(1) && model.overlay == nil, lens: ("action-1", lens)) {
                         model.focus = .actions(1)
                         model.open(.trophies)
                     }
                 }
                 let settingsIndex = model.actionCount - 1
-                ConsoleButton(title: "", symbol: "ellipsis", focused: model.focus == .actions(settingsIndex) && model.overlay == nil) {
+                ConsoleButton(title: "", symbol: "ellipsis", focused: model.focus == .actions(settingsIndex) && model.overlay == nil, lens: ("action-settings", lens)) {
                     model.focus = .actions(settingsIndex)
                     model.open(.gameSettings)
                 }
@@ -422,6 +533,7 @@ struct HeroInfo: View {
                         .transition(.opacity)
                 }
             }
+            .glassGroup(look, spacing: 12 * scale)
             .animation(Motion.layout, value: state)
             HStack(spacing: 14 * scale) {
                 InfoCard(title: T.text(.status), symbol: "circle.dashed") { StateLabel(state: state) }
@@ -544,7 +656,7 @@ struct LibraryGrid: View {
         .padding(.horizontal, 80 * scale)
         .padding(.vertical, 60 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .screenFrost(0.74)
     }
 
     private var grid: some View {
@@ -599,7 +711,7 @@ struct LogView: View {
             .glass(14 * scale, opacity: 0.55)
         }
         .padding(70 * scale)
-        .background(Color.black.opacity(0.65).background(.ultraThinMaterial))
+        .screenFrost(0.65)
     }
 }
 

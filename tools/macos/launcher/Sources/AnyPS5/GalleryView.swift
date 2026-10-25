@@ -18,7 +18,7 @@ struct Gallery: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.78).background(.ultraThinMaterial).ignoresSafeArea()
+            FrostFill(opacity: 0.78).ignoresSafeArea()
             if model.galleryViewing, shots.indices.contains(model.galleryIndex) {
                 viewer(shots[model.galleryIndex])
             } else {

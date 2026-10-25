@@ -170,7 +170,7 @@ struct ProfileView: View {
         .padding(.horizontal, 80 * scale)
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .screenFrost(0.74)
         .overlay {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
         }
@@ -566,11 +566,13 @@ struct ProfileAvatar: View {
     /// A picture on this Mac, before the avatar's address and the initial.
     var picture: NSImage? = nil
     @EnvironmentObject private var model: AppModel
+    @Environment(\.look) private var look
 
     var body: some View {
         ZStack {
-            Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(.white)
+            // The Glass theme's light Ice accent takes dark ink, on a fill that stays light enough for it.
+            Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(look.glass ? 0.8 : 0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(look.glass ? model.accent.onFill : .white)
             if let picture {
                 Image(nsImage: picture).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
             } else if let remote = url.flatMap(URL.init(string:)) {

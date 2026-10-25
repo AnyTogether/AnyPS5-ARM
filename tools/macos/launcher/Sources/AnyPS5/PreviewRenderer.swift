@@ -19,6 +19,9 @@ enum PreviewRenderer {
         ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_SELECT"]?.split(separator: ",").first.map(String.init)
     }
 
+    /// ANYPS5_PREVIEW_THEME=<number> (3 for Glass) draws the screens in another theme than Cosmic.
+    static let theme: Theme = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_THEME"].flatMap(Int.init).flatMap(Theme.init(rawValue:)) ?? .cosmic
+
     static func run(output: URL, games root: URL) {
         try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         // ANYPS5_PREVIEW_SELECT=<title ID>[,<title ID>…] puts those games first, in that order: the
@@ -29,7 +32,10 @@ enum PreviewRenderer {
         for game in found {
             Artwork.shared.prepare(game.icon, maxPixels: 400)
             Artwork.shared.prepare(game.background, maxPixels: Int(max(size.width, size.height) * 1.6))
+            if theme.isGlass { Artwork.shared.prepareFrosted(game.background) }
         }
+        // Cards drawn outside the window (the trophy banner) read the look from here.
+        Look.current = Look.make(style: theme, reduceTransparency: false, offscreen: true, reduceMotion: false)
         var preferences = Preferences()
         preferences.onboarded = true
         preferences.gamesFolder = root.path
@@ -49,9 +55,9 @@ enum PreviewRenderer {
             preferences.gameArtwork = false
             render(preferences, found, root, still, output.appendingPathComponent("home-theme\(theme.rawValue).png"))
         }
-        preferences.theme = .cosmic
+        preferences.theme = theme
         preferences.gameArtwork = true
-        let still = BackgroundView.still(theme: .cosmic, width: Int(size.width), height: Int(size.height), time: 260)
+        let still = BackgroundView.still(theme: theme, width: Int(size.width), height: Int(size.height), time: 260)
         render(preferences, found, root, still, output.appendingPathComponent("home-artwork.png")) { model in signedIn(model) }
         render(preferences, found, root, still, output.appendingPathComponent("home-actions.png")) { model in signedIn(model); model.focus = .actions(0) }
         // The pointer over a whole pill (Select) and over one glyph of another (→ of Move).

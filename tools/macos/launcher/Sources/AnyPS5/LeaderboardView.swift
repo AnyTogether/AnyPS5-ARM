@@ -153,7 +153,7 @@ struct LeaderboardView: View {
         .padding(.horizontal, 80 * scale)
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .screenFrost(0.74)
         .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
     }
 

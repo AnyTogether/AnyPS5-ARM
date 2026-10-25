@@ -330,7 +330,7 @@ struct MessagesView: View {
         .padding(.horizontal, 72 * scale)
         .padding(.vertical, 52 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .screenFrost(0.74)
         .overlay {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
         }
@@ -444,7 +444,7 @@ struct MessagesView: View {
                         Text(reply).font(.display(14 * scale, .semibold))
                             .foregroundStyle(focused ? Color.black : .white)
                             .padding(.horizontal, 14 * scale).padding(.vertical, 8 * scale)
-                            .background(Capsule().fill(focused ? Color.white : Color.white.opacity(0.1)))
+                            .background(FocusFill(Capsule(), focused: focused, idle: Color.white.opacity(0.1)))
                             .scaleEffect(focused ? 1.05 : 1)
                     }
                     .buttonStyle(.plain)
@@ -611,7 +611,7 @@ struct GroupComposer: View {
         .foregroundStyle(focused ? Color.black : .white)
         .padding(.horizontal, 14 * scale)
         .padding(.vertical, 9 * scale)
-        .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(picked ? 0.1 : 0.04)))
+        .background(FocusFill(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(picked ? 0.1 : 0.04)))
         .scaleEffect(focused ? 1.015 : 1)
         .animation(Motion.focus, value: focused)
         .animation(Motion.focus, value: picked)
@@ -627,7 +627,7 @@ struct GroupComposer: View {
             .foregroundStyle(focused ? Color.black : .white.opacity(ready ? 1 : 0.45))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 13 * scale)
-            .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(focused ? Color.white : (ready ? model.accent.opacity(0.8) : Color.white.opacity(0.06))))
+            .background(FocusFill(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous), focused: focused, idle: (ready ? model.accent.opacity(0.8) : Color.white.opacity(0.06))))
             .scaleEffect(focused ? 1.015 : 1)
         }
         .buttonStyle(.plain)
@@ -685,7 +685,7 @@ struct ConversationRow: View {
         .foregroundStyle(focused ? Color.black : .white)
         .padding(.horizontal, 14 * scale)
         .padding(.vertical, 11 * scale)
-        .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(selected ? 0.12 : 0.05)))
+        .background(FocusFill(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(selected ? 0.12 : 0.05)))
         .scaleEffect(focused ? 1.015 : 1)
         .animation(Motion.focus, value: focused)
     }

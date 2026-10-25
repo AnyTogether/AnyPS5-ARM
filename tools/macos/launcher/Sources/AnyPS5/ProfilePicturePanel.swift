@@ -173,7 +173,7 @@ struct PictureCropView: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.5)).ignoresSafeArea()
+            FrostFill(opacity: 0.5).ignoresSafeArea()
                 .contentShape(Rectangle()).onTapGesture {}
             if let crop = model.pictureCrop {
                 sheet(crop)

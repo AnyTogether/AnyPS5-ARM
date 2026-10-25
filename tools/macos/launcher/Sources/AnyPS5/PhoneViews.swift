@@ -9,7 +9,7 @@ struct PairingCard: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.55)).ignoresSafeArea()
+            FrostFill(opacity: 0.55).ignoresSafeArea()
             VStack(spacing: 22 * scale) {
                 Image(systemName: "iphone.gen3.radiowaves.left.and.right")
                     .font(.system(size: 44 * scale, weight: .light))

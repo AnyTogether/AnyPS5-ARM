@@ -74,19 +74,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.stillBackground) private var stillBackground
+
+    private var look: Look {
+        Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency, offscreen: stillBackground != nil,
+                  reduceMotion: model.preferences.reducedMotion || systemReduceMotion)
+    }
 
     var body: some View {
+        let look = look
         GeometryReader { proxy in
             let scale = min(1.45, max(0.68, min(proxy.size.width / 1600, proxy.size.height / 900)))
             ZStack {
-                Backdrop()
-                if model.preferences.onboarded {
-                    HomeView()
-                        .transition(.opacity)
-                } else {
-                    OnboardingView()
-                        .transition(.opacity)
+                Group {
+                    Backdrop()
+                    if model.preferences.onboarded {
+                        HomeView()
+                            .transition(.opacity)
+                    } else {
+                        OnboardingView()
+                            .transition(.opacity)
+                    }
                 }
+                // Offscreen there is no material to frost what a full-screen panel covers: the
+                // Glass look's renders blur it here instead, as the window's material does live.
+                .blur(radius: stillBackground != nil && look.glass && model.overlay?.coversScreen == true ? 30 * scale : 0)
                 overlays
                 if model.share.watching != nil {
                     ShareWatchView().transition(.opacity)
@@ -111,10 +125,13 @@ struct RootView: View {
                 .padding(.top, 26 * scale)
             }
             .environment(\.scale, scale)
+            .environment(\.look, look)
+            .animation(Motion.fade, value: look)
             .preferredColorScheme(.dark)
         }
         .background(Color.black)
         .ignoresSafeArea()
+        .onChange(of: look, initial: true) { _, now in Look.current = now }
         .onAppear {
             Input.shared.handler = { [weak model] command in model?.handle(command) ?? false }
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
@@ -213,7 +230,7 @@ struct LaunchSplash: View {
     var body: some View {
         let size = 200 * scale
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.55))
+            FrostFill(opacity: 0.55)
             VStack(spacing: 26 * scale) {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.12, style: .continuous).fill(Color.white.opacity(0.08))

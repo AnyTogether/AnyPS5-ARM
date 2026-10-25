@@ -444,7 +444,7 @@ struct ShareMenu: View {
         .padding(30 * scale)
         .frame(width: 440 * scale)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(white: 0.06).opacity(0.94).background(.ultraThinMaterial))
+        .panelFrost(classic: 0.94)
         .overlay(Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1), alignment: .leading)
     }
 
@@ -468,7 +468,7 @@ struct ShareMenu: View {
         .foregroundStyle(focused ? Color.black : .white)
         .padding(.horizontal, 14 * scale)
         .padding(.vertical, 9 * scale)
-        .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(0.06)))
+        .background(FocusFill(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(0.06)))
         .scaleEffect(focused ? 1.015 : 1)
         .animation(Motion.focus, value: focused)
         .contentShape(Rectangle())

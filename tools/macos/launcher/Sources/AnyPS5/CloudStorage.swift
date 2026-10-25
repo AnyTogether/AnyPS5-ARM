@@ -392,7 +392,7 @@ struct CloudStorageView: View {
             .padding(36 * scale)
             .frame(width: 600 * scale, alignment: .topLeading)
             .frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(white: 0.06).opacity(0.92).background(.ultraThinMaterial))
+            .panelFrost()
             .overlay(Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1), alignment: .leading)
         }
     }

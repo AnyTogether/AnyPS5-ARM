@@ -105,7 +105,7 @@ struct DroppingCard<Content: View>: View {
             content(popped || still)
                 .padding(14)
                 .frame(width: 480)
-                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(white: 0.07).opacity(0.94)))
+                .modifier(BannerGlass(still: still))
                 .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
                 .offset(y: visible ? 14 : -TrophyBanner.size.height)
                 .opacity(visible ? 1 : 0)

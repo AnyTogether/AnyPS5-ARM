@@ -187,7 +187,7 @@ struct RingingCard: View {
 
     var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.55)).ignoresSafeArea()
+            FrostFill(opacity: 0.55).ignoresSafeArea()
             VStack(spacing: 24 * scale) {
                 ZStack {
                     ForEach(0 ..< 2) { ring in
@@ -301,7 +301,7 @@ struct RingToast: View {
             }
             .padding(14)
             .frame(width: 480)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(white: 0.07).opacity(0.94)))
+            .modifier(BannerGlass(still: still))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
             .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
             .offset(y: visible ? 14 : -TrophyBanner.size.height)

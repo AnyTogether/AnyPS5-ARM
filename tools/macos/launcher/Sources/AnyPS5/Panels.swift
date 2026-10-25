@@ -617,7 +617,7 @@ struct SettingsPanel: View {
                     .foregroundStyle(focused ? Color.black : .white.opacity(selected ? 1 : 0.7))
                     .padding(.horizontal, 18 * scale)
                     .frame(height: 52 * scale)
-                    .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(selected ? 0.12 : 0)))
+                    .background(FocusFill(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(selected ? 0.12 : 0), rim: selected))
                     .contentShape(Rectangle())
                     .hoverTick("category-\(index)")
                     .onTapGesture {
@@ -641,7 +641,7 @@ struct SettingsPanel: View {
         .padding(.top, 70 * scale)
         .padding(.bottom, 50 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .screenFrost(0.74)
         .animation(Motion.focus, value: model.panelCategory)
     }
 }
@@ -666,7 +666,7 @@ struct SidePanel: View {
             .padding(36 * scale)
             .frame(width: 560 * scale, alignment: .topLeading)
             .frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(white: 0.06).opacity(0.92).background(.ultraThinMaterial))
+            .panelFrost()
             .overlay(Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1), alignment: .leading)
         }
     }
@@ -775,7 +775,7 @@ struct RowView: View {
         .padding(.horizontal, 18 * scale)
         .padding(.vertical, 8 * scale)
         .frame(minHeight: 58 * scale)
-        .background(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous).fill(focused ? Color.white : Color.white.opacity(row.focusable ? 0.07 : 0)))
+        .background(FocusFill(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(row.focusable ? 0.07 : 0)))
         .shadow(color: .white.opacity(focused ? 0.22 : 0), radius: 12 * scale)
         .scaleEffect(focused ? 1.015 : 1)
         .animation(Motion.focus, value: focused)

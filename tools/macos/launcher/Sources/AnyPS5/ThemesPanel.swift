@@ -92,7 +92,7 @@ extension AppModel {
         var rows = [
             PanelRow(id: "name", title: T.text(.themeName), symbol: "textformat", kind: .text(design.name) { [weak self] text in self?.edit { $0.name = text } }),
             PanelRow(id: "author", title: T.text(.themeAuthor), symbol: "person", kind: .text(design.author) { [weak self] text in self?.edit { $0.author = text } }),
-            PanelRow(id: "motion", title: T.text(.themeMotion), symbol: "wind", kind: .choice(options: Theme.allCases.map(\.title), selected: min(2, max(0, design.style))) { [weak self] index in
+            PanelRow(id: "motion", title: T.text(.themeMotion), symbol: "wind", kind: .choice(options: Theme.allCases.map(\.title), selected: min(Theme.allCases.count - 1, max(0, design.style))) { [weak self] index in
                 self?.edit { $0.style = index }
             }),
             PanelRow(id: "hue", title: T.text(.themeHue), symbol: "paintpalette", kind: .stepper(value: Int(knobs.hue), range: 0...355, step: 5, format: degrees) { [weak self] value in

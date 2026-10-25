@@ -105,6 +105,18 @@ enum HomeFocus: Equatable {
     case actions(Int)
 }
 
+extension Overlay {
+    /// Panels drawn over the whole screen rather than sliding in at its side.
+    var coversScreen: Bool {
+        switch self {
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 enum Overlay: Equatable {
     case settings
     case gameSettings

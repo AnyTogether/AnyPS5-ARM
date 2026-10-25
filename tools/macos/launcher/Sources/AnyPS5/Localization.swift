@@ -51,7 +51,7 @@ enum T {
         case profileName, behaviour, hideWhilePlaying, rosettaMissing, rosettaInstall, rosettaInstalled
         case moveToApplications, moveToApplicationsText, moveNow, later, noToolkit
         case emptyLibraryTitle, emptyLibraryText, scanning, allGames, sortName, playTime
-        case themeCosmic, themeAurora, themeSunset, hintMove, hintGame, hintSelect, hintBack, hintOptions
+        case themeCosmic, themeAurora, themeSunset, themeGlass, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
         case unreadableDump
         case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
@@ -540,6 +540,7 @@ enum T {
         .themeCosmic: "Kozmik",
         .themeAurora: "Aurora",
         .themeSunset: "Gün Batımı",
+        .themeGlass: "Cam",
         .hintMove: "Gezin",
         .hintGame: "Oyun",
         .hintSelect: "Seç",
@@ -1127,6 +1128,7 @@ enum T {
         .themeCosmic: "Cosmic",
         .themeAurora: "Aurora",
         .themeSunset: "Sunset",
+        .themeGlass: "Glass",
         .hintMove: "Move",
         .hintGame: "Game",
         .hintSelect: "Select",
