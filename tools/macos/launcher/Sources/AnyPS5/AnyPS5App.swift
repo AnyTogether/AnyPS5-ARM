@@ -12,6 +12,10 @@ enum Entry {
             MainActor.assumeIsolated { PreviewRenderer.run(output: URL(fileURLWithPath: arguments[index + 1]), games: URL(fileURLWithPath: arguments[index + 2])) }
             return
         }
+        // `AnyPS5 --glass-selftest` checks how the window is made in every theme, offscreen.
+        if arguments.contains("--glass-selftest") {
+            exit(MainActor.assumeIsolated { GlassSelfTest.run() })
+        }
         AnyPS5App.main()
     }
 }
@@ -41,7 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
             guard let window = NSApp.windows.first else { return }
-            window.backgroundColor = .black
+            // Its background color and opacity follow the theme (GlassWindowHook): black, or clear
+            // for Glass's see-through window.
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
             window.collectionBehavior.insert(.fullScreenPrimary)
@@ -77,10 +82,12 @@ struct RootView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.stillBackground) private var stillBackground
+    @Environment(\.mockDesktop) private var mockDesktop
 
     private var look: Look {
         Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency, offscreen: stillBackground != nil,
-                  reduceMotion: model.preferences.reducedMotion || systemReduceMotion)
+                  reduceMotion: model.preferences.reducedMotion || systemReduceMotion,
+                  transparency: model.preferences.glassTransparency, seeThrough: stillBackground == nil || mockDesktop != nil)
     }
 
     var body: some View {
@@ -100,7 +107,7 @@ struct RootView: View {
                 }
                 // Offscreen there is no material to frost what a full-screen panel covers: the
                 // Glass look's renders blur it here instead, as the window's material does live.
-                .blur(radius: stillBackground != nil && look.glass && model.overlay?.coversScreen == true ? 30 * scale : 0)
+                .blur(radius: stillBackground != nil && look.glass && (model.overlay?.coversScreen == true || model.starting != nil) ? 30 * scale : 0)
                 overlays
                 if model.share.watching != nil {
                     ShareWatchView().transition(.opacity)
@@ -129,7 +136,15 @@ struct RootView: View {
             .animation(Motion.fade, value: look)
             .preferredColorScheme(.dark)
         }
-        .background(Color.black)
+        // Glass: the window is see-through and this is the blurred, tinted desktop behind it.
+        .background {
+            if look.seeThrough {
+                GlassWindowBackdrop(recipe: look.window).transition(.opacity)
+            } else {
+                Color.black
+            }
+        }
+        .background(GlassWindowHook(recipe: look.window))
         .ignoresSafeArea()
         .onChange(of: look, initial: true) { _, now in Look.current = now }
         .onAppear {

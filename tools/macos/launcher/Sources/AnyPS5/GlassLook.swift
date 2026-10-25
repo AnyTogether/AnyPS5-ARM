@@ -8,6 +8,8 @@ struct Look: Equatable {
     var glass = false
     var rendering = GlassRendering.frosted
     var reduceMotion = false
+    /// The main window: opaque, or in the Glass look see-through to the desktop under a tint.
+    var window = GlassWindowRecipe.opaque
 
     /// The look of views hosted outside the main window (the trophy banner's panel).
     static var current = Look()
@@ -18,13 +20,22 @@ struct Look: Equatable {
     /// The previews' stand-in for Reduce Transparency (ANYPS5_PREVIEW_REDUCE_TRANSPARENCY=1).
     static var forceSolid = false
 
-    static func make(style: Theme, reduceTransparency: Bool, offscreen: Bool, reduceMotion: Bool) -> Look {
+    /// `seeThrough` is false where nothing can be behind the window (an offscreen render without
+    /// a mock desktop); `transparency` is Settings → Appearance → Glass Transparency.
+    static func make(style: Theme, reduceTransparency: Bool, offscreen: Bool, reduceMotion: Bool, transparency: Int? = nil, seeThrough: Bool = true) -> Look {
         guard style.isGlass else { return Look(reduceMotion: reduceMotion) }
         let reduceTransparency = reduceTransparency || forceSolid
         var liquidAvailable = false
         if #available(macOS 26, *) { liquidAvailable = true }
-        return Look(glass: true, rendering: .choose(reduceTransparency: reduceTransparency, liquidAvailable: liquidAvailable, offscreen: offscreen), reduceMotion: reduceMotion)
+        let window = seeThrough ? GlassWindowRecipe.make(glass: true, reduceTransparency: reduceTransparency, transparency: transparency) : .opaque
+        // The slider at 0 % is a solid pane: solid surfaces with it.
+        let rendering: GlassRendering = seeThrough && !window.translucent ? .solid
+            : .choose(reduceTransparency: reduceTransparency, liquidAvailable: liquidAvailable, offscreen: offscreen)
+        return Look(glass: true, rendering: rendering, reduceMotion: reduceMotion, window: window)
     }
+
+    /// The window lets the desktop through.
+    var seeThrough: Bool { window.translucent }
 }
 
 private struct LookKey: EnvironmentKey {

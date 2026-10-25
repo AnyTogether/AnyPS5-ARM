@@ -127,7 +127,7 @@ extension AppModel {
         appearance += [
             PanelRow(id: "themes", title: T.text(.themes), detail: T.text(.themesDetail), symbol: "square.grid.2x2", kind: .action(destructive: false) { [weak self] in self?.open(.themes) }),
             PanelRow(id: "studio", title: T.text(.themeStudio), detail: T.text(.themeStudioDetail), symbol: "wand.and.stars", kind: .action(destructive: false) { [weak self] in self?.openStudio() }),
-            PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
+            PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [lookStyle.isGlass && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency && (preferences.glassTransparency ?? 1) > 0 ? TG.text(.desktop) : T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
                 let backdrop = [Preferences.Backdrop.theme, .image, .video][index]
                 if backdrop != .theme && (self?.preferences.backdropFile == nil || self?.preferences.backdrop != backdrop) {
                     self?.chooseBackdrop(backdrop)
@@ -141,8 +141,21 @@ extension AppModel {
                 self?.chooseBackdrop(preferences.backdrop)
             }))
         }
+        if lookStyle.isGlass {
+            // The see-through window: how much of the desktop shows, and the key art over it.
+            let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            appearance += [
+                PanelRow(id: "glassTransparency", title: TG.text(.transparency), detail: TG.text(reduced ? .transparencyReduced : .transparencyDetail), symbol: "square.on.square.dashed",
+                         kind: .stepper(value: preferences.glassTransparency ?? GlassWindowRecipe.defaultTransparency, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
+                             self?.preferences.glassTransparency = value == GlassWindowRecipe.defaultTransparency ? nil : value
+                         }),
+                PanelRow(id: "glassArtwork", title: TG.text(.artworkBehind), detail: TG.text(.artworkBehindDetail), symbol: "photo",
+                         kind: .toggle(preferences.glassArtwork == true) { [weak self] value in self?.preferences.glassArtwork = value ? true : nil }),
+            ]
+        } else {
+            appearance.append(PanelRow(id: "artwork", title: T.text(.gameArtwork), symbol: "photo", kind: .toggle(preferences.gameArtwork) { [weak self] value in self?.preferences.gameArtwork = value }))
+        }
         appearance += [
-            PanelRow(id: "artwork", title: T.text(.gameArtwork), symbol: "photo", kind: .toggle(preferences.gameArtwork) { [weak self] value in self?.preferences.gameArtwork = value }),
             PanelRow(id: "motion", title: T.text(.motion), symbol: "wind", kind: .choice(options: [T.text(.motionFull), T.text(.motionReduced)], selected: preferences.reducedMotion ? 1 : 0) { [weak self] index in
                 self?.preferences.reducedMotion = index == 1
             }),

@@ -19,6 +19,11 @@ struct Preferences: Codable, Equatable {
     var backdrop = Backdrop.theme
     var backdropFile: String?
     var gameArtwork = true
+    /// The Glass theme's window: how much of the desktop shows through, in percent (nil for
+    /// GlassWindowRecipe.defaultTransparency), and whether the selected game's key art is laid
+    /// over it (nil means off: the desktop is Glass's background).
+    var glassTransparency: Int?
+    var glassArtwork: Bool?
     var reducedMotion = false
     var sounds = true
     /// Interface sounds and the selected game's theme song, in percent; nil keeps the default.

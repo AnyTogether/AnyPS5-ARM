@@ -24,17 +24,24 @@ struct Backdrop: View {
             case .video where preferences.backdropFile != nil:
                 LoopingVideo(url: URL(fileURLWithPath: preferences.backdropFile!), paused: paused)
             default:
-                if let still = stillBackground {
+                // Glass's see-through window: the desktop behind it is the background.
+                if look.seeThrough {
+                    Color.clear
+                } else if let still = stillBackground {
                     Image(nsImage: still).resizable()
                 } else {
                     ThemeBackground(theme: model.lookStyle, palette: model.activeDesign?.palette, paused: paused)
                 }
             }
             }
-            if preferences.onboarded, preferences.gameArtwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
+            // Over the see-through window the key art is laid only when asked for (Show Game Art
+            // Behind), and lets some of the desktop through.
+            let artwork = look.seeThrough ? preferences.glassArtwork == true : preferences.gameArtwork
+            if preferences.onboarded, artwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
                 Group {
                     if look.glass {
                         FrostedArtwork(url: background, animated: !look.reduceMotion, solid: look.solid)
+                            .opacity(look.seeThrough ? 0.72 : 1)
                     } else {
                         GameArtwork(url: background, animated: !preferences.reducedMotion)
                     }

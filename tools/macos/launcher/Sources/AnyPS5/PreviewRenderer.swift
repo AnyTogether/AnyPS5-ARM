@@ -1,5 +1,6 @@
 import AnyPS5Core
 import AppKit
+import CoreImage
 import SwiftUI
 
 /// Draws the launcher's screens into PNG files offscreen: no window opens, nothing is saved.
@@ -22,6 +23,24 @@ enum PreviewRenderer {
     /// ANYPS5_PREVIEW_THEME=<number> (3 for Glass) draws the screens in another theme than Cosmic.
     static let theme: Theme = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_THEME"].flatMap(Int.init).flatMap(Theme.init(rawValue:)) ?? .cosmic
 
+    /// The desktop the Glass previews put behind the see-through window: ANYPS5_PREVIEW_WALLPAPER
+    /// or the system's default desktop picture, blurred and dimmed roughly as the window server's
+    /// dark HUD material does. A mock: an offscreen render has no window, so nothing is behind it.
+    static let mockDesktop: NSImage? = {
+        let path = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_WALLPAPER"] ?? "/System/Library/CoreServices/DefaultDesktop.heic"
+        guard let small = Artwork.decode(URL(fileURLWithPath: path), maxPixels: 640), let cgImage = small.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let input = CIImage(cgImage: cgImage)
+        let dim = CIVector(x: 0.75, y: 0, z: 0, w: 0)
+        let output = input.clampedToExtent()
+            .applyingGaussianBlur(sigma: 14)
+            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 1.2])
+            .applyingFilter("CIColorMatrix", parameters: ["inputRVector": dim, "inputGVector": CIVector(x: 0, y: 0.75, z: 0, w: 0),
+                                                          "inputBVector": CIVector(x: 0, y: 0, z: 0.75, w: 0), "inputBiasVector": CIVector(x: 0.04, y: 0.04, z: 0.05, w: 0)])
+            .cropped(to: input.extent)
+        guard let mock = CIContext(options: [.cacheIntermediates: false]).createCGImage(output, from: input.extent) else { return nil }
+        return NSImage(cgImage: mock, size: NSSize(width: mock.width, height: mock.height))
+    }()
+
     static func run(output: URL, games root: URL) {
         try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         // ANYPS5_PREVIEW_SELECT=<title ID>[,<title ID>…] puts those games first, in that order: the
@@ -36,8 +55,12 @@ enum PreviewRenderer {
         }
         Look.forceSolid = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_REDUCE_TRANSPARENCY"] == "1"
         // Cards drawn outside the window (the trophy banner) read the look from here.
-        Look.current = Look.make(style: theme, reduceTransparency: false, offscreen: true, reduceMotion: false)
+        Look.current = Look.make(style: theme, reduceTransparency: false, offscreen: true, reduceMotion: false, seeThrough: mockDesktop != nil)
         var preferences = Preferences()
+        // ANYPS5_PREVIEW_GLASS_TRANSPARENCY=<percent> and ANYPS5_PREVIEW_GLASS_ARTWORK=1: Glass's
+        // window settings.
+        preferences.glassTransparency = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_GLASS_TRANSPARENCY"].flatMap(Int.init)
+        if ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_GLASS_ARTWORK"] == "1" { preferences.glassArtwork = true }
         preferences.onboarded = true
         preferences.gamesFolder = root.path
         preferences.sounds = false
@@ -354,6 +377,10 @@ enum PreviewRenderer {
         }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings-r1.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1; model.switchGame(1) }
         render(preferences, found, root, still, output.appendingPathComponent("settings.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 0 }
+        if theme.isGlass {
+            // Appearance's Glass Transparency row.
+            render(preferences, found, root, still, output.appendingPathComponent("settings-glass.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 5 }
+        }
         for category in 1..<6 {
             render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
         }
@@ -650,12 +677,26 @@ enum PreviewRenderer {
         let pick = selectedTitle.flatMap { id in games.firstIndex { $0.titleID == id } }
         model.selected = pick ?? min(1, max(0, games.count - 1))
         configure(model)
+        // Glass's see-through window over the mock desktop, labelled as the mock it is.
+        let look = Look.make(style: model.lookStyle, reduceTransparency: false, offscreen: true, reduceMotion: false,
+                             transparency: preferences.glassTransparency, seeThrough: mockDesktop != nil)
         let view = RootView()
             .environmentObject(model)
             .environment(\.stillBackground, still)
             .environment(\.themeStills, stills)
             .environment(\.hintHover, hintHover)
+            .environment(\.mockDesktop, mockDesktop)
             .frame(width: size.width, height: size.height)
+            .overlay(alignment: .bottomLeading) {
+                if look.seeThrough {
+                    Text("MOCK · desktop composited offscreen, blurred by Core Image, not the live window server blur")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.yellow, in: Capsule())
+                        .padding(14)
+                }
+            }
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1
         guard let image = renderer.cgImage else { print("could not render \(file.lastPathComponent)"); return }
