@@ -32,6 +32,7 @@ final class ShareSession {
     let host: SharePlayHost
     let router: SharePadRouter
     let capture = SharePlayCapture()
+    let awake = Awake("Share play")
     var viewers: [TogetherSharePlay.Viewer] = []
     var renewal: Task<Void, Never>?
 
@@ -39,6 +40,7 @@ final class ShareSession {
         self.id = id
         self.host = host
         self.router = router
+        awake.hold()
     }
 }
 
@@ -161,6 +163,7 @@ extension AppModel {
         session.renewal?.cancel()
         session.capture.stop()
         session.host.close()
+        session.awake.release()
         session.router.releaseAll()
         remote?.padOutput = nil
         shareSession = nil

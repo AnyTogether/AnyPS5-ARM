@@ -305,4 +305,35 @@ final class DiscordPresenceTests: XCTestCase {
         XCTAssertEqual(DiscordJoin.plan(share: nil, party: .init(id: "p1", code: nil, mine: false, mayMake: true)), .none, "a member never makes one")
         XCTAssertEqual(DiscordJoin.plan(share: nil, party: nil), .none)
     }
+
+    func testTheButtonIsLookedAtAgainWhenTheSoonestCodeRunsOut() {
+        let now = Date()
+        let party = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP", expires: 3600), mine: true, mayMake: true)
+        let share = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS", expires: 600), mine: true, mayMake: true)
+        XCTAssertEqual(DiscordJoin.refresh(share: share, party: party, now: now), share.code?.expiresAt)
+        XCTAssertEqual(DiscordJoin.refresh(share: nil, party: party, now: now), party.code?.expiresAt)
+        let ranOut = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS", expires: -10), mine: true, mayMake: true)
+        XCTAssertEqual(DiscordJoin.refresh(share: ranOut, party: party, now: now), party.code?.expiresAt, "one that ran out already is no reason to wait")
+        XCTAssertNil(DiscordJoin.refresh(share: ranOut, party: nil, now: now))
+        XCTAssertNil(DiscordJoin.refresh(share: nil, party: .init(id: "p1", code: nil, mine: true, mayMake: true), now: now))
+        XCTAssertNil(DiscordJoin.refresh(share: nil, party: nil, now: now))
+    }
+
+    func testWhenTheCodeRunsOutTheButtonGetsANewOneOrGoes() throws {
+        // The leader's code: until it runs out the button opens it, then a new one is made for it.
+        let led = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP", expires: 900), mine: true, mayMake: true)
+        let end = try XCTUnwrap(DiscordJoin.refresh(share: nil, party: led))
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: led, now: end.addingTimeInterval(-1)), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: led, now: end), .makeParty("p1"))
+        // A member's button goes; so does the leader's once they stopped making codes for it.
+        let member = DiscordJoin.Source(id: "p1", code: led.code, mine: false, mayMake: false)
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: member, now: end), .none)
+        let stopped = DiscordJoin.Source(id: "p1", code: led.code, mine: true, mayMake: false)
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: stopped, now: end), .none)
+        // The share play's code running out falls back to the party's, which still works.
+        let share = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS", expires: 60), mine: true, mayMake: false)
+        let party = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP", expires: 3600), mine: false, mayMake: false)
+        let shareEnd = try XCTUnwrap(DiscordJoin.refresh(share: share, party: party))
+        XCTAssertEqual(DiscordJoin.plan(share: share, party: party, now: shareEnd), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+    }
 }

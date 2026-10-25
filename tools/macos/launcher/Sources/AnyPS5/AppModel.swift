@@ -592,6 +592,8 @@ final class AppModel: ObservableObject {
     /// When the running game's window showed: its time on Discord.
     var discordSince: Date?
     var partySince: (id: String, at: Date)?
+    /// Discord looked at again when the code its Join button opens runs out, and when.
+    var discordRefresh: (task: Task<Void, Never>, at: Date)?
     /// The game session the user hosts or joined, and invitations to friends' games.
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
@@ -1417,10 +1419,13 @@ final class AppModel: ObservableObject {
     /// window is up, the party they are in ("In a party", with its size, even with no game), and
     /// the Join button with the share play's or party's code. The party's leader or the share
     /// play's host gets a code made for the button when none works, but not where they stopped
-    /// it themselves. Discord is told only when something changed.
+    /// it themselves; a code running out is such a time, with nothing else changing. Discord is
+    /// told only when something changed.
     func updateDiscord() {
         guard persists else { return }
         let game = gameWindowShown ? running?.game : nil
+        var refresh: Date?
+        defer { refreshDiscord(at: refresh) }
         guard preferences.discordPresence ?? true, game != nil || party != nil else {
             discordShown = nil
             if !discordCleared {
@@ -1438,6 +1443,7 @@ final class AppModel: ObservableObject {
             let partySource = party.map {
                 DiscordJoin.Source(id: $0.id, code: $0.joinCode, mine: $0.isLeader(me), mayMake: allowed && !codeStopped.contains($0.id) && !codeMakingForDiscord.contains($0.id))
             }
+            refresh = DiscordJoin.refresh(share: hosting, party: partySource)
             switch DiscordJoin.plan(share: hosting, party: partySource) {
             case .button(let url): button = DiscordActivity.Button(label: JS.text(.discordJoinLabel), url: url)
             case .makeShare(let id): makeCodeForDiscord(id, sharePlay: true)
@@ -1452,6 +1458,22 @@ final class AppModel: ObservableObject {
         discordShown = activity
         discordCleared = false
         discord.show(activity)
+    }
+
+    /// Discord again once `date` passes (the code its button opens ran out): the button opens the
+    /// other code, a new one made for it, or goes; the panels stop showing the old code too.
+    private func refreshDiscord(at date: Date?) {
+        guard date != discordRefresh?.at else { return }
+        discordRefresh?.task.cancel()
+        discordRefresh = date.map { date in
+            (Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow) + 1))
+                guard let self, !Task.isCancelled else { return }
+                self.discordRefresh = nil
+                self.objectWillChange.send()
+                self.updateDiscord()
+            }, date)
+        }
     }
 
     /// A code for the Join button, made once; one that fails is not tried again this session.

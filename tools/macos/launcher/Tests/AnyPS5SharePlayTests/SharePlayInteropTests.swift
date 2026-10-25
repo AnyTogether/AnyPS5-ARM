@@ -82,8 +82,10 @@ final class SharePlayInteropTests: XCTestCase {
         // The game: a moving picture at 60 fps and a 440 Hz tone in 5 ms packets.
         let pictures = (0 ..< 24).map(syntheticFrame)
         let frameIndex = Locked(0)
-        let pump = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "frames", qos: .userInteractive))
-        pump.schedule(deadline: .now(), repeating: .milliseconds(16))
+        // Strict, with no leeway: in a background process (taskpolicy -b) a timer's default leeway
+        // lets the system fold it to about 10 a second, and the game would run at 10 fps.
+        let pump = DispatchSource.makeTimerSource(flags: .strict, queue: DispatchQueue(label: "frames", qos: .userInteractive))
+        pump.schedule(deadline: .now(), repeating: .milliseconds(16), leeway: .nanoseconds(0))
         pump.setEventHandler {
             let index = frameIndex.withLock { value -> Int in
                 value += 1

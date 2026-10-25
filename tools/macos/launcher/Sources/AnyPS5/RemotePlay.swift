@@ -17,6 +17,7 @@ final class RemotePlay {
     private var stream: SCStream?
     private var output: Output?
     private var watch: Task<Void, Never>?
+    private let awake = Awake("Remote Play")
     private(set) var pid: pid_t?
     private(set) var size: (width: Int, height: Int)?
 
@@ -53,6 +54,7 @@ final class RemotePlay {
         self.output = output
         self.pid = pid
         self.size = (width, height)
+        awake.hold()
         watch = ClipRecorder.follow(stream, pid: pid, app: app, window: window, display: display, configure: configure)
     }
 
@@ -64,6 +66,7 @@ final class RemotePlay {
         output = nil
         pid = nil
         size = nil
+        awake.release()
     }
 
     /// The phone lost part of the picture.

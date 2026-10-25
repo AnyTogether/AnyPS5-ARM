@@ -27,6 +27,7 @@ final class Broadcaster: ObservableObject {
         }
     }
 
+    private let awake = Awake("Broadcast")
     @Published var settings: BroadcastSettings {
         didSet {
             guard settings != oldValue else { return }
@@ -91,6 +92,7 @@ final class Broadcaster: ObservableObject {
         }
         phase = .starting
         game = id
+        awake.hold()
         if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
         let content: SCShareableContent
         do {
@@ -162,6 +164,7 @@ final class Broadcaster: ObservableObject {
     }
 
     private func tearDown() {
+        awake.release()
         watch?.cancel()
         watch = nil
         if let stream { Task { try? await stream.stopCapture() } }

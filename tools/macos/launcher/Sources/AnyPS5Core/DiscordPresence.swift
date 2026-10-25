@@ -195,6 +195,13 @@ public enum DiscordJoin {
         if let party, party.mine, party.mayMake { return .makeParty(party.id) }
         return .none
     }
+
+    /// When the plan must be made again with nothing else changing: the moment the soonest code
+    /// that works now runs out (the button then opens the other code, a new one, or goes); nil
+    /// while no code works.
+    public static func refresh(share: Source?, party: Source?, now: Date = Date()) -> Date? {
+        [share, party].compactMap { $0?.code }.filter { $0.works(at: now) }.map(\.expiresAt).min()
+    }
 }
 
 /// "Playing <game>" on the user's Discord profile, through the Discord app's local socket
