@@ -168,7 +168,6 @@ final class OnlineBridgeTests: XCTestCase {
                        "2f21186674e36ff3b7a3c64d49553ec40d66baf6fb0700e734cc6f09e6af4ab1")
         XCTAssertEqual(OnlineWire.hex(OnlineWire.proof(secret: secret, side: .engine, engineNonce: engineNonce, launcherNonce: launcherNonce)),
                        "01c14bd9997ca8a60d1c14d1002ad65161b53ba7499fe653d2f73bc4b6641a4d")
-        XCTAssertEqual(OnlineWire.virtualAddress(player: 0), 0xC612_0001)
         XCTAssertTrue(OnlineWire.isVirtual(0xC613_FFFF))
         XCTAssertFalse(OnlineWire.isVirtual(0xC614_0000))
     }
@@ -294,6 +293,8 @@ final class OnlineBridgeTests: XCTestCase {
     func testTwoLaunchersCarryGamePacketsBetweenTwoEngines() throws {
         let key = OnlineWire.randomBytes(32)
         let players = [("a-id", "alice"), ("b-id", "bob")]
+        let addresses = OnlineIdentity.addresses(for: ["a-id", "b-id"])
+        let (a, b) = (try XCTUnwrap(addresses["a-id"]), try XCTUnwrap(addresses["b-id"]))
         let game = OnlineWebRouter.Game(titleId: "PPSA00000", gameVersion: "01.000", engineBuild: "unknown")
         let alicePlay = OnlinePlay(service: FakeSessions(players: players), user: TogetherUser(id: "a-id", handle: "alice", displayName: "Alice", avatar: nil), game: game, sessionKey: key)
         let bobPlay = OnlinePlay(service: FakeSessions(players: players), user: TogetherUser(id: "b-id", handle: "bob", displayName: "Bob", avatar: nil), game: game, sessionKey: key)
@@ -303,6 +304,7 @@ final class OnlineBridgeTests: XCTestCase {
             alicePlay.stop()
             bobPlay.stop()
         }
+        XCTAssertNil(aliceEnvironment["ANYPS5_ONLINE_LOG"], "no observation log unless one was asked for")
         let alicePort = try XCTUnwrap(aliceEnvironment["ANYPS5_ONLINE"]?.split(separator: ":").last.flatMap { UInt16($0) })
         let bobPort = try XCTUnwrap(bobEnvironment["ANYPS5_ONLINE"]?.split(separator: ":").last.flatMap { UInt16($0) })
         let aliceEngine = try XCTUnwrap(FakeEngine(port: alicePort, secret: alicePlay.bridge.secret))
@@ -314,21 +316,22 @@ final class OnlineBridgeTests: XCTestCase {
         XCTAssertEqual(opened.status, 201)
         let joined = try XCTUnwrap(bobEngine.web(.init(userId: 1, apiGroup: "anyps5", path: "/v1/sessions/0190a0b1-0000-7000-8000-000000000001/join", method: "POST")))
         XCTAssertEqual(joined.status, 200)
-        XCTAssertEqual(aliceEngine.account?.address ?? aliceEngine.nextAccount()?.address, 0xC612_0001, "the host is the first player")
-        XCTAssertEqual(bobEngine.account?.address == 0xC612_0002 ? 0xC612_0002 : bobEngine.nextAccount()?.address, 0xC612_0002, "the joiner is the second")
+        XCTAssertEqual(aliceEngine.account?.address == a ? a : aliceEngine.nextAccount()?.address, a, "each player gets the address their user ID gives")
+        XCTAssertEqual(bobEngine.account?.address == b ? b : bobEngine.nextAccount()?.address, b)
 
-        alicePlay.setEndpoint(of: "b-id", .init(host: "127.0.0.1", port: bobPlay.link.port))
-        bobPlay.setEndpoint(of: "a-id", .init(host: "127.0.0.1", port: alicePlay.link.port))
-        aliceEngine.send(.init(peer: 0xC612_0002, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("ping".utf8)))
+        let alicePeer = try XCTUnwrap(alicePlay.link), bobPeer = try XCTUnwrap(bobPlay.link)
+        alicePlay.setEndpoint(of: "b-id", .init(host: "127.0.0.1", port: bobPeer.port))
+        bobPlay.setEndpoint(of: "a-id", .init(host: "127.0.0.1", port: alicePeer.port))
+        aliceEngine.send(.init(peer: b, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("ping".utf8)))
         let atBob = try XCTUnwrap(bobEngine.nextDatagram())
-        XCTAssertEqual(atBob, OnlineWire.Datagram(peer: 0xC612_0001, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("ping".utf8)),
+        XCTAssertEqual(atBob, OnlineWire.Datagram(peer: a, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("ping".utf8)),
                        "the packet reaches the other engine from the sender's virtual address")
-        bobEngine.send(.init(peer: 0xC612_0001, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("pong".utf8)))
+        bobEngine.send(.init(peer: a, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 1, kind: .p2p, data: Data("pong".utf8)))
         let atAlice = try XCTUnwrap(aliceEngine.nextDatagram())
         XCTAssertEqual(atAlice.data, Data("pong".utf8))
-        XCTAssertEqual(atAlice.peer, 0xC612_0002)
+        XCTAssertEqual(atAlice.peer, b)
         for index in 0 ..< 100 {
-            aliceEngine.send(.init(peer: 0xC612_0002, peerPort: 9000, peerVport: 0, localPort: 9001, localVport: 0, kind: .udp, data: Data([UInt8(index)])))
+            aliceEngine.send(.init(peer: b, peerPort: 9000, peerVport: 0, localPort: 9001, localVport: 0, kind: .udp, data: Data([UInt8(index)])))
         }
         var received = 0
         while received < 100, let datagram = bobEngine.nextDatagram() {

@@ -20,22 +20,41 @@ public struct OnlineSessionView: Decodable, Equatable, Sendable {
         public let handle: String
     }
 
+    /// What a player published in the session: the device (the AnyTogether session their
+    /// launcher signs in with) is where signals for them go. Only players see it.
+    public struct Published: Decodable, Equatable, Sendable {
+        public let userId: String
+        public let device: String?
+    }
+
     public let id: String
     public let titleId: String
     public let gameVersion: String
     public let engineBuild: String
     public let players: [Member]
+    public let members: [Published]?
     public let endedAt: String?
 
-    /// The virtual address of each player, by join order: 198.18.0.1 for the first.
-    public var addresses: [String: UInt32] {
-        Dictionary(uniqueKeysWithValues: players.enumerated().map { ($0.element.userId, OnlineWire.virtualAddress(player: $0.offset)) })
+    public init(id: String, titleId: String, gameVersion: String, engineBuild: String, players: [Member], members: [Published]? = nil, endedAt: String? = nil) {
+        self.id = id
+        self.titleId = titleId
+        self.gameVersion = gameVersion
+        self.engineBuild = engineBuild
+        self.players = players
+        self.members = members
+        self.endedAt = endedAt
     }
+
+    /// The virtual address of each player (`OnlineIdentity.addresses`): the same on every
+    /// launcher, and nobody's moves when someone leaves.
+    public var addresses: [String: UInt32] { OnlineIdentity.addresses(for: players.map(\.userId)) }
 }
 
 /// Answers the engine's web API requests. The `anyps5` group maps onto AnyTogether's game
-/// sessions and invitations for this game; platform groups are answered "not offered" until their
-/// formats are known from observation, and every such request is counted so it shows up.
+/// sessions and invitations for this game; `userProfile` is answered from AnyTogether friends
+/// (`OnlineUserProfile`, unverified) while `platformGroups` is on; every other platform group is
+/// answered "not offered" until its format is known from observation, and every such request is
+/// counted so it shows up.
 public final class OnlineWebRouter: @unchecked Sendable {
     public struct Game: Sendable {
         public var titleId: String
@@ -51,14 +70,21 @@ public final class OnlineWebRouter: @unchecked Sendable {
     public static let group = "anyps5"
 
     private let service: OnlineSessionService
+    private let profile: OnlineUserProfile?
+    private let platformGroups: Bool
     private let lock = NSLock()
     private var game: Game
     private var unanswered: [String: Int] = [:]
     private let sessionChanged: @Sendable (OnlineSessionView?) -> Void
 
-    public init(service: OnlineSessionService, game: Game, sessionChanged: @escaping @Sendable (OnlineSessionView?) -> Void = { _ in }) {
+    /// `profile` answers `userProfile` (nil while signed out); `platformGroups` off answers every
+    /// platform group "not offered", for a clean observation run.
+    public init(service: OnlineSessionService, game: Game, profile: OnlineUserProfile? = nil, platformGroups: Bool = true,
+                sessionChanged: @escaping @Sendable (OnlineSessionView?) -> Void = { _ in }) {
         self.service = service
         self.game = game
+        self.profile = profile
+        self.platformGroups = platformGroups
         self.sessionChanged = sessionChanged
     }
 
@@ -68,6 +94,7 @@ public final class OnlineWebRouter: @unchecked Sendable {
     public func setEngineBuild(_ build: String) { lock.withLock { game.engineBuild = build } }
 
     public func handle(_ request: OnlineWire.WebRequest) async -> OnlineWire.WebReply {
+        if request.apiGroup == OnlineUserProfile.group, platformGroups, let profile { return await profile.handle(request) }
         guard request.apiGroup == OnlineWebRouter.group else {
             let path = request.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? request.path
             lock.withLock { unanswered["\(request.apiGroup) \(request.method) \(path)", default: 0] += 1 }

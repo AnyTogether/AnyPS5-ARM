@@ -37,8 +37,6 @@ public enum OnlineWire {
 
     public static func isVirtual(_ address: UInt32) -> Bool { address & virtualMask == virtualNetwork }
 
-    /// The address of the session's `index`-th player (from 0): 198.18.0.1, 198.18.0.2, …
-    public static func virtualAddress(player index: Int) -> UInt32 { virtualNetwork + UInt32(index + 1) }
 
     public struct Header: Equatable, Sendable {
         public var length: UInt32
