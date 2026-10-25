@@ -266,12 +266,13 @@ private struct HintPress<Label: View>: View {
 }
 
 extension View {
-    /// Tracks the pointer over the view and shows the pointing hand while it is there.
-    func pointingHand(_ hovering: Binding<Bool>) -> some View {
+    /// Tracks the pointer over the view and shows the pointing hand (or another cursor) while it
+    /// is there.
+    func pointingHand(_ hovering: Binding<Bool>, cursor: NSCursor = .pointingHand) -> some View {
         onHover { inside in
             guard inside != hovering.wrappedValue else { return }
             hovering.wrappedValue = inside
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            if inside { cursor.push() } else { NSCursor.pop() }
         }
         .onDisappear {
             if hovering.wrappedValue { NSCursor.pop() }

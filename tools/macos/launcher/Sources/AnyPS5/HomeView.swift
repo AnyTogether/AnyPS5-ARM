@@ -125,7 +125,7 @@ struct TopBar: View {
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
                 let name = model.togetherUser?.displayName ?? model.preferences.profileName
-                ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false)
+                ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false, picture: model.profilePicture)
                 Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
             }
             Clock()
@@ -610,6 +610,9 @@ extension AppModel {
             return panelCommand(command)
         case .profile:
             profileCommand(command)
+            return true
+        case .cropPicture:
+            cropCommand(command)
             return true
         case .messages:
             messagesCommand(command)

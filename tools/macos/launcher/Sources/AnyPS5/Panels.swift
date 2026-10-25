@@ -36,6 +36,8 @@ struct PanelPerson {
 
     let name: String
     let avatar: String?
+    /// A picture on this Mac in place of the avatar (the user's own profile picture).
+    var picture: NSImage?
     var status: Status?
     /// Speaking in the party's voice: a ring in the accent.
     var speaking = false
@@ -156,6 +158,7 @@ extension AppModel {
 
         var behaviour: [PanelRow] = [
             PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
+        ] + profilePictureRows() + [
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
                      kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.sounds = value > 0
@@ -710,7 +713,7 @@ struct RowView: View {
         let foreground: Color = focused ? .black : .white
         HStack(spacing: 14 * scale) {
             if let person = row.person {
-                ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false)
+                ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false, picture: person.picture)
                     .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(person.speaking ? 1 : 0))
                     .animation(.easeOut(duration: 0.15), value: person.speaking)
                     .overlay(alignment: .bottomTrailing) {

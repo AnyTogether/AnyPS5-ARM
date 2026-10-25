@@ -526,13 +526,17 @@ struct ProfileAvatar: View {
     let name: String
     let size: CGFloat
     var glow = true
+    /// A picture on this Mac, before the avatar's address and the initial.
+    var picture: NSImage? = nil
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         ZStack {
             Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
             Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(.white)
-            if let remote = url.flatMap(URL.init(string:)) {
+            if let picture {
+                Image(nsImage: picture).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            } else if let remote = url.flatMap(URL.init(string:)) {
                 AsyncImage(url: remote) { image in image.resizable().aspectRatio(contentMode: .fill) } placeholder: { Color.clear }
             }
         }

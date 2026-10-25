@@ -324,6 +324,25 @@ enum PreviewRenderer {
                 model.panelRow = 2
             }
         }
+        // The profile picture: cut from a game's artwork, on the top bar, in Settings and in the crop.
+        if let art = (found.first { $0.background != nil }?.background).flatMap({ try? Data(contentsOf: $0) }), let source = ProfilePicture.read(art),
+           let png = ProfilePicture.png(source, crop: ProfilePicture.crop(width: source.width, height: source.height, zoom: 1.6, offset: CGPoint(x: 0.2, y: -0.3))) {
+            let picture = NSImage(data: png)
+            render(preferences, found, root, still, output.appendingPathComponent("profile-topbar.png")) { model in signedIn(model); model.profilePicture = picture }
+            render(preferences, found, root, still, output.appendingPathComponent("profile-settings.png")) { model in
+                signedIn(model)
+                model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: "https://anytogether.test/api/v1/avatars/0.jpg")
+                model.profilePicture = picture
+                model.overlay = .settings
+                model.panelCategory = model.panelCategories().firstIndex { $0.id == "behaviour" } ?? 0
+                model.panelInRows = true
+                model.panelRow = 1
+            }
+            render(preferences, found, root, still, output.appendingPathComponent("profile-crop.png")) { model in
+                signedIn(model)
+                model.previewCrop(source, zoom: 1.6, offset: CGPoint(x: 0.2, y: -0.3))
+            }
+        }
         renderEngines(preferences, found, root, still, output)
         render(preferences, found, root, still, output.appendingPathComponent("gallery.png")) { model in model.open(.gallery); model.galleryIndex = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("gallery-viewer.png")) { model in model.open(.gallery); model.galleryViewing = true }

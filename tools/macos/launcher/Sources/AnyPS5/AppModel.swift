@@ -128,6 +128,8 @@ enum Overlay: Equatable {
     case lfgPost
     /// One game's hub: who plays it now, posts, public share plays and parties, its players.
     case gameHub
+    /// The profile picture being cut square.
+    case cropPicture
 }
 
 struct Toast: Identifiable, Equatable {
@@ -287,7 +289,7 @@ final class AppModel: ObservableObject {
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
-        if persists { loadEngines() }
+        if persists { loadEngines(); loadProfilePicture() }
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
             AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
@@ -500,6 +502,11 @@ final class AppModel: ObservableObject {
     var profileReturn: ProfileReturn?
     /// The user's own profile with its privacy, and the edits typed in Settings → AnyTogether.
     @Published var togetherProfile: TogetherOwnProfile?
+    /// The profile picture (ProfilePicture.file), the crop open on a new one, and an upload or
+    /// download of AnyTogether's on its way.
+    @Published var profilePicture: NSImage?
+    @Published var pictureCrop: PictureCrop?
+    @Published var pictureBusy = false
     var profileDraft = ProfileDraft()
     /// Messages: the conversations and threads, the row selected on the left, whether the thread
     /// has the focus (a quick reply, or the field at the end), and whether the field is typed in.

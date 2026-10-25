@@ -95,6 +95,18 @@ extension TogetherClient {
         try JSONDecoder.together.decode(TogetherPrivacy.self, from: try await authorized("PATCH", "me/privacy", [section.rawValue: visibility.rawValue]))
     }
 
+    /// A new avatar (PUT /me/avatar): a PNG or JPEG, at most 5 MB, that the server makes a
+    /// square JPEG; returns its address, which the session's user keeps.
+    public func uploadAvatar(_ picture: Data) async throws -> String {
+        struct Answer: Decodable { let avatar: String }
+        let body = TogetherRawBody(data: picture, contentType: ProfilePicture.contentType(picture))
+        let answer = try JSONDecoder.together.decode(Answer.self, from: try await authorized("PUT", "me/avatar", body))
+        store.update { user in
+            user = TogetherUser(id: user.id, handle: user.handle, displayName: user.displayName, avatar: answer.avatar)
+        }
+        return answer.avatar
+    }
+
     /// The session's user follows the profile: its handle, name and avatar.
     private func kept(_ profile: TogetherOwnProfile) -> TogetherOwnProfile {
         store.update { user in
