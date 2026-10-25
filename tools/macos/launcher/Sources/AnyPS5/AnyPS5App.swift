@@ -170,6 +170,8 @@ struct RootView: View {
         case .compat:
             SidePanel(title: model.compatTitle, subtitle: TS.text(.compatSubtitle))
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+        case .cloudStorage:
+            CloudStorageView().transition(.move(edge: .trailing).combined(with: .opacity))
         case .findPlayers:
             SettingsPanel(title: FP.text(.findPlayers), subtitle: model.togetherUser.map { "@\($0.handle)" }).transition(.opacity)
         case .gameHub:

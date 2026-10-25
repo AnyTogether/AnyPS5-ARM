@@ -34,6 +34,7 @@ extension AppModel {
         Sounds.shared.play(.select)
         profileTask?.cancel()
         loadProfileActivity(handle)
+        loadProfileGallery(handle)
         profileTask = Task {
             do {
                 let page = try await together.profilePage(handle, card: card)
@@ -75,6 +76,10 @@ extension AppModel {
 
     /// Up and down in a column, left and right between the games and the trophies.
     func profileCommand(_ command: Command) {
+        if cloud.viewing != nil {
+            if command == .back || command == .select || command == .options { closeViewer() }
+            return
+        }
         let counts = [profileGames.count, profileTrophies.count, social.profileActivity?.count ?? 0]
         switch command {
         case .up, .down:
@@ -119,6 +124,9 @@ struct ProfileView: View {
         let page = model.profilePage
         VStack(alignment: .leading, spacing: 30 * scale) {
             header(page)
+            if page != nil, let gallery = model.cloud.profileGallery {
+                ProfileGalleryStrip(gallery: gallery, mine: page?.profile.isMe == true).transition(.opacity)
+            }
             if let page {
                 HStack(alignment: .top, spacing: 28 * scale) {
                     gamesColumn(page)
@@ -145,6 +153,9 @@ struct ProfileView: View {
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .overlay {
+            if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
+        }
         // Capitals in the launcher's language: "PROFİLİM", not "PROFILIM".
         .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
     }

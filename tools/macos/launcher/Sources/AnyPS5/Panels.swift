@@ -65,6 +65,7 @@ extension AppModel {
         case .friends: return [PanelCategory(id: "friends", title: T.text(.friendsTitle), symbol: "person.2", rows: friendRows())]
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
         case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
+        case .cloudStorage: return [PanelCategory(id: "cloud", title: TCloud.text(.storageTitle), symbol: "externaldrive.badge.icloud", rows: cloudStorageRows())]
         case .compat: return [PanelCategory(id: "compat", title: compatTitle, symbol: "person.3.sequence", rows: compatRows())]
         case .crashReport: return [PanelCategory(id: "report", title: TC.text(.reportKicker), symbol: "stethoscope", rows: crashReportRows())]
         case .findPlayers: return findPlayersCategories()
@@ -180,14 +181,7 @@ extension AppModel {
                      kind: .stepper(value: clipSeconds, range: 15...120, step: 15, format: { T.format(.seconds, $0) }) { [weak self] value in
                          self?.preferences.clipLength = value
                      }),
-            PanelRow(id: "saveSync", title: T.text(.saveSync), detail: syncRoot.map { T.format(.saveSyncDetail, $0.abbreviatedPath) } ?? T.text(.saveSyncNoFolder), symbol: "arrow.triangle.2.circlepath.icloud",
-                     kind: .toggle(preferences.saveSync == true && syncRoot != nil) { [weak self] value in
-                         guard let self else { return }
-                         if value && self.syncRoot == nil { return self.chooseSyncFolder() }
-                         self.preferences.saveSync = value
-                     }),
-            PanelRow(id: "syncFolder", title: T.text(.syncFolder), detail: preferences.syncFolder.map { URL(fileURLWithPath: $0).abbreviatedPath } ?? T.text(SaveSync.iCloudDrive != nil ? .syncFolderICloud : .syncFolderNone),
-                     symbol: "folder.badge.gearshape", kind: .action(destructive: false) { [weak self] in self?.chooseSyncFolder() }),
+        ] + saveSyncRows() + [
             PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
                 self?.preferences.checkUpdates = value
                 if value { self?.checkForUpdate() }

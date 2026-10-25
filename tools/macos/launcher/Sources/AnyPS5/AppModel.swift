@@ -43,6 +43,8 @@ struct Preferences: Codable, Equatable {
     /// off. syncFolder nil is iCloud Drive.
     var saveSync: Bool?
     var syncFolder: String?
+    /// Save Sync through the AnyTogether cloud ("together") instead of the folder; nil is the folder.
+    var syncThrough: String?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
@@ -130,6 +132,8 @@ enum Overlay: Equatable {
     case gameHub
     /// The profile picture being cut square.
     case cropPicture
+    /// Settings → Cloud Storage: the usage, the cloud saves and the media on AnyTogether.
+    case cloudStorage
 }
 
 struct Toast: Identifiable, Equatable {
@@ -488,6 +492,8 @@ final class AppModel: ObservableObject {
     var togetherFlush: Task<Void, Never>?
     /// The social screens' state: activity, leaderboards, notifications.
     lazy var social = SocialState(owner: self)
+    /// Cloud saves and media: whether the server keeps files, Settings → Cloud Storage.
+    lazy var cloud = CloudState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
@@ -960,7 +966,7 @@ final class AppModel: ObservableObject {
     // MARK: Save sync
 
     /// The game whose saves are being synced, so it does not start twice meanwhile.
-    @Published private(set) var syncing: String?
+    @Published var syncing: String?
 
     var syncRoot: URL? { preferences.syncFolder.map { URL(fileURLWithPath: $0) } ?? SaveSync.iCloudDrive }
 
@@ -971,6 +977,11 @@ final class AppModel: ObservableObject {
 
     /// Syncs the game's saves off the main thread, says what came from another Mac, then goes on.
     private func syncSaves(_ game: Game, then: @escaping @MainActor () -> Void) {
+        if preferences.syncThrough == AppModel.syncThroughTogether, preferences.saveSync == true {
+            // Through AnyTogether's cloud; signed out or a server without files, nothing syncs.
+            guard let cloudSync = cloudSave(for: game) else { return then() }
+            return syncThroughCloud(cloudSync, game: game, then: then)
+        }
         guard let sync = saveSync(for: game) else { return then() }
         syncing = game.id
         Task.detached {

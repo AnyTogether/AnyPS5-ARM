@@ -360,6 +360,7 @@ enum PreviewRenderer {
         SocialPreviews.run(preferences, found, root, still, output)
         DiscoverPreviews.run(preferences, found, root, still, output)
         BroadcastPreviews.run(preferences, found, root, still, output)
+        CloudPreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")
     }
 
