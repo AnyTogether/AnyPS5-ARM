@@ -93,9 +93,11 @@ final class SharePlayWiringTests: XCTestCase {
 
         // The game runs at 60 frames a second on its own thread (a loop of pictures made first).
         let pictures = (0 ..< 24).map(syntheticFrame)
-        let pump = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "frames", qos: .userInteractive))
+        // Strict, with no leeway: in a background process (taskpolicy -b) a timer's default leeway
+        // lets the system fold it to about 10 a second, and the game would run at 10 fps.
+        let pump = DispatchSource.makeTimerSource(flags: .strict, queue: DispatchQueue(label: "frames", qos: .userInteractive))
         let frameIndex = Locked(0)
-        pump.schedule(deadline: .now(), repeating: .milliseconds(16))
+        pump.schedule(deadline: .now(), repeating: .milliseconds(16), leeway: .nanoseconds(0))
         pump.setEventHandler {
             let index = frameIndex.withLock { value -> Int in
                 value += 1
