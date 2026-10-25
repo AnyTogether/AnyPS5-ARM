@@ -223,8 +223,8 @@ final class EngineToolkitTests: XCTestCase {
         XCTAssertNil(Toolkit.layoutProblem(at: installed.folder))
         XCTAssertEqual(store.installed().map(\.version), ["0.2.16-arm-0123456789ab"])
         XCTAssertNotNil(try store.verifiedToolkit(version: "0.2.16-arm-0123456789ab"))
-        // Nothing of the unpacking stays behind.
-        let left = try FileManager.default.contentsOfDirectory(atPath: store.folder.path).filter { $0 != "0.2.16-arm-0123456789ab" }
+        // Nothing of the unpacking stays behind (.verified holds the notes of the checks).
+        let left = try FileManager.default.contentsOfDirectory(atPath: store.folder.path).filter { $0 != "0.2.16-arm-0123456789ab" && $0 != ".verified" }
         XCTAssertEqual(left, [])
     }
 

@@ -113,7 +113,11 @@ enum FileDigest {
 /// Checks a toolkit folder against its manifest: every file listed, with its sha256, and
 /// nothing else (no links, no extra files, hidden or not).
 public enum ToolkitVerifier {
+    /// How many times a folder was hashed whole, for the tests.
+    nonisolated(unsafe) static var fullChecks = 0
+
     public static func verify(_ folder: URL, manifest: ToolkitManifest) throws {
+        fullChecks += 1
         guard manifest.format <= ToolkitManifest.supportedFormat else { throw InstallError("toolkit format \(manifest.format) is newer than this launcher reads") }
         if let outside = manifest.files.keys.first(where: { !isInside($0) }) { throw InstallError("the toolkit names \(outside), outside its folder") }
         let fileManager = FileManager.default
@@ -299,8 +303,35 @@ public struct ToolkitStore: Sendable {
         let root = folder.appendingPathComponent(version)
         guard let manifest = Toolkit(root: root).manifest, manifest.version == version else { throw InstallError("toolkit \(version) is not downloaded") }
         if let problem = Toolkit.layoutProblem(at: root) { throw InstallError("toolkit \(version): \(problem)") }
+        // Hashed whole once per change: the note of the last check names every file's size,
+        // dates and inode, and the change time no one can set back.
+        let note = folder.appendingPathComponent(".verified").appendingPathComponent(version)
+        let signature = ToolkitStore.signature(of: root)
+        if let signature, (try? String(contentsOf: note, encoding: .utf8)) == signature { return Toolkit(root: root) }
+        try? FileManager.default.removeItem(at: note)
         try ToolkitVerifier.verify(root, manifest: manifest)
+        if let signature {
+            try? FileManager.default.createDirectory(at: note.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? signature.write(to: note, atomically: true, encoding: .utf8)
+        }
         return Toolkit(root: root)
+    }
+
+    /// Every entry of a toolkit folder with its type, size, inode, modification and change
+    /// times, hashed: anything written into the folder since changes it.
+    static func signature(of root: URL) -> String? {
+        guard let enumerator = FileManager.default.enumerator(atPath: root.path) else { return nil }
+        var lines: [String] = []
+        var info = stat()
+        guard lstat(root.path, &info) == 0 else { return nil }
+        lines.append(". \(info.st_mode) \(info.st_ino) \(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec)")
+        for case let relative as String in enumerator {
+            guard lstat(root.appendingPathComponent(relative).path, &info) == 0 else { return nil }
+            lines.append("\(relative) \(info.st_mode) \(info.st_size) \(info.st_ino) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec) \(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec)")
+        }
+        var hasher = SHA256()
+        hasher.update(data: Data(lines.sorted().joined(separator: "\n").utf8))
+        return FileDigest.hex(hasher.finalize())
     }
 
     /// Unpacks a downloaded toolkit into the store. `digest` (the release asset's sha256) is
@@ -382,6 +413,7 @@ public struct ToolkitStore: Sendable {
     public func remove(version: String) throws {
         guard ToolkitStore.isSafeName(version) else { throw InstallError("no toolkit \(version)") }
         try FileManager.default.removeItem(at: folder.appendingPathComponent(version))
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(".verified").appendingPathComponent(version))
     }
 
     /// Removes every downloaded toolkit not in `keeping`; returns their versions.

@@ -66,9 +66,29 @@ public final class Installer: @unchecked Sendable {
     public let toolkit: Toolkit
     let progress: @Sendable (Step, Double) -> Void
     let log: @Sendable (String) -> Void
-    private let lock = NSLock()
+    /// Guards `running`, `cancelled`, `paused` and `isBackground`; waited on while paused.
+    private let lock = NSCondition()
     private var running: Process?
     private var cancelled = false
+    private var paused = false
+    private var isBackground = false
+    /// The free bytes on the games folder's drive (FreeSpace.available); replaceable in tests.
+    public var freeSpace: @Sendable (URL) -> Int64? = { FreeSpace.available(at: $0) }
+
+    /// A background unlock (a new game prepared on its own): the tools it runs go in the
+    /// system's background band, as `taskpolicy -b` puts them, so a game or anything the user
+    /// does comes first. Set to false while it runs (the user asked to play it), it goes on at
+    /// full speed.
+    public var background: Bool {
+        get { lock.withLock { isBackground } }
+        set {
+            lock.lock()
+            isBackground = newValue
+            let process = running
+            lock.unlock()
+            if let process, process.isRunning, process.processIdentifier > 0 { Installer.setBackground(process.processIdentifier, newValue) }
+        }
+    }
 
     public init(game: Game, toolkit: Toolkit, progress: @escaping @Sendable (Step, Double) -> Void, log: @escaping @Sendable (String) -> Void) {
         self.game = game
@@ -132,14 +152,117 @@ public final class Installer: @unchecked Sendable {
         lock.lock()
         cancelled = true
         let process = running
+        lock.broadcast()
         lock.unlock()
         process?.terminate()
+        // A stopped process only gets the termination when it goes on.
+        if let process, process.processIdentifier > 0 { kill(process.processIdentifier, SIGCONT) }
     }
 
+    /// Stops the unlock where it is (a game started): the tool running is stopped (SIGSTOP), the
+    /// launcher's own steps wait at their next file.
+    public func pause() {
+        lock.lock()
+        paused = true
+        let process = running
+        lock.unlock()
+        if let process, process.isRunning, process.processIdentifier > 0 { kill(process.processIdentifier, SIGSTOP) }
+    }
+
+    public func resume() {
+        lock.lock()
+        paused = false
+        let process = running
+        lock.broadcast()
+        lock.unlock()
+        if let process, process.processIdentifier > 0 { kill(process.processIdentifier, SIGCONT) }
+    }
+
+    /// Throws when cancelled; while paused, waits for the resume (or the cancel).
     private func checkCancelled() throws {
         lock.lock()
         defer { lock.unlock() }
+        while paused && !cancelled { lock.wait() }
         if cancelled { throw CancellationError() }
+    }
+
+    /// Puts a process in the system's background band (`taskpolicy -b`: low CPU priority,
+    /// throttled disk), or takes it out.
+    static func setBackground(_ pid: pid_t, _ on: Bool) {
+        _ = setpriority(Installer.darwinProcess, id_t(pid), on ? Installer.darwinBackground : 0)
+    }
+
+    /// Whether another process (the launcher) put a process in the background band; what it
+    /// inherited from a parent in that band does not count.
+    public static func isBackground(_ pid: pid_t) -> Bool {
+        var info = proc_bsdinfo()
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) > 0 else { return false }
+        return info.pbi_flags & UInt32(PROC_FLAG_EXT_DARWINBG) != 0
+    }
+
+    // sys/resource.h: PRIO_DARWIN_PROCESS, PRIO_DARWIN_BG.
+    static let darwinProcess: Int32 = 4
+    static let darwinBackground: Int32 = 0x1000
+
+    // MARK: Room and kept work
+
+    /// Where the relinker's output of a game is kept for the next unlock, in the store.
+    public static func keptRelink(for game: Game, root: URL) -> URL {
+        root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Relinked")
+            .appendingPathComponent(bundle(for: game, root: root).deletingPathExtension().lastPathComponent)
+    }
+
+    /// What the relinker's output depends on: the toolkit, how it is called, and the dump's
+    /// executable and modules (path, size and change date of each). Unlocking again with the
+    /// same key reuses the kept output.
+    static func relinkKey(game: Game, toolkit: Toolkit, modules: [URL]) -> String {
+        var lines = ["toolkit \(toolkit.version)", "arguments --macos --to-rosetta " + moduleDirectories(modules).joined(separator: " ")]
+        for relative in [URL(fileURLWithPath: "eboot.bin")] + modules {
+            let file = game.folder.appendingPathComponent(relative.relativePath)
+            var info = stat()
+            guard stat(file.path, &info) == 0 else { return "" }
+            lines.append("\(relative.relativePath) \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)")
+            let backup = file.appendingPathExtension("esbak")
+            if stat(backup.path, &info) == 0 { lines.append("\(relative.relativePath).esbak \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)") }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The kept relinker output of `game` when its key is `key`, nil when there is none or it was
+    /// made from something else.
+    static func reusableRelink(for game: Game, root: URL, key: String) -> URL? {
+        let kept = keptRelink(for: game, root: root)
+        guard !key.isEmpty, (try? String(contentsOf: kept.appendingPathComponent("key.txt"), encoding: .utf8)) == key,
+              FileManager.default.fileExists(atPath: kept.appendingPathComponent("out/eboot").path) else { return nil }
+        return kept.appendingPathComponent("out")
+    }
+
+    /// Whether the store keeps relinker output: only on a drive that clones, where the bundle's
+    /// copy of it takes no room.
+    static func keepsRelinks(root: URL) -> Bool {
+        (try? root.resourceValues(forKeys: [.volumeSupportsFileCloningKey]))?.volumeSupportsFileCloning == true
+    }
+
+    /// What unlocking `game` into the games folder `root` will write (see UnlockSpace).
+    public static func plan(game: Game, toolkit: Toolkit, root: URL) -> UnlockSpace {
+        let fileManager = FileManager.default
+        func size(_ url: URL) -> Int64 { ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
+        let modules = Installer.modules(in: game.folder)
+        let executables = ([URL(fileURLWithPath: "eboot.bin")] + modules).reduce(Int64(0)) { $0 + size(game.folder.appendingPathComponent($1.relativePath)) }
+        let clones = keepsRelinks(root: root)
+        // The toolkit's files go in as clones from the same APFS drive, else as copies.
+        var libraries: Int64 = 0
+        if !Installer.clones(from: toolkit.root, to: root) {
+            let names = ((try? fileManager.contentsOfDirectory(atPath: toolkit.libraries.path)) ?? []).filter { $0.hasSuffix(".prx") }
+            libraries = names.reduce(Int64(0)) { $0 + size(toolkit.libraries.appendingPathComponent($1)) }
+            for name in ["libvulkan.1.dylib", "libMoltenVK.dylib", "MoltenVK_icd.json"] { libraries += size(toolkit.vulkan.appendingPathComponent(name)) }
+        }
+        var kept: Int64?
+        if clones, let reusable = reusableRelink(for: game, root: root, key: relinkKey(game: game, toolkit: toolkit, modules: modules)) {
+            kept = GameLibrary.size(of: reusable)
+        }
+        // The game's own files are cloned, or linked where they cannot be: never copied.
+        return UnlockSpace(executables: executables, libraries: libraries, copied: 0, clones: clones, keptRelink: kept)
     }
 
     public func run(root: URL) throws -> URL {
@@ -151,31 +274,48 @@ public final class Installer: @unchecked Sendable {
         let partial = bundle.deletingPathExtension().appendingPathExtension("partial")
         defer { try? fileManager.removeItem(at: partial) }
 
-        // 1. The executable and every guest module as plain ELF files, in the dump's layout.
-        progress(.unwrap, 0)
-        let source = work.appendingPathComponent("source")
-        try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
-        let modules = Installer.modules(in: game.folder)
-        let inputs = [URL(fileURLWithPath: "eboot.bin")] + modules
-        for (index, relative) in inputs.enumerated() {
-            try checkCancelled()
-            let original = game.folder.appendingPathComponent(relative.relativePath)
-            let target = source.appendingPathComponent(relative.relativePath)
-            try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try unwrap(original, to: target)
-            progress(.unwrap, Double(index + 1) / Double(inputs.count))
-        }
+        // 0. The room it takes, before anything is written.
+        try checkCancelled()
+        let space = Installer.plan(game: game, toolkit: toolkit, root: root)
+        if let shortage = space.shortage(free: freeSpace(root), volume: FreeSpace.volumeName(at: root)) { throw shortage }
 
-        // 2. The relinker turns them into a Mach-O executable and guest modules.
-        progress(.relink, 0)
-        let relinked = work.appendingPathComponent("out")
-        let estimate = RelinkProgress()
-        let moduleDirectories = Installer.moduleDirectories(modules).flatMap { ["--module-dir", $0] }
-        try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + moduleDirectories + ["eboot.bin", relinked.appendingPathComponent("eboot").path], in: source) { segment in
-            if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
+        let modules = Installer.modules(in: game.folder)
+        let key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules)
+        let keeps = Installer.keepsRelinks(root: root)
+        let relinked: URL
+        if keeps, let reusable = Installer.reusableRelink(for: game, root: root, key: key) {
+            // Nothing the relinker depends on changed since the last unlock: its output is reused.
+            log("\(game.titleID): the executable and modules are unchanged, the relinked ones are reused")
+            relinked = reusable
+            progress(.unwrap, 1)
+            progress(.relink, 1)
+        } else {
+            // 1. The executable and every guest module as plain ELF files, in the dump's layout.
+            progress(.unwrap, 0)
+            let source = work.appendingPathComponent("source")
+            try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
+            let inputs = [URL(fileURLWithPath: "eboot.bin")] + modules
+            for (index, relative) in inputs.enumerated() {
+                try checkCancelled()
+                let original = game.folder.appendingPathComponent(relative.relativePath)
+                let target = source.appendingPathComponent(relative.relativePath)
+                try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try unwrap(original, to: target)
+                progress(.unwrap, Double(index + 1) / Double(inputs.count))
+            }
+
+            // 2. The relinker turns them into a Mach-O executable and guest modules.
+            progress(.relink, 0)
+            let output = work.appendingPathComponent("out")
+            let estimate = RelinkProgress()
+            let moduleDirectories = Installer.moduleDirectories(modules).flatMap { ["--module-dir", $0] }
+            try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + moduleDirectories + ["eboot.bin", output.appendingPathComponent("eboot").path], in: source) { segment in
+                if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
+            }
+            guard fileManager.fileExists(atPath: output.appendingPathComponent("eboot").path) else { throw InstallError("relinker wrote no executable") }
+            relinked = keeps ? Installer.keep(output, key: key, for: game, root: root) : output
+            progress(.relink, 1)
         }
-        guard fileManager.fileExists(atPath: relinked.appendingPathComponent("eboot").path) else { throw InstallError("relinker wrote no executable") }
-        progress(.relink, 1)
 
         // 3. The game files, cloned (no extra space on APFS) or linked where the disk cannot clone,
         // with the relinked modules copied over them.
@@ -250,6 +390,25 @@ public final class Installer: @unchecked Sendable {
         try Installer.place(partial: partial, bundle: bundle, data: Installer.dataFolder(for: game, root: root))
         progress(.finish, 1)
         return bundle
+    }
+
+    /// Moves the relinker's output into the store for the next unlock (a rename on the same
+    /// drive) and returns where it is now; where that fails, it stays in the work folder.
+    static func keep(_ output: URL, key: String, for game: Game, root: URL) -> URL {
+        let fileManager = FileManager.default
+        let kept = keptRelink(for: game, root: root)
+        try? fileManager.removeItem(at: kept)
+        do {
+            try fileManager.createDirectory(at: kept, withIntermediateDirectories: true)
+            try fileManager.moveItem(at: output, to: kept.appendingPathComponent("out"))
+            try key.write(to: kept.appendingPathComponent("key.txt"), atomically: true, encoding: .utf8)
+            return kept.appendingPathComponent("out")
+        } catch {
+            let moved = kept.appendingPathComponent("out")
+            if fileManager.fileExists(atPath: moved.path) && !fileManager.fileExists(atPath: output.path) { try? fileManager.moveItem(at: moved, to: output) }
+            try? fileManager.removeItem(at: kept)
+            return output
+        }
     }
 
     /// What the game wrote beside app0 in the old bundle (saves in _sd, trophies in _trophy, its
@@ -431,9 +590,7 @@ public final class Installer: @unchecked Sendable {
                 total += size
             }
         }
-        var done: Int64 = 0
-        for (item, relative, size) in files {
-            try cancelled()
+        func place(_ item: URL, _ relative: String) throws {
             let destination = target.appendingPathComponent(relative)
             if fileManager.fileExists(atPath: destination.path) || (try? destination.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
                 try fileManager.removeItem(at: destination)
@@ -443,9 +600,35 @@ public final class Installer: @unchecked Sendable {
             } else if copyfile(item.path, destination.path, nil, copyfile_flags_t(COPYFILE_CLONE)) != 0 {
                 throw InstallError("copy \(relative): \(String(cString: strerror(errno)))")
             }
-            done += size
-            progress(total == 0 ? 1 : Double(done) / Double(total))
         }
+        // A clone or a link is a few metadata writes: several at once get through a game of tens
+        // of thousands of files sooner. The folders are all made above, so the workers only add
+        // files.
+        let lock = NSLock()
+        var done: Int64 = 0
+        var failure: Error?
+        let workers = files.count < 64 ? 1 : min(8, max(1, ProcessInfo.processInfo.activeProcessorCount))
+        DispatchQueue.concurrentPerform(iterations: workers) { worker in
+            var index = worker
+            while index < files.count {
+                if lock.withLock({ failure != nil }) { return }
+                let (item, relative, size) = files[index]
+                do {
+                    try cancelled()
+                    try place(item, relative)
+                } catch {
+                    lock.withLock { if failure == nil { failure = error } }
+                    return
+                }
+                lock.withLock {
+                    done += size
+                    progress(total == 0 ? 1 : Double(done) / Double(total))
+                }
+                index += workers
+            }
+        }
+        if let failure { throw failure }
+        if files.isEmpty { progress(1) }
     }
 
     func makeIcon(from png: URL, into resources: URL) -> Bool {
@@ -479,10 +662,15 @@ public final class Installer: @unchecked Sendable {
         let collected = OutputCollector(quiet: quiet, log: log, status: status)
         pipe.fileHandleForReading.readabilityHandler = { handle in collected.append(handle.availableData) }
         lock.lock()
+        while paused && !cancelled { lock.wait() }
         if cancelled { lock.unlock(); throw CancellationError() }
         running = process
+        let background = isBackground
         lock.unlock()
         try process.run()
+        if background { Installer.setBackground(process.processIdentifier, true) }
+        // Paused while it was starting.
+        if lock.withLock({ paused }) { kill(process.processIdentifier, SIGSTOP) }
         process.waitUntilExit()
         pipe.fileHandleForReading.readabilityHandler = nil
         collected.append(pipe.fileHandleForReading.readDataToEndOfFile())
