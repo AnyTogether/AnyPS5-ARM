@@ -107,6 +107,8 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 
 The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
 
+**Controllers.** **Settings → Controllers** lists the connected pads (DualSense, DualShock 4, Xbox, Switch Pro; the DualShock 3 over USB through the launcher's own reader) with USB or Bluetooth and the battery; the one used last is Player 1. **Test Buttons and Sticks** draws the pad live (hold ○ / B or press Esc to leave), **Test Vibration** shakes it, **Light Bar** colours a DualSense or DualShock 4, **Confirm Button** lets ○ confirm as on Japanese consoles, and **Stick Dead Zone** hides a drifting stick in the launcher and in games without their own. The troubleshooter below says why a pad does not show: the cable, Bluetooth pairing, a pad without a layout, a low battery, Steam's controller support. Crash reports list the controllers.
+
 | Home | Game settings | Unlocking | Game library |
 |---|---|---|---|
 | ![Home screen](../screenshots/launcher-home.jpg) | ![Game settings](../screenshots/launcher-game-settings.jpg) | ![Unlocking](../screenshots/launcher-unlocking.jpg) | ![Game library](../screenshots/launcher-library.jpg) |
@@ -339,6 +341,8 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 **Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir. **Cam** teması launcher penceresini saydam yapar: masaüstün ve arkadaki pencereler hafif bir renk tonunun altında bulanık görünür, duvar kağıdının renkleri parlar; yazılar her duvar kağıdında okunsun diye yumuşak koyu plakaların ve cam panellerin üstünde durur (macOS 26'da Apple'ın Liquid Glass'ı, önceki sürümlerde buzlu bir bulanıklık). **Ayarlar → Görünüm → Cam Saydamlığı** ne kadarının görüneceğini ayarlar (%0 tam opak), **Oyun Görselini Arkada Göster** seçili oyunun görselini masaüstünün üstüne serer; tam ekranda camın arkasına masaüstü resmi çizilir. macOS'un Erişilebilirlik ayarlarında **Saydamlığı azalt** açıkken pencere ve paneller düz renk olur. **Ayarlar → Görünüm → Temalar**, insanların Tema Hub'da paylaştığı temaları da listeler (bkz. [AnyTogether](#anytogether-1)).
 
 Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, ✕, ○, △) ya da fare ve trackpad ile kullanılır.
+
+**Kumandalar.** **Ayarlar → Kumandalar** bağlı kumandaları (DualSense, DualShock 4, Xbox, Switch Pro; DualShock 3 USB ile, launcher'ın kendi okuyucusuyla) USB ya da Bluetooth bilgisi ve şarjıyla listeler; en son kullanılan Oyuncu 1'dir. **Tuşları ve Çubukları Dene** kumandayı canlı çizer (çıkmak için ○ / B basılı tut ya da Esc), **Titreşimi Dene** titretir, **Işık Çubuğu** DualSense ya da DualShock 4'ü renklendirir, **Onay Tuşu** Japon konsollarındaki gibi ○ ile onaylatır, **Çubuk Ölü Bölgesi** kayan bir çubuğu launcher'da ve kendi ayarı olmayan oyunlarda gizler. Altındaki sorun giderici bir kumandanın neden görünmediğini söyler: kablo, Bluetooth eşleme, düzeni olmayan bir kumanda, düşük şarj, Steam'in kumanda desteği. Çökme raporları kumandaları listeler.
 
 | Ana ekran | Oyun ayarları | Kilit açılıyor | Oyun kütüphanesi |
 |---|---|---|---|
