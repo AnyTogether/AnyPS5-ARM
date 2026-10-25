@@ -7,6 +7,7 @@ import '../protocol/messages.dart';
 import '../strings.dart';
 import '../together/together_hub.dart';
 import 'about_sheet.dart';
+import 'broadcast_button.dart';
 import 'notifications_view.dart';
 import 'together_screen.dart';
 import 'together_sheet.dart';
@@ -328,6 +329,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 child: Text(texts.closeGame),
+              ),
+            if (playing)
+              BroadcastButton(
+                broadcasting: widget.session.broadcasting,
+                font: font,
+                onPressed: (start) => widget.session.send(
+                  Command(start ? 'broadcastStart' : 'broadcastStop'),
+                ),
               ),
           ],
         ),

@@ -41,6 +41,8 @@ class Strings {
   String get unlock => _text('unlock');
   String get cancel => _text('cancel');
   String get closeGame => _text('closeGame');
+  String get goLive => _text('goLive');
+  String get endBroadcast => _text('endBroadcast');
   String get starting => _text('starting');
   String get unavailable => _text('unavailable');
   String get noGames => _text('noGames');
@@ -224,6 +226,8 @@ class Strings {
     'unlock': 'Unlock',
     'cancel': 'Cancel',
     'closeGame': 'Close Game',
+    'goLive': 'Go Live',
+    'endBroadcast': 'End Broadcast',
     'starting': 'Starting…',
     'unavailable': 'Unreadable',
     'noGames': 'No games on the Mac yet',
@@ -401,6 +405,8 @@ class Strings {
     'unlock': 'Kilidi Aç',
     'cancel': 'Vazgeç',
     'closeGame': 'Oyunu Kapat',
+    'goLive': 'Yayına Başla',
+    'endBroadcast': 'Yayını Bitir',
     'starting': 'Açılıyor…',
     'unavailable': 'Okunamıyor',
     'noGames': "Mac'te henüz oyun yok",
