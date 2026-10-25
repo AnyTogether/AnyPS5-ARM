@@ -403,6 +403,7 @@ enum PreviewRenderer {
         DiscoverPreviews.run(preferences, found, root, still, output)
         BroadcastPreviews.run(preferences, found, root, still, output)
         CloudPreviews.run(preferences, found, root, still, output)
+        LevelPreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")
     }
 
