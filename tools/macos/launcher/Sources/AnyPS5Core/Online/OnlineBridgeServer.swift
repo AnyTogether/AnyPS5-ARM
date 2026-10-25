@@ -111,6 +111,15 @@ public final class OnlineBridgeServer: @unchecked Sendable {
         return write(socket, OnlineWire.frame(.datagram, datagram.payload))
     }
 
+    /// Hands a push event (session news) to the game; false while no game is connected or when
+    /// the event is not one the engine accepts.
+    @discardableResult
+    public func push(_ event: OnlineWire.PushEvent) -> Bool {
+        let socket = lock.withLock { engineSocket }
+        guard socket >= 0, event.isValid else { return false }
+        return write(socket, OnlineWire.frame(.pushEvent, event.payload))
+    }
+
     private func acceptLoop(_ listener: Int32) {
         while !lock.withLock({ stopped }) {
             var waiting = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)

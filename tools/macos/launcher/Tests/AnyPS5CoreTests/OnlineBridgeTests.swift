@@ -84,6 +84,13 @@ final class FakeEngine {
         return nil
     }
 
+    func nextPushEvent() -> OnlineWire.PushEvent? {
+        while let frame = readFrame() {
+            if frame.header.kind == OnlineWire.Kind.pushEvent.rawValue { return OnlineWire.PushEvent(frame.payload) }
+        }
+        return nil
+    }
+
     func nextAccount() -> OnlineWire.Account? {
         while let frame = readFrame() {
             if frame.header.kind == OnlineWire.Kind.account.rawValue {
@@ -161,6 +168,18 @@ final class OnlineBridgeTests: XCTestCase {
         var outside = datagram
         outside.peer = 0x0A00_0001
         XCTAssertNil(OnlineWire.Datagram(outside.payload))
+
+        // The same bytes as the engine's test (online_bridge "push events").
+        let push = OnlineWire.PushEvent(service: "sm", label: 1, pushContextId: "c", dataType: "t:x", data: Data("{}".utf8), extended: [.init("k", "v")], to: 2, from: 3, fromOnlineId: "b")
+        XCTAssertEqual(OnlineWire.hex(push.payload), "0200736d" + "01000000" + "010063" + "0300743a78" + "020000007b7d" + "0100" + "01006b" + "010076"
+                       + "0200000000000000" + "0300000000000000" + "010062")
+        XCTAssertEqual(OnlineWire.PushEvent(push.payload), push)
+        var untyped = push
+        untyped.dataType = ""
+        XCTAssertNil(OnlineWire.PushEvent(untyped.payload), "a push event needs a data type")
+        var longKey = push
+        longKey.extended = [.init(String(repeating: "k", count: 33), "v")]
+        XCTAssertFalse(longKey.isValid, "extended data keys hold 32 letters")
 
         let engineNonce = Data((0x10 ..< 0x20).map { UInt8($0) })
         let launcherNonce = Data((0x20 ..< 0x30).map { UInt8($0) })

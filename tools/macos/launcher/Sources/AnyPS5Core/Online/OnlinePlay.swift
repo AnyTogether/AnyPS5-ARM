@@ -34,7 +34,10 @@ public final class OnlinePlay: @unchecked Sendable {
         let context = OnlinePeerContext(deliver: { refs.bridge?.deliver($0) }, service: service, signal: signal)
         let made = transport?(context) ?? OnlinePeerLink(sessionKey: sessionKey, ownAddress: 0) { refs.bridge?.deliver($0) }
         let profile = user.map { OnlineUserProfile(service: service, me: $0, language: account.language) }
-        let router = OnlineWebRouter(service: service, game: game, profile: profile, platformGroups: platformGroups) { view in
+        let playerSessions = user.map { _ in
+            OnlinePlayerSessions(account: account.accountId, onlineId: account.onlineId) { event in refs.bridge?.push(event) }
+        }
+        let router = OnlineWebRouter(service: service, game: game, profile: profile, playerSessions: playerSessions, platformGroups: platformGroups) { view in
             guard let play = refs.play else { return }
             play.sessionChanged(view)
             Task { await play.follow(sessionId: view?.id) }

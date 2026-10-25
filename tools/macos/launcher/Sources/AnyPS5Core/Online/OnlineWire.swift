@@ -20,6 +20,7 @@ public enum OnlineWire {
         case account = 0x0101
         case observation = 0x0102
         case webRequest = 0x0201
+        case pushEvent = 0x0204
         case datagram = 0x0310
     }
 
@@ -335,6 +336,66 @@ public enum OnlineWire {
             self.kind = kind
             data = reader.bytes()
             guard reader.ok, OnlineWire.isVirtual(peer) || OnlineWire.isGroup(peer), data.count <= OnlineWire.maxDatagram else { return nil }
+        }
+    }
+
+    /// Session and invitation news for the game (launcher → engine, event), what the platform's
+    /// web API push events carry. An empty push context goes to the game's plain push callbacks
+    /// and to every push context; otherwise only to that context's callbacks.
+    public struct PushEvent: Equatable, Sendable {
+        public static let maxDataType = 64
+        public static let maxExtendedKey = 32
+        public static let maxPushContextId = 36
+
+        public var service: String
+        public var label: UInt32
+        public var pushContextId: String
+        public var dataType: String
+        public var data: Data
+        public var extended: [Pair]
+        public var to: UInt64
+        public var from: UInt64
+        public var fromOnlineId: String
+
+        public init(service: String, label: UInt32 = 0, pushContextId: String = "", dataType: String, data: Data = Data(), extended: [Pair] = [],
+                    to: UInt64 = 0, from: UInt64 = 0, fromOnlineId: String = "") {
+            self.service = service
+            self.label = label
+            self.pushContextId = pushContextId
+            self.dataType = dataType
+            self.data = data
+            self.extended = extended
+            self.to = to
+            self.from = from
+            self.fromOnlineId = fromOnlineId
+        }
+
+        public var payload: Data {
+            let writer = Writer()
+            writer.str(service).u32(label).str(pushContextId).str(dataType).bytes(data).pairs(extended.map { ($0.name, $0.value) })
+                .u64(to).u64(from).str(fromOnlineId)
+            return writer.data
+        }
+
+        public init?(_ payload: Data) {
+            var reader = Reader(payload)
+            service = reader.str()
+            label = reader.u32()
+            pushContextId = reader.str()
+            dataType = reader.str()
+            data = reader.bytes()
+            extended = reader.pairs().map { Pair($0.0, $0.1) }
+            to = reader.u64()
+            from = reader.u64()
+            fromOnlineId = reader.str()
+            guard reader.ok, isValid else { return nil }
+        }
+
+        /// What the engine accepts: the platform's structures hold a 64-letter data type and
+        /// 32-letter extended data keys.
+        public var isValid: Bool {
+            !dataType.isEmpty && dataType.utf8.count <= PushEvent.maxDataType && pushContextId.utf8.count <= PushEvent.maxPushContextId
+                && fromOnlineId.utf8.count <= 16 && extended.allSatisfy { !$0.name.isEmpty && $0.name.utf8.count <= PushEvent.maxExtendedKey }
         }
     }
 
