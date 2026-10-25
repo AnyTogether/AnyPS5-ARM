@@ -159,6 +159,12 @@ final class TogetherChatTests: TogetherSignedInCase {
         XCTAssertEqual(inbox.threads["c1"]?.last?.reactions, love)
         XCTAssertEqual(inbox.threads["c1"]?.first?.reactions, [])
         XCTAssertEqual(inbox.conversations[0].lastMessage?.reactions, love)
+        let event = TogetherSocket.Event(id: "1", type: "message.reactions", json: try! JSONSerialization.data(withJSONObject: [
+            "conversationId": "c1", "seq": 4, "reactions": [["reaction": "gg", "count": 2, "userIds": ["f1", "u1"]], ["reaction": "new", "count": 1, "userIds": ["f1"]]],
+        ]))
+        let changed: TogetherMessageReactions? = event.decode()
+        XCTAssertEqual(changed?.seq, 4)
+        XCTAssertEqual(changed?.reactions, [TogetherReactionCount(reaction: .gg, count: 2, userIds: ["f1", "u1"])])
         inbox.react("c9", seq: 5, reactions: [])
         XCTAssertEqual(inbox.threads["c1"]?.last?.reactions, love, "another conversation's event changes nothing here")
     }

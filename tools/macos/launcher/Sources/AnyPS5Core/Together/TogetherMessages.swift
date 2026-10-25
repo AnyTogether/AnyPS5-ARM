@@ -43,6 +43,23 @@ struct KnownReactions: Decodable {
     }
 }
 
+/// A message's reactions as they are now: the answer to reacting, and the socket's
+/// `message.reactions`.
+public struct TogetherMessageReactions: Decodable, Equatable, Sendable {
+    public let conversationId: String
+    public let seq: Int
+    public let reactions: [TogetherReactionCount]
+
+    enum CodingKeys: String, CodingKey { case conversationId, seq, reactions }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        conversationId = try container.decode(String.self, forKey: .conversationId)
+        seq = try container.decode(Int.self, forKey: .seq)
+        reactions = container.lenient(KnownReactions.self, .reactions)?.reactions ?? []
+    }
+}
+
 /// A message as every member sees it; an unsent or removed one keeps its place with no text,
 /// media or reactions.
 public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
@@ -325,9 +342,8 @@ extension TogetherClient {
 
     /// A reaction added (`on`) or taken back; the message's reactions as they are now.
     public func react(_ reaction: TogetherMessageReaction, to seq: Int, in conversationId: String, on: Bool) async throws -> [TogetherReactionCount] {
-        struct Answer: Decodable { let reactions: KnownReactions }
         let data = try await authorized(on ? "PUT" : "DELETE", "conversations/\(conversationId)/messages/\(seq)/reactions/\(reaction.rawValue)", nil)
-        return try JSONDecoder.together.decode(Answer.self, from: data).reactions.reactions
+        return try JSONDecoder.together.decode(TogetherMessageReactions.self, from: data).reactions
     }
 
     /// Pinned to the top of the list or not: "full" (409) with TogetherConversation.maxPinned pinned.
