@@ -3,13 +3,21 @@
 // launcher's tests start it with the variables of a real launcher service (ANYPS5_ONLINE,
 // ANYPS5_ONLINE_SECRET) to prove both ends of the bridge speak the same protocol; without them it
 // shows the game's view offline.
+//
+// `online_probe p2p <peer address> ping|pong` instead plays peer-to-peer: a datagram P2P socket
+// on port 3658, virtual port 1, through libSceNet; "ping" sends until the peer's "pong" comes
+// back, "pong" answers every "ping". Two of them behind two launchers prove packets cross
+// between players.
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "SceTypes.hpp"
+#include <arpa/inet.h>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <thread>
 
 extern "C" {
 int APS5_VABI sceNpGetState(int userId, std::uint32_t* state);
@@ -23,6 +31,12 @@ int APS5_VABI sceNpWebApi2AddHttpRequestHeader(std::int64_t requestId, const cha
 int APS5_VABI sceNpWebApi2SendRequest(std::int64_t requestId, const void* data, std::size_t size, NpWebApi2ResponseInformationOption* option);
 int APS5_VABI sceNpWebApi2ReadData(std::int64_t requestId, void* data, std::size_t size);
 int APS5_VABI sceNpWebApi2DeleteRequest(std::int64_t requestId);
+int APS5_VABI sceNetInit_nid_postfix(void);
+int APS5_VABI sceNetSocket(const char*, int, int, int);
+int APS5_VABI sceNetBind_nid_postfix(int, const void*, std::uint32_t);
+std::int64_t APS5_VABI sceNetSendto(int, const void*, std::size_t, int, const void*, std::uint32_t);
+std::int64_t APS5_VABI sceNetRecvfrom(int, void*, std::size_t, int, void*, std::uint32_t*);
+int APS5_VABI sceNetSocketClose(int);
 }
 
 namespace {
@@ -56,9 +70,85 @@ void ask(int user, const char* name, const char* group, const char* path) {
     sceNpWebApi2DeleteRequest(request);
 }
 
+// The platform's socket address: the virtual port sits where IPv4 has zeros.
+struct NetAddress {
+    std::uint8_t length = 16;
+    std::uint8_t family = 2;
+    std::uint16_t port = 0;
+    std::uint32_t address = 0;
+    std::uint16_t vport = 0;
+    std::uint8_t zero[6] = {};
+};
+static_assert(sizeof(NetAddress) == 16);
+
+std::string dotted(std::uint32_t networkOrder) {
+    in_addr address{};
+    address.s_addr = networkOrder;
+    return inet_ntoa(address);
 }
 
-int main() {
+int p2p(const std::string& peerText, const std::string& role) {
+    using namespace std::chrono_literals;
+    in_addr peerAddress{};
+    if (inet_pton(AF_INET, peerText.c_str(), &peerAddress) != 1) {
+        std::cerr << "online probe: not an address: " << peerText << '\n';
+        return 2;
+    }
+    sceNetInit_nid_postfix();
+    const int socket = sceNetSocket("probe", 2, 6, 0);
+    if (socket < 0) {
+        std::cout << "socket_error=" << hexResult(socket) << '\n';
+        return 1;
+    }
+    NetAddress bound;
+    bound.port = htons(3658);
+    bound.vport = htons(1);
+    if (const int result = sceNetBind_nid_postfix(socket, &bound, sizeof(bound)); result != 0) {
+        std::cout << "bind_error=" << hexResult(result) << '\n';
+        return 1;
+    }
+    NetAddress peer = bound;
+    peer.address = peerAddress.s_addr;
+    const bool pinging = role == "ping";
+    const auto until = std::chrono::steady_clock::now() + 20s;
+    auto lastSend = std::chrono::steady_clock::time_point{};
+    auto answeredAt = std::chrono::steady_clock::time_point{};
+    bool done = false;
+    while (std::chrono::steady_clock::now() < until && !done) {
+        const auto now = std::chrono::steady_clock::now();
+        if (pinging && now - lastSend > 100ms) {
+            sceNetSendto(socket, "ping", 4, 0, &peer, sizeof(peer));
+            lastSend = now;
+        }
+        char buffer[64];
+        NetAddress from;
+        std::uint32_t fromLength = sizeof(from);
+        const auto got = sceNetRecvfrom(socket, buffer, sizeof(buffer), 0x80, &from, &fromLength);
+        if (got < 0) {
+            if (!pinging && answeredAt != std::chrono::steady_clock::time_point{} && now - answeredAt > 2s) done = true;
+            std::this_thread::sleep_for(10ms);
+            continue;
+        }
+        const std::string text(buffer, static_cast<std::size_t>(got));
+        const std::string source = dotted(from.address) + ":" + std::to_string(ntohs(from.port)) + "/" + std::to_string(ntohs(from.vport));
+        if (pinging && text == "pong") {
+            std::cout << "got=pong\nfrom=" << source << '\n';
+            done = true;
+        } else if (!pinging && text == "ping") {
+            if (answeredAt == std::chrono::steady_clock::time_point{}) std::cout << "got=ping\nfrom=" << source << '\n' << std::flush;
+            sceNetSendto(socket, "pong", 4, 0, &from, fromLength);
+            answeredAt = now;
+        }
+    }
+    sceNetSocketClose(socket);
+    if (!done) std::cout << "timed_out=1\n";
+    return done ? 0 : 1;
+}
+
+}
+
+int main(int argc, char** argv) {
+    if (argc == 4 && std::string(argv[1]) == "p2p") return p2p(argv[2], argv[3]);
     try {
         std::uint32_t state = 0;
         const int stateResult = sceNpGetState(InitialUser, &state);

@@ -202,3 +202,75 @@ final class OnlinePeerMeshTests: XCTestCase {
         XCTAssertFalse(aliceMesh.send(ping))
     }
 }
+
+/// Phase 1 end to end: two real engines (the engine's `online_probe` stand-in game, each in its
+/// own process with its own bridge) behind two launchers, a datagram P2P socket on each side,
+/// packets over WebRTC data channels. Skipped when the probe is not built (ANYPS5_ONLINE_PROBE, or
+/// `ninja -C build-mac online_probe`).
+final class OnlineEngineP2pTests: XCTestCase {
+    static var probe: URL? {
+        if let path = ProcessInfo.processInfo.environment["ANYPS5_ONLINE_PROBE"], !path.isEmpty { return URL(fileURLWithPath: path) }
+        var folder = URL(fileURLWithPath: #filePath)
+        for _ in 0 ..< 6 { folder.deleteLastPathComponent() }
+        let built = folder.appendingPathComponent("build-mac/tests/online_probe")
+        return FileManager.default.isExecutableFile(atPath: built.path) ? built : nil
+    }
+
+    static func dotted(_ address: UInt32) -> String { "\(address >> 24).\(address >> 16 & 0xFF).\(address >> 8 & 0xFF).\(address & 0xFF)" }
+
+    func start(_ probe: URL, environment: [String: String], arguments: [String]) throws -> (Process, Pipe) {
+        let process = Process()
+        process.executableURL = probe
+        process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("ANYPS5_") }.merging(environment) { _, new in new }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return (process, output)
+    }
+
+    func finish(_ started: (Process, Pipe)) -> [String: String] {
+        let (process, output) = started
+        let deadline = Date().addingTimeInterval(40)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if process.isRunning { process.terminate() }
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        var fields: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+            if parts.count == 2 { fields[parts[0]] = parts[1] }
+        }
+        return fields
+    }
+
+    func testTwoGamesPlayPeerToPeerThroughTwoLaunchers() async throws {
+        guard let probe = OnlineEngineP2pTests.probe else { throw XCTSkip("online_probe is not built") }
+        let together = OneSession()
+        let users = ["0190a0b1-0000-7000-8000-00000000000a", "0190a0b1-0000-7000-8000-00000000000b"]
+        together.add(users[0], device: "dev-a")
+        together.add(users[1], device: "dev-b")
+        let game = OnlineWebRouter.Game(titleId: "PPSA00000", gameVersion: "01.000", engineBuild: "mesh-test")
+        let plays = users.enumerated().map { index, userId in
+            let device = index == 0 ? "dev-a" : "dev-b"
+            let play = OnlinePlay(service: together, user: TogetherUser(id: userId, handle: index == 0 ? "alice" : "bob", displayName: userId, avatar: nil), game: game,
+                                  signal: together.relay(from: userId, fromDevice: device), transport: { OnlinePeerMesh(context: $0, iceServers: []) })
+            together.attach(play, as: userId)
+            return play
+        }
+        let environments = try plays.map { try $0.start() }
+        defer { plays.forEach { $0.stop() } }
+        for play in plays { await play.follow(sessionId: together.id) }
+        let addresses = OnlineIdentity.addresses(for: users)
+        let (a, b) = (try XCTUnwrap(addresses[users[0]]), try XCTUnwrap(addresses[users[1]]))
+
+        let pong = try start(probe, environment: environments[1], arguments: ["p2p", OnlineEngineP2pTests.dotted(a), "pong"])
+        let ping = try start(probe, environment: environments[0], arguments: ["p2p", OnlineEngineP2pTests.dotted(b), "ping"])
+        let pinged = finish(ping)
+        let ponged = finish(pong)
+        XCTAssertEqual(pinged["got"], "pong", "\(pinged) \(together.signals)")
+        XCTAssertEqual(pinged["from"], "\(OnlineEngineP2pTests.dotted(b)):3658/1", "the answer comes from the other game's virtual address, port and virtual port")
+        XCTAssertEqual(ponged["got"], "ping", "\(ponged)")
+        XCTAssertEqual(ponged["from"], "\(OnlineEngineP2pTests.dotted(a)):3658/1")
+    }
+}
