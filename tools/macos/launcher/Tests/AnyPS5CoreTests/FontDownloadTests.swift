@@ -10,8 +10,12 @@ final class RangeServer: @unchecked Sendable {
     let body: Data
     var redirect = false
     var ignoreRange = false
-    /// The first connection sends this many bytes of the body and then closes.
+    /// The first connection sends this many bytes of the body and then closes, once `written` is
+    /// signalled. URLSession lets go of what it has not handed on yet when a connection ends short
+    /// of its Content-Length (all of it reaches the socket), so closing straight away leaves the
+    /// download a random part of them to go on from.
     var dropFirstAfter: Int?
+    let written = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var connections = 0
     private(set) var ranges: [String?] = []
@@ -69,9 +73,15 @@ final class RangeServer: @unchecked Sendable {
         } else {
             head = "HTTP/1.1 200 OK\r\nContent-Length: \(part.count)\r\nContent-Type: application/zip\r\nConnection: close\r\n\r\n"
         }
-        var sent = part
-        if first, let drop = dropFirstAfter { sent = part.prefix(drop) }
-        connection.send(content: Data(head.utf8) + sent, completion: .contentProcessed { _ in connection.cancel() })
+        if first, let drop = dropFirstAfter {
+            return connection.send(content: Data(head.utf8) + part.prefix(drop), completion: .contentProcessed { [written] _ in
+                DispatchQueue.global().async {
+                    _ = written.wait(timeout: .now() + 10)
+                    connection.cancel()
+                }
+            })
+        }
+        connection.send(content: Data(head.utf8) + part, completion: .contentProcessed { _ in connection.cancel() })
     }
 }
 
@@ -150,13 +160,19 @@ final class FontDownloadTests: XCTestCase {
     func testADroppedConnectionGoesOnWhereItStopped() async throws {
         let (zip, files) = try archive()
         let server = try RangeServer(body: zip)
-        server.dropFirstAfter = zip.count * 2 / 5
+        let drop = zip.count * 2 / 5
+        server.dropFirstAfter = drop
         defer { server.listener.cancel() }
         let downloads = FontDownloads(package: try package(server.url, zip: zip, files: files), folder: scratch.appendingPathComponent("CJK"))
-        try await downloads.install(configuration: configuration)
+        // The connection drops once everything sent before it is in the file.
+        let dropped = Locked(false)
+        try await downloads.install(configuration: configuration) { fraction in
+            guard fraction >= Double(drop) / Double(zip.count), !dropped.withLock({ was in defer { was = true }; return was }) else { return }
+            server.written.signal()
+        }
         XCTAssertTrue(downloads.installed)
         XCTAssertEqual(server.ranges.count, 2)
-        XCTAssertEqual(server.ranges.last, "bytes=\(zip.count * 2 / 5)-")
+        XCTAssertEqual(server.ranges.last, "bytes=\(drop)-")
     }
 
     func testADownloadKeptFromBeforeIsGoneOnFromAcrossTheRedirect() async throws {
