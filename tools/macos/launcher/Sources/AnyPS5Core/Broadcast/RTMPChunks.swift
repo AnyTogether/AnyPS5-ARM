@@ -205,7 +205,7 @@ public struct RTMPChunkReader: Sendable {
         var done: [RTMPMessage] = []
         while let message = try next() {
             if message.kind == .setChunkSize, let size = message.value32 {
-                guard size > 0 else { throw Malformed(description: "a chunk size of 0") }
+                guard size & 0x7FFF_FFFF > 0 else { throw Malformed(description: "a chunk size of 0") }
                 chunkSize = Int(size & 0x7FFF_FFFF)
             }
             done.append(message)
@@ -259,7 +259,9 @@ public struct RTMPChunkReader: Sendable {
                 if format <= 2 { stamp = value }
                 position += 4
             }
-            let wanted = min(chunkSize, length - (newMessage ? 0 : stream.partial.count))
+            let left = length - (newMessage ? 0 : stream.partial.count)
+            guard left >= 0 else { throw Malformed(description: "chunk stream \(csid) makes a message shorter than what came of it") }
+            let wanted = min(chunkSize, left)
             guard available >= position + wanted else { return nil }
             // The whole chunk is here: take it.
             if newMessage {

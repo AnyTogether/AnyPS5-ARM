@@ -13,6 +13,8 @@ final class FakeRTMPServer: @unchecked Sendable {
         var closeAfterMedia: Int?
         /// After publish starts the server stops reading, as a full uplink would.
         var stall = false
+        /// The stream ID createStream answers with.
+        var streamID: Double = 1
         var chunkSize: UInt32 = 4096
         var window: UInt32 = 2_500_000
     }
@@ -37,7 +39,7 @@ final class FakeRTMPServer: @unchecked Sendable {
 
     let options: Options
     private let listener: NWListener
-    private let queue = DispatchQueue(label: "fake-rtmp")
+    let queue = DispatchQueue(label: "fake-rtmp")
     private var all: [Session] = []
     private var connections: [NWConnection] = []
     private(set) var port: UInt16 = 0
@@ -57,7 +59,12 @@ final class FakeRTMPServer: @unchecked Sendable {
         self.port = port
     }
 
-    deinit { stop() }
+    /// Not stop(): the last reference can go on `queue` itself (a connection's handlers ending
+    /// there), where waiting on `queue` traps. Nothing else can touch `connections` by now.
+    deinit {
+        listener.cancel()
+        for connection in connections { connection.cancel() }
+    }
 
     func stop() {
         listener.cancel()
@@ -100,6 +107,9 @@ final class FakeRTMPServer: @unchecked Sendable {
     // MARK: One connection
 
     private func accept(_ connection: NWConnection) {
+        // The handlers below keep the connection's state, not the server: a connection still
+        // open when a test ends does not keep the server alive.
+        let options = options
         let session = Session()
         all.append(session)
         connections.append(connection)
@@ -152,7 +162,7 @@ final class FakeRTMPServer: @unchecked Sendable {
                     ])
                     command("onBWDone", 0, [.null])
                 case "createStream":
-                    command("_result", transaction, [.null, .number(1)])
+                    command("_result", transaction, [.null, .number(options.streamID)])
                 case "publish":
                     let key = values.count > 3 ? values[3].string ?? "" : ""
                     if key == options.refusedKey {

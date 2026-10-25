@@ -131,11 +131,13 @@ final class RTMPPublisherTests: XCTestCase {
         }
         publisher.stop()
         let sessions = server.sessions
-        XCTAssertEqual(sessions.count, 2)
+        // A reconnection too slow for the deadline is a failure, not an index out of range.
+        guard sessions.count == 2 else { return XCTFail("\(sessions.count) connections, states \(states.value)") }
         XCTAssertTrue(sessions[0].closed)
         XCTAssertTrue(sessions[1].handshakeIsValid)
         XCTAssertEqual(sessions[1].commands.prefix(5).map(\.name), ["connect", "releaseStream", "FCPublish", "createStream", "publish"])
         let again = sessions[1].messages.filter { $0.kind == .dataAMF0 || $0.kind == .audio || $0.kind == .video }
+        guard again.count >= 4 else { return XCTFail("only \(again.count) data and media messages on the second connection") }
         XCTAssertEqual(again[0].kind, .dataAMF0)
         XCTAssertEqual(Array(again[1].payload.prefix(2)), [0x17, 0x00])
         XCTAssertEqual(Array(again[2].payload.prefix(2)), [0xAF, 0x00])
@@ -143,6 +145,18 @@ final class RTMPPublisherTests: XCTestCase {
         XCTAssertEqual(again[3].timestamp, 0, "each connection's stream starts at zero")
         XCTAssertTrue(states.value.contains { if case .reconnecting(1, _, _) = $0 { return true } else { return false } })
         XCTAssertEqual(publisher.stats.reconnects, 1)
+    }
+
+    /// The fake server's last reference can go away on its own queue, as it does when a
+    /// connection's handlers outlive the test that made it: going away must not wait on that queue.
+    func testTheFakeServerCanGoAwayOnItsOwnQueue() throws {
+        var server: FakeRTMPServer? = try FakeRTMPServer()
+        let queue = try XCTUnwrap(server).queue
+        let gone = expectation(description: "released on its queue")
+        queue.async { [server] in withExtendedLifetime(server) {} }
+        server = nil
+        queue.async { gone.fulfill() }
+        wait(for: [gone], timeout: 5)
     }
 
     /// A key the service refuses ends the broadcast after a few tries, saying why.
@@ -157,6 +171,21 @@ final class RTMPPublisherTests: XCTestCase {
         XCTAssertTrue(reason.contains("Bad stream key"), reason)
         XCTAssertEqual(server.sessions.count, 4, "the first try and three more")
         XCTAssertFalse(states.value.contains(.live))
+    }
+
+    /// A stream ID from createStream that is no stream ID (negative, fractional, too big, not a
+    /// number) is the server failing, not a crash.
+    func testAStreamIDThatIsNotOneFails() throws {
+        for id in [-1, 1.5, 1e12, .nan] {
+            let server = try FakeRTMPServer(options: .init(streamID: id))
+            let states = Locked<[RTMPPublisher.State]>([])
+            let publisher = RTMPPublisher(endpoint: endpoint(server), metadata: [], options: options(backoff: 0.01),
+                                          onState: { state in states.withLock { $0.append(state) } })
+            publisher.start()
+            XCTAssertTrue(waitFor(states) { $0.contains { if case .failed = $0 { return true } else { return false } } }, "\(id)")
+            XCTAssertFalse(states.value.contains(.live), "\(id)")
+            XCTAssertTrue(server.sessions.allSatisfy { !$0.commands.contains { $0.name == "publish" } }, "\(id)")
+        }
     }
 
     /// Nothing listening: a few tries, then a failure, not a broadcast that never ends.

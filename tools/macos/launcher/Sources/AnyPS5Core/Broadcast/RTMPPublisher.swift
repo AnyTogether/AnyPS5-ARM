@@ -310,7 +310,11 @@ public final class RTMPPublisher: @unchecked Sendable {
             write(.command("createStream", transaction: 4, [.null]))
             phase = .creatingStream
         case ("_result", 4):
-            streamID = UInt32(values.count > 3 ? values[3].number ?? 1 : 1)
+            // The server's number, so one that is not a stream ID is refused rather than trapping.
+            guard let id = values.count > 3 ? values[3].number.flatMap({ UInt32(exactly: $0) }) : 1 else {
+                return lost("the server gave a stream ID that is not one: \(values[3])")
+            }
+            streamID = id
             write(.command("publish", transaction: 5, [.null, .string(endpoint.streamKey), .string("live")], streamID: streamID))
             phase = .publishing
         case ("_error", 1):
