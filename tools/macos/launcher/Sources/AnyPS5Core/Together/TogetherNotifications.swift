@@ -13,16 +13,18 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         /// Someone said "I'm in" on the user's looking-for-group post, or the poster let the user in.
         case lfgRequest = "lfg_request"
         case lfgAccepted = "lfg_accepted"
+        /// The user reached a new trophy level (the actor is the user).
+        case levelUp = "level_up"
         /// A kind this launcher does not know yet.
         case other
 
-        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .warning, .other]
+        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .levelUp, .warning, .other]
 
         /// Whether a new one deserves a toast of its own: requests, invites and missed calls are
         /// announced by their own events already.
         public var toastsOnItsOwn: Bool {
             switch self {
-            case .friendRequest, .friendAccepted, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted: return false
+            case .friendRequest, .friendAccepted, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .levelUp: return false
             case .message, .warning, .other: return true
             }
         }
@@ -58,8 +60,17 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         public var familyName: String?
         public var role: String?
         public var event: String?
+        /// level_up {level, tier, frame}.
+        public var level: Int?
+        public var tier: String?
+        public var frame: Int?
 
         public init() {}
+
+        /// The level a level_up notification is about.
+        public var levelBadge: TogetherLevelBadge? {
+            level.map { TogetherLevelBadge(level: $0, tier: tier.flatMap(TogetherLevelBadge.Tier.init(rawValue:)), frame: frame) }
+        }
     }
 
     public let id: String

@@ -10,8 +10,10 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
     public let country: String?
     /// "me", "friends", "none", "pending_out" (this user asked) or "pending_in" (they asked).
     public let friendship: String
+    /// Their trophy level; nil when their trophies are private to this user (or an older server).
+    public let trophyLevel: TogetherTrophyLevel?
 
-    public init(userId: String, handle: String, displayName: String, avatar: String?, bio: String?, country: String?, friendship: String) {
+    public init(userId: String, handle: String, displayName: String, avatar: String?, bio: String?, country: String?, friendship: String, trophyLevel: TogetherTrophyLevel? = nil) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
@@ -19,6 +21,17 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
         self.bio = bio
         self.country = country
         self.friendship = friendship
+        self.trophyLevel = trophyLevel
+    }
+
+    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, bio, country, friendship, trophyLevel }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(userId: try container.decode(String.self, forKey: .userId), handle: try container.decode(String.self, forKey: .handle),
+                  displayName: try container.decode(String.self, forKey: .displayName), avatar: try container.decodeIfPresent(String.self, forKey: .avatar),
+                  bio: try container.decodeIfPresent(String.self, forKey: .bio), country: try container.decodeIfPresent(String.self, forKey: .country),
+                  friendship: try container.decode(String.self, forKey: .friendship), trophyLevel: container.lenient(TogetherTrophyLevel.self, .trophyLevel))
     }
 
     public var isMe: Bool { friendship == "me" }

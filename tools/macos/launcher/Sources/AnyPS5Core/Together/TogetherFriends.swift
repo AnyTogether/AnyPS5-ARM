@@ -62,13 +62,25 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
     public let displayName: String
     public let avatar: String?
     public let presence: Presence?
+    /// Their trophy level; nil when their trophies are private to this user (or an older server).
+    public var level: TogetherLevelBadge?
 
-    public init(userId: String, handle: String, displayName: String, avatar: String?, presence: Presence?) {
+    public init(userId: String, handle: String, displayName: String, avatar: String?, presence: Presence?, level: TogetherLevelBadge? = nil) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
         self.avatar = avatar
         self.presence = presence
+        self.level = level
+    }
+
+    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, presence, level }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(userId: try container.decode(String.self, forKey: .userId), handle: try container.decode(String.self, forKey: .handle),
+                  displayName: try container.decode(String.self, forKey: .displayName), avatar: try container.decodeIfPresent(String.self, forKey: .avatar),
+                  presence: try container.decodeIfPresent(Presence.self, forKey: .presence), level: container.lenient(TogetherLevelBadge.self, .level))
     }
 }
 
