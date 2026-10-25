@@ -24,18 +24,18 @@ enum PreviewRenderer {
     static let theme: Theme = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_THEME"].flatMap(Int.init).flatMap(Theme.init(rawValue:)) ?? .cosmic
 
     /// The desktop the Glass previews put behind the see-through window: ANYPS5_PREVIEW_WALLPAPER
-    /// or the system's default desktop picture, blurred and dimmed roughly as the window server's
-    /// dark HUD material does. A mock: an offscreen render has no window, so nothing is behind it.
+    /// or the system's default desktop picture, blurred, a little dimmed and more saturated, roughly
+    /// as the window server's dark sidebar material does. A mock: an offscreen render has no window, so nothing is behind it.
     static let mockDesktop: NSImage? = {
         let path = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_WALLPAPER"] ?? "/System/Library/CoreServices/DefaultDesktop.heic"
         guard let small = Artwork.decode(URL(fileURLWithPath: path), maxPixels: 640), let cgImage = small.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let input = CIImage(cgImage: cgImage)
-        let dim = CIVector(x: 0.75, y: 0, z: 0, w: 0)
+        let dim = CIVector(x: 0.86, y: 0, z: 0, w: 0)
         let output = input.clampedToExtent()
             .applyingGaussianBlur(sigma: 14)
-            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 1.2])
-            .applyingFilter("CIColorMatrix", parameters: ["inputRVector": dim, "inputGVector": CIVector(x: 0, y: 0.75, z: 0, w: 0),
-                                                          "inputBVector": CIVector(x: 0, y: 0, z: 0.75, w: 0), "inputBiasVector": CIVector(x: 0.04, y: 0.04, z: 0.05, w: 0)])
+            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 1.35])
+            .applyingFilter("CIColorMatrix", parameters: ["inputRVector": dim, "inputGVector": CIVector(x: 0, y: 0.86, z: 0, w: 0),
+                                                          "inputBVector": CIVector(x: 0, y: 0, z: 0.86, w: 0), "inputBiasVector": CIVector(x: 0.04, y: 0.04, z: 0.05, w: 0)])
             .cropped(to: input.extent)
         guard let mock = CIContext(options: [.cacheIntermediates: false]).createCGImage(output, from: input.extent) else { return nil }
         return NSImage(cgImage: mock, size: NSSize(width: mock.width, height: mock.height))

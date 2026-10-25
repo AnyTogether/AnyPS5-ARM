@@ -327,6 +327,7 @@ struct HintBar: View {
             Hint(keys: "esc / ○", label: T.text(.hintBack))
             if options { Hint(keys: "O / △", label: T.text(.hintOptions)) }
         }
+        .legible(14)
     }
 }
 

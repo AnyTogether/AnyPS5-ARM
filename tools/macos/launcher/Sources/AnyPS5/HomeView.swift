@@ -195,6 +195,7 @@ struct TopBar: View {
             Text(T.text(.games))
                 .font(.display(24 * scale, .semibold))
                 .foregroundStyle(.white)
+                .legible(14)
             if model.scanning {
                 ProgressView().controlSize(.small).tint(.white).scaleEffect(scale)
             }
@@ -221,10 +222,10 @@ struct TopBar: View {
                         // Appearing offline: a moon where friends would see a dot.
                         if model.togetherUser != nil, model.appearingOffline { AppearingOfflineDot(size: 15 * scale).offset(x: 3 * scale, y: 3 * scale) }
                     }
-                Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
+                Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9)).legible(12)
                 if let level = model.myLevel { LevelBadgeView(badge: level.badge, size: 30 * scale) }
             }
-            Clock()
+            Clock().legible(12)
         }
         .glassGroup(look, spacing: 10 * scale)
         .animation(Motion.overlay, value: model.showsUpdateNotice)
@@ -370,6 +371,7 @@ struct TileRow: View {
                                 .lineLimit(2)
                             StateLabel(state: model.state(of: game))
                         }
+                        .legible(16)
                         .frame(width: label - gap, alignment: .leading)
                         .offset(x: leading + large + gap * 1.4, y: large * 0.32)
                         .transition(.opacity)
@@ -491,6 +493,7 @@ struct HeroInfo: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.6)
                 .shadow(color: .black.opacity(0.35), radius: 12)
+                .legible(26)
             HStack(spacing: 16 * scale) {
                 let family = model.familyPrimary(game, state)
                 ConsoleButton(title: family?.title ?? primaryTitle(state), symbol: family?.symbol ?? primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
@@ -523,6 +526,7 @@ struct HeroInfo: View {
                         }
                     }
                     .frame(width: 340 * scale)
+                    .legible(12)
                     .padding(.leading, 10 * scale)
                     .transition(.opacity)
                 } else if case .failed(let message) = state {
@@ -531,6 +535,7 @@ struct HeroInfo: View {
                         .foregroundStyle(Color(red: 1, green: 0.7, blue: 0.65))
                         .lineLimit(2)
                         .frame(maxWidth: 520 * scale, alignment: .leading)
+                        .legible(12)
                 } else if let diagnosis = model.diagnoses[game.id] {
                     Label(diagnosis.summary, systemImage: "exclamationmark.triangle.fill")
                         .font(.display(14 * scale))
@@ -620,10 +625,10 @@ struct EmptyLibrary: View {
             Image(systemName: model.scanning ? "magnifyingglass" : "square.stack.3d.up.slash")
                 .font(.system(size: 54 * scale, weight: .thin))
                 .foregroundStyle(.white.opacity(0.8))
-            Text(model.scanning ? T.text(.scanning) : T.text(.emptyLibraryTitle)).font(.display(34 * scale, .light)).foregroundStyle(.white)
-            Text(T.text(.emptyLibraryText)).font(.display(17 * scale)).foregroundStyle(.white.opacity(0.65))
+            Text(model.scanning ? T.text(.scanning) : T.text(.emptyLibraryTitle)).font(.display(34 * scale, .light)).foregroundStyle(.white).legible(16)
+            Text(T.text(.emptyLibraryText)).font(.display(17 * scale)).foregroundStyle(.white.opacity(0.75)).legible(12)
             if let folder = model.preferences.gamesFolder {
-                Text(folder).font(.display(13 * scale)).foregroundStyle(.white.opacity(0.45)).truncationMode(.middle).lineLimit(1)
+                Text(folder).font(.display(13 * scale)).foregroundStyle(.white.opacity(0.7)).truncationMode(.middle).lineLimit(1).legible(10)
             }
             ConsoleButton(title: T.text(.changeFolder), symbol: "folder", focused: true) { model.pickGamesFolder() }
                 .padding(.top, 10 * scale)

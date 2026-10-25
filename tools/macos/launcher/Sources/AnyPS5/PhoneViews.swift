@@ -56,6 +56,7 @@ struct PhoneIndicator: View {
     /// The connected phones, a numbered light each.
     var badges: [PhoneBadge] = []
     @Environment(\.scale) private var scale
+    @Environment(\.look) private var look
     @State private var pulse = false
 
     static let green = Color(red: 0.3, green: 0.85, blue: 0.45)
@@ -88,11 +89,12 @@ struct PhoneIndicator: View {
                 Text("\(Int(latency.rounded())) ms").font(.display(14 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.6))
             }
         }
-        .foregroundStyle(.white.opacity(color == nil ? 0.55 : 0.9))
+        .foregroundStyle(.white.opacity(color == nil ? (look.seeThrough ? 0.75 : 0.55) : 0.9))
         .padding(.leading, (badges.isEmpty ? 14 : 8) * scale)
         .padding(.trailing, 14 * scale)
         .frame(height: 36 * scale)
-        .background(Capsule().fill(Color.white.opacity(0.1)))
+                // On Glass's see-through window the pill is a plate its words read on.
+        .background(Capsule().fill(look.seeThrough ? Ice.navy.opacity(GlassWindowRecipe.plateOpacity) : Color.white.opacity(0.1)))
         .animation(.easeInOut(duration: 0.25), value: color)
         .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true } }
         .help(help)

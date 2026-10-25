@@ -120,30 +120,36 @@ final class LookStyleTests: XCTestCase {
                        GlassWindowRecipe.tint(transparency: GlassWindowRecipe.defaultTransparency))
     }
 
-    /// The slider runs from a solid pane down to the floor and never below it.
-    func testTheTintRunsFromSolidToTheFloor() {
+    /// The slider runs from a solid pane down to a breath of navy: the wallpaper glows through.
+    func testTheTintRunsFromSolidToAlmostClear() {
         XCTAssertEqual(GlassWindowRecipe.tint(transparency: 0), 1, accuracy: 0.0001)
-        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 100), GlassWindowRecipe.tintFloor, accuracy: 0.0001)
-        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 250), GlassWindowRecipe.tintFloor, accuracy: 0.0001)
+        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 100), GlassWindowRecipe.minimumTint, accuracy: 0.0001)
+        XCTAssertEqual(GlassWindowRecipe.tint(transparency: 250), GlassWindowRecipe.minimumTint, accuracy: 0.0001)
         XCTAssertGreaterThan(GlassWindowRecipe.tint(transparency: 40), GlassWindowRecipe.tint(transparency: 60))
-        // A real see-through: more than a third of the desktop's light comes through at the floor.
-        XCTAssertLessThan(GlassWindowRecipe.tintFloor, 0.66)
+        // By default most of the desktop's light comes through.
+        XCTAssertLessThan(GlassWindowRecipe.tint(transparency: GlassWindowRecipe.defaultTransparency), 0.15)
     }
 
-    /// Whatever is behind the window (a white page, a snowy or a dark wallpaper), the text on the
-    /// tinted desktop reads at every slider step, with no help from the blur.
-    func testTextReadsOverAnyDesktopAtAnyTransparency() {
+    /// Text sits on plates (a soft plate behind bare text, the cards' and buttons' glass): over
+    /// whatever is behind the window (a white page, a snowy or a dark wallpaper) and at every
+    /// slider step it reads, counting nothing for the window's tint or the blur.
+    func testTextReadsOnItsPlatesOverAnyDesktop() {
+        XCTAssertEqual(GlassWindowRecipe.plateFloor, 0.57)
+        XCTAssertGreaterThanOrEqual(GlassWindowRecipe.plateOpacity, GlassWindowRecipe.plateFloor)
         for transparency in stride(from: 0, through: 100, by: 10) {
             let tint = GlassWindowRecipe.tint(transparency: transparency)
             for backdrop in backdrops {
-                let behind = GlassRecipe.over(GlassRecipe.scrim, tint, backdrop)
-                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, behind), 4.5, "white at \(transparency) % over \(backdrop)")
-                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.over(white, 0.7, behind), behind), 3, "70 % white at \(transparency) % over \(backdrop)")
-                // Glass surfaces on the tinted desktop, and the focused chip's ink.
-                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, GlassRecipe.surface(over: behind)), 4.5)
-                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.ink, GlassRecipe.chip(over: behind)), 7)
+                let desktop = GlassRecipe.over(GlassRecipe.scrim, tint, backdrop)
+                for plate in [GlassRecipe.over(GlassRecipe.scrim, GlassWindowRecipe.plateFloor, desktop), GlassRecipe.plateSurface(over: desktop)] {
+                    XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, plate), 4.5, "white at \(transparency) % over \(backdrop)")
+                    XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.over(white, 0.7, plate), plate), 3, "70 % white at \(transparency) % over \(backdrop)")
+                }
+                XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(GlassRecipe.ink, GlassRecipe.chip(over: desktop)), 7)
             }
         }
+        // The plate does it alone: over white with no tint at all.
+        let bare = GlassRecipe.over(GlassRecipe.scrim, GlassWindowRecipe.plateFloor, white)
+        XCTAssertGreaterThanOrEqual(GlassRecipe.contrast(white, bare), 4.5)
     }
 
     /// The desktop picture is read only where macOS asks no permission for it.

@@ -71,12 +71,12 @@ enum GlassSelfTest {
                 check(blurs.count == 1, "one NSVisualEffectView blending behind the window (found \(blurs.count))")
                 if let blur = blurs.first {
                     check(blur.state == .active, "the blur stays active when the window is not key")
-                    check(blur.material == GlassWindow.material, "the blur's material is the HUD window's")
+                    check(blur.material == GlassWindow.material, "the blur's material is the sidebar's, the most vivid")
                     check(blur.appearance?.name == .darkAqua, "the blur is dark")
                     check(blur.frame.size == host.bounds.size, "the blur fills the window (\(Int(blur.frame.width))x\(Int(blur.frame.height)))")
                 }
                 let tint = GlassWindowRecipe.tint(transparency: test.transparency ?? GlassWindowRecipe.defaultTransparency)
-                check(abs(expected.tint - tint) < 0.0001 && tint >= GlassWindowRecipe.tintFloor, "navy tint \(String(format: "%.2f", tint)) at or above the floor \(GlassWindowRecipe.tintFloor)")
+                check(abs(expected.tint - tint) < 0.0001 && tint >= GlassWindowRecipe.minimumTint, "light navy tint \(String(format: "%.2f", tint)), the text on plates of \(GlassWindowRecipe.plateOpacity)")
                 check(subviews(of: host).contains { $0 is BackgroundView } == false, "no theme background drawn over the desktop")
                 check(Look.current.rendering != .solid, "glass surfaces stay glass")
             } else {

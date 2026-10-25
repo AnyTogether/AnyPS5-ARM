@@ -8,9 +8,10 @@ import SwiftUI
 /// the window, so the window's own backdrop is an NSVisualEffectView blending behind the window,
 /// on macOS 26 as before it, with the Liquid Glass surfaces on top of it.
 enum GlassWindow {
-    /// The blur behind the window: the HUD material is the darkest and softest, made to be read
-    /// over anything; it stays frosted while the launcher is not the key window.
-    static let material = NSVisualEffectView.Material.hudWindow
+    /// The blur behind the window: the sidebar's material, dark, the most vivid of the system's
+    /// (the wallpaper's colors glow through it, as in Finder's sidebar); it stays frosted while
+    /// the launcher is not the key window. The text is kept readable on plates, not by it.
+    static let material = NSVisualEffectView.Material.sidebar
 
     /// Makes the window see-through, or opaque again (the other themes, Reduce Transparency).
     static func apply(_ recipe: GlassWindowRecipe, to window: NSWindow) {
@@ -133,8 +134,8 @@ extension EnvironmentValues {
     }
 }
 
-/// The bottom of the see-through window: the blurred desktop, the navy tint over it (deeper
-/// where the game's title and the hints sit), light from the top left and a still grain.
+/// The bottom of the see-through window: the blurred desktop, a light navy tint over it, light
+/// from the top left and a still grain. No veil: text reads on its plates (Legible, the glass).
 struct GlassWindowBackdrop: View {
     let recipe: GlassWindowRecipe
     @ObservedObject private var state = GlassWindowState.shared
@@ -161,8 +162,6 @@ struct GlassWindowBackdrop: View {
                 }
             }
             Ice.scrim.opacity(recipe.tint)
-            // Deeper where the text is: the hero's title at the lower left, the hints at the bottom.
-            LinearGradient(stops: [.init(color: Ice.scrim.opacity(0.28), location: 0), .init(color: .clear, location: 0.55)], startPoint: .bottomLeading, endPoint: .topTrailing)
             RadialGradient(colors: [Color.white.opacity(0.07), .clear], center: UnitPoint(x: 0.12, y: -0.1), startRadius: 0, endRadius: 1100)
             LinearGradient(colors: [.clear, Ice.cyan.opacity(0.03)], startPoint: .top, endPoint: .bottom)
             GrainLayer(strength: 0.03)

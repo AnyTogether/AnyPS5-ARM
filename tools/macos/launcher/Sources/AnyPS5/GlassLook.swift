@@ -146,7 +146,8 @@ struct IceLayers<S: InsettableShape>: View {
                 shape.fill(Ice.solid)
             } else {
                 if !offscreen { shape.fill(.ultraThinMaterial) }
-                shape.fill(Ice.navy.opacity(base))
+                // On the see-through window a surface is a plate that its text reads on alone.
+                shape.fill(Ice.navy.opacity(look.seeThrough ? max(base, GlassWindowRecipe.plateOpacity) : base))
                 shape.fill(LinearGradient(stops: [
                     .init(color: .white.opacity(GlassRecipe.sheenOpacity), location: 0),
                     .init(color: .white.opacity(0.03), location: 0.55),
@@ -179,7 +180,7 @@ struct IceSurface<S: InsettableShape>: ViewModifier {
         } else if look.liquid {
             if #available(macOS 26, *) {
                 content
-                    .glassEffect(.regular.tint(Ice.navy.opacity(0.34)).interactive(interactive), in: shape)
+                    .glassEffect(.regular.tint(Ice.navy.opacity(look.seeThrough ? GlassWindowRecipe.plateOpacity : 0.34)).interactive(interactive), in: shape)
                     .overlay(IceRim(shape: shape, strength: 0.45))
             } else {
                 frosted(content)
@@ -237,7 +238,7 @@ struct ButtonGlass<S: InsettableShape>: ViewModifier {
 
     @available(macOS 26, *)
     @ViewBuilder private func liquid(_ content: Content) -> some View {
-        let glass = focused ? SwiftUI.Glass.regular.tint(Color.white.opacity(0.9)).interactive() : SwiftUI.Glass.regular.tint(Ice.navy.opacity(max(0.12, 0.32 - idle))).interactive()
+        let glass = focused ? SwiftUI.Glass.regular.tint(Color.white.opacity(0.9)).interactive() : SwiftUI.Glass.regular.tint(Ice.navy.opacity(look.seeThrough ? GlassWindowRecipe.plateOpacity : max(0.12, 0.32 - idle))).interactive()
         if let lens {
             content
                 .glassEffect(glass, in: shape)
@@ -317,7 +318,8 @@ struct FrostFill: View {
                     LinearGradient(colors: [Ice.solid, Color(recipe: GlassRecipe.scrim)], startPoint: .top, endPoint: .bottom)
                 } else {
                     if !offscreen { Rectangle().fill(.ultraThinMaterial) }
-                    Ice.scrim.opacity(GlassRecipe.screenOpacity * min(1, opacity / 0.74 * 0.9 + 0.1))
+                    // Over the see-through window, a full-screen layer is a plate for its text.
+                    Ice.scrim.opacity(max(look.seeThrough ? GlassWindowRecipe.plateOpacity : 0, GlassRecipe.screenOpacity * min(1, opacity / 0.74 * 0.9 + 0.1)))
                     RadialGradient(colors: [Color.white.opacity(0.075), .clear], center: UnitPoint(x: 0.18, y: -0.15), startRadius: 0, endRadius: 1100)
                     LinearGradient(colors: [.clear, Ice.cyan.opacity(0.035)], startPoint: .top, endPoint: .bottom)
                     GrainLayer(strength: 0.035)
@@ -405,7 +407,39 @@ struct SheenSweep<S: Shape>: ViewModifier {
     }
 }
 
+/// Bare text on Glass's see-through window (a title, the clock, the hints): a soft dark plate
+/// behind it, dark enough at its core for the text on its own over a white desktop
+/// (GlassWindowRecipe.plateFloor), fading out beyond it, and a faint shadow on the letters.
+/// Elsewhere nothing changes.
+struct Legible: ViewModifier {
+    var softness: CGFloat = 18
+    @Environment(\.look) private var look
+    @Environment(\.scale) private var scale
+
+    func body(content: Content) -> some View {
+        if look.seeThrough {
+            let soft = softness * scale
+            content
+                .shadow(color: .black.opacity(0.3), radius: 3 * scale, y: 1)
+                .background {
+                    // The blur halves the plate at its edge: it reaches 1.4 blurs past the text, so
+                    // under the text it is still over 0.94 of its fill.
+                    RoundedRectangle(cornerRadius: soft, style: .continuous)
+                        .fill(Ice.scrim.opacity(GlassWindowRecipe.plateOpacity + 0.04))
+                        .padding(-soft * 1.4)
+                        .blur(radius: soft)
+                        .allowsHitTesting(false)
+                }
+        } else {
+            content
+        }
+    }
+}
+
 extension View {
+    /// See Legible.
+    func legible(_ softness: CGFloat = 18) -> some View { modifier(Legible(softness: softness)) }
+
     func iceSurface<S: InsettableShape>(_ shape: S, classicOpacity: Double = 0.38, interactive: Bool = false, shadow: Bool = true) -> some View {
         modifier(IceSurface(shape: shape, classicOpacity: classicOpacity, interactive: interactive, shadow: shadow))
     }

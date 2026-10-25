@@ -98,6 +98,11 @@ public enum GlassRecipe {
         return over(RGB(1, 1, 1), sheenOpacity, over(surfaceBase, surfaceOpacity, scrimmed))
     }
 
+    /// A surface on the see-through window: its base raised to a plate's, then its sheen.
+    public static func plateSurface(over backdrop: RGB) -> RGB {
+        over(RGB(1, 1, 1), sheenOpacity, over(surfaceBase, GlassWindowRecipe.plateOpacity, backdrop))
+    }
+
     /// The focused chip at its darkest point, over a backdrop pixel.
     public static func chip(over backdrop: RGB) -> RGB { over(RGB(1, 1, 1), chipLow, backdrop) }
 
@@ -108,7 +113,9 @@ public enum GlassRecipe {
 }
 
 /// The Glass look's window: see-through to the desktop and the windows behind it, blurred by the
-/// system, under a navy tint that keeps the text readable whatever is back there.
+/// system under a light navy tint, so the wallpaper's colors glow through. The text is not kept
+/// readable by darkening the whole window but where it sits: on plates (a soft dark plate behind
+/// bare text, the cards' and buttons' own glass), each dark enough on its own.
 public struct GlassWindowRecipe: Equatable, Sendable {
     /// Whether the window lets what is behind it through (else it is opaque, as in other themes).
     public var translucent: Bool
@@ -120,26 +127,33 @@ public struct GlassWindowRecipe: Equatable, Sendable {
     /// Settings → Appearance → Glass Transparency when the user has not moved it, in percent.
     public static let defaultTransparency = 90
 
-    /// The least tint the window ever gets: white text keeps WCAG AA (4.5:1) and text at 70 %
-    /// white keeps 3:1 over a pure white desktop (a white window behind, a snowy wallpaper),
-    /// counting nothing for the blur's own darkening. Brighter backdrops do not exist, so no
-    /// sampling of the screen behind the window is needed (which would ask for Screen Recording).
-    public static let tintFloor: Double = {
+    /// The tint at 100 %: a breath of navy, so the glass still reads as Glass's blue.
+    public static let minimumTint = 0.04
+
+    /// The least a plate under text lays over the desktop: white text keeps WCAG AA (4.5:1) and
+    /// text at 70 % white keeps 3:1 over a pure white desktop (a white window behind, a snowy
+    /// wallpaper), counting nothing for the window's tint or the blur's darkening. Brighter
+    /// backdrops do not exist, so no sampling of the screen behind the window is needed (which
+    /// would ask for Screen Recording).
+    public static let plateFloor: Double = {
         let white = GlassRecipe.RGB(1, 1, 1)
-        func reads(_ tint: Double) -> Bool {
-            let behind = GlassRecipe.over(GlassRecipe.scrim, tint, white)
+        func reads(_ plate: Double) -> Bool {
+            let behind = GlassRecipe.over(GlassRecipe.scrim, plate, white)
             return GlassRecipe.contrast(white, behind) >= 4.5
                 && GlassRecipe.contrast(GlassRecipe.over(white, 0.7, behind), behind) >= 3
         }
-        var tint = 0.0
-        while !reads(tint) { tint += 0.01 }
-        return (tint * 100).rounded() / 100
+        var plate = 0.0
+        while !reads(plate) { plate += 0.01 }
+        return (plate * 100).rounded() / 100
     }()
 
-    /// The tint for a transparency in percent: 100 is the floor, 0 a solid pane.
+    /// The plates' core as drawn: over the floor, for the soft edge of a blurred plate.
+    public static let plateOpacity = 0.62
+
+    /// The tint for a transparency in percent: 100 is the minimum, 0 a solid pane.
     public static func tint(transparency: Int) -> Double {
         let fraction = Double(min(100, max(0, transparency))) / 100
-        return tintFloor + (1 - tintFloor) * (1 - fraction)
+        return minimumTint + (1 - minimumTint) * (1 - fraction)
     }
 
     /// Glass lets the desktop through unless Reduce Transparency is on or the slider is at 0 %;
