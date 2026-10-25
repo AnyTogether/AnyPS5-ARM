@@ -22,7 +22,7 @@ One line installs it into Applications (and Rosetta 2 if it is missing). A downl
 
 ### First start
 
-Three steps: the language (Türkçe or English), one of three animated themes (Cosmic, Aurora, Sunset) and the games folder. The folder and its subfolders are scanned, and games you add later show up on their own.
+Three steps: the language (Türkçe or English), one of four animated themes (Cosmic, Aurora, Sunset, and Glass: frosted ice, drawn with Liquid Glass on macOS 26) and the games folder. The folder and its subfolders are scanned, and games you add later show up on their own.
 
 <p align="center"><img src="docs/screenshots/launcher-themes.jpg" alt="Picking a theme on the first start" width="720"></p>
 

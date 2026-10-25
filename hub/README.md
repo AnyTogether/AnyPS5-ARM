@@ -29,5 +29,5 @@ A theme file is a zip of `theme.json` and the files it names:
 }
 ```
 
-`style` is the animated background (0 Cosmic, 1 Aurora, 2 Sunset); `background` and `music` are
+`style` is the animated background (0 Cosmic, 1 Aurora, 2 Sunset, 3 Glass); `background` and `music` are
 optional. Raise `version` when a theme changes, so launchers that have it offer the new one.

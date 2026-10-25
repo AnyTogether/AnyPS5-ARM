@@ -72,7 +72,7 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest) instead, the app is not notarized, so macOS blocks it the first time: open **System Settings → Privacy & Security** and click **Open Anyway**. If it then runs from the read-only copy macOS makes of downloaded apps, the launcher offers to move itself to Applications and reopen from there.
 
-**First start.** Pick the language, one of three animated themes (Cosmic, Aurora, Sunset) and the folder that holds your PS5 dumps. Subfolders are scanned, and games added later show up on their own.
+**First start.** Pick the language, one of four animated themes (Cosmic, Aurora, Sunset, Glass) and the folder that holds your PS5 dumps. Subfolders are scanned, and games added later show up on their own.
 
 **Unlocking.** A game that has not been converted yet shows a lock. **Unlock** opens its `eboot.bin` and modules even when they are still SELF containers, relinks them for macOS and makes the game app, with a PS5-style progress bar. The game files are APFS clones of the dump, so an unlocked game takes no extra space. A dump that is still encrypted is reported instead of converted.
 
@@ -103,7 +103,7 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 
 **Engine versions.** **Settings → Engine** lists the engine builds published with this project's releases, with their date and notes. Select one to download it (it is checked against its checksum, and again before each use), then choose it as the **Default Engine** for every game, or pick an engine for one game in its options; the row also says which engine unlocked the game. **Engine Folder** uses an engine you built yourself. A game unlocked with another engine than the one chosen for it offers **Update and Play**, which unlocks it again with the chosen engine and keeps its saves and trophies. **Delete Unused Engines** removes downloads no game uses.
 
-**Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name. **Settings → Appearance → Themes** also lists the themes people share on the Theme Hub (see [AnyTogether](#anytogether)).
+**Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name. The **Glass** theme shows the background and the game's artwork frosted, behind panels of glass (Apple's Liquid Glass on macOS 26, a frosted blur on earlier versions); with **Reduce transparency** on in macOS's Accessibility settings its panels turn solid. **Settings → Appearance → Themes** also lists the themes people share on the Theme Hub (see [AnyTogether](#anytogether)).
 
 The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
 
@@ -320,7 +320,7 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 [Son sürümdeki](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest) zip'i kullanırsan uygulama notarize edilmediği için macOS ilk seferde engeller: **Sistem Ayarları → Gizlilik ve Güvenlik**'te **Yine de Aç**'a tıkla. macOS indirilen uygulamayı salt okunur bir kopyadan açarsa launcher kendini Uygulamalar'a taşıyıp oradan yeniden açmayı önerir.
 
-**İlk açılış.** Dili, üç hareketli temadan birini (Kozmik, Aurora, Gün Batımı) ve PS5 dump'larının olduğu klasörü seç. Alt klasörler de taranır, sonradan eklenen oyunlar kendiliğinden görünür.
+**İlk açılış.** Dili, dört hareketli temadan birini (Kozmik, Aurora, Gün Batımı, Cam) ve PS5 dump'larının olduğu klasörü seç. Alt klasörler de taranır, sonradan eklenen oyunlar kendiliğinden görünür.
 
 **Kilidi açmak.** Henüz dönüştürülmemiş oyunlarda kilit işareti olur. **Kilidi Aç**, `eboot.bin` ve modüller hâlâ SELF kabı olsa bile açar, macOS için relink eder ve oyun uygulamasını hazırlar; ilerleme PS5'teki gibi bir çubukla görünür. Oyun dosyaları dump'ın APFS klonlarıdır, kilidi açılan oyun ek yer kaplamaz. Hâlâ şifreli bir dump dönüştürülmez, bildirilir.
 
@@ -336,7 +336,7 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 **Motor sürümleri.** **Ayarlar → Motor**, bu projenin sürümleriyle yayımlanan motor derlemelerini tarihleri ve notlarıyla listeler. Birini seçince indirilir (sağlama toplamıyla, her kullanımdan önce de yeniden denetlenir); sonra onu her oyun için **Varsayılan Motor** yap ya da bir oyunun seçeneklerinden yalnızca o oyuna motor seç; aynı satır oyunun kilidini hangi motorun açtığını da söyler. **Motor Klasörü** kendi derlediğin bir motoru kullanır. Kendisi için seçilenden başka bir motorla açılmış oyun **Güncelle ve Oyna**'yı önerir: kilidi seçilen motorla yeniden açılır, kayıtları ve kupaları korunur. **Kullanılmayan Motorları Sil**, hiçbir oyunun kullanmadığı indirmeleri siler.
 
-**Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir. **Ayarlar → Görünüm → Temalar**, insanların Tema Hub'da paylaştığı temaları da listeler (bkz. [AnyTogether](#anytogether-1)).
+**Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir. **Cam** teması arka planı ve oyunun görselini buzlu bir camın ardında, cam paneller arkasında gösterir (macOS 26'da Apple'ın Liquid Glass'ı, önceki sürümlerde buzlu bir bulanıklık); macOS'un Erişilebilirlik ayarlarında **Saydamlığı azalt** açıkken paneller düz renk olur. **Ayarlar → Görünüm → Temalar**, insanların Tema Hub'da paylaştığı temaları da listeler (bkz. [AnyTogether](#anytogether-1)).
 
 Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, ✕, ○, △) ya da fare ve trackpad ile kullanılır.
 
