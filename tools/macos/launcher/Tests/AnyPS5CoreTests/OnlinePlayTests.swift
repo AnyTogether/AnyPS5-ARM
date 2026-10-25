@@ -132,6 +132,42 @@ final class OnlinePlayTests: XCTestCase {
         XCTAssertEqual(nobody, .notOffered, "signed out there are no friends to offer")
     }
 
+    func testNobodyIsBlockedOrRestricted() async throws {
+        // As Human Fall Flat (PPSA02429) asks before it lists online games.
+        let together = FakeOnlineTogether(friends: [("b-id", "bob", "online")])
+        let profile = OnlineUserProfile(service: together, me: me, language: "en")
+        let router = OnlineWebRouter(service: together, game: .init(titleId: "PPSA02429", gameVersion: "01.017", engineBuild: "x"), profile: profile)
+        let mine = String(OnlineIdentity.accountId(forUser: me.id))
+        let bob = String(OnlineIdentity.accountId(forUser: "b-id"))
+
+        let blocks = await router.handle(.init(userId: 1, apiGroup: "userProfile", path: "/v1/users/me/blocks?offset=0&limit=0", method: "GET"))
+        XCTAssertEqual(blocks.status, 200)
+        let list = try XCTUnwrap(JSONSerialization.jsonObject(with: blocks.body) as? [String: Any])
+        XCTAssertEqual(list["blocks"] as? [String], [])
+        XCTAssertEqual(list["totalItemCount"] as? Int, 0)
+        let othersBlocks = await router.handle(.init(userId: 1, apiGroup: "userProfile", path: "/v1/users/\(bob)/blocks", method: "GET"))
+        XCTAssertEqual(othersBlocks.status, 403)
+
+        let status = await router.handle(.init(userId: 1, apiGroup: "communicationRestrictionStatus",
+                                               path: "/v3/users/\(mine)/communication/restriction/status", method: "GET"))
+        XCTAssertEqual(status.status, 200)
+        XCTAssertEqual(status.headers, [.init("Content-Type", "application/json")])
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: status.body) as? [String: Any])?["restricted"] as? Bool, false)
+        let local = await router.handle(.init(userId: 1, apiGroup: "communicationRestrictionStatus",
+                                              path: "/v3/users/local_268435456/communication/restriction/status", method: "GET"))
+        XCTAssertEqual(local.status, 200)
+        let other = await router.handle(.init(userId: 1, apiGroup: "communicationRestrictionStatus",
+                                              path: "/v3/users/\(bob)/communication/restriction/status", method: "GET"))
+        XCTAssertEqual(other.status, 403)
+        let unknown = await router.handle(.init(userId: 1, apiGroup: "communicationRestrictionStatus", path: "/v3/users/me/other", method: "GET"))
+        XCTAssertEqual(unknown.status, 404)
+        XCTAssertTrue(together.calls.isEmpty, "neither answer needs AnyTogether")
+
+        let quiet = OnlineWebRouter(service: together, game: .init(titleId: "PPSA02429", gameVersion: "01.017", engineBuild: "x"), profile: profile, platformGroups: false)
+        let off = await quiet.handle(.init(userId: 1, apiGroup: "communicationRestrictionStatus", path: "/v3/users/me/communication/restriction/status", method: "GET"))
+        XCTAssertEqual(off, .notOffered)
+    }
+
     func testFollowingASessionPublishesTheLauncherAndHandsThePlayersToTheTransport() async throws {
         let sessionId = "0190a0b1-0000-7000-8000-000000000001"
         let together = FakeOnlineTogether(session: FakeOnlineTogether.session(id: sessionId, players: [me.id, "b-id", "c-id"], devices: [me.id: "dev-a", "b-id": "dev-b"]))

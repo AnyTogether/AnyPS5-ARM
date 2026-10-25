@@ -52,7 +52,8 @@ public struct OnlineSessionView: Decodable, Equatable, Sendable {
 
 /// Answers the engine's web API requests. The `anyps5` group maps onto AnyTogether's game
 /// sessions and invitations for this game; `userProfile` is answered from AnyTogether friends
-/// (`OnlineUserProfile`, unverified) while `platformGroups` is on; every other platform group is
+/// (`OnlineUserProfile`, unverified) and `communicationRestrictionStatus` with "not restricted"
+/// while `platformGroups` is on; every other platform group is
 /// answered "not offered" until its format is known from observation, and every such request is
 /// counted so it shows up.
 public final class OnlineWebRouter: @unchecked Sendable {
@@ -95,6 +96,7 @@ public final class OnlineWebRouter: @unchecked Sendable {
 
     public func handle(_ request: OnlineWire.WebRequest) async -> OnlineWire.WebReply {
         if request.apiGroup == OnlineUserProfile.group, platformGroups, let profile { return await profile.handle(request) }
+        if request.apiGroup == OnlineUserProfile.restrictionGroup, platformGroups, let profile { return profile.handleRestriction(request) }
         guard request.apiGroup == OnlineWebRouter.group else {
             let path = request.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? request.path
             lock.withLock { unanswered["\(request.apiGroup) \(request.method) \(path)", default: 0] += 1 }

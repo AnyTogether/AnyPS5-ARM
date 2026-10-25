@@ -8,8 +8,14 @@ import Foundation
 ///
 /// Account IDs are `OnlineIdentity.accountId(forUser:)`, as decimal strings, as the platform
 /// writes them in JSON. Friends are asked of AnyTogether at most every 30 s: games poll.
+///
+/// Games check that they may play with others before they go online: Human Fall Flat (PPSA02429)
+/// asks for the block list (`GET /v1/users/me/blocks?offset=0&limit=0`) and, in the
+/// `communicationRestrictionStatus` group, `GET /v3/users/<account>/communication/restriction/status`.
+/// Nobody is blocked and nobody is restricted here.
 public final class OnlineUserProfile: @unchecked Sendable {
     public static let group = "userProfile"
+    public static let restrictionGroup = "communicationRestrictionStatus"
     static let keepFriends: TimeInterval = 30
     static let pageLimit = 2000
 
@@ -71,6 +77,9 @@ public final class OnlineUserProfile: @unchecked Sendable {
             case (4, let who, "basicPresences"):
                 guard let person = try await person(who) else { return problem(404, "No such user") }
                 return json(["basicPresence": presence(isMe(who) ? myAccount : who, person)])
+            case (4, let who, "blocks"):
+                guard isMe(who) else { return problem(403, "Only your own block list is offered") }
+                return json(["blocks": [String](), "totalItemCount": 0])
             default:
                 return problem(404, "No such userProfile call")
             }
@@ -79,6 +88,17 @@ public final class OnlineUserProfile: @unchecked Sendable {
         } catch {
             return problem(502, "AnyTogether could not be reached")
         }
+    }
+
+    /// The `communicationRestrictionStatus` group: our own account is never restricted.
+    public func handleRestriction(_ request: OnlineWire.WebRequest) -> OnlineWire.WebReply {
+        guard request.method.uppercased() == "GET" else { return problem(405, "Only GET is offered") }
+        let path = request.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? request.path
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.count == 6, parts[0] == "v3", parts[1] == "users", parts[3] == "communication", parts[4] == "restriction",
+              parts[5] == "status" else { return problem(404, "No such communicationRestrictionStatus call") }
+        guard isMe(parts[2]) else { return problem(403, "Only your own restriction status is offered") }
+        return json(["restricted": false])
     }
 
     /// "me", "local_<user ID>" (the game's own user, as games write it) or our account number.
